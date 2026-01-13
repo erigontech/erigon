@@ -23,6 +23,8 @@ jobs:
       redis_key_prefix: ${{ steps.vars.outputs.redis_key_prefix }}
       network: ${{ steps.vars.outputs.network }}
       vegeta_duration: ${{ steps.vars.outputs.vegeta_duration }}
+      erigon_redis_key: ${{ steps.vars.outputs.erigon_redis_key }}
+      geth_redis_key: ${{ steps.vars.outputs.geth_redis_key }}
     steps:
       - name: Compute shared variables
         id: vars
@@ -59,7 +61,7 @@ jobs:
 
       - name: Prepare Redis database
         shell: bash
-        working-directory: $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/rpc-tests
+        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/tip-tracking/rpc-tests
         run: |
           set -euo pipefail
           python redis_client.py --key ${{ steps.vars.outputs.erigon_redis_key }} --write "starting"
@@ -83,6 +85,7 @@ jobs:
 
       - name: Sanity check Redis config
         shell: bash
+        working-directory: $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/rpc-tests
         run: |
           set -euo pipefail
           python redis_client.py --key ${{ needs.setup.outputs.erigon_redis_key }} --read
@@ -121,7 +124,7 @@ jobs:
 
       - name: Sanity check Redis config
         shell: bash
-        working-directory: $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/rpc-tests
+        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/tip-tracking/rpc-tests
         run: |
           set -euo pipefail
           python redis_client.py --key ${{ needs.setup.outputs.geth_redis_key }} --read
