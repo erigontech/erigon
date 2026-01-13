@@ -22,16 +22,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"maps"
-	"os"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
-
-	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/mdbx-go/mdbx"
 
 	"github.com/erigontech/erigon/common/hexutil"
 
@@ -54,17 +50,6 @@ func (w RwWrapper) BeginRw(ctx context.Context) (RwTx, error) {
 }
 func (w RwWrapper) BeginRwNosync(ctx context.Context) (RwTx, error) {
 	return nil, errors.New("BeginRwNosync not implemented")
-}
-
-func DefaultPageSize() datasize.ByteSize {
-	osPageSize := os.Getpagesize()
-	if osPageSize < 4096 { // reduce further may lead to errors (because some data is just big)
-		osPageSize = 4096
-	} else if osPageSize > mdbx.MaxPageSize {
-		osPageSize = mdbx.MaxPageSize
-	}
-	osPageSize = osPageSize / 4096 * 4096 // ensure it's rounded
-	return datasize.ByteSize(osPageSize)
 }
 
 // BigChunks - read `table` by big chunks - restart read transaction after each 1 minutes

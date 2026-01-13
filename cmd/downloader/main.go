@@ -93,7 +93,8 @@ var (
 	natSetting                     string
 	torrentVerbosity               int
 	downloadRateStr, uploadRateStr string
-	// How do I mark this deprecated with cobra?
+	// Deprecated (v3.0): Captured for backward compatibility but intentionally unused.
+	// Cobra doesn't have built-in deprecation, so we handle it via runtime warning (see Downloader() function).
 	torrentDownloadSlots int
 	staticPeersStr       string
 	torrentPort          int
@@ -122,7 +123,8 @@ func init() {
 	rootCmd.Flags().IntVar(&torrentPort, "torrent.port", utils.TorrentPortFlag.Value, utils.TorrentPortFlag.Usage)
 	rootCmd.Flags().IntVar(&torrentMaxPeers, "torrent.maxpeers", utils.TorrentMaxPeersFlag.Value, utils.TorrentMaxPeersFlag.Usage)
 	rootCmd.Flags().IntVar(&torrentConnsPerFile, "torrent.conns.perfile", utils.TorrentConnsPerFileFlag.Value, utils.TorrentConnsPerFileFlag.Usage)
-	// Deprecated.
+	// Deprecated (v3.0): This flag is kept for backward compatibility but has no effect.
+	// The downloader automatically manages concurrent downloads. Will be removed in future release.
 	rootCmd.Flags().IntVar(&torrentDownloadSlots, "torrent.download.slots", utils.TorrentDownloadSlotsFlag.Value, utils.TorrentDownloadSlotsFlag.Usage)
 	rootCmd.Flags().StringVar(&staticPeersStr, utils.TorrentStaticPeersFlag.Name, utils.TorrentStaticPeersFlag.Value, utils.TorrentStaticPeersFlag.Usage)
 	rootCmd.Flags().BoolVar(&disableIPV6, "downloader.disable.ipv6", utils.DisableIPV6.Value, utils.DisableIPV6.Usage)
@@ -204,11 +206,12 @@ var rootCmd = &cobra.Command{
 		}
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return Downloader(cmd.Context(), logger)
+		return Downloader(cmd, logger)
 	},
 }
 
-func Downloader(ctx context.Context, logger log.Logger) error {
+func Downloader(cmd *cobra.Command, logger log.Logger) error {
+	ctx := cmd.Context()
 	dirs := datadir.New(datadirCli)
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return err
@@ -241,6 +244,16 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		"upload.rate", uploadRateStr,
 		"webseed", webseeds,
 	)
+
+	// Warn if deprecated flag was explicitly set by user
+	if cmd.Flags().Changed("torrent.download.slots") {
+		logger.Warn(
+			"[DEPRECATED] --torrent.download.slots flag is deprecated and has no effect",
+			"flag", "torrent.download.slots",
+			"provided_value", torrentDownloadSlots,
+			"action", "This flag will be removed in a future release. The downloader now manages concurrent downloads automatically.",
+		)
+	}
 
 	version := "erigon: " + version.VersionWithCommit(version.GitCommit)
 
