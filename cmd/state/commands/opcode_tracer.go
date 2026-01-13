@@ -742,7 +742,7 @@ func runBlock(engine rules.Engine, ibs *state.IntraBlockState, txnWriter state.S
 	rules := blockContext.Rules(chainConfig)
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(blockNum, i)
-		receipt, _, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader), engine, accounts.NilAddress, gp, ibs, txnWriter, header, txn, gasUsed, usedBlobGas, vmConfig)
+		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader), engine, accounts.NilAddress, gp, ibs, txnWriter, header, txn, gasUsed, usedBlobGas, vmConfig)
 		if err != nil {
 			return nil, fmt.Errorf("could not apply txn %d [%x] failed: %w", i, txn.Hash(), err)
 		}
