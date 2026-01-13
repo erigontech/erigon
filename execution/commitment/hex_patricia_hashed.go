@@ -1538,9 +1538,6 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 	fileEndTxNum := uint64(step) // TODO: investigate why we cast step to txNum!
 	hph.depthsToTxNum[depth] = fileEndTxNum
 
-	if len(branchData) >= 2 {
-		branchData = branchData[2:] // skip touch map and keep the rest
-	}
 	if hph.trace {
 		fmt.Printf("unfoldBranchNode prefix '%x', nibbles [%x] depth %d row %d '%x'\n",
 			key, hph.currentKey[:hph.currentKeyLen], depth, row, branchData)
@@ -1847,7 +1844,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 
 		upCell.reset()
 		if hph.branchBefore[row] {
-			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
+			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
@@ -1877,7 +1874,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 
 		if hph.branchBefore[row] { // encode Delete if prefix existed before
 			//fmt.Printf("delete existed row %d prefix %x\n", row, updateKey)
-			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
+			_, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
@@ -1897,11 +1894,9 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				hph.touchMap[row-1] |= uint16(1) << nibble
 			}
 		}
-		bitmap := hph.touchMap[row] & hph.afterMap[row]
 		if !hph.branchBefore[row] {
 			// There was no branch node before, so we need to touch even the singular child that existed
 			hph.touchMap[row] |= hph.afterMap[row]
-			bitmap |= hph.afterMap[row]
 		}
 
 		// Calculate total length of all hashes
@@ -1971,7 +1966,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 
 		b := [...]byte{0x80}
 		cellGetter := hph.createCellGetter(b[:], updateKey, row, depth)
-		lastNibble, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter)
+		lastNibble, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, hph.afterMap[row], cellGetter)
 		if err != nil {
 			return fmt.Errorf("failed to encode branch update: %w", err)
 		}

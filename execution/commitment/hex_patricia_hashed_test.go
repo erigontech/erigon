@@ -1677,16 +1677,15 @@ func TestCell_fillFromFields(t *testing.T) {
 	}
 
 	be := NewBranchEncoder(1024)
-	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
+	enc, _, err := be.EncodeBranch(bm, cg)
 	require.NoError(t, err)
 
 	//original := common.Copy(enc)
 	fmt.Printf("%s\n", enc.String())
 
-	tm, am, decRow, err := enc.decodeCells()
+	am, decRow, err := enc.decodeCells()
 	require.NoError(t, err)
 	require.Equal(t, bm, am)
-	require.Equal(t, bm, tm)
 
 	for i := 0; i < len(decRow); i++ {
 		t.Logf("cell %d\n", i)
