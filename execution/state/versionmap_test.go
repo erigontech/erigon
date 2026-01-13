@@ -16,7 +16,7 @@ var randomness = rand.Intn(10) + 10
 
 // create test data for a given txIdx and incarnation
 func valueFor(txIdx, inc int) []byte {
-	return []byte(fmt.Sprintf("%ver:%ver:%ver", txIdx*5, txIdx+inc, inc*5))
+	return fmt.Appendf(nil, "%ver:%ver:%ver", txIdx*5, txIdx+inc, inc*5)
 }
 
 func getAddress(i int) accounts.Address {
