@@ -520,3 +520,7 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx
 func (sd *SharedDomains) SetWarmupDB(db kv.TemporalRoDB) {
 	sd.sdCtx.SetWarmupDB(db)
 }
+
+func (sd *SharedDomains) SetParaTrieDB(db kv.TemporalRoDB) {
+	sd.sdCtx.SetParaTrieDB(db)
+}
