@@ -308,7 +308,15 @@ func ExecuteAATransaction(
 		log.Info("post op gas used", "gasUsed", applyRes.GasUsed, "penalty", validationGasPenalty)
 	}
 
-	if err = refundGas(header, tx, ibs, gasUsed-gasRefund); err != nil {
+	vmConfig := evm.Config()
+	rules := evm.ChainRules()
+	hasEIP3860 := vmConfig.HasEip3860(rules)
+	preTxCost, err := tx.PreTransactionGasCost(rules, hasEIP3860)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	if err = refundGas(header, tx, ibs, gasUsed-gasRefund, preTxCost); err != nil {
 		return 0, 0, err
 	}
 
@@ -316,7 +324,7 @@ func ExecuteAATransaction(
 		return 0, 0, err
 	}
 
-	gasPool.AddGas(params.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit - gasUsed)
+	gasPool.AddGas(preTxCost + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit - gasUsed)
 
 	return executionStatus, gasUsed, nil
 }
