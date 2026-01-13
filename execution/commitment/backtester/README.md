@@ -103,3 +103,7 @@ be extracted.
 ![](examples/detailed_timeseries_page4.png)
 ![](examples/detailed_timeseries_page5.png)
 ![](examples/detailed_timeseries_page6.png)
+
+## Comparing runs
+
+TODO: add section on comparing different runs

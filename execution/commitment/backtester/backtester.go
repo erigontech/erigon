@@ -25,6 +25,8 @@ import (
 	"os"
 	"path"
 	"runtime/pprof"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/felixge/fgprof"
@@ -132,8 +134,14 @@ func (bt Backtester) run(ctx context.Context, tx kv.TemporalTx, fromBlock uint64
 	if err != nil {
 		return err
 	}
-	runId := fmt.Sprintf("%d_%d_%d", fromBlock, toBlock, start.Unix())
-	runOutputDir := path.Join(bt.outputDir, runId)
+	ri := runId{
+		paraTrie: bt.paraTrie,
+		// warmup: bt.warmup, // TODO
+		fromBlock: fromBlock,
+		toBlock:   toBlock,
+		start:     start,
+	}
+	runOutputDir := path.Join(bt.outputDir, ri.String())
 	err = os.MkdirAll(runOutputDir, 0755)
 	if err != nil {
 		return err
@@ -379,6 +387,54 @@ func checkDataAvailable(tx kv.TemporalTx, fromBlock uint64, toBlock uint64, tnr 
 		return fmt.Errorf("history not available for given end: %d > %d", toTxNum, historyAvailableToTxNum)
 	}
 	return nil
+}
+
+type runId struct {
+	paraTrie  bool
+	warmup    bool
+	fromBlock uint64
+	toBlock   uint64
+	start     time.Time
+}
+
+func (ri runId) String() string {
+	var sb strings.Builder
+	if ri.paraTrie {
+		sb.WriteString("para")
+	} else {
+		sb.WriteString("hph")
+	}
+	if ri.warmup {
+		sb.WriteString("_warm")
+	} else {
+		sb.WriteString("_nowarm")
+	}
+	return fmt.Sprintf("%s_%d_%d_%d", sb.String(), ri.fromBlock, ri.toBlock, ri.start.Unix())
+}
+
+func extractRunId(s string) runId {
+	parts := strings.Split(s, "_")
+	paraTrie := parts[0] == "para"
+	warmup := parts[1] == "warm"
+	fromBlock, err := strconv.ParseUint(parts[2], 10, 64)
+	if err != nil {
+		panic(fmt.Errorf("extractRunId failed to parse fromBlock: %w", err))
+	}
+	toBlock, err := strconv.ParseUint(parts[3], 10, 64)
+	if err != nil {
+		panic(fmt.Errorf("extractRunId failed to parse toBlock: %w", err))
+	}
+	startUnix, err := strconv.ParseInt(parts[4], 10, 64)
+	if err != nil {
+		panic(fmt.Errorf("extractRunId failed to parse start: %w", err))
+	}
+	return runId{
+		paraTrie:  paraTrie,
+		warmup:    warmup,
+		fromBlock: fromBlock,
+		toBlock:   toBlock,
+		start:     time.Unix(startUnix, 0),
+	}
 }
 
 func deriveBlockOutputDir(runOutputDir string, block uint64) string {
