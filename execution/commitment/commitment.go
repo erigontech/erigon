@@ -225,16 +225,11 @@ func (be *BranchEncoder) CollectUpdate(
 		return 0, err
 	}
 
-	if len(prev) > 0 {
-		if bytes.Equal(prev, update) {
-			//fmt.Printf("skip collectBranchUpdate [%x]\n", prefix)
-			return lastNibble, nil // do not write the same data for prefix
-		}
-		update, err = be.merger.Merge(prev, update)
-		if err != nil {
-			return 0, err
-		}
+	if len(prev) > 0 && bytes.Equal(prev, update) {
+		//fmt.Printf("skip collectBranchUpdate [%x]\n", prefix)
+		return lastNibble, nil // do not write the same data for prefix
 	}
+	// No merge needed - updates are complete (contain all existing cells)
 	// fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 	// has to copy :(
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
