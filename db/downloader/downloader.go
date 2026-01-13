@@ -583,7 +583,7 @@ func (d *Downloader) VerifyData(
 						d.log(log.LvlInfo, "Verify",
 							"progress", fmt.Sprintf("%.2f%%", 100*float64(completedBytes.Load())/float64(totalBytes)),
 							"files", fmt.Sprintf("%d/%d", completedFiles.Load(), len(toVerify)),
-							"sz_gb", downloadercfg.DefaultPieceSize*completedBytes.Load()/1024/1024/1024,
+							"sz_gib", completedBytes.Load()>>30,
 						)
 					}
 				}
