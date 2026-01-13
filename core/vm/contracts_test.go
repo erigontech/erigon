@@ -304,17 +304,17 @@ func TestPrecompiledModExpInputEip7823(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
 	gas = osakaModExp.RequiredGas(in)
-	_, _, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil,nil)
+	_, _, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil, nil)
 	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
 
 	// length_of_EXPONENT = 2048; everything else is zero
 	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000000")
 	gas = pragueModExp.RequiredGas(in)
-	res, _, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil,nil)
+	res, _, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
 	gas = osakaModExp.RequiredGas(in)
-	_, _, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil,nil)
+	_, _, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil, nil)
 	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
 
 	// TODO review with code above
@@ -342,11 +342,11 @@ func TestPrecompiledModExpInputEip7823(t *testing.T) {
 	// length_of_EXPONENT = 2^32; everything else is zero
 	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000")
 	gas = pragueModExp.RequiredGas(in)
-	res, _, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil,nil)
+	res, _, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
 	gas = osakaModExp.RequiredGas(in)
-	_, _, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil,nil)
+	_, _, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil, nil)
 	assert.ErrorIs(t, err, errModExpExponentLengthTooLarge)
 
 	// length_of_EXPONENT = 2^64; everything else is zero
