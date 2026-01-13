@@ -45,6 +45,7 @@ func NewErigonMCPServer(ethAPI jsonrpc.EthAPI, erigonAPI jsonrpc.ErigonAPI, otsA
 
 	e.registerTools()
 	e.registerPrompts()
+	e.registerResources()
 
 	return e
 }
