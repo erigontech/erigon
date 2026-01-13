@@ -90,7 +90,7 @@ func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 	defer db.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(db).ChainName)
 
-	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	res, clean, err := OpenSnaps(ctx, cfg, dirs, db, logger)
 	agg := res.Aggregator
 	if err != nil {
 		return err
@@ -122,7 +122,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(db).ChainName)
-	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	res, clean, err := OpenSnaps(ctx, cfg, dirs, db, logger)
 	agg := res.Aggregator
 	if err != nil {
 		return err
@@ -233,7 +233,7 @@ func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) er
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	res, clean, err := OpenSnaps(ctx, cfg, dirs, db, logger)
 	br := res.BlockRetire
 	if err != nil {
 		return err

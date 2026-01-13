@@ -107,7 +107,7 @@ func doBacktestCommitment(ctx context.Context, args backtestCommitmentArgs, logg
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	snaps, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	snaps, clean, err := OpenSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}

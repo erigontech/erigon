@@ -824,7 +824,7 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	res, clean, err := OpenSnaps(ctx, cfg, dirs, chainDB, logger)
 	br, agg := res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
@@ -977,7 +977,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	res, clean, err := OpenSnaps(ctx, cfg, dirs, chainDB, logger)
 	agg := res.Aggregator
 	if err != nil {
 		return err
@@ -1049,7 +1049,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	res, clean, err := OpenSnaps(ctx, cfg, dirs, chainDB, logger)
 	borSnaps, blockRetire, agg := res.BorSnaps, res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
@@ -1162,7 +1162,7 @@ func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false /*keepBlocks*/, true /*produceE2*/, true /*produceE3*/, chainConfig.ChainName)
-	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	res, clean, err := OpenSnaps(ctx, cfg, dirs, chainDB, logger)
 	blockRetire, agg := res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
@@ -1187,7 +1187,7 @@ func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) err
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false /*keepBlocks*/, true /*produceE2*/, true /*produceE3*/, chainConfig.ChainName)
-	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	res, clean, err := OpenSnaps(ctx, cfg, dirs, chainDB, logger)
 	blockRetire, agg := res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
@@ -1754,7 +1754,7 @@ func doBlkTxNum(cliCtx *cli.Context) error {
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	res, clean, err := OpenSnaps(ctx, cfg, dirs, chainDB, logger)
 	br, agg := res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
@@ -1965,7 +1965,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	res, clean, err := OpenSnaps(ctx, cfg, dirs, chainDB, logger)
 	caplinSnaps, caplinStateSnaps, br, agg := res.CaplinSnaps, res.CaplinStateSnaps, res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
@@ -2006,7 +2006,7 @@ func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer chainDB.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(chainDB).ChainName)
 
-	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	res, clean, err := OpenSnaps(ctx, cfg, dirs, chainDB, logger)
 	blockSnaps, borSnaps, caplinSnaps, agg := res.BlockSnaps, res.BorSnaps, res.CaplinSnaps, res.Aggregator
 	if err != nil {
 		return err
@@ -2031,7 +2031,7 @@ type OpenSnapsResult struct {
 	ForkAgg          *state.ForkableAgg
 }
 
-func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
+func OpenSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
 	res OpenSnapsResult,
 	clean func(),
 	err error,
@@ -2306,7 +2306,7 @@ func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 	ctx := cliCtx.Context
 
-	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	res, clean, err := OpenSnaps(ctx, cfg, dirs, db, logger)
 	agg := res.Aggregator
 	if err != nil {
 		return err
@@ -2437,7 +2437,7 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	res, clean, err := OpenSnaps(ctx, cfg, dirs, chainDB, logger)
 	br := res.BlockRetire
 	if err != nil {
 		return err
@@ -2464,7 +2464,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	res, clean, err := OpenSnaps(ctx, cfg, dirs, db, logger)
 	caplinSnaps, br, agg := res.CaplinSnaps, res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
