@@ -412,7 +412,7 @@ func (s *simulator) simulateBlock(
 	cumulativeGasUsed := uint64(0)
 	cumulativeBlobGasUsed := uint64(0)
 
-	minTxNum, err := txNumReader.Min(tx, blockNumber)
+	minTxNum, err := txNumReader.Min(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, nil, err
 	}

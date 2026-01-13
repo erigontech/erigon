@@ -63,13 +63,13 @@ func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header 
 		if err != nil {
 			return nil, evmtypes.BlockContext{}, nil, nil, nil, err
 		}
-		reader, err = rpchelper.CreateHistoryCachedStateReader(cacheView, dbtx, header.Number.Uint64(), txIndex, txNumsReader)
+		reader, err = rpchelper.CreateHistoryCachedStateReader(ctx, cacheView, dbtx, header.Number.Uint64(), txIndex, txNumsReader)
 		if err != nil {
 			return nil, evmtypes.BlockContext{}, nil, nil, nil, err
 		}
 	} else {
 		var err error
-		reader, err = rpchelper.CreateHistoryStateReader(dbtx, header.Number.Uint64(), txIndex, txNumsReader)
+		reader, err = rpchelper.CreateHistoryStateReader(ctx, dbtx, header.Number.Uint64(), txIndex, txNumsReader)
 		if err != nil {
 			return nil, evmtypes.BlockContext{}, nil, nil, nil, err
 		}
