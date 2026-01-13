@@ -12,6 +12,7 @@ permissions:
 
 env:
   CHAIN: mainnet
+  ERIGON_QA_PATH: /home/qarunner/erigon-qa
 
 jobs:
   setup:
@@ -58,8 +59,9 @@ jobs:
 
       - name: Prepare Redis database
         shell: bash
+        working-directory: $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/rpc-tests
         run: |
-          set -euo pipefail          
+          set -euo pipefail
           python redis_client.py --key ${{ steps.vars.outputs.erigon_redis_key }} --write "starting"
           python redis_client.py --key ${{ steps.vars.outputs.geth_redis_key }} --write "starting"
 
@@ -73,8 +75,8 @@ jobs:
       REDIS_KEY_PREFIX: ${{ needs.setup.outputs.redis_key_prefix }}
       NETWORK: ${{ needs.setup.outputs.network }}
       VEGETA_DURATION: ${{ needs.setup.outputs.vegeta_duration }}
-      ERIGON_REDIS_KEY: ${{ steps.vars.outputs.erigon_redis_key }}
-      GETH_REDIS_KEY: ${{ steps.vars.outputs.geth_redis_key }}
+      ERIGON_REDIS_KEY: ${{ needs.vars.outputs.erigon_redis_key }}
+      GETH_REDIS_KEY: ${{ needs.vars.outputs.geth_redis_key }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -83,7 +85,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python redis_client.py --key ${{ steps.vars.outputs.erigon_redis_key }} --read
+          python redis_client.py --key ${{ needs.vars.outputs.erigon_redis_key }} --read
 
       - name: Run Erigon benchmark (placeholder)
         shell: bash
@@ -111,17 +113,18 @@ jobs:
       REDIS_KEY_PREFIX: ${{ needs.setup.outputs.redis_key_prefix }}
       NETWORK: ${{ needs.setup.outputs.network }}
       VEGETA_DURATION: ${{ needs.setup.outputs.vegeta_duration }}
-      ERIGON_REDIS_KEY: ${{ steps.vars.outputs.erigon_redis_key }}
-      GETH_REDIS_KEY: ${{ steps.vars.outputs.geth_redis_key }}
+      ERIGON_REDIS_KEY: ${{ needs.vars.outputs.erigon_redis_key }}
+      GETH_REDIS_KEY: ${{ needs.vars.outputs.geth_redis_key }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Sanity check Redis config
         shell: bash
+        working-directory: $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/rpc-tests
         run: |
           set -euo pipefail
-          python redis_client.py --key ${{ steps.vars.outputs.geth_redis_key }} --read
+          python redis_client.py --key ${{ needs.vars.outputs.geth_redis_key }} --read
 
       - name: Run Geth benchmark (placeholder)
         shell: bash
