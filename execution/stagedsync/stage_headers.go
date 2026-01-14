@@ -146,7 +146,6 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		log.Warn("can't check current block", "err", err)
 	}
 
-	// Query latest block number first to determine if we're in chain tip mode
 	var latestBlockHex string
 	if err := client.CallContext(context.Background(), &latestBlockHex, "eth_blockNumber"); err != nil {
 		log.Warn("Error fetching latest block number", "err", err)
@@ -314,6 +313,62 @@ var publicReceiptFeeds = map[uint64]string{
 
 func getPublicReceiptFeed(chainID uint64) string {
 	return publicReceiptFeeds[chainID]
+}
+
+func checkL2RPCEndpointsHealth(ctx context.Context, blockClient, receiptClient *rpc.Client, blockNum uint64, blockRPCAddr, receiptRPCAddr string) error {
+	if blockClient == nil {
+		return nil
+	}
+
+	checkBlockNum := fmt.Sprintf("0x%x", blockNum)
+
+	var blockResult map[string]interface{}
+	if err := blockClient.CallContext(ctx, &blockResult, "eth_getBlockByNumber", checkBlockNum, true); err != nil {
+		return fmt.Errorf("--l2rpc %q cannot respond to eth_getBlockByNumber for block %d: %w", blockRPCAddr, blockNum, err)
+	}
+	if blockResult == nil {
+		return fmt.Errorf("--l2rpc %q returned nil for block %d", blockRPCAddr, blockNum)
+	}
+
+	txs, ok := blockResult["transactions"].([]interface{})
+	if !ok || len(txs) == 0 {
+		log.Info("[Arbitrum] L2 RPC health check: block has no transactions, skipping receipt check", "block", blockNum)
+		return nil
+	}
+
+	var txHash string
+	if txMap, ok := txs[0].(map[string]interface{}); ok {
+		if h, ok := txMap["hash"].(string); ok {
+			txHash = h
+		}
+	}
+	if txHash == "" {
+		log.Warn("[Arbitrum] L2 RPC health check: could not extract tx hash from block, skipping receipt check", "block", blockNum)
+		return nil
+	}
+
+	if receiptClient == nil {
+		log.Info("[Arbitrum] L2 RPC health check: receipt client not configured, skipping receipt check", "block", blockNum)
+		return nil
+	}
+
+	var receiptResult map[string]interface{}
+	if err := receiptClient.CallContext(ctx, &receiptResult, "eth_getTransactionReceipt", txHash); err != nil {
+		return fmt.Errorf("--l2rpc.receipt %q cannot respond to eth_getTransactionReceipt for tx %s: %w", receiptRPCAddr, txHash, err)
+	}
+	if receiptResult == nil {
+		return fmt.Errorf("--l2rpc.receipt %q returned nil for tx %s", receiptRPCAddr, txHash)
+	}
+	receiptTxHash, ok := receiptResult["transactionHash"].(string)
+	if !ok || receiptTxHash == "" {
+		return fmt.Errorf("--l2rpc.receipt %q receipt missing transactionHash field or field is not a string for tx %s", receiptRPCAddr, txHash)
+	}
+	if receiptTxHash != txHash {
+		return fmt.Errorf("--l2rpc.receipt %q returned mismatched receipt: requested tx %s but got %s", receiptRPCAddr, txHash, receiptTxHash)
+	}
+
+	log.Info("[Arbitrum] L2 RPC endpoints health check passed", "blockEndpoint", blockRPCAddr, "receiptEndpoint", receiptRPCAddr, "checkedBlock", blockNum)
+	return nil
 }
 
 // HeadersPOW progresses Headers stage for Proof-of-Work headers
