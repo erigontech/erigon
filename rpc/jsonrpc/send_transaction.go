@@ -5,14 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/rpc/filters"
 )
 
-// SendRawTransaction implements eth_sendRawTransaction. Creates new message call transaction or a contract creation for previously-signed transactions.
+// SendRawTransaction implements eth_sendRawTransaction. Creates a new message call or contract creation for a previously signed transaction.
 func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error) {
 	txn, err := types.DecodeWrappedTransaction(encodedTx)
 	if err != nil {
@@ -62,6 +66,53 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 	}
 
 	return txn.Hash(), nil
+}
+
+// SendRawTransactionSync implements eth_sendRawTransactionSync (https://eips.ethereum.org/EIPS/eip-7966).
+// Creates a new message call or contract creation for a previously signed transaction waiting for the transaction to be processed and the receipt to be available.
+func (api *APIImpl) SendRawTransactionSync(ctx context.Context, encodedTx hexutil.Bytes, timeoutMs *hexutil.Uint64) (map[string]any, error) {
+	// TODO: add these as configuration parameters
+	const DefaultTimeout = time.Duration(2) * time.Second
+	const MaxTimeout = time.Duration(30) * time.Second
+
+	// If timeout is not specified or zero, we use the default, otherwise we use the passed one capped by max.
+	timeout := DefaultTimeout
+	if timeoutMs != nil && *timeoutMs > 0 {
+		reqTimeout := time.Duration(*timeoutMs) * time.Millisecond
+		if reqTimeout > MaxTimeout {
+			timeout = MaxTimeout
+		} else {
+			timeout = reqTimeout
+		}
+	}
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	hash, err := api.SendRawTransaction(timeoutCtx, encodedTx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Wait up to the timeout for the transaction to be processed and the receipt to be available.
+	criteria := filters.ReceiptsFilterCriteria{
+		TransactionHashes: []common.Hash{hash},
+	}
+	receiptsCh, id := api.filters.SubscribeReceipts(128, criteria)
+	defer api.filters.UnsubscribeReceipts(id)
+
+	for {
+		select {
+		case <-timeoutCtx.Done():
+			return nil, fmt.Errorf("the transaction was added to the mempool but wasn't processed in %fs", timeout.Seconds())
+		case protoReceipt, ok := <-receiptsCh:
+			if !ok || protoReceipt == nil {
+				log.Warn("[rpc] receipts channel was closed")
+				return nil, fmt.Errorf("receipts channel was closed") // TODO: proper error handling
+			}
+			receipt := ethutils.MarshalSubscribeReceipt(protoReceipt)
+			return receipt, nil
+		}
+	}
 }
 
 // SendTransaction implements eth_sendTransaction. Creates new message call transaction or a contract creation if the data field contains code.
