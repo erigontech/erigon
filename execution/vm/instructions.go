@@ -880,82 +880,82 @@ func stGas(pc uint64, scope *CallContext) string {
 }
 
 func opSwap1(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap1()
+	scope.Stack.swap(1)
 	return pc, nil, nil
 }
 
 func opSwap2(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap2()
+	scope.Stack.swap(2)
 	return pc, nil, nil
 }
 
 func opSwap3(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap3()
+	scope.Stack.swap(3)
 	return pc, nil, nil
 }
 
 func opSwap4(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap4()
+	scope.Stack.swap(4)
 	return pc, nil, nil
 }
 
 func opSwap5(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap5()
+	scope.Stack.swap(5)
 	return pc, nil, nil
 }
 
 func opSwap6(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap6()
+	scope.Stack.swap(6)
 	return pc, nil, nil
 }
 
 func opSwap7(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap7()
+	scope.Stack.swap(7)
 	return pc, nil, nil
 }
 
 func opSwap8(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap8()
+	scope.Stack.swap(8)
 	return pc, nil, nil
 }
 
 func opSwap9(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap9()
+	scope.Stack.swap(9)
 	return pc, nil, nil
 }
 
 func opSwap10(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap10()
+	scope.Stack.swap(10)
 	return pc, nil, nil
 }
 
 func opSwap11(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap11()
+	scope.Stack.swap(11)
 	return pc, nil, nil
 }
 
 func opSwap12(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap12()
+	scope.Stack.swap(12)
 	return pc, nil, nil
 }
 
 func opSwap13(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap13()
+	scope.Stack.swap(13)
 	return pc, nil, nil
 }
 
 func opSwap14(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap14()
+	scope.Stack.swap(14)
 	return pc, nil, nil
 }
 
 func opSwap15(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap15()
+	scope.Stack.swap(15)
 	return pc, nil, nil
 }
 
 func opSwap16(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap16()
+	scope.Stack.swap(16)
 	return pc, nil, nil
 }
 
@@ -1373,9 +1373,7 @@ func opSwapN(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64
 	}
 
 	// The (n+1)‘th stack item is swapped with the top of the stack.
-	indexTop := scope.Stack.len() - 1
-	indexN := scope.Stack.len() - 1 - n
-	scope.Stack.data[indexTop], scope.Stack.data[indexN] = scope.Stack.data[indexN], scope.Stack.data[indexTop]
+	scope.Stack.swap(n)
 	pc++
 	return pc, nil, nil
 }
