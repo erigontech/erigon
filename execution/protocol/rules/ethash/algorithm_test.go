@@ -763,7 +763,7 @@ func BenchmarkHashimotoFullMmap(b *testing.B) {
 
 func BenchmarkSeedHash(b *testing.B) {
 	var res []byte
-	const testBlock = 50 * epochLength + 1 // epoch 50 - representative mid-range complexity
+	const testBlock = 50*epochLength + 1 // epoch 50 - representative mid-range complexity
 	for b.Loop() {
 		res = seedHash(testBlock)
 	}
@@ -776,7 +776,7 @@ func BenchmarkSeedHash(b *testing.B) {
 
 func BenchmarkSeedHashOld(b *testing.B) {
 	var res []byte
-	const testBlock = 50 * epochLength + 1 // epoch 50 - representative mid-range complexity
+	const testBlock = 50*epochLength + 1 // epoch 50 - representative mid-range complexity
 	for b.Loop() {
 		res = seedHashOld(testBlock)
 	}
