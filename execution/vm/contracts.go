@@ -407,7 +407,10 @@ func (c *dataCopy) RequiredGas(input []byte) uint64 {
 	return uint64(len(input)+31)/32*params.IdentityPerWordGas + params.IdentityBaseGas
 }
 func (c *dataCopy) Run(in []byte) ([]byte, error) {
-	return common.Copy(in), nil
+	// Use pooled buffer - caller tracks it via BufferTracker
+	out := getPooledBuffer(uint64(len(in)))
+	copy(out, in)
+	return out, nil
 }
 
 func (c *dataCopy) Name() string {

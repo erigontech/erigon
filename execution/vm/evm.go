@@ -22,10 +22,12 @@ package vm
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/u256"
@@ -481,7 +483,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		createDataGas := uint64(len(ret)) * params.CreateDataGas
 		var ok bool
 		if gasRemaining, ok = useGas(gasRemaining, createDataGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage); ok {
-			evm.intraBlockState.SetCode(address, ret)
+			evm.intraBlockState.SetCode(address, common.Copy(ret))
 		} else {
 			// If we run out of gas, we do not store the code: the returned code must be empty.
 			ret = []byte{}
@@ -509,6 +511,407 @@ func (evm *EVM) maxCodeSize() int {
 		return params.MaxCodeSizePostAhmedabad
 	}
 	return params.MaxCodeSize
+}
+
+// PreparedCall contains all information needed to execute a prepared call.
+// This is used by the iterative interpreter to set up call frames.
+type PreparedCall struct {
+	Contract     Contract            // The contract to execute
+	Gas          uint64              // Gas available for the call
+	Input        []byte              // Call input data
+	ReadOnly     bool                // Whether this is a read-only call
+	Snapshot     int                 // State snapshot ID
+	Addr         accounts.Address    // Target address (for state revert)
+	IsPrecompile bool                // Whether target is a precompile
+	Precompile   PrecompiledContract // The precompile if IsPrecompile is true
+}
+
+// Reset clears the PreparedCall for reuse
+func (p *PreparedCall) Reset() {
+	// Only reset Contract if it was used (non-precompile calls)
+	// For precompiles, Contract is never set so skip the expensive zero
+	if !p.IsPrecompile {
+		p.Contract = Contract{}
+	}
+	p.Gas = 0
+	p.Input = nil
+	p.ReadOnly = false
+	p.Snapshot = 0
+	p.Addr = accounts.Address{}
+	p.IsPrecompile = false
+	p.Precompile = nil
+}
+
+// preparedCallPool provides PreparedCall reuse to reduce allocations
+var preparedCallPool = sync.Pool{
+	New: func() any {
+		return &PreparedCall{}
+	},
+}
+
+// getPreparedCall retrieves a PreparedCall from the pool
+func getPreparedCall() *PreparedCall {
+	return preparedCallPool.Get().(*PreparedCall)
+}
+
+// putPreparedCall returns a PreparedCall to the pool after resetting it
+func putPreparedCall(p *PreparedCall) {
+	p.Reset()
+	preparedCallPool.Put(p)
+}
+
+// PrepareCall sets up a call without executing it.
+// Returns a PreparedCall that can be used to execute the call, or an error if setup fails.
+// The caller is responsible for handling state reversion on errors.
+func (evm *EVM) PrepareCall(typ OpCode, caller, callerAddress, addr accounts.Address, input []byte, gas uint64, value uint256.Int, bailout bool) (*PreparedCall, error) {
+	if evm.abort.Load() {
+		return nil, nil
+	}
+
+	depth := evm.interpreter.Depth()
+
+	p, isPrecompile := evm.precompile(addr)
+	var code []byte
+	var err error
+	if !isPrecompile {
+		code, err = evm.intraBlockState.ResolveCode(addr)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		}
+	}
+
+	// Invoke tracer hooks
+	if evm.Config().Tracer != nil {
+		evm.captureBegin(depth, typ, caller, addr, isPrecompile, input, gas, value, code)
+	}
+
+	if evm.config.NoRecursion && depth > 0 {
+		return nil, nil
+	}
+
+	// Depth check
+	if depth > int(params.CallCreateDepth) {
+		return nil, ErrDepth
+	}
+
+	// Balance check for CALL/CALLCODE
+	if typ == CALL || typ == CALLCODE {
+		canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller, value)
+		if err != nil {
+			return nil, err
+		}
+		if !value.IsZero() && !canTransfer {
+			if !bailout {
+				return nil, ErrInsufficientBalance
+			}
+		}
+	}
+
+	// Mark address access
+	evm.intraBlockState.MarkAddressAccess(addr)
+
+	// Take snapshot
+	snapshot := evm.intraBlockState.PushSnapshot()
+
+	// Handle account creation and value transfer for CALL
+	if typ == CALL {
+		exist, err := evm.intraBlockState.Exist(addr)
+		if err != nil {
+			evm.intraBlockState.PopSnapshot(snapshot)
+			return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		}
+		if !exist {
+			if !isPrecompile && evm.chainRules.IsSpuriousDragon && value.IsZero() {
+				evm.intraBlockState.PopSnapshot(snapshot)
+				return nil, nil // No code, return early
+			}
+			evm.intraBlockState.CreateAccount(addr, false)
+		}
+		evm.Context.Transfer(evm.intraBlockState, caller, addr, value, bailout)
+	} else if typ == STATICCALL && !isPrecompile {
+		// Touch account for STATICCALL (skip for precompiles - they don't have state)
+		evm.intraBlockState.AddBalance(addr, u256.Num0, tracing.BalanceChangeTouchAccount)
+	}
+
+	// For precompiles, return immediately with precompile info
+	if isPrecompile {
+		prepared := getPreparedCall()
+		prepared.Gas = gas
+		prepared.Input = input
+		prepared.Snapshot = snapshot
+		prepared.Addr = addr
+		prepared.IsPrecompile = true
+		prepared.Precompile = p
+		return prepared, nil
+	}
+
+	// No code means nothing to execute
+	if len(code) == 0 {
+		evm.intraBlockState.PopSnapshot(snapshot)
+		return nil, nil
+	}
+
+	// Build the contract
+	var codeHash accounts.CodeHash
+	codeHash, err = evm.intraBlockState.ResolveCodeHash(addr)
+	if err != nil {
+		evm.intraBlockState.PopSnapshot(snapshot)
+		return nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	}
+
+	var contract Contract
+	if typ == CALLCODE {
+		contract = Contract{
+			caller: caller,
+			addr:   caller,
+			value:  value,
+			//jumpdests: evm.config.JumpDestCache,
+			Code:     code,
+			CodeHash: codeHash,
+		}
+	} else if typ == DELEGATECALL {
+		contract = Contract{
+			caller: callerAddress,
+			addr:   caller,
+			value:  value,
+			//jumpdests: evm.config.JumpDestCache,
+			Code:     code,
+			CodeHash: codeHash,
+		}
+	} else {
+		contract = Contract{
+			caller: caller,
+			addr:   addr,
+			value:  value,
+			//jumpdests: evm.config.JumpDestCache,
+			Code:     code,
+			CodeHash: codeHash,
+		}
+	}
+
+	prepared := getPreparedCall()
+	prepared.Contract = contract
+	prepared.Gas = gas
+	prepared.Input = input
+	prepared.ReadOnly = typ == STATICCALL
+	prepared.Snapshot = snapshot
+	prepared.Addr = addr
+	return prepared, nil
+}
+
+// FinishCall handles the completion of a call, reverting state if needed.
+func (evm *EVM) FinishCall(snapshot int, gas uint64, err error) uint64 {
+	if err != nil || evm.config.RestoreState {
+		evm.intraBlockState.RevertToSnapshot(snapshot, err)
+		if err != ErrExecutionReverted {
+			if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
+				evm.Config().Tracer.OnGasChange(gas, 0, tracing.GasChangeCallFailedExecution)
+			}
+			gas = 0
+		}
+	} else {
+		evm.intraBlockState.PopSnapshot(snapshot)
+	}
+	return gas
+}
+
+// PreparedCreate contains all information needed to execute a prepared CREATE/CREATE2.
+// This is used by the iterative interpreter to set up create frames.
+type PreparedCreate struct {
+	Contract  Contract         // The contract to execute (init code)
+	Gas       uint64           // Gas available for the create
+	Snapshot  int              // State snapshot ID
+	Addr      accounts.Address // Contract address being created
+	IsCreate2 bool             // True for CREATE2
+}
+
+// Reset clears the PreparedCreate for reuse
+func (p *PreparedCreate) Reset() {
+	p.Contract = Contract{}
+	p.Gas = 0
+	p.Snapshot = 0
+	p.Addr = accounts.Address{}
+	p.IsCreate2 = false
+}
+
+// preparedCreatePool provides PreparedCreate reuse to reduce allocations
+var preparedCreatePool = sync.Pool{
+	New: func() any {
+		return &PreparedCreate{}
+	},
+}
+
+// getPreparedCreate retrieves a PreparedCreate from the pool
+func getPreparedCreate() *PreparedCreate {
+	return preparedCreatePool.Get().(*PreparedCreate)
+}
+
+// putPreparedCreate returns a PreparedCreate to the pool after resetting it
+func putPreparedCreate(p *PreparedCreate) {
+	p.Reset()
+	preparedCreatePool.Put(p)
+}
+
+// PrepareCreate sets up a CREATE/CREATE2 without executing it.
+// Returns a PreparedCreate that can be used to execute the creation, or an error if setup fails.
+func (evm *EVM) PrepareCreate(caller accounts.Address, code []byte, gas uint64, value uint256.Int, salt *uint256.Int, isCreate2 bool) (*PreparedCreate, accounts.Address, error) {
+	if evm.abort.Load() {
+		return nil, accounts.NilAddress, nil
+	}
+
+	depth := evm.interpreter.Depth()
+
+	// Compute address
+	codeAndHash := &codeAndHash{code: code}
+	var address accounts.Address
+	var typ OpCode
+	if isCreate2 {
+		address = accounts.InternAddress(types.CreateAddress2(caller.Value(), salt.Bytes32(), codeAndHash.Hash()))
+		typ = CREATE2
+	} else {
+		nonce, err := evm.intraBlockState.GetNonce(caller)
+		if err != nil {
+			return nil, accounts.NilAddress, err
+		}
+		address = accounts.InternAddress(types.CreateAddress(caller.Value(), nonce))
+		typ = CREATE
+	}
+
+	// Mark address access
+	evm.intraBlockState.MarkAddressAccess(address)
+
+	// Invoke tracer hooks
+	if evm.Config().Tracer != nil {
+		evm.captureBegin(depth, typ, caller, address, false, code, gas, value, nil)
+	}
+
+	// Depth check
+	if depth > int(params.CallCreateDepth) {
+		return nil, address, ErrDepth
+	}
+
+	// Balance check
+	canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller, value)
+	if err != nil {
+		return nil, address, err
+	}
+	if !canTransfer {
+		return nil, address, ErrInsufficientBalance
+	}
+
+	// Increment nonce
+	nonce, err := evm.intraBlockState.GetNonce(caller)
+	if err != nil {
+		return nil, address, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	}
+	if nonce+1 < nonce {
+		return nil, address, ErrNonceUintOverflow
+	}
+	evm.intraBlockState.SetNonce(caller, nonce+1)
+
+	// Add to access list if Berlin
+	if evm.chainRules.IsBerlin {
+		evm.intraBlockState.AddAddressToAccessList(address)
+	}
+
+	// Check for address collision
+	contractHash, err := evm.intraBlockState.ResolveCodeHash(address)
+	if err != nil {
+		return nil, address, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	}
+	addressNonce, err := evm.intraBlockState.GetNonce(address)
+	if err != nil {
+		return nil, address, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	}
+	hasStorage, err := evm.intraBlockState.HasStorage(address)
+	if err != nil {
+		return nil, address, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	}
+	if addressNonce != 0 || !contractHash.IsEmpty() || hasStorage {
+		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
+			evm.Config().Tracer.OnGasChange(gas, 0, tracing.GasChangeCallFailedExecution)
+		}
+		return nil, address, ErrContractAddressCollision
+	}
+
+	// Take snapshot
+	snapshot := evm.intraBlockState.PushSnapshot()
+
+	// Create account and transfer value
+	evm.intraBlockState.CreateAccount(address, true)
+	if evm.chainRules.IsSpuriousDragon {
+		evm.intraBlockState.SetNonce(address, 1)
+	}
+	evm.Context.Transfer(evm.intraBlockState, caller, address, value, false)
+
+	// Check NoRecursion
+	if evm.config.NoRecursion && depth > 0 {
+		evm.intraBlockState.PopSnapshot(snapshot)
+		return nil, address, nil
+	}
+
+	// Build the contract
+	// Note: Use codeAndHash.hash (the field) not codeAndHash.Hash() (the method)
+	// For CREATE, the hash is not needed and would be zero. For CREATE2, it was
+	// already computed above when calculating the address.
+	prepared := getPreparedCreate()
+	prepared.Contract = Contract{
+		caller: caller,
+		addr:   address,
+		value:  value,
+		//jumpdests: evm.config.JumpDestCache,
+		Code:     code,
+		CodeHash: codeAndHash.hash,
+	}
+	prepared.Gas = gas
+	prepared.Snapshot = snapshot
+	prepared.Addr = address
+	prepared.IsCreate2 = isCreate2
+
+	return prepared, address, nil
+}
+
+// FinishCreate handles the completion of a CREATE/CREATE2, storing code and reverting on error.
+func (evm *EVM) FinishCreate(pc *PreparedCreate, ret []byte, gas uint64, execErr error) ([]byte, uint64, error) {
+	var err error = execErr
+
+	// EIP-170: Contract code size limit
+	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > evm.maxCodeSize() {
+		if !evm.chainRules.IsAura || evm.config.HasEip3860(evm.chainRules) {
+			err = ErrMaxCodeSizeExceeded
+		}
+	}
+
+	// EIP-3541: Reject code starting with 0xEF
+	if err == nil && evm.chainRules.IsLondon && len(ret) >= 1 && ret[0] == 0xEF {
+		err = ErrInvalidCode
+	}
+
+	// Store code if successful
+	if err == nil {
+		createDataGas := uint64(len(ret)) * params.CreateDataGas
+		var ok bool
+		if gas, ok = useGas(gas, createDataGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage); ok {
+			evm.intraBlockState.SetCode(pc.Addr, ret)
+		} else {
+			ret = []byte{}
+			if evm.chainRules.IsHomestead {
+				err = ErrCodeStoreOutOfGas
+			}
+		}
+	}
+
+	// Revert on error
+	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
+		evm.intraBlockState.RevertToSnapshot(pc.Snapshot, nil)
+		if err != ErrExecutionReverted {
+			gas, _ = useGas(gas, gas, evm.Config().Tracer, tracing.GasChangeCallFailedExecution)
+		}
+	} else {
+		evm.intraBlockState.PopSnapshot(pc.Snapshot)
+	}
+
+	return ret, gas, err
 }
 
 // Create creates a new contract using code as deployment code.
@@ -602,7 +1005,8 @@ func (evm *EVM) captureEnd(depth int, typ OpCode, startGas uint64, leftOverGas u
 	}
 
 	if tracer.OnExit != nil {
-		tracer.OnExit(depth, ret, startGas-leftOverGas, VMErrorFromErr(err), reverted)
+		vmErr := VMErrorFromErr(err)
+		tracer.OnExit(depth, ret, startGas-leftOverGas, vmErr, reverted)
 	}
 }
 
