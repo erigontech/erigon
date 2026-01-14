@@ -90,6 +90,13 @@ func validateAndFillMaxStack(jt *JumpTable) {
 	}
 }
 
+func newOsakaInstructionSet() JumpTable {
+	instructionSet := newPragueInstructionSet()
+	enable7939(&instructionSet) // EIP-7939 (CLZ opcode)
+	validateAndFillMaxStack(&instructionSet)
+	return instructionSet
+}
+
 // newPragueInstructionSet returns the frontier, homestead, byzantium,
 // constantinople, istanbul, petersburg, berlin, london, paris, shanghai,
 // cancun, and prague instructions.
@@ -285,13 +292,6 @@ func newHomesteadInstructionSet() JumpTable {
 		memorySize:  memoryDelegateCall,
 		string:      stDelegateCall,
 	}
-	validateAndFillMaxStack(&instructionSet)
-	return instructionSet
-}
-
-func newOsakaInstructionSet() JumpTable {
-	instructionSet := newPragueInstructionSet()
-	enable7939(&instructionSet) // EIP-7939 (CLZ opcode)
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }
