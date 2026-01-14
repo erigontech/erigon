@@ -557,12 +557,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		}
 		st.refundGas(st.initialGas - gasUsedForPaying)
 		st.gasRemaining = st.initialGas - gasUsedForBlockLimit
-		// Also return remaining gas to the block gas counter so it is
-		// available for the next transaction.
-		st.gp.AddGas(st.gasRemaining)
 	} else if rules.IsPrague {
 		st.gasRemaining = st.initialGas - max(floorGas7623, st.gasUsed())
 	}
+	// Also return remaining gas to the block gas counter so it is
+	// available for the next transaction.
+	st.gp.AddGas(st.gasRemaining)
 
 	effectiveTip := *st.gasPrice
 	if rules.IsLondon {
