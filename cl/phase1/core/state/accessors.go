@@ -261,17 +261,19 @@ func ComputeTimestampAtSlot(b abstract.BeaconState, slot uint64) uint64 {
 }
 
 // GetExpectedWithdrawals calculates the expected withdrawals that can be made by validators in the current epoch
-func GetExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) ([]*cltypes.Withdrawal, uint64) {
+func GetExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) *cltypes.ExpectedWithdrawals {
 	nextWithdrawalIndex := b.NextWithdrawalIndex()
 	nextWithdrawalValidatorIndex := b.NextWithdrawalValidatorIndex()
-	withdrawals := make([]*cltypes.Withdrawal, 0)
+	expWithdrawals := &cltypes.ExpectedWithdrawals{
+		Withdrawals: []*cltypes.Withdrawal{},
+	}
 	partialWithdrawalsCount := uint64(0)
 
 	// [New in Electra:EIP7251] Consume pending partial withdrawals
 	cfg := b.BeaconConfig()
 	if b.Version() >= clparams.ElectraVersion {
 		b.GetPendingPartialWithdrawals().Range(func(index int, w *solid.PendingPartialWithdrawal, length int) bool {
-			if w.WithdrawableEpoch > currentEpoch || len(withdrawals) == int(cfg.MaxPendingPartialsPerWithdrawalsSweep) {
+			if w.WithdrawableEpoch > currentEpoch || len(expWithdrawals.Withdrawals) == int(cfg.MaxPendingPartialsPerWithdrawalsSweep) {
 				return false
 			}
 
@@ -280,7 +282,7 @@ func GetExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) ([]*clt
 
 			// Calculate total withdrawn amount for this validator from previous withdrawals
 			totalWithdrawn := uint64(0)
-			for _, withdrawal := range withdrawals {
+			for _, withdrawal := range expWithdrawals.Withdrawals {
 				if withdrawal.Validator == w.ValidatorIndex {
 					totalWithdrawn += withdrawal.Amount
 				}
@@ -305,7 +307,7 @@ func GetExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) ([]*clt
 
 				wd := validator.WithdrawalCredentials()
 				withdrawableBalance := min(balance-cfg.MinActivationBalance, w.Amount)
-				withdrawals = append(withdrawals, &cltypes.Withdrawal{
+				expWithdrawals.Withdrawals = append(expWithdrawals.Withdrawals, &cltypes.Withdrawal{
 					Index:     nextWithdrawalIndex,
 					Validator: w.ValidatorIndex,
 					Address:   common.BytesToAddress(wd[12:]),
@@ -323,13 +325,13 @@ func GetExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) ([]*clt
 	maxValidatorsPerWithdrawalsSweep := b.BeaconConfig().MaxValidatorsPerWithdrawalsSweep
 	bound := min(maxValidators, maxValidatorsPerWithdrawalsSweep)
 
-	for validatorCount := uint64(0); validatorCount < bound && len(withdrawals) != int(b.BeaconConfig().MaxWithdrawalsPerPayload); validatorCount++ {
+	for validatorCount := uint64(0); validatorCount < bound && len(expWithdrawals.Withdrawals) != int(b.BeaconConfig().MaxWithdrawalsPerPayload); validatorCount++ {
 		currentValidator, _ := b.ValidatorForValidatorIndex(int(nextWithdrawalValidatorIndex))
 
 		// Calculate total withdrawn amount for this validator from previous withdrawals
 		totalWithdrawn := uint64(0)
 		if b.Version() >= clparams.ElectraVersion {
-			for _, w := range withdrawals {
+			for _, w := range expWithdrawals.Withdrawals {
 				if w.Validator == nextWithdrawalValidatorIndex {
 					totalWithdrawn += w.Amount
 				}
@@ -349,7 +351,7 @@ func GetExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) ([]*clt
 		wd := currentValidator.WithdrawalCredentials()
 
 		if isFullyWithdrawableValidator(b, currentValidator, currentBalance, currentEpoch) {
-			withdrawals = append(withdrawals, &cltypes.Withdrawal{
+			expWithdrawals.Withdrawals = append(expWithdrawals.Withdrawals, &cltypes.Withdrawal{
 				Index:     nextWithdrawalIndex,
 				Validator: nextWithdrawalValidatorIndex,
 				Address:   common.BytesToAddress(wd[12:]),
@@ -361,7 +363,7 @@ func GetExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) ([]*clt
 			if b.Version() >= clparams.ElectraVersion {
 				maxEffectiveBalance = getMaxEffectiveBalanceElectra(currentValidator, b.BeaconConfig())
 			}
-			withdrawals = append(withdrawals, &cltypes.Withdrawal{
+			expWithdrawals.Withdrawals = append(expWithdrawals.Withdrawals, &cltypes.Withdrawal{
 				Index:     nextWithdrawalIndex,
 				Validator: nextWithdrawalValidatorIndex,
 				Address:   common.BytesToAddress(wd[12:]),
@@ -372,6 +374,6 @@ func GetExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) ([]*clt
 
 		nextWithdrawalValidatorIndex = (nextWithdrawalValidatorIndex + 1) % maxValidators
 	}
-
-	return withdrawals, partialWithdrawalsCount
+	expWithdrawals.ProcessedPartialWithdrawalsCount = partialWithdrawalsCount
+	return expWithdrawals
 }
