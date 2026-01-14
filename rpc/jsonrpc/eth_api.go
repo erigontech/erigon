@@ -399,11 +399,26 @@ type APIImpl struct {
 	AllowUnprotectedTxs         bool
 	MaxGetProofRewindBlockCount int
 	SubscribeLogsChannelSize    int
+	RpcTxSyncDefaultTimeout     time.Duration
+	RpcTxSyncMaxTimeout         time.Duration
 	logger                      log.Logger
 }
 
+// EthApiConfig defines the configurable parameters for EthAPI
+type EthApiConfig struct {
+	GasCap                      uint64
+	FeeCap                      float64
+	ReturnDataLimit             int
+	AllowUnprotectedTxs         bool
+	MaxGetProofRewindBlockCount int
+	SubscribeLogsChannelSize    int
+	RpcTxSyncDefaultTimeout     time.Duration
+	RpcTxSyncMaxTimeout         time.Duration
+}
+
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, gascap uint64, feecap float64, returnDataLimit int, allowUnprotectedTxs bool, maxGetProofRewindBlockCount int, subscribeLogsChannelSize int, logger log.Logger) *APIImpl {
+func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, cfg *EthApiConfig, logger log.Logger) *APIImpl {
+	gascap := cfg.GasCap
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
 	}
@@ -416,11 +431,13 @@ func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPo
 		mining:                      mining,
 		gasCache:                    NewGasPriceCache(),
 		GasCap:                      gascap,
-		FeeCap:                      feecap,
-		AllowUnprotectedTxs:         allowUnprotectedTxs,
-		ReturnDataLimit:             returnDataLimit,
-		MaxGetProofRewindBlockCount: maxGetProofRewindBlockCount,
-		SubscribeLogsChannelSize:    subscribeLogsChannelSize,
+		FeeCap:                      cfg.FeeCap,
+		AllowUnprotectedTxs:         cfg.AllowUnprotectedTxs,
+		ReturnDataLimit:             cfg.ReturnDataLimit,
+		MaxGetProofRewindBlockCount: cfg.MaxGetProofRewindBlockCount,
+		SubscribeLogsChannelSize:    cfg.SubscribeLogsChannelSize,
+		RpcTxSyncDefaultTimeout:     cfg.RpcTxSyncDefaultTimeout,
+		RpcTxSyncMaxTimeout:         cfg.RpcTxSyncMaxTimeout,
 		logger:                      logger,
 	}
 }

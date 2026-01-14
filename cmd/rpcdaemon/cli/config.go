@@ -182,6 +182,8 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().Uint64Var(&cfg.OtsMaxPageSize, utils.OtsSearchMaxCapFlag.Name, utils.OtsSearchMaxCapFlag.Value, utils.OtsSearchMaxCapFlag.Usage)
 	rootCmd.PersistentFlags().DurationVar(&cfg.RPCSlowLogThreshold, utils.RPCSlowFlag.Name, utils.RPCSlowFlag.Value, utils.RPCSlowFlag.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.WebsocketSubscribeLogsChannelSize, utils.WSSubscribeLogsChannelSize.Name, utils.WSSubscribeLogsChannelSize.Value, utils.WSSubscribeLogsChannelSize.Usage)
+	rootCmd.PersistentFlags().DurationVar(&cfg.RpcTxSyncDefaultTimeout, "rpc.txsync.defaulttimeout", rpccfg.DefaultRpcTxSyncDefaultTimeout, "Default timeout for eth_sendRawTransactionSync (default: 15 secs).")
+	rootCmd.PersistentFlags().DurationVar(&cfg.RpcTxSyncMaxTimeout, "rpc.txsync.maxtimeout", rpccfg.DefaultRpcTxSyncMaxTimeout, "Maximum allowed timeout for eth_sendRawTransactionSync (default: 1 min).")
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
