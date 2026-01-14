@@ -22,7 +22,7 @@ jobs:
         include:
           - chain: mainnet   # Chain name as specified on the erigon command line
             tracking_time_seconds: 7200
-            total_time_seconds: 86400  # 24 hours
+            total_time_seconds: 82800  # 23 hours (1h buffer before job timeout)
           - chain: gnosis
             tracking_time_seconds: 7200
             total_time_seconds: 64800  # 18 hours
