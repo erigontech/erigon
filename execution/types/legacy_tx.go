@@ -384,16 +384,30 @@ func (tx *LegacyTx) Hash() common.Hash {
 	return hash
 }
 
+type legacyTxSigHash struct {
+	Nonce    uint64
+	GasPrice *uint256.Int
+	Gas      uint64
+	To       *common.Address `rlp:"nil"`
+	Value    *uint256.Int
+	Data     []byte
+	ChainID  *big.Int
+	V        uint
+	R        uint
+}
+
 func (tx *LegacyTx) SigningHash(chainID *big.Int) common.Hash {
 	if chainID != nil && chainID.Sign() != 0 {
-		return rlpHash([]any{
-			tx.Nonce,
-			tx.GasPrice,
-			tx.GasLimit,
-			tx.To,
-			tx.Value,
-			tx.Data,
-			chainID, uint(0), uint(0),
+		return rlpHash(&legacyTxSigHash{
+			Nonce:    tx.Nonce,
+			GasPrice: tx.GasPrice,
+			Gas:      tx.GasLimit,
+			To:       tx.To,
+			Value:    tx.Value,
+			Data:     tx.Data,
+			ChainID:  chainID,
+			V:        uint(0),
+			R:        uint(0),
 		})
 	}
 	return rlpHash([]any{
