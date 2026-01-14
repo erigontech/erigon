@@ -60,7 +60,7 @@ import (
 func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms *execctx.SharedDomains, maxBlockNum uint64) (
 	inputTxNum uint64, maxTxNum uint64, offsetFromBlockBeginning uint64, err error) {
 
-	txNumsReader := cfg.blockReader.TxnumReader(ctx)
+	txNumsReader := cfg.blockReader.TxnumReader()
 
 	inputTxNum = doms.TxNum()
 
@@ -70,12 +70,12 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms
 		return 0, 0, 0, err
 	}
 
-	maxTxNum, err = txNumsReader.Max(applyTx, maxBlockNum)
+	maxTxNum, err = txNumsReader.Max(ctx, applyTx, maxBlockNum)
 	if err != nil {
 		return 0, 0, 0, err
 	}
 
-	blockNum, ok, err := txNumsReader.FindBlockNum(applyTx, doms.TxNum())
+	blockNum, ok, err := txNumsReader.FindBlockNum(ctx, applyTx, doms.TxNum())
 	if err != nil {
 		return 0, 0, 0, err
 	}
@@ -85,13 +85,13 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms
 		return 0, 0, 0, fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d; in db: (%d-%d, %d-%d)", inputTxNum, fb, lb, ft, lt)
 	}
 	{
-		max, _ := txNumsReader.Max(applyTx, blockNum)
+		max, _ := txNumsReader.Max(ctx, applyTx, blockNum)
 		if doms.TxNum() == max {
 			blockNum++
 		}
 	}
 
-	min, err := txNumsReader.Min(applyTx, blockNum)
+	min, err := txNumsReader.Min(ctx, applyTx, blockNum)
 	if err != nil {
 		return 0, 0, 0, err
 	}

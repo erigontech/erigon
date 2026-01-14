@@ -919,7 +919,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 
-	txNumMin, err := api._txNumReader.Min(tx, blockNum)
+	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}

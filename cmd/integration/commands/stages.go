@@ -1096,7 +1096,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		_bridgeStoreSingleton = bridge.NewSnapshotStore(bridge.NewDbStore(db), _allBorSnapshotsSingleton, chainConfig.Bor)
 		_heimdallStoreSingleton = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), _allBorSnapshotsSingleton)
 		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton)
-		txNums := blockReader.TxnumReader(ctx)
+		txNums := blockReader.TxnumReader()
 
 		_aggSingleton = dbstate.New(dirs).Logger(logger).MustOpen(ctx, db)
 
@@ -1142,7 +1142,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			ac := _aggSingleton.BeginFilesRo()
 			defer ac.Close()
 			stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-				histBlockNumProgress, _, err := txNums.FindBlockNum(tx, endTxNumMinimax)
+				histBlockNumProgress, _, err := txNums.FindBlockNum(ctx, tx, endTxNumMinimax)
 				if err != nil {
 					return histBlockNumProgress, fmt.Errorf("findBlockNum(%d) fails: %w", endTxNumMinimax, err)
 				}
