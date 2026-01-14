@@ -1020,6 +1020,8 @@ func TestEIP8024_Execution(t *testing.T) {
 					pc, _, err = opJumpdest(pc, evmInterpreter, callContext)
 				case 0xe6:
 					pc, _, err = opDupN(pc, evmInterpreter, callContext)
+				case 0x15:
+					pc, _, err = opIszero(pc, evmInterpreter, callContext)
 				case 0xe7:
 					pc, _, err = opSwapN(pc, evmInterpreter, callContext)
 				case 0xe8:
