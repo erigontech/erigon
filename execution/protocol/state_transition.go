@@ -548,14 +548,18 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		if rules.IsLondon {
 			refundQuotient = params.RefundQuotientEIP3529
 		}
-		gasUsed := st.gasUsed()
-		refund := min(gasUsed/refundQuotient, st.state.GetRefund())
-		gasUsed = gasUsed - refund
-		if rules.IsPrague {
-			gasUsed = max(floorGas7623, gasUsed)
+		refund := min(st.gasUsed()/refundQuotient, st.state.GetRefund())
+		gasUsedForPaying := adjustGasUsed(st.gasUsed(), refund, rules.IsPrague, floorGas7623)
+		gasUsedForBlockLimit := gasUsedForPaying
+		if rules.IsAmsterdam {
+			refund = 0 // EIP-7778: Block Gas Accounting without Refunds
+			gasUsedForBlockLimit = adjustGasUsed(st.gasUsed(), refund, rules.IsPrague, floorGas7623)
 		}
-		st.gasRemaining = st.initialGas - gasUsed
-		st.refundGas()
+		st.refundGas(st.initialGas - gasUsedForPaying)
+		st.gasRemaining = st.initialGas - gasUsedForBlockLimit
+		// Also return remaining gas to the block gas counter so it is
+		// available for the next transaction.
+		st.gp.AddGas(st.gasRemaining)
 	} else if rules.IsPrague {
 		st.gasRemaining = st.initialGas - max(floorGas7623, st.gasUsed())
 	}
@@ -710,21 +714,24 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 	return verifiedAuthorities, nil
 }
 
-func (st *StateTransition) refundGas() {
+func (st *StateTransition) refundGas(gasRemaining uint64) {
 	// Return ETH for remaining gas, exchanged at the original rate.
-	remaining := u256.Mul(u256.U64(st.gasRemaining), *st.gasPrice)
+	remaining := u256.Mul(u256.U64(gasRemaining), *st.gasPrice)
 	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Handle()) {
-		fmt.Printf("%d (%d.%d) Refund %x: remaining: %d, price: %d val: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining, st.gasPrice, &remaining)
+		fmt.Printf("%d (%d.%d) Refund %x: remaining: %d, price: %d val: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), gasRemaining, st.gasPrice, &remaining)
 	}
-
 	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
-
-	// Also return remaining gas to the block gas counter so it is
-	// available for the next transaction.
-	st.gp.AddGas(st.gasRemaining)
 }
 
 // gasUsed returns the amount of gas used up by the state transition.
 func (st *StateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gasRemaining
+}
+
+func adjustGasUsed(gasUsed, refund uint64, isEip7623 bool, floorGas7623 uint64) uint64 {
+	gasUsed -= refund
+	if isEip7623 {
+		gasUsed = max(gasUsed, floorGas7623)
+	}
+	return gasUsed
 }
