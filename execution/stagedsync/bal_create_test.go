@@ -8,6 +8,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -81,7 +82,11 @@ func TestCreateBALOrdering(t *testing.T) {
 
 	slot1Changes := accountB.StorageChanges[0].Changes
 	if len(slot1Changes) != 1 || slot1Changes[0].Index != 2 || uint256.NewInt(0).SetBytes(slot1Changes[0].Value[:]).Uint64() != 5 {
-		t.Fatalf("unexpected slot1 change: %+v", slot1Changes)
+		changes := make([]types.StorageChange, len(slot1Changes))
+		for i, change := range slot1Changes {
+			changes[i] = *change
+		}
+		t.Fatalf("unexpected slot1 change: %+v", changes)
 	}
 
 	slot2Changes := accountB.StorageChanges[1].Changes
@@ -122,6 +127,7 @@ func addStorageWrite(writeSets map[int]state.VersionedWrites, txIdx int, addr ac
 		Path:    state.StoragePath,
 		Key:     slot,
 		Val:     *uint256.NewInt(value),
+		Version: state.Version{TxIndex: txIdx},
 	})
 }
 
@@ -130,6 +136,7 @@ func addBalanceWrite(writeSets map[int]state.VersionedWrites, txIdx int, addr ac
 		Address: addr,
 		Path:    state.BalancePath,
 		Val:     *uint256.NewInt(value),
+		Version: state.Version{TxIndex: txIdx},
 	})
 }
 
