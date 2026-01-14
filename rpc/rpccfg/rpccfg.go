@@ -58,7 +58,7 @@ var DefaultHTTPTimeouts = HTTPTimeouts{
 const DefaultEvmCallTimeout = 5 * time.Minute
 const DefaultOverlayGetLogsTimeout = 5 * time.Minute
 const DefaultOverlayReplayBlockTimeout = 10 * time.Second
-const DefaultRpcTxSyncDefaultTimeout = 15 * time.Second
+const DefaultRpcTxSyncDefaultTimeout = 25 * time.Second
 const DefaultRpcTxSyncMaxTimeout = 1 * time.Minute
 
 var SlowLogBlackList = []string{

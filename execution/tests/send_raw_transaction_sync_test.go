@@ -99,7 +99,8 @@ func TestSendRawTransactionSync(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		receipt, errSend = eat.RpcApiClient.SendRawTransactionSync(tx, nil)
+		timeoutMillis := hexutil.Uint64(1000)
+		receipt, errSend = eat.RpcApiClient.SendRawTransactionSync(tx, &timeoutMillis)
 	}()
 
 	// Wait for the transaction to show up in pending transactions (i.e. arrived at the mempool)

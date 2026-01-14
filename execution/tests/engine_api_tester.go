@@ -134,6 +134,8 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 		EvmCallTimeout:           rpccfg.DefaultEvmCallTimeout,
 		AuthRpcTimeouts:          rpccfg.DefaultHTTPTimeouts,
 		HTTPTimeouts:             rpccfg.DefaultHTTPTimeouts,
+		RpcTxSyncDefaultTimeout:  rpccfg.DefaultRpcTxSyncDefaultTimeout,
+		RpcTxSyncMaxTimeout:      rpccfg.DefaultRpcTxSyncMaxTimeout,
 	}
 
 	nodeKeyConfig := p2p.NodeKeyConfig{}
