@@ -444,8 +444,6 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		}
 	}
 
-	fmt.Println("MAP Result", res.Status())
-
 	switch res.Status() {
 	case MVReadResultDone:
 		vr.Source = MapRead

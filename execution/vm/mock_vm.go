@@ -79,8 +79,9 @@ func (evm *testVM) Run(_ Contract, _ uint64, _ []byte, readOnly bool) (ret []byt
 
 func (evm *testVM) Depth() int { return evm.depth }
 
-func (evm *testVM) IncDepth() { evm.depth++ }
-func (evm *testVM) DecDepth() { evm.depth-- }
+func (evm *testVM) IncDepth()      { evm.depth++ }
+func (evm *testVM) DecDepth()      { evm.depth-- }
+func (evm *testVM) ReadOnly() bool { return evm.getReadonly() }
 
 type readOnlyState struct {
 	outer  bool

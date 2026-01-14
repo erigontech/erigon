@@ -235,7 +235,6 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 		return false, err
 	}
 
-	fmt.Println("PREV", source, prev, value, "SAME", !force && source != UnknownSource && prev == value)
 	if !force && source != UnknownSource && prev == value {
 		return false, nil
 	}

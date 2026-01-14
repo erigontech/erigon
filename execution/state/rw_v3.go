@@ -787,9 +787,9 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 
 	if r.trace {
 		if enc == nil {
-			fmt.Printf("%sReadAccountStorage [%x %x] => [empty], txNum: %d\n", r.tracePrefix, address, key, r.txNum)
+			fmt.Printf("%sReadAccountStorage [%x %x] => [empty], txNum: %d, stack: %s\n", r.tracePrefix, address, key, r.txNum, dbg.Stack())
 		} else {
-			fmt.Printf("%sReadAccountStorage [%x %x] => [%x], txNum: %d\n", r.tracePrefix, address, key, &res, r.txNum)
+			fmt.Printf("%sReadAccountStorage [%x %x] => [%x], txNum: %d, stack: %s\n", r.tracePrefix, address, key, &res, r.txNum, dbg.Stack())
 		}
 	}
 
@@ -807,7 +807,7 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	}
 	if r.trace {
 		lenc, cs := printCode(enc)
-		fmt.Printf("%sReadAccountCode [%x] =>  [%d:%s], txNum: %d stack=%s\n", r.tracePrefix, address, lenc, cs, r.txNum, dbg.Stack())
+		fmt.Printf("%sReadAccountCode [%x] =>  [%d:%s], txNum: %d, stack: %s\n", r.tracePrefix, address, lenc, cs, r.txNum, dbg.Stack())
 	}
 	return enc, nil
 }

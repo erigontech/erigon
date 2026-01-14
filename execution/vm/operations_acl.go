@@ -32,6 +32,9 @@ import (
 
 func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 	return func(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
+		if evm.interpreter.ReadOnly() {
+			return 0, ErrWriteProtection
+		}
 		// If we fail the minimum gas availability invariant, fail (0)
 		if scopeGas <= params.SstoreSentryGasEIP2200 {
 			return 0, errors.New("not enough gas for reentrancy sentry")
@@ -224,9 +227,14 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 			address = accounts.InternAddress(callContext.Stack.peek().Bytes20())
 		)
 		// If the caller cannot afford the cost, this change will be rolled back
-		if evm.IntraBlockState().AddAddressToAccessList(address) {
+		if !evm.IntraBlockState().AddressInAccessList(address) {
 			gas = params.ColdAccountAccessCostEIP2929
+			if _, ok := useGas(scopeGas, gas, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
+				return 0, ErrOutOfGas
+			}
+			evm.IntraBlockState().AddAddressToAccessList(address)
 		}
+
 		// if empty and transfers value
 		empty, err := evm.IntraBlockState().Empty(address)
 		if err != nil {
@@ -236,9 +244,11 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 		if err != nil {
 			return 0, err
 		}
+		evm.IntraBlockState().MarkAddressAccess(address, false)
 		if empty && !balance.IsZero() {
 			gas += params.CreateBySelfdestructGas
 		}
+
 		hasSelfdestructed, err := evm.IntraBlockState().HasSelfdestructed(callContext.Address())
 		if err != nil {
 			return 0, err

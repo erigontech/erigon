@@ -68,6 +68,7 @@ type Interpreter interface {
 	Depth() int // `Depth` returns the current call stack's depth.
 	IncDepth()  // Increments the current call stack's depth.
 	DecDepth()  // Decrements the current call stack's depth
+	ReadOnly() bool
 }
 
 // CallContext contains the things that are per-call, such as stack and memory,
@@ -489,3 +490,5 @@ func (in *EVMInterpreter) IncDepth() { in.depth++ }
 
 // Decrements the current call stack's depth
 func (in *EVMInterpreter) DecDepth() { in.depth-- }
+
+func (in *EVMInterpreter) ReadOnly() bool { return in.readOnly }

@@ -3,7 +3,6 @@ package state
 import (
 	"errors"
 	"fmt"
-	"reflect"
 	"sync"
 
 	"github.com/erigontech/erigon/execution/types"
@@ -199,7 +198,6 @@ func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts
 	fk, fv := floor(txIdx - 1)
 
 	if fk != UnknownDep && fv != nil {
-		fmt.Println("READ", path, txIdx, fk, fv.data, reflect.TypeOf(fv.data))
 		switch fv.flag {
 		case FlagEstimate:
 			res.depIdx = fk

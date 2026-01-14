@@ -1135,19 +1135,15 @@ func (sdb *IntraBlockState) setState(addr accounts.Address, key accounts.Storage
 		return err
 	}
 	if set {
-		fmt.Println("IS SET")
 		storageKey := AccountKey{Path: StoragePath, Key: key}
 		if _, ok := sdb.versionedWrites[addr][storageKey]; ok {
 			if origin, ok := stateObject.GetOriginState(key); ok && value == origin {
-				fmt.Println("IS ORIGIN")
 				sdb.versionedWrites.Delete(addr, storageKey)
 				return nil
 			}
 		}
-		fmt.Println("WRITTEN")
 		versionWritten(sdb, addr, StoragePath, key, value)
 	}
-	fmt.Println("DONE SET")
 	return nil
 }
 
@@ -1859,7 +1855,6 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 
 // AddAddressToAccessList adds the given address to the access list
 func (sdb *IntraBlockState) AddAddressToAccessList(addr accounts.Address) (addrMod bool) {
-	fmt.Println("AddressToAccessList", addr, dbg.Stack())
 	addrMod = sdb.accessList.AddAddress(addr)
 	if addrMod {
 		sdb.journal.append(accessListAddAccountChange{addr})
@@ -1899,7 +1894,6 @@ func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 	if !sdb.recordAccess || sdb.addressAccess == nil {
 		return
 	}
-	fmt.Println("MarkAddressAccess", revertable, addr, dbg.Stack())
 	if opts, ok := sdb.addressAccess[addr]; ok {
 		if opts.revertable && !revertable {
 			opts.revertable = false

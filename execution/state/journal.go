@@ -254,7 +254,6 @@ func (ch touchAccount) revert(s *IntraBlockState) error {
 		if len(reads) == 1 {
 			if _, ok := reads[AccountKey{Path: AddressPath}]; ok {
 				if opts, ok := s.addressAccess[ch.account]; !ok || opts.revertable {
-					fmt.Println("REVERT TOUCH", ch.account)
 					delete(s.versionedReads, ch.account)
 					delete(s.addressAccess, ch.account)
 				}
@@ -521,7 +520,6 @@ func (ch accessListAddAccountChange) revert(s *IntraBlockState) error {
 		(addr) at this point, since no storage adds can remain when come upon
 		a single (addr) change.
 	*/
-	fmt.Println("REVERT ACCESS LIST", ch.address)
 	s.accessList.DeleteAddress(ch.address)
 	return nil
 }
