@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"bytes"
-	"crypto/ecdsa"
 	"math/big"
 	"testing"
 	"time"
@@ -29,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
@@ -179,13 +177,4 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 		require.NoError(err)
 		require.Equal(expectedTxValue, jsonTx.Value.Uint64())
 	}
-}
-
-func transaction(nonce uint64, gaslimit uint64, key *ecdsa.PrivateKey) types.Transaction {
-	return pricedTransaction(nonce, gaslimit, &u256.Num1, key)
-}
-
-func pricedTransaction(nonce uint64, gaslimit uint64, gasprice *uint256.Int, key *ecdsa.PrivateKey) types.Transaction {
-	tx, _ := types.SignTx(types.NewTransaction(nonce, common.Address{}, uint256.NewInt(100), gaslimit, gasprice, nil), *types.LatestSignerForChainID(big.NewInt(1337)), key)
-	return tx
 }
