@@ -303,7 +303,7 @@ func (I *impl) ProcessWithdrawals(
 	numValidators := uint64(s.ValidatorLength())
 
 	// Check if full validation is required and verify expected withdrawals.
-	expectedWithdrawals, partialWithdrawalsCount := state.ExpectedWithdrawals(s, state.Epoch(s))
+	expectedWithdrawals, partialWithdrawalsCount := state.GetExpectedWithdrawals(s, state.Epoch(s))
 	if I.FullValidation {
 		if len(expectedWithdrawals) != withdrawals.Len() {
 			return fmt.Errorf(

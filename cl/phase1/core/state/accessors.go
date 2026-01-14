@@ -260,8 +260,8 @@ func ComputeTimestampAtSlot(b abstract.BeaconState, slot uint64) uint64 {
 	return b.GenesisTime() + (slot-b.BeaconConfig().GenesisSlot)*b.BeaconConfig().SecondsPerSlot
 }
 
-// ExpectedWithdrawals calculates the expected withdrawals that can be made by validators in the current epoch
-func ExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) ([]*cltypes.Withdrawal, uint64) {
+// GetExpectedWithdrawals calculates the expected withdrawals that can be made by validators in the current epoch
+func GetExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) ([]*cltypes.Withdrawal, uint64) {
 	nextWithdrawalIndex := b.NextWithdrawalIndex()
 	nextWithdrawalValidatorIndex := b.NextWithdrawalValidatorIndex()
 	withdrawals := make([]*cltypes.Withdrawal, 0)
