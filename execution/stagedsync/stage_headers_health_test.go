@@ -201,6 +201,26 @@ func newMockRPCServer(t *testing.T, responses map[string]interface{}) *httptest.
 	}))
 }
 
+func TestGetPublicReceiptFeed(t *testing.T) {
+	tests := []struct {
+		chainID  uint64
+		expected string
+	}{
+		{421614, "https://sepolia-rollup.arbitrum.io/rpc"},
+		{42161, "https://arb1.arbitrum.io/rpc"},
+		{42170, "https://nova.arbitrum.io/rpc"},
+		{1, ""},      // Ethereum mainnet - no feed
+		{999999, ""}, // Unknown chain - no feed
+	}
+
+	for _, tt := range tests {
+		t.Run(strconv.FormatUint(tt.chainID, 10), func(t *testing.T) {
+			result := getPublicReceiptFeed(tt.chainID)
+			require.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 // TestCheckL2RPCEndpointsHealth_Integration tests against real RPC endpoints.
 // Set environment variables to run:
 //   - L2RPC: block RPC endpoint URL (required)
