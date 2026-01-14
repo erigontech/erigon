@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/version"
 	ver "github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
@@ -170,14 +171,25 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 		//typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
 		typeName := name[lastSep+1 : dot]
 		include := false
+		idxIndex := 0
 		if strings.Contains(name, "transactions-to-block") { // transactions-to-block should just be "transactions" type
+			idxIndex = 1
 			typeName = "transactions"
+		}
+		if strings.Contains(name, "blocksidecars") {
+			typeName = "blobsidecars"
 		}
 
 		for _, typ := range types {
 			if typeName == typ.Name() {
-				preferredVersion = typ.Versions().Current
-				minVersion = typ.Versions().MinSupported
+				var versions version.Versions
+				if strings.HasSuffix(p.Name, "idx") {
+					versions = typ.Indexes()[idxIndex].Version
+				} else {
+					versions = typ.Versions()
+				}
+				preferredVersion = versions.Current
+				minVersion = versions.MinSupported
 				include = true
 				break
 			}
@@ -223,6 +235,11 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	slices.SortFunc(versioned, func(i, j PreverifiedItem) int {
 		return strings.Compare(i.Name, j.Name)
 	})
+	if len(p.Items) != len(versioned) {
+		log.Root().Warn("Preverified list reduced after applying type filter", "from", len(p.Items), "to", len(versioned))
+	} else {
+		log.Root().Debug("Preverified list has same len after applying type filter", "len", len(p.Items))
+	}
 	p.Items = versioned
 	return p
 }
