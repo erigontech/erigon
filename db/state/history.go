@@ -463,7 +463,7 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 			const preallocKeys = 1024
 			b.Prealloc(preallocKeys, preallocKeys*1024) // value size is ~1kb
 			w.historyVals = etl.NewCollector(w.ii.filenameBase+".flush.hist", tmpdir, b, ht.h.logger).
-				LogLvl(log.LvlInfo).SortAndFlushInBackground(false)
+				LogLvl(log.LvlInfo).SortAndFlushInBackground(true)
 		} else {
 			w.historyVals = etl.NewCollectorWithAllocator(w.ii.filenameBase+".flush.hist", tmpdir, etl.SmallSortableBuffers, ht.h.logger).
 				LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
