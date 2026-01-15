@@ -61,7 +61,7 @@ jobs:
 
       - name: Prepare Redis database
         shell: bash
-        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/tip-tracking/rpc-tests
+        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
           set -euo pipefail
           python redis_client.py --key ${{ steps.vars.outputs.erigon_redis_key }} --write "starting"
@@ -87,7 +87,7 @@ jobs:
 
       - name: Sanity check Redis config
         shell: bash
-        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/tip-tracking/rpc-tests
+        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
           set -euo pipefail
           python redis_client.py --key ${{ needs.setup.outputs.erigon_redis_key }} --read
@@ -127,7 +127,7 @@ jobs:
 
       - name: Sanity check Redis config
         shell: bash
-        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/tip-tracking/rpc-tests
+        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
           set -euo pipefail
           python redis_client.py --key ${{ needs.setup.outputs.geth_redis_key }} --read
