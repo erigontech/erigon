@@ -255,12 +255,12 @@ func (sd *TemporalMemBatch) SizeEstimate() uint64 {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 
-	estimateSize := uint64(sd.metrics.CachePutSize)
-	estimateSize *= 2 // to cover data-structures overhead (and keep accounting cheap)
-	estimateSize *= 2 // to cover `multiple versions of domains in-mem data` - see `domains` field type
-	estimateSize *= 2 // to cover because Commitment storing copy of updates
-	estimateSize *= 2 // because Commitment will produce `trie` updates - when batch is full
-	return estimateSize
+	estimateRamUsage := uint64(sd.metrics.CachePutSize)
+	estimateRamUsage *= 2 // to cover data-structures overhead (and keep accounting cheap)
+	estimateRamUsage *= 2 // to cover `multiple versions of domains in-mem data` - see `domains` field type
+	estimateRamUsage *= 2 // to cover because Commitment storing copy of updates
+	estimateRamUsage *= 2 // because Commitment will produce `trie` updates - when batch is full
+	return estimateRamUsage
 }
 
 func (sd *TemporalMemBatch) ClearRam() {
