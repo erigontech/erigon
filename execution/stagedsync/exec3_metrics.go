@@ -903,7 +903,6 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 
 	vals = append(vals, []any{
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		"inMem", te.inMemExec,
 	}...)
 
 	p.logger.Info(fmt.Sprintf("[%s]%s%s", p.logPrefix, suffix, mode), vals...)

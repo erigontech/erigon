@@ -43,7 +43,6 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -125,7 +124,7 @@ func ExecV3(ctx context.Context,
 	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger) (execErr error) {
-	inMemExec := execStage.SyncMode() == stages.ModeForkValidation
+	isForkValidation := execStage.SyncMode() == stages.ModeForkValidation
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
 	hooks := cfg.vmConfig.Tracer
 
@@ -154,21 +153,6 @@ func ExecV3(ctx context.Context,
 		agg.SetCollateAndBuildWorkers(1)
 	}
 
-	var err error
-	if !inMemExec {
-		var err error
-		doms, err = execctx.NewSharedDomains(ctx, applyTx, log.New())
-		// if we are behind the commitment, we can't execute anything
-		// this can heppen if progress in domain is higher than progress in blocks
-		if errors.Is(err, commitmentdb.ErrBehindCommitment) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		defer doms.Close()
-	}
-
 	var (
 		blockNum     = doms.BlockNum()
 		initialTxNum = doms.TxNum()
@@ -188,6 +172,7 @@ func ExecV3(ctx context.Context,
 		maxTxNum                 uint64
 	)
 
+	var err error
 	if inputTxNum, maxTxNum, offsetFromBlockBeginning, err = restoreTxNum(ctx, &cfg, applyTx, doms, maxBlockNum); err != nil {
 		return err
 	}
@@ -251,14 +236,6 @@ func ExecV3(ctx context.Context,
 	}
 
 	if parallel {
-		if !inMemExec { //nolint:staticcheck
-			// this is becuase for parallel execution the shared domain needs to
-			// be co-ordinated between exec and unwind - otherwise unwound state
-			// is not visible to parallel workers
-			// TODO return fmt.Errorf("parallel exec only supports inmem exec")
-
-		}
-
 		pe := &parallelExecutor{
 			txExecutor: txExecutor{
 				cfg:                   cfg,
@@ -266,7 +243,7 @@ func ExecV3(ctx context.Context,
 				doms:                  doms,
 				agg:                   agg,
 				isMining:              cfg.blockProduction,
-				inMemExec:             inMemExec,
+				isForkValidation:      isForkValidation,
 				logger:                logger,
 				logPrefix:             execStage.LogPrefix(),
 				progress:              NewProgress(blockNum, inputTxNum, commitThreshold, false, execStage.LogPrefix(), logger),
@@ -298,7 +275,7 @@ func ExecV3(ctx context.Context,
 				agg:                   agg,
 				u:                     u,
 				isMining:              cfg.blockProduction,
-				inMemExec:             inMemExec,
+				isForkValidation:      isForkValidation,
 				applyTx:               applyTx,
 				logger:                logger,
 				logPrefix:             execStage.LogPrefix(),
@@ -322,7 +299,7 @@ func ExecV3(ctx context.Context,
 			if lastHeader != nil {
 				switch {
 				case execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}):
-					_, _, err = flushAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, parallel, logger, u, inMemExec)
+					_, _, err = flushAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, parallel, logger, u)
 					if err != nil {
 						return err
 					}
@@ -371,7 +348,7 @@ func ExecV3(ctx context.Context,
 		lastCommittedTxNum = se.lastCommittedTxNum
 	}
 
-	if false && !inMemExec {
+	if false && !isForkValidation {
 		dumpPlainStateDebug(applyTx, doms)
 	}
 
@@ -451,7 +428,7 @@ type txExecutor struct {
 	doms             *execctx.SharedDomains
 	u                Unwinder
 	isMining         bool
-	inMemExec        bool
+	isForkValidation bool
 	applyTx          kv.TemporalTx
 	logger           log.Logger
 	logPrefix        string
@@ -748,7 +725,7 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.T
 		te.agg.BuildFilesInBackground(te.lastCommittedTxNum)
 	}
 
-	if !te.inMemExec {
+	if !te.isForkValidation {
 		te.doms.ClearRam(false)
 	}
 
@@ -852,7 +829,7 @@ type FlushAndComputeCommitmentTimes struct {
 }
 
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
-func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *execctx.SharedDomains, cfg ExecuteBlockCfg, e *StageState, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
+func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *execctx.SharedDomains, cfg ExecuteBlockCfg, e *StageState, parallel bool, logger log.Logger, u Unwinder) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
 	if header == nil {
 		return false, times, errors.New("header is nil")
 	}
@@ -870,14 +847,6 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 
 	domsFlushFn := func() (bool, FlushAndComputeCommitmentTimes, error) {
-		if !inMemExec {
-			start = time.Now()
-			err := doms.Flush(ctx, applyTx)
-			times.Flush = time.Since(start)
-			if err != nil {
-				return false, times, err
-			}
-		}
 		return true, times, nil
 	}
 

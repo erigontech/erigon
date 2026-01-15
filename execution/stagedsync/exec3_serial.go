@@ -64,7 +64,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		log.Info(fmt.Sprintf("[%s] serial starting", execStage.LogPrefix()),
 			"from", blockNum, "to", maxBlockNum, "limit", blockNum+blockLimit-1, "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "lastFrozenStep", lastFrozenStep,
-			"initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", se.inMemExec)
+			"initialCycle", initialCycle, "useExternalTx", useExternalTx)
 	}
 
 	for ; blockNum <= maxBlockNum; blockNum++ {
@@ -164,7 +164,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			computeCommitmentDuration += time.Since(start)
 			if shouldGenerateChangesets {
 				se.doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)
-				if !se.inMemExec {
+				if !se.isForkValidation {
 					if err := changeset.WriteDiffSet(rwTx, blockNum, b.Hash(), changeSet); err != nil {
 						return nil, rwTx, err
 					}
@@ -223,7 +223,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				pruneDuration time.Duration
 			)
 
-			ok, times, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), rwTx, se.doms, se.cfg, execStage, false, se.logger, u, se.inMemExec)
+			execStage.SyncMode()
+			ok, times, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), rwTx, se.doms, se.cfg, execStage, false, se.logger, u)
 			if err != nil {
 				return nil, rwTx, err
 			} else if !ok {
@@ -493,7 +494,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				return false, err
 			}
 			se.logger.Warn(fmt.Sprintf("[%s] Execution failed", se.logPrefix),
-				"block", txTask.BlockNumber(), "txNum", txTask.TxNum, "header-hash", txTask.Header.Hash().String(), "err", err, "inMem", se.inMemExec)
+				"block", txTask.BlockNumber(), "txNum", txTask.TxNum, "header-hash", txTask.Header.Hash().String(), "err", err, "inMem", se.isForkValidation)
 			if se.cfg.hd != nil && se.cfg.hd.POSSync() && errors.Is(err, rules.ErrInvalidBlock) {
 				se.cfg.hd.ReportBadHeaderPoS(txTask.Header.Hash(), txTask.Header.ParentHash)
 			}
