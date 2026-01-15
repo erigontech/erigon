@@ -1347,7 +1347,6 @@ func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, 
 	if !s.SegmentsReady() {
 		return errors.New("not all snapshot segments are available")
 	}
-	s.LogStat("missed-idx")
 
 	// wait for Downloader service to download all expected snapshots
 	indexWorkers := estimate.IndexSnapshot.Workers()
