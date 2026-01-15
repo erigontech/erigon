@@ -126,6 +126,7 @@ func ExecV3(ctx context.Context,
 	logger log.Logger) (execErr error) {
 	isBlockProduction := execStage.SyncMode() == stages.ModeBlockProduction
 	isForkValidation := execStage.SyncMode() == stages.ModeForkValidation
+	isApplyingBlocks := execStage.SyncMode() == stages.ModeApplyingBlocks
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
 	hooks := cfg.vmConfig.Tracer
 
@@ -146,7 +147,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	if !isForkValidation && !isBlockProduction {
+	if initialCycle && isApplyingBlocks {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	} else {
@@ -237,14 +238,6 @@ func ExecV3(ctx context.Context,
 	}
 
 	if parallel {
-		if !isForkValidation { //nolint:staticcheck
-			// this is becuase for parallel execution the shared domain needs to
-			// be co-ordinated between exec and unwind - otherwise unwound state
-			// is not visible to parallel workers
-			// TODO return fmt.Errorf("parallel exec only supports inmem exec")
-
-		}
-
 		pe := &parallelExecutor{
 			txExecutor: txExecutor{
 				cfg:                   cfg,
