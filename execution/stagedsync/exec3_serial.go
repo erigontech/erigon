@@ -262,15 +262,13 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if err != nil {
 				return nil, rwTx, err
 			}
-			// on chain-tip: if batch is full then stop execution - to allow stages commit
-			if !initialCycle {
-				if isBatchFull {
-					return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
-				}
 
-				if canPrune {
-					return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch can be pruned"}
-				}
+			if isBatchFull {
+				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
+			}
+
+			if canPrune {
+				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch can be pruned"}
 			}
 
 			if !useExternalTx {

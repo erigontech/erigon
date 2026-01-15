@@ -125,7 +125,7 @@ func ExecV3(ctx context.Context,
 	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger) (execErr error) {
-	inMemExec := doms != nil
+	inMemExec := execStage.SyncMode() == stages.ModeForkValidation
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
 	hooks := cfg.vmConfig.Tracer
 
