@@ -360,7 +360,7 @@ func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
 	}
 }
 
-func rlpHash(x interface{}) (h common.Hash) {
+func rlpHash(x any) (h common.Hash) {
 	hw := sha3.NewLegacyKeccak256()
 	if err := rlp.Encode(hw, x); err != nil {
 		panic(err)

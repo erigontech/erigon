@@ -55,7 +55,7 @@ type PrivateDebugAPI interface {
 	TraceTransaction(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
 	TraceBlockByHash(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
 	TraceBlockByNumber(ctx context.Context, number rpc.BlockNumber, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
-	AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start interface{}, maxResults int, nocode, nostorage bool, incompletes *bool) (state.IteratorDump, error)
+	AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start any, maxResults int, nocode, nostorage bool, incompletes *bool) (state.IteratorDump, error)
 	GetModifiedAccountsByNumber(ctx context.Context, startNum rpc.BlockNumber, endNum *rpc.BlockNumber) ([]common.Address, error)
 	GetModifiedAccountsByHash(ctx context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error)
 	TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error
@@ -63,7 +63,7 @@ type PrivateDebugAPI interface {
 	GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 	GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 	GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutil.Bytes, error)
-	GetBadBlocks(ctx context.Context) ([]map[string]interface{}, error)
+	GetBadBlocks(ctx context.Context) ([]map[string]any, error)
 	GetRawTransaction(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
 	FreeOSMemory()
 	SetGCPercent(v int) int
@@ -118,7 +118,7 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 // Deprecation of []byte format: The []byte format is now deprecated and will be removed in a future release.
 //
 // New optional parameter incompletes: This parameter has been added for compatibility with Geth. It is currently not supported when set to true(as its functionality is specific to the Geth protocol).
-func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start interface{}, maxResults int, excludeCode, excludeStorage bool, optional_incompletes *bool) (state.IteratorDump, error) {
+func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start any, maxResults int, excludeCode, excludeStorage bool, optional_incompletes *bool) (state.IteratorDump, error) {
 	var startBytes []byte
 
 	switch v := start.(type) {
@@ -132,7 +132,7 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 	case []byte:
 		startBytes = v
 
-	case []interface{}:
+	case []any:
 		for _, val := range v {
 			if b, ok := val.(float64); ok {
 				startBytes = append(startBytes, byte(b))
@@ -401,6 +401,9 @@ func (api *DebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.Blo
 	defer tx.Rollback()
 	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645
+		}
 		return nil, err
 	}
 	header, err := api._blockReader.Header(ctx, tx, h, n)
@@ -422,6 +425,9 @@ func (api *DebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.Bloc
 	defer tx.Rollback()
 	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645
+		}
 		return nil, err
 	}
 	block, err := api.blockWithSenders(ctx, tx, h, n)
@@ -444,6 +450,9 @@ func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.B
 
 	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645
+		}
 		return nil, err
 	}
 	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
@@ -487,7 +496,7 @@ func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.B
 }
 
 // GetBadBlocks implements debug_getBadBlocks - Returns an array of recent bad blocks that the client has seen on the network
-func (api *DebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]interface{}, error) {
+func (api *DebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]any, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -497,10 +506,10 @@ func (api *DebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]interfa
 	blocks, err := rawdb.GetLatestBadBlocks(tx)
 	if err != nil || len(blocks) == 0 {
 		// Return empty array if no bad blocks found to align with other clients and spec
-		return []map[string]interface{}{}, err
+		return []map[string]any{}, err
 	}
 
-	results := make([]map[string]interface{}, 0, len(blocks))
+	results := make([]map[string]any, 0, len(blocks))
 	for _, block := range blocks {
 		var blockRlp string
 		if rlpBytes, err := rlp.EncodeToBytes(block); err != nil {
@@ -512,9 +521,9 @@ func (api *DebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]interfa
 		blockJson, err := ethapi.RPCMarshalBlock(block, true, true, nil)
 		if err != nil {
 			log.Error("Failed to marshal block", "err", err)
-			blockJson = map[string]interface{}{}
+			blockJson = map[string]any{}
 		}
-		results = append(results, map[string]interface{}{
+		results = append(results, map[string]any{
 			"hash":  block.Hash(),
 			"block": blockRlp,
 			"rlp":   blockJson,

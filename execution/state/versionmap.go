@@ -42,7 +42,7 @@ func (p AccountPath) String() string {
 }
 
 const (
-	AddressPath = iota
+	AddressPath AccountPath = iota
 	BalancePath
 	NoncePath
 	CodePath
@@ -117,7 +117,7 @@ func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
 
 }
 
-func (vm *VersionMap) Write(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version, data interface{}, complete bool) {
+func (vm *VersionMap) Write(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version, data any, complete bool) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 
@@ -321,8 +321,14 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 		} else {
 			if valid = checkVersion(version, version); valid == VersionValid {
 				if path == BalancePath || path == NoncePath || path == CodeHashPath {
-					valid = vm.validateRead(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
-						version, checkVersion, traceInvalid, tracePrefix)
+					if valid = vm.validateRead(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
+						version, checkVersion, traceInvalid, tracePrefix); valid == VersionValid {
+						valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
+							version, checkVersion, traceInvalid, tracePrefix)
+					} else {
+						valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
+							version, checkVersion, traceInvalid, tracePrefix)
+					}
 				}
 			}
 		}
@@ -371,7 +377,7 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 type WriteCell struct {
 	flag        statusFlag
 	incarnation int
-	data        interface{}
+	data        any
 }
 
 type Version struct {
@@ -392,7 +398,14 @@ const (
 type ReadResult struct {
 	depIdx      int
 	incarnation int
-	value       interface{}
+	value       any
+}
+
+func (res *ReadResult) DepString() string {
+	if res.depIdx == UnknownDep {
+		return "unknown"
+	}
+	return fmt.Sprintf("%d.%d", res.depIdx, res.incarnation)
 }
 
 func (res *ReadResult) DepIdx() int {
@@ -403,7 +416,7 @@ func (res *ReadResult) Incarnation() int {
 	return res.incarnation
 }
 
-func (res *ReadResult) Value() interface{} {
+func (res *ReadResult) Value() any {
 	return res.value
 }
 

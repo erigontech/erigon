@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-func (api *OtterscanAPIImpl) GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]interface{}, error) {
+func (api *OtterscanAPIImpl) GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]any, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -45,7 +45,7 @@ func (api *OtterscanAPIImpl) GetBlockDetails(ctx context.Context, number rpc.Blo
 	return api.getBlockDetailsImpl(ctx, tx, b, number, senders)
 }
 
-func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
+func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]any, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -72,7 +72,7 @@ func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash com
 	return api.getBlockDetailsImpl(ctx, tx, b, number, b.Body().SendersFromTxs())
 }
 
-func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.TemporalTx, b *types.Block, number rpc.BlockNumber, senders []common.Address) (map[string]interface{}, error) {
+func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.TemporalTx, b *types.Block, number rpc.BlockNumber, senders []common.Address) (map[string]any, error) {
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -95,7 +95,7 @@ func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.Temp
 		return nil, err
 	}
 
-	response := map[string]interface{}{}
+	response := map[string]any{}
 	response["block"] = getBlockRes
 	response["issuance"] = getIssuanceRes
 	response["totalFees"] = (*hexutil.Big)(feesRes)

@@ -1369,12 +1369,11 @@ func opPush2(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64
 	)
 
 	if pc+2 < codeLen {
-		scope.Stack.push(*integer.SetBytes2(scope.Contract.Code[pc+1 : pc+3]))
+		integer.SetBytes2(scope.Contract.Code[pc+1 : pc+3])
 	} else if pc+1 < codeLen {
-		scope.Stack.push(*integer.SetUint64(uint64(scope.Contract.Code[pc+1]) << 8))
-	} else {
-		scope.Stack.push(uint256.Int{})
+		integer.SetUint64(uint64(scope.Contract.Code[pc+1]) << 8)
 	}
+	scope.Stack.push(*integer)
 	pc += 2
 	return pc, nil, nil
 }
@@ -1411,9 +1410,9 @@ func makePushStringer(size uint64, pushByteSize int) stringer {
 }
 
 // make dup instruction function
-func makeDup(size int64) executionFunc {
+func makeDup(size int) executionFunc {
 	return func(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-		scope.Stack.dup(int(size))
+		scope.Stack.dup(size)
 		return pc, nil, nil
 	}
 }

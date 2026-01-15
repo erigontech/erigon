@@ -801,7 +801,7 @@ func TestDB_Batch_Panic(t *testing.T) {
 
 	var sentinel int
 	var bork = &sentinel
-	var problem interface{}
+	var problem any
 	var err error
 
 	// Execute a function inside a batch that panics.

@@ -93,7 +93,6 @@ type Config struct {
 	// Balancer fork (Gnosis Chain). See https://hackmd.io/@filoozom/rycoQITlWl
 	BalancerTime            *big.Int                         `json:"balancerTime,omitempty"`
 	BalancerRewriteBytecode map[common.Address]hexutil.Bytes `json:"balancerRewriteBytecode,omitempty"`
-	CensoringSchedule       map[uint64]*CensoringConfig      `json:"censoringSchedule,omitempty"`
 
 	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
 	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
@@ -731,7 +730,6 @@ type Rules struct {
 	IsCancun, IsNapoli, IsBhilai                      bool
 	IsPrague, IsOsaka, IsAmsterdam                    bool
 	IsAura                                            bool
-	Censoring                                         *CensoringConfig
 }
 
 // isForked returns whether a fork scheduled at block s is active at the given head block.

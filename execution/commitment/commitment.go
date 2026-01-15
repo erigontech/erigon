@@ -105,8 +105,8 @@ type Trie interface {
 	// Set context for state IO
 	ResetContext(ctx PatriciaContext)
 
-	// Process updates
-	Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress) (rootHash []byte, err error)
+	// Process updates. If warmup.Enabled is true, pre-warms MDBX page cache in parallel.
+	Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup WarmupConfig) (rootHash []byte, err error)
 }
 
 type CommitProgress struct {
@@ -1225,34 +1225,148 @@ func (t *Updates) Close() {
 	}
 }
 
+const hashSortBatchSize = 10_000
+
 // HashSort sorts and applies fn to each key-value pair in the order of hashed keys.
-func (t *Updates) HashSort(ctx context.Context, fn func(hk, pk []byte, update *Update) error) error {
+// Keys are processed in batches of 10k to control memory usage.
+// If warmuper is non-nil, keys are submitted for parallel warming before processing.
+// Caller is responsible for calling warmuper.Wait() after processing completes.
+func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
 	switch t.mode {
 	case ModeDirect:
 		clear(t.keys)
 
+		batch := make([]*KeyUpdate, 0, hashSortBatchSize)
+		var prevKey []byte
+
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return fn(k, v, nil)
+			// Make copies since ETL may reuse buffers
+			hk := common.Copy(k)
+			pk := common.Copy(v)
+			batch = append(batch, &KeyUpdate{hashedKey: hk, plainKey: string(pk)})
+
+			// Submit to warmuper with start depth based on divergence from previous key
+			if warmuper != nil {
+				startDepth := 0
+				if prevKey != nil {
+					// Find common prefix length
+					minLen := min(len(prevKey), len(hk))
+					for startDepth < minLen && prevKey[startDepth] == hk[startDepth] {
+						startDepth++
+					}
+				}
+				warmuper.WarmKey(hk, startDepth)
+				prevKey = hk
+			}
+
+			// Process batch when full
+			if len(batch) >= hashSortBatchSize {
+				for _, p := range batch {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					default:
+					}
+					if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
+						return err
+					}
+				}
+				if warmuper != nil {
+					warmuper.DrainPending()
+				}
+				batch = batch[:0]
+			}
+			return nil
 		}, etl.TransformArgs{Quit: ctx.Done()})
 		if err != nil {
 			return err
 		}
 
+		// Process remaining keys in final batch
+		for _, p := range batch {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), nil); err != nil {
+				return err
+			}
+		}
+
 		t.initCollector()
+
 	case ModeUpdate:
+		batch := make([]*KeyUpdate, 0, hashSortBatchSize)
+		var prevKey []byte
+		var processErr error
+
 		t.tree.Ascend(func(item *KeyUpdate) bool {
 			select {
 			case <-ctx.Done():
+				processErr = ctx.Err()
 				return false
 			default:
 			}
 
-			if err := fn(item.hashedKey, toBytesZeroCopy(item.plainKey), item.update); err != nil {
-				return false
+			// Make copies
+			hk := make([]byte, len(item.hashedKey))
+			copy(hk, item.hashedKey)
+			batch = append(batch, &KeyUpdate{hashedKey: hk, plainKey: item.plainKey, update: item.update})
+
+			// Submit to warmuper with start depth based on divergence from previous key
+			if warmuper != nil {
+				startDepth := 0
+				if prevKey != nil {
+					// Find common prefix length
+					minLen := min(len(prevKey), len(hk))
+					for startDepth < minLen && prevKey[startDepth] == hk[startDepth] {
+						startDepth++
+					}
+				}
+				warmuper.WarmKey(hk, startDepth)
+				prevKey = hk
+			}
+
+			// Process batch when full
+			if len(batch) >= hashSortBatchSize {
+				for _, p := range batch {
+					select {
+					case <-ctx.Done():
+						processErr = ctx.Err()
+						return false
+					default:
+					}
+					if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), p.update); err != nil {
+						processErr = err
+						return false
+					}
+				}
+				if warmuper != nil {
+					warmuper.DrainPending()
+				}
+				batch = batch[:0]
 			}
 			return true
 		})
+
+		if processErr != nil {
+			return processErr
+		}
+
+		// Process remaining keys in final batch
+		for _, p := range batch {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			if err := fn(p.hashedKey, toBytesZeroCopy(p.plainKey), p.update); err != nil {
+				return err
+			}
+		}
 		t.tree.Clear(true)
+
 	default:
 		return nil
 	}

@@ -141,19 +141,6 @@ func (a *ReceiptsFilterAggregator) createFilterRequest() *remoteproto.ReceiptsFi
 	return req
 }
 
-// getAggMaps returns aggregated transaction hashes
-func (a *ReceiptsFilterAggregator) getAggMaps() map[common.Hash]int {
-	a.receiptsFilterLock.RLock()
-	defer a.receiptsFilterLock.RUnlock()
-
-	txHashes := make(map[common.Hash]int)
-	a.aggReceiptsFilter.transactionHashes.Range(func(k common.Hash, v int) error {
-		txHashes[k] = v
-		return nil
-	})
-	return txHashes
-}
-
 // distributeReceipt processes a receipt and distributes it to matching filters
 func (a *ReceiptsFilterAggregator) distributeReceipt(receipt *remoteproto.SubscribeReceiptsReply) error {
 	a.receiptsFilterLock.RLock()

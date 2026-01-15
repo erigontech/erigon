@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -32,6 +33,7 @@ import (
 )
 
 type Generator struct {
+	stateCache    kvcache.Cache
 	receiptsCache *lru.Cache[common.Hash, types.Receipts]
 	receiptCache  *lru.Cache[common.Hash, *types.Receipt]
 
@@ -65,7 +67,7 @@ var (
 	receiptsCacheTrace = dbg.EnvBool("R_LRU_TRACE", false)
 )
 
-func NewGenerator(blockReader services.FullBlockReader, engine rules.EngineReader, evmTimeout time.Duration) *Generator {
+func NewGenerator(blockReader services.FullBlockReader, engine rules.EngineReader, stateCache kvcache.Cache, evmTimeout time.Duration) *Generator {
 	receiptsCache, err := lru.New[common.Hash, types.Receipts](receiptsCacheLimit) //TODO: is handling both of them a good idea though...?
 	if err != nil {
 		panic(err)
@@ -79,6 +81,7 @@ func NewGenerator(blockReader services.FullBlockReader, engine rules.EngineReade
 	txNumReader := blockReader.TxnumReader(context.Background())
 
 	return &Generator{
+		stateCache:         stateCache,
 		receiptsCache:      receiptsCache,
 		blockReader:        blockReader,
 		txNumReader:        txNumReader,
@@ -108,10 +111,12 @@ func (g *Generator) GetCachedReceipt(ctx context.Context, hash common.Hash) (*ty
 }
 
 var rpcDisableRCache = dbg.EnvBool("RPC_DISABLE_RCACHE", false)
+var rpcDisableRLRU = dbg.EnvBool("RPC_DISABLE_RLRU", false)
 
 func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *chain.Config, tx kv.TemporalTx, txIndex int) (*ReceiptEnv, error) {
 	txNumsReader := g.blockReader.TxnumReader(ctx)
-	ibs, _, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, header, cfg, g.blockReader, txNumsReader, tx, txIndex)
+	ibs, _, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, header, cfg, g.blockReader, g.stateCache, txNumsReader, tx, txIndex)
+
 	if err != nil {
 		return nil, fmt.Errorf("ReceiptsGen: PrepareEnv: bn=%d, %w", header.Number.Uint64(), err)
 	}
@@ -141,16 +146,22 @@ func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *c
 }
 
 func (g *Generator) addToCacheReceipts(header *types.Header, receipts types.Receipts) {
+	if rpcDisableRLRU {
+		return
+	}
 	//g.receiptsCache.Add(header.Hash(), receipts.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
 	g.receiptsCache.Add(header.Hash(), receipts)
 }
 
 func (g *Generator) addToCacheReceipt(hash common.Hash, receipt *types.Receipt) {
+	if rpcDisableRLRU {
+		return
+	}
 	//g.receiptCache.Add(hash, receipt.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
 	g.receiptCache.Add(hash, receipt)
 }
 
-func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, txsForPostState *types.Transactions) (*types.Receipt, error) {
+func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, header *types.Header, txn types.Transaction, index int, txNum uint64, txsForPostState *types.Transactions) (_ *types.Receipt, err error) {
 	blockHash := header.Hash()
 	blockNum := header.Number.Uint64()
 	txnHash := txn.Hash()
@@ -170,7 +181,8 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 				"blockNum", blockNum,
 				"firstLogIndex", firstLogIndex,
 				"logIdxAfterTx", logIdxAfterTx,
-				"nil receipt in db", receiptFromDB == nil)
+				"nil receipt in db", receiptFromDB == nil,
+				"err", err)
 		}
 	}()
 
@@ -211,7 +223,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		}
 	}
 
-	var err error
 	var evm *vm.EVM
 	var genEnv *ReceiptEnv
 
@@ -313,7 +324,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			if err != nil {
 				return nil, err
 			}
-
 			stateWriter = genEnv.noopWriter
 		}
 
@@ -372,7 +382,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	return receipt, nil
 }
 
-func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
+func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block) (_ types.Receipts, err error) {
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
 
@@ -394,7 +404,8 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	}
 
 	// Check if we have commitment history: this is required to know if state root will be computed or left zero for historical state.
-	commitmentHistory, _, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
+	var commitmentHistory bool
+	commitmentHistory, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
 	if err != nil {
 		return nil, err
 	}
@@ -405,7 +416,6 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	// If/when receipts are saved to the DB *with* the `postState` field,
 	// this check on `calculatePostState` should be removed to utilize the stored receipt.
 	if !rpcDisableRCache && !calculatePostState {
-		var err error
 		receiptsFromDB, err = rawdb.ReadReceiptsCacheV2(tx, block, g.txNumReader)
 		if err != nil {
 			return nil, err
@@ -416,14 +426,13 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		}
 	}
 
-	genEnv, err := g.PrepareEnv(ctx, block.HeaderNoCopy(), cfg, tx, 0)
+	var genEnv *ReceiptEnv
+	genEnv, err = g.PrepareEnv(ctx, block.HeaderNoCopy(), cfg, tx, 0)
 	if err != nil {
 		return nil, err
 	}
 	//genEnv.ibs.SetTrace(true)
-	vmCfg := vm.Config{
-		JumpDestCache: vm.NewJumpDestCache(16),
-	}
+	vmCfg := vm.Config{}
 
 	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 	defer cancel()
