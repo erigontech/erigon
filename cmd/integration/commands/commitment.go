@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/seg"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -172,11 +173,16 @@ Examples:
 			return
 		}
 		defer tx.Rollback()
-
+		sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+		if err != nil {
+			logger.Error("Failed to create shared domains", "error", err)
+			return
+		}
+		defer sd.Close()
 		// Use LatestStateReader to read from the commitment domain.
 		// This is the same approach used by commitmentdb.TrieContext.Branch internally:
 		// TrieContext.Branch -> TrieContext.readDomain -> StateReader.Read
-		commitmentReader := commitmentdb.NewLatestStateReader(tx)
+		commitmentReader := commitmentdb.NewLatestStateReader(tx, sd)
 
 		if err := readBranch(commitmentReader, prefix, logger); err != nil {
 			logger.Error("Failed to read branch", "error", err)
@@ -463,8 +469,12 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 		return fmt.Errorf("failed to begin temporal tx: %w", err)
 	}
 	defer tx.Rollback()
-
-	commitmentReader := commitmentdb.NewLatestStateReader(tx)
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+	if err != nil {
+		return fmt.Errorf("failed to create shared domains: %w", err)
+	}
+	defer sd.Close()
+	commitmentReader := commitmentdb.NewLatestStateReader(tx, sd)
 	durations := make([]time.Duration, len(keys))
 	var totalSize int64
 

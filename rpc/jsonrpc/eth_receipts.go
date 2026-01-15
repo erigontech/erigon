@@ -67,7 +67,7 @@ func (api *BaseAPI) getReceipt(ctx context.Context, cc *chain.Config, tx kv.Temp
 }
 
 func (api *BaseAPI) getReceiptsGasUsed(ctx context.Context, tx kv.TemporalTx, block *types.Block) (types.Receipts, error) {
-	return api.receiptsGenerator.GetReceiptsGasUsed(tx, block, api._txNumReader)
+	return api.receiptsGenerator.GetReceiptsGasUsed(ctx, tx, block, api._txNumReader)
 }
 
 func (api *BaseAPI) getCachedReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, bool) {
@@ -206,7 +206,7 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 	//[from,to)
 	var fromTxNum, toTxNum uint64
 	if begin > 0 {
-		fromTxNum, err = txNumsReader.Min(tx, begin)
+		fromTxNum, err = txNumsReader.Min(context.Background(), tx, begin)
 		if err != nil {
 			return out, err
 		}
@@ -215,7 +215,7 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 		}
 	}
 
-	toTxNum, err = txNumsReader.Max(tx, end)
+	toTxNum, err = txNumsReader.Max(context.Background(), tx, end)
 	if err != nil {
 		return out, err
 	}
@@ -288,7 +288,7 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		return logs, err
 	}
 
-	it := rawdbv3.TxNums2BlockNums(tx, api._txNumReader, txNumbers, order.Asc)
+	it := rawdbv3.TxNums2BlockNums(ctx, tx, api._txNumReader, txNumbers, order.Asc)
 	defer it.Close()
 
 	for it.HasNext() {
@@ -461,7 +461,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	txNumMin, err := api._txNumReader.Min(tx, blockNum)
+	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}

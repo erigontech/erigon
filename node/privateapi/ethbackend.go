@@ -490,8 +490,8 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AA
 	header := currentBlock.HeaderNoCopy()
 
 	aaTxn := types.FromProto(req.Tx)
-	txNumsReader := s.blockReader.TxnumReader(ctx)
-	maxTxNum, err := txNumsReader.Max(tx, header.Number.Uint64())
+	txNumsReader := s.blockReader.TxnumReader()
+	maxTxNum, err := txNumsReader.Max(ctx, tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}

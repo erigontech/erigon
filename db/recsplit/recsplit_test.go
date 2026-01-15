@@ -119,7 +119,7 @@ func TestIndexLookup(t *testing.T) {
 		}
 		defer rs.Close()
 		for i := 0; i < 100; i++ {
-			if err = rs.AddKey([]byte(fmt.Sprintf("key %d", i)), uint64(i*17)); err != nil {
+			if err = rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -130,7 +130,7 @@ func TestIndexLookup(t *testing.T) {
 		defer idx.Close()
 		for i := 0; i < 100; i++ {
 			reader := NewIndexReader(idx)
-			offset, ok := reader.Lookup([]byte(fmt.Sprintf("key %d", i)))
+			offset, ok := reader.Lookup(fmt.Appendf(nil, "key %d", i))
 			assert.True(t, ok)
 			if offset != uint64(i*17) {
 				t.Errorf("expected offset: %d, looked up: %d", i*17, offset)
@@ -172,7 +172,7 @@ func TestTwoLayerIndex(t *testing.T) {
 		}
 		defer rs.Close()
 		for i := 0; i < N; i++ {
-			if err = rs.AddKey([]byte(fmt.Sprintf("key %d", i)), uint64(i*17)); err != nil {
+			if err = rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -184,7 +184,7 @@ func TestTwoLayerIndex(t *testing.T) {
 		defer idx.Close()
 		for i := 0; i < N; i++ {
 			reader := NewIndexReader(idx)
-			e, _ := reader.Lookup([]byte(fmt.Sprintf("key %d", i)))
+			e, _ := reader.Lookup(fmt.Appendf(nil, "key %d", i))
 			if e != uint64(i) {
 				t.Errorf("expected enumeration: %d, lookup up: %d", i, e)
 			}

@@ -201,13 +201,13 @@ func calculateDomainWriteAmplification(
 ) (domainStats, error) {
 	stats := domainStats{Domain: domain}
 
-	// Count unique keys using RangeLatest iterator
+	// Count unique keys using RangeLatest iterator (files only, ignoring MDBX)
 	startTime := time.Now()
-	logger.Info("Counting unique keys via RangeLatest", "domain", domain.String())
+	logger.Info("Counting unique keys via RangeLatestFromFiles", "domain", domain.String())
 
-	iter, err := aggTx.DebugRangeLatest(tx, domain, nil, nil, -1)
+	iter, err := aggTx.DebugRangeLatestFromFiles(domain, nil, nil, -1)
 	if err != nil {
-		return stats, fmt.Errorf("DebugRangeLatest: %w", err)
+		return stats, fmt.Errorf("DebugRangeLatestFromFiles: %w", err)
 	}
 
 	logTicker := time.NewTicker(10 * time.Second)

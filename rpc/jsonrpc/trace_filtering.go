@@ -101,7 +101,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, nil
 	}
 
-	txNumMin, err := api._txNumReader.Min(tx, blockNumber)
+	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -354,12 +354,12 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var err error
 
 	if fromBlock > 0 {
-		fromTxNum, err = api._txNumReader.Min(dbtx, fromBlock)
+		fromTxNum, err = api._txNumReader.Min(ctx, dbtx, fromBlock)
 		if err != nil {
 			return err
 		}
 	}
-	toTxNum, err = api._txNumReader.Max(dbtx, toBlock) // toBlock is an inclusive bound
+	toTxNum, err = api._txNumReader.Max(ctx, dbtx, toBlock) // toBlock is an inclusive bound
 	if err != nil {
 		return err
 	}
@@ -368,7 +368,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	if err != nil {
 		return err
 	}
-	it := rawdbv3.TxNums2BlockNums(dbtx, api._txNumReader, allTxs, order.Asc)
+	it := rawdbv3.TxNums2BlockNums(ctx, dbtx, api._txNumReader, allTxs, order.Asc)
 	defer it.Close()
 
 	chainConfig, err := api.chainConfig(ctx, dbtx)
