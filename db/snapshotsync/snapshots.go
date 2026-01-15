@@ -1434,7 +1434,6 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 
 	ps := background.NewProgressSet()
-	startIndexingTime := time.Now()
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -1442,22 +1441,6 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 	g, gCtx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
 	finish := make(chan struct{})
-
-	go func() {
-		for {
-			select {
-			case <-logEvery.C:
-				var m runtime.MemStats
-				dbg.ReadMemStats(&m)
-				sendDiagnostics(startIndexingTime, ps.DiagnosticsData(), m.Alloc, m.Sys)
-				logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-			case <-finish:
-				return
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
 
 	var fmu sync.Mutex
 	failedIndexes := make(map[string]error, 0)
