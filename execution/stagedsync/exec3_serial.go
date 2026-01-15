@@ -13,8 +13,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -48,9 +46,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 	havePartialBlock := false
 	blockNum := startBlockNum
-	computeCommitmentDuration := time.Duration(0)
 
-	var uncommitedGas uint64
 	var b *types.Block
 
 	lastFrozenStep := se.applyTx.StepsInFiles(kv.CommitmentDomain)
@@ -142,14 +138,11 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			return nil, rwTx, err
 		}
 
-		uncommitedGas = uint64(se.executedGas.Load() - int64(se.committedGas))
-
 		if !continueLoop {
 			return b.HeaderNoCopy(), rwTx, nil
 		}
 
 		if !dbg.BatchCommitments || shouldGenerateChangesets || se.cfg.syncCfg.KeepExecutionProofs {
-			start := time.Now()
 			if dbg.TraceBlock(blockNum) {
 				se.doms.SetTrace(true, false)
 			}
@@ -161,14 +154,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				return nil, rwTx, err
 			}
 
-			computeCommitmentDuration += time.Since(start)
 			if shouldGenerateChangesets {
 				se.doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)
-				if se.isApplyingBlocks {
-					if err := changeset.WriteDiffSet(rwTx, blockNum, b.Hash(), changeSet); err != nil {
-						return nil, rwTx, err
-					}
-				}
 			}
 			se.doms.SetChangesetAccumulator(nil)
 
@@ -190,7 +177,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		select {
 		case <-logEvery.C:
-			if se.isBlockProduction {
+			if !se.isApplyingBlocks {
 				break
 			}
 
@@ -218,12 +205,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 			resetExecGauges(ctx)
 
-			var (
-				commitStart   = time.Now()
-				pruneDuration time.Duration
-			)
-
-			ok, times, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), rwTx, se.doms, se.cfg, execStage, false, se.logger, u, se.isForkValidation, se.isBlockProduction)
+			ok, times, err := computeAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), rwTx, se.doms, se.cfg, execStage, false, se.logger, u, se.isBlockProduction)
 			if err != nil {
 				return nil, rwTx, err
 			} else if !ok {
@@ -231,9 +213,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			}
 
 			resetCommitmentGauges(ctx)
-
-			computeCommitmentDuration += times.ComputeCommitment
-			flushDuration := times.Flush
 
 			se.txExecutor.lastCommittedBlockNum = b.NumberU64()
 			se.txExecutor.lastCommittedTxNum = inputTxNum
@@ -253,15 +232,14 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				return nil, rwTx, err
 			}
 
-			pruneDuration = time.Since(timeStart)
-
-			stepsInDb := rawdbhelpers.IdxStepsCountV3(se.applyTx, se.agg.StepSize())
-
-			var commitDuration time.Duration
-			rwTx, commitDuration, err = se.commit(ctx, execStage, rwTx, nil, useExternalTx)
-			if err != nil {
-				return nil, rwTx, err
-			}
+			se.logger.Info(
+				"periodic commit check",
+				"block", se.doms.BlockNum(),
+				"txNum", se.doms.TxNum(),
+				"step", fmt.Sprintf("%.1f", float64(se.doms.TxNum())/float64(se.agg.StepSize())),
+				"commitment", times.ComputeCommitment,
+				"prune", time.Since(timeStart),
+			)
 
 			if isBatchFull {
 				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
@@ -270,15 +248,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if canPrune {
 				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch can be pruned"}
 			}
-
-			if !useExternalTx {
-				se.LogCommitments(commitStart, 0, 0, uncommitedGas, stepsInDb, commitment.CommitProgress{})
-			}
-
-			se.logger.Info("Committed", "time", time.Since(commitStart),
-				"block", se.doms.BlockNum(), "txNum", se.doms.TxNum(),
-				"step", fmt.Sprintf("%.1f", float64(se.doms.TxNum())/float64(se.agg.StepSize())),
-				"flush", flushDuration, "compute commitment", computeCommitmentDuration, "tx.commit", commitDuration, "prune", pruneDuration)
 		default:
 		}
 
@@ -315,10 +284,6 @@ func (se *serialExecutor) LogCommitments(commitStart time.Time, committedBlocks 
 
 func (se *serialExecutor) LogComplete(stepsInDb float64) {
 	se.progress.LogComplete(se.rs.StateV3, se, stepsInDb)
-}
-
-func (se *serialExecutor) commit(ctx context.Context, execStage *StageState, tx kv.TemporalRwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.TemporalRwTx, time.Duration, error) {
-	return se.txExecutor.commit(ctx, execStage, tx, useExternalTx, se.resetWorkers)
 }
 
 func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.TemporalTx) (err error) {

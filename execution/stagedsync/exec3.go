@@ -303,7 +303,7 @@ func ExecV3(ctx context.Context,
 			if lastHeader != nil {
 				switch {
 				case execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}):
-					_, _, err = flushAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, parallel, logger, u, isForkValidation, isBlockProduction)
+					_, _, err = computeAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, parallel, logger, u, isBlockProduction)
 					if err != nil {
 						return err
 					}
@@ -318,10 +318,6 @@ func ExecV3(ctx context.Context,
 
 					commitStart := time.Now()
 					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
-					applyTx, _, err = se.commit(ctx, execStage, applyTx, nil, useExternalTx)
-					if err != nil {
-						return err
-					}
 
 					if !useExternalTx {
 						se.LogCommitments(commitStart, 0, committedTransactions, 0, stepsInDb, commitment.CommitProgress{})
@@ -688,55 +684,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 	return nil
 }
 
-func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.TemporalRwTx, useExternalTx bool, resetWorkers func(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.TemporalTx) error) (kv.TemporalRwTx, time.Duration, error) {
-	err := execStage.Update(tx, te.lastCommittedBlockNum)
-
-	if err != nil {
-		return nil, 0, err
-	}
-
-	tx.CollectMetrics()
-
-	var t2 time.Duration
-
-	if !useExternalTx {
-		tt := time.Now()
-		err = tx.Commit()
-
-		if err != nil {
-			return nil, 0, err
-		}
-
-		t2 = time.Since(tt)
-		dbtx, err := te.cfg.db.BeginRw(ctx) //nolint
-		if err != nil {
-			return nil, t2, err
-		}
-
-		tx = dbtx.(kv.TemporalRwTx)
-	}
-
-	err = resetWorkers(ctx, te.rs, tx)
-
-	if err != nil {
-		if !useExternalTx {
-			tx.Rollback()
-		}
-
-		return nil, t2, err
-	}
-
-	if !useExternalTx && execStage.SyncMode() == stages.ModeApplyingBlocks {
-		te.agg.BuildFilesInBackground(te.lastCommittedTxNum)
-	}
-
-	if !te.isForkValidation {
-		te.doms.ClearRam(false)
-	}
-
-	return tx, t2, nil
-}
-
 // nolint
 func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *execctx.SharedDomains) {
 	if doms != nil {
@@ -833,8 +780,8 @@ type FlushAndComputeCommitmentTimes struct {
 	ComputeCommitment time.Duration
 }
 
-// flushAndCheckCommitmentV3 - does write state to db and then check commitment
-func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *execctx.SharedDomains, cfg ExecuteBlockCfg, e *StageState, parallel bool, logger log.Logger, u Unwinder, isForkValidation bool, isBlockProduction bool) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
+// computeAndCheckCommitmentV3 - does write state to db and then check commitment
+func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *execctx.SharedDomains, cfg ExecuteBlockCfg, e *StageState, parallel bool, logger log.Logger, u Unwinder, isBlockProduction bool) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
 	if header == nil {
 		return false, times, errors.New("header is nil")
 	}
@@ -851,21 +798,10 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		}
 	}
 
-	domsFlushFn := func() (bool, FlushAndComputeCommitmentTimes, error) {
-		if !isForkValidation && !isBlockProduction {
-			start = time.Now()
-			err := doms.Flush(ctx, applyTx)
-			times.Flush = time.Since(start)
-			if err != nil {
-				return false, times, err
-			}
-		}
+	if dbg.DiscardCommitment() {
 		return true, times, nil
 	}
 
-	if dbg.DiscardCommitment() {
-		return domsFlushFn()
-	}
 	if doms.BlockNum() != header.Number.Uint64() {
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
@@ -888,7 +824,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		err = handleIncorrectRootHashError(header.Number.Uint64(), header.Hash(), header.ParentHash, applyTx, cfg, e, logger, u)
 		return false, times, err
 	}
-	return domsFlushFn()
+	return true, times, nil
 
 }
 
