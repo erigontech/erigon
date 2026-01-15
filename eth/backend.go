@@ -372,7 +372,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			chainConfig = arbOne.Config
 			genesis = rawdb.ReadBlock(tx, arbOne.GenesisHash, chainConfig.ArbitrumChainParams.GenesisBlockNum)
 			if genesis == nil {
-				log.Info("db genesis block is nil, set hardcoded genesis fro Arbitrum One")
+				log.Info("db genesis block is nil, set hardcoded genesis for Arbitrum One")
 				genesis = arbChain.ArbOneGenesisBlock()
 			}
 			return nil
