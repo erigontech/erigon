@@ -263,7 +263,10 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 
 func (rs *StateV3) SizeEstimate() (r uint64) {
 	if rs.domains != nil {
+		fmt.Printf("[dbg] a1: %d \n", rs.domains.SizeEstimate())
 		r += rs.domains.SizeEstimate()
+	} else {
+		fmt.Printf("[dbg] a2 what?\n")
 	}
 	return r
 }
