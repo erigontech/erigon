@@ -140,41 +140,67 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		return err
 	}
 
-	var receiptClient *rpc.Client
-	if cfg.ReceiptRPCAddr != "" {
-		receiptClient, err = rpc.Dial(cfg.ReceiptRPCAddr, log.Root())
-		if err != nil {
-			log.Warn("Error connecting to receipt RPC", "err", err, "url", cfg.ReceiptRPCAddr)
-			return err
-		}
-	}
-
-	var curBlock uint64
-	curBlock, err = stages.GetStageProgress(tx, stages.Headers)
+	var topDumpedBlock uint64
+	topDumpedBlock, err = stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		log.Warn("can't check current block", "err", err)
 	}
-	// Query latest block number.
+
 	var latestBlockHex string
 	if err := client.CallContext(context.Background(), &latestBlockHex, "eth_blockNumber"); err != nil {
 		log.Warn("Error fetching latest block number", "err", err)
 		return err
 	}
 
-	latestBlock := new(big.Int)
-	latestBlock.SetString(latestBlockHex[2:], 16)
-	if curBlock > 0 {
-		curBlock++
-	}
-	firstBlock := curBlock
+	latestRemoteBlock := new(big.Int)
+	latestRemoteBlock.SetString(latestBlockHex[2:], 16)
 
-	if firstBlock >= latestBlock.Uint64() {
+	// Determine receipt client based on chain tip mode
+	receiptRPCAddr := cfg.ReceiptRPCAddr
+	var receiptClient *rpc.Client
+
+	const chainTipThreshold = 20
+	isChainTipMode := latestRemoteBlock.Uint64() > 0 && (latestRemoteBlock.Uint64()-topDumpedBlock) <= chainTipThreshold
+
+	if isChainTipMode {
+		// In chain tip mode, use public feed which has receipts for recent blocks
+		chainID := cfg.chainConfig.ChainID.Uint64()
+		if publicFeed := getPublicReceiptFeed(chainID); publicFeed != "" {
+			receiptRPCAddr = publicFeed
+			receiptClient, err = rpc.Dial(publicFeed, log.Root())
+			if err != nil {
+				log.Warn("Error connecting to public receipt feed, falling back to configured endpoint", "url", publicFeed, "err", err)
+				receiptRPCAddr = cfg.ReceiptRPCAddr
+				receiptClient = nil
+			} else {
+				log.Info("[Arbitrum] Chain tip mode: using public feed for receipts", "feed", publicFeed, "blocksAhead", latestRemoteBlock.Uint64()-topDumpedBlock)
+			}
+		}
+	}
+
+	if receiptClient == nil && receiptRPCAddr != "" {
+		receiptClient, err = rpc.Dial(receiptRPCAddr, log.Root())
+		if err != nil {
+			log.Warn("Error connecting to receipt RPC", "err", err, "url", receiptRPCAddr)
+			return err
+		}
+	}
+
+	if topDumpedBlock > 0 {
+		topDumpedBlock++
+	}
+	firstBlock := topDumpedBlock
+	if err := checkL2RPCEndpointsHealth(ctx, client, receiptClient, firstBlock, cfg.L2RPCAddr, receiptRPCAddr); err != nil {
+		return err
+	}
+
+	if firstBlock >= latestRemoteBlock.Uint64() {
 		return nil
 	}
-	latestBlock.SetUint64(min(latestBlock.Uint64(), firstBlock+uint64(cfg.syncConfig.LoopBlockLimit)))
+	latestRemoteBlock.SetUint64(min(latestRemoteBlock.Uint64(), firstBlock+uint64(cfg.syncConfig.LoopBlockLimit)))
 
-	if firstBlock+1 > latestBlock.Uint64() { // print only if 1+ blocks available
-		log.Info("[Arbitrum] Headers stage started", "from", firstBlock, "lastAvailableBlock", latestBlock.Uint64(), "extTx", useExternalTx)
+	if firstBlock+1 > latestRemoteBlock.Uint64() { // print only if 1+ blocks available
+		log.Info("[Arbitrum] Headers stage started", "from", firstBlock, "lastAvailableBlock", latestRemoteBlock.Uint64(), "extTx", useExternalTx)
 	}
 
 	finaliseState := func(tx kv.RwTx, lastCommittedBlockNum uint64) error {
@@ -202,7 +228,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		return nil
 	}
 
-	lastCommittedBlockNum, err := snapshots.GetAndCommitBlocks(ctx, cfg.db, tx, client, receiptClient, firstBlock, latestBlock.Uint64(), false, true, false, finaliseState)
+	lastCommittedBlockNum, err := snapshots.GetAndCommitBlocks(ctx, cfg.db, tx, client, receiptClient, firstBlock, latestRemoteBlock.Uint64(), false, true, false, finaliseState)
 	if err != nil {
 		return fmt.Errorf("error fetching and committing blocks from rpc: %w", err)
 	}
@@ -218,8 +244,130 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 
 	if lastCommittedBlockNum-firstBlock > 1 {
 		log.Info("[Arbitrum] Headers stage completed", "latestProcessedBlock", lastCommittedBlockNum,
-			"from", firstBlock, "to", latestBlock.Uint64(), "wasTxCommitted", !useExternalTx)
+			"from", firstBlock, "to", latestRemoteBlock.Uint64(), "wasTxCommitted", !useExternalTx)
 	}
+	return nil
+}
+
+func checkL2RPCEndpointsHealth(ctx context.Context, blockClient, receiptClient *rpc.Client, blockNum uint64, blockRPCAddr, receiptRPCAddr string) error {
+	if blockClient == nil {
+		return nil
+	}
+
+	checkBlockNum := fmt.Sprintf("0x%x", blockNum)
+
+	var blockResult map[string]interface{}
+	if err := blockClient.CallContext(ctx, &blockResult, "eth_getBlockByNumber", checkBlockNum, true); err != nil {
+		return fmt.Errorf("--l2rpc %q cannot respond to eth_getBlockByNumber for block %d: %w", blockRPCAddr, blockNum, err)
+	}
+	if blockResult == nil {
+		return fmt.Errorf("--l2rpc %q returned nil for block %d", blockRPCAddr, blockNum)
+	}
+
+	txs, ok := blockResult["transactions"].([]interface{})
+	if !ok || len(txs) == 0 {
+		log.Info("[Arbitrum] L2 RPC health check: block has no transactions, skipping receipt check", "block", blockNum)
+		return nil
+	}
+
+	var txHash string
+	if txMap, ok := txs[0].(map[string]interface{}); ok {
+		if h, ok := txMap["hash"].(string); ok {
+			txHash = h
+		}
+	}
+	if txHash == "" {
+		log.Warn("[Arbitrum] L2 RPC health check: could not extract tx hash from block, skipping receipt check", "block", blockNum)
+		return nil
+	}
+
+	if receiptClient == nil {
+		log.Info("[Arbitrum] L2 RPC health check: receipt client not configured, skipping receipt check", "block", blockNum)
+		return nil
+	}
+
+	var receiptResult map[string]interface{}
+	if err := receiptClient.CallContext(ctx, &receiptResult, "eth_getTransactionReceipt", txHash); err != nil {
+		return fmt.Errorf("--l2rpc.receipt %q cannot respond to eth_getTransactionReceipt for tx %s: %w", receiptRPCAddr, txHash, err)
+	}
+	if receiptResult == nil {
+		return fmt.Errorf("--l2rpc.receipt %q returned nil for tx %s", receiptRPCAddr, txHash)
+	}
+	receiptTxHash, ok := receiptResult["transactionHash"].(string)
+	if !ok || receiptTxHash == "" {
+		return fmt.Errorf("--l2rpc.receipt %q receipt missing transactionHash field or field is not a string for tx %s", receiptRPCAddr, txHash)
+	}
+	if receiptTxHash != txHash {
+		return fmt.Errorf("--l2rpc.receipt %q returned mismatched receipt: requested tx %s but got %s", receiptRPCAddr, txHash, receiptTxHash)
+	}
+
+	log.Info("[Arbitrum] L2 RPC endpoints health check passed", "blockEndpoint", blockRPCAddr, "receiptEndpoint", receiptRPCAddr, "checkedBlock", blockNum)
+	return nil
+}
+
+var publicReceiptFeeds = map[uint64]string{
+	421614: "https://sepolia-rollup.arbitrum.io/rpc", // Arbitrum Sepolia
+	42161:  "https://arb1.arbitrum.io/rpc",           // Arbitrum One
+	42170:  "https://nova.arbitrum.io/rpc",           // Arbitrum Nova
+}
+
+func getPublicReceiptFeed(chainID uint64) string {
+	return publicReceiptFeeds[chainID]
+}
+
+func checkL2RPCEndpointsHealth(ctx context.Context, blockClient, receiptClient *rpc.Client, blockNum uint64, blockRPCAddr, receiptRPCAddr string) error {
+	if blockClient == nil {
+		return nil
+	}
+
+	checkBlockNum := fmt.Sprintf("0x%x", blockNum)
+
+	var blockResult map[string]interface{}
+	if err := blockClient.CallContext(ctx, &blockResult, "eth_getBlockByNumber", checkBlockNum, true); err != nil {
+		return fmt.Errorf("--l2rpc %q cannot respond to eth_getBlockByNumber for block %d: %w", blockRPCAddr, blockNum, err)
+	}
+	if blockResult == nil {
+		return fmt.Errorf("--l2rpc %q returned nil for block %d", blockRPCAddr, blockNum)
+	}
+
+	txs, ok := blockResult["transactions"].([]interface{})
+	if !ok || len(txs) == 0 {
+		log.Info("[Arbitrum] L2 RPC health check: block has no transactions, skipping receipt check", "block", blockNum)
+		return nil
+	}
+
+	var txHash string
+	if txMap, ok := txs[0].(map[string]interface{}); ok {
+		if h, ok := txMap["hash"].(string); ok {
+			txHash = h
+		}
+	}
+	if txHash == "" {
+		log.Warn("[Arbitrum] L2 RPC health check: could not extract tx hash from block, skipping receipt check", "block", blockNum)
+		return nil
+	}
+
+	if receiptClient == nil {
+		log.Info("[Arbitrum] L2 RPC health check: receipt client not configured, skipping receipt check", "block", blockNum)
+		return nil
+	}
+
+	var receiptResult map[string]interface{}
+	if err := receiptClient.CallContext(ctx, &receiptResult, "eth_getTransactionReceipt", txHash); err != nil {
+		return fmt.Errorf("--l2rpc.receipt %q cannot respond to eth_getTransactionReceipt for tx %s: %w", receiptRPCAddr, txHash, err)
+	}
+	if receiptResult == nil {
+		return fmt.Errorf("--l2rpc.receipt %q returned nil for tx %s", receiptRPCAddr, txHash)
+	}
+	receiptTxHash, ok := receiptResult["transactionHash"].(string)
+	if !ok || receiptTxHash == "" {
+		return fmt.Errorf("--l2rpc.receipt %q receipt missing transactionHash field or field is not a string for tx %s", receiptRPCAddr, txHash)
+	}
+	if receiptTxHash != txHash {
+		return fmt.Errorf("--l2rpc.receipt %q returned mismatched receipt: requested tx %s but got %s", receiptRPCAddr, txHash, receiptTxHash)
+	}
+
+	log.Info("[Arbitrum] L2 RPC endpoints health check passed", "blockEndpoint", blockRPCAddr, "receiptEndpoint", receiptRPCAddr, "checkedBlock", blockNum)
 	return nil
 }
 

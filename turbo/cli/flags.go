@@ -379,9 +379,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	if cfg.L2RPCReceiptAddr == "" {
 		cfg.L2RPCReceiptAddr = cfg.L2RPCAddr
 	}
-	if cfg.L2RPCReceiptAddr != "" {
-		log.Info("[Arbitrum] Using L2 RPC server to fetch receipts", "address", cfg.L2RPCReceiptAddr)
-	}
+	log.Info("[Arbitrum] Using L2 RPC server to fetch receipts", "address", cfg.L2RPCReceiptAddr)
 
 	if v := f.String(BatchSizeFlag.Name, BatchSizeFlag.Value, BatchSizeFlag.Usage); v != nil {
 		err := cfg.BatchSize.UnmarshalText([]byte(*v))
