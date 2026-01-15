@@ -458,8 +458,13 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 		ii: ht.iit.newWriter(tmpdir, discard),
 	}
 	if !discard {
-		w.historyVals = etl.NewCollector(w.ii.filenameBase+".flush.hist", tmpdir, etl.NewSortableBuffer(64*datasize.MB), ht.h.logger).
-			LogLvl(log.LvlInfo).SortAndFlushInBackground(false)
+		if w.ii.name == kv.CommitmentHistoryIdx {
+			w.historyVals = etl.NewCollector(w.ii.filenameBase+".flush.hist", tmpdir, etl.NewSortableBuffer(64*datasize.MB), ht.h.logger).
+				LogLvl(log.LvlInfo).SortAndFlushInBackground(false)
+		} else {
+			w.historyVals = etl.NewCollectorWithAllocator(w.ii.filenameBase+".flush.hist", tmpdir, etl.SmallSortableBuffers, ht.h.logger).
+				LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
+		}
 	}
 	return w
 }
