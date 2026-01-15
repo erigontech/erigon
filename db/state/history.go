@@ -459,7 +459,7 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 	}
 	if !discard {
 		w.historyVals = etl.NewCollector(w.ii.filenameBase+".flush.hist", tmpdir, etl.NewSortableBuffer(64*datasize.MB), ht.h.logger).
-			LogLvl(log.LvlTrace).SortAndFlushInBackground(false)
+			LogLvl(log.LvlInfo).SortAndFlushInBackground(false)
 	}
 	return w
 }
