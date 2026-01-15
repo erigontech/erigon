@@ -137,7 +137,7 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 
 // txnLookupTransform - [startKey, endKey)
 func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
-	txNumReader := cfg.blockReader.TxnumReader(ctx)
+	txNumReader := cfg.blockReader.TxnumReader()
 	data := make([]byte, 16)
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
@@ -150,7 +150,7 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 			return nil
 		}
 
-		firstTxNumInBlock, err := txNumReader.Min(tx, blocknum)
+		firstTxNumInBlock, err := txNumReader.Min(ctx, tx, blocknum)
 		if err != nil {
 			return err
 		}

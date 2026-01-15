@@ -51,13 +51,13 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx,
 		return receipt, nil
 	}
 
-	txNumsReader := g.blockReader.TxnumReader(ctx)
+	txNumsReader := g.blockReader.TxnumReader()
 	ibs, blockContext, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, block.HeaderNoCopy(), chainConfig, g.blockReader, g.stateCache, txNumsReader, tx, len(block.Transactions())) // we want to get the state at the end of the block
 	if err != nil {
 		return nil, err
 	}
 
-	txNum, err := txNumsReader.Max(tx, block.NumberU64())
+	txNum, err := txNumsReader.Max(ctx, tx, block.NumberU64())
 	if err != nil {
 		return nil, err
 	}
