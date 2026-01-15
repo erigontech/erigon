@@ -489,7 +489,7 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	if w.ii.name == kv.CommitmentHistoryIdx {
-		log.Warn("[dbg] flush10", "name", "commitment.history.index", "took", time.Since(t))
+		log.Warn("[dbg] flush10", "name", "commitment.history", "took", time.Since(t))
 	}
 	w.close()
 	return nil
