@@ -7,8 +7,6 @@ concurrency:
   group: erigon-vs-geth-benchmark-${{ github.ref }}
   cancel-in-progress: false
 
-permissions:
-  contents: read
 
 env:
   CHAIN: mainnet
@@ -18,6 +16,8 @@ jobs:
   setup:
     name: Setup benchmark run
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       run_id: ${{ steps.vars.outputs.run_id }}
       redis_key_prefix: ${{ steps.vars.outputs.redis_key_prefix }}
@@ -72,6 +72,8 @@ jobs:
     needs: [setup]
     runs-on: [self-hosted, qa, Ethereum, rpc-latest-erigon]
     timeout-minutes: 120
+    permissions:
+      contents: read
     env:
       RUN_ID: ${{ needs.setup.outputs.run_id }}
       REDIS_KEY_PREFIX: ${{ needs.setup.outputs.redis_key_prefix }}
@@ -109,8 +111,9 @@ jobs:
     name: Benchmark Geth
     needs: [setup]
     runs-on: [self-hosted, qa, Ethereum, rpc-latest-geth]
-
     timeout-minutes: 120
+    permissions:
+      contents: read
     env:
       RUN_ID: ${{ needs.setup.outputs.run_id }}
       REDIS_KEY_PREFIX: ${{ needs.setup.outputs.redis_key_prefix }}
