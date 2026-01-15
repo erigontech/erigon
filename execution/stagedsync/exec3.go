@@ -870,13 +870,11 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 
 	domsFlushFn := func() (bool, FlushAndComputeCommitmentTimes, error) {
-		if !inMemExec {
-			start = time.Now()
-			err := doms.Flush(ctx, applyTx)
-			times.Flush = time.Since(start)
-			if err != nil {
-				return false, times, err
-			}
+		start = time.Now()
+		err := doms.Flush(ctx, applyTx)
+		times.Flush = time.Since(start)
+		if err != nil {
+			return false, times, err
 		}
 		return true, times, nil
 	}
