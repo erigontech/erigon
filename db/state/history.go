@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -457,7 +458,7 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 		ii: ht.iit.newWriter(tmpdir, discard),
 	}
 	if !discard {
-		w.historyVals = etl.NewCollector(w.ii.filenameBase+".flush.hist", tmpdir, etl.SortableSliceBuffer, ht.h.logger).
+		w.historyVals = etl.NewCollector(w.ii.filenameBase+".flush.hist", tmpdir, etl.NewSortableBuffer(64*datasize.MB), ht.h.logger).
 			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
 	}
 	return w
