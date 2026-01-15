@@ -2341,7 +2341,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		ki uint64
 
 		updatesCount = updates.Size()
-		logEvery     = time.NewTicker(1 * time.Second)
+		logEvery     = time.NewTicker(time.Second / 2)
 	)
 	hph.memoizationOff, hph.trace = true, false
 	// defer func() {
@@ -2447,7 +2447,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 		updatesCount = updates.Size()
 		start        = time.Now()
-		logEvery     = time.NewTicker(1 * time.Second)
+		logEvery     = time.NewTicker(time.Second / 2)
 	)
 
 	//hph.trace = true
