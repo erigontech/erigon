@@ -459,7 +459,7 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 	}
 	if !discard {
 		if w.ii.name == kv.CommitmentHistoryIdx {
-			b := etl.NewSortableBuffer(32 * datasize.MB)
+			b := etl.NewSortableBuffer(64 * datasize.MB)
 			w.historyVals = etl.NewCollector(w.ii.filenameBase+".flush.hist", tmpdir, b, ht.h.logger).
 				LogLvl(log.LvlInfo).SortAndFlushInBackground(true)
 		} else {
