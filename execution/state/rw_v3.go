@@ -266,7 +266,7 @@ func (rs *StateV3) SizeEstimate() (r uint64) {
 		fmt.Printf("[dbg] a1: %d \n", rs.domains.SizeEstimate())
 		r += rs.domains.SizeEstimate()
 	} else {
-		fmt.Printf("[dbg] a2what: %d \n", rs.domains.SizeEstimate())
+		fmt.Printf("[dbg] a2 what?\n")
 	}
 	return r
 }
