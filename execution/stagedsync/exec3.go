@@ -187,7 +187,7 @@ func ExecV3(ctx context.Context,
 		return nil
 	}
 
-	shouldReportToTxPool := cfg.notifications != nil && !isBlockProduction && maxBlockNum <= blockNum+64
+	shouldReportToTxPool := cfg.notifications != nil && isApplyingBlocks && maxBlockNum <= blockNum+64
 	var accumulator *shards.Accumulator
 	if shouldReportToTxPool {
 		accumulator = cfg.notifications.Accumulator
@@ -246,6 +246,7 @@ func ExecV3(ctx context.Context,
 				agg:                   agg,
 				isBlockProduction:     isBlockProduction,
 				isForkValidation:      isForkValidation,
+				isApplyingBlocks:      isApplyingBlocks,
 				logger:                logger,
 				logPrefix:             execStage.LogPrefix(),
 				progress:              NewProgress(blockNum, inputTxNum, commitThreshold, false, execStage.LogPrefix(), logger),
@@ -278,6 +279,7 @@ func ExecV3(ctx context.Context,
 				u:                     u,
 				isBlockProduction:     isBlockProduction,
 				isForkValidation:      isForkValidation,
+				isApplyingBlocks:      isApplyingBlocks,
 				applyTx:               applyTx,
 				logger:                logger,
 				logPrefix:             execStage.LogPrefix(),
@@ -431,6 +433,7 @@ type txExecutor struct {
 	u                 Unwinder
 	isBlockProduction bool
 	isForkValidation  bool
+	isApplyingBlocks  bool
 	applyTx           kv.TemporalTx
 	logger            log.Logger
 	logPrefix         string

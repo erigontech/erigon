@@ -906,6 +906,7 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 		"sys", common.ByteCount(m.Sys),
 		"isForkValidation", te.isForkValidation,
 		"isBlockProduction", te.isBlockProduction,
+		"isApplyingBlocks", te.isApplyingBlocks,
 	}...)
 
 	p.logger.Info(fmt.Sprintf("[%s]%s%s", p.logPrefix, suffix, mode), vals...)

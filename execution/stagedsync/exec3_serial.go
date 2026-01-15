@@ -164,7 +164,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			computeCommitmentDuration += time.Since(start)
 			if shouldGenerateChangesets {
 				se.doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)
-				if !se.isForkValidation && !se.isBlockProduction {
+				if se.isApplyingBlocks {
 					if err := changeset.WriteDiffSet(rwTx, blockNum, b.Hash(), changeSet); err != nil {
 						return nil, rwTx, err
 					}

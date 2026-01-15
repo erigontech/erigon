@@ -115,7 +115,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		log.Info(fmt.Sprintf("[%s] parallel starting", execStage.LogPrefix()),
 			"from", startBlockNum, "to", maxBlockNum, "limit", startBlockNum+blockLimit-1, "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx,
-			"isForkValidation", pe.isForkValidation, "isBlockProduction", pe.isBlockProduction)
+			"isForkValidation", pe.isForkValidation, "isBlockProduction", pe.isBlockProduction, "isApplyingBlocks", pe.isApplyingBlocks)
 	}
 
 	executorContext, executorCancel, err := pe.run(ctx)
