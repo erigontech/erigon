@@ -87,7 +87,6 @@ type ExecuteBlockCfg struct {
 	genesis   *types.Genesis
 
 	silkworm        *silkworm.Silkworm
-	blockProduction bool
 	experimentalBAL bool
 }
 
