@@ -258,7 +258,7 @@ func (sd *TemporalMemBatch) SizeEstimate() uint64 {
 	estimateRamUsage := uint64(sd.metrics.CachePutSize)
 	estimateRamUsage *= 2 // cover golang-data-structures overhead (and keep accounting cheap)
 	estimateRamUsage *= 2 // cover multiple versions of domains in-mem data - see `domains` field type
-	estimateRamUsage *= 2 // cover because Commitment storing copy of updates
+	estimateRamUsage *= 2 // because Commitment storing copy of updates
 	estimateRamUsage *= 2 // because Commitment will produce `trie` updates - when batch is full
 	return estimateRamUsage
 }
