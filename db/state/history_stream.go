@@ -207,11 +207,13 @@ func (hi *HistoryRangeAsOfFiles) Next() ([]byte, []byte, error) {
 
 // HistoryRangeAsOfDB - returns state range at given time in history
 type HistoryRangeAsOfDB struct {
-	largeValues bool
-	roTx        kv.Tx
-	valsC       kv.Cursor
-	valsCDup    kv.CursorDupSort
-	valsTable   string
+	largeValues                   bool
+	historyValuesOnCompressedPage uint8
+	snappyReadBuffer              []byte
+	roTx                          kv.Tx
+	valsC                         kv.Cursor
+	valsCDup                      kv.CursorDupSort
+	valsTable                     string
 
 	from, toPrefix []byte
 	orderAscend    order.By
@@ -289,6 +291,30 @@ func (hi *HistoryRangeAsOfDB) advanceLargeVals() error {
 		}
 		hi.nextKey = k[:len(k)-8]
 		hi.nextVal = v
+		if hi.historyValuesOnCompressedPage > 1 {
+			if len(v) > 4 && bytes.Equal(v[:4], []byte{0x28, 0xb5, 0x2f, 0xfd}) {
+				// We want version <= startTxNum
+				seekInside := make([]byte, len(hi.nextKey)+8)
+				copy(seekInside, hi.nextKey)
+				binary.BigEndian.PutUint64(seekInside[len(hi.nextKey):], hi.startTxNum)
+
+				v, buf := seg.GetFromPage(seekInside, hi.nextVal, hi.snappyReadBuffer, true)
+				hi.snappyReadBuffer = buf
+				hi.nextVal = v
+			} else {
+				targetTxNum := binary.BigEndian.Uint64(k[len(k)-8:])
+				if targetTxNum > hi.startTxNum {
+					hi.nextVal = nil
+				}
+			}
+		}
+		if hi.nextVal == nil {
+			// If we didn't find a version <= startTxNum in this page/key,
+			// we must check PREVIOUS keys for the SAME user key.
+			// But advanceLargeVals is supposed to be called AFTER a seek that already landed us on the right spot.
+			// Actually, advance() calls advanceLargeVals repeatedly.
+			continue // try next key
+		}
 		return nil
 	}
 	hi.nextKey = nil
@@ -335,6 +361,25 @@ func (hi *HistoryRangeAsOfDB) advanceSmallVals() error {
 
 		hi.nextKey = k
 		hi.nextVal = v[8:]
+		if hi.historyValuesOnCompressedPage > 1 {
+			if len(hi.nextVal) > 4 && bytes.Equal(hi.nextVal[:4], []byte{0x28, 0xb5, 0x2f, 0xfd}) {
+				seekInside := make([]byte, len(hi.nextKey)+8)
+				copy(seekInside, hi.nextKey)
+				binary.BigEndian.PutUint64(seekInside[len(hi.nextKey):], hi.startTxNum)
+
+				v, buf := seg.GetFromPage(seekInside, hi.nextVal, hi.snappyReadBuffer, true)
+				hi.snappyReadBuffer = buf
+				hi.nextVal = v
+			} else {
+				targetTxNum := binary.BigEndian.Uint64(v[:8])
+				if targetTxNum > hi.startTxNum {
+					// Should have been handled by seek logic
+				}
+			}
+		}
+		if hi.nextVal == nil {
+			continue
+		}
 		return nil
 	}
 	hi.nextKey = nil

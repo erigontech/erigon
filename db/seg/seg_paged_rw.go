@@ -293,16 +293,37 @@ func (c *PagedWriter) Add(k, v []byte) (err error) {
 	c.vLengths = append(c.vLengths, len(v))
 	c.keys = append(c.keys, k...)
 	c.vals = append(c.vals, v...)
-	isFull := c.pairs%c.pageSize == 0
-	if isFull {
+	isFull := c.pairs >= c.pageSize
+	if isFull && c.parent != nil {
 		return c.writePage()
 	}
 	return nil
 }
 
+func (c *PagedWriter) ResetPage() {
+	c.resetPage()
+}
+
+func (c *PagedWriter) SetPageSize(val int) {
+	c.pageSize = val
+}
+
+func (c *PagedWriter) SetCompressionEnabled(val bool) {
+	c.compressionEnabled = val
+}
+
+func (c *PagedWriter) Bytes() ([]byte, bool) {
+	return c.bytes()
+}
+
+func (c *PagedWriter) PairsCount() int {
+	return c.pairs
+}
+
 func (c *PagedWriter) resetPage() {
 	c.kLengths, c.vLengths = c.kLengths[:0], c.vLengths[:0]
 	c.keys, c.vals = c.keys[:0], c.vals[:0]
+	c.pairs = 0
 }
 func (c *PagedWriter) Flush() error {
 	if c.pageSize <= 1 {

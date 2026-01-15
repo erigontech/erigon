@@ -420,6 +420,7 @@ func (ht *HistoryRoTx) NewWriter() *historyBufferedWriter {
 }
 
 type historyBufferedWriter struct {
+	h                *History
 	historyVals      *etl.Collector
 	historyKey       []byte
 	discard          bool
@@ -448,8 +449,8 @@ func (w *historyBufferedWriter) close() {
 
 func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWriter {
 	w := &historyBufferedWriter{
-		discard: discard,
-
+		h:                ht.h,
+		discard:          discard,
 		historyKey:       make([]byte, 128),
 		largeValues:      ht.h.HistoryLargeValues,
 		historyValsTable: ht.h.ValuesTable,
@@ -474,8 +475,111 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := w.ii.Flush(ctx, tx); err != nil {
 		return err
 	}
-	if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
+
+	loader := loadFunc
+	if w.h.HistoryValuesOnCompressedPage > 1 {
+		pagedCollector := etl.NewCollectorWithAllocator(w.h.FilenameBase+".paged", w.h.dirs.Tmp, etl.SmallSortableBuffers, w.h.logger).LogLvl(log.LvlTrace)
+		defer pagedCollector.Close()
+
+		pw := &seg.PagedWriter{}
+		pw.SetPageSize(int(w.h.HistoryValuesOnCompressedPage))
+		pw.SetCompressionEnabled(true)
+		var firstKey []byte
+		var lastUserKey []byte
+		loader = func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			userKey := k
+			if w.h.HistoryLargeValues {
+				userKey = k[:len(k)-8]
+			}
+			if !pw.Empty() && !bytes.Equal(userKey, lastUserKey) {
+				if bts, ok := pw.Bytes(); ok {
+					if err := pagedCollector.Collect(firstKey, bts); err != nil {
+						return err
+					}
+					pw.ResetPage()
+				}
+			}
+			if pw.Empty() {
+				firstKey = common.Copy(k)
+				lastUserKey = common.Copy(userKey)
+			}
+			if err := pw.Add(k, v); err != nil {
+				return err
+			}
+			if pw.PairsCount() >= int(w.h.HistoryValuesOnCompressedPage) {
+				if bts, ok := pw.Bytes(); ok {
+					if err := pagedCollector.Collect(firstKey, bts); err != nil {
+						return err
+					}
+					pw.ResetPage()
+				}
+			}
+			return nil
+		}
+
+		// Collect unique user keys (without txNum) to clear them from DB
+		userKeysCollector := etl.NewCollectorWithAllocator(w.h.FilenameBase+".userkeys", w.h.dirs.Tmp, etl.SmallSortableBuffers, w.h.logger).LogLvl(log.LvlTrace)
+		defer userKeysCollector.Close()
+		collectKeys := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			userKey := k
+			if w.h.HistoryLargeValues {
+				userKey = k[:len(k)-8]
+			}
+			if err := userKeysCollector.Collect(userKey, nil); err != nil {
+				return err
+			}
+			return loader(k, v, table, next)
+		}
+
+		if err := w.historyVals.Load(tx, "", collectKeys, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
+		if !pw.Empty() {
+			if bts, ok := pw.Bytes(); ok {
+				if err := pagedCollector.Collect(firstKey, bts); err != nil {
+					return err
+				}
+			}
+		}
+
+		// Delete ALL entries for these keys from DB
+		c, err := tx.RwCursorDupSort(w.historyValsTable)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+
+		if err := userKeysCollector.Load(tx, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			if w.h.HistoryLargeValues {
+				// For non-DupSort, keys are userKey + txNum.
+				dk, _, err := c.Seek(k)
+				for dk != nil && bytes.HasPrefix(dk, k) {
+					if err != nil {
+						return err
+					}
+					if err := c.Delete(dk); err != nil {
+						return err
+					}
+					dk, _, err = c.Next()
+				}
+			} else {
+				// For DupSort, all txNums for a userKey are in the same bucket
+				if err := c.Delete(k); err != nil {
+					return err
+				}
+			}
+			return nil
+		}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
+
+		if err := pagedCollector.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
+	} else {
+		if err := w.historyVals.Load(tx, w.historyValsTable, loader, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
 	}
 	w.close()
 	return nil
@@ -1227,6 +1331,50 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 		if err != nil {
 			return nil, false, err
 		}
+		if ht.h.HistoryValuesOnCompressedPage > 1 {
+			// Seeklands on first key >= seek.
+			// If we want version <= txNum, and we landed on version > txNum, we must go back.
+			if kAndTxNum == nil || !bytes.HasPrefix(kAndTxNum, key) {
+				kAndTxNum, val, err = c.Prev()
+			} else {
+				targetTxNum := binary.BigEndian.Uint64(kAndTxNum[len(kAndTxNum)-8:])
+				if targetTxNum > txNum {
+					kAndTxNum, val, err = c.Prev()
+				}
+			}
+			if err != nil {
+				return nil, false, err
+			}
+			for kAndTxNum != nil && bytes.HasPrefix(kAndTxNum, key) {
+				if len(val) > 4 && bytes.Equal(val[:4], []byte{0x28, 0xb5, 0x2f, 0xfd}) {
+					// We must use a key with the REQUESTED txNum for GetFromPage
+					// because GetFromPage finds HIGHEST version <= txNum in the key.
+					seekInside := make([]byte, len(key)+8)
+					copy(seekInside, key)
+					binary.BigEndian.PutUint64(seekInside[len(key):], txNum)
+
+					v, buf := seg.GetFromPage(seekInside, val, ht.snappyReadBuffer, true)
+					ht.snappyReadBuffer = buf
+					if v != nil {
+						// value can be []byte{} if it's a deletion
+						return v, true, nil
+					}
+					// If GetFromPage returns nil, it means ALL versions in this page are > requested txNum.
+					// We must continue to Prev() to find an older page.
+				} else {
+					// Fallback for uncompressed data
+					targetTxNum := binary.BigEndian.Uint64(kAndTxNum[len(kAndTxNum)-8:])
+					if targetTxNum <= txNum {
+						return val, true, nil
+					}
+				}
+				kAndTxNum, val, err = c.Prev()
+				if err != nil {
+					return nil, false, err
+				}
+			}
+			return nil, false, nil
+		}
 		if kAndTxNum == nil || !bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], key) {
 			return nil, false, nil
 		}
@@ -1240,6 +1388,50 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 	val, err := c.SeekBothRange(key, ht.encodeTs(txNum, nil))
 	if err != nil {
 		return nil, false, err
+	}
+	if ht.h.HistoryValuesOnCompressedPage > 1 {
+		// SeekBothRange lands on first value >= encodeTs(txNum)
+		// We want version <= txNum. If we landed on > txNum, go back.
+		if val != nil {
+			targetTxNum := binary.BigEndian.Uint64(val[:8])
+			if targetTxNum > txNum {
+				_, val, err = c.PrevDup()
+			}
+		} else {
+			// Lands beyond end of bucket, go back to last
+			val, err = c.SeekBothRange(key, nil)
+			if err != nil {
+				return nil, false, err
+			}
+			_, val, err = c.PrevDup()
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		for val != nil {
+			if len(val) > 12 && bytes.Equal(val[8:12], []byte{0x28, 0xb5, 0x2f, 0xfd}) {
+				seekInside := make([]byte, len(key)+8)
+				copy(seekInside, key)
+				binary.BigEndian.PutUint64(seekInside[len(key):], txNum)
+
+				v, buf := seg.GetFromPage(seekInside, val[8:], ht.snappyReadBuffer, true)
+				ht.snappyReadBuffer = buf
+				if v != nil {
+					// value can be []byte{} if it's a deletion
+					return v, true, nil
+				}
+			} else if len(val) >= 8 {
+				targetTxNum := binary.BigEndian.Uint64(val[:8])
+				if targetTxNum <= txNum {
+					return val[8:], true, nil
+				}
+			}
+			_, val, err = c.PrevDup()
+			if err != nil {
+				return nil, false, err
+			}
+		}
+		return nil, false, nil
 	}
 	if val == nil {
 		return nil, false, nil
@@ -1266,10 +1458,11 @@ func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, t
 	}
 
 	dbit := &HistoryRangeAsOfDB{
-		largeValues: ht.h.HistoryLargeValues,
-		roTx:        roTx,
-		valsTable:   ht.h.ValuesTable,
-		from:        from, toPrefix: to, limit: kv.Unlim, orderAscend: asc,
+		largeValues:                   ht.h.HistoryLargeValues,
+		historyValuesOnCompressedPage: uint8(ht.h.HistoryValuesOnCompressedPage),
+		roTx:                          roTx,
+		valsTable:                     ht.h.ValuesTable,
+		from:                          from, toPrefix: to, limit: kv.Unlim, orderAscend: asc,
 
 		startTxNum: startTxNum,
 
