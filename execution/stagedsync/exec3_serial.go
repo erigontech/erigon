@@ -263,6 +263,9 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if err != nil {
 				return nil, rwTx, err
 			}
+			if isBatchFull {
+				log.Warn("[dbg] see", "isBatchFull", isBatchFull, "initialCycle", initialCycle, "canPrune", canPrune)
+			}
 			// on chain-tip: if batch is full then stop execution - to allow stages commit
 			if isBatchFull {
 				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
