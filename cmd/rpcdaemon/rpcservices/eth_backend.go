@@ -450,8 +450,8 @@ func (back *RemoteBackend) Peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 	return peers, nil
 }
 
-func (back *RemoteBackend) TxnumReader(ctx context.Context) rawdbv3.TxNumsReader {
-	return back.blockReader.TxnumReader(ctx)
+func (back *RemoteBackend) TxnumReader() rawdbv3.TxNumsReader {
+	return back.blockReader.TxnumReader()
 }
 
 func (back *RemoteBackend) BlockForTxNum(ctx context.Context, tx kv.Tx, txNum uint64) (uint64, bool, error) {

@@ -247,6 +247,13 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	})
 	if len(p.Items) != len(versioned) {
 		log.Root().Warn("Preverified list reduced after applying type filter", "from", len(p.Items), "to", len(versioned))
+		// for _, v := range p.Items {
+		// 	if !slices.ContainsFunc(versioned, func(item PreverifiedItem) bool {
+		// 		return item.Name == v.Name
+		// 	}) {
+		// 		log.Root().Warn("Preverified item removed by type filter", "name", v.Name)
+		// 	}
+		// }
 	} else {
 		log.Root().Debug("Preverified list has same len after applying type filter", "len", len(p.Items))
 	}
