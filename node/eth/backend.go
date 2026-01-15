@@ -852,8 +852,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	if config.MCPAddress != "" {
 		go func() {
 			logger.Info("serve MCP on", "addr", config.MCPAddress)
-			err = mcpServer.ServeSSE(config.MCPAddress)
-			if err != nil {
+			mcpErr := mcpServer.ServeSSE(config.MCPAddress)
+			if mcpErr != nil {
 				logger.Error("mcpServer.ServeSSE", "err", err)
 				return
 			}
