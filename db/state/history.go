@@ -28,7 +28,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -458,14 +457,14 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 		ii: ht.iit.newWriter(tmpdir, discard),
 	}
 	if !discard {
-		if w.ii.name == kv.CommitmentHistoryIdx {
-			b := etl.NewSortableBuffer(64 * datasize.MB)
-			w.historyVals = etl.NewCollector(w.ii.filenameBase+".flush.hist", tmpdir, b, ht.h.logger).
-				LogLvl(log.LvlInfo).SortAndFlushInBackground(true)
-		} else {
-			w.historyVals = etl.NewCollectorWithAllocator(w.ii.filenameBase+".flush.hist", tmpdir, etl.SmallSortableBuffers, ht.h.logger).
-				LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
-		}
+		//if w.ii.name == kv.CommitmentHistoryIdx {
+		//	b := etl.NewSortableBuffer(64 * datasize.MB)
+		//	w.historyVals = etl.NewCollector(w.ii.filenameBase+".flush.hist", tmpdir, b, ht.h.logger).
+		//		LogLvl(log.LvlInfo).SortAndFlushInBackground(true)
+		//} else {
+		w.historyVals = etl.NewCollectorWithAllocator(w.ii.filenameBase+".flush.hist", tmpdir, etl.SmallSortableBuffers, ht.h.logger).
+			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
+		//}
 	}
 	return w
 }
@@ -478,11 +477,19 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
 	}
+	t := time.Now()
 	if err := w.ii.Flush(ctx, tx); err != nil {
 		return err
 	}
+	if w.ii.name == kv.CommitmentHistoryIdx {
+		log.Warn("[dbg] flush10", "name", "commitment.history.index", "took", time.Since(t))
+	}
+	t = time.Now()
 	if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
+	}
+	if w.ii.name == kv.CommitmentHistoryIdx {
+		log.Warn("[dbg] flush10", "name", "commitment.history.index", "took", time.Since(t))
 	}
 	w.close()
 	return nil
