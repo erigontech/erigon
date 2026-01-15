@@ -424,13 +424,13 @@ func (s *simulator) simulateBlock(
 		stateReader = state.NewReaderV3(sharedDomains.AsGetter(tx))
 	} else {
 		if minTxNum < state.StateHistoryStartTxNum(tx) {
-			return nil, nil, state.PrunedError
+			return nil, nil, fmt.Errorf("%w: min tx: %d", state.PrunedError, minTxNum)
 		}
 		stateReader = state.NewHistoryReaderV3(tx, minTxNum)
 
 		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
 		if s.commitmentHistory && minTxNum < commitmentStartingTxNum {
-			return nil, nil, state.PrunedError
+			return nil, nil, fmt.Errorf("%w: min commitment: %d, min tx: %d", state.PrunedError, commitmentStartingTxNum, minTxNum)
 		}
 	}
 	intraBlockState := state.New(stateReader)
