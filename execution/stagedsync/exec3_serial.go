@@ -205,7 +205,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			//}
 
 			isBatchFull := se.readState().SizeEstimate() >= se.cfg.batchSize.Bytes()
-			fmt.Printf("[dbg] isBatchFull: %t, %d, %d\n", isBatchFull, se.readState().SizeEstimate(), se.cfg.batchSize.Bytes())
 
 			canPrune := dbstate.AggTx(se.applyTx).CanPrune(se.applyTx, se.doms.TxNum())
 			needCalcRoot := isBatchFull || havePartialBlock || canPrune
