@@ -1663,3 +1663,160 @@ func TestHistory_OpenFolder(t *testing.T) {
 	require.NoError(t, err)
 	h.Close()
 }
+
+// TestHistoryDBPageCompression tests page-level compression for DB storage
+func TestHistoryDBPageCompression(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	logger := log.New()
+	ctx := context.Background()
+
+	test := func(t *testing.T, largeValues bool) {
+		t.Helper()
+		require := require.New(t)
+
+		dirs := datadir.New(t.TempDir())
+		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+		t.Cleanup(db.Close)
+
+		salt := uint32(1)
+		cfg := statecfg.Schema.AccountsDomain
+
+		cfg.Hist.IiCfg.Accessors = statecfg.AccessorHashMap
+		cfg.Hist.HistoryLargeValues = largeValues
+		cfg.Hist.IiCfg.Compression = seg.CompressNone
+		cfg.Hist.Compression = seg.CompressNone
+		// Enable DB page compression with 4 values per page (only when largeValues=true)
+		// Page compression requires large values mode
+		if largeValues {
+			cfg.Hist.DBValuesOnCompressedPage = 4
+		} else {
+			cfg.Hist.DBValuesOnCompressedPage = 0
+		}
+
+		aggregationStep := uint64(16)
+		h, err := NewHistory(cfg.Hist, aggregationStep, config3.DefaultStepsInFrozenFile, dirs, logger)
+		require.NoError(err)
+		t.Cleanup(h.Close)
+		h.salt.Store(&salt)
+		h.DisableFsync()
+
+		// Write some test data
+		tx, err := db.BeginRw(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+
+		hc := h.BeginFilesRo()
+		defer hc.Close()
+		writer := hc.NewWriter()
+		defer writer.close()
+
+		// Write multiple values for the same key to test page grouping
+		err = writer.AddPrevValue([]byte("key1"), 1, []byte("value1.1"))
+		require.NoError(err)
+		err = writer.AddPrevValue([]byte("key1"), 2, []byte("value1.2"))
+		require.NoError(err)
+		err = writer.AddPrevValue([]byte("key1"), 3, []byte("value1.3"))
+		require.NoError(err)
+		err = writer.AddPrevValue([]byte("key1"), 4, []byte("value1.4"))
+		require.NoError(err)
+		// This should trigger a new page (page size is 4)
+		err = writer.AddPrevValue([]byte("key1"), 5, []byte("value1.5"))
+		require.NoError(err)
+
+		// Write values for a different key
+		err = writer.AddPrevValue([]byte("key2"), 6, []byte("value2.1"))
+		require.NoError(err)
+		err = writer.AddPrevValue([]byte("key2"), 7, []byte("value2.2"))
+		require.NoError(err)
+
+		err = writer.Flush(ctx, tx)
+		require.NoError(err)
+		err = tx.Commit()
+		require.NoError(err)
+
+		// Now read back the values using HistorySeek
+		roTx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer roTx.Rollback()
+
+		hc2 := h.BeginFilesRo()
+		defer hc2.Close()
+
+		// Test reading values that should be in the DB (not files)
+		// HistorySeek(key, txNum) returns the value recorded at txNum or later
+		// AddPrevValue(key, txNum, val) records that 'val' was the value before the change at txNum
+
+		// Seek for txNum=1 should find value1.1 (the record at txNum=1)
+		val, found, err := hc2.HistorySeek([]byte("key1"), 1, roTx)
+		require.NoError(err)
+		if found {
+			require.Equal([]byte("value1.1"), val, "expected value at txNum=1")
+		}
+
+		// Seek for txNum=2 should find value1.2 (the record at txNum=2)
+		val, found, err = hc2.HistorySeek([]byte("key1"), 2, roTx)
+		require.NoError(err)
+		if found {
+			require.Equal([]byte("value1.2"), val, "expected value at txNum=2")
+		}
+
+		// Seek for txNum=5 should find value1.5 (the record at txNum=5)
+		val, found, err = hc2.HistorySeek([]byte("key1"), 5, roTx)
+		require.NoError(err)
+		if found {
+			require.Equal([]byte("value1.5"), val, "expected value at txNum=5")
+		}
+
+		// Seek for txNum=6 should find value2.1 for key2
+		val, found, err = hc2.HistorySeek([]byte("key2"), 6, roTx)
+		require.NoError(err)
+		if found {
+			require.Equal([]byte("value2.1"), val, "expected value at txNum=6 for key2")
+		}
+	}
+
+	t.Run("large_values", func(t *testing.T) {
+		test(t, true)
+	})
+	t.Run("small_values", func(t *testing.T) {
+		test(t, false)
+	})
+}
+
+// TestHistoryDBPageCompressionRequiresLargeValues verifies that enabling
+// DBValuesOnCompressedPage without HistoryLargeValues causes a panic
+func TestHistoryDBPageCompressionRequiresLargeValues(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+
+	cfg := statecfg.Schema.AccountsDomain
+
+	cfg.Hist.IiCfg.Accessors = statecfg.AccessorHashMap
+	cfg.Hist.HistoryLargeValues = false   // Small values mode
+	cfg.Hist.DBValuesOnCompressedPage = 4 // Enable page compression
+
+	aggregationStep := uint64(16)
+
+	// This should panic because page compression requires large values
+	defer func() {
+		if r := recover(); r != nil {
+			// Check that the panic message mentions the requirement
+			panicMsg := fmt.Sprint(r)
+			require.Contains(t, panicMsg, "DBValuesOnCompressedPage")
+			require.Contains(t, panicMsg, "HistoryLargeValues")
+			require.Contains(t, panicMsg, "page-level compression produces large values")
+		} else {
+			t.Fatal("expected panic when DBValuesOnCompressedPage > 0 && HistoryLargeValues == false")
+		}
+	}()
+
+	_, err := NewHistory(cfg.Hist, aggregationStep, config3.DefaultStepsInFrozenFile, dirs, logger)
+	if err != nil {
+		t.Fatalf("unexpected error before panic: %v", err)
+	}
+}

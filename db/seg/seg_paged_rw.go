@@ -246,7 +246,7 @@ type CompressorI interface {
 	GetValuesOnCompressedPage() int
 }
 type PagedWriter struct {
-	parent             CompressorI
+	parent             CompressorI // optional - nil for DB-only usage
 	pageSize           int
 	keys, vals         []byte
 	kLengths, vLengths []int
@@ -258,20 +258,32 @@ type PagedWriter struct {
 }
 
 func (c *PagedWriter) Empty() bool { return c.pairs == 0 }
-func (c *PagedWriter) Close()      { c.parent.Close() }
+func (c *PagedWriter) Close() {
+	if c.parent != nil {
+		c.parent.Close()
+	}
+}
 func (c *PagedWriter) Compress() error {
+	if c.parent == nil {
+		return nil
+	}
 	if err := c.Flush(); err != nil {
 		return err
 	}
 	return c.parent.Compress()
 }
 func (c *PagedWriter) Count() int {
-	if c.pageSize <= 1 {
+	if c.pageSize <= 1 && c.parent != nil {
 		return c.parent.Count()
 	}
 	return c.pairs * 2
 }
-func (c *PagedWriter) FileName() string { return c.parent.FileName() }
+func (c *PagedWriter) FileName() string {
+	if c.parent != nil {
+		return c.parent.FileName()
+	}
+	return ""
+}
 
 func (c *PagedWriter) writePage() error {
 	bts, ok := c.bytes()
@@ -279,11 +291,14 @@ func (c *PagedWriter) writePage() error {
 	if !ok {
 		return nil
 	}
+	if c.parent == nil {
+		return nil // for DB usage, caller will call BuildPage manually
+	}
 	_, err := c.parent.Write(bts)
 	return err
 }
 func (c *PagedWriter) Add(k, v []byte) (err error) {
-	if c.pageSize <= 1 {
+	if c.pageSize <= 1 && c.parent != nil {
 		_, err = c.parent.Write(v)
 		return err
 	}
@@ -294,7 +309,7 @@ func (c *PagedWriter) Add(k, v []byte) (err error) {
 	c.keys = append(c.keys, k...)
 	c.vals = append(c.vals, v...)
 	isFull := c.pairs%c.pageSize == 0
-	if isFull {
+	if isFull && c.parent != nil {
 		return c.writePage()
 	}
 	return nil
@@ -303,6 +318,7 @@ func (c *PagedWriter) Add(k, v []byte) (err error) {
 func (c *PagedWriter) resetPage() {
 	c.kLengths, c.vLengths = c.kLengths[:0], c.vLengths[:0]
 	c.keys, c.vals = c.keys[:0], c.vals[:0]
+	c.pairs = 0 // reset pairs counter
 }
 func (c *PagedWriter) Flush() error {
 	if c.pageSize <= 1 {
@@ -310,6 +326,37 @@ func (c *PagedWriter) Flush() error {
 	}
 	defer c.resetPage()
 	return c.writePage()
+}
+
+// IsFull returns true if the page has reached its size limit
+func (c *PagedWriter) IsFull() bool {
+	return c.pairs >= c.pageSize
+}
+
+// IsEmpty returns true if no pairs have been added
+func (c *PagedWriter) IsEmpty() bool {
+	return c.pairs == 0
+}
+
+// Reset clears all buffered data
+func (c *PagedWriter) Reset() {
+	c.resetPage()
+}
+
+// PageKey returns the first key in the current page buffer
+// Useful for DB storage to determine the page key
+func (c *PagedWriter) PageKey() []byte {
+	if len(c.kLengths) == 0 {
+		return nil
+	}
+	return c.keys[:c.kLengths[0]]
+}
+
+// BuildPage creates a compressed page from buffered values without writing to parent
+// This is useful for DB storage where pages are written directly to the database
+func (c *PagedWriter) BuildPage() []byte {
+	page, _ := c.bytes()
+	return page
 }
 
 func (c *PagedWriter) bytes() (wholePage []byte, notEmpty bool) {
@@ -341,13 +388,18 @@ func (c *PagedWriter) bytes() (wholePage []byte, notEmpty bool) {
 }
 
 func (c *PagedWriter) DisableFsync() {
+	if c.parent == nil {
+		return
+	}
 	if casted, ok := c.parent.(disableFsycn); ok {
 		casted.DisableFsync()
 	}
 }
 
 func (c *PagedWriter) SetMetadata(metadata []byte) {
-	c.parent.SetMetadata(metadata)
+	if c.parent != nil {
+		c.parent.SetMetadata(metadata)
+	}
 }
 
 type disableFsycn interface {
@@ -361,4 +413,40 @@ func growslice(b []byte, wantLength int) []byte {
 		return b[:wantLength]
 	}
 	return make([]byte, wantLength)
+}
+
+// NewPagedWriterStandalone creates a PagedWriter without a parent compressor
+// for direct page building (e.g., for DB storage)
+func NewPagedWriterStandalone(pageSize int, compressionEnabled bool) *PagedWriter {
+	return &PagedWriter{
+		parent:             nil,
+		pageSize:           pageSize,
+		compressionEnabled: compressionEnabled,
+	}
+}
+
+// SearchPageForTxNum searches for a specific txNum in a compressed page for small values
+// In small values mode, keys in the page are the full key (k), and values are txNum+value
+// We need to find the value where txNum matches
+// Uses Page for decompression and iteration
+func SearchPageForTxNum(targetTxNum uint64, compressedPage []byte, page *Page) (value []byte, found bool) {
+	page.Reset(compressedPage, true)
+
+	// For small values: key in page is the full key (k), value is txNum+actualValue
+	// We search through values looking for matching txNum
+	for page.HasNext() {
+		_, val := page.Next()
+		if len(val) >= 8 {
+			pageTxNum := binary.BigEndian.Uint64(val[:8])
+			if pageTxNum == targetTxNum {
+				// Found it - return the value part (after txNum)
+				return val[8:], true
+			}
+			// For SeekBothRange semantics: find first txNum >= target
+			if pageTxNum >= targetTxNum {
+				return val[8:], true
+			}
+		}
+	}
+	return nil, false
 }

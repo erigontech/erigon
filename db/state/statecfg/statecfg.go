@@ -59,6 +59,13 @@ type HistCfg struct {
 
 	HistoryValuesOnCompressedPage int // deprecated, it is only for ver.0 snapshots backward compatibility
 
+	// DBValuesOnCompressedPage - number of values to compress together when storing in DB
+	// if > 0 then page level compression is enabled for DB storage
+	// values for the same key are grouped into compressed pages
+	// IMPORTANT: When DBValuesOnCompressedPage > 0, HistoryLargeValues MUST be true
+	// because compressed pages are "large values" (cannot use DupSort optimization)
+	DBValuesOnCompressedPage int
+
 	Accessors     Accessors
 	CompressorCfg seg.Cfg             // Compression settings for history files
 	Compression   seg.FileCompression // defines type of Compression for history files

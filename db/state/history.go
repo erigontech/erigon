@@ -84,6 +84,12 @@ func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs d
 		_visibleFiles: []visibleFile{},
 	}
 
+	// Validate configuration consistency
+	if cfg.DBValuesOnCompressedPage > 0 && !cfg.HistoryLargeValues {
+		panic(fmt.Errorf("assert: DBValuesOnCompressedPage=%d requires HistoryLargeValues=true for %s (page-level compression produces large values)",
+			cfg.DBValuesOnCompressedPage, cfg.IiCfg.FilenameBase))
+	}
+
 	var err error
 	h.InvertedIndex, err = NewInvertedIndex(cfg.IiCfg, stepSize, stepsInFrozenFile, dirs, logger)
 	if err != nil {
@@ -433,6 +439,10 @@ type historyBufferedWriter struct {
 	//   vals: key1+key2+txNum -> value (not DupSort)
 	largeValues bool
 
+	// dbPageSize - number of values to compress together when storing in DB
+	// if > 0 then page level compression is enabled for DB storage
+	dbPageSize int
+
 	ii *InvertedIndexBufferedWriter
 }
 
@@ -453,6 +463,7 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 		historyKey:       make([]byte, 128),
 		largeValues:      ht.h.HistoryLargeValues,
 		historyValsTable: ht.h.ValuesTable,
+		dbPageSize:       ht.h.DBValuesOnCompressedPage,
 
 		ii: ht.iit.newWriter(tmpdir, discard),
 	}
@@ -474,11 +485,84 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := w.ii.Flush(ctx, tx); err != nil {
 		return err
 	}
-	if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
+
+	// Use page compression if enabled
+	if w.dbPageSize > 0 {
+		if err := w.flushWithPageCompression(ctx, tx); err != nil {
+			return err
+		}
+	} else {
+		if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
 	}
 	w.close()
 	return nil
+}
+
+// flushWithPageCompression writes history values to DB using page-level compression
+// Values for the same key are grouped into compressed pages
+func (w *historyBufferedWriter) flushWithPageCompression(ctx context.Context, tx kv.RwTx) error {
+	pageWriter := seg.NewPagedWriterStandalone(w.dbPageSize, true)
+
+	var prevKey []byte // for small values, this is just the key (k); for large values, this is k+txNum
+
+	// getKeyPrefix returns the key prefix used to group values into pages
+	// for small values: the key (k)
+	// for large values: the key (k) without the txNum suffix
+	getKeyPrefix := func(k []byte) []byte {
+		if w.largeValues {
+			// for large values, k = key + txNum (8 bytes)
+			if len(k) >= 8 {
+				return k[:len(k)-8]
+			}
+			return k
+		}
+		// for small values, k is already just the key
+		return k
+	}
+
+	writePageToDB := func() error {
+		if pageWriter.IsEmpty() {
+			return nil
+		}
+		pageKey := pageWriter.PageKey()
+		pageData := pageWriter.BuildPage()
+		pageWriter.Reset()
+
+		if w.largeValues {
+			// for large values: store with first key (k+txNum) as key
+			return tx.Put(w.historyValsTable, pageKey, pageData)
+		}
+		// for small values: store with key (k) and page as value
+		// note: this changes from DupSort to regular Put
+		return tx.Put(w.historyValsTable, pageKey, pageData)
+	}
+
+	loadFn := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		keyPrefix := getKeyPrefix(k)
+
+		// Check if key changed (need to start a new page for different keys)
+		keyChanged := prevKey != nil && !bytes.Equal(prevKey, keyPrefix)
+		if keyChanged || pageWriter.IsFull() {
+			if err := writePageToDB(); err != nil {
+				return err
+			}
+		}
+
+		if err := pageWriter.Add(k, v); err != nil {
+			return err
+		}
+		prevKey = common.Copy(keyPrefix)
+		return nil
+	}
+
+	if err := w.historyVals.Load(tx, w.historyValsTable, loadFn, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+
+	// Flush remaining buffered values
+	return writePageToDB()
 }
 
 type HistoryCollation struct {
@@ -905,6 +989,7 @@ type HistoryRoTx struct {
 
 	_bufTs           []byte
 	snappyReadBuffer []byte
+	dbPage           *seg.Page // reusable page for DB page compression reads
 }
 
 func (h *History) BeginFilesRo() *HistoryRoTx {
@@ -1214,6 +1299,11 @@ func (ht *HistoryRoTx) valsCursorDup(tx kv.Tx) (c kv.CursorDupSort, err error) {
 }
 
 func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
+	// Check if page compression is enabled for DB
+	if ht.h.DBValuesOnCompressedPage > 0 {
+		return ht.historySeekInDBPaged(key, txNum, tx)
+	}
+
 	if ht.h.HistoryLargeValues {
 		c, err := ht.valsCursor(tx)
 		if err != nil {
@@ -1247,6 +1337,88 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 	// `val == []byte{}` means key was created in this txNum and doesn't exist before.
 	v := val[8:]
 	return v, true, nil
+}
+
+// historySeekInDBPaged handles seeking in DB when page compression is enabled
+// Uses seg.Page and seg.GetFromPage for reading compressed pages
+func (ht *HistoryRoTx) historySeekInDBPaged(key []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
+	c, err := ht.valsCursor(tx)
+	if err != nil {
+		return nil, false, err
+	}
+
+	// Lazily initialize the reusable page
+	if ht.dbPage == nil {
+		ht.dbPage = &seg.Page{}
+	}
+
+	if ht.h.HistoryLargeValues {
+		// For large values with page compression:
+		// Pages are stored with key = k + firstTxNum
+		// We need to find the page that might contain our txNum
+		seek := make([]byte, len(key)+8)
+		copy(seek, key)
+		binary.BigEndian.PutUint64(seek[len(key):], txNum)
+
+		// Seek to find a page that might contain this txNum
+		kAndTxNum, compressedPage, err := c.Seek(seek)
+		if err != nil {
+			return nil, false, err
+		}
+
+		// Check if we found a page for this key
+		if kAndTxNum == nil || len(kAndTxNum) < 8 || !bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], key) {
+			// Try seeking backwards - the page might start before our txNum
+			// Go back to find pages for this key
+			kAndTxNum, compressedPage, err = c.Seek(key)
+			if err != nil {
+				return nil, false, err
+			}
+			if kAndTxNum == nil || len(kAndTxNum) < 8 || !bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], key) {
+				return nil, false, nil
+			}
+		}
+
+		// Build the full search key (k + txNum) for lookup
+		searchKey := make([]byte, len(key)+8)
+		copy(searchKey, key)
+		binary.BigEndian.PutUint64(searchKey[len(key):], txNum)
+
+		// Search through pages for this key to find the one containing our txNum
+		for kAndTxNum != nil && len(kAndTxNum) >= 8 && bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], key) {
+			// Try to find the value in this page using seg.GetFromPage
+			val, buf := seg.GetFromPage(searchKey, compressedPage, ht.snappyReadBuffer, true)
+			ht.snappyReadBuffer = buf
+			if val != nil {
+				return val, true, nil
+			}
+
+			// Move to next page for this key
+			kAndTxNum, compressedPage, err = c.Next()
+			if err != nil {
+				return nil, false, err
+			}
+		}
+		return nil, false, nil
+	}
+
+	// For small values with page compression:
+	// Pages are stored with key = k (the original key, not k+txNum)
+	// Each page contains multiple (key, txNum+value) pairs
+	_, compressedPage, err := c.Seek(key)
+	if err != nil {
+		return nil, false, err
+	}
+	if compressedPage == nil {
+		return nil, false, nil
+	}
+
+	// Search for the txNum in the page using seg.Page
+	val, found := seg.SearchPageForTxNum(txNum, compressedPage, ht.dbPage)
+	if found {
+		return val, true, nil
+	}
+	return nil, false, nil
 }
 
 func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, to []byte, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
