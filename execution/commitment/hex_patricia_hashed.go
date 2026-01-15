@@ -2447,7 +2447,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 		updatesCount = updates.Size()
 		start        = time.Now()
-		logEvery     = time.NewTicker(20 * time.Second)
+		logEvery     = time.NewTicker(1 * time.Second)
 	)
 
 	//hph.trace = true
