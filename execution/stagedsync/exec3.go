@@ -870,13 +870,13 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 
 	domsFlushFn := func() (bool, FlushAndComputeCommitmentTimes, error) {
-		start = time.Now()
-		logBeforeFlush()
-		err := doms.Flush(ctx, applyTx)
-		doms.ClearRam(true)
-		times.Flush = time.Since(start)
-		if err != nil {
-			return false, times, err
+		if !inMemExec {
+			start = time.Now()
+			err := doms.Flush(ctx, applyTx)
+			times.Flush = time.Since(start)
+			if err != nil {
+				return false, times, err
+			}
 		}
 		return true, times, nil
 	}
@@ -888,7 +888,6 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
 
-	logBeforeFlush()
 	// Use warmup to pre-fetch branch data in parallel before computing commitment
 	doms.SetWarmupDB(cfg.db)
 	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix(), nil)
