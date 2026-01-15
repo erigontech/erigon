@@ -449,7 +449,7 @@ func ParseEnum(s string) (Enum, bool) {
 	switch s {
 	case "beaconblocks":
 		return CaplinEnums.BeaconBlocks, true
-	case "blobsidecars":
+	case "blobsidecars", "blocksidecars":
 		return CaplinEnums.BlobSidecars, true
 	default:
 		if t, ok := namedTypes[s]; ok {
