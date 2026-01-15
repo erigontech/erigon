@@ -209,7 +209,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			canPrune := dbstate.AggTx(se.applyTx).CanPrune(se.applyTx, se.doms.TxNum())
 			needCalcRoot := isBatchFull || havePartialBlock || canPrune
 			// If we have a partial first block it may not be validated, then we should compute root hash ASAP for fail-fast
-			log.Warn("[dbg] see", "isBatchFull", isBatchFull, "initialCycle", initialCycle)
 
 			// this will only happen for the first executed block
 			havePartialBlock = false
