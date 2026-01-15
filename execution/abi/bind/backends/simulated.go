@@ -770,7 +770,6 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 	}
 
 	b.pendingState.SetTxContext(b.pendingBlock.NumberU64(), len(b.pendingBlock.Transactions()))
-	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
 	if _, err := protocol.ApplyTransaction(
 		b.m.ChainConfig, protocol.GetHashFn(b.pendingHeader, b.getHeader), b.m.Engine,
 		accounts.InternAddress(b.pendingHeader.Coinbase), b.gasPool,
@@ -780,7 +779,6 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 		vm.Config{}); err != nil {
 		return err
 	}
-	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
 	chain, err := blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *blockgen.BlockGen) {
 		for _, txn := range b.pendingBlock.Transactions() {
 			block.AddTxWithChain(b.getHeader, b.m.Engine, txn)
@@ -790,7 +788,6 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 	if err != nil {
 		return err
 	}
-	//fmt.Printf("==== End producing block %d\n", b.pendingBlock.NumberU64())
 	b.pendingBlock = chain.Blocks[0]
 	b.pendingReceipts = chain.Receipts[0]
 	b.pendingHeader = chain.Headers[0]
