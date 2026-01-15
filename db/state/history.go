@@ -482,14 +482,14 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := w.ii.Flush(ctx, tx); err != nil {
 		return err
 	}
-	if w.ii.name == kv.CommitmentHistoryIdx {
+	if w.ii.name == kv.CommitmentHistoryIdx && time.Since(t) > 10*time.Millisecond {
 		log.Warn("[dbg] flush10", "name", "commitment.history.index", "took", time.Since(t))
 	}
 	t = time.Now()
 	if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if w.ii.name == kv.CommitmentHistoryIdx {
+	if w.ii.name == kv.CommitmentHistoryIdx && time.Since(t) > 10*time.Millisecond {
 		log.Warn("[dbg] flush10", "name", "commitment.history", "took", time.Since(t))
 	}
 	w.close()

@@ -527,14 +527,12 @@ func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
 func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error {
 	aggTx := AggTx(tx)
 	for di, ws := range sd.pastDomainWriters {
-		t := time.Now()
 		for i := len(ws) - 1; i >= 0; i-- {
 			if err := ws[i].Flush(ctx, tx); err != nil {
 				return err
 			}
 			ws[i].Close()
 		}
-		log.Warn("[dbg] flush1 ", "name", di, "took", time.Since(t))
 	}
 	for di, w := range sd.domainWriters {
 		if w == nil {
