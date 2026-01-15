@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -457,14 +458,14 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 		ii: ht.iit.newWriter(tmpdir, discard),
 	}
 	if !discard {
-		//if w.ii.name == kv.CommitmentHistoryIdx {
-		//	b := etl.NewSortableBuffer(64 * datasize.MB)
-		//	w.historyVals = etl.NewCollector(w.ii.filenameBase+".flush.hist", tmpdir, b, ht.h.logger).
-		//		LogLvl(log.LvlInfo).SortAndFlushInBackground(true)
-		//} else {
-		w.historyVals = etl.NewCollectorWithAllocator(w.ii.filenameBase+".flush.hist", tmpdir, etl.SmallSortableBuffers, ht.h.logger).
-			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
-		//}
+		if w.ii.name == kv.CommitmentHistoryIdx {
+			b := etl.NewSortableBuffer(64 * datasize.MB)
+			w.historyVals = etl.NewCollector(w.ii.filenameBase+".flush.hist", tmpdir, b, ht.h.logger).
+				LogLvl(log.LvlInfo).SortAndFlushInBackground(true)
+		} else {
+			w.historyVals = etl.NewCollectorWithAllocator(w.ii.filenameBase+".flush.hist", tmpdir, etl.SmallSortableBuffers, ht.h.logger).
+				LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
+		}
 	}
 	return w
 }
