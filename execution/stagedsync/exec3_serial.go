@@ -269,10 +269,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
 			}
 
-			if !initialCycle {
-				if canPrune {
-					return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch can be pruned"}
-				}
+			if canPrune {
+				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch can be pruned"}
 			}
 
 			if !useExternalTx {
