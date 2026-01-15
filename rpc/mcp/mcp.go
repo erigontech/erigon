@@ -9,6 +9,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -41,6 +42,7 @@ func NewErigonMCPServer(ethAPI jsonrpc.EthAPI, erigonAPI jsonrpc.ErigonAPI, otsA
 		server.WithToolCapabilities(true),
 		server.WithPromptCapabilities(true),
 		server.WithLogging(),
+		server.WithRecovery(),
 	)
 
 	e.registerTools()
@@ -1086,7 +1088,16 @@ func (e *ErigonMCPServer) Serve() error {
 }
 
 // ServeSSE starts MCP server with SSE transport
-func (e *ErigonMCPServer) ServeSSE(addr string) error {
+func (e *ErigonMCPServer) ServeSSE(addr string) (err error) {
 	sse := server.NewSSEServer(e.mcpServer)
+
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error("[MCP]: recovered from panic:", "panic", r)
+
+			err = fmt.Errorf("mcp sse server panicked: %v", r)
+		}
+	}()
+
 	return sse.Start(addr)
 }
