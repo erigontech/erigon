@@ -1112,7 +1112,7 @@ var (
 	MCPAddrFlag = cli.StringFlag{
 		Name:  "mcp.addr",
 		Usage: "Address for MCP RPC server",
-		Value: "0.0.0.0",
+		Value: "127.0.0.1",
 	}
 	MCPPortFlag = cli.UintFlag{
 		Name:  "mcp.port",
