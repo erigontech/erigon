@@ -64,8 +64,8 @@ jobs:
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
           set -euo pipefail
-          python redis_client.py --key ${{ steps.vars.outputs.erigon_redis_key }} --write "starting"
-          python redis_client.py --key ${{ steps.vars.outputs.geth_redis_key }} --write "starting"
+          python3 redis_client.py --key ${{ steps.vars.outputs.erigon_redis_key }} --write "starting"
+          python3 redis_client.py --key ${{ steps.vars.outputs.geth_redis_key }} --write "starting"
 
   test_erigon:
     name: Benchmark Erigon
@@ -90,7 +90,7 @@ jobs:
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
           set -euo pipefail
-          python redis_client.py --key ${{ needs.setup.outputs.erigon_redis_key }} --read
+          python3 redis_client.py --key ${{ needs.setup.outputs.erigon_redis_key }} --read
 
       - name: Run Erigon benchmark (placeholder)
         shell: bash
@@ -130,7 +130,7 @@ jobs:
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
           set -euo pipefail
-          python redis_client.py --key ${{ needs.setup.outputs.geth_redis_key }} --read
+          python3 redis_client.py --key ${{ needs.setup.outputs.geth_redis_key }} --read
 
       - name: Run Geth benchmark (placeholder)
         shell: bash
