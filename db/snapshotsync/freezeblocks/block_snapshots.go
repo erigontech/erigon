@@ -29,9 +29,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/db/downloader"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
+
+	"github.com/erigontech/erigon/db/downloader"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -423,6 +424,7 @@ func (br *BlockRetire) RetireBlocksInBackground(
 	if !br.working.CompareAndSwap(false, true) {
 		return false
 	}
+	log.Warn("[dbg] RetireBlocksInBackground called", "stack", dbg.Stack())
 
 	go func() {
 		defer onDone()
