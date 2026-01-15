@@ -457,8 +457,8 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 		ii: ht.iit.newWriter(tmpdir, discard),
 	}
 	if !discard {
-		w.historyVals = etl.NewCollectorWithAllocator(w.ii.filenameBase+".flush.hist", tmpdir, etl.SmallSortableBuffers, ht.h.logger).
-			LogLvl(log.LvlTrace).SortAndFlushInBackground(false)
+		w.historyVals = etl.NewCollector(w.ii.filenameBase+".flush.hist", tmpdir, ht.h.logger).
+			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
 	}
 	return w
 }
