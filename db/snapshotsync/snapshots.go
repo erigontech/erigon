@@ -1471,17 +1471,6 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 				}
 				newIdxBuilt = true
 
-				if len(t.Type().Indexes()) > 0 {
-					oldVer, err := version.ParseVersion(info.Path)
-					if err != nil {
-						logger.Info(fmt.Sprintf("can't parse old version: %s", err))
-						oldVer = info.Version
-					}
-					info.Version = t.Type().Indexes()[0].Version.Current
-					info.Path = version.ReplaceVersion(info.Path, oldVer, info.Version)
-					info = info.As(t.Type())
-				}
-
 				segment.closeIdx()
 
 				indexBuilder := s.IndexBuilder(t.Type())
