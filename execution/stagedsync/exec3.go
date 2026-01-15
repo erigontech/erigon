@@ -872,6 +872,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	domsFlushFn := func() (bool, FlushAndComputeCommitmentTimes, error) {
 		start = time.Now()
 		err := doms.Flush(ctx, applyTx)
+		doms.ClearRam(true)
 		times.Flush = time.Since(start)
 		if err != nil {
 			return false, times, err
