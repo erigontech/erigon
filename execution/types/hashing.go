@@ -182,12 +182,24 @@ func rlpHash(x any) (h common.Hash) {
 	return h
 }
 
+// prefixSlices contains one-byte slices for all possible prefix values (0–255).
+// Each entry is pre-allocated once during init so we can write a single prefix
+// byte into the hasher without creating a new slice every time.
+// This avoids per-call heap allocations when hashing typed transactions.
+var prefixSlices [256][]byte
+
+func init() {
+	for i := range prefixSlices {
+		prefixSlices[i] = []byte{byte(i)}
+	}
+}
+
 // prefixedRlpHash writes the prefix into the hasher before rlp-encoding the
 // given interface. It's used for typed transactions.
 func prefixedRlpHash(prefix byte, x any) (h common.Hash) {
 	sha := crypto.NewKeccakState()
 	//nolint:errcheck
-	sha.Write([]byte{prefix})
+	sha.Write(prefixSlices[prefix])
 	if err := rlp.Encode(sha, x); err != nil {
 		panic(err)
 	}
