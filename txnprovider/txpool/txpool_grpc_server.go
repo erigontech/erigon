@@ -378,8 +378,8 @@ func StartGrpc(txPoolServer txpoolproto.TxpoolServer, miningServer txpoolproto.M
 	}
 
 	var (
-		streamInterceptors = make([]grpc.StreamServerInterceptor, 0, 1)
-		unaryInterceptors  = make([]grpc.UnaryServerInterceptor, 0, 1)
+		streamInterceptors = make([]grpc.StreamServerInterceptor, 0, 2)
+		unaryInterceptors  = make([]grpc.UnaryServerInterceptor, 0, 2)
 	)
 	streamInterceptors = append(streamInterceptors, recovery.StreamServerInterceptor())
 	unaryInterceptors = append(unaryInterceptors, recovery.UnaryServerInterceptor())
