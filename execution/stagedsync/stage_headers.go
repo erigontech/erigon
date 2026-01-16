@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math/big"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -53,6 +54,8 @@ import (
 // The number of blocks we should be able to re-org sub-second on commodity hardware.
 // See https://hackmd.io/TdJtNs0dS56q-In8h-ShSg
 const ShortPoSReorgThresholdBlocks = 10
+
+var l2RPCHealthCheckOnce sync.Once
 
 type HeadersCfg struct {
 	db                kv.RwDB
@@ -190,8 +193,12 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		topDumpedBlock++
 	}
 	firstBlock := topDumpedBlock
-	if err := checkL2RPCEndpointsHealth(ctx, client, receiptClient, firstBlock, cfg.L2RPCAddr, receiptRPCAddr); err != nil {
-		return err
+	var healthCheckErr error
+	l2RPCHealthCheckOnce.Do(func() {
+		healthCheckErr = checkL2RPCEndpointsHealth(ctx, client, receiptClient, firstBlock, cfg.L2RPCAddr, receiptRPCAddr)
+	})
+	if healthCheckErr != nil {
+		return healthCheckErr
 	}
 
 	if firstBlock >= latestRemoteBlock.Uint64() {
