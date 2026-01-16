@@ -197,6 +197,7 @@ func FindFilesWithVersionsByPattern(pattern string) (string, Version, bool, erro
 	}
 
 	if len(matches) == 0 {
+		println("no matching files", pattern)
 		return "", Version{}, false, nil
 	}
 	if len(matches) > 1 {
