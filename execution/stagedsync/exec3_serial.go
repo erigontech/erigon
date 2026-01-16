@@ -578,7 +578,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		}
 
 		var applyReceipt *types.Receipt
-		if txTask.TxIndex >= 0 {
+		if txTask.TxIndex >= 0 && txTask.TxIndex-startTxIndex < len(blockReceipts) {
 			applyReceipt = blockReceipts[txTask.TxIndex-startTxIndex]
 		}
 
