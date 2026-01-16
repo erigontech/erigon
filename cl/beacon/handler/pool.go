@@ -243,6 +243,7 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 		}
 		return
 	}
+	log.Debug("[Beacon REST] published attestations to gossip", "count", len(req))
 	w.WriteHeader(http.StatusOK)
 }
 

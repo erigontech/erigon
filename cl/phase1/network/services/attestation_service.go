@@ -264,6 +264,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		epochLastTime, ok := s.validatorAttestationSeen.Get(vIndex)
 		if ok && epochLastTime == targetEpoch {
 			//return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
+			// NOTE: don't return ErrIgnore here because we want to publish the attestation to the gossip network
 			return nil
 		}
 		s.validatorAttestationSeen.Add(vIndex, targetEpoch)
