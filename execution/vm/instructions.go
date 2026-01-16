@@ -1326,13 +1326,11 @@ func decodePair(x byte) (int, int) {
 
 func opDupN(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
 	code := scope.Contract.Code
-	i := pc + 1
-
-	// Ensure an immediate byte exists after DUPN
-	if i >= uint64(len(code)) {
-		return pc, nil, &ErrInvalidOpCode{opcode: INVALID}
+	pc++
+	x := byte(0) // see https://github.com/ethereum/EIPs/pull/11085
+	if pc < uint64(len(code)) {
+		x = code[pc]
 	}
-	x := code[i]
 
 	// This range is excluded to preserve compatibility with existing opcodes.
 	if x > 90 && x < 128 {
@@ -1347,19 +1345,16 @@ func opDupN(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64,
 
 	//The n‘th stack item is duplicated at the top of the stack.
 	scope.Stack.dup(n)
-	pc++
 	return pc, nil, nil
 }
 
 func opSwapN(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
 	code := scope.Contract.Code
-	i := pc + 1
-
-	// Ensure an immediate byte exists after SWAPN
-	if i >= uint64(len(code)) {
-		return pc, nil, &ErrInvalidOpCode{opcode: INVALID}
+	pc++
+	x := byte(0) // see https://github.com/ethereum/EIPs/pull/11085
+	if pc < uint64(len(code)) {
+		x = code[pc]
 	}
-	x := code[i]
 
 	// This range is excluded to preserve compatibility with existing opcodes.
 	if x > 90 && x < 128 {
@@ -1374,19 +1369,16 @@ func opSwapN(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64
 
 	// The (n+1)‘th stack item is swapped with the top of the stack.
 	scope.Stack.swap(n)
-	pc++
 	return pc, nil, nil
 }
 
 func opExchange(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
 	code := scope.Contract.Code
-	i := pc + 1
-
-	// Ensure an immediate byte exists after EXCHANGE
-	if i >= uint64(len(code)) {
-		return pc, nil, &ErrInvalidOpCode{opcode: INVALID}
+	pc++
+	x := byte(0) // see https://github.com/ethereum/EIPs/pull/11085
+	if pc < uint64(len(code)) {
+		x = code[pc]
 	}
-	x := code[i]
 
 	// This range is excluded both to preserve compatibility with existing opcodes
 	// and to keep decode_pair’s 16-aligned arithmetic mapping valid (0–79, 128–255).
@@ -1406,7 +1398,6 @@ func opExchange(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uin
 	indexN := scope.Stack.len() - 1 - n
 	indexM := scope.Stack.len() - 1 - m
 	scope.Stack.data[indexN], scope.Stack.data[indexM] = scope.Stack.data[indexM], scope.Stack.data[indexN]
-	pc++
 	return pc, nil, nil
 }
 
