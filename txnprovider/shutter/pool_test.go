@@ -75,6 +75,7 @@ func TestPoolCleanup(t *testing.T) {
 		// simulate some encrypted txn submissions and simulate a new block
 		encTxn1 := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon())
 		encTxn2 := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon())
+		require.Len(t, pool.AllEncryptedTxns(), 0)
 		err = handle.SimulateLogEvents(ctx, []types.Log{
 			MockTxnSubmittedEventLog(t, handle.config, ekg.Eon(), 1, encTxn1),
 			MockTxnSubmittedEventLog(t, handle.config, ekg.Eon(), 2, encTxn2),
@@ -532,6 +533,7 @@ func (cb *MockContractBackend) PrepareMocks() {
 			cb.mu.Lock()
 			defer cb.mu.Unlock()
 			var res []types.Log
+			addrStrs := make([]string, 0, len(query.Addresses))
 			for _, addr := range query.Addresses {
 				logs := cb.mockedFilterLogs[addr]
 				if len(logs) == 0 {
@@ -540,6 +542,7 @@ func (cb *MockContractBackend) PrepareMocks() {
 				}
 				res = append(res, logs[0]...)
 				cb.mockedFilterLogs[addr] = logs[1:]
+				addrStrs = append(addrStrs, addr.Hex())
 			}
 			cb.logger.Trace("--- DEBUG --- called FilterLogs")
 			return res, nil

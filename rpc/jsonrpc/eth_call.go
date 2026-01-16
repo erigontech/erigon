@@ -24,6 +24,9 @@ import (
 	"math/big"
 	"unsafe"
 
+	"github.com/erigontech/nitro-erigon/arbos"
+	"github.com/erigontech/nitro-erigon/arbos/arbosState"
+	"github.com/erigontech/nitro-erigon/arbos/l1pricing"
 	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 
@@ -184,7 +187,6 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 
 	blockNum := *(header.Number)
-
 	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, blockNum.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return 0, err
@@ -199,6 +201,42 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	if args.From == nil {
 		args.From = new(common.Address)
 	}
+	stateDb := state.New(stateReader)
+
+	if chainConfig.IsArbitrum() {
+		arbState := state.NewArbitrum(stateDb)
+		arbosVersion := arbosState.ArbOSVersion(arbState)
+		if arbosVersion == 0 {
+			// ArbOS hasn't been installed, so use the vanilla gas cap
+			return 0, nil
+		}
+		state, err := arbosState.OpenSystemArbosState(arbState, nil, true)
+		if err != nil {
+			return 0, err
+		}
+		if header.BaseFee.Sign() == 0 {
+			// if gas is free or there's no reimbursable poster, the user won't pay for L1 data costs
+			return 0, nil
+		}
+
+		brotliCompressionLevel, err := state.BrotliCompressionLevel()
+		if err != nil {
+			return 0, err
+		}
+
+		var baseFee *uint256.Int = nil
+		if header.BaseFee != nil {
+			baseFee, _ = uint256.FromBig(header.BaseFee)
+		}
+		msg, err := args.ToMessage(api.GasCap, baseFee)
+		if err != nil {
+			return 0, err
+		}
+		posterCost, _ := state.L1PricingState().PosterDataCost(msg, l1pricing.BatchPosterAddress, brotliCompressionLevel)
+		// Use estimate mode because this is used to raise the gas cap, so we don't want to underestimate.
+		postingGas := arbos.GetPosterGas(state, header.BaseFee, types.NewMessageGasEstimationContext(), posterCost)
+		api.GasCap += postingGas
+	}
 
 	// Determine the highest gas limit can be used during the estimation.
 	if args.Gas != nil && uint64(*args.Gas) >= params.TxGas {
@@ -207,7 +245,8 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		// Retrieve the block to act as the gas ceiling
 		hi = header.GasLimit
 	}
-	if hi > params.MaxTxnGasLimit && chainConfig.IsOsaka(header.Time) {
+	var arbosVersion uint64
+	if hi > params.MaxTxnGasLimit && chainConfig.IsOsaka(header.Time, arbosVersion) {
 		// Cap the maximum gas allowance according to EIP-7825 if Osaka
 		hi = params.MaxTxnGasLimit
 	}
@@ -224,8 +263,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	// Recap the highest gas limit with account's available balance.
 	if feeCap.Sign() != 0 {
-		state := state.New(stateReader)
-		if state == nil {
+		if stateDb == nil {
 			return 0, errors.New("can't get the current state")
 		}
 
@@ -889,9 +927,15 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		args.From = &common.Address{}
 	}
 
+	//var arbosFormatVersion uint64
+	//if chainConfig.IsArbitrum() {
+	//	arbosFormatVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	//}
+
 	// Retrieve the precompiles since they don't need to be added to the access list
 	blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
-	precompiles := vm.ActivePrecompiles(blockCtx.Rules(chainConfig))
+	// TODO arbitrum
+	precompiles := vm.ActivePrecompiles(blockCtx.Rules(chainConfig)) // blockNumber, header.Time, arbosFormatVersion))
 	excl := make(map[common.Address]struct{})
 	// Add 'from', 'to', precompiles to the exclusion list
 	excl[*args.From] = struct{}{}

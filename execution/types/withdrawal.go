@@ -31,15 +31,15 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
-type encodingBuf [32]byte
+type encodingBuf [64]byte
 
-var pooledBuf = sync.Pool{
+var PooledBuf = sync.Pool{
 	New: func() any { return new(encodingBuf) },
 }
 
-func newEncodingBuf() *encodingBuf {
-	b := pooledBuf.Get().(*encodingBuf)
-	*b = encodingBuf([32]byte{}) // reset, do we need to?
+func NewEncodingBuf() *encodingBuf {
+	b := PooledBuf.Get().(*encodingBuf)
+	*b = encodingBuf([64]byte{}) // reset, do we need to?
 	return b
 }
 
@@ -66,8 +66,8 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 
 	encodingSize := obj.EncodingSize()
 
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 
 	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err

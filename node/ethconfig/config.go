@@ -107,6 +107,9 @@ var Defaults = Config{
 	GPO:         FullNodeGPO,
 	RPCTxFeeCap: 1, // 1 ether
 
+	ArbRPCEVMTimeout: 5 * time.Second,
+	L2RPCAddr:        "", // arbitrum only field, url to connect to L2 RPC server
+
 	ImportMode: false,
 	Snapshot: BlocksFreezing{
 		KeepBlocks: false,
@@ -230,7 +233,8 @@ type Config struct {
 
 	// RPCTxFeeCap is the global transaction fee(price * gaslimit) cap for
 	// send-transction variants. The unit is ether.
-	RPCTxFeeCap float64 `toml:",omitempty"`
+	RPCTxFeeCap      float64       `toml:",omitempty"`
+	ArbRPCEVMTimeout time.Duration `toml:",omitempty"`
 
 	StateStream bool
 
@@ -275,6 +279,9 @@ type Config struct {
 
 	// fork choice update timeout
 	FcuTimeout time.Duration
+
+	L2RPCAddr        string
+	L2RPCReceiptAddr string
 }
 
 type Sync struct {

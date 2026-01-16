@@ -87,6 +87,7 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 
+	_ "github.com/erigontech/erigon/arb/chain"     // Register Arbitrum chains
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
@@ -451,6 +452,8 @@ func init() {
 	withChain(cmdStageHeaders)
 	withHeimdall(cmdStageHeaders)
 	withChaosMonkey(cmdStageHeaders)
+	withL2RPCaddress(cmdStageHeaders)
+	withL2RPCReceiptAddress(cmdStageHeaders)
 	rootCmd.AddCommand(cmdStageHeaders)
 
 	withConfig(cmdStageBodies)
@@ -810,11 +813,13 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	genesis := readGenesis(chain)
 	br, _ := blocksIO(db, logger)
 
+	ethdb.InitialiazeLocalWasmTarget()
+
 	notifications := shards.NewNotifications(nil)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true,
-		dirs, br, nil, genesis, syncCfg, nil /*experimentalBAL=*/, false)
+		dirs, br, nil, genesis, syncCfg, nil /*experimentalBAL=*/, false, wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm))
 
 	if unwind > 0 {
 		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
@@ -938,8 +943,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			break
 		}
 	}
-
-	return nil
 }
 
 func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
@@ -1182,6 +1185,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 ) {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
 
+	ethdb.InitialiazeLocalWasmTarget()
 	vmConfig := &vm.Config{}
 
 	genesis := readGenesis(chain)

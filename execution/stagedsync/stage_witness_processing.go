@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/p2p/protocols/wit"
@@ -166,6 +167,8 @@ func UnwindWitnessProcessingStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx
 			return err
 		}
 		defer tx.Rollback()
+	} else {
+		tx = txc.Tx
 	}
 
 	if err := cleanupWitnessesForUnwind(tx, u.UnwindPoint+1); err != nil {

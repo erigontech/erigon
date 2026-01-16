@@ -33,8 +33,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+<<<<<<<< HEAD:execution/commitment/trie/trie_test.go
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+========
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/crypto"
+>>>>>>>> arbitrum:execution/trie/trie_test.go
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )

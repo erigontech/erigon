@@ -702,6 +702,15 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal("bodies", f.TypeString)
 	require.Equal(".torrent4014494284", f.Ext)
 
+	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-070200-070300-bodies.seg.torrent4014494284"))
+	require.True(ok)
+	require.False(e3)
+	require.Equal(f.Type.Enum(), snaptype2.Bodies.Enum())
+	require.Equal(70200_000, int(f.From))
+	require.Equal(70300_000, int(f.To))
+	require.Equal("bodies", f.TypeString)
+	require.Equal(".torrent4014494284", f.Ext)
+
 	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-accounts.24-28.ef"))
 	require.True(ok)
 	require.True(e3)

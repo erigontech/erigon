@@ -1,7 +1,11 @@
 package witness
 
 import (
+<<<<<<<< HEAD:execution/commitment/witness/types.go
 	"github.com/erigontech/erigon/common"
+========
+	"github.com/erigontech/erigon-lib/common"
+>>>>>>>> arbitrum:execution/types/witness/types.go
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 

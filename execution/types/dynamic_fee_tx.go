@@ -35,10 +35,11 @@ import (
 
 type DynamicFeeTransaction struct {
 	CommonTx
-	ChainID    *uint256.Int
-	TipCap     *uint256.Int
-	FeeCap     *uint256.Int
-	AccessList AccessList
+	ChainID     *uint256.Int
+	TipCap      *uint256.Int
+	FeeCap      *uint256.Int
+	AccessList  AccessList
+	Timeboosted *bool
 }
 
 func (tx *DynamicFeeTransaction) GetFeeCap() *uint256.Int { return tx.FeeCap }
@@ -83,6 +84,9 @@ func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 		FeeCap:     new(uint256.Int),
 	}
 	copy(cpy.AccessList, tx.AccessList)
+	if tx.Timeboosted != nil {
+		cpy.Timeboosted = &(*tx.Timeboosted)
+	}
 	if tx.Value != nil {
 		cpy.Value.Set(tx.Value)
 	}
@@ -110,12 +114,12 @@ func (tx *DynamicFeeTransaction) GetAuthorizations() []Authorization {
 }
 
 func (tx *DynamicFeeTransaction) EncodingSize() int {
-	payloadSize, _ := tx.payloadSize()
+	payloadSize, _ := tx.payloadSize(false)
 	// Add envelope size and type size
 	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
-func (tx *DynamicFeeTransaction) payloadSize() (payloadSize int, accessListLen int) {
+func (tx *DynamicFeeTransaction) payloadSize(hashingOnly bool) (payloadSize int, accessListLen int) {
 	payloadSize += rlp.Uint256Len(*tx.ChainID)
 	payloadSize += rlp.U64Len(tx.Nonce)
 	payloadSize += rlp.Uint256Len(*tx.TipCap)
@@ -125,7 +129,7 @@ func (tx *DynamicFeeTransaction) payloadSize() (payloadSize int, accessListLen i
 	// size of To
 	payloadSize++
 	if tx.To != nil {
-		payloadSize += 20
+		payloadSize += length.Addr
 	}
 
 	payloadSize += rlp.Uint256Len(*tx.Value)
@@ -138,6 +142,11 @@ func (tx *DynamicFeeTransaction) payloadSize() (payloadSize int, accessListLen i
 	payloadSize += rlp.Uint256Len(tx.V)
 	payloadSize += rlp.Uint256Len(tx.R)
 	payloadSize += rlp.Uint256Len(tx.S)
+
+	if tx.Timeboosted != nil && !hashingOnly {
+		payloadSize++
+		payloadSize += rlp.BoolLen()
+	}
 	return payloadSize, accessListLen
 }
 
@@ -158,21 +167,36 @@ func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Trans
 // For legacy transactions, it returns the RLP encoding. For EIP-2718 typed
 // transactions, it returns the type and payload.
 func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
-	payloadSize, accessListLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	payloadSize, accessListLen := tx.payloadSize(false)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = DynamicFeeTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, false); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen int) error {
+func (tx *DynamicFeeTransaction) MarshalBinaryForHashing(w io.Writer) error {
+	payloadSize, accessListLen := tx.payloadSize(true)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
+	// encode TxType
+	b[0] = DynamicFeeTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, true); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen int, hashingOnly bool) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -229,15 +253,20 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
 		return err
 	}
+	if tx.Timeboosted != nil && !hashingOnly {
+		if err := rlp.EncodeBool(*tx.Timeboosted, w, b); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
-	payloadSize, accessListLen := tx.payloadSize()
+	payloadSize, accessListLen := tx.payloadSize(false)
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
@@ -247,7 +276,7 @@ func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, false); err != nil {
 		return err
 	}
 	return nil
@@ -312,6 +341,14 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	tx.S.SetBytes(b)
+
+	if s.MoreDataInList() {
+		boolVal, err := s.Bool()
+		if err != nil {
+			return err
+		}
+		tx.Timeboosted = &boolVal
+	}
 	return s.ListEnd()
 }
 
@@ -336,6 +373,9 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *ch
 		checkNonce:       true,
 		checkTransaction: true,
 		checkGas:         true,
+
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
+		Tx:           tx,
 	}
 	if !rules.IsLondon {
 		return nil, errors.New("eip-1559 transactions require London")
@@ -363,7 +403,7 @@ func (tx *DynamicFeeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(DynamicFeeTxType, []any{
+	hash := PrefixedRlpHash(DynamicFeeTxType, []any{
 		tx.ChainID,
 		tx.Nonce,
 		tx.TipCap,
@@ -392,7 +432,7 @@ type dynamicFeeTxSigHash struct {
 }
 
 func (tx *DynamicFeeTransaction) SigningHash(chainID *big.Int) common.Hash {
-	return prefixedRlpHash(
+	return PrefixedRlpHash(
 		DynamicFeeTxType,
 		&dynamicFeeTxSigHash{
 			ChainID:    chainID,
@@ -418,7 +458,7 @@ func (tx *DynamicFeeTransaction) GetChainID() *uint256.Int {
 	return tx.ChainID
 }
 
-func (tx *DynamicFeeTransaction) cachedSender() (sender accounts.Address, ok bool) {
+func (tx *DynamicFeeTransaction) CachedSender() (sender accounts.Address, ok bool) {
 	s := tx.from
 	if s.IsNil() {
 		return sender, false
@@ -436,6 +476,14 @@ func (tx *DynamicFeeTransaction) Sender(signer Signer) (accounts.Address, error)
 	}
 	tx.from = addr
 	return addr, nil
+}
+
+func (tx *DynamicFeeTransaction) IsTimeBoosted() *bool {
+	return tx.Timeboosted
+}
+
+func (tx *DynamicFeeTransaction) SetTimeboosted(val *bool) {
+	tx.Timeboosted = val
 }
 
 // NewEIP1559Transaction creates an unsigned eip1559 transaction.

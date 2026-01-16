@@ -42,6 +42,7 @@ var AllChecks = []Check{
 	BorSpans, BorCheckpoints, RCacheNoDups, CommitmentRoot,
 	CommitmentKvi, CommitmentKvDeref, StateProgress,
 	Publishable,
+	BorSpans, BorCheckpoints, RCacheNoDups, Publishable,
 }
 
 var NonDefaultChecks = []Check{CommitmentHistVal}

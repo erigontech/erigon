@@ -1224,7 +1224,8 @@ func (p *TxPool) isOsaka() bool {
 
 func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
 	now := time.Now().Unix()
-	return p.chainConfig.GetMaxBlobsPerBlock(uint64(now))
+	// TODO arbitrum
+	return p.chainConfig.GetMaxBlobsPerBlock(uint64(now), 0)
 }
 
 // Check that the serialized txn should not exceed a certain max size

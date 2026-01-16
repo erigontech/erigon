@@ -110,6 +110,8 @@ func NewNodConfigUrfave(ctx *cli.Context, debugMux *http.ServeMux, logger log.Lo
 		logger.Info("Starting Erigon on Gnosis Mainnet...")
 	case networkname.Chiado:
 		logger.Info("Starting Erigon on Chiado testnet...")
+	case networkname.ArbiturmSepolia:
+		logger.Info("Starting Erigon on Arbitrum Sepolia testnet...")
 	case "", networkname.Mainnet:
 		if !ctx.IsSet(utils.NetworkIdFlag.Name) {
 			logger.Info("Starting Erigon on Ethereum mainnet...")

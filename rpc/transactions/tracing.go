@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/nitro-erigon/arbos"
 )
 
 type BlockGetter interface {
@@ -133,6 +134,13 @@ func TraceTx(
 		if tracer != nil && tracer.OnTxStart != nil {
 			tracer.OnTxStart(evm.GetVMContext(), tx, message.From())
 		}
+
+		if chainConfig.IsArbitrum() {
+			msg := types.NewMessage(message.From(), message.To(), message.Nonce(), message.Value(), message.Gas(), message.GasPrice(), message.FeeCap(), message.TipCap(), message.Data(), message.AccessList(), true, false, false, message.MaxFeePerBlobGas())
+			msg.Tx = tx
+			evm.ProcessingHook = arbos.NewTxProcessorIBS(evm, state.NewArbitrum(ibs), msg)
+		}
+
 		result, err := protocol.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */, engine)
 		if err != nil {
 			if tracer != nil && tracer.OnTxEnd != nil {

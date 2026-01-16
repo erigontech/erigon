@@ -69,13 +69,13 @@ func (tx *SetCodeTransaction) copy() *SetCodeTransaction {
 }
 
 func (tx *SetCodeTransaction) EncodingSize() int {
-	payloadSize, _, _ := tx.payloadSize()
+	payloadSize, _, _ := tx.payloadSize(false)
 	// Add envelope size and type size
 	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
-func (tx *SetCodeTransaction) payloadSize() (payloadSize, accessListLen, authorizationsLen int) {
-	payloadSize, accessListLen = tx.DynamicFeeTransaction.payloadSize()
+func (tx *SetCodeTransaction) payloadSize(hashingOnly bool) (payloadSize, accessListLen, authorizationsLen int) {
+	payloadSize, accessListLen = tx.DynamicFeeTransaction.payloadSize(hashingOnly)
 	// size of Authorizations
 	authorizationsLen = authorizationsSize(tx.Authorizations)
 	payloadSize += rlp.ListPrefixLen(authorizationsLen) + authorizationsLen
@@ -101,15 +101,35 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 	if tx.To == nil {
 		return ErrNilToFieldTx
 	}
-	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	hashingOnly := false
+	payloadSize, accessListLen, authorizationsLen := tx.payloadSize(hashingOnly)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = SetCodeTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen, hashingOnly); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (tx *SetCodeTransaction) MarshalBinaryForHashing(w io.Writer) error {
+	if tx.To == nil {
+		return ErrNilToFieldTx
+	}
+	hashingOnly := true
+	payloadSize, accessListLen, authorizationsLen := tx.payloadSize(hashingOnly)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
+	// encode TxType
+	b[0] = SetCodeTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen, hashingOnly); err != nil {
 		return err
 	}
 	return nil
@@ -135,6 +155,9 @@ func (tx *SetCodeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		checkNonce:       true,
 		checkTransaction: true,
 		checkGas:         true,
+
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
+		Tx:           tx,
 	}
 	if !rules.IsPrague {
 		return nil, errors.New("SetCodeTransaction is only supported in Prague")
@@ -179,7 +202,7 @@ func (tx *SetCodeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(SetCodeTxType, []any{
+	hash := PrefixedRlpHash(SetCodeTxType, []any{
 		tx.ChainID,
 		tx.Nonce,
 		tx.TipCap,
@@ -210,7 +233,7 @@ type setCodeTxSigHash struct {
 }
 
 func (tx *SetCodeTransaction) SigningHash(chainID *big.Int) common.Hash {
-	return prefixedRlpHash(
+	return PrefixedRlpHash(
 		SetCodeTxType,
 		&setCodeTxSigHash{
 			ChainID:    chainID,
@@ -230,10 +253,10 @@ func (tx *SetCodeTransaction) EncodeRLP(w io.Writer) error {
 	if tx.To == nil {
 		return ErrNilToFieldTx
 	}
-	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
+	payloadSize, accessListLen, authorizationsLen := tx.payloadSize(false)
 	envelopSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode envelope size
 	if err := rlp.EncodeStringSizePrefix(envelopSize, w, b[:]); err != nil {
 		return err
@@ -244,7 +267,7 @@ func (tx *SetCodeTransaction) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	return tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen)
+	return tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen, false)
 }
 
 func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
@@ -311,10 +334,18 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	tx.S.SetBytes(b)
+
+	if s.MoreDataInList() {
+		boolVal, err := s.Bool()
+		if err != nil {
+			return err
+		}
+		tx.Timeboosted = &boolVal
+	}
 	return s.ListEnd()
 }
 
-func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, authorizationsLen int) error {
+func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, authorizationsLen int, hashingOnly bool) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -379,8 +410,13 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
 		return err
 	}
-	return nil
 
+	if tx.Timeboosted != nil && !hashingOnly {
+		if err := rlp.EncodeBool(*tx.Timeboosted, w, b); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ParseDelegation tries to parse the address from a delegation slice.

@@ -732,6 +732,15 @@ func (f *ForkChoiceStore) addProposerLookahead(slot uint64, proposerLookahead so
 	return nil
 }
 
+func (f *ForkChoiceStore) addProposerLookahead(slot uint64, proposerLookahead solid.Uint64VectorSSZ) {
+	epoch := slot / f.beaconCfg.SlotsPerEpoch
+	if _, ok := f.proposerLookahead.Get(epoch); !ok {
+		pl := solid.NewUint64VectorSSZ(proposerLookahead.Length())
+		proposerLookahead.CopyTo(pl)
+		f.proposerLookahead.Add(epoch, pl)
+	}
+}
+
 func (f *ForkChoiceStore) GetPendingConsolidations(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingConsolidation], bool) {
 	return f.pendingConsolidations.Get(blockRoot)
 }

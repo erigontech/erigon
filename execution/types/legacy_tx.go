@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 )
 
 type CommonTx struct {
@@ -95,6 +96,8 @@ func (ct *CommonTx) GetBlobHashes() []common.Hash {
 type LegacyTx struct {
 	CommonTx
 	GasPrice *uint256.Int // wei per gas
+
+	Timeboosted *bool
 }
 
 func (tx *LegacyTx) GetTipCap() *uint256.Int { return tx.GasPrice }
@@ -125,11 +128,19 @@ func (tx *LegacyTx) GetAuthorizations() []Authorization {
 }
 
 func (tx *LegacyTx) Protected() bool {
-	return isProtectedV(&tx.V)
+	return IsProtectedV(&tx.V)
 }
 
 func (tx *LegacyTx) Unwrap() Transaction {
 	return tx
+}
+
+func (tx *LegacyTx) IsTimeBoosted() *bool {
+	return tx.Timeboosted
+}
+
+func (tx *LegacyTx) SetTimeboosted(val *bool) {
+	tx.Timeboosted = val
 }
 
 // NewTransaction creates an unsigned legacy transaction.
@@ -177,6 +188,10 @@ func (tx *LegacyTx) copy() *LegacyTx {
 		},
 		GasPrice: new(uint256.Int),
 	}
+	if tx.Timeboosted != nil {
+		val := *tx.Timeboosted
+		cpy.Timeboosted = &val
+	}
 	if tx.Value != nil {
 		cpy.Value.Set(tx.Value)
 	}
@@ -190,36 +205,50 @@ func (tx *LegacyTx) copy() *LegacyTx {
 }
 
 func (tx *LegacyTx) EncodingSize() int {
-	return tx.payloadSize()
+	return tx.payloadSize(true)
 }
 
-func (tx *LegacyTx) payloadSize() (payloadSize int) {
+func (tx *LegacyTx) payloadSize(hashingOnly bool) (payloadSize int) {
 	payloadSize += rlp.U64Len(tx.Nonce)
 	payloadSize += rlp.Uint256Len(*tx.GasPrice)
 	payloadSize += rlp.U64Len(tx.GasLimit)
 	payloadSize++
 	if tx.To != nil {
-		payloadSize += 20
+		payloadSize += length.Addr
 	}
 	payloadSize += rlp.Uint256Len(*tx.Value)
 	payloadSize += rlp.StringLen(tx.Data)
 	payloadSize += rlp.Uint256Len(tx.V)
 	payloadSize += rlp.Uint256Len(tx.R)
 	payloadSize += rlp.Uint256Len(tx.S)
+	if tx.Timeboosted != nil {
+		payloadSize++
+		payloadSize += rlp.BoolLen()
+	}
 	return payloadSize
 }
 
 func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
-	payloadSize := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
-	if err := tx.encodePayload(w, b[:], payloadSize); err != nil {
+	payloadSize := tx.payloadSize(false)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
+	if err := tx.encodePayload(w, b[:], payloadSize, false); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error {
+func (tx *LegacyTx) MarshalBinaryForHashing(w io.Writer) error {
+	payloadSize := tx.payloadSize(true)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
+	if err := tx.encodePayload(w, b[:], payloadSize, true); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int, hashingOnly bool) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -261,15 +290,22 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
 		return err
 	}
+	if hashingOnly {
+		return nil
+	}
+
+	if tx.Timeboosted != nil {
+		return rlp.EncodeBool(*tx.Timeboosted, w, b)
+	}
 	return nil
 
 }
 
 func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
-	payloadSize := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
-	if err := tx.encodePayload(w, b[:], payloadSize); err != nil {
+	payloadSize := tx.payloadSize(false)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
+	if err := tx.encodePayload(w, b[:], payloadSize, false); err != nil {
 		return err
 	}
 	return nil
@@ -320,10 +356,15 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read S: %w", err)
 	}
 	tx.S.SetBytes(b)
-	if err = s.ListEnd(); err != nil {
-		return fmt.Errorf("close txn struct: %w", err)
+
+	if s.MoreDataInList() {
+		boolVal, err := s.Bool()
+		if err != nil {
+			return err
+		}
+		tx.Timeboosted = &boolVal
 	}
-	return nil
+	return s.ListEnd()
 }
 
 // AsMessage returns the transaction as a core.Message.
@@ -347,6 +388,8 @@ func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (*Message, e
 		checkNonce:       true,
 		checkTransaction: true,
 		checkGas:         true,
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
+		Tx:           tx,
 	}
 
 	var err error
@@ -430,7 +473,7 @@ func (tx *LegacyTx) GetChainID() *uint256.Int {
 	return DeriveChainId(&tx.V)
 }
 
-func (tx *LegacyTx) cachedSender() (sender accounts.Address, ok bool) {
+func (tx *LegacyTx) CachedSender() (sender accounts.Address, ok bool) {
 	s := tx.from
 	if s.IsNil() {
 		return sender, false

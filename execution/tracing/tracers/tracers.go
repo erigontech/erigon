@@ -75,3 +75,7 @@ func New(code string, ctx *Context, cfg json.RawMessage) (*Tracer, error) {
 	}
 	return nil, errors.New("tracer not found")
 }
+
+// StateReleaseFunc is used to deallocate resources held by constructing a
+// historical state for tracing purposes.
+type StateReleaseFunc func()

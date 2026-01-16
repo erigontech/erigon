@@ -23,7 +23,11 @@ import (
 	"bytes"
 	"io"
 
+<<<<<<<< HEAD:execution/commitment/trie/node.go
 	"github.com/erigontech/erigon/common"
+========
+	"github.com/erigontech/erigon-lib/common"
+>>>>>>>> arbitrum:execution/trie/node.go
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )

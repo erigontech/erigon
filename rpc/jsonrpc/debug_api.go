@@ -508,6 +508,10 @@ func (api *DebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]any, er
 		// Return empty array if no bad blocks found to align with other clients and spec
 		return []map[string]any{}, err
 	}
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 
 	results := make([]map[string]any, 0, len(blocks))
 	for _, block := range blocks {
@@ -518,7 +522,7 @@ func (api *DebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]any, er
 			blockRlp = fmt.Sprintf("%#x", rlpBytes)
 		}
 
-		blockJson, err := ethapi.RPCMarshalBlock(block, true, true, nil)
+		blockJson, err := ethapi.RPCMarshalBlock(block, true, true, nil, chainConfig.IsArbitrumNitro(block.Number()))
 		if err != nil {
 			log.Error("Failed to marshal block", "err", err)
 			blockJson = map[string]any{}

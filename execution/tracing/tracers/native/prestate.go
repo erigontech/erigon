@@ -26,6 +26,7 @@ import (
 	"math/big"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -111,6 +112,8 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 			OnTxEnd:   t.OnTxEnd,
 			OnOpcode:  t.OnOpcode,
 			OnExit:    t.OnExit,
+			CaptureArbitrumStorageGet: t.CaptureArbitrumStorageGet,
+			CaptureArbitrumStorageSet: t.CaptureArbitrumStorageSet,
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
@@ -230,6 +233,22 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	t.lookupAccount(from)
 	t.lookupAccount(t.to)
 	t.lookupAccount(env.Coinbase)
+	t.lookupAccount(params.HistoryStorageAddress)
+	if env.ChainConfig.IsArbitrum() {
+		t.lookupAccount(types.ArbosStateAddress)
+	}
+
+	// Add accounts with authorizations to the prestate before they get applied.
+	var b [32]byte
+	data := bytes.NewBuffer(nil)
+	for _, auth := range tx.GetAuthorizations() {
+		data.Reset()
+		addr, err := auth.RecoverSigner(data, b[:])
+		if err != nil {
+			continue
+		}
+		t.lookupAccount(*addr)
+	}
 
 	// Add accounts with authorizations to the prestate before they get applied.
 	var b [32]byte
@@ -388,6 +407,12 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 
 	if !t.config.DisableCode {
 		t.pre[addr].Code = code
+		if len(code) > 0 {
+			codeHash := crypto.Keccak256Hash(code)
+			t.pre[addr].CodeHash = &codeHash
+		} else {
+			t.pre[addr].CodeHash = nil
+		}
 	}
 	if !t.config.DisableStorage {
 		t.pre[addr].Storage = make(map[common.Hash]common.Hash)
@@ -400,6 +425,10 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 func (t *prestateTracer) lookupStorage(addr accounts.Address, key common.Hash) {
 	if t.config.DisableStorage {
 		return
+	}
+
+	if t.pre[addr] == nil {
+		t.lookupAccount(addr)
 	}
 
 	if _, ok := t.pre[addr].Storage[key]; ok {

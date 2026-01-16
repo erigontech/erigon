@@ -69,6 +69,10 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*M
 		checkNonce:       true,
 		checkTransaction: true,
 		checkGas:         true,
+
+
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
+		Tx:           stx,
 	}
 	if !rules.IsCancun {
 		return nil, errors.New("BlobTx transactions require Cancun")
@@ -92,7 +96,7 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*M
 	return &msg, nil
 }
 
-func (stx *BlobTx) cachedSender() (sender accounts.Address, ok bool) {
+func (stx *BlobTx) CachedSender() (sender accounts.Address, ok bool) {
 	s := stx.from
 	if s.IsNil() {
 		return sender, false
@@ -117,7 +121,7 @@ func (stx *BlobTx) Hash() common.Hash {
 	if hash := stx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(BlobTxType, []any{
+	hash := PrefixedRlpHash(BlobTxType, []any{
 		stx.ChainID,
 		stx.Nonce,
 		stx.TipCap,
@@ -150,7 +154,7 @@ type blobTxSigHash struct {
 }
 
 func (stx *BlobTx) SigningHash(chainID *big.Int) common.Hash {
-	return prefixedRlpHash(
+	return PrefixedRlpHash(
 		BlobTxType,
 		&blobTxSigHash{
 			ChainID:    chainID,
@@ -191,13 +195,13 @@ func (stx *BlobTx) copy() *BlobTx {
 }
 
 func (stx *BlobTx) EncodingSize() int {
-	payloadSize, _, _ := stx.payloadSize()
+	payloadSize, _, _ := stx.payloadSize(false)
 	// Add envelope size and type size
 	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
 func (stx *BlobTx) payloadSize() (payloadSize, accessListLen, blobHashesLen int) {
-	payloadSize, accessListLen = stx.DynamicFeeTransaction.payloadSize()
+	payloadSize, accessListLen = stx.DynamicFeeTransaction.payloadSize(hashingOnly)
 	payloadSize += rlp.Uint256Len(*stx.MaxFeePerBlobGas)
 	// size of BlobVersionedHashes
 	blobHashesLen = blobVersionedHashesSize(stx.BlobVersionedHashes)
@@ -218,7 +222,7 @@ func encodeBlobVersionedHashes(hashes []common.Hash, w io.Writer, b []byte) erro
 	return nil
 }
 
-func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, blobHashesLen int) error {
+func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, blobHashesLen int, hashingOnly bool) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -291,6 +295,12 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListL
 	if err := rlp.EncodeUint256(stx.S, w, b); err != nil {
 		return err
 	}
+	//encode Timeboosted
+	if stx.Timeboosted != nil && !hashingOnly {
+		if err := rlp.EncodeBool(*stx.Timeboosted, w, b); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -298,11 +308,11 @@ func (stx *BlobTx) EncodeRLP(w io.Writer) error {
 	if stx.To == nil {
 		return ErrNilToFieldTx
 	}
-	payloadSize, accessListLen, blobHashesLen := stx.payloadSize()
+	payloadSize, accessListLen, blobHashesLen := stx.payloadSize(false)
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
@@ -312,7 +322,7 @@ func (stx *BlobTx) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := stx.encodePayload(w, b[:], payloadSize, accessListLen, blobHashesLen); err != nil {
+	if err := stx.encodePayload(w, b[:], payloadSize, accessListLen, blobHashesLen, false); err != nil {
 		return err
 	}
 	return nil
@@ -322,15 +332,35 @@ func (stx *BlobTx) MarshalBinary(w io.Writer) error {
 	if stx.To == nil {
 		return ErrNilToFieldTx
 	}
-	payloadSize, accessListLen, blobHashesLen := stx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	payloadSize, accessListLen, blobHashesLen := stx.payloadSize(false)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = BlobTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := stx.encodePayload(w, b[:], payloadSize, accessListLen, blobHashesLen); err != nil {
+	if err := stx.encodePayload(w, b[:], payloadSize, accessListLen, blobHashesLen, false); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (stx *BlobTx) MarshalBinaryForHashing(w io.Writer) error {
+	if stx.To == nil {
+		return ErrNilToFieldTx
+	}
+	hashingOnly := true
+
+	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize(hashingOnly)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
+	// encode TxType
+	b[0] = BlobTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := stx.encodePayload(w, b[:], payloadSize, accessListLen, blobHashesLen, hashingOnly); err != nil {
 		return err
 	}
 	return nil
@@ -417,7 +447,23 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	stx.S.SetBytes(b)
+
+	if s.MoreDataInList() {
+		boolVal, err := s.Bool()
+		if err != nil {
+			return err
+		}
+		stx.Timeboosted = &boolVal
+	}
 	return s.ListEnd()
+}
+
+func (tx *BlobTx) IsTimeBoosted() *bool {
+	return tx.Timeboosted
+}
+
+func (tx *BlobTx) SetTimeboosted(val *bool) {
+	tx.Timeboosted = val
 }
 
 func decodeBlobVersionedHashes(hashes *[]common.Hash, s *rlp.Stream) error {

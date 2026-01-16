@@ -4,7 +4,11 @@ import (
 	"bytes"
 	"testing"
 
+<<<<<<<< HEAD:execution/commitment/trie/witness_builder_test.go
 	"github.com/erigontech/erigon/common"
+========
+	"github.com/erigontech/erigon-lib/common"
+>>>>>>>> arbitrum:execution/trie/witness_builder_test.go
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 

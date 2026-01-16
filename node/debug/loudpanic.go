@@ -17,6 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
+<<<<<<<< HEAD:node/debug/loudpanic.go
 package debug
 
 import "runtime/debug"
@@ -25,4 +26,17 @@ import "runtime/debug"
 func LoudPanic(x any) {
 	debug.SetTraceback("all")
 	panic(x)
+========
+package bridge
+
+import (
+	"context"
+	"time"
+)
+
+//go:generate mockgen -typed=true -destination=./client_mock.go -package=bridge . Client
+type Client interface {
+	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*EventRecordWithTime, error)
+	Close()
+>>>>>>>> arbitrum:polygon/bridge/client.go
 }

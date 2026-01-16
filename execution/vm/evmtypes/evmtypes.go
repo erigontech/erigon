@@ -19,6 +19,7 @@ package evmtypes
 import (
 	"math/big"
 
+	"github.com/erigontech/erigon/arb/multigas"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -49,6 +50,11 @@ type BlockContext struct {
 	BaseFee     uint256.Int      // Provides information for BASEFEE
 	PrevRanDao  *common.Hash     // Provides information for PREVRANDAO
 	BlobBaseFee uint256.Int      // Provides information for BLOBBASEFEE
+
+	//Arbitrum: current OS version
+	ArbOSVersion   uint64
+	BaseFeeInBlock *uint256.Int // Copy of BaseFee to be used in arbitrum's geth hooks and precompiles when BaseFee is lowered to 0 when vm runs with NoBaseFee flag and 0 gas price. Is nil when BaseFee isn't lowered to 0
+
 }
 
 // TxContext provides the EVM with information about a transaction.
@@ -75,6 +81,13 @@ type ExecutionResult struct {
 	FeeBurnt             uint256.Int
 	BurntContractAddress accounts.Address
 	EvmRefund            uint64 // Gas refunded by EVM without considering refundQuotient
+
+	// Arbitrum: a tx may yield others that need to run afterward (see retryables)
+	ScheduledTxes types.Transactions
+	// Arbitrum: the contract deployed from the top-level transaction, or nil if not a contract creation tx
+	TopLevelDeployed *common.Address
+	// Arbitrum: total used multi-dimensional gas
+	UsedMultiGas multigas.MultiGas
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -133,4 +146,60 @@ type IntraBlockState interface {
 	BlockNumber() uint64
 	TxIndex() int
 	Incarnation() int
+
+	// Arbitrum deprecated API
+	CreateAccount(common.Address, bool) error
+
+	RemoveEscrowProtection(addr common.Address)
+	ExpectBalanceBurn(amount *uint256.Int)
+	ExpectBalanceMint(amount *uint256.Int)
+
+	GetNonce(common.Address) (uint64, error)
+	SetNonce(common.Address, uint64) error
+
+	GetCodeHash(common.Address) (common.Hash, error)
+	GetCode(common.Address) ([]byte, error)
+	SetCode(common.Address, []byte) error
+	GetCodeSize(common.Address) (int, error)
+
+	// eip-7702; delegated designations
+	ResolveCodeHash(common.Address) (common.Hash, error)
+	ResolveCode(common.Address) ([]byte, error)
+	GetDelegatedDesignation(common.Address) (common.Address, bool, error)
+
+	AddRefund(uint64)
+	GetRefund() uint64
+	SubRefund(gas uint64) error
+
+	GetCommittedState(common.Address, common.Hash, *uint256.Int) error
+	GetState(address common.Address, slot common.Hash, outValue *uint256.Int) error
+	SetState(common.Address, common.Hash, uint256.Int) error
+
+	GetTransientState(addr common.Address, key common.Hash) uint256.Int
+	SetTransientState(addr common.Address, key common.Hash, value uint256.Int)
+
+	Selfdestruct(common.Address) (bool, error)
+	HasSelfdestructed(common.Address) (bool, error)
+	Selfdestruct6780(common.Address) error
+
+	// Exist reports whether the given account exists in state.
+	// Notably this should also return true for suicided accounts.
+	Exist(common.Address) (bool, error)
+	// Empty returns whether the given account is empty. Empty
+	// is defined according to EIP161 (balance = nonce = code = 0).
+	Empty(common.Address) (bool, error)
+
+	Prepare(rules *chain.Rules, sender, coinbase common.Address, dest *common.Address,
+		precompiles []common.Address, txAccesses types.AccessList, authorities []common.Address) error
+
+	AddressInAccessList(addr common.Address) bool
+	// AddAddressToAccessList adds the given address to the access list. This operation is safe to perform
+	// even if the feature/fork is not active yet
+	AddAddressToAccessList(addr common.Address) (addrMod bool)
+	// AddSlotToAccessList adds the given (address,slot) to the access list. This operation is safe to perform
+	// even if the feature/fork is not active yet
+	AddSlotToAccessList(addr common.Address, slot common.Hash) (addrMod, slotMod bool)
+
+	RevertToSnapshot(int, error)
+	Snapshot() int
 }

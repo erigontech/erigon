@@ -20,6 +20,7 @@
 package vm
 
 import (
+<<<<<<<< HEAD:execution/vm/contracts_fuzz_test.go
 	"maps"
 	"slices"
 	"testing"
@@ -41,4 +42,50 @@ func FuzzPrecompiledContracts(f *testing.F) {
 			t.Errorf("Precompiled %v modified input data", a)
 		}
 	})
+========
+	"fmt"
+)
+
+var (
+	// Following vars are injected through the build flags (see Makefile)
+	GitCommit string
+	GitBranch string
+	GitTag    string
+)
+
+// see https://calver.org
+const (
+	Major                    = 3             // Major version component of the current release
+	Minor                    = 3             // Minor version component of the current release
+	Micro                    = 0             // Patch version component of the current release
+	Modifier                 = "dev"         // Modifier component of the current release
+	DefaultSnapshotGitBranch = "release/3.1" // Branch of erigontech/erigon-snapshot to use in OtterSync
+	SnapshotMainGitBranch    = "main"        // Branch of erigontech/erigon-snapshot to use in OtterSync for arb-sepolia snapshots
+	VersionKeyCreated        = "ErigonVersionCreated"
+	VersionKeyFinished       = "ErigonVersionFinished"
+	ClientName               = "erigon"
+	ClientCode               = "EG"
+)
+
+// VersionNoMeta holds the textual version string excluding the metadata.
+var VersionNoMeta = func() string {
+	return fmt.Sprintf("%d.%d.%d", Major, Minor, Micro)
+}()
+
+// VersionWithMeta holds the textual version string including the metadata.
+var VersionWithMeta = func() string {
+	v := VersionNoMeta
+	if Modifier != "" {
+		v += "-" + Modifier
+	}
+	return v
+}()
+
+func VersionWithCommit(gitCommit string) string {
+	vsn := VersionWithMeta
+	if len(gitCommit) >= 8 {
+		vsn += "-" + gitCommit[:8]
+	}
+	return vsn
+>>>>>>>> arbitrum:db/version/app.go
 }

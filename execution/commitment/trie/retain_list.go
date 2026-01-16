@@ -29,9 +29,15 @@ import (
 
 	"github.com/holiman/uint256"
 
+<<<<<<<< HEAD:execution/commitment/trie/retain_list.go
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
+========
+	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon-lib/common/length"
+>>>>>>>> arbitrum:execution/trie/retain_list.go
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 

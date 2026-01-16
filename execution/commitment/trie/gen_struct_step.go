@@ -24,7 +24,11 @@ import (
 
 	"github.com/holiman/uint256"
 
+<<<<<<<< HEAD:execution/commitment/trie/gen_struct_step.go
 	"github.com/erigontech/erigon/common"
+========
+	"github.com/erigontech/erigon-lib/common"
+>>>>>>>> arbitrum:execution/trie/gen_struct_step.go
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
