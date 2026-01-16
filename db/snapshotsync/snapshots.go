@@ -1465,7 +1465,6 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 		s.dirty[t].Walk(func(segs []*DirtySegment) bool {
 			for _, segment := range segs {
 				info := segment.FileInfo(dir)
-				println("info for", segment.filePath, segment.version.String(), segment.From(), segment.To(), segment.segType.Name(), fmt.Sprintf("%+v", info))
 
 				if t.HasIndexFiles(info, logger) {
 					continue

@@ -308,7 +308,6 @@ func (s SnapType) FileInfoByMask(dir string, from uint64, to uint64) FileInfo {
 		return FileInfo{}
 	}
 
-	println("[snaptype] file mask", fName, "from", from, "to", to)
 	f, _, _ := ParseFileName("", fName)
 	return f
 }
