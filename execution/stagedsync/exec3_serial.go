@@ -151,6 +151,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		if !dbg.BatchCommitments || shouldGenerateChangesets || se.cfg.syncCfg.KeepExecutionProofs {
 			start := time.Now()
 			if dbg.TraceBlock(blockNum) {
+				fmt.Println(blockNum, "Commitment")
 				se.doms.SetTrace(true, false)
 			}
 			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, true, blockNum, inputTxNum-1, se.logPrefix, nil)
