@@ -23,8 +23,9 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/erigontech/erigon/db/downloader"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+
+	"github.com/erigontech/erigon/db/downloader"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -137,21 +138,17 @@ func StageLoop(
 // ProcessFrozenBlocks - withuot global rwtx
 func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook, logger log.Logger) error {
 	sawZeroBlocksTimes := 0
-
-	if err := sync.RunSnapshots(db); err != nil {
-		return err
-	}
-
-	initialCycle, firstCycle := true, false
-
-	tx, err := db.BeginTemporalRw(ctx) //nolint
+	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		tx.Rollback()
-	}()
+	defer tx.Rollback()
 
+	if err := sync.RunSnapshots(tx); err != nil {
+		return err
+	}
+
+	initialCycle, firstCycle := true, true
 	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
 		return err
