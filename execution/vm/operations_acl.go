@@ -228,6 +228,9 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 			gas     uint64
 			address = accounts.InternAddress(callContext.Stack.peek().Bytes20())
 		)
+		if evm.config.ReadOnly {
+			return 0, ErrWriteProtection
+		}
 		// If the caller cannot afford the cost, this change will be rolled back
 		if !evm.IntraBlockState().AddressInAccessList(address) {
 			gas = params.ColdAccountAccessCostEIP2929
