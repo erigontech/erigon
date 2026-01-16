@@ -110,7 +110,7 @@ type FullBlockReader interface {
 
 	AllTypes() []snaptype.Type
 
-	TxnumReader(ctx context.Context) rawdbv3.TxNumsReader
+	TxnumReader() rawdbv3.TxNumsReader
 }
 
 // BlockRetire - freezing blocks: moving old data from DB to snapshot files

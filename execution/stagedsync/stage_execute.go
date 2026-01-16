@@ -149,10 +149,10 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 		}
 		defer doms.Close()
 	}
-	txNumsReader := br.TxnumReader(ctx)
+	txNumsReader := br.TxnumReader()
 
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
-	txNum, err := txNumsReader.Min(rwTx, u.UnwindPoint+1)
+	txNum, err := txNumsReader.Min(ctx, rwTx, u.UnwindPoint+1)
 	if err != nil {
 		return err
 	}

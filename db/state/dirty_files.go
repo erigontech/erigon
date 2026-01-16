@@ -671,6 +671,18 @@ func calcVisibleFiles(files *btree2.BTreeG[*FilesItem], l statecfg.Accessors, ch
 	if newVisibleFiles == nil {
 		newVisibleFiles = []visibleFile{}
 	}
+
+	// Check for gaps in visible files and warn if found
+	for i := 1; i < len(newVisibleFiles); i++ {
+		prev := newVisibleFiles[i-1]
+		curr := newVisibleFiles[i]
+		if prev.endTxNum != curr.startTxNum {
+			log.Warn("[agg] gap in visible files", "prev", prev.src.decompressor.FileName(),
+				"prevEnd", prev.endTxNum, "curr", curr.src.decompressor.FileName(), "currStart", curr.startTxNum,
+				"gap", curr.startTxNum-prev.endTxNum)
+		}
+	}
+
 	return newVisibleFiles
 }
 

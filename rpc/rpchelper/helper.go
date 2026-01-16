@@ -151,11 +151,11 @@ func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, blo
 	if latest {
 		return CreateLatestCachedStateReader(cacheView, tx), nil
 	}
-	return CreateHistoryCachedStateReader(cacheView, tx, blockNumber+1, txnIndex, txNumsReader)
+	return CreateHistoryCachedStateReader(ctx, cacheView, tx, blockNumber+1, txnIndex, txNumsReader)
 }
 
-func CreateHistoryStateReader(tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
-	minTxNum, err := txNumsReader.Min(tx, blockNumber)
+func CreateHistoryStateReader(ctx context.Context, tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
+	minTxNum, err := txNumsReader.Min(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +171,7 @@ func NewLatestStateReader(getter kv.TemporalGetter) state.StateReader {
 }
 
 func NewLatestStateWriter(tx kv.TemporalTx, domains *execctx.SharedDomains, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
-	minTxNum, err := blockReader.TxnumReader(context.Background()).Min(tx, blockNum)
+	minTxNum, err := blockReader.TxnumReader().Min(context.Background(), tx, blockNum)
 	if err != nil {
 		panic(err)
 	}
@@ -188,13 +188,13 @@ type asOfView interface {
 	GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error)
 }
 
-func CreateHistoryCachedStateReader(cache kvcache.CacheView, tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
+func CreateHistoryCachedStateReader(ctx context.Context, cache kvcache.CacheView, tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
 	asOfView, ok := cache.(asOfView)
 
 	if !ok {
 		return nil, fmt.Errorf("%T does not implement GetAsOf at: %s", cache, dbg.Stack())
 	}
-	minTxNum, err := txNumsReader.Min(tx, blockNumber)
+	minTxNum, err := txNumsReader.Min(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}

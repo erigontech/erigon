@@ -317,10 +317,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	{
 		cfg.blockReader.Snapshots().LogStat("download")
-		txNumsReader := cfg.blockReader.TxnumReader(ctx)
+		txNumsReader := cfg.blockReader.TxnumReader()
 		aggtx := state.AggTx(tx)
 		stats.LogStats(aggtx, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-			histBlockNumProgress, _, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
+			histBlockNumProgress, _, err := txNumsReader.FindBlockNum(ctx, tx, endTxNumMinimax)
 			return histBlockNumProgress, err
 		})
 	}

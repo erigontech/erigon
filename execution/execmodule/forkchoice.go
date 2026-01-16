@@ -525,7 +525,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 
-		txnum, err := rawdbv3.TxNums.Max(tx, fcuHeader.Number.Uint64())
+		txnum, err := rawdbv3.TxNums.Max(ctx, tx, fcuHeader.Number.Uint64())
 		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}

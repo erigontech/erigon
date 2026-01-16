@@ -609,7 +609,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		CoinbaseInitBalance: coinbaseInitBalance,
 		FeeTipped:           tipAmount,
 		FeeBurnt:            burnAmount,
-		EvmRefund:           st.state.GetRefund(),
 	}
 
 	result.BurntContractAddress = burntContractAddress
