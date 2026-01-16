@@ -143,6 +143,16 @@ func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiry time.Time)
 	return nil
 }
 
+func (t *TopicSubscriptions) IsSubscribed(topic string) bool {
+	t.mutex.RLock()
+	defer t.mutex.RUnlock()
+	sub, ok := t.subs[topic]
+	if !ok {
+		return false
+	}
+	return sub.sub != nil
+}
+
 func (t *TopicSubscriptions) expireCheck(ctx context.Context) {
 	ticker := time.NewTicker(12 * time.Second)
 	defer ticker.Stop()

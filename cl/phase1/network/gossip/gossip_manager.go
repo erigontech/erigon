@@ -247,7 +247,26 @@ func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) e
 		return fmt.Errorf("topic not found: %s", topic)
 	}
 	// Note: before publishing the message to the network, Publish() internally runs the validator function.
-	return topicHandle.topic.Publish(ctx, compressedData, pubsub.WithReadiness(pubsub.MinTopicSize(1)))
+	cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if err := topicHandle.topic.Publish(cctx, compressedData, pubsub.WithReadiness(pubsub.MinTopicSize(1))); err != nil {
+		go func() {
+			// check if topic is successfully subscribed
+			if !g.subscriptions.IsSubscribed(topic) {
+				log.Warn("[GossipManager] publish failed because topic not subscribed", "topic", topic)
+				expiry := time.Now().Add(10 * time.Minute)
+				// subscribe the topic immediately
+				g.subscriptions.SubscribeWithExpiry(topic, expiry)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			if err := topicHandle.topic.Publish(ctx, compressedData, pubsub.WithReadiness(pubsub.MinTopicSize(1))); err != nil {
+				log.Warn("[GossipManager] Publish failed again with minute timeout", "topic", topic)
+			}
+		}()
+		return err
+	}
+	return nil
 }
 
 func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {
