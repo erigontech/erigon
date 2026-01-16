@@ -177,7 +177,7 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 func (cl *MockCl) InsertNewPayload(ctx context.Context, p *MockClPayload) (*enginetypes.PayloadStatus, error) {
 	elPayload := p.ExecutionPayload
 	clParentBlockRoot := p.ParentBeaconBlockRoot
-	return retryEngine(ctx, []enginetypes.EngineStatus{}, nil,
+	return retryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
 		func() (*enginetypes.PayloadStatus, enginetypes.EngineStatus, error) {
 			r, err := cl.engineApiClient.NewPayloadV4(ctx, elPayload, []common.Hash{}, clParentBlockRoot, []hexutil.Bytes{})
 			if err != nil {
