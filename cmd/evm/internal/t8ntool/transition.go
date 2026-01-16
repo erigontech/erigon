@@ -20,6 +20,7 @@
 package t8ntool
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"encoding/json"
@@ -461,7 +462,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 
 		if txJson.Type == types.DynamicFeeTxType {
 			return &types.DynamicFeeTransaction{
-				CommonTx: commonTx,
+				CommonTx:   commonTx,
 				ChainID:    chainId,
 				TipCap:     tipCap,
 				FeeCap:     feeCap,
@@ -481,7 +482,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 		return &types.SetCodeTransaction{
 			// it's ok to copy here - because it's constructor of object - no parallel access yet
 			DynamicFeeTransaction: types.DynamicFeeTransaction{
-				CommonTx: commonTx,
+				CommonTx:   commonTx,
 				ChainID:    chainId,
 				TipCap:     tipCap,
 				FeeCap:     feeCap,
