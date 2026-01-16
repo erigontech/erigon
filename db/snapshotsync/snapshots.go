@@ -377,7 +377,6 @@ func (s *DirtySegment) FilePaths(basePath string) (relativePaths []string) {
 }
 
 func (s *DirtySegment) FileInfo(dir string) snaptype.FileInfo {
-
 	return s.Type().FileInfoByMask(dir, s.from, s.to)
 }
 
@@ -1466,6 +1465,7 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 		s.dirty[t].Walk(func(segs []*DirtySegment) bool {
 			for _, segment := range segs {
 				info := segment.FileInfo(dir)
+				println("info for", segment.filePath, fmt.Sprintf("%+v", info))
 
 				if t.HasIndexFiles(info, logger) {
 					continue
