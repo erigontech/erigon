@@ -805,7 +805,7 @@ func parseTransactionBodyAA(ctx *TxnParseContext, payload []byte, p int, slot *T
 		return 0, fmt.Errorf("%w: postOpGasLimit: %s", ErrParseTxn, err)
 	}
 
-	var execData []byte
+	execData := make([]byte, 0, len(slot.DeployerData)+len(slot.PaymasterData)+len(slot.ExecutionData))
 	execData = append(execData, slot.DeployerData...)
 	execData = append(execData, slot.PaymasterData...)
 	execData = append(execData, slot.ExecutionData...)

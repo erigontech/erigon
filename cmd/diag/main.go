@@ -61,7 +61,7 @@ func main() {
 	app.UsageText = `diag [command] [flags]`
 
 	app.Action = func(context *cli.Context) error {
-		var goodNames []string
+		goodNames := make([]string, 0, len(app.VisibleCommands()))
 		for _, c := range app.VisibleCommands() {
 			goodNames = append(goodNames, c.Name)
 		}
