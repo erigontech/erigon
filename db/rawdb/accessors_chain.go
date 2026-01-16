@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb/utils"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -685,7 +686,7 @@ func DeleteBody(db kv.Putter, hash common.Hash, number uint64) {
 func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
 	nextBaseTxNum := 0
 	if from > 0 {
-		nextBaseTxNumFromDb, err := rawdbv3.TxNums.Max(tx, from-1)
+		nextBaseTxNumFromDb, err := rawdbv3.TxNums.Max(context.Background(), tx, from-1)
 		if err != nil {
 			return err
 		}
@@ -1222,6 +1223,30 @@ type RCacheV2Query struct {
 	DontCalcBloom bool // avoid calculating bloom (can be bottleneck)
 }
 
+// doesn't do DeriveFieldsV4ForCachedReceipt
+func ReceiptCacheV2Stream(tx kv.TemporalTx, fromTxNum, toTxNum uint64) (stream.Duo[uint64, *types.Receipt], error) {
+	it, err := tx.Debug().TraceKey(kv.RCacheDomain, receiptCacheKey, fromTxNum, toTxNum)
+	if err != nil {
+		return nil, err
+	}
+
+	return stream.TransformDuoV(it, func(txNum uint64, v []byte) (uint64, *types.Receipt, error) {
+		if len(v) == 0 {
+			return txNum, nil, nil
+		}
+
+		//fmt.Println("stream", "txnum", txNum, "v", len(v))
+
+		receipt := &types.ReceiptForStorage{}
+		if err := rlp.DecodeBytes(v, receipt); err != nil {
+			return txNum, nil, fmt.Errorf("%w, of txNum %d, len(v)=%d", err, txNum, len(v))
+		}
+		res := (*types.Receipt)(receipt)
+		//res.DeriveFieldsV4ForCachedReceipt(query.BlockHash, query.BlockNum, query.TxnHash, !query.DontCalcBloom)
+		return txNum, res, nil
+	}), nil
+}
+
 func ReadReceiptCacheV2(tx kv.TemporalTx, query RCacheV2Query) (*types.Receipt, bool, error) {
 	v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, query.TxNum+1 /*history storing value BEFORE-change*/)
 	if err != nil {
@@ -1248,11 +1273,11 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
 
-	_min, err := txNumReader.Min(tx, blockNum)
+	_min, err := txNumReader.Min(context.Background(), tx, blockNum)
 	if err != nil {
 		return
 	}
-	_max, err := txNumReader.Max(tx, blockNum)
+	_max, err := txNumReader.Max(context.Background(), tx, blockNum)
 	if err != nil {
 		return
 	}

@@ -23,12 +23,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/db/version"
 	"io"
 	"math"
 	"math/bits"
 	"os"
 	"path/filepath"
+
+	"github.com/erigontech/erigon/db/version"
 
 	"github.com/spaolacci/murmur3"
 
@@ -197,11 +198,11 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		rs.salt = *args.Salt
 	}
 	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.SmallSortableBuffers, logger)
-	rs.bucketCollector.SortAndFlushInBackground(true)
+	rs.bucketCollector.SortAndFlushInBackground(false)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
 	if args.Enums {
 		rs.offsetCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.SmallSortableBuffers, logger)
-		rs.bucketCollector.SortAndFlushInBackground(true)
+		rs.bucketCollector.SortAndFlushInBackground(false)
 		rs.offsetCollector.LogLvl(log.LvlDebug)
 	}
 	var err error
@@ -302,12 +303,12 @@ func (rs *RecSplit) ResetNextSalt() {
 		rs.bucketCollector.Close()
 	}
 	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+rs.fileName, rs.tmpDir, etl.SmallSortableBuffers, rs.logger)
-	rs.bucketCollector.SortAndFlushInBackground(true)
+	rs.bucketCollector.SortAndFlushInBackground(false)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
 	if rs.offsetCollector != nil {
 		rs.offsetCollector.Close()
 		rs.offsetCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+rs.fileName, rs.tmpDir, etl.SmallSortableBuffers, rs.logger)
-		rs.offsetCollector.SortAndFlushInBackground(true)
+		rs.offsetCollector.SortAndFlushInBackground(false)
 		rs.bucketCollector.LogLvl(log.LvlDebug)
 	}
 	rs.currentBucket = rs.currentBucket[:0]

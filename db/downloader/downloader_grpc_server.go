@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/erigontech/erigon/common/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -42,6 +43,12 @@ func NewGrpcServer(d *Downloader) (*GrpcServer, error) {
 	return svr, nil
 }
 
+// Error relating to using a snap name for RPC. Such as it is absolute or non-local to the
+// client-side.
+type errRpcSnapName struct {
+	error
+}
+
 type GrpcServer struct {
 	downloaderproto.UnimplementedDownloaderServer
 	d *Downloader
@@ -53,10 +60,10 @@ func (s *GrpcServer) checkNamesAndLogCall(names []string, callName string) error
 			return errors.New("field 'path' is required")
 		}
 		if filepath.IsAbs(name) {
-			return fmt.Errorf("assert: Downloader.GrpcServer.Add called with absolute path %q, please use filepath.Rel(dirs.Snap, filePath)", name)
+			return fmt.Errorf("assert: Downloader.GrpcServer called with absolute path %q, please use filepath.Rel(dirs.Snap, filePath) before RPC", name)
 		}
 	}
-	s.d.logger.Debug(fmt.Sprintf("[snapshots] Downloader.%s", callName), "files", names)
+	s.d.log(log.LvlDebug, fmt.Sprintf("Downloader.%s", callName), "files", names)
 	return nil
 }
 
@@ -96,6 +103,7 @@ func (s *GrpcServer) Seed(ctx context.Context, request *downloaderproto.SeedRequ
 	for _, name := range names {
 		err = s.d.AddNewSeedableFile(ctx, name)
 		if err != nil {
+			err = fmt.Errorf("adding %q: %w", name, err)
 			return
 		}
 	}

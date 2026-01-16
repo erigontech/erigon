@@ -96,7 +96,7 @@ func TestTxDependencyBlockDecoding(t *testing.T) {
 	if err := rlp.DecodeBytes(blockEnc, &block); err != nil {
 		t.Fatal("decode error: ", err)
 	}
-	check := func(f string, got, want interface{}) {
+	check := func(f string, got, want any) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s mismatch: got %v, want %v", f, got, want)
 		}
@@ -132,7 +132,7 @@ func TestBlockEncoding(t *testing.T) {
 		t.Fatal("decode error: ", err)
 	}
 
-	check := func(f string, got, want interface{}) {
+	check := func(f string, got, want any) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s mismatch: got %v, want %v", f, got, want)
 		}
@@ -169,7 +169,7 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 		t.Fatal("decode error: ", err)
 	}
 
-	check := func(f string, got, want interface{}) {
+	check := func(f string, got, want any) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s mismatch: got %v, want %v", f, got, want)
 		}
@@ -237,7 +237,7 @@ func TestEIP2718BlockEncoding(t *testing.T) {
 		t.Fatal("decode error: ", err)
 	}
 
-	check := func(f string, got, want interface{}) {
+	check := func(f string, got, want any) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s mismatch: got %v, want %v", f, got, want)
 		}

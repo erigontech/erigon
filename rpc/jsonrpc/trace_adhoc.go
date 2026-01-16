@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -89,10 +90,10 @@ type TraceCallResult struct {
 
 // StateDiffAccount is the part of `trace_call` response that is under "stateDiff" tag
 type StateDiffAccount struct {
-	Balance interface{}                            `json:"balance"` // Can be either string "=" or mapping "*" => {"from": "hex", "to": "hex"}
-	Code    interface{}                            `json:"code"`
-	Nonce   interface{}                            `json:"nonce"`
-	Storage map[common.Hash]map[string]interface{} `json:"storage"`
+	Balance any                            `json:"balance"` // Can be either string "=" or mapping "*" => {"from": "hex", "to": "hex"}
+	Code    any                            `json:"code"`
+	Nonce   any                            `json:"nonce"`
+	Storage map[common.Hash]map[string]any `json:"storage"`
 }
 
 type StateDiffBalance struct {
@@ -399,7 +400,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		copy(trResult.Address[:], toVal[:])
 		trace.Result = trResult
 	} else {
-		trace.Result = &TraceResult{}
+		trace.Result = &TraceResult{GasUsed: (*hexutil.Big)(big.NewInt(0))}
 		trace.Type = CALL
 	}
 	if deep {
@@ -694,21 +695,21 @@ type StateDiff struct {
 
 func (sd *StateDiff) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	if _, ok := sd.sdMap[address]; !ok {
-		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
+		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]any)}
 	}
 	return nil
 }
 
 func (sd *StateDiff) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
 	if _, ok := sd.sdMap[address]; !ok {
-		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
+		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]any)}
 	}
 	return nil
 }
 
 func (sd *StateDiff) DeleteAccount(address accounts.Address, original *accounts.Account) error {
 	if _, ok := sd.sdMap[address]; !ok {
-		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
+		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]any)}
 	}
 	return nil
 }
@@ -719,10 +720,10 @@ func (sd *StateDiff) WriteAccountStorage(address accounts.Address, incarnation u
 	}
 	accountDiff := sd.sdMap[address]
 	if accountDiff == nil {
-		accountDiff = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
+		accountDiff = &StateDiffAccount{Storage: make(map[common.Hash]map[string]any)}
 		sd.sdMap[address] = accountDiff
 	}
-	m := make(map[string]interface{})
+	m := make(map[string]any)
 	m["*"] = &StateDiffStorage{From: common.BytesToHash(original.Bytes()), To: common.BytesToHash(value.Bytes())}
 	accountDiff.Storage[key.Value()] = m
 	return nil
@@ -730,7 +731,7 @@ func (sd *StateDiff) WriteAccountStorage(address accounts.Address, incarnation u
 
 func (sd *StateDiff) CreateContract(address accounts.Address) error {
 	if _, ok := sd.sdMap[address]; !ok {
-		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
+		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]any)}
 	}
 	return nil
 }
@@ -918,7 +919,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 
-	txNumMin, err := api._txNumReader.Min(tx, blockNum)
+	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -1712,7 +1713,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 }
 
 // RawTransaction implements trace_rawTransaction.
-func (api *TraceAPIImpl) RawTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) ([]interface{}, error) {
-	var stub []interface{}
+func (api *TraceAPIImpl) RawTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) ([]any, error) {
+	var stub []any
 	return stub, fmt.Errorf(NotImplemented, "trace_rawTransaction")
 }

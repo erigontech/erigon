@@ -233,7 +233,7 @@ func (sc *SlotChanges) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (sc *StorageChange) EncodingSize() int {
-	size := 1 + rlp.IntLenExcludingHead(uint64(sc.Index))
+	size := rlp.U64Len(uint64(sc.Index))
 	size++
 	valInt := uint256FromHash(sc.Value)
 	size += rlp.Uint256LenExcludingHead(valInt)
@@ -276,9 +276,8 @@ func (sc *StorageChange) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (bc *BalanceChange) EncodingSize() int {
-	size := 1 + rlp.IntLenExcludingHead(uint64(bc.Index))
-	size++
-	size += rlp.Uint256LenExcludingHead(bc.Value)
+	size := rlp.U64Len(uint64(bc.Index))
+	size += rlp.Uint256Len(bc.Value)
 	return size
 }
 
@@ -320,9 +319,8 @@ func (bc *BalanceChange) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (nc *NonceChange) EncodingSize() int {
-	size := 1 + rlp.IntLenExcludingHead(uint64(nc.Index))
-	size++
-	size += rlp.IntLenExcludingHead(nc.Value)
+	size := rlp.U64Len(uint64(nc.Index))
+	size += rlp.U64Len(nc.Value)
 	return size
 }
 
@@ -361,7 +359,7 @@ func (nc *NonceChange) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (cc *CodeChange) EncodingSize() int {
-	size := 1 + rlp.IntLenExcludingHead(uint64(cc.Index))
+	size := rlp.U64Len(uint64(cc.Index))
 	size += rlp.StringLen(cc.Data)
 	return size
 }

@@ -188,17 +188,17 @@ func (db *DB) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	}
 	return &tx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn, viewID: msg.ViewId, id: msg.TxId}, nil
 }
-func (db *DB) Debug() kv.TemporalDebugDB                             { return kv.TemporalDebugDB(db) }
-func (db *DB) NewMemBatch(ioMetrics interface{}) kv.TemporalMemBatch { panic("not implemented") }
-func (db *DB) DomainTables(domain ...kv.Domain) []string             { panic("not implemented") }
-func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string   { panic("not implemented") }
-func (db *DB) ForkableTables(domain ...kv.ForkableId) []string       { panic("not implemented") }
-func (db *DB) ReloadFiles() error                                    { panic("not implemented") }
-func (db *DB) BuildMissedAccessors(_ context.Context, _ int) error   { panic("not implemented") }
-func (db *DB) EnableReadAhead() kv.TemporalDebugDB                   { panic("not implemented") }
-func (db *DB) DisableReadAhead()                                     { panic("not implemented") }
-func (db *DB) Files() []string                                       { panic("not implemented") }
-func (db *DB) MergeLoop(ctx context.Context) error                   { panic("not implemented") }
+func (db *DB) Debug() kv.TemporalDebugDB                           { return kv.TemporalDebugDB(db) }
+func (db *DB) NewMemBatch(ioMetrics any) kv.TemporalMemBatch       { panic("not implemented") }
+func (db *DB) DomainTables(domain ...kv.Domain) []string           { panic("not implemented") }
+func (db *DB) InvertedIdxTables(domain ...kv.InvertedIdx) []string { panic("not implemented") }
+func (db *DB) ForkableTables(domain ...kv.ForkableId) []string     { panic("not implemented") }
+func (db *DB) ReloadFiles() error                                  { panic("not implemented") }
+func (db *DB) BuildMissedAccessors(_ context.Context, _ int) error { panic("not implemented") }
+func (db *DB) EnableReadAhead() kv.TemporalDebugDB                 { panic("not implemented") }
+func (db *DB) DisableReadAhead()                                   { panic("not implemented") }
+func (db *DB) Files() []string                                     { panic("not implemented") }
+func (db *DB) MergeLoop(ctx context.Context) error                 { panic("not implemented") }
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	t, err := db.BeginRo(ctx) //nolint:gocritic
 	if err != nil {
@@ -243,7 +243,7 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) (err e
 	return errors.New("remote db provider doesn't support .UpdateNosync method")
 }
 
-func (tx *tx) NewMemBatch(ioMetrics interface{}) kv.TemporalMemBatch { panic("not implemented") }
+func (tx *tx) NewMemBatch(ioMetrics any) kv.TemporalMemBatch { panic("not implemented") }
 
 func (tx *tx) AggTx() any                                      { panic("not implemented") }
 func (tx *tx) Debug() kv.TemporalDebugTx                       { return kv.TemporalDebugTx(tx) }
@@ -256,6 +256,9 @@ func (tx *tx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step kv.Ste
 	panic("not implemented")
 }
 func (tx *tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+	panic("not implemented")
+}
+func (tx *tx) TraceKey(domain kv.Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error) {
 	panic("not implemented")
 }
 func (tx *tx) IIProgress(domain kv.InvertedIdx) uint64 { panic("not implemented") }
