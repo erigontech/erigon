@@ -68,6 +68,11 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	cfg.Hist.IiCfg.Compression = seg.CompressNone
 	cfg.Hist.Compression = seg.CompressNone
 	//cfg.hist.historyValuesOnCompressedPage = 16
+
+	// Page-level compression disabled by default in tests
+	// Enable it in specific tests by setting cfg.Hist.DBValuesOnCompressedPage
+	cfg.Hist.DBValuesOnCompressedPage = 0
+
 	aggregationStep := uint64(16)
 	h, err := NewHistory(cfg.Hist, aggregationStep, config3.DefaultStepsInFrozenFile, dirs, logger)
 	require.NoError(tb, err)

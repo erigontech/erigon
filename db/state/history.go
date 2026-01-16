@@ -683,6 +683,9 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		prevKey []byte
 
 		initialized bool
+
+		// For DB page compression support
+		snappyReadBuf []byte
 	)
 	defer bitmapdb.ReturnToPool64(bitmap)
 
@@ -713,35 +716,81 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 			seqBuilder.AddOffset(vTxNum)
 
 			binary.BigEndian.PutUint64(numBuf, vTxNum)
+			var val []byte
 			if !h.HistoryLargeValues {
-				val, err := cd.SeekBothRange(prevKey, numBuf)
+				// Small values path - page compression not supported for small values
+				dbVal, err := cd.SeekBothRange(prevKey, numBuf)
 				if err != nil {
 					return fmt.Errorf("seekBothRange %s history val [%x]: %w", h.FilenameBase, prevKey, err)
 				}
-				if val != nil && binary.BigEndian.Uint64(val) == vTxNum {
-					val = val[8:]
+				if dbVal != nil && binary.BigEndian.Uint64(dbVal) == vTxNum {
+					val = dbVal[8:]
 				} else {
 					val = nil
 				}
+			} else {
+				// Large values path - may use page compression
+				keyBuf = append(append(keyBuf[:0], prevKey...), numBuf...)
 
-				histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
-				if err := historyWriter.Add(histKeyBuf, val); err != nil {
-					return fmt.Errorf("add %s history val [%x]: %w", h.FilenameBase, prevKey, err)
+				if h.DBValuesOnCompressedPage > 0 {
+					// DB page compression enabled - need to extract value from compressed page
+					// For large values, pages are stored with key = k + firstTxNum
+					// We need to find the page containing our txNum
+
+					// Try to seek to the exact position
+					kAndTxNum, compressedPage, err := c.Seek(keyBuf)
+					if err != nil {
+						return fmt.Errorf("seek %s history val [%x]: %w", h.FilenameBase, keyBuf, err)
+					}
+
+					// Check if we found a page for this key
+					if kAndTxNum == nil || len(kAndTxNum) < 8 || !bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], prevKey) {
+						// Try seeking to just the key prefix - the page might start before our txNum
+						kAndTxNum, compressedPage, err = c.Seek(prevKey)
+						if err != nil {
+							return fmt.Errorf("seek to key %s history val [%x]: %w", h.FilenameBase, prevKey, err)
+						}
+						if kAndTxNum == nil || len(kAndTxNum) < 8 || !bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], prevKey) {
+							val = nil
+							goto addToFile
+						}
+					}
+
+					// Search through pages for this key to find the one containing our txNum
+					val = nil
+					for kAndTxNum != nil && len(kAndTxNum) >= 8 && bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], prevKey) {
+						// Try to find the value in this page
+						v, buf := seg.GetFromPage(keyBuf, compressedPage, snappyReadBuf, true)
+						snappyReadBuf = buf
+						if v != nil {
+							val = v
+							break
+						}
+						// Move to next page for this key
+						kAndTxNum, compressedPage, err = c.Next()
+						if err != nil {
+							return fmt.Errorf("next %s history val: %w", h.FilenameBase, err)
+						}
+					}
+				} else {
+					// No page compression - direct value lookup
+					key, dbVal, err := c.SeekExact(keyBuf)
+					if err != nil {
+						return fmt.Errorf("seekExact %s history val [%x]: %w", h.FilenameBase, key, err)
+					}
+					if len(dbVal) == 0 {
+						val = nil
+					} else {
+						val = dbVal
+					}
 				}
-				continue
 			}
-			keyBuf = append(append(keyBuf[:0], prevKey...), numBuf...)
-			key, val, err := c.SeekExact(keyBuf)
-			if err != nil {
-				return fmt.Errorf("seekExact %s history val [%x]: %w", h.FilenameBase, key, err)
-			}
-			if len(val) == 0 {
-				val = nil
-			}
+
+		addToFile:
 
 			histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
 			if err := historyWriter.Add(histKeyBuf, val); err != nil {
-				return fmt.Errorf("add %s history val [%x]: %w", h.FilenameBase, key, err)
+				return fmt.Errorf("add %s history val [%x]: %w", h.FilenameBase, prevKey, err)
 			}
 		}
 		bitmap.Clear()
