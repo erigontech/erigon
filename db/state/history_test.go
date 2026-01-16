@@ -52,6 +52,12 @@ import (
 )
 
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
+	return testDbAndHistoryWithPageCompression(tb, largeValues, 0, logger)
+}
+
+// testDbAndHistoryWithPageCompression creates a test DB and History with optional page compression
+// dbPageSize: number of values per compressed page (0 = disabled)
+func testDbAndHistoryWithPageCompression(tb testing.TB, largeValues bool, dbPageSize int, logger log.Logger) (kv.RwDB, *History) {
 	tb.Helper()
 	dirs := datadir.New(tb.TempDir())
 	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).MustOpen()
@@ -69,9 +75,12 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	cfg.Hist.Compression = seg.CompressNone
 	//cfg.hist.historyValuesOnCompressedPage = 16
 
-	// Page-level compression disabled by default in tests
-	// Enable it in specific tests by setting cfg.Hist.DBValuesOnCompressedPage
-	cfg.Hist.DBValuesOnCompressedPage = 0
+	// Enable page-level compression if requested
+	if largeValues && dbPageSize > 0 {
+		cfg.Hist.DBValuesOnCompressedPage = dbPageSize
+	} else {
+		cfg.Hist.DBValuesOnCompressedPage = 0
+	}
 
 	aggregationStep := uint64(16)
 	h, err := NewHistory(cfg.Hist, aggregationStep, config3.DefaultStepsInFrozenFile, dirs, logger)
@@ -303,6 +312,10 @@ func TestHistoryCollationBuild(t *testing.T) {
 		db, h := testDbAndHistory(t, true, logger)
 		test(t, h, db)
 	})
+	t.Run("large_values_with_page_compression", func(t *testing.T) {
+		db, h := testDbAndHistoryWithPageCompression(t, true, 4, logger)
+		test(t, h, db)
+	})
 	t.Run("small_values", func(t *testing.T) {
 		db, h := testDbAndHistory(t, false, logger)
 		test(t, h, db)
@@ -373,6 +386,10 @@ func TestHistoryAfterPrune(t *testing.T) {
 	}
 	t.Run("large_values", func(t *testing.T) {
 		db, h := testDbAndHistory(t, true, logger)
+		test(t, h, db)
+	})
+	t.Run("large_values_with_page_compression", func(t *testing.T) {
+		db, h := testDbAndHistoryWithPageCompression(t, true, 4, logger)
 		test(t, h, db)
 	})
 	t.Run("small_values", func(t *testing.T) {

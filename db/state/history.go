@@ -735,31 +735,27 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 				if h.DBValuesOnCompressedPage > 0 {
 					// DB page compression enabled - need to extract value from compressed page
 					// For large values, pages are stored with key = k + firstTxNum
-					// We need to find the page containing our txNum
+					// Pages group entries for the same key, so we need to:
+					// 1. Seek to the key prefix (prevKey) to find first page for this key
+					// 2. Iterate through all pages for this key
+					// 3. Extract the specific value we're looking for using GetFromPage
 
-					// Try to seek to the exact position
-					kAndTxNum, compressedPage, err := c.Seek(keyBuf)
+					// Seek to the key prefix to find the first page for this key
+					kAndTxNum, compressedPage, err := c.Seek(prevKey)
 					if err != nil {
-						return fmt.Errorf("seek %s history val [%x]: %w", h.FilenameBase, keyBuf, err)
+						return fmt.Errorf("seek %s history val [%x]: %w", h.FilenameBase, prevKey, err)
 					}
 
-					// Check if we found a page for this key
+					// Check if we found any pages for this key
 					if kAndTxNum == nil || len(kAndTxNum) < 8 || !bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], prevKey) {
-						// Try seeking to just the key prefix - the page might start before our txNum
-						kAndTxNum, compressedPage, err = c.Seek(prevKey)
-						if err != nil {
-							return fmt.Errorf("seek to key %s history val [%x]: %w", h.FilenameBase, prevKey, err)
-						}
-						if kAndTxNum == nil || len(kAndTxNum) < 8 || !bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], prevKey) {
-							val = nil
-							goto addToFile
-						}
+						val = nil
+						goto addToFile
 					}
 
-					// Search through pages for this key to find the one containing our txNum
+					// Search through all pages for this key to find the one containing our txNum
 					val = nil
 					for kAndTxNum != nil && len(kAndTxNum) >= 8 && bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], prevKey) {
-						// Try to find the value in this page
+						// Try to find the value in this page using the full key (prevKey + vTxNum)
 						v, buf := seg.GetFromPage(keyBuf, compressedPage, snappyReadBuf, true)
 						snappyReadBuf = buf
 						if v != nil {
