@@ -43,9 +43,8 @@ func NewClient(ctx context.Context, downloaderAddr string) (downloaderproto.Down
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16 * datasize.MB))),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}
-
-	dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	conn, err := grpc.DialContext(ctx, downloaderAddr, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("creating client connection to sentry P2P: %w", err)

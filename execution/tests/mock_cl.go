@@ -335,7 +335,7 @@ func MockClPayloadToHeader(p *MockClPayload) *types.Header {
 		wh := types.DeriveSha(types.Withdrawals(elPayload.Withdrawals))
 		header.WithdrawalsHash = &wh
 	}
-	requests := make(types.FlatRequests, 0)
+	requests := make(types.FlatRequests, 0, len(p.ExecutionRequests))
 	for _, r := range p.ExecutionRequests {
 		requests = append(requests, types.FlatRequest{Type: r[0], RequestData: r[1:]})
 	}
