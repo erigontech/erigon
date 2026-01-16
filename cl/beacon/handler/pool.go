@@ -146,6 +146,11 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 		}
 		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameBeaconAttestation(subnet), encodedSSZ); err != nil {
 			a.logger.Debug("[Beacon REST] failed to publish attestation to gossip", "err", err)
+			failures = append(failures, poolingFailure{
+				Index:   i,
+				Message: err.Error(),
+			})
+			continue
 		}
 	}
 	if len(failures) > 0 {
@@ -219,6 +224,11 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 		}
 		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameBeaconAttestation(subnet), encodedSSZ); err != nil {
 			a.logger.Debug("[Beacon REST] failed to publish attestation to gossip", "err", err)
+			failures = append(failures, poolingFailure{
+				Index:   i,
+				Message: err.Error(),
+			})
+			continue
 		}
 	}
 	if len(failures) > 0 {
