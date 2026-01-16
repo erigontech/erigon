@@ -189,9 +189,9 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		}
 	}
 
-	if topDumpedBlock > 0 {
-		topDumpedBlock++
-	}
+	//if topDumpedBlock > 0 {
+	//	topDumpedBlock++
+	//}
 	firstBlock := topDumpedBlock
 	var healthCheckErr error
 	l2RPCHealthCheckOnce.Do(func() {
@@ -206,7 +206,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	}
 	latestRemoteBlock.SetUint64(min(latestRemoteBlock.Uint64(), firstBlock+uint64(cfg.syncConfig.LoopBlockLimit)))
 
-	if firstBlock+1 > latestRemoteBlock.Uint64() { // print only if 1+ blocks available
+	if firstBlock+1 < latestRemoteBlock.Uint64() { // print only if 1+ blocks available
 		log.Info("[Arbitrum] Headers stage started", "from", firstBlock, "lastAvailableBlock", latestRemoteBlock.Uint64(), "extTx", useExternalTx)
 	}
 
