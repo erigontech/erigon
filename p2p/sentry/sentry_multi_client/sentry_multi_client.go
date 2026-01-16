@@ -1084,11 +1084,12 @@ func GrpcClient(ctx context.Context, sentryAddr string) (*direct.SentryClientRem
 	backoffCfg := backoff.DefaultConfig
 	backoffCfg.BaseDelay = 500 * time.Millisecond
 	backoffCfg.MaxDelay = 10 * time.Second
-	dialOpts := []grpc.DialOption{
+	dialOpts := make([]grpc.DialOption, 0, 4)
+	dialOpts = append(dialOpts,
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16 * datasize.MB))),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16*datasize.MB))),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
-	}
+	)
 
 	dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	conn, err := grpc.DialContext(ctx, sentryAddr, dialOpts...)
