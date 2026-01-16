@@ -169,12 +169,14 @@ func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
 
 	// Let's actually
 	if _, err := os.Stat(info.Path); err != nil {
+		logger.Debug("[ind] HasFile: seg file didn't found", "path", info.Path, "dir", dir, "err", err)
 		return false
 	}
 
 	fNameMask := IdxFileMask(info.From, info.To, i.Name)
 	fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(dir, fNameMask))
 	if err != nil {
+		logger.Debug("[ind] HasFile: files by pattern didn't found", "f", fNameMask, "dir", dir, "err", err)
 		return false
 	}
 
@@ -196,6 +198,7 @@ func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
 	idx, err := recsplit.OpenIndex(fPath)
 
 	if err != nil {
+		logger.Debug("[ind] HasFile: opening index", "path", fPath, "err", err)
 		return false
 	}
 
