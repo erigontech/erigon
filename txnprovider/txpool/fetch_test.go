@@ -137,7 +137,7 @@ func TestSendTxnPropagate(t *testing.T) {
 		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		list := make(Hashes, p2pTxPacketLimit*3)
 		for i := 0; i < len(list); i += 32 {
-			b := []byte(fmt.Sprintf("%x", i))
+			b := fmt.Appendf(nil, "%x", i)
 			copy(list[i:i+32], b)
 		}
 		send.BroadcastPooledTxns(testRlps(len(list)/32), 100)

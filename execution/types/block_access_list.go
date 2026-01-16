@@ -181,7 +181,7 @@ func (ac *AccountChanges) DecodeRLP(s *rlp.Stream) error {
 func (sc *SlotChanges) EncodingSize() int {
 	slot := sc.Slot.Value()
 	slotInt := uint256FromHash(slot)
-	size := 1 + rlp.Uint256LenExcludingHead(slotInt)
+	size := rlp.Uint256Len(slotInt)
 	changesLen := EncodingSizeGenericList(sc.Changes)
 	size += rlp.ListPrefixLen(changesLen) + changesLen
 	return size
@@ -233,10 +233,10 @@ func (sc *SlotChanges) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (sc *StorageChange) EncodingSize() int {
-	size := 1 + rlp.IntLenExcludingHead(uint64(sc.Index))
-	size++
+	size := rlp.U64Len(uint64(sc.Index))
 	valInt := uint256FromHash(sc.Value)
-	size += rlp.Uint256LenExcludingHead(valInt)
+	size += rlp.Uint256Len(valInt)
+
 	return size
 }
 
@@ -276,9 +276,8 @@ func (sc *StorageChange) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (bc *BalanceChange) EncodingSize() int {
-	size := 1 + rlp.IntLenExcludingHead(uint64(bc.Index))
-	size++
-	size += rlp.Uint256LenExcludingHead(bc.Value)
+	size := rlp.U64Len(uint64(bc.Index))
+	size += rlp.Uint256Len(bc.Value)
 	return size
 }
 
@@ -320,9 +319,8 @@ func (bc *BalanceChange) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (nc *NonceChange) EncodingSize() int {
-	size := 1 + rlp.IntLenExcludingHead(uint64(nc.Index))
-	size++
-	size += rlp.IntLenExcludingHead(nc.Value)
+	size := rlp.U64Len(uint64(nc.Index))
+	size += rlp.U64Len(nc.Value)
 	return size
 }
 
@@ -361,7 +359,7 @@ func (nc *NonceChange) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (cc *CodeChange) EncodingSize() int {
-	size := 1 + rlp.IntLenExcludingHead(uint64(cc.Index))
+	size := rlp.U64Len(uint64(cc.Index))
 	size += rlp.StringLen(cc.Data)
 	return size
 }
@@ -421,7 +419,7 @@ func encodeHashList(hashes []accounts.StorageKey, w io.Writer, buf []byte) error
 	for i := range hashes {
 		hash := hashes[i].Value()
 		hashInt := uint256FromHash(hash)
-		total += 1 + rlp.Uint256LenExcludingHead(hashInt)
+		total += rlp.Uint256Len(hashInt)
 	}
 	if err := rlp.EncodeStructSizePrefix(total, w, buf); err != nil {
 		return err
@@ -441,7 +439,7 @@ func encodingSizeHashList(hashes []accounts.StorageKey) int {
 	for i := range hashes {
 		hash := hashes[i].Value()
 		hashInt := uint256FromHash(hash)
-		size += 1 + rlp.Uint256LenExcludingHead(hashInt)
+		size += rlp.Uint256Len(hashInt)
 	}
 	return rlp.ListPrefixLen(size) + size
 }

@@ -20,6 +20,7 @@
 package state
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -137,7 +138,7 @@ func NewDumper(db kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader, blockNumber 
 
 var ErrTooManyIterations = errors.New("[rpc] dumper: too many iterations protection triggered")
 
-func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bool, startAddress common.Address, maxResults int) ([]byte, error) {
+func (d *Dumper) DumpToCollector(ctx context.Context, c DumpCollector, excludeCode, excludeStorage bool, startAddress common.Address, maxResults int) ([]byte, error) {
 	var emptyHash = common.Hash{}
 	var accountList []*DumpAccount
 	var addrList []common.Address
@@ -150,14 +151,11 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	c.OnRoot(emptyHash) // We do not calculate the root
 
 	ttx := d.tx
-	txNum, err := d.txNumsReader.Min(ttx, d.blockNumber+1)
+	txNum, err := d.txNumsReader.Min(ctx, ttx, d.blockNumber+1)
 	if err != nil {
 		return nil, err
 	}
-	txNumForStorage, err := d.txNumsReader.Min(ttx, d.blockNumber+1)
-	if err != nil {
-		return nil, err
-	}
+	txNumForStorage := txNum
 
 	var nextKey []byte
 	it, err := ttx.RangeAsOf(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, kv.Unlim) //unlim because need skip empty vals
@@ -248,7 +246,7 @@ func (d *Dumper) RawDump(excludeCode, excludeStorage bool) Dump {
 		Accounts: make(map[common.Address]DumpAccount),
 	}
 	//nolint:errcheck
-	d.DumpToCollector(dump, excludeCode, excludeStorage, common.Address{}, 0)
+	d.DumpToCollector(context.Background(), dump, excludeCode, excludeStorage, common.Address{}, 0)
 	return *dump
 }
 
@@ -265,7 +263,7 @@ func (d *Dumper) Dump(excludeCode, excludeStorage bool) []byte {
 // IterativeDump dumps out accounts as json-objects, delimited by linebreaks on stdout
 func (d *Dumper) IterativeDump(excludeCode, excludeStorage bool, output *json.Encoder) {
 	//nolint:errcheck
-	d.DumpToCollector(iterativeDump{output}, excludeCode, excludeStorage, common.Address{}, 0)
+	d.DumpToCollector(context.Background(), iterativeDump{output}, excludeCode, excludeStorage, common.Address{}, 0)
 }
 
 // IteratorDump dumps out a batch of accounts starts with the given start key
@@ -274,7 +272,7 @@ func (d *Dumper) IteratorDump(excludeCode, excludeStorage bool, start common.Add
 		Accounts: make(map[common.Address]DumpAccount),
 	}
 	var err error
-	iterator.Next, err = d.DumpToCollector(iterator, excludeCode, excludeStorage, start, maxResults)
+	iterator.Next, err = d.DumpToCollector(context.Background(), iterator, excludeCode, excludeStorage, start, maxResults)
 	return *iterator, err
 }
 

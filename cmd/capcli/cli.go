@@ -187,7 +187,7 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, nil, db)
-	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, clparams.CaplinConfig{}, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root(), nil)
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, clparams.CaplinConfig{}, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root(), nil, nil)
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
@@ -819,7 +819,7 @@ type ArchiveSanitizer struct {
 }
 
 func getHead(beaconApiURL string) (uint64, error) {
-	headResponse := map[string]interface{}{}
+	headResponse := map[string]any{}
 	req, err := http.NewRequest("GET", beaconApiURL+"/eth/v2/debug/beacon/heads", nil)
 	if err != nil {
 		return 0, err
@@ -833,11 +833,11 @@ func getHead(beaconApiURL string) (uint64, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&headResponse); err != nil {
 		return 0, err
 	}
-	data := headResponse["data"].([]interface{})
+	data := headResponse["data"].([]any)
 	if len(data) == 0 {
 		return 0, errors.New("no head found")
 	}
-	head := data[0].(map[string]interface{})
+	head := data[0].(map[string]any)
 	slotStr, ok := head["slot"].(string)
 	if !ok {
 		return 0, errors.New("no slot found")
@@ -850,7 +850,7 @@ func getHead(beaconApiURL string) (uint64, error) {
 }
 
 func getStateRootAtSlot(beaconApiURL string, slot uint64) (common.Hash, error) {
-	response := map[string]interface{}{}
+	response := map[string]any{}
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/eth/v1/beacon/states/%d/root", beaconApiURL, slot), nil)
 	if err != nil {
 		return common.Hash{}, err
@@ -867,7 +867,7 @@ func getStateRootAtSlot(beaconApiURL string, slot uint64) (common.Hash, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
 		return common.Hash{}, err
 	}
-	data := response["data"].(map[string]interface{})
+	data := response["data"].(map[string]any)
 	if len(data) == 0 {
 		return common.Hash{}, errors.New("no head found")
 	}
@@ -1501,7 +1501,7 @@ func (m *MakeDepositArgs) Run(ctx *Context) error {
 	privateKey := privateKeyBls.Bytes()
 
 	// Print all the details in json format
-	depositDetails := map[string]interface{}{
+	depositDetails := map[string]any{
 		"deposit":           deposit,
 		"deposit_tree_root": common.Hash(depositTreeRoot),
 		"private_key":       "0x" + common.Bytes2Hex(privateKey),

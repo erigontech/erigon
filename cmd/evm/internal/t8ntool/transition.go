@@ -343,7 +343,7 @@ func Main(ctx *cli.Context) error {
 	collector := make(Alloc)
 
 	dumper := state.NewDumper(tx, rawdbv3.TxNums, prestate.Env.Number)
-	dumper.DumpToCollector(collector, false, false, common.Address{}, 0)
+	dumper.DumpToCollector(context.Background(), collector, false, false, common.Address{}, 0)
 	return dispatchOutput(ctx, baseDir, result, collector, body)
 }
 
@@ -577,7 +577,7 @@ func (g Alloc) OnAccount(addr common.Address, dumpAccount state.DumpAccount) {
 }
 
 // saveFile marshalls the object to the given file
-func saveFile(baseDir, filename string, data interface{}) error {
+func saveFile(baseDir, filename string, data any) error {
 	b, err := json.MarshalIndent(data, "", " ")
 	if err != nil {
 		return NewError(ErrorJson, fmt.Errorf("failed marshalling output: %v", err))
@@ -593,9 +593,9 @@ func saveFile(baseDir, filename string, data interface{}) error {
 // dispatchOutput writes the output data to either stderr or stdout, or to the specified
 // files
 func dispatchOutput(ctx *cli.Context, baseDir string, result *protocol.EphemeralExecResult, alloc Alloc, body hexutil.Bytes) error {
-	stdOutObject := make(map[string]interface{})
-	stdErrObject := make(map[string]interface{})
-	dispatch := func(baseDir, fName, name string, obj interface{}) error {
+	stdOutObject := make(map[string]any)
+	stdErrObject := make(map[string]any)
+	dispatch := func(baseDir, fName, name string, obj any) error {
 		switch fName {
 		case "stdout":
 			stdOutObject[name] = obj

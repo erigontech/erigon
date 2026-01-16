@@ -21,11 +21,13 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/generics"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -87,6 +89,10 @@ type Config struct {
 	Bpo5Time              *big.Int                      `json:"bpo5Time,omitempty"`
 	parseBlobScheduleOnce sync.Once                     `copier:"-"`
 	parsedBlobSchedule    map[uint64]*params.BlobConfig
+
+	// Balancer fork (Gnosis Chain). See https://hackmd.io/@filoozom/rycoQITlWl
+	BalancerTime            *big.Int                         `json:"balancerTime,omitempty"`
+	BalancerRewriteBytecode map[common.Address]hexutil.Bytes `json:"balancerRewriteBytecode,omitempty"`
 
 	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
 	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
@@ -191,11 +197,8 @@ type BorConfig interface {
 	CalculateCoinbase(number uint64) accounts.Address
 }
 
-func timestampToTime(unixTime *big.Int) *time.Time {
-	if unixTime == nil {
-		return nil
-	}
-	t := time.Unix(unixTime.Int64(), 0).UTC()
+func timestampToTime(unixSec int64) *time.Time {
+	t := time.Unix(unixSec, 0).UTC()
 	return &t
 }
 
@@ -214,21 +217,43 @@ func (c *Config) String() string {
 		)
 	}
 
-	return fmt.Sprintf("{ChainID: %v, Terminal Total Difficulty: %v, Shapella: %v, Dencun: %v, Pectra: %v, Fusaka: %v, BPO1: %v, BPO2: %v, BPO3: %v, BPO4: %v, BPO5: %v, Amsterdam: %v, Engine: %v}",
-		c.ChainID,
-		c.TerminalTotalDifficulty,
-		timestampToTime(c.ShanghaiTime),
-		timestampToTime(c.CancunTime),
-		timestampToTime(c.PragueTime),
-		timestampToTime(c.OsakaTime),
-		timestampToTime(c.AmsterdamTime),
-		timestampToTime(c.Bpo1Time),
-		timestampToTime(c.Bpo2Time),
-		timestampToTime(c.Bpo3Time),
-		timestampToTime(c.Bpo4Time),
-		timestampToTime(c.Bpo5Time),
-		engine,
-	)
+	var b strings.Builder
+	fmt.Fprintf(&b, "{ChainID: %v, Terminal Total Difficulty: %v", c.ChainID, c.TerminalTotalDifficulty)
+	if c.ShanghaiTime != nil {
+		fmt.Fprintf(&b, ", Shapella: %v", timestampToTime(c.ShanghaiTime.Int64()))
+	}
+	if c.CancunTime != nil {
+		fmt.Fprintf(&b, ", Dencun: %v", timestampToTime(c.CancunTime.Int64()))
+	}
+	if c.PragueTime != nil {
+		fmt.Fprintf(&b, ", Pectra: %v", timestampToTime(c.PragueTime.Int64()))
+	}
+	if c.OsakaTime != nil {
+		fmt.Fprintf(&b, ", Fusaka: %v", timestampToTime(c.OsakaTime.Int64()))
+	}
+	if c.Bpo1Time != nil {
+		fmt.Fprintf(&b, ", BPO1: %v", timestampToTime(c.Bpo1Time.Int64()))
+	}
+	if c.Bpo2Time != nil {
+		fmt.Fprintf(&b, ", BPO2: %v", timestampToTime(c.Bpo2Time.Int64()))
+	}
+	if c.Bpo3Time != nil {
+		fmt.Fprintf(&b, ", BPO3: %v", timestampToTime(c.Bpo3Time.Int64()))
+	}
+	if c.Bpo4Time != nil {
+		fmt.Fprintf(&b, ", BPO4: %v", timestampToTime(c.Bpo4Time.Int64()))
+	}
+	if c.Bpo5Time != nil {
+		fmt.Fprintf(&b, ", BPO5: %v", timestampToTime(c.Bpo5Time.Int64()))
+	}
+	if c.BalancerTime != nil {
+		fmt.Fprintf(&b, ", Balancer: %v", timestampToTime(c.BalancerTime.Int64()))
+	}
+	if c.AmsterdamTime != nil {
+		fmt.Fprintf(&b, ", Glamsterdam: %v", timestampToTime(c.AmsterdamTime.Int64()))
+	}
+	fmt.Fprintf(&b, ", Engine: %v}", engine)
+	return b.String()
 }
 
 func (c *Config) getEngine() string {
@@ -374,9 +399,7 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 	c.parseBlobScheduleOnce.Do(func() {
 		// Populate with default values
-		c.parsedBlobSchedule = map[uint64]*params.BlobConfig{
-			0: nil,
-		}
+		c.parsedBlobSchedule = make(map[uint64]*params.BlobConfig)
 		if c.CancunTime != nil {
 			c.parsedBlobSchedule[c.CancunTime.Uint64()] = &params.DefaultCancunBlobConfig
 		}
@@ -683,7 +706,7 @@ func (c *CliqueConfig) String() string {
 // For blocks 0–4 an empty string will be returned.
 func ConfigValueLookup[T any](field map[uint64]T, number uint64) T {
 	keys := common.SortedKeys(field)
-	if number < keys[0] {
+	if len(keys) == 0 || number < keys[0] {
 		return generics.Zero[T]()
 	}
 	for i := 0; i < len(keys)-1; i++ {

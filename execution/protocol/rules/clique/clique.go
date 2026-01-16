@@ -364,7 +364,8 @@ func (c *Clique) Prepare(chain rules.ChainHeaderReader, header *types.Header, st
 }
 
 func (c *Clique) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
+	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) error {
+	return nil
 }
 
 func (c *Clique) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall rules.SystemCall,
@@ -570,7 +571,7 @@ func CliqueRLP(header *types.Header) []byte {
 }
 
 func encodeSigHeader(w io.Writer, header *types.Header) {
-	enc := []interface{}{
+	enc := []any{
 		header.ParentHash,
 		header.UncleHash,
 		header.Coinbase,

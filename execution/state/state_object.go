@@ -25,6 +25,7 @@ import (
 	"io"
 	"maps"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -46,12 +47,13 @@ func (c Code) String() string {
 
 type Storage map[accounts.StorageKey]uint256.Int
 
-func (s Storage) String() (str string) {
+func (s Storage) String() string {
+	var str strings.Builder
 	for key, value := range s {
-		str += fmt.Sprintf("%X : %X\n", key, value)
+		str.WriteString(fmt.Sprintf("%X : %X\n", key, value))
 	}
 
-	return
+	return str.String()
 }
 
 func (s Storage) Copy() Storage {

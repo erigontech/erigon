@@ -51,7 +51,7 @@ type StateContext struct {
 	TransactionIndex *int
 }
 
-func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, stateOverride *ethapi.StateOverrides, timeoutMilliSecondsPtr *int64) ([][]map[string]interface{}, error) {
+func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, stateOverride *ethapi.StateOverrides, timeoutMilliSecondsPtr *int64) ([][]map[string]any, error) {
 	var (
 		hash               common.Hash
 		replayTransactions types.Transactions
@@ -197,13 +197,13 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// after replaying the txns, we want to overload the state
 	// overload state
 	if stateOverride != nil {
-		err = stateOverride.OverrideAndCommit(evm.IntraBlockState(), blockCtx.Rules(chainConfig))
+		err = stateOverride.Override(evm.IntraBlockState(), nil, blockCtx.Rules(chainConfig))
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	ret := make([][]map[string]interface{}, 0)
+	ret := make([][]map[string]any, 0)
 
 	for _, bundle := range bundles {
 		// first change blockContext
@@ -228,7 +228,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		if bundle.BlockOverride.BlockHash != nil {
 			maps.Copy(overrideBlockHash, *bundle.BlockOverride.BlockHash)
 		}
-		results := []map[string]interface{}{}
+		results := []map[string]any{}
 		for _, txn := range bundle.Transactions {
 			if txn.Gas == nil || *(txn.Gas) == 0 {
 				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
@@ -250,11 +250,11 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			if evm.Cancelled() {
 				return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 			}
-			jsonResult := make(map[string]interface{})
+			jsonResult := make(map[string]any)
 			if result.Err != nil {
 				if len(result.Revert()) > 0 {
 					revertErr := ethapi.NewRevertError(result)
-					jsonResult["error"] = map[string]interface{}{
+					jsonResult["error"] = map[string]any{
 						"message": revertErr.Error(),
 						"data":    revertErr.ErrorData(),
 					}
