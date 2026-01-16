@@ -19,9 +19,8 @@ package vm
 import (
 	"fmt"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/holiman/uint256"
 )
 
 type readonlyGetSetter interface {
