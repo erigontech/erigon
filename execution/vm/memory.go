@@ -33,7 +33,7 @@ var memoryPool = sync.Pool{
 
 // Buffer pools for return data - sized by power of 2 buckets
 var (
-	bufPool4K = sync.Pool{New: func() any { b := make([]byte, 4096); return &b }}
+	bufPool4K  = sync.Pool{New: func() any { b := make([]byte, 4096); return &b }}
 	bufPool64K = sync.Pool{New: func() any { b := make([]byte, 65536); return &b }}
 )
 

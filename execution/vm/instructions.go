@@ -1157,7 +1157,7 @@ func opDelegateCall(pc uint64, interpreter *EVMInterpreter, scope *CallContext) 
 	// For DELEGATECALL: preserve caller chain
 	pending := getPendingCall()
 	pending.CallType = DELEGATECALL
-	pending.Caller = scope.Contract.addr   // Current contract's address
+	pending.Caller = scope.Contract.addr       // Current contract's address
 	pending.CallerAddr = scope.Contract.caller // Original caller
 	pending.Addr = toAddr
 	pending.Input = args

@@ -873,7 +873,7 @@ func (evm *EVM) PrepareCreate(caller accounts.Address, code []byte, gas uint64, 
 
 // FinishCreate handles the completion of a CREATE/CREATE2, storing code and reverting on error.
 func (evm *EVM) FinishCreate(pc *PreparedCreate, ret []byte, gas uint64, execErr error) ([]byte, uint64, error) {
-	var err error = execErr
+	var err = execErr
 
 	// EIP-170: Contract code size limit
 	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > evm.maxCodeSize() {

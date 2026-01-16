@@ -809,7 +809,7 @@ func TestOpMCopy(t *testing.T) {
 		callContext.Stack.push(*len)
 		callContext.Stack.push(*src)
 		callContext.Stack.push(*dst)
-		wantErr := (tc.wantGas == 0)
+		wantErr := tc.wantGas == 0
 		// Calc mem expansion
 		var memorySize uint64
 		if memSize, overflow := memoryMcopy(callContext); overflow {
