@@ -154,6 +154,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				fmt.Println(blockNum, "Commitment")
 				se.doms.SetTrace(true, false)
 			}
+			// Warmup is enabled via SetWarmupDB at executor init
 			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, true, blockNum, inputTxNum-1, se.logPrefix, nil)
 			se.doms.SetTrace(false, false)
 
@@ -190,7 +191,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		select {
 		case <-logEvery.C:
-			if se.inMemExec || se.isMining {
+			if se.isMining {
 				break
 			}
 
@@ -402,7 +403,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			if txTask.Tx() != nil {
 				se.blobGasUsed += txTask.Tx().GetBlobGas()
 			}
-
 			if txTask.IsBlockEnd() && txTask.BlockNumber() > 0 {
 				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
@@ -434,12 +434,13 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				}
 
 				if !se.isMining && startTxIndex == 0 && !isInitialCycle {
-					se.cfg.notifications.RecentLogs.Add(blockReceipts)
+					se.cfg.notifications.RecentReceipts.Add(blockReceipts, txTask.Txs, txTask.Header)
 				}
 				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts && !se.isMining
+
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-					if err := protocol.BlockPostValidation(se.gasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isMining, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
+					if err := se.getPostValidator().Process(se.gasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isMining, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
@@ -450,19 +451,31 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					panic(err)
 				}
 			} else if txTask.TxIndex >= 0 {
-				var prev *types.Receipt
+				var prev, receipt *types.Receipt
 				if txTask.TxIndex > 0 && txTask.TxIndex-startTxIndex > 0 {
 					prev = blockReceipts[txTask.TxIndex-startTxIndex-1]
+					receipt, err = result.CreateNextReceipt(prev)
+					if err != nil {
+						return err
+					}
+				} else if txTask.TxIndex > 0 {
+					// reconstruct receipt from previous receipt values
+					cumGasUsed, _, logIndexAfterTx, err := rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum)
+					if err != nil {
+						return err
+					}
+					receipt, err = result.CreateReceipt(int(txTask.TxNum), cumGasUsed+result.ExecutionResult.GasUsed, logIndexAfterTx)
+					if err != nil {
+						return err
+					}
 				} else {
-					// TODO get the previous reciept from the DB
+					receipt, err = result.CreateNextReceipt(nil)
+					if err != nil {
+						return err
+					}
 				}
 
-				receipt, err := result.CreateNextReceipt(prev)
-				if err != nil {
-					return err
-				}
 				blockReceipts = append(blockReceipts, receipt)
-
 				if hooks := result.TracingHooks(); hooks != nil && hooks.OnTxEnd != nil {
 					hooks.OnTxEnd(receipt, result.Err)
 				}

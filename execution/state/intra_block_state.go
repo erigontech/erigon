@@ -112,7 +112,7 @@ func (r *revisions) revertToSnapshot(revid int) int {
 }
 
 var revisionsPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &revisions{0, make([]revision, 0, 2048)}
 	},
 }
@@ -920,7 +920,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
 	}
-	if bversion.TxIndex >= readVersion.TxIndex {
+	if bversion.TxIndex > readVersion.TxIndex || (bversion.TxIndex == readVersion.TxIndex && bversion.Incarnation >= readVersion.Incarnation) {
 		if balance.Cmp(&account.Balance) != 0 {
 			if account == readAccount {
 				account = &accounts.Account{}
@@ -928,7 +928,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 			}
 			account.Balance = balance
 		}
-		if bversion.TxIndex > version.TxIndex || (bversion.TxIndex > version.TxIndex && bversion.Incarnation > version.Incarnation) {
+		if bversion.TxIndex > version.TxIndex || (bversion.TxIndex == version.TxIndex && bversion.Incarnation > version.Incarnation) {
 			version = bversion
 			if bsource != source {
 				source = bsource
@@ -940,7 +940,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
 	}
-	if nversion.TxIndex >= readVersion.TxIndex {
+	if nversion.TxIndex > readVersion.TxIndex || (nversion.TxIndex == readVersion.TxIndex && nversion.Incarnation >= readVersion.Incarnation) {
 		if nonce > account.Nonce {
 			if account == readAccount {
 				account = &accounts.Account{}
@@ -948,7 +948,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 			}
 			account.Nonce = nonce
 		}
-		if nversion.TxIndex > version.TxIndex || (nversion.TxIndex > version.TxIndex && nversion.Incarnation > version.Incarnation) {
+		if nversion.TxIndex > version.TxIndex || (nversion.TxIndex == version.TxIndex && nversion.Incarnation > version.Incarnation) {
 			version = nversion
 			if nsource != source {
 				source = nsource
@@ -961,7 +961,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 		return nil, UnknownSource, UnknownVersion, err
 	}
 
-	if cversion.TxIndex >= readVersion.TxIndex {
+	if cversion.TxIndex > readVersion.TxIndex || (cversion.TxIndex == readVersion.TxIndex && cversion.Incarnation >= readVersion.Incarnation) {
 		if codeHash != account.CodeHash {
 			if account == readAccount {
 				account = &accounts.Account{}
@@ -969,7 +969,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 			}
 			account.CodeHash = codeHash
 		}
-		if cversion.TxIndex > version.TxIndex || (cversion.TxIndex > version.TxIndex && cversion.Incarnation > version.Incarnation) {
+		if cversion.TxIndex > version.TxIndex || (cversion.TxIndex == version.TxIndex && cversion.Incarnation > version.Incarnation) {
 			version = cversion
 			if csource != source {
 				source = csource

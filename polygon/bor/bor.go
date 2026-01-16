@@ -146,7 +146,7 @@ func SealHash(header *types.Header, c *borcfg.BorConfig) (hash common.Hash) {
 }
 
 func encodeSigHeader(w io.Writer, header *types.Header, c *borcfg.BorConfig) {
-	enc := []interface{}{
+	enc := []any{
 		header.ParentHash,
 		header.UncleHash,
 		header.Coinbase,
@@ -913,10 +913,13 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 }
 
 func (c *Bor) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
+	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) error {
 	if chain != nil && chain.Config().IsBhilai(header.Number.Uint64()) {
-		_ = misc.StoreBlockHashesEip2935(header, state)
+		if err := misc.StoreBlockHashesEip2935(header, state); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // Authorize injects a private key into the rules engine to mint new blocks
@@ -1216,7 +1219,7 @@ func (c *Bor) getHeaderByNumber(ctx context.Context, tx kv.Tx, number uint64) (*
 		return nil, err
 	}
 	if header == nil {
-		_, _ = c.blockReader.HeaderByNumber(dbg.ContextWithDebug(ctx, true), tx, number)
+		_, _ = c.blockReader.HeaderByNumber(dbg.WithDebug(ctx, true), tx, number)
 		return nil, fmt.Errorf("[bor] header not found: %d", number)
 	}
 	return header, nil
@@ -1233,7 +1236,7 @@ func (c *Bor) CommitStates(
 	var events []*types.Message
 	var err error
 
-	ctx := dbg.ContextWithDebug(c.execCtx, true)
+	ctx := dbg.WithDebug(c.execCtx, true)
 	if fetchEventsWithinTime {
 		sprintLength := c.config.CalculateSprintLength(blockNum)
 

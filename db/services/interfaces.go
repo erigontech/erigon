@@ -22,6 +22,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -29,10 +30,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
-
-type All struct {
-	BlockReader FullBlockReader
-}
 
 type BlockReader interface {
 	BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error)
@@ -113,7 +110,7 @@ type FullBlockReader interface {
 
 	AllTypes() []snaptype.Type
 
-	TxnumReader(ctx context.Context) rawdbv3.TxNumsReader
+	TxnumReader() rawdbv3.TxNumsReader
 }
 
 // BlockRetire - freezing blocks: moving old data from DB to snapshot files
@@ -124,8 +121,7 @@ type BlockRetire interface {
 		miBlockNum uint64,
 		maxBlockNum uint64,
 		lvl log.Lvl,
-		seedNewSnapshots func(downloadRequest []DownloadRequest) error,
-		onDelete func(l []string) error,
+		seeder downloader.SeederClient,
 		onFinishRetire func() error,
 		onDone func()) bool
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier) error

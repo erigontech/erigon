@@ -47,12 +47,6 @@ type LogsFilter struct {
 	sender         Sub[*types.Log] // nil for aggregate subscriber, for appropriate stream server otherwise
 }
 
-// Send sends a log to the subscriber represented by the LogsFilter.
-// It forwards the log to the subscriber's sender.
-func (l *LogsFilter) Send(lg *types.Log) {
-	l.sender.Send(lg)
-}
-
 // Close closes the sender associated with the LogsFilter.
 // It is used to properly clean up and release resources associated with the sender.
 func (l *LogsFilter) Close() {

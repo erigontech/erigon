@@ -149,10 +149,10 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 		}
 		defer doms.Close()
 	}
-	txNumsReader := br.TxnumReader(ctx)
+	txNumsReader := br.TxnumReader()
 
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
-	txNum, err := txNumsReader.Min(rwTx, u.UnwindPoint+1)
+	txNum, err := txNumsReader.Min(ctx, rwTx, u.UnwindPoint+1)
 	if err != nil {
 		return err
 	}
@@ -214,8 +214,6 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 }
 
 var mxState3Unwind = metrics.GetOrCreateSummary("state3_unwind")
-
-const trace bool = true
 
 func unwindExec3State(ctx context.Context,
 	sd *execctx.SharedDomains, tx kv.TemporalRwTx,
@@ -451,7 +449,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 	return nil
 }
 
-func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context, logger log.Logger) (err error) {
+func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -470,6 +468,10 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	//  - and set ~500ms timeout
 	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
 	quickPruneTimeout := 500 * time.Millisecond
+
+	if timeout > 0 && timeout > quickPruneTimeout {
+		quickPruneTimeout = timeout
+	}
 
 	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth && !cfg.syncCfg.AlwaysGenerateChangesets {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb

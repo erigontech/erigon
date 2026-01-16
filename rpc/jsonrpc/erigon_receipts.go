@@ -231,7 +231,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	}
 
 	// latest logs that match the filter crit
-	it := rawdbv3.TxNums2BlockNums(tx, api._txNumReader, txNumbers, order.Desc)
+	it := rawdbv3.TxNums2BlockNums(ctx, tx, api._txNumReader, txNumbers, order.Desc)
 
 	defer it.Close()
 
@@ -348,7 +348,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	return erigonLogs, nil
 }
 
-func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonicalBlockHash common.Hash) ([]map[string]interface{}, error) {
+func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonicalBlockHash common.Hash) ([]map[string]any, error) {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -392,7 +392,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 
-	result := make([]map[string]interface{}, 0, len(receipts))
+	result := make([]map[string]any, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
 		result = append(result, ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, false))

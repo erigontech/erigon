@@ -41,16 +41,16 @@ type PeerNetworkInfo struct {
 }
 
 type PeerResponse struct {
-	ENR           string                 `json:"enr,omitempty"` // Ethereum Node Record
-	Enode         string                 `json:"enode"`         // Node URL
-	ID            string                 `json:"id"`            // Unique node identifier
-	Name          string                 `json:"name"`          // Name of the node, including client type, version, OS, custom data
-	ErrorCount    int                    `json:"errorCount"`    // Number of errors
-	LastSeenError string                 `json:"lastSeenError"` // Last seen error
-	Type          string                 `json:"type"`          // Type of connection
-	Caps          []string               `json:"caps"`          // Protocols advertised by this peer
-	Network       PeerNetworkInfo        `json:"network"`
-	Protocols     map[string]interface{} `json:"protocols"` // Sub-protocol specific metadata fields
+	ENR           string          `json:"enr,omitempty"` // Ethereum Node Record
+	Enode         string          `json:"enode"`         // Node URL
+	ID            string          `json:"id"`            // Unique node identifier
+	Name          string          `json:"name"`          // Name of the node, including client type, version, OS, custom data
+	ErrorCount    int             `json:"errorCount"`    // Number of errors
+	LastSeenError string          `json:"lastSeenError"` // Last seen error
+	Type          string          `json:"type"`          // Type of connection
+	Caps          []string        `json:"caps"`          // Protocols advertised by this peer
+	Network       PeerNetworkInfo `json:"network"`
+	Protocols     map[string]any  `json:"protocols"` // Sub-protocol specific metadata fields
 }
 
 func SetupPeersAccess(ctxclient *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode, diag *diaglib.DiagnosticClient) {

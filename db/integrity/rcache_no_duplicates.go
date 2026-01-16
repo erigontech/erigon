@@ -9,7 +9,6 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -21,10 +20,7 @@ func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 		log.Info("[integrity] RCacheNoDups: done", "err", err)
 	}()
 
-	logEvery := time.NewTicker(10 * time.Second)
-	defer logEvery.Stop()
-
-	txNumsReader := blockReader.TxnumReader(ctx)
+	txNumsReader := blockReader.TxnumReader()
 
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -34,21 +30,27 @@ func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 
 	rcacheDomainProgress := tx.Debug().DomainProgress(kv.RCacheDomain)
 	fromBlock := uint64(1)
-	toBlock, _, _ := txNumsReader.FindBlockNum(tx, rcacheDomainProgress)
+	toBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, rcacheDomainProgress)
 
-	if err := ValidateDomainProgress(db, kv.RCacheDomain, txNumsReader); err != nil {
+	if err := ValidateDomainProgress(ctx, db, kv.RCacheDomain, txNumsReader); err != nil {
 		return err
 	}
 
 	log.Info("[integrity] RCacheNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
 
 	defer db.Debug().EnableReadAhead().DisableReadAhead()
+
 	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, RCacheNoDupsRange)
 }
 
-func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.TemporalTx, blockReader services.FullBlockReader, failFast bool) (err error) {
-	txNumsReader := blockReader.TxnumReader(ctx)
-	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
+func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	txNumsReader := blockReader.TxnumReader()
+	fromTxNum, err := txNumsReader.Min(ctx, tx, fromBlock)
 	if err != nil {
 		return err
 	}
@@ -56,7 +58,7 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.Tem
 		toBlock-- // [fromBlock,toBlock)
 	}
 
-	toTxNum, err := txNumsReader.Max(tx, toBlock)
+	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
 	if err != nil {
 		return err
 	}
@@ -65,41 +67,36 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.Tem
 	expectedFirstLogIdx := uint32(0)
 	blockNum := fromBlock
 	var _min, _max uint64
-	_min, _ = txNumsReader.Min(tx, fromBlock)
-	_max, _ = txNumsReader.Max(tx, fromBlock)
-	for txNum := fromTxNum; txNum <= toTxNum; txNum++ {
-		r, found, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
-			TxNum:         txNum,
-			BlockNum:      blockNum,
-			BlockHash:     common.Hash{}, // don't care about blockHash/txnHash
-			TxnHash:       common.Hash{},
-			DontCalcBloom: true, // we don't need bloom for this check
-		})
+	_min = fromTxNum
+	_max, _ = txNumsReader.Max(ctx, tx, fromBlock)
+
+	it, err := rawdb.ReceiptCacheV2Stream(tx, fromTxNum, toTxNum)
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+
+	for it.HasNext() {
+		txNum, r, err := it.Next()
 		if err != nil {
 			return err
 		}
-		if !found {
-			if txNum == _max {
-				blockNum++
-				_min = _max + 1
-				_max, _ = txNumsReader.Max(tx, blockNum)
-				expectedFirstLogIdx = 0
-				prevCumUsedGas = -1
-				continue // skip system txs
-			}
-			if txNum == _min {
-				continue
-			}
-			if failFast {
-				return fmt.Errorf("[integrity] RCacheNoDups: missing receipt for block %d, txNum %d", blockNum, txNum)
-			}
-			log.Warn("[integrity] RCacheNoDups: missing receipt", "block", blockNum, "txNum", txNum)
+
+		if r == nil {
 			continue
+		}
+
+		for txNum > _max {
+			blockNum++
+			_min = _max + 1
+			_max, _ = txNumsReader.Max(ctx, tx, blockNum)
+			expectedFirstLogIdx = 0
+			prevCumUsedGas = -1
 		}
 
 		logIdx := r.FirstLogIndexWithinBlock
 		exactLogIdx := logIdx == expectedFirstLogIdx
-		if !exactLogIdx && txNum != _max {
+		if !exactLogIdx && txNum <= _max {
 			err := fmt.Errorf("RCacheNoDups: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdx=%d, expectedFirstLogIdx=%d", txNum, blockNum, _min, _max, logIdx, expectedFirstLogIdx)
 			if failFast {
 				return err
@@ -110,7 +107,7 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.Tem
 
 		cumUsedGas := r.CumulativeGasUsed
 		strongMonotonicCumGasUsed := int(cumUsedGas) > prevCumUsedGas
-		if !strongMonotonicCumGasUsed && txNum != _max { // system tx can be skipped
+		if !strongMonotonicCumGasUsed && txNum <= _max { // system tx can be skipped
 			err := fmt.Errorf("RCacheNoDups: non-monotonic cumUsedGas at txnum: %d, block: %d(%d-%d), cumUsedGas=%d, prevCumUsedGas=%d", txNum, blockNum, _min, _max, cumUsedGas, prevCumUsedGas)
 			if failFast {
 				return err
@@ -118,14 +115,6 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.Tem
 			log.Error(err.Error())
 		}
 		prevCumUsedGas = int(cumUsedGas)
-
-		if txNum == _max {
-			blockNum++
-			_min = _max + 1
-			_max, _ = txNumsReader.Max(tx, blockNum)
-			expectedFirstLogIdx = 0
-			prevCumUsedGas = -1
-		}
 
 		if txNum%1000 == 0 {
 			select {
@@ -139,7 +128,7 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.Tem
 	return nil
 }
 
-type chunkFn func(ctx context.Context, fromBlock, toBlock uint64, tx kv.TemporalTx, blockReader services.FullBlockReader, failFast bool) error
+type chunkFn func(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) error
 
 func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool, fn chunkFn) (err error) {
 	blockRange := toBlock - fromBlock + 1
@@ -180,14 +169,7 @@ func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.Te
 		chunkEnd := end     // Capture loop variable
 
 		g.Go(func() error {
-			tx, err := db.BeginTemporalRo(ctx)
-			if err != nil {
-				return err
-			}
-			defer tx.Rollback()
-
-			// chunkErr := ReceiptsNoDupsRange(ctx, chunkStart, chunkEnd, tx, blockReader, failFast)
-			chunkErr := fn(ctx, chunkStart, chunkEnd, tx, blockReader, failFast)
+			chunkErr := fn(ctx, chunkStart, chunkEnd, db, blockReader, failFast)
 			if chunkErr != nil {
 				return chunkErr
 			}

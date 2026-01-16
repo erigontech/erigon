@@ -46,7 +46,7 @@ func TestAccountChangesEncodeRejectsUnsortedReads(t *testing.T) {
 }
 
 func TestDecodeBalanceChangesRejectsOutOfOrderIndices(t *testing.T) {
-	payload, err := rlp.EncodeToBytes([][]interface{}{
+	payload, err := rlp.EncodeToBytes([][]any{
 		{uint64(2), []byte{0x01}},
 		{uint64(1), []byte{0x01}},
 	})
