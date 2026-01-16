@@ -12,7 +12,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol/fixedgas"
+	"github.com/erigontech/erigon/execution/protocol/gasutil"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -529,7 +529,7 @@ func (tx *AccountAbstractionTransaction) PreTransactionGasCost(rules *chain.Rule
 	data = append(data, tx.DeployerData...)
 	data = append(data, tx.ExecutionData...)
 	data = append(data, tx.PaymasterData...)
-	gas, _, overflow := fixedgas.IntrinsicGas(data, uint64(len(tx.AccessList)), uint64(tx.AccessList.StorageKeys()), false, rules.IsHomestead, rules.IsIstanbul, hasEIP3860, rules.IsPrague, true, uint64(len(tx.Authorizations)))
+	gas, _, overflow := gasutil.IntrinsicGas(data, uint64(len(tx.AccessList)), uint64(tx.AccessList.StorageKeys()), false, rules.IsHomestead, rules.IsIstanbul, hasEIP3860, rules.IsPrague, true, uint64(len(tx.Authorizations)))
 
 	if overflow {
 		return 0, errors.New("overflow")
