@@ -253,6 +253,8 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 					if err != nil {
 						return fmt.Errorf("failed to transform commitment value: %w", err)
 					}
+				} else {
+					v2 = v
 				}
 				if _, err = writer.Write(k); err != nil {
 					return fmt.Errorf("write key word: %w", err)
