@@ -306,7 +306,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	} else if req.BlockAccessList != nil {
 		return nil, &rpc.InvalidParamsError{Message: "unexpected blockAccessList before Amsterdam"}
 	}
-	log.Info(fmt.Sprintf("bal from header: %s", blockAccessList.DebugString()))
+	log.Debug(fmt.Sprintf("bal from header: %s", blockAccessList.DebugString()))
 
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) ||
