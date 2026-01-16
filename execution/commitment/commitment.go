@@ -653,9 +653,10 @@ func validateAfterMap(afterMap uint16, row [16]*cell) error {
 }
 
 func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccakState) error {
-	uncompactedBranchKey := uncompactNibbles(branchKey)
+	uncompactedBranchKey := bytesToHexNibblesNoTerminator(branchKey)
 	if hasTerm(uncompactedBranchKey) {
-		uncompactedBranchKey = uncompactedBranchKey[:len(uncompactedBranchKey)-1]
+		panic(fmt.Sprintf("there shouldn't be a terminator in %x", uncompactedBranchKey))
+		// uncompactedBranchKey = uncompactedBranchKey[:len(uncompactedBranchKey)-1]
 	}
 	if len(uncompactedBranchKey) > 128 {
 		return fmt.Errorf("branch key too long: %d", len(branchKey))

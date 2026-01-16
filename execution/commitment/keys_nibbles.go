@@ -81,6 +81,42 @@ func hexNibblesToCompactBytes(key []byte) []byte {
 	return buf
 }
 
+func hexNibblesToCompactBytesNoTerminator(nibbles []byte) []byte {
+	nibbleLen := len(nibbles)
+	if hasTerm(nibbles) {
+		panic(fmt.Sprintf("Unexpected terminator in key %x", nibbles))
+	}
+	if nibbleLen == 0 {
+		return nil
+	}
+
+	bufLen := (nibbleLen + 1) / 2
+	buf := make([]byte, bufLen)
+
+	for i := 0; i < nibbleLen; i++ {
+		if i%2 == 0 {
+			buf[i/2] = nibbles[i] << 4
+		} else {
+			buf[i/2] |= nibbles[i]
+		}
+	}
+	return buf
+}
+
+// bytesToHexNibblesNoTerminator converts compacted bytes back to hex nibbles (1-nibble-per-byte form).
+func bytesToHexNibblesNoTerminator(compacted []byte) []byte {
+	if len(compacted) == 0 {
+		return nil
+	}
+
+	buf := make([]byte, len(compacted)*2)
+	for i, b := range compacted {
+		buf[i*2] = b >> 4
+		buf[i*2+1] = b & 0x0f
+	}
+	return buf
+}
+
 // uncompactNibbles converts a slice of bytes representing nibbles in regular form into 1-nibble-per-byte form.
 func uncompactNibbles(key []byte) []byte {
 	if len(key) == 0 {
