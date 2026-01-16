@@ -294,12 +294,7 @@ func (s SnapType) FileInfo(dir string, from uint64, to uint64) FileInfo {
 }
 
 func (s SnapType) FileInfoByMask(dir string, from uint64, to uint64) FileInfo {
-	mask, err := version.ReplaceVersionWithMask(s.FileName(s.versions.Current, from, to))
-	if err != nil {
-		log.Debug("[snaptype] replace with mask error", "err", err, "fName", s.FileName(s.versions.Current, from, to))
-		return FileInfo{}
-	}
-	fName, _, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(dir, mask))
+	fName, _, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(dir, s.FileMask(from, to)))
 	if err != nil {
 		log.Debug("[snaptype] file mask error", "err", err, "fName", s.FileName(s.versions.Current, from, to))
 		return FileInfo{}
