@@ -38,7 +38,7 @@ import (
 // indicating the block was invalid.
 func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPool, ibs *state.IntraBlockState,
 	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, gasUsed, usedBlobGas *uint64,
-	evm *vm.EVM, cfg vm.Config) (*types.Receipt, []byte, error) {
+	evm *vm.EVM, cfg vm.Config) (*types.Receipt, error) {
 	var (
 		receipt *types.Receipt
 		err     error
@@ -48,7 +48,7 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	blockNum := header.Number.Uint64()
 	msg, err := txn.AsMessage(*types.MakeSigner(config, blockNum, header.Time), header.BaseFee, rules)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	msg.SetCheckNonce(!cfg.StatelessExec)
 
@@ -72,11 +72,11 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	evm.Reset(txContext, ibs)
 	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	// Update the state with pending changes
 	if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	*gasUsed += result.GasUsed
 	if usedBlobGas != nil {
@@ -90,7 +90,7 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 		receipt = MakeReceipt(header.Number, header.Hash(), msg, txn, *gasUsed, result, ibs, evm)
 	}
 
-	return receipt, result.ReturnData, err
+	return receipt, err
 }
 
 // ApplyTransaction attempts to apply a transaction to the given state database
@@ -100,7 +100,7 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) (common.Hash, error), engine rules.EngineReader,
 	author accounts.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter,
 	header *types.Header, txn types.Transaction, gasUsed, usedBlobGas *uint64, cfg vm.Config,
-) (*types.Receipt, []byte, error) {
+) (*types.Receipt, error) {
 	// Create a new context to be used in the EVM environment
 	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, config)
 	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
@@ -118,7 +118,7 @@ func ApplyTransactionWithEVM(config *chain.Config, engine rules.EngineReader, gp
 	ibs *state.IntraBlockState,
 	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, usedGas, usedBlobGas *uint64,
 	cfg vm.Config, vmenv *vm.EVM,
-) (*types.Receipt, []byte, error) {
+) (*types.Receipt, error) {
 	return applyTransaction(config, engine, gp, ibs, stateWriter, header, txn, usedGas, usedBlobGas, vmenv, cfg)
 }
 

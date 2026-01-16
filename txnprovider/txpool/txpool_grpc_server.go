@@ -239,9 +239,9 @@ func (s *GrpcServer) GetBlobs(ctx context.Context, in *txpoolproto.GetBlobsReque
 	blobBundles := s.txPool.GetBlobs(hashes)
 	reply := make([]*txpoolproto.BlobAndProof, len(blobBundles))
 	for i, bb := range blobBundles {
-		var proofs [][]byte
-		for _, p := range bb.Proofs {
-			proofs = append(proofs, p[:])
+		proofs := make([][]byte, len(bb.Proofs))
+		for j, p := range bb.Proofs {
+			proofs[j] = p[:]
 		}
 		reply[i] = &txpoolproto.BlobAndProof{
 			Blob:   bb.Blob,

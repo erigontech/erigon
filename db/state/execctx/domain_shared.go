@@ -376,6 +376,10 @@ func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 	return logMetrics
 }
 
+func (sd *SharedDomains) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return sd.mem.GetAsOf(domain, key, ts)
+}
+
 // DomainPut
 // Optimizations:
 //   - user can provide `prevVal != nil` - then it will not read prev value from storage
@@ -515,4 +519,8 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx
 // SetWarmupDB sets the database used for parallel warmup of MDBX page cache during commitment.
 func (sd *SharedDomains) SetWarmupDB(db kv.TemporalRoDB) {
 	sd.sdCtx.SetWarmupDB(db)
+}
+
+func (sd *SharedDomains) SetParaTrieDB(db kv.TemporalRoDB) {
+	sd.sdCtx.SetParaTrieDB(db)
 }

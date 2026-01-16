@@ -90,6 +90,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.RPCGlobalTxFeeCapFlag,
 	&utils.TxpoolApiAddrFlag,
 	&utils.TraceMaxtracesFlag,
+	&utils.AlwaysGenerateChangesetsFlag,
 
 	&HTTPReadTimeoutFlag,
 	&HTTPWriteTimeoutFlag,
@@ -118,7 +119,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.TorrentPortFlag,
 	&utils.TorrentMaxPeersFlag,
 	&utils.TorrentConnsPerFileFlag,
-	&utils.TorrentDownloadSlotsFlag,
+	&utils.TorrentDownloadSlotsFlag, // Deprecated (v3.0) - kept for backward compatibility, no effect
 	&utils.TorrentStaticPeersFlag,
 	&utils.TorrentDisableTrackers,
 	&utils.TorrentUploadRateFlag,

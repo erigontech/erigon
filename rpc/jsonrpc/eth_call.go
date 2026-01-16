@@ -446,13 +446,13 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	}
 	if blockNrOrHash.BlockNumber.Uint64() < latestBlock {
 		// Get first txnum of blockNumber+1 to ensure that correct state root will be restored as of blockNumber has been executed
-		lastTxnInBlock, err := api._txNumReader.Min(tx, blockNrOrHash.BlockNumber.Uint64()+1)
+		lastTxnInBlock, err := api._txNumReader.Min(ctx, tx, blockNrOrHash.BlockNumber.Uint64()+1)
 		if err != nil {
 			return nil, err
 		}
 		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
 		if lastTxnInBlock < commitmentStartingTxNum {
-			return nil, state.PrunedError
+			return nil, fmt.Errorf("%w: commitment start: %d, last tx: %d", state.PrunedError, commitmentStartingTxNum, lastTxnInBlock)
 		}
 
 		sdCtx.SetHistoryStateReader(roTx, lastTxnInBlock)
@@ -844,7 +844,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		}
 		stateReader = rpchelper.CreateLatestCachedStateReader(cacheView, tx)
 	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(tx, blockNumber+1, 0, api._txNumReader)
+		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, blockNumber+1, 0, api._txNumReader)
 		if err != nil {
 			return nil, err
 		}

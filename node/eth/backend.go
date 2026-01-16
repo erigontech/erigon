@@ -795,7 +795,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		txnProvider = backend.txPool
 	}
 
+	execmoduleCache := &execmodule.Cache{}
 	httpRpcCfg := stack.Config().Http
+	httpRpcCfg.StateCache.LocalCache = execmoduleCache
 	ethRpcClient, txPoolRpcClient, miningRpcClient, rpcDaemonStateCache, rpcFilters := rpcdaemoncli.EmbeddedServices(
 		ctx,
 		backend.chainDB,
@@ -991,7 +993,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.silkworm, backend.forkValidator, tracer)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
-	backend.eth1ExecutionServer = execmodule.NewEthereumExecutionModule(ctx, blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.RecentReceipts, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync)
+	backend.eth1ExecutionServer = execmodule.NewEthereumExecutionModule(ctx, blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.RecentReceipts, execmoduleCache, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync)
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
 
 	var executionEngine executionclient.ExecutionEngine
@@ -1339,14 +1341,23 @@ func (s *Ethereum) initDownloader(
 	}
 	s.downloader.HandleTorrentClientStatus(nodeCfg.DebugMux)
 
-	// start embedded Downloader
-	// TODO: Not sure if we want to add only the completed here, or add after we finish initial
-	// sync checks. Looks like we'd need to pass this or a callback all the way up into the sync
-	// stage somewhere?
-	err = s.downloader.AddTorrentsFromDisk(ctx)
+	// This adds completed snapshots on disk. Ideally we'd do this after completing sync, so that we
+	// don't unnecessarily report incomplete torrents. But to do that we need access to
+	// Downloader.AddTorrentsFromDisk in the sync stage, which only has the GPRC client. There's
+	// also the issue of having torrents not in the preverified set: If we are performing a sync for
+	// missing snapshots, any snapshots not in that set could cause issues. That's an unsolved issue
+	// and probably requires always resetting before resuming/starting a sync.
+	incomplete, err := s.downloader.AddTorrentsFromDisk(ctx)
 	if err != nil {
 		err = fmt.Errorf("adding torrents from disk: %w", err)
 		return
+	}
+
+	if incomplete != 0 {
+		// This is fine if we're resuming a sync. If not, there are files that will just float
+		// around. See the comment about resetting above. If that is resolved, we could delete or
+		// ignore incomplete torrents as aberrations.
+		s.logger.Warn("Downloader detected incomplete snapshots", "count", incomplete)
 	}
 
 	bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
