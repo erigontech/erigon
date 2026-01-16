@@ -84,26 +84,10 @@ func (s *Sync) NewUnwindState(id stages.SyncStage, unwindPoint, currentProgress 
 
 // PruneStageState Get the current prune status from the DB
 func (s *Sync) PruneStageState(id stages.SyncStage, forwardProgress uint64, tx kv.Tx, db kv.RwDB, initialCycle bool) (*PruneState, error) {
-	var pruneProgress uint64
-	var err error
-	useExternalTx := tx != nil
-	if useExternalTx {
-		pruneProgress, err = stages.GetStagePruneProgress(tx, id)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		if err = db.View(context.Background(), func(tx kv.Tx) error {
-			pruneProgress, err = stages.GetStagePruneProgress(tx, id)
-			if err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
-			return nil, err
-		}
+	pruneProgress, err := stages.GetStagePruneProgress(tx, id)
+	if err != nil {
+		return nil, err
 	}
-
 	return &PruneState{id, forwardProgress, pruneProgress, s, CurrentSyncCycleInfo{initialCycle, false}}, nil
 }
 
@@ -262,26 +246,10 @@ func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, prune
 }
 
 func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, db kv.RoDB, initialCycle, firstCycle bool) (*StageState, error) {
-	var blockNum uint64
-	var err error
-	useExternalTx := tx != nil
-	if useExternalTx {
-		blockNum, err = stages.GetStageProgress(tx, stage)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		if err = db.View(context.Background(), func(tx kv.Tx) error {
-			blockNum, err = stages.GetStageProgress(tx, stage)
-			if err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
-			return nil, err
-		}
+	blockNum, err := stages.GetStageProgress(tx, stage)
+	if err != nil {
+		return nil, err
 	}
-
 	return &StageState{s, stage, blockNum, CurrentSyncCycleInfo{initialCycle, firstCycle}}, nil
 }
 

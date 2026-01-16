@@ -49,16 +49,6 @@ func StageFinishCfg(db kv.RwDB, tmpDir string, forkValidator *engine_helpers.For
 
 func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 	defer updateInitialCycleDuration(s, cfg)
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
 	var executionAt uint64
 	var err error
 	if executionAt, err = s.ExecutionAt(tx); err != nil {
@@ -83,12 +73,6 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 		}
 	}
 
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -99,45 +83,6 @@ func updateInitialCycleDuration(s *StageState, cfg FinishCfg) {
 		*cfg.initialCycleStart = time.Now()
 		initialCycleDurationSecs.Set(0)
 	}
-}
-
-func UnwindFinish(u *UnwindState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
-	if err = u.Done(tx); err != nil {
-		return err
-	}
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func PruneFinish(u *PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // [from,to)

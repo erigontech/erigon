@@ -161,10 +161,10 @@ func DefaultStages(ctx context.Context,
 				return FinishForward(s, tx, finish)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return UnwindFinish(u, tx, finish, ctx)
+				return nil
 			},
 			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
-				return PruneFinish(p, tx, finish, ctx)
+				return nil
 			},
 		},
 	}
@@ -266,10 +266,10 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return FinishForward(s, tx, finish)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return UnwindFinish(u, tx, finish, ctx)
+				return nil
 			},
 			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
-				return PruneFinish(p, tx, finish, ctx)
+				return nil
 			},
 		},
 	)

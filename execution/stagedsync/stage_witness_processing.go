@@ -99,16 +99,6 @@ func SpawnStageWitnessProcessing(s *StageState, tx kv.RwTx, cfg WitnessProcessin
 		return nil
 	}
 
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
 	// Drain all buffered witnesses
 	witnesses := cfg.witnessBuffer.DrainWitnesses()
 
@@ -146,73 +136,31 @@ func SpawnStageWitnessProcessing(s *StageState, tx kv.RwTx, cfg WitnessProcessin
 		}
 	}
 
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	logger.Info("[WitnessProcessing] completed witness processing", "processed", len(witnesses))
 	return nil
 }
 
 // UnwindWitnessProcessingStage handles unwind operations for witness processing
 func UnwindWitnessProcessingStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg WitnessProcessingCfg, logger log.Logger) error {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
 	if err := cleanupWitnessesForUnwind(tx, u.UnwindPoint+1); err != nil {
 		logger.Warn("failed to cleanup witnesses during witness stage unwind", "err", err, "unwind_point", u.UnwindPoint)
 		return err
 	}
-
 	if err := u.Done(tx); err != nil {
 		return err
 	}
-
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
 // PruneWitnessProcessingStage handles pruning for witness processing
 func PruneWitnessProcessingStage(p *PruneState, tx kv.RwTx, cfg WitnessProcessingCfg, ctx context.Context, logger log.Logger) error {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
 	// Prune old witness data based on retention policy
 	if err := cleanupOldWitnesses(tx, p.ForwardProgress, logger); err != nil {
 		return err
 	}
-
 	if err := p.Done(tx); err != nil {
 		return err
 	}
-
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
