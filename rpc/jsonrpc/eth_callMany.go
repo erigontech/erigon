@@ -145,7 +145,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	timeout := api.evmCallTimeout
 
-	if timeoutMilliSecondsPtr != nil &&  *timeoutMilliSecondsPtr  > 0 {
+	if timeoutMilliSecondsPtr != nil && *timeoutMilliSecondsPtr > 0 {
 		timeout = time.Duration(*timeoutMilliSecondsPtr) * time.Millisecond
 	}
 
