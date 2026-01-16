@@ -240,7 +240,11 @@ func (t *UDPv5) Resolve(n *enode.Node) *enode.Node {
 func (t *UDPv5) AllNodes() []*enode.Node {
 	t.tab.mutex.Lock()
 	defer t.tab.mutex.Unlock()
-	nodes := make([]*enode.Node, 0)
+	capacity := 0
+	for _, b := range &t.tab.buckets {
+		capacity += len(b.entries)
+	}
+	nodes := make([]*enode.Node, 0, capacity)
 
 	for _, b := range &t.tab.buckets {
 		for _, n := range b.entries {
