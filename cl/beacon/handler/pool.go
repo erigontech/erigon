@@ -230,6 +230,7 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 			})
 			continue
 		}
+		log.Debug("[Beacon REST] published attestation to gossip", "slot", slot, "committeeIndex", cIndex)
 	}
 	if len(failures) > 0 {
 		errResp := poolingError{
@@ -243,7 +244,6 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 		}
 		return
 	}
-	log.Debug("[Beacon REST] published attestations to gossip", "count", len(req))
 	w.WriteHeader(http.StatusOK)
 }
 
