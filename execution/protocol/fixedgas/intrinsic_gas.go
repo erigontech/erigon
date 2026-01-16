@@ -20,13 +20,8 @@
 package fixedgas
 
 import (
-<<<<<<<< HEAD:execution/protocol/fixedgas/intrinsic_gas.go
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/params"
-========
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon/execution/chain/params"
->>>>>>>> arbitrum:execution/fixedgas/intrinsic_gas.go
 )
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.

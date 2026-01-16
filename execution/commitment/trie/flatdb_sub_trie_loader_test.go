@@ -23,11 +23,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-<<<<<<<< HEAD:execution/commitment/trie/flatdb_sub_trie_loader_test.go
 	"github.com/erigontech/erigon/common"
-========
-	"github.com/erigontech/erigon-lib/common"
->>>>>>>> arbitrum:execution/trie/flatdb_sub_trie_loader_test.go
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 

@@ -219,7 +219,6 @@ var (
 	DelegatedDesignationPrefix = []byte{0xef, 0x01, 0x00}
 	DelegatedCodeHash          = common.HexToHash("0xeadcdba66a79ab5dce91622d1d75c8cff5cff0b96944c3bf1072cd08ce018329")
 
-<<<<<<<< HEAD:execution/protocol/params/protocol.go
 // EIP-4788: Beacon block root in the EVM
 var BeaconRootsAddress = accounts.InternAddress(common.HexToAddress("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02"))
 
@@ -231,20 +230,6 @@ var WithdrawalRequestAddress = accounts.InternAddress(common.HexToAddress("0x000
 
 // EIP-7251
 var ConsolidationRequestAddress = accounts.InternAddress(common.HexToAddress("0x0000BBdDc7CE488642fb579F8B00f3a590007251"))
-========
-	// EIP-4788: Beacon block root in the EVM
-	BeaconRootsAddress = common.HexToAddress("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02")
-
-	// EIP-2935: Historical block hashes in state
-	HistoryStorageAddress = common.HexToAddress("0x0000F90827F1C53a10cb7A02335B175320002935")
-
-	// EIP-7002: Execution layer triggerable withdrawals
-	WithdrawalRequestAddress = common.HexToAddress("0x00000961Ef480Eb55e80D19ad83579A64c007002")
-
-	// EIP-7251
-	ConsolidationRequestAddress = common.HexToAddress("0x0000BBdDc7CE488642fb579F8B00f3a590007251")
-)
->>>>>>>> arbitrum:execution/chain/params/protocol.go
 
 var (
 	// Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations
@@ -278,12 +263,3 @@ var DefaultPragueBlobConfig = BlobConfig{
 	Max:                   9,
 	BaseFeeUpdateFraction: 5007716,
 }
-<<<<<<<< HEAD:execution/protocol/params/protocol.go
-========
-
-var DefaultOsakaBlobConfig = BlobConfig{
-	Target:                6,
-	Max:                   9,
-	BaseFeeUpdateFraction: 5007716,
-}
->>>>>>>> arbitrum:execution/chain/params/protocol.go

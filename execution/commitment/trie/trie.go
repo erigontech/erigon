@@ -27,13 +27,8 @@ import (
 	"fmt"
 	"reflect"
 
-<<<<<<<< HEAD:execution/commitment/trie/trie.go
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-========
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
->>>>>>>> arbitrum:execution/trie/trie.go
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 

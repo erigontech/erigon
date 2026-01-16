@@ -21,11 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-<<<<<<<< HEAD:execution/protocol/fixedgas/intrinsic_gas_test.go
 	"github.com/erigontech/erigon/execution/protocol/params"
-========
-	"github.com/erigontech/erigon/execution/chain/params"
->>>>>>>> arbitrum:execution/fixedgas/intrinsic_gas_test.go
 )
 
 func TestShanghaiIntrinsicGas(t *testing.T) {

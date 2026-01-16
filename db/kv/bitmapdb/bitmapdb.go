@@ -17,20 +17,9 @@
 package bitmapdb
 
 import (
-<<<<<<<< HEAD:db/kv/bitmapdb/bitmapdb.go
 	"sync"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
-========
-	"os"
-	"runtime/debug"
-	"sync/atomic"
-	"syscall"
-
-	stack2 "github.com/go-stack/stack"
-
-	"github.com/erigontech/erigon-lib/log/v3"
->>>>>>>> arbitrum:erigon-lib/common/dbg/log_panic.go
 )
 
 var roaring64Pool = sync.Pool{

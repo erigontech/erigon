@@ -19,11 +19,7 @@ package trie
 import (
 	"fmt"
 
-<<<<<<<< HEAD:execution/commitment/trie/hack.go
 	"github.com/erigontech/erigon/common"
-========
-	"github.com/erigontech/erigon-lib/common"
->>>>>>>> arbitrum:execution/trie/hack.go
 	"github.com/erigontech/erigon/execution/rlp"
 )
 

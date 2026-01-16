@@ -26,15 +26,9 @@ import (
 
 	"golang.org/x/crypto/sha3"
 
-<<<<<<<< HEAD:execution/commitment/trie/hasher.go
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
-========
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/crypto"
->>>>>>>> arbitrum:execution/trie/hasher.go
 	"github.com/erigontech/erigon/execution/rlp"
 )
 

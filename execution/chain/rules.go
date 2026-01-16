@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-<<<<<<<< HEAD:execution/chain/rules.go
 package chain
 
 type RulesName string
@@ -25,14 +24,3 @@ const (
 	CliqueRules RulesName = "clique"
 	BorRules    RulesName = "bor"
 )
-========
-package cmd
-
-import (
-	"github.com/urfave/cli/v2"
-)
-
-func RegisterCmds(app *cli.App) {
-	registerValidatorRegCheckCmd(app)
-}
->>>>>>>> arbitrum:txnprovider/shutter/cmd/register.go

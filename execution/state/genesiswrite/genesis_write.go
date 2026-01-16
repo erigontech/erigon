@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"math/big"
 	"slices"
 	"sort"
@@ -32,17 +33,9 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
-<<<<<<<< HEAD:execution/state/genesiswrite/genesis_write.go
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
-========
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/tracing"
->>>>>>>> arbitrum:execution/genesiswrite/genesis_write.go
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -51,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
-<<<<<<<< HEAD:execution/state/genesiswrite/genesis_write.go
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -59,11 +51,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
-========
-	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/chain/params"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
->>>>>>>> arbitrum:execution/genesiswrite/genesis_write.go
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	polygonchain "github.com/erigontech/erigon/polygon/chain"
@@ -98,27 +85,16 @@ func (e *GenesisMismatchError) Error() string {
 //
 // The returned chain configuration is never nil.
 func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
-<<<<<<<< HEAD:execution/state/genesiswrite/genesis_write.go
 	return CommitGenesisBlockWithOverride(db, genesis, nil, nil, false, dirs, logger)
 }
 
 func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overrideOsakaTime, overrideAmsterdamTime *big.Int, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
-========
-	return CommitGenesisBlockWithOverride(db, genesis, nil, false, dirs, logger)
-}
-
-func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overrideOsakaTime *big.Int, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
->>>>>>>> arbitrum:execution/genesiswrite/genesis_write.go
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-<<<<<<<< HEAD:execution/state/genesiswrite/genesis_write.go
 	c, b, err := WriteGenesisBlock(tx, genesis, overrideOsakaTime, overrideAmsterdamTime, keepStoredChainConfig, dirs, logger)
-========
-	c, b, err := WriteGenesisBlock(tx, genesis, overrideOsakaTime, keepStoredChainConfig, dirs, logger)
->>>>>>>> arbitrum:execution/genesiswrite/genesis_write.go
 	if err != nil {
 		return c, b, err
 	}
@@ -140,11 +116,7 @@ func configOrDefault(g *types.Genesis, genesisHash common.Hash) *chain.Config {
 	return spec.Config
 }
 
-<<<<<<<< HEAD:execution/state/genesiswrite/genesis_write.go
 func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime, overrideAmsterdamTime *big.Int, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
-========
-func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *big.Int, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
->>>>>>>> arbitrum:execution/genesiswrite/genesis_write.go
 	if err := rawdb.WriteGenesisIfNotExist(tx, genesis); err != nil {
 		return nil, nil, err
 	}
@@ -480,9 +452,6 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 // GenesisWithoutStateToBlock creates the genesis block, assuming an empty state.
 func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawals []*types.Withdrawal) {
 	head = &types.Header{
-========
-	head := &types.Header{
->>>>>>>> arbitrum:execution/genesiswrite/genesis_write.go
 		Number:        new(big.Int).SetUint64(g.Number),
 		Nonce:         types.EncodeNonce(g.Nonce),
 		Time:          g.Timestamp,
@@ -518,7 +487,6 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 
 	arbosVersion := types.GetArbOSVersion(head, g.Config)
 
-	var withdrawals []*types.Withdrawal
 	if g.Config != nil && g.Config.IsShanghai(g.Timestamp, arbosVersion) {
 		withdrawals = []*types.Withdrawal{}
 	}
@@ -549,7 +517,6 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		}
 	}
 
-<<<<<<<< HEAD:execution/state/genesiswrite/genesis_write.go
 	if g.Config != nil && g.Config.IsAmsterdam(g.Timestamp) {
 		if g.BlockAccessListHash != nil {
 			head.BlockAccessListHash = g.BlockAccessListHash
@@ -567,98 +534,7 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		head.ParentBeaconBlockRoot = &emptyHash
 	}
 	return
-========
-	ctx := context.Background()
 
-	// some users creating > 1Gb custome genesis by `erigon init`
-	genesisTmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(tb, dirs.Tmp).MapSize(2 * datasize.TB).GrowthStep(1 * datasize.MB).MustOpen()
-	defer genesisTmpDB.Close()
-
-	agg, err := dbstate.New(dirs).Logger(logger).Open(ctx, genesisTmpDB)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer agg.Close()
-
-	tdb, err := temporal.New(genesisTmpDB, agg)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer tdb.Close()
-
-	tx, err := tdb.BeginTemporalRw(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer tx.Rollback()
-
-	sd, err := dbstate.NewSharedDomains(tx, logger)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer sd.Close()
-
-	blockNum := uint64(0)
-	txNum := uint64(1) //2 system txs in begin/end of block. Attribute state-writes to first, consensus state-changes to second
-
-	//r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
-	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-
-	statedb := state.New(r)
-	statedb.SetTrace(false)
-
-	hasConstructorAllocation := false
-	for _, account := range g.Alloc {
-		if len(account.Constructor) > 0 {
-			hasConstructorAllocation = true
-			break
-		}
-	}
-	// See https://github.com/NethermindEth/nethermind/blob/master/src/Nethermind/Nethermind.Consensus.AuRa/InitializationSteps/LoadGenesisBlockAuRa.cs
-	if hasConstructorAllocation && g.Config.Aura != nil {
-		statedb.CreateAccount(common.Address{}, false)
-	}
-
-	addrs := sortedAllocAddresses(g.Alloc)
-	for _, addr := range addrs {
-		account := g.Alloc[addr]
-
-		balance, overflow := uint256.FromBig(account.Balance)
-		if overflow {
-			panic("overflow at genesis allocs")
-		}
-		statedb.AddBalance(addr, *balance, tracing.BalanceIncreaseGenesisBalance)
-		statedb.SetCode(addr, account.Code)
-		statedb.SetNonce(addr, account.Nonce)
-		var slotVal uint256.Int
-		for key, value := range account.Storage {
-			slotVal.SetBytes(value.Bytes())
-			statedb.SetState(addr, key, slotVal)
-		}
-
-		if len(account.Constructor) > 0 {
-			if _, err = core.SysCreate(addr, account.Constructor, g.Config, statedb, head); err != nil {
-				return nil, nil, err
-			}
-		}
-
-		if len(account.Code) > 0 || len(account.Storage) > 0 || len(account.Constructor) > 0 {
-			statedb.SetIncarnation(addr, state.FirstContractIncarnation)
-		}
-	}
-	if err = statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
-		return nil, nil, err
-	}
-
-	rh, err := sd.ComputeCommitment(context.Background(), true, blockNum, txNum, "genesis")
-	if err != nil {
-		return nil, nil, err
-	}
-
-	head.Root = common.BytesToHash(rh)
-
-	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
->>>>>>>> arbitrum:execution/genesiswrite/genesis_write.go
 }
 
 // GenesisWithoutStateToBlock creates the genesis block, assuming an empty state.

@@ -24,13 +24,8 @@ import (
 	"slices"
 	"testing"
 
-<<<<<<<< HEAD:execution/commitment/trie/stream_test.go
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-========
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
->>>>>>>> arbitrum:execution/trie/stream_test.go
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 

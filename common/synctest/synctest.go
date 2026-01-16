@@ -17,7 +17,6 @@
 package synctest
 
 import (
-<<<<<<<< HEAD:common/synctest/synctest.go
 	"testing"
 	"testing/synctest"
 )
@@ -29,13 +28,3 @@ import (
 var Wait = synctest.Wait // nolint:govet
 
 type testFunc func(t *testing.T, f func(*testing.T))
-========
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-)
-
-func MustOpen(path string) kv.RwDB {
-	return New(dbcfg.ChainDB, log.New()).Path(path).MustOpen()
-}
->>>>>>>> arbitrum:db/kv/mdbx/util.go

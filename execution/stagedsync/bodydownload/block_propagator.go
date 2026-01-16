@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-<<<<<<<< HEAD:execution/stagedsync/bodydownload/block_propagator.go
 package bodydownload
 
 import (
@@ -25,12 +24,3 @@ import (
 )
 
 type BlockPropagator func(ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int)
-========
-//go:build go1.25
-
-package synctest
-
-import "testing/synctest"
-
-var Test testFunc = synctest.Test
->>>>>>>> arbitrum:erigon-lib/synctest/synctest_go_1_25_and_beyond.go

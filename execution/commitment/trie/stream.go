@@ -25,13 +25,8 @@ import (
 	"fmt"
 	"os"
 
-<<<<<<<< HEAD:execution/commitment/trie/stream.go
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
-========
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/length"
->>>>>>>> arbitrum:execution/trie/stream.go
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
