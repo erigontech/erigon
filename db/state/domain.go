@@ -1925,7 +1925,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		Values:   pruneStat.PruneCountValues,
 		Dups:     pruneStat.DupsDeleted,
 		Progress: pruneStat.ValueProgress,
-	}, nil
+	}, err
 }
 
 func (dt *DomainRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
