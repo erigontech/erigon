@@ -12,7 +12,31 @@ on:
 
 jobs:
   test-hive:
-    runs-on: ubuntu-latest
+    runs-on:
+      group: hive
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sim: engine
+            sim-limit: exchange-capabilities
+            max-allowed-failures: 0
+          - sim: engine
+            sim-limit: withdrawals
+            max-allowed-failures: 0
+          - sim: engine
+            sim-limit: cancun
+            max-allowed-failures: 0
+          - sim: engine
+            sim-limit: api
+            max-allowed-failures: 0
+          - sim: engine
+            sim-limit: auth
+            max-allowed-failures: 0
+          - sim: rpc
+            sim-limit: compat
+            # 8 failures out of 199 tests, see https://github.com/ethereum/hive/pull/1355
+            max-allowed-failures: 8
     steps:
       - name: Checkout Hive
         uses: actions/checkout@v6
@@ -99,19 +123,13 @@ jobs:
               exit 1
             fi
           }
-          run_suite engine exchange-capabilities 0
-          run_suite engine withdrawals 0
-          run_suite engine cancun 0
-          run_suite engine api 0
-          run_suite engine auth 0
-          # 8 failures out of 199 tests, see https://github.com/ethereum/hive/pull/1355
-          run_suite rpc compat 8
+          run_suite ${{ matrix.sim }} ${{ matrix.sim-limit }} ${{ matrix.max-allowed-failures }}
         continue-on-error: true
 
       - name: Upload output log
         uses: actions/upload-artifact@v6
         with:
-          name: hive-workspace-log
+          name: hive-workspace-log-${{ matrix.sim }}-${{ matrix.sim-limit }}
           path: hive/workspace/logs
         continue-on-error: true
 

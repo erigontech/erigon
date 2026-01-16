@@ -32,7 +32,7 @@ func TestFeedPanics(t *testing.T) {
 	{
 		var f Feed
 		f.Send(2)
-		want := feedTypeError{op: "Send", got: reflect.TypeFor[uint64](), want: reflect.TypeFor[int]()}
+		want := feedTypeError{op: "Send", got: reflect.TypeOf(uint64(0)), want: reflect.TypeOf(0)}
 		if err := checkPanic(want, func() { f.Send(uint64(2)) }); err != nil {
 			t.Error(err)
 		}
@@ -41,7 +41,7 @@ func TestFeedPanics(t *testing.T) {
 		var f Feed
 		ch := make(chan int)
 		f.Subscribe(ch)
-		want := feedTypeError{op: "Send", got: reflect.TypeFor[uint64](), want: reflect.TypeFor[int]()}
+		want := feedTypeError{op: "Send", got: reflect.TypeOf(uint64(0)), want: reflect.TypeOf(0)}
 		if err := checkPanic(want, func() { f.Send(uint64(2)) }); err != nil {
 			t.Error(err)
 		}
@@ -49,7 +49,7 @@ func TestFeedPanics(t *testing.T) {
 	{
 		var f Feed
 		f.Send(2)
-		want := feedTypeError{op: "Subscribe", got: reflect.TypeFor[chan uint64](), want: reflect.TypeFor[chan<- int]()}
+		want := feedTypeError{op: "Subscribe", got: reflect.TypeOf(make(chan uint64)), want: reflect.TypeOf(make(chan<- int))}
 		if err := checkPanic(want, func() { f.Subscribe(make(chan uint64)) }); err != nil {
 			t.Error(err)
 		}

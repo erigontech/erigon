@@ -35,14 +35,14 @@ import (
 
 // make a buffer pool
 var bufferPool = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return new(bytes.Buffer)
 	},
 }
 
 // make a zstd writer pool
 var zstdWriterPool = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		encoder, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
 		if err != nil {
 			panic(err)

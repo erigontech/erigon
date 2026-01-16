@@ -74,7 +74,7 @@ func generateBlocks2(t *testing.T, from uint64, numberOfBlocks uint64, blockWrit
 			}
 			if blockNumber == 1 || updateIncarnation || difficulty == changeCodeIndepenentlyOfIncarnations {
 				if newAcc.Incarnation > 0 {
-					code := []byte(fmt.Sprintf("acc-code-%v", blockNumber))
+					code := fmt.Appendf(nil, "acc-code-%v", blockNumber)
 					codeHashValue, _ := common.HashData(code)
 					codeHash := accounts.InternCodeHash(codeHashValue)
 					if blockNumber >= from {

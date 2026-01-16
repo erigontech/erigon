@@ -23,6 +23,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/erigontech/erigon/db/downloader"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
 	"github.com/erigontech/erigon/common"
@@ -52,7 +53,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/node/silkworm"
 	"github.com/erigontech/erigon/p2p"
@@ -144,12 +144,12 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 
 	initialCycle, firstCycle := true, false
 
-	tx, err := db.BeginTemporalRw(ctx)  //nolint
+	tx, err := db.BeginTemporalRw(ctx) //nolint
 	if err != nil {
 		return err
 	}
 	defer func() {
-		tx.Commit()
+		tx.Rollback()
 	}()
 
 	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
@@ -158,31 +158,25 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	}
 	defer doms.Close()
 
-	for more := true; more; {
-		// run stages first time - it will download blocks
-		if hook != nil {
-			if err = hook.BeforeRun(tx, false); err != nil {
-				return err
-			}
+	// run stages first time - it will download blocks
+	var finishStageBeforeSync uint64
+	if hook != nil {
+		finishStageBeforeSync, err = stages.GetStageProgress(tx, stages.Finish)
+		if err != nil {
+			return err
 		}
+		if err = hook.BeforeRun(tx, false); err != nil {
+			return err
+		}
+	}
 
+	for more := true; more; {
 		more, err = sync.Run(db, doms, tx, initialCycle, firstCycle)
 		if err != nil {
 			return err
 		}
 
-		if hook != nil {
-			finishProgressBefore, _, _, err := stagesHeadersAndFinish(db, tx)
-			if err != nil {
-				return err
-			}
-			err = hook.AfterRun(tx, finishProgressBefore, false)
-			if err != nil {
-				return err
-			}
-		}
-
-		if err := sync.RunPrune(db, tx, initialCycle); err != nil {
+		if err := sync.RunPrune(ctx, db, tx, initialCycle, 0); err != nil {
 			return err
 		}
 
@@ -221,13 +215,25 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	}
 	doms.ClearRam(true)
 
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
 	if hook != nil {
-		var headerStageProgress uint64
-		headerStageProgress, err = stages.GetStageProgress(tx, stages.Headers)
-		if err != nil {
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			headersProgress, _, _, err := stagesHeadersAndFinish(db, tx)
+			if err != nil {
+				return err
+			}
+			err = hook.AfterRun(tx, finishStageBeforeSync, false)
+			if err != nil {
+				return err
+			}
+			hook.LastNewBlockSeen(headersProgress)
+			return nil
+		}); err != nil {
 			return err
 		}
-		hook.LastNewBlockSeen(headerStageProgress)
 	}
 	return nil
 }
@@ -342,9 +348,9 @@ func stageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sd *execctx.Sha
 
 	// -- Prune+commit(sync)
 	if externalTx {
-		err = sync.RunPrune(db, tx, initialCycle)
+		err = sync.RunPrune(ctx, db, tx, initialCycle, 0)
 	} else {
-		err = db.Update(ctx, func(tx kv.RwTx) error { return sync.RunPrune(db, tx, initialCycle) })
+		err = db.Update(ctx, func(tx kv.RwTx) error { return sync.RunPrune(ctx, db, tx, initialCycle, 0) })
 	}
 
 	if err != nil {
@@ -744,7 +750,7 @@ func NewDefaultStages(ctx context.Context,
 	cfg *ethconfig.Config,
 	controlServer *sentry_multi_client.MultiClient,
 	notifications *shards.Notifications,
-	snapDownloader downloaderproto.DownloaderClient,
+	snapDownloader downloader.Client,
 	blockReader services.FullBlockReader,
 	blockRetire services.BlockRetire,
 	silkworm *silkworm.Silkworm,
@@ -780,7 +786,7 @@ func NewPipelineStages(ctx context.Context,
 	cfg *ethconfig.Config,
 	controlServer *sentry_multi_client.MultiClient,
 	notifications *shards.Notifications,
-	snapDownloader downloaderproto.DownloaderClient,
+	snapDownloader downloader.Client,
 	blockReader services.FullBlockReader,
 	blockRetire services.BlockRetire,
 	silkworm *silkworm.Silkworm,

@@ -141,21 +141,15 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 }
 
 // FlushExtendingFork flush the current extending fork if fcu chooses its head hash as the its forkchoice.
-func (fv *ForkValidator) FlushExtendingFork(tx kv.TemporalRwTx, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts) error {
+func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts) error {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	start := time.Now()
 	// Flush changes to db.
 	if fv.sharedDom != nil {
-		_, err := fv.sharedDom.ComputeCommitment(context.Background(), tx, true, fv.sharedDom.BlockNum(), fv.sharedDom.TxNum(), "flush-commitment", nil)
+		sd.Merge(fv.sharedDom)
+		_, err := sd.ComputeCommitment(ctx, tx, true, sd.BlockNum(), sd.TxNum(), "flush-commitment", nil)
 		if err != nil {
-			return err
-		}
-		if err := fv.sharedDom.Flush(fv.ctx, tx); err != nil {
-			return err
-		}
-		fv.sharedDom.Close()
-		if err := stages.SaveStageProgress(tx, stages.Execution, fv.extendingForkNumber); err != nil {
 			return err
 		}
 	}
@@ -305,6 +299,8 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 	start := time.Now()
 	headersChain = append(headersChain, header)
 	bodiesChain = append(bodiesChain, body)
+	hash := header.Hash()
+	number := header.Number.Uint64()
 	if err := fv.validatePayload(sd, tx, unwindPoint, headersChain, bodiesChain, notifications); err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			validationError = err
@@ -313,11 +309,11 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 			return
 		}
 	}
-	fv.timingsCache.Add(header.Hash(), BlockTimings{time.Since(start), 0})
+	fv.timingsCache.Add(hash, BlockTimings{time.Since(start), 0})
 
-	latestValidHash = header.Hash()
-	fv.extendingForkHeadHash = header.Hash()
-	fv.extendingForkNumber = header.Number.Uint64()
+	latestValidHash = hash
+	fv.extendingForkHeadHash = hash
+	fv.extendingForkNumber = number
 	if validationError != nil {
 		var latestValidNumber uint64
 		latestValidNumber, criticalError = stages.GetStageProgress(tx, stages.Execution)
@@ -339,9 +335,9 @@ func (fv *ForkValidator) validateAndStorePayload(sd *execctx.SharedDomains, tx k
 		fv.extendingForkNumber = 0
 		return
 	}
-	fv.validHashes.Add(header.Hash(), true)
+	fv.validHashes.Add(hash, true)
 
-	_, criticalError = rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), header.Number.Uint64(), body)
+	_, criticalError = rawdb.WriteRawBodyIfNotExists(tx, hash, number, body)
 	if criticalError != nil {
 		return //nolint:nilnesserr
 	}

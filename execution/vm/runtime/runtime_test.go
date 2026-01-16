@@ -186,7 +186,7 @@ func BenchmarkCall(b *testing.B) {
 	tx, sd := testTemporalTxSD(b, db)
 	//cfg.w = state.NewWriter(execctx, nil)
 	cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
-	cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
+	//cfg.EVMConfig.JumpDestCache = vm.NewJumpDestCache(128)
 
 	tmpdir := b.TempDir()
 
@@ -231,12 +231,12 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 			SpuriousDragonBlock:   new(big.Int),
 		},
 		EVMConfig: vm.Config{
-			JumpDestCache: vm.NewJumpDestCache(128),
+			//JumpDestCache: vm.NewJumpDestCache(128),
 		},
 	}
 	// Warm up the intpools and stuff
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _, _ = Call(receiver, []byte{}, &runtimeConfig)
 	}
 	b.StopTimer()
@@ -284,7 +284,7 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 			contractCode := returnContract(n)
 			statedb.SetCode(contractAddr, contractCode)
 
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				ret, _, err := Call(contractAddr, []byte{}, &Config{State: statedb})
 				if err != nil {
 					b.Fatal(err)
@@ -499,7 +499,7 @@ func benchmarkNonModifyingCode(gas uint64, code []byte, name string, tracerCode 
 
 	b.Run(name, func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			vmenv.Call(sender, destination, nil, gas, cfg.Value, false /* bailout */) // nolint:errcheck
 		}
 	})
@@ -709,7 +709,7 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 		contractCode := swapContract(10_000)
 		state.SetCode(contractAddr, contractCode)
 
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, _, err := Call(contractAddr, []byte{}, &Config{State: state})
 			if err != nil {
 				b.Fatal(err)

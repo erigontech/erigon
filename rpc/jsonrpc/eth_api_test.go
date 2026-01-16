@@ -39,8 +39,7 @@ import (
 )
 
 func newBaseApiForTest(m *mock.MockSentry) *BaseAPI {
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	return NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil)
+	return NewBaseApi(nil, m.StateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil)
 }
 
 func TestGetBalanceChangesInBlock(t *testing.T) {
@@ -142,7 +141,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_BlockNotFoundError
 	offChainBlock := offChain.Blocks[0]
 
 	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), false)); err != nil {
-		if fmt.Sprintf("%v", err) != fmt.Sprintf("block %s not found", offChainBlock.Hash().String()[2:]) {
+		if fmt.Sprintf("%v", err) != fmt.Sprintf("block not found: %s", offChainBlock.Hash().String()) {
 			t.Errorf("wrong error: %v", err)
 		}
 	} else {
@@ -163,7 +162,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_BlockNotFoundError(t 
 	offChainBlock := offChain.Blocks[0]
 
 	if _, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(offChainBlock.Hash(), true)); err != nil {
-		if fmt.Sprintf("%v", err) != fmt.Sprintf("block %s not found", offChainBlock.Hash().String()[2:]) {
+		if fmt.Sprintf("%v", err) != fmt.Sprintf("block not found: %s", offChainBlock.Hash().String()) {
 			t.Errorf("wrong error: %v", err)
 		}
 	} else {

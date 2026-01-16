@@ -49,7 +49,6 @@ type Cfg struct {
 	beaconCfg               *clparams.BeaconChainConfig
 	executionClient         execution_client.ExecutionEngine
 	state                   *state.CachingBeaconState
-	gossipManager           *network2.GossipManager
 	forkChoice              *forkchoice.ForkChoiceStore
 	indiciesDB              kv.RwDB
 	dirs                    datadir.Dirs
@@ -84,7 +83,6 @@ func ClStagesCfg(
 	beaconCfg *clparams.BeaconChainConfig,
 	state *state.CachingBeaconState,
 	executionClient execution_client.ExecutionEngine,
-	gossipManager *network2.GossipManager,
 	forkChoice *forkchoice.ForkChoiceStore,
 	indiciesDB kv.RwDB,
 	sn *freezeblocks.CaplinSnapshots,
@@ -121,7 +119,6 @@ func ClStagesCfg(
 		beaconCfg:               beaconCfg,
 		state:                   state,
 		executionClient:         executionClient,
-		gossipManager:           gossipManager,
 		forkChoice:              forkChoice,
 		dirs:                    dirs,
 		indiciesDB:              indiciesDB,

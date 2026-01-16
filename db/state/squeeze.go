@@ -410,7 +410,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		keysPerStep := totalKeys / stepsInShard // how many keys in just one step?
 
 		//shardStepsSize := kv.Step(2)
-		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), 128))
+		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), 16))
 		if uint64(shardStepsSize) != stepsInShard { // processing shard in several smaller steps
 			shardTo = shardFrom + shardStepsSize // if shard is quite big, we will process it in several steps
 		}
@@ -439,8 +439,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			return nil, err
 		}
 		keyIter := stream.UnionKV(streamAcc, streamSto, -1)
-		//blockNum, ok, err := txNumsReader.FindBlockNum(roTx, rangeToTxNum-1)
-		blockNum, ok, err := txNumsReader.FindBlockNum(roTx, rangeToTxNum-1)
+		//blockNum, ok, err := txNumsReader.FindBlockNum(ctx, roTx, rangeToTxNum-1)
+		blockNum, ok, err := txNumsReader.FindBlockNum(ctx, roTx, rangeToTxNum-1)
 		if err != nil {
 			return nil, fmt.Errorf("CommitmentRebuild: FindBlockNum(%d) %w", rangeToTxNum, err)
 		}
@@ -556,6 +556,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 
 	logger.Info(fmt.Sprintf("[squeeze] latest root %x", latestRoot))
+	a.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
 
 	actx := a.BeginFilesRo()
 	defer actx.Close()
@@ -566,8 +567,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		return nil, err
 	}
 	actx.Close()
-	if err = a.OpenFolder(); err != nil {
-		logger.Warn("[squeeze] failed to open folder after sqeeze", "err", err)
+	if err = a.ReloadFiles(); err != nil {
+		logger.Warn("[squeeze] failed to reload folder after sqeeze", "err", err)
 	}
 
 	if err = a.BuildMissedAccessors(ctx, 4); err != nil {

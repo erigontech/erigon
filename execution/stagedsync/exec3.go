@@ -60,7 +60,7 @@ import (
 func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms *execctx.SharedDomains, maxBlockNum uint64) (
 	inputTxNum uint64, maxTxNum uint64, offsetFromBlockBeginning uint64, err error) {
 
-	txNumsReader := cfg.blockReader.TxnumReader(ctx)
+	txNumsReader := cfg.blockReader.TxnumReader()
 
 	inputTxNum = doms.TxNum()
 
@@ -70,12 +70,12 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms
 		return 0, 0, 0, err
 	}
 
-	maxTxNum, err = txNumsReader.Max(applyTx, maxBlockNum)
+	maxTxNum, err = txNumsReader.Max(ctx, applyTx, maxBlockNum)
 	if err != nil {
 		return 0, 0, 0, err
 	}
 
-	blockNum, ok, err := txNumsReader.FindBlockNum(applyTx, doms.TxNum())
+	blockNum, ok, err := txNumsReader.FindBlockNum(ctx, applyTx, doms.TxNum())
 	if err != nil {
 		return 0, 0, 0, err
 	}
@@ -85,13 +85,13 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms
 		return 0, 0, 0, fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d; in db: (%d-%d, %d-%d)", inputTxNum, fb, lb, ft, lt)
 	}
 	{
-		max, _ := txNumsReader.Max(applyTx, blockNum)
+		max, _ := txNumsReader.Max(ctx, applyTx, blockNum)
 		if doms.TxNum() == max {
 			blockNum++
 		}
 	}
 
-	min, err := txNumsReader.Min(applyTx, blockNum)
+	min, err := txNumsReader.Min(ctx, applyTx, blockNum)
 	if err != nil {
 		return 0, 0, 0, err
 	}
@@ -188,20 +188,15 @@ func ExecV3(ctx context.Context,
 		maxTxNum                 uint64
 	)
 
-	if applyTx != nil {
-		if inputTxNum, maxTxNum, offsetFromBlockBeginning, err = restoreTxNum(ctx, &cfg, applyTx, doms, maxBlockNum); err != nil {
-			return err
-		}
-	} else {
-		if err := cfg.db.View(ctx, func(tx kv.Tx) (err error) {
-			inputTxNum, maxTxNum, offsetFromBlockBeginning, err = restoreTxNum(ctx, &cfg, tx, doms, maxBlockNum)
-			return err
-		}); err != nil {
-			return err
-		}
+	if inputTxNum, maxTxNum, offsetFromBlockBeginning, err = restoreTxNum(ctx, &cfg, applyTx, doms, maxBlockNum); err != nil {
+		return err
 	}
 
 	if maxTxNum == 0 {
+		// nothing to exec, make sure the stage is in sync with the sd
+		if execStage.BlockNumber < blockNum {
+			return execStage.Update(rwTx, blockNum)
+		}
 		return nil
 	}
 
@@ -250,6 +245,11 @@ func ExecV3(ctx context.Context,
 	var lastCommittedTxNum uint64
 	var lastCommittedBlockNum uint64
 
+	postValidator := newBlockPostExecutionValidator()
+	if maxBlockNum == startBlockNum {
+		postValidator = newParallelBlockPostExecutionValidator()
+	}
+
 	if parallel {
 		if !inMemExec { //nolint:staticcheck
 			// this is becuase for parallel execution the shared domain needs to
@@ -274,9 +274,11 @@ func ExecV3(ctx context.Context,
 				hooks:                 hooks,
 				lastCommittedTxNum:    doms.TxNum(),
 				lastCommittedBlockNum: blockNum,
+				postValidator:         postValidator,
 			},
 			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
+		pe.doms.SetWarmupDB(cfg.db)
 
 		defer func() {
 			pe.LogComplete(stepsInDb)
@@ -305,7 +307,9 @@ func ExecV3(ctx context.Context,
 				hooks:                 hooks,
 				lastCommittedTxNum:    doms.TxNum(),
 				lastCommittedBlockNum: blockNum,
+				postValidator:         postValidator,
 			}}
+		se.doms.SetWarmupDB(cfg.db)
 
 		defer func() {
 			se.LogComplete(stepsInDb)
@@ -320,6 +324,10 @@ func ExecV3(ctx context.Context,
 				case execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}):
 					_, _, err = flushAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, parallel, logger, u, inMemExec)
 					if err != nil {
+						return err
+					}
+
+					if err := se.getPostValidator().Wait(); err != nil {
 						return err
 					}
 
@@ -469,10 +477,18 @@ type txExecutor struct {
 	writeCount   atomic.Int64
 
 	enableChaosMonkey bool
+	postValidator     BlockPostExecutionValidator
 }
 
 func (te *txExecutor) readState() *state.StateV3Buffered {
 	return te.rs
+}
+
+func (te *txExecutor) getPostValidator() BlockPostExecutionValidator {
+	if te.postValidator == nil {
+		return newBlockPostExecutionValidator()
+	}
+	return te.postValidator
 }
 
 func (te *txExecutor) domains() *execctx.SharedDomains {
@@ -872,6 +888,8 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
 
+	// Use warmup to pre-fetch branch data in parallel before computing commitment
+	doms.SetWarmupDB(cfg.db)
 	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix(), nil)
 
 	times.ComputeCommitment = time.Since(start)

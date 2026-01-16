@@ -90,7 +90,7 @@ type BlobAndProofV1 struct {
 	Proof hexutil.Bytes `json:"proof" gencodec:"required"`
 }
 
-// BlobAndProofV2 holds one item for engine_getBlobsV2
+// BlobAndProofV2 holds one item for engine_getBlobsV2/engine_getBlobsV3
 type BlobAndProofV2 struct {
 	Blob       hexutil.Bytes   `json:"blob" gencodec:"required"`
 	CellProofs []hexutil.Bytes `json:"proofs" gencodec:"required"`
