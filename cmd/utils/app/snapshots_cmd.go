@@ -281,6 +281,7 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&dryRunFlag,
 				&removeLocalFlag,
+				&preverifiedFlag,
 			},
 		},
 		{
@@ -841,8 +842,8 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 	}
 	defer tx.Rollback()
 	reader, _ := br.IO()
-	txNumReader := reader.TxnumReader(ctx)
-	toTxNum, err := txNumReader.Min(tx, blockNum)
+	txNumReader := reader.TxnumReader()
+	toTxNum, err := txNumReader.Min(ctx, tx, blockNum)
 	if err != nil {
 		return err
 	}
@@ -1621,16 +1622,16 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 	if intervals[0].from != 0 {
 		return fmt.Errorf("gap at start: snapshots start at (%d-%d). snaptype: %s", intervals[0].from, intervals[0].to, snapType)
 	}
-	// Check that there are no gaps
-	for i := 1; i < len(intervals); i++ {
-		if intervals[i].from != intervals[i-1].to {
-			return fmt.Errorf("gap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
-		}
-	}
 	// Check that there are no overlaps
 	for i := 1; i < len(intervals); i++ {
 		if intervals[i].from < intervals[i-1].to {
 			return fmt.Errorf("overlap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
+		}
+	}
+	// Check that there are no gaps
+	for i := 1; i < len(intervals); i++ {
+		if intervals[i].from != intervals[i-1].to {
+			return fmt.Errorf("gap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
 		}
 	}
 
@@ -1774,14 +1775,14 @@ func doBlkTxNum(cliCtx *cli.Context) error {
 	defer tx.Rollback()
 
 	reader, _ := br.IO()
-	txNumReader := reader.TxnumReader(ctx)
+	txNumReader := reader.TxnumReader()
 
 	if blkNumber >= 0 {
-		min, err := txNumReader.Min(tx, uint64(blkNumber))
+		min, err := txNumReader.Min(ctx, tx, uint64(blkNumber))
 		if err != nil {
 			return err
 		}
-		max, err := txNumReader.Max(tx, uint64(blkNumber))
+		max, err := txNumReader.Max(ctx, tx, uint64(blkNumber))
 		if err != nil {
 			return err
 		}
@@ -1790,7 +1791,7 @@ func doBlkTxNum(cliCtx *cli.Context) error {
 		maxStep := max / stepSize
 		logger.Info("out", "block", blkNumber, "min_txnum", min, "max_txnum", max, "min_step", minStep, "max_step", maxStep)
 	} else {
-		blk, ok, err := txNumReader.FindBlockNum(tx, uint64(txNum))
+		blk, ok, err := txNumReader.FindBlockNum(ctx, tx, uint64(txNum))
 		if err != nil {
 			return err
 		}
@@ -2105,7 +2106,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		ac := res.Aggregator.BeginFilesRo()
 		defer ac.Close()
 		stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-			histBlockNumProgress, _, err := blockReader.TxnumReader(ctx).FindBlockNum(tx, endTxNumMinimax)
+			histBlockNumProgress, _, err := blockReader.TxnumReader().FindBlockNum(ctx, tx, endTxNumMinimax)
 			return histBlockNumProgress, err
 		})
 		return nil
@@ -2545,11 +2546,11 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	txNumsReader := blockReader.TxnumReader(ctx)
+	txNumsReader := blockReader.TxnumReader()
 	var lastTxNum uint64
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)
-		lastTxNum, err = txNumsReader.Max(tx, execProgress)
+		lastTxNum, err = txNumsReader.Max(ctx, tx, execProgress)
 		if err != nil {
 			return err
 		}

@@ -52,7 +52,7 @@ var DefaultConfig = Config{
 		MaxPeers:        32,
 		MaxPendingPeers: 1000,
 		NAT:             nat.Any(),
-		DiscoveryV4:     true,
+		DiscoveryV4:     false,
 		DiscoveryV5:     true,
 	},
 }

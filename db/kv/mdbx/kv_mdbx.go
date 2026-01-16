@@ -98,7 +98,7 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 		bucketsCfg: WithChaindataTables,
 		flags:      mdbx.NoReadahead | mdbx.Durable,
 		log:        log,
-		pageSize:   kv.DefaultPageSize(),
+		pageSize:   DefaultPageSize(),
 
 		mapSize:         DefaultMapSize,
 		growthStep:      DefaultGrowthStep,
@@ -276,7 +276,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		//   - after they will require rwtx-lock, which is not acceptable in ACCEDEE mode.
 		pageSize := opts.pageSize
 		if pageSize == 0 {
-			pageSize = kv.DefaultPageSize()
+			pageSize = DefaultPageSize()
 		}
 		var dirtySpace uint64
 		if opts.dirtySpace > 0 {
@@ -1020,7 +1020,7 @@ func (tx *MdbxTx) Commit() error {
 
 	if tx.db.opts.metrics {
 		dbLabel := tx.db.opts.label
-		err = kv.RecordSummaries(dbLabel, latency)
+		err = RecordSummaries(dbLabel, latency)
 		if err != nil {
 			tx.db.opts.log.Error("failed to record mdbx summaries", "err", err)
 		}

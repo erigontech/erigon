@@ -224,7 +224,6 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 	}
 
 	// This flag will skip checking the state root
-	execCfg.blockProduction = true
 	execS := &StageState{state: s.state, ID: stages.Execution, BlockNumber: blockHeight - 1}
 
 	if err = ExecV3(ctx, execS, u, execCfg, sd, tx, dbg.Exec3Parallel, blockHeight, logger); err != nil {
@@ -476,7 +475,7 @@ func addTransactionsToMiningBlock(
 			return receipt.Logs, nil
 		}
 
-		receipt, _, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader), engine, coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, header.BlobGasUsed, *vmConfig)
+		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader), engine, coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, header.BlobGasUsed, *vmConfig)
 		if err != nil {
 			ibs.RevertToSnapshot(snap, err)
 			gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap) // restore gasPool as well as ibs

@@ -779,7 +779,7 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 		return 0, 0, 0, true, nil
 	}
 	err = a.db.View(ctx, func(tx kv.Tx) error {
-		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(tx, lastTxNumOfStep(step, a.stepSize))
+		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, lastTxNumOfStep(step, a.stepSize))
 		if err != nil {
 			return err
 		}
@@ -1867,6 +1867,12 @@ func (at *AggregatorRoTx) RangeAsOf(ctx context.Context, tx kv.Tx, domain kv.Dom
 }
 func (at *AggregatorRoTx) DebugRangeLatest(tx kv.Tx, domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
 	return at.d[domain].DebugRangeLatest(tx, from, to, limit)
+}
+
+// DebugRangeLatestFromFiles iterates over keys in .kv snapshot files only,
+// ignoring keys in MDBX database.
+func (at *AggregatorRoTx) DebugRangeLatestFromFiles(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
+	return at.d[domain].DebugRangeLatestFromFiles(from, to, limit)
 }
 
 func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {

@@ -1725,6 +1725,24 @@ func (dt *DomainRoTx) DebugRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit 
 	return s, nil
 }
 
+// DebugRangeLatestFromFiles iterates over keys in .kv snapshot files only,
+// ignoring keys in MDBX.
+func (dt *DomainRoTx) DebugRangeLatestFromFiles(fromKey, toKey []byte, limit int) (*DomainLatestIterFile, error) {
+	s := &DomainLatestIterFile{
+		from: fromKey, to: toKey, limit: limit,
+		orderAscend: order.Asc,
+		aggStep:     dt.stepSize,
+		filesOnly:   true,
+		logger:      dt.d.logger,
+		h:           &CursorHeap{},
+	}
+	if err := s.init(dt); err != nil {
+		s.Close() //it's responsibility of constructor (our) to close resource on error
+		return nil, err
+	}
+	return s, nil
+}
+
 // CanPruneUntil returns true if domain OR history tables can be pruned until txNum
 func (dt *DomainRoTx) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
 	canDomain, _ := dt.canPruneDomainTables(tx, untilTx)

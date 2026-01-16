@@ -35,7 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
-	"github.com/erigontech/erigon/execution/chain"
+
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol"
 	consensus "github.com/erigontech/erigon/execution/protocol/rules"
@@ -244,7 +244,16 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		b.Fatalf("failed to parse testcase input: %v", err)
 	}
 	signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
-	rules := &chain.Rules{}
+	context := evmtypes.BlockContext{
+		CanTransfer: protocol.CanTransfer,
+		Transfer:    consensus.Transfer,
+		Coinbase:    accounts.InternAddress(test.Context.Miner),
+		BlockNumber: uint64(test.Context.Number),
+		Time:        uint64(test.Context.Time),
+		Difficulty:  (*big.Int)(test.Context.Difficulty),
+		GasLimit:    uint64(test.Context.GasLimit),
+	}
+	rules := context.Rules(test.Genesis.Config)
 	msg, err := tx.AsMessage(*signer, nil, rules)
 	if err != nil {
 		b.Fatalf("failed to prepare transaction for tracing: %v", err)
@@ -255,15 +264,6 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		Origin:   origin,
 		GasPrice: *tx.GetEffectiveGasTip(baseFee),
 	}
-	context := evmtypes.BlockContext{
-		CanTransfer: protocol.CanTransfer,
-		Transfer:    consensus.Transfer,
-		Coinbase:    accounts.InternAddress(test.Context.Miner),
-		BlockNumber: uint64(test.Context.Number),
-		Time:        uint64(test.Context.Time),
-		Difficulty:  (*big.Int)(test.Context.Difficulty),
-		GasLimit:    uint64(test.Context.GasLimit),
-	}
 	m := mock.Mock(b)
 	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(b, err)
@@ -272,7 +272,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		tracer, err := tracers.New(tracerName, new(tracers.Context), nil)
 		if err != nil {
 			b.Fatalf("failed to create call tracer: %v", err)

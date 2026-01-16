@@ -63,7 +63,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		}
 	}
 	if ok {
-		txNumMin, err := api._txNumReader.Min(tx, blockNum)
+		txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
