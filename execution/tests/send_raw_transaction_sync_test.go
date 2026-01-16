@@ -147,7 +147,7 @@ func TestSendRawTransactionSyncTimeout(t *testing.T) {
 	timeoutMillis := hexutil.Uint64(100)
 	receipt, err := eat.RpcApiClient.SendRawTransactionSync(tx, &timeoutMillis)
 	assert.Error(err)
-	assert.Equal("the transaction was added to the mempool but wasn't processed in 0.100000s", err.Error())
+	assert.Equal("the transaction was added to the mempool but wasn't processed in 100ms", err.Error())
 	assert.Nil(receipt)
 
 	// Send the same txn second time and expect an error

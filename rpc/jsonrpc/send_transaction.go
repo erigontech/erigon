@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
 )
 
@@ -34,7 +35,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 	}
 
 	// this has been moved to prior to adding of transactions to capture the
-	// pre state of the db - which is used for logging in the messages below
+	// pre-state of the db - which is used for logging in the messages below
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return common.Hash{}, err
@@ -98,31 +99,28 @@ func (api *APIImpl) SendRawTransactionSync(ctx context.Context, encodedTx hexuti
 
 	// Theoretically, we should subscribe *before* submitting the transaction, but then we couldn't filter by hash.
 	// Hence, we add this fast-path to be sure we won't miss the receipt in all cases.
-	receipt, err := api.GetTransactionReceipt(ctx, hash)
-	if err != nil {
-		return nil, err
-	}
-	if receipt != nil {
+	if receipt, err := api.GetTransactionReceipt(ctx, hash); err != nil && receipt != nil {
 		return receipt, nil
 	}
 
 	// Wait up to the timeout for the transaction to be processed and the receipt to be available.
-	for {
-		select {
-		case <-timeoutCtx.Done():
-			return nil, fmt.Errorf("the transaction was added to the mempool but wasn't processed in %fs", timeout.Seconds())
-		case protoReceipt, ok := <-receiptsCh:
-			if !ok || protoReceipt == nil {
-				log.Warn("[rpc] receipts channel was closed")
-				return nil, fmt.Errorf("receipts channel was closed") // TODO: proper error handling
-			}
-			return ethutils.MarshalSubscribeReceipt(protoReceipt), nil
+	select {
+	case <-timeoutCtx.Done():
+		return nil, &rpc.TxSyncTimeoutError{
+			Msg:  fmt.Sprintf("the transaction was added to the mempool but wasn't processed in %v", timeout),
+			Hash: hash,
 		}
+	case protoReceipt, ok := <-receiptsCh:
+		if !ok || protoReceipt == nil {
+			log.Warn("[rpc] receipts subscription was closed")
+			return nil, fmt.Errorf("receipts subscription was closed")
+		}
+		return ethutils.MarshalSubscribeReceipt(protoReceipt), nil
 	}
 }
 
 // SendTransaction implements eth_sendTransaction. Creates new message call transaction or a contract creation if the data field contains code.
-func (api *APIImpl) SendTransaction(_ context.Context, txObject any) (common.Hash, error) {
+func (api *APIImpl) SendTransaction(_ context.Context, _ any) (common.Hash, error) {
 	return common.Hash{0}, fmt.Errorf(NotImplemented, "eth_sendTransaction")
 }
 

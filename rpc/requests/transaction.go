@@ -167,7 +167,7 @@ func (reqGen *requestGenerator) SendRawTransactionSync(signedTx types.Transactio
 		return nil, fmt.Errorf("failed to marshal binary: %v", err)
 	}
 
-	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHSendRawTransactionSync, hexutil.Bytes(buf.Bytes()), timeoutMs); err != nil {
+	if err := reqGen.rpcCallOnce(context.Background(), &result, Methods.ETHSendRawTransactionSync, hexutil.Bytes(buf.Bytes()), timeoutMs); err != nil {
 		return nil, err
 	}
 

@@ -203,6 +203,15 @@ func (req *requestGenerator) rpcCall(ctx context.Context, result any, method RPC
 	})
 }
 
+func (req *requestGenerator) rpcCallOnce(ctx context.Context, result any, method RPCMethod, args ...any) error {
+	client, err := req.rpcClient(ctx)
+	if err != nil {
+		return err
+	}
+
+	return client.CallContext(ctx, result, string(method), args...)
+}
+
 const requestTimeout = time.Second * 20
 const connectionTimeout = time.Millisecond * 500
 
