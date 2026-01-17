@@ -263,10 +263,11 @@ func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) e
 				// subscribe the topic immediately
 				g.subscriptions.SubscribeWithExpiry(topic, expiry)
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			if err := topicHandle.topic.Publish(ctx, compressedData, pubsub.WithReadiness(pubsub.MinTopicSize(1))); err != nil {
 				log.Warn("[GossipManager] Publish failed again with minute timeout", "topic", topic)
+				topicHandle.topic.Publish(ctx, compressedData)
 			}
 		}()
 		return err
