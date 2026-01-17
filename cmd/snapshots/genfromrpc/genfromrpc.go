@@ -883,7 +883,8 @@ func GetBlockByNumber(ctx context.Context, client, receiptClient *rpc.Client, bl
 		return nil, err
 	}
 
-	txs, err := unMarshalTransactions(ctx, receiptClient, block.Transactions, verify, isArbitrum)
+	timeboostActivated := block.Number.Uint64() > 327_000_000 // for arb1
+	txs, err := unMarshalTransactions(ctx, receiptClient, block.Transactions, verify, isArbitrum, timeboostActivated)
 	if err != nil {
 		return nil, err
 	}
@@ -933,7 +934,7 @@ func GetBlockByNumber(ctx context.Context, client, receiptClient *rpc.Client, bl
 	return blk, nil
 }
 
-func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool) (types.Transactions, error) {
+func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool, timeboostActivated bool) (types.Transactions, error) {
 	txs := make(types.Transactions, len(rawTxs))
 
 	receiptsEnabled := client != nil
@@ -991,7 +992,9 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 				return fmt.Errorf("unknown tx type: %s at index %d", typeTx, idx)
 			}
 
-			if receiptsEnabled && timeboostedTxTypes[typeTx] {
+			needsReceipt := typeTx == "0x69" || (timeboostActivated && timeboostedTxTypes[typeTx])
+
+			if receiptsEnabled && needsReceipt {
 				if txData["hash"] == "" {
 					return errors.New("missing tx hash for receipt fetch")
 				}
