@@ -250,6 +250,7 @@ func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) e
 	cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	if len(topicHandle.topic.ListPeers()) == 0 {
+		log.Warn("[GossipManager] no peers found for topic, publishing without readiness", "topic", topic)
 		return topicHandle.topic.Publish(cctx, compressedData)
 	}
 
