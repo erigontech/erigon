@@ -202,10 +202,10 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	}
 
 	// Debug: fetch single block to test TD seeding
-	if err := DebugFetchSingleBlock(ctx, tx, client, receiptClient, 87800000); err != nil {
-		log.Error("[Debug] Single block fetch failed", "err", err)
-	}
-	return nil // Debug: exit early after single block test
+	//if err := DebugFetchSingleBlock(ctx, tx, client, receiptClient, 87800000); err != nil {
+	//	log.Error("[Debug] Single block fetch failed", "err", err)
+	//}
+	//return nil // Debug: exit early after single block test
 
 	if firstBlock >= latestRemoteBlock.Uint64() {
 		return nil
