@@ -193,8 +193,6 @@ type EthereumExecutionModule struct {
 	// rules engine
 	engine rules.Engine
 
-	doingPostForkchoice bool
-
 	// metrics for average mgas/sec
 	avgMgasSec float64
 

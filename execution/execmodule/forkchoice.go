@@ -188,7 +188,14 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}, false)
 		return fmt.Errorf("semaphore timeout")
 	}
-	defer e.semaphore.Release(1)
+
+	releaseSemaphoreOnReturn := true
+
+	defer func() {
+		if releaseSemaphoreOnReturn {
+			e.semaphore.Release(1)
+		}
+	}()
 
 	defer UpdateForkChoiceDuration(time.Now())
 	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
@@ -427,7 +434,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				Status:          executionproto.ExecutionStatus_Success,
 				ValidationError: validationError,
 			}, false)
-			e.logHeadUpdated(blockHash, fcuHeader, 0, "head validated", false)
+			e.logHeadUpdated(blockHash, fcuHeader, 0, "head validated", nil, false)
 		}
 		if err := e.forkValidator.MergeExtendingFork(ctx, currentContext, tx, e.accumulator, e.recentReceipts); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
@@ -525,79 +532,32 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 
-		txnum, err := rawdbv3.TxNums.Max(ctx, tx, fcuHeader.Number.Uint64())
+		txnum, err := rawdbv3.TxNums.Max(tx, fcuHeader.Number.Uint64())
 		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 
-		e.logHeadUpdated(blockHash, fcuHeader, txnum, "head updated", stateFlushingInParallel)
-
-		// TODO: (20/12/25) we really want to commit all changes with the shared domains but
-		// to do that we need to remove all of the rawdb methods and call them via
-		// the domains - which will happen after they transiaiotn to an ExecutionContext
-		// for the moment just commit what we have
-		if err = tx.Commit(); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
-		}
-		e.lock.Lock()
-		e.currentContext = currentContext
-		e.lock.Unlock()
-		rollbackOnReturn = false
-	}
-
-	e.runPostForkchoiceInBackground(finishProgressBefore, isSynced, initialCycle)
-
-	return sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
-		LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
-		Status:          status,
-		ValidationError: validationError,
-	}, stateFlushingInParallel)
-}
-
-func (e *EthereumExecutionModule) runPostForkchoiceInBackground(finishProgressBefore uint64, isSynced bool, initialCycle bool) {
-	e.lock.Lock()
-	if e.doingPostForkchoice {
-		e.lock.Unlock()
-		return
-	}
-	e.doingPostForkchoice = true
-	e.lock.Unlock()
-
-	go func() {
-		err := func() error {
-			defer func() {
-				e.lock.Lock()
-				defer e.lock.Unlock()
-				e.doingPostForkchoice = false
-			}()
-
-			var timings []interface{}
-			// Wait for semaphore to be available
-			if err := e.semaphore.Acquire(e.bacgroundCtx, 1); err != nil {
+		var timings []interface{}
+		if dbg.AsyncFcuFlush {
+			// TODO: (20/12/25) we really want to commit all changes with the shared domains but
+			// to do that we need to remove all of the rawdb methods and call them via
+			// the domains - which will happen after they transiaiotn to an ExecutionContext
+			// for the moment just commit what we have
+			if err = tx.Commit(); err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+			}
+			rollbackOnReturn = false
+		} else {
+			flushStart := time.Now()
+			if err := e.currentContext.Flush(e.bacgroundCtx, tx); err != nil {
 				return err
 			}
-			defer e.semaphore.Release(1)
-
-			if e.currentContext != nil {
-				tx, err := e.db.BeginTemporalRw(e.bacgroundCtx) //nolint
-				if err != nil {
-					return err
-				}
-				defer func() {
-					tx.Rollback()
-				}()
-
-				flushStart := time.Now()
-				if err := e.currentContext.Flush(e.bacgroundCtx, tx); err != nil {
-					return err
-				}
-				timings = append(timings, "flush", common.Round(time.Since(flushStart), 0))
-				commitStart := time.Now()
-				if err := tx.Commit(); err != nil {
-					return err
-				}
-				timings = append(timings, "commit", common.Round(time.Since(commitStart), 0))
+			timings = append(timings, "flush", common.Round(time.Since(flushStart), 0))
+			commitStart := time.Now()
+			if err := tx.Commit(); err != nil {
+				return err
 			}
+			timings = append(timings, "commit", common.Round(time.Since(commitStart), 0))
 
 			if e.hook != nil {
 				if err := e.db.View(e.bacgroundCtx, func(tx kv.Tx) error {
@@ -613,7 +573,68 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(finishProgressBe
 			}); err != nil {
 				return err
 			}
+		}
 
+		e.logHeadUpdated(blockHash, fcuHeader, txnum, "head updated", timings, stateFlushingInParallel)
+
+		e.lock.Lock()
+		e.currentContext = currentContext
+		e.lock.Unlock()
+	}
+
+	releaseSemaphoreOnReturn = false
+	e.runPostForkchoiceInBackground(finishProgressBefore, isSynced, initialCycle)
+
+	return sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
+		LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
+		Status:          status,
+		ValidationError: validationError,
+	}, stateFlushingInParallel)
+}
+
+func (e *EthereumExecutionModule) runPostForkchoiceInBackground(finishProgressBefore uint64, isSynced bool, initialCycle bool) {
+	go func() {
+		err := func() error {
+			var timings []interface{}
+			defer e.semaphore.Release(1)
+
+			if dbg.AsyncFcuFlush {
+				if e.currentContext != nil {
+					tx, err := e.db.BeginTemporalRw(e.bacgroundCtx) //nolint
+					if err != nil {
+						return err
+					}
+					defer func() {
+						tx.Rollback()
+					}()
+
+					flushStart := time.Now()
+					if err := e.currentContext.Flush(e.bacgroundCtx, tx); err != nil {
+						return err
+					}
+					timings = append(timings, "flush", common.Round(time.Since(flushStart), 0))
+					commitStart := time.Now()
+					if err := tx.Commit(); err != nil {
+						return err
+					}
+					timings = append(timings, "commit", common.Round(time.Since(commitStart), 0))
+				}
+
+				if e.hook != nil {
+					if err := e.db.View(e.bacgroundCtx, func(tx kv.Tx) error {
+						return e.hook.AfterRun(tx, finishProgressBefore, isSynced)
+					}); err != nil {
+						return err
+					}
+				}
+
+				// force fsync after notifications are sent
+				if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
+					return kv.IncrementKey(tx, kv.DatabaseInfo, []byte("chaindata_force"))
+				}); err != nil {
+					return err
+				}
+			}
 			pruneStart := time.Now()
 			defer UpdateForkChoicePruneDuration(pruneStart)
 			if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
@@ -643,7 +664,7 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(finishProgressBe
 	}()
 }
 
-func (e *EthereumExecutionModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Header, txnum uint64, msg string, debug bool) {
+func (e *EthereumExecutionModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Header, txnum uint64, msg string, additionalArgs []any, debug bool) {
 	if e.logger == nil {
 		return
 	}
@@ -681,6 +702,7 @@ func (e *EthereumExecutionModule) logHeadUpdated(blockHash common.Hash, fcuHeade
 		}
 	}
 
+	logArgs = append(logArgs, additionalArgs...)
 	logArgs = append(logArgs, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 
 	dbgLevel := log.LvlInfo
