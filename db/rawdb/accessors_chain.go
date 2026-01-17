@@ -957,7 +957,8 @@ func ReadHeaderByNumber(db kv.Getter, number uint64) *types.Header {
 }
 
 func ReadFirstNonGenesisHeaderNumber(tx kv.Tx) (uint64, bool, error) {
-	v, err := rawdbv3.SecondKey(tx, kv.Headers)
+	//v, err := rawdbv3.SecondKey(tx, kv.Headers)
+	v, err := rawdbv3.FirstKey(tx, kv.Headers)
 	if err != nil {
 		return 0, false, err
 	}

@@ -349,6 +349,20 @@ func Last(tx kv.Tx, table string) ([]byte, []byte, error) {
 	return k, v, nil
 }
 
+// FirstKey
+func FirstKey(tx kv.Tx, table string) ([]byte, error) {
+	c, err := tx.Cursor(table)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	k, _, err := c.First()
+	if err != nil {
+		return nil, err
+	}
+	return k, nil
+}
+
 // SecondKey - useful if table always has zero-key (for example genesis block)
 func SecondKey(tx kv.Tx, table string) ([]byte, error) {
 	c, err := tx.Cursor(table)
