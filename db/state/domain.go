@@ -1897,15 +1897,10 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		defer valsCursor.Close()
 	}
 
-	prs, err := GetPruneValProgress(rwTx, []byte(dt.d.ValuesTable))
-	if err != nil {
-		return nil, err
-	}
-
-	prs.KeyProgress = prune.Done // domains don't have key tables
+	prg.KeyProgress = prune.Done // domains don't have key tables
 
 	pruneStat, err := prune.TableScanningPrune(ctx, "domain "+dt.name.String(), dt.d.FilenameBase, txFrom, txTo, limit, dt.stepSize,
-		logEvery, dt.d.logger, nil, valsCursor, asserts, prs, mode)
+		logEvery, dt.d.logger, nil, valsCursor, asserts, prg, mode)
 	if err != nil {
 		return nil, err
 	}
