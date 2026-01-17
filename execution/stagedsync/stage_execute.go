@@ -87,6 +87,7 @@ type ExecuteBlockCfg struct {
 	genesis   *types.Genesis
 
 	silkworm        *silkworm.Silkworm
+	blockProduction bool
 	experimentalBAL bool
 }
 
@@ -148,10 +149,10 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 		}
 		defer doms.Close()
 	}
-	txNumsReader := br.TxnumReader()
+	txNumsReader := br.TxnumReader(ctx)
 
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
-	txNum, err := txNumsReader.Min(ctx, rwTx, u.UnwindPoint+1)
+	txNum, err := txNumsReader.Min(rwTx, u.UnwindPoint+1)
 	if err != nil {
 		return err
 	}
@@ -283,7 +284,7 @@ func unwindExec3State(ctx context.Context,
 				if len(entry.Value) > 0 {
 					var account accounts.Account
 					if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
-						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
+						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d, prev: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep, prevStep)
 					}
 				} else {
 					if keyStep != prevStep {
@@ -508,23 +509,23 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize()) * 100)
 
 	pruneTimeout := quickPruneTimeout
-	if s.CurrentSyncCycle.IsInitialCycle {
-		pruneTimeout = 12 * time.Hour
-
-		// allow greedy prune on non-chain-tip
-		greedyPruneCommitmentHistoryStartTime := time.Now()
-		if err = tx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
-			return err
-		}
-		if duration := time.Since(greedyPruneCommitmentHistoryStartTime); duration > quickPruneTimeout {
-			logger.Debug(
-				fmt.Sprintf("[%s] greedy prune commitment history timing", s.LogPrefix()),
-				"duration", duration,
-				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
-				"externalTx", useExternalTx,
-			)
-		}
-	}
+	//if s.CurrentSyncCycle.IsInitialCycle {
+	//	//pruneTimeout = 12 * time.Hour
+	//
+	//	// allow greedy prune on non-chain-tip
+	//	greedyPruneCommitmentHistoryStartTime := time.Now()
+	//	//if err = tx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
+	//	//	return err
+	//	//}
+	//	if duration := time.Since(greedyPruneCommitmentHistoryStartTime); duration > quickPruneTimeout {
+	//		logger.Debug(
+	//			fmt.Sprintf("[%s] greedy prune commitment history timing", s.LogPrefix()),
+	//			"duration", duration,
+	//			"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
+	//			"externalTx", useExternalTx,
+	//		)
+	//	}
+	//}
 
 	pruneSmallBatchesStartTime := time.Now()
 	if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
