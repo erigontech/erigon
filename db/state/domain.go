@@ -1762,30 +1762,32 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 	if m := dt.files.EndTxNum(); m > 0 {
 		maxStepToPrune = kv.Step((m - 1) / dt.stepSize)
 	}
-	return true, maxStepToPrune //TODO: remove
-	//var untilStep kv.Step
-	//if untilTx > 0 {
-	//	untilStep = kv.Step((untilTx - 1) / dt.stepSize)
-	//}
-	//sm, err := GetExecV3PrunableProgress(tx, []byte(dt.d.ValuesTable))
-	//if err != nil {
-	//	dt.d.logger.Error("get domain pruning progress", "name", dt.d.FilenameBase, "error", err)
-	//	return false, maxStepToPrune
-	//}
-	//
-	//delta := float64(max(maxStepToPrune, sm) - min(maxStepToPrune, sm)) // maxStep could be 0
-	//switch dt.d.FilenameBase {
-	//case "account":
-	//	mxPrunableDAcc.Set(delta)
-	//case "storage":
-	//	mxPrunableDSto.Set(delta)
-	//case "code":
-	//	mxPrunableDCode.Set(delta)
-	//case "commitment":
-	//	mxPrunableDComm.Set(delta)
-	//}
-	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.FilenameBase, sm, maxStepToPrune, untilStep)
-	//return sm <= min(maxStepToPrune, untilStep) && dt.files.EndTxNum() > 0, maxStepToPrune
+
+	var untilStep kv.Step
+	if untilTx > 0 {
+		untilStep = kv.Step((untilTx - 1) / dt.stepSize)
+	}
+	prg, err := GetPruneValProgress(tx, []byte(dt.d.ValuesTable))
+	if err != nil {
+		dt.d.logger.Error("get domain pruning progress", "name", dt.d.FilenameBase, "error", err)
+		return false, maxStepToPrune
+	}
+
+	done := prg.KeyProgress == prune.Done && prg.ValueProgress == prune.Done
+	minStep := kv.Step(dt.d.minStepInDB(tx))
+	delta := float64(max(maxStepToPrune, minStep) - min(maxStepToPrune, minStep)) // maxStep could be 0
+	switch dt.d.FilenameBase {
+	case "account":
+		mxPrunableDAcc.Set(delta)
+	case "storage":
+		mxPrunableDSto.Set(delta)
+	case "code":
+		mxPrunableDCode.Set(delta)
+	case "commitment":
+		mxPrunableDComm.Set(delta)
+	}
+	fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.FilenameBase, minStep, maxStepToPrune, untilStep)
+	return minStep <= min(maxStepToPrune, untilStep) && dt.files.EndTxNum() > 0 || !done, maxStepToPrune
 }
 
 type DomainPruneStat struct {

@@ -983,16 +983,6 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 		txTo = min(ht.files.EndTxNum(), ht.iit.files.EndTxNum(), untilTx)
 	}
 
-	switch ht.h.FilenameBase {
-	case "accounts":
-		mxPrunableHAcc.Set(float64(txTo - minIdxTx))
-	case "storage":
-		mxPrunableHSto.Set(float64(txTo - minIdxTx))
-	case "code":
-		mxPrunableHCode.Set(float64(txTo - minIdxTx))
-	case "commitment":
-		mxPrunableHComm.Set(float64(txTo - minIdxTx))
-	}
 	return minIdxTx < txTo || pruneInProgress, txTo
 }
 
@@ -1002,6 +992,17 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 //   - E.g. Unwind can't use progress, because it's not linear
 //     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
 func (ht *HistoryRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
+	delta := float64((txTo - ht.h.minTxNumInDB(tx)) / ht.stepSize)
+	switch ht.h.FilenameBase {
+	case "accounts":
+		mxPrunableHAcc.Set(delta)
+	case "storage":
+		mxPrunableHSto.Set(delta)
+	case "code":
+		mxPrunableHCode.Set(delta)
+	case "commitment":
+		mxPrunableHComm.Set(delta)
+	}
 	if !forced {
 		if ht.files.EndTxNum() > 0 {
 			txTo = min(txTo, ht.files.EndTxNum())
