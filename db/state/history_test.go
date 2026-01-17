@@ -194,7 +194,10 @@ func TestHistoryCollationBuild(t *testing.T) {
 		defer tx.Rollback()
 		hc := h.BeginFilesRo()
 		defer hc.Close()
-		writer := hc.NewWriter()
+
+		// Create a single VLogSet in the correct directory
+		vlogSet := NewVLogSet(h.dirs.SnapDomain)
+		writer := hc.NewWriter(vlogSet)
 		defer writer.close()
 
 		err = writer.AddPrevValue([]byte("key1"), 2, nil)
@@ -209,7 +212,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.NoError(err)
 
 		flusher := writer
-		writer = hc.NewWriter()
+		writer = hc.NewWriter(vlogSet) // Reuse the same vlogSet
 
 		err = writer.AddPrevValue([]byte("key2"), 7, []byte("value2.2"))
 		require.NoError(err)
@@ -220,6 +223,10 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.NoError(err)
 
 		err = writer.Flush(ctx, tx)
+		require.NoError(err)
+
+		// Fsync vlogs before collation
+		err = vlogSet.FsyncAll()
 		require.NoError(err)
 
 		c, err := h.collate(ctx, 0, 0, 8, tx)
@@ -317,7 +324,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 		defer tx.Rollback()
 		hc := h.BeginFilesRo()
 		defer hc.Close()
-		writer := hc.NewWriter()
+		writer := hc.NewWriter(NewVLogSet(t.TempDir()))
 		defer writer.close()
 
 		err = writer.AddPrevValue([]byte("key1"), 2, nil)
@@ -504,7 +511,7 @@ func TestHistoryCanPrune(t *testing.T) {
 
 		hc := h.BeginFilesRo()
 		defer hc.Close()
-		writer := hc.NewWriter()
+		writer := hc.NewWriter(NewVLogSet(t.TempDir()))
 		defer writer.close()
 
 		addr = common.FromHex("ed7229d50cde8de174cc64a882a0833ca5f11669")
@@ -830,10 +837,13 @@ func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]up
 	//require.NoError(tb, err)
 	//defer tx.Rollback()
 
+	// Create a single VLogSet to be shared across all writers
+	vlogSet := NewVLogSet(h.dirs.SnapDomain)
+
 	err := db.Update(ctx, func(tx kv.RwTx) error {
 		hc := h.BeginFilesRo()
 		defer hc.Close()
-		writer := hc.NewWriter()
+		writer := hc.NewWriter(vlogSet)
 		defer writer.close()
 		// keys are encodings of numbers 1..31
 		// each key changes value on every txNum which is multiple of the key
@@ -852,14 +862,19 @@ func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]up
 					flusher = nil //nolint
 				}
 				flusher = writer
-				writer = hc.NewWriter()
+				writer = hc.NewWriter(vlogSet) // Reuse the same vlogSet
 			}
 		}
 		if flusher != nil {
 			err := flusher.Flush(ctx, tx)
 			require.NoError(tb, err)
 		}
-		return writer.Flush(ctx, tx)
+		if err := writer.Flush(ctx, tx); err != nil {
+			return err
+		}
+
+		// Fsync all vlog writers before committing
+		return vlogSet.FsyncAll()
 	})
 	require.NoError(tb, err)
 
@@ -875,7 +890,11 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 	defer tx.Rollback()
 	hc := h.BeginFilesRo()
 	defer hc.Close()
-	writer := hc.NewWriter()
+
+	// Create a single VLogSet to be shared across all writers
+	// This matches production where aggregator has one VLogSet
+	vlogSet := NewVLogSet(h.dirs.SnapDomain)
+	writer := hc.NewWriter(vlogSet)
 	defer writer.close()
 
 	txs := uint64(1000)
@@ -905,7 +924,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 		}
 		if txNum%10 == 0 {
 			flusher = writer
-			writer = hc.NewWriter()
+			writer = hc.NewWriter(vlogSet) // Reuse the same vlogSet
 		}
 	}
 	if flusher != nil {
@@ -914,6 +933,12 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 	}
 	err = writer.Flush(ctx, tx)
 	require.NoError(tb, err)
+
+	// Fsync all vlog writers before committing transaction
+	// This ensures vlog data is persisted to disk before collation reads it
+	err = vlogSet.FsyncAll()
+	require.NoError(tb, err)
+
 	err = tx.Commit()
 	require.NoError(tb, err)
 
@@ -1522,7 +1547,7 @@ func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	defer tx.Rollback()
 	hc := h.BeginFilesRo()
 	defer hc.Close()
-	writer := hc.NewWriter()
+	writer := hc.NewWriter(NewVLogSet(tb.TempDir()))
 	defer writer.close()
 
 	keys := [][]byte{
@@ -1563,7 +1588,7 @@ func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 		}
 		if txNum%10 == 0 {
 			flusher = writer
-			writer = hc.NewWriter()
+			writer = hc.NewWriter(NewVLogSet(tb.TempDir()))
 		}
 	}
 	if flusher != nil {

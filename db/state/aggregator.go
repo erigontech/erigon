@@ -56,10 +56,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-type aggVisible struct {
-	vlogWriters map[kv.Step]*VLogWriter // shared vlog writers per step, for current transaction
-}
-
 type Aggregator struct {
 	db                kv.RoDB //TODO: remove this field. Accept `tx` and `db` from outside. But it must be field of `temporal.DB` - and only `temporal.DB` must pass it to us. App-Level code must call methods of `temporal.DB`
 	d                 [kv.DomainLen]*Domain
@@ -74,8 +70,8 @@ type Aggregator struct {
 	visibleFilesMinimaxTxNum atomic.Uint64
 	snapshotBuildSema        *semaphore.Weighted
 
-	// _aggVisible - underscore means: don't use directly, managed through recalcVisibleFiles
-	_aggVisible *aggVisible
+	// _vlogSet - underscore means: don't use directly, managed through visibleFilesLock
+	_vlogSet *VLogSet
 
 	disableHistory         bool
 	collateAndBuildWorkers int // minimize amount of background workers by default
@@ -108,6 +104,7 @@ type Aggregator struct {
 
 func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
+
 	return &Aggregator{
 		ctx:                    ctx,
 		ctxCancel:              ctxCancel,
@@ -121,7 +118,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 		logger:                 logger,
 		collateAndBuildWorkers: 1,
 		mergeWorkers:           1,
-		_aggVisible:            &aggVisible{vlogWriters: make(map[kv.Step]*VLogWriter)},
+		_vlogSet:               NewVLogSet(dirs.SnapDomain),
 
 		produce: true,
 	}, nil
@@ -1777,22 +1774,22 @@ type AggregatorRoTx struct {
 	d   [kv.DomainLen]*DomainRoTx
 	iis []*InvertedIndexRoTx
 
-	_aggVisible *aggVisible // transaction-local vlog writers
-	_leakID     uint64      // set only if TRACE_AGG=true
+	vlogSet *VLogSet // transaction-local vlog set (clone of aggregator's vlogSet)
+	_leakID uint64   // set only if TRACE_AGG=true
 }
 
 func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
-	ac := &AggregatorRoTx{
-		a:           a,
-		_leakID:     a.leakDetector.Add(),
-		iis:         make([]*InvertedIndexRoTx, len(a.iis)),
-		_aggVisible: &aggVisible{vlogWriters: make(map[kv.Step]*VLogWriter)},
-	}
-
 	a.visibleFilesLock.RLock()
-	// Copy all existing vlog pointers to transaction-local aggVisible
-	for step, writer := range a._aggVisible.vlogWriters {
-		ac._aggVisible.vlogWriters[step] = writer
+	defer a.visibleFilesLock.RUnlock()
+
+	// Clone vlogSet for transaction isolation
+	vlogSet := a._vlogSet.Clone()
+
+	ac := &AggregatorRoTx{
+		a:       a,
+		_leakID: a.leakDetector.Add(),
+		iis:     make([]*InvertedIndexRoTx, len(a.iis)),
+		vlogSet: vlogSet,
 	}
 
 	for id, ii := range a.iis {
@@ -1803,9 +1800,8 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 			ac.d[id] = d.BeginFilesRo()
 		}
 	}
-	a.visibleFilesLock.RUnlock()
 
-	// Set aggTx reference on each domain for accessing shared vlog writers
+	// Set aggTx reference on each domain for accessing vlog set
 	for id := range ac.d {
 		if ac.d[id] != nil {
 			ac.d[id].aggTx = ac
@@ -2015,24 +2011,16 @@ func (a *Aggregator) DisableReadAhead() {
 // The writer is temporary and shared across all domains for this transaction.
 // Created when flush() detects a new step is being written.
 func (at *AggregatorRoTx) GetOrCreateVLogWriter(step kv.Step) (*VLogWriter, error) {
-	// Check transaction-local vlog writers (maintains ACID isolation)
-	if writer, exists := at._aggVisible.vlogWriters[step]; exists {
-		return writer, nil
-	}
-
-	// Create new vlog writer for this step (don't read from shared state - ACID isolation)
-	vlogPath := vlogPathForStep(at.a.dirs.SnapDomain, step)
-	writer, err := CreateVLogWriter(vlogPath)
+	// Use transaction-local vlogSet to get or create writer
+	// VLogSet knows the directory and will create the file there
+	writer, err := at.vlogSet.GetOrCreate(step)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create vlog writer for step %d: %w", step, err)
+		return nil, err
 	}
 
-	// Store in transaction-local map
-	at._aggVisible.vlogWriters[step] = writer
-
-	// Add to shared state at the END of the method
+	// Also add to shared vlogSet for visibility to other transactions
 	at.a.visibleFilesLock.Lock()
-	at.a._aggVisible.vlogWriters[step] = writer
+	at.a._vlogSet.AddDirty(step, writer)
 	at.a.visibleFilesLock.Unlock()
 
 	return writer, nil
@@ -2045,12 +2033,20 @@ func (at *AggregatorRoTx) Commit() error {
 		return nil
 	}
 
-	// Fsync all transaction-local vlog writers (no lock needed)
-	for step, writer := range at._aggVisible.vlogWriters {
+	// Fsync all transaction-local vlog writers
+	at.vlogSet.lock.RLock()
+	for step, writer := range at.vlogSet.dirty {
 		if err := writer.Fsync(); err != nil {
+			at.vlogSet.lock.RUnlock()
 			return fmt.Errorf("failed to fsync vlog writer for step %d: %w", step, err)
 		}
 	}
+	at.vlogSet.lock.RUnlock()
+
+	// After successful fsync, recalc visible to promote dirty → visible
+	at.a.visibleFilesLock.Lock()
+	at.a._vlogSet.RecalcVisible()
+	at.a.visibleFilesLock.Unlock()
 
 	return nil
 }
@@ -2061,16 +2057,10 @@ func (at *AggregatorRoTx) Close() {
 	}
 	at.a.leakDetector.Del(at._leakID)
 
-	// Close all transaction-local vlog writers (no lock needed for transaction-local)
-	for _, writer := range at._aggVisible.vlogWriters {
-		writer.Close()
+	// Close transaction-local vlogSet
+	if at.vlogSet != nil {
+		at.vlogSet.Close()
 	}
-	at._aggVisible.vlogWriters = make(map[kv.Step]*VLogWriter)
-
-	// Clear the shared writers map (only 1 RwTx at a time, so safe to clear)
-	at.a.visibleFilesLock.Lock()
-	at.a._aggVisible.vlogWriters = make(map[kv.Step]*VLogWriter)
-	at.a.visibleFilesLock.Unlock()
 
 	at.a = nil
 

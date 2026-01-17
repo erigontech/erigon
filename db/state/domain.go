@@ -60,13 +60,18 @@ var (
 )
 var traceGetLatest, _ = kv.String2Domain(dbg.EnvString("AGG_TRACE_GET_LATEST", ""))
 
+// VLogWriterProvider provides access to vlog writers for large values
+type VLogWriterProvider interface {
+	GetOrCreateVLogWriter(step kv.Step) (*VLogWriter, error)
+}
+
 // Domain is a part of the state (examples are Accounts, Storage, Code)
 // Domain should not have any go routines or locks
 //
 // Data-Existence in .kv vs .v files:
-//  1. key doesn’t exist, then create: .kv - yes, .v - yes
+//  1. key doesn't exist, then create: .kv - yes, .v - yes
 //  2. acc exists, then update/delete: .kv - yes, .v - yes
-//  3. acc doesn’t exist, then delete: .kv - no,  .v - no
+//  3. acc doesn't exist, then delete: .kv - no,  .v - no
 type Domain struct {
 	statecfg.DomainCfg // keep it above *History to avoid unexpected shadowing
 	*History
@@ -206,7 +211,9 @@ func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
 	return binary.BigEndian.Uint64(lstIdx) / d.stepSize
 }
 
-func (dt *DomainRoTx) NewWriter() *DomainBufferedWriter { return dt.newWriter(dt.d.dirs.Tmp, false) }
+func (dt *DomainRoTx) NewWriter(vlogSet *VLogSet) *DomainBufferedWriter {
+	return dt.newWriter(dt.d.dirs.Tmp, false, vlogSet)
+}
 
 // OpenList - main method to open list of files.
 // It's ok if some files was open earlier.
@@ -371,7 +378,7 @@ func (w *DomainBufferedWriter) DeleteWithPrev(k []byte, txNum uint64, prev []byt
 
 func (w *DomainBufferedWriter) SetDiff(diff *kv.DomainDiff) { w.diff = diff }
 
-func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWriter {
+func (dt *DomainRoTx) newWriter(tmpdir string, discard bool, vlogSet *VLogSet) *DomainBufferedWriter {
 	discardHistory := discard || dt.d.HistoryDisabled
 
 	w := &DomainBufferedWriter{
@@ -379,8 +386,8 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 		aux:       make([]byte, 0, 128),
 		valsTable: dt.d.ValuesTable,
 		largeVals: dt.d.LargeValues,
-		aggTx:     dt.aggTx,
-		h:         dt.ht.newWriter(tmpdir, discardHistory),
+		vlogSet:   vlogSet,
+		h:         dt.ht.newWriter(tmpdir, discardHistory, vlogSet),
 	}
 	if !discard {
 		w.values = etl.NewCollectorWithAllocator(dt.d.Name.String()+"domain.flush", tmpdir, etl.SmallSortableBuffers, dt.d.logger).
@@ -396,7 +403,7 @@ type DomainBufferedWriter struct {
 
 	valsTable string
 	largeVals bool
-	aggTx     *AggregatorRoTx // reference to get shared vlog writer (if largeVals=true)
+	vlogSet   *VLogSet // vlog set for large value storage (if largeVals=true)
 
 	stepBytes [8]byte // current inverted step representation
 	aux       []byte  // auxilary buffer for key1 + key2
@@ -424,7 +431,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 
-	if w.largeVals && w.aggTx != nil {
+	if w.largeVals {
 		// Pre-create map to cache vlog writers per step
 		// Typically all values are for the same step, so we'll only create one writer
 		vlogWriters := make(map[kv.Step]*VLogWriter)
@@ -444,14 +451,21 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 			vlogWriter, exists := vlogWriters[step]
 			if !exists {
 				var err error
-				vlogWriter, err = w.aggTx.GetOrCreateVLogWriter(step)
+				vlogWriter, err = w.vlogSet.GetOrCreate(step)
 				if err != nil {
-					return fmt.Errorf("failed to get vlog writer: %w", err)
+					return fmt.Errorf("failed to get vlog writer for step %d: %w", step, err)
 				}
 				vlogWriters[step] = vlogWriter
 			}
 
-			// Write ALL values to vlog (no size check)
+			// Special case: empty values stored directly (no vlog reference)
+			// Empty value (0 bytes) is smaller than vlog reference (16 bytes)
+			if len(actualValue) == 0 {
+				// Store step bytes only (no vlog reference needed)
+				return tx.Put(w.valsTable, k, stepBytes)
+			}
+
+			// Write non-empty values to vlog
 			// VLogWriter.Append writes [size][value] and returns offset
 			offset, err := vlogWriter.Append(actualValue)
 			if err != nil {
@@ -903,9 +917,14 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 		}
 
 		var actualValue []byte
-		if d.LargeValues && vlogFile != nil {
-			// v format: [step: 8 bytes] [offset: 8 bytes]
-			if len(kv.v) >= 16 {
+		if d.LargeValues {
+			// v format: [step: 8 bytes] [offset: 8 bytes] (for non-empty values)
+			//        or [step: 8 bytes] (for empty values)
+			if len(kv.v) == 8 {
+				// Empty value (only step bytes, no vlog reference)
+				actualValue = []byte{}
+			} else if len(kv.v) >= 16 && vlogFile != nil {
+				// Non-empty value with vlog reference (only if vlog file exists)
 				offset := binary.BigEndian.Uint64(kv.v[8:16])
 				actualValue, err = vlogFile.ReadAt(offset)
 				if err != nil {
@@ -1740,32 +1759,39 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 	foundStep := kv.Step(^binary.BigEndian.Uint64(foundInvStep))
 
 	// Dereference vlog if LargeValues mode
-	if dt.d.LargeValues && len(v) >= 16 {
-		// v format: [step: 8 bytes][offset: 8 bytes]
-		offset := binary.BigEndian.Uint64(v[8:16])
+	if dt.d.LargeValues {
+		// v format: [step: 8 bytes] (for empty values)
+		//        or [step: 8 bytes][offset: 8 bytes] (for non-empty values)
+		if len(v) == 8 {
+			// Empty value (only step bytes, no vlog reference)
+			v = []byte{}
+		} else if len(v) >= 16 {
+			// Non-empty value with vlog reference
+			offset := binary.BigEndian.Uint64(v[8:16])
 
-		// Find vlog file for this step
-		var vlogFile *VLogFile
-		for _, file := range dt.files {
-			if file.src != nil && file.src.vlog != nil {
-				// Check if this file covers the step
-				stepTxNumFrom := firstTxNumOfStep(foundStep, dt.stepSize)
-				if stepTxNumFrom >= file.startTxNum && stepTxNumFrom < file.endTxNum {
-					vlogFile = file.src.vlog
-					break
+			// Find vlog file for this step
+			var vlogFile *VLogFile
+			for _, file := range dt.files {
+				if file.src != nil && file.src.vlog != nil {
+					// Check if this file covers the step
+					stepTxNumFrom := firstTxNumOfStep(foundStep, dt.stepSize)
+					if stepTxNumFrom >= file.startTxNum && stepTxNumFrom < file.endTxNum {
+						vlogFile = file.src.vlog
+						break
+					}
 				}
 			}
-		}
 
-		if vlogFile != nil {
-			// Read actual value from vlog
-			actualValue, err := vlogFile.ReadAt(offset)
-			if err != nil {
-				return nil, 0, false, fmt.Errorf("failed to read vlog at offset %d: %w", offset, err)
+			if vlogFile != nil {
+				// Read actual value from vlog
+				actualValue, err := vlogFile.ReadAt(offset)
+				if err != nil {
+					return nil, 0, false, fmt.Errorf("failed to read vlog at offset %d: %w", offset, err)
+				}
+				v = actualValue
 			}
-			v = actualValue
+			// If vlogFile is nil, fall back to returning v (backward compatibility)
 		}
-		// If vlogFile is nil, fall back to returning v (backward compatibility)
 	}
 
 	if lastTxNumOfStep(foundStep, dt.stepSize) >= dt.files.EndTxNum() {

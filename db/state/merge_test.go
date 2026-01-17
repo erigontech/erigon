@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -585,7 +586,7 @@ func TestMergeFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	w := dc.NewWriter()
+	w := dc.NewWriter(NewVLogSet(filepath.Join(db.Path(), "vlog")))
 
 	prev := []byte{}
 	prevStep := kv.Step(0)

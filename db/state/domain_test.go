@@ -159,7 +159,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 	defer tx.Rollback()
 	domainRoTx := d.BeginFilesRo()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 	defer writer.Close()
 
 	var (
@@ -295,7 +295,7 @@ func TestDomain_AfterPrune(t *testing.T) {
 	defer tx.Rollback()
 	domainRoTx := d.BeginFilesRo()
 	defer d.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 	defer writer.Close()
 
 	var (
@@ -383,7 +383,7 @@ func fillDomain(t *testing.T, d *Domain, db kv.RwDB, logger log.Logger) uint64 {
 
 	domainRoTx := d.BeginFilesRo()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 	defer writer.Close()
 
 	var prev [32][]byte
@@ -635,7 +635,7 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 
 	domainRoTx := d.BeginFilesRo()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 	defer writer.Close()
 
 	val := []byte("value1")
@@ -691,7 +691,7 @@ func TestDomain_Delete(t *testing.T) {
 	defer tx.Rollback()
 	domainRoTx := d.BeginFilesRo()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 	defer writer.Close()
 
 	// Put on even txNum, delete on odd txNum
@@ -862,7 +862,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	defer tx.Rollback()
 	domainRoTx := d.BeginFilesRo()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 	defer writer.Close()
 
 	// keys are encodings of numbers 1..31
@@ -1119,7 +1119,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	domainRoTx := d.BeginFilesRo()
 	defer domainRoTx.Close()
 
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 	defer writer.Close()
 
 	var preval1, preval2, preval3 []byte
@@ -1214,7 +1214,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 
 	domainRoTx := d.BeginFilesRo()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 	defer writer.Close()
 
 	defer func(t time.Time) { fmt.Printf("domain_test.go:1217: %s\n", time.Since(t)) }(time.Now())
@@ -1317,7 +1317,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 	defer tx.Rollback()
 	domainRoTx := d.BeginFilesRo()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 	defer writer.Close()
 
 	// keys are encodings of numbers 1..31
@@ -1457,7 +1457,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 
 	domainRoTx := d.BeginFilesRo()
 	defer d.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 	defer writer.Close()
 
 	keySize1 := uint64(length.Addr)
@@ -1532,7 +1532,7 @@ func TestDomainRange(t *testing.T) {
 
 	domainRoTx := d.BeginFilesRo()
 	defer d.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 	defer writer.Close()
 
 	keySize1 := uint64(2)
@@ -1646,7 +1646,7 @@ func TestDomain_CanPruneAfterAggregation(t *testing.T) {
 
 	domainRoTx := d.BeginFilesRo()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 	defer writer.Close()
 
 	keySize1 := uint64(length.Addr)
@@ -1743,7 +1743,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 
 	domainRoTx := d.BeginFilesRo()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 	defer writer.Close()
 
 	keySize1 := uint64(length.Addr)
@@ -1890,7 +1890,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 
 	domainRoTx := d.BeginFilesRo()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 	defer writer.Close()
 
 	keySize1 := uint64(length.Addr)
@@ -2014,7 +2014,7 @@ func TestDomain_Unwind(t *testing.T) {
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
-		writer := domainRoTx.NewWriter()
+		writer := domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 		defer writer.Close()
 		var preval1, preval2, preval3, preval4 []byte
 
@@ -2064,7 +2064,7 @@ func TestDomain_Unwind(t *testing.T) {
 
 		domainRoTx := d.BeginFilesRo()
 		defer domainRoTx.Close()
-		writer := domainRoTx.NewWriter()
+		writer := domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 		defer writer.Close()
 
 		totalDiff := []kv.DomainEntryDiff{}
@@ -2250,7 +2250,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
-		writer := domainRoTx.NewWriter()
+		writer := domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 		defer writer.Close()
 
 		for i := 0; uint64(i) < maxTx; i++ {
@@ -2412,7 +2412,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	d.HistoryLargeValues = true
 	domainRoTx := d.BeginFilesRo()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 	defer writer.Close()
 
 	keySize1 := uint64(length.Addr)
@@ -2497,7 +2497,7 @@ func TestCanBuild(t *testing.T) {
 
 	domainRoTx.files = append(domainRoTx.files, visibleFile{startTxNum: 0, endTxNum: d.stepSize})
 
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 	defer writer.Close()
 
 	k, v := []byte{1}, []byte{1}
@@ -2614,7 +2614,7 @@ func TestCommitmentDomain_DebugRangeLatest(t *testing.T) {
 
 	domainRoTx := d.BeginFilesRo()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 	defer writer.Close()
 
 	// Insert test data: keys 1..31, with updates at different txNums
@@ -2725,7 +2725,7 @@ func TestDomain_DebugRangeLatestFromFiles(t *testing.T) {
 
 	domainRoTx := d.BeginFilesRo()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 	defer writer.Close()
 
 	// Phase 1: Write keys 1-10 to be stored in files
@@ -2765,7 +2765,7 @@ func TestDomain_DebugRangeLatestFromFiles(t *testing.T) {
 	domainRoTx.Close()
 	domainRoTx = d.BeginFilesRo()
 	defer domainRoTx.Close()
-	writer = domainRoTx.NewWriter()
+	writer = domainRoTx.NewWriter(NewVLogSet(t.TempDir()))
 	defer writer.Close()
 
 	dbOnlyKeyNums := make(map[uint64]bool) //keys only in MDBX

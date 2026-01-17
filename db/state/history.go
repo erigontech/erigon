@@ -416,8 +416,8 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 	return nil
 }
 
-func (ht *HistoryRoTx) NewWriter() *historyBufferedWriter {
-	return ht.newWriter(ht.h.dirs.Tmp, false)
+func (ht *HistoryRoTx) NewWriter(vlogSet *VLogSet) *historyBufferedWriter {
+	return ht.newWriter(ht.h.dirs.Tmp, false, vlogSet)
 }
 
 type historyBufferedWriter struct {
@@ -433,7 +433,8 @@ type historyBufferedWriter struct {
 	//   keys: txNum -> key1+key2
 	//   vals: key1+key2+txNum -> value (not DupSort)
 	largeValues bool
-	aggTx       *AggregatorRoTx // reference to get shared vlog writer (if largeValues=true)
+	vlogSet     *VLogSet // vlog set for large value storage (if largeValues=true)
+	stepSize    uint64   // step size for calculating vlog step from txNum
 
 	ii *InvertedIndexBufferedWriter
 }
@@ -448,14 +449,15 @@ func (w *historyBufferedWriter) close() {
 	}
 }
 
-func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWriter {
+func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool, vlogSet *VLogSet) *historyBufferedWriter {
 	w := &historyBufferedWriter{
 		discard: discard,
 
 		historyKey:       make([]byte, 128),
 		largeValues:      ht.h.HistoryLargeValues,
 		historyValsTable: ht.h.ValuesTable,
-		aggTx:            ht.aggTx,
+		stepSize:         ht.stepSize,
+		vlogSet:          vlogSet,
 
 		ii: ht.iit.newWriter(tmpdir, discard),
 	}
@@ -478,7 +480,7 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 
-	if w.largeValues && w.aggTx != nil {
+	if w.largeValues {
 		// Pre-create map to cache vlog writers per step
 		vlogWriters := make(map[kv.Step]*VLogWriter)
 
@@ -489,24 +491,29 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 				return fmt.Errorf("key too short: %d bytes", len(k))
 			}
 			txNum := binary.BigEndian.Uint64(k[len(k)-8:])
-			stepBytes := make([]byte, 8)
-			binary.BigEndian.PutUint64(stepBytes, ^(txNum / w.aggTx.a.stepSize)) // inverted step
 
 			actualValue := v
-			step := kv.Step(^binary.BigEndian.Uint64(stepBytes))
+			step := kv.Step(txNum / w.stepSize)
 
 			// Get or create vlog writer for this step (cached lookup)
 			vlogWriter, exists := vlogWriters[step]
 			if !exists {
 				var err error
-				vlogWriter, err = w.aggTx.GetOrCreateVLogWriter(step)
+				vlogWriter, err = w.vlogSet.GetOrCreate(step)
 				if err != nil {
-					return fmt.Errorf("failed to get vlog writer: %w", err)
+					return fmt.Errorf("failed to get vlog writer for step %d: %w", step, err)
 				}
 				vlogWriters[step] = vlogWriter
 			}
 
-			// Write ALL values to vlog (including empty ones)
+			// Special case: empty values stored directly (no vlog reference)
+			// Empty value (0 bytes) is smaller than vlog reference (8 bytes)
+			if len(actualValue) == 0 {
+				// Store empty value directly
+				return tx.Put(w.historyValsTable, k, []byte{})
+			}
+
+			// Write non-empty values to vlog
 			offset, err := vlogWriter.Append(actualValue)
 			if err != nil {
 				return err
@@ -720,16 +727,22 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 				return fmt.Errorf("seekExact %s history val [%x]: %w", h.FilenameBase, key, err)
 			}
 
-			// Dereference vlog if value is a vlog reference
-			if vlogFile != nil && len(val) == 8 {
+			// Handle value based on length:
+			// - len=0: empty value (stored directly, no vlog)
+			// - len=8: vlog reference (if HistoryLargeValues) or backward compatibility inline value
+			// - other: inline value (backward compatibility)
+			if len(val) == 0 {
+				// Empty value stored directly (no vlog reference)
+				val = nil
+			} else if h.HistoryLargeValues && len(val) == 8 && vlogFile != nil {
+				// In HistoryLargeValues mode with vlog file, 8-byte values are vlog references
+				// Vlog reference: dereference to get actual value
 				offset := binary.BigEndian.Uint64(val)
 				actualValue, err := vlogFile.ReadAt(offset)
 				if err != nil {
-					return fmt.Errorf("failed to read vlog at offset %d: %w", offset, err)
+					return fmt.Errorf("failed to read vlog at offset %d for step %d: %w", offset, step, err)
 				}
 				val = actualValue
-			} else if len(val) == 0 {
-				val = nil
 			}
 
 			histKeyBuf = historyKey(vTxNum, prevKey, histKeyBuf)
@@ -1308,7 +1321,53 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 		if kAndTxNum == nil || !bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], key) {
 			return nil, false, nil
 		}
-		// val == []byte{}, means key was created in this txNum and doesn't exist before.
+
+		// Dereference vlog if value is a reference
+		// - len(val) == 0: empty value (key was created in this txNum)
+		// - len(val) == 8: vlog reference (need to dereference)
+		// - other: inline value (backward compatibility)
+		if len(val) == 0 {
+			// Empty value - key was created in this txNum and doesn't exist before
+			return val, true, nil
+		} else if len(val) == 8 {
+			// Vlog reference - need to dereference
+			// Find vlog file for this txNum's step
+			step := kv.Step(txNum / ht.h.stepSize)
+			var vlogFile *VLogFile
+			for _, file := range ht.files {
+				if file.src != nil && file.src.vlog != nil {
+					fileStep := kv.Step(file.startTxNum / ht.h.stepSize)
+					if step == fileStep {
+						vlogFile = file.src.vlog
+						break
+					}
+				}
+			}
+
+			// If not in integrated files, try opening directly from disk
+			if vlogFile == nil {
+				vlogPath := vlogPathForStep(ht.h.dirs.SnapDomain, step)
+				if _, statErr := os.Stat(vlogPath); statErr == nil {
+					// Vlog file exists on disk but not yet integrated
+					vlogFile, err = OpenVLogFile(vlogPath)
+					if err != nil {
+						return nil, false, fmt.Errorf("failed to open vlog file for step %d: %w", step, err)
+					}
+					defer vlogFile.Close()
+				}
+			}
+
+			if vlogFile != nil {
+				offset := binary.BigEndian.Uint64(val)
+				actualValue, err := vlogFile.ReadAt(offset)
+				if err != nil {
+					return nil, false, fmt.Errorf("failed to read vlog at offset %d: %w", offset, err)
+				}
+				return actualValue, true, nil
+			}
+			// If vlogFile is nil, fall back to returning val (backward compatibility)
+		}
+
 		return val, true, nil
 	}
 	c, err := ht.valsCursorDup(tx)
@@ -1423,6 +1482,7 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 		largeValues: ht.h.HistoryLargeValues,
 		valsTable:   ht.h.ValuesTable,
 		limit:       limit,
+		ht:          ht, // For vlog dereferencing
 	}
 	if fromTxNum >= 0 {
 		binary.BigEndian.PutUint64(s.startTxKey[:], uint64(fromTxNum))
