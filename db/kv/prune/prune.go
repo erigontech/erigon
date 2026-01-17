@@ -198,8 +198,6 @@ func TableScanningPrune(
 	stat = &Stat{MinTxNum: math.MaxUint64}
 	start := time.Now()
 
-	logger.Debug("started table scan prune", "name", name)
-
 	if limit == 0 { // limits amount of txn to be pruned
 		limit = math.MaxUint64
 	}
@@ -356,7 +354,6 @@ func TableScanningPrune(
 					break
 				}
 				if time.Since(start) > timeOut {
-					logger.Debug("prune val timed out", "name", filenameBase)
 					stat.LastPrunedValue = common.Copy(val)
 					stat.ValueProgress = InProgress
 					return stat, nil
