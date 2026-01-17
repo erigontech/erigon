@@ -249,6 +249,10 @@ func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) e
 	// Note: before publishing the message to the network, Publish() internally runs the validator function.
 	cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
+	if len(topicHandle.topic.ListPeers()) == 0 {
+		return topicHandle.topic.Publish(cctx, compressedData)
+	}
+
 	if err := topicHandle.topic.Publish(cctx, compressedData, pubsub.WithReadiness(pubsub.MinTopicSize(1))); err != nil {
 		go func() {
 			// check if topic is successfully subscribed
