@@ -509,7 +509,7 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 	seconds := interval.Seconds()
 
 	var suffix string
-	var execVals []any
+	execVals := make([]any, 0, 2)
 	var te *txExecutor
 
 	switch ex := ex.(type) {

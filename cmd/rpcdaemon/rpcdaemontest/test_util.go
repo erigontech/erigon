@@ -489,9 +489,10 @@ func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 	if l := len(initCode); l > 32 {
 		t.Fatalf("init code is too long for a pushx, need a more elaborate deployer")
 	}
-	bbCode := []byte{
+	bbCode := make([]byte, 0, 1+len(initCode)+12)
+	bbCode = append(bbCode,
 		// Push initcode onto stack
-		byte(vm.PUSH1) + byte(len(initCode)-1)}
+		byte(vm.PUSH1)+byte(len(initCode)-1))
 	bbCode = append(bbCode, initCode...)
 	bbCode = append(bbCode, []byte{
 		byte(vm.PUSH1), 0x0, // memory start on stack

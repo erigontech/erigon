@@ -69,8 +69,8 @@ func TLS(tlsCACert, tlsCertFile, tlsKeyFile string) (credentials.TransportCreden
 
 func NewServer(rateLimit uint32, creds credentials.TransportCredentials) *grpc.Server {
 	var (
-		streamInterceptors []grpc.StreamServerInterceptor
-		unaryInterceptors  []grpc.UnaryServerInterceptor
+		streamInterceptors = make([]grpc.StreamServerInterceptor, 0, 1)
+		unaryInterceptors  = make([]grpc.UnaryServerInterceptor, 0, 1)
 	)
 	streamInterceptors = append(streamInterceptors, recovery.StreamServerInterceptor())
 	unaryInterceptors = append(unaryInterceptors, recovery.UnaryServerInterceptor())
