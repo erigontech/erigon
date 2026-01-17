@@ -983,16 +983,8 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 		txTo = min(ht.files.EndTxNum(), ht.iit.files.EndTxNum(), untilTx)
 	}
 
-	return minIdxTx < txTo || pruneInProgress, txTo
-}
-
-// Prune [txFrom; txTo)
-// `force` flag to prune even if canPruneUntil returns false (when Unwind is needed, canPruneUntil always returns false)
-// `useProgress` flag to restore and update prune progress.
-//   - E.g. Unwind can't use progress, because it's not linear
-//     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
-func (ht *HistoryRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
 	delta := float64((txTo - ht.h.minTxNumInDB(tx)) / ht.stepSize)
+	println("delta for", ht.h.FilenameBase, delta, txTo, ht.h.minTxNumInDB(tx), ht.stepSize)
 	switch ht.h.FilenameBase {
 	case "accounts":
 		mxPrunableHAcc.Set(delta)
@@ -1003,6 +995,16 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limi
 	case "commitment":
 		mxPrunableHComm.Set(delta)
 	}
+
+	return minIdxTx < txTo || pruneInProgress, txTo
+}
+
+// Prune [txFrom; txTo)
+// `force` flag to prune even if canPruneUntil returns false (when Unwind is needed, canPruneUntil always returns false)
+// `useProgress` flag to restore and update prune progress.
+//   - E.g. Unwind can't use progress, because it's not linear
+//     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
+func (ht *HistoryRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
 	if !forced {
 		if ht.files.EndTxNum() > 0 {
 			txTo = min(txTo, ht.files.EndTxNum())
