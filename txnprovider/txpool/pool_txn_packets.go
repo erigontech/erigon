@@ -74,7 +74,6 @@ func EncodeGetPooledTransactions66(hashes []byte, requestID uint64, encodeBuf []
 	pos += rlp.EncodeListPrefix(dataLen, encodeBuf[pos:])
 	pos += rlp.EncodeU64(requestID, encodeBuf[pos:])
 	pos += rlp.EncodeHashes(hashes, encodeBuf[pos:])
-	_ = pos
 	return encodeBuf, nil
 }
 
@@ -135,7 +134,6 @@ func EncodePooledTransactions66(txnsRlp [][]byte, requestID uint64, encodeBuf []
 			pos += rlp.EncodeString2(txnsRlp[i], encodeBuf[pos:])
 		}
 	}
-	_ = pos
 	return encodeBuf
 }
 
@@ -164,7 +162,6 @@ func EncodeTransactions(txnsRlp [][]byte, encodeBuf []byte) []byte {
 			pos += rlp.EncodeString2(txnsRlp[i], encodeBuf[pos:])
 		}
 	}
-	_ = pos
 	return encodeBuf
 }
 
