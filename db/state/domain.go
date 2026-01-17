@@ -437,14 +437,17 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		vlogWriters := make(map[kv.Step]*VLogWriter)
 
 		loadFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			if len(v) < 8 {
-				return fmt.Errorf("value too short: %d bytes", len(v))
+			// In large values mode, addValue() stores: key=(originalKey+stepBytes), value=actualValue
+			// Extract stepBytes from end of key
+			if len(k) < 8 {
+				return fmt.Errorf("key too short: %d bytes", len(k))
 			}
 
-			stepBytes := v[:8]
-			actualValue := v[8:]
+			stepBytes := k[len(k)-8:]
+			originalKey := k[:len(k)-8]
+			actualValue := v // v is the actual value (can be empty)
 
-			// Extract step from value
+			// Extract step from stepBytes
 			step := kv.Step(^binary.BigEndian.Uint64(stepBytes))
 
 			// Get or create vlog writer for this step (cached lookup)
@@ -462,7 +465,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 			// Empty value (0 bytes) is smaller than vlog reference (16 bytes)
 			if len(actualValue) == 0 {
 				// Store step bytes only (no vlog reference needed)
-				return tx.Put(w.valsTable, k, stepBytes)
+				return tx.Put(w.valsTable, originalKey, stepBytes)
 			}
 
 			// Write non-empty values to vlog
@@ -478,7 +481,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 			binary.BigEndian.PutUint64(vlogRef[8:], offset)
 
 			// Store reference in DB instead of full value
-			return tx.Put(w.valsTable, k, vlogRef)
+			return tx.Put(w.valsTable, originalKey, vlogRef)
 		}
 
 		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
