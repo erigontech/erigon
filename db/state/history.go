@@ -982,12 +982,12 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 		}
 		txTo = min(ht.files.EndTxNum(), ht.iit.files.EndTxNum(), untilTx)
 	}
-
-	deltaTx := txTo - ht.h.minTxNumInDB(tx)
-	if txTo < deltaTx {
-		deltaTx = 0 //TODO: why this is happening?
+	minTxDB := ht.h.minTxNumInDB(tx)
+	delta := 0.0
+	if txTo > minTxDB {
+		delta = float64(txTo-minTxDB) / float64(ht.stepSize) //TODO: why this is happening?
 	}
-	delta := float64(deltaTx) / float64(ht.stepSize)
+
 	switch ht.h.FilenameBase {
 	case "accounts":
 		mxPrunableHAcc.Set(delta)
