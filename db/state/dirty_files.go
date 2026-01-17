@@ -19,6 +19,7 @@ package state
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -55,7 +56,8 @@ type FilesItem struct {
 	index                *recsplit.Index
 	bindex               *BtIndex
 	existence            *existence.Filter
-	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
+	vlog                 *VLogFile // vLog file for large values
+	startTxNum, endTxNum uint64    //[startTxNum, endTxNum)
 
 	// Frozen: file containing Aggregator.stepsInFrozenFile steps. Completely immutable.
 	// Cold: file containing < Aggregator.stepsInFrozenFile steps. Immutable, but can be closed/removed after merge to bigger file.
@@ -254,6 +256,15 @@ func (i *FilesItem) closeFilesAndRemove() {
 		}
 		i.existence = nil
 	}
+	if i.vlog != nil {
+		i.vlog.Close()
+		if !i.frozen {
+			if err := dir.RemoveFile(i.vlog.Path()); err != nil {
+				log.Trace("remove after close", "err", err, "file", i.vlog.Path())
+			}
+		}
+		i.vlog = nil
+	}
 }
 
 func filterDirtyFiles(fileNames []string, stepSize, stepsInFrozenFile uint64, filenameBase, ext string, logger log.Logger) (res []*FilesItem) {
@@ -418,6 +429,17 @@ func (d *Domain) openDirtyFiles() (err error) {
 					}
 					if item.existence, err = existence.OpenFilter(fPath, false); err != nil {
 						_, fName := filepath.Split(fPath)
+						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+						// don't interrupt on error. other files may be good
+					}
+				}
+			}
+			// Open vlog file if LargeValues mode and file exists
+			if item.vlog == nil && d.LargeValues {
+				vlogPath := vlogPathForStep(d.dirs.SnapDomain, fromStep)
+				if _, statErr := os.Stat(vlogPath); statErr == nil {
+					if item.vlog, err = OpenVLogFile(vlogPath); err != nil {
+						_, fName := filepath.Split(vlogPath)
 						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}

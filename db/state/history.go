@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -432,6 +433,7 @@ type historyBufferedWriter struct {
 	//   keys: txNum -> key1+key2
 	//   vals: key1+key2+txNum -> value (not DupSort)
 	largeValues bool
+	aggTx       *AggregatorRoTx // reference to get shared vlog writer (if largeValues=true)
 
 	ii *InvertedIndexBufferedWriter
 }
@@ -453,6 +455,7 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 		historyKey:       make([]byte, 128),
 		largeValues:      ht.h.HistoryLargeValues,
 		historyValsTable: ht.h.ValuesTable,
+		aggTx:            ht.aggTx,
 
 		ii: ht.iit.newWriter(tmpdir, discard),
 	}
@@ -474,9 +477,59 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := w.ii.Flush(ctx, tx); err != nil {
 		return err
 	}
-	if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
+
+	if w.largeValues && w.aggTx != nil {
+		// Pre-create map to cache vlog writers per step
+		vlogWriters := make(map[kv.Step]*VLogWriter)
+
+		loadFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			// For history, k format is key+txNum, v is the actual value
+			// Extract txNum from key to determine step
+			if len(k) < 8 {
+				return fmt.Errorf("key too short: %d bytes", len(k))
+			}
+			txNum := binary.BigEndian.Uint64(k[len(k)-8:])
+			stepBytes := make([]byte, 8)
+			binary.BigEndian.PutUint64(stepBytes, ^(txNum / w.aggTx.a.stepSize)) // inverted step
+
+			actualValue := v
+			step := kv.Step(^binary.BigEndian.Uint64(stepBytes))
+
+			// Get or create vlog writer for this step (cached lookup)
+			vlogWriter, exists := vlogWriters[step]
+			if !exists {
+				var err error
+				vlogWriter, err = w.aggTx.GetOrCreateVLogWriter(step)
+				if err != nil {
+					return fmt.Errorf("failed to get vlog writer: %w", err)
+				}
+				vlogWriters[step] = vlogWriter
+			}
+
+			// Write ALL values to vlog (including empty ones)
+			offset, err := vlogWriter.Append(actualValue)
+			if err != nil {
+				return err
+			}
+
+			// Create reference: [offset: 8 bytes] for history
+			vlogRef := make([]byte, 8)
+			binary.BigEndian.PutUint64(vlogRef, offset)
+
+			// Store reference in DB instead of full value
+			return tx.Put(w.historyValsTable, k, vlogRef)
+		}
+
+		if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
+	} else {
+		// Standard flush without vlog (either largeValues=false or aggTx is nil)
+		if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
 	}
+
 	w.close()
 	return nil
 }
@@ -509,6 +562,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		_efComp   *seg.Compressor
 		txKey     [8]byte
 		err       error
+		vlogFile  *VLogFile
 
 		historyPath   = h.vNewFilePath(step, step+1)
 		efHistoryPath = h.efNewFilePath(step, step+1)
@@ -524,8 +578,22 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 			if _efComp != nil {
 				_efComp.Close()
 			}
+			if vlogFile != nil {
+				vlogFile.Close()
+			}
 		}
 	}()
+
+	// Open vlog file if HistoryLargeValues mode
+	if h.HistoryLargeValues {
+		vlogPath := vlogPathForStep(h.dirs.SnapDomain, step)
+		if _, statErr := os.Stat(vlogPath); statErr == nil {
+			vlogFile, err = OpenVLogFile(vlogPath)
+			if err != nil {
+				return HistoryCollation{}, fmt.Errorf("open %s vlog: %w", h.FilenameBase, err)
+			}
+		}
+	}
 
 	_histComp, err = seg.NewCompressor(ctx, "collate hist "+h.FilenameBase, historyPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
 	if err != nil {
@@ -651,7 +719,16 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 			if err != nil {
 				return fmt.Errorf("seekExact %s history val [%x]: %w", h.FilenameBase, key, err)
 			}
-			if len(val) == 0 {
+
+			// Dereference vlog if value is a vlog reference
+			if vlogFile != nil && len(val) == 8 {
+				offset := binary.BigEndian.Uint64(val)
+				actualValue, err := vlogFile.ReadAt(offset)
+				if err != nil {
+					return fmt.Errorf("failed to read vlog at offset %d: %w", offset, err)
+				}
+				val = actualValue
+			} else if len(val) == 0 {
 				val = nil
 			}
 
@@ -889,8 +966,9 @@ type HistoryRecord struct {
 }
 
 type HistoryRoTx struct {
-	h   *History
-	iit *InvertedIndexRoTx
+	h     *History
+	iit   *InvertedIndexRoTx
+	aggTx *AggregatorRoTx // parent aggregator tx for accessing shared vlog writers
 
 	files             visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
 	getters           []*seg.Reader

@@ -121,6 +121,7 @@ type ForkableCfg struct {
 
 type DomainVersionTypes struct {
 	DataKV       version.Versions
+	DataVLog     version.Versions
 	AccessorBT   version.Versions
 	AccessorKVEI version.Versions
 	AccessorKVI  version.Versions

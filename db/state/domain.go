@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -378,6 +379,7 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 		aux:       make([]byte, 0, 128),
 		valsTable: dt.d.ValuesTable,
 		largeVals: dt.d.LargeValues,
+		aggTx:     dt.aggTx,
 		h:         dt.ht.newWriter(tmpdir, discardHistory),
 	}
 	if !discard {
@@ -394,6 +396,7 @@ type DomainBufferedWriter struct {
 
 	valsTable string
 	largeVals bool
+	aggTx     *AggregatorRoTx // reference to get shared vlog writer (if largeVals=true)
 
 	stepBytes [8]byte // current inverted step representation
 	aux       []byte  // auxilary buffer for key1 + key2
@@ -421,8 +424,50 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 
-	if w.largeVals {
-		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
+	if w.largeVals && w.aggTx != nil {
+		// Pre-create map to cache vlog writers per step
+		// Typically all values are for the same step, so we'll only create one writer
+		vlogWriters := make(map[kv.Step]*VLogWriter)
+
+		loadFunc := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			if len(v) < 8 {
+				return fmt.Errorf("value too short: %d bytes", len(v))
+			}
+
+			stepBytes := v[:8]
+			actualValue := v[8:]
+
+			// Extract step from value
+			step := kv.Step(^binary.BigEndian.Uint64(stepBytes))
+
+			// Get or create vlog writer for this step (cached lookup)
+			vlogWriter, exists := vlogWriters[step]
+			if !exists {
+				var err error
+				vlogWriter, err = w.aggTx.GetOrCreateVLogWriter(step)
+				if err != nil {
+					return fmt.Errorf("failed to get vlog writer: %w", err)
+				}
+				vlogWriters[step] = vlogWriter
+			}
+
+			// Write ALL values to vlog (no size check)
+			// VLogWriter.Append writes [size][value] and returns offset
+			offset, err := vlogWriter.Append(actualValue)
+			if err != nil {
+				return err
+			}
+
+			// Create reference: [step: 8 bytes] [offset: 8 bytes]
+			vlogRef := make([]byte, 16)
+			copy(vlogRef[:8], stepBytes)
+			binary.BigEndian.PutUint64(vlogRef[8:], offset)
+
+			// Store reference in DB instead of full value
+			return tx.Put(w.valsTable, k, vlogRef)
+		}
+
+		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 			return err
 		}
 		w.Close()
@@ -512,7 +557,8 @@ type DomainRoTx struct {
 	ht                *HistoryRoTx
 	salt              *uint32
 
-	d *Domain
+	d     *Domain
+	aggTx *AggregatorRoTx // parent aggregator tx for accessing shared vlog writers
 
 	dataReaders []*seg.Reader
 	btReaders   []*BtIndex
@@ -836,12 +882,45 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 			return coll, fmt.Errorf("duplicate key [%x]", kvs[i].k)
 		}
 	}
+	// Open vlog file for reading if LargeValues mode
+	var vlogFile *VLogFile
+	if d.LargeValues {
+		vlogPath := vlogPathForStep(d.dirs.SnapDomain, step)
+		// Check if vlog file exists
+		if _, err := os.Stat(vlogPath); err == nil {
+			vlogFile, err = OpenVLogFile(vlogPath)
+			if err != nil {
+				return coll, fmt.Errorf("failed to open vlog file for step %d: %w", step, err)
+			}
+			defer vlogFile.Close()
+		}
+		// If vlog doesn't exist yet, values are still inline (backward compatibility)
+	}
+
 	for _, kv := range kvs {
 		if _, err = comp.Write(kv.k); err != nil {
 			return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, kv.k, err)
 		}
-		if _, err = comp.Write(kv.v); err != nil {
-			return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, kv.k, kv.v, err)
+
+		var actualValue []byte
+		if d.LargeValues && vlogFile != nil {
+			// v format: [step: 8 bytes] [offset: 8 bytes]
+			if len(kv.v) >= 16 {
+				offset := binary.BigEndian.Uint64(kv.v[8:16])
+				actualValue, err = vlogFile.ReadAt(offset)
+				if err != nil {
+					return coll, fmt.Errorf("failed to read from vlog at offset %d: %w", offset, err)
+				}
+			} else {
+				// Fallback: value is inline (backward compatibility or transition period)
+				actualValue = kv.v
+			}
+		} else {
+			actualValue = kv.v
+		}
+
+		if _, err = comp.Write(actualValue); err != nil {
+			return coll, fmt.Errorf("add %s values [%x]=>[%x]: %w", d.FilenameBase, kv.k, actualValue, err)
 		}
 	}
 
@@ -857,6 +936,7 @@ type StaticFiles struct {
 	valuesIdx       *recsplit.Index
 	valuesBt        *BtIndex
 	existenceFilter *existence.Filter
+	vlog            *VLogFile // vLog file for large values
 }
 
 // CleanupOnError - call it on collation fail. It closing all files
@@ -872,6 +952,9 @@ func (sf StaticFiles) CleanupOnError() {
 	}
 	if sf.existenceFilter != nil {
 		sf.existenceFilter.Close()
+	}
+	if sf.vlog != nil {
+		sf.vlog.Close()
 	}
 	sf.HistoryFiles.CleanupOnError()
 }
@@ -1002,6 +1085,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 		valuesIdx    *recsplit.Index
 		bt           *BtIndex
 		bloom        *existence.Filter
+		vlog         *VLogFile
 	)
 	closeComp := true
 	defer func() {
@@ -1021,6 +1105,9 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 			}
 			if bloom != nil {
 				bloom.Close()
+			}
+			if vlog != nil {
+				vlog.Close()
 			}
 		}
 	}()
@@ -1066,6 +1153,19 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 			}
 		}
 	}
+
+	// Open vlog file if it exists (for LargeValues mode)
+	if d.LargeValues {
+		vlogPath := vlogPathForStep(d.dirs.SnapDomain, step)
+		if _, statErr := os.Stat(vlogPath); statErr == nil {
+			vlog, err = OpenVLogFile(vlogPath)
+			if err != nil {
+				return StaticFiles{}, fmt.Errorf("open %s vlog: %w", d.FilenameBase, err)
+			}
+		}
+		// If vlog doesn't exist, that's ok (backward compatibility or no values written yet)
+	}
+
 	closeComp = false
 	return StaticFiles{
 		HistoryFiles:    hStaticFiles,
@@ -1073,6 +1173,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 		valuesIdx:       valuesIdx,
 		valuesBt:        bt,
 		existenceFilter: bloom,
+		vlog:            vlog,
 	}, nil
 }
 
@@ -1257,6 +1358,7 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 	fi.index = sf.valuesIdx
 	fi.bindex = sf.valuesBt
 	fi.existence = sf.existenceFilter
+	fi.vlog = sf.vlog
 	d.dirtyFiles.Set(fi)
 }
 
@@ -1636,6 +1738,35 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 	}
 
 	foundStep := kv.Step(^binary.BigEndian.Uint64(foundInvStep))
+
+	// Dereference vlog if LargeValues mode
+	if dt.d.LargeValues && len(v) >= 16 {
+		// v format: [step: 8 bytes][offset: 8 bytes]
+		offset := binary.BigEndian.Uint64(v[8:16])
+
+		// Find vlog file for this step
+		var vlogFile *VLogFile
+		for _, file := range dt.files {
+			if file.src != nil && file.src.vlog != nil {
+				// Check if this file covers the step
+				stepTxNumFrom := firstTxNumOfStep(foundStep, dt.stepSize)
+				if stepTxNumFrom >= file.startTxNum && stepTxNumFrom < file.endTxNum {
+					vlogFile = file.src.vlog
+					break
+				}
+			}
+		}
+
+		if vlogFile != nil {
+			// Read actual value from vlog
+			actualValue, err := vlogFile.ReadAt(offset)
+			if err != nil {
+				return nil, 0, false, fmt.Errorf("failed to read vlog at offset %d: %w", offset, err)
+			}
+			v = actualValue
+		}
+		// If vlogFile is nil, fall back to returning v (backward compatibility)
+	}
 
 	if lastTxNumOfStep(foundStep, dt.stepSize) >= dt.files.EndTxNum() {
 		return v, foundStep, true, nil

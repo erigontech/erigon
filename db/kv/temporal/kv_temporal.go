@@ -458,6 +458,13 @@ func (tx *RwTx) Commit() error {
 	if tx.RwTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
 		return nil
 	}
+
+	// CRITICAL: Fsync vlog BEFORE DB commit to ensure ACID properties
+	// VLog data must be durable before DB commits references to it
+	if err := tx.aggtx.Commit(); err != nil {
+		return err
+	}
+
 	t := tx.RwTx
 	tx.RwTx = nil
 	return t.Commit()
