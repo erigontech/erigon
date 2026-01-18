@@ -561,3 +561,11 @@ func (sd *ExecutionContext) ComputeCommitment(ctx context.Context, tx kv.Tempora
 func (sd *ExecutionContext) SetWarmupDB(db kv.TemporalRoDB) {
 	sd.sdCtx.SetWarmupDB(db)
 }
+
+func (sd *ExecutionContext) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return sd.mem.GetAsOf(domain, key, ts)
+}
+
+func (sd *ExecutionContext) SetParaTrieDB(db kv.TemporalRoDB) {
+	sd.sdCtx.SetParaTrieDB(db)
+}

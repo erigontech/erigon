@@ -799,8 +799,15 @@ func (sd *StorageDomain) HasStorage(ctx context.Context, addr accounts.Address, 
 	var hasPrefix bool
 	addrVal := addr.Value()
 	err := sd.mem.IteratePrefix(kv.StorageDomain, addrVal[:], nil, roTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
-		hasPrefix = true
-		return false, nil // do not continue, end on first occurrence
+		if sd.mem.IsUnwound() {
+			// if we have been unwound we need to do this to ensure the value 
+			// has not been removed during the unwind
+			if val, _, ok := d.mem.GetLatest(kv.StorageDomain, k); ok {
+				v = val
+			}
+		}
+		hasPrefix = len(v) > 0 
+		return !hasPrefix, nil
 	})
 	return hasPrefix, err
 }
