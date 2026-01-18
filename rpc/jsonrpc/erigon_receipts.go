@@ -231,7 +231,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	}
 
 	// latest logs that match the filter crit
-	it := rawdbv3.TxNums2BlockNums(tx, api._txNumReader, txNumbers, order.Desc)
+	it := rawdbv3.TxNums2BlockNums(ctx, tx, api._txNumReader, txNumbers, order.Desc)
 
 	defer it.Close()
 

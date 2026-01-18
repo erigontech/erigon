@@ -34,6 +34,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/erigontech/erigon/db/downloader"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -123,6 +125,7 @@ type MockSentry struct {
 	ReceiveWg            sync.WaitGroup
 	Address              common.Address
 	Eth1ExecutionService *execmodule.EthereumExecutionModule
+	StateCache           *execmodule.Cache
 	retirementStart      chan bool
 	retirementDone       chan struct{}
 	retirementWg         sync.WaitGroup
@@ -330,7 +333,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		PeerId:             gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots:     allSnapshots,
 		BlockReader:        br,
-		ReceiptsReader:     receipts.NewGenerator(br, engine, 5*time.Second),
+		ReceiptsReader:     receipts.NewGenerator(br, engine, nil, 5*time.Second),
 		HistoryV3:          true,
 		cfg:                cfg,
 	}
@@ -460,7 +463,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	}
 	mock.sentriesClient.IsMock = true
 
-	snapDownloader := mockDownloader(ctrl)
+	snapDownloader := mockDownloader(ctrl, mock.Dirs.Snap)
 
 	miningConfig := cfg.Miner
 	miningConfig.Etherbase = mock.Address
@@ -558,7 +561,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	hook := stageloop.NewHook(mock.Ctx, mock.DB, mock.Notifications, mock.posStagedSync, mock.BlockReader, mock.ChainConfig, logger, nil, nil, nil)
 
-	mock.Eth1ExecutionService = execmodule.NewEthereumExecutionModule(ctx, mock.BlockReader, mock.DB, mock.posStagedSync, forkValidator, mock.ChainConfig, assembleBlockPOS, hook, mock.Notifications.Accumulator, mock.Notifications.RecentReceipts, mock.Notifications.StateChangesConsumer, logger, engine, cfg.Sync)
+	mock.StateCache = &execmodule.Cache{}
+	mock.Eth1ExecutionService = execmodule.NewEthereumExecutionModule(ctx, mock.BlockReader, mock.DB, mock.posStagedSync, forkValidator, mock.ChainConfig, assembleBlockPOS, hook, mock.Notifications.Accumulator, mock.Notifications.RecentReceipts, mock.StateCache, mock.Notifications.StateChangesConsumer, logger, engine, cfg.Sync)
 
 	mock.sentriesClient.Hd.StartPoSDownloader(mock.Ctx, sendHeaderRequest, penalize)
 
@@ -617,7 +621,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	return mock
 }
 
-func mockDownloader(ctrl *gomock.Controller) *downloaderproto.MockDownloaderClient {
+func mockDownloader(ctrl *gomock.Controller, snapRoot string) downloader.Client {
 	snapDownloader := downloaderproto.NewMockDownloaderClient(ctrl)
 
 	snapDownloader.EXPECT().
@@ -625,7 +629,7 @@ func mockDownloader(ctrl *gomock.Controller) *downloaderproto.MockDownloaderClie
 		Return(&emptypb.Empty{}, nil).
 		AnyTimes()
 
-	return snapDownloader
+	return downloader.NewRpcClient(snapDownloader, snapRoot)
 }
 
 // Mock is convenience function to create a mock with some pre-set values
@@ -736,7 +740,7 @@ func (ms *MockSentry) Cfg() ethconfig.Config { return ms.cfg }
 func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 	wr := chainreader.NewChainReaderEth1(ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), uint64(time.Hour))
 
-	streamCtx, cancel := context.WithTimeout(ms.Ctx, 30*time.Second)
+	streamCtx, cancel := context.WithCancel(ms.Ctx)
 	defer cancel()
 	stream, err := ms.stateChangesClient.StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: false, WithTransactions: false}, grpc.WaitForReady(true))
 	if err != nil {
@@ -789,7 +793,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 
 		for _, change := range req.ChangeBatch {
 			if change.Direction == remoteproto.Direction_UNWIND {
-				insertedBlocks = nil
+				continue
 			}
 			for lastSeenBlock <= change.BlockHeight {
 				delete(insertedBlocks, lastSeenBlock)
@@ -805,7 +809,6 @@ func (ms *MockSentry) InsertChain(chain *blockgen.ChainPack) error {
 	if err := ms.insertPoSBlocks(chain); err != nil {
 		return err
 	}
-
 	roTx, err := ms.DB.BeginRo(ms.Ctx)
 	if err != nil {
 		return err
@@ -819,11 +822,12 @@ func (ms *MockSentry) InsertChain(chain *blockgen.ChainPack) error {
 	if err != nil {
 		return err
 	}
-
 	if execAt < chain.TopBlock.NumberU64() {
 		return fmt.Errorf("sentryMock.InsertChain end up with Execution stage progress: %d < %d", execAt, chain.TopBlock.NumberU64())
 	}
-
+	if rawdb.ReadHeadBlockHash(roTx) != chain.TopBlock.Hash() {
+		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
+	}
 	if ms.sentriesClient.Hd.IsBadHeader(chain.TopBlock.Hash()) {
 		return fmt.Errorf("block %d %x was invalid", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
@@ -835,7 +839,7 @@ func (ms *MockSentry) HeaderDownload() *headerdownload.HeaderDownload {
 }
 
 func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.TemporalTx) state.StateReader {
-	r, err := rpchelper.CreateHistoryStateReader(tx, blockNum, 0, ms.BlockReader.TxnumReader(ms.Ctx))
+	r, err := rpchelper.CreateHistoryStateReader(context.Background(), tx, blockNum, 0, ms.BlockReader.TxnumReader())
 	if err != nil {
 		panic(err)
 	}

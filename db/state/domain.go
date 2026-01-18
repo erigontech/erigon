@@ -1180,12 +1180,6 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 	}
 }
 
-// TODO: exported for idx_optimize.go
-// TODO: this utility can be safely deleted after PR https://github.com/erigontech/erigon/pull/12907/ is rolled out in production
-func BuildHashMapAccessor(ctx context.Context, d *seg.Reader, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
-	return buildHashMapAccessor(ctx, d, idxPath, values, cfg, ps, logger)
-}
-
 func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) (err error) {
 	_, fileName := filepath.Split(idxPath)
 	count := g.Count()
@@ -1731,6 +1725,24 @@ func (dt *DomainRoTx) DebugRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit 
 	return s, nil
 }
 
+// DebugRangeLatestFromFiles iterates over keys in .kv snapshot files only,
+// ignoring keys in MDBX.
+func (dt *DomainRoTx) DebugRangeLatestFromFiles(fromKey, toKey []byte, limit int) (*DomainLatestIterFile, error) {
+	s := &DomainLatestIterFile{
+		from: fromKey, to: toKey, limit: limit,
+		orderAscend: order.Asc,
+		aggStep:     dt.stepSize,
+		filesOnly:   true,
+		logger:      dt.d.logger,
+		h:           &CursorHeap{},
+	}
+	if err := s.init(dt); err != nil {
+		s.Close() //it's responsibility of constructor (our) to close resource on error
+		return nil, err
+	}
+	return s, nil
+}
+
 // CanPruneUntil returns true if domain OR history tables can be pruned until txNum
 func (dt *DomainRoTx) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
 	canDomain, _ := dt.canPruneDomainTables(tx, untilTx)
@@ -1970,7 +1982,7 @@ func versionTooLowPanic(filename string, version version.Versions) {
 	))
 }
 
-// [startTxNum, endTxNum)]
+// [startTxNum, endTxNum)
 func (dt *DomainRoTx) TraceKey(ctx context.Context, key []byte, startTxNum, endTxNum uint64, roTx kv.Tx) (stream.U64V, error) {
 	// need to do this first as TraceKey doesn't work if internal seg readers are seeked into different locations
 	v2, ok, err := dt.GetAsOf(key, endTxNum, roTx)
@@ -2007,15 +2019,9 @@ func (dt *DomainRoTx) TraceKey(ctx context.Context, key []byte, startTxNum, endT
 	// then when we actually use this value, we adjust the txNum
 	ds := stream.NewSingleDuo(uint64(math.MaxUint64), v2)
 	dst := stream.Union2(tfht, ds, order.Asc, kv.Unlim)
-	historyValExists := false
 
 	fdst := stream.FilterDuo(dst, func(txNum uint64, v []byte) bool {
-		if txNum == math.MaxUint64 {
-			// if !historyValExists, need to skip GetAsOf val as well
-			return historyValExists
-		}
-		historyValExists = true
-		return true
+		return prevTxNum != -1 // is there history value?, if no...we don't want GetAsOf value either
 	})
 
 	return stream.TransformDuo(fdst, func(txNum uint64, v []byte) (uint64, []byte, error) {

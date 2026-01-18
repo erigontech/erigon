@@ -422,8 +422,8 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, ec execContext,
 			return nil, err
 		}
 		keyIter := stream.UnionKV(streamAcc, streamSto, -1)
-		//blockNum, ok, err := txNumsReader.FindBlockNum(roTx, rangeToTxNum-1)
-		blockNum, ok, err := txNumsReader.FindBlockNum(roTx, rangeToTxNum-1)
+		//blockNum, ok, err := txNumsReader.FindBlockNum(ctx, roTx, rangeToTxNum-1)
+		blockNum, ok, err := txNumsReader.FindBlockNum(ctx, roTx, rangeToTxNum-1)
 		if err != nil {
 			return nil, fmt.Errorf("CommitmentRebuild: FindBlockNum(%d) %w", rangeToTxNum, err)
 		}

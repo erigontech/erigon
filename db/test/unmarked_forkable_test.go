@@ -108,7 +108,7 @@ func TestUnmarkedPrune(t *testing.T) {
 			require.NoError(t, err)
 
 			getData := func(i int) (Num, state.Bytes) {
-				return Num(i), state.Bytes(fmt.Sprintf("data%d", i))
+				return Num(i), fmt.Appendf(nil, "data%d", i)
 			}
 
 			for i := range int(entries_count) {
@@ -191,7 +191,7 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 	entries_count := num_files*cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
 
 	getData := func(i int) (Num, state.Bytes) {
-		return Num(i), state.Bytes(fmt.Sprintf("data%d", i))
+		return Num(i), fmt.Appendf(nil, "data%d", i)
 	}
 
 	for i := range int(entries_count) {
@@ -288,7 +288,7 @@ func TestBuildFiles_PagedUnmarked(t *testing.T) {
 	entries_count := num_files*cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
 
 	getData := func(i int) (Num, state.Bytes) {
-		return Num(i), state.Bytes(fmt.Sprintf("data%d", i))
+		return Num(i), fmt.Appendf(nil, "data%d", i)
 	}
 
 	for i := range int(entries_count) {

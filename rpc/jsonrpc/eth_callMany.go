@@ -143,13 +143,12 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := evm.ChainRules()
 
-	timeoutMilliSeconds := int64(5000)
+	timeout := api.evmCallTimeout
 
-	if timeoutMilliSecondsPtr != nil {
-		timeoutMilliSeconds = *timeoutMilliSecondsPtr
+	if timeoutMilliSecondsPtr != nil && *timeoutMilliSecondsPtr > 0 {
+		timeout = time.Duration(*timeoutMilliSecondsPtr) * time.Millisecond
 	}
 
-	timeout := time.Millisecond * time.Duration(timeoutMilliSeconds)
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
 	var cancel context.CancelFunc

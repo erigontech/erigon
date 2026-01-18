@@ -547,6 +547,17 @@ func BenchmarkSimpleLoop(b *testing.B) {
 		Op(vm.PUSH6).Append(make([]byte, 6)).Op(vm.JUMP). // Jumpdest zero expressed in 6 bytes
 		Jump(lbl).Bytes()
 
+	loopingCode3 := []byte{
+		byte(vm.JUMPDEST), //  [ count ]
+		// push args for the call
+		byte(vm.PUSH4), 1, 2, 3, 4,
+		byte(vm.PUSH5), 1, 2, 3, 4, 5,
+
+		byte(vm.POP), byte(vm.POP),
+		byte(vm.PUSH6), 0, 0, 0, 0, 0, 0, // jumpdestination
+		byte(vm.JUMP),
+	}
+
 	p, lbl = program.New().Jumpdest()
 	callRevertingContractWithInput := p.
 		Call(nil, 0xee, 0, 0, 0x20, 0x0, 0x0).
@@ -563,6 +574,7 @@ func BenchmarkSimpleLoop(b *testing.B) {
 	benchmarkNonModifyingCode(100_000_000, callIdentity, "call-identity-100M", "", b)
 	benchmarkNonModifyingCode(100_000_000, loopingCode, "loop-100M", "", b)
 	benchmarkNonModifyingCode(100_000_000, loopingCode2, "loop2-100M", "", b)
+	benchmarkNonModifyingCode(100_000_000, loopingCode3, "loop3-100M", "", b)
 	benchmarkNonModifyingCode(100_000_000, callInexistant, "call-nonexist-100M", "", b)
 	benchmarkNonModifyingCode(100_000_000, callEOA, "call-EOA-100M", "", b)
 	benchmarkNonModifyingCode(100_000_000, callRevertingContractWithInput, "call-reverting-100M", "", b)

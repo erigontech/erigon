@@ -49,7 +49,6 @@ type MiningBlock struct {
 	Txns             types.Transactions
 	Receipts         types.Receipts
 	Withdrawals      []*types.Withdrawal
-	PreparedTxns     types.Transactions
 	Requests         types.FlatRequests
 
 	headerRlpSize         *int
@@ -97,11 +96,6 @@ func (mb *MiningBlock) AvailableRlpSpace(chainConfig *chain.Config, withAddition
 }
 
 func (mb *MiningBlock) TxnsRlpSize(withAdditional ...types.Transaction) int {
-	if len(mb.PreparedTxns) > 0 {
-		s := types.EncodingSizeGenericList(mb.PreparedTxns)
-		s += rlp.ListPrefixLen(s)
-		return s
-	}
 	if len(mb.Txns) != mb.txnsRlpSizeCalculated {
 		panic("mismatch between mb.Txns and mb.txnsRlpSizeCalculated - did you forget to use mb.AddTxn()?")
 	}

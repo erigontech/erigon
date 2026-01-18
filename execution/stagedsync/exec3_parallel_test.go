@@ -187,7 +187,7 @@ func (t *testExecTask) Sender() accounts.Address {
 }
 
 func (t *testExecTask) Hash() common.Hash {
-	return common.BytesToHash([]byte(fmt.Sprintf("%d", t.TxIndex)))
+	return common.BytesToHash(fmt.Appendf(nil, "%d", t.TxIndex))
 }
 
 func (t *testExecTask) Dependencies() []int {

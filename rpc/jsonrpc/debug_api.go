@@ -103,7 +103,7 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	if number == nil {
 		return StorageRangeResult{}, nil
 	}
-	minTxNum, err := api._txNumReader.Min(tx, *number)
+	minTxNum, err := api._txNumReader.Min(ctx, tx, *number)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -203,7 +203,7 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 		}
 	}
 
-	dumper := state.NewDumper(tx, api._blockReader.TxnumReader(ctx), blockNumber)
+	dumper := state.NewDumper(tx, api._blockReader.TxnumReader(), blockNumber)
 	res, err := dumper.IteratorDump(excludeCode, excludeStorage, common.BytesToAddress(startBytes), maxResults)
 	if err != nil {
 		return state.IteratorDump{}, err
@@ -255,11 +255,11 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum)
 	}
 	//[from, to)
-	startTxNum, err := api._txNumReader.Min(tx, startNum)
+	startTxNum, err := api._txNumReader.Min(ctx, tx, startNum)
 	if err != nil {
 		return nil, err
 	}
-	endTxNum, err := api._txNumReader.Min(tx, endNum)
+	endTxNum, err := api._txNumReader.Min(ctx, tx, endNum)
 	if err != nil {
 		return nil, err
 	}
@@ -318,11 +318,11 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 	}
 
 	//[from, to)
-	startTxNum, err := api._txNumReader.Min(tx, startNum)
+	startTxNum, err := api._txNumReader.Min(ctx, tx, startNum)
 	if err != nil {
 		return nil, err
 	}
-	endTxNum, err := api._txNumReader.Min(tx, endNum)
+	endTxNum, err := api._txNumReader.Min(ctx, tx, endNum)
 	if err != nil {
 		return nil, err
 	}
@@ -355,7 +355,7 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 		return nil, errors.New("block hash is not canonical")
 	}
 
-	minTxNum, err := api._txNumReader.Min(tx, header.Number.Uint64())
+	minTxNum, err := api._txNumReader.Min(ctx, tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
@@ -401,6 +401,9 @@ func (api *DebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.Blo
 	defer tx.Rollback()
 	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645
+		}
 		return nil, err
 	}
 	header, err := api._blockReader.Header(ctx, tx, h, n)
@@ -422,6 +425,9 @@ func (api *DebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.Bloc
 	defer tx.Rollback()
 	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645
+		}
 		return nil, err
 	}
 	block, err := api.blockWithSenders(ctx, tx, h, n)
@@ -444,6 +450,9 @@ func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.B
 
 	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645
+		}
 		return nil, err
 	}
 	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
@@ -553,7 +562,7 @@ func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.H
 		return nil, nil
 	}
 
-	txNumMin, err := api._txNumReader.Min(tx, blockNum)
+	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}

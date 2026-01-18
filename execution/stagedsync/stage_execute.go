@@ -87,7 +87,6 @@ type ExecuteBlockCfg struct {
 	genesis   *types.Genesis
 
 	silkworm        *silkworm.Silkworm
-	blockProduction bool
 	experimentalBAL bool
 }
 
@@ -149,10 +148,10 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execstate.ExecutionContext
 		}
 		defer doms.Close()
 	}
-	txNumsReader := br.TxnumReader(ctx)
+	txNumsReader := br.TxnumReader()
 
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
-	txNum, err := txNumsReader.Min(rwTx, u.UnwindPoint+1)
+	txNum, err := txNumsReader.Min(ctx, rwTx, u.UnwindPoint+1)
 	if err != nil {
 		return err
 	}
@@ -214,8 +213,6 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execstate.ExecutionContext
 }
 
 var mxState3Unwind = metrics.GetOrCreateSummary("state3_unwind")
-
-const trace bool = true
 
 func unwindExec3State(ctx context.Context,
 	sd *execstate.ExecutionContext, tx kv.TemporalRwTx,
@@ -286,7 +283,7 @@ func unwindExec3State(ctx context.Context,
 				if len(entry.Value) > 0 {
 					var account accounts.Account
 					if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
-						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
+						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d, prev: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep, prevStep)
 					}
 				} else {
 					if keyStep != prevStep {

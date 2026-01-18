@@ -1386,10 +1386,12 @@ func makePush(size uint64, pushByteSize int) executionFunc {
 		startMin := min(int(pc+1), codeLen)
 		endMin := min(startMin+pushByteSize, codeLen)
 
-		integer := new(uint256.Int)
-		scope.Stack.push(*integer.SetBytes(common.RightPadBytes(
-			// So it doesn't matter what we push onto the stack.
-			scope.Contract.Code[startMin:endMin], pushByteSize)))
+		integer := new(uint256.Int).SetBytes(scope.Contract.Code[startMin:endMin])
+		// Missing bytes: pushByteSize - len(pushData)
+		if missing := pushByteSize - (endMin - startMin); missing > 0 {
+			integer.Lsh(integer, uint(8*missing))
+		}
+		scope.Stack.push(*integer)
 
 		pc += size
 		return pc, nil, nil

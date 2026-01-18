@@ -1,11 +1,13 @@
 package stagedsync
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -71,5 +73,8 @@ func (v *parallelBlockPostExecutionValidator) Process(gasUsed, blobGasUsed uint6
 
 func (v *parallelBlockPostExecutionValidator) Wait() error {
 	v.wg.Wait()
-	return v.err
+	if v.err != nil {
+		return fmt.Errorf("%w, %w", rules.ErrInvalidBlock, v.err)
+	}
+	return nil
 }
