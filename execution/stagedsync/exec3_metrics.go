@@ -509,7 +509,7 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 	seconds := interval.Seconds()
 
 	var suffix string
-	var execVals []any
+	execVals := make([]any, 0, 2)
 	var te *txExecutor
 
 	switch ex := ex.(type) {
@@ -905,8 +905,11 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 	}
 
 	vals = append(vals, []any{
-		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		"inMem", te.inMemExec,
+		"alloc", common.ByteCount(m.Alloc),
+		"sys", common.ByteCount(m.Sys),
+		"isForkValidation", te.isForkValidation,
+		"isBlockProduction", te.isBlockProduction,
+		"isApplyingBlocks", te.isApplyingBlocks,
 	}...)
 
 	p.logger.Info(fmt.Sprintf("[%s]%s%s", p.logPrefix, suffix, mode), vals...)
