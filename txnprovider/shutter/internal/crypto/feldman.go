@@ -150,7 +150,7 @@ func ValidEval(v *big.Int) bool {
 
 // Gammas computes the gamma values for a given polynomial.
 func (p *Polynomial) Gammas() *Gammas {
-	gammas := Gammas{}
+	gammas := make(Gammas, 0, len(*p))
 	for _, c := range *p {
 		gamma := generateP2(c)
 		gammas = append(gammas, gamma)

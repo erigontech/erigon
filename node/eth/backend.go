@@ -448,7 +448,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		apiAddr := fmt.Sprintf("127.0.0.1:%d", apiPort)
 
 		collectNodeURLs := func(nodes []*enode.Node) []string {
-			var urls []string
+			urls := make([]string, 0, len(nodes))
 			for _, n := range nodes {
 				urls = append(urls, n.URLv4())
 			}

@@ -54,7 +54,7 @@ func main() {
 
 	app.Action = func(context *cli.Context) error {
 		if context.Args().Present() {
-			var goodNames []string
+			goodNames := make([]string, 0, len(app.VisibleCommands()))
 			for _, c := range app.VisibleCommands() {
 				goodNames = append(goodNames, c.Name)
 			}
