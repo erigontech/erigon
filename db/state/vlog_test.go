@@ -22,15 +22,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/kv"
 )
 
 func TestVLog_WriteAndRead(t *testing.T) {
 	tmpDir := t.TempDir()
 	vlogPath := filepath.Join(tmpDir, "v1-0.vlog")
-
-	// Create writer
 	writer, err := CreateVLogWriter(vlogPath)
 	require.NoError(t, err)
 	defer writer.Close()

@@ -70,8 +70,7 @@ type Aggregator struct {
 	visibleFilesMinimaxTxNum atomic.Uint64
 	snapshotBuildSema        *semaphore.Weighted
 
-	// _vlogSet - underscore means: don't use directly, managed through visibleFilesLock
-	_vlogSet *VLogSet
+	vlogSet *VLogSet
 
 	disableHistory         bool
 	collateAndBuildWorkers int // minimize amount of background workers by default
@@ -118,7 +117,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 		logger:                 logger,
 		collateAndBuildWorkers: 1,
 		mergeWorkers:           1,
-		_vlogSet:               NewVLogSet(dirs.SnapDomain),
+		vlogSet:                NewVLogSet(dirs.SnapDomain),
 
 		produce: true,
 	}, nil
@@ -187,7 +186,7 @@ func (a *Aggregator) RegisterDomain(cfg statecfg.DomainCfg, salt *uint32, dirs d
 		cfg.Hist.HistoryDisabled = true
 		cfg.Hist.IiCfg.Disable = true
 	}
-	a.d[cfg.Name], err = NewDomain(cfg, a.stepSize, a.stepsInFrozenFile, dirs, logger)
+	a.d[cfg.Name], err = NewDomain(cfg, a.vlogSet, a.stepSize, a.stepsInFrozenFile, dirs, logger)
 	if err != nil {
 		return err
 	}
@@ -1774,22 +1773,17 @@ type AggregatorRoTx struct {
 	d   [kv.DomainLen]*DomainRoTx
 	iis []*InvertedIndexRoTx
 
-	vlogSet *VLogSet // transaction-local vlog set (clone of aggregator's vlogSet)
-	_leakID uint64   // set only if TRACE_AGG=true
+	_leakID uint64 // set only if TRACE_AGG=true
 }
 
 func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	a.visibleFilesLock.RLock()
 	defer a.visibleFilesLock.RUnlock()
 
-	// Clone vlogSet for transaction isolation
-	vlogSet := a._vlogSet.Clone()
-
 	ac := &AggregatorRoTx{
 		a:       a,
 		_leakID: a.leakDetector.Add(),
 		iis:     make([]*InvertedIndexRoTx, len(a.iis)),
-		vlogSet: vlogSet,
 	}
 
 	for id, ii := range a.iis {
@@ -2007,47 +2001,15 @@ func (a *Aggregator) DisableReadAhead() {
 	}
 }
 
-// GetOrCreateVLogWriter returns or creates a vlog writer for the given step.
-// The writer is temporary and shared across all domains for this transaction.
-// Created when flush() detects a new step is being written.
-func (at *AggregatorRoTx) GetOrCreateVLogWriter(step kv.Step) (*VLogWriter, error) {
-	// Use transaction-local vlogSet to get or create writer
-	// VLogSet knows the directory and will create the file there
-	writer, err := at.vlogSet.GetOrCreate(step)
-	if err != nil {
-		return nil, err
-	}
-
-	// Also add to shared vlogSet for visibility to other transactions
-	at.a.visibleFilesLock.Lock()
-	at.a._vlogSet.AddDirty(step, writer)
-	at.a.visibleFilesLock.Unlock()
-
-	return writer, nil
-}
-
 // Commit fsyncs all active vlog writers.
 // Must be called before the database transaction commits to ensure ACID properties.
 func (at *AggregatorRoTx) Commit() error {
 	if at == nil || at.a == nil {
 		return nil
 	}
-
-	// Fsync all transaction-local vlog writers
-	at.vlogSet.lock.RLock()
-	for step, writer := range at.vlogSet.dirty {
-		if err := writer.Fsync(); err != nil {
-			at.vlogSet.lock.RUnlock()
-			return fmt.Errorf("failed to fsync vlog writer for step %d: %w", step, err)
-		}
+	if err := at.a.vlogSet.FsyncAll(); err != nil {
+		return fmt.Errorf("failed to fsync vlog: %w", err)
 	}
-	at.vlogSet.lock.RUnlock()
-
-	// After successful fsync, recalc visible to promote dirty → visible
-	at.a.visibleFilesLock.Lock()
-	at.a._vlogSet.RecalcVisible()
-	at.a.visibleFilesLock.Unlock()
-
 	return nil
 }
 
@@ -2056,11 +2018,6 @@ func (at *AggregatorRoTx) Close() {
 		return
 	}
 	at.a.leakDetector.Del(at._leakID)
-
-	// Close transaction-local vlogSet
-	if at.vlogSet != nil {
-		at.vlogSet.Close()
-	}
 
 	at.a = nil
 

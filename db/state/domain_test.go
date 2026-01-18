@@ -85,10 +85,11 @@ func testDbAndDomainOfStep(t *testing.T, domainCfg statecfg.DomainCfg, aggStep u
 	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 	salt := uint32(1)
+	vlogSet := NewVLogSet(filepath.Join(db.Path(), "vlog"))
 
 	cfg.Hist.IiCfg.FileVersion = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
 	//cfg.hist.historyValuesOnCompressedPage = 16
-	d, err := NewDomain(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, logger)
+	d, err := NewDomain(cfg, vlogSet, aggStep, config3.DefaultStepsInFrozenFile, dirs, logger)
 	d.salt.Store(&salt)
 	require.NoError(t, err)
 	d.DisableFsync()
@@ -1069,8 +1070,9 @@ func emptyTestDomain(aggStep uint64) *Domain {
 	cfg.Hist.IiCfg.Name = kv.InvertedIdx(0)
 	cfg.Hist.IiCfg.FileVersion = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
 	cfg.Hist.IiCfg.Accessors = statecfg.AccessorHashMap
+	vlogSet := NewVLogSet(filepath.Join(dirs.Chaindata, "vlog"))
 
-	d, err := NewDomain(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, log.New())
+	d, err := NewDomain(cfg, vlogSet, aggStep, config3.DefaultStepsInFrozenFile, dirs, log.New())
 	if err != nil {
 		panic(err)
 	}

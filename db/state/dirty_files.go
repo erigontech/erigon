@@ -19,7 +19,6 @@ package state
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -27,16 +26,15 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/state/statecfg"
-
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datastruct/existence"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -435,16 +433,16 @@ func (d *Domain) openDirtyFiles() (err error) {
 				}
 			}
 			// Open vlog file if LargeValues mode and file exists
-			if item.vlog == nil && d.LargeValues {
-				vlogPath := vlogPathForStep(d.dirs.SnapDomain, fromStep)
-				if _, statErr := os.Stat(vlogPath); statErr == nil {
-					if item.vlog, err = OpenVLogFile(vlogPath); err != nil {
-						_, fName := filepath.Split(vlogPath)
-						d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
-						// don't interrupt on error. other files may be good
-					}
-				}
-			}
+			//if item.vlog == nil && d.LargeValues {
+			//	vlogPath := vlogPathForStep(d.dirs.SnapDomain, fromStep)
+			//	if _, statErr := os.Stat(vlogPath); statErr == nil {
+			//		if item.vlog, err = OpenVLogFile(vlogPath); err != nil {
+			//			_, fName := filepath.Split(vlogPath)
+			//			d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
+			//			// don't interrupt on error. other files may be good
+			//		}
+			//	}
+			//}
 		}
 		return true
 	})

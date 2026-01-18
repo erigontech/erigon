@@ -71,9 +71,11 @@ type History struct {
 	// _visibleFiles - underscore in name means: don't use this field directly, use BeginFilesRo()
 	// underlying array is immutable - means it's ready for zero-copy use
 	_visibleFiles []visibleFile
+
+	vlogSet *VLogSet
 }
 
-func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*History, error) {
+func NewHistory(cfg statecfg.HistCfg, vlogSet *VLogSet, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*History, error) {
 	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	if cfg.Accessors == 0 {
 		cfg.Accessors = statecfg.AccessorHashMap
@@ -83,6 +85,7 @@ func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs d
 		HistCfg:       cfg,
 		dirtyFiles:    btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		_visibleFiles: []visibleFile{},
+		vlogSet:       vlogSet,
 	}
 
 	var err error
@@ -499,7 +502,7 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 			vlogWriter, exists := vlogWriters[step]
 			if !exists {
 				var err error
-				vlogWriter, err = w.vlogSet.GetOrCreate(step)
+				vlogWriter, err = w.vlogSet.GetOrCreateWriter(step)
 				if err != nil {
 					return fmt.Errorf("failed to get vlog writer for step %d: %w", step, err)
 				}
@@ -530,6 +533,7 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 			return err
 		}
+
 	} else {
 		// Standard flush without vlog (either largeValues=false or aggTx is nil)
 		if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
@@ -1333,39 +1337,15 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 			// Vlog reference - need to dereference
 			// Find vlog file for this txNum's step
 			step := kv.Step(txNum / ht.h.stepSize)
-			var vlogFile *VLogFile
-			for _, file := range ht.files {
-				if file.src != nil && file.src.vlog != nil {
-					fileStep := kv.Step(file.startTxNum / ht.h.stepSize)
-					if step == fileStep {
-						vlogFile = file.src.vlog
-						break
-					}
-				}
-			}
+			offset := binary.BigEndian.Uint64(val)
 
-			// If not in integrated files, try opening directly from disk
-			if vlogFile == nil {
-				vlogPath := vlogPathForStep(ht.h.dirs.SnapDomain, step)
-				if _, statErr := os.Stat(vlogPath); statErr == nil {
-					// Vlog file exists on disk but not yet integrated
-					vlogFile, err = OpenVLogFile(vlogPath)
-					if err != nil {
-						return nil, false, fmt.Errorf("failed to open vlog file for step %d: %w", step, err)
-					}
-					defer vlogFile.Close()
-				}
-			}
+			vlogFile := ht.h.vlogSet.Reader(step)
 
-			if vlogFile != nil {
-				offset := binary.BigEndian.Uint64(val)
-				actualValue, err := vlogFile.ReadAt(offset)
-				if err != nil {
-					return nil, false, fmt.Errorf("failed to read vlog at offset %d: %w", offset, err)
-				}
-				return actualValue, true, nil
+			actualValue, err := vlogFile.ReadAt(offset)
+			if err != nil {
+				return nil, false, fmt.Errorf("failed to read vlog at offset %d: %w", offset, err)
 			}
-			// If vlogFile is nil, fall back to returning val (backward compatibility)
+			return actualValue, true, nil
 		}
 
 		return val, true, nil

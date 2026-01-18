@@ -17,8 +17,11 @@
 package state
 
 import (
+	"fmt"
+	"maps"
 	"sync"
 
+	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -27,11 +30,13 @@ import (
 type VLogSet struct {
 	// All vlog writers (dirty + visible)
 	// Contains both: work-in-progress vlogs and ready vlogs
-	dirty map[kv.Step]*VLogWriter
+	dirty        map[kv.Step]*VLogFile
+	dirtyWriters map[kv.Step]*VLogWriter
 
 	// Subset of dirty that are ready for reading
 	// Writers that have been fsynced and can be safely read
-	visible map[kv.Step]*VLogWriter
+	visible        map[kv.Step]*VLogFile
+	visibleWriters map[kv.Step]*VLogWriter
 
 	dir  string // directory where vlog files are stored
 	lock sync.RWMutex
@@ -39,58 +44,56 @@ type VLogSet struct {
 
 // NewVLogSet creates a new VLogSet
 func NewVLogSet(dir string) *VLogSet {
+	dir2.MustExist(dir)
 	return &VLogSet{
-		dir:     dir,
-		dirty:   make(map[kv.Step]*VLogWriter),
-		visible: make(map[kv.Step]*VLogWriter),
+		dir:            dir,
+		dirty:          make(map[kv.Step]*VLogFile),
+		visible:        make(map[kv.Step]*VLogFile),
+		dirtyWriters:   make(map[kv.Step]*VLogWriter),
+		visibleWriters: make(map[kv.Step]*VLogWriter),
 	}
 }
 
-// GetOrCreate gets an existing vlog writer or creates a new one for the given step
+// GetOrCreateWriter gets an existing vlog writer or creates a new one for the given step
 // New writers are added to dirty set only
-func (s *VLogSet) GetOrCreate(step kv.Step) (*VLogWriter, error) {
+func (s *VLogSet) GetOrCreateWriter(step kv.Step) (*VLogWriter, error) {
 	s.lock.RLock()
-	if writer, exists := s.dirty[step]; exists {
+	if writer, exists := s.visibleWriters[step]; exists {
 		s.lock.RUnlock()
 		return writer, nil
 	}
 	s.lock.RUnlock()
 
-	// Need to create new writer
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	// Double-check after acquiring write lock
-	if writer, exists := s.dirty[step]; exists {
-		return writer, nil
-	}
-
 	// Create new writer in the configured directory
 	vlogPath := vlogPathForStep(s.dir, step)
-	writer, err := CreateVLogWriter(vlogPath)
+	vlog, err := CreateVLogFile(vlogPath)
+	if err != nil {
+		return nil, err
+	}
+	writer, err := NewVLogWriter(vlog)
 	if err != nil {
 		return nil, err
 	}
 
-	// Add to dirty set only (not visible until fsynced)
-	s.dirty[step] = writer
+	s.lock.Lock()
+	s.dirty[step] = vlog
+	s.dirtyWriters[step] = writer
+	s.lock.Unlock()
+
+	s.RecalcVisible()
 
 	return writer, nil
 }
 
-// Get returns a vlog writer for the given step from dirty set
-// Used during flush to access writers created earlier in the transaction
-func (s *VLogSet) Get(step kv.Step) *VLogWriter {
+// Reader returns a visible vlog writer for the given step (read-only access)
+func (s *VLogSet) Reader(step kv.Step) *VLogFile {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
-	return s.dirty[step]
-}
-
-// GetVisible returns a visible vlog writer for the given step (read-only access)
-func (s *VLogSet) GetVisible(step kv.Step) *VLogWriter {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
-	return s.visible[step]
+	v, ok := s.visible[step]
+	if !ok {
+		panic(fmt.Sprintf("VLogSet Reader for step %v does not exist", step))
+	}
+	return v
 }
 
 // FsyncAll fsyncs all dirty vlog writers
@@ -99,7 +102,7 @@ func (s *VLogSet) FsyncAll() error {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
-	for _, writer := range s.dirty {
+	for _, writer := range s.dirtyWriters {
 		if err := writer.Fsync(); err != nil {
 			return err
 		}
@@ -113,50 +116,11 @@ func (s *VLogSet) RecalcVisible() {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	// For now, simple strategy: all dirty vlogs become visible
-	// In future, can add logic to check if vlog is properly fsynced, indexed, etc.
-	s.visible = make(map[kv.Step]*VLogWriter, len(s.dirty))
-	for step, writer := range s.dirty {
-		s.visible[step] = writer
-	}
-}
+	s.visible = make(map[kv.Step]*VLogFile, len(s.dirty))
+	maps.Copy(s.visible, s.dirty)
 
-// Clone creates a shallow copy of the VLogSet for transaction isolation
-// Each transaction gets its own view of vlogs
-func (s *VLogSet) Clone() *VLogSet {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
-
-	clone := &VLogSet{
-		dir:     s.dir,
-		dirty:   make(map[kv.Step]*VLogWriter, len(s.dirty)),
-		visible: make(map[kv.Step]*VLogWriter, len(s.visible)),
-	}
-
-	// Copy pointers (shallow copy - writers are shared)
-	for step, writer := range s.dirty {
-		clone.dirty[step] = writer
-	}
-	for step, writer := range s.visible {
-		clone.visible[step] = writer
-	}
-
-	return clone
-}
-
-// AddDirty adds a vlog writer to the dirty set
-func (s *VLogSet) AddDirty(step kv.Step, writer *VLogWriter) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	s.dirty[step] = writer
-}
-
-// AddVisible adds a vlog writer to both dirty and visible sets
-func (s *VLogSet) AddVisible(step kv.Step, writer *VLogWriter) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	s.dirty[step] = writer
-	s.visible[step] = writer
+	s.visibleWriters = make(map[kv.Step]*VLogWriter, len(s.dirtyWriters))
+	maps.Copy(s.visibleWriters, s.dirtyWriters)
 }
 
 // Close closes all vlog writers
@@ -164,10 +128,10 @@ func (s *VLogSet) Close() {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	for _, writer := range s.dirty {
-		writer.Close()
+	for _, f := range s.dirty {
+		f.Close()
 	}
-
-	s.dirty = make(map[kv.Step]*VLogWriter)
-	s.visible = make(map[kv.Step]*VLogWriter)
+	for _, f := range s.dirtyWriters {
+		f.Close()
+	}
 }

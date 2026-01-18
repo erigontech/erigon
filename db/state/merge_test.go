@@ -625,7 +625,9 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		cfg.Hist.IiCfg.Name = kv.InvertedIdx(0)
 		cfg.Hist.IiCfg.FileVersion = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
 
-		d, err := NewDomain(cfg, 1, config3.DefaultStepsInFrozenFile, dirs, log.New())
+		vlogSet := NewVLogSet(filepath.Join(dirs.Chaindata, "vlog"))
+
+		d, err := NewDomain(cfg, vlogSet, 1, config3.DefaultStepsInFrozenFile, dirs, log.New())
 		if err != nil {
 			panic(err)
 		}

@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"os"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -612,45 +611,13 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 			txNum := binary.BigEndian.Uint64(k[len(k)-8:])
 			step := kv.Step(txNum / hi.ht.h.stepSize)
 
-			// Find vlog file for this step in integrated files
-			var vlogFile *VLogFile
-			for _, file := range hi.ht.files {
-				if file.src != nil && file.src.vlog != nil {
-					fileStep := kv.Step(file.startTxNum / hi.ht.h.stepSize)
-					if step == fileStep {
-						vlogFile = file.src.vlog
-						break
-					}
-				}
+			vlogFile := hi.ht.h.vlogSet.Reader(step)
+			offset := binary.BigEndian.Uint64(v)
+			actualValue, err := vlogFile.ReadAt(offset)
+			if err != nil {
+				return fmt.Errorf("failed to read vlog at offset %d: %w", offset, err)
 			}
-
-			// If not in integrated files, try opening directly from disk
-			if vlogFile == nil {
-				vlogPath := vlogPathForStep(hi.ht.h.dirs.SnapDomain, step)
-				if _, statErr := os.Stat(vlogPath); statErr == nil {
-					// Vlog file exists on disk but not yet integrated
-					vlogFile, err = OpenVLogFile(vlogPath)
-					if err != nil {
-						return fmt.Errorf("failed to open vlog file for step %d: %w", step, err)
-					}
-					// Note: We're opening the file here but not tracking it for closure
-					// This is okay for iteration since the file will be closed when iterator closes
-					// TODO: Consider adding vlog cache or cleanup mechanism
-					defer vlogFile.Close()
-				}
-			}
-
-			if vlogFile != nil {
-				offset := binary.BigEndian.Uint64(v)
-				actualValue, err := vlogFile.ReadAt(offset)
-				if err != nil {
-					return fmt.Errorf("failed to read vlog at offset %d: %w", offset, err)
-				}
-				hi.nextVal = actualValue
-			} else {
-				// No vlog file found, use value as-is (backward compatibility)
-				hi.nextVal = v
-			}
+			hi.nextVal = actualValue
 		} else {
 			// Inline value or backward compatibility
 			hi.nextVal = v

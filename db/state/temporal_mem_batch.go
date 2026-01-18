@@ -88,7 +88,7 @@ func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 
 	for id, d := range aggTx.d {
 		sd.domains[id] = map[string][]dataWithTxNum{}
-		sd.domainWriters[id] = d.NewWriter(aggTx.vlogSet)
+		sd.domainWriters[id] = d.NewWriter(aggTx.a.vlogSet)
 	}
 
 	sd.forkableWriters = make(map[kv.ForkableId]kv.BufferedWriter)

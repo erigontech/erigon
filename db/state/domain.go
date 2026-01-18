@@ -96,6 +96,8 @@ type Domain struct {
 	// underlying array is immutable - means it's ready for zero-copy use
 	_visible *domainVisible
 
+	vLogSet *VLogSet
+
 	checker *DependencyIntegrityChecker
 }
 
@@ -105,7 +107,7 @@ type domainVisible struct {
 	caches *sync.Pool
 }
 
-func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*Domain, error) {
+func NewDomain(cfg statecfg.DomainCfg, vlogSet *VLogSet, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*Domain, error) {
 	if dirs.SnapDomain == "" {
 		panic("assert: empty `dirs`")
 	}
@@ -117,10 +119,11 @@ func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs 
 		DomainCfg:  cfg,
 		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		_visible:   newDomainVisible(cfg.Name, []visibleFile{}),
+		vLogSet:    vlogSet,
 	}
 
 	var err error
-	if d.History, err = NewHistory(cfg.Hist, stepSize, stepsInFrozenFile, dirs, logger); err != nil {
+	if d.History, err = NewHistory(cfg.Hist, vlogSet, stepSize, stepsInFrozenFile, dirs, logger); err != nil {
 		return nil, err
 	}
 
@@ -454,7 +457,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 			vlogWriter, exists := vlogWriters[step]
 			if !exists {
 				var err error
-				vlogWriter, err = w.vlogSet.GetOrCreate(step)
+				vlogWriter, err = w.vlogSet.GetOrCreateWriter(step)
 				if err != nil {
 					return fmt.Errorf("failed to get vlog writer for step %d: %w", step, err)
 				}
@@ -1176,18 +1179,6 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 		}
 	}
 
-	// Open vlog file if it exists (for LargeValues mode)
-	if d.LargeValues {
-		vlogPath := vlogPathForStep(d.dirs.SnapDomain, step)
-		if _, statErr := os.Stat(vlogPath); statErr == nil {
-			vlog, err = OpenVLogFile(vlogPath)
-			if err != nil {
-				return StaticFiles{}, fmt.Errorf("open %s vlog: %w", d.FilenameBase, err)
-			}
-		}
-		// If vlog doesn't exist, that's ok (backward compatibility or no values written yet)
-	}
-
 	closeComp = false
 	return StaticFiles{
 		HistoryFiles:    hStaticFiles,
@@ -1734,6 +1725,11 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 		if len(fullkey) == 0 {
 			return nil, 0, false, nil // This key is not in DB
 		}
+		// In large values mode, keys are stored as (originalKey + stepBytes)
+		// So fullkey must be at least 8 bytes longer than the search key
+		if len(fullkey) < len(key)+8 {
+			return nil, 0, false, nil // This key is not in DB (too short to contain stepBytes)
+		}
 		if !bytes.Equal(fullkey[:len(fullkey)-8], key) {
 			return nil, 0, false, nil // This key is not in DB
 		}
@@ -1772,28 +1768,13 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 			// Non-empty value with vlog reference
 			offset := binary.BigEndian.Uint64(v[8:16])
 
-			// Find vlog file for this step
-			var vlogFile *VLogFile
-			for _, file := range dt.files {
-				if file.src != nil && file.src.vlog != nil {
-					// Check if this file covers the step
-					stepTxNumFrom := firstTxNumOfStep(foundStep, dt.stepSize)
-					if stepTxNumFrom >= file.startTxNum && stepTxNumFrom < file.endTxNum {
-						vlogFile = file.src.vlog
-						break
-					}
-				}
+			vlogFile := dt.d.vlogSet.Reader(foundStep)
+			// Read actual value from vlog
+			actualValue, err := vlogFile.ReadAt(offset)
+			if err != nil {
+				return nil, 0, false, fmt.Errorf("failed to read vlog at offset %d: %w", offset, err)
 			}
-
-			if vlogFile != nil {
-				// Read actual value from vlog
-				actualValue, err := vlogFile.ReadAt(offset)
-				if err != nil {
-					return nil, 0, false, fmt.Errorf("failed to read vlog at offset %d: %w", offset, err)
-				}
-				v = actualValue
-			}
-			// If vlogFile is nil, fall back to returning v (backward compatibility)
+			v = actualValue
 		}
 	}
 

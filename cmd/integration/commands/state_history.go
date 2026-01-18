@@ -20,6 +20,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+
+	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -27,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/node/debug"
-	"github.com/spf13/cobra"
 )
 
 func init() {
@@ -78,8 +80,11 @@ var printCmd = &cobra.Command{
 			return
 		}
 
+		vlogSet := state.NewVLogSet(filepath.Join(dirs.Chaindata, "vlog"))
+
 		history, err := state.NewHistory(
 			statecfg.Schema.GetDomainCfg(domainKV).Hist,
+			vlogSet,
 			config3.DefaultStepSize,
 			config3.DefaultStepsInFrozenFile,
 			dirs,
@@ -125,8 +130,10 @@ var rebuildCmd = &cobra.Command{
 			return
 		}
 
+		vlogSet := state.NewVLogSet(filepath.Join(dirs.Chaindata, "vlog"))
 		history, err := state.NewHistory(
 			statecfg.Schema.GetDomainCfg(domainKV).Hist,
+			vlogSet,
 			config3.DefaultStepSize,
 			config3.DefaultStepsInFrozenFile,
 			dirs,

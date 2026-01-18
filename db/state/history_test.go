@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -69,7 +70,11 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	cfg.Hist.Compression = seg.CompressNone
 	//cfg.hist.historyValuesOnCompressedPage = 16
 	aggregationStep := uint64(16)
-	h, err := NewHistory(cfg.Hist, aggregationStep, config3.DefaultStepsInFrozenFile, dirs, logger)
+
+	vlogSet := NewVLogSet(filepath.Join(dirs.Chaindata, "vlog"))
+	tb.Cleanup(vlogSet.Close)
+
+	h, err := NewHistory(cfg.Hist, vlogSet, aggregationStep, config3.DefaultStepsInFrozenFile, dirs, logger)
 	require.NoError(tb, err)
 	tb.Cleanup(h.Close)
 	h.salt.Store(&salt)

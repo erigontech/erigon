@@ -48,9 +48,8 @@ type VLogFile struct {
 // VLogWriter handles sequential append operations to a vlog file
 // Uses buffering for performance. Only 1 RwTx at a time guarantees no concurrency issues.
 type VLogWriter struct {
-	file   *os.File
+	file   *VLogFile
 	writer *bufio.Writer
-	path   string
 	offset uint64 // current write offset
 }
 
@@ -59,13 +58,31 @@ func vlogPathForStep(dir string, step kv.Step) string {
 	return filepath.Join(dir, fmt.Sprintf("v%d-%d.vlog", vlogVersion, step))
 }
 
+func CreateVLogFile(path string) (*VLogFile, error) {
+	f, err := os.Create(path)
+	if err != nil {
+		return nil, err
+	}
+	return newVlog(f, path)
+}
+func CreateVLogWriter(path string) (*VLogWriter, error) {
+	f, err := CreateVLogFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return NewVLogWriter(f)
+}
+
 // OpenVLogFile opens an existing vlog file for reading using mmap
 func OpenVLogFile(path string) (*VLogFile, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
+	return newVlog(f, path)
+}
 
+func newVlog(f *os.File, path string) (*VLogFile, error) {
 	stat, err := f.Stat()
 	if err != nil {
 		f.Close()
@@ -161,17 +178,11 @@ func (v *VLogFile) Path() string {
 	return v.path
 }
 
-// CreateVLogWriter creates a new vlog file for writing
-func CreateVLogWriter(path string) (*VLogWriter, error) {
-	f, err := os.Create(path)
-	if err != nil {
-		return nil, err
-	}
-
+// NewVLogWriter creates a new vlog file for writing
+func NewVLogWriter(f *VLogFile) (*VLogWriter, error) {
 	return &VLogWriter{
 		file:   f,
-		writer: bufio.NewWriterSize(f, vlogBufferSize),
-		path:   path,
+		writer: bufio.NewWriterSize(f.file, vlogBufferSize),
 		offset: 0,
 	}, nil
 }
@@ -215,7 +226,7 @@ func (w *VLogWriter) Fsync() error {
 	}
 
 	// Sync to disk
-	if err := w.file.Sync(); err != nil {
+	if err := w.file.file.Sync(); err != nil {
 		return err
 	}
 
@@ -242,5 +253,5 @@ func (w *VLogWriter) Close() error {
 
 // Path returns the file path
 func (w *VLogWriter) Path() string {
-	return w.path
+	return w.file.path
 }
