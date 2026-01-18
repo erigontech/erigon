@@ -17,11 +17,12 @@ import (
 	"testing"
 
 	g "github.com/anacrolix/generics"
+	"github.com/go-quicktest/qt"
+
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/preverified"
-	"github.com/go-quicktest/qt"
 )
 
 func haveDir(name string) fsChecker {
@@ -38,7 +39,7 @@ func TestSnapshots(t *testing.T) {
 			{Name: "snapshots/dont/keep/me"},
 		}
 		makeEntries(t, startEntries, root)
-		r := makeTestingReset(t, startEntries, root, ".")
+		r := makeTestingReset(t, startEntries, root, "", ".")
 		printFs(t, root.FS())
 		r.PreverifiedSnapshots = preverified.SortedItems{
 			{Name: "keep/me"},
@@ -114,7 +115,7 @@ func TestResetCheapDiskExample(t *testing.T) {
 		makeEntries(t, startEntries, testRoot)
 		rootFS := testRoot.FS()
 		printFs(t, rootFS)
-		r := makeTestingReset(t, startEntries, testRoot, "datadir")
+		r := makeTestingReset(t, startEntries, testRoot, "", "datadir")
 		qt.Assert(t, qt.IsNil(r.Run()))
 		checkFs(t, rootFS, haveEntries(endEntries...)...)
 	})
@@ -127,12 +128,10 @@ func TestResetSymlinkToExternalFile(t *testing.T) {
 	}
 	withOsRoot(t, func(osRoot *os.Root) {
 		makeEntries(t, startEntries, osRoot)
-		resetJail, err := osRoot.OpenRoot("jail")
-		qt.Assert(t, qt.IsNil(err))
 		rootFS := osRoot.FS()
 		printFs(t, rootFS)
-		r := makeTestingReset(t, startEntries, resetJail, ".")
-		err = r.Run()
+		r := makeTestingReset(t, startEntries, osRoot, "jail", ".")
+		err := r.Run()
 		qt.Check(t, qt.IsNil(err))
 		endEntries := haveEntries(
 			startEntries[0],
@@ -150,12 +149,10 @@ func TestResetSymlinkToExternalDirWithContents(t *testing.T) {
 	endEntries := slices.Clone(startEntries)
 	withOsRoot(t, func(osRoot *os.Root) {
 		makeEntries(t, startEntries, osRoot)
-		resetJail, err := osRoot.OpenRoot("jail")
-		qt.Assert(t, qt.IsNil(err))
 		rootFS := osRoot.FS()
 		printFs(t, rootFS)
-		r := makeTestingReset(t, startEntries, resetJail, ".")
-		err = r.Run()
+		r := makeTestingReset(t, startEntries, osRoot, "jail", ".")
+		err := r.Run()
 		qt.Check(t, qt.ErrorMatches(err, pathEscapesFromParent))
 		checkFs(t, rootFS, haveEntries(endEntries...)...)
 	})
@@ -221,7 +218,7 @@ func testResetDatadirRoot(t *testing.T, startEntries []fsEntry, checkers []fsChe
 		makeEntries(t, startEntries, osRoot)
 		rootFS := osRoot.FS()
 		printFs(t, rootFS)
-		r := makeTestingReset(t, startEntries, osRoot, ".")
+		r := makeTestingReset(t, startEntries, osRoot, "", ".")
 		qt.Assert(t, runChecker(r.Run()))
 		checkFs(t, rootFS, checkers...)
 	})
@@ -401,13 +398,24 @@ func makeTestingReset(
 	t *testing.T,
 	entries []fsEntry,
 	osRoot *os.Root,
-	// Location within osRoot.
+	jailPath string, // Optional jail subdirectory. Empty string means no jail.
 	datadirSubDir slashName,
 ) Reset {
 	logger := log.New("test", t.Name())
 	logger.SetHandler(log.StderrHandler)
+
 	osRootPath := OsFilePath(osRoot.Name())
-	datadirOs := OsFilePath(osRoot.Name()).Join(datadirSubDir.FromSlash())
+	removeRoot := osRoot
+
+	// If jailPath is specified, open a sub-root for path escape detection
+	if jailPath != "" {
+		var err error
+		removeRoot, err = osRoot.OpenRoot(jailPath)
+		qt.Assert(t, qt.IsNil(err))
+		osRootPath = osRootPath.Join(OsFilePath(jailPath))
+	}
+
+	datadirOs := osRootPath.Join(datadirSubDir.FromSlash())
 	dirs := datadir.Open(datadirOs.ToString())
 	return Reset{
 		Dirs:                 &dirs,
@@ -422,7 +430,7 @@ func makeTestingReset(
 					return entry.Remove()
 				}
 			}
-			return osRoot.Remove(string(osFilePath.MustRel(osRootPath)))
+			return removeRoot.Remove(string(osFilePath.MustRel(osRootPath)))
 		},
 	}
 }

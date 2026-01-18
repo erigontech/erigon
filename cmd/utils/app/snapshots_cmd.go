@@ -36,9 +36,10 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
+
+	"github.com/erigontech/erigon/db/downloader"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
@@ -1622,16 +1623,16 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 	if intervals[0].from != 0 {
 		return fmt.Errorf("gap at start: snapshots start at (%d-%d). snaptype: %s", intervals[0].from, intervals[0].to, snapType)
 	}
-	// Check that there are no gaps
-	for i := 1; i < len(intervals); i++ {
-		if intervals[i].from != intervals[i-1].to {
-			return fmt.Errorf("gap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
-		}
-	}
 	// Check that there are no overlaps
 	for i := 1; i < len(intervals); i++ {
 		if intervals[i].from < intervals[i-1].to {
 			return fmt.Errorf("overlap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
+		}
+	}
+	// Check that there are no gaps
+	for i := 1; i < len(intervals); i++ {
+		if intervals[i].from != intervals[i-1].to {
+			return fmt.Errorf("gap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
 		}
 	}
 
