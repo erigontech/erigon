@@ -526,7 +526,7 @@ func (s *simulator) simulateBlock(
 			}
 			// Change the state reader to a commitment-only history reader that reads non-commitment domains from the latest state.
 			txNum := minTxNum + 1 + uint64(len(bsc.Calls))
-			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains, txNum+1))
+			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains.AsGetter(tx), txNum+1))
 		}
 		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNumber, sharedDomains.TxNum(), "eth_simulateV1", nil)
 		if err != nil {
@@ -756,15 +756,13 @@ func clientLimitExceededError(message string) error {
 type HistoryCommitmentOnlyReader struct {
 	latestReader       commitment.StateReader
 	historyReader      commitment.StateReader
-	sd                 *execctx.SharedDomains
 	limitReadAsOfTxNum uint64
 }
 
-func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, limitReadAsOfTxNum uint64) commitmentdb.StateReader {
+func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, getter kv.TemporalGetter, limitReadAsOfTxNum uint64) commitment.StateReader {
 	return &HistoryCommitmentOnlyReader{
-		latestReader:       commitmentdb.NewLatestStateReader(roTx, sd),
-		historyReader:      commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum),
-		sd:                 sd,
+		latestReader:       commitment.NewLatestStateReader(getter),
+		historyReader:      commitment.NewHistoryStateReader(roTx, limitReadAsOfTxNum),
 		limitReadAsOfTxNum: limitReadAsOfTxNum,
 	}
 }
@@ -792,6 +790,6 @@ func (r *HistoryCommitmentOnlyReader) Read(d kv.Domain, plainKey []byte) (enc []
 	return enc, step, nil
 }
 
-func (r *HistoryCommitmentOnlyReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
-	return newHistoryCommitmentOnlyReader(tx, r.sd, r.limitReadAsOfTxNum)
+func (r *HistoryCommitmentOnlyReader) Clone(tx kv.TemporalTx, getter kv.TemporalGetter) commitment.StateReader {
+	return newHistoryCommitmentOnlyReader(tx, getter, r.limitReadAsOfTxNum)
 }

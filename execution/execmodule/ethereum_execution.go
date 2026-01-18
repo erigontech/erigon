@@ -100,7 +100,7 @@ var _ kvcache.Cache = (*Cache)(nil)         // compile-time interface check
 var _ kvcache.CacheView = (*CacheView)(nil) // compile-time interface check
 
 func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
-	var context *execctx.SharedDomains
+	var context *state.ExecutionContext
 	if c.execModule != nil {
 		c.execModule.lock.RLock()
 		defer c.execModule.lock.RUnlock()
@@ -117,7 +117,7 @@ func (c *Cache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*kvcach
 }
 
 type CacheView struct {
-	context *execctx.SharedDomains
+	context *state.ExecutionContext
 	tx      kv.TemporalTx
 }
 
@@ -157,8 +157,7 @@ func (c *CacheView) HasStorage(address common.Address) (bool, error) {
 	if c.context != nil {
 		getter = c.context.AsGetter(c.tx)
 	}
-	_, _, hasStorage, err := getter.HasPrefix(kv.StorageDomain, address[:])
-	return hasStorage, err
+	return getter.HasPrefix(kv.StorageDomain, address[:])
 }
 
 // EthereumExecutionModule describes ethereum execution logic and indexing.
@@ -198,7 +197,7 @@ type EthereumExecutionModule struct {
 	// metrics for average mgas/sec
 	avgMgasSec float64
 
-	currentContext *execctx.SharedDomains
+	currentContext *state.ExecutionContext
 
 	executionproto.UnimplementedExecutionServer
 }

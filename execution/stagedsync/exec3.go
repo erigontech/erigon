@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
+	execstate "github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -424,7 +425,7 @@ type txExecutor struct {
 	cfg               ExecuteBlockCfg
 	agg               *dbstate.Aggregator
 	rs                *state.StateV3Buffered
-	doms              *execctx.SharedDomains
+	doms              *execstate.ExecutionContext
 	u                 Unwinder
 	isBlockProduction bool
 	isForkValidation  bool

@@ -697,10 +697,10 @@ func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
 	value := address.Value()
 	// this is an optimization, but also checks the account is checked in the domain
 	// for being deleted on unwind before we try to access the storage
-	if enc, _, err := r.getter.GetLatest(kv.AccountsDomain, value[:]); len(enc) == 0 {
+	if enc, _, err := r.tx.GetLatest(kv.AccountsDomain, value[:]); len(enc) == 0 {
 		return false, err
 	}
-	_, _, hasStorage, err := r.getter.HasPrefix(kv.StorageDomain, value[:])
+	hasStorage, err := r.tx.HasPrefix(kv.StorageDomain, value[:])
 	return hasStorage, err
 }
 

@@ -477,11 +477,10 @@ type TemporalDebugDB interface {
 	MergeLoop(ctx context.Context) error
 }
 
-type DataWithStep struct {
-	Data []byte
-	Step Step
+type DataWithTxNum struct {
+	Data  []byte
+	TxNum uint64
 }
-
 type TemporalMemBatch interface {
 	DomainPut(domain Domain, k []byte, v []byte, txNum uint64, preval []byte, prevStep Step) error
 	DomainDel(domain Domain, k []byte, txNum uint64, preval []byte, prevStep Step) error
@@ -489,7 +488,7 @@ type TemporalMemBatch interface {
 	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
 	Merge(other TemporalMemBatch) error
 	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
-	IteratePrefix(domain Domain, prefix []byte, mem iter.Seq2[string, DataWithStep], roTx Tx, it func(k []byte, v []byte, step Step) (cont bool, err error)) error
+	IteratePrefix(domain Domain, prefix []byte, mem iter.Seq2[string, []DataWithTxNum], roTx Tx, it func(k []byte, v []byte, step Step) (cont bool, err error)) error
 	Flush(ctx context.Context, tx RwTx) error
 	Close()
 	PutForkable(id ForkableId, num Num, v []byte) error
@@ -499,7 +498,6 @@ type TemporalMemBatch interface {
 	StepSize() Step
 	SetValueCache(cache ValueCache)
 	ValueCache(d Domain) ValueCache
-	GetAsOf(domain Domain, key []byte, ts uint64) (v []byte, ok bool, err error)
 }
 
 type WithFreezeInfo interface {

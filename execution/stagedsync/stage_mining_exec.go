@@ -99,7 +99,7 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *state.Executio
 	logPrefix := s.LogPrefix()
 	current := cfg.miningState.MiningBlock
 
-	stateReader := state.NewReaderV3(sd.AsGetter(tx))
+	stateReader := state.NewStateReader(sd, tx)
 	ibs := state.New(stateReader)
 	// Clique consensus needs forced author in the evm context
 	//if cfg.chainConfig.Consensus == chain.CliqueConsensus {
@@ -131,8 +131,8 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *state.Executio
 	coinbase := accounts.InternAddress(cfg.miningState.MiningConfig.Etherbase)
 
 	yielded := mapset.NewSet[[32]byte]()
-	simStateWriter := state.NewWriter(simSd.AsPutDel(tx), nil, txNum)
-	simStateReader := state.NewReaderV3(simSd.AsGetter(tx))
+	simStateWriter := state.NewWriter(simSd, tx, nil, txNum)
+	simStateReader := state.NewStateReader(simSd, tx)
 
 	executionAt, err := s.ExecutionAt(tx)
 	if err != nil {

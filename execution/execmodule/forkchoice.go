@@ -533,39 +533,18 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 
-		logArgs := []interface{}{"hash", blockHash, "number", fcuHeader.Number.Uint64(), "txnum", txnum, "age", common.PrettyAge(time.Unix(int64(fcuHeader.Time), 0))}
+		e.logHeadUpdated(blockHash, fcuHeader, txnum, "head updated", stateFlushingInParallel)
+
 		if mergeExtendingFork {
-			totalTime := blockTimings[engine_helpers.BlockTimingsValidationIndex]
-			if !e.syncCfg.ParallelStateFlushing {
-				totalTime += blockTimings[engine_helpers.BlockTimingsFlushExtendingFork]
-			}
-			gasUsedMgas := float64(fcuHeader.GasUsed) / 1e6
-			mgasPerSec := gasUsedMgas / totalTime.Seconds()
-			metrics.ChainTipMgasPerSec.Add(mgasPerSec)
-
-			const blockRange = 300 // ~1 hour
-			const alpha = 2.0 / (blockRange + 1)
-
-			if e.avgMgasSec == 0 {
-				e.avgMgasSec = mgasPerSec
-			}
-			e.avgMgasSec = alpha*mgasPerSec + (1-alpha)*e.avgMgasSec
-			logArgs = append(logArgs, "execution", common.Round(blockTimings[engine_helpers.BlockTimingsValidationIndex], 0), "mgas/s", fmt.Sprintf("%.2f", mgasPerSec), "average mgas/s", fmt.Sprintf("%.2f", e.avgMgasSec))
-			if !e.syncCfg.ParallelStateFlushing {
-				logArgs = append(logArgs, "flushing", blockTimings[engine_helpers.BlockTimingsFlushExtendingFork])
+			// TODO: (20/12/25) we really want to commit all changes with the shared domains but
+			// to do that we need to remove all of the rawdb methods and call them via
+			// the domains - which will happen after they transiaiotn to an ExecutionContext
+			// for the moment just commit what we have
+			if err = tx.Commit(); err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			}
 		}
-		if e.logger != nil {
-			e.logger.Info("head updated", logArgs...)
-		}
 
-		// TODO: (20/12/25) we really want to commit all changes with the shared domains but
-		// to do that we need to remove all of the rawdb methods and call them via
-		// the domains - which will happen after they transiaiotn to an ExecutionContext
-		// for the moment just commit what we have
-		if err = tx.Commit(); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
-		}
 		e.lock.Lock()
 		e.currentContext = currentContext
 		e.lock.Unlock()

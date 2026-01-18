@@ -356,6 +356,38 @@ func (d *domain[K, V]) getLatest(ctx context.Context, domain kv.Domain, k []byte
 	return v, step, nil
 }
 
+func (d *domain[K, V]) getAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+	/* TODO
+	keyS := toStringZeroCopy(key)
+	var dataWithTxNums []dataWithTxNum
+	if domain == kv.StorageDomain {
+		dataWithTxNums, ok = sd.storage.Get(keyS)
+		if !ok {
+			return nil, false, nil
+		}
+		for i, dataWithTxNum := range dataWithTxNums {
+			if ts > dataWithTxNum.txNum && (i == len(dataWithTxNums)-1 || ts <= dataWithTxNums[i+1].txNum) {
+				return dataWithTxNum.data, true, nil
+			}
+		}
+		return nil, false, nil
+	}
+
+	dataWithTxNums, ok = sd.domains[domain][keyS]
+	if !ok {
+		return nil, false, nil
+	}
+	for i, dataWithTxNum := range dataWithTxNums {
+		if ts > dataWithTxNum.txNum && (i == len(dataWithTxNums)-1 || ts <= dataWithTxNums[i+1].txNum) {
+			return dataWithTxNum.data, true, nil
+		}
+	}
+	*/
+	return nil, false, nil
+}
+
 func (sd *domain[K, V]) ClearMetrics() {
 	sd.metrics.Lock()
 	defer sd.metrics.Unlock()
@@ -727,15 +759,15 @@ func (sd *StorageDomain) Del(ctx context.Context, addr accounts.Address, key acc
 		roTx, txNum, pv)
 }
 
-func (sd *StorageDomain) slotIterator(addr accounts.Address) func(yield func(string, kv.DataWithStep) bool) {
+func (sd *StorageDomain) slotIterator(addr accounts.Address) func(yield func(string, []kv.DataWithTxNum) bool) {
 	sd.lock.RLock()
 	iter := sd.updates.(storageUpdates).SortedIter(addr)
 	sd.lock.RUnlock()
-	return func(yield func(string, kv.DataWithStep) bool) {
+	return func(yield func(string, []kv.DataWithTxNum) bool) {
 		for k, v := range iter {
 			aval := k.address.Value()
 			kval := k.key.Value()
-			yield(string(append(aval[:], kval[:]...)), kv.DataWithStep{Data: v.Value.Bytes(), Step: v.Step})
+			yield(string(append(aval[:], kval[:]...)), []kv.DataWithTxNum{{Data: v.Value.Bytes(), TxNum: uint64(v.Step)}}) //TODO ValueWithTxNum
 		}
 	}
 }
@@ -800,13 +832,13 @@ func (sd *StorageDomain) HasStorage(ctx context.Context, addr accounts.Address, 
 	addrVal := addr.Value()
 	err := sd.mem.IteratePrefix(kv.StorageDomain, addrVal[:], nil, roTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
 		if sd.mem.IsUnwound() {
-			// if we have been unwound we need to do this to ensure the value 
+			// if we have been unwound we need to do this to ensure the value
 			// has not been removed during the unwind
-			if val, _, ok := d.mem.GetLatest(kv.StorageDomain, k); ok {
+			if val, _, ok := sd.mem.GetLatest(kv.StorageDomain, k); ok {
 				v = val
 			}
 		}
-		hasPrefix = len(v) > 0 
+		hasPrefix = len(v) > 0
 		return !hasPrefix, nil
 	})
 	return hasPrefix, err

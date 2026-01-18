@@ -43,7 +43,7 @@ const (
 )
 
 type memIter struct {
-	next func() (string, []dataWithTxNum, bool)
+	next func() (string, []kv.DataWithTxNum, bool)
 	stop func()
 }
 
@@ -362,7 +362,7 @@ func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 // debugIteratePrefix iterates over key-value pairs of the storage domain that start with given prefix
 //
 // k and v lifetime is bounded by the lifetime of the iterator
-func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, mem iter.Seq2[string, kv.[]dataWithTxNum], it func(k []byte, v []byte, step kv.Step) (cont bool, err error), roTx kv.Tx) error {
+func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, mem iter.Seq2[string, []kv.DataWithTxNum], it func(k []byte, v []byte, step kv.Step) (cont bool, err error), roTx kv.Tx) error {
 	// Implementation:
 	//     File endTxNum  = last txNum of file step
 	//     DB endTxNum    = first txNum of step in db
@@ -379,7 +379,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, mem iter.Seq2[stri
 	var err error
 
 	if mem != nil {
-		next, stop := iter.Pull2[string, kv.DataWithStep](mem)
+		next, stop := iter.Pull2[string, []kv.DataWithTxNum](mem)
 		heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), step: 0, iter: memIter{next, stop}, endTxNum: math.MaxUint64, reverse: true})
 	}
 
@@ -432,7 +432,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, mem iter.Seq2[stri
 					k = toBytesZeroCopy(mk)
 					if k != nil && bytes.HasPrefix(k, prefix) {
 						ci1.key = common.Copy(k)
-						ci1.val = common.Copy(mv.Data[len(mv.Data)-1].data)
+						ci1.val = common.Copy(mv[len(mv)-1].Data)
 						heap.Push(cpPtr, ci1)
 					}
 				}

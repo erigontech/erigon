@@ -203,8 +203,8 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 		return nil, err
 	}
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
-	sd.GetCommitmentCtx().SetLimitedHistoryStateReader(tx, maxTxNum) // to use tx.Debug().GetLatestFromFiles with maxTxNum
-	err = sd.SeekCommitment(ctx, tx)                                 // seek commitment again to use the new state reader instead
+	sd.GetCommitmentCtx().SetLimitedHistoryStateReader(tx, sd.AsGetter(tx), maxTxNum) // to use tx.Debug().GetLatestFromFiles with maxTxNum
+	err = sd.SeekCommitment(ctx, tx)                                                  // seek commitment again to use the new state reader instead
 	if err != nil {
 		return nil, err
 	}

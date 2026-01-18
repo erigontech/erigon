@@ -33,17 +33,6 @@ import (
 
 type iodir int
 
-const (
-	get iodir = iota
-	put
-)
-
-type dataWithTxNum struct {
-	data  []byte
-	txNum uint64
-	dir   iodir
-}
-
 // TemporalMemBatch - temporal read-write interface - which storing updates in RAM. Don't forget to call `.Flush()`
 type TemporalMemBatch struct {
 	aggTx        *AggregatorRoTx
@@ -139,6 +128,7 @@ func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, s
 
 	return nil, 0, false
 }
+
 
 func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, memIter iter.Seq2[string, []kv.DataWithTxNum], roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
 	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, memIter, it, roTx)

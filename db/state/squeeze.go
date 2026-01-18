@@ -454,7 +454,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, ec execContext,
 
 			ec.SetBlockNum(blockNum)
 			ec.SetTxNum(lastTxnumInShard - 1)
-			ec.GetCommitmentCtx().SetLimitedHistoryStateReader(roTx, lastTxnumInShard) // this helps to read state from correct file during commitment
+			ec.GetCommitmentCtx().SetLimitedHistoryStateReader(roTx, ec.AsGetter(roTx), lastTxnumInShard) // this helps to read state from correct file during commitment
 
 			rebuiltCommit, err = rebuildCommitmentShard(ctx, ec, roTx, nextKey, &rebuiltCommitment{
 				StepFrom: shardFrom,

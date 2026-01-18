@@ -469,6 +469,12 @@ func (sd *ExecutionContext) getLatest(ctx context.Context, domain kv.Domain, tx 
 	return v, step, nil
 }
 
+func (sd *ExecutionContext) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	//return sd.mem.GetAsOf(domain, key, ts)
+	// TODO - we need to add getAsOf to domains
+	return nil, false, fmt.Errorf("TODO")
+}
+
 func (sd *ExecutionContext) Metrics() *DomainMetrics {
 	return &sd.metrics
 }
@@ -560,10 +566,6 @@ func (sd *ExecutionContext) ComputeCommitment(ctx context.Context, tx kv.Tempora
 // SetWarmupDB sets the database used for parallel warmup of MDBX page cache during commitment.
 func (sd *ExecutionContext) SetWarmupDB(db kv.TemporalRoDB) {
 	sd.sdCtx.SetWarmupDB(db)
-}
-
-func (sd *ExecutionContext) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
-	return sd.mem.GetAsOf(domain, key, ts)
 }
 
 func (sd *ExecutionContext) SetParaTrieDB(db kv.TemporalRoDB) {
