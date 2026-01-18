@@ -982,17 +982,23 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 		}
 		txTo = min(ht.files.EndTxNum(), ht.iit.files.EndTxNum(), untilTx)
 	}
+	minTxDB := ht.h.minTxNumInDB(tx)
+	delta := 0.0
+	if txTo > minTxDB {
+		delta = float64(txTo-minTxDB) / float64(ht.stepSize) //TODO: why this is happening?
+	}
 
 	switch ht.h.FilenameBase {
 	case "accounts":
-		mxPrunableHAcc.Set(float64(txTo - minIdxTx))
+		mxPrunableHAcc.Set(delta)
 	case "storage":
-		mxPrunableHSto.Set(float64(txTo - minIdxTx))
+		mxPrunableHSto.Set(delta)
 	case "code":
-		mxPrunableHCode.Set(float64(txTo - minIdxTx))
+		mxPrunableHCode.Set(delta)
 	case "commitment":
-		mxPrunableHComm.Set(float64(txTo - minIdxTx))
+		mxPrunableHComm.Set(delta)
 	}
+
 	return minIdxTx < txTo || pruneInProgress, txTo
 }
 

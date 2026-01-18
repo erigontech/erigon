@@ -87,7 +87,6 @@ type ExecuteBlockCfg struct {
 	genesis   *types.Genesis
 
 	silkworm        *silkworm.Silkworm
-	blockProduction bool
 	experimentalBAL bool
 }
 
@@ -284,7 +283,7 @@ func unwindExec3State(ctx context.Context,
 				if len(entry.Value) > 0 {
 					var account accounts.Account
 					if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
-						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
+						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d, prev: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep, prevStep)
 					}
 				} else {
 					if keyStep != prevStep {
@@ -467,7 +466,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	//  - stop prune when `tx.SpaceDirty()` is big
 	//  - and set ~500ms timeout
 	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
-	quickPruneTimeout := 500 * time.Millisecond
+	quickPruneTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond
 
 	if timeout > 0 && timeout > quickPruneTimeout {
 		quickPruneTimeout = timeout

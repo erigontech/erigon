@@ -877,7 +877,7 @@ func processCommitmentFile(fpath string) (*visualizeOverallStat, error) {
 }
 
 func prefixLenCountChart(fname string, data *visualizeOverallStat) *charts.Pie {
-	items := make([]opts.PieData, 0)
+	items := make([]opts.PieData, 0, len(data.prefCount))
 	for prefSize, count := range data.prefCount {
 		items = append(items, opts.PieData{Name: strconv.FormatUint(prefSize, 10), Value: count})
 	}

@@ -250,10 +250,17 @@ func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) 
 	var firstKey, firstVal []byte
 	var hasPrefix bool
 	err := sd.IteratePrefix(domain, prefix, roTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
-		firstKey = common.Copy(k)
-		firstVal = common.Copy(v)
-		hasPrefix = true
-		return false, nil // do not continue, end on first occurrence
+		// we need to do this to ensure the value has not been unwound
+		if lv, _, ok := sd.mem.GetLatest(domain, k); ok {
+			v = lv
+		}
+		if len(v) > 0 {
+			firstKey = common.Copy(k)
+			firstVal = common.Copy(v)
+			hasPrefix = true
+			return false, nil // do not continue, end on first occurrence
+		}
+		return true, nil
 	})
 	return firstKey, firstVal, hasPrefix, err
 }

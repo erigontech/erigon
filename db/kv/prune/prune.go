@@ -354,7 +354,6 @@ func TableScanningPrune(
 					break
 				}
 				if time.Since(start) > timeOut {
-					logger.Info("prune val timed out", "name", filenameBase)
 					stat.LastPrunedValue = common.Copy(val)
 					stat.ValueProgress = InProgress
 					return stat, nil
