@@ -126,6 +126,7 @@ func newVlog(f *os.File, path string) (*VLogFile, error) {
 // Format: [size: 4 bytes] [value: size bytes]
 func (v *VLogFile) ReadAt(offset uint64) ([]byte, error) {
 	if v.mmapHandle2 == nil {
+		panic(fmt.Errorf("vlog file is closed or empty"))
 		return nil, fmt.Errorf("vlog file is closed or empty")
 	}
 

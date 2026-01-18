@@ -34,6 +34,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/existence"
@@ -509,25 +510,12 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 				vlogWriters[step] = vlogWriter
 			}
 
-			// Special case: empty values stored directly (no vlog reference)
-			// Empty value (0 bytes) is smaller than vlog reference (8 bytes)
-			if len(actualValue) == 0 {
-				// Store empty value directly
-				return tx.Put(w.historyValsTable, k, []byte{})
-			}
-
 			// Write non-empty values to vlog
 			offset, err := vlogWriter.Append(actualValue)
 			if err != nil {
 				return err
 			}
-
-			// Create reference: [offset: 8 bytes] for history
-			vlogRef := make([]byte, 8)
-			binary.BigEndian.PutUint64(vlogRef, offset)
-
-			// Store reference in DB instead of full value
-			return tx.Put(w.historyValsTable, k, vlogRef)
+			return tx.Put(w.historyValsTable, k, hexutil.EncodeTs(offset))
 		}
 
 		if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {

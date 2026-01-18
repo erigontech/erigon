@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -37,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/existence"
@@ -447,8 +447,6 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 			}
 
 			stepBytes := k[len(k)-8:]
-			originalKey := k[:len(k)-8]
-			actualValue := v // v is the actual value (can be empty)
 
 			// Extract step from stepBytes
 			step := kv.Step(^binary.BigEndian.Uint64(stepBytes))
@@ -464,27 +462,11 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 				vlogWriters[step] = vlogWriter
 			}
 
-			// Special case: empty values stored directly (no vlog reference)
-			// Empty value (0 bytes) is smaller than vlog reference (16 bytes)
-			if len(actualValue) == 0 {
-				// Store step bytes only (no vlog reference needed)
-				return tx.Put(w.valsTable, originalKey, stepBytes)
-			}
-
-			// Write non-empty values to vlog
-			// VLogWriter.Append writes [size][value] and returns offset
-			offset, err := vlogWriter.Append(actualValue)
+			offset, err := vlogWriter.Append(v)
 			if err != nil {
 				return err
 			}
-
-			// Create reference: [step: 8 bytes] [offset: 8 bytes]
-			vlogRef := make([]byte, 16)
-			copy(vlogRef[:8], stepBytes)
-			binary.BigEndian.PutUint64(vlogRef[8:], offset)
-
-			// Store reference in DB instead of full value
-			return tx.Put(w.valsTable, originalKey, vlogRef)
+			return tx.Put(w.valsTable, k, hexutil.EncodeTs(offset))
 		}
 
 		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
@@ -905,16 +887,7 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 	// Open vlog file for reading if LargeValues mode
 	var vlogFile *VLogFile
 	if d.LargeValues {
-		vlogPath := vlogPathForStep(d.dirs.SnapDomain, step)
-		// Check if vlog file exists
-		if _, err := os.Stat(vlogPath); err == nil {
-			vlogFile, err = OpenVLogFile(vlogPath)
-			if err != nil {
-				return coll, fmt.Errorf("failed to open vlog file for step %d: %w", step, err)
-			}
-			defer vlogFile.Close()
-		}
-		// If vlog doesn't exist yet, values are still inline (backward compatibility)
+		vlogFile = d.vlogSet.Reader(step)
 	}
 
 	for _, kv := range kvs {
@@ -922,26 +895,21 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 			return coll, fmt.Errorf("add %s values key [%x]: %w", d.FilenameBase, kv.k, err)
 		}
 
-		var actualValue []byte
+		actualValue := kv.v
 		if d.LargeValues {
 			// v format: [step: 8 bytes] [offset: 8 bytes] (for non-empty values)
 			//        or [step: 8 bytes] (for empty values)
 			if len(kv.v) == 8 {
 				// Empty value (only step bytes, no vlog reference)
 				actualValue = []byte{}
-			} else if len(kv.v) >= 16 && vlogFile != nil {
+			} else {
 				// Non-empty value with vlog reference (only if vlog file exists)
 				offset := binary.BigEndian.Uint64(kv.v[8:16])
 				actualValue, err = vlogFile.ReadAt(offset)
 				if err != nil {
 					return coll, fmt.Errorf("failed to read from vlog at offset %d: %w", offset, err)
 				}
-			} else {
-				// Fallback: value is inline (backward compatibility or transition period)
-				actualValue = kv.v
 			}
-		} else {
-			actualValue = kv.v
 		}
 
 		if _, err = comp.Write(actualValue); err != nil {
@@ -1727,9 +1695,9 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 		}
 		// In large values mode, keys are stored as (originalKey + stepBytes)
 		// So fullkey must be at least 8 bytes longer than the search key
-		if len(fullkey) < len(key)+8 {
-			return nil, 0, false, nil // This key is not in DB (too short to contain stepBytes)
-		}
+		//if len(fullkey) < len(key)+8 {
+		//	return nil, 0, false, nil // This key is not in DB (too short to contain stepBytes)
+		//}
 		if !bytes.Equal(fullkey[:len(fullkey)-8], key) {
 			return nil, 0, false, nil // This key is not in DB
 		}
