@@ -1351,6 +1351,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 		}
 		chainConfig = spec.Config
 		genesisBlock = arbChain.ArbOneGenesisBlock()
+		fmt.Printf("newSync: would you not like to write arbitrum one genesis here??")
 	} else {
 		var genesisErr error
 		chainConfig, genesisBlock, genesisErr = genesiswrite.CommitGenesisBlock(db, genesis, dirs, logger)

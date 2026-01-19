@@ -91,7 +91,6 @@ func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
 		return nil
 	}
 
-	// Marshal json g
 	val, err := json.Marshal(g)
 	if err != nil {
 		return err

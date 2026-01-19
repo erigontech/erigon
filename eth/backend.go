@@ -364,13 +364,16 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var genesis *types.Block
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
 		if config.Genesis.Config.ChainName == networkname.ArbitrumOne {
-			//if config.NetworkID == arbOne.Config.ChainID.Uint64() {
 			arbOne, err := chainspec.ChainSpecByName(networkname.ArbitrumOne)
 			if err != nil {
 				return err
 			}
+
 			chainConfig = arbOne.Config
+			fmt.Printf("backend.New reading genesis block with hash %v of block %d chainParams.genBlockNum %d\n",
+				arbOne.GenesisHash, chainConfig.ArbitrumChainParams.GenesisBlockNum, arbOne.Genesis.Number)
 			genesis = rawdb.ReadBlock(tx, arbOne.GenesisHash, chainConfig.ArbitrumChainParams.GenesisBlockNum)
+
 			if genesis == nil {
 				log.Info("db genesis block is nil, set hardcoded genesis for Arbitrum One")
 				genesis = arbChain.ArbOneGenesisBlock()
@@ -382,6 +385,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if err != nil {
 			return err
 		}
+		fmt.Printf("backend.New genesis config %+v\n", genesisConfig)
 
 		if genesisConfig != nil {
 			config.Genesis = genesisConfig
@@ -391,7 +395,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			tracer.Hooks.OnBlockchainInit(config.Genesis.Config)
 		}
 
-		h, err := rawdb.ReadCanonicalHash(tx, 0)
+		h, err := rawdb.ReadCanonicalHash(tx, genesisConfig.Number)
 		if err != nil {
 			panic(err)
 		}

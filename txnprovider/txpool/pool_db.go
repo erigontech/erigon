@@ -146,12 +146,22 @@ func SaveChainConfigIfNeed(
 
 	for {
 		if err = coreDB.View(ctx, func(tx kv.Tx) error {
-			//cc, err = chain.GetConfig(tx, nil, 0)
-			//if err != nil {
-			//	return err
-			//}
-			spec, _ := chainspec.ChainSpecByName(networkname.ArbitrumOne)
-			cc = spec.Config
+			var genBlockNum uint64
+			if cc.IsArbitrum() {
+				genBlockNum = cc.ArbitrumChainParams.GenesisBlockNum
+			}
+			cc, err = chain.GetConfig(tx, nil, genBlockNum)
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("SaveChainConfigIfNeeded: read config %+v\n", cc)
+			{
+				spec, _ := chainspec.ChainSpecByName(networkname.ArbitrumOne)
+				cc = spec.Config
+			}
+			fmt.Printf("SaveChainConfigIfNeeded: hardcode config %+v\n", cc)
+
 			n, err := chain.CurrentBlockNumber(tx)
 			if err != nil {
 				return err

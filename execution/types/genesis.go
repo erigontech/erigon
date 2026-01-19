@@ -54,11 +54,12 @@ type Genesis struct {
 
 	AuRaSeal *AuRaSeal `json:"seal"`
 
+	Number     uint64      `json:"number"`     // > 0 in arbitrum One genesis
+	ParentHash common.Hash `json:"parentHash"` // non empty in arbitrum One genesis
+
 	// These fields are used for consensus tests. Please don't use them
 	// in actual genesis blocks.
-	Number     uint64      `json:"number"`
-	GasUsed    uint64      `json:"gasUsed"`
-	ParentHash common.Hash `json:"parentHash"`
+	GasUsed uint64 `json:"gasUsed"`
 
 	// Header fields added in London and later hard forks
 	BaseFee               *big.Int     `json:"baseFeePerGas"`         // EIP-1559

@@ -263,8 +263,13 @@ var (
 				defer d.MadvSequential().DisableReadAhead()
 				defer bodiesSegment.MadvSequential().DisableReadAhead()
 
-				// TODO required for arb1 chain parsing - there are two duplicate hashes. Instead, have to extract their hashes during dumping from rpc and skip them during indexing
-				uniq := make(map[common.Hash]uint64, 1_000_00)
+				txnHashDupesExpected := chainConfig.IsArbitrum() && chainConfig.ChainName == networkname.ArbitrumOne
+				// in arbitrum One chain there are few txn hash duplicates, first seen is always accepted while follow-ups are rejected, but still visible in explorer/RPC
+				// Duplicates breaks index creation, have to filter them out
+				var uniqTxnHashes map[common.Hash]uint64
+				if txnHashDupesExpected {
+					uniqTxnHashes = make(map[common.Hash]uint64, 100_000)
+				}
 
 				for {
 					g, bodyGetter := d.MakeGetter(), bodiesSegment.MakeGetter()
@@ -315,10 +320,18 @@ var (
 							}
 							txnHash = txn.Hash()
 						}
-						if chainConfig.IsArbitrum() && chainConfig.ChainName == networkname.ArbitrumOne {
-							_, ok := uniq[txnHash]
-							uniq[txnHash]++
-							if ok {
+						if txnHashDupesExpected {
+							_, hashExisted := uniqTxnHashes[txnHash]
+							uniqTxnHashes[txnHash]++
+							if hashExisted {
+								//ti++
+								//offset = nextPos
+								//expectedCount--
+								//continue
+								// TODO should we really generate random hash or just skip this txn at all? non existing txn is not much better than duplicate
+								//   it also increases following txn position in block which is not something good - this txn should not be even included
+								//   it affects TxsAmountBasedOnBodiesSnapshots - we should reduce it as well, but this could be used for snapshot verification or something
+
 								_, err = rand.Read(txnHash[:])
 								if err != nil {
 									return fmt.Errorf("failed to generate new txnHash: %w", err)
@@ -347,7 +360,7 @@ var (
 							txnHashIdx.ResetNextSalt()
 							txnHash2BlockNumIdx.ResetNextSalt()
 
-							clear(uniq)
+							clear(uniqTxnHashes)
 							continue
 						}
 						return fmt.Errorf("txnHashIdx: %w", err)
@@ -358,25 +371,19 @@ var (
 							txnHashIdx.ResetNextSalt()
 							txnHash2BlockNumIdx.ResetNextSalt()
 
-							clear(uniq)
+							clear(uniqTxnHashes)
 							continue
 						}
 						return fmt.Errorf("txnHash2BlockNumIdx: %w", err)
 					}
 
-					if chainConfig.ChainName == networkname.ArbitrumOne { // TODO remove related to arb1 filtering code
-						count := 0
-						for txh, v := range uniq {
-							if v > 1 {
-								fmt.Printf("Duplicate transaction hash %x found %d times\n", txh, v)
-								count++
+					if txnHashDupesExpected {
+						for txh, dupCount := range uniqTxnHashes {
+							if dupCount > 1 {
+								log.Warn("Duplicate transaction hash", "txHash", txh, "dupes", dupCount, "file", sn.Name())
 							}
 						}
-						if count > 0 {
-							log.Warn("TransactionsIdx: finished building", "file", sn.Name(), "duplicateHashes", count)
-						}
 					}
-
 					return nil
 				}
 			}),

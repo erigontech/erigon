@@ -112,6 +112,9 @@ func configOrDefault(g *types.Genesis, genesisHash common.Hash) *chain.Config {
 }
 
 func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *big.Int, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+	if genesis == nil {
+		panic("nil genesis")
+	}
 	if err := rawdb.WriteGenesisIfNotExist(tx, genesis); err != nil {
 		return nil, nil, err
 	}
@@ -121,7 +124,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *bi
 		return chain.AllProtocolChanges, nil, types.ErrGenesisNoConfig
 	}
 	// Just commit the new block if there is no stored genesis block.
-	storedHash, storedErr := rawdb.ReadCanonicalHash(tx, 0)
+	storedHash, storedErr := rawdb.ReadCanonicalHash(tx, genesis.Number)
 	if storedErr != nil {
 		return nil, nil, storedErr
 	}
@@ -140,9 +143,9 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *bi
 			custom = false
 		}
 		applyOverrides(genesis.Config)
-		block, _, err1 := write(tx, genesis, dirs, logger)
-		if err1 != nil {
-			return genesis.Config, nil, err1
+		block, _, err := write(tx, genesis, dirs, logger)
+		if err != nil {
+			return genesis.Config, nil, err
 		}
 		if custom {
 			logger.Info("Writing custom genesis block", "hash", block.Hash().String())
@@ -152,15 +155,16 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *bi
 
 	// Check whether the genesis block is already written.
 	if genesis != nil {
-		block, _, err1 := GenesisToBlock(nil, genesis, dirs, logger)
-		if err1 != nil {
-			return genesis.Config, nil, err1
+		block, _, err := GenesisToBlock(nil, genesis, dirs, logger)
+		if err != nil {
+			return genesis.Config, nil, err
 		}
-		hash := block.Hash()
-		if hash != storedHash {
-			return genesis.Config, block, &GenesisMismatchError{Stored: storedHash, New: hash}
+		// todo nice place to inject L2 specific geneiss like arbone, which we cant write via GenesisToBlock, or inside GenesisToBlock
+		if bh := block.Hash(); bh != storedHash {
+			return genesis.Config, block, &GenesisMismatchError{Stored: storedHash, New: bh}
 		}
 	}
+
 	number := rawdb.ReadHeaderNumber(tx, storedHash)
 	if number != nil {
 		var err error
@@ -262,7 +266,7 @@ func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (
 }
 
 // Writes custom genesis block to db. Allows to write genesis with block number > 0.
-func WriteCustomGenesisBlock(tx kv.RwTx, gen *types.Genesis, block *types.Block, difficulty *big.Int, genesisBlockNum uint64, cfg *chain.Config) error {
+func WriteCustomGenesisBlock(tx kv.RwTx, gen *types.Genesis, block *types.Block, difficulty *big.Int, cfg *chain.Config) error {
 	// This part already happens in InitializeArbosInDatabase
 	//var stateWriter state.StateWriter
 	//if block.Number().Sign() != 0 {
@@ -285,10 +289,7 @@ func WriteCustomGenesisBlock(tx kv.RwTx, gen *types.Genesis, block *types.Block,
 	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), difficulty); err != nil {
 		return err
 	}
-	if genesisBlockNum != block.NumberU64() {
-		return fmt.Errorf("genesis block number and given block number mismatches (gen %d != block %d)", genesisBlockNum, block.NumberU64())
-	}
-	if err := rawdbv3.TxNums.Append(tx, genesisBlockNum, uint64(block.Transactions().Len()+1)); err != nil {
+	if err := rawdbv3.TxNums.Append(tx, block.NumberU64(), uint64(block.Transactions().Len()+1)); err != nil {
 		return err
 	}
 	if err := rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64()); err != nil {
@@ -321,7 +322,8 @@ func WriteGenesisBesideState(block *types.Block, tx kv.RwTx, g *types.Genesis) e
 	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), g.Difficulty); err != nil {
 		return err
 	}
-	if err := rawdbv3.TxNums.Append(tx, 0, uint64(block.Transactions().Len()+1)); err != nil {
+	fmt.Printf("WriteGenesisBesideState: genBLockNum %d cfg %+v\n", g.Number, config)
+	if err := rawdbv3.TxNums.Append(tx, g.Number, uint64(block.Transactions().Len()+1)); err != nil {
 		return err
 	}
 
