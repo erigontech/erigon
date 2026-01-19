@@ -1081,18 +1081,17 @@ func (cs *MultiClient) makeStatusData(ctx context.Context) (*sentryproto.StatusD
 
 func GrpcClient(ctx context.Context, sentryAddr string) (*direct.SentryClientRemote, error) {
 	// creating grpc client connection
-	var dialOpts []grpc.DialOption
-
 	backoffCfg := backoff.DefaultConfig
 	backoffCfg.BaseDelay = 500 * time.Millisecond
 	backoffCfg.MaxDelay = 10 * time.Second
-	dialOpts = []grpc.DialOption{
+	dialOpts := make([]grpc.DialOption, 0, 4)
+	dialOpts = append(dialOpts,
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16 * datasize.MB))),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16*datasize.MB))),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
-	}
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
 
-	dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	conn, err := grpc.DialContext(ctx, sentryAddr, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("creating client connection to sentry P2P: %w", err)
