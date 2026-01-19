@@ -932,15 +932,8 @@ func (u codeUpdates) Put(k accounts.Address, v ValueWithTxNum[codeWithHash]) (bo
 	}
 
 	if !v.Value.hash.IsEmpty() {
-		if values, ok := u.code[v.Value.hash]; ok {
-			if v.TxNum <= values[len(values)-1].TxNum {
-				return false, fmt.Errorf("can't insert non sequential tx: got: %d, expected > %d", v.TxNum, values[len(values)-1].TxNum)
-			}
-			u.code[v.Value.hash] = append(values, v)
-			return true, nil
-		} else {
+		if _, ok := u.code[v.Value.hash]; !ok {
 			u.code[v.Value.hash] = []ValueWithTxNum[codeWithHash]{v}
-			return false, nil
 		}
 	}
 
