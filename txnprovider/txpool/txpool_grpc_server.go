@@ -152,11 +152,11 @@ func (s *GrpcServer) Pending(ctx context.Context, _ *emptypb.Empty) (*txpoolprot
 	if _, err := s.txPool.PeekBest(ctx, math.MaxInt16, &txnsRlp, 0 /* onTopOf */, math.MaxUint64 /* availableGas */, math.MaxUint64 /* availableBlobGas */, math.MaxInt /* availableRlpSpace */); err != nil {
 		return nil, err
 	}
-	var senderArr [20]byte
+
 	for i := range txnsRlp.Txns {
-		copy(senderArr[:], txnsRlp.Senders.At(i)) // TODO: optimize
+		sender := txnsRlp.Senders.AddressAt(i)
 		reply.Txs = append(reply.Txs, &txpoolproto.PendingReply_Tx{
-			Sender:  gointerfaces.ConvertAddressToH160(senderArr),
+			Sender:  gointerfaces.ConvertAddressToH160(sender),
 			RlpTx:   txnsRlp.Txns[i],
 			IsLocal: txnsRlp.IsLocal[i],
 		})
