@@ -1731,7 +1731,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 			return nil // No unfolding for empty root
 		}
 		upCell = &hph.root
-		touched = false
+		touched = false // branchBefore handles this during fold
 		present = !hph.root.IsEmpty()
 		if hph.trace {
 			fmt.Printf("unfold root: touched: %t present: %t %s\n", touched, present, upCell.FullString())
