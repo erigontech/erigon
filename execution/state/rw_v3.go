@@ -623,9 +623,9 @@ func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint6
 	if w.trace {
 		fmt.Printf("storage: %x,%x,%x\n", address, key, &value)
 	}
-	var prev []ValueWithStep[uint256.Int]
+	var prev []ValueWithTxNum[uint256.Int]
 	if original.ByteLen() < 0 {
-		prev = []ValueWithStep[uint256.Int]{{Value: original}}
+		prev = []ValueWithTxNum[uint256.Int]{{Value: original}}
 	}
 	if value.ByteLen() == 0 {
 		return w.ec.DelStorage(context.Background(), address, key, w.tx, w.txNum, prev...)

@@ -127,7 +127,7 @@ Loop:
 			pv, step, _, err := domains.GetAccount(context.Background(), addr0, rwTx)
 			require.NoError(t, err)
 
-			err = domains.PutAccount(context.Background(), addr0, &acc, rwTx, uint64(i), execstate.ValueWithStep[*accounts.Account]{pv, step})
+			err = domains.PutAccount(context.Background(), addr0, &acc, rwTx, uint64(i), execstate.ValueWithTxNum[*accounts.Account]{pv, step})
 			require.NoError(t, err)
 		}
 
@@ -214,20 +214,20 @@ func TestExecutionContext_StorageIter(t *testing.T) {
 			pv, step, _, err := domains.GetAccount(context.Background(), addr0, rwTx)
 			require.NoError(t, err)
 
-			err = domains.PutAccount(context.Background(), addr0, &acc, rwTx, txNum, execstate.ValueWithStep[*accounts.Account]{pv, step})
+			err = domains.PutAccount(context.Background(), addr0, &acc, rwTx, txNum, execstate.ValueWithTxNum[*accounts.Account]{pv, step})
 			require.NoError(t, err)
 			binary.BigEndian.PutUint64(l0[16:24], uint64(accs))
 
 			for locs := 0; locs < 1000; locs++ {
 				binary.BigEndian.PutUint64(l0[24:], uint64(locs))
-				p, step, ok, err := domains.GetStorage(context.Background(), addr0, accounts.BytesToKey(l0), rwTx)
+				p, txNum, ok, err := domains.GetStorage(context.Background(), addr0, accounts.BytesToKey(l0), rwTx)
 				require.NoError(t, err)
 
 				var v uint256.Int
-				var pv []execstate.ValueWithStep[uint256.Int]
+				var pv []execstate.ValueWithTxNum[uint256.Int]
 
 				if ok {
-					pv = []execstate.ValueWithStep[uint256.Int]{{Value: p, Step: step}}
+					pv = []execstate.ValueWithTxNum[uint256.Int]{{Value: p, TxNum: txNum}}
 				}
 
 				v.SetBytes(l0[24:])
@@ -278,7 +278,7 @@ func TestExecutionContext_StorageIter(t *testing.T) {
 	txNum := domains.TxNum()
 	for accs := 0; accs < noaccounts; accs++ {
 		k0[0] = byte(accs)
-		pv, step, _, err := domains.GetAccount(ctx, accounts.BytesToAddress(k0), rwTx)
+		pv, pTxNum, _, err := domains.GetAccount(ctx, accounts.BytesToAddress(k0), rwTx)
 		require.NoError(t, err)
 
 		existed := make(map[accounts.StorageKey]struct{})
@@ -299,9 +299,9 @@ func TestExecutionContext_StorageIter(t *testing.T) {
 		require.NoError(t, err)
 		require.Zero(t, missed)
 
-		var prev []execstate.ValueWithStep[*accounts.Account]
+		var prev []execstate.ValueWithTxNum[*accounts.Account]
 		if pv != nil {
-			prev = []execstate.ValueWithStep[*accounts.Account]{{Value: pv, Step: step}}
+			prev = []execstate.ValueWithTxNum[*accounts.Account]{{Value: pv, TxNum: pTxNum}}
 		}
 		err = domains.DelAccount(ctx, accounts.BytesToAddress(k0), rwTx, txNum, prev...)
 		require.NoError(t, err)

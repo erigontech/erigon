@@ -124,14 +124,14 @@ func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
 
 type valueCache[K comparable, V any] interface {
 	Name() kv.Domain
-	Add(key K, value V, step kv.Step) (evicted bool)
+	Add(key K, value V, txNum uint64) (evicted bool)
 	Remove(key K) (evicted bool)
-	Get(key K) (value ValueWithStep[V], ok bool)
+	Get(key K) (value ValueWithTxNum[V], ok bool)
 }
 
 type lruValueCache[K comparable, U comparable, V any] struct {
 	d     kv.Domain
-	lru   *freelru.ShardedLRU[K, ValueWithStep[V]]
+	lru   *freelru.ShardedLRU[K, ValueWithTxNum[V]]
 	limit uint32
 }
 
@@ -142,7 +142,7 @@ func newLRUValueCache[K comparable, U comparable, V any](d kv.Domain, limit uint
 		panic("handle type != unique.Handle - check unique.Handle implementation details for this version of go")
 	}
 
-	c, err := freelru.NewSharded[K, ValueWithStep[V]](limit, func(k K) uint32 {
+	c, err := freelru.NewSharded[K, ValueWithTxNum[V]](limit, func(k K) uint32 {
 		return uint32(uintptr(unsafe.Pointer((*handle[U])(unsafe.Pointer(&k)).value)))
 	})
 
@@ -156,22 +156,22 @@ func (c *lruValueCache[K, U, V]) Name() kv.Domain {
 	return c.d
 }
 
-func (c *lruValueCache[K, U, V]) Add(key K, value V, step kv.Step) (evicted bool) {
-	return c.lru.Add(key, ValueWithStep[V]{value, step})
+func (c *lruValueCache[K, U, V]) Add(key K, value V, txNum uint64) (evicted bool) {
+	return c.lru.Add(key, ValueWithTxNum[V]{value, txNum})
 }
 
 func (c *lruValueCache[K, U, V]) Remove(key K) (evicted bool) {
 	return c.lru.Remove(key)
 }
 
-func (c *lruValueCache[K, U, V]) Get(key K) (value ValueWithStep[V], ok bool) {
+func (c *lruValueCache[K, U, V]) Get(key K) (value ValueWithTxNum[V], ok bool) {
 	return c.lru.GetAndRefresh(key, 5*time.Minute)
 }
 
 type updates[K comparable, V any] interface {
-	Get(key K) (ValueWithStep[V], bool)
-	Put(key K, value ValueWithStep[V]) bool
-	Iter() iter.Seq2[K, ValueWithStep[V]]
+	Get(key K) ([]ValueWithTxNum[V], bool)
+	Put(key K, value ValueWithTxNum[V]) (bool, error)
+	Iter() iter.Seq2[K, []ValueWithTxNum[V]]
 	Clear() updates[K, V]
 }
 
@@ -184,7 +184,7 @@ type domain[K comparable, V any] struct {
 	updates    updates[K, V]
 }
 
-func (d *domain[K, V]) get(ctx context.Context, k K, tx kv.TemporalTx, serializer func(k K) []byte, deserializer func(b []byte) (V, error)) (v V, step kv.Step, ok bool, err error) {
+func (d *domain[K, V]) get(ctx context.Context, k K, tx kv.TemporalTx, serializer func(k K) []byte, deserializer func(b []byte) (V, error)) (v V, txNum uint64, ok bool, err error) {
 	if tx == nil {
 		return v, 0, false, errors.New("domain get: unexpected nil tx")
 	}
@@ -196,7 +196,7 @@ func (d *domain[K, V]) get(ctx context.Context, k K, tx kv.TemporalTx, serialize
 
 	if ok {
 		d.metrics.UpdateCacheReads(d.valueCache.Name(), start)
-		return val.Value, val.Step, true, nil
+		return val[len(val)-1].Value, val[len(val)-1].TxNum, true, nil
 	}
 
 	maxStep := kv.Step(math.MaxUint64)
@@ -205,10 +205,10 @@ func (d *domain[K, V]) get(ctx context.Context, k K, tx kv.TemporalTx, serialize
 		av := serializer(k)
 		if val, step, ok := d.mem.GetLatest(d.valueCache.Name(), av[:]); ok {
 			if v, err = deserializer(val); err != nil {
-				return v, step, false, err
+				return v, uint64(step) * tx.StepSize(), false, err
 			}
 			d.metrics.UpdateCacheReads(d.valueCache.Name(), start)
-			return v, step, true, nil
+			return v, uint64(step) * tx.StepSize(), true, nil
 		} else {
 			if step > 0 {
 				maxStep = step
@@ -219,7 +219,7 @@ func (d *domain[K, V]) get(ctx context.Context, k K, tx kv.TemporalTx, serialize
 	if d.valueCache != nil {
 		if val, ok := d.valueCache.Get(k); ok {
 			d.metrics.UpdateCacheReads(d.valueCache.Name(), start)
-			return val.Value, val.Step, true, nil
+			return val.Value, val.TxNum, true, nil
 		}
 	}
 
@@ -243,21 +243,21 @@ func (d *domain[K, V]) get(ctx context.Context, k K, tx kv.TemporalTx, serialize
 
 func (d *domain[K, V]) put(ctx context.Context, k K, v V,
 	keySerializer func(k K) []byte, valueCmp func(v0 V, v1 V) bool, valueSerializer func(v V) []byte, valueDeserializer func(b []byte) (V, error),
-	roTx kv.TemporalTx, txNum uint64, prev *ValueWithStep[V]) error {
+	roTx kv.TemporalTx, txNum uint64, prev *ValueWithTxNum[V]) error {
 	var ok bool
 	var prevVal V
-	var prevStep kv.Step
+	var prevTxNum uint64
 
 	if prev == nil {
 		var err error
-		prevVal, prevStep, ok, err = d.get(ctx, k, roTx, keySerializer, valueDeserializer)
+		prevVal, prevTxNum, ok, err = d.get(ctx, k, roTx, keySerializer, valueDeserializer)
 		if err != nil {
 			return err
 		}
 	} else {
 		ok = true
 		prevVal = prev.Value
-		prevStep = prev.Step
+		prevTxNum = prev.TxNum
 	}
 
 	if ok && valueCmp(v, prevVal) {
@@ -270,7 +270,7 @@ func (d *domain[K, V]) put(ctx context.Context, k K, v V,
 	if ok {
 		pvbuf = valueSerializer(prevVal)
 	}
-	if err := d.mem.DomainPut(d.valueCache.Name(), kbuf, vbuf, txNum, pvbuf, prevStep); err != nil {
+	if err := d.mem.DomainPut(d.valueCache.Name(), kbuf, vbuf, txNum, pvbuf, kv.Step(prevTxNum/roTx.StepSize())); err != nil {
 		return err
 	}
 
@@ -278,8 +278,12 @@ func (d *domain[K, V]) put(ctx context.Context, k K, v V,
 	putValueSize := 0
 
 	d.lock.Lock()
-	inserted := d.updates.Put(k, ValueWithStep[V]{v, kv.Step(txNum / roTx.StepSize())})
+	inserted, err := d.updates.Put(k, ValueWithTxNum[V]{v, txNum})
 	d.lock.Unlock()
+
+	if err != nil {
+		return err
+	}
 
 	if inserted {
 		putKeySize += len(kbuf)
@@ -294,21 +298,21 @@ func (d *domain[K, V]) put(ctx context.Context, k K, v V,
 
 func (d *domain[K, V]) del(ctx context.Context, k K,
 	keySerializer func(k K) []byte, valueSerializer func(v V) []byte, valueDeserializer func(b []byte) (V, error),
-	roTx kv.TemporalTx, txNum uint64, prev *ValueWithStep[V]) error {
+	roTx kv.TemporalTx, txNum uint64, prev *ValueWithTxNum[V]) error {
 	var ok bool
 	var prevVal V
-	var prevStep kv.Step
+	var prevTxNum uint64
 
 	if prev == nil {
 		var err error
-		prevVal, prevStep, ok, err = d.get(ctx, k, roTx, keySerializer, valueDeserializer)
+		prevVal, prevTxNum, ok, err = d.get(ctx, k, roTx, keySerializer, valueDeserializer)
 		if err != nil {
 			return err
 		}
 	} else {
 		ok = true
 		prevVal = prev.Value
-		prevStep = prev.Step
+		prevTxNum = prev.TxNum
 	}
 
 	kbuf := keySerializer(k)
@@ -317,7 +321,7 @@ func (d *domain[K, V]) del(ctx context.Context, k K,
 		pvbuf = valueSerializer(prevVal)
 	}
 
-	if err := d.mem.DomainDel(kv.AccountsDomain, kbuf, txNum, pvbuf, prevStep); err != nil {
+	if err := d.mem.DomainDel(kv.AccountsDomain, kbuf, txNum, pvbuf, kv.Step(prevTxNum/roTx.StepSize())); err != nil {
 		return err
 	}
 
@@ -325,8 +329,12 @@ func (d *domain[K, V]) del(ctx context.Context, k K,
 	putValueSize := 0
 
 	d.lock.Lock()
-	inserted := d.updates.Put(k, ValueWithStep[V]{Step: kv.Step(txNum / roTx.StepSize())})
+	inserted, err := d.updates.Put(k, ValueWithTxNum[V]{TxNum: txNum})
 	d.lock.Unlock()
+
+	if err != nil {
+		return err
+	}
 
 	if inserted {
 		putKeySize += len(kbuf)
@@ -338,11 +346,12 @@ func (d *domain[K, V]) del(ctx context.Context, k K,
 	return nil
 }
 
-func (d *domain[K, V]) getLatest(ctx context.Context, domain kv.Domain, k []byte, tx kv.TemporalTx, maxStep kv.Step, start time.Time) (v []byte, step kv.Step, err error) {
+func (d *domain[K, V]) getLatest(ctx context.Context, domain kv.Domain, k []byte, tx kv.TemporalTx, maxStep kv.Step, start time.Time) (v []byte, txNum uint64, err error) {
 	type MeteredGetter interface {
 		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
 	}
 
+	var step kv.Step
 	if aggTx, ok := tx.AggTx().(MeteredGetter); ok {
 		v, step, _, err = aggTx.MeteredGetLatest(domain, k, tx, maxStep, d.metrics, start)
 	} else {
@@ -353,7 +362,7 @@ func (d *domain[K, V]) getLatest(ctx context.Context, domain kv.Domain, k []byte
 		return nil, 0, fmt.Errorf("account %s read error: %w", k, err)
 	}
 
-	return v, step, nil
+	return v, uint64(step) * tx.StepSize(), nil
 }
 
 func (d *domain[K, V]) getAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
@@ -402,16 +411,20 @@ func (sd *domain[K, V]) ClearMetrics() {
 func (d *domain[K, V]) Merge(other *domain[K, V]) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	for key, value := range other.updates.Iter() {
-		d.updates.Put(key, value)
+	for key, values := range other.updates.Iter() {
+		for _, value := range values {
+			d.updates.Put(key, value)
+		}
 	}
 }
 
 func (d *domain[K, V]) FlushUpdates() {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	for k, v := range d.updates.Iter() {
-		d.valueCache.Add(k, v.Value, v.Step)
+	for k, vs := range d.updates.Iter() {
+		for _, v := range vs {
+			d.valueCache.Add(k, v.Value, v.TxNum)
+		}
 	}
 	d.updates = d.updates.Clear()
 	d.ClearMetrics()
@@ -423,21 +436,28 @@ type AccountsDomain struct {
 	code    *CodeDomain
 }
 
-type accountUpdates map[accounts.Address]ValueWithStep[*accounts.Account]
+type accountUpdates map[accounts.Address][]ValueWithTxNum[*accounts.Account]
 
-func (u accountUpdates) Get(k accounts.Address) (ValueWithStep[*accounts.Account], bool) {
+func (u accountUpdates) Get(k accounts.Address) ([]ValueWithTxNum[*accounts.Account], bool) {
 	v, ok := u[k]
 	return v, ok
 }
 
-func (u accountUpdates) Put(k accounts.Address, v ValueWithStep[*accounts.Account]) bool {
-	_, exists := u[k]
-	u[k] = v
-	return !exists
+func (u accountUpdates) Put(k accounts.Address, v ValueWithTxNum[*accounts.Account]) (bool, error) {
+	if values, exists := u[k]; exists {
+		if v.TxNum <= values[len(values)-1].TxNum {
+			return false, fmt.Errorf("can't insert non sequential tx: got: %d, expected > %d", v.TxNum, values[len(values)-1].TxNum)
+		}
+		u[k] = append(values, v)
+		return true, nil
+	} else {
+		u[k] = []ValueWithTxNum[*accounts.Account]{v}
+		return false, nil
+	}
 }
 
-func (u accountUpdates) Iter() iter.Seq2[accounts.Address, ValueWithStep[*accounts.Account]] {
-	return func(yield func(accounts.Address, ValueWithStep[*accounts.Account]) bool) {
+func (u accountUpdates) Iter() iter.Seq2[accounts.Address, []ValueWithTxNum[*accounts.Account]] {
+	return func(yield func(accounts.Address, []ValueWithTxNum[*accounts.Account]) bool) {
 		for k, v := range u {
 			yield(k, v)
 		}
@@ -477,7 +497,7 @@ func NewAccountsDomain(mem kv.TemporalMemBatch, storage *StorageDomain, code *Co
 	}, nil
 }
 
-func (ad *AccountsDomain) Get(ctx context.Context, k accounts.Address, tx kv.TemporalTx) (v *accounts.Account, step kv.Step, ok bool, err error) {
+func (ad *AccountsDomain) Get(ctx context.Context, k accounts.Address, tx kv.TemporalTx) (v *accounts.Account, txNum uint64, ok bool, err error) {
 	return ad.domain.get(ctx, k, tx,
 		func(k accounts.Address) []byte {
 			kv := k.Value()
@@ -490,14 +510,14 @@ func (ad *AccountsDomain) Get(ctx context.Context, k accounts.Address, tx kv.Tem
 		})
 }
 
-func (ad *AccountsDomain) Put(ctx context.Context, k accounts.Address, v *accounts.Account, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithStep[*accounts.Account]) error {
+func (ad *AccountsDomain) Put(ctx context.Context, k accounts.Address, v *accounts.Account, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[*accounts.Account]) error {
 	if v == nil {
 		return fmt.Errorf("accounts domain: %s, trying to put nil value. not allowed", kv.AccountsDomain)
 	}
 
 	ad.commitCtx.TouchAccount(k, v)
 
-	var pv *ValueWithStep[*accounts.Account]
+	var pv *ValueWithTxNum[*accounts.Account]
 	if len(prev) != 0 {
 		pv = &prev[0]
 	}
@@ -521,7 +541,7 @@ func (ad *AccountsDomain) Put(ctx context.Context, k accounts.Address, v *accoun
 		roTx, txNum, pv)
 }
 
-func (ad *AccountsDomain) Del(ctx context.Context, k accounts.Address, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithStep[*accounts.Account]) error {
+func (ad *AccountsDomain) Del(ctx context.Context, k accounts.Address, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[*accounts.Account]) error {
 	ad.commitCtx.TouchAccount(k, nil)
 
 	if err := ad.storage.Del(ctx, k, accounts.NilKey, roTx, txNum); err != nil {
@@ -532,7 +552,7 @@ func (ad *AccountsDomain) Del(ctx context.Context, k accounts.Address, roTx kv.T
 		return err
 	}
 
-	var pv *ValueWithStep[*accounts.Account]
+	var pv *ValueWithTxNum[*accounts.Account]
 	if len(prev) != 0 {
 		pv = &prev[0]
 	}
@@ -559,7 +579,7 @@ type storageLocation struct {
 }
 
 type storageCache struct {
-	lru   *freelru.ShardedLRU[storageLocation, ValueWithStep[uint256.Int]]
+	lru   *freelru.ShardedLRU[storageLocation, ValueWithTxNum[uint256.Int]]
 	limit uint32
 }
 
@@ -570,7 +590,7 @@ func newStroageCache(limit uint32) (*storageCache, error) {
 		panic("handle type != unique.Handle - check unique.Handle implementation details for this version of go")
 	}
 
-	c, err := freelru.NewSharded[storageLocation, ValueWithStep[uint256.Int]](limit, func(k storageLocation) uint32 {
+	c, err := freelru.NewSharded[storageLocation, ValueWithTxNum[uint256.Int]](limit, func(k storageLocation) uint32 {
 		return uint32(uintptr(unsafe.Pointer((*handle[common.Address])(unsafe.Pointer(&k.address)).value))) ^
 			uint32(uintptr(unsafe.Pointer((*handle[common.Hash])(unsafe.Pointer(&k.address)).value)))
 	})
@@ -586,39 +606,45 @@ func (c *storageCache) Name() kv.Domain {
 	return kv.StorageDomain
 }
 
-func (c *storageCache) Add(key storageLocation, value uint256.Int, step kv.Step) (evicted bool) {
-	return c.lru.Add(key, ValueWithStep[uint256.Int]{value, step})
+func (c *storageCache) Add(key storageLocation, value uint256.Int, txNum uint64) (evicted bool) {
+	return c.lru.Add(key, ValueWithTxNum[uint256.Int]{value, txNum})
 }
 
 func (c storageCache) Remove(key storageLocation) (evicted bool) {
 	return c.lru.Remove(key)
 }
 
-func (c *storageCache) Get(key storageLocation) (value ValueWithStep[uint256.Int], ok bool) {
+func (c *storageCache) Get(key storageLocation) (value ValueWithTxNum[uint256.Int], ok bool) {
 	return c.lru.GetAndRefresh(key, 5*time.Minute)
 }
 
-type storageUpdates map[accounts.Address]map[accounts.StorageKey]ValueWithStep[uint256.Int]
+type storageUpdates map[accounts.Address]map[accounts.StorageKey][]ValueWithTxNum[uint256.Int]
 
-func (u storageUpdates) Get(k storageLocation) (ValueWithStep[uint256.Int], bool) {
+func (u storageUpdates) Get(k storageLocation) ([]ValueWithTxNum[uint256.Int], bool) {
 	v, ok := u[k.address][k.key]
 	return v, ok
 }
 
-func (u storageUpdates) Put(k storageLocation, v ValueWithStep[uint256.Int]) bool {
-	exists := false
+func (u storageUpdates) Put(k storageLocation, v ValueWithTxNum[uint256.Int]) (bool, error) {
 	if vm, ok := u[k.address]; ok {
-		_, exists = vm[k.key]
-		vm[k.key] = v
+		if values, exists := vm[k.key]; exists {
+			if v.TxNum <= values[len(values)-1].TxNum {
+				return false, fmt.Errorf("can't insert non sequential tx: got: %d, expected > %d", v.TxNum, values[len(values)-1].TxNum)
+			}
+			vm[k.key] = append(values, v)
+			return true, nil
+		} else {
+			vm[k.key] = []ValueWithTxNum[uint256.Int]{v}
+		}
 	} else {
-		u[k.address] = map[accounts.StorageKey]ValueWithStep[uint256.Int]{k.key: v}
+		u[k.address] = map[accounts.StorageKey][]ValueWithTxNum[uint256.Int]{k.key: []ValueWithTxNum[uint256.Int]{v}}
 	}
 
-	return !exists
+	return false, nil
 }
 
-func (u storageUpdates) Iter() iter.Seq2[storageLocation, ValueWithStep[uint256.Int]] {
-	return func(yield func(storageLocation, ValueWithStep[uint256.Int]) bool) {
+func (u storageUpdates) Iter() iter.Seq2[storageLocation, []ValueWithTxNum[uint256.Int]] {
+	return func(yield func(storageLocation, []ValueWithTxNum[uint256.Int]) bool) {
 		for a, m := range u {
 			for k, v := range m {
 				yield(storageLocation{address: a, key: k}, v)
@@ -627,15 +653,15 @@ func (u storageUpdates) Iter() iter.Seq2[storageLocation, ValueWithStep[uint256.
 	}
 }
 
-func (u storageUpdates) UpdatedSlots(addr accounts.Address) (map[accounts.StorageKey]ValueWithStep[uint256.Int], bool) {
+func (u storageUpdates) UpdatedSlots(addr accounts.Address) (map[accounts.StorageKey][]ValueWithTxNum[uint256.Int], bool) {
 	vm, ok := u[addr]
 	return vm, ok
 }
 
-func (u storageUpdates) SortedIter(addr accounts.Address) iter.Seq2[storageLocation, ValueWithStep[uint256.Int]] {
+func (u storageUpdates) SortedIter(addr accounts.Address) iter.Seq2[storageLocation, []ValueWithTxNum[uint256.Int]] {
 	if addr.IsNil() {
 		iter := slices.SortedFunc(maps.Keys(u), func(a, b accounts.Address) int { return a.Value().Cmp(b.Value()) })
-		return func(yield func(storageLocation, ValueWithStep[uint256.Int]) bool) {
+		return func(yield func(storageLocation, []ValueWithTxNum[uint256.Int]) bool) {
 			for _, a := range iter {
 				for _, k := range slices.SortedFunc(maps.Keys(u[a]), func(a, b accounts.StorageKey) int { return a.Value().Cmp(b.Value()) }) {
 					yield(storageLocation{address: a, key: k}, u[a][k])
@@ -644,7 +670,7 @@ func (u storageUpdates) SortedIter(addr accounts.Address) iter.Seq2[storageLocat
 		}
 	}
 
-	return func(yield func(storageLocation, ValueWithStep[uint256.Int]) bool) {
+	return func(yield func(storageLocation, []ValueWithTxNum[uint256.Int]) bool) {
 		for _, k := range slices.SortedFunc(maps.Keys(u[addr]), func(a, b accounts.StorageKey) int { return a.Value().Cmp(b.Value()) }) {
 			yield(storageLocation{address: addr, key: k}, u[addr][k])
 		}
@@ -686,7 +712,7 @@ func NewStorageDomain(mem kv.TemporalMemBatch, commitCtx *commitment.CommitmentC
 	}, nil
 }
 
-func (sd *StorageDomain) Get(ctx context.Context, addr accounts.Address, key accounts.StorageKey, tx kv.TemporalTx) (v uint256.Int, step kv.Step, ok bool, err error) {
+func (sd *StorageDomain) Get(ctx context.Context, addr accounts.Address, key accounts.StorageKey, tx kv.TemporalTx) (v uint256.Int, txNum uint64, ok bool, err error) {
 	return sd.domain.get(ctx, storageLocation{address: addr, key: key}, tx,
 		func(k storageLocation) []byte {
 			av := k.address.Value()
@@ -699,10 +725,10 @@ func (sd *StorageDomain) Get(ctx context.Context, addr accounts.Address, key acc
 		})
 }
 
-func (sd *StorageDomain) Put(ctx context.Context, addr accounts.Address, key accounts.StorageKey, v uint256.Int, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithStep[uint256.Int]) error {
+func (sd *StorageDomain) Put(ctx context.Context, addr accounts.Address, key accounts.StorageKey, v uint256.Int, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[uint256.Int]) error {
 	sd.commitCtx.TouchStorage(addr, key, v)
 
-	var pv *ValueWithStep[uint256.Int]
+	var pv *ValueWithTxNum[uint256.Int]
 	if len(prev) != 0 {
 		pv = &prev[0]
 	}
@@ -726,7 +752,7 @@ func (sd *StorageDomain) Put(ctx context.Context, addr accounts.Address, key acc
 		roTx, txNum, pv)
 }
 
-func (sd *StorageDomain) Del(ctx context.Context, addr accounts.Address, key accounts.StorageKey, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithStep[uint256.Int]) error {
+func (sd *StorageDomain) Del(ctx context.Context, addr accounts.Address, key accounts.StorageKey, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[uint256.Int]) error {
 	if !key.IsNil() && addr.IsNil() {
 		return errors.New("address unexpectedly nil")
 	}
@@ -737,7 +763,7 @@ func (sd *StorageDomain) Del(ctx context.Context, addr accounts.Address, key acc
 
 	sd.commitCtx.TouchStorage(addr, key, uint256.Int{})
 
-	var pv *ValueWithStep[uint256.Int]
+	var pv *ValueWithTxNum[uint256.Int]
 
 	if len(prev) != 0 {
 		pv = &prev[0]
@@ -764,10 +790,14 @@ func (sd *StorageDomain) slotIterator(addr accounts.Address) func(yield func(str
 	iter := sd.updates.(storageUpdates).SortedIter(addr)
 	sd.lock.RUnlock()
 	return func(yield func(string, []kv.DataWithTxNum) bool) {
-		for k, v := range iter {
+		for k, vs := range iter {
 			aval := k.address.Value()
 			kval := k.key.Value()
-			yield(string(append(aval[:], kval[:]...)), []kv.DataWithTxNum{{Data: v.Value.Bytes(), TxNum: uint64(v.Step)}}) //TODO ValueWithTxNum
+			dataWithTxNum := make([]kv.DataWithTxNum, len(vs))
+			for i, v := range vs {
+				dataWithTxNum[i] = kv.DataWithTxNum{Data: v.Value.Bytes(), TxNum: v.TxNum}
+			}
+			yield(string(append(aval[:], kval[:]...)), dataWithTxNum)
 		}
 	}
 }
@@ -796,7 +826,7 @@ func (sd *StorageDomain) DelAll(ctx context.Context, addr accounts.Address, roTx
 		tv.SetBytes(tomb.v)
 		if err := sd.Del(ctx,
 			accounts.BytesToAddress(tomb.k[:length.Addr]), accounts.BytesToKey(tomb.k[length.Addr:]),
-			roTx, txNum, ValueWithStep[uint256.Int]{tv, tomb.step}); err != nil {
+			roTx, txNum, ValueWithTxNum[uint256.Int]{tv, uint64(tomb.step) * roTx.StepSize()}); err != nil {
 			return err
 		}
 	}
@@ -822,7 +852,7 @@ func (sd *StorageDomain) HasStorage(ctx context.Context, addr accounts.Address, 
 	sd.lock.RUnlock()
 	if ok {
 		for _, slot := range slots {
-			if slot.Value.ByteLen() > 0 {
+			if slot[len(slot)-1].Value.ByteLen() > 0 {
 				return true, nil
 			}
 		}
@@ -863,26 +893,26 @@ type weakCodeWithHash struct {
 	code weak.Pointer[[]byte]
 }
 
-type CodeWithStep struct {
-	Code []byte
-	Hash accounts.CodeHash
-	Step kv.Step
+type CodeWithTxNum struct {
+	Code  []byte
+	Hash  accounts.CodeHash
+	TxNum uint64
 }
 
 type codeUpdates struct {
 	hashes map[accounts.Address]accounts.CodeHash
-	code   map[accounts.CodeHash]ValueWithStep[codeWithHash]
+	code   map[accounts.CodeHash][]ValueWithTxNum[codeWithHash]
 }
 
-func (u codeUpdates) Get(k accounts.Address) (ValueWithStep[codeWithHash], bool) {
+func (u codeUpdates) Get(k accounts.Address) ([]ValueWithTxNum[codeWithHash], bool) {
 	h, ok := u.hashes[k]
 
 	if !ok {
-		return ValueWithStep[codeWithHash]{}, false
+		return nil, false
 	}
 
 	if h.IsEmpty() {
-		return ValueWithStep[codeWithHash]{Value: codeWithHash{hash: h}}, true
+		return []ValueWithTxNum[codeWithHash]{{Value: codeWithHash{hash: h}}}, true
 	}
 
 	c, ok := u.code[h]
@@ -890,7 +920,7 @@ func (u codeUpdates) Get(k accounts.Address) (ValueWithStep[codeWithHash], bool)
 	return c, ok
 }
 
-func (u codeUpdates) Put(k accounts.Address, v ValueWithStep[codeWithHash]) bool {
+func (u codeUpdates) Put(k accounts.Address, v ValueWithTxNum[codeWithHash]) (bool, error) {
 	h, exists := u.hashes[k]
 
 	if exists {
@@ -902,14 +932,23 @@ func (u codeUpdates) Put(k accounts.Address, v ValueWithStep[codeWithHash]) bool
 	}
 
 	if !v.Value.hash.IsEmpty() {
-		u.code[v.Value.hash] = v
+		if values, ok := u.code[v.Value.hash]; ok {
+			if v.TxNum <= values[len(values)-1].TxNum {
+				return false, fmt.Errorf("can't insert non sequential tx: got: %d, expected > %d", v.TxNum, values[len(values)-1].TxNum)
+			}
+			u.code[v.Value.hash] = append(values, v)
+			return true, nil
+		} else {
+			u.code[v.Value.hash] = []ValueWithTxNum[codeWithHash]{v}
+			return false, nil
+		}
 	}
 
-	return !exists
+	return !exists, nil
 }
 
-func (u codeUpdates) Iter() iter.Seq2[accounts.Address, ValueWithStep[codeWithHash]] {
-	return func(yield func(accounts.Address, ValueWithStep[codeWithHash]) bool) {
+func (u codeUpdates) Iter() iter.Seq2[accounts.Address, []ValueWithTxNum[codeWithHash]] {
+	return func(yield func(accounts.Address, []ValueWithTxNum[codeWithHash]) bool) {
 		for a, h := range u.hashes {
 			yield(a, u.code[h])
 		}
@@ -919,13 +958,13 @@ func (u codeUpdates) Iter() iter.Seq2[accounts.Address, ValueWithStep[codeWithHa
 func (u codeUpdates) Clear() updates[accounts.Address, codeWithHash] {
 	return codeUpdates{
 		hashes: map[accounts.Address]accounts.CodeHash{},
-		code:   map[accounts.CodeHash]ValueWithStep[codeWithHash]{},
+		code:   map[accounts.CodeHash][]ValueWithTxNum[codeWithHash]{},
 	}
 }
 
 type codeCache struct {
 	hashes *freelru.ShardedLRU[accounts.Address, accounts.CodeHash]
-	code   *freelru.ShardedLRU[accounts.CodeHash, ValueWithStep[weakCodeWithHash]]
+	code   *freelru.ShardedLRU[accounts.CodeHash, ValueWithTxNum[weakCodeWithHash]]
 	limit  uint32
 }
 
@@ -944,7 +983,7 @@ func newCodeCache(limit uint32) (*codeCache, error) {
 		return nil, err
 	}
 
-	code, err := freelru.NewSharded[accounts.CodeHash, ValueWithStep[weakCodeWithHash]](limit, func(k accounts.CodeHash) uint32 {
+	code, err := freelru.NewSharded[accounts.CodeHash, ValueWithTxNum[weakCodeWithHash]](limit, func(k accounts.CodeHash) uint32 {
 		return uint32(uintptr(unsafe.Pointer((*handle[common.Hash])(unsafe.Pointer(&k)).value)))
 	})
 
@@ -959,28 +998,28 @@ func (c *codeCache) Name() kv.Domain {
 	return kv.CodeDomain
 }
 
-func (c *codeCache) Get(key accounts.Address) (value ValueWithStep[codeWithHash], ok bool) {
+func (c *codeCache) Get(key accounts.Address) (value ValueWithTxNum[codeWithHash], ok bool) {
 	h, ok := c.hashes.Get(key)
 
 	if !ok {
-		return ValueWithStep[codeWithHash]{}, false
+		return ValueWithTxNum[codeWithHash]{}, false
 	}
 
 	if h.IsEmpty() {
-		return ValueWithStep[codeWithHash]{Value: codeWithHash{hash: h}}, true
+		return ValueWithTxNum[codeWithHash]{Value: codeWithHash{hash: h}}, true
 	}
 
 	pc, ok := c.code.Get(h)
 
 	if !ok || pc.Value.code.Value() == nil {
 		c.code.Remove(h)
-		return ValueWithStep[codeWithHash]{}, false
+		return ValueWithTxNum[codeWithHash]{}, false
 	}
 
-	return ValueWithStep[codeWithHash]{Value: codeWithHash{code: *pc.Value.code.Value(), hash: h}}, true
+	return ValueWithTxNum[codeWithHash]{Value: codeWithHash{code: *pc.Value.code.Value(), hash: h}}, true
 }
 
-func (c *codeCache) Add(k accounts.Address, v codeWithHash, s kv.Step) (evicted bool) {
+func (c *codeCache) Add(k accounts.Address, v codeWithHash, txNum uint64) (evicted bool) {
 	h, ok := c.hashes.Get(k)
 
 	if !ok || h != v.hash {
@@ -989,7 +1028,7 @@ func (c *codeCache) Add(k accounts.Address, v codeWithHash, s kv.Step) (evicted 
 
 	if !v.hash.IsEmpty() {
 		if pv, ok := c.code.Get(h); !ok || pv.Value.code.Value() == nil {
-			return c.code.Add(v.hash, ValueWithStep[weakCodeWithHash]{Value: weakCodeWithHash{code: weak.Make(&v.code), hash: v.hash}, Step: s})
+			return c.code.Add(v.hash, ValueWithTxNum[weakCodeWithHash]{Value: weakCodeWithHash{code: weak.Make(&v.code), hash: v.hash}, TxNum: txNum})
 		}
 	}
 
@@ -1030,13 +1069,13 @@ func NewCodeDomain(mem kv.TemporalMemBatch, commitCtx *commitment.CommitmentCont
 			valueCache: cache.(valueCache[accounts.Address, codeWithHash]),
 			updates: codeUpdates{
 				hashes: map[accounts.Address]accounts.CodeHash{},
-				code:   map[accounts.CodeHash]ValueWithStep[codeWithHash]{},
+				code:   map[accounts.CodeHash][]ValueWithTxNum[codeWithHash]{},
 			},
 		},
 	}, nil
 }
 
-func (cd *CodeDomain) Get(ctx context.Context, k accounts.Address, tx kv.TemporalTx) (h accounts.CodeHash, c []byte, step kv.Step, ok bool, err error) {
+func (cd *CodeDomain) Get(ctx context.Context, k accounts.Address, tx kv.TemporalTx) (h accounts.CodeHash, c []byte, txNum uint64, ok bool, err error) {
 	v, step, ok, err := cd.domain.get(ctx, k, tx,
 		func(k accounts.Address) []byte {
 			av := k.Value()
@@ -1057,18 +1096,18 @@ func (cd *CodeDomain) Get(ctx context.Context, k accounts.Address, tx kv.Tempora
 	return v.hash, v.code, step, ok, err
 }
 
-func (cd *CodeDomain) Put(ctx context.Context, k accounts.Address, h accounts.CodeHash, c []byte, roTx kv.TemporalTx, txNum uint64, prev ...CodeWithStep) error {
+func (cd *CodeDomain) Put(ctx context.Context, k accounts.Address, h accounts.CodeHash, c []byte, roTx kv.TemporalTx, txNum uint64, prev ...CodeWithTxNum) error {
 	if c == nil {
 		return fmt.Errorf("domain: %s, trying to put nil value. not allowed", kv.CodeDomain)
 	}
 
 	cd.commitCtx.TouchCode(k, c)
 
-	var pv *ValueWithStep[codeWithHash]
+	var pv *ValueWithTxNum[codeWithHash]
 	if len(prev) != 0 {
-		pv = &ValueWithStep[codeWithHash]{
+		pv = &ValueWithTxNum[codeWithHash]{
 			Value: codeWithHash{code: prev[0].Code, hash: prev[0].Hash},
-			Step:  prev[0].Step,
+			TxNum: prev[0].TxNum,
 		}
 	}
 
@@ -1097,14 +1136,14 @@ func (cd *CodeDomain) Put(ctx context.Context, k accounts.Address, h accounts.Co
 		roTx, txNum, pv)
 }
 
-func (cd *CodeDomain) Del(ctx context.Context, k accounts.Address, roTx kv.TemporalTx, txNum uint64, prev ...CodeWithStep) error {
+func (cd *CodeDomain) Del(ctx context.Context, k accounts.Address, roTx kv.TemporalTx, txNum uint64, prev ...CodeWithTxNum) error {
 	cd.commitCtx.TouchCode(k, nil)
 
-	var pv *ValueWithStep[codeWithHash]
+	var pv *ValueWithTxNum[codeWithHash]
 	if len(prev) != 0 {
-		pv = &ValueWithStep[codeWithHash]{
+		pv = &ValueWithTxNum[codeWithHash]{
 			Value: codeWithHash{code: prev[0].Code, hash: prev[0].Hash},
-			Step:  prev[0].Step,
+			TxNum: prev[0].TxNum,
 		}
 	}
 
@@ -1127,12 +1166,12 @@ type CommitmentDomain struct {
 }
 
 type branchCache struct {
-	state       ValueWithStep[commitment.Branch]
-	t0          ValueWithStep[commitment.Branch]
-	t1          [16]ValueWithStep[commitment.Branch]
-	t2          [256]ValueWithStep[commitment.Branch]
-	t3          [4096]ValueWithStep[commitment.Branch]
-	t4          [65536]ValueWithStep[commitment.Branch]
+	state       ValueWithTxNum[commitment.Branch]
+	t0          ValueWithTxNum[commitment.Branch]
+	t1          [16]ValueWithTxNum[commitment.Branch]
+	t2          [256]ValueWithTxNum[commitment.Branch]
+	t3          [4096]ValueWithTxNum[commitment.Branch]
+	t4          [65536]ValueWithTxNum[commitment.Branch]
 	branches    *lruValueCache[commitment.Path, string, commitment.Branch]
 	branchLimit uint32
 }
@@ -1156,25 +1195,25 @@ func (c *branchCache) Name() kv.Domain {
 
 var statePath = commitment.InternPath([]byte("state"))
 
-func (c *branchCache) Get(key commitment.Path) (ValueWithStep[commitment.Branch], bool) {
+func (c *branchCache) Get(key commitment.Path) (ValueWithTxNum[commitment.Branch], bool) {
 	// see: HexNibblesToCompactBytes for encoding spec
 	switch {
 	case key == statePath:
 		if len(c.state.Value) == 0 {
-			return ValueWithStep[commitment.Branch]{}, false
+			return ValueWithTxNum[commitment.Branch]{}, false
 		}
 		return c.state, true
 	case len(key.Value()) < 4:
 		keyValue := key.Value()
 		switch len(keyValue) {
 		case 0:
-			return ValueWithStep[commitment.Branch]{}, false
+			return ValueWithTxNum[commitment.Branch]{}, false
 		case 1:
 			if keyValue[0]&0x10 == 0 {
 				if len(c.t0.Value) > 0 {
 					return c.t0, true
 				}
-				return ValueWithStep[commitment.Branch]{}, false
+				return ValueWithTxNum[commitment.Branch]{}, false
 			} else {
 				value := c.t1[keyValue[0]&0x0f]
 				return value, len(value.Value) > 0
@@ -1198,11 +1237,11 @@ func (c *branchCache) Get(key commitment.Path) (ValueWithStep[commitment.Branch]
 	return c.branches.Get(key)
 }
 
-func (c *branchCache) Add(k commitment.Path, v commitment.Branch, s kv.Step) (evicted bool) {
+func (c *branchCache) Add(k commitment.Path, v commitment.Branch, txNum uint64) (evicted bool) {
 	// see: HexNibblesToCompactBytes for encoding spec
 	switch {
 	case k == statePath:
-		c.state = ValueWithStep[commitment.Branch]{Value: v, Step: s}
+		c.state = ValueWithTxNum[commitment.Branch]{Value: v, TxNum: txNum}
 		return false
 	case len(k.Value()) < 4:
 		keyValue := k.Value()
@@ -1211,29 +1250,29 @@ func (c *branchCache) Add(k commitment.Path, v commitment.Branch, s kv.Step) (ev
 			return false
 		case 1:
 			if keyValue[0]&0x10 == 0 {
-				c.t0 = ValueWithStep[commitment.Branch]{Value: v, Step: s}
+				c.t0 = ValueWithTxNum[commitment.Branch]{Value: v, TxNum: txNum}
 				return false
 			} else {
-				c.t1[keyValue[0]&0x0f] = ValueWithStep[commitment.Branch]{Value: v, Step: s}
+				c.t1[keyValue[0]&0x0f] = ValueWithTxNum[commitment.Branch]{Value: v, TxNum: txNum}
 				return false
 			}
 		case 2:
 			if keyValue[0]&0x10 == 0 {
-				c.t2[keyValue[1]] = ValueWithStep[commitment.Branch]{Value: v, Step: s}
+				c.t2[keyValue[1]] = ValueWithTxNum[commitment.Branch]{Value: v, TxNum: txNum}
 			} else {
-				c.t3[uint16(keyValue[0]&0x0f)<<8|uint16(keyValue[1])] = ValueWithStep[commitment.Branch]{Value: v, Step: s}
+				c.t3[uint16(keyValue[0]&0x0f)<<8|uint16(keyValue[1])] = ValueWithTxNum[commitment.Branch]{Value: v, TxNum: txNum}
 			}
 			return false
 		default:
 			if keyValue[0]&0x10 == 0 {
-				c.t4[uint16(keyValue[1])<<8|uint16(keyValue[2])] = ValueWithStep[commitment.Branch]{Value: v, Step: s}
+				c.t4[uint16(keyValue[1])<<8|uint16(keyValue[2])] = ValueWithTxNum[commitment.Branch]{Value: v, TxNum: txNum}
 				return false
 			}
 		}
 
 	}
 
-	return c.branches.Add(k, v, s)
+	return c.branches.Add(k, v, txNum)
 }
 
 func (c *branchCache) Remove(k commitment.Path) (evicted bool) {
@@ -1241,7 +1280,7 @@ func (c *branchCache) Remove(k commitment.Path) (evicted bool) {
 	switch {
 	case k == statePath:
 		evicted = len(c.state.Value) > 0
-		c.state = ValueWithStep[commitment.Branch]{}
+		c.state = ValueWithTxNum[commitment.Branch]{}
 		return evicted
 	case len(k.Value()) < 4:
 		keyValue := k.Value()
@@ -1251,30 +1290,30 @@ func (c *branchCache) Remove(k commitment.Path) (evicted bool) {
 		case 1:
 			if keyValue[0]&0x10 == 0 {
 				evicted = len(c.t0.Value) > 0
-				c.t0 = ValueWithStep[commitment.Branch]{}
+				c.t0 = ValueWithTxNum[commitment.Branch]{}
 				return evicted
 			} else {
 				evicted := len(c.t1[keyValue[0]&0x0f].Value) > 0
-				c.t1[keyValue[0]&0x0f] = ValueWithStep[commitment.Branch]{}
+				c.t1[keyValue[0]&0x0f] = ValueWithTxNum[commitment.Branch]{}
 				return evicted
 			}
 		case 2:
 			if keyValue[0]&0x10 == 0 {
 				kv := keyValue[1]
 				evicted := len(c.t2[kv].Value) > 0
-				c.t2[kv] = ValueWithStep[commitment.Branch]{}
+				c.t2[kv] = ValueWithTxNum[commitment.Branch]{}
 				return evicted
 			} else {
 				kv := uint16(keyValue[0]&0x0f)<<8 | uint16(keyValue[1])
 				evicted := len(c.t3[kv].Value) > 0
-				c.t3[kv] = ValueWithStep[commitment.Branch]{}
+				c.t3[kv] = ValueWithTxNum[commitment.Branch]{}
 				return evicted
 			}
 		default:
 			if keyValue[0]&0x10 == 0 {
 				kv := uint16(keyValue[1])<<8 | uint16(keyValue[2])
 				evicted := len(c.t4[kv].Value) > 0
-				c.t4[kv] = ValueWithStep[commitment.Branch]{}
+				c.t4[kv] = ValueWithTxNum[commitment.Branch]{}
 				return evicted
 			}
 		}
@@ -1282,21 +1321,28 @@ func (c *branchCache) Remove(k commitment.Path) (evicted bool) {
 	return c.branches.Remove(k)
 }
 
-type branchUpdates map[commitment.Path]ValueWithStep[commitment.Branch]
+type branchUpdates map[commitment.Path][]ValueWithTxNum[commitment.Branch]
 
-func (u branchUpdates) Get(k commitment.Path) (ValueWithStep[commitment.Branch], bool) {
+func (u branchUpdates) Get(k commitment.Path) ([]ValueWithTxNum[commitment.Branch], bool) {
 	v, ok := u[k]
 	return v, ok
 }
 
-func (u branchUpdates) Put(k commitment.Path, v ValueWithStep[commitment.Branch]) bool {
-	_, exists := u[k]
-	u[k] = v
-	return !exists
+func (u branchUpdates) Put(k commitment.Path, v ValueWithTxNum[commitment.Branch]) (bool, error) {
+	if values, exists := u[k]; exists {
+		if v.TxNum <= values[len(values)-1].TxNum {
+			return false, fmt.Errorf("can't insert non sequential tx: got: %d, expected > %d", v.TxNum, values[len(values)-1].TxNum)
+		}
+		u[k] = append(values, v)
+		return true, nil
+	} else {
+		u[k] = []ValueWithTxNum[commitment.Branch]{v}
+		return false, nil
+	}
 }
 
-func (u branchUpdates) Iter() iter.Seq2[commitment.Path, ValueWithStep[commitment.Branch]] {
-	return func(yield func(commitment.Path, ValueWithStep[commitment.Branch]) bool) {
+func (u branchUpdates) Iter() iter.Seq2[commitment.Path, []ValueWithTxNum[commitment.Branch]] {
+	return func(yield func(commitment.Path, []ValueWithTxNum[commitment.Branch]) bool) {
 		for k, v := range u {
 			yield(k, v)
 		}
@@ -1334,7 +1380,7 @@ func NewCommitmentDomain(mem kv.TemporalMemBatch, commitCtx *commitment.Commitme
 	}, nil
 }
 
-func (cd *CommitmentDomain) GetBranch(ctx context.Context, k commitment.Path, tx kv.TemporalTx) (v commitment.Branch, step kv.Step, ok bool, err error) {
+func (cd *CommitmentDomain) GetBranch(ctx context.Context, k commitment.Path, tx kv.TemporalTx) (v commitment.Branch, txNum uint64, ok bool, err error) {
 	return cd.domain.get(ctx, k, tx,
 		func(k commitment.Path) []byte {
 			return k.Value()
@@ -1344,12 +1390,12 @@ func (cd *CommitmentDomain) GetBranch(ctx context.Context, k commitment.Path, tx
 		})
 }
 
-func (cd *CommitmentDomain) PutBranch(ctx context.Context, k commitment.Path, v commitment.Branch, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithStep[commitment.Branch]) error {
+func (cd *CommitmentDomain) PutBranch(ctx context.Context, k commitment.Path, v commitment.Branch, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[commitment.Branch]) error {
 	if v == nil {
 		return fmt.Errorf("PutBranch: %s, trying to put nil value. not allowed", kv.CommitmentDomain)
 	}
 
-	var pv *ValueWithStep[commitment.Branch]
+	var pv *ValueWithTxNum[commitment.Branch]
 	if len(prev) != 0 {
 		pv = &prev[0]
 	}
@@ -1370,8 +1416,8 @@ func (cd *CommitmentDomain) PutBranch(ctx context.Context, k commitment.Path, v 
 		roTx, txNum, pv)
 }
 
-func (cd *CommitmentDomain) DelBranch(ctx context.Context, k commitment.Path, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithStep[commitment.Branch]) error {
-	var pv *ValueWithStep[commitment.Branch]
+func (cd *CommitmentDomain) DelBranch(ctx context.Context, k commitment.Path, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[commitment.Branch]) error {
+	var pv *ValueWithTxNum[commitment.Branch]
 	if len(prev) != 0 {
 		pv = &prev[0]
 	}

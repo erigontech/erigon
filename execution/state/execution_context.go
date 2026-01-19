@@ -44,6 +44,10 @@ type accHolder interface {
 	SetChangesetAccumulator(acc *changeset.StateChangeSet)
 }
 
+type ValueWithTxNum[V any] struct {
+	Value V
+	TxNum uint64
+}
 type ValueWithStep[V any] struct {
 	Value V
 	Step  kv.Step
@@ -115,36 +119,36 @@ func (pd *temporalPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum uint64,
 		if err := accounts.DeserialiseV3(&a, v); err != nil {
 			return err
 		}
-		var pa []ValueWithStep[*accounts.Account]
+		var pa []ValueWithTxNum[*accounts.Account]
 		if prevVal != nil {
 			var a accounts.Account
 			if err := accounts.DeserialiseV3(&a, prevVal); err != nil {
 				return err
 			}
-			pa = []ValueWithStep[*accounts.Account]{{Value: &a, Step: prevStep}}
+			pa = []ValueWithTxNum[*accounts.Account]{{Value: &a, TxNum: prevStep.ToTxNum(pd.tx.StepSize())}}
 		}
 		return pd.sd.PutAccount(context.Background(), accounts.BytesToAddress(k), &a, pd.tx, txNum, pa...)
 	case kv.StorageDomain:
 		var i uint256.Int
 		i.SetBytes(v)
-		var prev []ValueWithStep[uint256.Int]
+		var prev []ValueWithTxNum[uint256.Int]
 		if prevVal != nil {
 			var i uint256.Int
 			i.SetBytes(prevVal)
-			prev = []ValueWithStep[uint256.Int]{{Value: i, Step: prevStep}}
+			prev = []ValueWithTxNum[uint256.Int]{{Value: i, TxNum: prevStep.ToTxNum(pd.tx.StepSize())}}
 		}
 		return pd.sd.PutStorage(context.Background(),
 			accounts.BytesToAddress(k[:length.Addr]), accounts.BytesToKey(k[length.Addr:]), i, pd.tx, txNum, prev...)
 	case kv.CodeDomain:
-		var prev []CodeWithStep
+		var prev []CodeWithTxNum
 		if prevVal != nil {
-			prev = []CodeWithStep{{Code: prevVal, Step: prevStep}}
+			prev = []CodeWithTxNum{{Code: prevVal, TxNum: prevStep.ToTxNum(pd.tx.StepSize())}}
 		}
 		return pd.sd.PutCode(context.Background(), accounts.BytesToAddress(k), accounts.NilCodeHash, v, pd.tx, txNum, prev...)
 	case kv.CommitmentDomain:
-		var prev []ValueWithStep[commitment.Branch]
+		var prev []ValueWithTxNum[commitment.Branch]
 		if prevVal != nil {
-			prev = []ValueWithStep[commitment.Branch]{{Value: prevVal, Step: prevStep}}
+			prev = []ValueWithTxNum[commitment.Branch]{{Value: prevVal, TxNum: prevStep.ToTxNum(pd.tx.StepSize())}}
 		}
 		return pd.sd.PutBranch(context.Background(), commitment.InternPath(k), commitment.Branch(v), pd.tx, txNum, prev...)
 	}
@@ -154,34 +158,34 @@ func (pd *temporalPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum uint64,
 func (pd *temporalPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
 	switch domain {
 	case kv.AccountsDomain:
-		var prev []ValueWithStep[*accounts.Account]
+		var prev []ValueWithTxNum[*accounts.Account]
 		if prevVal != nil {
 			var a accounts.Account
 			if err := accounts.DeserialiseV3(&a, prevVal); err != nil {
 				return err
 			}
-			prev = []ValueWithStep[*accounts.Account]{{Value: &a, Step: prevStep}}
+			prev = []ValueWithTxNum[*accounts.Account]{{Value: &a, TxNum: prevStep.ToTxNum(pd.tx.StepSize())}}
 		}
 		return pd.sd.DelAccount(context.Background(), accounts.BytesToAddress(k), pd.tx, txNum, prev...)
 	case kv.StorageDomain:
-		var prev []ValueWithStep[uint256.Int]
+		var prev []ValueWithTxNum[uint256.Int]
 		if prevVal != nil {
 			var i uint256.Int
 			i.SetBytes(prevVal)
-			prev = []ValueWithStep[uint256.Int]{{Value: i, Step: prevStep}}
+			prev = []ValueWithTxNum[uint256.Int]{{Value: i, TxNum: prevStep.ToTxNum(pd.tx.StepSize())}}
 		}
 		return pd.sd.DelStorage(context.Background(),
 			accounts.BytesToAddress(k[:length.Addr]), accounts.BytesToKey(k[length.Addr:]), pd.tx, txNum, prev...)
 	case kv.CodeDomain:
-		var prev []CodeWithStep
+		var prev []CodeWithTxNum
 		if prevVal != nil {
-			prev = []CodeWithStep{{Code: prevVal, Step: prevStep}}
+			prev = []CodeWithTxNum{{Code: prevVal, TxNum: prevStep.ToTxNum(pd.tx.StepSize())}}
 		}
 		return pd.sd.DelCode(context.Background(), accounts.BytesToAddress(k), pd.tx, txNum, prev...)
 	case kv.CommitmentDomain:
-		var prev []ValueWithStep[commitment.Branch]
+		var prev []ValueWithTxNum[commitment.Branch]
 		if prevVal != nil {
-			prev = []ValueWithStep[commitment.Branch]{{Value: prevVal, Step: prevStep}}
+			prev = []ValueWithTxNum[commitment.Branch]{{Value: prevVal, TxNum: prevStep.ToTxNum(pd.tx.StepSize())}}
 		}
 		return pd.sd.DelBranch(context.Background(), commitment.InternPath(k), pd.tx, txNum, prev...)
 	}
@@ -226,27 +230,27 @@ func (gt *temporalGetter) GetLatest(name kv.Domain, k []byte) (v []byte, step kv
 	switch name {
 	case kv.AccountsDomain:
 		addr := accounts.BytesToAddress(k)
-		a, s, ok, err := gt.sd.GetAccount(context.Background(), addr, gt.tx)
+		a, txNum, ok, err := gt.sd.GetAccount(context.Background(), addr, gt.tx)
 		if ok {
-			return accounts.SerialiseV3(a), s, nil
+			return accounts.SerialiseV3(a), kv.Step(txNum / gt.tx.StepSize()), nil
 		}
 		return nil, 0, err
 	case kv.StorageDomain:
 		addr := accounts.BytesToAddress(k[:length.Addr])
 		key := accounts.BytesToKey(k[length.Addr:])
-		i, s, ok, err := gt.sd.GetStorage(context.Background(), addr, key, gt.tx)
+		i, txNum, ok, err := gt.sd.GetStorage(context.Background(), addr, key, gt.tx)
 		if ok {
-			return i.Bytes(), s, nil
+			return i.Bytes(), kv.Step(txNum / gt.tx.StepSize()), nil
 		}
 		return nil, 0, err
 	case kv.CodeDomain:
 		addr := accounts.BytesToAddress(k)
-		_, c, s, _, err := gt.sd.GetCode(context.Background(), addr, gt.tx)
-		return c, s, err
+		_, c, txNum, _, err := gt.sd.GetCode(context.Background(), addr, gt.tx)
+		return c, kv.Step(txNum / gt.tx.StepSize()), err
 	case kv.CommitmentDomain:
-		b, s, ok, err := gt.sd.GetBranch(context.Background(), commitment.InternPath(k), gt.tx)
+		b, txNum, ok, err := gt.sd.GetBranch(context.Background(), commitment.InternPath(k), gt.tx)
 		if ok {
-			return b, s, nil
+			return b, kv.Step(txNum / gt.tx.StepSize()), nil
 		}
 		return nil, 0, err
 	}
@@ -392,51 +396,51 @@ func (sd *ExecutionContext) Flush(ctx context.Context, tx kv.RwTx) error {
 	return sd.mem.Flush(ctx, tx)
 }
 
-func (sd *ExecutionContext) GetAccount(ctx context.Context, k accounts.Address, tx kv.TemporalTx) (v *accounts.Account, step kv.Step, ok bool, err error) {
+func (sd *ExecutionContext) GetAccount(ctx context.Context, k accounts.Address, tx kv.TemporalTx) (v *accounts.Account, txNum uint64, ok bool, err error) {
 	return sd.accountsDomain.Get(ctx, k, tx)
 }
 
-func (sd *ExecutionContext) PutAccount(ctx context.Context, k accounts.Address, v *accounts.Account, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithStep[*accounts.Account]) error {
+func (sd *ExecutionContext) PutAccount(ctx context.Context, k accounts.Address, v *accounts.Account, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[*accounts.Account]) error {
 	return sd.accountsDomain.Put(ctx, k, v, roTx, txNum, prev...)
 }
 
-func (sd *ExecutionContext) DelAccount(ctx context.Context, k accounts.Address, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithStep[*accounts.Account]) error {
+func (sd *ExecutionContext) DelAccount(ctx context.Context, k accounts.Address, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[*accounts.Account]) error {
 	return sd.accountsDomain.Del(ctx, k, roTx, txNum, prev...)
 }
 
-func (sd *ExecutionContext) GetStorage(ctx context.Context, addr accounts.Address, key accounts.StorageKey, tx kv.TemporalTx) (v uint256.Int, step kv.Step, ok bool, err error) {
+func (sd *ExecutionContext) GetStorage(ctx context.Context, addr accounts.Address, key accounts.StorageKey, tx kv.TemporalTx) (v uint256.Int, txNum uint64, ok bool, err error) {
 	return sd.storageDomain.Get(ctx, addr, key, tx)
 }
 
-func (sd *ExecutionContext) PutStorage(ctx context.Context, addr accounts.Address, key accounts.StorageKey, v uint256.Int, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithStep[uint256.Int]) error {
+func (sd *ExecutionContext) PutStorage(ctx context.Context, addr accounts.Address, key accounts.StorageKey, v uint256.Int, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[uint256.Int]) error {
 	return sd.storageDomain.Put(ctx, addr, key, v, roTx, txNum, prev...)
 }
 
-func (sd *ExecutionContext) DelStorage(ctx context.Context, addr accounts.Address, key accounts.StorageKey, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithStep[uint256.Int]) error {
+func (sd *ExecutionContext) DelStorage(ctx context.Context, addr accounts.Address, key accounts.StorageKey, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[uint256.Int]) error {
 	return sd.storageDomain.Del(ctx, addr, key, roTx, txNum, prev...)
 }
 
-func (sd *ExecutionContext) GetCode(ctx context.Context, k accounts.Address, tx kv.TemporalTx) (h accounts.CodeHash, v []byte, step kv.Step, ok bool, err error) {
+func (sd *ExecutionContext) GetCode(ctx context.Context, k accounts.Address, tx kv.TemporalTx) (h accounts.CodeHash, v []byte, txNum uint64, ok bool, err error) {
 	return sd.codeDomain.Get(ctx, k, tx)
 }
 
-func (sd *ExecutionContext) PutCode(ctx context.Context, k accounts.Address, h accounts.CodeHash, v []byte, roTx kv.TemporalTx, txNum uint64, prev ...CodeWithStep) error {
+func (sd *ExecutionContext) PutCode(ctx context.Context, k accounts.Address, h accounts.CodeHash, v []byte, roTx kv.TemporalTx, txNum uint64, prev ...CodeWithTxNum) error {
 	return sd.codeDomain.Put(ctx, k, h, v, roTx, txNum, prev...)
 }
 
-func (sd *ExecutionContext) DelCode(ctx context.Context, k accounts.Address, roTx kv.TemporalTx, txNum uint64, prev ...CodeWithStep) error {
+func (sd *ExecutionContext) DelCode(ctx context.Context, k accounts.Address, roTx kv.TemporalTx, txNum uint64, prev ...CodeWithTxNum) error {
 	return sd.codeDomain.Del(ctx, k, roTx, txNum, prev...)
 }
 
-func (sd *ExecutionContext) GetBranch(ctx context.Context, k commitment.Path, tx kv.TemporalTx) (v commitment.Branch, step kv.Step, ok bool, err error) {
+func (sd *ExecutionContext) GetBranch(ctx context.Context, k commitment.Path, tx kv.TemporalTx) (v commitment.Branch, txNum uint64, ok bool, err error) {
 	return sd.commitmentDomain.GetBranch(ctx, k, tx)
 }
 
-func (sd *ExecutionContext) PutBranch(ctx context.Context, k commitment.Path, v commitment.Branch, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithStep[commitment.Branch]) error {
+func (sd *ExecutionContext) PutBranch(ctx context.Context, k commitment.Path, v commitment.Branch, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[commitment.Branch]) error {
 	return sd.commitmentDomain.PutBranch(ctx, k, v, roTx, txNum, prev...)
 }
 
-func (sd *ExecutionContext) DelBranch(ctx context.Context, k commitment.Path, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithStep[commitment.Branch]) error {
+func (sd *ExecutionContext) DelBranch(ctx context.Context, k commitment.Path, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[commitment.Branch]) error {
 	return sd.commitmentDomain.DelBranch(ctx, k, roTx, txNum, prev...)
 }
 
@@ -469,7 +473,7 @@ func (sd *ExecutionContext) getLatest(ctx context.Context, domain kv.Domain, tx 
 	return v, step, nil
 }
 
-func (sd *ExecutionContext) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+func (sd *ExecutionContext) GetAsOf(domain kv.Domain, key []byte, txNum uint64) (v []byte, ok bool, err error) {
 	//return sd.mem.GetAsOf(domain, key, ts)
 	// TODO - we need to add getAsOf to domains
 	return nil, false, fmt.Errorf("TODO")

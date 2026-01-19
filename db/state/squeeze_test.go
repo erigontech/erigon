@@ -141,11 +141,11 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 				Incarnation: 0,
 			}
 			addr := accounts.BytesToAddress(keys[j])
-			prevVal, step, _, err := domains.GetAccount(ctx, addr, rwTx)
+			prevVal, txNum, _, err := domains.GetAccount(ctx, addr, rwTx)
 			require.NoError(tb, err)
-			var prev []execstate.ValueWithStep[*accounts.Account]
+			var prev []execstate.ValueWithTxNum[*accounts.Account]
 			if prevVal != nil {
-				prev = []execstate.ValueWithStep[*accounts.Account]{{Value: prevVal, Step: step}}
+				prev = []execstate.ValueWithTxNum[*accounts.Account]{{Value: prevVal, TxNum: txNum}}
 			}
 			err = domains.PutAccount(ctx, addr, &acc, rwTx, txNum, prev...)
 			require.NoError(tb, err)
@@ -496,11 +496,11 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 				Incarnation: 0,
 			}
 			addr := accounts.BytesToAddress(keys[j])
-			prevVal, step, _, err := domains.GetAccount(ctx, addr, rwTx)
+			prevVal, txNum, _, err := domains.GetAccount(ctx, addr, rwTx)
 			require.NoError(t, err)
-			var prev []execstate.ValueWithStep[*accounts.Account]
+			var prev []execstate.ValueWithTxNum[*accounts.Account]
 			if prevVal != nil {
-				prev = []execstate.ValueWithStep[*accounts.Account]{{Value: prevVal, Step: step}}
+				prev = []execstate.ValueWithTxNum[*accounts.Account]{{Value: prevVal, TxNum: txNum}}
 			}
 			err = domains.PutAccount(ctx, addr, &acc, rwTx, txNum, prev...)
 			//err = domains.UpdateAccountCode(keys[j], vals[i], nil)
@@ -545,12 +545,12 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			}
 			prevb, step, err := rwTx.GetLatest(kv.AccountsDomain, keys[j])
 			require.NoError(t, err)
-			var prev []execstate.ValueWithStep[*accounts.Account]
+			var prev []execstate.ValueWithTxNum[*accounts.Account]
 			if prevb != nil {
 				var pa accounts.Account
 				err = accounts.DeserialiseV3(&pa, prevb)
 				require.NoError(t, err)
-				prev = []execstate.ValueWithStep[*accounts.Account]{{Value: &pa, Step: step}}
+				prev = []execstate.ValueWithTxNum[*accounts.Account]{{Value: &pa, TxNum: step.ToTxNum(rwTx.StepSize())}}
 			}
 			err = domains.PutAccount(ctx, accounts.BytesToAddress(keys[j]), &acc, rwTx, txNum, prev...)
 			require.NoError(t, err)
@@ -597,12 +597,12 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 			}
 			prevb, step, err := rwTx.GetLatest(kv.AccountsDomain, keys[j])
 			require.NoError(t, err)
-			var prev []execstate.ValueWithStep[*accounts.Account]
+			var prev []execstate.ValueWithTxNum[*accounts.Account]
 			if prevb != nil {
 				var pa accounts.Account
 				err = accounts.DeserialiseV3(&pa, prevb)
 				require.NoError(t, err)
-				prev = []execstate.ValueWithStep[*accounts.Account]{{Value: &pa, Step: step}}
+				prev = []execstate.ValueWithTxNum[*accounts.Account]{{Value: &pa, TxNum: step.ToTxNum(rwTx.StepSize())}}
 			}
 			err = domains.PutAccount(ctx, accounts.BytesToAddress(keys[j]), &acc, rwTx, txNum, prev...)
 			require.NoError(t, err)

@@ -361,21 +361,21 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		var v [8]byte
 		binary.BigEndian.PutUint64(v[:], txNum)
 		if txNum%135 == 0 {
-			pv, step, ok, err := domains.GetBranch(context.Background(), commitment.InternPath(commKey2), rwTx)
+			pv, prevTxNum, ok, err := domains.GetBranch(context.Background(), commitment.InternPath(commKey2), rwTx)
 			require.NoError(t, err)
-			var prev []execstate.ValueWithStep[commitment.Branch]
+			var prev []execstate.ValueWithTxNum[commitment.Branch]
 			if ok {
-				prev = []execstate.ValueWithStep[commitment.Branch]{{Value: pv, Step: step}}
+				prev = []execstate.ValueWithTxNum[commitment.Branch]{{Value: pv, TxNum: prevTxNum}}
 			}
 			err = domains.PutBranch(context.Background(), commitment.InternPath(commKey2), commitment.Branch(v[:]), rwTx, txNum, prev...)
 			require.NoError(t, err)
 			otherMaxWrite = txNum
 		} else {
-			pv, step, ok, err := domains.GetBranch(context.Background(), commitment.InternPath(commKey1), rwTx)
+			pv, prevTxNum, ok, err := domains.GetBranch(context.Background(), commitment.InternPath(commKey1), rwTx)
 			require.NoError(t, err)
-			var prev []execstate.ValueWithStep[commitment.Branch]
+			var prev []execstate.ValueWithTxNum[commitment.Branch]
 			if ok {
-				prev = []execstate.ValueWithStep[commitment.Branch]{{Value: pv, Step: step}}
+				prev = []execstate.ValueWithTxNum[commitment.Branch]{{Value: pv, TxNum: prevTxNum}}
 			}
 			err = domains.PutBranch(context.Background(), commitment.InternPath(commKey1), commitment.Branch(v[:]), rwTx, txNum, prev...)
 			require.NoError(t, err)
@@ -882,9 +882,9 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execstate.Executio
 
 			usedKeys[string(key)] = struct{}{}
 
-			var prev []execstate.ValueWithStep[*accounts.Account]
+			var prev []execstate.ValueWithTxNum[*accounts.Account]
 			if prevVal != nil {
-				prev = []execstate.ValueWithStep[*accounts.Account]{{Value: prevVal, Step: step}}
+				prev = []execstate.ValueWithTxNum[*accounts.Account]{{Value: prevVal, TxNum: step}}
 			}
 			err = domains.PutAccount(context.Background(), addr, &acc, tx, txNum, prev...)
 			require.NoError(t, err)
@@ -903,9 +903,9 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execstate.Executio
 
 			h, c, step, ok, err := domains.GetCode(context.Background(), addr, tx)
 			require.NoError(t, err)
-			var prev []execstate.CodeWithStep
+			var prev []execstate.CodeWithTxNum
 			if ok {
-				prev = []execstate.CodeWithStep{{Code: c, Hash: h, Step: step}}
+				prev = []execstate.CodeWithTxNum{{Code: c, Hash: h, TxNum: step}}
 			}
 			err = domains.PutCode(context.Background(), accounts.BytesToAddress(key), accounts.NilCodeHash, codeUpd, tx, txNum, prev...)
 			require.NoError(t, err)
@@ -946,13 +946,13 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execstate.Executio
 				copy(sk[length.Addr:], loc)
 				usedKeys[string(sk)] = struct{}{}
 
-				prev, step, ok, err := domains.GetStorage(context.Background(),
+				prev, prevTxNum, ok, err := domains.GetStorage(context.Background(),
 					accounts.BytesToAddress(sk[:length.Addr]), accounts.BytesToKey(sk[length.Addr:]), tx)
 				require.NoError(t, err)
 
-				var pprev []execstate.ValueWithStep[uint256.Int]
+				var pprev []execstate.ValueWithTxNum[uint256.Int]
 				if ok {
-					pprev = []execstate.ValueWithStep[uint256.Int]{{Value: prev, Step: step}}
+					pprev = []execstate.ValueWithTxNum[uint256.Int]{{Value: prev, TxNum: prevTxNum}}
 				}
 				err = domains.PutStorage(context.Background(), accounts.BytesToAddress(sk[:length.Addr]),
 					accounts.BytesToKey(sk[length.Addr:]), *uint256.NewInt(txNum), tx, txNum, pprev...)
