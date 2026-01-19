@@ -44,6 +44,7 @@ var backtestCommitmentCommand = cli.Command{
 		&cli.Int64Flag{Name: "tMinusN", Value: -1, Usage: "number of blocks to backtest starting from latest block minus N. Alternative to [from,to). Defaults to -1, i.e. by default use [from,to)"},
 		&cli.StringFlag{Name: "output-dir", Usage: "directory to store all backtesting result artefacts such as graphs, metrics, profiling, etc."},
 		&cli.BoolFlag{Name: "para-trie", Value: false, Usage: "use para trie, defaults to false"},
+		&cli.BoolFlag{Name: "trie-warmup", Value: false, Usage: "enable trie warmup, defaults to false"},
 		&cli.Uint64Flag{Name: "metrics-top-n", Usage: "override the number of top blocks to show in the overview metrics page"},
 		&cli.Uint64Flag{Name: "metrics-page-size", Usage: "override the number of blocks to show in the detailed block range metrics page"},
 	}),
@@ -57,12 +58,13 @@ var backtestCommitmentCommand = cli.Command{
 			return fmt.Errorf("cannot specify both [from,to) and tMinusN")
 		}
 		args := backtestCommitmentArgs{
-			from:      cliCtx.Uint64("from"),
-			to:        cliCtx.Uint64("to"),
-			tMinusN:   cliCtx.Int64("tMinusN"),
-			dataDir:   cliCtx.String(utils.DataDirFlag.Name),
-			outputDir: cliCtx.String("output-dir"),
-			paraTrie:  cliCtx.Bool("para-trie"),
+			from:       cliCtx.Uint64("from"),
+			to:         cliCtx.Uint64("to"),
+			tMinusN:    cliCtx.Int64("tMinusN"),
+			dataDir:    cliCtx.String(utils.DataDirFlag.Name),
+			outputDir:  cliCtx.String("output-dir"),
+			paraTrie:   cliCtx.Bool("para-trie"),
+			trieWarmup: cliCtx.Bool("trie-warmup"),
 		}
 		if args.outputDir == "" {
 			return fmt.Errorf("output-dir must be specified")
@@ -114,6 +116,7 @@ type backtestCommitmentArgs struct {
 	dataDir         string
 	outputDir       string
 	paraTrie        bool
+	trieWarmup      bool
 	metricsTopN     *uint64
 	metricsPageSize *uint64
 }
@@ -147,6 +150,9 @@ func doBacktestCommitment(ctx context.Context, args backtestCommitmentArgs, logg
 	var opts []backtester.Opt
 	if args.paraTrie {
 		opts = append(opts, backtester.WithParaTrie(true))
+	}
+	if args.trieWarmup {
+		opts = append(opts, backtester.WithTrieWarmup(true))
 	}
 	if args.metricsTopN != nil {
 		opts = append(opts, backtester.WithChartsTopN(*args.metricsTopN))

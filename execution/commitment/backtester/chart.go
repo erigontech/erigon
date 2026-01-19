@@ -561,6 +561,12 @@ func generateComparisonPage(runIds []string, blockNums []uint64, processingTimes
 	page := components.NewPage()
 	page.SetPageTitle("commitment backtest results overview")
 	page.SetLayout(components.PageFlexLayout)
+
+	var overviewPagesJsArray strings.Builder
+	overviewPagesJsArray.WriteString("var overviewPages = [];\n")
+	for i, runOverviewPage := range runOverviewPages {
+		overviewPagesJsArray.WriteString(fmt.Sprintf("overviewPages[%d] = '%s';\n", i, runOverviewPage))
+	}
 	processingTimesChart := charts.NewLine()
 	processingTimesChart.SetGlobalOptions(
 		titleOpts("processing times"),
@@ -568,18 +574,18 @@ func generateComparisonPage(runIds []string, blockNums []uint64, processingTimes
 		dataZoomOpts(),
 		charts.WithEventListeners(event.Listener{
 			EventName: "click",
-			Handler: opts.FuncOpts(
+			Handler: opts.FuncOpts(fmt.Sprintf(
 				`function(params) {
 					console.log(params.name);
 					console.log(params.value);
 					console.log(params.seriesIndex);
+					%s
+					window.open(overviewPages[params.seriesIndex], '_blank');
 				}`,
-			),
+				overviewPagesJsArray.String(),
+			)),
 		}),
 	)
-	//
-	// TODO make the chart above clickable -> use params.seriesIndex  to go to the right overview.html page
-	//
 	processingTimesChartLine := processingTimesChart.SetXAxis(blockNums)
 	for i, ri := range runIds {
 		times := processingTimes[i]
