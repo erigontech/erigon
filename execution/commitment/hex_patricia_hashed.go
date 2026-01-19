@@ -75,9 +75,6 @@ type HexPatriciaHashed struct {
 	afterMap      [128]uint16   // For each row, bitmap of cells that were present after modification
 	keccak        keccakState
 	keccak2       keccakState
-	rootChecked   bool // Set to false if it is not known whether the root is empty, set to true if it is checked
-	rootTouched   bool
-	rootPresent   bool
 	trace         bool
 	traceDomain   bool
 	capture       []string
@@ -1183,7 +1180,7 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int16 {
 	var depth int16
 	if hph.activeRows == 0 {
 		if hph.trace {
-			fmt.Printf("needUnfolding root, rootChecked = %t\n", hph.rootChecked)
+			fmt.Printf("needUnfolding root\n")
 		}
 		if hph.root.hashedExtLen == 64 && hph.root.accountAddrLen > 0 && hph.root.storageAddrLen > 0 {
 			// in case if root is a leaf node with storage and account, we need to derive storage part of a key
@@ -1196,10 +1193,7 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int16 {
 			}
 		}
 		if hph.root.hashedExtLen == 0 && hph.root.hashLen == 0 {
-			if hph.rootChecked {
-				return 0 // Previously checked, empty root, no unfolding needed
-			}
-			return 1 // Need to attempt to unfold the root
+			return 0 // Empty root, no unfolding needed
 		}
 		cell = &hph.root
 	} else {
@@ -1679,9 +1673,8 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 		fmt.Printf("unfoldBranchNode prefix '%x', nibbles [%x] depth %d row %d '%x'\n",
 			key, hph.currentKey[:hph.currentKeyLen], depth, row, branchData)
 	}
-	if !hph.rootChecked && hph.currentKeyLen == 0 && len(branchData) == 0 {
+	if hph.currentKeyLen == 0 && len(branchData) == 0 {
 		// Special case - empty or deleted root
-		hph.rootChecked = true
 		return nil
 	}
 	if len(branchData) == 0 {
@@ -1734,12 +1727,12 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 	var touched, present bool
 	var upDepth, depth int16
 	if hph.activeRows == 0 {
-		if hph.rootChecked && hph.root.hashLen == 0 && hph.root.hashedExtLen == 0 {
+		if hph.root.hashLen == 0 && hph.root.hashedExtLen == 0 {
 			return nil // No unfolding for empty root
 		}
 		upCell = &hph.root
-		touched = hph.rootTouched
-		present = hph.rootPresent
+		touched = false
+		present = !hph.root.IsEmpty()
 		if hph.trace {
 			fmt.Printf("unfold root: touched: %t present: %t %s\n", touched, present, upCell.FullString())
 		}
@@ -1966,8 +1959,6 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		if hph.touchMap[row] != 0 {
 			if row == 0 {
 				// Root is deleted because the tree is empty
-				hph.rootTouched = true
-				hph.rootPresent = false
 			} else if upDepth == 64 {
 				// Special case - all storage items of an account have been deleted, but it does not automatically delete the account, just makes it empty storage
 				// Therefore we are not propagating deletion upwards, but turn it into a modification
@@ -1995,9 +1986,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 	case updateKindPropagate: // Leaf or extension node
 		if hph.touchMap[row] != 0 {
 			// any modifications
-			if row == 0 {
-				hph.rootTouched = true
-			} else {
+			if row != 0 {
 				// Modification is propagated upwards
 				hph.touchMap[row-1] |= uint16(1) << nibble
 			}
@@ -2023,10 +2012,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		}
 	case updateKindBranch:
 		if hph.touchMap[row] != 0 { // any modifications
-			if row == 0 {
-				hph.rootTouched = true
-				hph.rootPresent = true
-			} else {
+			if row != 0 {
 				// Modification is propagated upwards
 				hph.touchMap[row-1] |= uint16(1) << nibble
 			}
@@ -2151,7 +2137,6 @@ func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
 	var cell *cell
 	if hph.activeRows == 0 { // Remove the root
 		cell = &hph.root
-		hph.rootTouched, hph.rootPresent = true, false
 	} else {
 		row := hph.activeRows - 1
 		if hph.depths[row] < int16(len(hashedKey)) {
@@ -2191,7 +2176,6 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 	var depth int16
 	if hph.activeRows == 0 {
 		cell = &hph.root
-		hph.rootTouched, hph.rootPresent = true, true
 	} else {
 		row := hph.activeRows - 1
 		depth = hph.depths[row]
@@ -2318,7 +2302,7 @@ func (hph *HexPatriciaHashed) foldMounted(nib int) (cell, error) {
 	if hph.trace {
 		fmt.Printf("===[%x] !@folded to the root\n", hph.mountedNib)
 	}
-	if hph.rootPresent && hph.rootTouched {
+	if !hph.root.IsEmpty() {
 		if hph.trace {
 			fmt.Printf("mount root as %02x %s\n", hph.mountedNib, hph.root.String())
 		}
@@ -2608,22 +2592,11 @@ func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaT
 // Reset allows HexPatriciaHashed instance to be reused for the new commitment calculation
 func (hph *HexPatriciaHashed) Reset() {
 	hph.root.reset()
-	hph.rootTouched = false
-	hph.rootChecked = false
-	hph.rootPresent = true
 }
 
 func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	hph.ctx = ctx
 }
-
-type stateRootFlag int8
-
-var (
-	stateRootPresent stateRootFlag = 1
-	stateRootChecked stateRootFlag = 2
-	stateRootTouched stateRootFlag = 4
-)
 
 // represents state of the tree
 type state struct {
@@ -2632,27 +2605,10 @@ type state struct {
 	TouchMap     [128]uint16 // For each row, bitmap of cells that were either present before modification, or modified or deleted
 	AfterMap     [128]uint16 // For each row, bitmap of cells that were present after modification
 	BranchBefore [128]bool   // For each row, whether there was a branch node in the database loaded in unfold
-	RootChecked  bool        // Set to false if it is not known whether the root is empty, set to true if it is checked
-	RootTouched  bool
-	RootPresent  bool
 }
 
 func (s *state) Encode(buf []byte) ([]byte, error) {
-	var rootFlags stateRootFlag
-	if s.RootPresent {
-		rootFlags |= stateRootPresent
-	}
-	if s.RootChecked {
-		rootFlags |= stateRootChecked
-	}
-	if s.RootTouched {
-		rootFlags |= stateRootTouched
-	}
-
 	ee := bytes.NewBuffer(buf)
-	if err := binary.Write(ee, binary.BigEndian, int8(rootFlags)); err != nil {
-		return nil, fmt.Errorf("encode rootFlags: %w", err)
-	}
 	if err := binary.Write(ee, binary.BigEndian, uint16(len(s.Root))); err != nil {
 		return nil, fmt.Errorf("encode root len: %w", err)
 	}
@@ -2695,21 +2651,6 @@ func (s *state) Encode(buf []byte) ([]byte, error) {
 
 func (s *state) Decode(buf []byte) error {
 	aux := bytes.NewBuffer(buf)
-	var rootFlags stateRootFlag
-	if err := binary.Read(aux, binary.BigEndian, &rootFlags); err != nil {
-		return fmt.Errorf("rootFlags: %w", err)
-	}
-
-	if rootFlags&stateRootPresent != 0 {
-		s.RootPresent = true
-	}
-	if rootFlags&stateRootTouched != 0 {
-		s.RootTouched = true
-	}
-	if rootFlags&stateRootChecked != 0 {
-		s.RootChecked = true
-	}
-
 	var rootSize uint16
 	if err := binary.Read(aux, binary.BigEndian, &rootSize); err != nil {
 		return fmt.Errorf("root size: %w", err)
@@ -2858,11 +2799,7 @@ func (cell *cell) Decode(buf []byte) error {
 
 // Encode current state of hph into bytes
 func (hph *HexPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
-	s := state{
-		RootChecked: hph.rootChecked,
-		RootTouched: hph.rootTouched,
-		RootPresent: hph.rootPresent,
-	}
+	var s state
 	if hph.currentKeyLen > 0 {
 		panic("currentKeyLen > 0")
 	}
@@ -2883,9 +2820,6 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	if buf == nil {
 		// reset state to 'empty'
 		hph.currentKeyLen = 0
-		hph.rootChecked = false
-		hph.rootTouched = false
-		hph.rootPresent = false
 		hph.activeRows = 0
 
 		for i := 0; i < len(hph.depths); i++ {
@@ -2908,9 +2842,6 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	if err := hph.root.Decode(s.Root); err != nil {
 		return err
 	}
-	hph.rootChecked = s.RootChecked
-	hph.rootTouched = s.RootTouched
-	hph.rootPresent = s.RootPresent
 
 	copy(hph.depths[:], s.Depths[:])
 	copy(hph.branchBefore[:], s.BranchBefore[:])
@@ -3020,7 +2951,7 @@ func HexTrieStateToString(enc []byte) (string, error) {
 			}
 		}
 	}
-	fmt.Fprintf(sb, " rootNode: %x [touched=%t, present=%t, checked=%t]\n", s.Root, s.RootTouched, s.RootPresent, s.RootChecked)
+	fmt.Fprintf(sb, " rootNode: %x\n", s.Root)
 
 	root := new(cell)
 	if err := root.Decode(s.Root); err != nil {
