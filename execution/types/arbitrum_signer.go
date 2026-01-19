@@ -2,29 +2,30 @@ package types
 
 import (
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/holiman/uint256"
 )
 
-var ArbosAddress = common.HexToAddress("0xa4b05")
-var ArbosStateAddress = common.HexToAddress("0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")
-var ArbSysAddress = common.HexToAddress("0x64")
-var ArbInfoAddress = common.HexToAddress("0x65")
-var ArbAddressTableAddress = common.HexToAddress("0x66")
-var ArbBLSAddress = common.HexToAddress("0x67")
-var ArbFunctionTableAddress = common.HexToAddress("0x68")
-var ArbosTestAddress = common.HexToAddress("0x69")
-var ArbGasInfoAddress = common.HexToAddress("0x6c")
-var ArbOwnerPublicAddress = common.HexToAddress("0x6b")
-var ArbAggregatorAddress = common.HexToAddress("0x6d")
-var ArbRetryableTxAddress = common.HexToAddress("0x6e")
-var ArbStatisticsAddress = common.HexToAddress("0x6f")
-var ArbOwnerAddress = common.HexToAddress("0x70")
-var ArbWasmAddress = common.HexToAddress("0x71")
-var ArbWasmCacheAddress = common.HexToAddress("0x72")
-var ArbNativeTokenManagerAddress = common.HexToAddress("0x73")
-var NodeInterfaceAddress = common.HexToAddress("0xc8")
-var NodeInterfaceDebugAddress = common.HexToAddress("0xc9")
-var ArbDebugAddress = common.HexToAddress("0xff")
+var ArbosAddress = accounts.InternAddress(common.HexToAddress("0xa4b05"))
+var ArbosStateAddress = accounts.InternAddress(common.HexToAddress("0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"))
+var ArbSysAddress = accounts.InternAddress(common.HexToAddress("0x64"))
+var ArbInfoAddress = accounts.InternAddress(common.HexToAddress("0x65"))
+var ArbAddressTableAddress = accounts.InternAddress(common.HexToAddress("0x66"))
+var ArbBLSAddress = accounts.InternAddress(common.HexToAddress("0x67"))
+var ArbFunctionTableAddress = accounts.InternAddress(common.HexToAddress("0x68"))
+var ArbosTestAddress = accounts.InternAddress(common.HexToAddress("0x69"))
+var ArbGasInfoAddress = accounts.InternAddress(common.HexToAddress("0x6c"))
+var ArbOwnerPublicAddress = accounts.InternAddress(common.HexToAddress("0x6b"))
+var ArbAggregatorAddress = accounts.InternAddress(common.HexToAddress("0x6d"))
+var ArbRetryableTxAddress = accounts.InternAddress(common.HexToAddress("0x6e"))
+var ArbStatisticsAddress = accounts.InternAddress(common.HexToAddress("0x6f"))
+var ArbOwnerAddress = accounts.InternAddress(common.HexToAddress("0x70"))
+var ArbWasmAddress = accounts.InternAddress(common.HexToAddress("0x71"))
+var ArbWasmCacheAddress = accounts.InternAddress(common.HexToAddress("0x72"))
+var ArbNativeTokenManagerAddress = accounts.InternAddress(common.HexToAddress("0x73"))
+var NodeInterfaceAddress = accounts.InternAddress(common.HexToAddress("0xc8"))
+var NodeInterfaceDebugAddress = accounts.InternAddress(common.HexToAddress("0xc9"))
+var ArbDebugAddress = accounts.InternAddress(common.HexToAddress("0xff"))
 
 type ArbitrumSigner struct {
 	Signer
@@ -34,7 +35,7 @@ func NewArbitrumSigner(signer Signer) ArbitrumSigner {
 	return ArbitrumSigner{Signer: signer}
 }
 
-func (s ArbitrumSigner) Sender(tx Transaction) (common.Address, error) {
+func (s ArbitrumSigner) Sender(tx Transaction) (accounts.Address, error) {
 	switch inner := tx.(type) {
 	case *ArbitrumUnsignedTx:
 		return inner.From, nil

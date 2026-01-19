@@ -73,14 +73,14 @@ var skipAccountChecks = [...]bool{
 type ArbitrumUnsignedTx struct {
 	arb.NoTimeBoosted
 	ChainId *big.Int
-	From    common.Address
+	From    accounts.Address
 
-	Nonce     uint64          // nonce of sender account
-	GasFeeCap *big.Int        // wei per gas
-	Gas       uint64          // gas limit
-	To        *common.Address `rlp:"nil"` // nil means contract creation
-	Value     *big.Int        // wei amount
-	Data      []byte          // contract invocation input data
+	Nonce     uint64           // nonce of sender account
+	GasFeeCap *big.Int         // wei per gas
+	Gas       uint64           // gas limit
+	To        accounts.Address `rlp:"nil"` // nil means contract creation
+	Value     *big.Int         // wei amount
+	Data      []byte           // contract invocation input data
 }
 
 func (tx *ArbitrumUnsignedTx) copy() Transaction {
@@ -90,7 +90,7 @@ func (tx *ArbitrumUnsignedTx) copy() Transaction {
 		GasFeeCap: new(big.Int),
 		Gas:       tx.Gas,
 		From:      tx.From,
-		To:        nil,
+		To:        accounts.NilAddress,
 		Value:     new(big.Int),
 		Data:      common.Copy(tx.Data),
 	}
@@ -100,9 +100,9 @@ func (tx *ArbitrumUnsignedTx) copy() Transaction {
 	if tx.GasFeeCap != nil {
 		cpy.GasFeeCap.Set(tx.GasFeeCap)
 	}
-	if tx.To != nil {
-		tmp := *tx.To
-		cpy.To = &tmp
+	if tx.To != accounts.NilAddress {
+		tmp := tx.To
+		cpy.To = tmp
 	}
 	if tx.Value != nil {
 		cpy.Value.Set(tx.Value)
@@ -119,7 +119,7 @@ func (tx *ArbitrumUnsignedTx) GetBlobHashes() []common.Hash       { return []com
 func (tx *ArbitrumUnsignedTx) GetGasLimit() uint64                { return tx.Gas }
 func (tx *ArbitrumUnsignedTx) GetBlobGas() uint64                 { return 0 }
 func (tx *ArbitrumUnsignedTx) GetValue() *uint256.Int             { return uint256.MustFromBig(tx.Value) }
-func (tx *ArbitrumUnsignedTx) GetTo() *common.Address             { return tx.To }
+func (tx *ArbitrumUnsignedTx) GetTo() accounts.Address            { return tx.To }
 func (tx *ArbitrumUnsignedTx) GetData() []byte                    { return tx.Data }
 func (tx *ArbitrumUnsignedTx) GetAccessList() AccessList          { return nil }
 func (tx *ArbitrumUnsignedTx) GetFeeCap() *uint256.Int            { return uint256.MustFromBig(tx.GasFeeCap) }
@@ -419,20 +419,20 @@ func (tx *ArbitrumUnsignedTx) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *ArbitrumUnsignedTx) Sender(signer Signer) (common.Address, error) {
+func (tx *ArbitrumUnsignedTx) Sender(signer Signer) (accounts.Address, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (tx *ArbitrumUnsignedTx) CachedSender() (common.Address, bool) {
+func (tx *ArbitrumUnsignedTx) CachedSender() (accounts.Address, bool) {
 	return tx.From, true
 }
 
-func (tx *ArbitrumUnsignedTx) GetSender() (common.Address, bool) {
+func (tx *ArbitrumUnsignedTx) GetSender() (accounts.Address, bool) {
 	return tx.From, true
 }
 
-func (tx *ArbitrumUnsignedTx) SetSender(address common.Address) {
+func (tx *ArbitrumUnsignedTx) SetSender(address accounts.Address) {
 	tx.From = address
 }
 

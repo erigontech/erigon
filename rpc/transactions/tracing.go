@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/nitro-erigon/arbos"
-	"github.com/holiman/uint256"
 )
 
 type BlockGetter interface {
