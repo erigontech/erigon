@@ -8,13 +8,14 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestCreateBALOrdering(t *testing.T) {
-	addrA := common.HexToAddress("0x0000000000000000000000000000000000000001")
-	addrB := common.HexToAddress("0x0000000000000000000000000000000000000002")
-	slot1 := common.BigToHash(big.NewInt(1))
-	slot2 := common.BigToHash(big.NewInt(2))
+	addrA := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000000001"))
+	addrB := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000000002"))
+	slot1 := accounts.InternKey(common.BigToHash(big.NewInt(1)))
+	slot2 := accounts.InternKey(common.BigToHash(big.NewInt(2)))
 
 	io := state.NewVersionedIO(4)
 
@@ -79,17 +80,17 @@ func TestCreateBALOrdering(t *testing.T) {
 	}
 
 	slot1Changes := accountB.StorageChanges[0].Changes
-	if len(slot1Changes) != 1 || slot1Changes[0].Index != 2 || slot1Changes[0].Value.Uint64() != 5 {
+	if len(slot1Changes) != 1 || slot1Changes[0].Index != 2 || uint256.NewInt(0).SetBytes(slot1Changes[0].Value[:]).Uint64() != 5 {
 		t.Fatalf("unexpected slot1 change: %+v", slot1Changes)
 	}
 
 	slot2Changes := accountB.StorageChanges[1].Changes
-	if len(slot2Changes) != 1 || slot2Changes[0].Index != 1 || slot2Changes[0].Value.Uint64() != 20 {
+	if len(slot2Changes) != 1 || slot2Changes[0].Index != 1 || uint256.NewInt(0).SetBytes(slot2Changes[0].Value[:]).Uint64() != 20 {
 		t.Fatalf("slot2 changes not deduplicated or unsorted: %+v", slot2Changes)
 	}
 }
 
-func addStorageRead(readSets map[int]state.ReadSet, txIdx int, addr common.Address, slot common.Hash) {
+func addStorageRead(readSets map[int]state.ReadSet, txIdx int, addr accounts.Address, slot accounts.StorageKey) {
 	rs := readSets[txIdx]
 	if rs == nil {
 		rs = state.ReadSet{}
@@ -102,7 +103,7 @@ func addStorageRead(readSets map[int]state.ReadSet, txIdx int, addr common.Addre
 	})
 }
 
-func addBalanceRead(readSets map[int]state.ReadSet, txIdx int, addr common.Address, value uint64) {
+func addBalanceRead(readSets map[int]state.ReadSet, txIdx int, addr accounts.Address, value uint64) {
 	rs := readSets[txIdx]
 	if rs == nil {
 		rs = state.ReadSet{}
@@ -115,7 +116,7 @@ func addBalanceRead(readSets map[int]state.ReadSet, txIdx int, addr common.Addre
 	})
 }
 
-func addStorageWrite(writeSets map[int]state.VersionedWrites, txIdx int, addr common.Address, slot common.Hash, value uint64) {
+func addStorageWrite(writeSets map[int]state.VersionedWrites, txIdx int, addr accounts.Address, slot accounts.StorageKey, value uint64) {
 	writeSets[txIdx] = append(writeSets[txIdx], &state.VersionedWrite{
 		Address: addr,
 		Path:    state.StoragePath,
@@ -124,7 +125,7 @@ func addStorageWrite(writeSets map[int]state.VersionedWrites, txIdx int, addr co
 	})
 }
 
-func addBalanceWrite(writeSets map[int]state.VersionedWrites, txIdx int, addr common.Address, value uint64) {
+func addBalanceWrite(writeSets map[int]state.VersionedWrites, txIdx int, addr accounts.Address, value uint64) {
 	writeSets[txIdx] = append(writeSets[txIdx], &state.VersionedWrite{
 		Address: addr,
 		Path:    state.BalancePath,

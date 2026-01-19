@@ -27,7 +27,7 @@ jobs:
           format('{0}-{1}', github.workflow, github.ref)
         }}
       cancel-in-progress: true
-    runs-on: [ self-hosted, qa, Ethereum, rpc-integration ]
+    runs-on: [ self-hosted, qa, Ethereum, rpc-integration-commitment ]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
@@ -71,7 +71,7 @@ jobs:
         run: |
           echo "Starting RpcDaemon..."
           
-          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
+          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > rpcdaemon.log 2>&1 &
 
           RPC_DAEMON_PID=$!          
           RPC_DAEMON_EXIT_STATUS=$?
@@ -79,7 +79,7 @@ jobs:
           echo "rpc_daemon_started=true" >> $GITHUB_OUTPUT
           
           sleep 5
-          tail erigon.log
+          tail rpcdaemon.log
           
           if [ $RPC_DAEMON_EXIT_STATUS -ne 0 ]; then            
             echo "RpcDaemon failed to start"
@@ -158,12 +158,12 @@ jobs:
 
       - name: Upload test results
         if: steps.test_step.outputs.test_executed == 'true'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: test-results
           path: |
             ${{ env.TEST_RESULT_DIR }}
-            ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
+            ${{ github.workspace }}/build/bin/rpcdaemon.log
 
       - name: Save test results
         if: steps.test_step.outputs.test_executed == 'true'

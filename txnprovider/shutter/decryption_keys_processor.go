@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	shuttercrypto "github.com/erigontech/erigon/txnprovider/shutter/internal/crypto"
 	"github.com/erigontech/erigon/txnprovider/shutter/internal/proto"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
@@ -268,7 +269,7 @@ func (dkp *DecryptionKeysProcessor) decryptTxn(keys map[TxnIndex]*proto.Key, sub
 		return nil, fmt.Errorf("txn gas limit mismatch: txn=%d, encryptedTxnSubmission=%d", txn.GetGasLimit(), subGasLimit)
 	}
 
-	txn.SetSender(sender)
+	txn.SetSender(accounts.InternAddress(sender))
 	return txn, nil
 }
 
@@ -345,7 +346,7 @@ func (dkp *DecryptionKeysProcessor) processBlockEventCleanup(blockEvent BlockEve
 
 	for _, mark := range cleanUpMarks {
 		dkp.processed.Remove(mark)
-		dkp.encryptedTxnsPool.DeleteUpTo(mark.Eon, mark.To+1)
+		dkp.encryptedTxnsPool.DeleteUpTo(mark.Eon, mark.To)
 	}
 
 	return nil

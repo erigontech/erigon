@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 type seenSyncCommitteeMessage struct {
@@ -77,16 +78,24 @@ func NewSyncCommitteeMessagesService(
 	}
 }
 
+func (s *syncCommitteeMessagesService) Names() []string {
+	names := make([]string, 0, s.beaconChainCfg.SyncCommitteeSubnetCount)
+	for i := 0; i < int(s.beaconChainCfg.SyncCommitteeSubnetCount); i++ {
+		names = append(names, gossip.TopicNameSyncCommittee(i))
+	}
+	return names
+}
+
 func (s *syncCommitteeMessagesService) IsMyGossipMessage(name string) bool {
 	return gossip.IsTopicSyncCommittee(name)
 }
 
-func (s *syncCommitteeMessagesService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*SyncCommitteeMessageForGossip, error) {
+func (s *syncCommitteeMessagesService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*SyncCommitteeMessageForGossip, error) {
 	obj := &SyncCommitteeMessageForGossip{
-		Receiver:             copyOfPeerData(data),
+		Receiver:             &sentinelproto.Peer{Pid: pid.String()},
 		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{},
 	}
-	if err := obj.SyncCommitteeMessage.DecodeSSZ(data.Data, int(version)); err != nil {
+	if err := obj.SyncCommitteeMessage.DecodeSSZ(data, int(version)); err != nil {
 		return nil, err
 	}
 	return obj, nil
@@ -167,7 +176,7 @@ func (s *syncCommitteeMessagesService) cleanupOldSyncCommitteeMessages() {
 	headSlot := s.syncedDataManager.HeadSlot()
 
 	entriesToRemove := []seenSyncCommitteeMessage{}
-	s.seenSyncCommitteeMessages.Range(func(key, value interface{}) bool {
+	s.seenSyncCommitteeMessages.Range(func(key, value any) bool {
 		k := key.(seenSyncCommitteeMessage)
 		if headSlot > k.slot+1 {
 			entriesToRemove = append(entriesToRemove, k)

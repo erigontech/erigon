@@ -128,8 +128,19 @@ func (pd *temporalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum
 func (sd *SharedDomains) AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel {
 	return &temporalPutDel{sd, tx}
 }
-func (sd *SharedDomains) TrieCtxForTests() *commitmentdb.SharedDomainsCommitmentContext {
-	return sd.sdCtx
+
+func (sd *SharedDomains) Merge(other *SharedDomains) error {
+	if sd.txNum > other.txNum {
+		return fmt.Errorf("can't merge backwards: txnum: %d > %d", sd.txNum, other.txNum)
+	}
+
+	if err := sd.mem.Merge(other.mem); err != nil {
+		return err
+	}
+
+	sd.txNum = other.txNum
+	sd.blockNum.Store(other.blockNum.Load())
+	return nil
 }
 
 type temporalGetter struct {
@@ -197,7 +208,7 @@ func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmen
 func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
-	if resetCommitment {
+	if resetCommitment && sd.sdCtx != nil {
 		sd.sdCtx.ClearRam()
 	}
 	sd.mem.ClearRam()
@@ -239,10 +250,17 @@ func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) 
 	var firstKey, firstVal []byte
 	var hasPrefix bool
 	err := sd.IteratePrefix(domain, prefix, roTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
-		firstKey = common.Copy(k)
-		firstVal = common.Copy(v)
-		hasPrefix = true
-		return false, nil // do not continue, end on first occurrence
+		// we need to do this to ensure the value has not been unwound
+		if lv, _, ok := sd.mem.GetLatest(domain, k); ok {
+			v = lv
+		}
+		if len(v) > 0 {
+			firstKey = common.Copy(k)
+			firstVal = common.Copy(v)
+			hasPrefix = true
+			return false, nil // do not continue, end on first occurrence
+		}
+		return true, nil
 	})
 	return firstKey, firstVal, hasPrefix, err
 }
@@ -363,6 +381,10 @@ func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
 	}
 
 	return logMetrics
+}
+
+func (sd *SharedDomains) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return sd.mem.GetAsOf(domain, key, ts)
 }
 
 // DomainPut
@@ -495,6 +517,17 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 	return nil
 }
 
+// ComputeCommitment evaluates commitment for gathered updates.
+// If warmupDB was set via SetWarmupDB, pre-warms MDBX page cache by reading Branch data in parallel before processing.
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
 	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, commitProgress)
+}
+
+// SetWarmupDB sets the database used for parallel warmup of MDBX page cache during commitment.
+func (sd *SharedDomains) SetWarmupDB(db kv.TemporalRoDB) {
+	sd.sdCtx.SetWarmupDB(db)
+}
+
+func (sd *SharedDomains) SetParaTrieDB(db kv.TemporalRoDB) {
+	sd.sdCtx.SetParaTrieDB(db)
 }

@@ -194,7 +194,7 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 }
 
 func transaction(nonce uint64, gaslimit uint64, key *ecdsa.PrivateKey) types.Transaction {
-	return pricedTransaction(nonce, gaslimit, u256.Num1, key)
+	return pricedTransaction(nonce, gaslimit, &u256.Num1, key)
 }
 
 func pricedTransaction(nonce uint64, gaslimit uint64, gasprice *uint256.Int, key *ecdsa.PrivateKey) types.Transaction {

@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -117,7 +118,7 @@ Loop:
 			acc := accounts3.Account{
 				Nonce:       txNum,
 				Balance:     *uint256.NewInt(uint64(i*10e6) + uint64(accs*10e2)),
-				CodeHash:    common.Hash{},
+				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
 			v := accounts3.SerialiseV3(&acc)
@@ -195,16 +196,16 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	k0 := make([]byte, length.Addr)
 	l0 := make([]byte, length.Hash)
 	commitStep := 3
-	accounts := 1
+	noaccounts := 1
 
 	var blockNum uint64
 	for ; i < int(maxTx); i++ {
 		txNum := uint64(i)
-		for accs := 0; accs < accounts; accs++ {
+		for accs := 0; accs < noaccounts; accs++ {
 			acc := accounts3.Account{
 				Nonce:       uint64(i),
 				Balance:     *uint256.NewInt(uint64(i*10e6) + uint64(accs*10e2)),
-				CodeHash:    common.Hash{},
+				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
 			v := accounts3.SerialiseV3(&acc)
@@ -267,7 +268,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	defer domains.Close()
 
 	txNum := domains.TxNum()
-	for accs := 0; accs < accounts; accs++ {
+	for accs := 0; accs < noaccounts; accs++ {
 		k0[0] = byte(accs)
 		pv, step, err := domains.GetLatest(kv.AccountsDomain, rwTx, k0)
 		require.NoError(t, err)

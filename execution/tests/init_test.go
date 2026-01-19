@@ -43,7 +43,7 @@ var (
 	cornersDir = filepath.Join(".", "test-corners")
 )
 
-func readJSONFile(fn string, value interface{}) error {
+func readJSONFile(fn string, value any) error {
 	data, err := os.ReadFile(fn)
 	if err != nil {
 		return fmt.Errorf("error reading JSON file: %w", err)
@@ -168,7 +168,7 @@ func (tm *testMatcher) checkFailureWithName(t *testing.T, name string, err error
 //
 // runTest should be a function of type func(t *testing.T, name string, x <TestType>),
 // where TestType is the type of the test contained in test files.
-func (tm *testMatcher) walk(t *testing.T, dir string, runTest interface{}) {
+func (tm *testMatcher) walk(t *testing.T, dir string, runTest any) {
 	// Walk the directory.
 	dirinfo, err := os.Stat(dir)
 	if os.IsNotExist(err) || !dirinfo.IsDir() {
@@ -203,7 +203,7 @@ func (tm *testMatcher) walk(t *testing.T, dir string, runTest interface{}) {
 	//panic(fmt.Sprintf("[dbg] mem info: alloc=%s, sys=%s", common.ByteCount(m.Alloc), common.ByteCount(m.Sys)))
 }
 
-func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest interface{}) {
+func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest any) {
 	t.Parallel()
 	if r, _ := tm.findSkip(name); r != "" {
 		t.Skip(r)
@@ -243,7 +243,7 @@ func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest inte
 	}
 }
 
-func makeMapFromTestFunc(f interface{}) reflect.Value {
+func makeMapFromTestFunc(f any) reflect.Value {
 	stringT := reflect.TypeFor[string]()
 	testingT := reflect.TypeFor[*testing.T]()
 	ftyp := reflect.TypeOf(f)
@@ -264,7 +264,7 @@ func sortedMapKeys(m reflect.Value) []string {
 	return keys
 }
 
-func runTestFunc(runTest interface{}, t *testing.T, name string, m reflect.Value, key string) {
+func runTestFunc(runTest any, t *testing.T, name string, m reflect.Value, key string) {
 	reflect.ValueOf(runTest).Call([]reflect.Value{
 		reflect.ValueOf(t),
 		reflect.ValueOf(name),

@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
@@ -628,25 +629,26 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, 
 	err = m.InsertChain(chain)
 	require.NoError(t, err)
 
-	tx, err := db.BeginTemporalRo(context.Background())
+	ctx := context.Background()
+	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		t.Fatalf("read only db tx to read state: %v", err)
 	}
 	defer tx.Rollback()
 
-	stateReader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, rawdbv3.TxNums)
+	stateReader, err := rpchelper.CreateHistoryStateReader(ctx, tx, 1, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st := state.New(stateReader)
 	require.NoError(t, err)
-	exist, err := st.Exist(contractAddr)
+	exist, err := st.Exist(accounts.InternAddress(contractAddr))
 	require.NoError(t, err)
 	assert.False(t, exist, "Contract should not exist at block #1")
 
-	stateReader, err = rpchelper.CreateHistoryStateReader(tx, 2, 0, rawdbv3.TxNums)
+	stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, 2, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st = state.New(stateReader)
 	require.NoError(t, err)
-	exist, err = st.Exist(contractAddr)
+	exist, err = st.Exist(accounts.InternAddress(contractAddr))
 	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #2")
 

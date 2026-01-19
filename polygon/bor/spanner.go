@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
@@ -37,8 +38,8 @@ type Spanner interface {
 }
 
 type ABI interface {
-	Pack(name string, args ...interface{}) ([]byte, error)
-	UnpackIntoInterface(v interface{}, name string, data []byte) error
+	Pack(name string, args ...any) ([]byte, error)
+	UnpackIntoInterface(v any, name string, data []byte) error
 }
 
 type ChainSpanner struct {
@@ -71,7 +72,7 @@ func (c *ChainSpanner) GetCurrentSpan(syscall rules.SystemCall) (*heimdall.Span,
 		return nil, err
 	}
 
-	result, err := syscall(common.HexToAddress(c.borConfig.ValidatorContract), data)
+	result, err := syscall(accounts.InternAddress(common.HexToAddress(c.borConfig.ValidatorContract)), data)
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +149,7 @@ func (c *ChainSpanner) CommitSpan(heimdallSpan heimdall.Span, syscall rules.Syst
 		return err
 	}
 
-	_, err = syscall(common.HexToAddress(c.borConfig.ValidatorContract), data)
+	_, err = syscall(accounts.InternAddress(common.HexToAddress(c.borConfig.ValidatorContract)), data)
 
 	return err
 }

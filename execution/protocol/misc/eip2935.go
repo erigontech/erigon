@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func StoreBlockHashesEip2935(header *types.Header, state *state.IntraBlockState) error {
@@ -45,5 +46,5 @@ func storeHash(num uint64, hash common.Hash, state *state.IntraBlockState) error
 	slotNum := num % params.BlockHashHistoryServeWindow
 	storageSlot := common.BytesToHash(uint256.NewInt(slotNum).Bytes())
 	parentHashInt := uint256.NewInt(0).SetBytes32(hash.Bytes())
-	return state.SetState(params.HistoryStorageAddress, storageSlot, *parentHashInt)
+	return state.SetState(params.HistoryStorageAddress, accounts.InternKey(storageSlot), *parentHashInt)
 }

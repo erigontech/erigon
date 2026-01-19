@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -62,7 +63,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		}
 	}
 	if ok {
-		txNumMin, err := api._txNumReader.Min(tx, blockNum)
+		txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err
 		}
@@ -265,6 +266,9 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByBlockNumberAndIndex
 	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
 	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+		}
 		return nil, err
 	}
 
@@ -313,6 +317,9 @@ func (api *APIImpl) GetRawTransactionByBlockNumberAndIndex(ctx context.Context, 
 
 	block, err := api.blockByRPCNumber(ctx, blockNr, tx)
 	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+		}
 		return nil, err
 	}
 	if block == nil {

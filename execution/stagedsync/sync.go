@@ -20,9 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"runtime/debug"
 	"time"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -350,10 +351,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, sd *execctx.SharedDomains, tx kv.Tempo
 
 		stage := s.stages[s.currentStage]
 
-		if string(stage.ID) == dbg.StopBeforeStage() { // stop process for debugging reasons
-			s.logger.Warn("STOP_BEFORE_STAGE env flag forced to stop app")
-			return false, common.ErrStopped
-		}
+		s.checkStopBeforeStage(stage)
 
 		if stage.Disabled || stage.Forward == nil {
 			s.logger.Trace(fmt.Sprintf("%s disabled. %s", stage.ID, stage.DisabledDescription))
@@ -370,10 +368,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, sd *execctx.SharedDomains, tx kv.Tempo
 			hasMore = true
 		}
 
-		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
-			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
-			return false, common.ErrStopped
-		}
+		s.checkStopAfterStage(stage)
 
 		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
 			s.logger.Warn("--sync.loop.break.after caused stage break")
@@ -446,10 +441,7 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.Temporal
 
 		stage := s.stages[s.currentStage]
 
-		if string(stage.ID) == dbg.StopBeforeStage() { // stop process for debugging reasons
-			s.logger.Warn("STOP_BEFORE_STAGE env flag forced to stop app")
-			return false, common.ErrStopped
-		}
+		s.checkStopBeforeStage(stage)
 
 		if stage.Disabled || stage.Forward == nil {
 			s.logger.Trace(fmt.Sprintf("%s disabled. %s", stage.ID, stage.DisabledDescription))
@@ -464,10 +456,7 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.Temporal
 			more = true
 		}
 
-		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
-			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
-			return false, common.ErrStopped
-		}
+		s.checkStopAfterStage(stage)
 
 		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
 			s.logger.Warn("--sync.loop.break.after caused stage break")
@@ -504,13 +493,13 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.Temporal
 }
 
 // RunPrune pruning for stages as per the defined pruning order, if enabled for that stage
-func (s *Sync) RunPrune(db kv.RwDB, tx kv.RwTx, initialCycle bool) error {
+func (s *Sync) RunPrune(ctx context.Context, db kv.RwDB, tx kv.RwTx, initialCycle bool, timeout time.Duration) error {
 	s.timings = s.timings[:0]
 	for i := 0; i < len(s.pruningOrder); i++ {
 		if s.pruningOrder[i] == nil || s.pruningOrder[i].Disabled || s.pruningOrder[i].Prune == nil {
 			continue
 		}
-		if err := s.pruneStage(initialCycle, s.pruningOrder[i], db, tx); err != nil {
+		if err := s.pruneStage(ctx, initialCycle, s.pruningOrder[i], db, tx, timeout); err != nil {
 			return err
 		}
 	}
@@ -521,8 +510,8 @@ func (s *Sync) RunPrune(db kv.RwDB, tx kv.RwTx, initialCycle bool) error {
 	return nil
 }
 
-func (s *Sync) PrintTimings() []interface{} {
-	var logCtx []interface{}
+func (s *Sync) PrintTimings() []any {
+	var logCtx []any
 	count := 0
 	for i := range s.timings {
 		if s.timings[i].took < 100*time.Millisecond {
@@ -533,9 +522,9 @@ func (s *Sync) PrintTimings() []interface{} {
 			break
 		}
 		if s.timings[i].isUnwind {
-			logCtx = append(logCtx, "Unwind "+string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
+			logCtx = append(logCtx, "unwind "+string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
 		} else if s.timings[i].isPrune {
-			logCtx = append(logCtx, "Prune "+string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
+			logCtx = append(logCtx, "prune "+string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
 		} else {
 			logCtx = append(logCtx, string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
 		}
@@ -612,7 +601,7 @@ func (s *Sync) unwindStage(initialCycle bool, stage *Stage, db kv.RwDB, sd *exec
 }
 
 // Run the pruning function for the given stage
-func (s *Sync) pruneStage(initialCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx) error {
+func (s *Sync) pruneStage(ctx context.Context, initialCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx, timeout time.Duration) error {
 	start := time.Now()
 
 	stageState, err := s.StageState(stage.ID, tx, db, initialCycle, false)
@@ -628,7 +617,7 @@ func (s *Sync) pruneStage(initialCycle bool, stage *Stage, db kv.RwDB, tx kv.RwT
 		return err
 	}
 
-	err = stage.Prune(pruneState, tx, s.logger)
+	err = stage.Prune(ctx, pruneState, tx, timeout, s.logger)
 	if err != nil {
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}
@@ -685,5 +674,24 @@ func (s *Sync) MockExecFunc(id stages.SyncStage, f ExecFunc) {
 		if s.stages[i].ID == id {
 			s.stages[i].Forward = f
 		}
+	}
+}
+
+// We're duplicating constants around env naming, and it isn't 100% because there can be ERIGON_
+// prefixing applied in dbg, but this is a minor feature. Abstracted out to avoid drifting on
+// implementation in separate areas.
+
+func (s *Sync) checkStopBeforeStage(stage *Stage) {
+	s.checkStopStage(stage, "STOP_BEFORE_STAGE", dbg.StopBeforeStage())
+}
+func (s *Sync) checkStopAfterStage(stage *Stage) {
+	s.checkStopStage(stage, "STOP_AFTER_STAGE", dbg.StopAfterStage())
+}
+func (s *Sync) checkStopStage(stage *Stage, envName, value string) {
+	if string(stage.ID) == value { // stop process for debugging reasons
+		s.logger.Warn("env flag forced to stop app", "env", envName, "value", value)
+		// None of the wrappers check the stop error reason anymore, and so they ignore this.
+		debug.PrintStack()
+		os.Exit(0)
 	}
 }

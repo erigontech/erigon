@@ -54,7 +54,7 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 }
 
 // Syncing implements eth_syncing. Returns a data object detailing the status of the sync process or false if not syncing.
-func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
+func (api *APIImpl) Syncing(ctx context.Context) (any, error) {
 	reply, err := api.ethBackend.Syncing(ctx)
 	if err != nil {
 		return false, err
@@ -76,7 +76,7 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		stagesMap[i].BlockNumber = hexutil.Uint64(stage.BlockNumber)
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"startingBlock": "0x0", // 0x0 is a placeholder, I do not think it matters what we return here
 		"currentBlock":  hexutil.Uint64(currentBlock),
 		"highestBlock":  hexutil.Uint64(highestBlock),
@@ -211,7 +211,7 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 	}
 	defer tx.Rollback()
 	header := rawdb.ReadCurrentHeader(tx)
-	if header == nil || header.BlobGasUsed == nil {
+	if header == nil || header.ExcessBlobGas == nil {
 		return (*hexutil.Big)(common.Big0), nil
 	}
 	config, err := api.BaseAPI.chainConfig(ctx, tx)
@@ -222,7 +222,7 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 		return (*hexutil.Big)(common.Big0), nil
 	}
 	nextBlockTime := header.Time + config.SecondsPerSlot()
-	ret256, err := misc.GetBlobGasPrice(config, misc.CalcExcessBlobGas(config, header, nextBlockTime), nextBlockTime)
+	ret256, err := misc.GetBlobGasPrice(config, *header.ExcessBlobGas, nextBlockTime)
 	if err != nil {
 		return nil, err
 	}
@@ -341,9 +341,13 @@ func fillForkConfig(chainConfig *chain.Config, forkId [4]byte, activationTime ui
 	precompiles := vm.Precompiles(blockContext.Rules(chainConfig))
 	forkConfig.Precompiles = make(map[string]common.Address, len(precompiles))
 	for addr, precompile := range precompiles {
-		forkConfig.Precompiles[precompile.Name()] = addr
+		forkConfig.Precompiles[precompile.Name()] = addr.Value()
 	}
-	forkConfig.SystemContracts = chainConfig.SystemContracts(activationTime)
+	systemContracts := chainConfig.SystemContracts(activationTime)
+	forkConfig.SystemContracts = make(map[string]common.Address, len(systemContracts))
+	for name, contract := range systemContracts {
+		forkConfig.SystemContracts[name] = contract.Value()
+	}
 	return &forkConfig
 }
 

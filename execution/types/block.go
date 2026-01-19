@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const (
@@ -125,33 +126,22 @@ func (h *Header) EncodingSize() int {
 	encodingSize := 33 /* ParentHash */ + 33 /* UncleHash */ + 21 /* Coinbase */ + 33 /* Root */ + 33 /* TxHash */ +
 		33 /* ReceiptHash */ + 259 /* Bloom */
 
-	encodingSize++
-	if h.Difficulty != nil {
-		encodingSize += rlp.BigIntLenExcludingHead(h.Difficulty)
-	}
-	encodingSize++
-	if h.Number != nil {
-		encodingSize += rlp.BigIntLenExcludingHead(h.Number)
-	}
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(h.GasLimit)
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(h.GasUsed)
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(h.Time)
-	// size of Extra
+	encodingSize += rlp.BigIntLen(h.Difficulty)
+	encodingSize += rlp.BigIntLen(h.Number)
+	encodingSize += rlp.U64Len(h.GasLimit)
+	encodingSize += rlp.U64Len(h.GasUsed)
+	encodingSize += rlp.U64Len(h.Time)
 	encodingSize += rlp.StringLen(h.Extra)
 
 	if len(h.AuRaSeal) != 0 {
-		encodingSize += 1 + rlp.IntLenExcludingHead(h.AuRaStep)
+		encodingSize += rlp.U64Len(h.AuRaStep)
 		encodingSize += rlp.ListPrefixLen(len(h.AuRaSeal)) + len(h.AuRaSeal)
 	} else {
 		encodingSize += 33 /* MixDigest */ + 9 /* BlockNonce */
 	}
 
 	if h.BaseFee != nil {
-		encodingSize++
-		encodingSize += rlp.BigIntLenExcludingHead(h.BaseFee)
+		encodingSize += rlp.BigIntLen(h.BaseFee)
 	}
 
 	if h.WithdrawalsHash != nil {
@@ -159,12 +149,10 @@ func (h *Header) EncodingSize() int {
 	}
 
 	if h.BlobGasUsed != nil {
-		encodingSize++
-		encodingSize += rlp.IntLenExcludingHead(*h.BlobGasUsed)
+		encodingSize += rlp.U64Len(*h.BlobGasUsed)
 	}
 	if h.ExcessBlobGas != nil {
-		encodingSize++
-		encodingSize += rlp.IntLenExcludingHead(*h.ExcessBlobGas)
+		encodingSize += rlp.U64Len(*h.ExcessBlobGas)
 	}
 
 	if h.ParentBeaconBlockRoot != nil {
@@ -816,7 +804,7 @@ func (b *Body) SendersToTxs(senders []common.Address) {
 		return
 	}
 	for i, txn := range b.Transactions {
-		txn.SetSender(senders[i])
+		txn.SetSender(accounts.InternAddress(senders[i]))
 	}
 }
 
@@ -825,7 +813,7 @@ func (b *Body) SendersFromTxs() []common.Address {
 	senders := make([]common.Address, len(b.Transactions))
 	for i, txn := range b.Transactions {
 		if sender, ok := txn.GetSender(); ok {
-			senders[i] = sender
+			senders[i] = sender.Value()
 		}
 	}
 	return senders
@@ -937,11 +925,8 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen, blockAccessListLen int) {
-	baseTxnIDLen := 1 + rlp.IntLenExcludingHead(bfs.BaseTxnID.U64())
-	txCountLen := 1 + rlp.IntLenExcludingHead(uint64(bfs.TxCount))
-
-	payloadSize += baseTxnIDLen
-	payloadSize += txCountLen
+	payloadSize += rlp.U64Len(bfs.BaseTxnID.U64())
+	payloadSize += rlp.U64Len(uint64(bfs.TxCount))
 
 	// size of Uncles
 	unclesLen += EncodingSizeGenericList(bfs.Uncles)
@@ -1184,8 +1169,7 @@ func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, r
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
 func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal, blockAccessList BlockAccessList) *Block {
 	header.hash.Store(&hash)
-	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals}
-	b.SetBlockAccessList(blockAccessList)
+	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals, blockAccessList: blockAccessList}
 	return b
 }
 
@@ -1450,7 +1434,7 @@ func (b *Block) SendersToTxs(senders []common.Address) {
 		return
 	}
 	for i, txn := range b.transactions {
-		txn.SetSender(senders[i])
+		txn.SetSender(accounts.InternAddress(senders[i]))
 	}
 }
 

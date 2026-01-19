@@ -30,7 +30,7 @@ func SetupFlagsAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
 
 	metricsMux.HandleFunc("/flags", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		flags := map[string]interface{}{}
+		flags := map[string]any{}
 
 		ctxFlags := map[string]struct{}{}
 
@@ -60,9 +60,9 @@ func SetupFlagsAccess(ctx *cli.Context, metricsMux *http.ServeMux) {
 			_, inCtx := ctxFlags[name]
 
 			flags[name] = struct {
-				Value   interface{} `json:"value,omitempty"`
-				Usage   string      `json:"usage,omitempty"`
-				Default bool        `json:"default"`
+				Value   any    `json:"value,omitempty"`
+				Usage   string `json:"usage,omitempty"`
+				Default bool   `json:"default"`
 			}{
 				Value:   value,
 				Usage:   usage,

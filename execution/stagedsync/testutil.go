@@ -57,7 +57,7 @@ func generateBlocks2(t *testing.T, from uint64, numberOfBlocks uint64, blockWrit
 		updateIncarnation := difficulty != staticCodeStaticIncarnations && blockNumber%10 == 0
 
 		for i, oldAcc := range testAccounts {
-			addr := common.HexToAddress(fmt.Sprintf("0x1234567890%d", i))
+			addr := accounts.InternAddress(common.HexToAddress(fmt.Sprintf("0x1234567890%d", i)))
 
 			newAcc := oldAcc.SelfCopy()
 			newAcc.Balance.SetUint64(blockNumber)
@@ -74,8 +74,9 @@ func generateBlocks2(t *testing.T, from uint64, numberOfBlocks uint64, blockWrit
 			}
 			if blockNumber == 1 || updateIncarnation || difficulty == changeCodeIndepenentlyOfIncarnations {
 				if newAcc.Incarnation > 0 {
-					code := []byte(fmt.Sprintf("acc-code-%v", blockNumber))
-					codeHash, _ := common.HashData(code)
+					code := fmt.Appendf(nil, "acc-code-%v", blockNumber)
+					codeHashValue, _ := common.HashData(code)
+					codeHash := accounts.InternCodeHash(codeHashValue)
 					if blockNumber >= from {
 						if err := blockWriter.UpdateAccountCode(addr, newAcc.Incarnation, codeHash, code); err != nil {
 							t.Fatal(err)
@@ -91,7 +92,7 @@ func generateBlocks2(t *testing.T, from uint64, numberOfBlocks uint64, blockWrit
 				var location common.Hash
 				location.SetBytes(new(big.Int).SetUint64(blockNumber).Bytes())
 				if blockNumber >= from {
-					if err := blockWriter.WriteAccountStorage(addr, newAcc.Incarnation, location, oldValue, newValue); err != nil {
+					if err := blockWriter.WriteAccountStorage(addr, newAcc.Incarnation, accounts.InternKey(location), oldValue, newValue); err != nil {
 						t.Fatal(err)
 					}
 				}

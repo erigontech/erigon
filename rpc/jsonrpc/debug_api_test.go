@@ -438,7 +438,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 
 		txNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 1024, -1, order.Desc, kv.Unlim)
 		require.NoError(t, err)
-		txNumsIter := rawdbv3.TxNums2BlockNums(tx, rawdbv3.TxNums, txNums, order.Desc)
+		txNumsIter := rawdbv3.TxNums2BlockNums(m.Ctx, tx, rawdbv3.TxNums, txNums, order.Desc)
 		expectTxNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 1024, -1, order.Desc, kv.Unlim)
 		require.NoError(t, err)
 		checkIter(t, expectTxNums, txNumsIter)
@@ -450,7 +450,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 
 		txNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, kv.Unlim)
 		require.NoError(t, err)
-		txNumsIter := rawdbv3.TxNums2BlockNums(tx, rawdbv3.TxNums, txNums, order.Desc)
+		txNumsIter := rawdbv3.TxNums2BlockNums(m.Ctx, tx, rawdbv3.TxNums, txNums, order.Desc)
 		expectTxNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, kv.Unlim)
 		require.NoError(t, err)
 		checkIter(t, expectTxNums, txNumsIter)
@@ -462,7 +462,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 
 		txNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, 2)
 		require.NoError(t, err)
-		txNumsIter := rawdbv3.TxNums2BlockNums(tx, rawdbv3.TxNums, txNums, order.Desc)
+		txNumsIter := rawdbv3.TxNums2BlockNums(m.Ctx, tx, rawdbv3.TxNums, txNums, order.Desc)
 		expectTxNums, err := tx.IndexRange(kv.LogAddrIdx, addr[:], 0, 1024, order.Asc, 2)
 		require.NoError(t, err)
 		checkIter(t, expectTxNums, txNumsIter)
@@ -557,8 +557,8 @@ func TestGetBadBlocks(t *testing.T) {
 		signer1 := types.MakeSigner(chainspec.Mainnet.Config, number, number-1)
 		body := &types.Body{
 			Transactions: []types.Transaction{
-				mustSign(types.NewTransaction(number, testAddr, u256.Num1, 1, u256.Num1, nil), *signer1),
-				mustSign(types.NewTransaction(number+1, testAddr, u256.Num1, 2, u256.Num1, nil), *signer1),
+				mustSign(types.NewTransaction(number, testAddr, &u256.Num1, 1, &u256.Num1, nil), *signer1),
+				mustSign(types.NewTransaction(number+1, testAddr, &u256.Num1, 2, &u256.Num1, nil), *signer1),
 			},
 			Uncles: []*types.Header{{Extra: []byte("test header")}},
 		}

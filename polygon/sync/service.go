@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
@@ -60,7 +61,7 @@ func NewService(
 	blocksVerifier := VerifyBlocks
 	p2pService := polygonp2p.NewService(logger, maxPeers, sentryClient, statusDataProvider.GetStatusData, tmpDir)
 	execution := newExecutionClient(logger, executionClient)
-	signaturesCache, err := lru.NewARC[common.Hash, common.Address](InMemorySignatures)
+	signaturesCache, err := lru.NewARC[common.Hash, accounts.Address](InMemorySignatures)
 	if err != nil {
 		panic(err)
 	}

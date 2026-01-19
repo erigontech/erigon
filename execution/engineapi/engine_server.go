@@ -18,9 +18,11 @@ package engineapi
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -279,10 +282,38 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
 	}
 
+	var blockAccessList types.BlockAccessList
+	var err error
+	if version >= clparams.GloasVersion {
+		if req.BlockAccessList == nil {
+			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
+		}
+		if len(*req.BlockAccessList) == 0 {
+			blockAccessList = nil
+			header.BlockAccessListHash = &empty.BlockAccessListHash
+		} else {
+			blockAccessList, err = types.DecodeBlockAccessListBytes(*req.BlockAccessList)
+			if err != nil {
+				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(*req.BlockAccessList))
+				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList decode: %v", err)}
+			}
+			if err := blockAccessList.Validate(); err != nil {
+				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList validate: %v", err)}
+			}
+			hash := crypto.Keccak256Hash(*req.BlockAccessList)
+			header.BlockAccessListHash = &hash
+		}
+	} else if req.BlockAccessList != nil {
+		return nil, &rpc.InvalidParamsError{Message: "unexpected blockAccessList before Amsterdam"}
+	}
+	log.Debug(fmt.Sprintf("bal from header: %s", blockAccessList.DebugString()))
+
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) ||
 		(!s.config.IsPrague(header.Time) && version >= clparams.ElectraVersion) ||
-		(s.config.IsPrague(header.Time) && version < clparams.ElectraVersion) {
+		(s.config.IsPrague(header.Time) && version < clparams.ElectraVersion) || // osaka has no new newPayload method
+		(!s.config.IsAmsterdam(header.Time) && version >= clparams.GloasVersion) ||
+		(s.config.IsAmsterdam(header.Time) && version < clparams.GloasVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
@@ -357,7 +388,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer s.lock.Unlock()
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
-	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals, nil)
+	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals, blockAccessList)
 
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
 	if err != nil {
@@ -467,14 +498,14 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		if header != nil && isCanonical {
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
-		if shouldWait, _ := waitForStuff(50*time.Millisecond, func() (bool, error) {
+		if shouldWait, _ := waitForResponse(50*time.Millisecond, func() (bool, error) {
 			return parent == nil && s.blockDownloader.Status() == engine_block_downloader.Syncing, nil
 		}); shouldWait {
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	} else {
-		if shouldWait, _ := waitForStuff(50*time.Millisecond, func() (bool, error) {
+		if shouldWait, _ := waitForResponse(50*time.Millisecond, func() (bool, error) {
 			return header == nil && s.blockDownloader.Status() == engine_block_downloader.Syncing, nil
 		}); shouldWait {
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
@@ -488,7 +519,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}
-	waitingForExecutionReady, err := waitForStuff(500*time.Millisecond, func() (bool, error) {
+	waitingForExecutionReady, err := waitForResponse(500*time.Millisecond, func() (bool, error) {
 		isReady, err := s.chainRW.Ready(ctx)
 		return !isReady, err
 	})
@@ -522,13 +553,23 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.logger.Debug("[GetPayload] lock acquired")
-	resp, err := s.executionService.GetAssembledBlock(ctx, &executionproto.GetAssembledBlockRequest{
-		Id: payloadId,
+	var resp *executionproto.GetAssembledBlockResponse
+	var err error
+
+	execBusy, err := waitForResponse(time.Duration(s.config.SecondsPerSlot())*time.Second, func() (bool, error) {
+		resp, err = s.executionService.GetAssembledBlock(ctx, &executionproto.GetAssembledBlockRequest{
+			Id: payloadId,
+		})
+		if err != nil {
+			return false, err
+		}
+		return resp.Busy, nil
 	})
+
 	if err != nil {
 		return nil, err
 	}
-	if resp.Busy {
+	if execBusy {
 		s.logger.Warn("Cannot build payload, execution is busy", "payloadId", payloadId)
 		return nil, &engine_helpers.UnknownPayloadErr
 	}
@@ -554,7 +595,9 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		(!s.config.IsPrague(ts) && version >= clparams.ElectraVersion) ||
 		(s.config.IsPrague(ts) && version < clparams.ElectraVersion) ||
 		(!s.config.IsOsaka(ts) && version >= clparams.FuluVersion) ||
-		(s.config.IsOsaka(ts) && version < clparams.FuluVersion) {
+		(s.config.IsOsaka(ts) && version < clparams.FuluVersion) ||
+		(!s.config.IsAmsterdam(ts) && version >= clparams.GloasVersion) ||
+		(s.config.IsAmsterdam(ts) && version < clparams.GloasVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
@@ -609,7 +652,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	if status == nil {
 		s.logger.Debug("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkchoiceState.HeadHash)
 
-		status, err = s.HandlesForkChoice(ctx, "ForkChoiceUpdated", forkchoiceState)
+		status, err = s.HandleForkChoice(ctx, "ForkChoiceUpdated", forkchoiceState)
 		if err != nil {
 			if errors.Is(err, rules.ErrInvalidBlock) {
 				return &engine_types.ForkChoiceUpdatedResponse{
@@ -679,7 +722,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	var resp *executionproto.AssembleBlockResponse
 	// Wait for the execution service to be ready to assemble a block. Wait a full slot duration (12 seconds) to ensure that the execution service is not busy.
 	// Blocks are important and 0.5 seconds is not enough to wait for the execution service to be ready.
-	execBusy, err := waitForStuff(time.Duration(s.config.SecondsPerSlot())*time.Second, func() (bool, error) {
+	execBusy, err := waitForResponse(time.Duration(s.config.SecondsPerSlot())*time.Second, func() (bool, error) {
 		resp, err = s.executionService.AssembleBlock(ctx, req)
 		if err != nil {
 			return false, err
@@ -756,14 +799,7 @@ func (s *EngineServer) getPayloadBodiesByRange(ctx context.Context, start, count
 func compareCapabilities(from []string, to []string) []string {
 	result := make([]string, 0)
 	for _, f := range from {
-		found := false
-		for _, t := range to {
-			if f == t {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(to, f) {
 			result = append(result, f)
 		}
 	}
@@ -812,7 +848,7 @@ func (e *EngineServer) HandleNewPayload(
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
 			// so that we will perform full validation.
 			var respondSyncing bool
-			if _, _ = waitForStuff(waitTime, func() (bool, error) {
+			if _, _ = waitForResponse(waitTime, func() (bool, error) {
 				status := e.blockDownloader.Status()
 				respondSyncing = status != engine_block_downloader.Synced
 				// no point in waiting if the downloader is no longer syncing (e.g. it's dropped the download request)
@@ -910,7 +946,7 @@ func convertGrpcStatusToEngineStatus(status executionproto.ExecutionStatus) engi
 	panic("giulio u stupid.")
 }
 
-func (e *EngineServer) HandlesForkChoice(
+func (e *EngineServer) HandleForkChoice(
 	ctx context.Context,
 	logPrefix string,
 	forkChoice *engine_types.ForkChoiceState,
@@ -993,17 +1029,36 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 		return nil, nil
 	}
 
-	if version == clparams.FuluVersion {
+	switch version {
+	case clparams.FuluVersion: // GetBlobsV3
 		ret := make([]*engine_types.BlobAndProofV2, len(blobHashes))
 		for i, bwp := range res.BlobsWithProofs {
 			logHead := fmt.Sprintf("\n%x: ", blobHashes[i])
 			if len(bwp.Blob) == 0 {
-				// engine_getblobsv2 MUST return null in case of any missing or older version blobs
+				logLine = append(logLine, logHead, "nil")
+			} else if len(bwp.Proofs) != int(params.CellsPerExtBlob) {
+				logLine = append(logLine, logHead, fmt.Sprintf("pre-Fusaka proofs, len(proof)=%d", len(bwp.Proofs)))
+			} else {
+				ret[i] = &engine_types.BlobAndProofV2{Blob: bwp.Blob, CellProofs: make([]hexutil.Bytes, params.CellsPerExtBlob)}
+				for c := range params.CellsPerExtBlob {
+					ret[i].CellProofs[c] = bwp.Proofs[c]
+				}
+				logLine = append(logLine, logHead, fmt.Sprintf("OK, len(blob)=%d", len(bwp.Blob)))
+			}
+		}
+		e.logger.Debug("[GetBlobsV3]", "Responses", logLine)
+		return ret, nil
+	case clparams.ElectraVersion: // GetBlobsV2
+		ret := make([]*engine_types.BlobAndProofV2, len(blobHashes))
+		for i, bwp := range res.BlobsWithProofs {
+			logHead := fmt.Sprintf("\n%x: ", blobHashes[i])
+			if len(bwp.Blob) == 0 {
+				// engine_getBlobsV2 MUST return null in case of any missing or older version blobs
 				ret = nil
 				logLine = append(logLine, logHead, "nil")
 				break
 			} else if len(bwp.Proofs) != int(params.CellsPerExtBlob) {
-				// engine_getblobsv2 MUST return null in case of any missing or older version blobs
+				// engine_getBlobsV2 MUST return null in case of any missing or older version blobs
 				ret = nil
 				logLine = append(logLine, logHead, fmt.Sprintf("pre-Fusaka proofs, len(proof)=%d", len(bwp.Proofs)))
 				break
@@ -1017,7 +1072,7 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 		}
 		e.logger.Debug("[GetBlobsV2]", "Responses", logLine)
 		return ret, nil
-	} else if version == clparams.DenebVersion {
+	case clparams.DenebVersion: // GetBlobsV1
 		ret := make([]*engine_types.BlobAndProofV1, len(blobHashes))
 		for i, bwp := range res.BlobsWithProofs {
 			logHead := fmt.Sprintf("\n%x: ", blobHashes[i])
@@ -1032,11 +1087,12 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 		}
 		e.logger.Debug("[GetBlobsV1]", "Responses", logLine)
 		return ret, nil
+	default:
+		return nil, nil
 	}
-	return nil, nil
 }
 
-func waitForStuff(maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {
+func waitForResponse(maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {
 	shouldWait, err := waitCondnF()
 	if err != nil || !shouldWait {
 		return false, err

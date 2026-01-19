@@ -64,10 +64,7 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 	if executionAt, err = s.ExecutionAt(tx); err != nil {
 		return err
 	}
-	if s.BlockNumber > executionAt { // Erigon will self-heal (download missed blocks) eventually
-		return nil
-	}
-	if executionAt <= s.BlockNumber {
+	if s.BlockNumber >= executionAt { // Erigon will self-heal (download missed blocks) eventually
 		return nil
 	}
 

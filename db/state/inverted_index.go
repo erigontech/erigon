@@ -106,7 +106,7 @@ func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize, stepsInFrozenFile uint64
 		InvIdxCfg:  cfg,
 		dirs:       dirs,
 		salt:       &atomic.Pointer[uint32]{},
-		dirtyFiles: btree2.NewBTreeGOptions[*FilesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		dirtyFiles: btree2.NewBTreeGOptions(filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		_visible:   newIIVisible(cfg.FilenameBase, []visibleFile{}),
 		logger:     logger,
 
@@ -612,7 +612,7 @@ func (iit *InvertedIndexRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc
 	if err != nil {
 		return nil, err
 	}
-	return stream.Union[uint64](frozenIt, recentIt, asc, limit), nil
+	return stream.Union(frozenIt, recentIt, asc, limit), nil
 }
 
 func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
@@ -715,7 +715,10 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 }
 
 func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
-	return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum()
+	if min := iit.ii.minTxNumInDB(tx); min == 0 || min < iit.files.EndTxNum() {
+		return true
+	}
+	return false
 }
 
 func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool { //nolint
@@ -757,7 +760,7 @@ func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
 	is.PruneCountValues += other.PruneCountValues
 }
 
-func (iit *InvertedIndexRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) error {
+func (iit *InvertedIndexRoTx) unwind(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, _ bool, fn func(key []byte, txnum []byte) error) error {
 	_, err := iit.prune(ctx, rwTx, txFrom, txTo, limit, logEvery, fn)
 	if err != nil {
 		return err
@@ -814,7 +817,7 @@ func (iit *InvertedIndexRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, t
 	collector := etl.NewCollectorWithAllocator(ii.FilenameBase+".prune.ii", ii.dirs.Tmp, etl.SmallSortableBuffers, ii.logger)
 	defer collector.Close()
 	collector.LogLvl(log.LvlTrace)
-	collector.SortAndFlushInBackground(true)
+	collector.SortAndFlushInBackground(false)
 
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
@@ -1177,16 +1180,16 @@ func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(tx, ii.KeysTable)
 	if len(fst) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
-		return min(fstInDb, math.MaxUint64)
+		return fstInDb
 	}
-	return math.MaxUint64
+	return 0
 }
 
 func (ii *InvertedIndex) maxTxNumInDB(tx kv.Tx) uint64 {
 	lst, _ := kv.LastKey(tx, ii.KeysTable)
 	if len(lst) > 0 {
 		lstInDb := binary.BigEndian.Uint64(lst)
-		return max(lstInDb, 0)
+		return lstInDb
 	}
 	return 0
 }

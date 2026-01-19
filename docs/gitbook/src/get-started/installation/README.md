@@ -89,8 +89,8 @@ docker run -it erigontech/erigon:v3.2.2 --chain=hoodi --prune.mode=minimal --dat
 
 * `-v` connects a folder on your computer to the container (must have authorization)
 * `-it` lets you see what's happening and interact with Erigon
-* `--chain=hoodi` specifies which [network](../fundamentals/supported-networks.md) to sync
-* `--prune.mode=minimal` tells Erigon to use minimal [Sync Mode](../fundamentals/sync-modes.md)
+* `--chain=hoodi` specifies which [network](../../fundamentals/supported-networks.md) to sync
+* `--prune.mode=minimal` tells Erigon to use minimal [Sync Mode](../../fundamentals/sync-modes.md)
 * `--datadir` tells Erigon where to store data inside the container
 
 </details>

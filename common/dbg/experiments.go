@@ -27,6 +27,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unique"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/estimate"
@@ -97,6 +98,8 @@ var (
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
+
+	RpcDropResponse = EnvBool("RPC_DROP_RESPONSE", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {
@@ -279,7 +282,7 @@ func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOpt
 var tracedBlocks map[uint64]struct{}
 var traceAllBlocks bool
 var tracedTxIndexes map[int64]struct{}
-var tracedAccounts map[common.Address]struct{}
+var tracedAccounts map[unique.Handle[common.Address]]struct{}
 var traceAllDomains bool
 var tracedDomains map[uint16]struct{}
 
@@ -297,10 +300,10 @@ func initTraceMaps() {
 	for _, index := range TraceTxIndexes {
 		tracedTxIndexes[index] = struct{}{}
 	}
-	tracedAccounts = map[common.Address]struct{}{}
+	tracedAccounts = map[unique.Handle[common.Address]]struct{}{}
 	for _, account := range TraceAccounts {
 		account, _ = strings.CutPrefix(strings.ToLower(account), "Ox")
-		tracedAccounts[common.HexToAddress(account)] = struct{}{}
+		tracedAccounts[unique.Make(common.HexToAddress(account))] = struct{}{}
 	}
 	if len(traceDomains) == 1 &&
 		(strings.EqualFold(traceDomains[0], "all") || strings.EqualFold(traceDomains[0], "any") ||
@@ -369,7 +372,7 @@ func TraceTx(blockNum uint64, txIndex int) bool {
 	return true
 }
 
-func TraceAccount(addr common.Address) bool {
+func TraceAccount(addr unique.Handle[common.Address]) bool {
 	traceInit.Do(initTraceMaps)
 	if len(tracedAccounts) != 0 {
 		_, ok := tracedAccounts[addr]

@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/shards"
@@ -100,7 +101,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, nil
 	}
 
-	txNumMin, err := api._txNumReader.Min(tx, blockNumber)
+	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +233,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	for _, r := range rewards {
 		var tr ParityTrace
 		rewardAction := &RewardTraceAction{}
-		rewardAction.Author = r.Beneficiary
+		rewardAction.Author = r.Beneficiary.Value()
 		rewardAction.RewardType = rewardKindToString(r.Kind)
 		rewardAction.Value.ToInt().Set(r.Amount.ToBig())
 		tr.Action = rewardAction
@@ -317,6 +318,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	} else {
 		fromBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.FromBlock, dbtx, api._blockReader, api.filters)
 		if err != nil {
+			if errors.As(err, &rpc.BlockNotFoundErr{}) {
+				stream.WriteEmptyArray()
+				return nil // waiting for spec: not error for historical reasons
+			}
 			return err
 		}
 	}
@@ -330,6 +335,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	} else {
 		toBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.ToBlock, dbtx, api._blockReader, api.filters)
 		if err != nil {
+			if errors.As(err, &rpc.BlockNotFoundErr{}) {
+				stream.WriteEmptyArray()
+				return nil // waiting for spec: not error for historical reasons
+			}
 			return err
 		}
 	}
@@ -345,12 +354,12 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var err error
 
 	if fromBlock > 0 {
-		fromTxNum, err = api._txNumReader.Min(dbtx, fromBlock)
+		fromTxNum, err = api._txNumReader.Min(ctx, dbtx, fromBlock)
 		if err != nil {
 			return err
 		}
 	}
-	toTxNum, err = api._txNumReader.Max(dbtx, toBlock) // toBlock is an inclusive bound
+	toTxNum, err = api._txNumReader.Max(ctx, dbtx, toBlock) // toBlock is an inclusive bound
 	if err != nil {
 		return err
 	}
@@ -359,7 +368,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	if err != nil {
 		return err
 	}
-	it := rawdbv3.TxNums2BlockNums(dbtx, api._txNumReader, allTxs, order.Asc)
+	it := rawdbv3.TxNums2BlockNums(ctx, dbtx, api._txNumReader, allTxs, order.Asc)
 	defer it.Close()
 
 	chainConfig, err := api.chainConfig(ctx, dbtx)
@@ -391,8 +400,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var lastSigner *types.Signer
 	var lastRules *chain.Rules
 
-	stateReader := state.NewHistoryReaderV3()
-	stateReader.SetTx(dbtx)
 	noop := state.NewNoopWriter()
 	isPos := false
 	for it.HasNext() {
@@ -582,12 +589,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			continue
 		}
 
-		stateReader.SetTxNum(txNum)
 		stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
-		cachedReader := state.NewCachedReader(stateReader, stateCache)
-		//cachedReader := stateReader
+		cachedReader := state.NewCachedReader(state.NewHistoryReaderV3(dbtx, txNum), stateCache)
 		cachedWriter := state.NewCachedWriter(noop, stateCache)
-		//cachedWriter := noop
 
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
 		var ot OeTracer
@@ -780,7 +784,7 @@ func (api *TraceAPIImpl) callBlock(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 
-	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
+	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, nil)
 	logger := log.New("trace_filtering")
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, ibs, nil, logger, nil)
 	if err != nil {
@@ -823,7 +827,7 @@ func (api *TraceAPIImpl) callBlock(
 		return nil, nil, cmErr
 	}
 
-	syscall := func(contract common.Address, data []byte) ([]byte, error) {
+	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		ret, err := protocol.SysCallContract(contract, data, cfg, ibs, header, engine, false /* constCall */, vm.Config{})
 		return ret, err
 	}
@@ -894,7 +898,7 @@ func (api *TraceAPIImpl) callTransaction(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 
-	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, nil, nil)
+	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, nil)
 	logger := log.New("trace_filtering")
 	err = protocol.InitializeBlockExecution(engine.(protocolrules.Engine), consensusHeaderReader, header, cfg, ibs, nil, logger, nil)
 	if err != nil {

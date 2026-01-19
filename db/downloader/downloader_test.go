@@ -18,40 +18,77 @@ package downloader
 
 import (
 	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
-func TestChangeInfoHashOfSameFile(t *testing.T) {
+func TestConcurrentDownload(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please")
+		t.Skip("copied from TestChangeInfoHashOfSameFile")
 	}
 
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
 	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
 	require.NoError(err)
-	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
+	d, err := New(context.Background(), cfg, log.New())
 	require.NoError(err)
 	defer d.Close()
-	err = d.RequestSnapshot(snaptype.Hex2InfoHash("aa"), "a.seg")
+	const conc = 2
+	waits := make(chan func(ctx context.Context) error, conc)
+	g, ctx := errgroup.WithContext(t.Context())
+	for range conc {
+		g.Go(func() error {
+			wait, err := d.testStartSingleDownload(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
+			if err != nil {
+				return err
+			}
+			waits <- wait
+			return nil
+		})
+	}
+	require.NoError(g.Wait())
+	close(waits)
+	d.Close()
+	for w := range waits {
+		// Make sure we don't get stuck. The torrents shouldn't exist, and the Downloader is closed.
+		w(t.Context())
+	}
+}
+
+func TestChangeInfoHashOfSameFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
+
+	ctx := t.Context()
+	require := require.New(t)
+	dirs := datadir.New(t.TempDir())
+	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
+	require.NoError(err)
+	d, err := New(context.Background(), cfg, log.New())
+	require.NoError(err)
+	defer d.Close()
+	err = d.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
 	require.NoError(err)
 	tt, ok := d.torrentClient.Torrent(snaptype.Hex2InfoHash("aa"))
 	require.True(ok)
 	require.Equal("a.seg", tt.Name())
 
 	// adding same file twice is ok
-	err = d.RequestSnapshot(snaptype.Hex2InfoHash("aa"), "a.seg")
+	err = d.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
 	require.NoError(err)
 
 	// adding same file with another infoHash - is ok, must be skipped
@@ -59,7 +96,7 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 	//	- release of re-compressed version of same file,
 	//	- ErigonV1.24 produced file X, then ErigonV1.25 released with new compression algorithm and produced X with anouther infoHash.
 	//		ErigonV1.24 node must keep using existing file instead of downloading new one.
-	err = d.RequestSnapshot(snaptype.Hex2InfoHash("bb"), "a.seg")
+	err = d.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("bb"), "a.seg")
 	// I'm not sure if this is a good idea.
 	//require.Error(err)
 	_ = err
@@ -69,41 +106,71 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 }
 
 func TestNoEscape(t *testing.T) {
-	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
 	ctx := context.Background()
 
 	tf := NewAtomicTorrentFS(dirs.Snap)
 	// allow adding files only if they are inside snapshots dir
 	_, err := BuildTorrentIfNeed(ctx, "a.seg", dirs.Snap, tf)
-	require.NoError(err)
+	assert.ErrorIs(t, err, fs.ErrNotExist)
 	_, err = BuildTorrentIfNeed(ctx, "b/a.seg", dirs.Snap, tf)
-	require.NoError(err)
+	assert.ErrorIs(t, err, fs.ErrNotExist)
 	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "a.seg"), dirs.Snap, tf)
-	require.NoError(err)
+	assert.ErrorIs(t, err, fs.ErrNotExist)
 	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "b", "a.seg"), dirs.Snap, tf)
-	require.NoError(err)
+	assert.ErrorIs(t, err, fs.ErrNotExist)
 
 	// reject escaping snapshots dir
 	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Chaindata, "b", "a.seg"), dirs.Snap, tf)
-	require.Error(err)
+	assert.NotErrorIs(t, err, fs.ErrNotExist)
 	_, err = BuildTorrentIfNeed(ctx, "./../a.seg", dirs.Snap, tf)
-	require.Error(err)
+	assert.NotErrorIs(t, err, fs.ErrNotExist)
+}
+
+func TestVerifyDataNoTorrents(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
+	require := require.New(t)
+	dirs := datadir.New(t.TempDir())
+	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
+	require.NoError(err)
+	d, err := New(context.Background(), cfg, log.New())
+	require.NoError(err)
+	defer d.Close()
+	err = d.VerifyData(d.ctx, nil, false)
+	require.NoError(err)
 }
 
 func TestVerifyData(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please")
 	}
-
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
 	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
 	require.NoError(err)
-	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
+	d, err := New(context.Background(), cfg, log.New())
 	require.NoError(err)
 	defer d.Close()
+	os.WriteFile(filepath.Join(dirs.Snap, "a"), nil, 0o444)
+	err = d.AddNewSeedableFile(t.Context(), "a")
+	require.NoError(err)
+	err = d.VerifyData(d.ctx, nil, false)
+	require.NoError(err)
+}
 
+func TestVerifyDataDownloaderClosed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
+	require := require.New(t)
+	dirs := datadir.New(t.TempDir())
+	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
+	require.NoError(err)
+	d, err := New(context.Background(), cfg, log.New())
+	require.NoError(err)
+	d.Close()
 	err = d.VerifyData(d.ctx, nil, false)
 	require.NoError(err)
 }
@@ -119,65 +186,76 @@ func TestAddDel(t *testing.T) {
 
 	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
 	require.NoError(err)
-	d, err := New(context.Background(), cfg, log.New(), log.LvlInfo)
+	d, err := New(context.Background(), cfg, log.New())
 	require.NoError(err)
 	defer d.Close()
+
+	// In the following tests we use combinations of f1Abs, f1, f2, and f1BadAbs. Absolute file
+	// paths are allowed to calls to RpcClient if they're local to the SnapDir, it does the required
+	// conversion. This is the behaviour consumers will see.
 
 	f1Abs := filepath.Join(dirs.Snap, "a.seg")      // block file
 	f2Abs := filepath.Join(dirs.SnapDomain, "a.kv") // state file
 	_, _ = os.Create(f1Abs)
-	_, _ = os.Create(f2Abs)
+	require.NoError(os.WriteFile(f2Abs, []byte("a.kv"), 0o666))
 
-	srever, _ := NewGrpcServer(d)
-	// Add: epxect relative paths
-	_, err = srever.Add(ctx, &downloaderproto.AddRequest{Items: []*downloaderproto.AddItem{{Path: f1Abs}}})
-	require.Error(err)
-	_, err = srever.Add(ctx, &downloaderproto.AddRequest{Items: []*downloaderproto.AddItem{{Path: f2Abs}}})
-	require.Error(err)
+	// Create a second datadir, not relative to the one the Downloader expects.
+	invalidDirs := datadir.New(t.TempDir())
+	// Mixed and matched with f1Abs, which is now allowed but heavily warned against.
+	f1BadAbs := filepath.Join(invalidDirs.Snap, "a.seg")
+
+	grpcServer, _ := NewGrpcServer(d)
+
+	server := NewRpcClient(DirectGrpcServerClient(grpcServer), dirs.Snap)
+
+	// So... errors.AsType is coming.
+	var errRpcSnapName errRpcSnapName
+
+	// Add: expect relative paths
+	err = server.Seed(ctx, []string{f1BadAbs})
+	require.ErrorAs(err, &errRpcSnapName)
 	require.Equal(0, len(d.torrentClient.Torrents()))
 
 	f1, _ := filepath.Rel(dirs.Snap, f1Abs)
 	f2, _ := filepath.Rel(dirs.Snap, f2Abs)
-	_, err = srever.Add(ctx, &downloaderproto.AddRequest{Items: []*downloaderproto.AddItem{{Path: f1}}})
+	err = server.Seed(ctx, []string{f1Abs})
 	require.NoError(err)
-	_, err = srever.Add(ctx, &downloaderproto.AddRequest{Items: []*downloaderproto.AddItem{{Path: f2}}})
+	err = server.Seed(ctx, []string{f2})
 	require.NoError(err)
 	require.Equal(2, len(d.torrentClient.Torrents()))
 
 	// add idempotency
-	_, err = srever.Add(ctx, &downloaderproto.AddRequest{Items: []*downloaderproto.AddItem{{Path: f1}}})
+	err = server.Seed(ctx, []string{f1})
 	require.NoError(err)
-	_, err = srever.Add(ctx, &downloaderproto.AddRequest{Items: []*downloaderproto.AddItem{{Path: f2}}})
+	err = server.Seed(ctx, []string{f2})
 	require.NoError(err)
 	require.Equal(2, len(d.torrentClient.Torrents()))
 
-	// Del: epxect relative paths
-	_, err = srever.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1Abs}})
-	require.Error(err)
-	_, err = srever.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f2Abs}})
-	require.Error(err)
+	// Del: expect relative paths
+	err = server.Delete(ctx, []string{f1BadAbs})
+	require.ErrorAs(err, &errRpcSnapName)
 	require.Equal(2, len(d.torrentClient.Torrents()))
 
 	// Del: idempotency
-	_, err = srever.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1}})
+	err = server.Delete(ctx, []string{f1Abs})
 	require.NoError(err)
 	require.Equal(1, len(d.torrentClient.Torrents()))
-	_, err = srever.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1}})
+	err = server.Delete(ctx, []string{f1})
 	require.NoError(err)
 	require.Equal(1, len(d.torrentClient.Torrents()))
 
-	_, err = srever.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f2}})
+	err = server.Delete(ctx, []string{f2})
 	require.NoError(err)
 	require.Equal(0, len(d.torrentClient.Torrents()))
-	_, err = srever.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f2}})
+	err = server.Delete(ctx, []string{f2})
 	require.NoError(err)
 	require.Equal(0, len(d.torrentClient.Torrents()))
 
 	// Batch
-	_, err = srever.Add(ctx, &downloaderproto.AddRequest{Items: []*downloaderproto.AddItem{{Path: f1}, {Path: f2}}})
+	err = server.Seed(ctx, []string{f1, f2})
 	require.NoError(err)
 	require.Equal(2, len(d.torrentClient.Torrents()))
-	_, err = srever.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{f1, f2}})
+	err = server.Delete(ctx, []string{f1Abs, f2})
 	require.NoError(err)
 	require.Equal(0, len(d.torrentClient.Torrents()))
 

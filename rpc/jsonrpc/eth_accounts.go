@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 
@@ -26,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
@@ -43,8 +43,7 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 	if err != nil {
 		return nil, err
 	}
-
-	acc, err := reader.ReadAccountData(address)
+	acc, err := reader.ReadAccountData(accounts.InternAddress(address))
 	if err != nil {
 		return nil, fmt.Errorf("cant get a balance for account %x: %w", address.String(), err)
 	}
@@ -80,7 +79,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 		return nil, err
 	}
 	nonce := hexutil.Uint64(0)
-	acc, err := reader.ReadAccountData(address)
+	acc, err := reader.ReadAccountData(accounts.InternAddress(address))
 	if acc == nil || err != nil {
 		return &nonce, err
 	}
@@ -99,11 +98,12 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 		return nil, err
 	}
 
-	acc, err := reader.ReadAccountData(address)
+	addr := accounts.InternAddress(address)
+	acc, err := reader.ReadAccountData(addr)
 	if acc == nil || err != nil || acc.IsEmptyCodeHash() {
 		return hexutil.Bytes(""), nil
 	}
-	res, _ := reader.ReadAccountCode(address)
+	res, _ := reader.ReadAccountCode(addr)
 	if res == nil {
 		return hexutil.Bytes(""), nil
 	}
@@ -117,10 +117,10 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	// Waiting for a spec, we choose the latter because it's more general, but we check that the length is not greater than 64 hex-digits.
 	indexBytes, err := hexutil.FromHexWithValidation(index)
 	if err != nil {
-		return "", errors.New("unable to decode storage key: " + hexutil.ErrHexStringInvalid.Error())
+		return "", &rpc.InvalidParamsError{Message: "unable to decode storage key: " + hexutil.ErrHexStringInvalid.Error()}
 	}
 	if len(indexBytes) > 32 {
-		return "", hexutil.ErrTooBigHexString
+		return "", &rpc.InvalidParamsError{Message: hexutil.ErrTooBigHexString.Error()}
 	}
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -132,13 +132,15 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	if err != nil {
 		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
 	}
-	acc, err := reader.ReadAccountData(address)
+
+	addr := accounts.InternAddress(address)
+	acc, err := reader.ReadAccountData(addr)
 	if acc == nil || err != nil {
 		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
 	}
 
-	location := common.HexToHash(index)
-	res, _, err := reader.ReadAccountStorage(address, location)
+	location := accounts.InternKey(common.HexToHash(index))
+	res, _, err := reader.ReadAccountStorage(addr, location)
 	if err != nil {
 		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
 	}
@@ -157,7 +159,7 @@ func (api *APIImpl) Exist(ctx context.Context, address common.Address, blockNrOr
 	if err != nil {
 		return false, err
 	}
-	acc, err := reader.ReadAccountData(address)
+	acc, err := reader.ReadAccountData(accounts.InternAddress(address))
 	if err != nil {
 		return false, err
 	}

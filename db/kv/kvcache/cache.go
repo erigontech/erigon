@@ -141,6 +141,9 @@ type CoherentView struct {
 func (c *CoherentView) Get(k []byte) ([]byte, error) {
 	return c.cache.Get(k, c.tx, c.stateVersionID)
 }
+func (c *CoherentView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return nil, false, nil
+}
 func (c *CoherentView) GetCode(k []byte) ([]byte, error) {
 	return c.cache.GetCode(k, c.tx, c.stateVersionID)
 }
@@ -172,6 +175,7 @@ type CoherentConfig struct {
 	MetricsLabel    string
 	NewBlockWait    time.Duration // how long wait
 	KeepViews       uint64        // keep in memory up to this amount of views, evict older
+	LocalCache      Cache
 }
 
 var DefaultCoherentConfig = CoherentConfig{
@@ -218,8 +222,8 @@ func (c *Coherent) selectOrCreateRoot(versionID uint64) *CoherentRoot {
 
 	r = &CoherentRoot{
 		ready:     make(chan struct{}),
-		cache:     btree2.NewBTreeG[*Element](Less),
-		codeCache: btree2.NewBTreeG[*Element](Less),
+		cache:     btree2.NewBTreeG(Less),
+		codeCache: btree2.NewBTreeG(Less),
 	}
 	c.roots[versionID] = r
 	return r
@@ -248,8 +252,8 @@ func (c *Coherent) advanceRoot(stateVersionID uint64) (r *CoherentRoot) {
 		c.codeEvict.Init()
 		if r.cache == nil {
 			//log.Info("advance: new", "to", viewID)
-			r.cache = btree2.NewBTreeG[*Element](Less)
-			r.codeCache = btree2.NewBTreeG[*Element](Less)
+			r.cache = btree2.NewBTreeG(Less)
+			r.codeCache = btree2.NewBTreeG(Less)
 		} else {
 			r.cache.Walk(func(items []*Element) bool {
 				for _, i := range items {

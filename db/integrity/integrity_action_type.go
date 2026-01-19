@@ -32,6 +32,7 @@ const (
 	CommitmentRoot     Check = "CommitmentRoot"
 	CommitmentKvi      Check = "CommitmentKvi"
 	CommitmentKvDeref  Check = "CommitmentKvDeref"
+	CommitmentHistVal  Check = "CommitmentHistVal"
 	StateProgress      Check = "StateProgress" // state files is not ahead of blocks files
 	Publishable        Check = "Publishable"
 )
@@ -43,4 +44,4 @@ var AllChecks = []Check{
 	Publishable,
 }
 
-var NonDefaultChecks = []Check{}
+var NonDefaultChecks = []Check{CommitmentHistVal}
