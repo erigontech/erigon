@@ -106,4 +106,20 @@ be extracted.
 
 ## Comparing runs
 
-TODO: add section on comparing different runs
+To compare the results of several backtest runs we can use the backtester comparison command:
+
+```
+backtest-commitment compare-runs \
+--run-output-dirs \
+/results/hph_nowarm_1752740_1752747_1768799062,\
+/results/hph_warm_1752740_1752747_1768799942,\
+/results/para_nowarm_1752740_1752747_1768799778 \
+--output-dir /results/comparison-results \
+--log.console.verbosity=debug
+```
+
+The output will be a single HTML page with charts comparing the results of all the provided runs that looks like this:
+![](examples/comparison_page.png)
+
+You can navigate to the more detailed overview pages of each run by clicking on the line chart points itself or using
+the overview pages catalogue at the bottom.
