@@ -22,6 +22,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -108,7 +109,7 @@ type (
 	CanTransferFunc func(IntraBlockState, accounts.Address, uint256.Int) (bool, error)
 
 	// TransferFunc is the signature of a transfer function
-	TransferFunc func(IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool) error
+	TransferFunc func(IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error
 
 	// GetHashFunc returns the nth block hash in the blockchain
 	// and is used by the BLOCKHASH EVM op code.

@@ -1286,7 +1286,7 @@ func (c *Bor) CommitStates(
 }
 
 // BorTransfer transfer in Bor
-func BorTransfer(db evmtypes.IntraBlockState, sender, recipient accounts.Address, amount uint256.Int, bailout bool) error {
+func BorTransfer(db evmtypes.IntraBlockState, sender, recipient accounts.Address, amount uint256.Int, bailout bool, cr *chain.Rules) error {
 	// get inputs before
 	input1, err := db.GetBalance(sender)
 	if err != nil {
@@ -1297,7 +1297,7 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient accounts.Address
 		return err
 	}
 
-	rules.Transfer(db, sender, recipient, amount, bailout)
+	misc.Transfer(db, sender, recipient, amount, bailout, cr)
 
 	output1, err := db.GetBalance(sender)
 	if err != nil {

@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -1293,7 +1294,17 @@ func opSelfdestruct6780(pc uint64, interpreter *EVMInterpreter, scope *CallConte
 	}
 	interpreter.evm.IntraBlockState().SubBalance(callerAddr, balance, tracing.BalanceDecreaseSelfdestruct)
 	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
-	interpreter.evm.IntraBlockState().Selfdestruct6780(callerAddr)
+	newlyCreated, err := interpreter.evm.IntraBlockState().Selfdestruct6780(callerAddr)
+	if err != nil {
+		return pc, nil, err
+	}
+	if interpreter.evm.ChainRules().IsAmsterdam && !balance.IsZero() {
+		if callerAddr != beneficiaryAddr {
+			interpreter.evm.IntraBlockState().AddLog(misc.EthTransferLog(callerAddr, beneficiaryAddr, balance))
+		} else if newlyCreated {
+			interpreter.evm.IntraBlockState().AddLog(misc.EthTransferLog(callerAddr, accounts.ZeroAddress, balance))
+		}
+	}
 	if interpreter.evm.Config().Tracer != nil && interpreter.evm.Config().Tracer.OnEnter != nil {
 		interpreter.cfg.Tracer.OnEnter(interpreter.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, 0, balance, nil)
 	}

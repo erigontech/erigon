@@ -232,6 +232,13 @@ var (
 	ConsolidationRequestAddress = accounts.InternAddress(common.HexToAddress("0x0000BBdDc7CE488642fb579F8B00f3a590007251"))
 )
 
+// System log events
+var (
+	// EIP-7708 - System logs emitted for ETH transfer and self-destruct balance burn
+	EthTransferLogEvent     = common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef") // keccak256('Transfer(address,address,uint256)')
+	EthSelfDestructLogEvent = common.HexToHash("0x4bfaba3443c1a1836cd362418edc679fc96cae8449cbefccb6457cdf2c943083") // keccak256('Selfdestruct(address,uint256)')
+)
+
 // Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations
 var Bls12381MSMDiscountTableG1 = [128]uint64{1000, 949, 848, 797, 764, 750, 738, 728, 719, 712, 705, 698, 692, 687, 682, 677, 673, 669, 665, 661, 658, 654, 651, 648, 645, 642, 640, 637, 635, 632, 630, 627, 625, 623, 621, 619, 617, 615, 613, 611, 609, 608, 606, 604, 603, 601, 599, 598, 596, 595, 593, 592, 591, 589, 588, 586, 585, 584, 582, 581, 580, 579, 577, 576, 575, 574, 573, 572, 570, 569, 568, 567, 566, 565, 564, 563, 562, 561, 560, 559, 558, 557, 556, 555, 554, 553, 552, 551, 550, 549, 548, 547, 547, 546, 545, 544, 543, 542, 541, 540, 540, 539, 538, 537, 536, 536, 535, 534, 533, 532, 532, 531, 530, 529, 528, 528, 527, 526, 525, 525, 524, 523, 522, 522, 521, 520, 520, 519}
 

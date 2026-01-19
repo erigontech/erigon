@@ -87,7 +87,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		transferFunc = engine.GetTransferFunc()
 		postApplyMessageFunc = engine.GetPostApplyMessageFunc()
 	} else {
-		transferFunc = rules.Transfer
+		transferFunc = misc.Transfer
 		postApplyMessageFunc = nil
 	}
 	blockContext := evmtypes.BlockContext{
