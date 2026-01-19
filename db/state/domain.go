@@ -1787,6 +1787,7 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 		mxPrunableDComm.Set(delta)
 	}
 	fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.FilenameBase, minStep, maxStepToPrune, untilStep)
+	println(done)
 	return minStep <= min(maxStepToPrune, untilStep) && dt.files.EndTxNum() > 0 || !done, maxStepToPrune
 }
 
@@ -1834,6 +1835,24 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 	} else {
 		dc.History.Accumulate(other.History)
 	}
+}
+
+func (dt *DomainRoTx) OldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
+	if dt.files.EndTxNum() > 0 {
+		txTo = min(txTo, dt.files.EndTxNum())
+	}
+	err = SavePruneValProgress(rwTx, dt.d.ValuesTable, &prune.Stat{
+		LastPrunedValue: nil,
+		LastPrunedKey:   nil,
+		KeyProgress:     prune.Done,
+		ValueProgress:   prune.Done,
+		TxFrom:          txFrom,
+		TxTo:            txTo,
+	})
+	if err != nil {
+		dt.d.logger.Error("prune val progress", "name", dt.name, "err", err)
+	}
+	return dt.oldPrune(ctx, rwTx, step, txFrom, txTo, limit, logEvery)
 }
 
 func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
