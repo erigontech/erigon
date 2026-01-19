@@ -13,8 +13,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -48,9 +46,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 	havePartialBlock := false
 	blockNum := startBlockNum
-	computeCommitmentDuration := time.Duration(0)
 
-	var uncommitedGas uint64
 	var b *types.Block
 
 	lastFrozenStep := se.applyTx.StepsInFiles(kv.CommitmentDomain)
@@ -64,7 +60,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		log.Info(fmt.Sprintf("[%s] serial starting", execStage.LogPrefix()),
 			"from", blockNum, "to", maxBlockNum, "limit", blockNum+blockLimit-1, "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "lastFrozenStep", lastFrozenStep,
-			"initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", se.inMemExec)
+			"initialCycle", initialCycle, "useExternalTx", useExternalTx, "isForkValidation", se.isForkValidation, "isBlockProduction", se.isBlockProduction)
 	}
 
 	for ; blockNum <= maxBlockNum; blockNum++ {
@@ -142,14 +138,11 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			return nil, rwTx, err
 		}
 
-		uncommitedGas = uint64(se.executedGas.Load() - int64(se.committedGas))
-
 		if !continueLoop {
 			return b.HeaderNoCopy(), rwTx, nil
 		}
 
 		if !dbg.BatchCommitments || shouldGenerateChangesets || se.cfg.syncCfg.KeepExecutionProofs {
-			start := time.Now()
 			if dbg.TraceBlock(blockNum) {
 				fmt.Println(blockNum, "Commitment")
 				se.doms.SetTrace(true, false)
@@ -162,18 +155,12 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				return nil, rwTx, err
 			}
 
-			computeCommitmentDuration += time.Since(start)
 			if shouldGenerateChangesets {
 				se.doms.SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)
-				if !se.inMemExec {
-					if err := changeset.WriteDiffSet(rwTx, blockNum, b.Hash(), changeSet); err != nil {
-						return nil, rwTx, err
-					}
-				}
 			}
 			se.doms.SetChangesetAccumulator(nil)
 
-			if !se.isMining && !bytes.Equal(rh, header.Root.Bytes()) {
+			if !se.isBlockProduction && !bytes.Equal(rh, header.Root.Bytes()) {
 				se.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", se.logPrefix, header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
 				return b.HeaderNoCopy(), rwTx, fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNum)
 			}
@@ -191,7 +178,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		select {
 		case <-logEvery.C:
-			if se.isMining {
+			if !se.isApplyingBlocks {
 				break
 			}
 
@@ -219,12 +206,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 			resetExecGauges(ctx)
 
-			var (
-				commitStart   = time.Now()
-				pruneDuration time.Duration
-			)
-
-			ok, times, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), rwTx, se.doms, se.cfg, execStage, false, se.logger, u, se.inMemExec)
+			ok, times, err := computeAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), rwTx, se.doms, se.cfg, execStage, false, se.logger, u, se.isBlockProduction)
 			if err != nil {
 				return nil, rwTx, err
 			} else if !ok {
@@ -232,9 +214,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			}
 
 			resetCommitmentGauges(ctx)
-
-			computeCommitmentDuration += times.ComputeCommitment
-			flushDuration := times.Flush
 
 			se.txExecutor.lastCommittedBlockNum = b.NumberU64()
 			se.txExecutor.lastCommittedTxNum = inputTxNum
@@ -254,34 +233,22 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				return nil, rwTx, err
 			}
 
-			pruneDuration = time.Since(timeStart)
-
-			stepsInDb := rawdbhelpers.IdxStepsCountV3(se.applyTx, se.agg.StepSize())
-
-			var commitDuration time.Duration
-			rwTx, commitDuration, err = se.commit(ctx, execStage, rwTx, nil, useExternalTx)
-			if err != nil {
-				return nil, rwTx, err
-			}
-			// on chain-tip: if batch is full then stop execution - to allow stages commit
-			if !initialCycle {
-				if isBatchFull {
-					return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
-				}
-
-				if canPrune {
-					return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch can be pruned"}
-				}
-			}
-
-			if !useExternalTx {
-				se.LogCommitments(commitStart, 0, 0, uncommitedGas, stepsInDb, commitment.CommitProgress{})
-			}
-
-			se.logger.Info("Committed", "time", time.Since(commitStart),
-				"block", se.doms.BlockNum(), "txNum", se.doms.TxNum(),
+			se.logger.Info(
+				"periodic commit check",
+				"block", se.doms.BlockNum(),
+				"txNum", se.doms.TxNum(),
 				"step", fmt.Sprintf("%.1f", float64(se.doms.TxNum())/float64(se.agg.StepSize())),
-				"flush", flushDuration, "compute commitment", computeCommitmentDuration, "tx.commit", commitDuration, "prune", pruneDuration)
+				"commitment", times.ComputeCommitment,
+				"prune", time.Since(timeStart),
+			)
+
+			if isBatchFull {
+				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
+			}
+
+			if canPrune {
+				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch can be pruned"}
+			}
 		default:
 		}
 
@@ -318,10 +285,6 @@ func (se *serialExecutor) LogCommitments(commitStart time.Time, committedBlocks 
 
 func (se *serialExecutor) LogComplete(stepsInDb float64) {
 	se.progress.LogComplete(se.rs.StateV3, se, stepsInDb)
-}
-
-func (se *serialExecutor) commit(ctx context.Context, execStage *StageState, tx kv.TemporalRwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.TemporalRwTx, time.Duration, error) {
-	return se.txExecutor.commit(ctx, execStage, tx, useExternalTx, se.resetWorkers)
 }
 
 func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buffered, applyTx kv.TemporalTx) (err error) {
@@ -419,7 +382,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 				chainReader := consensuschain.NewReader(se.cfg.chainConfig, se.applyTx, se.cfg.blockReader, se.logger)
 
-				if se.isMining {
+				if se.isBlockProduction {
 					_, _, err = se.cfg.engine.FinalizeAndAssemble(
 						se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles,
 						blockReceipts, txTask.Withdrawals, chainReader, syscall, nil, se.logger)
@@ -433,14 +396,14 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 				}
 
-				if !se.isMining && startTxIndex == 0 && !isInitialCycle {
+				if !se.isBlockProduction && startTxIndex == 0 && !isInitialCycle {
 					se.cfg.notifications.RecentReceipts.Add(blockReceipts, txTask.Txs, txTask.Header)
 				}
-				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts && !se.isMining
+				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts && !se.isBlockProduction
 
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-					if err := se.getPostValidator().Process(se.gasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isMining, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
+					if err := se.getPostValidator().Process(se.gasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isBlockProduction, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
@@ -496,7 +459,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				return false, err
 			}
 			se.logger.Warn(fmt.Sprintf("[%s] Execution failed", se.logPrefix),
-				"block", txTask.BlockNumber(), "txNum", txTask.TxNum, "header-hash", txTask.Header.Hash().String(), "err", err, "inMem", se.inMemExec)
+				"block", txTask.BlockNumber(), "txNum", txTask.TxNum, "header-hash", txTask.Header.Hash().String(), "err", err, "isForkValidation", se.isForkValidation, "isBlockProduction", se.isBlockProduction)
 			if se.cfg.hd != nil && se.cfg.hd.POSSync() && errors.Is(err, rules.ErrInvalidBlock) {
 				se.cfg.hd.ReportBadHeaderPoS(txTask.Header.Hash(), txTask.Header.ParentHash)
 			}
@@ -581,8 +544,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		}
 
 		var applyReceipt *types.Receipt
-		if txTask.TxIndex >= 0 && txTask.TxIndex < len(blockReceipts) {
-			applyReceipt = blockReceipts[txTask.TxIndex]
+		if txTask.TxIndex >= 0 && txTask.TxIndex-startTxIndex < len(blockReceipts) {
+			applyReceipt = blockReceipts[txTask.TxIndex-startTxIndex]
 		}
 
 		if err := se.rs.ApplyTxState(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, state.StateUpdates{},
