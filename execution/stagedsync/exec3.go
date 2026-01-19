@@ -406,9 +406,10 @@ func dumpTxIODebug(blockNum uint64, txIO *state.VersionedIO) {
 			fmt.Println(fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation), "RD", vr.String())
 		}
 
-		var writes []*state.VersionedWrite
+		writeSet := txIO.WriteSet(txIndex)
+		writes := make([]*state.VersionedWrite, 0, len(writeSet))
 
-		for _, vw := range txIO.WriteSet(txIndex) {
+		for _, vw := range writeSet {
 			writes = append(writes, vw)
 		}
 

@@ -808,8 +808,8 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 		}
 
 		if stateObject.data.Empty() {
+			versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
 			if _, ok := sdb.journal.dirties[addr]; !ok {
-				versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
 				if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 					fmt.Printf("%d (%d.%d) Touch %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 				}

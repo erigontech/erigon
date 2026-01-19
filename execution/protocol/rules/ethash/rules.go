@@ -654,7 +654,7 @@ func AccumulateRewards(config *chain.Config, header *types.Header, uncles []*typ
 		blockReward = ConstantinopleBlockReward
 	}
 	// Accumulate the rewards for the miner and any included uncles
-	uncleRewards := []uint256.Int{}
+	uncleRewards := make([]uint256.Int, 0, len(uncles))
 	reward := new(uint256.Int).Set(blockReward)
 	r := new(uint256.Int)
 	headerNum, _ := uint256.FromBig(header.Number)
