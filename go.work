@@ -4,6 +4,6 @@ toolchain go1.24.7
 
 use .
 
-use ./erigon-lib
+//use ./erigon-lib
 
-use ../
+//use ../

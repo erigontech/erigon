@@ -30,6 +30,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -1549,9 +1551,9 @@ func (sdb *IntraBlockState) PushSnapshot() int {
 	}
 	// MERGE_ARBITRUM
 	/*
-	sdb.validRevisions = append(sdb.validRevisions,
-			revision{id, sdb.journal.length(), sdb.arbExtraData.unexpectedBalanceDelta.Clone()})
-	 */
+		sdb.validRevisions = append(sdb.validRevisions,
+				revision{id, sdb.journal.length(), sdb.arbExtraData.unexpectedBalanceDelta.Clone()})
+	*/
 	return sdb.revisions.snapshot(sdb.journal)
 }
 

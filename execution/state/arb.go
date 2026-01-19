@@ -6,14 +6,15 @@ import (
 	"fmt"
 	"runtime"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/arb/lru"
-	"github.com/erigontech/erigon/core/tracing"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
@@ -192,8 +193,8 @@ func (s *IntraBlockState) GetUnexpectedBalanceDelta() *uint256.Int {
 	return s.arbExtraData.unexpectedBalanceDelta
 }
 
-func (s *IntraBlockState) GetSelfDestructs() []common.Address {
-	selfDestructs := []common.Address{}
+func (s *IntraBlockState) GetSelfDestructs() []accounts.Address {
+	selfDestructs := []accounts.Address{}
 	for addr := range s.journal.dirties {
 		obj, exist := s.stateObjects[addr]
 		if !exist {
@@ -329,7 +330,7 @@ func (s *IntraBlockState) GetRecentWasms() RecentWasms {
 	return s.arbExtraData.recentWasms
 }
 
-func (s *IntraBlockState) HasSelfDestructed(addr common.Address) bool {
+func (s *IntraBlockState) HasSelfDestructed(addr accounts.Address) bool {
 	stateObject, err := s.getStateObject(addr)
 	if err != nil {
 		panic(err)
@@ -348,7 +349,7 @@ func (s *IntraBlockState) IntermediateRoot(deleteEmptyObjects bool) common.Hash 
 
 // GetStorageRoot retrieves the storage root from the given address or empty
 // if object not found.
-func (s *IntraBlockState) GetStorageRoot(addr common.Address) common.Hash {
+func (s *IntraBlockState) GetStorageRoot(addr accounts.Address) common.Hash {
 	stateObject, err := s.getStateObject(addr)
 	if err == nil && stateObject != nil {
 		return stateObject.data.Root
@@ -407,8 +408,8 @@ func (ch wasmActivation) revert(s *IntraBlockState) error {
 	return nil
 }
 
-func (ch wasmActivation) dirtied() *common.Address {
-	return nil
+func (ch wasmActivation) dirtied() (accounts.Address, bool) {
+	return accounts.NilAddress, false
 }
 
 // Updates the Rust-side recent program cache
@@ -427,8 +428,8 @@ func (ch CacheWasm) revert(*IntraBlockState) error {
 	return nil
 }
 
-func (ch CacheWasm) dirtied() *common.Address {
-	return nil
+func (ch CacheWasm) dirtied() (accounts.Address, bool) {
+	return accounts.NilAddress, false
 }
 
 type EvictWasm struct {
@@ -447,8 +448,8 @@ func (ch EvictWasm) revert(s *IntraBlockState) error {
 	return err
 }
 
-func (ch EvictWasm) dirtied() *common.Address {
-	return nil
+func (ch EvictWasm) dirtied() (accounts.Address, bool) {
+	return accounts.NilAddress, false
 }
 
 // Type for managing recent program access.

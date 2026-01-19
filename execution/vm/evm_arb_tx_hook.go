@@ -2,11 +2,12 @@ package vm
 
 import (
 	"github.com/erigontech/erigon/arb/multigas"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -49,7 +50,7 @@ type TxProcessingHook interface {
 	IsCalldataPricingIncreaseEnabled() bool // arbos 40/pectra
 
 	// used within evm run
-	ExecuteWASM(scope *ScopeContext, input []byte, interpreter *EVMInterpreter) ([]byte, error)
+	ExecuteWASM(ctx *CallContext, input []byte, interpreter *EVMInterpreter) ([]byte, error)
 	PushContract(contract *Contract)
 	PopContract()
 
@@ -71,7 +72,7 @@ func (p DefaultTxProcessor) StartTxHook() (bool, multigas.MultiGas, error, []byt
 	return false, multigas.ZeroGas(), nil, nil
 }
 
-func (p DefaultTxProcessor) GasChargingHook(gasRemaining *uint64, intrinsing uint64) (common.Address, multigas.MultiGas, error) {
+func (p DefaultTxProcessor) GasChargingHook(gasRemaining *uint64, intrinsing uint64) (accounts.Address, multigas.MultiGas, error) {
 	return p.evm.Context.Coinbase, multigas.ZeroGas(), nil
 }
 
@@ -100,7 +101,7 @@ func (p DefaultTxProcessor) L1BlockHash(blockCtx evmtypes.BlockContext, l1BlocKN
 }
 
 func (p DefaultTxProcessor) GasPriceOp(evm *EVM) *uint256.Int {
-	return p.evm.GasPrice
+	return &p.evm.GasPrice
 }
 
 func (p DefaultTxProcessor) FillReceiptInfo(*types.Receipt) {}
@@ -109,7 +110,7 @@ func (p DefaultTxProcessor) MsgIsNonMutating() bool {
 	return false
 }
 
-func (p DefaultTxProcessor) ExecuteWASM(scope *ScopeContext, input []byte, interpreter *EVMInterpreter) ([]byte, error) {
+func (p DefaultTxProcessor) ExecuteWASM(scope *CallContext, input []byte, interpreter *EVMInterpreter) ([]byte, error) {
 	log.Crit("tried to execute WASM with default processing hook")
 	return nil, nil
 }

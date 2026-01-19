@@ -7,6 +7,8 @@ import (
 	"io"
 	"math/big"
 
+	"github.com/erigontech/erigon/arb"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -79,7 +81,7 @@ func (tx *AccountAbstractionTransaction) Sender(signer Signer) (accounts.Address
 	return tx.SenderAddress, nil
 }
 
-func (tx *AccountAbstractionTransaction) cachedSender() (accounts.Address, bool) {
+func (tx *AccountAbstractionTransaction) CachedSender() (accounts.Address, bool) {
 	return tx.SenderAddress, true
 }
 
@@ -184,7 +186,7 @@ func (tx *AccountAbstractionTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := PrefixedRlpHash(AccountAbstractionTxType, []any{
+	hash := prefixedRlpHash(AccountAbstractionTxType, []any{
 		tx.ChainID,
 		tx.NonceKey, tx.Nonce,
 		tx.SenderAddress, tx.SenderValidationData,
@@ -204,7 +206,7 @@ func (tx *AccountAbstractionTransaction) Hash() common.Hash {
 }
 
 func (tx *AccountAbstractionTransaction) SigningHash(chainID *big.Int) common.Hash {
-	hash := PrefixedRlpHash(AccountAbstractionTxType, []any{
+	hash := prefixedRlpHash(AccountAbstractionTxType, []any{
 		chainID,
 		tx.NonceKey, tx.Nonce,
 		tx.SenderAddress, tx.SenderValidationData,
@@ -302,7 +304,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeUint256(tx.ChainID, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.ChainID, w, b); err != nil {
 		return err
 	}
 

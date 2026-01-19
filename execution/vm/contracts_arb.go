@@ -3,8 +3,8 @@ package vm
 import (
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/arb/multigas"
+	"github.com/erigontech/erigon/common"
 )
 
 var (

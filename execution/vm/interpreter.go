@@ -26,8 +26,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/erigontech/erigon/core/state"
-
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"

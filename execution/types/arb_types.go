@@ -8,15 +8,16 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/common/length"
-	"github.com/erigontech/erigon-lib/common/math"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/arb"
 	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/holiman/uint256"
 )
 
@@ -140,8 +141,8 @@ func (tx *ArbitrumUnsignedTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		gasLimit:   tx.GetGasLimit(),
 		nonce:      tx.GetNonce(),
 		accessList: tx.GetAccessList(),
-		from:       tx.From,
-		to:         tx.GetTo(),
+		from:       accounts.InternAddress(tx.From),
+		to:         accounts.InternAddress(*tx.GetTo()),
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
 		checkNonce: !skipAccountChecks[tx.Type()],
@@ -164,7 +165,7 @@ func (tx *ArbitrumUnsignedTx) WithSignature(signer Signer, sig []byte) (Transact
 
 func (tx *ArbitrumUnsignedTx) Hash() common.Hash {
 	//TODO implement me
-	return PrefixedRlpHash(ArbitrumUnsignedTxType, []interface{}{
+	return prefixedRlpHash(ArbitrumUnsignedTxType, []interface{}{
 		tx.ChainId,
 		tx.From,
 		tx.Nonce,

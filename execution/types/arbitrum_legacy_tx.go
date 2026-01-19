@@ -6,8 +6,8 @@ import (
 	"errors"
 	"io"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/holiman/uint256"
 )
@@ -74,10 +74,10 @@ func (tx *ArbitrumLegacyTxData) EncodeRLP(w io.Writer) error {
 	}
 	legacyBytes := legacy.Bytes()
 
-	payloadSize := rlp.StringLen(legacyBytes)                        // embedded LegacyTx RLP
-	payloadSize += 1 + 32                                            // HashOverride (1 byte length + 32 bytes hash)
-	payloadSize += 1 + rlp.IntLenExcludingHead(tx.EffectiveGasPrice) // EffectiveGasPrice
-	payloadSize += 1 + rlp.IntLenExcludingHead(tx.L1BlockNumber)     // L1BlockNumber
+	payloadSize := rlp.StringLen(legacyBytes)       // embedded LegacyTx RLP
+	payloadSize += 1 + 32                           // HashOverride (1 byte length + 32 bytes hash)
+	payloadSize += rlp.U64Len(tx.EffectiveGasPrice) // EffectiveGasPrice
+	payloadSize += rlp.U64Len(tx.L1BlockNumber)     // L1BlockNumber
 
 	if tx.OverrideSender == nil {
 		payloadSize += 1 // empty OverrideSender

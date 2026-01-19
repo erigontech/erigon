@@ -9,11 +9,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/common"
+	cmath "github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
-
-	"github.com/erigontech/erigon-lib/common"
-	cmath "github.com/erigontech/erigon-lib/common/math"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 var (
@@ -491,7 +491,7 @@ func (tx *ArbTx) Hash() common.Hash {
 	} else if tx.Type() == ArbitrumLegacyTxType {
 		h = tx.inner.(*ArbitrumLegacyTxData).HashOverride
 	} else {
-		h = PrefixedRlpHash(tx.Type(), tx.inner)
+		h = prefixedRlpHash(tx.Type(), tx.inner)
 	}
 	tx.hash.Store(h)
 	return h
@@ -637,7 +637,7 @@ func TransactionToMessage(tx Transaction, s ArbitrumSigner, baseFee *big.Int, ru
 		gasPrice: *tx.GetFeeCap(),
 		feeCap:   *tx.GetFeeCap(),
 		tipCap:   *tx.GetTipCap(),
-		to:       tx.GetTo(),
+		to:       accounts.InternAddress(*tx.GetTo()),
 		// value:             tx.GetValue(),
 		amount:            *tx.GetValue(), // TODO amount is value?
 		data:              tx.GetData(),

@@ -11,17 +11,16 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/erigontech/erigon/core/tracing"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
-	"github.com/erigontech/erigon-lib/log/v3"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/eth/tracers"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/nitro-erigon/util/containers"
-
-	libcommon "github.com/erigontech/erigon-lib/common"
 )
 
 func init() {
@@ -59,7 +58,7 @@ type HostioTraceInfo struct {
 	EndInk uint64 `json:"endInk"`
 
 	// For *call HostIOs, the address of the called contract.
-	Address *common.Address `json:"address,omitempty"`
+	Address *accounts.Address `json:"address,omitempty"`
 
 	// For *call HostIOs, the steps performed by the called contract.
 	Steps *containers.Stack[HostioTraceInfo] `json:"steps,omitempty"`
@@ -120,7 +119,7 @@ func (t *stylusTracer) CaptureStylusHostio(name string, args, outs []byte, start
 	t.open.Push(info)
 }
 
-func (t *stylusTracer) OnEnter(depth int, opCode byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *stylusTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	if t.interrupt.Load() {
 		return
 	}
@@ -131,7 +130,7 @@ func (t *stylusTracer) OnEnter(depth int, opCode byte, from libcommon.Address, t
 	// This function adds the prefix evm_ because it assumes the opcode came from the EVM.
 	// If the opcode comes from WASM, the CaptureStylusHostio function will remove the evm prefix.
 	var name string
-	switch vm.OpCode(opCode) {
+	switch vm.OpCode(typ) {
 	case vm.CALL:
 		name = "evm_call_contract"
 	case vm.DELEGATECALL:
@@ -214,7 +213,7 @@ func (t *stylusTracer) CaptureTxEnd(restGas uint64)                             
 func (t *stylusTracer) CaptureEnd(output []byte, usedGas uint64, err error)                      {}
 func (t *stylusTracer) CaptureStart(env *vm.EVM, from, to common.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
-func (t *stylusTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
+func (t *stylusTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.CallContext, rData []byte, depth int, err error) {
 }
-func (t *stylusTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+func (t *stylusTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.CallContext, depth int, err error) {
 }

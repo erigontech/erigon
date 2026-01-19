@@ -1,7 +1,7 @@
 package chainparams
 
 import (
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 )
 
 // System Arbitrum contracts.
