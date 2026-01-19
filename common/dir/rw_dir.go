@@ -138,11 +138,11 @@ func writeFileWithFsyncAndFlags(name string, data []byte, perm os.FileMode, flag
 	if err != nil {
 		return err
 	}
-	err = f.Sync()
+	_ , err = f.Write(data)
 	if err != nil {
 		return err
 	}
-	return nil
+	return f.Sync()
 }
 
 // nolint
