@@ -122,11 +122,10 @@ func APIList(db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.Tx
 				Version:   "1.0",
 			})
 		case "db": /* Deprecated */
-			dbImpl := NewDBAPIImpl() /* deprecated */
 			list = append(list, rpc.API{
 				Namespace: "db",
 				Public:    true,
-				Service:   DBAPI(dbImpl),
+			Service:   DBAPI(NewDBAPIImpl()), /* deprecated */
 				Version:   "1.0",
 			})
 		case "erigon":
