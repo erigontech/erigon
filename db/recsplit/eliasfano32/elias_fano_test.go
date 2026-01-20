@@ -290,26 +290,26 @@ func BenchmarkRead(b *testing.B) {
 	require.NoError(b, ef.Write(buf))
 
 	b.Run("read", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			ReadEliasFano(buf.Bytes())
 		}
 	})
 
 	b.Run("reset", func(b *testing.B) {
 		ef := NewEliasFano(1, 1)
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			ef.Reset(buf.Bytes())
 		}
 	})
 	b.Run("read.search", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			Seek(buf.Bytes(), 1)
 		}
 	})
 
 	b.Run("reset.search", func(b *testing.B) {
 		ef := NewEliasFano(1, 1)
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			ef.Reset(buf.Bytes()).Seek(1)
 		}
 	})
@@ -521,7 +521,7 @@ func BenchmarkEF(b *testing.B) {
 	}
 	ef.Build()
 	b.Run("next to value 1_000_000", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			it := ef.Iterator()
 			for it.HasNext() {
 				n, err := it.Next()
@@ -533,13 +533,13 @@ func BenchmarkEF(b *testing.B) {
 		}
 	})
 	b.Run("seek to value 1_000_000", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			it := ef.Iterator()
 			it.Seek(1_000_000)
 		}
 	})
 	b.Run("reverse next to value 1_230", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			it := ef.ReverseIterator()
 			for it.HasNext() {
 				n, err := it.Next()
@@ -555,7 +555,7 @@ func BenchmarkEF(b *testing.B) {
 		}
 	})
 	b.Run("reverse seek to value 1_230", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			it := ef.ReverseIterator()
 			it.Seek(1_230)
 			n, err := it.Next()
@@ -564,7 +564,7 @@ func BenchmarkEF(b *testing.B) {
 		}
 	})
 	b.Run("naive reverse iterator", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			it := naiveReverseIterator(ef)
 			for it.HasNext() {
 				_, err := it.Next()
@@ -573,7 +573,7 @@ func BenchmarkEF(b *testing.B) {
 		}
 	})
 	b.Run("reverse iterator", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			it := ef.ReverseIterator()
 			for it.HasNext() {
 				_, err := it.Next()

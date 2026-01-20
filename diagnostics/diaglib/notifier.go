@@ -8,8 +8,8 @@ import (
 )
 
 type DiagMessages struct {
-	MessageType string      `json:"messageType"`
-	Message     interface{} `json:"message"`
+	MessageType string `json:"messageType"`
+	Message     any    `json:"message"`
 }
 
 var upgrader = websocket.Upgrader{

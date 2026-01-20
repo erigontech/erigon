@@ -40,7 +40,6 @@ import (
 // Config are the configuration options for the Interpreter
 type Config struct {
 	Tracer        *tracing.Hooks
-	JumpDestCache *JumpDestCache
 	NoRecursion   bool // Disables call, callcode, delegate call and create
 	NoBaseFee     bool // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
 	TraceJumpDest bool // Print transaction hashes where jumpdest analysis was useful
@@ -50,7 +49,6 @@ type Config struct {
 	RestoreState  bool // Revert all changes made to the state (useful for constant system calls)
 
 	ExtraEips []int // Additional EIPS that are to be enabled
-
 }
 
 func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
@@ -81,7 +79,7 @@ type CallContext struct {
 }
 
 var contextPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &CallContext{
 			Stack: Stack{data: make([]uint256.Int, 0, 16)},
 		}
@@ -394,8 +392,11 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 		} else if sLen > operation.maxStack {
 			return nil, callContext.gas, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
 		}
-		if !callContext.useGas(cost, in.cfg.Tracer, tracing.GasChangeIgnored) {
+		// for tracing: this gas consumption event is emitted below in the debug section.
+		if callContext.gas < cost {
 			return nil, callContext.gas, ErrOutOfGas
+		} else {
+			callContext.gas -= cost
 		}
 
 		// All ops with a dynamic memory usage also has a dynamic gas cost.
@@ -429,8 +430,11 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 				fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
 			}
 
-			if !callContext.useGas(dynamicCost, in.cfg.Tracer, tracing.GasChangeIgnored) {
+			// for tracing: this gas consumption event is emitted below in the debug section.
+			if callContext.gas < dynamicCost {
 				return nil, callContext.gas, ErrOutOfGas
+			} else {
+				callContext.gas -= dynamicCost
 			}
 		}
 

@@ -53,11 +53,11 @@ type GethTraces []*GethTrace
 // ParityTrace A trace in the desired format (Parity/OpenEthereum) See: https://openethereum.github.io/JSONRPC-trace-module
 type ParityTrace struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
-	Action              interface{}  `json:"action"` // Can be either CallTraceAction or CreateTraceAction
+	Action              any          `json:"action"` // Can be either CallTraceAction or CreateTraceAction
 	BlockHash           *common.Hash `json:"blockHash,omitempty"`
 	BlockNumber         *uint64      `json:"blockNumber,omitempty"`
 	Error               string       `json:"error,omitempty"`
-	Result              interface{}  `json:"result"`
+	Result              any          `json:"result"`
 	Subtraces           int          `json:"subtraces"`
 	TraceAddress        []int        `json:"traceAddress"`
 	TransactionHash     *common.Hash `json:"transactionHash,omitempty"`

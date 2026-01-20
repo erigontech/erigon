@@ -23,8 +23,9 @@ import (
 
 // MiningConfig is the configuration parameters of block building.
 type MiningConfig struct {
-	EnabledPOS bool
-	Etherbase  common.Address `toml:",omitempty"` // Public address for block building rewards
-	ExtraData  hexutil.Bytes  `toml:",omitempty"` // Block extra data set by the block builder
-	GasLimit   *uint64        // Target gas limit for built blocks
+	EnabledPOS       bool
+	Etherbase        common.Address `toml:",omitempty"` // Public address for block building rewards
+	ExtraData        hexutil.Bytes  `toml:",omitempty"` // Block extra data set by the block builder
+	GasLimit         *uint64        // Target gas limit for built blocks
+	MaxBlobsPerBlock *uint64        // Cap the number of blob transactions included in a block
 }

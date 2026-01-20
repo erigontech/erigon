@@ -17,8 +17,10 @@
 package stagedsync
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -40,7 +42,7 @@ type UnwindFunc func(u *UnwindState, s *StageState, doms *execctx.SharedDomains,
 
 // PruneFunc is the execution function for the stage to prune old data.
 // * state - is the current state of the stage and contains stage data.
-type PruneFunc func(p *PruneState, tx kv.RwTx, logger log.Logger) error
+type PruneFunc func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error
 
 // Stage is a single sync stage in staged sync.
 type Stage struct {

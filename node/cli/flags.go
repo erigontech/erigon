@@ -381,6 +381,16 @@ func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *nodecfg.Config, logger log.L
 	setPrivateApi(ctx, cfg)
 	setEmbeddedRpcDaemon(ctx, cfg, logger)
 	cfg.DatabaseVerbosity = kv.DBVerbosityLvl(ctx.Int(DatabaseVerbosityFlag.Name))
+
+	// Warn if deprecated flag was explicitly set by user
+	if ctx.IsSet(utils.TorrentDownloadSlotsFlag.Name) {
+		logger.Warn(
+			"[DEPRECATED] --torrent.download.slots flag is deprecated and has no effect",
+			"flag", "torrent.download.slots",
+			"provided_value", ctx.Int(utils.TorrentDownloadSlotsFlag.Name),
+			"action", "This flag will be removed in a future release. The downloader now manages concurrent downloads automatically.",
+		)
+	}
 }
 
 func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logger) {
@@ -426,7 +436,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		AuthRpcTimeouts: rpccfg.HTTPTimeouts{
 			ReadTimeout:  ctx.Duration(AuthRpcReadTimeoutFlag.Name),
 			WriteTimeout: ctx.Duration(AuthRpcWriteTimeoutFlag.Name),
-			IdleTimeout:  ctx.Duration(HTTPIdleTimeoutFlag.Name),
+			IdleTimeout:  ctx.Duration(AuthRpcIdleTimeoutFlag.Name),
 		},
 		EvmCallTimeout:            ctx.Duration(EvmCallTimeoutFlag.Name),
 		OverlayGetLogsTimeout:     ctx.Duration(OverlayGetLogsFlag.Name),

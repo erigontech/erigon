@@ -139,8 +139,8 @@ func (h *Eth1Header) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(h.getSchema()...)
 }
 
-func (h *Eth1Header) getSchema() []interface{} {
-	s := []interface{}{
+func (h *Eth1Header) getSchema() []any {
+	s := []any{
 		h.ParentHash[:], h.FeeRecipient[:], h.StateRoot[:], h.ReceiptsRoot[:], h.LogsBloom[:],
 		h.PrevRandao[:], &h.BlockNumber, &h.GasLimit, &h.GasUsed, &h.Time, h.Extra, h.BaseFeePerGas[:], h.BlockHash[:], h.TransactionsRoot[:],
 	}

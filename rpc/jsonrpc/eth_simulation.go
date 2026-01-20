@@ -79,11 +79,11 @@ type CallResult struct {
 	Logs       []*types.RPCLog `json:"logs"`
 	GasUsed    hexutil.Uint64  `json:"gasUsed"`
 	Status     hexutil.Uint64  `json:"status"`
-	Error      interface{}     `json:"error,omitempty"`
+	Error      any             `json:"error,omitempty"`
 }
 
 // SimulatedBlockResult represents the result of the simulated calls for a single block (i.e. one SimulatedBlock).
-type SimulatedBlockResult map[string]interface{}
+type SimulatedBlockResult map[string]any
 
 // SimulationResult represents the result contained in an eth_simulateV1 response.
 type SimulationResult []SimulatedBlockResult
@@ -412,7 +412,7 @@ func (s *simulator) simulateBlock(
 	cumulativeGasUsed := uint64(0)
 	cumulativeBlobGasUsed := uint64(0)
 
-	minTxNum, err := txNumReader.Min(tx, blockNumber)
+	minTxNum, err := txNumReader.Min(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -423,17 +423,14 @@ func (s *simulator) simulateBlock(
 	if latest {
 		stateReader = state.NewReaderV3(sharedDomains.AsGetter(tx))
 	} else {
-		historyStateReader := state.NewHistoryReaderV3()
-		historyStateReader.SetTx(tx)
-		if minTxNum < historyStateReader.StateHistoryStartFrom() {
-			return nil, nil, state.PrunedError
+		if minTxNum < state.StateHistoryStartTxNum(tx) {
+			return nil, nil, fmt.Errorf("%w: min tx: %d", state.PrunedError, minTxNum)
 		}
-		historyStateReader.SetTxNum(minTxNum)
-		stateReader = historyStateReader
+		stateReader = state.NewHistoryReaderV3(tx, minTxNum)
 
 		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
 		if s.commitmentHistory && minTxNum < commitmentStartingTxNum {
-			return nil, nil, state.PrunedError
+			return nil, nil, fmt.Errorf("%w: min commitment: %d, min tx: %d", state.PrunedError, commitmentStartingTxNum, minTxNum)
 		}
 	}
 	intraBlockState := state.New(stateReader)
@@ -530,7 +527,7 @@ func (s *simulator) simulateBlock(
 			}
 			// Change the state reader to a commitment-only history reader that reads non-commitment domains from the latest state.
 			txNum := minTxNum + 1 + uint64(len(bsc.Calls))
-			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains.AsGetter(tx), txNum+1))
+			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains, txNum+1))
 		}
 		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNumber, sharedDomains.TxNum(), "eth_simulateV1", nil)
 		if err != nil {
@@ -543,7 +540,7 @@ func (s *simulator) simulateBlock(
 	}
 
 	// Marshal the block in RPC format including the call results in a custom field.
-	additionalFields := make(map[string]interface{})
+	additionalFields := make(map[string]any)
 	blockResult, err := ethapi.RPCMarshalBlock(block, true, s.fullTransactions, additionalFields)
 	if err != nil {
 		return nil, nil, err
@@ -758,14 +755,19 @@ func clientLimitExceededError(message string) error {
 }
 
 type HistoryCommitmentOnlyReader struct {
-	latestReader  commitmentdb.StateReader
-	historyReader commitmentdb.StateReader
+	latestReader       commitmentdb.StateReader
+	historyReader      commitmentdb.StateReader
+	sd                 *execctx.SharedDomains
+	limitReadAsOfTxNum uint64
 }
 
-func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, getter kv.TemporalGetter, limitReadAsOfTxNum uint64) commitmentdb.StateReader {
-	latestReader := commitmentdb.NewLatestStateReader(getter)
-	historyReader := commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum)
-	return &HistoryCommitmentOnlyReader{latestReader, historyReader}
+func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, limitReadAsOfTxNum uint64) commitmentdb.StateReader {
+	return &HistoryCommitmentOnlyReader{
+		latestReader:       commitmentdb.NewLatestStateReader(roTx, sd),
+		historyReader:      commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum),
+		sd:                 sd,
+		limitReadAsOfTxNum: limitReadAsOfTxNum,
+	}
 }
 
 func (r *HistoryCommitmentOnlyReader) WithHistory() bool {
@@ -789,4 +791,8 @@ func (r *HistoryCommitmentOnlyReader) Read(d kv.Domain, plainKey []byte, stepSiz
 		return nil, 0, fmt.Errorf("HistoryCommitmentOnlyReader latestReader %q: %w", d, err)
 	}
 	return enc, step, nil
+}
+
+func (r *HistoryCommitmentOnlyReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
+	return newHistoryCommitmentOnlyReader(tx, r.sd, r.limitReadAsOfTxNum)
 }

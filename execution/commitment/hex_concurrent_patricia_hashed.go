@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 )
 
@@ -176,6 +179,7 @@ func (p *ConcurrentPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
 	p.root.EnableCsvMetrics(filePathPrefix)
 	for i := range p.mounts {
 		p.mounts[i].EnableCsvMetrics(filePathPrefix)
+		p.mounts[i].metrics = p.root.metrics
 	}
 }
 
@@ -187,7 +191,7 @@ func (p *ConcurrentPatriciaHashed) SetParticularTrace(b bool, n int) {
 	}
 }
 
-func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaHashed) ([]byte, error) {
+func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaHashed, trieCtxFactory TrieContextFactory) ([]byte, error) {
 	if t.mode != ModeDirect {
 		return nil, errors.New("parallel hashsort for indirect mode is not supported")
 	}
@@ -210,6 +214,9 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 		ni := n
 
 		g.Go(func() error {
+			trieCtx, trieCtxClose := trieCtxFactory()
+			defer trieCtxClose()
+			phnib.ResetContext(trieCtx)
 			cnt := 0
 			err := nib.Load(nil, "", func(hashedKey, plainKey []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 				cnt++
@@ -262,24 +269,35 @@ func (t *Updates) ParallelHashSort(ctx context.Context, pph *ConcurrentPatriciaH
 }
 
 // Computing commitment root hash. If possible, use parallel commitment and after evaluation decides, if it can be used next time
-func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress) (rootHash []byte, err error) {
-	// start := time.Now()
-	// wasConcurrent := updates.IsConcurrentCommitment()
-	// updCount := updates.Size()
-	// defer func(s time.Time, wasConcurrent bool) {
-	// 	fmt.Printf("commitment time %s; keys %s; was concurrent: %t\n", time.Since(s), common.PrettyCounter(updCount), wasConcurrent)
-	// }(start, wasConcurrent)
-
+func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates, logPrefix string, progress chan *CommitProgress, warmup WarmupConfig) (rootHash []byte, err error) {
+	start := time.Now()
+	wasConcurrent := updates.IsConcurrentCommitment()
+	updatesCount := updates.Size()
+	defer func() {
+		log.Debug(
+			"concurrent commitment processed",
+			"dur", time.Since(start),
+			"updates", common.PrettyCounter(updatesCount),
+			"wasConcurrent", wasConcurrent,
+		)
+	}()
+	if p.root.metrics.collectCommitmentMetrics {
+		p.root.metrics.Reset()
+		p.root.metrics.updates.Store(updatesCount)
+		defer func() {
+			p.root.metrics.TotalProcessingTimeInc(start)
+			p.root.metrics.WriteToCSV()
+		}()
+	}
 	switch updates.IsConcurrentCommitment() {
 	case true:
-		rootHash, err = updates.ParallelHashSort(ctx, p)
+		rootHash, err = updates.ParallelHashSort(ctx, p, warmup.CtxFactory)
 	default:
-		rootHash, err = p.root.Process(ctx, updates, logPrefix, progress)
+		rootHash, err = p.root.Process(ctx, updates, logPrefix, progress, warmup)
 	}
 	if err != nil {
 		return nil, err
 	}
-
 	nextConcurrent, err := p.CanDoConcurrentNext()
 	if err != nil {
 		return nil, err
