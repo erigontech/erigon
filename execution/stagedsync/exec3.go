@@ -145,7 +145,10 @@ func ExecV3(ctx context.Context,
 			applyTx.Rollback()
 		}()
 	}
-
+	err := doms.SeekCommitment(ctx, applyTx)
+	if err != nil {
+		return err
+	}
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if initialCycle && isApplyingBlocks {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
@@ -156,7 +159,6 @@ func ExecV3(ctx context.Context,
 	}
 
 	var (
-		err          error
 		blockNum     = doms.BlockNum()
 		initialTxNum = doms.TxNum()
 	)
