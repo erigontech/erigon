@@ -74,14 +74,14 @@ These flags control database performance and memory usage.
 
 Flags for managing how old chain data is handled and stored.
 
-* `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`). See also [Sync Modes](../fundamentals/sync-modes.md)
+* `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`). See also [Sync Modes](sync-modes.md)
   * Default: `"full"`
 * `--prune.distance value`: Keeps state history for the latest `N` blocks.
   * Default: `0`
 * `--prune.distance.blocks value`: Keeps block history for the latest `N` blocks.
   * Default: `0`
 * `--prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables faster `eth_getProof` for executed blocks.
-  * Default: `false`&#x20;
+  * Default: `false`
 * `--prune.include-commitment-history` : (experimental) Enables the storage of commitment history. When enabled, it allows for blazing fast retrieval of Merkle proofs for executed blocks using the `eth_getProof` JSON-RPC method.
   * Default: `false`
 * `--snap.keepblocks`: Keeps ancient blocks in the database for debugging.
@@ -557,7 +557,7 @@ USAGE:
    erigon [command] [flags]
 
 VERSION:
-   3.3.0-dev-fc7a858a
+   3.3.3-7bc3d6d1
 
 COMMANDS:
    init                                         Bootstrap and initialize a new genesis block
@@ -602,7 +602,6 @@ GLOBAL OPTIONS:
    --tls.key value                                                                                                         Specify key file
    --tls.cacert value                                                                                                      Specify certificate authority
    --state.stream.disable                                                                                                  Disable streaming of state changes from core to RPC daemon (default: false)
-   --experimental.bal                                                                                                      generate block access list (default: false)
    --sync.loop.throttle value                                                                                              Sets the minimum time between sync loop starts (e.g. 1h30m, default is none)
    --bad.block value                                                                                                       Marks block with given hex string as bad and forces initial reorg before normal staged sync
    --http                                                                                                                  JSON-RPC server (enabled by default). Use --http=false to disable it (default: true)
@@ -655,7 +654,7 @@ GLOBAL OPTIONS:
    --snap.state.stop                                                                                                       Workaround to stop producing new state files, if you meet some state-related critical bug. It will stop aggregate DB history in a state files. DB will grow and may slightly slow-down - and removing this flag in future will not fix this effect (db size will not greatly reduce). (default: false)
    --snap.skip-state-snapshot-download                                                                                     Skip state download and start from genesis block (default: false)
    --snap.download.to.block value, --shadow.fork.block value                                                               Download snapshots up to the given block number (exclusive). Disabled by default. Useful for testing and shadow forks. (default: 0)
-   --db.pagesize value                                                                                                     DB is split to 'pages' of fixed size. Can't change DB creation. Must be power of 2 and '256b <= pagesize <= 64kb'. Default: equal to OperationSystem's pageSize. Bigger pageSize causing: 1. More writes to disk during commit 2. Smaller b-tree high 3. Less fragmentation 4. Less overhead on 'free-pages list' maintenance (a bit faster Put/Commit) 5. If expecting DB-size > 8Tb then set pageSize >= 8Kb (default: "16KB")
+   --db.pagesize value                                                                                                     DB is splitted to 'pages' of fixed size. Can't change DB creation. Must be power of 2 and '256b <= pagesize <= 64kb'. Default: equal to OperationSystem's pageSize. Bigger pageSize causing: 1. More writes to disk during commit 2. Smaller b-tree high 3. Less fragmentation 4. Less overhead on 'free-pages list' maintainance (a bit faster Put/Commit) 5. If expecting DB-size > 8Tb then set pageSize >= 8Kb (default: "16KB")
    --db.size.limit value                                                                                                   Runtime limit of chaindata db size (can change at any time) (default: "1TB")
    --db.writemap                                                                                                           Enable WRITE_MAP feature for fast database writes and fast commit times (default: true)
    --torrent.port value                                                                                                    Port to listen and serve BitTorrent protocol (default: 42069)
@@ -679,7 +678,8 @@ GLOBAL OPTIONS:
                                                                                                                                 "stun"               Uses STUN to detect an external IP using a default server
                                                                                                                                 "stun:<server>"      Uses STUN to detect an external IP using the given server (host:port)
    --nodiscover                                                                                                            Disables the peer discovery mechanism (manual peer addition) (default: false)
-   --v5disc                                                                                                                Enables the experimental RLPx V5 (Topic Discovery) mechanism (default: false)
+   --discovery.v4, --discv4                                                                                                Enables the V4 discovery mechanism (default: false)
+   --discovery.v5, --discv5                                                                                                Enables the V5 discovery mechanism (default: false)
    --netrestrict value                                                                                                     Restricts network communication to the given IP networks (CIDR masks)
    --nodekey value                                                                                                         P2P node key file
    --nodekeyhex value                                                                                                      P2P node key as hex (for testing)
@@ -723,6 +723,7 @@ GLOBAL OPTIONS:
    --aa                                                                                                                    Enable AA transactions (default: false)
    --ethstats value                                                                                                        Reporting URL of a ethstats service (nodename:secret@host:port)
    --override.osaka value                                                                                                  Manually specify the Osaka fork time, overriding the bundled setting (default: 0)
+   --override.balancer value                                                                                               Manually specify the Balancer fork time, overriding the bundled setting (default: 0)
    --keep.stored.chain.config                                                                                              Avoid overriding chain config already stored in the DB (default: false)
    --caplin.discovery.addr value                                                                                           Address for Caplin DISCV5 protocol (default: "0.0.0.0")
    --caplin.discovery.port value                                                                                           Port for Caplin DISCV5 protocol (default: 4000)
@@ -763,7 +764,7 @@ GLOBAL OPTIONS:
    --caplin.blocks-archive                                                                                                 sets whether backfilling is enabled for caplin (default: false)
    --caplin.blobs-archive                                                                                                  sets whether backfilling is enabled for caplin (default: false)
    --caplin.states-archive                                                                                                 enables archival node for historical states in caplin (it will enable block archival as well) (default: false)
-   --caplin.blobs-immediate-backfill                                                                                       sets whether caplin should immediately backfill blobs (4096 epochs) (default: false)
+   --caplin.blobs-immediate-backfill                                                                                       sets whether caplin should immediatelly backfill blobs (4096 epochs) (default: false)
    --caplin.blobs-no-pruning                                                                                               disable blob pruning in caplin (default: false)
    --caplin.checkpoint-sync.disable                                                                                        disable checkpoint sync in caplin (default: false)
    --caplin.snapgen                                                                                                        enables snapshot generation in caplin (default: false)
@@ -773,7 +774,7 @@ GLOBAL OPTIONS:
    --caplin.custom-genesis value                                                                                           set the custom genesis for caplin
    --caplin.use-engine-api                                                                                                 Use engine API for internal Caplin. useful for testing and if CL network is degraded (default: false)
    --trusted-setup-file value                                                                                              Absolute path to trusted_setup.json file
-   --rpc.slow value                                                                                                        Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Excluded methods: eth_getBlock,eth_getBlockByNumber,eth_getBlockByHash,eth_blockNumber,erigon_blockNumber,erigon_getHeaderByNumber,erigon_getHeaderByHash,erigon_getBlockByTimestamp,eth_call (default: 0s)
+   --rpc.slow value                                                                                                        Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Exluded methods: eth_getBlock,eth_getBlockByNumber,eth_getBlockByHash,eth_blockNumber,erigon_blockNumber,erigon_getHeaderByNumber,erigon_getHeaderByHash,erigon_getBlockByTimestamp,eth_call (default: 0s)
    --txpool.gossip.disable                                                                                                 Disabling p2p gossip of txs. Any txs received by p2p - will be dropped. Some networks like 'Optimism execution engine'/'Optimistic Rollup' - using it to protect against MEV attacks (default: false)
    --sync.loop.block.limit value                                                                                           Sets the maximum number of blocks to process per loop iteration (default: 5000)
    --sync.loop.break.after value                                                                                           Sets the last stage of the sync loop to run
