@@ -35,6 +35,7 @@ func GetFromPage(key, compressedPage []byte, compressionBuf []byte, compressionE
 	if err != nil {
 		panic(err)
 	}
+	log.Warn("[dbg] page2 decomp", "comp", len(v), "decomp", len(compressionBuf))
 
 	cnt := int(page[0])
 	if cnt == 0 {
@@ -85,7 +86,7 @@ func (r *Page) Reset(v []byte, compressionEnabled bool) (n int) {
 		panic(fmt.Errorf("len(v): %d, %w", len(v), err))
 	}
 
-	log.Warn("[dbg] page decomp", "comp", len(v), "decomp", len(r.compressionBuf))
+	log.Warn("[dbg] page1 decomp", "comp", len(v), "decomp", len(r.compressionBuf))
 	r.i, r.kOffset, r.vOffset = 0, 0, 0
 	r.limit = int(v[0])
 	meta, data := v[1:1+r.limit*4*2], v[1+r.limit*4*2:]
