@@ -62,6 +62,8 @@ then it should look something like:
 
 `[ {A: []}, {B: [0]}, {G: [0, 0]}, {C: [1]}, {G: [1, 0]} ]`
 
+***
+
 ## JSON-RPC Specification
 
 #### Ad-hoc Tracing
@@ -126,8 +128,6 @@ Response
   }
 }
 ```
-
-***
 
 ### trace\_callMany
 
@@ -231,8 +231,6 @@ Response
 }
 ```
 
-***
-
 ### trace\_rawTransaction
 
 Traces a call to `eth_sendRawTransaction` without making the call, returning the traces
@@ -288,8 +286,6 @@ Response
   }
 }
 ```
-
-***
 
 ### trace\_replayBlockTransactions
 
@@ -349,8 +345,6 @@ Response
 }
 ```
 
-***
-
 ### trace\_replayTransaction
 
 Replays a transaction, returning the traces.
@@ -404,8 +398,6 @@ Response
   }
 }
 ```
-
-***
 
 ### trace\_block
 
@@ -467,8 +459,6 @@ Response
   ]
 }
 ```
-
-***
 
 ### trace\_filter
 
@@ -541,8 +531,6 @@ Response
 }
 ```
 
-***
-
 ### trace\_get
 
 Returns trace at given position.
@@ -604,8 +592,6 @@ Response
   }
 }
 ```
-
-***
 
 ### trace\_transaction
 
