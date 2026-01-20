@@ -141,8 +141,8 @@ func (tx *ArbitrumUnsignedTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		gasLimit:   tx.GetGasLimit(),
 		nonce:      tx.GetNonce(),
 		accessList: tx.GetAccessList(),
-		from:       accounts.InternAddress(tx.From),
-		to:         accounts.InternAddress(*tx.GetTo()),
+		from:       tx.From,
+		to:         tx.GetTo(),
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
 		checkNonce: !skipAccountChecks[tx.Type()],
@@ -466,13 +466,13 @@ type ArbitrumContractTx struct {
 	arb.NoTimeBoosted
 	ChainId   *big.Int
 	RequestId common.Hash
-	From      common.Address
+	From      accounts.Address
 
-	GasFeeCap *big.Int        // wei per gas
-	Gas       uint64          // gas limit
-	To        *common.Address `rlp:"nil"` // nil means contract creation
-	Value     *big.Int        // wei amount
-	Data      []byte          // contract invocation input data
+	GasFeeCap *big.Int         // wei per gas
+	Gas       uint64           // gas limit
+	To        accounts.Address `rlp:"nil"` // nil means contract creation
+	Value     *big.Int         // wei amount
+	Data      []byte           // contract invocation input data
 }
 
 func (tx *ArbitrumContractTx) copy() *ArbitrumContractTx {
@@ -484,7 +484,7 @@ func (tx *ArbitrumContractTx) copy() *ArbitrumContractTx {
 		From:      tx.From,
 		To:        nil,
 		Value:     new(big.Int),
-		Data:      common.CopyBytes(tx.Data),
+		Data:      common.Copy(tx.Data),
 	}
 	if tx.ChainId != nil {
 		cpy.ChainId.Set(tx.ChainId)

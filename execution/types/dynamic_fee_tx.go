@@ -25,6 +25,8 @@ import (
 	"io"
 	"math/big"
 
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -403,7 +405,7 @@ func (tx *DynamicFeeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := PrefixedRlpHash(DynamicFeeTxType, []any{
+	hash := prefixedRlpHash(DynamicFeeTxType, []any{
 		tx.ChainID,
 		tx.Nonce,
 		tx.TipCap,
@@ -432,7 +434,7 @@ type dynamicFeeTxSigHash struct {
 }
 
 func (tx *DynamicFeeTransaction) SigningHash(chainID *big.Int) common.Hash {
-	return PrefixedRlpHash(
+	return prefixedRlpHash(
 		DynamicFeeTxType,
 		&dynamicFeeTxSigHash{
 			ChainID:    chainID,
