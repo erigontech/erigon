@@ -385,7 +385,9 @@ func (s *Service) login(conn *connWrapper) error {
 	}
 	nodeName := "Erigon"
 	if len(s.servers) > 0 {
-		nodeInfo, err := s.servers[0].NodeInfo(context.TODO(), nil)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		nodeInfo, err := s.servers[0].NodeInfo(ctx, nil)
 		if err != nil {
 			return err
 		}
