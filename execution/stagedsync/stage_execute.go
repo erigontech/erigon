@@ -466,7 +466,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	//  - stop prune when `tx.SpaceDirty()` is big
 	//  - and set ~500ms timeout
 	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
-	quickPruneTimeout := 1 * 1024 * time.Millisecond
+	quickPruneTimeout := 2 * time.Second
 
 	//if timeout > 0 && timeout > quickPruneTimeout {
 	//	quickPruneTimeout = timeout
