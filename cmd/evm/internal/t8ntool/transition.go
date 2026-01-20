@@ -343,7 +343,7 @@ func Main(ctx *cli.Context) error {
 	collector := make(Alloc)
 
 	dumper := state.NewDumper(tx, rawdbv3.TxNums, prestate.Env.Number)
-	dumper.DumpToCollector(collector, false, false, common.Address{}, 0)
+	dumper.DumpToCollector(context.Background(), collector, false, false, common.Address{}, 0)
 	return dispatchOutput(ctx, baseDir, result, collector, body)
 }
 
@@ -413,21 +413,6 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 			return nil, errors.New("chainId field caused an overflow (uint256)")
 		}
 	}
-
-	commonTx := types.CommonTx{
-		Nonce:    uint64(txJson.Nonce),
-		To:       txJson.To,
-		Value:    value,
-		GasLimit: uint64(txJson.Gas),
-		Data:     txJson.Input,
-	}
-
-	commonTx.V.SetFromBig(txJson.V.ToInt())
-	commonTx.R.SetFromBig(txJson.R.ToInt())
-	commonTx.S.SetFromBig(txJson.S.ToInt())
-
-	//TODO: remove after https://github.com/erigontech/erigon/issues/17942
-	_, _, _, _, _, _, _, _ = commonTx.V, commonTx.R, commonTx.S, commonTx.Data, commonTx.Value, commonTx.To, commonTx.GasLimit, commonTx.Nonce
 
 	if txJson.Type == types.LegacyTxType || txJson.Type == types.AccessListTxType {
 		if txJson.Type == types.LegacyTxType {

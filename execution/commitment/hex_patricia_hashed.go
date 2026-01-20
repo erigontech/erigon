@@ -2610,9 +2610,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	return rootHash, nil
 }
 
-func (hph *HexPatriciaHashed) SetTrace(trace bool)              { hph.trace = trace }
-func (hph *HexPatriciaHashed) SetTraceDomain(trace bool)        { hph.traceDomain = trace }
-func (hph *HexPatriciaHashed) SetEnableWarmupCache(enable bool) { hph.enableWarmupCache = enable }
+func (hph *HexPatriciaHashed) SetTrace(trace bool)           { hph.trace = trace }
+func (hph *HexPatriciaHashed) SetTraceDomain(trace bool)     { hph.traceDomain = trace }
+func (hph *HexPatriciaHashed) EnableWarmupCache(enable bool) { hph.enableWarmupCache = enable }
 func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
 	capture := hph.capture
 	if truncate {

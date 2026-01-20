@@ -95,8 +95,8 @@ type Trie interface {
 	SetCapture(capture []string)
 	GetCapture(truncate bool) []string
 	EnableCsvMetrics(filePathPrefix string)
-	// SetEnableWarmupCache enables/disables warmup cache during Process (false by default)
-	SetEnableWarmupCache(bool)
+	// EnableWarmupCache enables/disables warmup cache during Process (false by default)
+	EnableWarmupCache(bool)
 
 	// Variant returns commitment trie variant
 	Variant() TrieVariant

@@ -250,10 +250,17 @@ func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) 
 	var firstKey, firstVal []byte
 	var hasPrefix bool
 	err := sd.IteratePrefix(domain, prefix, roTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
-		firstKey = common.Copy(k)
-		firstVal = common.Copy(v)
-		hasPrefix = true
-		return false, nil // do not continue, end on first occurrence
+		// we need to do this to ensure the value has not been unwound
+		if lv, _, ok := sd.mem.GetLatest(domain, k); ok {
+			v = lv
+		}
+		if len(v) > 0 {
+			firstKey = common.Copy(k)
+			firstVal = common.Copy(v)
+			hasPrefix = true
+			return false, nil // do not continue, end on first occurrence
+		}
+		return true, nil
 	})
 	return firstKey, firstVal, hasPrefix, err
 }
@@ -511,15 +518,21 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 }
 
 // ComputeCommitment evaluates commitment for gathered updates.
-// If warmupDB was set via SetWarmupDB, pre-warms MDBX page cache by reading Branch data in parallel before processing.
+// If trieWarmup toggle was enabled via EnableTrieWarmup, pre-warms MDBX page cache by reading Branch data in parallel before processing.
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
 	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, commitProgress)
 }
 
-func (sd *SharedDomains) SetParaTrieDB(db kv.TemporalRoDB) {
-	sd.sdCtx.SetParaTrieDB(db)
+// EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
+// It requires a DB to be enabled via EnableParaTrieDB.
+func (sd *SharedDomains) EnableTrieWarmup(trieWarmup bool) {
+	sd.sdCtx.EnableTrieWarmup(trieWarmup)
 }
 
-func (sd *SharedDomains) SetEnableWarmupCache(enable bool) {
-	sd.sdCtx.SetEnableWarmupCache(enable)
+func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
+	sd.sdCtx.EnableParaTrieDB(db)
+}
+
+func (sd *SharedDomains) EnableWarmupCache(enable bool) {
+	sd.sdCtx.EnableWarmupCache(enable)
 }

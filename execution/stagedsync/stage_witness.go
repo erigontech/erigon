@@ -60,7 +60,7 @@ func StageWitnessCfg(enableWitnessGeneration bool, maxWitnessLimit uint64, chain
 func PrepareForWitness(tx kv.TemporalTx, block *types.Block, prevRoot common.Hash, cfg *WitnessCfg, ctx context.Context, logger log.Logger) (*WitnessStore, error) {
 	blockNr := block.NumberU64()
 	txNumsReader := rawdbv3.TxNums
-	reader, err := rpchelper.CreateHistoryStateReader(tx, blockNr, 0, txNumsReader)
+	reader, err := rpchelper.CreateHistoryStateReader(ctx, tx, blockNr, 0, txNumsReader)
 	// stateReader, err := rpchelper.CreateHistoryStateReader(roTx, txNumsReader, blockNr, 0, "")
 	if err != nil {
 		return nil, err

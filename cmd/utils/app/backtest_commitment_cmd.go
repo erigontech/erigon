@@ -42,8 +42,9 @@ var backtestCommitmentCommand = cli.Command{
 		&cli.Uint64Flag{Name: "from", Value: 1, Usage: "block number to start historical backtesting from. Defaults to first block."},
 		&cli.Uint64Flag{Name: "to", Value: math.MaxUint64, Usage: "block number to end historical backtesting at. Defaults to latest block with historical data in files."},
 		&cli.Int64Flag{Name: "tMinusN", Value: -1, Usage: "number of blocks to backtest starting from latest block minus N. Alternative to [from,to). Defaults to -1, i.e. by default use [from,to)"},
-		&cli.StringFlag{Name: "output-dir", Required: true, Usage: "directory to store all backtesting result artefacts such as graphs, metrics, profiling, etc."},
+		&cli.StringFlag{Name: "output-dir", Usage: "directory to store all backtesting result artefacts such as graphs, metrics, profiling, etc."},
 		&cli.BoolFlag{Name: "para-trie", Value: false, Usage: "use para trie, defaults to false"},
+		&cli.BoolFlag{Name: "trie-warmup", Value: false, Usage: "enable trie warmup, defaults to false"},
 		&cli.Uint64Flag{Name: "metrics-top-n", Usage: "override the number of top blocks to show in the overview metrics page"},
 		&cli.Uint64Flag{Name: "metrics-page-size", Usage: "override the number of blocks to show in the detailed block range metrics page"},
 	}),
@@ -51,18 +52,22 @@ var backtestCommitmentCommand = cli.Command{
 		ctx := cliCtx.Context
 		logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
 		if err != nil {
-			panic(fmt.Errorf("rollback snapshots to block: could not setup logger: %w", err))
+			panic(fmt.Errorf("backtest-commitment: could not setup logger: %w", err))
 		}
 		if cliCtx.IsSet("tMinusN") && (cliCtx.IsSet("from") || cliCtx.IsSet("to")) {
 			return fmt.Errorf("cannot specify both [from,to) and tMinusN")
 		}
 		args := backtestCommitmentArgs{
-			from:      cliCtx.Uint64("from"),
-			to:        cliCtx.Uint64("to"),
-			tMinusN:   cliCtx.Int64("tMinusN"),
-			dataDir:   cliCtx.String(utils.DataDirFlag.Name),
-			outputDir: cliCtx.String("output-dir"),
-			paraTrie:  cliCtx.Bool("para-trie"),
+			from:       cliCtx.Uint64("from"),
+			to:         cliCtx.Uint64("to"),
+			tMinusN:    cliCtx.Int64("tMinusN"),
+			dataDir:    cliCtx.String(utils.DataDirFlag.Name),
+			outputDir:  cliCtx.String("output-dir"),
+			paraTrie:   cliCtx.Bool("para-trie"),
+			trieWarmup: cliCtx.Bool("trie-warmup"),
+		}
+		if args.outputDir == "" {
+			return fmt.Errorf("output-dir must be specified")
 		}
 		if cliCtx.IsSet("metrics-top-n") {
 			v := cliCtx.Uint64("metrics-top-n")
@@ -79,6 +84,29 @@ var backtestCommitmentCommand = cli.Command{
 		}
 		return nil
 	},
+	Subcommands: []*cli.Command{
+		{
+			Name: "compare-runs",
+			Flags: joinFlags([]cli.Flag{
+				&cli.StringSliceFlag{Name: "run-output-dirs", Required: true, Usage: "comma separated list of directories containing output of backtest-commitment runs to compare"},
+				&cli.StringFlag{Name: "output-dir", Required: true, Usage: "directory to store comparison.html file"},
+			}),
+			Action: func(cliCtx *cli.Context) error {
+				logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+				if err != nil {
+					panic(fmt.Errorf("backtest-commitment: compare-runs: could not setup logger: %w", err))
+				}
+				runOutputDirs := cliCtx.StringSlice("run-output-dirs")
+				outputDir := cliCtx.String("output-dir")
+				err = backtester.CompareRuns(runOutputDirs, outputDir, logger)
+				if err != nil {
+					logger.Error("encountered an issue while comparing backtest runs", "err", err)
+					return err
+				}
+				return nil
+			},
+		},
+	},
 }
 
 type backtestCommitmentArgs struct {
@@ -88,6 +116,7 @@ type backtestCommitmentArgs struct {
 	dataDir         string
 	outputDir       string
 	paraTrie        bool
+	trieWarmup      bool
 	metricsTopN     *uint64
 	metricsPageSize *uint64
 }
@@ -121,6 +150,9 @@ func doBacktestCommitment(ctx context.Context, args backtestCommitmentArgs, logg
 	var opts []backtester.Opt
 	if args.paraTrie {
 		opts = append(opts, backtester.WithParaTrie(true))
+	}
+	if args.trieWarmup {
+		opts = append(opts, backtester.WithTrieWarmup(true))
 	}
 	if args.metricsTopN != nil {
 		opts = append(opts, backtester.WithChartsTopN(*args.metricsTopN))
