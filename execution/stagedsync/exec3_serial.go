@@ -146,7 +146,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if dbg.TraceBlock(blockNum) {
 				se.doms.SetTrace(true, false)
 			}
-			// Warmup is enabled via SetWarmupDB at executor init
+			// Warmup is enabled via EnableTrieWarmup at executor init
 			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, true, blockNum, inputTxNum-1, se.logPrefix, nil)
 			se.doms.SetTrace(false, false)
 
