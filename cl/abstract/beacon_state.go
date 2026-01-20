@@ -70,6 +70,9 @@ type BeaconStateExtension interface {
 	ComputeExitEpochAndUpdateChurn(exitBalance uint64) uint64
 	GetConsolidationBalanceToConsume() uint64
 	GetProposerLookahead() solid.Uint64VectorSSZ
+	GetBuilders() *solid.ListSSZ[*cltypes.Builder]
+	GetLatestExecutionPayloadBid() *cltypes.ExecutionPayloadBid
+	GetLatestBlockHash() common.Hash
 }
 
 type BeaconStateBasic interface {
