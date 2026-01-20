@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/metrics"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -194,44 +195,103 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 		return fmt.Errorf("cannot finalize block execution: %s", err)
 	}
 
-	// Simulate the block execution to get the final state root
-	if err = rawdb.WriteHeader(tx, block.Header()); err != nil {
-		return fmt.Errorf("cannot write header: %s", err)
-	}
 	blockHeight := block.NumberU64()
+	writeBlockForExecution := func(rwTx kv.TemporalRwTx) error {
+		if err = rawdb.WriteHeader(rwTx, block.Header()); err != nil {
+			return fmt.Errorf("cannot write header: %s", err)
+		}
+		if err = rawdb.WriteCanonicalHash(rwTx, block.Hash(), blockHeight); err != nil {
+			return fmt.Errorf("cannot write canonical hash: %s", err)
+		}
+		if err = rawdb.WriteHeadHeaderHash(rwTx, block.Hash()); err != nil {
+			return err
+		}
+		if _, err = rawdb.WriteRawBodyIfNotExists(rwTx, block.Hash(), blockHeight, block.RawBody()); err != nil {
+			return fmt.Errorf("cannot write body: %s", err)
+		}
+		if err = rawdb.AppendCanonicalTxNums(rwTx, blockHeight); err != nil {
+			return err
+		}
+		if err = stages.SaveStageProgress(rwTx, kv.Headers, blockHeight); err != nil {
+			return err
+		}
+		if err = stages.SaveStageProgress(rwTx, stages.Bodies, blockHeight); err != nil {
+			return err
+		}
+		senderS := &StageState{state: s.state, ID: stages.Senders, BlockNumber: blockHeight - 1}
+		if err = SpawnRecoverSendersStage(sendersCfg, senderS, nil, rwTx, blockHeight, ctx, logger); err != nil {
+			return err
+		}
+		return nil
+	}
 
-	if err = rawdb.WriteCanonicalHash(tx, block.Hash(), blockHeight); err != nil {
-		return fmt.Errorf("cannot write canonical hash: %s", err)
-	}
-	if err = rawdb.WriteHeadHeaderHash(tx, block.Hash()); err != nil {
-		return err
-	}
-	if _, err = rawdb.WriteRawBodyIfNotExists(tx, block.Hash(), blockHeight, block.RawBody()); err != nil {
-		return fmt.Errorf("cannot write body: %s", err)
-	}
-	if err = rawdb.AppendCanonicalTxNums(tx, blockHeight); err != nil {
-		return err
-	}
-	if err = stages.SaveStageProgress(tx, kv.Headers, blockHeight); err != nil {
-		return err
-	}
-	if err = stages.SaveStageProgress(tx, stages.Bodies, blockHeight); err != nil {
-		return err
-	}
-	senderS := &StageState{state: s.state, ID: stages.Senders, BlockNumber: blockHeight - 1}
-	if err = SpawnRecoverSendersStage(sendersCfg, senderS, nil, tx, blockHeight, ctx, logger); err != nil {
+	// Simulate the block execution to get the final state root
+	if err = writeBlockForExecution(tx); err != nil {
 		return err
 	}
 
 	// This flag will skip checking the state root
 	execS := &StageState{state: s.state, ID: stages.Execution, BlockNumber: blockHeight - 1}
 
-	if err = ExecV3(ctx, execS, u, execCfg, sd, tx, dbg.Exec3Parallel, blockHeight, logger); err != nil {
+	var blockAccessList types.BlockAccessList
+	needBAL := execCfg.chainConfig.IsAmsterdam(current.Header.Time) || execCfg.experimentalBAL
+	if needBAL {
+		execCfg.blockAccessListSink = func(blockNum uint64, bal types.BlockAccessList) {
+			if blockNum == blockHeight {
+				blockAccessList = bal
+			}
+		}
+	}
+
+	forceParallel := dbg.Exec3Parallel || needBAL
+	execTx := tx
+	execSd := sd
+	var execCleanup func()
+	if forceParallel {
+		if _, ok := tx.(*temporal.RwTx); !ok {
+			type txUnwrapper interface {
+				UnderlyingTx() kv.TemporalTx
+			}
+			if unwrap, ok := tx.(txUnwrapper); ok {
+				if rwTx, ok := unwrap.UnderlyingTx().(kv.TemporalRwTx); ok {
+					tempSd, err := execctx.NewSharedDomains(ctx, rwTx, logger)
+					if err != nil {
+						return err
+					}
+					execTx = rwTx
+					execSd = tempSd
+					execCleanup = func() {
+						tempSd.Close()
+					}
+					if err = writeBlockForExecution(execTx); err != nil {
+						execCleanup()
+						return err
+					}
+				}
+			}
+		}
+		if _, ok := execTx.(*temporal.RwTx); !ok {
+			return fmt.Errorf("parallel execution requires *temporal.RwTx, got %T", execTx)
+		}
+	}
+	if execCleanup != nil {
+		defer execCleanup()
+	}
+
+	if err = ExecV3(ctx, execS, u, execCfg, execSd, execTx, forceParallel, blockHeight, logger); err != nil {
 		logger.Error("cannot execute block execution", "err", err)
 		return err
 	}
 
-	rh, err := sd.ComputeCommitment(ctx, tx, true, blockHeight, txNum, s.LogPrefix(), nil)
+	if needBAL {
+		if blockAccessList == nil {
+			return fmt.Errorf("block %d: missing block access list from execution", blockHeight)
+		}
+		current.BlockAccessList = blockAccessList
+	}
+
+	commitmentTxNum := execSd.TxNum()
+	rh, err := execSd.ComputeCommitment(ctx, execTx, true, blockHeight, commitmentTxNum, s.LogPrefix(), nil)
 	if err != nil {
 		return fmt.Errorf("compute commitment failed: %w", err)
 	}

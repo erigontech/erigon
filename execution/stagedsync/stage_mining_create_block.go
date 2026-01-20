@@ -51,6 +51,7 @@ type MiningBlock struct {
 	Receipts         types.Receipts
 	Withdrawals      []*types.Withdrawal
 	Requests         types.FlatRequests
+	BlockAccessList  types.BlockAccessList
 
 	headerRlpSize         *int
 	withdrawalsRlpSize    *int

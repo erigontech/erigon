@@ -216,16 +216,29 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
 							bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO, pe.cfg.dirs.DataDir)
 							log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash(), "valid", bal.Validate() == nil)
+							if pe.cfg.blockAccessListSink != nil {
+								pe.cfg.blockAccessListSink(applyResult.BlockNum, bal)
+							}
 
 							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) {
-								headerBALHash := *lastHeader.BlockAccessListHash
-								if headerBALHash != b.BlockAccessList().Hash() {
-									log.Info(fmt.Sprintf("bal from block: %s", b.BlockAccessList().DebugString()))
-									return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, b.BlockAccessList().Hash(), headerBALHash)
+								if lastHeader.BlockAccessListHash == nil {
+									if pe.isBlockProduction {
+										hash := bal.Hash()
+										lastHeader.BlockAccessListHash = &hash
+									} else {
+										return fmt.Errorf("block %d: missing block access list hash", applyResult.BlockNum)
+									}
 								}
-								if headerBALHash != bal.Hash() {
-									log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))
-									return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, applyResult.BlockNum, bal.Hash(), headerBALHash)
+								headerBALHash := *lastHeader.BlockAccessListHash
+								if !pe.isBlockProduction {
+									if headerBALHash != b.BlockAccessList().Hash() {
+										log.Info(fmt.Sprintf("bal from block: %s", b.BlockAccessList().DebugString()))
+										return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, b.BlockAccessList().Hash(), headerBALHash)
+									}
+									if headerBALHash != bal.Hash() {
+										log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))
+										return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, applyResult.BlockNum, bal.Hash(), headerBALHash)
+									}
 								}
 							}
 						}
