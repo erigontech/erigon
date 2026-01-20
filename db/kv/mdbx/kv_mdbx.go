@@ -108,7 +108,7 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 		metrics:         label == dbcfg.ChainDB,
 	}
 	if label == dbcfg.ChainDB {
-		//opts = opts.RemoveFlags(mdbx.NoReadahead) // enable readahead for chaindata by default. Erigon3 require fast updates and prune. Also it's chaindata is small (doesen GB)
+		opts = opts.RemoveFlags(mdbx.NoReadahead) // enable readahead for chaindata by default. Erigon3 require fast updates and prune. Also it's chaindata is small (doesen GB)
 	}
 	return opts
 }
@@ -222,7 +222,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	if err = env.SetOption(mdbx.OptMaxReaders, kv.ReadersLimit); err != nil {
 		return nil, err
 	}
-	if err = env.SetOption(mdbx.OptRpAugmentLimit /*1_000_000_000*/, 1_000_000); err != nil { //default: 262144
+	if err = env.SetOption(mdbx.OptRpAugmentLimit, 1_000_000_000); err != nil { //default: 262144
 		return nil, err
 	}
 
