@@ -37,6 +37,7 @@ CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
 #CGO_CFLAGS += -DMDBX_ENABLE_PGOP_STAT=0 # Disabled by default, but may be useful for performance debugging
 #CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
 
+
 CGO_CFLAGS += -D__BLST_PORTABLE__
 
 # Configure GOAMD64 env.variable for AMD64 architecture:
@@ -44,10 +45,10 @@ ifeq ($(shell uname -m),x86_64)
 	CPU_ARCH= GOAMD64=${GOAMD64_VERSION}
 endif
 
-CGO_CFLAGS += -Wno-unknown-warning-option -Wno-enum-int-mismatch -Wno-strict-prototypes -Wno-unused-but-set-variable
+CGO_CFLAGS += -Wno-unknown-warning-option -Wno-enum-int-mismatch -Wno-strict-prototypes -Wno-unused-but-set-variable -O3
 
 CGO_LDFLAGS := $(shell $(GO) env CGO_LDFLAGS 2> /dev/null)
-CGO_LDFLAGS += -g
+CGO_LDFLAGS += -O3 -g
 
 ifeq ($(shell uname -s), Darwin)
 	ifeq ($(filter-out 13.%,$(shell sw_vers --productVersion)),)
