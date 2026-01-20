@@ -26,7 +26,10 @@ jobs:
             max-allowed-failures: 0
           - sim: engine
             sim-limit: cancun
-            max-allowed-failures: 0
+            # 2 failures (not due to us, but due to Hive/Geth secondary client)
+            # will remove once resolved by STEEL team (these 2 tests are failing on all clients)
+            # see https://discord.com/channels/1359927674746835211/1410592782258540565/1462699469824065560
+            max-allowed-failures: 2
           - sim: engine
             sim-limit: api
             max-allowed-failures: 0
