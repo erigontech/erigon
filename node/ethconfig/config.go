@@ -118,6 +118,7 @@ var Defaults = Config{
 	ErigonDBStepSize:          config3.DefaultStepSize,
 	ErigonDBStepsInFrozenFile: config3.DefaultStepsInFrozenFile,
 	FcuTimeout:                1 * time.Second,
+	FcuBackgroundPrune:        true,
 }
 
 const DefaultChainDBPageSize = 16 * datasize.KB
@@ -281,7 +282,8 @@ type Config struct {
 	ErigonDBStepsInFrozenFile int
 
 	// fork choice update timeout
-	FcuTimeout time.Duration
+	FcuTimeout         time.Duration
+	FcuBackgroundPrune bool
 }
 
 type Sync struct {

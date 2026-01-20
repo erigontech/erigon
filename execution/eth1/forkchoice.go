@@ -180,7 +180,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}, false)
 		return
 	}
-	defer e.semaphore.Release(1)
+	shouldReleaseSema := true
+	defer func() {
+		if shouldReleaseSema {
+			e.semaphore.Release(1)
+		}
+	}()
 
 	defer UpdateForkChoiceDuration(time.Now())
 
@@ -602,8 +607,22 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			e.logger.Info("head updated", logArgs...)
 		}
 	}
-	if *headNumber >= startPruneFrom {
-		e.runPostForkchoiceInBackground(initialCycle)
+	if e.fcuBackgroundPrune {
+		shouldReleaseSema = false // pass on semaphore to background goroutine doing post fcu processing
+		go func() {
+			defer e.semaphore.Release(1)
+			err := e.runPostForkchoice(*headNumber, initialCycle)
+			if err != nil {
+				e.logger.Error("run post fork choice in background", "error", err)
+			}
+		}()
+	} else {
+		err := e.runPostForkchoice(*headNumber, initialCycle)
+		if err != nil {
+			e.logger.Error("run post fork choice in background", "error", err)
+			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+			return
+		}
 	}
 
 	sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
@@ -613,18 +632,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}, stateFlushingInParallel)
 }
 
-func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle bool) {
-	if !e.doingPostForkchoice.CompareAndSwap(false, true) {
-		return
-	}
-	go func() {
-		defer e.doingPostForkchoice.Store(false)
-		var timings []interface{}
-		// Wait for semaphore to be available
-		if e.semaphore.Acquire(e.bacgroundCtx, 1) != nil {
-			return
-		}
-		defer e.semaphore.Release(1)
+func (e *EthereumExecutionModule) runPostForkchoice(headNumber uint64, initialCycle bool) error {
+	var timings []interface{}
+	if headNumber >= startPruneFrom {
 		pruneStart := time.Now()
 		defer UpdateForkChoicePruneDuration(pruneStart)
 		if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
@@ -634,16 +644,14 @@ func (e *EthereumExecutionModule) runPostForkchoiceInBackground(initialCycle boo
 			if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
 				timings = append(timings, pruneTimings...)
 			}
-
 			return nil
 		}); err != nil {
-			e.logger.Error("runPostForkchoiceInBackground", "error", err)
-			return
+			return err
 		}
-
-		if len(timings) > 0 {
-			timings = append(timings, "initialCycle", initialCycle)
-			e.logger.Info("Timings: Post-Forkchoice", timings...)
-		}
-	}()
+	}
+	if len(timings) > 0 {
+		timings = append(timings, "initialCycle", initialCycle)
+		e.logger.Info("Timings: Post-Forkchoice", timings...)
+	}
+	return nil
 }

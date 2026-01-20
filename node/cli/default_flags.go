@@ -44,6 +44,7 @@ var DefaultFlags = []cli.Flag{
 	&PruneModeFlag,
 	&utils.KeepExecutionProofsFlag,
 	&utils.FcuTimeoutFlag,
+	&utils.FcuBackgroundPruneFlag,
 	&BatchSizeFlag,
 	&BodyCacheLimitFlag,
 	&DatabaseVerbosityFlag,
