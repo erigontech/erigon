@@ -37,6 +37,9 @@ func NewMapWriter() *MapWriter {
 }
 
 func (mw *MapWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
+	if account.Equals(original) {
+		return nil
+	}
 	addressValue := address.Value()
 	mw.Changes[string(addressValue[:])] = accounts.SerialiseV3(account)
 	return nil

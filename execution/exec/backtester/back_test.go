@@ -2,6 +2,7 @@ package exec_backtester
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -47,24 +48,40 @@ func storedChanges(tx kv.TemporalTx, fromTxNum uint64, txnIndex int) (map[string
 	}
 	//defer it.Close()
 	for it.HasNext() {
-		key, val, err := it.Next()
+		key, _, err := it.Next()
 		if err != nil {
 			return changes, err
 		}
+		val, ok, err := tx.GetAsOf(kv.AccountsDomain, key, fromTxNum+uint64(txnIndex+2))
+		if err != nil {
+			return changes, err
+		}
+		if !ok {
+			return changes, errors.New("account val not found")
+		}
 		changes[string(key)] = val
 	}
+
 	it, err = tx.HistoryRange(kv.StorageDomain, int(fromTxNum+uint64(txnIndex+1)), int(fromTxNum+uint64(txnIndex+2)), order.Asc, -1)
 	if err != nil {
 		return changes, err
 	}
 	//defer it.Close()
 	for it.HasNext() {
-		key, val, err := it.Next()
+		key, _, err := it.Next()
 		if err != nil {
 			return changes, err
 		}
+		val, ok, err := tx.GetAsOf(kv.StorageDomain, key, fromTxNum+uint64(txnIndex+2))
+		if err != nil {
+			return changes, err
+		}
+		if !ok {
+			return changes, errors.New("storage val not found")
+		}
 		changes[string(key)] = val
 	}
+
 	return changes, err
 }
 
@@ -136,7 +153,7 @@ func TestReExecution(t *testing.T) {
 	block, err := blockReader.BlockByNumber(ctx, tx, blockNum)
 	require.NoError(t, err)
 
-	txnIndex := -1
+	txnIndex := -1 // beginning of the block
 
 	// Check changes at the beginning of the block
 	changesInDb, err := storedChanges(tx, fromTxNum, txnIndex)
