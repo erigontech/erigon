@@ -1,5 +1,9 @@
 ---
 description: Inspecting Unconfirmed Transactions in Erigon
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/interacting-with-erigon/interacting-with-erigon/txpool
 ---
 
 # txpool
@@ -45,7 +49,9 @@ The txpool namespace must be explicitly enabled using the `--http.api` flag when
 
 ***
 
-## **txpool\_content**
+## **JSON-RPC Specification**
+
+### **txpool\_content**
 
 Returns the content of the transaction pool, organized by sender address and categorized into pending, queued, and baseFee sub-pools.
 
@@ -70,9 +76,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"txpool_content","params":[],"id":"1"}
 | baseFee | Object                                              |
 | queued  | Object                                              |
 
-***
-
-## **txpool\_contentFrom**
+### **txpool\_contentFrom**
 
 Returns the content of the transaction pool for a specific sender address, showing all transactions from that address across all sub-pools.
 
@@ -99,9 +103,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"txpool_contentFrom","params":["0xb60e
 | baseFee | Object                                             |
 | queued  | Object                                             |
 
-***
-
-## **txpool\_status**
+### **txpool\_status**
 
 Returns the current status of the transaction pool, including the count of transactions in each sub-pool.
 

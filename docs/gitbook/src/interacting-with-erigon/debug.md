@@ -43,7 +43,7 @@ The `debug` namespace is intended for debugging and development purposes, not fo
 
 ***
 
-## JSON RPC API Reference
+## JSON-RPC Specification
 
 ### debug\_getRawReceipts
 
@@ -57,9 +57,11 @@ Returns an array of EIP-2718 binary-encoded receipts from a single block. debug\
 
 #### Example
 
-```
+{% code overflow="wrap" %}
+```bash
 curl -s --data '{"jsonrpc":"2.0","method":"debug_getRawReceipts","params":["0x123456"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 #### Returns
 
@@ -84,9 +86,11 @@ Returns a range of accounts involved in the given block range. debug\_api.
 
 #### Example
 
-```
+{% code overflow="wrap" %}
+```bash
 curl -s --data '{"jsonrpc":"2.0","method":"debug_accountRange","params":["0xaaaaa",[1],1,true,true,true],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 #### Returns
 
@@ -108,9 +112,11 @@ Returns account information at a specific block and transaction index. debug\_ap
 
 #### Example
 
-```
+{% code overflow="wrap" %}
+```bash
 curl -s --data '{"jsonrpc":"2.0","method":"debug_accountAt","params":["0x123456...",1,"0x123456..."],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 #### Returns
 
@@ -131,9 +137,11 @@ Returns a list of accounts modified in the given block range by number. debug\_a
 
 #### Example
 
-```
+{% code overflow="wrap" %}
+```bash
 curl -s --data '{"jsonrpc":"2.0","method":"debug_getModifiedAccountsByNumber","params":["0xccccd","0xcccce"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 #### Returns
 
@@ -154,9 +162,11 @@ Returns a list of accounts modified in the given block range by hash. debug\_api
 
 #### Example
 
-```
+{% code overflow="wrap" %}
+```bash
 curl -s --data '{"jsonrpc":"2.0","method":"debug_getModifiedAccountsByHash","params":["0x2a1af0...","0x4e3d3e..."],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 #### Returns
 
@@ -180,9 +190,11 @@ Returns information about a range of storage locations for a contract address. d
 
 #### Example
 
-```
+{% code overflow="wrap" %}
+```bash
 curl -s --data '{"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0xd3f185...",1,"0xb734c7...","0x00",2],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 #### Returns
 
@@ -203,9 +215,11 @@ Returns Geth style transaction traces for a block by hash. tracing.
 
 #### Example
 
-```
+{% code overflow="wrap" %}
+```bash
 curl -s --data '{"jsonrpc":"2.0","method":"debug_traceBlockByHash","params":["0x123456...",{}],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 #### Returns
 
@@ -226,9 +240,11 @@ Returns Geth style transaction traces for a block by number. tracing.
 
 #### Example
 
-```
+{% code overflow="wrap" %}
+```bash
 curl -s --data '{"jsonrpc":"2.0","method":"debug_traceBlockByNumber","params":["0x123456",{}],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 #### Returns
 
@@ -249,9 +265,11 @@ Returns Geth style transaction trace. debug\_api.
 
 #### Example
 
-```
+{% code overflow="wrap" %}
+```bash
 curl -s --data '{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["0x123456...",{}],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 #### Returns
 
@@ -273,9 +291,11 @@ Returns Geth style call trace. debug\_api.
 
 #### Example
 
-```
+{% code overflow="wrap" %}
+```bash
 curl -s --data '{"jsonrpc":"2.0","method":"debug_traceCall","params":[{"to":"0x123456..."},"latest",{}],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 #### Returns
 
@@ -297,9 +317,11 @@ Returns Geth style traces for multiple call bundles. tracing.
 
 #### Example
 
-```
+{% code overflow="wrap" %}
+```bash
 curl -s --data '{"jsonrpc":"2.0","method":"debug_traceCallMany","params":[[{"transactions":[...]}],{"blockNumber":"latest"},{}],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 #### Returns
 
@@ -309,7 +331,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_traceCallMany","params":[[{"tra
 
 ### debug\_setMemoryLimit
 
-Sets the GOMEMLIMIT for the process. debug\_api.
+Sets the GOMEMLIMIT for the process. Part of `debug_api`.
 
 #### Parameters
 
@@ -319,9 +341,11 @@ Sets the GOMEMLIMIT for the process. debug\_api.
 
 #### Example
 
-```
+{% code overflow="wrap" %}
+```bash
 curl -s --data '{"jsonrpc":"2.0","method":"debug_setMemoryLimit","params":[8589934592],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 #### Returns
 
@@ -331,7 +355,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_setMemoryLimit","params":[85899
 
 ### debug\_setGCPercent
 
-Sets the garbage collection target percentage. debug\_api.
+Sets the garbage collection target percentage. Part of `debug_api`.
 
 #### Parameters
 
@@ -341,9 +365,11 @@ Sets the garbage collection target percentage. debug\_api.
 
 #### Example
 
-```
+{% code overflow="wrap" %}
+```bash
 curl -s --data '{"jsonrpc":"2.0","method":"debug_setGCPercent","params":[100],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 #### Returns
 
@@ -353,19 +379,19 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_setGCPercent","params":[100],"i
 
 ### debug\_freeOSMemory
 
-Forces a garbage collection to free OS memory. debug\_api.
+Forces a garbage collection to free OS memory. Part of `debug_api`.
 
-#### Parameters
+#### **Parameters**
 
-| Parameter | Type | Description            |
-| --------- | ---- | ---------------------- |
-| None      | -    | No parameters required |
+None
 
 #### Example
 
-```
+{% code overflow="wrap" %}
+```bash
 curl -s --data '{"jsonrpc":"2.0","method":"debug_freeOSMemory","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 #### Returns
 
@@ -375,19 +401,19 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_freeOSMemory","params":[],"id":
 
 ### debug\_gcStats
 
-Returns garbage collection statistics. debug\_api.
+Returns garbage collection statistics. Part of `debug_api`.
 
-#### Parameters
+#### **Parameters**
 
-| Parameter | Type | Description            |
-| --------- | ---- | ---------------------- |
-| None      | -    | No parameters required |
+None
 
 #### Example
 
-```
+{% code overflow="wrap" %}
+```bash
 curl -s --data '{"jsonrpc":"2.0","method":"debug_gcStats","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 #### Returns
 
@@ -397,19 +423,19 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_gcStats","params":[],"id":"1"}'
 
 ### debug\_memStats
 
-Returns detailed runtime memory statistics. debug\_api.
+Returns detailed runtime memory statistics. Part of `debug_api`.
 
-#### Parameters
+#### **Parameters**
 
-| Parameter | Type | Description            |
-| --------- | ---- | ---------------------- |
-| None      | -    | No parameters required |
+None
 
 #### Example
 
-```
+{% code overflow="wrap" %}
+```bash
 curl -s --data '{"jsonrpc":"2.0","method":"debug_memStats","params":[],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
+{% endcode %}
 
 #### Returns
 

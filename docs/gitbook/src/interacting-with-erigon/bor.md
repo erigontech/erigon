@@ -1,5 +1,9 @@
 ---
 description: Accessing Polygon Validator and Bor Consensus Data
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/interacting-with-erigon/interacting-with-erigon/bor
 ---
 
 # bor
@@ -28,7 +32,9 @@ The bor namespace must be explicitly enabled using the `--http.api` flag when st
 
 ***
 
-## **bor\_getSnapshot**
+## **JSON-RPC Specification**
+
+### **bor\_getSnapshot**
 
 Returns the validator snapshot at a given block number, containing information about the current validator set and their voting power.
 
@@ -52,9 +58,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"bor_getSnapshot","params":["latest"],
 | ------ | ------------------------------------------------------------------- |
 | Object | Snapshot object containing validator information and voting details |
 
-***
-
-## **bor\_getAuthor**
+### **bor\_getAuthor**
 
 Returns the author (block proposer) of a block at the given block number or hash.
 
@@ -78,9 +82,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"bor_getAuthor","params":["0x1b4"],"id
 | -------------- | ---------------------------------------- |
 | DATA, 20 BYTES | The address of the block author/proposer |
 
-***
-
-## **bor\_getSnapshotAtHash**
+### **bor\_getSnapshotAtHash**
 
 Returns the validator snapshot at a specific block hash.
 
@@ -104,9 +106,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"bor_getSnapshotAtHash","params":["0x1
 | ------ | ---------------------------------------------------------------------------- |
 | Object | Snapshot object containing validator information at the specified block hash |
 
-***
-
-## **bor\_getSigners**
+### **bor\_getSigners**
 
 Returns the list of authorized signers (validators) at a given block number.
 
@@ -130,9 +130,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"bor_getSigners","params":["latest"],"
 | ----- | ------------------------------------------------------ |
 | Array | Array of validator addresses authorized to sign blocks |
 
-***
-
-## **bor\_getSignersAtHash**
+### **bor\_getSignersAtHash**
 
 Returns the list of authorized signers (validators) at a specific block hash.
 
@@ -156,9 +154,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"bor_getSignersAtHash","params":["0x1d
 | ----- | ---------------------------------------------------------------------------- |
 | Array | Array of validator addresses authorized to sign blocks at the specified hash |
 
-***
-
-## **bor\_getCurrentProposer**
+### **bor\_getCurrentProposer**
 
 Returns the address of the current block proposer based on the current validator set and proposer selection algorithm.
 
@@ -180,9 +176,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"bor_getCurrentProposer","params":[],"
 | -------------- | ----------------------------------- |
 | DATA, 20 BYTES | The address of the current proposer |
 
-***
-
-## **bor\_getCurrentValidators**
+### **bor\_getCurrentValidators**
 
 Returns the current validator set with their details including voting power and other metadata.
 
@@ -200,13 +194,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"bor_getCurrentValidators","params":[]
 
 **Returns**
 
-| Type  | Description                                                                 |
-| ----- | --------------------------------------------------------------------------- |
-| Array | Array of validator objects with their addresses, voting power, and metadata |
-
-***
-
-## **bor\_getSnapshotProposerSequence**
+### **bor\_getSnapshotProposerSequence**
 
 Returns the proposer sequence for a given block, showing the order in which validators are expected to propose blocks.
 
@@ -230,9 +218,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"bor_getSnapshotProposerSequence","par
 | ------ | ---------------------------------------------------------------- |
 | Object | BlockSigners object containing the proposer sequence information |
 
-***
-
-## **bor\_getRootHash**
+### **bor\_getRootHash**
 
 Returns the root hash for a range of blocks, used for checkpoint verification and state synchronization.
 
@@ -257,9 +243,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"bor_getRootHash","params":["0x1", "0x
 | ------ | ------------------------------------------- |
 | STRING | The root hash for the specified block range |
 
-***
-
-## **bor\_getVoteOnHash**
+### **bor\_getVoteOnHash**
 
 Returns voting information for a specific block hash, used in the Bor consensus mechanism.
 
