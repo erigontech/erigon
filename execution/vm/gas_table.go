@@ -101,7 +101,7 @@ var (
 	gasReturnDataCopy = memoryCopierGas(2)
 )
 
-func gasSStore(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
+func gasSStore(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 	value, x := callContext.Stack.Back(1), callContext.Stack.Back(0)
 	key := accounts.InternKey(x.Bytes32())
 	current, _ := evm.IntraBlockState().GetState(callContext.Address(), key)
@@ -182,7 +182,7 @@ func gasSStore(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize u
 //     2.2.2. If original value equals new value (this storage slot is reset):
 //     2.2.2.1. If original value is 0, add SSTORE_SET_GAS - SLOAD_GAS to refund counter.
 //     2.2.2.2. Otherwise, add SSTORE_RESET_GAS - SLOAD_GAS gas to refund counter.
-func gasSStoreEIP2200(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
+func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 	// If we fail the minimum gas availability invariant, fail (0)
 	if callContext.gas <= params.SstoreSentryGasEIP2200 {
 		return 0, errors.New("not enough gas for reentrancy sentry")
@@ -224,7 +224,7 @@ func gasSStoreEIP2200(evm *EVM, callContext *CallContext, scopeGas uint64, memor
 }
 
 func makeGasLog(n uint64) gasFunc {
-	return func(_ *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
+	return func(_ *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 		requestedSize, overflow := callContext.Stack.Back(1).Uint64WithOverflow()
 		if overflow {
 			return 0, ErrGasUintOverflow
@@ -253,7 +253,7 @@ func makeGasLog(n uint64) gasFunc {
 	}
 }
 
-func gasKeccak256(_ *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
+func gasKeccak256(_ *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return 0, err
@@ -274,7 +274,7 @@ func gasKeccak256(_ *EVM, callContext *CallContext, scopeGas uint64, memorySize 
 // pureMemoryGascost is used by several operations, which aside from their
 // static cost have a dynamic cost which is solely based on the memory
 // expansion
-func pureMemoryGascost(_ *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
+func pureMemoryGascost(_ *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 	return memoryGasCost(callContext, memorySize)
 }
 
@@ -287,7 +287,7 @@ var (
 	gasCreate  = pureMemoryGascost
 )
 
-func gasCreate2(_ *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
+func gasCreate2(_ *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return 0, err
@@ -308,7 +308,7 @@ func gasCreate2(_ *EVM, callContext *CallContext, scopeGas uint64, memorySize ui
 	return gas, nil
 }
 
-func gasCreateEip3860(_ *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
+func gasCreateEip3860(_ *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return 0, err
@@ -330,7 +330,7 @@ func gasCreateEip3860(_ *EVM, callContext *CallContext, scopeGas uint64, memoryS
 	return gas, nil
 }
 
-func gasCreate2Eip3860(_ *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
+func gasCreate2Eip3860(_ *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return 0, err
@@ -352,7 +352,7 @@ func gasCreate2Eip3860(_ *EVM, callContext *CallContext, scopeGas uint64, memory
 	return gas, nil
 }
 
-func gasExpFrontier(_ *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
+func gasExpFrontier(_ *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 	expByteLen := uint64(common.BitLenToByteLen(callContext.Stack.data[callContext.Stack.len()-2].BitLen()))
 
 	var (
@@ -365,7 +365,7 @@ func gasExpFrontier(_ *EVM, callContext *CallContext, scopeGas uint64, memorySiz
 	return gas, nil
 }
 
-func gasExpEIP160(_ *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
+func gasExpEIP160(_ *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 	expByteLen := uint64(common.BitLenToByteLen(callContext.Stack.data[callContext.Stack.len()-2].BitLen()))
 
 	var (
@@ -378,7 +378,11 @@ func gasExpEIP160(_ *EVM, callContext *CallContext, scopeGas uint64, memorySize 
 	return gas, nil
 }
 
-func gasCall(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
+func gasCall(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	return statelessGasCall(evm, callContext, availableGas, memorySize, true)
+}
+
+func statelessGasCall(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64, withCallGasCalc bool) (uint64, error) {
 	var gas uint64
 
 	transfersValue := !callContext.Stack.Back(2).IsZero()
@@ -396,7 +400,7 @@ func gasCall(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uin
 		return 0, ErrGasUintOverflow
 	}
 
-	if gas > scopeGas {
+	if gas > availableGas {
 		return 0, ErrOutOfGas
 	}
 
@@ -421,35 +425,51 @@ func gasCall(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uin
 		}
 	}
 
-	if gas > scopeGas {
+	if gas > availableGas {
 		return 0, ErrOutOfGas
 	}
 
-	var callGasTemp uint64
-	callGasTemp, err = callGas(evm.ChainRules().IsTangerineWhistle, scopeGas, gas, callContext.Stack.Back(0))
-	evm.SetCallGasTemp(callGasTemp)
+	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
+		fmt.Printf("%d (%d.%d) Call Gas: base: %d memory(%d): %d\n",
+			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gas-memoryGas, memorySize, memoryGas)
+	}
 
+	if !withCallGasCalc {
+		return gas, nil
+	}
+
+	return calcCallGas(evm, callContext, availableGas, gas)
+}
+
+func calcCallGas(evm *EVM, callContext *CallContext, availableGas, gas uint64) (uint64, error) {
+	callGas, err := callGas(evm.ChainRules().IsTangerineWhistle, availableGas, gas, callContext.Stack.Back(0))
 	if err != nil {
 		return 0, err
 	}
+	evm.SetCallGasTemp(callGas)
 
 	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
-		fmt.Printf("%d (%d.%d) Call Gas: base: %d memory(%d): %d call: %d\n",
-			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gas-memoryGas, memorySize, memoryGas, callGasTemp)
+		fmt.Printf("%d (%d.%d) Call Gas: call: %d\n",
+			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), callGas)
 	}
 
-	if gas, overflow = math.SafeAdd(gas, callGasTemp); overflow {
+	var overflow bool
+	if gas, overflow = math.SafeAdd(gas, callGas); overflow {
 		return 0, ErrGasUintOverflow
 	}
 
-	if gas > scopeGas {
+	if gas > availableGas {
 		return 0, ErrOutOfGas
 	}
 
 	return gas, nil
 }
 
-func gasCallCode(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
+func gasCallCode(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	return statelessGasCallCode(evm, callContext, availableGas, memorySize, true)
+}
+
+func statelessGasCallCode(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64, withCallGasCalc bool) (uint64, error) {
 	memoryGas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return 0, err
@@ -466,33 +486,30 @@ func gasCallCode(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize
 		return 0, ErrGasUintOverflow
 	}
 
-	var callGasTemp uint64
-	callGasTemp, err = callGas(evm.ChainRules().IsTangerineWhistle, scopeGas, gas, callContext.Stack.Back(0))
-	evm.SetCallGasTemp(callGasTemp)
-
-	if err != nil {
-		return 0, err
-	}
-
 	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
-		fmt.Printf("%d (%d.%d) CallCode Gas: base: %d memory(%d): %d call: %d\n",
-			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gas-memoryGas, memorySize, memoryGas, callGasTemp)
+		fmt.Printf("%d (%d.%d) CallCode Gas: base: %d memory(%d): %d\n",
+			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gas-memoryGas, memorySize, memoryGas)
 	}
 
-	if gas, overflow = math.SafeAdd(gas, callGasTemp); overflow {
-		return 0, ErrGasUintOverflow
+	if !withCallGasCalc {
+		return gas, nil
 	}
-	return gas, nil
+
+	return calcCallGas(evm, callContext, availableGas, gas)
 }
 
-func gasDelegateCall(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
+func gasDelegateCall(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	return statelessGasDelegateCall(evm, callContext, availableGas, memorySize, true)
+}
+
+func statelessGasDelegateCall(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64, withCallGasCalc bool) (uint64, error) {
 	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return 0, err
 	}
 
 	var callGasTemp uint64
-	callGasTemp, err = callGas(evm.ChainRules().IsTangerineWhistle, scopeGas, gas, callContext.Stack.Back(0))
+	callGasTemp, err = callGas(evm.ChainRules().IsTangerineWhistle, availableGas, gas, callContext.Stack.Back(0))
 	evm.SetCallGasTemp(callGasTemp)
 
 	if err != nil {
@@ -500,45 +517,40 @@ func gasDelegateCall(evm *EVM, callContext *CallContext, scopeGas uint64, memory
 	}
 
 	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
-		fmt.Printf("%d (%d.%d) DelegateCall Gas: memory(%d): %d call: %d\n",
-			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), memorySize, gas, callGasTemp)
+		fmt.Printf("%d (%d.%d) DelegateCall Gas: memory(%d)\n",
+			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), memorySize, gas)
 	}
 
-	var overflow bool
-	if gas, overflow = math.SafeAdd(gas, callGasTemp); overflow {
-		return 0, ErrGasUintOverflow
+	if !withCallGasCalc {
+		return gas, nil
 	}
-	return gas, nil
+
+	return calcCallGas(evm, callContext, availableGas, gas)
 }
 
-func gasStaticCall(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
+func gasStaticCall(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	return statelessGasStaticCall(evm, callContext, availableGas, memorySize, true)
+}
+
+func statelessGasStaticCall(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64, withCallGasCalc bool) (uint64, error) {
 	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return 0, err
 	}
 
-	var callGasTemp uint64
-	callGasTemp, err = callGas(evm.ChainRules().IsTangerineWhistle, scopeGas, gas, callContext.Stack.Back(0))
-	evm.SetCallGasTemp(callGasTemp)
-
-	if err != nil {
-		return 0, err
-	}
-
 	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
-		fmt.Printf("%d (%d.%d) StaticCall Gas: memory(%d): %d call: %d\n",
-			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), memorySize, gas, callGasTemp)
+		fmt.Printf("%d (%d.%d) StaticCall Gas: memory(%d): %d\n",
+			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), memorySize, gas)
 	}
 
-	var overflow bool
-	if gas, overflow = math.SafeAdd(gas, callGasTemp); overflow {
-		return 0, ErrGasUintOverflow
+	if !withCallGasCalc {
+		return gas, nil
 	}
 
-	return gas, nil
+	return calcCallGas(evm, callContext, availableGas, gas)
 }
 
-func gasSelfdestruct(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
+func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 	var gas uint64
 	// TangerineWhistle (EIP150) gas reprice fork:
 	if evm.ChainRules().IsTangerineWhistle {

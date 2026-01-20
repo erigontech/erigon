@@ -262,14 +262,14 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 }
 
 var (
-	gasCallEIP7702         = makeCallVariantGasCallEIP7702(gasCall)
-	gasDelegateCallEIP7702 = makeCallVariantGasCallEIP7702(gasDelegateCall)
-	gasStaticCallEIP7702   = makeCallVariantGasCallEIP7702(gasStaticCall)
-	gasCallCodeEIP7702     = makeCallVariantGasCallEIP7702(gasCallCode)
+	gasCallEIP7702         = makeCallVariantGasCallEIP7702(statelessGasCall)
+	gasDelegateCallEIP7702 = makeCallVariantGasCallEIP7702(statelessGasDelegateCall)
+	gasStaticCallEIP7702   = makeCallVariantGasCallEIP7702(statelessGasStaticCall)
+	gasCallCodeEIP7702     = makeCallVariantGasCallEIP7702(statelessGasCallCode)
 )
 
-func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
-	return func(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
+func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc) gasFunc {
+	return func(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 		addr := accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
 		// Check slot presence in the access list
 		var dynCost uint64
@@ -279,7 +279,7 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 			dynCost = params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
 			// Charge the remaining difference here already, to correctly calculate available
 			// gas for call
-			if _, ok := useGas(scopeGas, dynCost, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
+			if _, ok := useGas(availableGas, dynCost, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
 				return 0, ErrOutOfGas
 			}
 
@@ -291,7 +291,7 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 		// - transfer value
 		// - memory expansion
 		// - 63/64ths rule
-		gas, err := oldCalculator(evm, callContext, scopeGas-dynCost, memorySize)
+		gas, err := statelessCalculator(evm, callContext, availableGas-dynCost, memorySize, false)
 		if err != nil {
 			return 0, err
 		}
@@ -301,7 +301,7 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 			return 0, ErrGasUintOverflow
 		}
 
-		if _, ok := useGas(scopeGas, gas, evm.Config().Tracer, tracing.GasChangeDelegatedDesignation); !ok {
+		if _, ok := useGas(availableGas, gas, evm.Config().Tracer, tracing.GasChangeDelegatedDesignation); !ok {
 			return 0, ErrOutOfGas
 		}
 
@@ -320,13 +320,13 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 
 			evm.intraBlockState.GetCode(addr)
 
-			if _, ok := useGas(scopeGas, gas, evm.Config().Tracer, tracing.GasChangeDelegatedDesignation); !ok {
+			if _, ok := useGas(availableGas, gas, evm.Config().Tracer, tracing.GasChangeDelegatedDesignation); !ok {
 				return 0, ErrOutOfGas
 			}
 
 			evm.intraBlockState.AddAddressToAccessList(dd)
 		}
 
-		return gas, err
+		return calcCallGas(evm, callContext, availableGas, gas)
 	}
 }
