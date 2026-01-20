@@ -11,21 +11,95 @@ import (
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"
 	"github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/testutil"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/rulesconfig"
 )
 
-func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
+func dbCfg(label kv.Label, path string, logger log.Logger) mdbx.MdbxOpts {
 	const ThreadsLimit = 9_000
 	limiterB := semaphore.NewWeighted(ThreadsLimit)
-	return mdbx.New(label, log.New()).Path(path).
+	return mdbx.New(label, logger).Path(path).
 		RoTxsLimiter(limiterB).
 		Accede(true) // integration tool: open db without creation and without blocking erigon
+}
+
+func storedChanges(tx kv.TemporalTx, fromTxNum uint64, txnIndex int) (map[string]([]byte), error) {
+	changes := make(map[string]([]byte))
+
+	it, err := tx.HistoryRange(kv.AccountsDomain, int(fromTxNum+uint64(txnIndex+1)), int(fromTxNum+uint64(txnIndex+2)), order.Asc, -1)
+	if err != nil {
+		return changes, err
+	}
+	//defer it.Close()
+	for it.HasNext() {
+		key, val, err := it.Next()
+		if err != nil {
+			return changes, err
+		}
+		changes[string(key)] = val
+	}
+	it, err = tx.HistoryRange(kv.StorageDomain, int(fromTxNum+uint64(txnIndex+1)), int(fromTxNum+uint64(txnIndex+2)), order.Asc, -1)
+	if err != nil {
+		return changes, err
+	}
+	//defer it.Close()
+	for it.HasNext() {
+		key, val, err := it.Next()
+		if err != nil {
+			return changes, err
+		}
+		changes[string(key)] = val
+	}
+	return changes, err
+}
+
+// Use HistoricalTraceWorker instead???
+func reExecutedChanges(ctx context.Context, tx kv.TemporalTx, blockReader services.FullBlockReader, chainConfig *chain.Config, header *types.Header, fromTxNum uint64, txnIndex int, logger log.Logger) (map[string]([]byte), error) {
+	// What's the diff between commitmentdb.HistoryStateReader and state.HistoryReaderV3?
+	stateReader := state.NewHistoryReaderV3(tx, fromTxNum+uint64(txnIndex+1))
+	ibs := state.New(stateReader)
+	engine := rulesconfig.CreateRulesEngineBareBones(ctx, chainConfig, logger)
+	vmCfg := vm.Config{}
+	syscall := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+		ret, err := protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, vmCfg)
+		return ret, err
+	}
+	chain := consensuschain.NewReader(chainConfig, tx, blockReader, logger)
+	err := engine.Initialize(chainConfig, chain, header, ibs, syscall, logger, nil /* hooks */)
+	if err != nil {
+		return nil, err
+	}
+	noop := state.NewNoopWriter()
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), engine, accounts.NilAddress, chainConfig)
+	rules := blockContext.Rules(chainConfig)
+	err = ibs.FinalizeTx(rules, noop)
+	if err != nil {
+		return nil, err
+	}
+	stateWriter := testutil.NewMapWriter()
+	err = ibs.MakeWriteSet(rules, stateWriter)
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO(yperbasis) implement for txnIndex != -1
+
+	return stateWriter.Changes, err
 }
 
 func TestReExecution(t *testing.T) {
@@ -39,12 +113,13 @@ func TestReExecution(t *testing.T) {
 	// 	err := l.Unlock()
 	// 	require.NoError(t, err)
 	// }()
-	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	logger := log.New()
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata, logger).MustOpen()
 	//defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 	ctx := context.TODO()
-	snaps, _, err := app.OpenSnaps(ctx, cfg, dirs, chainDB, log.New())
+	snaps, _, err := app.OpenSnaps(ctx, cfg, dirs, chainDB, logger)
 	require.NoError(t, err)
 	//	defer clean()
 	blockReader, _ := snaps.BlockRetire.IO()
@@ -58,34 +133,17 @@ func TestReExecution(t *testing.T) {
 	fromTxNum, err := tnr.Min(tx, blockNum)
 	require.NoError(t, err)
 
+	block, err := blockReader.BlockByNumber(ctx, tx, blockNum)
+	require.NoError(t, err)
+
+	txnIndex := -1
+
 	// Check changes at the beginning of the block
-	changes := 0
-	it, err := tx.HistoryRange(kv.AccountsDomain, int(fromTxNum), int(fromTxNum+1), order.Asc, -1)
+	changesInDb, err := storedChanges(tx, fromTxNum, txnIndex)
 	require.NoError(t, err)
-	//defer it.Close()
-	for it.HasNext() {
-		_, _, err := it.Next()
-		require.NoError(t, err)
-		changes++
-	}
-	assert.Equal(t, 0, changes)
-
-	changes = 0
-	it, err = tx.HistoryRange(kv.StorageDomain, int(fromTxNum), int(fromTxNum+1), order.Asc, -1)
+	reExecChanges, err := reExecutedChanges(ctx, tx, blockReader, chainConfig, block.Header(), fromTxNum, txnIndex, logger)
 	require.NoError(t, err)
-	//defer it.Close()
-	for it.HasNext() {
-		_, _, err := it.Next()
-		require.NoError(t, err)
-		changes++
-	}
-	assert.Equal(t, 0, changes)
+	assert.Equal(t, changesInDb, reExecChanges)
 
-	// Alternative: use HistoricalTraceWorker
-
-	// TODO: re-execute and compare results
-	// ?
-	//	block, err := blockReader.BlockByNumber(ctx, tx, blockNum)
-	//	require.NoError(t, err)
-
+	// TODO: re-execute and compare results for all transactions in the block
 }
