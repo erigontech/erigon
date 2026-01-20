@@ -21,13 +21,15 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/spf13/cobra"
+
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/node/debug"
-	"github.com/spf13/cobra"
 )
 
 func init() {
@@ -138,6 +140,7 @@ var rebuildCmd = &cobra.Command{
 		}
 		history.Scan(toStep * config3.DefaultStepSize)
 
+		log.Info("[dbg] Compression config", "name", domainKV, "cfg", history.CompressorCfg)
 		roTx := history.BeginFilesRo()
 		defer roTx.Close()
 
