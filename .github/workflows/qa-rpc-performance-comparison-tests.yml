@@ -64,8 +64,8 @@ jobs:
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
           set -euo pipefail
-          python3 redis_client.py --key ${{ steps.vars.outputs.erigon_redis_key }} --write "starting"
-          python3 redis_client.py --key ${{ steps.vars.outputs.geth_redis_key }} --write "starting"
+          python3 redis_client.py --key ${{ steps.vars.outputs.erigon_redis_key }} --write "created"
+          python3 redis_client.py --key ${{ steps.vars.outputs.geth_redis_key }} --write "created"
 
   test_erigon:
     name: Benchmark Erigon
