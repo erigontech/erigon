@@ -230,6 +230,7 @@ func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.P
 }
 
 func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, efBaseTxNum uint64, ps *background.ProgressSet) error {
+	return nil
 	var histKey []byte
 	var valOffset uint64
 
@@ -1448,8 +1449,6 @@ func (ht *HistoryRoTx) CompactRange(ctx context.Context, fromTxNum, toTxNum uint
 	if len(ht.iit.files) == 0 {
 		return nil
 	}
-	fmt.Printf("CompactRange: %s, %d\n", ht.iit.name, ht.h.CompressorCfg.ValuesOnCompressedPage)
-	panic(1)
 	mergeRange := NewHistoryRanges(
 		*NewMergeRange("", true, fromTxNum, toTxNum),
 		*NewMergeRange("", true, fromTxNum, toTxNum),
