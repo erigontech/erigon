@@ -208,10 +208,13 @@ jobs:
             method=$2
             pattern=$3
             sequence=$4
+            client=$5
+            result_file=$client-$method-result.json
+            full_path_result_file=${{runner.workspace}}/rpc-tests/perf/reports/$CHAIN/$result_file
           
             # clean temporary area
             cd ${{runner.workspace}}/rpc-tests/perf
-            rm -rf ./reports/
+            rm -rf ./reports/$CHAIN
           
             python3 ./run_perf_tests.py --blockchain "$network" \
                                       --test-type "$method" \
@@ -222,15 +225,12 @@ jobs:
                                       --silk-dir ${{runner.workspace}}/erigon \
                                       --test-mode 2 \
                                       --test-report \
-                                      --json-report ./reports/$CHAIN/result.json \
+                                      --json-report $full_path_result_file \
                                       --testing-daemon erigon
           
             # Capture test runner script exit status
             perf_exit_status=$?
-          
-            # Preserve test results
-            mv ${{runner.workspace}}/rpc-tests/perf/reports/$CHAIN/result.json ${{runner.workspace}}/rpc-tests/perf/reports/$CHAIN/erigon-$method-result.json
-          
+                    
             # Detect the pre-built db version
             db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_REFERENCE_DIR/production.ini production erigon_repo_commit)
           
@@ -238,7 +238,7 @@ jobs:
             if [ $perf_exit_status -eq 0 ]; then           
               # save all vegeta binary report
               echo "Save current vegeta binary files"
-              cp -r ${{runner.workspace}}/rpc-tests/perf/reports/bin $RPC_PAST_TEST_DIR/$CHAIN_bin
+              cp -r ${{runner.workspace}}/rpc-tests/perf/reports/bin $RPC_PAST_TEST_DIR/${CHAIN}_bin
           
               echo "Save test result on DB"
               cd ${{runner.workspace}}/erigon
@@ -251,7 +251,7 @@ jobs:
                 --runner ${{ runner.name }} \
                 --db_version $db_version \
                 --outcome success \
-                --result_file ${{runner.workspace}}/rpc-tests/perf/reports/$CHAIN/erigon-$method-result.json
+                --result_file $full_path_result_file
           
               if [ $? -ne 0 ]; then
                 failed_test=1
@@ -285,7 +285,7 @@ jobs:
           # Launch the RPC performance test runner
           failed_test=0
           #run_perf $CHAIN <method> <pattern> <load-sequence>
-          run_perf $CHAIN eth_call stress_test_eth_call_001_14M 1:1,100:30,1000:20,10000:20,20000:20                  
+          run_perf $CHAIN eth_call stress_test_eth_call_001_14M 1:1,100:30,1000:20,10000:20,20000:20 erigon                 
           
           # Save the subsection reached status
           
@@ -397,7 +397,10 @@ jobs:
             method=$2
             pattern=$3
             sequence=$4
-
+            client=$5
+            result_file=$client-$method-result.json
+            full_path_result_file=${{runner.workspace}}/rpc-tests/perf/reports/$CHAIN/$result_file
+          
             # clean temporary area
             cd ${{runner.workspace}}/rpc-tests/perf
             rm -rf ./reports/
@@ -411,14 +414,11 @@ jobs:
                                       --silk-dir ${{runner.workspace}}/erigon \
                                       --test-mode 2 \
                                       --test-report \
-                                      --json-report ./reports/$CHAIN/result.json \
+                                      --json-report $full_path_result_file \
                                       --testing-daemon geth
 
             # Capture test runner script exit status
             perf_exit_status=$?
-
-            # Preserve test results
-            mv ${{runner.workspace}}/rpc-tests/perf/reports/$CHAIN/result.json ${{runner.workspace}}/rpc-tests/perf/reports/$CHAIN/geth-$method-result.json
 
             # Detect the pre-built db version
             db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_REFERENCE_DIR/production.ini production erigon_repo_commit)
@@ -427,7 +427,7 @@ jobs:
             if [ $perf_exit_status -eq 0 ]; then           
               # save all vegeta binary report
               echo "Save current vegeta binary files"
-              cp -r ${{runner.workspace}}/rpc-tests/perf/reports/bin $RPC_PAST_TEST_DIR/$CHAIN_bin
+              cp -r ${{runner.workspace}}/rpc-tests/perf/reports/bin $RPC_PAST_TEST_DIR/${CHAIN}_bin
 
               echo "Save test result on DB"
               cd ${{runner.workspace}}/erigon
@@ -440,7 +440,7 @@ jobs:
                 --runner ${{ runner.name }} \
                 --db_version "unknown" \
                 --outcome success \
-                --result_file ${{runner.workspace}}/rpc-tests/perf/reports/$CHAIN/geth-$method-result.json
+                --result_file $full_path_result_file
 
               if [ $? -ne 0 ]; then
                 failed_test=1
@@ -474,7 +474,7 @@ jobs:
           # Launch the RPC performance test runner
           failed_test=0
           #run_perf $CHAIN <method> <pattern> <load-sequence>
-          run_perf $CHAIN eth_call stress_test_eth_call_001_14M 1:1,100:30,1000:20,10000:20,20000:20
+          run_perf $CHAIN eth_call stress_test_eth_call_001_14M 1:1,100:30,1000:20,10000:20,20000:20 geth
 
           # Save the subsection reached status
 
