@@ -92,8 +92,9 @@ jobs:
           set -euo pipefail
           python3 redis_client.py --key ${{ needs.setup.outputs.erigon_redis_key }} --read
 
-      - name: Run Erigon benchmark (placeholder)
+      - name: Run Erigon benchmark
         shell: bash
+        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
           set -euo pipefail
           echo "TODO: Build/run Erigon, monitor sync, publish status to Redis, wait barrier, run Vegeta."
@@ -104,8 +105,8 @@ jobs:
           echo "  VEGETA_DURATION=${VEGETA_DURATION}"
           echo "  ERIGON_REDIS_KEY=${ERIGON_REDIS_KEY}"
           echo "  GETH_REDIS_KEY=${GETH_REDIS_KEY}"
-          # Example placeholders for later:
-          # python3 scripts/bench_client.py --client erigon --redis-prefix "REDIS_KEY_PREFIX" --network "$NETWORK"
+          # Wait for an agreement between Erigon and Geth
+          python3 coordinated_start.py --client erigon --run-id "$RUN_ID" --chain "$NETWORK"
 
   test_geth:
     name: Benchmark Geth
@@ -132,8 +133,9 @@ jobs:
           set -euo pipefail
           python3 redis_client.py --key ${{ needs.setup.outputs.geth_redis_key }} --read
 
-      - name: Run Geth benchmark (placeholder)
+      - name: Run Geth benchmark
         shell: bash
+        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
           set -euo pipefail
           echo "TODO: Monitor Geth sync, publish status to Redis, wait barrier, run Vegeta."
@@ -144,5 +146,5 @@ jobs:
           echo "  VEGETA_DURATION=${VEGETA_DURATION}"
           echo "  ERIGON_REDIS_KEY=${ERIGON_REDIS_KEY}"
           echo "  GETH_REDIS_KEY=${GETH_REDIS_KEY}"
-          # Example placeholders for later:
-          # python3 scripts/bench_client.py --client geth --redis-prefix "REDIS_KEY_PREFIX" --network "$NETWORK"
+          # Wait for an agreement between Erigon and Geth
+          python3 coordinated_start.py --client geth --run-id "$RUN_ID" --chain "$NETWORK"
