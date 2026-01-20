@@ -47,7 +47,7 @@ The `debug` namespace is intended for debugging and development purposes, not fo
 
 ### debug\_getRawReceipts
 
-Returns an array of EIP-2718 binary-encoded receipts from a single block. debug\_api.
+Returns an array of EIP-2718 binary-encoded receipts from a single block.
 
 #### Parameters
 
@@ -71,7 +71,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_getRawReceipts","params":["0x12
 
 ### debug\_accountRange
 
-Returns a range of accounts involved in the given block range. debug\_api.
+Returns a range of accounts involved in the given block range.
 
 #### Parameters
 
@@ -100,7 +100,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_accountRange","params":["0xaaaa
 
 ### debug\_accountAt
 
-Returns account information at a specific block and transaction index. debug\_api.
+Returns account information at a specific block and transaction index.
 
 #### Parameters
 
@@ -126,7 +126,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_accountAt","params":["0x123456.
 
 ### debug\_getModifiedAccountsByNumber
 
-Returns a list of accounts modified in the given block range by number. debug\_api.
+Returns a list of accounts modified in the given block range by number.
 
 #### Parameters
 
@@ -151,7 +151,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_getModifiedAccountsByNumber","p
 
 ### debug\_getModifiedAccountsByHash
 
-Returns a list of accounts modified in the given block range by hash. debug\_api.
+Returns a list of accounts modified in the given block range by hash.
 
 #### Parameters
 
@@ -176,7 +176,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_getModifiedAccountsByHash","par
 
 ### debug\_storageRangeAt
 
-Returns information about a range of storage locations for a contract address. debug\_api.
+Returns information about a range of storage locations for a contract address.
 
 #### Parameters
 
@@ -204,7 +204,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0xd3
 
 ### debug\_traceBlockByHash
 
-Returns Geth style transaction traces for a block by hash. tracing.
+Returns Geth style transaction traces for a block by hash.
 
 #### Parameters
 
@@ -229,7 +229,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_traceBlockByHash","params":["0x
 
 ### debug\_traceBlockByNumber
 
-Returns Geth style transaction traces for a block by number. tracing.
+Returns Geth style transaction traces for a block by number.
 
 #### Parameters
 
@@ -254,7 +254,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_traceBlockByNumber","params":["
 
 ### debug\_traceTransaction
 
-Returns Geth style transaction trace. debug\_api.
+Returns Geth style transaction trace.
 
 #### Parameters
 
@@ -279,7 +279,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["0x
 
 ### debug\_traceCall
 
-Returns Geth style call trace. debug\_api.
+Returns Geth style call trace.
 
 #### Parameters
 
@@ -305,7 +305,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_traceCall","params":[{"to":"0x1
 
 ### debug\_traceCallMany
 
-Returns Geth style traces for multiple call bundles. tracing.
+Returns Geth style traces for multiple call bundles.
 
 #### Parameters
 
@@ -331,7 +331,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_traceCallMany","params":[[{"tra
 
 ### debug\_setMemoryLimit
 
-Sets the GOMEMLIMIT for the process. Part of `debug_api`.
+Sets the GOMEMLIMIT for the process.
 
 #### Parameters
 
@@ -355,7 +355,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_setMemoryLimit","params":[85899
 
 ### debug\_setGCPercent
 
-Sets the garbage collection target percentage. Part of `debug_api`.
+Sets the garbage collection target percentage.
 
 #### Parameters
 
@@ -379,7 +379,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_setGCPercent","params":[100],"i
 
 ### debug\_freeOSMemory
 
-Forces a garbage collection to free OS memory. Part of `debug_api`.
+Forces a garbage collection to free OS memory.
 
 #### **Parameters**
 
@@ -401,7 +401,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_freeOSMemory","params":[],"id":
 
 ### debug\_gcStats
 
-Returns garbage collection statistics. Part of `debug_api`.
+Returns garbage collection statistics.
 
 #### **Parameters**
 
@@ -423,7 +423,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_gcStats","params":[],"id":"1"}'
 
 ### debug\_memStats
 
-Returns detailed runtime memory statistics. Part of `debug_api`.
+Returns detailed runtime memory statistics.
 
 #### **Parameters**
 
