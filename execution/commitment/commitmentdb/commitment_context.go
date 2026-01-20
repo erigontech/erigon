@@ -308,6 +308,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}()
 	}
 	if updateCount == 0 {
+		sdc.trieContext(tx) // Ensure context is set even for empty blocks
 		rootHash, err = sdc.patriciaTrie.RootHash()
 		return rootHash, err
 	}
