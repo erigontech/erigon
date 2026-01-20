@@ -14,7 +14,7 @@ import (
 
 var (
 	collectTableSizesPeriodically = dbg.EnvBool("COLLECT_TABLE_SIZES", true)
-	collectTableSizesFrequency    = dbg.EnvDuration("COLLECT_TABLE_SIZES_FREQUENCY", 5*time.Minute)
+	collectTableSizesFrequency    = dbg.EnvDuration("COLLECT_TABLE_SIZES_FREQUENCY", 1*time.Minute)
 	dbTableSizeBytes              = metrics.GetOrCreateGaugeVec("db_table_size_bytes", []string{"db", "table"})
 )
 
