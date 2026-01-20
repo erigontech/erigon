@@ -8,10 +8,10 @@ func InitSchemasGen() {
 	Schema.AccountsDomain.FileVersion.AccessorBT = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.AccountsDomain.FileVersion.DataKV = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.AccountsDomain.FileVersion.AccessorKVEI = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
-	Schema.AccountsDomain.Hist.FileVersion.DataV = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
-	Schema.AccountsDomain.Hist.FileVersion.AccessorVI = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
-	Schema.AccountsDomain.Hist.IiCfg.FileVersion.DataEF = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
-	Schema.AccountsDomain.Hist.IiCfg.FileVersion.AccessorEFI = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
+	Schema.AccountsDomain.Hist.FileVersion.DataV = version.Versions{version.Version{1, 2}, version.Version{1, 0}}
+	Schema.AccountsDomain.Hist.FileVersion.AccessorVI = version.Versions{version.Version{1, 2}, version.Version{1, 0}}
+	Schema.AccountsDomain.Hist.IiCfg.FileVersion.DataEF = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
+	Schema.AccountsDomain.Hist.IiCfg.FileVersion.AccessorEFI = version.Versions{version.Version{2, 1}, version.Version{1, 0}}
 	Schema.BodiesBlock.FileVersion.AccessorIdx = version.Versions{version.Version{2, 0}, version.Version{1, 0}}
 	Schema.BodiesBlock.FileVersion.DataSeg = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
 	Schema.CodeDomain.FileVersion.AccessorBT = version.Versions{version.Version{1, 1}, version.Version{1, 0}}
