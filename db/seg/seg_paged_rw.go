@@ -35,7 +35,7 @@ func GetFromPage(key, compressedPage []byte, compressionBuf []byte, compressionE
 	if err != nil {
 		panic(err)
 	}
-	log.Warn("[dbg] page2 decomp", "comp", len(v), "decomp", len(compressionBuf))
+	log.Warn("[dbg] page2 decomp", "comp", len(compressedPage), "decomp", len(compressionBuf))
 
 	cnt := int(page[0])
 	if cnt == 0 {
