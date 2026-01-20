@@ -117,6 +117,7 @@ var Defaults = Config{
 
 	ErigonDBStepSize:          config3.DefaultStepSize,
 	ErigonDBStepsInFrozenFile: config3.DefaultStepsInFrozenFile,
+	FcuTimeout:                1 * time.Second,
 }
 
 const DefaultChainDBPageSize = 16 * datasize.KB
