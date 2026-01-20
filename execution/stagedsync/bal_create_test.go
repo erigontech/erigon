@@ -128,7 +128,6 @@ func addStorageWrite(writeSets map[int]state.VersionedWrites, txIdx int, addr ac
 		Key:     slot,
 		Version: state.Version{TxIndex: txIdx},
 		Val:     *uint256.NewInt(value),
-		Version: state.Version{TxIndex: txIdx},
 	})
 }
 
@@ -138,7 +137,6 @@ func addBalanceWrite(writeSets map[int]state.VersionedWrites, txIdx int, addr ac
 		Path:    state.BalancePath,
 		Version: state.Version{TxIndex: txIdx},
 		Val:     *uint256.NewInt(value),
-		Version: state.Version{TxIndex: txIdx},
 	})
 }
 
