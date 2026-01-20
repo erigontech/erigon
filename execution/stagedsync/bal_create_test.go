@@ -126,6 +126,7 @@ func addStorageWrite(writeSets map[int]state.VersionedWrites, txIdx int, addr ac
 		Address: addr,
 		Path:    state.StoragePath,
 		Key:     slot,
+		Version: state.Version{TxIndex: txIdx},
 		Val:     *uint256.NewInt(value),
 		Version: state.Version{TxIndex: txIdx},
 	})
@@ -135,6 +136,7 @@ func addBalanceWrite(writeSets map[int]state.VersionedWrites, txIdx int, addr ac
 	writeSets[txIdx] = append(writeSets[txIdx], &state.VersionedWrite{
 		Address: addr,
 		Path:    state.BalancePath,
+		Version: state.Version{TxIndex: txIdx},
 		Val:     *uint256.NewInt(value),
 		Version: state.Version{TxIndex: txIdx},
 	})

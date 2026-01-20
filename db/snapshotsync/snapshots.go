@@ -1466,9 +1466,10 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 			for _, segment := range segs {
 				info := segment.FileInfo(dir)
 
-				if t.HasIndexFiles(info, logger) {
+				if segment.IsIndexed() {
 					continue
 				}
+
 				newIdxBuilt = true
 
 				segment.closeIdx()
