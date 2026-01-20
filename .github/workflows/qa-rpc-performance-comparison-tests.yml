@@ -84,7 +84,7 @@ jobs:
       GETH_REDIS_KEY: ${{ needs.setup.outputs.geth_redis_key }}
       ERIGON_REFERENCE_DIR: /opt/erigon-versions/reference-version
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
-      ERIGON_TESTBED_AREA: /opt/erigon-testbed
+      ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -195,13 +195,13 @@ jobs:
           set +e # Disable exit on error
           failed_test=0
           commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD) # use ${{ github.sha }} or GITHUB_SHA
-          past_test_dir=$RPC_PAST_TEST_DIR/$CHAIN_$(date +%Y%m%d_%H%M%S)_comp_perf_$commit
+          past_test_dir=$RPC_PAST_TEST_DIR/${CHAIN}_$(date +%Y%m%d_%H%M%S)_comp_perf_$commit
           echo "past_test_dir=$past_test_dir" >> $GITHUB_ENV
           
           # Prepare historical test results directory
           mkdir -p $past_test_dir
-          rm -rf $RPC_PAST_TEST_DIR/$CHAIN_bin  # we want only the latest binary files
-          mkdir -p $RPC_PAST_TEST_DIR/$CHAIN_bin
+          rm -rf $RPC_PAST_TEST_DIR/${CHAIN}_bin  # we want only the latest binary files
+          mkdir -p $RPC_PAST_TEST_DIR/${CHAIN}_bin
           
           run_perf () {
             network=$1
@@ -384,13 +384,13 @@ jobs:
           set +e # Disable exit on error
           failed_test=0
           commit="Geth_vX.Y.Z_commit_hash"
-          past_test_dir=$RPC_PAST_TEST_DIR/$CHAIN_$(date +%Y%m%d_%H%M%S)_comp_perf_$commit
+          past_test_dir=$RPC_PAST_TEST_DIR/${CHAIN}_$(date +%Y%m%d_%H%M%S)_comp_perf_$commit
           echo "past_test_dir=$past_test_dir" >> $GITHUB_ENV
 
           # Prepare historical test results directory
           mkdir -p $past_test_dir
-          rm -rf $RPC_PAST_TEST_DIR/$CHAIN_bin  # we want only the latest binary files
-          mkdir -p $RPC_PAST_TEST_DIR/$CHAIN_bin
+          rm -rf $RPC_PAST_TEST_DIR/${CHAIN}_bin  # we want only the latest binary files
+          mkdir -p $RPC_PAST_TEST_DIR/${CHAIN}_bin
 
           run_perf () {
             network=$1
@@ -474,7 +474,7 @@ jobs:
           # Launch the RPC performance test runner
           failed_test=0
           #run_perf $CHAIN <method> <pattern> <load-sequence>
-          run_perf $CHAIN eth_call stress_test_eth_call_001_14M 1:1,100:30,1000:20,10000:20,20000:20                  
+          run_perf $CHAIN eth_call stress_test_eth_call_001_14M 1:1,100:30,1000:20,10000:20,20000:20
 
           # Save the subsection reached status
 
