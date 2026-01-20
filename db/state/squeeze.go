@@ -124,19 +124,19 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 		domain: [kv.DomainLen]DomainRanges{
 			kv.AccountsDomain: {
 				name:    kv.AccountsDomain,
-				values:  MergeRange{"", true, 2048 * 1562500, math.MaxUint64},
+				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
 				aggStep: stepSize,
 			},
 			kv.StorageDomain: {
 				name:    kv.StorageDomain,
-				values:  MergeRange{"", true, 2048 * 1562500, math.MaxUint64},
+				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
 				aggStep: stepSize,
 			},
 			kv.CommitmentDomain: {
 				name:    kv.CommitmentDomain,
-				values:  MergeRange{"", true, 2048 * 1562500, math.MaxUint64},
+				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
 				aggStep: stepSize,
 			},
@@ -355,7 +355,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		domain: [kv.DomainLen]DomainRanges{
 			kv.AccountsDomain: {
 				name:    kv.AccountsDomain,
-				values:  MergeRange{"", true, 2048 * 1562500, math.MaxUint64},
+				values:  MergeRange{"", true, 0, math.MaxUint64},
 				history: HistoryRanges{},
 				aggStep: a.StepSize(),
 			},

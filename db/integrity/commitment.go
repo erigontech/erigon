@@ -284,7 +284,6 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 		eg.SetLimit(1)
 	}
 	var branchKeys, referencedAccounts, plainAccounts, referencedStorages, plainStorages atomic.Uint64
-	files = files[1:]
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".kv") {
 			continue
@@ -473,7 +472,7 @@ func checkCommitmentKvDeref(ctx context.Context, tx kv.TemporalTx, file state.Vi
 				return plainKey, nil
 			}
 			if len(key) == length.Addr {
-				if logger.Enabled(ctx, log.LvlTrace) || file.EndRootNum() == 2064*1562500 {
+				if logger.Enabled(ctx, log.LvlTrace) {
 					logger.Trace(
 						"skipping, not an account reference",
 						"branchKey", hex.EncodeToString(branchKey),
