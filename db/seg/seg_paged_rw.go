@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/compress"
 )
 
@@ -84,6 +85,7 @@ func (r *Page) Reset(v []byte, compressionEnabled bool) (n int) {
 		panic(fmt.Errorf("len(v): %d, %w", len(v), err))
 	}
 
+	log.Warn("[dbg] page decomp", "comp", len(v), "decomp", len(r.compressionBuf))
 	r.i, r.kOffset, r.vOffset = 0, 0, 0
 	r.limit = int(v[0])
 	meta, data := v[1:1+r.limit*4*2], v[1+r.limit*4*2:]
