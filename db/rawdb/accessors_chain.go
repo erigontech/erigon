@@ -686,7 +686,7 @@ func DeleteBody(db kv.Putter, hash common.Hash, number uint64) {
 func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
 	nextBaseTxNum := 0
 	if from > 0 {
-		nextBaseTxNumFromDb, err := rawdbv3.TxNums.Max(tx, from-1)
+		nextBaseTxNumFromDb, err := rawdbv3.TxNums.Max(context.Background(), tx, from-1)
 		if err != nil {
 			return err
 		}
@@ -1273,11 +1273,11 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
 
-	_min, err := txNumReader.Min(tx, blockNum)
+	_min, err := txNumReader.Min(context.Background(), tx, blockNum)
 	if err != nil {
 		return
 	}
-	_max, err := txNumReader.Max(tx, blockNum)
+	_max, err := txNumReader.Max(context.Background(), tx, blockNum)
 	if err != nil {
 		return
 	}

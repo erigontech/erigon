@@ -74,7 +74,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 		return false, nil, nil
 	}
 
-	reader, err := rpchelper.CreateHistoryStateReader(dbtx, blockNum, 0, api._txNumReader)
+	reader, err := rpchelper.CreateHistoryStateReader(ctx, dbtx, blockNum, 0, api._txNumReader)
 	if err != nil {
 		return false, nil, err
 	}

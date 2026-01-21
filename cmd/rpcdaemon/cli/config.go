@@ -429,7 +429,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, cfg.Dirs.DataDir, true, roTxLimit), allBorSnapshots)
 		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(cfg.Dirs.DataDir, logger, true, roTxLimit), allBorSnapshots, cc.Bor)
 		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
-		txNumsReader := blockReader.TxnumReader(ctx)
+		txNumsReader := blockReader.TxnumReader()
 
 		if err := dbstate.CheckSnapshotsCompatibility(cfg.Dirs); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
@@ -461,7 +461,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				aggTx := agg.BeginFilesRo()
 				defer aggTx.Close()
 				stats.LogStats(aggTx, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-					histBlockNumProgress, _, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
+					histBlockNumProgress, _, err := txNumsReader.FindBlockNum(ctx, tx, endTxNumMinimax)
 					return histBlockNumProgress, err
 				})
 				return nil
@@ -495,7 +495,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 						ac := agg.BeginFilesRo()
 						defer ac.Close()
 						stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-							histBlockNumProgress, _, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
+							histBlockNumProgress, _, err := txNumsReader.FindBlockNum(ctx, tx, endTxNumMinimax)
 							return histBlockNumProgress, err
 						})
 						return nil
@@ -1108,7 +1108,7 @@ func (e *remoteRulesEngine) Prepare(_ rules.ChainHeaderReader, _ *types.Header, 
 	panic("remoteRulesEngine.Prepare not supported")
 }
 
-func (e *remoteRulesEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ rules.ChainReader, _ rules.SystemCall, skipReceiptsEval bool, _ log.Logger) (types.FlatRequests, error) {
+func (e *remoteRulesEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ rules.ChainReader, _ rules.SystemCall, skipReceiptsEval bool, _ log.Logger) (types.FlatRequests, error) {
 	panic("remoteRulesEngine.Finalize not supported")
 }
 

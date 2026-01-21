@@ -890,3 +890,238 @@ func TestOpCLZ(t *testing.T) {
 		})
 	}
 }
+
+// TestPush sanity-checks how code with immediates are handled when the code size is
+// smaller than the size of the immediate.
+func TestPush(t *testing.T) {
+	code := common.FromHex("0011223344556677889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a19181716151413121")
+	push32 := makePush(32, 32)
+
+	env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+	callContext := &CallContext{}
+	callContext.Contract.Code = code
+	evmInterpreter := NewEVMInterpreter(env, env.Config())
+
+	for i, want := range []string{
+		"0x11223344556677889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1",
+		"0x223344556677889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1e1",
+		"0x3344556677889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1",
+		"0x44556677889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1",
+		"0x556677889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1",
+		"0x6677889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a1",
+		"0x77889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a191",
+		"0x889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a19181",
+		"0x9900aabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a1918171",
+		"0xaabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a191817161",
+		"0xaabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a19181716151",
+		"0xbbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a1918171615141",
+		"0xccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a191817161514131",
+		"0xddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a19181716151413121",
+		"0xeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a1918171615141312100",
+		"0xff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a191817161514131210000",
+		"0x102030405060708090a0b0c0d0e0ff1e1d1c1b1a19181716151413121000000",
+		"0x2030405060708090a0b0c0d0e0ff1e1d1c1b1a1918171615141312100000000",
+		"0x30405060708090a0b0c0d0e0ff1e1d1c1b1a191817161514131210000000000",
+		"0x405060708090a0b0c0d0e0ff1e1d1c1b1a19181716151413121000000000000",
+		"0x5060708090a0b0c0d0e0ff1e1d1c1b1a1918171615141312100000000000000",
+		"0x60708090a0b0c0d0e0ff1e1d1c1b1a191817161514131210000000000000000",
+		"0x708090a0b0c0d0e0ff1e1d1c1b1a19181716151413121000000000000000000",
+		"0x8090a0b0c0d0e0ff1e1d1c1b1a1918171615141312100000000000000000000",
+		"0x90a0b0c0d0e0ff1e1d1c1b1a191817161514131210000000000000000000000",
+		"0xa0b0c0d0e0ff1e1d1c1b1a19181716151413121000000000000000000000000",
+		"0xb0c0d0e0ff1e1d1c1b1a1918171615141312100000000000000000000000000",
+		"0xc0d0e0ff1e1d1c1b1a191817161514131210000000000000000000000000000",
+		"0xd0e0ff1e1d1c1b1a19181716151413121000000000000000000000000000000",
+		"0xe0ff1e1d1c1b1a1918171615141312100000000000000000000000000000000",
+		"0xff1e1d1c1b1a191817161514131210000000000000000000000000000000000",
+		"0xf1e1d1c1b1a19181716151413121000000000000000000000000000000000000",
+		"0xe1d1c1b1a1918171615141312100000000000000000000000000000000000000",
+		"0xd1c1b1a191817161514131210000000000000000000000000000000000000000",
+		"0xc1b1a19181716151413121000000000000000000000000000000000000000000",
+		"0xb1a1918171615141312100000000000000000000000000000000000000000000",
+		"0xa191817161514131210000000000000000000000000000000000000000000000",
+		"0x9181716151413121000000000000000000000000000000000000000000000000",
+		"0x8171615141312100000000000000000000000000000000000000000000000000",
+		"0x7161514131210000000000000000000000000000000000000000000000000000",
+		"0x6151413121000000000000000000000000000000000000000000000000000000",
+		"0x5141312100000000000000000000000000000000000000000000000000000000",
+		"0x4131210000000000000000000000000000000000000000000000000000000000",
+		"0x3121000000000000000000000000000000000000000000000000000000000000",
+		"0x2100000000000000000000000000000000000000000000000000000000000000",
+		"0x0",
+	} {
+		pc := uint64(i)
+		push32(pc, evmInterpreter, callContext)
+		res := callContext.Stack.pop()
+		if have := res.Hex(); have != want {
+			t.Fatalf("case %d, have %v want %v", i, have, want)
+		}
+	}
+}
+
+func TestEIP8024_Execution(t *testing.T) {
+	env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+	evmInterpreter := NewEVMInterpreter(env, env.Config())
+
+	tests := []struct {
+		name     string
+		codeHex  string
+		wantErr  bool
+		wantVals []uint64
+	}{
+		{
+			name:    "DUPN",
+			codeHex: "60016000808080808080808080808080808080e600",
+			wantVals: []uint64{
+				1,
+				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+				1,
+			},
+		},
+		{
+			name:    "SWAPN",
+			codeHex: "600160008080808080808080808080808080806002e700",
+			wantVals: []uint64{
+				1,
+				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+				2,
+			},
+		},
+		{
+			name:     "EXCHANGE",
+			codeHex:  "600060016002e801",
+			wantVals: []uint64{2, 0, 1},
+		},
+		{
+			name:    "INVALID_SWAPN_LOW",
+			codeHex: "e75b",
+			wantErr: true,
+		},
+		{
+			name:    "JUMP over INVALID_DUPN",
+			codeHex: "600456e65b",
+			wantErr: false,
+		},
+		// Additional test cases
+		{
+			name:    "INVALID_DUPN_LOW",
+			codeHex: "e65b",
+			wantErr: true,
+		},
+		{
+			name:    "INVALID_EXCHANGE_LOW",
+			codeHex: "e850",
+			wantErr: true,
+		},
+		{
+			name:    "INVALID_DUPN_HIGH",
+			codeHex: "e67f",
+			wantErr: true,
+		},
+		{
+			name:    "INVALID_SWAPN_HIGH",
+			codeHex: "e77f",
+			wantErr: true,
+		},
+		{
+			name:    "INVALID_EXCHANGE_HIGH",
+			codeHex: "e87f",
+			wantErr: true,
+		},
+		{
+			name:    "UNDERFLOW_DUPN",
+			codeHex: "5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5fe600", // (n=17, need 17 items, have 16)
+			wantErr: true,
+		},
+		{
+			name:    "UNDERFLOW_SWAPN",
+			codeHex: "5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5fe700", // (n=17, need 18 items, have 17)
+			wantErr: true,
+		},
+		{
+			name:    "UNDERFLOW_EXCHANGE",
+			codeHex: "60016002e801", // (n,m)=(1,2), need 3 items, have 2
+			wantErr: true,
+		},
+		{
+			name:    "MISSING_IMMEDIATE_DUPN",
+			codeHex: "e6", // no operand
+			wantErr: true,
+		},
+		{
+			name:    "MISSING_IMMEDIATE_SWAPN",
+			codeHex: "e7", // no operand
+			wantErr: true,
+		},
+		{
+			name:    "MISSING_IMMEDIATE_EXCHANGE",
+			codeHex: "e8", // no operand
+			wantErr: true,
+		},
+		{
+			name:     "PC_INCREMENT",
+			codeHex:  "600060006000e80115",
+			wantVals: []uint64{1, 0, 0},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			code := common.FromHex(tc.codeHex)
+			pc := uint64(0)
+			callContext := new(CallContext)
+			callContext.Contract.Code = code
+			var err error
+			for pc < uint64(len(code)) && err == nil {
+				op := code[pc]
+				switch op {
+				case 0x00:
+					return
+				case 0x60:
+					pc, _, err = opPush1(pc, evmInterpreter, callContext)
+				case 0x80:
+					dup1 := makeDup(1)
+					pc, _, err = dup1(pc, evmInterpreter, callContext)
+				case 0x56:
+					pc, _, err = opJump(pc, evmInterpreter, callContext)
+				case 0x5b:
+					pc, _, err = opJumpdest(pc, evmInterpreter, callContext)
+				case 0xe6:
+					pc, _, err = opDupN(pc, evmInterpreter, callContext)
+				case 0x15:
+					pc, _, err = opIszero(pc, evmInterpreter, callContext)
+				case 0xe7:
+					pc, _, err = opSwapN(pc, evmInterpreter, callContext)
+				case 0xe8:
+					pc, _, err = opExchange(pc, evmInterpreter, callContext)
+				default:
+					err = &ErrInvalidOpCode{opcode: OpCode(op)}
+				}
+				pc++
+			}
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			stack := callContext.Stack
+			got := make([]uint64, 0, stack.len())
+			for i := stack.len() - 1; i >= 0; i-- {
+				got = append(got, stack.data[i].Uint64())
+			}
+			if len(got) != len(tc.wantVals) {
+				t.Fatalf("stack len=%d; want %d", len(got), len(tc.wantVals))
+			}
+			for i := range got {
+				if got[i] != tc.wantVals[i] {
+					t.Fatalf("[%s] stack[%d]=%d; want %d\nstack=%v",
+						tc.name, i, got[i], tc.wantVals[i], got)
+				}
+			}
+		})
+	}
+}
