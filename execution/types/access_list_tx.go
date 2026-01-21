@@ -25,6 +25,8 @@ import (
 	"io"
 	"math/big"
 
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -146,7 +148,6 @@ func (tx *AccessListTx) payloadSize(hashingOnly bool) (payloadSize int, accessLi
 	payloadSize += rlp.Uint256Len(tx.S)
 
 	if !hashingOnly && tx.Timeboosted != nil {
-		payloadSize++
 		payloadSize += rlp.BoolLen()
 	}
 
@@ -206,7 +207,7 @@ func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, false); err != nil {
 		return err
 	}
 	return nil
@@ -221,7 +222,7 @@ func (tx *AccessListTx) MarshalBinaryForHashing(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, true); err != nil {
 		return err
 	}
 	return nil
@@ -489,7 +490,7 @@ func (tx *AccessListTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := PrefixedRlpHash(AccessListTxType, []any{
+	hash := prefixedRlpHash(AccessListTxType, []any{
 		tx.ChainID,
 		tx.Nonce,
 		tx.GasPrice,
@@ -516,7 +517,7 @@ type accessListTxSigHash struct {
 }
 
 func (tx *AccessListTx) SigningHash(chainID *big.Int) common.Hash {
-	return PrefixedRlpHash(
+	return prefixedRlpHash(
 		AccessListTxType,
 		&accessListTxSigHash{
 			ChainID:    chainID,

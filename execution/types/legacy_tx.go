@@ -26,11 +26,11 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 )
 
 type CommonTx struct {
@@ -214,7 +214,7 @@ func (tx *LegacyTx) payloadSize(hashingOnly bool) (payloadSize int) {
 	payloadSize += rlp.U64Len(tx.GasLimit)
 	payloadSize++
 	if tx.To != nil {
-		payloadSize += length.Addr
+		payloadSize += 20
 	}
 	payloadSize += rlp.Uint256Len(*tx.Value)
 	payloadSize += rlp.StringLen(tx.Data)
@@ -222,7 +222,6 @@ func (tx *LegacyTx) payloadSize(hashingOnly bool) (payloadSize int) {
 	payloadSize += rlp.Uint256Len(tx.R)
 	payloadSize += rlp.Uint256Len(tx.S)
 	if tx.Timeboosted != nil {
-		payloadSize++
 		payloadSize += rlp.BoolLen()
 	}
 	return payloadSize
@@ -388,8 +387,8 @@ func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (*Message, e
 		checkNonce:       true,
 		checkTransaction: true,
 		checkGas:         true,
-		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
-		Tx:           tx,
+		TxRunContext:     NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
+		Tx:               tx,
 	}
 
 	var err error

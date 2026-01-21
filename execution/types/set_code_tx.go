@@ -23,6 +23,7 @@ import (
 	"io"
 	"math/big"
 
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -202,7 +203,7 @@ func (tx *SetCodeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := PrefixedRlpHash(SetCodeTxType, []any{
+	hash := prefixedRlpHash(SetCodeTxType, []any{
 		tx.ChainID,
 		tx.Nonce,
 		tx.TipCap,
@@ -233,7 +234,7 @@ type setCodeTxSigHash struct {
 }
 
 func (tx *SetCodeTransaction) SigningHash(chainID *big.Int) common.Hash {
-	return PrefixedRlpHash(
+	return prefixedRlpHash(
 		SetCodeTxType,
 		&setCodeTxSigHash{
 			ChainID:    chainID,

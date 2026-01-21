@@ -43,10 +43,9 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-check
+//var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-check
 
 type revision struct {
 	id           int
@@ -64,7 +63,7 @@ type revisions struct {
 func (r *revisions) snapshot(journal *journal) int {
 	id := r.nextId
 	r.nextId++
-	r.valid = append(r.valid, revision{id, journal.length()})
+	r.valid = append(r.valid, revision{id, journal.length(), nil})
 	return id
 }
 
@@ -190,6 +189,11 @@ type IntraBlockState struct {
 
 	// Arbitrum stylus
 	wasmDB wasmdb.WasmIface
+}
+
+func (sdb *IntraBlockState) Snapshot() int {
+	//TODO implement me
+	panic("implement me")
 }
 
 // Create a new state from a given trie
@@ -775,7 +779,7 @@ func (sdb *IntraBlockState) ReadVersion(addr accounts.Address, path AccountPath,
 	return sdb.versionMap.Read(addr, path, key, txIdx)
 }
 
-func (sdb *IntraBlockState) RemoveEscrowProtection(addr common.Address) {
+func (sdb *IntraBlockState) RemoveEscrowProtection(addr accounts.Address) {
 	bi, ok := sdb.balanceInc[addr]
 	if ok {
 		if sdb.trace {
@@ -1234,7 +1238,8 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 			sdb.tracingHooks.OnBalanceChange(addr, prevBalance, zeroBalance, tracing.BalanceDecreaseSelfdestruct)
 		}
 		if sdb.tracingHooks.CaptureArbitrumTransfer != nil {
-			sdb.tracingHooks.CaptureArbitrumTransfer(&addr, nil, &prevBalance, false, "selfDestruct")
+			addrValue := addr.Value()
+			sdb.tracingHooks.CaptureArbitrumTransfer(&addrValue, nil, &prevBalance, false, "selfDestruct")
 		}
 	}
 

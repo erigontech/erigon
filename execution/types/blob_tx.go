@@ -22,6 +22,7 @@ import (
 	"io"
 	"math/big"
 
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -69,7 +70,6 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*M
 		checkNonce:       true,
 		checkTransaction: true,
 		checkGas:         true,
-
 
 		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 		Tx:           stx,
@@ -121,7 +121,7 @@ func (stx *BlobTx) Hash() common.Hash {
 	if hash := stx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := PrefixedRlpHash(BlobTxType, []any{
+	hash := prefixedRlpHash(BlobTxType, []any{
 		stx.ChainID,
 		stx.Nonce,
 		stx.TipCap,
@@ -154,7 +154,7 @@ type blobTxSigHash struct {
 }
 
 func (stx *BlobTx) SigningHash(chainID *big.Int) common.Hash {
-	return PrefixedRlpHash(
+	return prefixedRlpHash(
 		BlobTxType,
 		&blobTxSigHash{
 			ChainID:    chainID,
@@ -200,7 +200,7 @@ func (stx *BlobTx) EncodingSize() int {
 	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
-func (stx *BlobTx) payloadSize() (payloadSize, accessListLen, blobHashesLen int) {
+func (stx *BlobTx) payloadSize(hashingOnly bool) (payloadSize, accessListLen, blobHashesLen int) {
 	payloadSize, accessListLen = stx.DynamicFeeTransaction.payloadSize(hashingOnly)
 	payloadSize += rlp.Uint256Len(*stx.MaxFeePerBlobGas)
 	// size of BlobVersionedHashes
@@ -350,9 +350,8 @@ func (stx *BlobTx) MarshalBinaryForHashing(w io.Writer) error {
 	if stx.To == nil {
 		return ErrNilToFieldTx
 	}
-	hashingOnly := true
 
-	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize(hashingOnly)
+	payloadSize, accessListLen, blobHashesLen := stx.payloadSize(true)
 	b := NewEncodingBuf()
 	defer PooledBuf.Put(b)
 	// encode TxType
@@ -360,7 +359,7 @@ func (stx *BlobTx) MarshalBinaryForHashing(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := stx.encodePayload(w, b[:], payloadSize, accessListLen, blobHashesLen, hashingOnly); err != nil {
+	if err := stx.encodePayload(w, b[:], payloadSize, accessListLen, blobHashesLen, true); err != nil {
 		return err
 	}
 	return nil

@@ -358,7 +358,7 @@ func (txw *BlobTxWrapper) RawSignatureValues() (*uint256.Int, *uint256.Int, *uin
 	return txw.Tx.RawSignatureValues()
 }
 
-func (txw *BlobTxWrapper) CachedSender() (accounts.Address, bool) { return txw.Tx.cachedSender() }
+func (txw *BlobTxWrapper) CachedSender() (accounts.Address, bool) { return txw.Tx.CachedSender() }
 
 func (txw *BlobTxWrapper) Sender(s Signer) (accounts.Address, error) { return txw.Tx.Sender(s) }
 

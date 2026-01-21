@@ -75,12 +75,12 @@ type ArbitrumUnsignedTx struct {
 	ChainId *big.Int
 	From    accounts.Address
 
-	Nonce     uint64           // nonce of sender account
-	GasFeeCap *big.Int         // wei per gas
-	Gas       uint64           // gas limit
-	To        accounts.Address `rlp:"nil"` // nil means contract creation
-	Value     *big.Int         // wei amount
-	Data      []byte           // contract invocation input data
+	Nonce     uint64          // nonce of sender account
+	GasFeeCap *big.Int        // wei per gas
+	Gas       uint64          // gas limit
+	To        *common.Address `rlp:"nil"` // nil means contract creation
+	Value     *big.Int        // wei amount
+	Data      []byte          // contract invocation input data
 }
 
 func (tx *ArbitrumUnsignedTx) copy() Transaction {
@@ -90,7 +90,7 @@ func (tx *ArbitrumUnsignedTx) copy() Transaction {
 		GasFeeCap: new(big.Int),
 		Gas:       tx.Gas,
 		From:      tx.From,
-		To:        accounts.NilAddress,
+		To:        nil,
 		Value:     new(big.Int),
 		Data:      common.Copy(tx.Data),
 	}
@@ -100,9 +100,9 @@ func (tx *ArbitrumUnsignedTx) copy() Transaction {
 	if tx.GasFeeCap != nil {
 		cpy.GasFeeCap.Set(tx.GasFeeCap)
 	}
-	if tx.To != accounts.NilAddress {
-		tmp := tx.To
-		cpy.To = tmp
+	if tx.To != nil {
+		tmp := *tx.To
+		cpy.To = &tmp
 	}
 	if tx.Value != nil {
 		cpy.Value.Set(tx.Value)
@@ -119,7 +119,7 @@ func (tx *ArbitrumUnsignedTx) GetBlobHashes() []common.Hash       { return []com
 func (tx *ArbitrumUnsignedTx) GetGasLimit() uint64                { return tx.Gas }
 func (tx *ArbitrumUnsignedTx) GetBlobGas() uint64                 { return 0 }
 func (tx *ArbitrumUnsignedTx) GetValue() *uint256.Int             { return uint256.MustFromBig(tx.Value) }
-func (tx *ArbitrumUnsignedTx) GetTo() accounts.Address            { return tx.To }
+func (tx *ArbitrumUnsignedTx) GetTo() *common.Address             { return tx.To }
 func (tx *ArbitrumUnsignedTx) GetData() []byte                    { return tx.Data }
 func (tx *ArbitrumUnsignedTx) GetAccessList() AccessList          { return nil }
 func (tx *ArbitrumUnsignedTx) GetFeeCap() *uint256.Int            { return uint256.MustFromBig(tx.GasFeeCap) }
@@ -134,6 +134,12 @@ func (tx *ArbitrumUnsignedTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.
 }
 
 func (tx *ArbitrumUnsignedTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+	var to accounts.Address
+	if tx.GetTo() == nil {
+		to = accounts.InternAddress(*tx.GetTo())
+	} else {
+		to = accounts.NilAddress
+	}
 	msg := &Message{
 		gasPrice:   *tx.GetPrice(),
 		tipCap:     *tx.GetTipCap(),
@@ -142,7 +148,7 @@ func (tx *ArbitrumUnsignedTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		nonce:      tx.GetNonce(),
 		accessList: tx.GetAccessList(),
 		from:       tx.From,
-		to:         tx.GetTo(),
+		to:         to,
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
 		checkNonce: !skipAccountChecks[tx.Type()],
@@ -193,25 +199,23 @@ func (tx *ArbitrumUnsignedTx) RawSignatureValues() (*uint256.Int, *uint256.Int, 
 
 func (tx *ArbitrumUnsignedTx) payloadSize() (payloadSize int, nonceLen, gasLen int) {
 	// ChainId
-	payloadSize++
-	payloadSize += rlp.BigIntLenExcludingHead(tx.ChainId)
+	payloadSize += rlp.BigIntLen(tx.ChainId)
 
 	// Nonce
-	payloadSize++
-	nonceLen = rlp.IntLenExcludingHead(tx.Nonce)
+	nonceLen = rlp.U64Len(tx.Nonce)
 	payloadSize += nonceLen
 
-	// From (20 bytes)
+	// size of From (20 bytes)
 	payloadSize++
-	payloadSize += 20
+	if tx.To != nil {
+		payloadSize += length.Addr
+	}
 
 	// GasFeeCap
-	payloadSize++
-	payloadSize += rlp.BigIntLenExcludingHead(tx.GasFeeCap)
+	payloadSize += rlp.BigIntLen(tx.GasFeeCap)
 
 	// Gas
-	payloadSize++
-	gasLen = rlp.IntLenExcludingHead(tx.Gas)
+	gasLen = rlp.U64Len(tx.Gas)
 	payloadSize += gasLen
 
 	// To (20 bytes if non-nil)
@@ -221,8 +225,7 @@ func (tx *ArbitrumUnsignedTx) payloadSize() (payloadSize int, nonceLen, gasLen i
 	}
 
 	// Value
-	payloadSize++
-	payloadSize += rlp.BigIntLenExcludingHead(tx.Value)
+	payloadSize += rlp.BigIntLen(tx.GasFeeCap)
 
 	// Data (includes its own header)
 	payloadSize += rlp.StringLen(tx.Data)
@@ -243,7 +246,8 @@ func (tx *ArbitrumUnsignedTx) encodePayload(w io.Writer, b []byte, payloadSize, 
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(tx.From[:]); err != nil {
+	addrFrom := tx.From.Value()
+	if _, err := w.Write(addrFrom[:]); err != nil {
 		return err
 	}
 
@@ -287,7 +291,7 @@ func (tx *ArbitrumUnsignedTx) encodePayload(w io.Writer, b []byte, payloadSize, 
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
 		}
-		if _, err := w.Write((*tx.To)[:]); err != nil {
+		if _, err := w.Write(tx.To[:]); err != nil {
 			return err
 		}
 	}
@@ -354,7 +358,8 @@ func (tx *ArbitrumUnsignedTx) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for From: %d", len(b))
 	}
-	copy(tx.From[:], b)
+	addrFrom := tx.From.Value()
+	copy(addrFrom[:], b)
 
 	// Decode Nonce (uint64)
 	if tx.Nonce, err = s.Uint(); err != nil {
@@ -466,13 +471,13 @@ type ArbitrumContractTx struct {
 	arb.NoTimeBoosted
 	ChainId   *big.Int
 	RequestId common.Hash
-	From      accounts.Address
+	From      common.Address
 
-	GasFeeCap *big.Int         // wei per gas
-	Gas       uint64           // gas limit
-	To        accounts.Address `rlp:"nil"` // nil means contract creation
-	Value     *big.Int         // wei amount
-	Data      []byte           // contract invocation input data
+	GasFeeCap *big.Int        // wei per gas
+	Gas       uint64          // gas limit
+	To        *common.Address `rlp:"nil"` // nil means contract creation
+	Value     *big.Int        // wei amount
+	Data      []byte          // contract invocation input data
 }
 
 func (tx *ArbitrumContractTx) copy() *ArbitrumContractTx {
@@ -528,6 +533,13 @@ func (tx *ArbitrumContractTx) RawSignatureValues() (*uint256.Int, *uint256.Int, 
 }
 
 func (tx *ArbitrumContractTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+	var to accounts.Address
+	if tx.To != nil {
+		to = accounts.InternAddress(*tx.To)
+	} else {
+		to = accounts.NilAddress
+	}
+
 	msg := &Message{
 		gasPrice:   *tx.GetPrice(),
 		tipCap:     *tx.GetTipCap(),
@@ -535,8 +547,8 @@ func (tx *ArbitrumContractTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		gasLimit:   tx.GetGasLimit(),
 		nonce:      tx.GetNonce(),
 		accessList: tx.GetAccessList(),
-		from:       tx.From,
-		to:         tx.GetTo(),
+		from:       accounts.InternAddress(tx.From),
+		to:         to,
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
 		checkNonce: !skipAccountChecks[tx.Type()],
@@ -557,7 +569,7 @@ func (tx *ArbitrumContractTx) WithSignature(signer Signer, sig []byte) (Transact
 
 func (tx *ArbitrumContractTx) Hash() common.Hash {
 	//TODO implement me
-	return PrefixedRlpHash(ArbitrumContractTxType, []interface{}{
+	return prefixedRlpHash(ArbitrumContractTxType, []interface{}{
 		tx.ChainId,
 		tx.RequestId,
 		tx.From,
@@ -581,8 +593,7 @@ func (tx *ArbitrumContractTx) Protected() bool {
 
 func (tx *ArbitrumContractTx) payloadSize() (payloadSize int, gasLen int) {
 	// 1. ChainId (big.Int): 1 header byte + content length.
-	payloadSize++ // header for ChainId
-	payloadSize += rlp.BigIntLenExcludingHead(tx.ChainId)
+	payloadSize += rlp.BigIntLen(tx.ChainId)
 
 	// 2. RequestId (common.Hash, fixed 32 bytes): header + 32 bytes.
 	payloadSize++ // header for RequestId
@@ -593,12 +604,10 @@ func (tx *ArbitrumContractTx) payloadSize() (payloadSize int, gasLen int) {
 	payloadSize += 20
 
 	// 4. GasFeeCap (big.Int): header + content length.
-	payloadSize++ // header for GasFeeCap
-	payloadSize += rlp.BigIntLenExcludingHead(tx.GasFeeCap)
+	payloadSize += rlp.BigIntLen(tx.GasFeeCap)
 
 	// 5. Gas (uint64): header + computed length.
-	payloadSize++ // header for Gas
-	gasLen = rlp.IntLenExcludingHead(tx.Gas)
+	gasLen = rlp.U64Len(tx.Gas)
 	payloadSize += gasLen
 
 	// 6. To (*common.Address): header always; if non-nil then add 20 bytes.
@@ -608,8 +617,7 @@ func (tx *ArbitrumContractTx) payloadSize() (payloadSize int, gasLen int) {
 	}
 
 	// 7. Value (big.Int): header + content length.
-	payloadSize++ // header for Value
-	payloadSize += rlp.BigIntLenExcludingHead(tx.Value)
+	payloadSize += rlp.BigIntLen(tx.Value)
 
 	// 8. Data ([]byte): rlp.StringLen returns full encoded length (header + data).
 	payloadSize += rlp.StringLen(tx.Data)
@@ -781,8 +789,9 @@ func (tx *ArbitrumContractTx) DecodeRLP(s *rlp.Stream) error {
 		if len(b) != 20 {
 			return fmt.Errorf("wrong size for To: %d", len(b))
 		}
-		tx.To = new(common.Address)
-		copy(tx.To[:], b)
+		addrValue := common.Address{}
+		copy(addrValue[:], b)
+		tx.To = &addrValue
 	} else {
 		tx.To = nil
 	}
@@ -820,20 +829,22 @@ func (tx *ArbitrumContractTx) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *ArbitrumContractTx) Sender(signer Signer) (common.Address, error) {
+func (tx *ArbitrumContractTx) Sender(signer Signer) (accounts.Address, error) {
 	panic("implement me")
 }
 
-func (tx *ArbitrumContractTx) CachedSender() (common.Address, bool) {
-	return tx.From, true
+func (tx *ArbitrumContractTx) CachedSender() (accounts.Address, bool) {
+	address := accounts.InternAddress(tx.From)
+	return address, true
 }
 
-func (tx *ArbitrumContractTx) GetSender() (common.Address, bool) {
-	return tx.From, true
+func (tx *ArbitrumContractTx) GetSender() (accounts.Address, bool) {
+	address := accounts.InternAddress(tx.From)
+	return address, true
 }
 
-func (tx *ArbitrumContractTx) SetSender(address common.Address) {
-	tx.From = address
+func (tx *ArbitrumContractTx) SetSender(address accounts.Address) {
+	tx.From = address.Value()
 }
 
 func (tx *ArbitrumContractTx) IsContractDeploy() bool {
@@ -898,7 +909,7 @@ func (t *ArbitrumRetryTx) copy() *ArbitrumRetryTx {
 		From:                t.From,
 		To:                  nil,
 		Value:               new(big.Int),
-		Data:                common.CopyBytes(t.Data),
+		Data:                common.Copy(t.Data),
 		TicketId:            t.TicketId,
 		RefundTo:            t.RefundTo,
 		MaxRefund:           new(big.Int),
@@ -954,6 +965,12 @@ func (t *ArbitrumRetryTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uin
 }
 
 func (t *ArbitrumRetryTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+	var to accounts.Address
+	if t.To != nil {
+		to = accounts.InternAddress(*t.To)
+	} else {
+		to = accounts.NilAddress
+	}
 	msg := &Message{
 		gasPrice:   *t.GetPrice(),
 		tipCap:     *t.GetTipCap(),
@@ -961,8 +978,8 @@ func (t *ArbitrumRetryTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rul
 		gasLimit:   t.GetGasLimit(),
 		nonce:      t.GetNonce(),
 		accessList: t.GetAccessList(),
-		from:       t.From,
-		to:         t.GetTo(),
+		from:       accounts.InternAddress(t.From),
+		to:         to,
 		data:       t.GetData(),
 		amount:     *t.GetValue(),
 		checkNonce: !skipAccountChecks[t.Type()],
@@ -983,7 +1000,7 @@ func (t *ArbitrumRetryTx) WithSignature(signer Signer, sig []byte) (Transaction,
 
 func (t *ArbitrumRetryTx) Hash() common.Hash {
 	//TODO implement me
-	return PrefixedRlpHash(ArbitrumRetryTxType, []interface{}{
+	return prefixedRlpHash(ArbitrumRetryTxType, []interface{}{
 		t.ChainId,
 		t.Nonce,
 		t.From,
@@ -1118,12 +1135,10 @@ func (t *ArbitrumRetryTx) encodePayload(w io.Writer, b []byte, payloadSize, nonc
 
 func (t *ArbitrumRetryTx) payloadSize(hashingOnly bool) (payloadSize int, nonceLen, gasLen int) {
 	// ChainId (big.Int)
-	payloadSize++ // header
-	payloadSize += rlp.BigIntLenExcludingHead(t.ChainId)
+	payloadSize += rlp.BigIntLen(t.ChainId)
 
 	// Nonce (uint64)
-	payloadSize++ // header
-	nonceLen = rlp.IntLenExcludingHead(t.Nonce)
+	nonceLen = rlp.U64Len(t.Nonce)
 	payloadSize += nonceLen
 
 	// From (common.Address, 20 bytes)
@@ -1131,12 +1146,10 @@ func (t *ArbitrumRetryTx) payloadSize(hashingOnly bool) (payloadSize int, nonceL
 	payloadSize += 20
 
 	// GasFeeCap (big.Int)
-	payloadSize++ // header
-	payloadSize += rlp.BigIntLenExcludingHead(t.GasFeeCap)
+	payloadSize += rlp.BigIntLen(t.GasFeeCap)
 
 	// Gas (uint64)
-	payloadSize++ // header
-	gasLen = rlp.IntLenExcludingHead(t.Gas)
+	gasLen = rlp.U64Len(t.Gas)
 	payloadSize += gasLen
 
 	// To (optional common.Address, 20 bytes if non-nil)
@@ -1146,8 +1159,7 @@ func (t *ArbitrumRetryTx) payloadSize(hashingOnly bool) (payloadSize int, nonceL
 	}
 
 	// Value (big.Int)
-	payloadSize++ // header
-	payloadSize += rlp.BigIntLenExcludingHead(t.Value)
+	payloadSize += rlp.BigIntLen(t.Value)
 
 	// Data ([]byte) — rlp.StringLen returns the full encoded length (header + data)
 	payloadSize += rlp.StringLen(t.Data)
@@ -1161,12 +1173,10 @@ func (t *ArbitrumRetryTx) payloadSize(hashingOnly bool) (payloadSize int, nonceL
 	payloadSize += 20
 
 	// MaxRefund (big.Int)
-	payloadSize++ // header
-	payloadSize += rlp.BigIntLenExcludingHead(t.MaxRefund)
+	payloadSize += rlp.BigIntLen(t.MaxRefund)
 
 	// SubmissionFeeRefund (big.Int)
-	payloadSize++ // header
-	payloadSize += rlp.BigIntLenExcludingHead(t.SubmissionFeeRefund)
+	payloadSize += rlp.BigIntLen(t.SubmissionFeeRefund)
 
 	if t.Timeboosted != nil && !hashingOnly {
 		// Timeboosted (bool)
@@ -1339,22 +1349,22 @@ func (t *ArbitrumRetryTx) MarshalBinaryForHashing(w io.Writer) error {
 	return nil
 }
 
-func (t *ArbitrumRetryTx) Sender(signer Signer) (common.Address, error) {
+func (t *ArbitrumRetryTx) Sender(signer Signer) (accounts.Address, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (t *ArbitrumRetryTx) CachedSender() (common.Address, bool) {
+func (t *ArbitrumRetryTx) CachedSender() (accounts.Address, bool) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (t *ArbitrumRetryTx) GetSender() (common.Address, bool) {
-	return t.From, true
+func (t *ArbitrumRetryTx) GetSender() (accounts.Address, bool) {
+	return accounts.InternAddress(t.From), true
 }
 
-func (t *ArbitrumRetryTx) SetSender(address common.Address) {
-	t.From = address
+func (t *ArbitrumRetryTx) SetSender(address accounts.Address) {
+	t.From = address.Value()
 }
 
 func (t *ArbitrumRetryTx) IsContractDeploy() bool {
@@ -1432,7 +1442,7 @@ func (tx *ArbitrumSubmitRetryableTx) copy() *ArbitrumSubmitRetryableTx {
 		Beneficiary:      tx.Beneficiary,
 		MaxSubmissionFee: new(big.Int),
 		FeeRefundAddr:    tx.FeeRefundAddr,
-		RetryData:        common.CopyBytes(tx.RetryData),
+		RetryData:        common.Copy(tx.RetryData),
 		EffectiveGasUsed: tx.EffectiveGasUsed,
 	}
 	if tx.ChainId != nil {
@@ -2073,7 +2083,7 @@ func (tx *ArbitrumDepositTx) WithSignature(signer Signer, sig []byte) (Transacti
 
 func (tx *ArbitrumDepositTx) Hash() common.Hash {
 	//TODO implement me
-	return PrefixedRlpHash(ArbitrumDepositTxType, []interface{}{
+	return prefixedRlpHash(ArbitrumDepositTxType, []interface{}{
 		tx.ChainId,
 		tx.L1RequestId,
 		tx.From,
