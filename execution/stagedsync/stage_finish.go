@@ -76,6 +76,10 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 	return nil
 }
 
+func UnwindFinish(u *UnwindState, tx kv.RwTx) (err error) {
+	return u.Done(tx)
+}
+
 func updateInitialCycleDuration(s *StageState, cfg FinishCfg) {
 	if s.CurrentSyncCycle.IsInitialCycle {
 		initialCycleDurationSecs.Set(time.Since(*cfg.initialCycleStart).Seconds())
