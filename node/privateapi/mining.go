@@ -165,7 +165,6 @@ type MinedBlockStreams struct {
 	chans  map[uint]txpoolproto.Mining_OnMinedBlockServer
 	id     uint
 	mu     sync.Mutex
-	logger log.Logger
 }
 
 func (s *MinedBlockStreams) Add(stream txpoolproto.Mining_OnMinedBlockServer) (remove func()) {
