@@ -1382,19 +1382,15 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 
 func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error {
 	// Read feature flags from DB
-	closeDB := false
 	if chainDB == nil {
 		chainDB = dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
-		closeDB = true
-	}
-	if closeDB {
 		defer chainDB.Close()
 	}
 
-	var persistRCache, commitmentHistory bool
+	var persistReceipts, commitmentHistory bool
 	if err := chainDB.View(context.Background(), func(tx kv.Tx) error {
 		var err error
-		persistRCache, err = kvcfg.PersistReceipts.Enabled(tx)
+		persistReceipts, err = kvcfg.PersistReceipts.Enabled(tx)
 		if err != nil {
 			return fmt.Errorf("failed to read PersistReceipts config: %w", err)
 		}
