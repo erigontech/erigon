@@ -17,10 +17,12 @@
 package seg
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/erigontech/erigon/db/compress"
 )
@@ -227,12 +229,12 @@ func (g *PagedReader) Skip() (uint64, int) {
 	return offset, len(v)
 }
 
-func NewPagedWriter(parent CompressorI, compressionEnabled bool) *PagedWriter {
-
+func NewPagedWriter(parent CompressorI, compressionEnabled bool, tempDir string) *PagedWriter {
 	return &PagedWriter{
 		parent:             parent,
 		pageSize:           parent.GetValuesOnCompressedPage(),
 		compressionEnabled: compressionEnabled,
+		tempDir:            tempDir,
 	}
 }
 
@@ -255,32 +257,135 @@ type PagedWriter struct {
 	compressionEnabled bool
 
 	pairs int
+
+	// Temporary file for uncompressed pages when page-level compression is enabled
+	// These pages are compressed later in the Compress() method for non-blocking Add()
+	tempFile       *os.File
+	tempFileWriter *bufio.Writer
+	tempDir        string
 }
 
 func (c *PagedWriter) Empty() bool { return c.pairs == 0 }
-func (c *PagedWriter) Close()      { c.parent.Close() }
+func (c *PagedWriter) Close() {
+	// Clean up temp file if it exists
+	if c.tempFile != nil {
+		c.tempFile.Close()
+		os.Remove(c.tempFile.Name())
+		c.tempFile = nil
+		c.tempFileWriter = nil
+	}
+	c.parent.Close()
+}
 func (c *PagedWriter) Compress() error {
+	// Flush any remaining unwritten page data
 	if err := c.Flush(); err != nil {
 		return err
 	}
+
+	if c.tempFile != nil {
+		return c.parent.Compress()
+	}
+
+	if err := c.tempFileWriter.Flush(); err != nil {
+		return fmt.Errorf("failed to flush temp file writer: %w", err)
+	}
+
+	// Seek back to the beginning
+	if _, err := c.tempFile.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("failed to seek temp file: %w", err)
+	}
+
+	// Read and compress each page
+	reader := bufio.NewReader(c.tempFile)
+	pageLenBuf := make([]byte, 4)
+	var uncompressedPage []byte
+
+	for {
+		// Read page length
+		_, err := io.ReadFull(reader, pageLenBuf)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("failed to read page length: %w", err)
+		}
+
+		pageLen := binary.BigEndian.Uint32(pageLenBuf)
+
+		// Read page data
+		if cap(uncompressedPage) < int(pageLen) {
+			uncompressedPage = make([]byte, pageLen)
+		} else {
+			uncompressedPage = uncompressedPage[:pageLen]
+		}
+
+		if _, err := io.ReadFull(reader, uncompressedPage); err != nil {
+			return fmt.Errorf("failed to read page data: %w", err)
+		}
+
+		// Compress and write to parent
+		var compressedPage []byte
+		c.compressionBuf, compressedPage = compress.EncodeZstdIfNeed(c.compressionBuf[:0], uncompressedPage, c.compressionEnabled)
+		if _, err := c.parent.Write(compressedPage); err != nil {
+			return err
+		}
+	}
+
+	// Clean up temp file
+	c.tempFile.Close()
+	os.Remove(c.tempFile.Name())
+	c.tempFile = nil
+	c.tempFileWriter = nil
+
 	return c.parent.Compress()
 }
+
 func (c *PagedWriter) Count() int {
 	if c.pageSize <= 1 {
 		return c.parent.Count()
 	}
 	return c.pairs * 2
 }
+
 func (c *PagedWriter) FileName() string { return c.parent.FileName() }
 
 func (c *PagedWriter) writePage() error {
-	bts, ok := c.bytes()
+	// When page-level compression is enabled, defer compression to Compress() method
+	if !c.compressionEnabled {
+		bts, ok := c.bytes()
+		c.resetPage()
+		if !ok {
+			return nil
+		}
+		_, err := c.parent.Write(bts)
+		return err
+	}
+
+	bts, ok := c.bytesUncompressed()
 	c.resetPage()
 	if !ok {
 		return nil
 	}
-	_, err := c.parent.Write(bts)
-	return err
+
+	// Lazily create temporary file on first write
+	if c.tempFile == nil {
+		tmpFile, err := os.CreateTemp(c.tempDir, "paged_writer_*.tmp")
+		if err != nil {
+			return fmt.Errorf("failed to create temp file: %w", err)
+		}
+		c.tempFile = tmpFile
+		c.tempFileWriter = bufio.NewWriter(tmpFile)
+	}
+
+	pageLenBuf := make([]byte, 4)
+	binary.BigEndian.PutUint32(pageLenBuf, uint32(len(bts)))
+	if _, err := c.tempFileWriter.Write(pageLenBuf); err != nil {
+		return fmt.Errorf("failed to write page length: %w", err)
+	}
+	if _, err := c.tempFileWriter.Write(bts); err != nil {
+		return fmt.Errorf("failed to write page data: %w", err)
+	}
+	return nil
 }
 func (c *PagedWriter) Add(k, v []byte) (err error) {
 	if c.pageSize <= 1 {
@@ -312,11 +417,10 @@ func (c *PagedWriter) Flush() error {
 	return c.writePage()
 }
 
-func (c *PagedWriter) bytes() (wholePage []byte, notEmpty bool) {
+func (c *PagedWriter) bytesUncompressed() (wholePage []byte, notEmpty bool) {
 	if len(c.kLengths) == 0 {
 		return nil, false
 	}
-	//TODO: alignment,compress+alignment
 
 	c.keys = append(c.keys, c.vals...)
 	keysAndVals := c.keys
@@ -335,8 +439,17 @@ func (c *PagedWriter) bytes() (wholePage []byte, notEmpty bool) {
 	}
 
 	wholePage = append(wholePage, keysAndVals...)
-	c.compressionBuf, wholePage = compress.EncodeZstdIfNeed(c.compressionBuf[:0], wholePage, c.compressionEnabled)
 
+	return wholePage, true
+}
+
+func (c *PagedWriter) bytes() (wholePage []byte, notEmpty bool) {
+	//TODO: alignment,compress+alignment
+	wholePage, notEmpty = c.bytesUncompressed()
+	if !notEmpty {
+		return nil, false
+	}
+	c.compressionBuf, wholePage = compress.EncodeZstdIfNeed(c.compressionBuf[:0], wholePage, c.compressionEnabled)
 	return wholePage, true
 }
 
