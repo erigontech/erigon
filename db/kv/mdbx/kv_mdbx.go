@@ -304,6 +304,9 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 			return nil, err
 		}
 	}
+	if opts.label == dbcfg.ChainDB {
+		log.Info("[dbg] db config", "opts", opts)
+	}
 
 	err = env.Open(opts.path, opts.flags, 0664)
 	if err != nil {
