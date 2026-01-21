@@ -781,6 +781,78 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 	defer hc.Close()
 
 	// this one should not prune anything due to forced=false but no files built
+	stat, err := hc.OldPrune(context.Background(), rwTx, 0, 10, pruneLimit, false, logEvery)
+	require.NoError(t, err)
+	require.Nil(t, stat)
+
+	// this one should prune value of tx=0 due to given range [0,1) (we have first value at tx=0) even it is forced
+	stat, err = hc.OldPrune(context.Background(), rwTx, 0, 1, pruneLimit, true, logEvery)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, stat.PruneCountValues)
+	require.EqualValues(t, 1, stat.PruneCountTx)
+
+	// this should prune exactly pruneLimit*pruneIter transactions
+	for i := 0; i < pruneIters; i++ {
+		stat, err = hc.OldPrune(context.Background(), rwTx, 0, 1000, pruneLimit, true, logEvery)
+		require.NoError(t, err)
+		t.Logf("[%d] stats: %v", i, stat)
+	}
+
+	icc, err = rwTx.CursorDupSort(h.ValuesTable)
+	require.NoError(t, err)
+	defer icc.Close()
+
+	key, _, err := icc.First()
+	require.NoError(t, err)
+	require.NotNil(t, key)
+	require.EqualValues(t, pruneIters*int(pruneLimit), binary.BigEndian.Uint64(key[len(key)-8:])-1)
+
+	icc, err = rwTx.CursorDupSort(h.ValuesTable)
+	require.NoError(t, err)
+	defer icc.Close()
+}
+
+func TestHistoryScanPruneCorrectness(t *testing.T) {
+	t.Parallel()
+
+	values := generateTestData(t, length.Addr, length.Addr, 1000, 1000, 1)
+	db, h := filledHistoryValues(t, true, values, log.New())
+	defer db.Close()
+	defer h.Close()
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	pruneLimit := uint64(10)
+	pruneIters := 8
+
+	rwTx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	var from, to [8]byte
+	binary.BigEndian.PutUint64(from[:], uint64(0))
+	binary.BigEndian.PutUint64(to[:], uint64(pruneIters)*pruneLimit)
+
+	icc, err := rwTx.CursorDupSort(h.ValuesTable)
+	require.NoError(t, err)
+
+	count := 0
+	for key, _, err := icc.Seek(from[:]); key != nil; key, _, err = icc.Next() {
+		require.NoError(t, err)
+		//t.Logf("key %x\n", key)
+		if bytes.Compare(key[len(key)-8:], to[:]) >= 0 {
+			break
+		}
+		count++
+	}
+	require.Equal(t, pruneIters*int(pruneLimit), count)
+	icc.Close()
+
+	hc := h.BeginFilesRo()
+	defer hc.Close()
+
+	// this one should not prune anything due to forced=false but no files built
 	stat, err := hc.Prune(context.Background(), rwTx, 0, 10, pruneLimit, false, logEvery)
 	require.NoError(t, err)
 	require.Nil(t, stat)
