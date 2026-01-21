@@ -637,7 +637,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						} else {
 							_, err =
 								pe.cfg.engine.Finalize(
-									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
+									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, blockReceipts,
 									txTask.Withdrawals, chainReader, syscall, false, pe.logger)
 						}
 
