@@ -252,7 +252,7 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 	}
 	logger.Info("[Experiment] wrote heap profile to buffer", "size", common.ByteCount(uint64(buf.Len())))
 
-	//  create temp file-> write buffer -> fsync -> close -> rename
+	//  create temp file-> write buffer -> fsync -> rename
 	tmpPath := filePath + ".tmp"
 	f, err := os.Create(tmpPath)
 	if err != nil {
