@@ -517,7 +517,7 @@ func statelessGasDelegateCall(evm *EVM, callContext *CallContext, availableGas u
 	}
 
 	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
-		fmt.Printf("%d (%d.%d) DelegateCall Gas: memory(%d)\n",
+		fmt.Printf("%d (%d.%d) DelegateCall Gas: memory(%d): %d\n",
 			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), memorySize, gas)
 	}
 
