@@ -206,6 +206,10 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 
 }
 
+type throttleType string
+
+const throttle throttleType = "throttle"
+
 func TestInvIndexScanPruningCorrectness(t *testing.T) {
 	t.Parallel()
 
@@ -225,7 +229,7 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 	binary.BigEndian.PutUint64(from[:], uint64(0))
 	binary.BigEndian.PutUint64(to[:], uint64(pruneIters)*pruneLimit)
 	thr := time.Millisecond * 20
-	ctx := context.WithValue(context.Background(), "throttle", &thr)
+	ctx := context.WithValue(context.Background(), throttle, &thr)
 
 	t.Run("no_files_no_force", func(t *testing.T) {
 		ic := ii.BeginFilesRo()
@@ -281,7 +285,7 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 		ic = ii.BeginFilesRo()
 		defer ic.Close()
 		newTHR := 9 * time.Millisecond
-		otherCtx := context.WithValue(context.Background(), "throttle", &newTHR)
+		otherCtx := context.WithValue(context.Background(), throttle, &newTHR)
 		stat, err = ic.TableScanningPrune(otherCtx, tx, 0, 10, pruneLimit, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
 		require.NoError(t, err)
 		require.Equal(t, 9, int(stat.PruneCountTx))
