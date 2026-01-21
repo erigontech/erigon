@@ -222,9 +222,9 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	if err = env.SetOption(mdbx.OptMaxReaders, kv.ReadersLimit); err != nil {
 		return nil, err
 	}
-	if err = env.SetOption(mdbx.OptRpAugmentLimit, 1_000_000_000); err != nil { //default: 262144
-		return nil, err
-	}
+	//if err = env.SetOption(mdbx.OptRpAugmentLimit, 1_000_000_000); err != nil { //default: 262144
+	//	return nil, err
+	//}
 
 	exists, err := dir.FileExist(filepath.Join(opts.path, "mdbx.dat"))
 	if err != nil {
@@ -303,9 +303,6 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		if err = env.SetOption(mdbx.OptMergeThreshold16dot16Percent, opts.mergeThreshold); err != nil {
 			return nil, err
 		}
-	}
-	if opts.label == dbcfg.ChainDB {
-		log.Info("[dbg] db config", "opts", opts)
 	}
 
 	err = env.Open(opts.path, opts.flags, 0664)
