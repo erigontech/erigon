@@ -87,7 +87,7 @@ func storedChanges(tx kv.TemporalTx, fromTxNum uint64, txnIndex int) (map[string
 }
 
 // Use HistoricalTraceWorker instead???
-func reExecutedChanges(ctx context.Context, tx kv.TemporalTx, blockReader services.FullBlockReader, chainConfig *chain.Config, block *types.Block, fromTxNum uint64, txnIndex int, logger log.Logger) (map[string]([]byte), error) {
+func reExecutedChanges(ctx context.Context, tx kv.TemporalTx, blockReader services.FullBlockReader, chainConfig *chain.Config, block *types.Block, fromTxNum uint64, txnIndex int, logger log.Logger, receipts types.Receipts) (map[string]([]byte), error) {
 	header := block.Header()
 	stateReader := state.NewHistoryReaderV3(tx, fromTxNum+uint64(txnIndex+1))
 	ibs := state.New(stateReader)
@@ -98,16 +98,27 @@ func reExecutedChanges(ctx context.Context, tx kv.TemporalTx, blockReader servic
 
 	if txnIndex == -1 { // beginning of the block
 		syscall := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, err := protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, vmCfg)
-			return ret, err
+			return protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, vmCfg)
 		}
-		chain := consensuschain.NewReader(chainConfig, tx, blockReader, logger)
-		err := engine.Initialize(chainConfig, chain, header, ibs, syscall, logger, nil /* hooks */)
+		chainReader := consensuschain.NewReader(chainConfig, tx, blockReader, logger)
+		err := engine.Initialize(chainConfig, chainReader, header, ibs, syscall, logger, nil /* hooks */)
 		if err != nil {
 			return nil, err
 		}
 		noop := state.NewNoopWriter()
 		err = ibs.FinalizeTx(rules, noop)
+		if err != nil {
+			return nil, err
+		}
+	} else if txnIndex == len(block.Transactions()) { // end of the block
+		ibs.SetTxContext(block.NumberU64(), txnIndex)
+		syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
+			return protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vmCfg)
+		}
+		chainReader := consensuschain.NewReader(chainConfig, tx, blockReader, logger)
+		_, err := engine.Finalize(
+			chainConfig, header, ibs, block.Transactions(), block.Uncles(),
+			receipts, block.Withdrawals(), chainReader, syscall, false, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -127,6 +138,8 @@ func reExecutedChanges(ctx context.Context, tx kv.TemporalTx, blockReader servic
 			return nil, err
 		}
 		ibs.SoftFinalise()
+		logs := ibs.GetRawLogs(txnIndex)
+		receipts = append(receipts, &types.Receipt{Logs: logs})
 	}
 
 	stateWriter := testutil.NewMapWriter()
@@ -139,7 +152,7 @@ func reExecutedChanges(ctx context.Context, tx kv.TemporalTx, blockReader servic
 
 func TestReExecution(t *testing.T) {
 	// https://github.com/erigontech/erigon/issues/18276
-	dataDir := "/Users/andrew/Library/Erigon/chiado"
+	dataDir := "/Users/andrew/Library/Erigon/chiado_backup"
 	blockNum := uint64(19366160)
 
 	dirs, _, err := datadir.New(dataDir).MustFlock()
@@ -171,11 +184,11 @@ func TestReExecution(t *testing.T) {
 	block, err := blockReader.BlockByNumber(ctx, tx, blockNum)
 	require.NoError(t, err)
 
-	// TODO(yperbasis) check block end
-	for txnIndex := -1; txnIndex < len(block.Transactions()); txnIndex++ {
+	receipts := make([]*types.Receipt, 0, len(block.Transactions()))
+	for txnIndex := -1; txnIndex <= len(block.Transactions()); txnIndex++ {
 		changesInDb, err := storedChanges(tx, fromTxNum, txnIndex)
 		require.NoError(t, err)
-		reExecChanges, err := reExecutedChanges(ctx, tx, blockReader, chainConfig, block, fromTxNum, txnIndex, logger)
+		reExecChanges, err := reExecutedChanges(ctx, tx, blockReader, chainConfig, block, fromTxNum, txnIndex, logger, receipts)
 		require.NoError(t, err)
 		assert.Equal(t, changesInDb, reExecChanges, fmt.Sprintf("mismatch at %d", txnIndex))
 	}
