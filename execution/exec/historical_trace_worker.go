@@ -115,7 +115,6 @@ func NewHistoricalTraceWorker(
 		vmCfg:       &vm.Config{},
 	}
 	ie.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, *ie.vmCfg)
-	ie.taskGasPool.AddBlobGas(execArgs.ChainConfig.GetMaxBlobGasPerBlock(0))
 	ie.ibs = state.New(ie.stateReader)
 	return ie
 }
@@ -202,7 +201,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 	default:
 		tracer := calltracer.NewCallTracer(nil)
 		result.Err = func() error {
-			rw.taskGasPool.Reset(txTask.Tx().GetGasLimit(), cc.GetMaxBlobGasPerBlock(header.Time))
+			rw.taskGasPool.Reset(txTask.Tx().GetGasLimit(), txTask.Tx().GetBlobGas())
 			rw.vmCfg.Tracer = tracer.Tracer().Hooks
 			ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 			txn := txTask.Tx()
