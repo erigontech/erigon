@@ -85,6 +85,7 @@ jobs:
       ERIGON_REFERENCE_DIR: /opt/erigon-versions/reference-version
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
+      CLIENT: erigon
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -187,46 +188,51 @@ jobs:
           echo "  ERIGON_REDIS_KEY=${ERIGON_REDIS_KEY}"
           echo "  GETH_REDIS_KEY=${GETH_REDIS_KEY}"
           # Wait for an agreement between Erigon and Geth
-          python3 coordinated_start.py --client erigon --run-id "$RUN_ID" --chain "$NETWORK"
+          python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$NETWORK"
 
       - name: Run RPC Performance Tests
         id: test_step
         run: |
           set +e # Disable exit on error
+          
           failed_test=0
-          commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD) # use ${{ github.sha }} or GITHUB_SHA
-          past_test_dir=$RPC_PAST_TEST_DIR/${CHAIN}_$(date +%Y%m%d_%H%M%S)_comp_perf_$commit
-          echo "past_test_dir=$past_test_dir" >> $GITHUB_ENV
+          
+          commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD)
           
           # Prepare historical test results directory
+          # a) Save text results to a directory with timestamp and commit hash
+          past_test_dir=$RPC_PAST_TEST_DIR/${CHAIN}_$(date +%Y%m%d_%H%M%S)_comp_perf_$commit
+          echo "past_test_dir=$past_test_dir" >> $GITHUB_ENV          
           mkdir -p $past_test_dir
-          rm -rf $RPC_PAST_TEST_DIR/${CHAIN}_bin  # we want only the latest binary files
-          mkdir -p $RPC_PAST_TEST_DIR/${CHAIN}_bin
+          # b) Save binary results to a fixed directory
+          bin_past_test_dir=$RPC_PAST_TEST_DIR/${CHAIN}_bin
+          rm -rf $bin_past_test_dir  # we want only the latest binary files
+          mkdir -p $bin_past_test_dir
           
           run_perf () {
-            network=$1
-            method=$2
-            pattern=$3
-            sequence=$4
-            client=$5
-            result_file=$client-$method-result.json
-            full_path_result_file=${{runner.workspace}}/rpc-tests/perf/reports/$CHAIN/$result_file
-          
+            workspace=$1
+            network=$2
+            method=$3
+            pattern=$4
+            sequence=$5
+            client=$6
+            
+            result_dir=$workspace/rpc-tests/perf/reports/$network
+            result_file=$client-$method-result.json            
+                    
             # clean temporary area
-            cd ${{runner.workspace}}/rpc-tests/perf
-            rm -rf ./reports/$CHAIN
+            cd $workspace/rpc-tests/perf
+            rm -rf ./reports/$network
           
             python3 ./run_perf_tests.py --blockchain "$network" \
                                       --test-type "$method" \
                                       --pattern-file pattern/"$network"/"$pattern".tar \
                                       --test-sequence "$sequence" \
                                       --repetitions 5 \
-                                      --erigon-dir $ERIGON_TESTBED_DATA_DIR \
-                                      --silk-dir ${{runner.workspace}}/erigon \
                                       --test-mode 2 \
                                       --test-report \
-                                      --json-report $full_path_result_file \
-                                      --testing-daemon erigon
+                                      --json-report $result_dir/$result_file \
+                                      --testing-daemon $client
           
             # Capture test runner script exit status
             perf_exit_status=$?
@@ -235,57 +241,51 @@ jobs:
             db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_REFERENCE_DIR/production.ini production erigon_repo_commit)
           
             # Check test runner script exit status
-            if [ $perf_exit_status -eq 0 ]; then           
-              # save all vegeta binary report
+            if [ $perf_exit_status -eq 0 ]; then
+              outcome=success
+          
+              # Save all vegeta binary reports
               echo "Save current vegeta binary files"
-              cp -r ${{runner.workspace}}/rpc-tests/perf/reports/bin $RPC_PAST_TEST_DIR/${CHAIN}_bin
-          
-              echo "Save test result on DB"
-              cd ${{runner.workspace}}/erigon
-              python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
-                --repo erigon \
-                --branch ${{ github.ref_name }} \
-                --commit $(git rev-parse HEAD) \
-                --test_name rpc-performance-comparison-test-$method \
-                --chain $CHAIN \
-                --runner ${{ runner.name }} \
-                --db_version $db_version \
-                --outcome success \
-                --result_file $full_path_result_file
-          
-              if [ $? -ne 0 ]; then
-                failed_test=1
-                echo "Failure saving test results on DB"
-              fi
-          
+              cp -r $workspace/rpc-tests/perf/reports/bin $bin_past_test_dir
+                    
               echo "Execute Latency Percentile HDR Analysis"
-              cd ${{runner.workspace}}/rpc-tests/perf/reports/$CHAIN/
+              cd $result_dir
               python3 $ERIGON_QA_PATH/test_system/qa-tests/rpc-tests/perf_hdr_analysis.py \
-                --test_name erigon-$method \
-                --input_file ./erigon-$method-result.json \
-                --output_file ./erigon-$method-latency_hdr_analysis.pdf
+                --test_name $client-$method \
+                --input_file ./$result_file \
+                --output_file ./$client-$method-latency_hdr_analysis.pdf
             else
               failed_test=1
-              cd ${{runner.workspace}}/erigon
-              python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
-                --repo erigon \
-                --branch ${{ github.ref_name }} \
-                --commit $(git rev-parse HEAD) \
-                --test_name rpc-performance-comparison-test-$method \
-                --chain $CHAIN \
-                --runner ${{ runner.name }} \
-                --db_version $db_version \
-                --outcome failure
+              outcome=failure
+            fi
+          
+            # Save results on DB
+            echo "Save test result on DB"
+
+            python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+              --repo $client \
+              --branch ${{ github.ref_name }} \
+              --commit $(git -C $workspace/erigon rev-parse HEAD) \
+              --test_name rpc-performance-comparison-test-$method \
+              --chain $CHAIN \
+              --runner ${{ runner.name }} \
+              --db_version $db_version \
+              --outcome $outcome \
+              --result_file $result_dir/$result_file
+        
+            if [ $? -ne 0 ]; then
+              failed_test=1
+              echo "Failure saving test results on DB"
             fi
           
             # Save test results to a directory with timestamp and commit hash
-            cp -r ${{runner.workspace}}/rpc-tests/perf/reports/$CHAIN $past_test_dir
+            cp -r $workspace/rpc-tests/perf/reports/$CHAIN $past_test_dir
           }
 
           # Launch the RPC performance test runner
           failed_test=0
-          #run_perf $CHAIN <method> <pattern> <load-sequence>
-          run_perf $CHAIN eth_call stress_test_eth_call_001_14M 1:1,100:30,1000:20,10000:20,20000:20 erigon                 
+          #run_perf <workspace> <chain> <method> <pattern> <load-sequence> <client>
+          run_perf ${{runner.workspace}} $CHAIN eth_call stress_test_eth_call_001_14M 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT                 
           
           # Save the subsection reached status
           
@@ -345,6 +345,9 @@ jobs:
       VEGETA_DURATION: ${{ needs.setup.outputs.vegeta_duration }}
       ERIGON_REDIS_KEY: ${{ needs.setup.outputs.erigon_redis_key }}
       GETH_REDIS_KEY: ${{ needs.setup.outputs.geth_redis_key }}
+      GETH_INSTALL_DIR: /opt/go-ethereum
+      ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
+      CLIENT: geth
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -376,33 +379,40 @@ jobs:
           echo "  ERIGON_REDIS_KEY=${ERIGON_REDIS_KEY}"
           echo "  GETH_REDIS_KEY=${GETH_REDIS_KEY}"
           # Wait for an agreement between Erigon and Geth
-          python3 coordinated_start.py --client geth --run-id "$RUN_ID" --chain "$NETWORK"
+          python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$NETWORK"
 
       - name: Run RPC Performance Tests
         id: test_step
         run: |
           set +e # Disable exit on error
+          
           failed_test=0
-          commit="Geth_vX.Y.Z_commit_hash"
-          past_test_dir=$RPC_PAST_TEST_DIR/${CHAIN}_$(date +%Y%m%d_%H%M%S)_comp_perf_$commit
-          echo "past_test_dir=$past_test_dir" >> $GITHUB_ENV
-
+          
+          commit=$(git -C $GETH_INSTALL_DIR rev-parse --short HEAD)
+          
           # Prepare historical test results directory
+          # a) Save text results to a directory with timestamp and commit hash
+          past_test_dir=$RPC_PAST_TEST_DIR/${CHAIN}_$(date +%Y%m%d_%H%M%S)_comp_perf_$commit
+          echo "past_test_dir=$past_test_dir" >> $GITHUB_ENV          
           mkdir -p $past_test_dir
-          rm -rf $RPC_PAST_TEST_DIR/${CHAIN}_bin  # we want only the latest binary files
-          mkdir -p $RPC_PAST_TEST_DIR/${CHAIN}_bin
+          # b) Save binary results to a fixed directory
+          bin_past_test_dir=$RPC_PAST_TEST_DIR/${CHAIN}_bin
+          rm -rf $bin_past_test_dir  # we want only the latest binary files
+          mkdir -p $bin_past_test_dir
 
           run_perf () {
-            network=$1
-            method=$2
-            pattern=$3
-            sequence=$4
-            client=$5
-            result_file=$client-$method-result.json
-            full_path_result_file=${{runner.workspace}}/rpc-tests/perf/reports/$CHAIN/$result_file
+            workspace=$1
+            network=$2
+            method=$3
+            pattern=$4
+            sequence=$5
+            client=$6
+            
+            result_dir=$workspace/rpc-tests/perf/reports/$network
+            result_file=$client-$method-result.json         
           
             # clean temporary area
-            cd ${{runner.workspace}}/rpc-tests/perf
+            cd $workspace/rpc-tests/perf
             rm -rf ./reports/
 
             python3 ./run_perf_tests.py --blockchain "$network" \
@@ -410,71 +420,63 @@ jobs:
                                       --pattern-file pattern/"$network"/"$pattern".tar \
                                       --test-sequence "$sequence" \
                                       --repetitions 5 \
-                                      --erigon-dir $ERIGON_TESTBED_DATA_DIR \
-                                      --silk-dir ${{runner.workspace}}/erigon \
                                       --test-mode 2 \
                                       --test-report \
-                                      --json-report $full_path_result_file \
-                                      --testing-daemon geth
+                                      --json-report $result_dir/$result_file \
+                                      --testing-daemon $client
 
             # Capture test runner script exit status
             perf_exit_status=$?
 
-            # Detect the pre-built db version
-            db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_REFERENCE_DIR/production.ini production erigon_repo_commit)
+            # There is no db versioning in our geth installation
+            db_version=$commit
 
             # Check test runner script exit status
-            if [ $perf_exit_status -eq 0 ]; then           
-              # save all vegeta binary report
+            if [ $perf_exit_status -eq 0 ]; then     
+              outcome=success
+          
+              # Save all vegeta binary reports
               echo "Save current vegeta binary files"
-              cp -r ${{runner.workspace}}/rpc-tests/perf/reports/bin $RPC_PAST_TEST_DIR/${CHAIN}_bin
-
-              echo "Save test result on DB"
-              cd ${{runner.workspace}}/erigon
-              python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
-                --repo geth \
-                --branch "unknown" \
-                --commit "unknown" \
-                --test_name rpc-performance-comparison-test-$method \
-                --chain $CHAIN \
-                --runner ${{ runner.name }} \
-                --db_version "unknown" \
-                --outcome success \
-                --result_file $full_path_result_file
-
-              if [ $? -ne 0 ]; then
-                failed_test=1
-                echo "Failure saving test results on DB"
-              fi
+              cp -r $workspace/rpc-tests/perf/reports/bin $bin_past_test_dir
 
               echo "Execute Latency Percentile HDR Analysis"
-              cd ${{runner.workspace}}/rpc-tests/perf/reports/$CHAIN/
+              cd $result_dir
               python3 $ERIGON_QA_PATH/test_system/qa-tests/rpc-tests/perf_hdr_analysis.py \
-                --test_name erigon-$method \
-                --input_file ./geth-$method-result.json \
-                --output_file ./geth-$method-latency_hdr_analysis.pdf
+                --test_name $client-$method \
+                --input_file ./$result_file \
+                --output_file ./$client-$method-latency_hdr_analysis.pdf
             else
               failed_test=1
-              cd ${{runner.workspace}}/erigon
-              python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
-                --repo geth \
-                --branch "unknown" \
-                --commit "unknown" \
-                --test_name rpc-performance-comparison-test-$method \
-                --chain $CHAIN \
-                --runner ${{ runner.name }} \
-                --db_version "unknown" \
-                --outcome failure
+              outcome=failure
             fi
+          
+            # Save results on DB
+            echo "Save test result on DB"
 
+            python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
+              --repo $client \
+              --branch "release" \
+              --commit $commit \
+              --test_name rpc-performance-comparison-test-$method \
+              --chain $CHAIN \
+              --runner ${{ runner.name }} \
+              --db_version $db_version \
+              --outcome $outcome \
+              --result_file $result_dir/$result_file
+
+            if [ $? -ne 0 ]; then
+              failed_test=1
+              echo "Failure saving test results on DB"
+            fi
+          
             # Save test results to a directory with timestamp and commit hash
-            cp -r ${{runner.workspace}}/rpc-tests/perf/reports/$CHAIN $past_test_dir
+            cp -r $workspace/rpc-tests/perf/reports/$CHAIN $past_test_dir
           }
 
           # Launch the RPC performance test runner
           failed_test=0
-          #run_perf $CHAIN <method> <pattern> <load-sequence>
-          run_perf $CHAIN eth_call stress_test_eth_call_001_14M 1:1,100:30,1000:20,10000:20,20000:20 geth
+          #run_perf <workspace> <chain> <method> <pattern> <load-sequence> <client>
+          run_perf ${{runner.workspace}} $CHAIN eth_call stress_test_eth_call_001_14M 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
 
           # Save the subsection reached status
 
