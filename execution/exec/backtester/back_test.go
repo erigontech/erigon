@@ -3,6 +3,7 @@ package exec_backtester
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -86,36 +87,53 @@ func storedChanges(tx kv.TemporalTx, fromTxNum uint64, txnIndex int) (map[string
 }
 
 // Use HistoricalTraceWorker instead???
-func reExecutedChanges(ctx context.Context, tx kv.TemporalTx, blockReader services.FullBlockReader, chainConfig *chain.Config, header *types.Header, fromTxNum uint64, txnIndex int, logger log.Logger) (map[string]([]byte), error) {
-	// What's the diff between commitmentdb.HistoryStateReader and state.HistoryReaderV3?
+func reExecutedChanges(ctx context.Context, tx kv.TemporalTx, blockReader services.FullBlockReader, chainConfig *chain.Config, block *types.Block, fromTxNum uint64, txnIndex int, logger log.Logger) (map[string]([]byte), error) {
+	header := block.Header()
 	stateReader := state.NewHistoryReaderV3(tx, fromTxNum+uint64(txnIndex+1))
 	ibs := state.New(stateReader)
 	engine := rulesconfig.CreateRulesEngineBareBones(ctx, chainConfig, logger)
-	vmCfg := vm.Config{}
-	syscall := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-		ret, err := protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, vmCfg)
-		return ret, err
-	}
-	chain := consensuschain.NewReader(chainConfig, tx, blockReader, logger)
-	err := engine.Initialize(chainConfig, chain, header, ibs, syscall, logger, nil /* hooks */)
-	if err != nil {
-		return nil, err
-	}
-	noop := state.NewNoopWriter()
 	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), engine, accounts.NilAddress, chainConfig)
 	rules := blockContext.Rules(chainConfig)
-	err = ibs.FinalizeTx(rules, noop)
-	if err != nil {
-		return nil, err
+	vmCfg := vm.Config{}
+
+	if txnIndex == -1 { // beginning of the block
+		syscall := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+			ret, err := protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, vmCfg)
+			return ret, err
+		}
+		chain := consensuschain.NewReader(chainConfig, tx, blockReader, logger)
+		err := engine.Initialize(chainConfig, chain, header, ibs, syscall, logger, nil /* hooks */)
+		if err != nil {
+			return nil, err
+		}
+		noop := state.NewNoopWriter()
+		err = ibs.FinalizeTx(rules, noop)
+		if err != nil {
+			return nil, err
+		}
+	} else { // normal transaction
+		txn := block.Transactions()[txnIndex]
+		gasPool := protocol.NewGasPool(txn.GetGasLimit(), txn.GetBlobGas())
+		ibs.SetTxContext(block.NumberU64(), txnIndex)
+		signer := types.MakeSigner(chainConfig, block.NumberU64(), header.Time)
+		msg, err := txn.AsMessage(*signer, header.BaseFee, rules)
+		if err != nil {
+			return nil, err
+		}
+		txnContext := protocol.NewEVMTxContext(msg)
+		evm := vm.NewEVM(blockContext, txnContext, ibs, chainConfig, vmCfg)
+		_, err = protocol.ApplyMessage(evm, msg, gasPool, true /* refunds */, false /* gasBailout */, engine)
+		if err != nil {
+			return nil, err
+		}
+		ibs.SoftFinalise()
 	}
+
 	stateWriter := testutil.NewMapWriter()
-	err = ibs.MakeWriteSet(rules, stateWriter)
+	err := ibs.MakeWriteSet(rules, stateWriter)
 	if err != nil {
 		return nil, err
 	}
-
-	// TODO(yperbasis) implement for txnIndex != -1
-
 	return stateWriter.Changes, err
 }
 
@@ -153,14 +171,12 @@ func TestReExecution(t *testing.T) {
 	block, err := blockReader.BlockByNumber(ctx, tx, blockNum)
 	require.NoError(t, err)
 
-	txnIndex := -1 // beginning of the block
-
-	// Check changes at the beginning of the block
-	changesInDb, err := storedChanges(tx, fromTxNum, txnIndex)
-	require.NoError(t, err)
-	reExecChanges, err := reExecutedChanges(ctx, tx, blockReader, chainConfig, block.Header(), fromTxNum, txnIndex, logger)
-	require.NoError(t, err)
-	assert.Equal(t, changesInDb, reExecChanges)
-
-	// TODO: re-execute and compare results for all transactions in the block
+	// TODO(yperbasis) check block end
+	for txnIndex := -1; txnIndex < len(block.Transactions()); txnIndex++ {
+		changesInDb, err := storedChanges(tx, fromTxNum, txnIndex)
+		require.NoError(t, err)
+		reExecChanges, err := reExecutedChanges(ctx, tx, blockReader, chainConfig, block, fromTxNum, txnIndex, logger)
+		require.NoError(t, err)
+		assert.Equal(t, changesInDb, reExecChanges, fmt.Sprintf("mismatch at %d", txnIndex))
+	}
 }
