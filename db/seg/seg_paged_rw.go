@@ -21,7 +21,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"os"
+	"math/rand/v2"
+	"path/filepath"
 
 	"github.com/erigontech/erigon/db/compress"
 )
@@ -336,7 +337,8 @@ func (c *PagedWriter) writePage() error {
 
 	// Lazily create temporary file on first write
 	if c.tempFile == nil {
-		tempFilePath := fmt.Sprintf("%s/paged_writer_%d.tmp", c.tempDir, os.Getpid())
+		tempFileName := fmt.Sprintf("paged_writer_%d.tmp", rand.Int64())
+		tempFilePath := filepath.Join(c.tempDir, tempFileName)
 		tmpFile, err := NewRawWordsFile(tempFilePath)
 		if err != nil {
 			return fmt.Errorf("failed to create temp file: %w", err)
