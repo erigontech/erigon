@@ -1695,7 +1695,6 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 	totalTx := uint64(5000)
 	keyTxsLimit := uint64(50)
 	keyLimit := uint64(200)
-	SaveExecV3PrunableProgress(tx, kv.MinimumPrunableStepDomainKey, 0)
 	// Put some kvs
 	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
 	for key, updates := range data {
@@ -1716,10 +1715,11 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 	domainRoTx.Close()
 
 	stepToPrune := kv.Step(2)
-	collateAndMergeOnce(t, d, tx, stepToPrune, true)
+	collateAndMergeOnceWithScanPrune(t, d, tx, stepToPrune, true)
 
 	domainRoTx = d.BeginFilesRo()
-	can, untilStep := domainRoTx.canPruneDomainTables(tx, aggStep)
+
+	can, untilStep := domainRoTx.canScanPruneDomainTables(tx, aggStep)
 	defer domainRoTx.Close()
 	require.Falsef(t, can, "those step is already pruned")
 	require.Equal(t, stepToPrune, untilStep)
@@ -1730,34 +1730,34 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 	// refresh file list
 	domainRoTx = d.BeginFilesRo()
 	t.Logf("pruning step %d", stepToPrune)
-	can, untilStep = domainRoTx.canPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune))
+	can, untilStep = domainRoTx.canScanPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune))
 	require.True(t, can, "third step is not yet pruned")
 	require.LessOrEqual(t, stepToPrune, untilStep)
 
-	can, untilStep = domainRoTx.canPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune)+(aggStep/2))
+	can, untilStep = domainRoTx.canScanPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune)+(aggStep/2))
 	require.True(t, can, "third step is not yet pruned, we are checking for a half-step after it and still have something to prune")
 	require.LessOrEqual(t, stepToPrune, untilStep)
 	domainRoTx.Close()
 
 	stepToPrune = 30
-	collateAndMergeOnce(t, d, tx, stepToPrune, true)
+	collateAndMergeOnceWithScanPrune(t, d, tx, stepToPrune, true)
 
 	domainRoTx = d.BeginFilesRo()
-	can, untilStep = domainRoTx.canPruneDomainTables(tx, aggStep*uint64(stepToPrune))
+	can, untilStep = domainRoTx.canScanPruneDomainTables(tx, aggStep*uint64(stepToPrune))
 	require.False(t, can, "latter step is not yet pruned")
 	require.Equal(t, stepToPrune, untilStep)
 	domainRoTx.Close()
 
 	stepToPrune = 35
-	collateAndMergeOnce(t, d, tx, stepToPrune, false)
+	collateAndMergeOnceWithScanPrune(t, d, tx, stepToPrune, false)
 
 	domainRoTx = d.BeginFilesRo()
 	t.Logf("pruning step %d", stepToPrune)
-	can, untilStep = domainRoTx.canPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune))
+	can, untilStep = domainRoTx.canScanPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune))
 	require.True(t, can, "third step is not yet pruned")
 	require.LessOrEqual(t, stepToPrune, untilStep)
 
-	can, untilStep = domainRoTx.canPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune)+(aggStep/2))
+	can, untilStep = domainRoTx.canScanPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune)+(aggStep/2))
 	require.True(t, can, "third step is not yet pruned, we are checking for a half-step after it and still have something to prune")
 	require.LessOrEqual(t, stepToPrune, untilStep)
 	domainRoTx.Close()
