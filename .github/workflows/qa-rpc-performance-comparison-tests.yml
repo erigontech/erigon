@@ -69,8 +69,8 @@ jobs:
 
   test_erigon:
     name: Benchmark Erigon
-    needs: [setup]
-    runs-on: [self-hosted, qa, Ethereum, rpc-latest-erigon]
+    needs: [ setup ]
+    runs-on: [ self-hosted, qa, Ethereum, rpc-latest-erigon ]
     timeout-minutes: 120
     permissions:
       contents: read
@@ -109,8 +109,8 @@ jobs:
 
   test_geth:
     name: Benchmark Geth
-    needs: [setup]
-    runs-on: [self-hosted, qa, Ethereum, rpc-latest-geth]
+    needs: [ setup ]
+    runs-on: [ self-hosted, qa, Ethereum, rpc-latest-geth ]
     timeout-minutes: 120
     permissions:
       contents: read

@@ -90,24 +90,19 @@ func StageLoop(
 	initialCycle := true
 	for {
 		start := time.Now()
-
 		select {
 		case <-hd.ShutdownCh:
 			return
 		default:
 			// continue
 		}
-
 		hook.LastNewBlockSeen(hd.Progress())
 		t := time.Now()
-		// Estimate the current top height seen from the peer
-		err := StageLoopIteration(ctx, db, nil, nil, sync, initialCycle, false, logger, blockReader, hook)
-
+		err := StageLoopIteration(ctx, db, sync, initialCycle, false, logger, blockReader, hook)
 		if err != nil {
 			if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
 			}
-
 			logger.Error("Staged Sync", "err", err)
 			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
 				logger.Error("Failed to recover header sentriesClient", "err", recoveryErr)
@@ -121,7 +116,6 @@ func StageLoop(
 		if !initialCycle {
 			hd.AfterInitialCycle()
 		}
-
 		if loopMinTime != 0 {
 			waitTime := loopMinTime - time.Since(start)
 			logger.Info("Wait time until next loop", "for", waitTime)
@@ -138,24 +132,23 @@ func StageLoop(
 // ProcessFrozenBlocks - withuot global rwtx
 func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook, logger log.Logger) error {
 	sawZeroBlocksTimes := 0
-	tx, err := db.BeginTemporalRw(ctx)
+	tx, err := db.BeginTemporalRw(ctx) //nolint
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
-
-	if err := sync.RunSnapshots(tx); err != nil {
-		return err
-	}
-
-	initialCycle, firstCycle := true, true
+	defer func() {
+		tx.Rollback()
+	}()
 	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
 		return err
 	}
 	defer doms.Close()
-
 	// run stages first time - it will download blocks
+	err = sync.RunSnapshots(db, doms, tx)
+	if err != nil {
+		return err
+	}
 	var finishStageBeforeSync uint64
 	if hook != nil {
 		finishStageBeforeSync, err = stages.GetStageProgress(tx, stages.Finish)
@@ -166,7 +159,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 			return err
 		}
 	}
-
+	initialCycle, firstCycle := true, false
 	for more := true; more; {
 		more, err = sync.Run(db, doms, tx, initialCycle, firstCycle)
 		if err != nil {
@@ -235,13 +228,23 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	return nil
 }
 
-func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
+func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
 	// avoid crash because Erigon's core does many things
 	defer dbg.RecoverPanicIntoError(logger, &err)
-
 	hasMore := true
 	for hasMore {
-		hasMore, err = stageLoopIteration(ctx, db, sd, tx, sync, initialCycle, firstCycle, logger, blockReader, hook)
+		err = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+			if err != nil {
+				return err
+			}
+			defer sd.Close()
+			hasMore, err = stageLoopIteration(ctx, db, sd, tx, sync, initialCycle, firstCycle, logger, blockReader, hook)
+			if err != nil {
+				return err
+			}
+			return sd.Flush(ctx, tx)
+		})
 		if err != nil {
 			return err
 		}
@@ -250,7 +253,6 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sd *execctx.Sha
 }
 
 func stageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (hasMore bool, err error) {
-	externalTx := tx != nil
 	finishProgressBefore, headersProgressBefore, gasUsed, err := stagesHeadersAndFinish(db, tx)
 	if err != nil {
 		return false, err
@@ -259,32 +261,12 @@ func stageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sd *execctx.Sha
 	// In all other cases - process blocks batch in 1 RwTx
 	// 2 corner-cases: when sync with --snapshots=false and when executed only blocks from snapshots (in this case all stages progress is equal and > 0, but node is not synced)
 	isSynced := finishProgressBefore > 0 && finishProgressBefore > blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
-	canRunCycleInOneTransaction := isSynced
-	if externalTx {
-		canRunCycleInOneTransaction = true
-	}
-	if firstCycle {
-		canRunCycleInOneTransaction = false
-	}
-	if dbg.CommitEachStage {
-		canRunCycleInOneTransaction = false
-	}
-
 	// Main steps:
 	// - process new blocks
 	// - commit(no_sync). NoSync - making data available for readers as-soon-as-possible. Can
 	//       send notifications Now and do write to disks Later.
 	// - Send Notifications: about new blocks, new receipts, state changes, etc...
 	// - Prune(limited time)+Commit(sync). Write to disk happening here.
-
-	if canRunCycleInOneTransaction && !externalTx {
-		tx, err = db.BeginTemporalRwNosync(ctx)
-		if err != nil {
-			return false, err
-		}
-		defer tx.Rollback()
-	}
-
 	if err = hook.BeforeRun(tx, isSynced); err != nil {
 		return false, err
 	}
@@ -293,24 +275,9 @@ func stageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sd *execctx.Sha
 		return false, err
 	}
 	logCtx := sync.PrintTimings()
-	//var tableSizes []interface{}
-	var commitTime time.Duration
-	if canRunCycleInOneTransaction && !externalTx {
-		//tableSizes = stagedsync.CollectDBMetrics(db, txc.Tx) // Need to do this before commit to access tx
-		commitStart := time.Now()
-		if err := tx.Commit(); err != nil {
-			return false, err
-		}
-		commitTime = time.Since(commitStart)
-		tx = nil
-	}
-
 	// -- send notifications START
 	if err = hook.AfterRun(tx, finishProgressBefore, isSynced); err != nil {
 		return false, err
-	}
-	if canRunCycleInOneTransaction && !externalTx && commitTime > 500*time.Millisecond {
-		logger.Info("Commit cycle", "in", commitTime)
 	}
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -337,23 +304,12 @@ func stageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sd *execctx.Sha
 	}
 	logCtx = append(logCtx, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	logger.Info("Timings", logCtx...)
-	//if len(tableSizes) > 0 {
-	//	logger.Info("Tables", tableSizes...)
-	//}
-	//}
 	// -- send notifications END
-
 	// -- Prune+commit(sync)
-	if externalTx {
-		err = sync.RunPrune(ctx, db, tx, initialCycle, 0)
-	} else {
-		err = db.Update(ctx, func(tx kv.RwTx) error { return sync.RunPrune(ctx, db, tx, initialCycle, 0) })
-	}
-
+	err = sync.RunPrune(ctx, db, tx, initialCycle, 0)
 	if err != nil {
 		return false, err
 	}
-
 	return hasMore, nil
 }
 

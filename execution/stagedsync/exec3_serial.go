@@ -146,7 +146,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if dbg.TraceBlock(blockNum) {
 				se.doms.SetTrace(true, false)
 			}
-			// Warmup is enabled via SetWarmupDB at executor init
+			// Warmup is enabled via EnableTrieWarmup at executor init
 			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, true, blockNum, inputTxNum-1, se.logPrefix, nil)
 			se.doms.SetTrace(false, false)
 
@@ -543,8 +543,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		}
 
 		var applyReceipt *types.Receipt
-		if txTask.TxIndex >= 0 && txTask.TxIndex < len(blockReceipts) {
-			applyReceipt = blockReceipts[txTask.TxIndex]
+		if txTask.TxIndex >= 0 && txTask.TxIndex-startTxIndex < len(blockReceipts) {
+			applyReceipt = blockReceipts[txTask.TxIndex-startTxIndex]
 		}
 
 		if err := se.rs.ApplyTxState(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, state.StateUpdates{},

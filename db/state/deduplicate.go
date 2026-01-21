@@ -113,6 +113,7 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 			ss := seq.Iterator(0)
 
 			var dedupVal *[]byte
+			var histKeyBuf []byte
 			var prevTxNum uint64
 
 			for ss.HasNext() {
@@ -125,8 +126,7 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 					panic(fmt.Errorf("assert: no value??? %s, txNum=%d, count=%d, lastKey=%x, ci1.key=%x", ci1.hist.FileName(), txNum, count, lastKey, ci1.key))
 				}
 
-				var k, v []byte
-				k, v, valBuf, _ = ci1.hist.Next2(valBuf[:0])
+				v, _ := ci1.hist.Next(valBuf[:0])
 
 				if dedupVal != nil && bytes.Equal(*dedupVal, v) {
 					if dedupKeyEFs[string(ci1.key)] == nil {
@@ -143,7 +143,9 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 				dedupVal = &dd
 				prevTxNum = txNum
 
-				if err = pagedWr.Add(k, v); err != nil {
+				histKeyBuf = historyKey(txNum, ci1.key, histKeyBuf)
+
+				if err = pagedWr.Add(histKeyBuf, v); err != nil {
 					return err
 				}
 			}

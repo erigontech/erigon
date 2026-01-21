@@ -548,7 +548,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		}
 
 		// prepare key path (keccak(address) | keccak(key))
-		var fullKey []byte
+		fullKey := make([]byte, 0, 64)
 		fullKey = append(fullKey, crypto.Keccak256(address.Bytes())...)
 		fullKey = append(fullKey, crypto.Keccak256(storageKey.Hash.Bytes())...)
 

@@ -130,6 +130,10 @@ func ExecV3(ctx context.Context,
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
 	hooks := cfg.vmConfig.Tracer
 	applyTx := rwTx
+	err := doms.SeekCommitment(ctx, applyTx)
+	if err != nil {
+		return err
+	}
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if initialCycle && isApplyingBlocks {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
@@ -138,9 +142,7 @@ func ExecV3(ctx context.Context,
 		agg.SetCompressWorkers(1)
 		agg.SetCollateAndBuildWorkers(1)
 	}
-
 	var (
-		err          error
 		blockNum     = doms.BlockNum()
 		initialTxNum = doms.TxNum()
 	)
@@ -242,7 +244,8 @@ func ExecV3(ctx context.Context,
 			},
 			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
-		pe.doms.SetWarmupDB(cfg.db)
+		pe.doms.EnableParaTrieDB(cfg.db)
+		pe.doms.EnableTrieWarmup(true)
 
 		defer func() {
 			pe.LogComplete(stepsInDb)
@@ -274,7 +277,8 @@ func ExecV3(ctx context.Context,
 				lastCommittedBlockNum: blockNum,
 				postValidator:         postValidator,
 			}}
-		se.doms.SetWarmupDB(cfg.db)
+		se.doms.EnableParaTrieDB(cfg.db)
+		se.doms.EnableTrieWarmup(true)
 
 		defer func() {
 			se.LogComplete(stepsInDb)
@@ -384,9 +388,10 @@ func dumpTxIODebug(blockNum uint64, txIO *state.VersionedIO) {
 			fmt.Println(fmt.Sprintf("%d (%d.%d)", blockNum, txIndex, txIncarnation), "RD", vr.String())
 		}
 
-		var writes []*state.VersionedWrite
+		writeSet := txIO.WriteSet(txIndex)
+		writes := make([]*state.VersionedWrite, 0, len(writeSet))
 
-		for _, vw := range txIO.WriteSet(txIndex) {
+		for _, vw := range writeSet {
 			writes = append(writes, vw)
 		}
 
@@ -785,7 +790,8 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 	}
 
 	// Use warmup to pre-fetch branch data in parallel before computing commitment
-	doms.SetWarmupDB(cfg.db)
+	doms.EnableParaTrieDB(cfg.db)
+	doms.EnableTrieWarmup(true)
 	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix(), nil)
 
 	times.ComputeCommitment = time.Since(start)

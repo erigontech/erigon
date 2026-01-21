@@ -253,10 +253,10 @@ func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, db kv.RoDB, initialC
 	return &StageState{s, stage, blockNum, CurrentSyncCycleInfo{initialCycle, firstCycle}}, nil
 }
 
-func (s *Sync) RunSnapshots(tx kv.TemporalRwTx) error {
+func (s *Sync) RunSnapshots(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 	for _, stage := range s.stages {
 		if stage.ID == stages.Snapshots {
-			_, err := s.runStage(stage, nil, nil, tx, true, true, false)
+			_, err := s.runStage(stage, db, sd, tx, true, true, false)
 			return err
 		}
 	}

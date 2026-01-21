@@ -448,7 +448,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		apiAddr := fmt.Sprintf("127.0.0.1:%d", apiPort)
 
 		collectNodeURLs := func(nodes []*enode.Node) []string {
-			var urls []string
+			urls := make([]string, 0, len(nodes))
 			for _, n := range nodes {
 				urls = append(urls, n.URLv4())
 			}
@@ -1523,9 +1523,8 @@ func (s *Ethereum) Start() error {
 			// which make use of snapshots and expect them to be initialize
 			// TODO: get the snapshots to call the downloader directly - which will avoid this
 			go func() {
-				err := s.chainDB.UpdateTemporal(s.sentryCtx, func(tx kv.TemporalRwTx) error {
-					return stageloop.StageLoopIteration(s.sentryCtx, nil, nil, tx, s.polygonDownloadSync, true, true, s.logger, s.blockReader, hook)
-				})
+				err := stageloop.StageLoopIteration(s.sentryCtx, s.chainDB, s.polygonDownloadSync, true, true, s.logger, s.blockReader, hook)
+
 				if err != nil && !errors.Is(err, context.Canceled) {
 					s.logger.Error("[polygon.sync] downloader stage crashed - stopping node", "err", err)
 					err = s.stopNode()
