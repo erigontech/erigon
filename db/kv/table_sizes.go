@@ -3,8 +3,10 @@ package kv
 import (
 	"context"
 	"sort"
+	"strings"
 	"time"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -90,20 +92,20 @@ func CollectTableSizesPeriodically(ctx context.Context, db TemporalRoDB, label L
 				continue
 			}
 
-			//var sb strings.Builder
+			var sb strings.Builder
 			for _, t := range tableSizes {
 				dbTableSizeBytes.WithLabelValues(string(label), t.Name).Set(float64(t.Size))
 				if t.Size == 0 || !debugLogging {
 					continue
 				}
 
-				//sb.WriteString(t.Name)
-				//sb.WriteRune(':')
-				//sb.WriteString(common.ByteCount(t.Size))
-				//sb.WriteRune(',')
+				sb.WriteString(t.Name)
+				sb.WriteRune(':')
+				sb.WriteString(common.ByteCount(t.Size))
+				sb.WriteRune(',')
 			}
 
-			//logger.Debug("[kv] table sizes", "all", sb.String())
+			logger.Debug("[kv] table sizes", "all", sb.String())
 		}
 	}
 }
