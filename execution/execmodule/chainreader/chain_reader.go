@@ -438,6 +438,10 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block,
 	extraData := solid.NewExtraData()
 	extraData.SetBytes(payloadRpc.ExtraData)
 	blockHash := gointerfaces.ConvertH256ToHash(payloadRpc.BlockHash)
+	baseFeePerGas := gointerfaces.ConvertH256ToHash(payloadRpc.BaseFeePerGas)
+	for i, j := 0, len(baseFeePerGas)-1; i < j; i, j = i+1, j-1 {
+		baseFeePerGas[i], baseFeePerGas[j] = baseFeePerGas[j], baseFeePerGas[i]
+	}
 	block := &cltypes.Eth1Block{
 		ParentHash:    gointerfaces.ConvertH256ToHash(payloadRpc.ParentHash),
 		FeeRecipient:  gointerfaces.ConvertH160toAddress(payloadRpc.Coinbase),
@@ -452,9 +456,8 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block,
 		PrevRandao:    gointerfaces.ConvertH256ToHash(payloadRpc.PrevRandao),
 		Transactions:  solid.NewTransactionsSSZFromTransactions(payloadRpc.Transactions),
 		BlockHash:     blockHash,
-		BaseFeePerGas: gointerfaces.ConvertH256ToHash(payloadRpc.BaseFeePerGas),
+		BaseFeePerGas: baseFeePerGas,
 	}
-	copy(block.BaseFeePerGas[:], utils.ReverseOfByteSlice(block.BaseFeePerGas[:])) // reverse the byte slice
 	if payloadRpc.ExcessBlobGas != nil {
 		block.ExcessBlobGas = *payloadRpc.ExcessBlobGas
 	}
