@@ -436,7 +436,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "publishable",
 			Action: func(cliCtx *cli.Context) error {
-				if err := doPublishable(cliCtx); err != nil {
+				if err := doPublishable(cliCtx, nil); err != nil {
 					log.Error("[publishable]", "err", err)
 					return err
 				}
@@ -1131,7 +1131,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		case integrity.Publishable:
-			if err := doPublishable(cliCtx); err != nil {
+			if err := doPublishable(cliCtx, chainDB); err != nil {
 				return err
 			}
 		case integrity.CommitmentRoot:
@@ -1380,10 +1380,16 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	return nil
 }
 
-func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
+func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error {
 	// Read feature flags from DB
-	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
-	defer chainDB.Close()
+	closeDB := false
+	if chainDB == nil {
+		chainDB = dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+		closeDB = true
+	}
+	if closeDB {
+		defer chainDB.Close()
+	}
 
 	var persistRCache, commitmentHistory bool
 	if err := chainDB.View(context.Background(), func(tx kv.Tx) error {
@@ -1670,14 +1676,14 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 
 }
 
-func doPublishable(cliCtx *cli.Context) error {
+func doPublishable(cliCtx *cli.Context, chainDB kv.RoDB) error {
 	dat := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	// Check block snapshots sanity
 	if err := checkIfBlockSnapshotsPublishable(dat.Snap); err != nil {
 		return err
 	}
 	// Iterate over all fies in dat.Snap
-	if err := checkIfStateSnapshotsPublishable(dat); err != nil {
+	if err := checkIfStateSnapshotsPublishable(dat, chainDB); err != nil {
 		return err
 	}
 	if err := checkIfCaplinSnapshotsPublishable(dat, true); err != nil {
