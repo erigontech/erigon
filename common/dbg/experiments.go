@@ -17,6 +17,7 @@
 package dbg
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -229,34 +230,36 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 		return
 	}
 
-	// above 45%
+	// above threshold - save heap profile
 	var filePath string
 	if heapProfileFilePath == "" {
 		filePath = filepath.Join(os.TempDir(), "erigon-mem.prof")
 	} else {
 		filePath = heapProfileFilePath
 	}
+
 	if logger != nil {
-		logger.Info("[Experiment] saving heap profile as near OOM", "filePath", filePath)
+		logger.Info("[Experiment] saving heap profile as near OOM", "filePath", filePath, "alloc", common.ByteCount(memStats.Alloc))
 	}
 
-	f, err := os.Create(filePath)
-	if err != nil && logger != nil {
-		logger.Warn("[Experiment] could not create heap profile file", "err", err)
-	}
-
-	defer func() {
-		err := f.Close()
-		if err != nil && logger != nil {
-			logger.Warn("[Experiment] could not close heap profile file", "err", err)
+	// Write heap profile to buffer first to minimize file corruption window
+	var buf bytes.Buffer
+	if err := pprof.WriteHeapProfile(&buf); err != nil {
+		if logger != nil {
+			logger.Warn("[Experiment] could not write heap profile to buffer", "err", err)
 		}
-	}()
-
-	runtime.GC()
-	err = pprof.WriteHeapProfile(f)
-	if err != nil && logger != nil {
-		logger.Warn("[Experiment] could not write heap profile file", "err", err)
+		return
 	}
+	logger.Info("[Experiment] wrote heap profile to buffer", "size", common.ByteCount(uint64(buf.Len())))
+
+	// Now write buffer to file - this is fast since data is already in memory
+	if err := os.WriteFile(filePath, buf.Bytes(), 0644); err != nil {
+		if logger != nil {
+			logger.Warn("[Experiment] could not write heap profile file", "err", err)
+		}
+	}
+
+	logger.Info("[Experiment] wrote heap profile to disk")
 }
 
 func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOption) {
