@@ -603,6 +603,9 @@ type DBGauges struct { // these gauges are shared by all MDBX instances, but nee
 	GcLeafMetric     *metrics.GaugeVec
 	GcOverflowMetric *metrics.GaugeVec
 	GcPagesMetric    *metrics.GaugeVec
+
+	InfoRecentTxnID       *metrics.GaugeVec
+	InfoLatterReaderTxnID *metrics.GaugeVec
 }
 
 type DBSummaries struct { // the summaries are particular to a DB instance
@@ -635,6 +638,9 @@ func InitMDBXMGauges() *DBGauges {
 		GcLeafMetric:     metrics.GetOrCreateGaugeVec(`db_gc_leaf`, []string{dbLabelName}),
 		GcOverflowMetric: metrics.GetOrCreateGaugeVec(`db_gc_overflow`, []string{dbLabelName}),
 		GcPagesMetric:    metrics.GetOrCreateGaugeVec(`db_gc_pages`, []string{dbLabelName}),
+
+		InfoRecentTxnID:       metrics.GetOrCreateGaugeVec(`db_info{field="recent_txnid"}`, []string{dbLabelName}),
+		InfoLatterReaderTxnID: metrics.GetOrCreateGaugeVec(`db_info{field="latter_reader_txnid"}`, []string{dbLabelName}),
 	}
 }
 
