@@ -1387,10 +1387,10 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 		defer chainDB.Close()
 	}
 
-	var persistReceipts, commitmentHistory bool
+	var persistReceiptCache, commitmentHistory bool
 	if err := chainDB.View(context.Background(), func(tx kv.Tx) error {
 		var err error
-		persistReceipts, err = kvcfg.PersistReceipts.Enabled(tx)
+		persistReceiptCache, err = kvcfg.PersistReceipts.Enabled(tx)
 		if err != nil {
 			return fmt.Errorf("failed to read PersistReceipts config: %w", err)
 		}
@@ -1563,7 +1563,7 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 
 	viTypes := []string{"accounts", "storage", "code", "receipt"}
 	iiTypes := []string{"accounts", "storage", "code", "receipt", "logtopics", "logaddrs", "tracesfrom", "tracesto"}
-	if persistRCache {
+	if persistReceiptCache {
 		viTypes = append(viTypes, "rcache")
 		iiTypes = append(iiTypes, "rcache")
 	}
