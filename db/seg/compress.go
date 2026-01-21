@@ -887,6 +887,8 @@ func Ratio(f1, f2 string) (CompressionRatio, error) {
 }
 
 // RawWordsFile - .idt file format - simple format for temporary data store
+// PerfCritical: Used to speedup foreground processes by moving heavy compression to background
+// or outside of critical sections (e.g., outside of database.RoTx)
 type RawWordsFile struct {
 	f        *os.File
 	w        *bufio.Writer
@@ -915,8 +917,12 @@ func (f *RawWordsFile) Flush() error {
 	return f.w.Flush()
 }
 func (f *RawWordsFile) Close() {
-	f.w.Flush()
-	f.f.Close()
+	if f.w != nil {
+		f.w.Flush()
+		f.f.Close()
+		f.w = nil
+		f.f = nil
+	}
 }
 func (f *RawWordsFile) CloseAndRemove() {
 	f.Close()

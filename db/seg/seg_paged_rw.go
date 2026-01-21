@@ -17,7 +17,6 @@
 package seg
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/binary"
 	"fmt"
@@ -260,19 +259,16 @@ type PagedWriter struct {
 
 	// Temporary file for uncompressed pages when page-level compression is enabled
 	// These pages are compressed later in the Compress() method for non-blocking Add()
-	tempFile       *os.File
-	tempFileWriter *bufio.Writer
-	tempDir        string
+	tempFile *RawWordsFile
+	tempDir  string
 }
 
 func (c *PagedWriter) Empty() bool { return c.pairs == 0 }
 func (c *PagedWriter) Close() {
 	// Clean up temp file if it exists
 	if c.tempFile != nil {
-		c.tempFile.Close()
-		os.Remove(c.tempFile.Name())
+		c.tempFile.CloseAndRemove()
 		c.tempFile = nil
-		c.tempFileWriter = nil
 	}
 	c.parent.Close()
 }
@@ -282,60 +278,31 @@ func (c *PagedWriter) Compress() error {
 		return err
 	}
 
-	if c.tempFile != nil {
+	if c.tempFile == nil {
 		return c.parent.Compress()
 	}
 
-	if err := c.tempFileWriter.Flush(); err != nil {
-		return fmt.Errorf("failed to flush temp file writer: %w", err)
+	if err := c.tempFile.Flush(); err != nil {
+		return fmt.Errorf("failed to flush temp file: %w", err)
 	}
 
-	// Seek back to the beginning
-	if _, err := c.tempFile.Seek(0, io.SeekStart); err != nil {
-		return fmt.Errorf("failed to seek temp file: %w", err)
-	}
-
-	// Read and compress each page
-	reader := bufio.NewReader(c.tempFile)
-	pageLenBuf := make([]byte, 4)
-	var uncompressedPage []byte
-
-	for {
-		// Read page length
-		_, err := io.ReadFull(reader, pageLenBuf)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("failed to read page length: %w", err)
-		}
-
-		pageLen := binary.BigEndian.Uint32(pageLenBuf)
-
-		// Read page data
-		if cap(uncompressedPage) < int(pageLen) {
-			uncompressedPage = make([]byte, pageLen)
-		} else {
-			uncompressedPage = uncompressedPage[:pageLen]
-		}
-
-		if _, err := io.ReadFull(reader, uncompressedPage); err != nil {
-			return fmt.Errorf("failed to read page data: %w", err)
-		}
-
+	// Iterate through temp file and compress each page
+	err := c.tempFile.ForEach(func(uncompressedPage []byte, compressed bool) error {
 		// Compress and write to parent
 		var compressedPage []byte
 		c.compressionBuf, compressedPage = compress.EncodeZstdIfNeed(c.compressionBuf[:0], uncompressedPage, c.compressionEnabled)
 		if _, err := c.parent.Write(compressedPage); err != nil {
 			return err
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	// Clean up temp file
-	c.tempFile.Close()
-	os.Remove(c.tempFile.Name())
+	c.tempFile.CloseAndRemove()
 	c.tempFile = nil
-	c.tempFileWriter = nil
 
 	return c.parent.Compress()
 }
@@ -369,23 +336,15 @@ func (c *PagedWriter) writePage() error {
 
 	// Lazily create temporary file on first write
 	if c.tempFile == nil {
-		tmpFile, err := os.CreateTemp(c.tempDir, "paged_writer_*.tmp")
+		tempFilePath := fmt.Sprintf("%s/paged_writer_%d.tmp", c.tempDir, os.Getpid())
+		tmpFile, err := NewRawWordsFile(tempFilePath)
 		if err != nil {
 			return fmt.Errorf("failed to create temp file: %w", err)
 		}
 		c.tempFile = tmpFile
-		c.tempFileWriter = bufio.NewWriter(tmpFile)
 	}
 
-	pageLenBuf := make([]byte, 4)
-	binary.BigEndian.PutUint32(pageLenBuf, uint32(len(bts)))
-	if _, err := c.tempFileWriter.Write(pageLenBuf); err != nil {
-		return fmt.Errorf("failed to write page length: %w", err)
-	}
-	if _, err := c.tempFileWriter.Write(bts); err != nil {
-		return fmt.Errorf("failed to write page data: %w", err)
-	}
-	return nil
+	return c.tempFile.Append(bts)
 }
 func (c *PagedWriter) Add(k, v []byte) (err error) {
 	if c.pageSize <= 1 {
