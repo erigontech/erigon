@@ -28,12 +28,13 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/erigontech/erigon/db/downloader"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -793,7 +794,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 
 		for _, change := range req.ChangeBatch {
 			if change.Direction == remoteproto.Direction_UNWIND {
-				insertedBlocks = nil
+				continue
 			}
 			for lastSeenBlock <= change.BlockHeight {
 				delete(insertedBlocks, lastSeenBlock)
@@ -809,7 +810,6 @@ func (ms *MockSentry) InsertChain(chain *blockgen.ChainPack) error {
 	if err := ms.insertPoSBlocks(chain); err != nil {
 		return err
 	}
-
 	roTx, err := ms.DB.BeginRo(ms.Ctx)
 	if err != nil {
 		return err
@@ -823,11 +823,12 @@ func (ms *MockSentry) InsertChain(chain *blockgen.ChainPack) error {
 	if err != nil {
 		return err
 	}
-
 	if execAt < chain.TopBlock.NumberU64() {
 		return fmt.Errorf("sentryMock.InsertChain end up with Execution stage progress: %d < %d", execAt, chain.TopBlock.NumberU64())
 	}
-
+	if rawdb.ReadHeadBlockHash(roTx) != chain.TopBlock.Hash() {
+		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
+	}
 	if ms.sentriesClient.Hd.IsBadHeader(chain.TopBlock.Hash()) {
 		return fmt.Errorf("block %d %x was invalid", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
@@ -839,7 +840,7 @@ func (ms *MockSentry) HeaderDownload() *headerdownload.HeaderDownload {
 }
 
 func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.TemporalTx) state.StateReader {
-	r, err := rpchelper.CreateHistoryStateReader(tx, blockNum, 0, ms.BlockReader.TxnumReader(ms.Ctx))
+	r, err := rpchelper.CreateHistoryStateReader(context.Background(), tx, blockNum, 0, ms.BlockReader.TxnumReader())
 	if err != nil {
 		panic(err)
 	}

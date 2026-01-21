@@ -177,7 +177,7 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 func (cl *MockCl) InsertNewPayload(ctx context.Context, p *MockClPayload) (*enginetypes.PayloadStatus, error) {
 	elPayload := p.ExecutionPayload
 	clParentBlockRoot := p.ParentBeaconBlockRoot
-	return retryEngine(ctx, []enginetypes.EngineStatus{}, nil,
+	return retryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
 		func() (*enginetypes.PayloadStatus, enginetypes.EngineStatus, error) {
 			r, err := cl.engineApiClient.NewPayloadV4(ctx, elPayload, []common.Hash{}, clParentBlockRoot, []hexutil.Bytes{})
 			if err != nil {
@@ -335,7 +335,7 @@ func MockClPayloadToHeader(p *MockClPayload) *types.Header {
 		wh := types.DeriveSha(types.Withdrawals(elPayload.Withdrawals))
 		header.WithdrawalsHash = &wh
 	}
-	requests := make(types.FlatRequests, 0)
+	requests := make(types.FlatRequests, 0, len(p.ExecutionRequests))
 	for _, r := range p.ExecutionRequests {
 		requests = append(requests, types.FlatRequest{Type: r[0], RequestData: r[1:]})
 	}

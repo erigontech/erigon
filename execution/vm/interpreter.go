@@ -394,8 +394,11 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 		} else if sLen > operation.maxStack {
 			return nil, callContext.gas, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
 		}
-		if !callContext.useGas(cost, in.cfg.Tracer, tracing.GasChangeIgnored) {
+		// for tracing: this gas consumption event is emitted below in the debug section.
+		if callContext.gas < cost {
 			return nil, callContext.gas, ErrOutOfGas
+		} else {
+			callContext.gas -= cost
 		}
 
 		// All ops with a dynamic memory usage also has a dynamic gas cost.
@@ -429,8 +432,11 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 				fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
 			}
 
-			if !callContext.useGas(dynamicCost, in.cfg.Tracer, tracing.GasChangeIgnored) {
+			// for tracing: this gas consumption event is emitted below in the debug section.
+			if callContext.gas < dynamicCost {
 				return nil, callContext.gas, ErrOutOfGas
+			} else {
+				callContext.gas -= dynamicCost
 			}
 		}
 

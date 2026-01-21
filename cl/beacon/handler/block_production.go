@@ -614,7 +614,7 @@ func (a *ApiHandler) produceBeaconBody(
 			baseState,
 			targetSlot/a.beaconChainCfg.SlotsPerEpoch,
 		)
-		withdrawals := []*types.Withdrawal{}
+		withdrawals := make([]*types.Withdrawal, 0, len(clWithdrawals))
 		for _, w := range clWithdrawals {
 			withdrawals = append(withdrawals, &types.Withdrawal{
 				Index:     w.Index,

@@ -66,7 +66,8 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common
 }
 
 func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.Int) (*common.Address, error) {
-	hashData := []byte{params.SetCodeMagicPrefix}
+	hashData := make([]byte, 0, 1+len(rlp))
+	hashData = append(hashData, params.SetCodeMagicPrefix)
 	hashData = append(hashData, rlp...)
 	hash := crypto.Keccak256Hash(hashData)
 
