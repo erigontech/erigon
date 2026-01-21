@@ -31,7 +31,6 @@ import (
 	"unique"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -263,7 +262,7 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 		return
 	}
 	defer f.Close()
-	defer dir.RemoveFile(tmpPath) // cleanup temp file. If it doesn't exist nothing happens
+	defer os.Remove(tmpPath) //nolint: can't use dir.RemoveFile here due to import cycle
 
 	if _, err := f.Write(buf.Bytes()); err != nil {
 		if logger != nil {
