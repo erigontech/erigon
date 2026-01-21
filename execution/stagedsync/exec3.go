@@ -166,7 +166,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	if execStage.SyncMode() == stages.ModeApplyingBlocks {
-		agg.BuildFiles(doms.TxNum())
+		agg.BuildFilesInBackground(doms.TxNum())
 	}
 
 	var (
@@ -370,7 +370,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	if execStage.SyncMode() == stages.ModeApplyingBlocks {
-		agg.BuildFiles(doms.TxNum())
+		agg.BuildFilesInBackground(doms.TxNum())
 	}
 
 	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && !isBlockProduction && lastHeader != nil {
