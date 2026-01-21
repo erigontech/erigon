@@ -740,6 +740,13 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 	if d.Disable {
 		return Collation{}, nil
 	}
+	defer func(t time.Duration) {
+		took := time.Since(t)
+		if took > time.Millisecond {
+			log.Warn("[dbg] collate", "name", d.Name.String(), "took", took)
+		}
+		(time.Now())
+	}
 
 	{ //assert
 		if txFrom%d.stepSize != 0 {
