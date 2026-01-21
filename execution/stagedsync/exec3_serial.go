@@ -387,7 +387,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 						blockReceipts, txTask.Withdrawals, chainReader, syscall, nil, se.logger)
 				} else {
 					_, err = se.cfg.engine.Finalize(
-						se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles,
+						se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles,
 						blockReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
 				}
 
