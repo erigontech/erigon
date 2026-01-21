@@ -643,7 +643,7 @@ func numEqual(x, y *big.Int) bool {
 		return y == nil
 	}
 	if y == nil {
-		return x == nil
+		return false
 	}
 	return x.Cmp(y) == 0
 }
