@@ -57,8 +57,10 @@ import (
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
@@ -1379,6 +1381,26 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 }
 
 func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
+	// Read feature flags from DB
+	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+
+	var persistRCache, commitmentHistory bool
+	if err := chainDB.View(context.Background(), func(tx kv.Tx) error {
+		var err error
+		persistRCache, err = kvcfg.PersistReceipts.Enabled(tx)
+		if err != nil {
+			return fmt.Errorf("failed to read PersistReceipts config: %w", err)
+		}
+		commitmentHistory, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+		if err != nil {
+			return fmt.Errorf("failed to read CommitmentHistory config: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
 	var maxStepDomain uint64 // across all files in SnapDomain
 	var accFiles []snaptype.FileInfo
 
@@ -1537,14 +1559,23 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		prevFrom, prevTo = res.From, res.To
 	}
 
-	viTypes := []string{"accounts", "storage", "code", "rcache", "receipt"}
+	viTypes := []string{"accounts", "storage", "code", "receipt"}
+	iiTypes := []string{"accounts", "storage", "code", "receipt", "logtopics", "logaddrs", "tracesfrom", "tracesto"}
+	if persistRCache {
+		viTypes = append(viTypes, "rcache")
+		iiTypes = append(iiTypes, "rcache")
+	}
+	if commitmentHistory {
+		viTypes = append(viTypes, "commitment")
+		iiTypes = append(iiTypes, "commitment")
+	}
 	for _, res := range accFiles {
 		accName, err := version.ReplaceVersionWithMask(res.Name())
 		if err != nil {
 			return fmt.Errorf("failed to replace version file %s: %w", res.Name(), err)
 		}
 		// do a range check over all snapshots types (sanitizes domain and history folder)
-		for _, snapType := range []string{"accounts", "storage", "code", "rcache", "receipt", "logtopics", "logaddrs", "tracesfrom", "tracesto"} {
+		for _, snapType := range iiTypes {
 			versioned, err := statecfg.Schema.GetVersioned(snapType)
 			if err != nil {
 				return err
