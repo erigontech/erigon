@@ -280,7 +280,7 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 
 		ic = ii.BeginFilesRo()
 		defer ic.Close()
-		newTHR := 10 * time.Millisecond
+		newTHR := 9 * time.Millisecond
 		otherCtx := context.WithValue(context.Background(), "throttle", &newTHR)
 		stat, err = ic.TableScanningPrune(otherCtx, tx, 0, 10, pruneLimit, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
 		require.NoError(t, err)
