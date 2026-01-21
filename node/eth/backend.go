@@ -575,7 +575,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// setup periodic logging and prometheus updates
 	go mem.LogMemStats(ctx, logger)
 	go disk.UpdateDiskStats(ctx, logger)
-	go dbg.SaveHeapProfileNearOOMPeriodically(ctx, dbg.SaveHeapWithLogger(&logger))
 	go kv.CollectTableSizesPeriodically(ctx, backend.chainDB, dbcfg.ChainDB, logger)
 
 	var currentBlock *types.Block
