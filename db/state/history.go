@@ -28,10 +28,11 @@ import (
 	"strings"
 	"time"
 
-	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/prune"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
+
+	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/prune"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -528,6 +529,12 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 			}
 		}
 	}()
+	defer func(t time.Time) {
+		took := time.Since(t)
+		if took > 10*time.Millisecond {
+			log.Warn("[dbg] collate hist", "name", h.Name.String(), "took", took)
+		}
+	}(time.Now())
 
 	_histComp, err = seg.NewCompressor(ctx, "collate hist "+h.FilenameBase, historyPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
 	if err != nil {
