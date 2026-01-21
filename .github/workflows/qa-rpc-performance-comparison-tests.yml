@@ -143,15 +143,14 @@ jobs:
           
           ./erigon --datadir $ERIGON_TESTBED_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
 
-          ERIGON_PID=$!          
-          ERIGON_EXIT_STATUS=$?
+          ERIGON_PID=$!
           echo "ERIGON_PID=$ERIGON_PID" >> $GITHUB_ENV
           echo "erigon_started=true" >> $GITHUB_OUTPUT
           
           sleep 5
           tail erigon.log
           
-          if [ $ERIGON_EXIT_STATUS -ne 0 ]; then            
+          if ! kill -0 "$ERIGON_PID" 2>/dev/null; then
             echo "Erigon failed to start"
             echo "::error::Error detected during tests: Erigon failed to start"
             exit 1
@@ -283,7 +282,7 @@ jobs:
           }
 
           # Launch the RPC performance test runner
-          failed_test=0
+
           #run_perf <workspace> <chain> <method> <pattern> <load-sequence> <client>
           run_perf ${{runner.workspace}} $CHAIN eth_call stress_test_eth_call_001_14M 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT                 
           
@@ -317,14 +316,12 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: erigon-logs
-          path: $ERIGON_TESTBED_DATA_DIR/logs/rpcdaemon.log
+          path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/rpcdaemon.log
 
       - name: Delete Erigon Testbed Data Directory
         if: always() && steps.save_datadir_step.outputs.datadir_saved == 'true'
         run: |
-          if [ -d "$ERIGON_TESTBED_DATA_DIR" ]; then
-            rm -rf $ERIGON_TESTBED_DATA_DIR
-          fi
+          rm -rf $ERIGON_TESTBED_DATA_DIR
 
       - name: Resume the Erigon instance dedicated to db maintenance
         if: always()
@@ -413,7 +410,7 @@ jobs:
           
             # clean temporary area
             cd $workspace/rpc-tests/perf
-            rm -rf ./reports/
+            rm -rf ./reports/$network
 
             python3 ./run_perf_tests.py --blockchain "$network" \
                                       --test-type "$method" \
@@ -474,7 +471,7 @@ jobs:
           }
 
           # Launch the RPC performance test runner
-          failed_test=0
+
           #run_perf <workspace> <chain> <method> <pattern> <load-sequence> <client>
           run_perf ${{runner.workspace}} $CHAIN eth_call stress_test_eth_call_001_14M 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
 
