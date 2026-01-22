@@ -111,7 +111,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		ps:                     background.NewProgressSet(),
 		logger:                 logger,
-		collateAndBuildWorkers: 1,
+		collateAndBuildWorkers: 10,
 		mergeWorkers:           1,
 
 		produce: true,
@@ -664,6 +664,9 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(a.collateAndBuildWorkers)
+
+	buildG, ctx := errgroup.WithContext(ctx)
+	buildG.SetLimit(a.collateAndBuildWorkers)
 	for _, d := range a.d {
 		if d.Disable {
 			continue
@@ -692,18 +695,21 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 			collations = append(collations, collation)
 			collListMu.Unlock()
 
-			sf, err := d.buildFiles(ctx, step, collation, a.ps)
-			collation.Close()
-			if err != nil {
-				sf.CleanupOnError()
-				return err
-			}
+			buildG.Go(func() error {
+				sf, err := d.buildFiles(ctx, step, collation, a.ps)
+				collation.Close()
+				if err != nil {
+					sf.CleanupOnError()
+					return err
+				}
 
-			dd, err := kv.String2Domain(d.FilenameBase)
-			if err != nil {
-				return err
-			}
-			static.d[dd] = sf
+				dd, err := kv.String2Domain(d.FilenameBase)
+				if err != nil {
+					return err
+				}
+				static.d[dd] = sf
+				return nil
+			})
 			return nil
 		})
 	}
@@ -735,13 +741,18 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 			if err != nil {
 				return fmt.Errorf("index collation %q has failed: %w", ii.FilenameBase, err)
 			}
-			sf, err := ii.buildFiles(ctx, step, collation, a.ps)
-			if err != nil {
-				sf.CleanupOnError()
-				return err
-			}
 
-			static.ivfs[iikey] = sf
+			buildG.Go(func() error {
+				sf, err := ii.buildFiles(ctx, step, collation, a.ps)
+				if err != nil {
+					sf.CleanupOnError()
+					return err
+				}
+
+				static.ivfs[iikey] = sf
+				return nil
+			})
+
 			return nil
 		})
 	}
@@ -752,6 +763,15 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	}
 	if took := time.Since(t); took > 100*time.Millisecond {
 		log.Warn("[dbg] collate total", "took", took)
+	}
+
+	t = time.Now()
+	if err := buildG.Wait(); err != nil {
+		static.CleanupOnError()
+		return fmt.Errorf("domain collate-build: %w", err)
+	}
+	if took := time.Since(t); took > 100*time.Millisecond {
+		log.Warn("[dbg] build total", "took", took)
 	}
 	mxStepTook.ObserveDuration(stepStartedAt)
 	a.IntegrateDirtyFiles(static, txFrom, txTo)
