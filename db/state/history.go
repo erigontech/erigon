@@ -889,13 +889,17 @@ func (h *History) dataReader(f *seg.Decompressor) *seg.Reader {
 	}
 	return seg.NewReader(f.MakeGetter(), h.Compression)
 }
-func (h *History) dataWriter(f *seg.Compressor) *seg.PagedWriter {
+func (h *History) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.PagedWriter {
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
 	if f.GetValuesOnCompressedPage() > 0 && h.Compression != seg.CompressNone {
 		panic(fmt.Sprintf("a: %s, %s\n", h.Name.String(), h.Compression.String()))
 	}
+	if forceNoCompress {
+		return seg.NewPagedWriter(seg.NewWriter(f, seg.CompressNone), false, h.dirs.Tmp)
+	}
+
 	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0, h.dirs.Tmp)
 }
 func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return ht.h.dataReader(f) }
