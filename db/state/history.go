@@ -887,7 +887,7 @@ func (h *History) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.Paged
 }
 func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return ht.h.dataReader(f) }
 func (ht *HistoryRoTx) datarWriter(f *seg.Compressor) *seg.PagedWriter {
-	return ht.h.dataWriter(f)
+	return ht.h.dataWriter(f, false)
 }
 
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {
