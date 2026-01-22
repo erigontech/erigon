@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -91,7 +92,7 @@ func PrepareForWitness(tx kv.TemporalTx, block *types.Block, prevRoot common.Has
 }
 
 // RewindStagesForWitness rewinds the Execution stage to previous block.
-func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr, latestBlockNr uint64, cfg *WitnessCfg, regenerateHash bool, ctx context.Context, logger log.Logger) error {
+func RewindStagesForWitness(sd *execctx.SharedDomains, batch *membatchwithdb.MemoryMutation, blockNr, latestBlockNr uint64, cfg *WitnessCfg, regenerateHash bool, ctx context.Context, logger log.Logger) error {
 	// Rewind the Execution stage to previous block
 	unwindState := &UnwindState{ID: stages.Execution, UnwindPoint: blockNr - 1, CurrentBlockNumber: latestBlockNr}
 	stageState := &StageState{ID: stages.Execution, BlockNumber: blockNr}
@@ -113,7 +114,7 @@ func RewindStagesForWitness(batch *membatchwithdb.MemoryMutation, blockNr, lates
 	execCfg := StageExecuteBlocksCfg(batch.MemDB(), pruneMode, batchSize, cfg.chainConfig, cfg.engine, vmConfig,
 		nil /*stateStream=*/, false /*badBlockHalt=*/, true, dirs, blockReader, nil, nil, syncCfg, nil, false /*experimentalBAL=*/)
 
-	if err := UnwindExecutionStage(unwindState, stageState, nil, batch, ctx, execCfg, logger); err != nil {
+	if err := UnwindExecutionStage(unwindState, stageState, sd, batch, ctx, execCfg, logger); err != nil {
 		return err
 	}
 

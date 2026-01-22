@@ -212,24 +212,37 @@ func (m *FairMix) Next() bool {
 		if source == nil {
 			return m.nextFromAny()
 		}
-		var timeout <-chan time.Time
+		var (
+			timer   *time.Timer
+			timeout <-chan time.Time
+		)
 		if source.timeout >= 0 {
-			timer := time.NewTimer(source.timeout)
+			timer = time.NewTimer(source.timeout)
 			timeout = timer.C
-			defer timer.Stop()
 		}
 		select {
 		case n, ok := <-source.next:
 			if ok {
+				if timer != nil {
+					if !timer.Stop() {
+						<-timer.C
+					}
+				}
 				// Here, the timeout is reset to the configured value
 				// because the source delivered a node.
 				source.timeout = m.timeout
 				m.cur = n
 				return true
 			}
+			if timer != nil {
+				timer.Stop()
+			}
 			// This source has ended.
 			m.deleteSource(source)
 		case <-timeout:
+			if timer != nil {
+				timer.Stop()
+			}
 			// The selected source did not deliver a node within the timeout, so the
 			// timeout duration is halved for next time. This is supposed to improve
 			// latency with stuck sources.

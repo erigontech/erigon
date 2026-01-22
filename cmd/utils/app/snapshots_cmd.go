@@ -57,8 +57,10 @@ import (
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
@@ -434,7 +436,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "publishable",
 			Action: func(cliCtx *cli.Context) error {
-				if err := doPublishable(cliCtx); err != nil {
+				if err := doPublishable(cliCtx, nil); err != nil {
 					log.Error("[publishable]", "err", err)
 					return err
 				}
@@ -1129,7 +1131,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		case integrity.Publishable:
-			if err := doPublishable(cliCtx); err != nil {
+			if err := doPublishable(cliCtx, chainDB); err != nil {
 				return err
 			}
 		case integrity.CommitmentRoot:
@@ -1378,7 +1380,29 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	return nil
 }
 
-func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
+func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error {
+	// Read feature flags from DB
+	if chainDB == nil {
+		chainDB = dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+		defer chainDB.Close()
+	}
+
+	var persistReceiptCache, commitmentHistory bool
+	if err := chainDB.View(context.Background(), func(tx kv.Tx) error {
+		var err error
+		persistReceiptCache, err = kvcfg.PersistReceipts.Enabled(tx)
+		if err != nil {
+			return fmt.Errorf("failed to read PersistReceipts config: %w", err)
+		}
+		commitmentHistory, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+		if err != nil {
+			return fmt.Errorf("failed to read CommitmentHistory config: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
 	var maxStepDomain uint64 // across all files in SnapDomain
 	var accFiles []snaptype.FileInfo
 
@@ -1537,14 +1561,23 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		prevFrom, prevTo = res.From, res.To
 	}
 
-	viTypes := []string{"accounts", "storage", "code", "rcache", "receipt"}
+	viTypes := []string{"accounts", "storage", "code", "receipt"}
+	iiTypes := []string{"accounts", "storage", "code", "receipt", "logtopics", "logaddrs", "tracesfrom", "tracesto"}
+	if persistReceiptCache {
+		viTypes = append(viTypes, "rcache")
+		iiTypes = append(iiTypes, "rcache")
+	}
+	if commitmentHistory {
+		viTypes = append(viTypes, "commitment")
+		iiTypes = append(iiTypes, "commitment")
+	}
 	for _, res := range accFiles {
 		accName, err := version.ReplaceVersionWithMask(res.Name())
 		if err != nil {
 			return fmt.Errorf("failed to replace version file %s: %w", res.Name(), err)
 		}
 		// do a range check over all snapshots types (sanitizes domain and history folder)
-		for _, snapType := range []string{"accounts", "storage", "code", "rcache", "receipt", "logtopics", "logaddrs", "tracesfrom", "tracesto"} {
+		for _, snapType := range iiTypes {
 			versioned, err := statecfg.Schema.GetVersioned(snapType)
 			if err != nil {
 				return err
@@ -1639,14 +1672,14 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 
 }
 
-func doPublishable(cliCtx *cli.Context) error {
+func doPublishable(cliCtx *cli.Context, chainDB kv.RoDB) error {
 	dat := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	// Check block snapshots sanity
 	if err := checkIfBlockSnapshotsPublishable(dat.Snap); err != nil {
 		return err
 	}
 	// Iterate over all fies in dat.Snap
-	if err := checkIfStateSnapshotsPublishable(dat); err != nil {
+	if err := checkIfStateSnapshotsPublishable(dat, chainDB); err != nil {
 		return err
 	}
 	if err := checkIfCaplinSnapshotsPublishable(dat, true); err != nil {

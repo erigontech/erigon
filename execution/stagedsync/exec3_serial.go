@@ -39,7 +39,7 @@ type serialExecutor struct {
 
 func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
-	initialTxNum uint64, inputTxNum uint64, useExternalTx bool, initialCycle bool, rwTx kv.TemporalRwTx,
+	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
 	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
 	se.resetWorkers(ctx, se.rs, se.applyTx)
@@ -60,7 +60,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		log.Info(fmt.Sprintf("[%s] serial starting", execStage.LogPrefix()),
 			"from", blockNum, "to", maxBlockNum, "limit", blockNum+blockLimit-1, "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "lastFrozenStep", lastFrozenStep,
-			"initialCycle", initialCycle, "useExternalTx", useExternalTx, "isForkValidation", se.isForkValidation, "isBlockProduction", se.isBlockProduction)
+			"initialCycle", initialCycle, "isForkValidation", se.isForkValidation, "isBlockProduction", se.isBlockProduction)
 	}
 
 	for ; blockNum <= maxBlockNum; blockNum++ {
@@ -387,7 +387,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 						blockReceipts, txTask.Withdrawals, chainReader, syscall, nil, se.logger)
 				} else {
 					_, err = se.cfg.engine.Finalize(
-						se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles,
+						se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles,
 						blockReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
 				}
 
