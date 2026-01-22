@@ -1454,6 +1454,8 @@ func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) error {
 		cfg.Dirs = datadir.New(paths.DataDirForNetwork(paths.DefaultDataDir(), ctx.String(ChainFlag.Name)))
 	}
 
+	cfg.Dirs.Log = logging.LogDirPath(ctx)
+
 	cfg.MdbxPageSize = flags.DBPageSizeFlagUnmarshal(ctx, DbPageSizeFlag.Name, DbPageSizeFlag.Usage)
 	if err := cfg.MdbxDBSizeLimit.UnmarshalText([]byte(ctx.String(DbSizeLimitFlag.Name))); err != nil {
 		return fmt.Errorf("failed to parse --%s: %w", DbSizeLimitFlag.Name, err)

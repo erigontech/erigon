@@ -25,14 +25,16 @@ type ErigonMCPServer struct {
 	ethAPI    jsonrpc.EthAPI
 	erigonAPI jsonrpc.ErigonAPI
 	otsAPI    jsonrpc.OtterscanAPI
+	logDir    string
 }
 
 // NewErigonMCPServer creates a new MCP server for Erigon.
-func NewErigonMCPServer(ethAPI jsonrpc.EthAPI, erigonAPI jsonrpc.ErigonAPI, otsAPI jsonrpc.OtterscanAPI) *ErigonMCPServer {
+func NewErigonMCPServer(ethAPI jsonrpc.EthAPI, erigonAPI jsonrpc.ErigonAPI, otsAPI jsonrpc.OtterscanAPI, logDir string) *ErigonMCPServer {
 	e := &ErigonMCPServer{
 		ethAPI:    ethAPI,
 		erigonAPI: erigonAPI,
 		otsAPI:    otsAPI,
+		logDir:    logDir,
 	}
 
 	e.mcpServer = server.NewMCPServer(

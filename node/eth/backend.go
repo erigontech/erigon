@@ -36,6 +36,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/rpc/mcp"
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -847,7 +848,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	otsApi := jsonrpc.NewOtterscanAPI(baseApi, backend.chainDB, stack.Config().Http.OtsMaxPageSize)
 
-	mcpServer := mcp.NewErigonMCPServer(ethApi, erigonApi, otsApi)
+	mcpServer := mcp.NewErigonMCPServer(ethApi, erigonApi, otsApi, config.Dirs.Log)
 
 	if config.MCPAddress != "" {
 		go func() {
