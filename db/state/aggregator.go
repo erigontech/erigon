@@ -100,6 +100,7 @@ type Aggregator struct {
 
 func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
+	dbg.MergeTr()
 	return &Aggregator{
 		ctx:                    ctx,
 		ctxCancel:              ctxCancel,
@@ -111,7 +112,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		ps:                     background.NewProgressSet(),
 		logger:                 logger,
-		collateAndBuildWorkers: 1,
+		collateAndBuildWorkers: int(dbg.AggCollateWorkers),
 		mergeWorkers:           1,
 
 		produce: true,
