@@ -24,38 +24,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func BenchmarkDecompressNext(b *testing.B) {
+func BenchmarkDecompressNextBuf(b *testing.B) {
+	t := new(testing.T)
+	d := prepareDict(t, 1, 1_000)
+	defer d.Close()
+	b.ReportAllocs()
+	var k []byte
+	g := d.MakeGetter()
+	for b.Loop() {
+		if !g.HasNext() {
+			g.Reset(0)
+		}
+		k, _ = g.Next(k[:0])
+		if len(k) > 0 {
+			_, _ = k[0], k[len(k)-1]
+		}
+	}
+}
+
+func BenchmarkDecompressNextHeap(b *testing.B) {
 	t := new(testing.T)
 	d := prepareDict(t, 1, 1_000)
 	defer d.Close()
 
-	b.Run("buf", func(b *testing.B) {
-		b.ReportAllocs()
-		var k []byte
-		g := d.MakeGetter()
-		for i := 0; i < b.N; i++ {
+	b.ReportAllocs()
+	g := d.MakeGetter()
+	for b.Loop() {
+		if !g.HasNext() {
 			g.Reset(0)
-			for g.HasNext() {
-				k, _ = g.Next(k[:0])
-				if len(k) > 0 {
-					_, _ = k[0], k[len(k)-1]
-				}
-			}
 		}
-	})
-	b.Run("heap", func(b *testing.B) {
-		b.ReportAllocs()
-		g := d.MakeGetter()
-		for i := 0; i < b.N; i++ {
-			g.Reset(0)
-			for g.HasNext() {
-				k, _ := g.Next(nil)
-				if len(k) > 0 {
-					_, _ = k[0], k[len(k)-1]
-				}
-			}
+		k, _ := g.Next(nil)
+		if len(k) > 0 {
+			_, _ = k[0], k[len(k)-1]
 		}
-	})
+	}
 }
 
 func BenchmarkDecompressSkip(b *testing.B) {
@@ -66,7 +68,7 @@ func BenchmarkDecompressSkip(b *testing.B) {
 	b.Run("skip", func(b *testing.B) {
 		b.ReportAllocs()
 		g := d.MakeGetter()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, _ = g.Skip()
 			if !g.HasNext() {
 				g.Reset(0)
@@ -77,7 +79,7 @@ func BenchmarkDecompressSkip(b *testing.B) {
 	b.Run("matchcmp_non_existing_key", func(b *testing.B) {
 		b.ReportAllocs()
 		g := d.MakeGetter()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_ = g.MatchCmp([]byte("longlongword"))
 			if !g.HasNext() {
 				g.Reset(0)
@@ -95,9 +97,6 @@ func BenchmarkDecompressTorrent(t *testing.B) {
 	st, err := os.Stat(fpath)
 	require.NoError(t, err)
 	fmt.Printf("file: %v, size: %d\n", st.Name(), st.Size())
-
-	condensePatternTableBitThreshold = 5
-	fmt.Printf("bit threshold: %d\n", condensePatternTableBitThreshold)
 
 	t.Run("init", func(t *testing.B) {
 		for i := 0; i < t.N; i++ {

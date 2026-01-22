@@ -65,9 +65,9 @@ func TestCreateBALOrdering(t *testing.T) {
 
 	accountB := bal[1]
 
-	// Storage reads should be sorted and deduplicated.
-	if len(accountB.StorageReads) != 2 || accountB.StorageReads[0] != slot1 || accountB.StorageReads[1] != slot2 {
-		t.Fatalf("unexpected storage reads ordering: %+v", accountB.StorageReads)
+	// Storage reads are only recorded for slots without writes.
+	if len(accountB.StorageReads) != 0 {
+		t.Fatalf("unexpected storage reads: %+v", accountB.StorageReads)
 	}
 
 	// Storage slots should be sorted lexicographically.
@@ -80,12 +80,12 @@ func TestCreateBALOrdering(t *testing.T) {
 	}
 
 	slot1Changes := accountB.StorageChanges[0].Changes
-	if len(slot1Changes) != 1 || slot1Changes[0].Index != 2 || slot1Changes[0].Value.Uint64() != 5 {
+	if len(slot1Changes) != 1 || slot1Changes[0].Index != 2 || uint256.NewInt(0).SetBytes(slot1Changes[0].Value[:]).Uint64() != 5 {
 		t.Fatalf("unexpected slot1 change: %+v", slot1Changes)
 	}
 
 	slot2Changes := accountB.StorageChanges[1].Changes
-	if len(slot2Changes) != 1 || slot2Changes[0].Index != 1 || slot2Changes[0].Value.Uint64() != 20 {
+	if len(slot2Changes) != 1 || slot2Changes[0].Index != 1 || uint256.NewInt(0).SetBytes(slot2Changes[0].Value[:]).Uint64() != 20 {
 		t.Fatalf("slot2 changes not deduplicated or unsorted: %+v", slot2Changes)
 	}
 }
@@ -121,6 +121,7 @@ func addStorageWrite(writeSets map[int]state.VersionedWrites, txIdx int, addr ac
 		Address: addr,
 		Path:    state.StoragePath,
 		Key:     slot,
+		Version: state.Version{TxIndex: txIdx},
 		Val:     *uint256.NewInt(value),
 	})
 }
@@ -129,6 +130,7 @@ func addBalanceWrite(writeSets map[int]state.VersionedWrites, txIdx int, addr ac
 	writeSets[txIdx] = append(writeSets[txIdx], &state.VersionedWrite{
 		Address: addr,
 		Path:    state.BalancePath,
+		Version: state.Version{TxIndex: txIdx},
 		Val:     *uint256.NewInt(value),
 	})
 }

@@ -509,7 +509,7 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 	seconds := interval.Seconds()
 
 	var suffix string
-	var execVals []interface{}
+	execVals := make([]any, 0, 2)
 	var te *txExecutor
 
 	switch ex := ex.(type) {
@@ -633,7 +633,7 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 		mxTaskMgasSec.Set(float64(curTaskGasPerSec / 1e6))
 		mxExecCPUs.Set(float64(curTaskDur) / float64(interval))
 
-		execVals = []interface{}{
+		execVals = []any{
 			"exec", common.PrettyCounter(execDiff),
 			"repeat%", fmt.Sprintf("%.2f", repeatRatio),
 			"abort", common.PrettyCounter(abortCount - p.prevAbortCount),
@@ -664,7 +664,7 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 		curReadCount := readCount - p.prevReadCount
 		p.prevReadCount = readCount
 
-		execVals = []interface{}{
+		execVals = []any{
 			"tgas/s", fmt.Sprintf("%s(%s)", common.PrettyCounter(curTaskGasPerSec), common.PrettyCounter(avgTaskGasPerSec)),
 			"aratio", fmt.Sprintf("%.1f", float64(curTaskDur)/float64(interval)),
 			"tdur", common.Round(avgTaskDur, 0),
@@ -859,7 +859,7 @@ func (p *Progress) LogComplete(rs *state.StateV3, ex executor, stepsInDb float64
 }
 
 func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.StateV3, interval time.Duration,
-	blk uint64, blks int64, txs uint64, txsSec uint64, gasSec uint64, uncommitedGas uint64, stepsInDb float64, extraVals []interface{}) {
+	blk uint64, blks int64, txs uint64, txsSec uint64, gasSec uint64, uncommitedGas uint64, stepsInDb float64, extraVals []any) {
 
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -869,13 +869,13 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 		suffix += " "
 	}
 
-	var vals []interface{}
+	var vals []any
 
 	if mode == "done" {
-		vals = []interface{}{"in", interval}
+		vals = []any{"in", interval}
 	}
 
-	vals = append(vals, []interface{}{
+	vals = append(vals, []any{
 		"blk", blk,
 		"blks", blks,
 		"blk/s", common.PrettyCounter(float64(blks) / interval.Seconds()),
@@ -889,21 +889,24 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 	}
 
 	if stepsInDb > 0 {
-		vals = append(vals, []interface{}{
+		vals = append(vals, []any{
 			"stepsInDB", fmt.Sprintf("%.2f", stepsInDb),
 			"step", fmt.Sprintf("%.1f", float64(te.lastCommittedTxNum)/float64(te.agg.StepSize())),
 		}...)
 	}
 
 	if uncommitedGas > 0 {
-		vals = append(vals, []interface{}{
+		vals = append(vals, []any{
 			"ucgas", common.PrettyCounter(uncommitedGas),
 		}...)
 	}
 
-	vals = append(vals, []interface{}{
-		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-		"inMem", te.inMemExec,
+	vals = append(vals, []any{
+		"alloc", common.ByteCount(m.Alloc),
+		"sys", common.ByteCount(m.Sys),
+		"isForkValidation", te.isForkValidation,
+		"isBlockProduction", te.isBlockProduction,
+		"isApplyingBlocks", te.isApplyingBlocks,
 	}...)
 
 	p.logger.Info(fmt.Sprintf("[%s]%s%s", p.logPrefix, suffix, mode), vals...)

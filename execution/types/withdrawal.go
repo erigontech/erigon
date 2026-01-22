@@ -34,7 +34,7 @@ import (
 type encodingBuf [32]byte
 
 var pooledBuf = sync.Pool{
-	New: func() interface{} { return new(encodingBuf) },
+	New: func() any { return new(encodingBuf) },
 }
 
 func newEncodingBuf() *encodingBuf {
@@ -56,12 +56,9 @@ type Withdrawal struct {
 
 func (obj *Withdrawal) EncodingSize() int {
 	encodingSize := 21 /* Address */
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(obj.Index)
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(obj.Validator)
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(obj.Amount)
+	encodingSize += rlp.U64Len(obj.Index)
+	encodingSize += rlp.U64Len(obj.Validator)
+	encodingSize += rlp.U64Len(obj.Amount)
 	return encodingSize
 }
 

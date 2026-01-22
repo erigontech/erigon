@@ -45,7 +45,7 @@ func (t *TransactionsSSZ) UnmarshalJSON(buf []byte) error {
 }
 
 func (t TransactionsSSZ) MarshalJSON() ([]byte, error) {
-	tmp := []hexutil.Bytes{}
+	tmp := make([]hexutil.Bytes, 0, len(t.underlying))
 	for _, tx := range t.underlying {
 		tmp = append(tmp, tx)
 	}

@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 func (a *ApiHandler) GetEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -145,14 +144,13 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			})
 			continue
 		}
-		if a.sentinel != nil {
-			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinelproto.GossipData{
-				Data:     encodedSSZ,
-				Name:     gossip.TopicNamePrefixBeaconAttestation,
-				SubnetId: &subnet,
-			}); err != nil {
-				a.logger.Debug("[Beacon REST] failed to publish attestation to gossip", "err", err)
-			}
+		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameBeaconAttestation(subnet), encodedSSZ); err != nil {
+			a.logger.Debug("[Beacon REST] failed to publish attestation to gossip", "err", err)
+			failures = append(failures, poolingFailure{
+				Index:   i,
+				Message: err.Error(),
+			})
+			continue
 		}
 	}
 	if len(failures) > 0 {
@@ -171,6 +169,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 }
 
 func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) {
+	log.Debug("[Beacon REST] posting attestations")
 	v := r.Header.Get("Eth-Consensus-Version")
 	if v == "" {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("missing version header")).WriteTo(w)
@@ -214,7 +213,9 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 			return
 		}
 
-		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestationWithGossipData); err != nil && !errors.Is(err, services.ErrIgnore) {
+		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestationWithGossipData); errors.Is(err, services.ErrIgnore) {
+			log.Debug("[Beacon REST] ignored attestation in attestation service", "err", err, "slot", slot, "committeeIndex", cIndex)
+		} else if err != nil {
 			log.Warn("[Beacon REST] failed to process attestation in attestation service", "err", err)
 			failures = append(failures, poolingFailure{
 				Index:   i,
@@ -222,15 +223,15 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 			})
 			continue
 		}
-		if a.sentinel != nil {
-			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinelproto.GossipData{
-				Data:     encodedSSZ,
-				Name:     gossip.TopicNamePrefixBeaconAttestation,
-				SubnetId: &subnet,
-			}); err != nil {
-				a.logger.Debug("[Beacon REST] failed to publish attestation to gossip", "err", err)
-			}
+		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameBeaconAttestation(subnet), encodedSSZ); err != nil {
+			a.logger.Debug("[Beacon REST] failed to publish attestation to gossip", "err", err)
+			failures = append(failures, poolingFailure{
+				Index:   i,
+				Message: err.Error(),
+			})
+			continue
 		}
+		log.Debug("[Beacon REST] published attestation to gossip", "slot", slot, "committeeIndex", cIndex)
 	}
 	if len(failures) > 0 {
 		errResp := poolingError{
@@ -268,13 +269,8 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 		return
 	}
 	a.operationsPool.VoluntaryExitsPool.Insert(req.VoluntaryExit.ValidatorIndex, &req)
-	if a.sentinel != nil {
-		if _, err := a.sentinel.PublishGossip(r.Context(), &sentinelproto.GossipData{
-			Data: encodedSSZ,
-			Name: gossip.TopicNameVoluntaryExit,
-		}); err != nil {
-			a.logger.Debug("[Beacon REST] failed to publish voluntary exit to gossip", "err", err)
-		}
+	if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameVoluntaryExit, encodedSSZ); err != nil {
+		a.logger.Debug("[Beacon REST] failed to publish voluntary exit to gossip", "err", err)
 	}
 	// Only write 200
 	w.WriteHeader(http.StatusOK)
@@ -299,10 +295,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter,
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
-		if _, err := a.sentinel.PublishGossip(r.Context(), &sentinelproto.GossipData{
-			Data: encodedSSZ,
-			Name: gossip.TopicNameAttesterSlashing,
-		}); err != nil {
+		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameAttesterSlashing, encodedSSZ); err != nil {
 			a.logger.Debug("[Beacon REST] failed to publish attester slashing to gossip", "err", err)
 		}
 	}
@@ -327,10 +320,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolProposerSlashings(w http.ResponseWriter,
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
-		if _, err := a.sentinel.PublishGossip(r.Context(), &sentinelproto.GossipData{
-			Data: encodedSSZ,
-			Name: gossip.TopicNameProposerSlashing,
-		}); err != nil {
+		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameProposerSlashing, encodedSSZ); err != nil {
 			a.logger.Debug("[Beacon REST] failed to publish proposer slashing to gossip", "err", err)
 		}
 	}
@@ -369,13 +359,9 @@ func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWri
 			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
 			continue
 		}
-		if a.sentinel != nil {
-			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinelproto.GossipData{
-				Data: encodedSSZ,
-				Name: gossip.TopicNameBlsToExecutionChange,
-			}); err != nil {
-				a.logger.Debug("[Beacon REST] failed to publish bls-to-execution-change to gossip", "err", err)
-			}
+
+		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameBlsToExecutionChange, encodedSSZ); err != nil {
+			a.logger.Debug("[Beacon REST] failed to publish bls-to-execution-change to gossip", "err", err)
 		}
 	}
 
@@ -414,14 +400,8 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
 			continue
 		}
-
-		if a.sentinel != nil {
-			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinelproto.GossipData{
-				Data: encodedSSZ,
-				Name: gossip.TopicNameBeaconAggregateAndProof,
-			}); err != nil {
-				a.logger.Debug("[Beacon REST] failed to publish aggregate and proof to gossip", "err", err)
-			}
+		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameBeaconAggregateAndProof, encodedSSZ); err != nil {
+			a.logger.Debug("[Beacon REST] failed to publish aggregate and proof to gossip", "err", err)
 		}
 	}
 
@@ -477,14 +457,8 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 				failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 				break
 			}
-			if a.sentinel != nil {
-				if _, err := a.sentinel.PublishGossip(r.Context(), &sentinelproto.GossipData{
-					Data:     encodedSSZ,
-					Name:     gossip.TopicNamePrefixSyncCommittee,
-					SubnetId: &subnetId,
-				}); err != nil {
-					a.logger.Debug("[Beacon REST] failed to publish sync committee message to gossip", "err", err)
-				}
+			if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameSyncCommittee(int(subnetId)), encodedSSZ); err != nil {
+				a.logger.Debug("[Beacon REST] failed to publish sync committee message to gossip", "err", err)
 			}
 		}
 	}
@@ -527,13 +501,9 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue
 		}
-		if a.sentinel != nil {
-			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinelproto.GossipData{
-				Data: encodedSSZ,
-				Name: gossip.TopicNameSyncCommitteeContributionAndProof,
-			}); err != nil {
-				a.logger.Debug("[Beacon REST] failed to publish sync committee contribution to gossip", "err", err)
-			}
+
+		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameSyncCommitteeContributionAndProof, encodedSSZ); err != nil {
+			a.logger.Debug("[Beacon REST] failed to publish sync committee contribution to gossip", "err", err)
 		}
 	}
 

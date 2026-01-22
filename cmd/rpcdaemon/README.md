@@ -331,6 +331,8 @@ The following table shows the current implementation status of Erigon's RPC daem
 | engine_getPayloadBodiesByRangeV1           | Yes     |                                                       |
 | engine_getClientVersionV1                  | Yes     |                                                       |
 | engine_getBlobsV1                          | Yes     |                                                       |
+| engine_getBlobsV2                          | Yes     | Added in Fusaka                                       |
+| engine_getBlobsV3                          | Yes     | Added with BPO3                                       |
 |                                            |         |                                                       |
 | debug_getRawReceipts                       | Yes     | `debug_` expected to be private                       |
 | debug_accountRange                         | Yes     |                                                       |
@@ -598,3 +600,20 @@ processed sequentially (on 1 goroutine).
 
 `go.mod` stores right version of generators, use `make grpc` to install it and generate code (it also installs protoc
 into ./build/bin folder).
+
+### Historical blocks exec perf test
+
+```sh
+# start RPCD on datadir. Disable: receipts LRU. Disable: json marshaling of response. Disable: http compression.  
+RPC_DROP_RESPONSE=true RPC_DISABLE_RCACHE=true RPC_DISABLE_RLRU=true go run ./cmd/rpcdaemon --datadir /erigon-data/mainnet_full/ --http.compression=false --pprof --pprof.port=6062 --private.api.addr=127.0.0.1:0
+
+echo '{"method":"eth_getLogs","params":[{"fromBlock":"0x16E3600","toBlock":"0x16E3610"}],"id":1,"jsonrpc":"2.0"}' > body.json
+
+cat > getLogs.http << 'EOF'
+POST http://localhost:8545
+Content-Type: application/json
+@body.json
+EOF
+
+vegeta attack -targets=getLogs.http -rate=16 -duration=10s -timeout=300s | vegeta report
+```

@@ -18,6 +18,7 @@ package tracer
 
 import (
 	"context"
+	"math/big"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -53,7 +54,7 @@ func TraceBorStateSyncTxnDebugAPI(
 	txIndex int,
 ) (gasUsed uint64, err error) {
 	txCtx := initStateSyncTxContext(blockNum, blockHash)
-	tracer, streaming, cancel, err := transactions.AssembleTracer(ctx, traceConfig, txCtx.TxHash, blockHash, txIndex, stream, callTimeout)
+	tracer, streaming, cancel, err := transactions.AssembleTracer(ctx, traceConfig, txCtx.TxHash, new(big.Int).SetUint64(blockNum), blockHash, txIndex, stream, callTimeout)
 	if err != nil {
 		stream.WriteNil()
 		return gasUsed, err
@@ -75,7 +76,7 @@ func TraceBorStateSyncTxnDebugAPI(
 		return res, nil
 	}
 
-	err = transactions.ExecuteTraceTx(blockCtx, txCtx, ibs, traceConfig, chainConfig, stream, tracer, streaming, execCb)
+	err = transactions.ExecuteTraceTx(blockCtx, txCtx, ibs, traceConfig, chainConfig, stream, tracer, streaming, nil, execCb)
 	return gasUsed, err
 }
 

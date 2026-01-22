@@ -493,13 +493,13 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.Temporal
 }
 
 // RunPrune pruning for stages as per the defined pruning order, if enabled for that stage
-func (s *Sync) RunPrune(db kv.RwDB, tx kv.RwTx, initialCycle bool) error {
+func (s *Sync) RunPrune(ctx context.Context, db kv.RwDB, tx kv.RwTx, initialCycle bool, timeout time.Duration) error {
 	s.timings = s.timings[:0]
 	for i := 0; i < len(s.pruningOrder); i++ {
 		if s.pruningOrder[i] == nil || s.pruningOrder[i].Disabled || s.pruningOrder[i].Prune == nil {
 			continue
 		}
-		if err := s.pruneStage(initialCycle, s.pruningOrder[i], db, tx); err != nil {
+		if err := s.pruneStage(ctx, initialCycle, s.pruningOrder[i], db, tx, timeout); err != nil {
 			return err
 		}
 	}
@@ -510,8 +510,8 @@ func (s *Sync) RunPrune(db kv.RwDB, tx kv.RwTx, initialCycle bool) error {
 	return nil
 }
 
-func (s *Sync) PrintTimings() []interface{} {
-	var logCtx []interface{}
+func (s *Sync) PrintTimings() []any {
+	var logCtx []any
 	count := 0
 	for i := range s.timings {
 		if s.timings[i].took < 100*time.Millisecond {
@@ -522,9 +522,9 @@ func (s *Sync) PrintTimings() []interface{} {
 			break
 		}
 		if s.timings[i].isUnwind {
-			logCtx = append(logCtx, "Unwind "+string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
+			logCtx = append(logCtx, "unwind "+string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
 		} else if s.timings[i].isPrune {
-			logCtx = append(logCtx, "Prune "+string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
+			logCtx = append(logCtx, "prune "+string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
 		} else {
 			logCtx = append(logCtx, string(s.timings[i].stage), s.timings[i].took.Truncate(time.Millisecond).String())
 		}
@@ -601,7 +601,7 @@ func (s *Sync) unwindStage(initialCycle bool, stage *Stage, db kv.RwDB, sd *exec
 }
 
 // Run the pruning function for the given stage
-func (s *Sync) pruneStage(initialCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx) error {
+func (s *Sync) pruneStage(ctx context.Context, initialCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx, timeout time.Duration) error {
 	start := time.Now()
 
 	stageState, err := s.StageState(stage.ID, tx, db, initialCycle, false)
@@ -617,7 +617,7 @@ func (s *Sync) pruneStage(initialCycle bool, stage *Stage, db kv.RwDB, tx kv.RwT
 		return err
 	}
 
-	err = stage.Prune(pruneState, tx, s.logger)
+	err = stage.Prune(ctx, pruneState, tx, timeout, s.logger)
 	if err != nil {
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}

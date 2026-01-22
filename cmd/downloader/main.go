@@ -93,7 +93,8 @@ var (
 	natSetting                     string
 	torrentVerbosity               int
 	downloadRateStr, uploadRateStr string
-	// How do I mark this deprecated with cobra?
+	// Deprecated (v3.0): Captured for backward compatibility but intentionally unused.
+	// Cobra doesn't have built-in deprecation, so we handle it via runtime warning (see Downloader() function).
 	torrentDownloadSlots int
 	staticPeersStr       string
 	torrentPort          int
@@ -122,7 +123,8 @@ func init() {
 	rootCmd.Flags().IntVar(&torrentPort, "torrent.port", utils.TorrentPortFlag.Value, utils.TorrentPortFlag.Usage)
 	rootCmd.Flags().IntVar(&torrentMaxPeers, "torrent.maxpeers", utils.TorrentMaxPeersFlag.Value, utils.TorrentMaxPeersFlag.Usage)
 	rootCmd.Flags().IntVar(&torrentConnsPerFile, "torrent.conns.perfile", utils.TorrentConnsPerFileFlag.Value, utils.TorrentConnsPerFileFlag.Usage)
-	// Deprecated.
+	// Deprecated (v3.0): This flag is kept for backward compatibility but has no effect.
+	// The downloader automatically manages concurrent downloads. Will be removed in future release.
 	rootCmd.Flags().IntVar(&torrentDownloadSlots, "torrent.download.slots", utils.TorrentDownloadSlotsFlag.Value, utils.TorrentDownloadSlotsFlag.Usage)
 	rootCmd.Flags().StringVar(&staticPeersStr, utils.TorrentStaticPeersFlag.Name, utils.TorrentStaticPeersFlag.Value, utils.TorrentStaticPeersFlag.Usage)
 	rootCmd.Flags().BoolVar(&disableIPV6, "downloader.disable.ipv6", utils.DisableIPV6.Value, utils.DisableIPV6.Usage)
@@ -203,17 +205,13 @@ var rootCmd = &cobra.Command{
 			logger.Info("Build info", "git_branch", version.GitBranch, "git_tag", version.GitTag, "git_commit", version.GitCommit)
 		}
 	},
-	Run: func(cmd *cobra.Command, args []string) {
-		if err := Downloader(cmd.Context(), logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return Downloader(cmd, logger)
 	},
 }
 
-func Downloader(ctx context.Context, logger log.Logger) error {
+func Downloader(cmd *cobra.Command, logger log.Logger) error {
+	ctx := cmd.Context()
 	dirs := datadir.New(datadirCli)
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return err
@@ -246,6 +244,16 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		"upload.rate", uploadRateStr,
 		"webseed", webseeds,
 	)
+
+	// Warn if deprecated flag was explicitly set by user
+	if cmd.Flags().Changed("torrent.download.slots") {
+		logger.Warn(
+			"[DEPRECATED] --torrent.download.slots flag is deprecated and has no effect",
+			"flag", "torrent.download.slots",
+			"provided_value", torrentDownloadSlots,
+			"action", "This flag will be removed in a future release. The downloader now manages concurrent downloads automatically.",
+		)
+	}
 
 	version := "erigon: " + version.VersionWithCommit(version.GitCommit)
 
@@ -291,7 +299,9 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	manualDataVerification := verify || verifyFailfast || len(verifyFiles) > 0
 	cfg.ManualDataVerification = manualDataVerification
 
-	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo)
+	cfg.LogPrefix = "[snapshots] "
+
+	d, err := downloader.New(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}
@@ -300,13 +310,17 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 
 	d.HandleTorrentClientStatus(nil)
 
-	err = d.AddTorrentsFromDisk(ctx)
+	incomplete, err := d.AddTorrentsFromDisk(ctx)
 	if err != nil {
 		return fmt.Errorf("adding torrents from disk: %w", err)
 	}
 
+	if incomplete != 0 && manualDataVerification {
+		return fmt.Errorf("%v torrents are incomplete", incomplete)
+	}
+
 	// I think we could use DisableInitialPieceVerification to get the behaviour we want here: One
-	// hash, and fail if it's in the verify files list or we have fail fast on.
+	// hash, and fail if it's in the verify files list, or we have fail fast on.
 
 	if len(_verifyFiles) > 0 {
 		verifyFiles = strings.Split(_verifyFiles, ",")
@@ -320,9 +334,10 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		}
 	}
 
-	// This only works if Cfg.ManualDataVerification is held by reference by the Downloader. The
-	// alternative is to pass the value through AddTorrentsFromDisk, do it per Torrent ourselves, or
-	// defer all hashing to the torrent Client in the Downloader and wait for it to complete.
+	// Turn automatic data verification back on (verify incomplete). This only works if
+	// Cfg.ManualDataVerification is held by reference by the Downloader. The alternative is to pass
+	// the value through AddTorrentsFromDisk, do it per Torrent ourselves, or defer all hashing to
+	// the torrent Client in the Downloader and wait for it to complete.
 	cfg.ManualDataVerification = false
 
 	bittorrentServer, err := downloader.NewGrpcServer(d)
@@ -665,8 +680,8 @@ func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.
 	}
 
 	var (
-		streamInterceptors []grpc.StreamServerInterceptor
-		unaryInterceptors  []grpc.UnaryServerInterceptor
+		streamInterceptors = make([]grpc.StreamServerInterceptor, 0, 1)
+		unaryInterceptors  = make([]grpc.UnaryServerInterceptor, 0, 1)
 	)
 	streamInterceptors = append(streamInterceptors, recovery.StreamServerInterceptor())
 	unaryInterceptors = append(unaryInterceptors, recovery.UnaryServerInterceptor())
