@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"runtime/debug"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -243,8 +242,7 @@ func TableScanningPrune(
 			"spent ms", time.Since(start).Milliseconds(),
 			"key prune status", stat.KeyProgress.String(),
 			"val prune status", stat.ValueProgress.String(),
-			"dbg", dbg.Stack(),
-			"debug", debug.Stack())
+			"dbg", dbg.Stack())
 	}()
 	if prevStat.KeyProgress != Done {
 		txnb := common.Copy(keyCursorPosition.StartKey)
