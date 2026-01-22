@@ -787,7 +787,7 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 	defer func(t time.Time) {
 		took := time.Since(t)
 		if took > 10*time.Millisecond {
-			log.Warn("[dbg] biild hist", "name", h.Name.String(), "took", took)
+			log.Warn("[dbg] build hist", "name", h.Name.String(), "took", took)
 		}
 	}(time.Now())
 
