@@ -1899,7 +1899,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	}
 	prg, err := GetPruneValProgress(rwTx, []byte(dt.d.ValuesTable))
 	if err != nil {
-		return nil, err
+		return stat, err
 	}
 	if prg != nil && prg.TxFrom == txFrom && prg.TxTo == txTo && prg.ValueProgress == prune.Done {
 		stat.Progress = prune.Done
@@ -1929,7 +1929,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		case *mdbx2.MdbxDupSortCursor:
 			valsCursor = valsRwCursor.(*mdbx2.MdbxDupSortCursor)
 		default:
-			return nil, fmt.Errorf("unexpected cursor type %T for table %s", valsRwCursor, dt.d.ValuesTable)
+			return stat, fmt.Errorf("unexpected cursor type %T for table %s", valsRwCursor, dt.d.ValuesTable)
 		}
 		defer valsCursor.Close()
 	} else {
@@ -1946,7 +1946,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	pruneStat, err := prune.TableScanningPrune(ctx, "domain "+dt.name.String(), dt.d.FilenameBase, txFrom, txTo, limit, dt.stepSize,
 		logEvery, dt.d.logger, nil, valsCursor, asserts, prg, mode)
 	if err != nil {
-		return nil, err
+		return stat, err
 	}
 	defer func() {
 		pruneStat.TxFrom, pruneStat.TxTo = txFrom, txTo
@@ -1956,17 +1956,18 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		}
 	}()
 	if pruneStat == nil {
-		return &DomainPruneStat{MinStep: math.MaxUint64}, errors.New("prune stat is nil")
+		return stat, errors.New("prune stat is nil")
 	}
 	mxPruneSizeDomain.AddUint64(pruneStat.PruneCountValues)
 	mxDupsPruneSizeIndex.AddUint64(pruneStat.DupsDeleted)
-	return &DomainPruneStat{
-		MinStep:  kv.Step(pruneStat.MinTxNum / dt.stepSize),
-		MaxStep:  kv.Step(pruneStat.MaxTxNum / dt.stepSize),
-		Values:   pruneStat.PruneCountValues,
-		Dups:     pruneStat.DupsDeleted,
-		Progress: pruneStat.ValueProgress,
-	}, err
+
+	stat.MinStep = kv.Step(pruneStat.MinTxNum / dt.stepSize)
+	stat.MaxStep = kv.Step(pruneStat.MinTxNum / dt.stepSize)
+	stat.Values = pruneStat.PruneCountValues
+	stat.Dups = pruneStat.DupsDeleted
+	stat.Progress = pruneStat.ValueProgress
+
+	return stat, err
 }
 
 func (dt *DomainRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
