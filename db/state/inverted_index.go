@@ -32,11 +32,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
@@ -932,6 +933,13 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
+
+	defer func(t time.Time) {
+		took := time.Since(t)
+		if took > 10*time.Millisecond {
+			log.Warn("[dbg] collate ii", "name", ii.Name.String(), "took", took)
+		}
+	}(time.Now())
 
 	for k, v, err := keysCursor.Seek(txKey[:]); k != nil; k, v, err = keysCursor.Next() {
 		if err != nil {
