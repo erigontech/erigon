@@ -544,13 +544,13 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 		}
 
 		if strings.HasPrefix(webseed, "v1:") {
-			withoutVerisonPrefix := webseed[3:]
-			if !strings.HasPrefix(withoutVerisonPrefix, "https:") {
+			withoutVersionPrefix := webseed[3:]
+			if !strings.HasPrefix(withoutVersionPrefix, "https:") {
 				continue
 			}
-			uri, err := url.ParseRequestURI(withoutVerisonPrefix)
+			uri, err := url.ParseRequestURI(withoutVersionPrefix)
 			if err != nil {
-				log.Warn("[webseed] can't parse url", "err", err, "url", withoutVerisonPrefix)
+				log.Warn("[webseed] can't parse url", "err", err, "url", withoutVersionPrefix)
 				continue
 			}
 			webseedHttpProviders = append(webseedHttpProviders, uri)

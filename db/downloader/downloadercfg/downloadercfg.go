@@ -258,14 +258,14 @@ func New(
 
 	cfg.WebSeedUrls = make([]string, 0, len(webseeds))
 	for _, webseed := range webseeds {
-		if after, ok := strings.CutPrefix(webseed, "v1:"); ok {
-			// WebSeed URLs must have a trailing slash if the implementation should append the file
-			// name. In Erigon they don't, in anacrolix/torrent they do for our use case.
-			cfg.WebSeedUrls = append(cfg.WebSeedUrls, after+"/")
-		} else {
-			err = fmt.Errorf("unhandled webseed %q", webseed)
+		var after string
+		after, err = snapcfg.WebseedToUrl(webseed)
+		if err != nil {
 			return
 		}
+		// WebSeed URLs must have a trailing slash if the implementation should append the file
+		// name. In Erigon they don't, in anacrolix/torrent they do for our use case.
+		cfg.WebSeedUrls = append(cfg.WebSeedUrls, after+"/")
 	}
 
 	for value := range opts.WebseedDownloadRateLimit.Iter {

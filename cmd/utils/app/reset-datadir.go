@@ -6,7 +6,6 @@ import (
 	"os"
 
 	g "github.com/anacrolix/generics"
-	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir/reset"
 	"github.com/erigontech/erigon/db/kv"
@@ -36,12 +35,6 @@ var (
 		Value:    false,
 		Aliases:  []string{"n"},
 		Category: "Reset",
-	}
-	preverifiedFlag = cli.StringFlag{
-		Name:     "preverified",
-		Category: "Reset",
-		Usage:    "preverified to use (remote, local, embedded)",
-		Value:    "remote",
 	}
 )
 
@@ -96,21 +89,8 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 	}
 	defer unlock()
 
-	switch value := preverifiedFlag.Get(cliCtx); value {
-	case "local":
-		panicif.Err(os.Setenv(snapcfg.RemotePreverifiedEnvKey, dirs.PreverifiedPath()))
-		fallthrough
-	case "remote":
-		err = snapcfg.LoadRemotePreverified(cliCtx.Context)
-		if err != nil {
-			// TODO: Check if we should continue? What if we ask for a git revision and
-			// can't get it? What about a branch? Can we reset to the embedded snapshot hashes?
-			return fmt.Errorf("loading remote preverified snapshots: %w", err)
-		}
-	case "embedded":
-		// Should already be loaded.
-	default:
-		err = fmt.Errorf("invalid preverified flag value %q", value)
+	err = handlePreverifiedFlag(cliCtx, &dirs)
+	if err != nil {
 		return
 	}
 
