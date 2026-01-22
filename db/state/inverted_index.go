@@ -1181,7 +1181,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 		return err
 	}
 	if took := time.Since(t); took > 10*time.Millisecond {
-		log.Warn("[dbg] build ii", "name", ii.Name.String(), "took", took)
+		log.Warn("[dbg] build ii", "name", ii.Name.String(), "took", took, "idxPath", idxPath)
 	}
 
 	return nil
