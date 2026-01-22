@@ -913,6 +913,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 
 	collector := etl.NewCollectorWithAllocator(ii.FilenameBase+".collate.ii", ii.dirs.Tmp, etl.SmallSortableBuffers, ii.logger).LogLvl(log.LvlTrace)
 	defer collector.Close()
+	collector.SortAndFlushInBackground(true)
 
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
