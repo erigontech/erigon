@@ -141,7 +141,7 @@ jobs:
           set +e # Disable exit on error
           echo "Starting Erigon..."
           
-          ./erigon --datadir $ERIGON_TESTBED_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
+          ./erigon --prune.mode=minimal --datadir $ERIGON_TESTBED_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
 
           ERIGON_PID=$!
           echo "ERIGON_PID=$ERIGON_PID" >> $GITHUB_ENV
