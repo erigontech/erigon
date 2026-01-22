@@ -1039,7 +1039,7 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 	case "commitment":
 		mxPrunableHComm.Set(delta)
 	}
-	println("in history", ht.h.FilenameBase, stat.KeyProgress.String(), stat.ValueProgress.String(), stat.TxTo, txTo, minTxDB)
+	println("in history", ht.h.FilenameBase, stat.KeyProgress.String(), stat.ValueProgress.String(), stat.TxTo, txTo, minTxDB, minIdxTx < txTo || pruneInProgress)
 
 	return minIdxTx < txTo || pruneInProgress, txTo
 }
