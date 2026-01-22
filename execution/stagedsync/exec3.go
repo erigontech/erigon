@@ -370,6 +370,7 @@ func ExecV3(ctx context.Context,
 
 	if execStage.SyncMode() == stages.ModeApplyingBlocks {
 		agg.BuildFilesInBackground(doms.TxNum())
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && !isBlockProduction && lastHeader != nil {
