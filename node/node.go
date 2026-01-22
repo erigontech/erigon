@@ -325,7 +325,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		roTxsLimiter := semaphore.NewWeighted(roTxLimit) // 1 less than max to allow unlocking to happen
 		opts := mdbx.New(label, logger).
 			Path(dbPath).
-			GrowthStep(32 * datasize.MB).
+			GrowthStep(16 * datasize.MB).
 			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter).
 			WriteMap(config.MdbxWriteMap).
 			Readonly(readonly).
@@ -341,9 +341,12 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 			}
 			if config.MdbxGrowthStep > 0 {
 				opts = opts.GrowthStep(config.MdbxGrowthStep)
+			} else {
+				opts.GrowthStep(1 * datasize.GB)
 			}
 			opts = opts.DirtySpace(uint64(1024 * datasize.MB))
 		case dbcfg.ConsensusDB:
+
 			if config.MdbxPageSize.Bytes() > 0 {
 				opts = opts.PageSize(config.MdbxPageSize)
 			}
