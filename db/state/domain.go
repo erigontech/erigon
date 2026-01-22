@@ -1827,8 +1827,8 @@ func (dt *DomainRoTx) canScanPruneDomainTables(tx kv.Tx, untilTx uint64) (can bo
 	case "commitment":
 		mxPrunableDComm.Set(delta)
 	}
-	fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.FilenameBase, minStep, maxStepToPrune, untilTx)
-	println("in d", dt.d.FilenameBase, done, prg.TxTo)
+	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.FilenameBase, minStep, maxStepToPrune, untilTx)
+	//println("in d", dt.d.FilenameBase, done, prg.TxTo)
 	return !done, maxStepToPrune
 }
 
