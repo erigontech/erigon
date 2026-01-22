@@ -132,13 +132,11 @@ func StageLoop(
 // ProcessFrozenBlocks - withuot global rwtx
 func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook, logger log.Logger) error {
 	sawZeroBlocksTimes := 0
-	tx, err := db.BeginTemporalRw(ctx) //nolint
+	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		tx.Rollback()
-	}()
+	defer tx.Rollback()
 	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
 		return err
