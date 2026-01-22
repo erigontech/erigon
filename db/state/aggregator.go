@@ -652,12 +652,16 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		closeCollations = true
 		collListMu      = sync.Mutex{}
 		collations      = make([]Collation, 0)
+		iiCollations    = make([]InvertedIndexCollation, 0)
 	)
 	defer func() {
 		if !closeCollations {
 			return
 		}
 		for _, c := range collations {
+			c.Close()
+		}
+		for _, c := range iiCollations {
 			c.Close()
 		}
 	}()
@@ -742,6 +746,9 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 				collation, err = ii.collate(ctx, step, tx)
 				return err
 			})
+			collListMu.Lock()
+			collations = append(collations, collation)
+			collListMu.Unlock()
 
 			buildG.Go(func() error {
 				defer a.wg.Done()
