@@ -695,7 +695,9 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 			collations = append(collations, collation)
 			collListMu.Unlock()
 
+			a.wg.Add(1)
 			buildG.Go(func() error {
+				defer a.wg.Done()
 				sf, err := d.buildFiles(ctx, step, collation, a.ps)
 				collation.Close()
 				if err != nil {
@@ -742,7 +744,9 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 				return fmt.Errorf("index collation %q has failed: %w", ii.FilenameBase, err)
 			}
 
+			a.wg.Add(1)
 			buildG.Go(func() error {
+				defer a.wg.Done()
 				sf, err := ii.buildFiles(ctx, step, collation, a.ps)
 				if err != nil {
 					sf.CleanupOnError()
