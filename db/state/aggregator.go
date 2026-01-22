@@ -682,12 +682,8 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		}
 	}()
 
-	collateG, ctx := errgroup.WithContext(ctx)
-	collateG.SetLimit(a.collateWorkers)
-
-	buildG, ctx := errgroup.WithContext(ctx)
-	buildG.SetLimit(a.buildWorkers)
-
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(a.collateWorkers)
 	for _, d := range a.d {
 		if d.Disable {
 			continue
@@ -702,7 +698,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		}
 
 		a.wg.Add(1)
-		collateG.Go(func() error {
+		g.Go(func() error {
 			defer a.wg.Done()
 
 			var collation Collation
@@ -716,21 +712,18 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 			collations = append(collations, collation)
 			collListMu.Unlock()
 
-			buildG.Go(func() error {
-				sf, err := d.buildFiles(ctx, step, collation, a.ps)
-				collation.Close()
-				if err != nil {
-					sf.CleanupOnError()
-					return err
-				}
+			sf, err := d.buildFiles(ctx, step, collation, a.ps)
+			collation.Close()
+			if err != nil {
+				sf.CleanupOnError()
+				return err
+			}
 
-				dd, err := kv.String2Domain(d.FilenameBase)
-				if err != nil {
-					return err
-				}
-				static.d[dd] = sf
-				return nil
-			})
+			dd, err := kv.String2Domain(d.FilenameBase)
+			if err != nil {
+				return err
+			}
+			static.d[dd] = sf
 			return nil
 		})
 	}
@@ -751,7 +744,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		}
 
 		a.wg.Add(1)
-		collateG.Go(func() error {
+		g.Go(func() error {
 			defer a.wg.Done()
 
 			var collation InvertedIndexCollation
@@ -762,38 +755,20 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 			if err != nil {
 				return fmt.Errorf("index collation %q has failed: %w", ii.FilenameBase, err)
 			}
+			sf, err := ii.buildFiles(ctx, step, collation, a.ps)
+			if err != nil {
+				sf.CleanupOnError()
+				return err
+			}
 
-			buildG.Go(func() error {
-				sf, err := ii.buildFiles(ctx, step, collation, a.ps)
-				if err != nil {
-					sf.CleanupOnError()
-					return err
-				}
-
-				static.ivfs[iikey] = sf
-				return nil
-			})
+			static.ivfs[iikey] = sf
 			return nil
 		})
 	}
-	t := time.Now()
-	if err := collateG.Wait(); err != nil {
+	if err := g.Wait(); err != nil {
 		static.CleanupOnError()
 		return fmt.Errorf("domain collate-build: %w", err)
 	}
-	if took := time.Since(t); took > 10*time.Millisecond {
-		log.Warn("[dbg] collate total", "took", took)
-	}
-
-	t = time.Now()
-	if err := buildG.Wait(); err != nil {
-		static.CleanupOnError()
-		return fmt.Errorf("domain collate-build: %w", err)
-	}
-	if took := time.Since(t); took > 10*time.Millisecond {
-		log.Warn("[dbg] build total", "took", took)
-	}
-
 	mxStepTook.ObserveDuration(stepStartedAt)
 	a.IntegrateDirtyFiles(static, txFrom, txTo)
 	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt))
