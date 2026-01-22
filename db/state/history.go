@@ -801,18 +801,22 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 		if err = collation.efHistoryComp.Compress(); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s .ef history: %w", h.FilenameBase, err)
 		}
-		took := time.Since(t)
-		if took > 10*time.Millisecond {
-			log.Warn("[dbg] biild hist", "name", h.Name.String(), "took", took)
+		if took := time.Since(t); took > 10*time.Millisecond {
+			log.Warn("[dbg] build1 hist", "name", h.Name.String(), "took", took)
 		}
+
 		ps.Delete(p)
 	}
 	{
 		_, historyFileName := filepath.Split(collation.historyPath)
 		p := ps.AddNew(historyFileName, 1)
 		defer ps.Delete(p)
+		t := time.Now()
 		if err = collation.historyComp.Compress(); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s .v history: %w", h.FilenameBase, err)
+		}
+		if took := time.Since(t); took > 10*time.Millisecond {
+			log.Warn("[dbg] build2 hist", "name", h.Name.String(), "took", took)
 		}
 		ps.Delete(p)
 	}
