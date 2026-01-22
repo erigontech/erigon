@@ -563,7 +563,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	collector := etl.NewCollectorWithAllocator(h.FilenameBase+".collate.hist", h.dirs.Tmp, etl.SmallSortableBuffers, h.logger).LogLvl(log.LvlTrace)
 	defer collector.Close()
-	collector.SortAndFlushInBackground(true) // `Collate` method is perf-critical - so trading a bit of RAM for speed. Slower Collate -> bigger chaindata
+	collector.SortAndFlushInBackground(false) // `Collate` method is perf-critical - so trading a bit of RAM for speed. Slower Collate -> bigger chaindata
 
 	for txnmb, k, err := keysCursor.Seek(txKey[:]); txnmb != nil; txnmb, k, err = keysCursor.Next() {
 		if err != nil {

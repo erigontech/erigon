@@ -36,9 +36,10 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
+
+	"github.com/erigontech/erigon/db/downloader"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
@@ -2479,7 +2480,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
 	// `erigon retire` command is designed to maximize resouces utilization. But `Erigon itself` does minimize background impact (because not in rush).
-	agg.SetCollateAndBuildWorkers(min(8, estimate.StateV3Collate.Workers()))
+	agg.SetCollateWorkers(min(8, estimate.StateV3Collate.Workers()))
 	agg.SetMergeWorkers(min(8, estimate.StateV3Collate.Workers()))
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	agg.PeriodicalyPrintProcessSet(ctx)

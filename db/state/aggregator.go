@@ -72,9 +72,9 @@ type Aggregator struct {
 	visibleFilesMinimaxTxNum atomic.Uint64
 	snapshotBuildSema        *semaphore.Weighted
 
-	disableHistory         bool
-	collateAndBuildWorkers int // minimize amount of background workers by default
-	mergeWorkers           int // usually 1
+	disableHistory bool
+	collateWorkers int // minimize amount of background workers by default
+	mergeWorkers   int // usually 1
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
@@ -104,18 +104,18 @@ type Aggregator struct {
 func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	return &Aggregator{
-		ctx:                    ctx,
-		ctxCancel:              ctxCancel,
-		onFilesChange:          func(frozenFileNames []string) {},
-		onFilesDelete:          func(frozenFileNames []string) {},
-		dirs:                   dirs,
-		reorgBlockDepth:        reorgBlockDepth,
-		db:                     db,
-		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
-		ps:                     background.NewProgressSet(),
-		logger:                 logger,
-		collateAndBuildWorkers: 1,
-		mergeWorkers:           1,
+		ctx:             ctx,
+		ctxCancel:       ctxCancel,
+		onFilesChange:   func(frozenFileNames []string) {},
+		onFilesDelete:   func(frozenFileNames []string) {},
+		dirs:            dirs,
+		reorgBlockDepth: reorgBlockDepth,
+		db:              db,
+		leakDetector:    dbg.NewLeakDetector("agg", dbg.SlowTx()),
+		ps:              background.NewProgressSet(),
+		logger:          logger,
+		collateWorkers:  2,
+		mergeWorkers:    1,
 
 		produce: true,
 	}, nil
@@ -443,9 +443,9 @@ func (a *Aggregator) closeDirtyFiles() {
 	wg.Wait()
 }
 
-func (a *Aggregator) EnableDomain(domain kv.Domain)   { a.d[domain].Disable = false }
-func (a *Aggregator) SetCollateAndBuildWorkers(i int) { a.collateAndBuildWorkers = i }
-func (a *Aggregator) SetMergeWorkers(i int)           { a.mergeWorkers = i }
+func (a *Aggregator) EnableDomain(domain kv.Domain) { a.d[domain].Disable = false }
+func (a *Aggregator) SetCollateWorkers(i int)       { a.collateWorkers = i }
+func (a *Aggregator) SetMergeWorkers(i int)         { a.mergeWorkers = i }
 func (a *Aggregator) SetCompressWorkers(i int) {
 	for _, d := range a.d {
 		d.CompressCfg.Workers = i
@@ -660,7 +660,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		a.logger.Debug("[agg] step not ready for collation", "step", step, "lastTxInStep", lastTxNumOfStep(step, a.StepSize()), "lastBlockInStep", lastBlockInStep, "lastTxInDB", lastTxInDB, "lastBlockInDB", lastBlockInDB)
 		return errStepNotReady
 	}
-	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
+	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
 
 	var (
 		txFrom        = a.FirstTxNumOfStep(step)
@@ -689,7 +689,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	}(time.Now())
 
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(a.collateAndBuildWorkers)
+	g.SetLimit(a.collateWorkers)
 	for _, d := range a.d {
 		if d.Disable {
 			continue
@@ -865,7 +865,7 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step) 
 }
 
 func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethingDone bool, err error) {
-	a.logger.Debug("[agg] merge", "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
+	a.logger.Debug("[agg] merge", "collate_workers", a.collateWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
 
 	aggTx := a.BeginFilesRo()
 	defer aggTx.Close()
