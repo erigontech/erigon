@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 )
 
 var GreatOtterBanner = `
@@ -497,9 +498,12 @@ func SyncSnapshots(
 				break
 			}
 			if ctx.Err() != nil {
-				return context.Cause(ctx)
+				return err
 			}
-			log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
+			if !grpcutil.IsRetryLater(err) {
+				return err
+			}
+			log.Error(fmt.Sprintf("[%s] error requesting snapshots download from downloader", logPrefix), "err", err)
 			select {
 			case <-ctx.Done():
 				return context.Cause(ctx)
