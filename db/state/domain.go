@@ -760,6 +760,12 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 		return Collation{}, err
 	}
 
+	defer func(t time.Time) {
+		if took := time.Since(t); took > 100*time.Millisecond {
+			log.Warn("[dbg] collate domain", "name", d.Name.String(), "took", took)
+		}
+	}(time.Now())
+
 	closeCollation := true
 	defer func() {
 		if closeCollation {
@@ -1030,9 +1036,15 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 	if d.noFsync {
 		valuesComp.DisableFsync()
 	}
+
+	t := time.Now()
 	if err = valuesComp.Compress(); err != nil {
 		return StaticFiles{}, fmt.Errorf("compress %s values: %w", d.FilenameBase, err)
 	}
+	if took := time.Since(t); took > 100*time.Millisecond {
+		log.Warn("[dbg] build1 domain", "name", d.Name.String(), "took", took)
+	}
+
 	valuesComp.Close()
 	valuesComp = nil
 	if valuesDecomp, err = seg.NewDecompressor(collation.valuesPath); err != nil {
@@ -1040,8 +1052,12 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 	}
 
 	if d.Accessors.Has(statecfg.AccessorHashMap) {
+		t := time.Now()
 		if err = d.buildHashMapAccessor(ctx, step, step+1, d.dataReader(valuesDecomp), ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.FilenameBase, err)
+		}
+		if took := time.Since(t); took > 100*time.Millisecond {
+			log.Warn("[dbg] build2 domain", "name", d.Name.String(), "took", took)
 		}
 		valuesIdx, err = d.openHashMapAccessor(d.kviAccessorNewFilePath(step, step+1))
 		if err != nil {

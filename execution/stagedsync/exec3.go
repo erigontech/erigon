@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/cmp"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -148,11 +147,11 @@ func ExecV3(ctx context.Context,
 
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if initialCycle && isApplyingBlocks {
-		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
-		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+		//agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
+		//agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	} else {
-		agg.SetCompressWorkers(1)
-		agg.SetCollateAndBuildWorkers(1)
+		//agg.SetCompressWorkers(1)
+		//agg.SetCollateAndBuildWorkers(1)
 	}
 
 	var (
