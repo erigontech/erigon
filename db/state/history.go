@@ -31,12 +31,12 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/prune"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
@@ -233,6 +233,8 @@ func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.P
 }
 
 func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, efBaseTxNum uint64, ps *background.ProgressSet) error {
+	t := time.Now()
+
 	var histKey []byte
 	var valOffset uint64
 
@@ -329,6 +331,10 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		} else {
 			break
 		}
+	}
+
+	if took := time.Since(t); took > 100*time.Millisecond {
+		log.Warn("[dbg] build3 hist", "name", h.Name.String(), "took", took, "fName", fName)
 	}
 	return nil
 }
@@ -802,7 +808,7 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 			return HistoryFiles{}, fmt.Errorf("compress %s .ef history: %w", h.FilenameBase, err)
 		}
 		if took := time.Since(t); took > 100*time.Millisecond {
-			log.Warn("[dbg] build1 hist", "name", h.Name.String(), "took", took)
+			log.Warn("[dbg] build1 hist", "name", h.Name.String(), "took", took, "f", efHistoryFileName)
 		}
 
 		ps.Delete(p)
@@ -816,7 +822,7 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 			return HistoryFiles{}, fmt.Errorf("compress %s .v history: %w", h.FilenameBase, err)
 		}
 		if took := time.Since(t); took > 100*time.Millisecond {
-			log.Warn("[dbg] build2 hist", "name", h.Name.String(), "took", took)
+			log.Warn("[dbg] build2 hist", "name", h.Name.String(), "took", took, "f", historyFileName)
 		}
 		ps.Delete(p)
 	}
@@ -842,13 +848,9 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 
 	historyIdxPath := h.vAccessorNewFilePath(step, step+1)
 
-	t := time.Now()
 	err = h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, collation.efBaseTxNum, ps)
 	if err != nil {
 		return HistoryFiles{}, fmt.Errorf("build %s .vi: %w", h.FilenameBase, err)
-	}
-	if took := time.Since(t); took > 100*time.Millisecond {
-		log.Warn("[dbg] build2 hist", "name", h.Name.String(), "took", took)
 	}
 
 	if historyIdx, err = h.openHashMapAccessor(historyIdxPath); err != nil {

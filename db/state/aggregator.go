@@ -682,8 +682,9 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		}
 	}()
 
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(a.collateWorkers)
+	collateG, ctx := errgroup.WithContext(ctx)
+	collateG.SetLimit(a.collateWorkers)
+
 	for _, d := range a.d {
 		if d.Disable {
 			continue
@@ -698,7 +699,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		}
 
 		a.wg.Add(1)
-		g.Go(func() error {
+		collateG.Go(func() error {
 			defer a.wg.Done()
 
 			var collation Collation
@@ -744,7 +745,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		}
 
 		a.wg.Add(1)
-		g.Go(func() error {
+		collateG.Go(func() error {
 			defer a.wg.Done()
 
 			var collation InvertedIndexCollation
@@ -766,7 +767,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		})
 	}
 	t := time.Now()
-	if err := g.Wait(); err != nil {
+	if err := collateG.Wait(); err != nil {
 		static.CleanupOnError()
 		return fmt.Errorf("domain collate-build: %w", err)
 	}
