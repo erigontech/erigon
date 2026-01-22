@@ -736,7 +736,7 @@ func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 
 	println("in ii", iit.ii.FilenameBase, stat.KeyProgress.String(), stat.ValueProgress.String(), stat.TxTo, untilTx, min)
 
-	return min == 0 || min < iit.files.EndTxNum() || pruneInProgress
+	return min == 0 || min < iit.files.EndTxNum() || pruneInProgress || untilTx > stat.TxTo
 }
 
 func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool { //nolint
