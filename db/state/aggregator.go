@@ -800,6 +800,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	t = time.Now()
 	log.Warn("[dbg] build start", "took", time.Since(t))
 	if err := buildG.Wait(); err != nil {
+		log.Warn("[dbg] build fuck", "took", time.Since(t))
 		static.CleanupOnError()
 		return fmt.Errorf("domain collate-build: %w", err)
 	}
