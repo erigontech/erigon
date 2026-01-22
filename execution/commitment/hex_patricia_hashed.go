@@ -1739,9 +1739,8 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 	var touched, present bool
 	var upDepth, depth int16
 	if hph.activeRows == 0 {
-		if hph.root.hashLen == 0 && hph.root.hashedExtLen == 0 {
-			return nil // No unfolding for empty root
-		}
+		// Even if root cell appears empty, we may need to load from database.
+		// unfoldBranchNode will handle empty database case gracefully.
 		upCell = &hph.root
 		touched = false // branchBefore handles this during fold
 		present = !hph.root.IsEmpty()
