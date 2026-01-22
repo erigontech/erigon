@@ -100,6 +100,7 @@ type Aggregator struct {
 
 func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
+	dbg.MergeTr()
 	return &Aggregator{
 		ctx:                    ctx,
 		ctxCancel:              ctxCancel,
@@ -111,7 +112,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		ps:                     background.NewProgressSet(),
 		logger:                 logger,
-		collateAndBuildWorkers: 2,
+		collateAndBuildWorkers: dbg.AggCollateWorkers,
 		mergeWorkers:           1,
 
 		produce: true,
@@ -1009,7 +1010,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	furiousPrune := timeout > 5*time.Hour
 	aggressivePrune := !furiousPrune && timeout >= 1*time.Minute
 
-	var pruneLimit uint64 = 100
+	var pruneLimit uint64 = 1000
 	if furiousPrune {
 		pruneLimit = 1_000_000
 	}
