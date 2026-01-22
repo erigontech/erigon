@@ -252,7 +252,11 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 	}
 	logger.Info("[Experiment] wrote heap profile to buffer", "size", common.ByteCount(uint64(buf.Len())))
 
-	//  create temp file-> write buffer -> fsync -> rename
+	// create temp file-> write buffer -> fsync -> rename
+	// Writing to the temporary file first and then renaming to the output file ensures durability of data in case of an OOM
+	// If there is an OOM crash while writing to the .tmp file we still have the previous heap profile result saved
+	// in the output file. The rename() operation is atomic for POSIX systems, so there is no danger of corruption if the OOM comes
+	// when os.Rename() is being called.
 	tmpPath := filePath + ".tmp"
 	f, err := os.Create(tmpPath)
 	if err != nil {
