@@ -841,9 +841,14 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 	}
 
 	historyIdxPath := h.vAccessorNewFilePath(step, step+1)
+
+	t := time.Now()
 	err = h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, collation.efBaseTxNum, ps)
 	if err != nil {
 		return HistoryFiles{}, fmt.Errorf("build %s .vi: %w", h.FilenameBase, err)
+	}
+	if took := time.Since(t); took > 10*time.Millisecond {
+		log.Warn("[dbg] build2 hist", "name", h.Name.String(), "took", took)
 	}
 
 	if historyIdx, err = h.openHashMapAccessor(historyIdxPath); err != nil {

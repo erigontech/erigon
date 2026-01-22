@@ -1119,6 +1119,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 	if err := ii.buildMapAccessor(ctx, step, step+1, ii.dataReader(decomp), ps); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.FilenameBase, err)
 	}
+
 	if ii.Accessors.Has(statecfg.AccessorHashMap) {
 		if mapAccessor, err = ii.openHashMapAccessor(ii.efAccessorNewFilePath(step, step+1)); err != nil {
 			return InvertedFiles{}, err
