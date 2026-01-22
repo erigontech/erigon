@@ -28,7 +28,6 @@ import (
 
 	"github.com/erigontech/erigon/cmd/erigon/node"
 	erigonapp "github.com/erigontech/erigon/cmd/utils/app"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/version"
@@ -57,8 +56,6 @@ func runErigon(cliCtx *cli.Context) (err error) {
 	if err != nil {
 		return
 	}
-
-	go dbg.SaveHeapProfileNearOOMPeriodically(cliCtx.Context, dbg.SaveHeapWithLogger(&logger))
 
 	syscheck.CheckKernelAllocationHints(cliCtx.Context, logger)
 
