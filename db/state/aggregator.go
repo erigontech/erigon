@@ -33,8 +33,6 @@ import (
 
 	rand2 "golang.org/x/exp/rand"
 
-	"github.com/erigontech/erigon/db/kv/prune"
-
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -49,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/bitmapdb"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/state/changeset"
