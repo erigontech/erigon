@@ -121,19 +121,22 @@ func (e ErrCompressedFileCorrupted) Is(err error) bool {
 
 // Decompressor provides access to the superstrings in a file produced by a compressor
 type Decompressor struct {
-	f               *os.File
-	mmapHandle2     *[mmap.MaxMapSize]byte // mmap handle for windows (this is used to close mmap)
-	dict            *patternTable
-	posDict         *posTable
-	mmapHandle1     []byte // mmap handle for unix (this is used to close mmap)
-	data            []byte // slice of correct size for the decompressor to work with
-	wordsStart      uint64 // Offset of whether the superstrings actually start
-	size            int64
-	modTime         time.Time
-	wordsCount      uint64
-	emptyWordsCount uint64
-	hasMetadata     bool
-	metadata        []byte
+	f                   *os.File
+	mmapHandle2         *[mmap.MaxMapSize]byte // mmap handle for windows (this is used to close mmap)
+	dict                *patternTable
+	posDict             *posTable
+	mmapHandle1         []byte // mmap handle for unix (this is used to close mmap)
+	data                []byte // slice of correct size for the decompressor to work with
+	wordsStart          uint64 // Offset of whether the superstrings actually start
+	size                int64
+	modTime             time.Time
+	wordsCount          uint64
+	emptyWordsCount     uint64
+	hasMetadata         bool
+	metadata            []byte
+	version             uint8
+	featureFlagBitmask  FeatureFlagBitmask
+	compPageValuesCount uint8
 
 	serializedDictSize uint64
 	lenDictSize        uint64 // huffman encoded lengths
@@ -230,6 +233,21 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 	// read patterns from file
 	d.data = d.mmapHandle1[:d.size]
 	defer d.MadvNormal().DisableReadAhead() //speedup opening on slow drives
+
+	d.version = d.data[0]
+
+	if d.version == FileCompressionFormatV1 {
+		// 1st byte: version,
+		// 2nd byte: defines how exactly the file is compressed
+		// 3rd byte (otional): exists if PageLevelCompressionEnabled flag is enabled, and defines number of values on compressed page
+		d.featureFlagBitmask = FeatureFlagBitmask(d.data[1])
+		d.data = d.data[2:]
+	}
+
+	if d.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
+		d.compPageValuesCount = d.data[0]
+		d.data = d.data[1:]
+	}
 
 	if hasMetadata {
 		metadataLen := binary.BigEndian.Uint32(d.data[:4])
@@ -362,10 +380,11 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 	}
 	d.wordsStart = pos + dictSize
 
-	if d.Count() == 0 && dictSize == 0 && d.size > compressedMinSize {
+	if d.Count() == 0 && dictSize == 0 && d.size > d.calcCompressedMinSize() {
 		return nil, &ErrCompressedFileCorrupted{
 			FileName: fName, Reason: fmt.Sprintf("size %v but no words in it", datasize.ByteSize(d.size).HR())}
 	}
+
 	validationPassed = true
 	return d, nil
 }
@@ -466,10 +485,12 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 func (d *Decompressor) DataHandle() unsafe.Pointer {
 	return unsafe.Pointer(&d.data[0])
 }
-func (d *Decompressor) SerializedDictSize() uint64 { return d.serializedDictSize }
-func (d *Decompressor) SerializedLenSize() uint64  { return d.lenDictSize }
-func (d *Decompressor) DictWords() int             { return d.dictWords }
-func (d *Decompressor) DictLens() int              { return d.dictLens }
+func (d *Decompressor) SerializedDictSize() uint64      { return d.serializedDictSize }
+func (d *Decompressor) SerializedLenSize() uint64       { return d.lenDictSize }
+func (d *Decompressor) DictWords() int                  { return d.dictWords }
+func (d *Decompressor) DictLens() int                   { return d.dictLens }
+func (d *Decompressor) CompressedPageValuesCount() int  { return int(d.compPageValuesCount) }
+func (d *Decompressor) CompressionFormatVersion() uint8 { return d.version }
 
 func (d *Decompressor) Size() int64 {
 	return d.size
@@ -1081,4 +1102,16 @@ func (g *Getter) BinarySearch(seek []byte, count int, getOffset func(i uint64) (
 		return 0, false
 	}
 	return foundOffset, true
+}
+
+func (d *Decompressor) calcCompressedMinSize() int64 {
+	if d.version == FileCompressionFormatV0 {
+		return compressedMinSize
+	}
+
+	if d.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
+		return compressedMinSize + 3 // 2 bytes always are used for bitmask and version + 1 optional for page level compression if enabled
+	}
+
+	return compressedMinSize + 2
 }

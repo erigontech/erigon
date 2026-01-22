@@ -90,7 +90,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.RPCGlobalTxFeeCapFlag,
 	&utils.TxpoolApiAddrFlag,
 	&utils.TraceMaxtracesFlag,
-
+	&utils.AlwaysGenerateChangesetsFlag,
 	&HTTPReadTimeoutFlag,
 	&HTTPWriteTimeoutFlag,
 	&HTTPIdleTimeoutFlag,
