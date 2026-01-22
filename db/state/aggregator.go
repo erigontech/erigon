@@ -74,6 +74,7 @@ type Aggregator struct {
 
 	disableHistory bool
 	collateWorkers int // minimize amount of background workers by default
+	buildWorkers   int
 	mergeWorkers   int // usually 1
 
 	// To keep DB small - need move data to small files ASAP.
@@ -115,6 +116,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 		ps:              background.NewProgressSet(),
 		logger:          logger,
 		collateWorkers:  2,
+		buildWorkers:    1,
 		mergeWorkers:    1,
 
 		produce: true,
@@ -685,7 +687,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	collateG.SetLimit(a.collateWorkers)
 
 	buildG, ctx := errgroup.WithContext(ctx)
-	buildG.SetLimit(1)
+	buildG.SetLimit(a.buildWorkers)
 
 	for _, d := range a.d {
 		if d.Disable {
