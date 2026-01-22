@@ -742,7 +742,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		static.CleanupOnError()
 		return fmt.Errorf("domain collate-build: %w", err)
 	}
-
 	if took := time.Since(t); took > 100*time.Millisecond {
 		log.Warn("[dbg] collate total", "took", took)
 	}
@@ -753,13 +752,10 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		if d.Disable {
 			continue
 		}
+		collation := dddd[d.Name]
 		a.wg.Add(1)
 		buildG.Go(func() error {
 			defer a.wg.Done()
-
-			collListMu.Lock()
-			collation := dddd[d.Name]
-			collListMu.Unlock()
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
 			collation.Close()
 			if err != nil {
@@ -780,14 +776,11 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		if ii.Disable {
 			continue
 		}
+		collation := iii[iikey]
 
 		a.wg.Add(1)
 		buildG.Go(func() error {
 			defer a.wg.Done()
-			collListMu.Lock()
-			collation := iii[iikey]
-			collListMu.Unlock()
-
 			sf, err := ii.buildFiles(ctx, step, collation, a.ps)
 			if err != nil {
 				sf.CleanupOnError()
