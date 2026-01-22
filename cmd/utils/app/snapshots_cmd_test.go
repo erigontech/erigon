@@ -66,7 +66,7 @@ func Test_DeleteLatestStateSnaps_DomainWithLargeRange(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	b := bundle{}
 	dc := statecfg.Schema.ReceiptDomain
-	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
+	b.domain, b.history, _ = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
 
 	for i := 0; i < 9; i++ {
 		createSchemaFiles(t, b.history, i*10, (i+1)*10)
@@ -85,7 +85,7 @@ func Test_DeleteLatestStateSnaps_DomainAndHistorySameEnd(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	b := bundle{}
 	dc := statecfg.Schema.ReceiptDomain
-	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
+	b.domain, b.history, _ = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
 
 	for i := 0; i < 4; i++ {
 		createSchemaFiles(t, b.history, i*10, (i+1)*10)
