@@ -681,6 +681,13 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		}
 	}()
 
+	defer func(t time.Time) {
+		took := time.Since(t)
+		if took > 10*time.Millisecond {
+			log.Warn("[dbg] collate total", "took", took)
+		}
+	}(time.Now())
+
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(a.collateAndBuildWorkers)
 	for _, d := range a.d {
