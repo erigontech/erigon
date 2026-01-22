@@ -1046,6 +1046,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		if sptx, ok := tx.(kv.HasSpaceDirty); ok && !furiousPrune && !aggressivePrune {
 			spaceDirty, _, err := sptx.SpaceDirty()
 			if err != nil {
+				at.a.logger.Error(err.Error())
 				return false, err
 			}
 			if spaceDirty > uint64(statecfg.MaxNonFuriousDirtySpacePerTx) {
@@ -1067,7 +1068,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			return false, err
 		}
 		if stat == nil || stat.PrunedNothing() {
-			println("[snapshots] PruneSmallBatches nilled or nothing")
+			at.a.logger.Info("[snapshots] PruneSmallBatches nilled or nothing")
 			if !fullStat.PrunedNothing() {
 				at.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fullStat.String())
 			}
@@ -1087,6 +1088,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 
 		select {
 		case <-localTimeout.C: //must be first to improve responsivness
+			at.a.logger.Info("[snapshots] PruneSmallBatches local timeout", "timeout", timeout.String())
 			return true, nil
 		case <-ctx.Done():
 			at.a.logger.Info("[snapshots] PruneSmallBatches bad timeout", "err", err)
