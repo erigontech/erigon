@@ -1050,17 +1050,19 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	fullStat := newAggregatorPruneStat()
 	ctxWithTO, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+
 	for {
-		if sptx, ok := tx.(kv.HasSpaceDirty); ok && !furiousPrune && !aggressivePrune {
-			spaceDirty, _, err := sptx.SpaceDirty()
-			if err != nil {
-				at.a.logger.Error(err.Error())
-				return false, err
-			}
-			if spaceDirty > uint64(statecfg.MaxNonFuriousDirtySpacePerTx) {
-				return false, nil
-			}
-		}
+		//if sptx, ok := tx.(kv.HasSpaceDirty); ok && !furiousPrune && !aggressivePrune {
+		//	spaceDirty, _, err := sptx.SpaceDirty()
+		//	if err != nil {
+		//		at.a.logger.Error(err.Error())
+		//		return false, err
+		//	}
+		//	if spaceDirty > uint64(statecfg.MaxNonFuriousDirtySpacePerTx) {
+		//		at.a.logger.Info("[prune] tx dirty space limit exceeded")
+		//		return false, nil
+		//	}
+		//}
 		iterationStarted := time.Now()
 		// `context.Background()` is important here!
 		//     it allows keep DB consistent - prune all keys-related data or noting
@@ -1068,7 +1070,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 		stat, err := at.prune(ctxWithTO, tx, pruneLimit /*pruneLimit*/, furiousPrune || aggressivePrune, aggLogEvery)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
-				at.a.logger.Info("[snapshots] PruneSmallBatches timeout", "err", err)
+				at.a.logger.Debug("[snapshots] PruneSmallBatches timeout", "err", err)
 				fullStat.Accumulate(stat)
 				return true, nil
 			}
@@ -1076,7 +1078,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 			return false, err
 		}
 		if stat == nil || stat.PrunedNothing() {
-			at.a.logger.Info("[snapshots] PruneSmallBatches nilled or nothing")
+			at.a.logger.Debug("[snapshots] PruneSmallBatches nilled or nothing")
 			if !fullStat.PrunedNothing() {
 				at.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fullStat.String())
 			}
@@ -1096,10 +1098,10 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 
 		select {
 		case <-localTimeout.C: //must be first to improve responsivness
-			at.a.logger.Info("[snapshots] PruneSmallBatches local timeout", "timeout", timeout.String())
+			at.a.logger.Debug("[snapshots] PruneSmallBatches local timeout", "timeout", timeout.String())
 			return true, nil
 		case <-ctx.Done():
-			at.a.logger.Info("[snapshots] PruneSmallBatches bad timeout", "err", err)
+			at.a.logger.Debug("[snapshots] PruneSmallBatches bad timeout", "err", err)
 			return false, ctx.Err()
 		case <-logEvery.C:
 			if furiousPrune {
