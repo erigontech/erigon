@@ -1033,7 +1033,7 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 		return StaticFiles{}, fmt.Errorf("compress %s values: %w", d.FilenameBase, err)
 	}
 	if took := time.Since(t); took > 100*time.Millisecond {
-		log.Warn("[dbg] build1 domain", "name", d.Name.String(), "took", took)
+		log.Warn("[dbg] build1 domain", "name", d.Name.String(), "took", took, "f", valuesComp.FileName())
 	}
 
 	valuesComp.Close()
@@ -1043,12 +1043,8 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 	}
 
 	if d.Accessors.Has(statecfg.AccessorHashMap) {
-		t := time.Now()
 		if err = d.buildHashMapAccessor(ctx, step, step+1, d.dataReader(valuesDecomp), ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.FilenameBase, err)
-		}
-		if took := time.Since(t); took > 100*time.Millisecond {
-			log.Warn("[dbg] build2 domain", "name", d.Name.String(), "took", took)
 		}
 		valuesIdx, err = d.openHashMapAccessor(d.kviAccessorNewFilePath(step, step+1))
 		if err != nil {
@@ -1104,6 +1100,12 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.S
 		Salt:       d.salt.Load(),
 		NoFsync:    d.noFsync,
 	}
+
+	t := time.Now()
+	if took := time.Since(t); took > 100*time.Millisecond {
+		log.Warn("[dbg] build2 domain", "name", d.Name.String(), "took", took, "f", idxPath)
+	}
+
 	return buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, d.logger)
 }
 
