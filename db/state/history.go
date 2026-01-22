@@ -1002,7 +1002,7 @@ func (ht *HistoryRoTx) canHashPruneUntil(tx kv.Tx, untilTx uint64) (can bool, tx
 		}
 		txTo = min(maxIdxTx-ht.h.KeepRecentTxnInDB, untilTx) // bound pruning
 	} else {
-		canPruneIdx := ht.iit.CanPrune(tx)
+		canPruneIdx := ht.iit.CanPrune(tx, untilTx)
 		if !canPruneIdx {
 			return false, 0
 		}
@@ -1040,7 +1040,7 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 		ht.h.logger.Warn("CanPrune GetPruneValProgress error", "err", err)
 	}
 
-	pruneInProgress := stat.KeyProgress == prune.InProgress || stat.ValueProgress == prune.InProgress
+	pruneInProgress := (stat.KeyProgress != prune.Done || stat.ValueProgress != prune.Done) && untilTx == stat.TxTo
 
 	if ht.h.SnapshotsDisabled {
 		if ht.h.KeepRecentTxnInDB >= maxIdxTx {
@@ -1048,7 +1048,7 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 		}
 		txTo = min(maxIdxTx-ht.h.KeepRecentTxnInDB, untilTx) // bound pruning
 	} else {
-		canPruneIdx := ht.iit.CanPrune(tx)
+		canPruneIdx := ht.iit.CanPrune(tx, untilTx)
 		if !canPruneIdx {
 			return false, 0
 		}
@@ -1070,7 +1070,7 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 	case "commitment":
 		mxPrunableHComm.Set(delta)
 	}
-
+	println("in history", ht.h.FilenameBase, stat.KeyProgress.String(), stat.ValueProgress.String(), stat.TxTo, txTo, minTxDB)
 	return minIdxTx < txTo || pruneInProgress, txTo
 }
 

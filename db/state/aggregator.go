@@ -1011,7 +1011,7 @@ func (at *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 		}
 	}
 	for _, ii := range at.iis {
-		if ii.CanPrune(tx) {
+		if ii.CanPrune(tx, untilTx) {
 			return true
 		}
 	}
