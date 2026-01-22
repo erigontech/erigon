@@ -27,6 +27,9 @@ import (
 	"unicode"
 
 	"github.com/c2h5oh/datasize"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/gossip"
@@ -37,8 +40,6 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // GossipManager is responsible for managing the gossip subscriptions and publications
@@ -246,6 +247,7 @@ func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) e
 	if topicHandle == nil {
 		return fmt.Errorf("topic not found: %s", topic)
 	}
+	// Note: before publishing the message to the network, Publish() internally runs the validator function.
 	return topicHandle.topic.Publish(ctx, compressedData, pubsub.WithReadiness(pubsub.MinTopicSize(1)))
 }
 

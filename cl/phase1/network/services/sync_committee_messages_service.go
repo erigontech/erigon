@@ -22,6 +22,8 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -32,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 type seenSyncCommitteeMessage struct {
@@ -129,7 +130,7 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 		// [IGNORE] There has been no other valid sync committee message for the declared slot for the validator referenced by sync_committee_message.validator_index.
 
 		if _, ok := s.seenSyncCommitteeMessages.Load(seenSyncCommitteeMessageIdentifier); ok {
-			return ErrIgnore
+			return nil
 		}
 		// [REJECT] The signature is valid for the message beacon_block_root for the validator referenced by validator_index
 		signature, signingRoot, pubKey, err := verifySyncCommitteeMessageSignature(headState, msg.SyncCommitteeMessage)
@@ -167,7 +168,7 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 		// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
 		// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
 		// gossip ourselves or ban the peer which sent that particular invalid signature.
-		return ErrIgnore
+		return nil
 	})
 }
 

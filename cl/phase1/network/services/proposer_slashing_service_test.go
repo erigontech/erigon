@@ -21,6 +21,9 @@ import (
 	"log"
 	"testing"
 
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/mock/gomock"
+
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -30,8 +33,6 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
-	"github.com/stretchr/testify/suite"
-	"go.uber.org/mock/gomock"
 )
 
 type proposerSlashingTestSuite struct {
@@ -120,8 +121,7 @@ func (t *proposerSlashingTestSuite) TestProcessMessage() {
 				t.proposerSlashingService.cache.Add(mockProposerIndex, struct{}{})
 			},
 			msg:     mockMsg,
-			wantErr: true,
-			err:     ErrIgnore,
+			wantErr: false, // Silent ignore: returns nil when already seen
 		},
 		{
 			name: "ignore proposer slashing in pool",
@@ -129,8 +129,7 @@ func (t *proposerSlashingTestSuite) TestProcessMessage() {
 				t.operationsPool.ProposerSlashingsPool.Insert(pool.ComputeKeyForProposerSlashing(mockMsg), mockMsg)
 			},
 			msg:     mockMsg,
-			wantErr: true,
-			err:     ErrIgnore,
+			wantErr: false, // Silent ignore: returns nil when already in pool
 		},
 		{
 			name: "non-matching slots",

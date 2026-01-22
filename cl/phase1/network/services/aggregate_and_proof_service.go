@@ -24,6 +24,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -42,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // SignedAggregateAndProofData is passed to SignedAggregateAndProof service. The service does the signature verification
@@ -247,7 +248,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			index: aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex,
 		}
 		if a.seenAggreatorIndexes.Contains(seenIndex) {
-			return fmt.Errorf("%w: aggregator already seen: %v", ErrIgnore, seenIndex)
+			return nil
 		}
 
 		committee, err := headState.GetBeaconCommitee(slot, committeeIndex)

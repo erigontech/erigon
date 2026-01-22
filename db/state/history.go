@@ -963,6 +963,45 @@ func (ht *HistoryRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 	return r
 }
 
+func (ht *HistoryRoTx) canHashPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
+	minIdxTx, maxIdxTx := ht.iit.ii.minTxNumInDB(tx), ht.iit.ii.maxTxNumInDB(tx)
+	//defer func() {
+	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t txTo %d idxTx [%d-%d] keepRecentTxInDB=%d; result %t\n",
+	//		ht.h.filenameBase, untilTx, ht.h.dontProduceHistoryFiles, txTo, minIdxTx, maxIdxTx, ht.h.keepRecentTxInDB, minIdxTx < txTo)
+	//}()
+
+	if ht.h.SnapshotsDisabled {
+		if ht.h.KeepRecentTxnInDB >= maxIdxTx {
+			return false, 0
+		}
+		txTo = min(maxIdxTx-ht.h.KeepRecentTxnInDB, untilTx) // bound pruning
+	} else {
+		canPruneIdx := ht.iit.CanPrune(tx)
+		if !canPruneIdx {
+			return false, 0
+		}
+		txTo = min(ht.files.EndTxNum(), ht.iit.files.EndTxNum(), untilTx)
+	}
+	minTxDB := ht.h.minTxNumInDB(tx)
+	delta := 0.0
+	if txTo > minTxDB {
+		delta = float64(txTo-minTxDB) / float64(ht.stepSize) //TODO: why this is happening?
+	}
+
+	switch ht.h.FilenameBase {
+	case "accounts":
+		mxPrunableHAcc.Set(delta)
+	case "storage":
+		mxPrunableHSto.Set(delta)
+	case "code":
+		mxPrunableHCode.Set(delta)
+	case "commitment":
+		mxPrunableHComm.Set(delta)
+	}
+
+	return minIdxTx < txTo, txTo
+}
+
 func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
 	minIdxTx, maxIdxTx := ht.iit.ii.minTxNumInDB(tx), ht.iit.ii.maxTxNumInDB(tx)
 	//defer func() {
@@ -975,7 +1014,7 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 		ht.h.logger.Warn("CanPrune GetPruneValProgress error", "err", err)
 	}
 
-	pruneInProgress := stat.KeyProgress != prune.Done || stat.ValueProgress != prune.Done
+	pruneInProgress := stat.KeyProgress == prune.InProgress || stat.ValueProgress == prune.InProgress
 
 	if ht.h.SnapshotsDisabled {
 		if ht.h.KeepRecentTxnInDB >= maxIdxTx {
@@ -1072,6 +1111,71 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 	}
 
 	return ht.iit.TableScanningPrune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, valsCP, &ht.h.ValuesTable, mxPruneSizeHistory, mode)
+}
+
+// Prune [txFrom; txTo)
+// `force` flag to prune even if canPruneUntil returns false (when Unwind is needed, canPruneUntil always returns false)
+// `useProgress` flag to restore and update prune progress.
+//   - E.g. Unwind can't use progress, because it's not linear
+//     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
+func (ht *HistoryRoTx) OldPrune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
+	if !forced {
+		if ht.files.EndTxNum() > 0 {
+			txTo = min(txTo, ht.files.EndTxNum())
+		}
+		var can bool
+		can, txTo = ht.canHashPruneUntil(tx, txTo)
+		if !can {
+			return nil, nil
+		}
+	}
+	return ht.oldPrune(ctx, tx, txFrom, txTo, limit, forced, logEvery)
+}
+
+func (ht *HistoryRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
+	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", ht.h.filenameBase, ht.CanPruneUntil(rwTx), txFrom, txTo)
+	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
+
+	var (
+		//	seek     = make([]byte, 8, 256)
+		valsCDup kv.RwCursorDupSort
+		valsC    kv.RwCursor
+		valsCP   kv.PseudoDupSortRwCursor
+		err      error
+		mode     prune.StorageMode
+	)
+
+	if !ht.h.HistoryLargeValues {
+		valsCDup, err = rwTx.RwCursorDupSort(ht.h.ValuesTable)
+		if err != nil {
+			return nil, err
+		}
+		defer valsCDup.Close()
+		valsCP = valsCDup
+		mode = prune.PrefixValStorageMode
+	} else {
+		valsC, err = rwTx.RwCursor(ht.h.ValuesTable)
+		if err != nil {
+			return nil, err
+		}
+		defer valsC.Close()
+		mode = prune.KeyStorageMode
+
+		switch c := valsC.(type) {
+		case *mdbx2.MdbxCursor:
+			valsCP = &mdbx2.MdbxCursorPseudoDupSort{MdbxCursor: c}
+		case *mdbx2.MdbxDupSortCursor:
+			valsCP = valsC.(*mdbx2.MdbxDupSortCursor)
+		default:
+			return nil, fmt.Errorf("unexpected cursor type %T for table %s", valsC, ht.h.ValuesTable)
+		}
+	}
+
+	if !forced && ht.h.SnapshotsDisabled {
+		forced = true // or index.CanPrune will return false cuz no snapshots made
+	}
+
+	return ht.iit.HashSeekingPrune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, valsCP, mxPruneSizeHistory, mode)
 }
 
 func (ht *HistoryRoTx) Close() {

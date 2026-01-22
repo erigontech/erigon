@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -38,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 var (
@@ -137,7 +138,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		slot:          msg.Block.Slot,
 	}
 	if b.seenBlocksCache.Contains(seenCacheKey) {
-		return fmt.Errorf("%w: block already seen: %v", ErrIgnore, seenCacheKey)
+		return nil
 	}
 
 	if err := b.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {

@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -30,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 type proposerSlashingService struct {
@@ -85,11 +86,11 @@ func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *ui
 	// [IGNORE] The proposer slashing is the first valid proposer slashing received for the proposer with index proposer_slashing.signed_header_1.message.proposer_index
 	pIndex := msg.Header1.Header.ProposerIndex
 	if _, ok := s.cache.Get(pIndex); ok {
-		return ErrIgnore
+		return nil
 	}
 
 	if s.operationsPool.ProposerSlashingsPool.Has(pool.ComputeKeyForProposerSlashing(msg)) {
-		return ErrIgnore
+		return nil
 	}
 	h1 := msg.Header1.Header
 	h2 := msg.Header2.Header

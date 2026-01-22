@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -39,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 var (
@@ -263,7 +264,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		// mark the validator as seen
 		epochLastTime, ok := s.validatorAttestationSeen.Get(vIndex)
 		if ok && epochLastTime == targetEpoch {
-			return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
+			return nil
 		}
 		s.validatorAttestationSeen.Add(vIndex, targetEpoch)
 

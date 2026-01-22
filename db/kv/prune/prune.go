@@ -201,6 +201,10 @@ func TableScanningPrune(
 	if limit == 0 { // limits amount of txn to be pruned
 		limit = math.MaxUint64
 	}
+	var throttling *time.Duration
+	if v := ctx.Value("throttle"); v != nil {
+		throttling = v.(*time.Duration)
+	}
 
 	timeOut := 999 * time.Hour
 	if limit < 1000 { //TODO: change after tests
@@ -246,7 +250,6 @@ func TableScanningPrune(
 				return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 			}
 			if time.Since(start) > timeOut {
-				logger.Info("prune key timed out", "name", filenameBase)
 				stat.LastPrunedKey = common.Copy(txnb)
 				stat.KeyProgress = InProgress
 				return stat, nil
@@ -261,6 +264,9 @@ func TableScanningPrune(
 				return nil, err
 			}
 			pairs += dups
+			if throttling != nil {
+				time.Sleep(*throttling)
+			}
 			//println("key", hex.EncodeToString(txnb), "value", hex.EncodeToString(val))
 			if err = keysCursor.DeleteCurrentDuplicates(); err != nil {
 				return nil, err
@@ -292,7 +298,6 @@ func TableScanningPrune(
 			return 0
 		}
 	}
-
 	for ; val != nil; val, txNumBytes, err = valDelCursor.NextNoDup() {
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
@@ -331,6 +336,9 @@ func TableScanningPrune(
 		stat.MinTxNum = min(stat.MinTxNum, txNum)
 		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
 		if dupsDelete {
+			if throttling != nil {
+				time.Sleep(*throttling)
+			}
 			//println("deleted", hex.EncodeToString(val), txNumGetter(val, txNumBytes), dups)
 			err = valDelCursor.DeleteCurrentDuplicates()
 			if err != nil {
@@ -352,6 +360,9 @@ func TableScanningPrune(
 				}
 				if txNumDup >= txTo {
 					break
+				}
+				if throttling != nil {
+					time.Sleep(*throttling)
 				}
 				if time.Since(start) > timeOut {
 					stat.LastPrunedValue = common.Copy(val)
@@ -386,6 +397,5 @@ func TableScanningPrune(
 
 	stat.LastPrunedValue = nil
 	stat.ValueProgress = Done
-
 	return stat, err
 }

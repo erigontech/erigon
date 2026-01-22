@@ -20,6 +20,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -27,8 +30,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	syncpoolmock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
-	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
 )
 
 func setupSyncCommitteesServiceTest(t *testing.T, ctrl *gomock.Controller) (SyncCommitteeMessagesService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock) {
@@ -103,5 +104,5 @@ func TestSyncCommitteesSuccess(t *testing.T) {
 	synced.OnHeadState(state)
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(msg.SyncCommitteeMessage.Slot).Return(true).AnyTimes()
 	require.NoError(t, s.ProcessMessage(context.Background(), new(uint64), msg))
-	require.Error(t, s.ProcessMessage(context.Background(), new(uint64), msg)) // Ignore if done twice
+	require.NoError(t, s.ProcessMessage(context.Background(), new(uint64), msg)) // Silent ignore: returns nil if done twice
 }
