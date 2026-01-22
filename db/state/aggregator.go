@@ -769,7 +769,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		static.CleanupOnError()
 		return fmt.Errorf("domain collate-build: %w", err)
 	}
-	if took := time.Since(t); took > 100*time.Millisecond {
+	if took := time.Since(t); took > 1*time.Millisecond {
 		log.Warn("[dbg] build total", "took", took)
 	}
 	mxStepTook.ObserveDuration(stepStartedAt)
