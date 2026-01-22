@@ -157,7 +157,7 @@ func ExecV3(ctx context.Context,
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	} else {
 		agg.SetCompressWorkers(1)
-		agg.SetCollateAndBuildWorkers(1)
+		agg.SetCollateAndBuildWorkers(int(dbg.AggCollateWorkers))
 	}
 
 	var err error
