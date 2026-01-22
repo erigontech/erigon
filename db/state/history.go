@@ -1017,6 +1017,7 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 	} else {
 		canPruneIdx := ht.iit.CanPrune(tx)
 		if !canPruneIdx {
+			println("im sorry we cant", ht.h.FilenameBase)
 			return false, 0
 		}
 		txTo = min(ht.files.EndTxNum(), ht.iit.files.EndTxNum(), untilTx)
