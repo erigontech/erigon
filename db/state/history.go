@@ -784,6 +784,13 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 		collation.efHistoryComp.DisableFsync()
 	}
 
+	defer func(t time.Time) {
+		took := time.Since(t)
+		if took > 10*time.Millisecond {
+			log.Warn("[dbg] biild hist", "name", h.Name.String(), "took", took)
+		}
+	}(time.Now())
+
 	{
 		ps := background.NewProgressSet()
 		_, efHistoryFileName := filepath.Split(collation.efHistoryPath)
