@@ -1103,6 +1103,16 @@ var (
 		Name:  "experimental.always-generate-changesets",
 		Usage: "Allows to override changesets generation logic",
 	}
+	FcuTimeoutFlag = cli.DurationFlag{
+		Name:  "fcu.timeout",
+		Usage: "FCU timeout before it switches to being process async (use 0 to disable)",
+		Value: ethconfig.Defaults.FcuTimeout,
+	}
+	FcuBackgroundPruneFlag = cli.BoolFlag{
+		Name:  "fcu.background.prune",
+		Usage: "Enables background pruning post fcu",
+		Value: ethconfig.Defaults.FcuBackgroundPrune,
+	}
 	// ErigonDB geometry settings
 	ErigonDBStepSizeFlag = cli.Uint64Flag{
 		Name:  "erigondb.override.stepsize",
@@ -1919,7 +1929,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	cfg.ErigonDBStepSize = ctx.Int(ErigonDBStepSizeFlag.Name)
 	cfg.ErigonDBStepsInFrozenFile = ctx.Int(ErigonDBStepsInFrozenFileFlag.Name)
-
+	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
+	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.Uint64(RPCGlobalGasCapFlag.Name)
 	}
