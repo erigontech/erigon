@@ -248,6 +248,7 @@ jobs:
                                       --pattern-file pattern/"$network"/"$pattern".tar \
                                       --test-sequence "$sequence" \
                                       --repetitions 5 \
+                                      --erigon-dir "/" \
                                       --test-mode 2 \
                                       --test-report \
                                       --json-report $result_dir/$result_file \
