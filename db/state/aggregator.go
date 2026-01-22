@@ -765,9 +765,13 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 			return nil
 		})
 	}
+	t := time.Now()
 	if err := g.Wait(); err != nil {
 		static.CleanupOnError()
 		return fmt.Errorf("domain collate-build: %w", err)
+	}
+	if took := time.Since(t); took > 10*time.Millisecond {
+		log.Warn("[dbg] collate total", "took", took)
 	}
 	mxStepTook.ObserveDuration(stepStartedAt)
 	a.IntegrateDirtyFiles(static, txFrom, txTo)

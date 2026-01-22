@@ -761,8 +761,7 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 	}
 
 	defer func(t time.Time) {
-		took := time.Since(t)
-		if took > 10*time.Millisecond {
+		if took := time.Since(t); took > 10*time.Millisecond {
 			log.Warn("[dbg] collate domain", "name", d.Name.String(), "took", took)
 		}
 	}(time.Now())
