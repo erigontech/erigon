@@ -267,7 +267,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 
 	defer func() {
-		if rollbackOnReturn {
+		if rollbackOnReturn && currentContext != nil {
 			currentContext.Close()
 		}
 	}()
@@ -504,6 +504,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			}
 			e.logger.Warn("bad forkchoice", "head", headHash, "head block", headNum, "hash", blockHash, "hash block", hashBlockNum)
 		}
+		currentContext.Close()
 		currentContext = nil
 		if e.fcuBackgroundCommit {
 			e.lock.Lock()
