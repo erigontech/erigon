@@ -543,7 +543,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	if h.noFsync {
 		_histComp.DisableFsync()
 	}
-	historyWriter := h.dataWriter(_histComp, true) // `Collate+Build` must be fast -> no Compression. Slowness here means growth of `chaindata`
+	historyWriter := h.dataWriter(_histComp, false) // `Collate+Build` must be fast -> no Compression. Slowness here means growth of `chaindata`
 
 	_efComp, err = seg.NewCompressor(ctx, "collate idx "+h.FilenameBase, efHistoryPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
 	if err != nil {
@@ -797,8 +797,13 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 		p := ps.AddNew(efHistoryFileName, 1)
 		defer ps.Delete(p)
 
+		t := time.Now()
 		if err = collation.efHistoryComp.Compress(); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s .ef history: %w", h.FilenameBase, err)
+		}
+		took := time.Since(t)
+		if took > 10*time.Millisecond {
+			log.Warn("[dbg] biild hist", "name", h.Name.String(), "took", took)
 		}
 		ps.Delete(p)
 	}
