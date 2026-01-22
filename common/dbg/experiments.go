@@ -43,8 +43,8 @@ var (
 	heapProfileThreshold = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
 	heapProfileFrequency = EnvDuration("HEAP_PROFILE_FREQUENCY", 30*time.Second)
 	mdbxLockInRam        = EnvBool("MDBX_LOCK_IN_RAM", false)
-	MdbxNoSync           = EnvBool("MDBX_NO_SYNC", false)
-	ExecThrottle         = EnvDuration("MDBX_NO_SYNC", 0*time.Second)
+	MdbxNoSync           = EnvBool("MDBX_NO_FSYNC", false)
+	ExecThrottle         = EnvDuration("EXEC_THROTTLE", 0*time.Second)
 
 	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
 
