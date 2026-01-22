@@ -18,6 +18,7 @@ package recsplit
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/binary"
@@ -28,6 +29,9 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
+	"time"
 
 	"github.com/erigontech/erigon/db/version"
 
@@ -125,9 +129,46 @@ type RecSplit struct {
 	lessFalsePositives bool
 	built              bool // Flag indicating that the hash function has been built and no more keys can be added
 	trace              bool
-	logger             log.Logger
+	logger log.Logger
 
-	noFsync bool // fsync is enabled by default, but tests can manually disable
+	noFsync       bool       // fsync is enabled by default, but tests can manually disable
+	parallelBuild bool       // Enable parallel bucket processing
+	workers       int        // Number of workers for parallel processing
+	golombMutex   sync.Mutex // Protects golombRice array in parallel mode
+}
+
+// bucketWorkItem represents a bucket to be processed by a worker
+type bucketWorkItem struct {
+	idx     uint64
+	keys    []uint64
+	offsets []uint64
+}
+
+// bucketResult contains the result of processing a bucket
+type bucketResult struct {
+	idx        uint64
+	grBits     int
+	grData     []uint64
+	indexData  []byte  // For size-1 buckets
+	bucketSize uint64
+}
+
+// workerBuffers holds reusable buffers for parallel processing
+type workerBuffers struct {
+	buffer       []uint64
+	offsetBuffer []uint64
+	gr           *GolombRice
+}
+
+// bufferPool is a sync.Pool for reusing worker buffers
+var bufferPool = sync.Pool{
+	New: func() interface{} {
+		return &workerBuffers{
+			buffer:       make([]uint64, 0, DefaultBucketSize*2),
+			offsetBuffer: make([]uint64, 0, DefaultBucketSize*2),
+			gr:           &GolombRice{},
+		}
+	},
 }
 
 type RecSplitArgs struct {
@@ -148,6 +189,10 @@ type RecSplitArgs struct {
 	LeafSize   uint16
 
 	NoFsync bool // fsync is enabled by default, but tests can manually disable
+
+	// Parallel build options
+	ParallelBuild bool // Enable parallel bucket processing
+	Workers       int  // Number of workers (default: runtime.NumCPU())
 }
 
 // DefaultLeafSize - LeafSize=8 and BucketSize=100, use about 1.8 bits per key. Increasing the leaf and bucket
@@ -179,6 +224,8 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		lessFalsePositives: args.LessFalsePositives,
 		startSeed:          args.StartSeed,
 		lvl:                log.LvlDebug, logger: logger,
+		parallelBuild:      args.ParallelBuild,
+		workers:            args.Workers,
 	}
 	closeFiles := true
 	defer func() {
@@ -373,6 +420,12 @@ func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, sec
 // salt for the part of the hash function separating m elements. It is based on
 // calculations with assumptions that we draw hash functions at random
 func (rs *RecSplit) golombParam(m uint16) int {
+	// In parallel mode, use mutex to protect access
+	if rs.parallelBuild {
+		rs.golombMutex.Lock()
+		defer rs.golombMutex.Unlock()
+	}
+
 	for s := uint16(len(rs.golombRice)); m >= s; s++ {
 		rs.golombRice = append(rs.golombRice, 0)
 		// For the case where bucket is larger than planned
@@ -466,15 +519,33 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 			}
 		}
 		bitPos := rs.gr.bitCount
+
+		// Pre-allocate buffers to avoid multiple allocations
+		bucketLen := len(rs.currentBucket)
 		if rs.buffer == nil {
-			rs.buffer = make([]uint64, len(rs.currentBucket))
-			rs.offsetBuffer = make([]uint64, len(rs.currentBucketOffs))
-		} else {
-			for len(rs.buffer) < len(rs.currentBucket) {
-				rs.buffer = append(rs.buffer, 0)
-				rs.offsetBuffer = append(rs.offsetBuffer, 0)
+			// Initial allocation with capacity for max bucket size
+			maxSize := rs.bucketSize * 2
+			if maxSize < bucketLen {
+				maxSize = bucketLen
 			}
+			rs.buffer = make([]uint64, bucketLen, maxSize)
+			rs.offsetBuffer = make([]uint64, bucketLen, maxSize)
+		} else if cap(rs.buffer) < bucketLen {
+			// Need to grow capacity
+			newCap := cap(rs.buffer) * 2
+			if newCap < bucketLen {
+				newCap = bucketLen
+			}
+			newBuffer := make([]uint64, bucketLen, newCap)
+			newOffsetBuffer := make([]uint64, bucketLen, newCap)
+			rs.buffer = newBuffer
+			rs.offsetBuffer = newOffsetBuffer
+		} else {
+			// Reuse existing buffers with adequate capacity
+			rs.buffer = rs.buffer[:bucketLen]
+			rs.offsetBuffer = rs.offsetBuffer[:bucketLen]
 		}
+
 		unary, err := rs.recsplit(0 /* level */, rs.currentBucket, rs.currentBucketOffs, nil /* unary */)
 		if err != nil {
 			return err
@@ -605,6 +676,101 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 	return unary, nil
 }
 
+// recsplitParallel is a parallel-safe version of recsplit that doesn't use rs.buffer, rs.offsetBuffer, rs.indexW, or rs.gr
+func (rs *RecSplit) recsplitParallel(level int, bucket []uint64, offsets []uint64, unary []uint64, gr *GolombRice, buffer []uint64, offsetBuffer []uint64, indexW io.Writer) ([]uint64, []byte, error) {
+	salt := rs.startSeed[level]
+	m := uint16(len(bucket))
+	var numBuf [8]byte
+
+	if m <= rs.leafSize {
+		// No need to build aggregation levels - just find bijection
+		var mask uint32
+		for {
+			mask = 0
+			var fail bool
+			for i := uint16(0); !fail && i < m; i++ {
+				bit := uint32(1) << remap16(remix(bucket[i]+salt), m)
+				if mask&bit != 0 {
+					fail = true
+				} else {
+					mask |= bit
+				}
+			}
+			if !fail {
+				break
+			}
+			salt++
+		}
+		for i := uint16(0); i < m; i++ {
+			j := remap16(remix(bucket[i]+salt), m)
+			offsetBuffer[j] = offsets[i]
+		}
+		for _, offset := range offsetBuffer[:m] {
+			binary.BigEndian.PutUint64(numBuf[:], offset)
+			if _, err := indexW.Write(numBuf[8-rs.bytesPerRec:]); err != nil {
+				return nil, nil, err
+			}
+		}
+		salt -= rs.startSeed[level]
+		log2golomb := rs.golombParam(m)
+		gr.appendFixed(salt, log2golomb)
+		unary = append(unary, salt>>log2golomb)
+	} else {
+		fanout, unit := splitParams(m, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
+		count := make([]uint16, rs.secondaryAggrBound)
+		for {
+			for i := uint16(0); i < fanout-1; i++ {
+				count[i] = 0
+			}
+			var fail bool
+			for i := uint16(0); i < m; i++ {
+				count[remap16(remix(bucket[i]+salt), m)/unit]++
+			}
+			for i := uint16(0); i < fanout-1; i++ {
+				fail = fail || (count[i] != unit)
+			}
+			if !fail {
+				break
+			}
+			salt++
+		}
+		for i, c := uint16(0), uint16(0); i < fanout; i++ {
+			count[i] = c
+			c += unit
+		}
+		for i := uint16(0); i < m; i++ {
+			j := remap16(remix(bucket[i]+salt), m) / unit
+			buffer[count[j]] = bucket[i]
+			offsetBuffer[count[j]] = offsets[i]
+			count[j]++
+		}
+		copy(bucket, buffer)
+		copy(offsets, offsetBuffer)
+		salt -= rs.startSeed[level]
+		log2golomb := rs.golombParam(m)
+		gr.appendFixed(salt, log2golomb)
+		unary = append(unary, salt>>log2golomb)
+		var err error
+		var i uint16
+		for i = 0; i < m-unit; i += unit {
+			if unary, _, err = rs.recsplitParallel(level+1, bucket[i:i+unit], offsets[i:i+unit], unary, gr, buffer, offsetBuffer, indexW); err != nil {
+				return nil, nil, err
+			}
+		}
+		if m-i > 1 {
+			if unary, _, err = rs.recsplitParallel(level+1, bucket[i:], offsets[i:], unary, gr, buffer, offsetBuffer, indexW); err != nil {
+				return nil, nil, err
+			}
+		} else if m-i == 1 {
+			binary.BigEndian.PutUint64(numBuf[:], offsets[i])
+			if _, err := indexW.Write(numBuf[8-rs.bytesPerRec:]); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	return unary, nil, nil
+}
+
 // loadFuncBucket is required to satisfy the type etl.LoadFunc type, to use with collector.Load
 func (rs *RecSplit) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 	// k is the BigEndian encoding of the bucket number, and the v is the key that is assigned into that bucket
@@ -644,6 +810,10 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 
 	defer rs.indexF.Close()
 	rs.indexW = bufio.NewWriterSize(rs.indexF, etl.BufIOSize)
+
+	// Timing instrumentation
+	var bucketProcessingTime, eliasF, existenceFilterTime, fileIOTime time.Duration
+	buildStartTime := time.Now()
 	// 1 byte: dataStructureVersion, 7 bytes: app-specific minimal dataID (of current shard)
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)
 	rs.numBuf[0] = uint8(rs.dataStructureVersion)
@@ -671,14 +841,27 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.lvl < log.LvlTrace {
 		log.Log(rs.lvl, "[index] calculating", "file", rs.fileName)
 	}
-	if err := rs.bucketCollector.Load(nil, "", rs.loadFuncBucket, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
-	if len(rs.currentBucket) > 0 {
-		if err := rs.recsplitCurrentBucket(); err != nil {
+
+	// Time bucket processing
+	bucketStartTime := time.Now()
+
+	// Use parallel or sequential build based on configuration
+	if rs.parallelBuild {
+		if err := rs.buildParallel(ctx); err != nil {
 			return err
 		}
+	} else {
+		if err := rs.bucketCollector.Load(nil, "", rs.loadFuncBucket, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
+		if len(rs.currentBucket) > 0 {
+			if err := rs.recsplitCurrentBucket(); err != nil {
+				return err
+			}
+		}
 	}
+
+	bucketProcessingTime = time.Since(bucketStartTime)
 
 	if assert.Enable {
 		rs.indexW.Flush()
@@ -691,6 +874,9 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.lvl < log.LvlTrace {
 		log.Log(rs.lvl, "[index] write", "file", rs.fileName)
 	}
+
+	// Time Elias-Fano encoding
+	efStartTime := time.Now()
 	if rs.enums && rs.keysAdded > 0 {
 		rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
 		defer rs.offsetCollector.Close()
@@ -702,6 +888,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	rs.gr.appendFixed(1, 1) // Sentinel (avoids checking for parts of size 1)
 	// Construct Elias Fano index
 	rs.ef.Build(rs.bucketSizeAcc, rs.bucketPosAcc)
+	eliasF = time.Since(efStartTime)
 	rs.built = true
 
 	// Write out bucket count, bucketSize, leafSize
@@ -749,9 +936,16 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 			return fmt.Errorf("writing elias fano for offsets: %w", err)
 		}
 	}
+
+	// Time existence filter
+	existenceFilterStart := time.Now()
 	if err := rs.flushExistenceFilter(); err != nil {
 		return err
 	}
+	existenceFilterTime = time.Since(existenceFilterStart)
+
+	// Time file I/O
+	fileIOStart := time.Now()
 	// Write out the size of golomb rice params
 	binary.BigEndian.PutUint16(rs.numBuf[:], uint16(len(rs.golombRice)))
 	if _, err := rs.indexW.Write(rs.numBuf[:4]); err != nil {
@@ -780,9 +974,263 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		rs.logger.Warn("[index] rename", "file", rs.indexF.Name(), "err", err)
 		return err
 	}
+	fileIOTime = time.Since(fileIOStart)
+
+	totalTime := time.Since(buildStartTime)
+
+	// Log timing information when trace is enabled
+	if rs.trace {
+		rs.logger.Info("[index] build timing",
+			"file", rs.fileName,
+			"total", totalTime,
+			"bucketProcessing", bucketProcessingTime,
+			"bucketPct", fmt.Sprintf("%.1f%%", 100.0*bucketProcessingTime.Seconds()/totalTime.Seconds()),
+			"eliasFano", eliasF,
+			"eliasFanoPct", fmt.Sprintf("%.1f%%", 100.0*eliasF.Seconds()/totalTime.Seconds()),
+			"existenceFilter", existenceFilterTime,
+			"existenceFilterPct", fmt.Sprintf("%.1f%%", 100.0*existenceFilterTime.Seconds()/totalTime.Seconds()),
+			"fileIO", fileIOTime,
+			"fileIOPct", fmt.Sprintf("%.1f%%", 100.0*fileIOTime.Seconds()/totalTime.Seconds()),
+		)
+	}
+
 	rs.logger.Debug("[index] created", "file", rs.fileName)
 
 	return nil
+}
+
+// processBucketParallel processes a single bucket in parallel and returns the result
+func (rs *RecSplit) processBucketParallel(item bucketWorkItem, gr *GolombRice, buffer, offsetBuffer []uint64) bucketResult {
+	result := bucketResult{
+		idx:        item.idx,
+		bucketSize: uint64(len(item.keys)),
+	}
+
+	// Size 0 buckets - nothing to do
+	if len(item.keys) == 0 {
+		return result
+	}
+
+	// Size 1 buckets - return index data
+	if len(item.keys) == 1 {
+		var numBuf [8]byte
+		binary.BigEndian.PutUint64(numBuf[:], item.offsets[0])
+		result.indexData = make([]byte, rs.bytesPerRec)
+		copy(result.indexData, numBuf[8-rs.bytesPerRec:])
+		return result
+	}
+
+	// Check for collisions
+	for i, key := range item.keys[1:] {
+		if key == item.keys[i] {
+			rs.logger.Error("collision detected in parallel processing", "bucket", item.idx, "key", fmt.Sprintf("%x", key))
+			return result
+		}
+	}
+
+	// Prepare buffers - grow if needed
+	if cap(buffer) < len(item.keys) {
+		buffer = make([]uint64, len(item.keys))
+	} else {
+		buffer = buffer[:len(item.keys)]
+	}
+	if cap(offsetBuffer) < len(item.offsets) {
+		offsetBuffer = make([]uint64, len(item.offsets))
+	} else {
+		offsetBuffer = offsetBuffer[:len(item.offsets)]
+	}
+
+	// Reset GolombRice for this bucket
+	gr.data = gr.data[:0]
+	gr.bitCount = 0
+
+	// Create a buffer for index writes
+	var indexBuf bytes.Buffer
+
+	// Run recsplit algorithm with parallel-safe version
+	unary, _, err := rs.recsplitParallel(0, item.keys, item.offsets, nil, gr, buffer, offsetBuffer, &indexBuf)
+	if err != nil {
+		rs.logger.Error("recsplit error in parallel processing", "bucket", item.idx, "err", err)
+		return result
+	}
+
+	// Encode using Golomb-Rice
+	gr.appendUnaryAll(unary)
+
+	// Copy the results
+	result.grBits = gr.bitCount
+	result.grData = make([]uint64, len(gr.data))
+	copy(result.grData, gr.data)
+
+	// Store index data if any was written
+	if indexBuf.Len() > 0 {
+		result.indexData = indexBuf.Bytes()
+	}
+
+	return result
+}
+
+// bucketWorker processes buckets from the work channel
+func (rs *RecSplit) bucketWorker(work <-chan bucketWorkItem, results chan<- bucketResult, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	// Get buffers from pool
+	buffers := bufferPool.Get().(*workerBuffers)
+	defer func() {
+		// Reset buffers before returning to pool
+		buffers.buffer = buffers.buffer[:0]
+		buffers.offsetBuffer = buffers.offsetBuffer[:0]
+		buffers.gr.data = buffers.gr.data[:0]
+		buffers.gr.bitCount = 0
+		bufferPool.Put(buffers)
+	}()
+
+	for item := range work {
+		result := rs.processBucketParallel(item, buffers.gr, buffers.buffer, buffers.offsetBuffer)
+		results <- result
+	}
+}
+
+// collectResults collects and orders results from workers
+func (rs *RecSplit) collectResults(results <-chan bucketResult, done chan<- error) {
+	resultMap := make(map[uint64]bucketResult)
+	nextIdx := uint64(0)
+
+	for result := range results {
+		resultMap[result.idx] = result
+
+		// Write results in order
+		for {
+			r, ok := resultMap[nextIdx]
+			if !ok {
+				break
+			}
+
+			// Extend accumulators if needed
+			for len(rs.bucketSizeAcc) <= int(nextIdx)+1 {
+				rs.bucketSizeAcc = append(rs.bucketSizeAcc, rs.bucketSizeAcc[len(rs.bucketSizeAcc)-1])
+			}
+			for len(rs.bucketPosAcc) <= int(nextIdx)+1 {
+				rs.bucketPosAcc = append(rs.bucketPosAcc, rs.bucketPosAcc[len(rs.bucketPosAcc)-1])
+			}
+
+			// Update size accumulator
+			rs.bucketSizeAcc[nextIdx+1] = rs.bucketSizeAcc[nextIdx] + r.bucketSize
+
+			// Handle index data for size-1 buckets
+			if len(r.indexData) > 0 {
+				if _, err := rs.indexW.Write(r.indexData); err != nil {
+					done <- fmt.Errorf("writing index data for bucket %d: %w", nextIdx, err)
+					return
+				}
+			}
+
+			// Merge Golomb-Rice data for size > 1 buckets
+			if r.grBits > 0 {
+				rs.gr.merge(r.grData, r.grBits)
+			}
+
+			// Update position accumulator
+			rs.bucketPosAcc[nextIdx+1] = uint64(rs.gr.Bits())
+
+			delete(resultMap, nextIdx)
+			nextIdx++
+		}
+	}
+
+	done <- nil
+}
+
+// buildParallel builds the index using parallel bucket processing
+func (rs *RecSplit) buildParallel(ctx context.Context) error {
+	// Determine worker count
+	workers := rs.workers
+	if workers == 0 {
+		workers = runtime.NumCPU()
+	}
+
+	if rs.lvl < log.LvlTrace {
+		log.Log(rs.lvl, "[index] parallel build", "file", rs.fileName, "workers", workers)
+	}
+
+	// Pre-compute golombRice table for all possible bucket sizes to avoid race conditions
+	// We compute up to the secondaryAggrBound to cover all possible cases
+	for m := uint16(0); m <= rs.secondaryAggrBound; m++ {
+		rs.golombParam(m)
+	}
+
+	workChan := make(chan bucketWorkItem, workers*2)
+	resultChan := make(chan bucketResult, workers*2)
+
+	// Launch workers
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go rs.bucketWorker(workChan, resultChan, &wg)
+	}
+
+	// Launch result collector
+	done := make(chan error, 1)
+	go rs.collectResults(resultChan, done)
+
+	// Load and distribute buckets
+	currentBucketIdx := uint64(math.MaxUint64)
+	currentBucket := make([]uint64, 0, rs.bucketSize)
+	currentOffsets := make([]uint64, 0, rs.bucketSize)
+
+	loadFunc := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		bucketIdx := binary.BigEndian.Uint64(k[0:8])
+		if bucketIdx != currentBucketIdx {
+			if currentBucketIdx != math.MaxUint64 && len(currentBucket) > 0 {
+				// Send current bucket to workers
+				item := bucketWorkItem{
+					idx:     currentBucketIdx,
+					keys:    make([]uint64, len(currentBucket)),
+					offsets: make([]uint64, len(currentOffsets)),
+				}
+				copy(item.keys, currentBucket)
+				copy(item.offsets, currentOffsets)
+				workChan <- item
+
+				currentBucket = currentBucket[:0]
+				currentOffsets = currentOffsets[:0]
+			}
+			currentBucketIdx = bucketIdx
+		}
+
+		// Add to current bucket
+		fingerprint := binary.BigEndian.Uint64(k[8:])
+		offset := binary.BigEndian.Uint64(v)
+		currentBucket = append(currentBucket, fingerprint)
+		currentOffsets = append(currentOffsets, offset)
+
+		return nil
+	}
+
+	if err := rs.bucketCollector.Load(nil, "", loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		close(workChan)
+		wg.Wait()
+		close(resultChan)
+		return err
+	}
+
+	// Send last bucket
+	if len(currentBucket) > 0 {
+		item := bucketWorkItem{
+			idx:     currentBucketIdx,
+			keys:    make([]uint64, len(currentBucket)),
+			offsets: make([]uint64, len(currentOffsets)),
+		}
+		copy(item.keys, currentBucket)
+		copy(item.offsets, currentOffsets)
+		workChan <- item
+	}
+
+	close(workChan)
+	wg.Wait()
+	close(resultChan)
+
+	return <-done
 }
 
 func (rs *RecSplit) flushExistenceFilter() error {

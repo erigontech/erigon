@@ -37,12 +37,30 @@ type GolombRice struct {
 // appendUnaryAll adds the unary encoding of specified sequence of numbers to the end of the
 // current encoding
 func (g *GolombRice) appendUnaryAll(unary []uint64) {
+	if len(unary) == 0 {
+		return
+	}
+
+	// Pre-compute total bits needed
 	bitInc := 0
 	for _, u := range unary {
 		// Each number u uses u+1 bits for its unary representation
 		bitInc += int(u) + 1
 	}
+
+	// Grow data array to target size in one allocation if needed
 	targetSize := (g.bitCount + bitInc + 63) / 64
+	if cap(g.data) < targetSize {
+		// Need to grow capacity
+		newCap := cap(g.data) * 2
+		if newCap < targetSize {
+			newCap = targetSize
+		}
+		newData := make([]uint64, len(g.data), newCap)
+		copy(newData, g.data)
+		g.data = newData
+	}
+	// Extend to target size
 	for len(g.data) < targetSize {
 		g.data = append(g.data, 0)
 	}
@@ -85,6 +103,57 @@ func (g *GolombRice) appendFixed(v uint64, log2golomb int) {
 // Bits returns current number of bits in the compact encoding of the hash function representation
 func (g *GolombRice) Bits() int {
 	return g.bitCount
+}
+
+// merge appends data from another GolombRice encoder to this one
+// This is used in parallel processing to combine results from worker encoders
+func (g *GolombRice) merge(data []uint64, bitCount int) {
+	if bitCount == 0 {
+		return
+	}
+
+	// Calculate target size after merge
+	targetSize := (g.bitCount + bitCount + 63) / 64
+	for len(g.data) < targetSize {
+		g.data = append(g.data, 0)
+	}
+
+	// Bit-level merge
+	sourceBitOffset := 0
+	destBitOffset := g.bitCount
+
+	for sourceBitOffset < bitCount {
+		bitsRemaining := bitCount - sourceBitOffset
+		sourceWordIdx := sourceBitOffset / 64
+		sourceWordOffset := sourceBitOffset & 63
+
+		destWordIdx := destBitOffset / 64
+		destWordOffset := destBitOffset & 63
+
+		// How many bits can we copy from current source word
+		bitsFromSourceWord := 64 - sourceWordOffset
+		if bitsFromSourceWord > bitsRemaining {
+			bitsFromSourceWord = bitsRemaining
+		}
+
+		// How many bits can we write to current dest word
+		bitsToDestWord := 64 - destWordOffset
+		if bitsToDestWord > bitsFromSourceWord {
+			bitsToDestWord = bitsFromSourceWord
+		}
+
+		// Extract bits from source
+		sourceWord := data[sourceWordIdx]
+		bits := (sourceWord >> sourceWordOffset) & ((uint64(1) << bitsToDestWord) - 1)
+
+		// Write to destination
+		g.data[destWordIdx] |= bits << destWordOffset
+
+		sourceBitOffset += bitsToDestWord
+		destBitOffset += bitsToDestWord
+	}
+
+	g.bitCount += bitCount
 }
 
 func (g *GolombRiceReader) ReadReset(bitPos, unaryOffset int) {

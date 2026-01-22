@@ -213,3 +213,251 @@ func TestTwoLayerIndex(t *testing.T) {
 		test(t, cfg)
 	})
 }
+
+// BenchmarkRecSplitBuild_10K benchmarks building RecSplit index with 10,000 keys
+func BenchmarkRecSplitBuild_10K(b *testing.B) {
+	benchmarkRecSplitBuild(b, 10000, DefaultBucketSize, DefaultLeafSize)
+}
+
+// BenchmarkRecSplitBuild_100K benchmarks building RecSplit index with 100,000 keys
+func BenchmarkRecSplitBuild_100K(b *testing.B) {
+	benchmarkRecSplitBuild(b, 100000, DefaultBucketSize, DefaultLeafSize)
+}
+
+// BenchmarkRecSplitBuild_1M benchmarks building RecSplit index with 1,000,000 keys
+func BenchmarkRecSplitBuild_1M(b *testing.B) {
+	benchmarkRecSplitBuild(b, 1000000, DefaultBucketSize, DefaultLeafSize)
+}
+
+// BenchmarkRecSplitBuild_BucketSize100 benchmarks with bucket size 100
+func BenchmarkRecSplitBuild_BucketSize100(b *testing.B) {
+	benchmarkRecSplitBuild(b, 100000, 100, DefaultLeafSize)
+}
+
+// BenchmarkRecSplitBuild_BucketSize500 benchmarks with bucket size 500
+func BenchmarkRecSplitBuild_BucketSize500(b *testing.B) {
+	benchmarkRecSplitBuild(b, 100000, 500, DefaultLeafSize)
+}
+
+// BenchmarkRecSplitBuild_BucketSize1000 benchmarks with bucket size 1000
+func BenchmarkRecSplitBuild_BucketSize1000(b *testing.B) {
+	benchmarkRecSplitBuild(b, 100000, 1000, DefaultLeafSize)
+}
+
+// BenchmarkRecSplitBuild_LeafSize8 benchmarks with leaf size 8
+func BenchmarkRecSplitBuild_LeafSize8(b *testing.B) {
+	benchmarkRecSplitBuild(b, 100000, DefaultBucketSize, 8)
+}
+
+// BenchmarkRecSplitBuild_LeafSize12 benchmarks with leaf size 12
+func BenchmarkRecSplitBuild_LeafSize12(b *testing.B) {
+	benchmarkRecSplitBuild(b, 100000, DefaultBucketSize, 12)
+}
+
+// BenchmarkRecSplitBuild_LeafSize16 benchmarks with leaf size 16
+func BenchmarkRecSplitBuild_LeafSize16(b *testing.B) {
+	benchmarkRecSplitBuild(b, 100000, DefaultBucketSize, 16)
+}
+
+func benchmarkRecSplitBuild(b *testing.B, keyCount, bucketSize int, leafSize uint16) {
+	logger := log.New()
+	salt := uint32(1)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		tmpDir := b.TempDir()
+		indexFile := filepath.Join(tmpDir, "index")
+
+		rs, err := NewRecSplit(RecSplitArgs{
+			KeyCount:   keyCount,
+			BucketSize: bucketSize,
+			Salt:       &salt,
+			TmpDir:     tmpDir,
+			IndexFile:  indexFile,
+			LeafSize:   leafSize,
+			NoFsync:    true, // Disable fsync for benchmarking
+		}, logger)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		// Add keys
+		for j := 0; j < keyCount; j++ {
+			if err = rs.AddKey(fmt.Appendf(nil, "benchmark_key_%d", j), uint64(j)); err != nil {
+				b.Fatal(err)
+			}
+		}
+
+		b.StartTimer()
+		// Benchmark the Build operation
+		if err := rs.Build(context.Background()); err != nil {
+			b.Fatal(err)
+		}
+		b.StopTimer()
+
+		rs.Close()
+	}
+
+	// Report keys per second
+	b.ReportMetric(float64(keyCount)/b.Elapsed().Seconds()*float64(b.N), "keys/sec")
+}
+
+// TestParallelBuild tests that parallel build produces correct results
+func TestParallelBuild(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	salt := uint32(1)
+	keyCount := 1000
+
+	// Build sequential index
+	indexFileSeq := filepath.Join(tmpDir, "index_seq")
+	rsSeq, err := NewRecSplit(RecSplitArgs{
+		KeyCount:      keyCount,
+		BucketSize:    100,
+		Salt:          &salt,
+		TmpDir:        tmpDir,
+		IndexFile:     indexFileSeq,
+		LeafSize:      8,
+		ParallelBuild: false,
+		NoFsync:       true,
+	}, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < keyCount; i++ {
+		if err = rsSeq.AddKey(fmt.Appendf(nil, "test_key_%d", i), uint64(i*17)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := rsSeq.Build(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	rsSeq.Close()
+
+	// Build parallel index
+	indexFilePar := filepath.Join(tmpDir, "index_par")
+	rsPar, err := NewRecSplit(RecSplitArgs{
+		KeyCount:      keyCount,
+		BucketSize:    100,
+		Salt:          &salt,
+		TmpDir:        tmpDir,
+		IndexFile:     indexFilePar,
+		LeafSize:      8,
+		ParallelBuild: true,
+		Workers:       4,
+		NoFsync:       true,
+	}, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < keyCount; i++ {
+		if err = rsPar.AddKey(fmt.Appendf(nil, "test_key_%d", i), uint64(i*17)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := rsPar.Build(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	rsPar.Close()
+
+	// Open both indexes and verify lookups match
+	idxSeq := MustOpen(indexFileSeq)
+	defer idxSeq.Close()
+	idxPar := MustOpen(indexFilePar)
+	defer idxPar.Close()
+
+	for i := 0; i < keyCount; i++ {
+		key := fmt.Appendf(nil, "test_key_%d", i)
+		readerSeq := NewIndexReader(idxSeq)
+		offsetSeq, okSeq := readerSeq.Lookup(key)
+
+		readerPar := NewIndexReader(idxPar)
+		offsetPar, okPar := readerPar.Lookup(key)
+
+		if okSeq != okPar {
+			t.Errorf("key %d: sequential found=%v, parallel found=%v", i, okSeq, okPar)
+		}
+		if offsetSeq != offsetPar {
+			t.Errorf("key %d: sequential offset=%d, parallel offset=%d", i, offsetSeq, offsetPar)
+		}
+		if offsetSeq != uint64(i*17) {
+			t.Errorf("key %d: expected offset %d, got %d", i, i*17, offsetSeq)
+		}
+	}
+}
+
+// BenchmarkRecSplitBuild_Parallel_100K benchmarks parallel build with 100K keys
+func BenchmarkRecSplitBuild_Parallel_100K(b *testing.B) {
+	benchmarkRecSplitBuildParallel(b, 100000, DefaultBucketSize, DefaultLeafSize, 0)
+}
+
+// BenchmarkRecSplitBuild_Parallel_1M benchmarks parallel build with 1M keys
+func BenchmarkRecSplitBuild_Parallel_1M(b *testing.B) {
+	benchmarkRecSplitBuildParallel(b, 1000000, DefaultBucketSize, DefaultLeafSize, 0)
+}
+
+// BenchmarkRecSplitBuild_Parallel_Workers2 benchmarks parallel build with 2 workers
+func BenchmarkRecSplitBuild_Parallel_Workers2(b *testing.B) {
+	benchmarkRecSplitBuildParallel(b, 100000, DefaultBucketSize, DefaultLeafSize, 2)
+}
+
+// BenchmarkRecSplitBuild_Parallel_Workers4 benchmarks parallel build with 4 workers
+func BenchmarkRecSplitBuild_Parallel_Workers4(b *testing.B) {
+	benchmarkRecSplitBuildParallel(b, 100000, DefaultBucketSize, DefaultLeafSize, 4)
+}
+
+// BenchmarkRecSplitBuild_Parallel_Workers8 benchmarks parallel build with 8 workers
+func BenchmarkRecSplitBuild_Parallel_Workers8(b *testing.B) {
+	benchmarkRecSplitBuildParallel(b, 100000, DefaultBucketSize, DefaultLeafSize, 8)
+}
+
+func benchmarkRecSplitBuildParallel(b *testing.B, keyCount, bucketSize int, leafSize uint16, workers int) {
+	logger := log.New()
+	salt := uint32(1)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		tmpDir := b.TempDir()
+		indexFile := filepath.Join(tmpDir, "index")
+
+		rs, err := NewRecSplit(RecSplitArgs{
+			KeyCount:      keyCount,
+			BucketSize:    bucketSize,
+			Salt:          &salt,
+			TmpDir:        tmpDir,
+			IndexFile:     indexFile,
+			LeafSize:      leafSize,
+			NoFsync:       true,
+			ParallelBuild: true,
+			Workers:       workers,
+		}, logger)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		// Add keys
+		for j := 0; j < keyCount; j++ {
+			if err = rs.AddKey(fmt.Appendf(nil, "benchmark_key_%d", j), uint64(j)); err != nil {
+				b.Fatal(err)
+			}
+		}
+
+		b.StartTimer()
+		// Benchmark the Build operation
+		if err := rs.Build(context.Background()); err != nil {
+			b.Fatal(err)
+		}
+		b.StopTimer()
+
+		rs.Close()
+	}
+
+	// Report keys per second
+	b.ReportMetric(float64(keyCount)/b.Elapsed().Seconds()*float64(b.N), "keys/sec")
+}
