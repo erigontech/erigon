@@ -765,7 +765,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		log.Warn("[dbg] collate total", "took", took)
 	}
 
-	t = time.Now()
 	if err := buildG.Wait(); err != nil {
 		static.CleanupOnError()
 		return fmt.Errorf("domain collate-build: %w", err)
