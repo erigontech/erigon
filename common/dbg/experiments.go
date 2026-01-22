@@ -69,8 +69,6 @@ var (
 	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", true)
 	OnlyCreateDB    = EnvBool("ONLY_CREATE_DB", false)
 
-	CommitEachStage = EnvBool("COMMIT_EACH_STAGE", false)
-
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
 	Exec3Parallel = EnvBool("EXEC3_PARALLEL", false)

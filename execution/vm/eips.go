@@ -31,6 +31,7 @@ import (
 )
 
 var activators = map[int]func(*JumpTable){
+	8024: enable8024,
 	7702: enable7702,
 	7516: enable7516,
 	6780: enable6780,
@@ -344,5 +345,27 @@ func enable7939(jt *JumpTable) {
 		constantGas: GasFastStep,
 		numPop:      1,
 		numPush:     1,
+	}
+}
+
+// enable8024 applies EIP-8024 (DUPN, SWAPN, EXCHANGE)
+func enable8024(jt *JumpTable) {
+	jt[DUPN] = &operation{
+		execute:     opDupN,
+		constantGas: GasFastestStep,
+		numPop:      0,
+		numPush:     1,
+	}
+	jt[SWAPN] = &operation{
+		execute:     opSwapN,
+		constantGas: GasFastestStep,
+		numPop:      0,
+		numPush:     0,
+	}
+	jt[EXCHANGE] = &operation{
+		execute:     opExchange,
+		constantGas: GasFastestStep,
+		numPop:      0,
+		numPush:     0,
 	}
 }
