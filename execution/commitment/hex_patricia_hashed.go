@@ -1193,6 +1193,18 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int16 {
 			}
 		}
 		if hph.root.hashedExtLen == 0 && hph.root.hashLen == 0 {
+			// Root cell is empty - check database directly to see if there's branch data
+			if hph.ctx != nil {
+				// For root, empty nibbles converts to compact form []byte{0x00}
+				branchData, _, err := hph.ctx.Branch([]byte{0x00})
+				if err != nil {
+					log.Warn("needUnfolding: failed to check root branch", "err", err)
+					return 0
+				}
+				if len(branchData) > 2 { // branch data has at least touch map (2 bytes) + actual data
+					return 1 // Database has root data, need to unfold
+				}
+			}
 			return 0 // Empty root, no unfolding needed
 		}
 		cell = &hph.root
