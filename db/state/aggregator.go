@@ -1042,9 +1042,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	fullStat := newAggregatorPruneStat()
 	ctxWithTO, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	defer func() {
-		at.a.logger.Info("prune batches ended")
-	}()
+
 	for {
 		if sptx, ok := tx.(kv.HasSpaceDirty); ok && !furiousPrune && !aggressivePrune {
 			spaceDirty, _, err := sptx.SpaceDirty()
@@ -1053,7 +1051,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 				return false, err
 			}
 			if spaceDirty > uint64(statecfg.MaxNonFuriousDirtySpacePerTx) {
-				at.a.logger.Info("no mem")
+				at.a.logger.Info("[prune] tx dirty space limit exceeded")
 				return false, nil
 			}
 		}
