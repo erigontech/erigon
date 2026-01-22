@@ -543,7 +543,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	if h.noFsync {
 		_histComp.DisableFsync()
 	}
-	historyWriter := h.dataWriter(_histComp)
+	historyWriter := h.dataWriter(_histComp, true) // `Collate+Build` must be fast -> no Compression. Slowness here means growth of `chaindata`
 
 	_efComp, err = seg.NewCompressor(ctx, "collate idx "+h.FilenameBase, efHistoryPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
 	if err != nil {
@@ -552,7 +552,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	if h.noFsync {
 		_efComp.DisableFsync()
 	}
-	invIndexWriter := h.InvertedIndex.dataWriter(_efComp, true) // coll+build must be fast - no Compression
+	invIndexWriter := h.InvertedIndex.dataWriter(_efComp, true) // `Collate+Build` must be fast -> no Compression. Slowness here means growth of `chaindata`
 
 	keysCursor, err := roTx.CursorDupSort(h.KeysTable)
 	if err != nil {
@@ -876,9 +876,12 @@ func (h *History) dataReader(f *seg.Decompressor) *seg.Reader {
 	}
 	return seg.NewReader(f.MakeGetter(), h.Compression)
 }
-func (h *History) dataWriter(f *seg.Compressor) *seg.PagedWriter {
+func (h *History) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.PagedWriter {
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
+	}
+	if forceNoCompress {
+		return seg.NewPagedWriter(seg.NewWriter(f, seg.CompressNone), false, h.dirs.Tmp)
 	}
 	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0, h.dirs.Tmp)
 }
