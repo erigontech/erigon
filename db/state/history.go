@@ -546,7 +546,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	if h.noFsync {
 		_histComp.DisableFsync()
 	}
-	historyWriter := h.dataWriter(_histComp)
+	historyWriter := h.dataWriter(_histComp, true)
 
 	_efComp, err = seg.NewCompressor(ctx, "collate idx "+h.FilenameBase, efHistoryPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
 	if err != nil {
@@ -904,7 +904,7 @@ func (h *History) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.Paged
 }
 func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return ht.h.dataReader(f) }
 func (ht *HistoryRoTx) datarWriter(f *seg.Compressor) *seg.PagedWriter {
-	return ht.h.dataWriter(f)
+	return ht.h.dataWriter(f, false)
 }
 
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {
