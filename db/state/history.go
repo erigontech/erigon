@@ -1011,6 +1011,7 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 
 	if ht.h.SnapshotsDisabled {
 		if ht.h.KeepRecentTxnInDB >= maxIdxTx {
+			println("im sorry we cant", ht.h.FilenameBase, ht.h.KeepRecentTxnInDB, maxIdxTx)
 			return false, 0
 		}
 		txTo = min(maxIdxTx-ht.h.KeepRecentTxnInDB, untilTx) // bound pruning
