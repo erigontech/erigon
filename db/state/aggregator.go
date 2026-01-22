@@ -112,7 +112,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		ps:                     background.NewProgressSet(),
 		logger:                 logger,
-		collateAndBuildWorkers: dbg.AggCollateWorkers,
+		collateAndBuildWorkers: int(dbg.AggCollateWorkers),
 		mergeWorkers:           1,
 
 		produce: true,
@@ -642,7 +642,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		return errStepNotReady
 	}
 	a.logger.Debug("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
-	a.logger.Warn("[agg] collate and build", "step", step, "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].CompressCfg.Workers)
 
 	var (
 		txFrom        = a.FirstTxNumOfStep(step)

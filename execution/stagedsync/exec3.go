@@ -128,22 +128,7 @@ func ExecV3(ctx context.Context,
 	isApplyingBlocks := execStage.SyncMode() == stages.ModeApplyingBlocks
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
 	hooks := cfg.vmConfig.Tracer
-
-	useExternalTx := rwTx != nil
-	var applyTx kv.TemporalRwTx
-
-	if useExternalTx {
-		applyTx = rwTx
-	} else {
-		var err error
-		applyTx, err = cfg.db.BeginTemporalRw(ctx) //nolint
-		if err != nil {
-			return err
-		}
-		defer func() {
-			applyTx.Rollback()
-		}()
-	}
+	applyTx := rwTx
 	err := doms.SeekCommitment(ctx, applyTx)
 	if err != nil {
 		return err
@@ -156,7 +141,6 @@ func ExecV3(ctx context.Context,
 	//	agg.SetCompressWorkers(1)
 	//	agg.SetCollateAndBuildWorkers(1)
 	//}
-
 	var (
 		blockNum     = doms.BlockNum()
 		initialTxNum = doms.TxNum()
@@ -267,7 +251,7 @@ func ExecV3(ctx context.Context,
 		}()
 
 		lastHeader, applyTx, execErr = pe.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
-			initialTxNum, inputTxNum, useExternalTx, initialCycle, applyTx, accumulator, readAhead, logEvery)
+			initialTxNum, inputTxNum, initialCycle, applyTx, accumulator, readAhead, logEvery)
 
 		lastCommittedBlockNum = pe.lastCommittedBlockNum
 		lastCommittedTxNum = pe.lastCommittedTxNum
@@ -300,7 +284,7 @@ func ExecV3(ctx context.Context,
 		}()
 
 		lastHeader, applyTx, execErr = se.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
-			initialTxNum, inputTxNum, useExternalTx, initialCycle, applyTx, accumulator, readAhead, logEvery)
+			initialTxNum, inputTxNum, initialCycle, applyTx, accumulator, readAhead, logEvery)
 
 		if u != nil && !u.HasUnwindPoint() {
 			if lastHeader != nil {
@@ -322,7 +306,7 @@ func ExecV3(ctx context.Context,
 					commitStart := time.Now()
 					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
 
-					if !useExternalTx {
+					if initialCycle {
 						se.LogCommitments(commitStart, 0, committedTransactions, 0, stepsInDb, commitment.CommitProgress{})
 					}
 				case errors.Is(execErr, ErrWrongTrieRoot):
@@ -364,12 +348,6 @@ func ExecV3(ctx context.Context,
 			"lastFrozenStep", lastFrozenStep, "lastFrozenTxNum", ((lastFrozenStep+1)*kv.Step(doms.StepSize()))-1)
 		return fmt.Errorf("can't persist comittement for blockNum %d, txNum %d: step %d is frozen",
 			lastCommittedBlockNum, lastCommittedTxNum, lastCommitedStep)
-	}
-
-	if !useExternalTx && applyTx != nil {
-		if err = applyTx.Commit(); err != nil {
-			return err
-		}
 	}
 
 	if execStage.SyncMode() == stages.ModeApplyingBlocks {

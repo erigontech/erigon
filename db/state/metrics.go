@@ -28,7 +28,9 @@ var (
 	//LatestStateReadGrindNotFound = metrics.GetOrCreateSummary(`latest_state_read{type="grind",found="no"}`)  //nolint
 	//LatestStateReadCold          = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="yes"}`)  //nolint
 	//LatestStateReadColdNotFound  = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="no"}`)   //nolint
-	mxPruneTookAgg         = metrics.GetOrCreateSummary(`prune_seconds{type="state"}`)
+	mxPruneTookAgg   = metrics.GetOrCreateSummary(`prune_seconds{type="state"}`)
+	mxCollateTookAgg = metrics.GetOrCreateSummary(`collate_seconds{type="state"}`)
+
 	mxPrunableDAcc         = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="account"}`)
 	mxPrunableDSto         = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="storage"}`)
 	mxPrunableDCode        = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="code"}`)

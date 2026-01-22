@@ -78,14 +78,6 @@ func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, c
 
 	var d1, d2, d3, d4, d5, d6 time.Duration
 	var err error
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(context.Background())
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
 	timeout := cfg.timeout
 
 	// this update is required, because cfg.bd.UpdateFromDb(tx) below reads it and initialises requestedLow accordingly
@@ -309,14 +301,6 @@ func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, c
 			return err
 		}
 	}
-
-	// remove the temporary bucket for bodies stage
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	if stopped {
 		return common.ErrStopped
 	}
@@ -396,30 +380,13 @@ func logWritingBodies(logPrefix string, committed, headerProgress uint64, logger
 
 func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {
 	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
-
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-
 	if err := cfg.blockWriter.MakeBodiesNonCanonical(tx, u.UnwindPoint+1); err != nil {
 		return err
 	}
-
 	if err = u.Done(tx); err != nil {
 		return err
-	}
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
 	}
 	return nil
 }
