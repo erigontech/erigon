@@ -6,9 +6,11 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"runtime/debug"
 	"time"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -240,7 +242,9 @@ func TableScanningPrune(
 			stat.PruneCountTx, "vals", stat.PruneCountValues, "all vals", valLen, "dups", stat.DupsDeleted,
 			"spent ms", time.Since(start).Milliseconds(),
 			"key prune status", stat.KeyProgress.String(),
-			"val prune status", stat.ValueProgress.String())
+			"val prune status", stat.ValueProgress.String(),
+			"dbg", dbg.Stack(),
+			"debug", debug.Stack())
 	}()
 	if prevStat.KeyProgress != Done {
 		txnb := common.Copy(keyCursorPosition.StartKey)
