@@ -1083,6 +1083,8 @@ func (d *Domain) buildFiles(ctx context.Context, step kv.Step, collation Collati
 }
 
 func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Reader, ps *background.ProgressSet) error {
+	t := time.Now()
+
 	idxPath := d.kviAccessorNewFilePath(fromStep, toStep)
 	versionOfRs := uint8(0)
 	if !d.FileVersion.AccessorKVI.Current.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
@@ -1101,7 +1103,6 @@ func (d *Domain) buildHashMapAccessor(ctx context.Context, fromStep, toStep kv.S
 		NoFsync:    d.noFsync,
 	}
 
-	t := time.Now()
 	if took := time.Since(t); took > 100*time.Millisecond {
 		log.Warn("[dbg] build2 domain", "name", d.Name.String(), "took", took, "f", idxPath)
 	}
