@@ -943,7 +943,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 
 	defer func(t time.Time) {
 		took := time.Since(t)
-		if took > 10*time.Millisecond {
+		if took > 100*time.Millisecond {
 			log.Warn("[dbg] collate ii", "name", ii.Name.String(), "took", took)
 		}
 	}(time.Now())
@@ -1181,7 +1181,7 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 	if err := buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, ii.logger); err != nil {
 		return err
 	}
-	if took := time.Since(t); took > 10*time.Millisecond {
+	if took := time.Since(t); took > 100*time.Millisecond {
 		log.Warn("[dbg] build ii", "name", ii.Name.String(), "took", took, "idxPath", idxPath)
 	}
 
