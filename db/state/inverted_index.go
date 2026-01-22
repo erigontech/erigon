@@ -734,8 +734,7 @@ func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 	min := iit.ii.minTxNumInDB(tx)
 
 	pruneInProgress := (stat.KeyProgress != prune.Done || stat.ValueProgress != prune.Done) && untilTx == stat.TxTo
-
-	//println("in ii", iit.ii.FilenameBase, stat.KeyProgress.String(), stat.ValueProgress.String(), stat.TxTo, untilTx, min)
+	//println(pruneInProgress, stat.ValueProgress.String(), stat.KeyProgress.String())
 	return min == 0 || min < iit.files.EndTxNum() || pruneInProgress || untilTx > stat.TxTo
 }
 
