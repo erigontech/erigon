@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erigontech/erigon/common/dbg"
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/prune"
 	btree2 "github.com/tidwall/btree"
@@ -1039,7 +1040,7 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 	case "commitment":
 		mxPrunableHComm.Set(delta)
 	}
-	println("in history", ht.h.FilenameBase, stat.KeyProgress.String(), stat.ValueProgress.String(), stat.TxTo, txTo, minTxDB, minIdxTx < txTo || pruneInProgress)
+	println("in history", ht.h.FilenameBase, stat.KeyProgress.String(), stat.ValueProgress.String(), stat.TxTo, txTo, minTxDB, minIdxTx < txTo || pruneInProgress, dbg.Stack())
 
 	return minIdxTx < txTo || pruneInProgress, txTo
 }
@@ -1057,6 +1058,7 @@ func (ht *HistoryRoTx) Prune(ctx context.Context, tx kv.RwTx, txFrom, txTo, limi
 		var can bool
 		can, txTo = ht.canPruneUntil(tx, txTo)
 		if !can {
+			println("prune not allowed for tx", txTo, ht.h.FilenameBase, can)
 			return nil, nil
 		}
 	}
