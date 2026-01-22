@@ -1288,21 +1288,22 @@ func opSelfdestruct6780(pc uint64, interpreter *EVMInterpreter, scope *CallConte
 	beneficiary := scope.Stack.pop()
 	callerAddr := scope.Contract.Address()
 	beneficiaryAddr := accounts.InternAddress(beneficiary.Bytes20())
-	balance, err := interpreter.evm.IntraBlockState().GetBalance(callerAddr)
+	ibs := interpreter.evm.IntraBlockState()
+	balance, err := ibs.GetBalance(callerAddr)
 	if err != nil {
 		return pc, nil, err
 	}
-	interpreter.evm.IntraBlockState().SubBalance(callerAddr, balance, tracing.BalanceDecreaseSelfdestruct)
-	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
-	newlyCreated, err := interpreter.evm.IntraBlockState().Selfdestruct6780(callerAddr)
+	ibs.SubBalance(callerAddr, balance, tracing.BalanceDecreaseSelfdestruct)
+	ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
+	selfDestructed, err := ibs.Selfdestruct6780(callerAddr)
 	if err != nil {
 		return pc, nil, err
 	}
 	if interpreter.evm.ChainRules().IsAmsterdam && !balance.IsZero() {
 		if callerAddr != beneficiaryAddr {
-			interpreter.evm.IntraBlockState().AddLog(misc.EthTransferLog(callerAddr, beneficiaryAddr, balance))
-		} else if newlyCreated {
-			interpreter.evm.IntraBlockState().AddLog(misc.EthTransferLog(callerAddr, accounts.ZeroAddress, balance))
+			ibs.AddLog(misc.EthTransferLog(callerAddr.Value(), beneficiaryAddr.Value(), balance))
+		} else if selfDestructed {
+			ibs.AddLog(misc.EthTransferLog(callerAddr.Value(), common.Address{}, balance))
 		}
 	}
 	if interpreter.evm.Config().Tracer != nil && interpreter.evm.Config().Tracer.OnEnter != nil {

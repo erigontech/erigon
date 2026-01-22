@@ -399,7 +399,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	}
 
 	if st.evm.Context.PostApplyMessage != nil {
-		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result)
+		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result, rules)
 	}
 
 	return result, nil
@@ -614,7 +614,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	result.BurntContractAddress = burntContractAddress
 
 	if st.evm.Context.PostApplyMessage != nil {
-		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result)
+		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result, rules)
 	}
 
 	return result, nil

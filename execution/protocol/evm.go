@@ -88,7 +88,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		postApplyMessageFunc = engine.GetPostApplyMessageFunc()
 	} else {
 		transferFunc = misc.Transfer
-		postApplyMessageFunc = nil
+		postApplyMessageFunc = misc.LogSelfDestructedAccounts
 	}
 	blockContext := evmtypes.BlockContext{
 		CanTransfer:      CanTransfer,

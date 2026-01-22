@@ -20,6 +20,8 @@
 package misc
 
 import (
+	"sort"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -33,14 +35,14 @@ import (
 
 // EthTransferLog creates and ETH transfer log according to EIP-7708.
 // Specification: https://eips.ethereum.org/EIPS/eip-7708
-func EthTransferLog(from, to accounts.Address, amount uint256.Int) *types.Log {
+func EthTransferLog(from, to common.Address, amount uint256.Int) *types.Log {
 	amount32 := amount.Bytes32()
 	return &types.Log{
 		Address: params.SystemAddress.Value(),
 		Topics: []common.Hash{
 			params.EthTransferLogEvent,
-			from.Value().Hash(),
-			to.Value().Hash(),
+			from.Hash(),
+			to.Hash(),
 		},
 		Data: amount32[:],
 	}
@@ -48,13 +50,13 @@ func EthTransferLog(from, to accounts.Address, amount uint256.Int) *types.Log {
 
 // EthSelfDestructLog creates and ETH self-destruct burn log according to EIP-7708.
 // Specification: https://eips.ethereum.org/EIPS/eip-7708
-func EthSelfDestructLog(from accounts.Address, amount uint256.Int) *types.Log {
+func EthSelfDestructLog(from common.Address, amount uint256.Int) *types.Log {
 	amount32 := amount.Bytes32()
 	return &types.Log{
 		Address: params.SystemAddress.Value(),
 		Topics: []common.Hash{
 			params.EthSelfDestructLogEvent,
-			from.Value().Hash(),
+			from.Hash(),
 		},
 		Data: amount32[:],
 	}
@@ -72,8 +74,24 @@ func Transfer(db evmtypes.IntraBlockState, sender, recipient accounts.Address, a
 	if err != nil {
 		return err
 	}
-	if rules.IsAmsterdam && !amount.IsZero() {
-		db.AddLog(EthTransferLog(sender, recipient, amount))
+	if rules.IsAmsterdam && !amount.IsZero() { // EIP-7708
+		db.AddLog(EthTransferLog(sender.Value(), recipient.Value(), amount))
 	}
 	return nil
+}
+
+func LogSelfDestructedAccounts(ibs evmtypes.IntraBlockState, sender accounts.Address, coinbase accounts.Address, result *evmtypes.ExecutionResult, rules *chain.Rules) {
+	if !rules.IsAmsterdam {
+		return
+	}
+	// (EIP-7708) Emit SelfDestruct logs where accounts with non-empty balances have been deleted
+	removedWithBalance := ibs.GetRemovedAccountsWithBalance()
+	if removedWithBalance != nil {
+		sort.Slice(removedWithBalance, func(i, j int) bool {
+			return removedWithBalance[i].Address.Cmp(removedWithBalance[j].Address) < 0
+		})
+		for _, sd := range removedWithBalance {
+			ibs.AddLog(EthSelfDestructLog(sd.Address, sd.Balance))
+		}
+	}
 }

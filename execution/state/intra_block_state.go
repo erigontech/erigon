@@ -1184,7 +1184,7 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 
 var zeroBalance uint256.Int
 
-func (sdb *IntraBlockState) Selfdestruct6780(addr accounts.Address) (newlyCreated bool, err error) {
+func (sdb *IntraBlockState) Selfdestruct6780(addr accounts.Address) (bool, error) {
 	stateObject, err := sdb.getStateObject(addr)
 	if err != nil {
 		return false, err
@@ -1199,9 +1199,11 @@ func (sdb *IntraBlockState) Selfdestruct6780(addr accounts.Address) (newlyCreate
 		}
 		if _, ok := types.ParseDelegation(code); !ok {
 			sdb.Selfdestruct(addr)
+			return true, nil
 		}
 	}
-	return stateObject.newlyCreated, nil
+	// TODO(yperbasis) double check that returning false is OK here in the context of EIP-7708
+	return false, nil
 }
 
 // SetTransientState sets transient storage for a given account. It
@@ -1609,6 +1611,24 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 	// Invalidate journal because reverting across transactions is not allowed.
 	sdb.clearJournalAndRefund()
 	return nil
+}
+
+// GetRemovedAccountsWithBalance returns a list of accounts scheduled for
+// removal which still have positive balance. The purpose of this function is
+// to handle a corner case of EIP-7708 where a self-destructed account might
+// still receive funds between sending/burning its previous balance and actual
+// removal. In this case the burning of these remaining balances still need to
+// be logged.
+// Specification EIP-7708: https://eips.ethereum.org/EIPS/eip-7708
+func (sdb *IntraBlockState) GetRemovedAccountsWithBalance() (list []evmtypes.AddressAndBalance) {
+	for addr := range sdb.journal.dirties {
+		if obj, exist := sdb.stateObjects[addr]; exist && obj.selfdestructed {
+			if balance := obj.Balance(); !balance.IsZero() {
+				list = append(list, evmtypes.AddressAndBalance{Address: obj.address.Value(), Balance: balance})
+			}
+		}
+	}
+	return list
 }
 
 func (sdb *IntraBlockState) SoftFinalise() {

@@ -406,7 +406,7 @@ func (s *Merge) GetTransferFunc() evmtypes.TransferFunc {
 }
 
 func (s *Merge) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
-	return s.eth1Engine.GetPostApplyMessageFunc()
+	return misc.LogSelfDestructedAccounts
 }
 
 func (s *Merge) Close() error {

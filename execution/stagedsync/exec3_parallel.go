@@ -976,9 +976,11 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	}
 	ibs.SetTrace(txTask.Trace)
 
+	rules := txTask.EvmBlockContext.Rules(txTask.Config)
+
 	if task.IsBlockEnd() || txIndex < 0 {
 		if blockNum == 0 || txTask.Config.IsByzantium(blockNum) {
-			if err := ibs.FinalizeTx(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter); err != nil {
+			if err := ibs.FinalizeTx(rules, stateWriter); err != nil {
 				return nil, nil, nil, err
 			}
 		}
@@ -1022,6 +1024,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 					message.From(),
 					result.Coinbase,
 					&execResult,
+					rules,
 				)
 
 				// capture postApplyMessageFunc side affects
@@ -1043,7 +1046,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	vm.SetTrace(false)
 
 	if txTask.Config.IsByzantium(blockNum) {
-		ibs.FinalizeTx(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter)
+		ibs.FinalizeTx(rules, stateWriter)
 	}
 
 	receipt, err := result.CreateNextReceipt(prevReceipt)
