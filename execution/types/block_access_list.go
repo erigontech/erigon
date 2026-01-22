@@ -1029,7 +1029,7 @@ func ConvertBlockAccessListToTypesProto(bal BlockAccessList) []*typesproto.Block
 		if account == nil {
 			continue
 		}
-		rpcAccount := &typesproto.BlockAccessListAccount{
+		balAccount := &typesproto.BlockAccessListAccount{
 			Address: gointerfaces.ConvertAddressToH160(account.Address.Value()),
 		}
 		for _, storageChange := range account.StorageChanges {
@@ -1048,17 +1048,17 @@ func ConvertBlockAccessListToTypesProto(bal BlockAccessList) []*typesproto.Block
 					Value: gointerfaces.ConvertHashToH256(change.Value),
 				})
 			}
-			rpcAccount.StorageChanges = append(rpcAccount.StorageChanges, slotChanges)
+			balAccount.StorageChanges = append(balAccount.StorageChanges, slotChanges)
 		}
 		for _, read := range account.StorageReads {
-			rpcAccount.StorageReads = append(rpcAccount.StorageReads, gointerfaces.ConvertHashToH256(read.Value()))
+			balAccount.StorageReads = append(balAccount.StorageReads, gointerfaces.ConvertHashToH256(read.Value()))
 		}
 		for _, balanceChange := range account.BalanceChanges {
 			if balanceChange == nil {
 				continue
 			}
 			val := balanceChange.Value
-			rpcAccount.BalanceChanges = append(rpcAccount.BalanceChanges, &typesproto.BlockAccessListBalanceChange{
+			balAccount.BalanceChanges = append(balAccount.BalanceChanges, &typesproto.BlockAccessListBalanceChange{
 				Index: uint32(balanceChange.Index),
 				Value: gointerfaces.ConvertUint256IntToH256(&val),
 			})
@@ -1067,7 +1067,7 @@ func ConvertBlockAccessListToTypesProto(bal BlockAccessList) []*typesproto.Block
 			if nonceChange == nil {
 				continue
 			}
-			rpcAccount.NonceChanges = append(rpcAccount.NonceChanges, &typesproto.BlockAccessListNonceChange{
+			balAccount.NonceChanges = append(balAccount.NonceChanges, &typesproto.BlockAccessListNonceChange{
 				Index: uint32(nonceChange.Index),
 				Value: nonceChange.Value,
 			})
@@ -1078,12 +1078,12 @@ func ConvertBlockAccessListToTypesProto(bal BlockAccessList) []*typesproto.Block
 			}
 			data := make([]byte, len(codeChange.Data))
 			copy(data, codeChange.Data)
-			rpcAccount.CodeChanges = append(rpcAccount.CodeChanges, &typesproto.BlockAccessListCodeChange{
+			balAccount.CodeChanges = append(balAccount.CodeChanges, &typesproto.BlockAccessListCodeChange{
 				Index: uint32(codeChange.Index),
 				Data:  data,
 			})
 		}
-		out = append(out, rpcAccount)
+		out = append(out, balAccount)
 	}
 	return out
 }

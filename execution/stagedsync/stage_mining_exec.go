@@ -100,9 +100,18 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 	logPrefix := s.LogPrefix()
 	current := cfg.miningState.MiningBlock
+	needBAL := execCfg.chainConfig.IsAmsterdam(current.Header.Time) || execCfg.experimentalBAL
 
 	stateReader := state.NewReaderV3(sd.AsGetter(tx))
 	ibs := state.New(stateReader)
+	var balIO *state.VersionedIO
+	var systemReads state.ReadSet
+	var systemWrites state.VersionedWrites
+	var systemAccess map[accounts.Address]struct{}
+	if needBAL {
+		ibs.SetVersionMap(state.NewVersionMap(nil))
+		balIO = &state.VersionedIO{}
+	}
 	// Clique consensus needs forced author in the evm context
 	//if cfg.chainConfig.Consensus == chain.CliqueConsensus {
 	//	execCfg.author = &cfg.miningState.MiningConfig.Etherbase
@@ -129,6 +138,12 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 	txNum := sd.TxNum()
 
 	protocol.InitializeBlockExecution(cfg.engine, chainReader, current.Header, cfg.chainConfig, ibs, &state.NoopWriter{}, logger, nil)
+	if needBAL {
+		systemReads = mergeReadSets(systemReads, ibs.VersionedReads())
+		systemWrites = mergeVersionedWrites(systemWrites, ibs.VersionedWrites(false))
+		systemAccess = mergeAccessedAddresses(systemAccess, ibs.AccessedAddresses())
+		ibs.ResetVersionedIO()
+	}
 
 	coinbase := accounts.InternAddress(cfg.miningState.MiningConfig.Etherbase)
 
@@ -150,7 +165,7 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 		}
 
 		if len(txns) > 0 {
-			logs, stop, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, coinbase, ibs, interrupt, cfg.payloadId, logger)
+			logs, stop, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, coinbase, ibs, balIO, interrupt, cfg.payloadId, logger)
 			if err != nil {
 				return err
 			}
@@ -190,12 +205,27 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 	}
 
 	var block *types.Block
+	if needBAL {
+		ibs.ResetVersionedIO()
+	}
 	block, current.Requests, err = protocol.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txns, current.Uncles, &state.NoopWriter{}, cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, chainReader, true, logger, nil)
 	if err != nil {
 		return fmt.Errorf("cannot finalize block execution: %s", err)
 	}
 
 	blockHeight := block.NumberU64()
+	if needBAL {
+		systemReads = mergeReadSets(systemReads, ibs.VersionedReads())
+		systemWrites = mergeVersionedWrites(systemWrites, ibs.VersionedWrites(false))
+		systemAccess = mergeAccessedAddresses(systemAccess, ibs.AccessedAddresses())
+		ibs.ResetVersionedIO()
+
+		systemVersion := state.Version{BlockNum: blockHeight, TxIndex: -1}
+		balIO.RecordReads(systemVersion, systemReads)
+		balIO.RecordWrites(systemVersion, systemWrites)
+		balIO.RecordAccesses(systemVersion, systemAccess)
+		current.BlockAccessList = CreateBAL(blockHeight, balIO, execCfg.dirs.DataDir)
+	}
 	writeBlockForExecution := func(rwTx kv.TemporalRwTx) error {
 		if err = rawdb.WriteHeader(rwTx, block.Header()); err != nil {
 			return fmt.Errorf("cannot write header: %s", err)
@@ -232,22 +262,12 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 
 	// This flag will skip checking the state root
 	execS := &StageState{state: s.state, ID: stages.Execution, BlockNumber: blockHeight - 1}
-
-	var blockAccessList types.BlockAccessList
-	needBAL := execCfg.chainConfig.IsAmsterdam(current.Header.Time) || execCfg.experimentalBAL
-	if needBAL {
-		execCfg.blockAccessListSink = func(blockNum uint64, bal types.BlockAccessList) {
-			if blockNum == blockHeight {
-				blockAccessList = bal
-			}
-		}
-	}
-
-	forceParallel := dbg.Exec3Parallel || needBAL
+	forceParallel := dbg.Exec3Parallel || cfg.chainConfig.IsAmsterdam(current.Header.Time)
 	execTx := tx
 	execSd := sd
 	var execCleanup func()
 	if forceParallel {
+		// get the underlying TemporalTx from MemoryMutation and create temporary SharedDomain
 		if _, ok := tx.(*temporal.RwTx); !ok {
 			type txUnwrapper interface {
 				UnderlyingTx() kv.TemporalTx
@@ -281,13 +301,6 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 	if err = ExecV3(ctx, execS, u, execCfg, execSd, execTx, forceParallel, blockHeight, logger); err != nil {
 		logger.Error("cannot execute block execution", "err", err)
 		return err
-	}
-
-	if needBAL {
-		if blockAccessList == nil {
-			return fmt.Errorf("block %d: missing block access list from execution", blockHeight)
-		}
-		current.BlockAccessList = blockAccessList
 	}
 
 	commitmentTxNum := execSd.TxNum()
@@ -486,12 +499,13 @@ func addTransactionsToMiningBlock(
 	txns types.Transactions,
 	coinbase accounts.Address,
 	ibs *state.IntraBlockState,
+	balIO *state.VersionedIO,
 	interrupt *atomic.Bool,
 	payloadId uint64,
 	logger log.Logger,
 ) (types.Logs, bool, error) {
 	header := current.Header
-	txnIdx := ibs.TxnIndex() + 1
+	txnIdx := ibs.TxnIndex()
 	gasPool := new(protocol.GasPool).AddGas(header.GasLimit - header.GasUsed)
 	if header.BlobGasUsed != nil {
 		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed)
@@ -500,6 +514,23 @@ func addTransactionsToMiningBlock(
 
 	var coalescedLogs types.Logs
 	noop := state.NewNoopWriter()
+	recordTxIO := func() {
+		if balIO == nil {
+			return
+		}
+		version := ibs.Version()
+		balIO.RecordReads(version, ibs.VersionedReads())
+		balIO.RecordWrites(version, ibs.VersionedWrites(false))
+		balIO.RecordAccesses(version, ibs.AccessedAddresses())
+		ibs.ResetVersionedIO()
+	}
+	clearTxIO := func() {
+		if balIO == nil {
+			return
+		}
+		ibs.AccessedAddresses()
+		ibs.ResetVersionedIO()
+	}
 
 	var miningCommitTx = func(txn types.Transaction, coinbase accounts.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
 		ibs.SetTxContext(current.Header.Number.Uint64(), txnIdx)
@@ -612,6 +643,11 @@ LOOP:
 
 		// Start executing the transaction
 		logs, err := miningCommitTx(txn, coinbase, vmConfig, chainConfig, ibs, current)
+		if err == nil {
+			recordTxIO()
+		} else {
+			clearTxIO()
+		}
 		if errors.Is(err, protocol.ErrGasLimitReached) {
 			// Skip the env out-of-gas transaction
 			logger.Debug(fmt.Sprintf("[%s] Gas limit exceeded for env block", logPrefix), "hash", txn.Hash(), "sender", from)

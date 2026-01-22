@@ -53,6 +53,14 @@ func TestEngineApiGeneratedPayloadIncludesBlockAccessList(t *testing.T) {
 		require.NoError(t, bal.Validate())
 		require.NotEmpty(t, bal)
 
+		blockNumber := rpc.BlockNumber(payload.ExecutionPayload.BlockNumber)
+		block, err := eat.RpcApiClient.GetBlockByNumber(ctx, blockNumber, false)
+		require.NoError(t, err)
+		require.NotNil(t, block)
+		require.Equal(t, payload.ExecutionPayload.BlockHash, block.Hash)
+		require.NotNil(t, block.BlockAccessListHash)
+		require.Equal(t, bal.Hash(), *block.BlockAccessListHash)
+
 		senderChanges := findAccountChanges(bal, accounts.InternAddress(sender))
 		receiverChanges := findAccountChanges(bal, accounts.InternAddress(receiver))
 		require.NotNil(t, senderChanges)

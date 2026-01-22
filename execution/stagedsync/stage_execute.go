@@ -88,9 +88,6 @@ type ExecuteBlockCfg struct {
 
 	silkworm        *silkworm.Silkworm
 	experimentalBAL bool
-
-	// blockAccessListSink captures computed BALs (parallel execution only).
-	blockAccessListSink func(blockNum uint64, bal types.BlockAccessList)
 }
 
 func StageExecuteBlocksCfg(

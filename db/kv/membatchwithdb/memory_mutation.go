@@ -73,7 +73,6 @@ func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) *MemoryM
 	}
 }
 
-// UnderlyingTx exposes the wrapped temporal transaction.
 func (m *MemoryMutation) UnderlyingTx() kv.TemporalTx {
 	return m.db
 }
