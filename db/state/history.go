@@ -1010,18 +1010,14 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 	pruneInProgress := stat.KeyProgress == prune.InProgress || stat.ValueProgress == prune.InProgress
 
 	if ht.h.SnapshotsDisabled {
-		if ht.h.KeepRecentTxnInDB >= maxIdxTx {
-			println("im sorry we cant", ht.h.FilenameBase, ht.h.KeepRecentTxnInDB, maxIdxTx)
-			return false, 0
+		if ht.h.KeepRecentTxnInDB < maxIdxTx {
+			txTo = min(maxIdxTx-ht.h.KeepRecentTxnInDB, untilTx) // bound pruning
 		}
-		txTo = min(maxIdxTx-ht.h.KeepRecentTxnInDB, untilTx) // bound pruning
+
 	} else {
-		canPruneIdx := ht.iit.CanPrune(tx)
-		if !canPruneIdx {
-			println("im sorry we cant", ht.h.FilenameBase)
-			return false, 0
+		if ht.iit.CanPrune(tx) {
+			txTo = min(ht.files.EndTxNum(), ht.iit.files.EndTxNum(), untilTx)
 		}
-		txTo = min(ht.files.EndTxNum(), ht.iit.files.EndTxNum(), untilTx)
 	}
 	minTxDB := ht.h.minTxNumInDB(tx)
 	delta := 0.0
