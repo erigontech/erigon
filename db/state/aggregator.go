@@ -666,145 +666,148 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		}
 	}()
 
-	t := time.Now()
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(a.collateAndBuildWorkers)
-
 	dddd := [kv.DomainLen]Collation{}
 	iii := make([]InvertedIndexCollation, len(a.iis))
+	t := time.Now()
+	{
+		g, ctx := errgroup.WithContext(ctx)
+		g.SetLimit(a.collateAndBuildWorkers)
 
-	for _, d := range a.d {
-		if d.Disable {
-			continue
-		}
-
-		d := d
-		dc := d.BeginFilesRo()
-		firstStepNotInFiles := dc.FirstStepNotInFiles()
-		dc.Close()
-		if step < firstStepNotInFiles {
-			continue
-		}
-
-		a.wg.Add(1)
-		g.Go(func() error {
-			defer a.wg.Done()
-
-			var collation Collation
-			if err := a.db.View(ctx, func(tx kv.Tx) (err error) {
-				collation, err = d.collate(ctx, step, txFrom, txTo, tx)
-				return err
-			}); err != nil {
-				return fmt.Errorf("domain collation %q has failed: %w", d.FilenameBase, err)
+		for _, d := range a.d {
+			if d.Disable {
+				continue
 			}
-			collListMu.Lock()
-			collations = append(collations, collation)
-			dddd[d.Name] = collation
-			collListMu.Unlock()
-			return nil
-		})
-	}
-	closeCollations = false
 
-	// indices are built concurrently
-	for iikey, ii := range a.iis {
-		if ii.Disable {
-			continue
-		}
+			d := d
+			dc := d.BeginFilesRo()
+			firstStepNotInFiles := dc.FirstStepNotInFiles()
+			dc.Close()
+			if step < firstStepNotInFiles {
+				continue
+			}
 
-		ii := ii
-		dc := ii.BeginFilesRo()
-		firstStepNotInFiles := dc.FirstStepNotInFiles()
-		dc.Close()
-		if step < firstStepNotInFiles {
-			continue
-		}
+			a.wg.Add(1)
+			g.Go(func() error {
+				defer a.wg.Done()
 
-		a.wg.Add(1)
-		g.Go(func() error {
-			defer a.wg.Done()
-
-			var collation InvertedIndexCollation
-			err := a.db.View(ctx, func(tx kv.Tx) (err error) {
-				collation, err = ii.collate(ctx, step, tx)
-				return err
+				var collation Collation
+				if err := a.db.View(ctx, func(tx kv.Tx) (err error) {
+					collation, err = d.collate(ctx, step, txFrom, txTo, tx)
+					return err
+				}); err != nil {
+					return fmt.Errorf("domain collation %q has failed: %w", d.FilenameBase, err)
+				}
+				collListMu.Lock()
+				collations = append(collations, collation)
+				dddd[d.Name] = collation
+				collListMu.Unlock()
+				return nil
 			})
-			if err != nil {
-				return fmt.Errorf("index collation %q has failed: %w", ii.FilenameBase, err)
-			}
-			collListMu.Lock()
-			iii[iikey] = collation
-			collListMu.Unlock()
-			return nil
-		})
-	}
-	if err := g.Wait(); err != nil {
-		static.CleanupOnError()
-		return fmt.Errorf("domain collate-build: %w", err)
-	}
-	if took := time.Since(t); took > 100*time.Millisecond {
-		log.Warn("[dbg] collate total", "took", took)
-	}
-
-	buildG, ctx := errgroup.WithContext(ctx)
-	buildG.SetLimit(a.collateAndBuildWorkers)
-	for _, d := range a.d {
-		if d.Disable {
-			continue
 		}
-		a.wg.Add(1)
-		buildG.Go(func() error {
-			defer a.wg.Done()
+		closeCollations = false
 
-			collListMu.Lock()
-			collation := dddd[d.Name]
-			collListMu.Unlock()
-			sf, err := d.buildFiles(ctx, step, collation, a.ps)
-			collation.Close()
-			if err != nil {
-				sf.CleanupOnError()
-				return err
+		// indices are built concurrently
+		for iikey, ii := range a.iis {
+			if ii.Disable {
+				continue
 			}
 
-			dd, err := kv.String2Domain(d.FilenameBase)
-			if err != nil {
-				return err
+			ii := ii
+			dc := ii.BeginFilesRo()
+			firstStepNotInFiles := dc.FirstStepNotInFiles()
+			dc.Close()
+			if step < firstStepNotInFiles {
+				continue
 			}
-			static.d[dd] = sf
-			return nil
-		})
-	}
-	// indices are built concurrently
-	for iikey, ii := range a.iis {
-		if ii.Disable {
-			continue
+
+			a.wg.Add(1)
+			g.Go(func() error {
+				defer a.wg.Done()
+
+				var collation InvertedIndexCollation
+				err := a.db.View(ctx, func(tx kv.Tx) (err error) {
+					collation, err = ii.collate(ctx, step, tx)
+					return err
+				})
+				if err != nil {
+					return fmt.Errorf("index collation %q has failed: %w", ii.FilenameBase, err)
+				}
+				collListMu.Lock()
+				iii[iikey] = collation
+				collListMu.Unlock()
+				return nil
+			})
 		}
+		if err := g.Wait(); err != nil {
+			static.CleanupOnError()
+			return fmt.Errorf("domain collate-build: %w", err)
+		}
+		if took := time.Since(t); took > 100*time.Millisecond {
+			log.Warn("[dbg] collate total", "took", took)
+		}
+	}
+	{
 
-		a.wg.Add(1)
-		buildG.Go(func() error {
-			defer a.wg.Done()
-			collListMu.Lock()
-			collation := iii[iikey]
-			collListMu.Unlock()
+		buildG, ctx := errgroup.WithContext(ctx)
+		buildG.SetLimit(a.collateAndBuildWorkers)
+		for _, d := range a.d {
+			if d.Disable {
+				continue
+			}
+			a.wg.Add(1)
+			buildG.Go(func() error {
+				defer a.wg.Done()
 
-			sf, err := ii.buildFiles(ctx, step, collation, a.ps)
-			if err != nil {
-				sf.CleanupOnError()
-				return err
+				collListMu.Lock()
+				collation := dddd[d.Name]
+				collListMu.Unlock()
+				sf, err := d.buildFiles(ctx, step, collation, a.ps)
+				collation.Close()
+				if err != nil {
+					sf.CleanupOnError()
+					return err
+				}
+
+				dd, err := kv.String2Domain(d.FilenameBase)
+				if err != nil {
+					return err
+				}
+				static.d[dd] = sf
+				return nil
+			})
+		}
+		// indices are built concurrently
+		for iikey, ii := range a.iis {
+			if ii.Disable {
+				continue
 			}
 
-			static.ivfs[iikey] = sf
-			return nil
-		})
+			a.wg.Add(1)
+			buildG.Go(func() error {
+				defer a.wg.Done()
+				collListMu.Lock()
+				collation := iii[iikey]
+				collListMu.Unlock()
+
+				sf, err := ii.buildFiles(ctx, step, collation, a.ps)
+				if err != nil {
+					sf.CleanupOnError()
+					return err
+				}
+
+				static.ivfs[iikey] = sf
+				return nil
+			})
+		}
+		t = time.Now()
+		log.Warn("[dbg] build start", "took", time.Since(t))
+		if err := buildG.Wait(); err != nil {
+			log.Warn("[dbg] build fuck", "took", time.Since(t), "err", err)
+			static.CleanupOnError()
+			return fmt.Errorf("domain collate-build: %w", err)
+		}
+		log.Warn("[dbg] build total", "took", time.Since(t))
 	}
-	t = time.Now()
-	log.Warn("[dbg] build start", "took", time.Since(t))
-	if err := buildG.Wait(); err != nil {
-		log.Warn("[dbg] build fuck", "took", time.Since(t), "err", err)
-		static.CleanupOnError()
-		return fmt.Errorf("domain collate-build: %w", err)
-	}
-	log.Warn("[dbg] build total", "took", time.Since(t))
 
 	mxStepTook.ObserveDuration(stepStartedAt)
 	a.IntegrateDirtyFiles(static, txFrom, txTo)
