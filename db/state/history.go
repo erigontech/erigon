@@ -230,6 +230,8 @@ func (h *History) buildVi(ctx context.Context, item *FilesItem, ps *background.P
 }
 
 func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHist *seg.Decompressor, efBaseTxNum uint64, ps *background.ProgressSet) error {
+	t := time.Now()
+
 	var histKey []byte
 	var valOffset uint64
 
@@ -326,6 +328,10 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		} else {
 			break
 		}
+	}
+
+	if took := time.Since(t); took > 100*time.Millisecond {
+		log.Warn("[dbg] build3 hist", "name", h.Name.String(), "took", took, "fName", fName)
 	}
 	return nil
 }
@@ -526,6 +532,12 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 			}
 		}
 	}()
+	defer func(t time.Time) {
+		took := time.Since(t)
+		if took > 100*time.Millisecond {
+			log.Warn("[dbg] collate hist", "name", h.Name.String(), "took", took)
+		}
+	}(time.Now())
 
 	_histComp, err = seg.NewCompressor(ctx, "collate hist "+h.FilenameBase, historyPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
 	if err != nil {
@@ -775,23 +787,39 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 		collation.efHistoryComp.DisableFsync()
 	}
 
+	defer func(t time.Time) {
+		took := time.Since(t)
+		if took > 100*time.Millisecond {
+			log.Warn("[dbg] build hist", "name", h.Name.String(), "took", took)
+		}
+	}(time.Now())
+
 	{
 		ps := background.NewProgressSet()
 		_, efHistoryFileName := filepath.Split(collation.efHistoryPath)
 		p := ps.AddNew(efHistoryFileName, 1)
 		defer ps.Delete(p)
 
+		t := time.Now()
 		if err = collation.efHistoryComp.Compress(); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s .ef history: %w", h.FilenameBase, err)
 		}
+		if took := time.Since(t); took > 100*time.Millisecond {
+			log.Warn("[dbg] build1 hist", "name", h.Name.String(), "took", took, "f", efHistoryFileName)
+		}
+
 		ps.Delete(p)
 	}
 	{
 		_, historyFileName := filepath.Split(collation.historyPath)
 		p := ps.AddNew(historyFileName, 1)
 		defer ps.Delete(p)
+		t := time.Now()
 		if err = collation.historyComp.Compress(); err != nil {
 			return HistoryFiles{}, fmt.Errorf("compress %s .v history: %w", h.FilenameBase, err)
+		}
+		if took := time.Since(t); took > 100*time.Millisecond {
+			log.Warn("[dbg] build2 hist", "name", h.Name.String(), "took", took, "f", historyFileName)
 		}
 		ps.Delete(p)
 	}
@@ -816,6 +844,7 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 	}
 
 	historyIdxPath := h.vAccessorNewFilePath(step, step+1)
+
 	err = h.buildVI(ctx, historyIdxPath, historyDecomp, efHistoryDecomp, collation.efBaseTxNum, ps)
 	if err != nil {
 		return HistoryFiles{}, fmt.Errorf("build %s .vi: %w", h.FilenameBase, err)

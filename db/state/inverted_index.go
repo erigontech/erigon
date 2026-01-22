@@ -917,6 +917,13 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
 
+	defer func(t time.Time) {
+		took := time.Since(t)
+		if took > 100*time.Millisecond {
+			log.Warn("[dbg] collate ii", "name", ii.Name.String(), "took", took)
+		}
+	}(time.Now())
+
 	for k, v, err := keysCursor.Seek(txKey[:]); k != nil; k, v, err = keysCursor.Next() {
 		if err != nil {
 			return InvertedIndexCollation{}, fmt.Errorf("iterate over %s keys cursor: %w", ii.FilenameBase, err)
@@ -1088,6 +1095,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 	if err := ii.buildMapAccessor(ctx, step, step+1, ii.dataReader(decomp), ps); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.FilenameBase, err)
 	}
+
 	if ii.Accessors.Has(statecfg.AccessorHashMap) {
 		if mapAccessor, err = ii.openHashMapAccessor(ii.efAccessorNewFilePath(step, step+1)); err != nil {
 			return InvertedFiles{}, err
@@ -1099,6 +1107,8 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 }
 
 func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Reader, ps *background.ProgressSet) error {
+	t := time.Now()
+
 	idxPath := ii.efAccessorNewFilePath(fromStep, toStep)
 	versionOfRs := uint8(0)
 	if !ii.FileVersion.AccessorEFI.Current.Eq(version.V1_0) { // inner version=1 incompatible with .efi v1.0
@@ -1147,6 +1157,10 @@ func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep 
 	if err := buildHashMapAccessor(ctx, data, idxPath, false, cfg, ps, ii.logger); err != nil {
 		return err
 	}
+	if took := time.Since(t); took > 100*time.Millisecond {
+		log.Warn("[dbg] build ii", "name", ii.Name.String(), "took", took, "idxPath", idxPath)
+	}
+
 	return nil
 }
 
@@ -1173,6 +1187,7 @@ func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	if to == 0 {
 		to = from
 	}
+
 	return from, to
 }
 
