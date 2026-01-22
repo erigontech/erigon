@@ -794,6 +794,7 @@ func (iit *InvertedIndexRoTx) TableScanningPrune(ctx context.Context, tx kv.RwTx
 			txTo = min(txTo, iit.files.EndTxNum())
 		}
 		if !iit.CanPrune(tx) {
+			println("in ii!!! prune not allowed for", iit.ii.FilenameBase)
 			return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64, Progress: prune.Done}, nil
 		}
 	}
