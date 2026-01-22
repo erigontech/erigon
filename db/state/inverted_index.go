@@ -959,6 +959,9 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 	if err != nil {
 		return InvertedIndexCollation{}, fmt.Errorf("create %s compressor: %w", ii.FilenameBase, err)
 	}
+	if ii.noFsync {
+		comp.DisableFsync()
+	}
 	coll.writer = seg.NewWriter(comp, ii.Compression)
 
 	var (
