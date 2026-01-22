@@ -1012,11 +1012,15 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 	if ht.h.SnapshotsDisabled {
 		if ht.h.KeepRecentTxnInDB < maxIdxTx {
 			txTo = min(maxIdxTx-ht.h.KeepRecentTxnInDB, untilTx) // bound pruning
+		} else {
+			txTo = untilTx
 		}
 
 	} else {
 		if ht.iit.CanPrune(tx) {
 			txTo = min(ht.files.EndTxNum(), ht.iit.files.EndTxNum(), untilTx)
+		} else {
+			txTo = untilTx
 		}
 	}
 	minTxDB := ht.h.minTxNumInDB(tx)
