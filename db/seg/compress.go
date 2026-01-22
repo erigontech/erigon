@@ -33,8 +33,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c2h5oh/datasize"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	dir2 "github.com/erigontech/erigon/common/dir"
@@ -964,7 +962,7 @@ func (f *RawWordsFile) ForEach(walker func(v []byte, compressed bool) error) err
 	if err != nil {
 		return err
 	}
-	r := bufio.NewReaderSize(f.f, int(8*datasize.MB))
+	r := bufio.NewReaderSize(f.f, int(2*etl.BufIOSize))
 	buf := make([]byte, 16*1024)
 	l, e := binary.ReadUvarint(r)
 	for ; e == nil; l, e = binary.ReadUvarint(r) {
