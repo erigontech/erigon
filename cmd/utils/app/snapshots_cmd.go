@@ -500,6 +500,15 @@ var snapshotCommand = cli.Command{
 				},
 			},
 		},
+		{
+			Name:   "preverified",
+			Action: verifyWebseeds,
+			Flags: []cli.Flag{
+				&preverifiedFlag,
+				&verifyChainFlag,
+				&concurrencyFlag,
+			},
+		},
 	},
 }
 
