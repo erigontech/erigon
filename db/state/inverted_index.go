@@ -724,7 +724,7 @@ func (iit *InvertedIndexRoTx) CanHashPrune(tx kv.Tx) bool {
 	return false
 }
 
-func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
+func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 	stat, err := GetPruneValProgress(tx, []byte(iit.ii.ValuesTable))
 	if err != nil {
 		iit.ii.logger.Warn("CanPrune GetPruneValProgress error", "err", err)
@@ -732,7 +732,9 @@ func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx) bool {
 	}
 	min := iit.ii.minTxNumInDB(tx)
 
-	return min == 0 || min < iit.files.EndTxNum() || stat.KeyProgress == prune.InProgress || stat.ValueProgress == prune.InProgress
+	pruneInProgress := (stat.KeyProgress != prune.Done || stat.ValueProgress != prune.Done) && untilTx == stat.TxTo
+
+	return min == 0 || min < iit.files.EndTxNum() || pruneInProgress
 }
 
 func (iit *InvertedIndexRoTx) canBuild(dbtx kv.Tx) bool { //nolint
@@ -793,7 +795,7 @@ func (iit *InvertedIndexRoTx) TableScanningPrune(ctx context.Context, tx kv.RwTx
 		if iit.files.EndTxNum() > 0 {
 			txTo = min(txTo, iit.files.EndTxNum())
 		}
-		if !iit.CanPrune(tx) {
+		if !iit.CanPrune(tx, txTo) {
 			return &InvertedIndexPruneStat{MinTxNum: math.MaxUint64, Progress: prune.Done}, nil
 		}
 	}
