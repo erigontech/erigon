@@ -385,6 +385,9 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, dbg.Exec3Parallel, to, logger); err != nil {
 		return err
 	}
+	if dbg.ExecThrottle > 0 {
+		time.Sleep(dbg.ExecThrottle)
+	}
 	return nil
 }
 
