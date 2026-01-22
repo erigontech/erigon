@@ -173,7 +173,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	var cumGasUsed uint64
 
 	defer func() {
-		if dbg.Enabled(ctx) {
+		if dbg.DebugEnabled(ctx) {
 			log.Info("[dbg] ReceiptGenerator.GetReceipt",
 				"txNum", txNum,
 				"txHash", txnHash.String(),
@@ -289,7 +289,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			if err := sharedDomains.SeekCommitment(ctx, tx); err != nil {
 				return nil, err
 			}
-			stateWriter = state.NewWriter(sharedDomains,tx, nil, sharedDomains.TxNum())
+			stateWriter = state.NewWriter(sharedDomains, tx, nil, sharedDomains.TxNum())
 
 			evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
 			ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
@@ -389,7 +389,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	var receiptsFromDB types.Receipts
 	receipts := make(types.Receipts, len(block.Transactions()))
 	defer func() {
-		if dbg.Enabled(ctx) {
+		if dbg.DebugEnabled(ctx) {
 			log.Info("[dbg] ReceiptGenerator.GetReceipts",
 				"blockNum", blockNum,
 				"nil receipts in db", receiptsFromDB == nil)

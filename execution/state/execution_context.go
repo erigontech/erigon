@@ -229,24 +229,35 @@ type temporalGetter struct {
 func (gt *temporalGetter) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
 	switch name {
 	case kv.AccountsDomain:
-		addr := accounts.BytesToAddress(k)
-		a, txNum, ok, err := gt.sd.GetAccount(context.Background(), addr, gt.tx)
-		if ok {
-			return accounts.SerialiseV3(a), kv.Step(txNum / gt.tx.StepSize()), nil
+		if len(k) == length.Addr {
+			addr := accounts.BytesToAddress(k)
+			a, txNum, ok, err := gt.sd.GetAccount(context.Background(), addr, gt.tx)
+			if ok {
+				return accounts.SerialiseV3(a), kv.Step(txNum / gt.tx.StepSize()), nil
+			}
+			return nil, 0, err
 		}
-		return nil, 0, err
+		return nil, 0, nil
 	case kv.StorageDomain:
-		addr := accounts.BytesToAddress(k[:length.Addr])
-		key := accounts.BytesToKey(k[length.Addr:])
-		i, txNum, ok, err := gt.sd.GetStorage(context.Background(), addr, key, gt.tx)
-		if ok {
-			return i.Bytes(), kv.Step(txNum / gt.tx.StepSize()), nil
+		if len(k) > length.Addr {
+			addr := accounts.BytesToAddress(k[:length.Addr])
+			key := accounts.BytesToKey(k[length.Addr:])
+			i, txNum, ok, err := gt.sd.GetStorage(context.Background(), addr, key, gt.tx)
+			if err != nil {
+				return nil, 0, err
+			}
+			if ok {
+				return i.Bytes(), kv.Step(txNum / gt.tx.StepSize()), nil
+			}
 		}
-		return nil, 0, err
+		return nil, 0, nil
 	case kv.CodeDomain:
-		addr := accounts.BytesToAddress(k)
-		_, c, txNum, _, err := gt.sd.GetCode(context.Background(), addr, gt.tx)
-		return c, kv.Step(txNum / gt.tx.StepSize()), err
+		if len(k) == length.Addr {
+			addr := accounts.BytesToAddress(k)
+			_, c, txNum, _, err := gt.sd.GetCode(context.Background(), addr, gt.tx)
+			return c, kv.Step(txNum / gt.tx.StepSize()), err
+		}
+		return nil, 0, nil
 	case kv.CommitmentDomain:
 		b, txNum, ok, err := gt.sd.GetBranch(context.Background(), commitment.InternPath(k), gt.tx)
 		if ok {

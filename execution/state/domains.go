@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -175,6 +176,17 @@ type updates[K comparable, V any] interface {
 	Clear() updates[K, V]
 }
 
+//keySerializer func(k K) []byte
+//keyFormatter func(k K) string
+
+type elementOps[V any] struct {
+	cmp          func(v0 V, v1 V) bool
+	isEmpty      func(v0 V) bool
+	serializer   func(v V) []byte
+	deserializer func(b []byte) (V, error)
+	formatter    func(v V) string
+}
+
 type domain[K comparable, V any] struct {
 	lock       sync.RWMutex
 	mem        kv.TemporalMemBatch
@@ -182,12 +194,20 @@ type domain[K comparable, V any] struct {
 	commitCtx  *commitment.CommitmentContext
 	valueCache valueCache[K, V]
 	updates    updates[K, V]
+	keyOps     elementOps[K]
+	valueOps   elementOps[V]
 }
 
-func (d *domain[K, V]) get(ctx context.Context, k K, tx kv.TemporalTx, serializer func(k K) []byte, deserializer func(b []byte) (V, error)) (v V, txNum uint64, ok bool, err error) {
+func (d *domain[K, V]) name() kv.Domain {
+	return d.valueCache.Name()
+}
+
+func (d *domain[K, V]) get(ctx context.Context, k K, tx kv.TemporalTx) (v V, txNum uint64, ok bool, err error) {
 	if tx == nil {
 		return v, 0, false, errors.New("domain get: unexpected nil tx")
 	}
+
+	tracePrefix, trace := dbg.TraceValues(ctx)
 
 	start := time.Now()
 	d.lock.RLock()
@@ -195,20 +215,32 @@ func (d *domain[K, V]) get(ctx context.Context, k K, tx kv.TemporalTx, serialize
 	d.lock.RUnlock()
 
 	if ok {
-		d.metrics.UpdateCacheReads(d.valueCache.Name(), start)
+		d.metrics.UpdateCacheReads(d.name(), start)
+		if trace {
+			fmt.Printf("%s%s get(updates) [%s] => [%s] (%d)\n", tracePrefix, d.name(), d.keyOps.formatter(k), d.valueOps.formatter(val[len(val)-1].Value), val[len(val)-1].TxNum)
+		}
+
+		if d.valueOps.isEmpty(val[len(val)-1].Value) {
+			var v V
+			return v, 0, false, nil
+		}
 		return val[len(val)-1].Value, val[len(val)-1].TxNum, true, nil
 	}
 
 	maxStep := kv.Step(math.MaxUint64)
 
 	if d.mem.IsUnwound() {
-		av := serializer(k)
-		if val, step, ok := d.mem.GetLatest(d.valueCache.Name(), av[:]); ok {
-			if v, err = deserializer(val); err != nil {
+		av := d.keyOps.serializer(k)
+		if val, step, ok := d.mem.GetLatest(d.name(), av[:]); ok {
+			if v, err = d.valueOps.deserializer(val); err != nil {
 				return v, uint64(step) * tx.StepSize(), false, err
 			}
-			d.metrics.UpdateCacheReads(d.valueCache.Name(), start)
-			return v, uint64(step) * tx.StepSize(), true, nil
+			txNum := step.ToTxNum(tx.StepSize())
+			d.metrics.UpdateCacheReads(d.name(), start)
+			if trace {
+				fmt.Printf("%s%s get(unwind) [%s] => [%s] (%d)\n", tracePrefix, d.name(), d.keyOps.formatter(k), d.valueOps.formatter(v), txNum)
+			}
+			return v, txNum, true, nil
 		} else {
 			if step > 0 {
 				maxStep = step
@@ -218,39 +250,44 @@ func (d *domain[K, V]) get(ctx context.Context, k K, tx kv.TemporalTx, serialize
 
 	if d.valueCache != nil {
 		if val, ok := d.valueCache.Get(k); ok {
-			d.metrics.UpdateCacheReads(d.valueCache.Name(), start)
+			d.metrics.UpdateCacheReads(d.name(), start)
+			if trace {
+				fmt.Printf("%s%s get(cache) [%s] => [%s] (%d)\n", tracePrefix, d.name(), d.keyOps.formatter(k), d.valueOps.formatter(val.Value), val.TxNum)
+			}
 			return val.Value, val.TxNum, true, nil
 		}
 	}
 
-	av := serializer(k)
-	latest, step, err := d.getLatest(ctx, d.valueCache.Name(), av[:], tx, maxStep, start)
+	av := d.keyOps.serializer(k)
+	latest, txNum, err := d.getLatest(ctx, d.name(), av[:], tx, maxStep, start)
 
 	if len(latest) == 0 {
-		return v, step, false, nil
+		return v, txNum, false, nil
 	}
 
-	if v, err = deserializer(latest); err != nil {
-		return v, step, false, err
+	if v, err = d.valueOps.deserializer(latest); err != nil {
+		return v, txNum, false, err
 	}
 
 	if d.valueCache != nil {
-		d.valueCache.Add(k, v, step)
+		d.valueCache.Add(k, v, txNum)
 	}
 
-	return v, step, true, nil
+	if trace {
+		fmt.Printf("%s%s get(db) [%s] => [%s] (%d)\n", tracePrefix, d.name(), d.keyOps.formatter(k), d.valueOps.formatter(v), txNum)
+	}
+
+	return v, txNum, true, nil
 }
 
-func (d *domain[K, V]) put(ctx context.Context, k K, v V,
-	keySerializer func(k K) []byte, valueCmp func(v0 V, v1 V) bool, valueSerializer func(v V) []byte, valueDeserializer func(b []byte) (V, error),
-	roTx kv.TemporalTx, txNum uint64, prev *ValueWithTxNum[V]) error {
+func (d *domain[K, V]) put(ctx context.Context, k K, v V, roTx kv.TemporalTx, txNum uint64, prev *ValueWithTxNum[V]) error {
 	var ok bool
 	var prevVal V
 	var prevTxNum uint64
 
 	if prev == nil {
 		var err error
-		prevVal, prevTxNum, ok, err = d.get(ctx, k, roTx, keySerializer, valueDeserializer)
+		prevVal, prevTxNum, ok, err = d.get(ctx, k, roTx)
 		if err != nil {
 			return err
 		}
@@ -260,17 +297,21 @@ func (d *domain[K, V]) put(ctx context.Context, k K, v V,
 		prevTxNum = prev.TxNum
 	}
 
-	if ok && valueCmp(v, prevVal) {
+	if ok && d.valueOps.cmp(v, prevVal) {
 		return nil
 	}
 
-	vbuf := valueSerializer(v)
-	kbuf := keySerializer(k)
+	if tracePrefix, trace := dbg.TraceValues(ctx); trace {
+		fmt.Printf("%s%s put [%s] => [%s] (%d)\n", tracePrefix, d.name(), d.keyOps.formatter(k), d.valueOps.formatter(v), txNum)
+	}
+
+	vbuf := d.valueOps.serializer(v)
+	kbuf := d.keyOps.serializer(k)
 	var pvbuf []byte
 	if ok {
-		pvbuf = valueSerializer(prevVal)
+		pvbuf = d.valueOps.serializer(prevVal)
 	}
-	if err := d.mem.DomainPut(d.valueCache.Name(), kbuf, vbuf, txNum, pvbuf, kv.Step(prevTxNum/roTx.StepSize())); err != nil {
+	if err := d.mem.DomainPut(d.name(), kbuf, vbuf, txNum, pvbuf, kv.Step(prevTxNum/roTx.StepSize())); err != nil {
 		return err
 	}
 
@@ -292,20 +333,18 @@ func (d *domain[K, V]) put(ctx context.Context, k K, v V,
 		putValueSize = len(vbuf) - len(pvbuf)
 	}
 
-	d.metrics.UpdatePutCacheWrites(d.valueCache.Name(), putKeySize, putValueSize)
+	d.metrics.UpdatePutCacheWrites(d.name(), putKeySize, putValueSize)
 	return nil
 }
 
-func (d *domain[K, V]) del(ctx context.Context, k K,
-	keySerializer func(k K) []byte, valueSerializer func(v V) []byte, valueDeserializer func(b []byte) (V, error),
-	roTx kv.TemporalTx, txNum uint64, prev *ValueWithTxNum[V]) error {
+func (d *domain[K, V]) del(ctx context.Context, k K, roTx kv.TemporalTx, txNum uint64, prev *ValueWithTxNum[V]) error {
 	var ok bool
 	var prevVal V
 	var prevTxNum uint64
 
 	if prev == nil {
 		var err error
-		prevVal, prevTxNum, ok, err = d.get(ctx, k, roTx, keySerializer, valueDeserializer)
+		prevVal, prevTxNum, ok, err = d.get(ctx, k, roTx)
 		if err != nil {
 			return err
 		}
@@ -315,13 +354,17 @@ func (d *domain[K, V]) del(ctx context.Context, k K,
 		prevTxNum = prev.TxNum
 	}
 
-	kbuf := keySerializer(k)
+	kbuf := d.keyOps.serializer(k)
 	var pvbuf []byte
 	if ok {
-		pvbuf = valueSerializer(prevVal)
+		pvbuf = d.valueOps.serializer(prevVal)
 	}
 
-	if err := d.mem.DomainDel(kv.AccountsDomain, kbuf, txNum, pvbuf, kv.Step(prevTxNum/roTx.StepSize())); err != nil {
+	if tracePrefix, trace := dbg.TraceValues(ctx); trace {
+		fmt.Printf("%s%s del [%s] (%d)\n", tracePrefix, d.name(), d.keyOps.formatter(k), txNum)
+	}
+
+	if err := d.mem.DomainDel(d.name(), kbuf, txNum, pvbuf, kv.Step(prevTxNum/roTx.StepSize())); err != nil {
 		return err
 	}
 
@@ -342,7 +385,7 @@ func (d *domain[K, V]) del(ctx context.Context, k K,
 		putValueSize = -len(pvbuf)
 	}
 
-	d.metrics.UpdatePutCacheWrites(d.valueCache.Name(), putKeySize, putValueSize)
+	d.metrics.UpdatePutCacheWrites(d.name(), putKeySize, putValueSize)
 	return nil
 }
 
@@ -400,7 +443,7 @@ func (d *domain[K, V]) getAsOf(key []byte, ts uint64) (v []byte, ok bool, err er
 func (sd *domain[K, V]) ClearMetrics() {
 	sd.metrics.Lock()
 	defer sd.metrics.Unlock()
-	if dm, ok := sd.metrics.Domains[kv.AccountsDomain]; ok {
+	if dm, ok := sd.metrics.Domains[sd.name()]; ok {
 		dm.CachePutCount = 0
 		dm.CachePutSize = 0
 		dm.CachePutKeySize = 0
@@ -491,6 +534,37 @@ func NewAccountsDomain(mem kv.TemporalMemBatch, storage *StorageDomain, code *Co
 			commitCtx:  commitCtx,
 			valueCache: cache.(valueCache[accounts.Address, *accounts.Account]),
 			updates:    accountUpdates{},
+			keyOps: elementOps[accounts.Address]{
+				serializer: func(k accounts.Address) []byte {
+					kv := k.Value()
+					return kv[:]
+				},
+				formatter: func(k accounts.Address) string {
+					return k.Value().Hex()
+				},
+			},
+			valueOps: elementOps[*accounts.Account]{
+				cmp: func(v0 *accounts.Account, v1 *accounts.Account) bool {
+					return v0.Equals(v1)
+				},
+				isEmpty: func(v *accounts.Account) bool {
+					return v == nil
+				},
+				serializer: func(v *accounts.Account) []byte {
+					return accounts.SerialiseV3(v)
+				},
+				deserializer: func(b []byte) (v *accounts.Account, err error) {
+					v = &accounts.Account{}
+					err = accounts.DeserialiseV3(v, b)
+					return v, err
+				},
+				formatter: func(a *accounts.Account) string {
+					if a != nil {
+						return fmt.Sprintf("nonce: %d, balance: %d, codeHash: %x", a.Nonce, &a.Balance, a.CodeHash)
+					}
+					return "empty"
+				},
+			},
 		},
 		storage: storage,
 		code:    code,
@@ -498,16 +572,7 @@ func NewAccountsDomain(mem kv.TemporalMemBatch, storage *StorageDomain, code *Co
 }
 
 func (ad *AccountsDomain) Get(ctx context.Context, k accounts.Address, tx kv.TemporalTx) (v *accounts.Account, txNum uint64, ok bool, err error) {
-	return ad.domain.get(ctx, k, tx,
-		func(k accounts.Address) []byte {
-			kv := k.Value()
-			return kv[:]
-		},
-		func(b []byte) (v *accounts.Account, err error) {
-			v = &accounts.Account{}
-			err = accounts.DeserialiseV3(v, b)
-			return v, err
-		})
+	return ad.domain.get(ctx, k, tx)
 }
 
 func (ad *AccountsDomain) Put(ctx context.Context, k accounts.Address, v *accounts.Account, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[*accounts.Account]) error {
@@ -522,23 +587,7 @@ func (ad *AccountsDomain) Put(ctx context.Context, k accounts.Address, v *accoun
 		pv = &prev[0]
 	}
 
-	return ad.domain.put(ctx, k, v,
-		func(k accounts.Address) []byte {
-			kv := k.Value()
-			return kv[:]
-		},
-		func(v0 *accounts.Account, v1 *accounts.Account) bool {
-			return v0.Equals(v1)
-		},
-		func(v *accounts.Account) []byte {
-			return accounts.SerialiseV3(v)
-		},
-		func(b []byte) (v *accounts.Account, err error) {
-			v = &accounts.Account{}
-			err = accounts.DeserialiseV3(v, b)
-			return v, err
-		},
-		roTx, txNum, pv)
+	return ad.domain.put(ctx, k, v, roTx, txNum, pv)
 }
 
 func (ad *AccountsDomain) Del(ctx context.Context, k accounts.Address, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[*accounts.Account]) error {
@@ -557,20 +606,7 @@ func (ad *AccountsDomain) Del(ctx context.Context, k accounts.Address, roTx kv.T
 		pv = &prev[0]
 	}
 
-	return ad.domain.del(ctx, k,
-		func(k accounts.Address) []byte {
-			kv := k.Value()
-			return kv[:]
-		},
-		func(v *accounts.Account) []byte {
-			return accounts.SerialiseV3(v)
-		},
-		func(b []byte) (v *accounts.Account, err error) {
-			v = &accounts.Account{}
-			err = accounts.DeserialiseV3(v, b)
-			return v, err
-		},
-		roTx, txNum, pv)
+	return ad.domain.del(ctx, k, roTx, txNum, pv)
 }
 
 type storageLocation struct {
@@ -708,21 +744,43 @@ func NewStorageDomain(mem kv.TemporalMemBatch, commitCtx *commitment.CommitmentC
 			commitCtx:  commitCtx,
 			valueCache: cache.(*storageCache),
 			updates:    storageUpdates{},
+			keyOps: elementOps[storageLocation]{
+				serializer: func(k storageLocation) []byte {
+					av := k.address.Value()
+					kv := k.key.Value()
+					return append(av[:], kv[:]...)
+				},
+				formatter: func(k storageLocation) string {
+					return fmt.Sprintf("%x %x", k.address.Value(), k.key.Value())
+				},
+			},
+			valueOps: elementOps[uint256.Int]{
+				cmp: func(v0 uint256.Int, v1 uint256.Int) bool {
+					return v0 == v1
+				},
+				isEmpty: func(v uint256.Int) bool {
+					return v.IsZero()
+				},
+				serializer: func(v uint256.Int) []byte {
+					return v.Bytes()
+				},
+				deserializer: func(b []byte) (v uint256.Int, err error) {
+					v.SetBytes(b)
+					return v, nil
+				},
+				formatter: func(a uint256.Int) string {
+					if !a.IsZero() {
+						return fmt.Sprintf("%x", &a)
+					}
+					return "empty"
+				},
+			},
 		},
 	}, nil
 }
 
 func (sd *StorageDomain) Get(ctx context.Context, addr accounts.Address, key accounts.StorageKey, tx kv.TemporalTx) (v uint256.Int, txNum uint64, ok bool, err error) {
-	return sd.domain.get(ctx, storageLocation{address: addr, key: key}, tx,
-		func(k storageLocation) []byte {
-			av := k.address.Value()
-			kv := k.key.Value()
-			return append(av[:], kv[:]...)
-		},
-		func(b []byte) (v uint256.Int, err error) {
-			v.SetBytes(b)
-			return v, nil
-		})
+	return sd.domain.get(ctx, storageLocation{address: addr, key: key}, tx)
 }
 
 func (sd *StorageDomain) Put(ctx context.Context, addr accounts.Address, key accounts.StorageKey, v uint256.Int, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[uint256.Int]) error {
@@ -733,23 +791,7 @@ func (sd *StorageDomain) Put(ctx context.Context, addr accounts.Address, key acc
 		pv = &prev[0]
 	}
 
-	return sd.domain.put(ctx, storageLocation{addr, key}, v,
-		func(k storageLocation) []byte {
-			av := k.address.Value()
-			kv := k.key.Value()
-			return append(av[:], kv[:]...)
-		},
-		func(v0 uint256.Int, v1 uint256.Int) bool {
-			return v0 == v1
-		},
-		func(v uint256.Int) []byte {
-			return v.Bytes()
-		},
-		func(b []byte) (v uint256.Int, err error) {
-			v.SetBytes(b)
-			return v, err
-		},
-		roTx, txNum, pv)
+	return sd.domain.put(ctx, storageLocation{addr, key}, v, roTx, txNum, pv)
 }
 
 func (sd *StorageDomain) Del(ctx context.Context, addr accounts.Address, key accounts.StorageKey, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[uint256.Int]) error {
@@ -769,20 +811,7 @@ func (sd *StorageDomain) Del(ctx context.Context, addr accounts.Address, key acc
 		pv = &prev[0]
 	}
 
-	return sd.domain.del(ctx, storageLocation{addr, key},
-		func(k storageLocation) []byte {
-			av := k.address.Value()
-			kv := k.key.Value()
-			return append(av[:], kv[:]...)
-		},
-		func(v uint256.Int) []byte {
-			return v.Bytes()
-		},
-		func(b []byte) (v uint256.Int, err error) {
-			v.SetBytes(b)
-			return v, err
-		},
-		roTx, txNum, pv)
+	return sd.domain.del(ctx, storageLocation{addr, key}, roTx, txNum, pv)
 }
 
 func (sd *StorageDomain) slotIterator(addr accounts.Address) func(yield func(string, []kv.DataWithTxNum) bool) {
@@ -1064,19 +1093,43 @@ func NewCodeDomain(mem kv.TemporalMemBatch, commitCtx *commitment.CommitmentCont
 				hashes: map[accounts.Address]accounts.CodeHash{},
 				code:   map[accounts.CodeHash][]ValueWithTxNum[codeWithHash]{},
 			},
+			keyOps: elementOps[accounts.Address]{
+				serializer: func(k accounts.Address) []byte {
+					av := k.Value()
+					return av[:]
+				},
+				formatter: func(k accounts.Address) string {
+					return fmt.Sprintf("%x", k.Value())
+				},
+			},
+			valueOps: elementOps[codeWithHash]{
+				cmp: func(v0 codeWithHash, v1 codeWithHash) bool {
+					return bytes.Equal(v0.code, v1.code)
+				},
+				isEmpty: func(v codeWithHash) bool {
+					return len(v.code) == 0
+				},
+				serializer: func(v codeWithHash) []byte {
+					return v.code
+				},
+				deserializer: func(b []byte) (v codeWithHash, err error) {
+					code := common.Copy(b)
+					return codeWithHash{code: code, hash: accounts.InternCodeHash(crypto.Keccak256Hash(code))}, nil
+				},
+				formatter: func(c codeWithHash) string {
+					if c.code != nil {
+						l, c := printCode(c.code)
+						return fmt.Sprintf("%d:%s)", l, c)
+					}
+					return "empty"
+				},
+			},
 		},
 	}, nil
 }
 
 func (cd *CodeDomain) Get(ctx context.Context, k accounts.Address, tx kv.TemporalTx) (h accounts.CodeHash, c []byte, txNum uint64, ok bool, err error) {
-	v, step, ok, err := cd.domain.get(ctx, k, tx,
-		func(k accounts.Address) []byte {
-			av := k.Value()
-			return av[:]
-		},
-		func(b []byte) (v codeWithHash, err error) {
-			return codeWithHash{code: b, hash: accounts.InternCodeHash(crypto.Keccak256Hash(b))}, nil
-		})
+	v, step, ok, err := cd.domain.get(ctx, k, tx)
 
 	if !ok {
 		return accounts.EmptyCodeHash, nil, step, ok, err
@@ -1112,21 +1165,7 @@ func (cd *CodeDomain) Put(ctx context.Context, k accounts.Address, h accounts.Co
 		h = accounts.InternCodeHash(crypto.Keccak256Hash(c))
 	}
 
-	return cd.domain.put(ctx, k, codeWithHash{code: c, hash: h},
-		func(k accounts.Address) []byte {
-			kv := k.Value()
-			return kv[:]
-		},
-		func(v0 codeWithHash, v1 codeWithHash) bool {
-			return bytes.Equal(v0.code, v1.code)
-		},
-		func(v codeWithHash) []byte {
-			return v.code
-		},
-		func(b []byte) (v codeWithHash, err error) {
-			return codeWithHash{code: b, hash: accounts.InternCodeHash(crypto.Keccak256Hash(b))}, nil
-		},
-		roTx, txNum, pv)
+	return cd.domain.put(ctx, k, codeWithHash{code: c, hash: h}, roTx, txNum, pv)
 }
 
 func (cd *CodeDomain) Del(ctx context.Context, k accounts.Address, roTx kv.TemporalTx, txNum uint64, prev ...CodeWithTxNum) error {
@@ -1140,18 +1179,7 @@ func (cd *CodeDomain) Del(ctx context.Context, k accounts.Address, roTx kv.Tempo
 		}
 	}
 
-	return cd.domain.del(ctx, k,
-		func(k accounts.Address) []byte {
-			kv := k.Value()
-			return kv[:]
-		},
-		func(v codeWithHash) []byte {
-			return v.code
-		},
-		func(b []byte) (v codeWithHash, err error) {
-			return codeWithHash{code: b, hash: accounts.InternCodeHash(crypto.Keccak256Hash(b))}, nil
-		},
-		roTx, txNum, pv)
+	return cd.domain.del(ctx, k, roTx, txNum, pv)
 }
 
 type CommitmentDomain struct {
@@ -1369,18 +1397,41 @@ func NewCommitmentDomain(mem kv.TemporalMemBatch, commitCtx *commitment.Commitme
 			commitCtx:  commitCtx,
 			valueCache: cache.(valueCache[commitment.Path, commitment.Branch]),
 			updates:    branchUpdates{},
+			keyOps: elementOps[commitment.Path]{
+				serializer: func(k commitment.Path) []byte {
+					return k.Value()
+				},
+				formatter: func(k commitment.Path) string {
+					return fmt.Sprintf("%x", k.Value())
+				},
+			},
+			valueOps: elementOps[commitment.Branch]{
+				cmp: func(v0 commitment.Branch, v1 commitment.Branch) bool {
+					return bytes.Equal(v0, v1)
+				},
+				isEmpty: func(v commitment.Branch) bool {
+					return len(v) == 0
+				},
+				serializer: func(v commitment.Branch) []byte {
+					return v
+				},
+				deserializer: func(b []byte) (v commitment.Branch, err error) {
+					return commitment.Branch(common.Copy(b)), nil
+				},
+				formatter: func(c commitment.Branch) string {
+					if len(c) > 0 {
+						l, s := printCode(c)
+						return fmt.Sprintf("%p:%d:%s)", &c[0], l, s)
+					}
+					return "empty"
+				},
+			},
 		},
 	}, nil
 }
 
 func (cd *CommitmentDomain) GetBranch(ctx context.Context, k commitment.Path, tx kv.TemporalTx) (v commitment.Branch, txNum uint64, ok bool, err error) {
-	return cd.domain.get(ctx, k, tx,
-		func(k commitment.Path) []byte {
-			return k.Value()
-		},
-		func(b []byte) (v commitment.Branch, err error) {
-			return commitment.Branch(b), nil
-		})
+	return cd.domain.get(dbg.WithTrace(ctx, true), k, tx)
 }
 
 func (cd *CommitmentDomain) PutBranch(ctx context.Context, k commitment.Path, v commitment.Branch, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[commitment.Branch]) error {
@@ -1393,20 +1444,7 @@ func (cd *CommitmentDomain) PutBranch(ctx context.Context, k commitment.Path, v 
 		pv = &prev[0]
 	}
 
-	return cd.domain.put(ctx, k, v,
-		func(k commitment.Path) []byte {
-			return k.Value()
-		},
-		func(v0 commitment.Branch, v1 commitment.Branch) bool {
-			return bytes.Equal(v0, v1)
-		},
-		func(v commitment.Branch) []byte {
-			return v
-		},
-		func(b []byte) (v commitment.Branch, err error) {
-			return commitment.Branch(b), nil
-		},
-		roTx, txNum, pv)
+	return cd.domain.put(dbg.WithTrace(ctx, true), k, v, roTx, txNum, pv)
 }
 
 func (cd *CommitmentDomain) DelBranch(ctx context.Context, k commitment.Path, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[commitment.Branch]) error {
@@ -1415,15 +1453,5 @@ func (cd *CommitmentDomain) DelBranch(ctx context.Context, k commitment.Path, ro
 		pv = &prev[0]
 	}
 
-	return cd.domain.del(ctx, k,
-		func(k commitment.Path) []byte {
-			return k.Value()
-		},
-		func(v commitment.Branch) []byte {
-			return v
-		},
-		func(b []byte) (v commitment.Branch, err error) {
-			return commitment.Branch(b), nil
-		},
-		roTx, txNum, pv)
+	return cd.domain.del(dbg.WithTrace(ctx, true), k, roTx, txNum, pv)
 }

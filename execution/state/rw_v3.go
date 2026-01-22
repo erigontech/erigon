@@ -716,7 +716,12 @@ func (r *ReaderV3) readAccountData(address accounts.Address) (*accounts.Account,
 	var addressValue common.Address
 
 	if r.ec != nil {
-		acc, _, ok, err = r.ec.GetAccount(context.Background(), address, r.tx)
+		ctx := context.Background()
+		if r.trace {
+			ctx = dbg.WithTrace(dbg.WithTracePrefix(ctx, r.tracePrefix), true)
+		}
+
+		acc, _, ok, err = r.ec.GetAccount(ctx, address, r.tx)
 		if err != nil {
 			return nil, err
 		}
@@ -770,7 +775,11 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 	var keyValue common.Hash
 
 	if r.ec != nil {
-		res, _, ok, err = r.ec.GetStorage(context.Background(), address, key, r.tx)
+		ctx := context.Background()
+		if r.trace {
+			ctx = dbg.WithTrace(dbg.WithTracePrefix(ctx, r.tracePrefix), true)
+		}
+		res, _, ok, err = r.ec.GetStorage(ctx, address, key, r.tx)
 		if err != nil {
 			return uint256.Int{}, false, err
 		}
@@ -812,7 +821,11 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	var err error
 	var addressValue common.Address
 	if r.ec != nil {
-		_, code, _, _, err = r.ec.GetCode(context.Background(), address, r.tx)
+		ctx := context.Background()
+		if r.trace {
+			ctx = dbg.WithTrace(dbg.WithTracePrefix(ctx, r.tracePrefix), true)
+		}
+		_, code, _, _, err = r.ec.GetCode(ctx, address, r.tx)
 		if err != nil {
 			return nil, err
 		}
@@ -838,10 +851,12 @@ func (r *ReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	var err error
 	var addressValue common.Address
 	if r.ec != nil {
-		_, code, _, _, err = r.ec.GetCode(context.Background(), address, r.tx)
+		ctx := context.Background()
 		if r.trace {
 			addressValue = address.Value()
+			ctx = dbg.WithTrace(dbg.WithTracePrefix(ctx, r.tracePrefix), true)
 		}
+		_, code, _, _, err = r.ec.GetCode(context.Background(), address, r.tx)
 	} else {
 		if !address.IsNil() {
 			addressValue = address.Value()

@@ -514,7 +514,7 @@ func (r *BlockReader) HeadersRange(ctx context.Context, walker func(header *type
 
 func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
 	var dbgPrefix string
-	dbgLogs := dbg.Enabled(ctx)
+	dbgLogs := dbg.DebugEnabled(ctx)
 	if dbgLogs {
 		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).HeaderByNumber(blk=%d) -> ", r.sn.IndicesMax(), r.sn.SegmentsMax(), blockHeight)
 	}
@@ -681,7 +681,7 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash
 
 func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
 	var dbgPrefix string
-	dbgLogs := dbg.Enabled(ctx)
+	dbgLogs := dbg.DebugEnabled(ctx)
 	if dbgLogs {
 		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).BodyWithTransactions(hash=%x,blk=%d) -> ", r.sn.IndicesMax(), r.sn.SegmentsMax(), hash, blockHeight)
 	}
@@ -826,7 +826,7 @@ func (r *BlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter,
 }
 func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64, forceCanonical bool) (block *types.Block, senders []common.Address, err error) {
 	var dbgPrefix string
-	dbgLogs := dbg.Enabled(ctx)
+	dbgLogs := dbg.DebugEnabled(ctx)
 	if dbgLogs {
 		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).blockWithSenders(hash=%x,blk=%d) -> ", r.sn.IndicesMax(), r.sn.SegmentsMax(), hash, blockHeight)
 	}

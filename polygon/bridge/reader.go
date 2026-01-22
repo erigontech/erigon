@@ -81,7 +81,7 @@ func (r *Reader) EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Tim
 
 	eventsRaw := make([]*types.Message, 0, len(events))
 
-	if len(events) > 0 && dbg.Enabled(ctx) {
+	if len(events) > 0 && dbg.DebugEnabled(ctx) {
 		r.logger.Debug(
 			bridgeLogPrefix("events for time range"),
 			"timeFrom", timeFrom.Unix(),
@@ -122,7 +122,7 @@ func (r *Reader) Events(ctx context.Context, blockHash common.Hash, blockNum uin
 		return nil, err
 	}
 
-	if len(events) > 0 && dbg.Enabled(ctx) {
+	if len(events) > 0 && dbg.DebugEnabled(ctx) {
 		r.logger.Debug(bridgeLogPrefix("events for block"), "block", blockNum, "len", len(events))
 	}
 

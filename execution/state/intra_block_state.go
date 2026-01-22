@@ -1033,7 +1033,7 @@ func printCode(c []byte) (int, string) {
 		return lenc, fmt.Sprintf("%x...", c[0:40])
 	}
 
-	return lenc, fmt.Sprintf("%x...", c)
+	return lenc, fmt.Sprintf("%x", c)
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#code-hash

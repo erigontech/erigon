@@ -339,7 +339,7 @@ func (d *Domain) Close() {
 	d.closeWhatNotInList([]string{})
 }
 
-func (w *DomainBufferedWriter) PutWithPrev(k, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
+func (w *DomainBufferedWriter) PutWithPrev(domain kv.Domain, k, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
 	step := kv.Step(txNum / w.h.ii.stepSize)
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
 	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
@@ -349,12 +349,12 @@ func (w *DomainBufferedWriter) PutWithPrev(k, v []byte, txNum uint64, preval []b
 		return err
 	}
 	if w.diff != nil {
-		w.diff.DomainUpdate(k, step, preval, prevStep)
+		w.diff.DomainUpdate(domain, k, step, preval, prevStep)
 	}
 	return w.addValue(k, v, step)
 }
 
-func (w *DomainBufferedWriter) DeleteWithPrev(k []byte, txNum uint64, prev []byte, prevStep kv.Step) (err error) {
+func (w *DomainBufferedWriter) DeleteWithPrev(domain kv.Domain, k []byte, txNum uint64, prev []byte, prevStep kv.Step) (err error) {
 	step := kv.Step(txNum / w.h.ii.stepSize)
 
 	// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
@@ -365,7 +365,7 @@ func (w *DomainBufferedWriter) DeleteWithPrev(k []byte, txNum uint64, prev []byt
 		return err
 	}
 	if w.diff != nil {
-		w.diff.DomainUpdate(k, step, prev, prevStep)
+		w.diff.DomainUpdate(domain, k, step, prev, prevStep)
 	}
 	return w.addValue(k, nil, step)
 }

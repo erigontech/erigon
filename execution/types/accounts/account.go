@@ -86,14 +86,6 @@ func (a *Account) EncodingLengthForHashing() uint {
 	return uint(rlp.ListPrefixLen(structLength) + structLength)
 }
 
-func (a *Account) Encode(w io.Writer) error {
-	return fmt.Errorf("TODO")
-}
-
-func (a *Account) Decode(r io.Reader) error {
-	return fmt.Errorf("TODO")
-}
-
 func (a *Account) EncodeForStorage(buffer []byte) {
 	var fieldSet = 0 // start with first bit set to 0
 	var pos = 1

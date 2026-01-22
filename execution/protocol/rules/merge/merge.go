@@ -18,6 +18,7 @@ package merge
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -201,24 +202,36 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			return nil, fmt.Errorf("error: could not parse requests logs: %v", err)
 		}
 		if depositReqs != nil {
+			fmt.Println(header.Number.Uint64(), "depositReqs", depositReqs.Type, hex.EncodeToString(depositReqs.RequestData))
 			rs = append(rs, *depositReqs)
+		} else {
+			fmt.Println(header.Number.Uint64(), "depositReqs", nil)
 		}
 		withdrawalReq, err := misc.DequeueWithdrawalRequests7002(syscall, state)
 		if err != nil {
 			return nil, err
 		}
 		if withdrawalReq != nil {
+			fmt.Println(header.Number.Uint64(), "withdrawalReq", withdrawalReq.Type, hex.EncodeToString(withdrawalReq.RequestData))
 			rs = append(rs, *withdrawalReq)
+		} else {
+			fmt.Println(header.Number.Uint64(), "withdrawalReq", nil)
 		}
+		fmt.Println(header.Number.Uint64(), "DequeueConsolidationRequests7251")
 		consolidations, err := misc.DequeueConsolidationRequests7251(syscall, state)
+		fmt.Println(header.Number.Uint64(), "Done DequeueConsolidationRequests7251")
 		if err != nil {
 			return nil, err
 		}
 		if consolidations != nil {
+			fmt.Println(header.Number.Uint64(), "consolidations", consolidations.Type, hex.EncodeToString(consolidations.RequestData))
 			rs = append(rs, *consolidations)
+		} else {
+			fmt.Println(header.Number.Uint64(), "consolidations", nil)
 		}
 		if header.RequestsHash != nil {
 			rh := rs.Hash()
+			fmt.Println(header.Number.Uint64(), "RequestsHash", len(rs), hex.EncodeToString(rh[:]))
 			if *header.RequestsHash != *rh {
 				return nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got:%v", header.RequestsHash, rh)
 			}
