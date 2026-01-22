@@ -670,8 +670,9 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(a.collateAndBuildWorkers)
 
-	buildG, ctx := errgroup.WithContext(ctx)
-	buildG.SetLimit(a.collateAndBuildWorkers)
+	dddd := [kv.DomainLen]Collation{}
+	iii := make([]InvertedIndexCollation, len(a.iis))
+
 	for _, d := range a.d {
 		if d.Disable {
 			continue
@@ -698,26 +699,8 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 			}
 			collListMu.Lock()
 			collations = append(collations, collation)
+			dddd[d.Name] = collation
 			collListMu.Unlock()
-
-			a.wg.Add(1)
-			buildG.Go(func() error {
-				defer a.wg.Done()
-				sf, err := d.buildFiles(ctx, step, collation, a.ps)
-				collation.Close()
-				if err != nil {
-					sf.CleanupOnError()
-					return err
-				}
-
-				dd, err := kv.String2Domain(d.FilenameBase)
-				if err != nil {
-					return err
-				}
-				static.d[dd] = sf
-				return nil
-			})
-
 			return nil
 		})
 	}
@@ -746,24 +729,12 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 				collation, err = ii.collate(ctx, step, tx)
 				return err
 			})
+			if err != nil {
+				return fmt.Errorf("index collation %q has failed: %w", ii.FilenameBase, err)
+			}
 			collListMu.Lock()
-			collations = append(collations, collation)
+			iii[iikey] = collation
 			collListMu.Unlock()
-
-			buildG.Go(func() error {
-				defer a.wg.Done()
-				if err != nil {
-					return fmt.Errorf("index collation %q has failed: %w", ii.FilenameBase, err)
-				}
-				sf, err := ii.buildFiles(ctx, step, collation, a.ps)
-				if err != nil {
-					sf.CleanupOnError()
-					return err
-				}
-
-				static.ivfs[iikey] = sf
-				return nil
-			})
 			return nil
 		})
 	}
@@ -771,9 +742,63 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 		static.CleanupOnError()
 		return fmt.Errorf("domain collate-build: %w", err)
 	}
+
 	if took := time.Since(t); took > 100*time.Millisecond {
 		log.Warn("[dbg] collate total", "took", took)
 	}
+
+	buildG, ctx := errgroup.WithContext(ctx)
+	buildG.SetLimit(a.collateAndBuildWorkers)
+	for _, d := range a.d {
+		if d.Disable {
+			continue
+		}
+		a.wg.Add(1)
+		buildG.Go(func() error {
+			defer a.wg.Done()
+
+			collListMu.Lock()
+			collation := dddd[d.Name]
+			collListMu.Unlock()
+			sf, err := d.buildFiles(ctx, step, collation, a.ps)
+			collation.Close()
+			if err != nil {
+				sf.CleanupOnError()
+				return err
+			}
+
+			dd, err := kv.String2Domain(d.FilenameBase)
+			if err != nil {
+				return err
+			}
+			static.d[dd] = sf
+			return nil
+		})
+	}
+	// indices are built concurrently
+	for iikey, ii := range a.iis {
+		if ii.Disable {
+			continue
+		}
+
+		a.wg.Add(1)
+		buildG.Go(func() error {
+			defer a.wg.Done()
+			collListMu.Lock()
+			collation := iii[iikey]
+			collListMu.Unlock()
+
+			sf, err := ii.buildFiles(ctx, step, collation, a.ps)
+			if err != nil {
+				sf.CleanupOnError()
+				return err
+			}
+
+			static.ivfs[iikey] = sf
+			return nil
+		})
+	}
+	t = time.Now()
 	if err := buildG.Wait(); err != nil {
 		static.CleanupOnError()
 		return fmt.Errorf("domain collate-build: %w", err)
