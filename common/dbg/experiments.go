@@ -46,7 +46,7 @@ var (
 	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
 	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
 	MdbxNoSyncUnsafe = EnvBool("MDBX_NO_FSYNC_UNSAFE", false)
-	ExecThrottle     = EnvDuration("EXEC_THROTTLE", 0*time.Second)
+	ExecThrottle     = EnvDuration("EXEC_THROTTLE", 0*time.Second) // sleep at the end of stage_exec
 
 	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
 
