@@ -43,19 +43,8 @@ func (g *GolombRice) appendUnaryAll(unary []uint64) {
 		bitInc += int(u) + 1
 	}
 	targetSize := (g.bitCount + bitInc + 63) / 64
-	if len(g.data) < targetSize {
-		oldLen := len(g.data)
-		if cap(g.data) >= targetSize {
-			g.data = g.data[:targetSize]
-			// Clear the newly exposed elements
-			for i := oldLen; i < targetSize; i++ {
-				g.data[i] = 0
-			}
-		} else {
-			newData := make([]uint64, targetSize, targetSize+targetSize/4)
-			copy(newData, g.data)
-			g.data = newData
-		}
+	for len(g.data) < targetSize {
+		g.data = append(g.data, 0)
 	}
 
 	for _, u := range unary {
@@ -77,18 +66,8 @@ func (g *GolombRice) appendFixed(v uint64, log2golomb int) {
 	usedBits := g.bitCount & 63                      // How many bits of the last element of b.data is used by previous value
 	targetSize := (g.bitCount + log2golomb + 63) / 64
 	//fmt.Printf("g.bitCount = %d, log2golomb = %d, targetSize = %d\n", g.bitCount, log2golomb, targetSize)
-	if len(g.data) < targetSize {
-		oldLen := len(g.data)
-		if cap(g.data) >= targetSize {
-			g.data = g.data[:targetSize]
-			for i := oldLen; i < targetSize; i++ {
-				g.data[i] = 0
-			}
-		} else {
-			newData := make([]uint64, targetSize, targetSize+targetSize/4)
-			copy(newData, g.data)
-			g.data = newData
-		}
+	for len(g.data) < targetSize {
+		g.data = append(g.data, 0)
 	}
 	appendPtr := g.bitCount / 64 // The index in b.data corresponding to the last element used by previous value, or if previous values fits perfectly, the index of the next free element
 	curWord := g.data[appendPtr]

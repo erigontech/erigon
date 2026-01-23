@@ -99,7 +99,6 @@ type RecSplit struct {
 	offsetBuffer      []uint64
 	buffer            []uint64
 	golombRice        []uint32
-	indexWriteBuf     []byte   // Buffer for batching index writes
 	bucketSizeAcc     []uint64 // Bucket size accumulator
 	// Helper object to encode the sequence of cumulative number of keys in the buckets
 	// and the sequence of cumulative bit offsets of buckets in the Golomb-Rice code.
@@ -239,20 +238,6 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		rs.secondaryAggrBound = rs.primaryAggrBound * uint16(math.Ceil(0.21*float64(rs.leafSize)+9./10.))
 	}
 	rs.count = make([]uint16, rs.secondaryAggrBound)
-
-	// Pre-allocate golombRice table to avoid dynamic growth during build
-	maxBucketSize := uint16(args.BucketSize + 1)
-	rs.golombRice = make([]uint32, maxBucketSize)
-	for s := uint16(0); s < maxBucketSize; s++ {
-		if s == 0 {
-			rs.golombRice[0] = (bijMemo[0] << 27) | bijMemo[0]
-		} else if s <= rs.leafSize {
-			rs.golombRice[s] = (bijMemo[s] << 27) | (uint32(1) << 16) | bijMemo[s]
-		} else {
-			computeGolombRice(s, rs.golombRice, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
-		}
-	}
-
 	if args.NoFsync {
 		rs.DisableFsync()
 	}
@@ -388,22 +373,16 @@ func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, sec
 // salt for the part of the hash function separating m elements. It is based on
 // calculations with assumptions that we draw hash functions at random
 func (rs *RecSplit) golombParam(m uint16) int {
-	if m >= uint16(len(rs.golombRice)) {
-		// Bucket larger than expected - grow dynamically (rare case)
-		oldLen := uint16(len(rs.golombRice))
-		newSize := m + 1
-		newGolombRice := make([]uint32, newSize)
-		copy(newGolombRice, rs.golombRice)
-		for s := oldLen; s < newSize; s++ {
-			if s == 0 {
-				newGolombRice[0] = (bijMemo[0] << 27) | bijMemo[0]
-			} else if s <= rs.leafSize {
-				newGolombRice[s] = (bijMemo[s] << 27) | (uint32(1) << 16) | bijMemo[s]
-			} else {
-				computeGolombRice(s, newGolombRice, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
-			}
+	for s := uint16(len(rs.golombRice)); m >= s; s++ {
+		rs.golombRice = append(rs.golombRice, 0)
+		// For the case where bucket is larger than planned
+		if s == 0 {
+			rs.golombRice[0] = (bijMemo[0] << 27) | bijMemo[0]
+		} else if s <= rs.leafSize {
+			rs.golombRice[s] = (bijMemo[s] << 27) | (uint32(1) << 16) | bijMemo[s]
+		} else {
+			computeGolombRice(s, rs.golombRice, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
 		}
-		rs.golombRice = newGolombRice
 	}
 	return int(rs.golombRice[m] >> 27)
 }
@@ -534,18 +513,21 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 	if m <= rs.leafSize {
 		// No need to build aggregation levels - just find bijection
 		var mask uint32
-	saltLoop:
 		for {
 			mask = 0
-			for i := uint16(0); i < m; i++ {
+			var fail bool
+			for i := uint16(0); !fail && i < m; i++ {
 				bit := uint32(1) << remap16(remix(bucket[i]+salt), m)
 				if mask&bit != 0 {
-					salt++
-					continue saltLoop
+					fail = true
+				} else {
+					mask |= bit
 				}
-				mask |= bit
 			}
-			break
+			if !fail {
+				break
+			}
+			salt++
 		}
 		for i := uint16(0); i < m; i++ {
 			j := remap16(remix(bucket[i]+salt), m)
