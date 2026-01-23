@@ -220,6 +220,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			timeStart := time.Now()
 
 			pruneTimeout := time.Duration(se.cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond // 250 * time.Millisecond
+			pruneTimeout /= 2
 
 			//if initialCycle {
 			//	pruneTimeout = 10 * time.Hour
