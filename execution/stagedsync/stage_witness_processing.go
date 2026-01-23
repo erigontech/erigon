@@ -73,20 +73,18 @@ func (wb *WitnessBuffer) DrainWitnesses() []WitnessData {
 }
 
 type WitnessProcessingCfg struct {
-	db            kv.RwDB
 	witnessBuffer *WitnessBuffer
 }
 
-func NewWitnessProcessingCfg(db kv.RwDB, witnessBuffer *WitnessBuffer) WitnessProcessingCfg {
+func NewWitnessProcessingCfg(witnessBuffer *WitnessBuffer) WitnessProcessingCfg {
 	return WitnessProcessingCfg{
-		db:            db,
 		witnessBuffer: witnessBuffer,
 	}
 }
 
-func StageWitnessProcessingCfg(db kv.RwDB, chainConfig *chain.Config, witnessBuffer *WitnessBuffer) *WitnessProcessingCfg {
+func StageWitnessProcessingCfg(chainConfig *chain.Config, witnessBuffer *WitnessBuffer) *WitnessProcessingCfg {
 	if chainConfig.Bor != nil && witnessBuffer != nil {
-		cfg := NewWitnessProcessingCfg(db, witnessBuffer)
+		cfg := NewWitnessProcessingCfg(witnessBuffer)
 		return &cfg
 	}
 
@@ -94,7 +92,7 @@ func StageWitnessProcessingCfg(db kv.RwDB, chainConfig *chain.Config, witnessBuf
 }
 
 // SpawnStageWitnessProcessing processes buffered witness data and stores it in the database
-func SpawnStageWitnessProcessing(s *StageState, tx kv.RwTx, cfg WitnessProcessingCfg, ctx context.Context, logger log.Logger) error {
+func SpawnStageWitnessProcessing(tx kv.RwTx, cfg WitnessProcessingCfg, logger log.Logger) error {
 	if cfg.witnessBuffer == nil {
 		return nil
 	}

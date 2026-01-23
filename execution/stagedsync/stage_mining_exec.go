@@ -50,7 +50,6 @@ import (
 )
 
 type MiningExecCfg struct {
-	db          kv.RwDB
 	miningState MiningState
 	notifier    ChainEventNotifier
 	chainConfig *chain.Config
@@ -64,7 +63,6 @@ type MiningExecCfg struct {
 }
 
 func StageMiningExecCfg(
-	db kv.RwDB,
 	miningState MiningState,
 	notifier ChainEventNotifier,
 	chainConfig *chain.Config,
@@ -77,7 +75,6 @@ func StageMiningExecCfg(
 	blockReader services.FullBlockReader,
 ) MiningExecCfg {
 	return MiningExecCfg{
-		db:          db,
 		miningState: miningState,
 		notifier:    notifier,
 		chainConfig: chainConfig,

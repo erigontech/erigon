@@ -23,23 +23,17 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
 type BlockHashesCfg struct {
-	db     kv.RwDB
-	tmpDir string
-	cc     *chain.Config
-
+	tmpDir       string
 	headerWriter *blockio.BlockWriter
 }
 
-func StageBlockHashesCfg(db kv.RwDB, tmpDir string, cc *chain.Config, headerWriter *blockio.BlockWriter) BlockHashesCfg {
+func StageBlockHashesCfg(tmpDir string, headerWriter *blockio.BlockWriter) BlockHashesCfg {
 	return BlockHashesCfg{
-		db:           db,
 		tmpDir:       tmpDir,
-		cc:           cc,
 		headerWriter: headerWriter,
 	}
 }
@@ -62,9 +56,6 @@ func SpawnBlockHashStage(s *StageState, tx kv.RwTx, cfg BlockHashesCfg, ctx cont
 	return nil
 }
 
-func UnwindBlockHashStage(u *UnwindState, tx kv.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
-	if err = u.Done(tx); err != nil {
-		return fmt.Errorf(" reset: %w", err)
-	}
-	return nil
+func UnwindBlockHashStage(u *UnwindState, tx kv.RwTx) error {
+	return u.Done(tx)
 }

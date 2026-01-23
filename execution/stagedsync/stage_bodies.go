@@ -41,7 +41,6 @@ import (
 const requestLoopCutOff int = 1
 
 type BodiesCfg struct {
-	db              kv.RwDB
 	bd              *bodydownload.BodyDownload
 	bodyReqSend     func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool)
 	penalise        func(context.Context, []headerdownload.PenaltyItem)
@@ -52,7 +51,7 @@ type BodiesCfg struct {
 	blockWriter     *blockio.BlockWriter
 }
 
-func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload,
+func StageBodiesCfg(bd *bodydownload.BodyDownload,
 	bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool), penalise func(context.Context, []headerdownload.PenaltyItem),
 	blockPropagator bodydownload.BlockPropagator, timeout int,
 	chanConfig *chain.Config,
@@ -60,7 +59,7 @@ func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload,
 	blockWriter *blockio.BlockWriter,
 ) BodiesCfg {
 	return BodiesCfg{
-		db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator,
+		bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator,
 		timeout: timeout, chanConfig: chanConfig, blockReader: blockReader,
 		blockWriter: blockWriter}
 }
@@ -378,15 +377,11 @@ func logWritingBodies(logPrefix string, committed, headerProgress uint64, logger
 	)
 }
 
-func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {
+func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg) error {
 	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-	if err := cfg.blockWriter.MakeBodiesNonCanonical(tx, u.UnwindPoint+1); err != nil {
+	err := cfg.blockWriter.MakeBodiesNonCanonical(tx, u.UnwindPoint+1)
+	if err != nil {
 		return err
 	}
-	if err = u.Done(tx); err != nil {
-		return err
-	}
-	return nil
+	return u.Done(tx)
 }
