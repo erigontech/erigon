@@ -348,6 +348,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							}
 							resetCommitmentGauges(ctx)
 
+							// on chain tip we run receipt root verification in parallel alongside commitment computation
+							// make sure to wait for it to finish and check for an error
+							err = pe.getPostValidator().Wait()
+							if err != nil {
+								return err
+							}
+
 							if shouldGenerateChangesets {
 								pe.domains().SavePastChangesetAccumulator(applyResult.BlockHash, applyResult.BlockNum, changeSet)
 							}
