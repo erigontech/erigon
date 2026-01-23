@@ -103,10 +103,17 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	if number == nil {
 		return StorageRangeResult{}, nil
 	}
+
+	err = api.BaseAPI.checkPruneStateHistory(ctx, tx, *number)
+	if err != nil {
+		return StorageRangeResult{}, err
+	}
+
 	minTxNum, err := api._txNumReader.Min(ctx, tx, *number)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
+
 	fromTxNum := minTxNum + txIndex + 1 //+1 for system txn in the beginning of block
 	return storageRangeAt(tx, contractAddress, keyStart, fromTxNum, maxResult)
 }
@@ -190,6 +197,11 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 		blockNumber = header.Number.Uint64()
 	}
 
+	err = api.BaseAPI.checkPruneStateHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return state.IteratorDump{}, err
+	}
+
 	// Determine how many results we will dump
 	if excludeStorage {
 		// Plain addresses
@@ -254,6 +266,12 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 	if startNum >= endNum {
 		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum)
 	}
+
+	err = api.BaseAPI.checkPruneStateHistory(ctx, tx, startNum)
+	if err != nil {
+		return nil, err
+	}
+
 	//[from, to)
 	startTxNum, err := api._txNumReader.Min(ctx, tx, startNum)
 	if err != nil {
@@ -353,6 +371,11 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	isCanonical := canonicalHash == blockHash
 	if !isCanonical {
 		return nil, errors.New("block hash is not canonical")
+	}
+
+	err = api.BaseAPI.checkPruneStateHistory(ctx, tx, header.Number.Uint64())
+	if err != nil {
+		return nil, err
 	}
 
 	minTxNum, err := api._txNumReader.Min(ctx, tx, header.Number.Uint64())
