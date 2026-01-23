@@ -80,7 +80,7 @@ jobs:
           - client: geth
             runs-on: [self-hosted, qa, Ethereum, rpc-latest-geth]
     runs-on: ${{ matrix.runs-on }}
-    timeout-minutes: 120
+    timeout-minutes: 480
     permissions:
       contents: read
     env:
