@@ -61,10 +61,15 @@ var Arbitrum = cli.BoolFlag{
 }
 
 var Command = cli.Command{
-	Action:      func(cliCtx *cli.Context) error { return genFromRPc(cliCtx) },
-	Name:        "genfromrpc",
-	Usage:       "genfromrpc utilities",
-	Flags:       []cli.Flag{&utils.DataDirFlag, &RpcAddr, &Verify, &FromBlock, &Arbitrum, &turbocli.L2RPCReceiptAddrFlag},
+	Action: func(cliCtx *cli.Context) error { return genFromRPc(cliCtx) },
+	Name:   "genfromrpc",
+	Usage:  "genfromrpc utilities",
+	Flags: []cli.Flag{
+		&utils.DataDirFlag, &RpcAddr, &Verify, &FromBlock, &Arbitrum,
+		&turbocli.L2RPCReceiptAddrFlag,
+		&turbocli.L2RPCBlockRPSFlag, &turbocli.L2RPCBlockBurstFlag,
+		&turbocli.L2RPCReceiptRPSFlag, &turbocli.L2RPCReceiptBurstFlag,
+	},
 	Description: ``,
 }
 
@@ -727,7 +732,12 @@ func genFromRPc(cliCtx *cli.Context) error {
 
 	noWrite := cliCtx.Bool(NoWrite.Name)
 
-	_, err = GetAndCommitBlocks(context.Background(), db, nil, client, receiptClient, start, latestBlock.Uint64(), verification, isArbitrum, noWrite, nil)
+	blockRPS := cliCtx.Int(turbocli.L2RPCBlockRPSFlag.Name)
+	blockBurst := cliCtx.Int(turbocli.L2RPCBlockBurstFlag.Name)
+	receiptRPS := cliCtx.Int(turbocli.L2RPCReceiptRPSFlag.Name)
+	receiptBurst := cliCtx.Int(turbocli.L2RPCReceiptBurstFlag.Name)
+
+	_, err = GetAndCommitBlocks(context.Background(), db, nil, client, receiptClient, start, latestBlock.Uint64(), verification, isArbitrum, noWrite, nil, blockRPS, blockBurst, receiptRPS, receiptBurst)
 	return err
 }
 
@@ -736,11 +746,9 @@ var (
 	prevReceiptTime = new(atomic.Uint64)
 )
 
-func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, receiptClient *rpc.Client, startBlockNum, endBlockNum uint64, verify, isArbitrum, dryRun bool, f func(tx kv.RwTx, lastBlockNum uint64) error) (lastBlockNum uint64, err error) {
+func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, receiptClient *rpc.Client, startBlockNum, endBlockNum uint64, verify, isArbitrum, dryRun bool, f func(tx kv.RwTx, lastBlockNum uint64) error, blockRPS, blockBurst, receiptRPS, receiptBurst int) (lastBlockNum uint64, err error) {
 	var (
-		batchSize                = uint64(5)
-		blockRPS, blockBurst     = 5000, 5 // rps, amount of simultaneous requests
-		receiptRPS, receiptBurst = 590, 3  // rps, amount of simultaneous requests
+		batchSize = uint64(5)
 
 		logInterval   = time.Second * 40
 		logEvery      = time.NewTicker(logInterval)

@@ -75,8 +75,7 @@ type HeadersCfg struct {
 
 	syncConfig ethconfig.Sync
 
-	L2RPCAddr      string // L2 RPC address for Arbitrum
-	ReceiptRPCAddr string // L2 RPC address for fetching receipts (if different from L2RPCAddr)
+	L2RPC ethconfig.L2RPCConfig
 }
 
 func StageHeadersCfg(
@@ -94,8 +93,7 @@ func StageHeadersCfg(
 	blockWriter *blockio.BlockWriter,
 	tmpdir string,
 	notifications *shards.Notifications,
-	L2RPCAddr string, // L2 RPC address for Arbitrum
-	ReceiptRPCAddr string,
+	l2rpc ethconfig.L2RPCConfig,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -112,8 +110,7 @@ func StageHeadersCfg(
 		blockReader:       blockReader,
 		blockWriter:       blockWriter,
 		notifications:     notifications,
-		L2RPCAddr:         L2RPCAddr,
-		ReceiptRPCAddr:    ReceiptRPCAddr,
+		L2RPC:             l2rpc,
 	}
 }
 
@@ -136,7 +133,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		return HeadersPOW(s, u, ctx, tx, cfg, test, useExternalTx, logger)
 	}
 
-	jsonRpcAddr := cfg.L2RPCAddr
+	jsonRpcAddr := cfg.L2RPC.Addr
 	client, err := rpc.Dial(jsonRpcAddr, log.Root())
 	if err != nil {
 		log.Warn("Error connecting to RPC", "err", err)
@@ -159,7 +156,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	latestRemoteBlock.SetString(latestBlockHex[2:], 16)
 
 	// Determine receipt client based on chain tip mode
-	receiptRPCAddr := cfg.ReceiptRPCAddr
+	receiptRPCAddr := cfg.L2RPC.ReceiptAddr
 	var receiptClient *rpc.Client
 
 	const chainTipThreshold = 20
@@ -173,7 +170,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 			receiptClient, err = rpc.Dial(publicFeed, log.Root())
 			if err != nil {
 				log.Warn("Error connecting to public receipt feed, falling back to configured endpoint", "url", publicFeed, "err", err)
-				receiptRPCAddr = cfg.ReceiptRPCAddr
+				receiptRPCAddr = cfg.L2RPC.ReceiptAddr
 				receiptClient = nil
 			} else {
 				log.Info("[Arbitrum] Chain tip mode: using public feed for receipts", "feed", publicFeed, "blocksAhead", latestRemoteBlock.Uint64()-topDumpedBlock)
@@ -195,7 +192,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	firstBlock := topDumpedBlock
 	var healthCheckErr error
 	l2RPCHealthCheckOnce.Do(func() {
-		healthCheckErr = checkL2RPCEndpointsHealth(ctx, client, receiptClient, firstBlock, cfg.L2RPCAddr, receiptRPCAddr)
+		healthCheckErr = checkL2RPCEndpointsHealth(ctx, client, receiptClient, firstBlock, cfg.L2RPC.Addr, receiptRPCAddr)
 	})
 	if healthCheckErr != nil {
 		return healthCheckErr
@@ -235,7 +232,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		return nil
 	}
 
-	lastCommittedBlockNum, err := snapshots.GetAndCommitBlocks(ctx, cfg.db, tx, client, receiptClient, firstBlock, latestRemoteBlock.Uint64(), false, true, false, finaliseState)
+	lastCommittedBlockNum, err := snapshots.GetAndCommitBlocks(ctx, cfg.db, tx, client, receiptClient, firstBlock, latestRemoteBlock.Uint64(), false, true, false, finaliseState, cfg.L2RPC.BlockRPS, cfg.L2RPC.BlockBurst, cfg.L2RPC.ReceiptRPS, cfg.L2RPC.ReceiptBurst)
 	if err != nil {
 		return fmt.Errorf("error fetching and committing blocks from rpc: %w", err)
 	}
