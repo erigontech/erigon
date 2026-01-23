@@ -64,7 +64,7 @@ func (me *downloadBatch) addAllItems(ctx context.Context, items []preverifiedSna
 		}
 		err := me.addDownload(it)
 		if err != nil {
-			err = fmt.Errorf("adding %q: %w", it.Name, err)
+			err = fmt.Errorf("downloading snapshot %s (infohash %s): %w", it.Name, it.InfoHash.HexString(), err)
 			return err
 		}
 	}

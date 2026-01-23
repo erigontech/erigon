@@ -92,10 +92,10 @@ func streamDeferClose(m dsl.Matcher) {
 }
 
 func closeCollector(m dsl.Matcher) {
-	m.Match(`$c := etl.NewCollector($*_); $close`).
-		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
-		Report(`Add "defer $c.Close()" right after collector creation`)
-	m.Match(`$c := etl.NewCollectorWithAllocator($*_); $close`).
+	m.Match(
+		`$c := etl.NewCollector($*_); $close`,
+		`$c := etl.NewCollectorWithAllocator($*_); $close`,
+	).
 		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
 		Report(`Add "defer $c.Close()" right after collector creation`)
 }

@@ -113,6 +113,9 @@ var Defaults = Config{
 		ProduceE2:  true,
 		ProduceE3:  true,
 	},
+	FcuTimeout:          1 * time.Second,
+	FcuBackgroundPrune:  true,
+	FcuBackgroundCommit: false, // to enable, we need to 1) have rawdb API go via execctx and 2) revive Coherent cache for rpcdaemon
 }
 
 const DefaultChainDBPageSize = 16 * datasize.KB
@@ -274,7 +277,9 @@ type Config struct {
 	AllowAA bool
 
 	// fork choice update timeout
-	FcuTimeout time.Duration
+	FcuTimeout          time.Duration
+	FcuBackgroundPrune  bool
+	FcuBackgroundCommit bool
 
 	MCPAddress string
 }

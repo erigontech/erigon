@@ -29,7 +29,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -601,9 +601,7 @@ func calculateBenchStats(durations []time.Duration) BenchStats {
 	// Sort for percentile calculations
 	sorted := make([]time.Duration, len(durations))
 	copy(sorted, durations)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i] < sorted[j]
-	})
+	slices.Sort(sorted)
 
 	// Calculate basic stats
 	var total time.Duration
@@ -877,7 +875,7 @@ func processCommitmentFile(fpath string) (*visualizeOverallStat, error) {
 }
 
 func prefixLenCountChart(fname string, data *visualizeOverallStat) *charts.Pie {
-	items := make([]opts.PieData, 0)
+	items := make([]opts.PieData, 0, len(data.prefCount))
 	for prefSize, count := range data.prefCount {
 		items = append(items, opts.PieData{Name: strconv.FormatUint(prefSize, 10), Value: count})
 	}

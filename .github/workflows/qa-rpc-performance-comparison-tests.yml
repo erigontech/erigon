@@ -69,8 +69,8 @@ jobs:
 
   test_erigon:
     name: Benchmark Erigon
-    needs: [setup]
-    runs-on: [self-hosted, qa, Ethereum, rpc-latest-erigon]
+    needs: [ setup ]
+    runs-on: [ self-hosted, qa, Ethereum, rpc-latest-erigon ]
     timeout-minutes: 120
     permissions:
       contents: read
@@ -83,7 +83,7 @@ jobs:
       GETH_REDIS_KEY: ${{ needs.setup.outputs.geth_redis_key }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Sanity check Redis config
         shell: bash
@@ -109,8 +109,8 @@ jobs:
 
   test_geth:
     name: Benchmark Geth
-    needs: [setup]
-    runs-on: [self-hosted, qa, Ethereum, rpc-latest-geth]
+    needs: [ setup ]
+    runs-on: [ self-hosted, qa, Ethereum, rpc-latest-geth ]
     timeout-minutes: 120
     permissions:
       contents: read
@@ -123,7 +123,7 @@ jobs:
       GETH_REDIS_KEY: ${{ needs.setup.outputs.geth_redis_key }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Sanity check Redis config
         shell: bash

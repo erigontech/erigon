@@ -377,7 +377,7 @@ func (s *DirtySegment) FilePaths(basePath string) (relativePaths []string) {
 }
 
 func (s *DirtySegment) FileInfo(dir string) snaptype.FileInfo {
-	return s.Type().FileInfo(dir, s.from, s.to)
+	return s.Type().FileInfoByMask(dir, s.from, s.to)
 }
 
 func (s *DirtySegment) GetRange() (from, to uint64) { return s.from, s.to }
@@ -1466,9 +1466,10 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 			for _, segment := range segs {
 				info := segment.FileInfo(dir)
 
-				if t.HasIndexFiles(info, logger) {
+				if segment.IsIndexed() {
 					continue
 				}
+
 				newIdxBuilt = true
 
 				segment.closeIdx()
