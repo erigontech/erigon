@@ -296,11 +296,11 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	if tx == nil {
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
 	}
-	start := time.Now()
+	//start := time.Now()
 	maxStep := kv.Step(math.MaxUint64)
 
 	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
-		sd.metrics.UpdateCacheReads(domain, start)
+		//sd.metrics.UpdateCacheReads(domain, start)
 		return v, step, nil
 	} else {
 		if step > 0 {
