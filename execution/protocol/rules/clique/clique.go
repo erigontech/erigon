@@ -376,7 +376,7 @@ func (c *Clique) CalculateRewards(config *chain.Config, header *types.Header, un
 // Finalize implements rules.Engine, ensuring no uncles are set, nor block
 // rewards given.
 func (c *Clique) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
+	uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.FlatRequests, error) {
 	return nil, nil

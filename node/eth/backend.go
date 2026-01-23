@@ -223,12 +223,11 @@ type Ethereum struct {
 	silkwormRPCDaemonService *silkworm.RpcDaemonService
 	silkwormSentryService    *silkworm.SentryService
 
-	polygonSyncService  *polygonsync.Service
-	polygonDownloadSync *stagedsync.Sync
-	polygonBridge       *bridge.Service
-	heimdallService     *heimdall.Service
-	stopNode            func() error
-	bgComponentsEg      errgroup.Group
+	polygonSyncService *polygonsync.Service
+	polygonBridge      *bridge.Service
+	heimdallService    *heimdall.Service
+	stopNode           func() error
+	bgComponentsEg     errgroup.Group
 }
 
 func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
@@ -287,6 +286,8 @@ const blockBufferSize = 128
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
 func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger, tracer *tracers.Tracer) (*Ethereum, error) {
+	go dbg.SaveHeapProfileNearOOMPeriodically(ctx, dbg.SaveHeapWithLogger(&logger))
+
 	dirs := stack.Config().Dirs
 
 	tmpdir := dirs.Tmp
@@ -448,7 +449,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		apiAddr := fmt.Sprintf("127.0.0.1:%d", apiPort)
 
 		collectNodeURLs := func(nodes []*enode.Node) []string {
-			var urls []string
+			urls := make([]string, 0, len(nodes))
 			for _, n := range nodes {
 				urls = append(urls, n.URLv4())
 			}
@@ -575,7 +576,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// setup periodic logging and prometheus updates
 	go mem.LogMemStats(ctx, logger)
 	go disk.UpdateDiskStats(ctx, logger)
-	go dbg.SaveHeapProfileNearOOMPeriodically(ctx, dbg.SaveHeapWithLogger(&logger))
 	go kv.CollectTableSizesPeriodically(ctx, backend.chainDB, dbcfg.ChainDB, logger)
 
 	var currentBlock *types.Block
@@ -993,12 +993,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.silkworm, backend.forkValidator, tracer)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
-	backend.eth1ExecutionServer = execmodule.NewEthereumExecutionModule(ctx, blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.RecentReceipts, execmoduleCache, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync)
+	// for polygon, we only need to download snapshots on start so that all driver components are correctly initialised before any block execution begins
+	onlySnapDownloadOnStart := chainConfig.Bor != nil
+	backend.eth1ExecutionServer = execmodule.NewEthereumExecutionModule(ctx, blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.RecentReceipts, execmoduleCache, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync, config.FcuBackgroundPrune, config.FcuBackgroundCommit, onlySnapDownloadOnStart)
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
 
 	var executionEngine executionclient.ExecutionEngine
 
-	executionEngine, err = executionclient.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chainConfig, executionRpc, 1000), txPoolRpcClient)
+	executionEngine, err = executionclient.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chainConfig, executionRpc, uint64(config.FcuTimeout.Milliseconds())), txPoolRpcClient)
 	if err != nil {
 		return nil, err
 	}
@@ -1066,25 +1068,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			backend.engineBackendRPC,
 			backend,
 			config.Dirs.Tmp,
-		)
-
-		// we need to initiate download before the heimdall services start rather than
-		// waiting for the stage loop to start
-
-		if !config.Snapshot.NoDownloader && backend.downloaderClient == nil {
-			panic("expect to have non-nil downloaderClient")
-		}
-		backend.polygonDownloadSync = stagedsync.New(
-			backend.config.Sync,
-			stagedsync.DownloadSyncStages(
-				backend.sentryCtx, stagedsync.StageSnapshotsCfg(
-					backend.chainDB, backend.sentriesClient.ChainConfig, config.Sync, dirs, blockRetire, backend.downloaderClient,
-					blockReader, backend.notifications, false, false, false, backend.silkworm, config.Prune,
-				)),
-			nil,
-			nil,
-			backend.logger,
-			stages.ModeApplyingBlocks,
 		)
 
 		// these range extractors set the db to the local db instead of the chain db
@@ -1517,29 +1500,17 @@ func (s *Ethereum) Start() error {
 		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // Shutdown is handled by context
 		s.bgComponentsEg.Go(func() error {
+			defer s.logger.Info("[polygon.sync] exeuction server start goroutine completed")
+			s.eth1ExecutionServer.Start(s.sentryCtx, hook)
+			return nil
+		})
+		s.bgComponentsEg.Go(func() error {
 			defer s.logger.Info("[polygon.sync] goroutine terminated")
-			// when we're running in stand alone mode we need to run the downloader before we start the
-			// polygon services because they will wait for it to complete before opening their stores
-			// which make use of snapshots and expect them to be initialize
-			// TODO: get the snapshots to call the downloader directly - which will avoid this
-			go func() {
-				err := stageloop.StageLoopIteration(s.sentryCtx, s.chainDB, nil, nil, s.polygonDownloadSync, true, true, s.logger, s.blockReader, hook)
-
-				if err != nil && !errors.Is(err, context.Canceled) {
-					s.logger.Error("[polygon.sync] downloader stage crashed - stopping node", "err", err)
-					err = s.stopNode()
-					if err != nil {
-						s.logger.Error("could not stop node", "err", err)
-					}
-				}
-			}()
-
 			ctx := s.sentryCtx
 			err := s.polygonSyncService.Run(ctx)
 			if err == nil || errors.Is(err, context.Canceled) {
 				return err
 			}
-
 			s.logger.Error("[polygon.sync] crashed - stopping node", "err", err)
 			go func() { // call stopNode in another goroutine to avoid deadlock
 				stopErr := s.stopNode()
@@ -1547,7 +1518,6 @@ func (s *Ethereum) Start() error {
 					s.logger.Error("[polygon.sync] could not stop node", "err", stopErr)
 				}
 			}()
-
 			return err
 		})
 	} else {
