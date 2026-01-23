@@ -173,7 +173,6 @@ jobs:
           echo "Erigon started"
 
       - name: Wait for port 8545 to be opened
-        if: matrix.client == 'erigon'
         run: |
           for i in {1..30}; do
             if nc -z localhost 8545; then
@@ -249,6 +248,7 @@ jobs:
                                       --test-sequence "$sequence" \
                                       --repetitions 5 \
                                       --erigon-dir "/" \
+                                      --silk-dir "/" \
                                       --test-mode 2 \
                                       --test-report \
                                       --json-report $result_dir/$result_file \
@@ -293,7 +293,14 @@ jobs:
               branch_name="release"
               commit_hash=$commit
             fi
-
+            
+            echo branch_name=$branch_name
+            echo commit_hash=$commit_hash
+            echo method=$method
+            echo db_version=$db_version
+            echo outcome=$outcome
+            echo result_file=$result_file
+          
             python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py \
               --repo $client \
               --branch $branch_name \
