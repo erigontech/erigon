@@ -170,7 +170,6 @@ type EthereumExecutionModule struct {
 	// MDBX database
 	db                kv.TemporalRwDB // main database
 	semaphore         *semaphore.Weighted
-	lock              sync.RWMutex
 	executionPipeline *stagedsync.Sync
 	forkValidator     *engine_helpers.ForkValidator
 
@@ -193,11 +192,12 @@ type EthereumExecutionModule struct {
 	// rules engine
 	engine rules.Engine
 
-	doingPostForkchoice bool
-
+	fcuBackgroundPrune  bool
+	fcuBackgroundCommit bool
 	// metrics for average mgas/sec
 	avgMgasSec float64
 
+	lock           sync.RWMutex
 	currentContext *execctx.SharedDomains
 
 	executionproto.UnimplementedExecutionServer
@@ -211,6 +211,8 @@ func NewEthereumExecutionModule(ctx context.Context, blockReader services.FullBl
 	stateCache *Cache, stateChangeConsumer shards.StateChangeConsumer,
 	logger log.Logger, engine rules.Engine,
 	syncCfg ethconfig.Sync,
+	fcuBackgroundPrune bool,
+	fcuBackgroundCommit bool,
 ) *EthereumExecutionModule {
 	em := &EthereumExecutionModule{
 		blockReader:         blockReader,
@@ -229,6 +231,8 @@ func NewEthereumExecutionModule(ctx context.Context, blockReader services.FullBl
 		engine:              engine,
 		syncCfg:             syncCfg,
 		bacgroundCtx:        ctx,
+		fcuBackgroundPrune:  fcuBackgroundPrune,
+		fcuBackgroundCommit: fcuBackgroundCommit,
 	}
 
 	if stateCache != nil {
