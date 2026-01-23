@@ -145,15 +145,15 @@ type pyroscopeLogger struct {
 	Logger log.Logger
 }
 
-func (l *pyroscopeLogger) Infof(format string, v ...interface{}) {
+func (l *pyroscopeLogger) Infof(format string, v ...any) {
 	l.Logger.Info(fmt.Sprintf(format, v...))
 }
 
-func (l *pyroscopeLogger) Debugf(format string, v ...interface{}) {
+func (l *pyroscopeLogger) Debugf(format string, v ...any) {
 	l.Logger.Debug(fmt.Sprintf(format, v...))
 }
 
-func (l *pyroscopeLogger) Errorf(format string, v ...interface{}) {
+func (l *pyroscopeLogger) Errorf(format string, v ...any) {
 	l.Logger.Error(fmt.Sprintf(format, v...))
 }
 

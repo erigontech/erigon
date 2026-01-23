@@ -111,7 +111,6 @@ func SaveChainConfigIfNeed(
 	ctx context.Context,
 	coreDB kv.RoDB,
 	poolDB kv.RwDB,
-	force bool,
 	logger log.Logger,
 ) (cc *chain.Config, blockNum uint64, err error) {
 	if err = poolDB.View(ctx, func(tx kv.Tx) error {
@@ -126,13 +125,6 @@ func SaveChainConfigIfNeed(
 		return nil
 	}); err != nil {
 		return nil, 0, err
-	}
-
-	if cc != nil && !force {
-		if cc.ChainID.Sign() == 0 {
-			return nil, 0, errors.New("wrong chain config")
-		}
-		return initBor(cc), blockNum, nil
 	}
 
 	for {

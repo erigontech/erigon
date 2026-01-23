@@ -296,7 +296,7 @@ func TestAllowList(t *testing.T) {
 }
 
 func testCustomRequest(t *testing.T, srv *httpServer, method string) bool {
-	body := bytes.NewReader([]byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"%s"}`, method)))
+	body := bytes.NewReader(fmt.Appendf(nil, `{"jsonrpc":"2.0","id":1,"method":"%s"}`, method))
 	req, _ := http.NewRequest("POST", "http://"+srv.listenAddr(), body)
 	req.Header.Set("content-type", "application/json")
 

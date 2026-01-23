@@ -196,7 +196,7 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 	var blocks []*types.Block
 	var insertedBlocksWithoutExec int
 	for blocks, err = feed.Next(ctx); err == nil && len(blocks) > 0; blocks, err = feed.Next(ctx) {
-		progressLogArgs := []interface{}{
+		progressLogArgs := []any{
 			"from", blocks[0].NumberU64(),
 			"fromHash", blocks[0].Hash(),
 			"to", blocks[len(blocks)-1].NumberU64(),

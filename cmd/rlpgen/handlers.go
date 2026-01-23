@@ -123,7 +123,7 @@ func uintHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string
 	}
 
 	// size
-	fmt.Fprintf(b1, "    size += rlp.IntLenExcludingHead(uint64(obj.%s)) + 1\n", fieldName)
+	fmt.Fprintf(b1, "    size += rlp.U64Len(uint64(obj.%s))\n", fieldName)
 
 	// encode
 	fmt.Fprintf(b2, "    if err := rlp.EncodeInt(uint64(obj.%s), w, b[:]); err != nil {\n", fieldName)
@@ -160,7 +160,7 @@ func uintPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName str
 
 	// size
 	fmt.Fprintf(b1, "    if obj.%s != nil {\n", fieldName)
-	fmt.Fprintf(b1, "        size += rlp.IntLenExcludingHead(uint64(*obj.%s)) + 1\n", fieldName)
+	fmt.Fprintf(b1, "        size += rlp.U64Len(uint64(*obj.%s))\n", fieldName)
 	fmt.Fprintf(b1, "    }\n")
 
 	// encode
@@ -187,7 +187,7 @@ func bigIntHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName stri
 		_ = addToImports(named)
 	}
 	// size
-	fmt.Fprintf(b1, "    size += rlp.BigIntLenExcludingHead(&obj.%s) + 1\n", fieldName)
+	fmt.Fprintf(b1, "    size += rlp.BigIntLen(&obj.%s)\n", fieldName)
 
 	// encode
 	fmt.Fprintf(b2, "    if err := rlp.EncodeBigInt(&obj.%s, w, b[:]); err != nil {\n", fieldName)
@@ -214,10 +214,7 @@ func bigIntPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName s
 	}
 
 	// size
-	fmt.Fprintf(b1, "    size += 1\n")
-	fmt.Fprintf(b1, "    if obj.%s != nil {\n", fieldName)
-	fmt.Fprintf(b1, "        size += rlp.BigIntLenExcludingHead(obj.%s)\n", fieldName)
-	fmt.Fprintf(b1, "    }\n")
+	fmt.Fprintf(b1, "    size += rlp.BigIntLen(obj.%s)\n", fieldName)
 
 	// encode
 	fmt.Fprintf(b2, "    if err := rlp.EncodeBigInt(obj.%s, w, b[:]); err != nil {\n", fieldName)
@@ -240,7 +237,7 @@ func uint256Handle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName str
 	}
 
 	// size
-	fmt.Fprintf(b1, "    size += rlp.Uint256LenExcludingHead(&obj.%s) + 1\n", fieldName)
+	fmt.Fprintf(b1, "    size += rlp.Uint256Len(&obj.%s)\n", fieldName)
 
 	// encode
 	fmt.Fprintf(b2, "    if err := rlp.EncodeUint256(obj.%s, w, b[:]); err != nil {\n", fieldName)
@@ -267,7 +264,7 @@ func uint256PtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName 
 	}
 
 	// size
-	fmt.Fprintf(b1, "    size += rlp.Uint256LenExcludingHead(*obj.%s) + 1\n", fieldName)
+	fmt.Fprintf(b1, "    size += rlp.Uint256Len(*obj.%s)\n", fieldName)
 
 	// encode
 	fmt.Fprintf(b2, "    if err := rlp.EncodeUint256(*obj.%s, w, b[:]); err != nil {\n", fieldName)

@@ -38,6 +38,11 @@ import (
 // Whether the reverse downloader arrived at expected height or condition.
 type OnNewBlock func(blk *cltypes.SignedBeaconBlock) (finished bool, err error)
 
+// BlockChecker is an interface for checking if a block exists
+type BlockChecker interface {
+	HasBlock(blockNumber uint64) bool
+}
+
 type BackwardBeaconDownloader struct {
 	ctx            context.Context
 	slotToDownload atomic.Uint64
@@ -50,6 +55,7 @@ type BackwardBeaconDownloader struct {
 	db             kv.RwDB
 	sn             *freezeblocks.CaplinSnapshots
 	neverSkip      bool
+	blockChecker   BlockChecker
 
 	mu sync.Mutex
 }
@@ -59,7 +65,7 @@ func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn 
 		ctx:         ctx,
 		rpc:         rpc,
 		db:          db,
-		reqInterval: time.NewTicker(600 * time.Millisecond),
+		reqInterval: time.NewTicker(200 * time.Millisecond),
 		neverSkip:   true,
 		engine:      engine,
 		sn:          sn,
@@ -92,6 +98,13 @@ func (b *BackwardBeaconDownloader) SetNeverSkip(neverSkip bool) {
 	b.neverSkip = neverSkip
 }
 
+// SetBlockChecker sets the block checker for skipping already downloaded blocks
+func (b *BackwardBeaconDownloader) SetBlockChecker(checker BlockChecker) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.blockChecker = checker
+}
+
 // SetShouldStopAtFn sets the stop condition.
 func (b *BackwardBeaconDownloader) SetOnNewBlock(onNewBlock OnNewBlock) {
 	b.mu.Lock()
@@ -118,88 +131,113 @@ func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 }
 
 // RequestMore downloads a range of blocks in a backward manner.
-// The function sends a request for a range of blocks starting from a given slot and ending count blocks before it.
-// It then processes the response by iterating over the blocks in reverse order and calling a provided callback function onNewBlock on each block.
-// If the callback returns an error or signals that the download should be finished, the function will exit.
-// If the block's root hash does not match the expected root hash, it will be rejected and the function will continue to the next block.
+// It requests blocks, processes them in reverse order via the onNewBlock callback,
+// and rejects blocks whose root hash doesn't match the expected root.
 func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
-	count := uint64(16)
+	responses, err := b.fetchBlockRange(ctx)
+	if err != nil {
+		return err
+	}
+
+	if err := b.processResponses(responses); err != nil {
+		return err
+	}
+
+	if !b.neverSkip {
+		return nil
+	}
+
+	return b.trySkipToExistingBlock(ctx)
+}
+
+// fetchBlockRange requests a range of blocks from peers and waits for a response.
+func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*cltypes.SignedBeaconBlock, error) {
+	const count = uint64(64)
 	start := b.slotToDownload.Load() - count + 1
-	// Overflow? round to 0.
-	if start > b.slotToDownload.Load() {
+	if start > b.slotToDownload.Load() { // overflow check
 		start = 0
 	}
 
-	var responses []*cltypes.SignedBeaconBlock
-	var received = make(chan []*cltypes.SignedBeaconBlock)
+	// Buffered channel prevents goroutine leaks
+	received := make(chan []*cltypes.SignedBeaconBlock, 1)
+	var requestSent atomic.Bool
 
-Loop:
 	for {
 		select {
-		case <-b.reqInterval.C:
-			if len(received) == 0 {
-				go func() {
-					blocks, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
-					if err != nil {
-						b.rpc.BanPeer(peerId)
-						return
-					}
-					if blocks == nil {
-						b.rpc.BanPeer(peerId)
-						return
-					}
-					if len(blocks) == 0 {
-						b.rpc.BanPeer(peerId)
-						return
-					}
-					if len(received) == 0 {
-						received <- blocks
-					}
-				}()
-			}
 		case <-ctx.Done():
-			return ctx.Err()
-		case responses = <-received:
-			break Loop
+			return nil, ctx.Err()
+
+		case <-b.reqInterval.C:
+			if requestSent.Swap(true) {
+				continue // request already in flight
+			}
+			go b.sendBlockRequest(ctx, start, count, received, &requestSent)
+
+		case responses := <-received:
+			return responses, nil
 		}
 	}
+}
 
-	// Import new blocks, order is forward so reverse the whole packet
+// sendBlockRequest sends a block range request and writes the result to the channel.
+func (b *BackwardBeaconDownloader) sendBlockRequest(
+	ctx context.Context,
+	start, count uint64,
+	received chan<- []*cltypes.SignedBeaconBlock,
+	requestSent *atomic.Bool,
+) {
+	blocks, peerId, err := b.rpc.SendBeaconBlocksByRangeReq(ctx, start, count)
+	if err != nil || blocks == nil || len(blocks) == 0 {
+		b.rpc.BanPeer(peerId)
+		requestSent.Store(false)
+		return
+	}
+
+	select {
+	case received <- blocks:
+	default:
+		// Response already received, discard
+	}
+}
+
+// processResponses processes downloaded blocks in reverse order.
+func (b *BackwardBeaconDownloader) processResponses(responses []*cltypes.SignedBeaconBlock) error {
 	for i := len(responses) - 1; i >= 0; i-- {
 		if b.finished.Load() {
 			return nil
 		}
-		segment := responses[i]
-		// is this new block root equal to the expected root?
-		blockRoot, err := segment.Block.HashSSZ()
+
+		block := responses[i]
+		blockRoot, err := block.Block.HashSSZ()
 		if err != nil {
-			log.Debug("Could not compute block root while processing packet", "err", err)
+			log.Debug("Could not compute block root", "err", err)
 			continue
 		}
-		// No? Reject.
+
 		if blockRoot != b.expectedRoot {
-			log.Debug("Gotten unexpected root", "got", common.Hash(blockRoot), "expected", b.expectedRoot)
+			log.Debug("Unexpected root", "got", common.Hash(blockRoot), "expected", b.expectedRoot)
 			continue
 		}
-		// Yes? then go for the callback.
-		finished, err := b.onNewBlock(segment)
+
+		finished, err := b.onNewBlock(block)
 		b.finished.Store(finished)
 		if err != nil {
-			log.Warn("Found error while processing packet", "err", err)
+			log.Warn("Error processing block", "err", err)
 			continue
 		}
-		// set expected root to the segment parent root
-		b.expectedRoot = segment.Block.ParentRoot
-		if segment.Block.Slot == 0 {
+
+		b.expectedRoot = block.Block.ParentRoot
+		if block.Block.Slot == 0 {
 			b.finished.Store(true)
 			return nil
 		}
-		b.slotToDownload.Store(segment.Block.Slot - 1) // update slot (might be inexact but whatever)
+		b.slotToDownload.Store(block.Block.Slot - 1)
 	}
-	if !b.neverSkip {
-		return nil
-	}
-	// try skipping if the next slot is in db
+	return nil
+}
+
+// trySkipToExistingBlock attempts to skip ahead if the expected block already exists in the database.
+func (b *BackwardBeaconDownloader) trySkipToExistingBlock(ctx context.Context) error {
 	tx, err := b.db.BeginRw(b.ctx)
 	if err != nil {
 		return err
@@ -210,18 +248,19 @@ Loop:
 	if b.engine != nil && b.engine.SupportInsertion() {
 		elFrozenBlocks = b.engine.FrozenBlocks(ctx)
 	}
+
 	clFrozenBlocks := uint64(0)
 	if b.sn != nil {
 		clFrozenBlocks = b.sn.SegmentsMax()
 	}
 
-	updateFrozenBlocksTicker := time.NewTicker(5 * time.Second)
-	defer updateFrozenBlocksTicker.Stop()
-	// it will stop if we end finding a gap or if we reach the maxIterations
-	for {
+	refreshTicker := time.NewTicker(5 * time.Second)
+	defer refreshTicker.Stop()
 
+	for {
+		// Periodically refresh frozen block counts
 		select {
-		case <-updateFrozenBlocksTicker.C:
+		case <-refreshTicker.C:
 			if b.sn != nil {
 				clFrozenBlocks = b.sn.SegmentsMax()
 			}
@@ -231,61 +270,76 @@ Loop:
 		default:
 		}
 
-		// check if the expected root is in db
 		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, b.expectedRoot)
 		if err != nil {
 			return err
 		}
-
 		if slot == nil || *slot == 0 {
 			break
 		}
 
-		if b.engine != nil && b.engine.SupportInsertion() {
-			blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, b.expectedRoot)
-			if err != nil {
-				return err
-			}
-			blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, b.expectedRoot)
-			if err != nil {
-				return err
-			}
-			if blockHash == (common.Hash{}) || blockNumber == nil {
-				break
-			}
-			if *blockNumber >= elFrozenBlocks {
-				has, err := b.engine.HasBlock(ctx, blockHash)
-				if err != nil {
-					return err
-				}
-				if !has {
-					break
-				}
-			}
-		}
-		if *slot <= clFrozenBlocks {
+		if !b.canSkipSlot(ctx, tx, elFrozenBlocks, clFrozenBlocks, *slot) {
 			break
 		}
+
 		b.slotToDownload.Store(*slot - 1)
 		if err := beacon_indicies.MarkRootCanonical(b.ctx, tx, *slot, b.expectedRoot); err != nil {
 			return err
 		}
+
 		b.expectedRoot, err = beacon_indicies.ReadParentBlockRoot(b.ctx, tx, b.expectedRoot)
 		if err != nil {
 			return err
 		}
-		// Some cleaning of possible ugly restarts
-		newSlotToDownload, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, b.expectedRoot)
+
+		// Clean up non-canonical slots
+		newSlot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, b.expectedRoot)
 		if err != nil {
 			return err
 		}
-		if newSlotToDownload == nil || *newSlotToDownload == 0 {
+		if newSlot == nil || *newSlot == 0 {
 			continue
 		}
-		for i := *newSlotToDownload + 1; i < *slot; i++ {
+		for i := *newSlot + 1; i < *slot; i++ {
 			tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(i))
 		}
 	}
 
 	return tx.Commit()
+}
+
+// canSkipSlot checks if we can skip to an existing block at the given slot.
+func (b *BackwardBeaconDownloader) canSkipSlot(ctx context.Context, tx kv.Tx, elFrozenBlocks, clFrozenBlocks, slot uint64) bool {
+	if slot <= clFrozenBlocks {
+		return false
+	}
+
+	if b.engine == nil || !b.engine.SupportInsertion() {
+		return true
+	}
+
+	blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, b.expectedRoot)
+	if err != nil || blockHash == (common.Hash{}) {
+		return false
+	}
+
+	blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, b.expectedRoot)
+	if err != nil {
+		log.Warn("Failed to read execution block number", "err", err)
+	}
+	if err != nil || blockNumber == nil {
+		return false
+	}
+
+	// Check if block is already in the collector
+	if b.blockChecker != nil && b.blockChecker.HasBlock(*blockNumber) {
+		return true
+	}
+
+	if *blockNumber < elFrozenBlocks {
+		return true
+	}
+
+	has, err := b.engine.HasBlock(ctx, blockHash)
+	return err == nil && has
 }

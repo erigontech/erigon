@@ -51,10 +51,17 @@ func (c *StateDiffClientDirect) Snapshots(ctx context.Context, in *remoteproto.S
 func (c *StateDiffClientDirect) StateChanges(ctx context.Context, in *remoteproto.StateChangeRequest, opts ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
 	ch := make(chan *stateDiffReply, 16384)
 	streamServer := &StateDiffStreamS{ch: ch, ctx: ctx}
+	// there is a timing hole on startup which breaks tests
+	// really we need a subscribed event so the subscriber
+	// can ensure that the subcription is complete before it
+	// starts processing - this just shortens the gap
+	started := make(chan *struct{}, 1)
 	go func() {
 		defer close(ch)
+		started <- nil
 		streamServer.Err(c.server.StateChanges(in, streamServer))
 	}()
+	<-started
 	return &StateDiffStreamC{ch: ch, ctx: ctx}, nil
 }
 

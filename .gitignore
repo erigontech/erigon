@@ -114,3 +114,5 @@ mdbx.lck
 .my
 
 *.prof
+
+.claude/settings.local.json
