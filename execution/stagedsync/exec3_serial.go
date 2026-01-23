@@ -219,7 +219,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 			timeStart := time.Now()
 
-			pruneTimeout := 250 * time.Millisecond
+			pruneTimeout := 2 * time.Second //250 * time.Millisecond
 			if initialCycle {
 				//pruneTimeout = 10 * time.Hour
 				//
