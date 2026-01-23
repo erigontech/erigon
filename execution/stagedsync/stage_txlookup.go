@@ -68,14 +68,6 @@ func StageTxLookupCfg(
 }
 
 func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, ctx context.Context, logger log.Logger) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
 	logPrefix := s.LogPrefix()
 	endBlock, err := s.ExecutionAt(tx)
 	if err != nil {
@@ -125,13 +117,6 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 			return fmt.Errorf("txnLookupIntegrity: %w", err)
 		}
 	}
-
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -209,14 +194,6 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	if s.BlockNumber <= u.UnwindPoint {
 		return nil
 	}
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
 
 	// end key needs to be s.BlockNumber + 1 and not s.BlockNumber, because
 	// the keys in BlockBody table always have hash after the block number
@@ -231,24 +208,11 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	if err := u.Done(tx); err != nil {
 		return err
 	}
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
 func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, logger log.Logger) (err error) {
 	logPrefix := s.LogPrefix()
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
 	blockFrom := s.PruneProgress
 	if blockFrom == 0 {
 		firstNonGenesisHeader, err := rawdbv3.SecondKey(tx, kv.Headers)
@@ -304,12 +268,6 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 			}
 		}
 		if err = s.DoneAt(tx, pruneBlockNum); err != nil {
-			return err
-		}
-	}
-
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
 			return err
 		}
 	}

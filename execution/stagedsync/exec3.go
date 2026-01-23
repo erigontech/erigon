@@ -129,23 +129,11 @@ func ExecV3(ctx context.Context,
 	isApplyingBlocks := execStage.SyncMode() == stages.ModeApplyingBlocks
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
 	hooks := cfg.vmConfig.Tracer
-
-	useExternalTx := rwTx != nil
-	var applyTx kv.TemporalRwTx
-
-	if useExternalTx {
-		applyTx = rwTx
-	} else {
-		var err error
-		applyTx, err = cfg.db.BeginTemporalRw(ctx) //nolint
-		if err != nil {
-			return err
-		}
-		defer func() {
-			applyTx.Rollback()
-		}()
+	applyTx := rwTx
+	err := doms.SeekCommitment(ctx, applyTx)
+	if err != nil {
+		return err
 	}
-
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if initialCycle && isApplyingBlocks {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
@@ -154,9 +142,7 @@ func ExecV3(ctx context.Context,
 		agg.SetCompressWorkers(1)
 		agg.SetCollateAndBuildWorkers(1)
 	}
-
 	var (
-		err          error
 		blockNum     = doms.BlockNum()
 		initialTxNum = doms.TxNum()
 	)
@@ -258,14 +244,15 @@ func ExecV3(ctx context.Context,
 			},
 			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
-		pe.doms.SetWarmupDB(cfg.db)
+		pe.doms.EnableParaTrieDB(cfg.db)
+		pe.doms.EnableTrieWarmup(true)
 
 		defer func() {
 			pe.LogComplete(stepsInDb)
 		}()
 
 		lastHeader, applyTx, execErr = pe.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
-			initialTxNum, inputTxNum, useExternalTx, initialCycle, applyTx, accumulator, readAhead, logEvery)
+			initialTxNum, inputTxNum, initialCycle, applyTx, accumulator, readAhead, logEvery)
 
 		lastCommittedBlockNum = pe.lastCommittedBlockNum
 		lastCommittedTxNum = pe.lastCommittedTxNum
@@ -290,14 +277,15 @@ func ExecV3(ctx context.Context,
 				lastCommittedBlockNum: blockNum,
 				postValidator:         postValidator,
 			}}
-		se.doms.SetWarmupDB(cfg.db)
+		se.doms.EnableParaTrieDB(cfg.db)
+		se.doms.EnableTrieWarmup(true)
 
 		defer func() {
 			se.LogComplete(stepsInDb)
 		}()
 
 		lastHeader, applyTx, execErr = se.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
-			initialTxNum, inputTxNum, useExternalTx, initialCycle, applyTx, accumulator, readAhead, logEvery)
+			initialTxNum, inputTxNum, initialCycle, applyTx, accumulator, readAhead, logEvery)
 
 		if u != nil && !u.HasUnwindPoint() {
 			if lastHeader != nil {
@@ -319,7 +307,7 @@ func ExecV3(ctx context.Context,
 					commitStart := time.Now()
 					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
 
-					if !useExternalTx {
+					if initialCycle {
 						se.LogCommitments(commitStart, 0, committedTransactions, 0, stepsInDb, commitment.CommitProgress{})
 					}
 				case errors.Is(execErr, ErrWrongTrieRoot):
@@ -361,12 +349,6 @@ func ExecV3(ctx context.Context,
 			"lastFrozenStep", lastFrozenStep, "lastFrozenTxNum", ((lastFrozenStep+1)*kv.Step(doms.StepSize()))-1)
 		return fmt.Errorf("can't persist comittement for blockNum %d, txNum %d: step %d is frozen",
 			lastCommittedBlockNum, lastCommittedTxNum, lastCommitedStep)
-	}
-
-	if !useExternalTx && applyTx != nil {
-		if err = applyTx.Commit(); err != nil {
-			return err
-		}
 	}
 
 	if execStage.SyncMode() == stages.ModeApplyingBlocks {
@@ -808,7 +790,8 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 	}
 
 	// Use warmup to pre-fetch branch data in parallel before computing commitment
-	doms.SetWarmupDB(cfg.db)
+	doms.EnableParaTrieDB(cfg.db)
+	doms.EnableTrieWarmup(true)
 	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix(), nil)
 
 	times.ComputeCommitment = time.Since(start)
