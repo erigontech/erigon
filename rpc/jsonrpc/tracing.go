@@ -76,6 +76,13 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		return fmt.Errorf("genesis is not traceable")
 	}
 
+	// if we've pruned this history away for this block then just return early
+	// to save any red herring errors
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return err
+	}
+
 	block, err := api.blockWithSenders(ctx, tx, hash, blockNumber)
 	if err != nil {
 		return err
@@ -83,13 +90,6 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	if block == nil {
 		stream.WriteNil()
 		return fmt.Errorf("invalid arguments; block with hash %x not found", hash)
-	}
-
-	// if we've pruned this history away for this block then just return early
-	// to save any red herring errors
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, block.NumberU64())
-	if err != nil {
-		return err
 	}
 
 	if config == nil {

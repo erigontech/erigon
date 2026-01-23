@@ -194,6 +194,13 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	}
 	bn := hexutil.Uint64(blockNum)
 
+	// if we've pruned this history away for this block then just return early
+	// to save any red herring errors
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
 	// Extract transactions from block
 	block, bErr := api.blockWithSenders(ctx, tx, hash, blockNum)
 	if bErr != nil {
@@ -344,6 +351,14 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	}
 	if fromBlock > toBlock {
 		return errors.New("invalid parameters: fromBlock cannot be greater than toBlock")
+	}
+
+	// if we've pruned this history away for this block then just return early
+	// to save any red herring errors
+
+	err = api.BaseAPI.checkPruneStateHistory(ctx, dbtx, fromBlock)
+	if err != nil {
+		return err
 	}
 
 	return api.filterV3(ctx, dbtx, fromBlock, toBlock, req, stream, *gasBailOut, traceConfig)

@@ -431,6 +431,11 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return nil, err
 	}
 
+	err = api.BaseAPI.checkPruneStateHistory(ctx, tx, blockNrOrHash.BlockNumber.Uint64())
+	if err != nil {
+		return nil, err
+	}
+
 	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	if err != nil {
 		return nil, err
