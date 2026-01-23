@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"sync/atomic"
 	"time"
 
@@ -297,14 +296,14 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
 	}
 	//start := time.Now()
-	maxStep := kv.Step(math.MaxUint64)
+	//maxStep := kv.Step(math.MaxUint64)
 
 	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
 		//sd.metrics.UpdateCacheReads(domain, start)
 		return v, step, nil
 	} else {
 		if step > 0 {
-			maxStep = step
+			//maxStep = step
 		}
 	}
 
