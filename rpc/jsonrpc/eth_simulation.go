@@ -1032,7 +1032,13 @@ func (s *simulator) computeCustomCommitmentFromStateHistory(
 
 	// We can obtain the historical commitment at baseBlockNum by touching all state keys from history, then compute
 	minTxNum, err := s.txNumReader.Min(ctx, tx, 1)
+	if err != nil {
+		return nil, err
+	}
 	maxTxNum, err := s.txNumReader.Max(ctx, tx, baseBlockNum)
+	if err != nil {
+		return nil, err
+	}
 	tsd.GetCommitmentCtx().SetStateReader(newReplayStateReader(ttx, tx, tsd, maxTxNum+1))
 	s.logger.Debug("Touch historical keys", "fromTxNum", minTxNum, "toTxNum", maxTxNum+1)
 	_, _, _, err = tsd.TouchChangedKeysFromHistory(tx, minTxNum, maxTxNum+1)
