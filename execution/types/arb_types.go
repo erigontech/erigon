@@ -471,7 +471,7 @@ type ArbitrumContractTx struct {
 	arb.NoTimeBoosted
 	ChainId   *big.Int
 	RequestId common.Hash
-	From      common.Address
+	From      accounts.Address
 
 	GasFeeCap *big.Int        // wei per gas
 	Gas       uint64          // gas limit
@@ -547,7 +547,7 @@ func (tx *ArbitrumContractTx) AsMessage(s Signer, baseFee *big.Int, rules *chain
 		gasLimit:   tx.GetGasLimit(),
 		nonce:      tx.GetNonce(),
 		accessList: tx.GetAccessList(),
-		from:       accounts.InternAddress(tx.From),
+		from:       tx.From,
 		to:         to,
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
@@ -651,7 +651,8 @@ func (tx *ArbitrumContractTx) encodePayload(w io.Writer, b []byte, payloadSize, 
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(tx.From[:]); err != nil {
+	fromAddr := tx.From.Value()
+	if _, err := w.Write(fromAddr[:]); err != nil {
 		return err
 	}
 
@@ -768,7 +769,9 @@ func (tx *ArbitrumContractTx) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for From: %d", len(b))
 	}
-	copy(tx.From[:], b)
+	fromAddr := common.Address{}
+	copy(fromAddr[:], b)
+	tx.From = accounts.InternAddress(fromAddr)
 
 	// Decode GasFeeCap (*big.Int)
 	if b, err = s.Bytes(); err != nil {
@@ -834,17 +837,15 @@ func (tx *ArbitrumContractTx) Sender(signer Signer) (accounts.Address, error) {
 }
 
 func (tx *ArbitrumContractTx) CachedSender() (accounts.Address, bool) {
-	address := accounts.InternAddress(tx.From)
-	return address, true
+	return tx.From, true
 }
 
 func (tx *ArbitrumContractTx) GetSender() (accounts.Address, bool) {
-	address := accounts.InternAddress(tx.From)
-	return address, true
+	return tx.From, true
 }
 
 func (tx *ArbitrumContractTx) SetSender(address accounts.Address) {
-	tx.From = address.Value()
+	tx.From = address
 }
 
 func (tx *ArbitrumContractTx) IsContractDeploy() bool {
@@ -887,7 +888,7 @@ func (tx *ArbitrumContractTx) setSignatureValues(chainID, v, r, s *big.Int) {}
 type ArbitrumRetryTx struct {
 	ChainId             *big.Int
 	Nonce               uint64
-	From                common.Address
+	From                accounts.Address
 	GasFeeCap           *big.Int        // wei per gas
 	Gas                 uint64          // gas limit
 	To                  *common.Address `rlp:"nil"` // nil means contract creation
@@ -978,7 +979,7 @@ func (t *ArbitrumRetryTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rul
 		gasLimit:   t.GetGasLimit(),
 		nonce:      t.GetNonce(),
 		accessList: t.GetAccessList(),
-		from:       accounts.InternAddress(t.From),
+		from:       t.From,
 		to:         to,
 		data:       t.GetData(),
 		amount:     *t.GetValue(),
@@ -1056,7 +1057,8 @@ func (t *ArbitrumRetryTx) encodePayload(w io.Writer, b []byte, payloadSize, nonc
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(t.From[:]); err != nil {
+	fromAddr := t.From.Value()
+	if _, err := w.Write(fromAddr[:]); err != nil {
 		return err
 	}
 
@@ -1243,7 +1245,10 @@ func (t *ArbitrumRetryTx) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for From: %d", len(b))
 	}
-	copy(t.From[:], b)
+	fromAddr := common.Address{}
+	copy(fromAddr[:], b)
+
+	t.From = accounts.InternAddress(fromAddr)
 
 	// Decode GasFeeCap (*big.Int)
 	if b, err = s.Bytes(); err != nil {
@@ -1360,11 +1365,11 @@ func (t *ArbitrumRetryTx) CachedSender() (accounts.Address, bool) {
 }
 
 func (t *ArbitrumRetryTx) GetSender() (accounts.Address, bool) {
-	return accounts.InternAddress(t.From), true
+	return t.From, true
 }
 
 func (t *ArbitrumRetryTx) SetSender(address accounts.Address) {
-	t.From = address.Value()
+	t.From = address
 }
 
 func (t *ArbitrumRetryTx) IsContractDeploy() bool {
@@ -1413,7 +1418,7 @@ type ArbitrumSubmitRetryableTx struct {
 	arb.NoTimeBoosted
 	ChainId   *big.Int
 	RequestId common.Hash
-	From      common.Address
+	From      accounts.Address
 	L1BaseFee *big.Int
 
 	DepositValue     *big.Int
@@ -1604,7 +1609,8 @@ func (tx *ArbitrumSubmitRetryableTx) encodePayload(w io.Writer, b []byte, payloa
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(tx.From[:]); err != nil {
+	fromAddr := tx.From.Value()
+	if _, err := w.Write(fromAddr[:]); err != nil {
 		return err
 	}
 
@@ -1690,7 +1696,7 @@ func (tx *ArbitrumSubmitRetryableTx) AsMessage(s Signer, baseFee *big.Int, rules
 		gasLimit:   tx.GetGasLimit(),
 		nonce:      tx.GetNonce(),
 		accessList: tx.GetAccessList(),
-		from:       accounts.InternAddress(tx.From),
+		from:       tx.From,
 		to:         to,
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
@@ -1818,7 +1824,10 @@ func (tx *ArbitrumSubmitRetryableTx) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for From: %d", len(b))
 	}
-	copy(tx.From[:], b)
+	fromAddr := common.Address{}
+	copy(fromAddr[:], b)
+
+	tx.From = accounts.InternAddress(fromAddr)
 
 	// Decode L1BaseFee (*big.Int)
 	if b, err = s.Bytes(); err != nil {
@@ -1945,15 +1954,15 @@ func (tx *ArbitrumSubmitRetryableTx) Sender(signer Signer) (accounts.Address, er
 }
 
 func (tx *ArbitrumSubmitRetryableTx) CachedSender() (accounts.Address, bool) {
-	return accounts.InternAddress(tx.From), true
+	return tx.From, true
 }
 
 func (tx *ArbitrumSubmitRetryableTx) GetSender() (accounts.Address, bool) {
-	return accounts.InternAddress(tx.From), true
+	return tx.From, true
 }
 
 func (tx *ArbitrumSubmitRetryableTx) SetSender(address accounts.Address) {
-	tx.From = address.Value()
+	tx.From = address
 }
 
 func (tx *ArbitrumSubmitRetryableTx) IsContractDeploy() bool {
@@ -1993,7 +2002,7 @@ type ArbitrumDepositTx struct {
 	arb.NoTimeBoosted
 	ChainId     *big.Int
 	L1RequestId common.Hash
-	From        common.Address
+	From        accounts.Address
 	To          common.Address
 	Value       *big.Int
 }
@@ -2049,7 +2058,7 @@ func (tx *ArbitrumDepositTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.
 		gasLimit:   tx.GetGasLimit(),
 		nonce:      tx.GetNonce(),
 		accessList: tx.GetAccessList(),
-		from:       accounts.InternAddress(tx.From),
+		from:       tx.From,
 		to:         to,
 		data:       tx.GetData(),
 		amount:     *tx.GetValue(),
@@ -2187,7 +2196,8 @@ func (tx *ArbitrumDepositTx) encodePayload(w io.Writer, b []byte, payloadSize in
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(tx.From[:]); err != nil {
+	fromAddr := tx.From.Value()
+	if _, err := w.Write(fromAddr[:]); err != nil {
 		return err
 	}
 
@@ -2239,7 +2249,10 @@ func (tx *ArbitrumDepositTx) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for From: %d", len(b))
 	}
-	copy(tx.From[:], b)
+	from := common.Address{}
+	copy(from[:], b)
+
+	tx.From = accounts.InternAddress(from)
 
 	// Decode To (common.Address, 20 bytes)
 	if b, err = s.Bytes(); err != nil {
@@ -2279,17 +2292,13 @@ func (tx *ArbitrumDepositTx) MarshalBinary(w io.Writer) error {
 }
 
 func (tx *ArbitrumDepositTx) Sender(signer Signer) (accounts.Address, error) { panic("implement me") }
-func (tx *ArbitrumDepositTx) CachedSender() (accounts.Address, bool) {
-	return accounts.InternAddress(tx.From), true
-}
-func (tx *ArbitrumDepositTx) GetSender() (accounts.Address, bool) {
-	return accounts.InternAddress(tx.From), true
-}
-func (tx *ArbitrumDepositTx) SetSender(address accounts.Address) { tx.From = address.Value() }
-func (tx *ArbitrumDepositTx) IsContractDeploy() bool             { return false }
-func (tx *ArbitrumDepositTx) Unwrap() Transaction                { return tx }
-func (tx *ArbitrumDepositTx) encode(b *bytes.Buffer) error       { return rlp.Encode(b, tx) }
-func (tx *ArbitrumDepositTx) decode(input []byte) error          { return rlp.DecodeBytes(input, tx) }
+func (tx *ArbitrumDepositTx) CachedSender() (accounts.Address, bool)         { return tx.From, true }
+func (tx *ArbitrumDepositTx) GetSender() (accounts.Address, bool)            { return tx.From, true }
+func (tx *ArbitrumDepositTx) SetSender(address accounts.Address)             { tx.From = address }
+func (tx *ArbitrumDepositTx) IsContractDeploy() bool                         { return false }
+func (tx *ArbitrumDepositTx) Unwrap() Transaction                            { return tx }
+func (tx *ArbitrumDepositTx) encode(b *bytes.Buffer) error                   { return rlp.Encode(b, tx) }
+func (tx *ArbitrumDepositTx) decode(input []byte) error                      { return rlp.DecodeBytes(input, tx) }
 
 //func (tx *ArbitrumDepositTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {
 //	return dst.Set(bigZero)

@@ -1,6 +1,6 @@
 package txn
 
-import "github.com/erigontech/erigon-lib/common"
+import "github.com/erigontech/erigon/common"
 
 var ArbosAddress = common.HexToAddress("0xa4b05")
 var ArbosStateAddress = common.HexToAddress("0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")

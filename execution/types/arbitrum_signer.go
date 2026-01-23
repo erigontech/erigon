@@ -51,11 +51,11 @@ func (s ArbitrumSigner) Sender(tx Transaction) (accounts.Address, error) {
 		return inner.From, nil
 	case *ArbitrumLegacyTxData:
 		if inner.OverrideSender != nil {
-			return *inner.OverrideSender, nil
+			return accounts.InternAddress(*inner.OverrideSender), nil
 		}
 		// TODO Arbitrum: not sure this check is needed for arb1
 		if inner.LegacyTx.V.IsZero() && inner.LegacyTx.R.IsZero() && inner.LegacyTx.S.IsZero() {
-			return common.Address{}, nil
+			return accounts.NilAddress, nil
 		}
 		return s.Signer.Sender(inner.LegacyTx)
 	default:

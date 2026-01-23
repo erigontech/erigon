@@ -30,10 +30,9 @@ import (
 	"github.com/erigontech/nitro-erigon/gethhook"
 	"github.com/erigontech/nitro-erigon/statetransfer"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/dbg"
-	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/genesiswrite"
 	"github.com/erigontech/erigon/core/state"
@@ -48,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/exec3/calltracer"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/log/v3"
 	"github.com/erigontech/erigon/turbo/services"
 	"github.com/erigontech/erigon/turbo/shards"
 )

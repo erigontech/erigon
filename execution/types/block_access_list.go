@@ -98,7 +98,7 @@ func (ac *AccountChanges) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	encodingSize := ac.EncodingSize()
-	b := newEncodingBuf()
+	b := NewEncodingBuf()
 	defer releaseEncodingBuf(b)
 
 	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
@@ -191,7 +191,7 @@ func (sc *SlotChanges) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	b := newEncodingBuf()
+	b := NewEncodingBuf()
 	defer releaseEncodingBuf(b)
 
 	encodingSize := sc.EncodingSize()
@@ -235,7 +235,7 @@ func (sc *StorageChange) EncodingSize() int {
 }
 
 func (sc *StorageChange) EncodeRLP(w io.Writer) error {
-	b := newEncodingBuf()
+	b := NewEncodingBuf()
 	defer releaseEncodingBuf(b)
 
 	encodingSize := sc.EncodingSize()
@@ -273,7 +273,7 @@ func (bc *BalanceChange) EncodingSize() int {
 }
 
 func (bc *BalanceChange) EncodeRLP(w io.Writer) error {
-	b := newEncodingBuf()
+	b := NewEncodingBuf()
 	defer releaseEncodingBuf(b)
 
 	encodingSize := bc.EncodingSize()
@@ -316,7 +316,7 @@ func (nc *NonceChange) EncodingSize() int {
 }
 
 func (nc *NonceChange) EncodeRLP(w io.Writer) error {
-	b := newEncodingBuf()
+	b := NewEncodingBuf()
 	defer releaseEncodingBuf(b)
 
 	encodingSize := nc.EncodingSize()
@@ -356,7 +356,7 @@ func (cc *CodeChange) EncodingSize() int {
 }
 
 func (cc *CodeChange) EncodeRLP(w io.Writer) error {
-	b := newEncodingBuf()
+	b := NewEncodingBuf()
 	defer releaseEncodingBuf(b)
 
 	encodingSize := cc.EncodingSize()
@@ -701,7 +701,7 @@ func releaseEncodingBuf(buf *encodingBuf) {
 		return
 	}
 	*buf = encodingBuf{}
-	pooledBuf.Put(buf)
+	PooledBuf.Put(buf)
 }
 
 func (bal BlockAccessList) Hash() common.Hash {

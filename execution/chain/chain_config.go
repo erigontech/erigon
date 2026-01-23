@@ -25,14 +25,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/arb/chain/types"
+	"github.com/erigontech/erigon/arb/osver"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/arb/chain/types"
-	"github.com/erigontech/erigon/arb/osver"
 	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // Config is the core config which determines the blockchain settings.
@@ -758,7 +757,7 @@ type Rules struct {
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
-func (c *Config) Rules(num uint64, time, currentArbosVersion uint64) *Rules {
+func (c *Config) ChainRules(num uint64, time, currentArbosVersion uint64) *Rules {
 	chainID := c.ChainID
 	if chainID == nil {
 		chainID = new(big.Int)

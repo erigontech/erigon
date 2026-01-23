@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"os"
 
-	"github.com/erigontech/erigon-lib/common/length"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"

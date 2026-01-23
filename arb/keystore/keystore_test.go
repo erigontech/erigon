@@ -26,9 +26,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	dirs "github.com/erigontech/erigon-lib/common/dir"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common"
+	dirs "github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/p2p/event"
 	"golang.org/x/exp/slices"
 )

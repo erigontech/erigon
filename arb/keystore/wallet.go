@@ -22,7 +22,7 @@ import (
 	"math/big"
 
 	ethereum "github.com/erigontech/erigon"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/execution/types"
 )
 

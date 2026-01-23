@@ -27,6 +27,7 @@ import (
 	"math/big"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/holiman/uint256"
 	"github.com/protolambda/ztyp/codec"
 
@@ -541,8 +542,8 @@ func (m *Message) SetIsFree(isFree bool) {
 	m.isFree = isFree
 }
 
-func (msg *Message) SetTo(addr *common.Address)             { msg.to = addr }
-func (msg *Message) SetFrom(addr *common.Address)           { msg.from = *addr }
+func (msg *Message) SetTo(addr *accounts.Address)           { msg.to = *addr }
+func (msg *Message) SetFrom(addr *accounts.Address)         { msg.from = *addr }
 func (msg *Message) SetNonce(val uint64)                    { msg.nonce = val }
 func (msg *Message) SetAmount(f *uint256.Int)               { msg.amount.Set(f) }
 func (msg *Message) SetGasLimit(val uint64)                 { msg.gasLimit = val }

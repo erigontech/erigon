@@ -1,5 +1,6 @@
 package txn
 
+/*
 import (
 	"encoding/json"
 
@@ -96,3 +97,4 @@ func (tx *ArbitrumInternalTx) UnmarshalJSON(input []byte) error {
 	}
 	return nil
 }
+*/

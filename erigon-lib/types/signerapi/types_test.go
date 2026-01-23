@@ -21,7 +21,7 @@ package apitypes
 //	"encoding/json"
 //	"testing"
 //
-//	"github.com/erigontech/erigon-lib/common"
+//	"github.com/erigontech/erigon/common"
 //	"github.com/erigontech/erigon/core/types"
 //	//"github.com/erigontech/erigon/crypto/kzg"
 //	"github.com/holiman/uint256"

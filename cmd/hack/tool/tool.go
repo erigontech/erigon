@@ -20,7 +20,7 @@ import (
 	"context"
 
 	arbparams "github.com/erigontech/erigon/arb/chain/params"
-	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"

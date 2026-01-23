@@ -23,7 +23,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/erigontech/erigon-lib/log/v3"
+	"github.com/erigontech/erigon/log/v3"
 	"github.com/fsnotify/fsnotify"
 )
 

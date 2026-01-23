@@ -19,7 +19,6 @@ package datadir
 import (
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"io/fs"
 	"os"
 	"path/filepath"

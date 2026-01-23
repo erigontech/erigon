@@ -1,13 +1,14 @@
 package txn
 
+/*a
 import (
 	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/common/hexutil"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/holiman/uint256"
@@ -320,3 +321,6 @@ func (tx *ArbitrumLegacyTxData) UnmarshalJSON(input []byte) error {
 
 	return nil
 }
+
+
+*/

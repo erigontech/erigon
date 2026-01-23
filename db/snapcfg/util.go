@@ -58,14 +58,14 @@ type preverifiedRegistry struct {
 
 var registry = &preverifiedRegistry{
 	data: map[string]Preverified{
-		networkname.Mainnet:    fromEmbeddedToml(snapshothashes.Mainnet),
-		networkname.Sepolia:    fromEmbeddedToml(snapshothashes.Sepolia),
-		networkname.Amoy:       fromEmbeddedToml(snapshothashes.Amoy),
-		networkname.BorMainnet: fromEmbeddedToml(snapshothashes.BorMainnet),
-		networkname.Gnosis:     fromEmbeddedToml(snapshothashes.Gnosis),
-		networkname.Chiado:     fromEmbeddedToml(snapshothashes.Chiado),
-		networkname.Hoodi:      fromEmbeddedToml(snapshothashes.Hoodi),
-		networkname.ArbSepolia = fromEmbeddedToml(snapshothashes.ArbSepolia)
+		networkname.Mainnet:         fromEmbeddedToml(snapshothashes.Mainnet),
+		networkname.Sepolia:         fromEmbeddedToml(snapshothashes.Sepolia),
+		networkname.Amoy:            fromEmbeddedToml(snapshothashes.Amoy),
+		networkname.BorMainnet:      fromEmbeddedToml(snapshothashes.BorMainnet),
+		networkname.Gnosis:          fromEmbeddedToml(snapshothashes.Gnosis),
+		networkname.Chiado:          fromEmbeddedToml(snapshothashes.Chiado),
+		networkname.Hoodi:           fromEmbeddedToml(snapshothashes.Hoodi),
+		networkname.ArbiturmSepolia: fromEmbeddedToml(snapshothashes.ArbSepolia),
 	},
 	cached: make(map[string]*Cfg),
 }
@@ -474,13 +474,13 @@ func KnownCfg(networkName string) (*Cfg, bool) {
 }
 
 var KnownWebseeds = map[string][]string{
-	networkname.Mainnet:    webseedsParse(webseed.Mainnet),
-	networkname.Sepolia:    webseedsParse(webseed.Sepolia),
-	networkname.Amoy:       webseedsParse(webseed.Amoy),
-	networkname.BorMainnet: webseedsParse(webseed.BorMainnet),
-	networkname.Gnosis:     webseedsParse(webseed.Gnosis),
-	networkname.Chiado:     webseedsParse(webseed.Chiado),
-	networkname.Hoodi:      webseedsParse(webseed.Hoodi),
+	networkname.Mainnet:         webseedsParse(webseed.Mainnet),
+	networkname.Sepolia:         webseedsParse(webseed.Sepolia),
+	networkname.Amoy:            webseedsParse(webseed.Amoy),
+	networkname.BorMainnet:      webseedsParse(webseed.BorMainnet),
+	networkname.Gnosis:          webseedsParse(webseed.Gnosis),
+	networkname.Chiado:          webseedsParse(webseed.Chiado),
+	networkname.Hoodi:           webseedsParse(webseed.Hoodi),
 	networkname.ArbiturmSepolia: webseedsParse(webseed.ArbSepolia),
 }
 
@@ -525,26 +525,26 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 	}
 
 	KnownWebseeds = map[string][]string{
-		networkname.Mainnet:    webseedsParse(webseed.Mainnet),
-		networkname.Sepolia:    webseedsParse(webseed.Sepolia),
-		networkname.Amoy:       webseedsParse(webseed.Amoy),
-		networkname.BorMainnet: webseedsParse(webseed.BorMainnet),
-		networkname.Gnosis:     webseedsParse(webseed.Gnosis),
-		networkname.Chiado:     webseedsParse(webseed.Chiado),
-		networkname.Hoodi:      webseedsParse(webseed.Hoodi),
-		networkname.ArbSepolia:      webseedsParse(webseed.ArbSepolia),
+		networkname.Mainnet:         webseedsParse(webseed.Mainnet),
+		networkname.Sepolia:         webseedsParse(webseed.Sepolia),
+		networkname.Amoy:            webseedsParse(webseed.Amoy),
+		networkname.BorMainnet:      webseedsParse(webseed.BorMainnet),
+		networkname.Gnosis:          webseedsParse(webseed.Gnosis),
+		networkname.Chiado:          webseedsParse(webseed.Chiado),
+		networkname.Hoodi:           webseedsParse(webseed.Hoodi),
+		networkname.ArbiturmSepolia: webseedsParse(webseed.ArbSepolia),
 	}
 
 	// Re-load the preverified hashes
 	registry.Reset(map[string]Preverified{
-		networkname.Mainnet:    fromEmbeddedToml(snapshothashes.Mainnet),
-		networkname.Sepolia:    fromEmbeddedToml(snapshothashes.Sepolia),
-		networkname.Amoy:       fromEmbeddedToml(snapshothashes.Amoy),
-		networkname.BorMainnet: fromEmbeddedToml(snapshothashes.BorMainnet),
-		networkname.Gnosis:     fromEmbeddedToml(snapshothashes.Gnosis),
-		networkname.Chiado:     fromEmbeddedToml(snapshothashes.Chiado),
-		networkname.Hoodi:      fromEmbeddedToml(snapshothashes.Hoodi),
-		networkname.ArbSepolia = fromEmbeddedToml(snapshothashes.ArbSepolia),
+		networkname.Mainnet:         fromEmbeddedToml(snapshothashes.Mainnet),
+		networkname.Sepolia:         fromEmbeddedToml(snapshothashes.Sepolia),
+		networkname.Amoy:            fromEmbeddedToml(snapshothashes.Amoy),
+		networkname.BorMainnet:      fromEmbeddedToml(snapshothashes.BorMainnet),
+		networkname.Gnosis:          fromEmbeddedToml(snapshothashes.Gnosis),
+		networkname.Chiado:          fromEmbeddedToml(snapshothashes.Chiado),
+		networkname.Hoodi:           fromEmbeddedToml(snapshothashes.Hoodi),
+		networkname.ArbiturmSepolia: fromEmbeddedToml(snapshothashes.ArbSepolia),
 	})
 	return
 }

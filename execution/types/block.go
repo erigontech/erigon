@@ -669,32 +669,6 @@ func (b *Body) MatchesHeader(h *Header) error {
 	return nil
 }
 
-func (b *Body) MatchesHeader(h *Header) error {
-	if hash := DeriveSha(Transactions(b.Transactions)); hash != h.TxHash {
-		return fmt.Errorf("body has invalid transaction hash: have %x, exp: %x", hash, h.TxHash)
-	}
-
-	if hash := CalcUncleHash(b.Uncles); hash != h.UncleHash {
-		return fmt.Errorf("body has invalid uncle hash: have %x, exp: %x", hash, h.UncleHash)
-	}
-
-	if h.WithdrawalsHash == nil {
-		if b.Withdrawals != nil {
-			return errors.New("body has unexpected withdrawals")
-		}
-	} else {
-		if b.Withdrawals == nil {
-			return errors.New("body is missing withdrawals")
-		}
-
-		if hash := DeriveSha(Withdrawals(b.Withdrawals)); hash != *h.WithdrawalsHash {
-			return fmt.Errorf("body has invalid withdrawals hash: have %x, exp: %x", hash, h.WithdrawalsHash)
-		}
-	}
-
-	return nil
-}
-
 // RawBody is semi-parsed variant of Body, where transactions are still unparsed RLP strings
 // It is useful in the situations when actual transaction context is not important, for example
 // when downloading Block bodies from other peers or serving them to other peers

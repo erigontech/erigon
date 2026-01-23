@@ -158,7 +158,7 @@ func NewLondonSigner(chainID *big.Int) *Signer {
 		panic("chainID higher than 2^256-1")
 	}
 	signer.chainID.Set(chainId)
-	signer.chainIDMul.Mul(chainId, u256.Num2)
+	signer.chainIDMul.Mul(chainId, &u256.Num2)
 	signer.protected = true
 	signer.accessList = true
 	signer.dynamicFee = true
@@ -176,7 +176,7 @@ func NewCancunSigner(chainID *big.Int) *Signer {
 		panic("chainID higher than 2^256-1")
 	}
 	signer.chainID.Set(chainId)
-	signer.chainIDMul.Mul(chainId, u256.Num2)
+	signer.chainIDMul.Mul(chainId, &u256.Num2)
 	signer.protected = true
 	signer.accessList = true
 	signer.dynamicFee = true

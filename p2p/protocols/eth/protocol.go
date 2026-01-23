@@ -158,16 +158,6 @@ type StatusPacket69 struct {
 	LatestBlockHash           common.Hash
 }
 
-// StatusPacket69 is the network packet for the status message for eth/69 and later.
-type StatusPacket69 struct {
-	ProtocolVersion           uint32
-	NetworkID                 uint64
-	Genesis                   common.Hash
-	ForkID                    forkid.ID
-	MinimumBlock, LatestBlock uint64
-	LatestBlockHash           common.Hash
-}
-
 // NewBlockHashesPacket is the network packet for the block announcements.
 type NewBlockHashesPacket []struct {
 	Hash   common.Hash // Hash of one particular block being announced

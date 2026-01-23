@@ -163,19 +163,6 @@ func ResetWitnesses(tx kv.RwTx) error {
 	return nil
 }
 
-func ResetWitnesses(tx kv.RwTx) error {
-	if err := tx.ClearTable(kv.BorWitnesses); err != nil {
-		return err
-	}
-	if err := tx.ClearTable(kv.BorWitnessSizes); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(tx, stages.WitnessProcessing, 0); err != nil {
-		return err
-	}
-	return nil
-}
-
 var Tables = map[stages.SyncStage][]string{
 	stages.CustomTrace: {},
 	stages.Finish:      {},

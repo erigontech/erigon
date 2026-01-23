@@ -1,5 +1,6 @@
 package txn
 
+/*
 import (
 	"bytes"
 	"errors"
@@ -13,8 +14,8 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
-	cmath "github.com/erigontech/erigon-lib/common/math"
+	"github.com/erigontech/erigon/common"
+	cmath "github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -657,3 +658,4 @@ func TransactionToMessage(tx types.Transaction, s ArbitrumSigner, baseFee *big.I
 	msg.SetFrom(&sender)
 	return msg, err
 }
+*/

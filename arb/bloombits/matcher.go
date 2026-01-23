@@ -26,7 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 // bloomIndexes represents the bit indexes inside the bloom filter that belong

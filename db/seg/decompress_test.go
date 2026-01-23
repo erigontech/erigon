@@ -20,7 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/erigontech/erigon-lib/common/dir"
+	"github.com/erigontech/erigon/common/dir"
 	"math/rand"
 	"os"
 	"path/filepath"

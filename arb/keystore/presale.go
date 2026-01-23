@@ -25,7 +25,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/crypto"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/pbkdf2"
 )

@@ -1,7 +1,8 @@
 package txn
 
+/*
 import (
-	"github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/holiman/uint256"
 )
@@ -60,3 +61,4 @@ func (s ArbitrumSigner) SignatureValues(tx types.Transaction, sig []byte) (R, S,
 		return s.Signer.SignatureValues(tx, sig)
 	}
 }
+*/

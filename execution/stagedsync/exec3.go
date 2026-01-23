@@ -23,11 +23,13 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/db/config3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -758,44 +760,44 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 
 			te.execRequests <- &execRequest{
 				b.Number().Uint64(), b.Hash(),
-				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
+				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time(), 0)),
 				b.BlockAccessList(),
 				txTasks, applyResults, false, exhausted,
 			}
 
 			// ARBITRUM_MERGE
 			/*
-			if ERIGON_COMMIT_EACH_BLOCK || shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs {
-					start := time.Now()
-					if blockNum == 0 {
-						executor.domains().GetCommitmentContext().Trie().SetTrace(true)
-					} else {
-						executor.domains().GetCommitmentContext().Trie().SetTrace(false)
-					}
-					rh, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix())
-					if err != nil {
-						return err
-					}
-
-					if ERIGON_COMMIT_EACH_BLOCK {
-						if !bytes.Equal(rh, header.Root.Bytes()) {
-							logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
-							return errors.New("wrong trie root")
+				if ERIGON_COMMIT_EACH_BLOCK || shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs {
+						start := time.Now()
+						if blockNum == 0 {
+							executor.domains().GetCommitmentContext().Trie().SetTrace(true)
+						} else {
+							executor.domains().GetCommitmentContext().Trie().SetTrace(false)
 						}
-					}
+						rh, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix())
+						if err != nil {
+							return err
+						}
 
-					computeCommitmentDuration += time.Since(start)
-					if shouldGenerateChangesets {
-						executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)
-						if !inMemExec {
-							if err := changeset2.WriteDiffSet(executor.tx(), blockNum, b.Hash(), changeSet); err != nil {
-								return err
+						if ERIGON_COMMIT_EACH_BLOCK {
+							if !bytes.Equal(rh, header.Root.Bytes()) {
+								logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
+								return errors.New("wrong trie root")
 							}
 						}
+
+						computeCommitmentDuration += time.Since(start)
+						if shouldGenerateChangesets {
+							executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)
+							if !inMemExec {
+								if err := changeset2.WriteDiffSet(executor.tx(), blockNum, b.Hash(), changeSet); err != nil {
+									return err
+								}
+							}
+						}
+						executor.domains().SetChangesetAccumulator(nil)
 					}
-					executor.domains().SetChangesetAccumulator(nil)
-				}
-			 */
+			*/
 
 			mxExecBlocks.Add(1)
 
@@ -1018,20 +1020,6 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	}
 	return domsFlushFn()
 
-}
-
-func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64, initialCycle bool) bool {
-	if cfg.syncCfg.AlwaysGenerateChangesets {
-		return true
-	}
-	if blockNum < cfg.blockReader.FrozenBlocks() {
-		return false
-	}
-	if initialCycle {
-		return false
-	}
-	// once past the initial cycle, make sure to generate changesets for the last blocks that fall in the reorg window
-	return blockNum+cfg.syncCfg.MaxReorgDepth >= maxBlockNum
 }
 
 func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64, initialCycle bool) bool {

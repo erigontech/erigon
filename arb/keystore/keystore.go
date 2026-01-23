@@ -32,8 +32,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon-lib/common"
-	"github.com/erigontech/erigon-lib/crypto"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/p2p/event"
 )

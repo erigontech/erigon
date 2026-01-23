@@ -3,13 +3,14 @@ package costs
 import (
 	"fmt"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/arb/multigas"
-	"github.com/erigontech/erigon/core/state"
-	"github.com/erigontech/erigon/core/vm"
-	"github.com/erigontech/erigon/core/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/params"
 	"github.com/erigontech/nitro-erigon/util/arbmath"
@@ -18,11 +19,13 @@ import (
 // Computes the cost of doing a state load in wasm
 // Note: the code here is adapted from gasSLoadEIP2929
 func WasmStateLoadCost(db *state.IntraBlockState, program common.Address, key common.Hash) multigas.MultiGas {
+	programAcc := accounts.InternAddress(program)
+	storageKey := accounts.InternKey(key)
 	// Check slot presence in the access list
-	if _, slotPresent := db.SlotInAccessList(program, key); !slotPresent {
+	if _, slotPresent := db.SlotInAccessList(programAcc, storageKey); !slotPresent {
 		// If the caller cannot afford the cost, this change will be rolled back
 		// If he does afford it, we can skip checking the same thing later on, during execution
-		db.AddSlotToAccessList(program, key)
+		db.AddSlotToAccessList(programAcc, storageKey)
 
 		// TODO consider that og code counted only params.ColdSloadCostEIP2929
 		// Cold slot access considered as storage access + computation
@@ -40,18 +43,20 @@ func WasmStateLoadCost(db *state.IntraBlockState, program common.Address, key co
 // Note: the sentry check must be done by the caller
 func WasmStateStoreCost(db *state.IntraBlockState, program common.Address, key, value common.Hash) multigas.MultiGas {
 	clearingRefund := params.SstoreClearsScheduleRefundEIP3529
-
-	current := new(uint256.Int)
-	if err := db.GetState(program, key, current); err != nil {
+	programAcc := accounts.InternAddress(program)
+	storageKey := accounts.InternKey(key)
+	current := uint256.Int{}
+	var err error
+	if current, err = db.GetState(programAcc, storageKey); err != nil {
 		panic(err)
 	}
 
 	cost := multigas.ZeroGas()
 	// Check slot presence in the access list
-	if addrPresent, slotPresent := db.SlotInAccessList(program, key); !slotPresent {
+	if addrPresent, slotPresent := db.SlotInAccessList(programAcc, storageKey); !slotPresent {
 		cost.SaturatingIncrementInto(multigas.ResourceKindStorageAccess, params.ColdSloadCostEIP2929)
 		// If the caller cannot afford the cost, this change will be rolled back
-		db.AddSlotToAccessList(program, key)
+		db.AddSlotToAccessList(programAcc, storageKey)
 		if !addrPresent {
 			panic(fmt.Sprintf("impossible case: address %v was not present in access list", program))
 		}
@@ -63,11 +68,11 @@ func WasmStateStoreCost(db *state.IntraBlockState, program common.Address, key, 
 		return cost.SaturatingIncrement(multigas.ResourceKindComputation, params.WarmStorageReadCostEIP2929) // SLOAD_GAS
 	}
 
-	original := uint256.NewInt(0)
-	if err := db.GetCommittedState(program, key, original); err != nil {
+	original := uint256.Int{}
+	if original, err = db.GetCommittedState(programAcc, storageKey); err != nil {
 		panic(err)
 	}
-	if original.Eq(current) {
+	if original.Eq(&current) {
 		if original.IsZero() { // create slot (2.1.1)
 			return cost.SaturatingIncrement(multigas.ResourceKindStorageGrowth, params.SstoreSetGasEIP2200)
 		}
