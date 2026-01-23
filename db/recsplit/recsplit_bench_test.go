@@ -83,7 +83,6 @@ func BenchmarkRecSplitBuildLarge(b *testing.B) {
 	}
 
 	for i := 0; i < b.N; i++ {
-		b.StopTimer()
 		tmpDir := b.TempDir()
 		indexFile := filepath.Join(tmpDir, "index")
 		salt := uint32(1)
@@ -102,7 +101,6 @@ func BenchmarkRecSplitBuildLarge(b *testing.B) {
 			b.Fatal(err)
 		}
 
-		b.StartTimer()
 		for j := uint64(0); j < uint64(size); j++ {
 			if err := rs.AddKey(keys[j], j); err != nil {
 				b.Fatal(err)
@@ -112,8 +110,6 @@ func BenchmarkRecSplitBuildLarge(b *testing.B) {
 		if err := rs.Build(context.Background()); err != nil {
 			b.Fatal(err)
 		}
-		b.StopTimer()
-
 		rs.Close()
 	}
 }
