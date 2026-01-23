@@ -53,7 +53,17 @@ type PeerDasGetter interface {
 	GetPeerDas() das.PeerDas
 }
 
-// BlobHistoryDownloader downloads blob history backwards from a head slot
+// BlobBackfiller is an interface for downloading blob history
+type BlobBackfiller interface {
+	// SetHeadSlot sets the head slot to download from
+	SetHeadSlot(slot uint64)
+	// SetNotifyBlobBackfilled sets the callback to notify when blob backfilling is complete
+	SetNotifyBlobBackfilled(notify func())
+	// Start begins the blob history download loop
+	Start()
+}
+
+// BlobHistoryDownloader downloads blob history backwards from a head slot using P2P
 type BlobHistoryDownloader struct {
 	ctx context.Context
 
