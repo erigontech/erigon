@@ -31,7 +31,6 @@ func BenchmarkRecSplitBuild(b *testing.B) {
 
 	for _, size := range benchSizes {
 		keys := make([][]byte, size)
-		// Add keys
 		for j := 0; j < size; j++ {
 			keys[j] = fmt.Appendf(nil, "key_%d", j)
 		}
@@ -57,14 +56,12 @@ func BenchmarkRecSplitBuild(b *testing.B) {
 				}
 
 				b.StartTimer()
-				// Add keys
 				for j := uint64(0); j < uint64(size); j++ {
 					if err := rs.AddKey(keys[j], j); err != nil {
 						b.Fatal(err)
 					}
 				}
 
-				// Benchmark only the Build phase
 				if err := rs.Build(context.Background()); err != nil {
 					b.Fatal(err)
 				}
@@ -79,6 +76,11 @@ func BenchmarkRecSplitBuild(b *testing.B) {
 func BenchmarkRecSplitBuildLarge(b *testing.B) {
 	logger := log.New()
 	size := 100000
+
+	keys := make([][]byte, size)
+	for j := 0; j < size; j++ {
+		keys[j] = fmt.Appendf(nil, "key_%d", j)
+	}
 
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
@@ -100,15 +102,13 @@ func BenchmarkRecSplitBuildLarge(b *testing.B) {
 			b.Fatal(err)
 		}
 
-		// Add keys
-		for j := 0; j < size; j++ {
-			if err := rs.AddKey(fmt.Appendf(nil, "key_%d", j), uint64(j*17)); err != nil {
+		b.StartTimer()
+		for j := uint64(0); j < uint64(size); j++ {
+			if err := rs.AddKey(keys[j], j); err != nil {
 				b.Fatal(err)
 			}
 		}
 
-		b.StartTimer()
-		// Benchmark only the Build phase
 		if err := rs.Build(context.Background()); err != nil {
 			b.Fatal(err)
 		}
