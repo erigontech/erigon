@@ -30,6 +30,12 @@ func BenchmarkRecSplitBuild(b *testing.B) {
 	benchSizes := []int{1000, 10000, 100000}
 
 	for _, size := range benchSizes {
+		keys := make([][]byte, size)
+		// Add keys
+		for j := 0; j < size; j++ {
+			keys[j] = fmt.Appendf(nil, "key_%d", j)
+		}
+
 		b.Run(fmt.Sprintf("keys_%d", size), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				b.StopTimer()
@@ -51,8 +57,8 @@ func BenchmarkRecSplitBuild(b *testing.B) {
 				}
 
 				// Add keys
-				for j := 0; j < size; j++ {
-					if err := rs.AddKey(fmt.Appendf(nil, "key_%d", j), uint64(j)); err != nil {
+				for j := uint64(0); j < uint64(size); j++ {
+					if err := rs.AddKey(keys[j], j); err != nil {
 						b.Fatal(err)
 					}
 				}
