@@ -99,6 +99,7 @@ type RecSplit struct {
 	offsetBuffer      []uint64
 	buffer            []uint64
 	golombRice        []uint32
+	indexWriteBuf     []byte   // Buffer for batching index writes
 	bucketSizeAcc     []uint64 // Bucket size accumulator
 	// Helper object to encode the sequence of cumulative number of keys in the buckets
 	// and the sequence of cumulative bit offsets of buckets in the Golomb-Rice code.
@@ -513,21 +514,18 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 	if m <= rs.leafSize {
 		// No need to build aggregation levels - just find bijection
 		var mask uint32
+	saltLoop:
 		for {
 			mask = 0
-			var fail bool
-			for i := uint16(0); !fail && i < m; i++ {
+			for i := uint16(0); i < m; i++ {
 				bit := uint32(1) << remap16(remix(bucket[i]+salt), m)
 				if mask&bit != 0 {
-					fail = true
-				} else {
-					mask |= bit
+					salt++
+					continue saltLoop
 				}
+				mask |= bit
 			}
-			if !fail {
-				break
-			}
-			salt++
+			break
 		}
 		for i := uint16(0); i < m; i++ {
 			j := remap16(remix(bucket[i]+salt), m)
