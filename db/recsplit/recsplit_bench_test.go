@@ -27,7 +27,7 @@ import (
 
 func BenchmarkRecSplitBuild(b *testing.B) {
 	logger := log.New()
-	benchSizes := []int{1000, 10000, 100000}
+	benchSizes := []int{10000}
 
 	for _, size := range benchSizes {
 		b.Run(fmt.Sprintf("keys_%d", size), func(b *testing.B) {
