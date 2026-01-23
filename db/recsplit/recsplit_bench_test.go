@@ -36,7 +36,7 @@ func BenchmarkRecSplitBuild(b *testing.B) {
 		}
 
 		b.Run(fmt.Sprintf("keys_%d", size), func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				b.StopTimer()
 				tmpDir := b.TempDir()
 				indexFile := filepath.Join(tmpDir, "index")
@@ -82,7 +82,7 @@ func BenchmarkRecSplitBuildLarge(b *testing.B) {
 		keys[j] = fmt.Appendf(nil, "key_%d", j)
 	}
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		tmpDir := b.TempDir()
 		indexFile := filepath.Join(tmpDir, "index")
 		salt := uint32(1)
