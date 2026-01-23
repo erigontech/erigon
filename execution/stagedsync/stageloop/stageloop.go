@@ -71,7 +71,7 @@ func StageLoop(
 ) {
 	defer close(waitForDone)
 
-	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook, logger); err != nil {
+	if err := ProcessFrozenBlocks(ctx, db, blockReader, sync, hook, false /* onlySnapDownload */, logger); err != nil {
 		if errors.Is(err, common.ErrStopped) || errors.Is(err, context.Canceled) {
 			return
 		}
@@ -125,8 +125,7 @@ func StageLoop(
 	}
 }
 
-// ProcessFrozenBlocks - withuot global rwtx
-func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook, logger log.Logger) error {
+func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook, onlySnapDownload bool, logger log.Logger) error {
 	sawZeroBlocksTimes := 0
 	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
@@ -142,6 +141,9 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	err = sync.RunSnapshots(db, doms, tx)
 	if err != nil {
 		return err
+	}
+	if onlySnapDownload {
+		return nil
 	}
 	var finishStageBeforeSync uint64
 	if hook != nil {
