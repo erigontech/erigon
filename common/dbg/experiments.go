@@ -42,10 +42,11 @@ var (
 	heapProfileFilePath  = EnvString("HEAP_PROFILE_FILE_PATH", "")
 	heapProfileThreshold = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
 	heapProfileFrequency = EnvDuration("HEAP_PROFILE_FREQUENCY", 30*time.Second)
-	mdbxLockInRam        = EnvBool("MDBX_LOCK_IN_RAM", false)
-	MdbxNoSync           = EnvBool("MDBX_NO_FSYNC", false)
-	MdbxNoSyncUnsafe     = EnvBool("MDBX_NO_FSYNC_UNSAFE", false)
-	ExecThrottle         = EnvDuration("EXEC_THROTTLE", 0*time.Second)
+
+	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
+	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
+	MdbxNoSyncUnsafe = EnvBool("MDBX_NO_FSYNC_UNSAFE", false)
+	ExecThrottle     = EnvDuration("EXEC_THROTTLE", 0*time.Second)
 
 	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
 
@@ -112,8 +113,6 @@ func ReadMemStats(m *runtime.MemStats) {
 	}
 	runtime.ReadMemStats(m)
 }
-
-func MdbxLockInRam() bool { return mdbxLockInRam }
 
 func DiscardCommitment() bool    { return discardCommitment }
 func NoPrune() bool              { return noPrune }
