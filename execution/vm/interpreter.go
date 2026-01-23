@@ -54,19 +54,6 @@ func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 	return slices.Contains(vmConfig.ExtraEips, 3860) || rules.IsShanghai
 }
 
-// Interpreter is used to run Ethereum based contracts and will utilise the
-// passed environment to query external sources for state information.
-// The Interpreter will run the byte code VM based on the passed
-// configuration.
-type Interpreter interface {
-	// Run loops and evaluates the contract's code with the given input data and returns
-	// the return byte-slice and an error if one occurred.
-	Run(contract Contract, gas uint64, input []byte, static bool) ([]byte, uint64, error)
-	Depth() int // `Depth` returns the current call stack's depth.
-	IncDepth()  // Increments the current call stack's depth.
-	DecDepth()  // Decrements the current call stack's depth
-}
-
 // CallContext contains the things that are per-call, such as stack and memory,
 // but not transients like pc and gas
 type CallContext struct {
