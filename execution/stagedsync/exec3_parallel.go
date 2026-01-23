@@ -348,6 +348,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							}
 							resetCommitmentGauges(ctx)
 
+							// we run receipt root verification in parallel alongside commitment computation
 							err = pe.getPostValidator().Wait()
 							if err != nil {
 								return err
