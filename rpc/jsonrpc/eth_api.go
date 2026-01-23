@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -41,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -334,6 +336,19 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 		return nil, nil
 	}
 	return api._blockReader.Header(ctx, tx, hash, *number)
+}
+
+// verify if History state is present or pruned at specific blockNumber
+func (api *BaseAPI) checkPruneStateHistory(ctx context.Context, tx kv.TemporalTx, block_number uint64) error {
+	maxTxNum, err := api._txNumReader.Max(ctx, tx, block_number)
+	if err != nil {
+		return err
+	}
+
+	if minTxNum := state.StateHistoryStartTxNum(tx); maxTxNum < minTxNum {
+		return fmt.Errorf("%w: from tx: %d, min tx: %d", state.PrunedError, maxTxNum, minTxNum)
+	}
+	return nil
 }
 
 // checks the pruning state to see if we would hold information about this
