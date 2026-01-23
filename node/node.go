@@ -335,7 +335,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		switch label {
 		case dbcfg.ChainDB:
 			if dbg.MdbxNoSync {
-				opts.Flags(func(u uint) uint { return mdbx2.NoReadahead | mdbx2.UtterlyNoSync })
+				opts = opts.Flags(func(f uint) uint { return f&^mdbx2.Durable | mdbx2.UtterlyNoSync })
 			}
 			if config.MdbxPageSize.Bytes() > 0 {
 				opts = opts.PageSize(config.MdbxPageSize)
