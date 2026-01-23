@@ -239,6 +239,20 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		rs.secondaryAggrBound = rs.primaryAggrBound * uint16(math.Ceil(0.21*float64(rs.leafSize)+9./10.))
 	}
 	rs.count = make([]uint16, rs.secondaryAggrBound)
+
+	// Pre-allocate golombRice table to avoid dynamic growth during build
+	maxBucketSize := uint16(args.BucketSize + 1)
+	rs.golombRice = make([]uint32, maxBucketSize)
+	for s := uint16(0); s < maxBucketSize; s++ {
+		if s == 0 {
+			rs.golombRice[0] = (bijMemo[0] << 27) | bijMemo[0]
+		} else if s <= rs.leafSize {
+			rs.golombRice[s] = (bijMemo[s] << 27) | (uint32(1) << 16) | bijMemo[s]
+		} else {
+			computeGolombRice(s, rs.golombRice, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
+		}
+	}
+
 	if args.NoFsync {
 		rs.DisableFsync()
 	}
@@ -374,16 +388,22 @@ func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, sec
 // salt for the part of the hash function separating m elements. It is based on
 // calculations with assumptions that we draw hash functions at random
 func (rs *RecSplit) golombParam(m uint16) int {
-	for s := uint16(len(rs.golombRice)); m >= s; s++ {
-		rs.golombRice = append(rs.golombRice, 0)
-		// For the case where bucket is larger than planned
-		if s == 0 {
-			rs.golombRice[0] = (bijMemo[0] << 27) | bijMemo[0]
-		} else if s <= rs.leafSize {
-			rs.golombRice[s] = (bijMemo[s] << 27) | (uint32(1) << 16) | bijMemo[s]
-		} else {
-			computeGolombRice(s, rs.golombRice, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
+	if m >= uint16(len(rs.golombRice)) {
+		// Bucket larger than expected - grow dynamically (rare case)
+		oldLen := uint16(len(rs.golombRice))
+		newSize := m + 1
+		newGolombRice := make([]uint32, newSize)
+		copy(newGolombRice, rs.golombRice)
+		for s := oldLen; s < newSize; s++ {
+			if s == 0 {
+				newGolombRice[0] = (bijMemo[0] << 27) | bijMemo[0]
+			} else if s <= rs.leafSize {
+				newGolombRice[s] = (bijMemo[s] << 27) | (uint32(1) << 16) | bijMemo[s]
+			} else {
+				computeGolombRice(s, newGolombRice, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
+			}
 		}
+		rs.golombRice = newGolombRice
 	}
 	return int(rs.golombRice[m] >> 27)
 }
