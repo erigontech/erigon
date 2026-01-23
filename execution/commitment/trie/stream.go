@@ -48,8 +48,6 @@ const (
 	// SHashStreamItem used for marking a key-value pair in the stream as belonging to an intermediate hash
 	// within the storage items (storage tries)
 	SHashStreamItem
-	// CutoffStremItem used for marking the end of the subtrie
-	CutoffStreamItem
 )
 
 // Stream represents the collection of key-value pairs, sorted by keys, where values may belong
@@ -61,7 +59,6 @@ type Stream struct {
 	aValues   []*accounts.Account
 	aCodes    [][]byte
 	sValues   [][]byte
-	hashes    []byte
 }
 
 // Reset sets all slices to zero sizes, without de-allocating
@@ -83,9 +80,6 @@ func (s *Stream) Reset() {
 	}
 	if len(s.sValues) > 0 {
 		s.sValues = s.sValues[:0]
-	}
-	if len(s.hashes) > 0 {
-		s.hashes = s.hashes[:0]
 	}
 }
 
@@ -791,7 +785,6 @@ func HashWithModifications(
 	aKeys common.Hashes, aValues []*accounts.Account, aCodes [][]byte,
 	sKeys common.StorageKeys, sValues [][]byte,
 	storagePrefixLen int,
-	newStream *Stream, // Streams that will be reused for old and new stream
 	hb *HashBuilder, // HashBuilder will be reused
 	trace bool,
 ) (common.Hash, error) {
@@ -874,8 +867,6 @@ func HashWithModifications(
 		offset += int(size)
 	}
 	// Now we merge old and new streams, preferring the new
-	newStream.Reset()
-
 	oldIt := NewIterator(t, rl, trace)
 
 	it := NewStreamMergeIterator(oldIt, &stream, trace)
