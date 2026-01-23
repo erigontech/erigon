@@ -56,6 +56,7 @@ func BenchmarkRecSplitBuild(b *testing.B) {
 					b.Fatal(err)
 				}
 
+				b.StartTimer()
 				// Add keys
 				for j := uint64(0); j < uint64(size); j++ {
 					if err := rs.AddKey(keys[j], j); err != nil {
@@ -63,7 +64,6 @@ func BenchmarkRecSplitBuild(b *testing.B) {
 					}
 				}
 
-				b.StartTimer()
 				// Benchmark only the Build phase
 				if err := rs.Build(context.Background()); err != nil {
 					b.Fatal(err)
