@@ -1031,6 +1031,7 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 
 	furiousPrune := timeout > 5*time.Hour
 	aggressivePrune := !furiousPrune && timeout >= 1*time.Minute
+	fmt.Printf("[dbg] PruneSmallBatches timeout %s, %t, %t\n", timeout, furiousPrune, aggressivePrune)
 
 	var pruneLimit uint64 = 100
 	if furiousPrune {
