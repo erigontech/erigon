@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"testing"
@@ -75,6 +76,10 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 			runtime.GC()
 			debug.FreeOSMemory()
 		}
+
+		accFile := filepath.Join(dirs.SnapAccessors, "v1.0-inv.0-1.efi")
+		err := os.Remove(accFile)
+		tb.Log("remove accessor file after Close:", err, accFile)
 	})
 	ii.salt.Store(&salt)
 	ii.DisableFsync()
