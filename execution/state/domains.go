@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"iter"
 	"math"
+	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,11 @@ import (
 	"github.com/holiman/uint256"
 	cmap "github.com/orcaman/concurrent-map/v2"
 )
+
+func init() {
+	// this matches go-freelru sharding
+	cmap.SHARD_COUNT = runtime.GOMAXPROCS(0) * 16
+}
 
 type iodir int
 
@@ -271,12 +277,6 @@ type lruValueCache[K comparable, V any] struct {
 }
 
 func newLRUValueCache[K comparable, U comparable, V any](d kv.Domain, limit uint32) (*lruValueCache[K, V], error) {
-	type handle[U comparable] struct{ value *U }
-
-	if unsafe.Sizeof(handle[U]{}) != unsafe.Sizeof(unique.Handle[U]{}) {
-		panic("handle type != unique.Handle - check unique.Handle implementation details for this version of go")
-	}
-
 	c, err := freelru.NewSharded[K, ValueWithTxNum[V]](limit, func(k K) uint32 {
 		return uint32(uintptr(unsafe.Pointer((*handle[U])(unsafe.Pointer(&k)).value)))
 	})
@@ -314,13 +314,15 @@ type valueUpdates[K comparable, U comparable, V any] struct {
 	cmap cmap.ConcurrentMap[K, []ValueWithTxNum[V]]
 }
 
-func newValueUpdates[K comparable, U comparable, V any]() updates[K, V] {
-	type handle[U comparable] struct{ value *U }
+type handle[C comparable] struct{ value *C }
 
+func init() {
 	if unsafe.Sizeof(handle[common.Address]{}) != unsafe.Sizeof(unique.Handle[common.Address]{}) {
 		panic("handle type != unique.Handle - check unique.Handle implementation details for this version of go")
 	}
+}
 
+func newValueUpdates[K comparable, U comparable, V any]() updates[K, V] {
 	return &valueUpdates[K, U, V]{
 		cmap: cmap.NewWithCustomShardingFunction[K, []ValueWithTxNum[V]](func(k K) uint32 {
 			return uint32(uintptr(unsafe.Pointer((*handle[U])(unsafe.Pointer(&k)).value)))
@@ -363,12 +365,6 @@ func (u *valueUpdates[K, U, V]) Iter() iter.Seq2[K, []ValueWithTxNum[V]] {
 }
 
 func (u *valueUpdates[K, U, V]) Clear() updates[K, V] {
-	type handle[U comparable] struct{ value *U }
-
-	if unsafe.Sizeof(handle[common.Address]{}) != unsafe.Sizeof(unique.Handle[common.Address]{}) {
-		panic("handle type != unique.Handle - check unique.Handle implementation details for this version of go")
-	}
-
 	*u = *newValueUpdates[K, U, V]().(*valueUpdates[K, U, V])
 	return u
 }
@@ -786,12 +782,6 @@ type storageCache struct {
 }
 
 func newStorageCache(limit uint32) (*storageCache, error) {
-	type handle[U comparable] struct{ value *U }
-
-	if unsafe.Sizeof(handle[common.Address]{}) != unsafe.Sizeof(unique.Handle[common.Address]{}) {
-		panic("handle type != unique.Handle - check unique.Handle implementation details for this version of go")
-	}
-
 	c, err := freelru.NewSharded[storageLocation, ValueWithTxNum[uint256.Int]](limit, func(k storageLocation) uint32 {
 		return uint32(uintptr(unsafe.Pointer((*handle[common.Address])(unsafe.Pointer(&k.address)).value))) ^
 			uint32(uintptr(unsafe.Pointer((*handle[common.Hash])(unsafe.Pointer(&k.address)).value)))
@@ -825,12 +815,6 @@ type storageUpdates struct {
 }
 
 func newStorageUpdates() updates[storageLocation, uint256.Int] {
-	type handle[U comparable] struct{ value *U }
-
-	if unsafe.Sizeof(handle[common.Address]{}) != unsafe.Sizeof(unique.Handle[common.Address]{}) {
-		panic("handle type != unique.Handle - check unique.Handle implementation details for this version of go")
-	}
-
 	return &storageUpdates{
 		cmap: cmap.NewWithCustomShardingFunction[accounts.Address, *cmap.ConcurrentMap[accounts.StorageKey, []ValueWithTxNum[uint256.Int]]](
 			func(k accounts.Address) uint32 {
@@ -872,7 +856,6 @@ func (u storageUpdates) Put(k storageLocation, v ValueWithTxNum[uint256.Int]) (i
 		}
 		slots := cmap.NewWithCustomShardingFunction[accounts.StorageKey, []ValueWithTxNum[uint256.Int]](
 			func(k accounts.StorageKey) uint32 {
-				type handle[U comparable] struct{ value *U }
 				return uint32(uintptr(unsafe.Pointer((*handle[common.Hash])(unsafe.Pointer(&k)).value)))
 			})
 		slots.Set(k.key, []ValueWithTxNum[uint256.Int]{v})
@@ -1144,12 +1127,6 @@ type codeUpdates struct {
 }
 
 func newCodeUpdates() *codeUpdates {
-	type handle[U comparable] struct{ value *U }
-
-	if unsafe.Sizeof(handle[common.Address]{}) != unsafe.Sizeof(unique.Handle[common.Address]{}) {
-		panic("handle type != unique.Handle - check unique.Handle implementation details for this version of go")
-	}
-
 	return &codeUpdates{
 		hashes: cmap.NewWithCustomShardingFunction[accounts.Address, accounts.CodeHash](
 			func(k accounts.Address) uint32 {
@@ -1222,12 +1199,6 @@ type codeCache struct {
 }
 
 func newCodeCache(limit uint32) (*codeCache, error) {
-	type handle[U comparable] struct{ value *U }
-
-	if unsafe.Sizeof(handle[common.Address]{}) != unsafe.Sizeof(unique.Handle[common.Address]{}) {
-		panic("handle type != unique.Handle - check unique.Handle implementation details for this version of go")
-	}
-
 	hashes, err := freelru.NewSharded[accounts.Address, accounts.CodeHash](limit, func(k accounts.Address) uint32 {
 		return uint32(uintptr(unsafe.Pointer((*handle[common.Address])(unsafe.Pointer(&k)).value)))
 	})
