@@ -148,35 +148,6 @@ function Get-Env {
 }
 
 # -----------------------------------------------------------------------------
-# Function 		: Get-Uninstall-Item
-# -----------------------------------------------------------------------------
-# Description	: Try get uninstall key for given item pattern
-# Returns       : object
-# -----------------------------------------------------------------------------
-function Get-Uninstall-Item {
-    param ([string]$pattern = $(throw "A search pattern must be provided"))    
-    
-    # Trying to get the enumerable of all installed programs using Get-ItemProperty may cause 
-    # exceptions due to possible garbage values inserted into the registry by installers.
-    # Specifically an invalid cast exception throws when registry keys contain invalid DWORD data. 
-    # See https://github.com/PowerShell/PowerShell/issues/9552
-    # Due to this all items must be parsed one by one
-
-    $Private:regUninstallPath = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\"
-    $Private:result = $null
-    Get-ChildItem -Path $regUninstallPath | ForEach-Object {
-        if(-not $result) {
-            $item = Get-ItemProperty -Path $_.pspath
-            if ($item.DisplayName -imatch $pattern) {
-                $result = $item
-                # DO NOT use break
-            }
-        }
-    }
-    Write-Output $result
-}
-
-# -----------------------------------------------------------------------------
 # Function 		: Test-GO-Installed
 # -----------------------------------------------------------------------------
 # Description	: Checks whether or not GO language is installed
