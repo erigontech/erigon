@@ -69,6 +69,7 @@ var (
 	cancunInstructionSet           = newCancunInstructionSet()
 	pragueInstructionSet           = newPragueInstructionSet()
 	osakaInstructionSet            = newOsakaInstructionSet()
+	amsterdamInstructionSet        = newAmsterdamInstructionSet()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
@@ -90,6 +91,20 @@ func validateAndFillMaxStack(jt *JumpTable) {
 		}
 		op.maxStack = maxStack(op.numPop, op.numPush)
 	}
+}
+
+func newAmsterdamInstructionSet() JumpTable {
+	instructionSet := newOsakaInstructionSet()
+	enable8024(&instructionSet) // EIP-8024 (DUPN, SWAPN, EXCHANGE)
+	validateAndFillMaxStack(&instructionSet)
+	return instructionSet
+}
+
+func newOsakaInstructionSet() JumpTable {
+	instructionSet := newPragueInstructionSet()
+	enable7939(&instructionSet) // EIP-7939 (CLZ opcode)
+	validateAndFillMaxStack(&instructionSet)
+	return instructionSet
 }
 
 // newPragueInstructionSet returns the frontier, homestead, byzantium,
@@ -287,13 +302,6 @@ func newHomesteadInstructionSet() JumpTable {
 		memorySize:  memoryDelegateCall,
 		string:      stDelegateCall,
 	}
-	validateAndFillMaxStack(&instructionSet)
-	return instructionSet
-}
-
-func newOsakaInstructionSet() JumpTable {
-	instructionSet := newPragueInstructionSet()
-	enable7939(&instructionSet) // EIP-7939 (CLZ opcode)
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }

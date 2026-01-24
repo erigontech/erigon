@@ -75,7 +75,6 @@ func main() {
 	defer cancel()
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
-		fmt.Println(err)
 		os.Exit(1)
 	}
 }
@@ -193,9 +192,10 @@ func must(err error) {
 
 var logger log.Logger
 var rootCmd = &cobra.Command{
-	Use:     "",
-	Short:   "snapshot downloader",
-	Example: "go run ./cmd/downloader --datadir <your_datadir> --downloader.api.addr 127.0.0.1:9093",
+	Use:          "",
+	Short:        "snapshot downloader",
+	Example:      "go run ./cmd/downloader --datadir <your_datadir> --downloader.api.addr 127.0.0.1:9093",
+	SilenceUsage: true,
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		debug.Exit()
 	},
