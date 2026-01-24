@@ -47,9 +47,9 @@ import (
 	"github.com/erigontech/erigon/db/version"
 )
 
-func testDbAndInvertedIndex(tb testing.TB, tmp string, aggStep uint64, logger log.Logger) (kv.RwDB, *InvertedIndex) {
+func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (kv.RwDB, *InvertedIndex) {
 	tb.Helper()
-	dirs := datadir.New(tmp)
+	dirs := datadir.New(tb.TempDir())
 	keysTable := "Keys"
 	indexTable := "Index"
 	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
@@ -75,7 +75,7 @@ func testDbAndInvertedIndex(tb testing.TB, tmp string, aggStep uint64, logger lo
 func TestInvIndexPruningCorrectness(t *testing.T) {
 	t.Parallel()
 
-	db, ii, _ := filledInvIndexOfSize(t, t.TempDir(), 1000, 16, 1, log.New())
+	db, ii, _ := filledInvIndexOfSize(t, 1000, 16, 1, log.New())
 	defer ii.Close()
 
 	tx, err := db.BeginRw(context.Background())
@@ -213,7 +213,7 @@ const throttle throttleType = "throttle"
 func TestInvIndexScanPruningCorrectness(t *testing.T) {
 	t.Parallel()
 
-	db, ii, _ := filledInvIndexOfSize(t, t.TempDir(), 1000, 16, 1, log.New())
+	db, ii, _ := filledInvIndexOfSize(t, 1000, 16, 1, log.New())
 	defer ii.Close()
 
 	tx, err := db.BeginRw(context.Background())
@@ -444,7 +444,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	db, ii := testDbAndInvertedIndex(t, t.TempDir(), 16, logger)
+	db, ii := testDbAndInvertedIndex(t, 16, logger)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -520,7 +520,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	t.Parallel()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	db, ii := testDbAndInvertedIndex(t, t.TempDir(), 16, log.New())
+	db, ii := testDbAndInvertedIndex(t, 16, log.New())
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -599,18 +599,18 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.Equal(t, float64(0), to)   //nolint:testifylint
 }
 
-func filledInvIndex(tb testing.TB, tmp string, logger log.Logger) (kv.RwDB, *InvertedIndex, uint64) {
+func filledInvIndex(tb testing.TB, logger log.Logger) (kv.RwDB, *InvertedIndex, uint64) {
 	tb.Helper()
-	return filledInvIndexOfSize(tb, tmp, uint64(1000), 16, 31, logger)
+	return filledInvIndexOfSize(tb, uint64(1000), 16, 31, logger)
 }
 
 // Creates InvertedIndex instance and fills it with generated data.
 // Txs - amount of transactions to generate
 // AggStep - aggregation step for InvertedIndex
 // Module - amount of keys to generate
-func filledInvIndexOfSize(tb testing.TB, tmp string, txs, aggStep, module uint64, logger log.Logger) (kv.RwDB, *InvertedIndex, uint64) {
+func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log.Logger) (kv.RwDB, *InvertedIndex, uint64) {
 	tb.Helper()
-	db, ii := testDbAndInvertedIndex(tb, tmp, aggStep, logger)
+	db, ii := testDbAndInvertedIndex(tb, aggStep, logger)
 	ctx, require := context.Background(), require.New(tb)
 	tb.Cleanup(db.Close)
 
@@ -794,7 +794,7 @@ func TestInvIndexRanges(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	db, ii, txs := filledInvIndex(t, t.TempDir(), logger)
+	db, ii, txs := filledInvIndex(t, logger)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -827,7 +827,7 @@ func TestInvIndexMerge(t *testing.T) {
 	}
 
 	logger := log.New()
-	db, ii, txs := filledInvIndex(t, t.TempDir(), logger)
+	db, ii, txs := filledInvIndex(t, logger)
 
 	mergeInverted(t, db, ii, txs)
 	checkRanges(t, db, ii, txs)
@@ -839,7 +839,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 	}
 
 	logger, require := log.New(), require.New(t)
-	db, ii, txs := filledInvIndex(t, t.TempDir(), logger)
+	db, ii, txs := filledInvIndex(t, logger)
 
 	// Recreate InvertedIndex to scan the files
 	salt := uint32(1)
@@ -958,7 +958,7 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 
 	t.Parallel()
 
-	db, ii, txs := filledInvIndex(t, t.TempDir(), log.New())
+	db, ii, txs := filledInvIndex(t, log.New())
 
 	mergeInverted(t, db, ii, txs)
 
