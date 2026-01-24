@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	mdbxgo "github.com/erigontech/mdbx-go/mdbx"
+	mdbxgo "github.com/Giulio2002/gdbx"
 )
 
 // BenchmarkNodeDBGeometry for `dbSyncBytesThreshold` constant

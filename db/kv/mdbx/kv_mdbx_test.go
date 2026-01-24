@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	mdbxgo "github.com/erigontech/mdbx-go/mdbx"
+	mdbxgo "github.com/Giulio2002/gdbx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 

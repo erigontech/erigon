@@ -34,8 +34,8 @@ import (
 	"time"
 	"unsafe"
 
+	mdbx "github.com/Giulio2002/gdbx"
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/mdbx-go/mdbx"
 	stack2 "github.com/go-stack/stack"
 	"golang.org/x/sync/semaphore"
 
@@ -211,7 +211,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		return nil, err
 	}
 	if opts.label == dbcfg.ChainDB && opts.verbosity != -1 {
-		err = env.SetDebug(mdbx.LogLvl(opts.verbosity), mdbx.DbgDoNotChange, mdbx.LoggerDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
+		err = env.SetDebug(mdbx.DbgDoNotChange) // temporary disable error, because it works if call it 1 time, but returns error if call it twice in same process (what often happening in tests)
 		if err != nil {
 			return nil, fmt.Errorf("db verbosity set: %w", err)
 		}
@@ -232,14 +232,14 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	}
 
 	if !opts.HasFlag(mdbx.Accede) && !exists {
-		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(opts.growthStep), opts.shrinkThreshold, int(opts.pageSize)); err != nil {
+		if err = env.SetGeometry(-1, -1, int64(opts.mapSize), int64(opts.growthStep), int64(opts.shrinkThreshold), int(opts.pageSize)); err != nil {
 			return nil, err
 		}
 		if err = os.MkdirAll(opts.path, 0744); err != nil {
 			return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
 		}
 	} else if exists {
-		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(opts.growthStep), opts.shrinkThreshold, -1); err != nil {
+		if err = env.SetGeometry(-1, -1, int64(opts.mapSize), int64(opts.growthStep), int64(opts.shrinkThreshold), -1); err != nil {
 			return nil, err
 		}
 	}
@@ -470,7 +470,7 @@ func (db *MdbxKV) ReadOnly() bool              { return db.opts.HasFlag(mdbx.Rea
 func (db *MdbxKV) Accede() bool                { return db.opts.HasFlag(mdbx.Accede) }
 
 func (db *MdbxKV) CHandle() unsafe.Pointer {
-	return db.env.CHandle()
+	panic("unsupported")
 }
 
 // openDBIs - first trying to open existing DBI's in RO transaction
@@ -691,13 +691,13 @@ func (tx *MdbxTx) CollectMetrics() {
 	if err != nil {
 		return
 	}
-	if info.SinceReaderCheck.Hours() > 1 {
-		if staleReaders, err := tx.db.env.ReaderCheck(); err != nil {
-			tx.db.log.Error("failed ReaderCheck", "err", err)
-		} else if staleReaders > 0 {
-			tx.db.log.Info("cleared reader slots from dead processes", "amount", staleReaders)
-		}
-	}
+	// if info.SinceReaderCheck.Hours() > 1 {
+	// 	if staleReaders, err := tx.db.env.ReaderCheck(); err != nil {
+	// 		tx.db.log.Error("failed ReaderCheck", "err", err)
+	// 	} else if staleReaders > 0 {
+	// 		tx.db.log.Info("cleared reader slots from dead processes", "amount", staleReaders)
+	// 	}
+	// }
 
 	var dbLabel = string(tx.db.opts.label)
 	kv.MDBXGauges.DbSize.WithLabelValues(dbLabel).SetUint64(info.Geo.Current)
@@ -1239,7 +1239,7 @@ func (tx *MdbxTx) Cursor(bucket string) (kv.Cursor, error) {
 }
 
 func (tx *MdbxTx) stdCursor(bucket string) (kv.RwCursor, error) {
-	c := &MdbxCursor{bucketName: bucket, toCloseMap: tx.toCloseMap, label: tx.db.opts.label, isDupSort: tx.db.buckets[bucket].Flags&mdbx.DupSort != 0, id: tx.cursorID}
+	c := &MdbxCursor{bucketName: bucket, toCloseMap: tx.toCloseMap, label: tx.db.opts.label, isDupSort: uint(tx.db.buckets[bucket].Flags)&mdbx.DupSort != 0, id: tx.cursorID}
 	tx.cursorID++
 
 	if tx.tx == nil {
@@ -1947,5 +1947,5 @@ func (tx *MdbxTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, wal
 }
 
 func (tx *MdbxTx) CHandle() unsafe.Pointer {
-	return tx.tx.CHandle()
+	panic("unsupported ")
 }

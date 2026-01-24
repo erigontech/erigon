@@ -31,7 +31,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	mdbx1 "github.com/erigontech/mdbx-go/mdbx"
+	mdbx1 "github.com/Giulio2002/gdbx"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
