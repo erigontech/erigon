@@ -432,7 +432,7 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas uint64, m
 	if err != nil {
 		return 0, transfersValue, err
 	}
-	
+
 	var overflow bool
 	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
 		return 0, false, ErrGasUintOverflow
