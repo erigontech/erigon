@@ -223,9 +223,9 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if initialCycle {
 				pruneTimeout = 10 * time.Hour
 
-				if err = rwTx.GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
-					return nil, rwTx, err
-				}
+				//if err = rwTx.GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
+				//	return nil, rwTx, err
+				//}
 			}
 
 			if _, err := rwTx.PruneSmallBatches(ctx, pruneTimeout); err != nil {
