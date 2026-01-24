@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"maps"
 	"math"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unique"
 	"unsafe"
@@ -22,26 +22,108 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/holiman/uint256"
+	cmap "github.com/orcaman/concurrent-map/v2"
 )
 
+type iodir int
+
+const (
+	Get iodir = iota
+	Put
+)
+
+type AtomicDuration atomic.Uint64
+
+// Load atomically loads and returns the value stored in x.
+func (x *AtomicDuration) Load() time.Duration {
+	return time.Duration((*atomic.Uint64)(x).Load())
+}
+
+// Store atomically stores val into x.
+func (x *AtomicDuration) Store(val time.Duration) { (*atomic.Uint64)(x).Store(uint64(val)) }
+
+// Swap atomically stores new into x and returns the previous value.
+func (x *AtomicDuration) Swap(new uint64) (old time.Duration) {
+	return time.Duration((*atomic.Uint64)(x).Swap(uint64(new)))
+}
+
+// CompareAndSwap executes the compare-and-swap operation for x.
+func (x *AtomicDuration) CompareAndSwap(old, new time.Duration) (swapped bool) {
+	return (*atomic.Uint64)(x).CompareAndSwap(uint64(old), uint64(new))
+}
+
+// Add atomically adds delta to x and returns the new value.
+func (x *AtomicDuration) Add(delta time.Duration) (new time.Duration) {
+	return time.Duration((*atomic.Uint64)(x).Add(uint64(new)))
+}
+
 type DomainIOMetrics struct {
-	CacheReadCount    int64
-	CacheReadDuration time.Duration
-	CacheGetCount     int64
-	CachePutCount     int64
-	CacheGetSize      int
-	CacheGetKeySize   int
-	CacheGetValueSize int
-	CachePutSize      int
-	CachePutKeySize   int
-	CachePutValueSize int
-	DbReadCount       int64
-	DbReadDuration    time.Duration
-	FileReadCount     int64
-	FileReadDuration  time.Duration
+	CacheReadCount       atomic.Uint64
+	CacheReadDuration    AtomicDuration
+	GetCacheCount        atomic.Uint64
+	GetCacheSize         atomic.Uint64
+	GetCacheKeySize      atomic.Uint64
+	GetCacheValueSize    atomic.Uint64
+	GetCacheReadCount    atomic.Uint64
+	GetCacheReadDuration AtomicDuration
+	PutCacheCount        atomic.Uint64
+	PutCacheSize         atomic.Uint64
+	PutCacheKeySize      atomic.Uint64
+	PutCacheValueSize    atomic.Uint64
+	PutCacheReadCount    atomic.Uint64
+	PutCacheReadDuration AtomicDuration
+	DbReadCount          atomic.Uint64
+	DbReadDuration       AtomicDuration
+	FileReadCount        atomic.Uint64
+	FileReadDuration     AtomicDuration
+}
+
+type DomainIOMetricsSnapshot struct {
+	CacheReadCount       uint64
+	CacheReadDuration    time.Duration
+	GetCacheCount        uint64
+	GetCacheSize         uint64
+	GetCacheKeySize      uint64
+	GetCacheValueSize    uint64
+	GetCacheReadCount    uint64
+	GetCacheReadDuration time.Duration
+	PutCacheCount        uint64
+	PutCacheSize         uint64
+	PutCacheKeySize      uint64
+	PutCacheValueSize    uint64
+	PutCacheReadCount    uint64
+	PutCacheReadDuration time.Duration
+	DbReadCount          uint64
+	DbReadDuration       time.Duration
+	FileReadCount        uint64
+	FileReadDuration     time.Duration
+}
+
+func (dm *DomainIOMetrics) Snapshot() *DomainIOMetricsSnapshot {
+	return &DomainIOMetricsSnapshot{
+		CacheReadCount:       dm.CacheReadCount.Load(),
+		CacheReadDuration:    dm.CacheReadDuration.Load(),
+		GetCacheCount:        dm.GetCacheCount.Load(),
+		GetCacheSize:         dm.GetCacheSize.Load(),
+		GetCacheKeySize:      dm.GetCacheKeySize.Load(),
+		GetCacheValueSize:    dm.GetCacheValueSize.Load(),
+		GetCacheReadCount:    dm.GetCacheReadCount.Load(),
+		GetCacheReadDuration: dm.GetCacheReadDuration.Load(),
+		PutCacheCount:        dm.PutCacheCount.Load(),
+		PutCacheSize:         dm.PutCacheSize.Load(),
+		PutCacheKeySize:      dm.PutCacheKeySize.Load(),
+		PutCacheValueSize:    dm.PutCacheValueSize.Load(),
+		PutCacheReadCount:    dm.PutCacheReadCount.Load(),
+		PutCacheReadDuration: dm.PutCacheReadDuration.Load(),
+		DbReadCount:          dm.DbReadCount.Load(),
+		DbReadDuration:       dm.DbReadDuration.Load(),
+		FileReadCount:        dm.FileReadCount.Load(),
+		FileReadDuration:     dm.FileReadDuration.Load(),
+	}
 }
 
 type DomainMetrics struct {
@@ -49,77 +131,129 @@ type DomainMetrics struct {
 	DomainIOMetrics
 	Domains map[kv.Domain]*DomainIOMetrics
 }
+type DomainMetricsSnapshot struct {
+	*DomainIOMetricsSnapshot
+	Domains map[kv.Domain]*DomainIOMetricsSnapshot
+}
+
+func (dm *DomainMetrics) Snapshot() *DomainMetricsSnapshot {
+	dm.RLock()
+	defer dm.Unlock()
+	snapshot := DomainMetricsSnapshot{
+		DomainIOMetricsSnapshot: dm.DomainIOMetrics.Snapshot(),
+		Domains:                 map[kv.Domain]*DomainIOMetricsSnapshot{},
+	}
+	for domain, metrics := range dm.Domains {
+		snapshot.Domains[domain] = metrics.Snapshot()
+	}
+	return &snapshot
+}
 
 func (dm *DomainMetrics) UpdatePutCacheWrites(domain kv.Domain, putKeySize int, putValueSize int) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.CachePutCount++
-	dm.CachePutSize += putKeySize + putValueSize
-	dm.CachePutKeySize += putKeySize
-	dm.CachePutValueSize += putValueSize
+	dm.PutCacheCount.Add(1)
+	dm.PutCacheSize.Add(uint64(putKeySize + putValueSize))
+	dm.PutCacheKeySize.Add(uint64(putKeySize))
+	dm.PutCacheValueSize.Add(uint64(putValueSize))
 	if m, ok := dm.Domains[domain]; ok {
-		m.CachePutCount++
-		m.CachePutSize += putKeySize + putValueSize
-		m.CachePutKeySize += putKeySize
-		m.CachePutValueSize += putValueSize
+		m.PutCacheCount.Add(1)
+		m.PutCacheSize.Add(uint64(putKeySize + putValueSize))
+		m.PutCacheKeySize.Add(uint64(putKeySize))
+		m.PutCacheValueSize.Add(uint64(putValueSize))
 	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			CachePutCount:     1,
-			CachePutSize:      putKeySize + putValueSize,
-			CachePutKeySize:   putKeySize,
-			CachePutValueSize: putValueSize,
-		}
+		dm.Lock()
+		defer dm.Unlock()
+		m = &DomainIOMetrics{}
+		m.PutCacheCount.Store(1)
+		m.PutCacheSize.Store(uint64(putKeySize + putValueSize))
+		m.PutCacheKeySize.Store(uint64(putKeySize))
+		m.PutCacheValueSize.Store(uint64(putValueSize))
+		dm.Domains[domain] = m
 	}
 }
 
-func (dm *DomainMetrics) UpdateCacheReads(domain kv.Domain, start time.Time) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.CacheReadCount++
-	readDuration := time.Since(start)
-	dm.CacheReadDuration += readDuration
-	if d, ok := dm.Domains[domain]; ok {
-		d.CacheReadCount++
-		d.CacheReadDuration += readDuration
+func (dm *DomainMetrics) UpdateGetCacheWrites(domain kv.Domain, getKeySize int, getValueSize int) {
+	dm.GetCacheCount.Add(1)
+	dm.GetCacheSize.Add(uint64(getKeySize + getValueSize))
+	dm.GetCacheKeySize.Add(uint64(getKeySize))
+	dm.GetCacheValueSize.Add(uint64(getValueSize))
+	if m, ok := dm.Domains[domain]; ok {
+		m.GetCacheCount.Add(1)
+		m.GetCacheSize.Add(uint64(getKeySize + getValueSize))
+		m.GetCacheKeySize.Add(uint64(getKeySize))
+		m.GetCacheValueSize.Add(uint64(getValueSize))
 	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			CacheReadCount:    1,
-			CacheReadDuration: readDuration,
-		}
+		dm.Lock()
+		defer dm.Unlock()
+		m := &DomainIOMetrics{}
+		m.GetCacheCount.Store(1)
+		m.GetCacheSize.Store(uint64(getKeySize + getValueSize))
+		m.GetCacheKeySize.Store(uint64(getKeySize))
+		m.GetCacheValueSize.Store(uint64(getValueSize))
+		dm.Domains[domain] = m
+	}
+}
+
+func (dm *DomainMetrics) UpdateCacheReads(domain kv.Domain, direction iodir, start time.Time) {
+	dm.CacheReadCount.Add(1)
+	readDuration := time.Since(start)
+	dm.CacheReadDuration.Add(readDuration)
+	m, ok := dm.Domains[domain]
+	if ok {
+		m.CacheReadCount.Add(1)
+		m.CacheReadDuration.Add(readDuration)
+	} else {
+		dm.Lock()
+		defer dm.Unlock()
+		m = &DomainIOMetrics{}
+		m.CacheReadCount.Store(1)
+		m.CacheReadDuration.Store(readDuration)
+		dm.Domains[domain] = m
+	}
+	switch direction {
+	case Get:
+		dm.GetCacheReadCount.Add(1)
+		dm.GetCacheReadDuration.Add(readDuration)
+		m.GetCacheReadCount.Add(1)
+		m.GetCacheReadDuration.Add(readDuration)
+	case Put:
+		dm.PutCacheReadCount.Add(1)
+		dm.PutCacheReadDuration.Add(readDuration)
+		m.PutCacheReadCount.Add(1)
+		m.PutCacheReadDuration.Add(readDuration)
 	}
 }
 
 func (dm *DomainMetrics) UpdateDbReads(domain kv.Domain, start time.Time) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.DbReadCount++
+	dm.DbReadCount.Add(1)
 	readDuration := time.Since(start)
-	dm.DbReadDuration += readDuration
+	dm.DbReadDuration.Add(readDuration)
 	if d, ok := dm.Domains[domain]; ok {
-		d.DbReadCount++
-		d.DbReadDuration += readDuration
+		d.DbReadCount.Add(1)
+		d.DbReadDuration.Add(readDuration)
 	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			DbReadCount:    1,
-			DbReadDuration: readDuration,
-		}
+		dm.Lock()
+		defer dm.Unlock()
+		m := &DomainIOMetrics{}
+		m.DbReadCount.Store(1)
+		m.DbReadDuration.Store(readDuration)
+		dm.Domains[domain] = m
 	}
 }
 
 func (dm *DomainMetrics) UpdateFileReads(domain kv.Domain, start time.Time) {
-	dm.Lock()
-	defer dm.Unlock()
-	dm.FileReadCount++
+	dm.FileReadCount.Add(1)
 	readDuration := time.Since(start)
-	dm.FileReadDuration += readDuration
+	dm.FileReadDuration.Add(readDuration)
 	if d, ok := dm.Domains[domain]; ok {
-		d.FileReadCount++
-		d.FileReadDuration += readDuration
+		d.FileReadCount.Add(1)
+		d.FileReadDuration.Add(readDuration)
 	} else {
-		dm.Domains[domain] = &DomainIOMetrics{
-			FileReadCount:    1,
-			FileReadDuration: readDuration,
-		}
+		dm.Lock()
+		defer dm.Unlock()
+		m := &DomainIOMetrics{}
+		m.FileReadCount.Store(1)
+		m.FileReadDuration.Store(readDuration)
+		dm.Domains[domain] = m
 	}
 }
 
@@ -130,13 +264,13 @@ type valueCache[K comparable, V any] interface {
 	Get(key K) (value ValueWithTxNum[V], ok bool)
 }
 
-type lruValueCache[K comparable, U comparable, V any] struct {
+type lruValueCache[K comparable, V any] struct {
 	d     kv.Domain
 	lru   *freelru.ShardedLRU[K, ValueWithTxNum[V]]
 	limit uint32
 }
 
-func newLRUValueCache[K comparable, U comparable, V any](d kv.Domain, limit uint32) (*lruValueCache[K, U, V], error) {
+func newLRUValueCache[K comparable, U comparable, V any](d kv.Domain, limit uint32) (*lruValueCache[K, V], error) {
 	type handle[U comparable] struct{ value *U }
 
 	if unsafe.Sizeof(handle[U]{}) != unsafe.Sizeof(unique.Handle[U]{}) {
@@ -150,22 +284,22 @@ func newLRUValueCache[K comparable, U comparable, V any](d kv.Domain, limit uint
 	if err != nil {
 		return nil, err
 	}
-	return &lruValueCache[K, U, V]{d: d, lru: c, limit: limit}, nil
+	return &lruValueCache[K, V]{d: d, lru: c, limit: limit}, nil
 }
 
-func (c *lruValueCache[K, U, V]) Name() kv.Domain {
+func (c *lruValueCache[K, V]) Name() kv.Domain {
 	return c.d
 }
 
-func (c *lruValueCache[K, U, V]) Add(key K, value V, txNum uint64) (evicted bool) {
+func (c *lruValueCache[K, V]) Add(key K, value V, txNum uint64) (evicted bool) {
 	return c.lru.Add(key, ValueWithTxNum[V]{value, txNum})
 }
 
-func (c *lruValueCache[K, U, V]) Remove(key K) (evicted bool) {
+func (c *lruValueCache[K, V]) Remove(key K) (evicted bool) {
 	return c.lru.Remove(key)
 }
 
-func (c *lruValueCache[K, U, V]) Get(key K) (value ValueWithTxNum[V], ok bool) {
+func (c *lruValueCache[K, V]) Get(key K) (value ValueWithTxNum[V], ok bool) {
 	return c.lru.GetAndRefresh(key, 5*time.Minute)
 }
 
@@ -176,10 +310,74 @@ type updates[K comparable, V any] interface {
 	Clear() updates[K, V]
 }
 
-//keySerializer func(k K) []byte
-//keyFormatter func(k K) string
+type valueUpdates[K comparable, U comparable, V any] struct {
+	cmap cmap.ConcurrentMap[K, []ValueWithTxNum[V]]
+}
 
-type elementOps[V any] struct {
+func newValueUpdates[K comparable, U comparable, V any]() updates[K, V] {
+	type handle[U comparable] struct{ value *U }
+
+	if unsafe.Sizeof(handle[common.Address]{}) != unsafe.Sizeof(unique.Handle[common.Address]{}) {
+		panic("handle type != unique.Handle - check unique.Handle implementation details for this version of go")
+	}
+
+	return &valueUpdates[K, U, V]{
+		cmap: cmap.NewWithCustomShardingFunction[K, []ValueWithTxNum[V]](func(k K) uint32 {
+			return uint32(uintptr(unsafe.Pointer((*handle[U])(unsafe.Pointer(&k)).value)))
+		}),
+	}
+}
+
+func (u *valueUpdates[K, U, V]) Get(k K) ([]ValueWithTxNum[V], bool) {
+	v, ok := u.cmap.Get(k)
+	return v, ok
+}
+
+func (u *valueUpdates[K, U, V]) Put(k K, v ValueWithTxNum[V]) (inserted bool, err error) {
+	u.cmap.Upsert(k, nil, func(e bool, values, _ []ValueWithTxNum[V]) []ValueWithTxNum[V] {
+		if e {
+			txNum := values[len(values)-1].TxNum
+			switch {
+			case v.TxNum < txNum:
+				err = fmt.Errorf("can't insert non sequential tx: got: %d, expected > %d", v.TxNum, values[len(values)-1].TxNum)
+			case v.TxNum == txNum:
+				values[len(values)-1] = v
+			default:
+				inserted = true
+				return append(values, v)
+			}
+		}
+		inserted = true
+		return []ValueWithTxNum[V]{v}
+	})
+
+	return inserted, err
+}
+
+func (u *valueUpdates[K, U, V]) Iter() iter.Seq2[K, []ValueWithTxNum[V]] {
+	return func(yield func(K, []ValueWithTxNum[V]) bool) {
+		for v := range u.cmap.IterBuffered() {
+			yield(v.Key, v.Val)
+		}
+	}
+}
+
+func (u *valueUpdates[K, U, V]) Clear() updates[K, V] {
+	type handle[U comparable] struct{ value *U }
+
+	if unsafe.Sizeof(handle[common.Address]{}) != unsafe.Sizeof(unique.Handle[common.Address]{}) {
+		panic("handle type != unique.Handle - check unique.Handle implementation details for this version of go")
+	}
+
+	*u = *newValueUpdates[K, U, V]().(*valueUpdates[K, U, V])
+	return u
+}
+
+type keyOps[V any] struct {
+	serializer func(v V) []byte
+	formatter  func(v V) string
+}
+type valueOps[V any] struct {
 	cmp          func(v0 V, v1 V) bool
 	isEmpty      func(v0 V) bool
 	serializer   func(v V) []byte
@@ -194,8 +392,8 @@ type domain[K comparable, V any] struct {
 	commitCtx  *commitment.CommitmentContext
 	valueCache valueCache[K, V]
 	updates    updates[K, V]
-	keyOps     elementOps[K]
-	valueOps   elementOps[V]
+	keyOps     keyOps[K]
+	valueOps   valueOps[V]
 }
 
 func (d *domain[K, V]) name() kv.Domain {
@@ -210,12 +408,10 @@ func (d *domain[K, V]) get(ctx context.Context, k K, tx kv.TemporalTx) (v V, txN
 	tracePrefix, trace := dbg.TraceValues(ctx)
 
 	start := time.Now()
-	d.lock.RLock()
 	val, ok := d.updates.Get(k)
-	d.lock.RUnlock()
 
 	if ok {
-		d.metrics.UpdateCacheReads(d.name(), start)
+		d.metrics.UpdateCacheReads(d.name(), Put, start)
 		if trace {
 			fmt.Printf("%s%s get(updates) [%s] => [%s] (%d)\n", tracePrefix, d.name(), d.keyOps.formatter(k), d.valueOps.formatter(val[len(val)-1].Value), val[len(val)-1].TxNum)
 		}
@@ -236,7 +432,7 @@ func (d *domain[K, V]) get(ctx context.Context, k K, tx kv.TemporalTx) (v V, txN
 				return v, uint64(step) * tx.StepSize(), false, err
 			}
 			txNum := step.ToTxNum(tx.StepSize())
-			d.metrics.UpdateCacheReads(d.name(), start)
+			d.metrics.UpdateCacheReads(d.name(), Put, start)
 			if trace {
 				fmt.Printf("%s%s get(unwind) [%s] => [%s] (%d)\n", tracePrefix, d.name(), d.keyOps.formatter(k), d.valueOps.formatter(v), txNum)
 			}
@@ -250,7 +446,7 @@ func (d *domain[K, V]) get(ctx context.Context, k K, tx kv.TemporalTx) (v V, txN
 
 	if d.valueCache != nil {
 		if val, ok := d.valueCache.Get(k); ok {
-			d.metrics.UpdateCacheReads(d.name(), start)
+			d.metrics.UpdateCacheReads(d.name(), Get, start)
 			if trace {
 				fmt.Printf("%s%s get(cache) [%s] => [%s] (%d)\n", tracePrefix, d.name(), d.keyOps.formatter(k), d.valueOps.formatter(val.Value), val.TxNum)
 			}
@@ -318,9 +514,7 @@ func (d *domain[K, V]) put(ctx context.Context, k K, v V, roTx kv.TemporalTx, tx
 	putKeySize := 0
 	putValueSize := 0
 
-	d.lock.Lock()
 	inserted, err := d.updates.Put(k, ValueWithTxNum[V]{v, txNum})
-	d.lock.Unlock()
 
 	if err != nil {
 		return err
@@ -371,9 +565,7 @@ func (d *domain[K, V]) del(ctx context.Context, k K, roTx kv.TemporalTx, txNum u
 	putKeySize := 0
 	putValueSize := 0
 
-	d.lock.Lock()
 	inserted, err := d.updates.Put(k, ValueWithTxNum[V]{TxNum: txNum})
-	d.lock.Unlock()
 
 	if err != nil {
 		return err
@@ -391,7 +583,7 @@ func (d *domain[K, V]) del(ctx context.Context, k K, roTx kv.TemporalTx, txNum u
 
 func (d *domain[K, V]) getLatest(ctx context.Context, domain kv.Domain, k []byte, tx kv.TemporalTx, maxStep kv.Step, start time.Time) (v []byte, txNum uint64, err error) {
 	type MeteredGetter interface {
-		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
+		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics state.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
 	}
 
 	var step kv.Step
@@ -441,13 +633,13 @@ func (d *domain[K, V]) getAsOf(key []byte, ts uint64) (v []byte, ok bool, err er
 }
 
 func (sd *domain[K, V]) ClearMetrics() {
-	sd.metrics.Lock()
-	defer sd.metrics.Unlock()
+	sd.metrics.RLock()
+	defer sd.metrics.RUnlock()
 	if dm, ok := sd.metrics.Domains[sd.name()]; ok {
-		dm.CachePutCount = 0
-		dm.CachePutSize = 0
-		dm.CachePutKeySize = 0
-		dm.CachePutValueSize = 0
+		dm.PutCacheCount.Store(0)
+		dm.PutCacheSize.Store(0)
+		dm.PutCacheKeySize.Store(0)
+		dm.PutCacheValueSize.Store(0)
 	}
 }
 
@@ -465,8 +657,14 @@ func (d *domain[K, V]) FlushUpdates() {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	for k, vs := range d.updates.Iter() {
-		for _, v := range vs {
-			d.valueCache.Add(k, v.Value, v.TxNum)
+		if len(vs) > 0 {
+			// the value cache only handles latest values for the moment
+			v := vs[len(vs)-1]
+			if d.valueOps.isEmpty(v.Value) {
+				d.valueCache.Remove(k)
+			} else {
+				d.valueCache.Add(k, v.Value, v.TxNum)
+			}
 		}
 	}
 	d.updates = d.updates.Clear()
@@ -479,48 +677,16 @@ type AccountsDomain struct {
 	code    *CodeDomain
 }
 
-type accountUpdates map[accounts.Address][]ValueWithTxNum[*accounts.Account]
-
-func (u accountUpdates) Get(k accounts.Address) ([]ValueWithTxNum[*accounts.Account], bool) {
-	v, ok := u[k]
-	return v, ok
-}
-
-func (u accountUpdates) Put(k accounts.Address, v ValueWithTxNum[*accounts.Account]) (bool, error) {
-	if values, exists := u[k]; exists {
-		if v.TxNum <= values[len(values)-1].TxNum {
-			return false, fmt.Errorf("can't insert non sequential tx: got: %d, expected > %d", v.TxNum, values[len(values)-1].TxNum)
-		}
-		u[k] = append(values, v)
-		return true, nil
-	} else {
-		u[k] = []ValueWithTxNum[*accounts.Account]{v}
-		return false, nil
-	}
-}
-
-func (u accountUpdates) Iter() iter.Seq2[accounts.Address, []ValueWithTxNum[*accounts.Account]] {
-	return func(yield func(accounts.Address, []ValueWithTxNum[*accounts.Account]) bool) {
-		for k, v := range u {
-			yield(k, v)
-		}
-	}
-}
-
-func (u accountUpdates) Clear() updates[accounts.Address, *accounts.Account] {
-	return accountUpdates{}
-}
-
 func NewAccountsDomain(mem kv.TemporalMemBatch, storage *StorageDomain, code *CodeDomain, commitCtx *commitment.CommitmentContext, metrics *DomainMetrics) (*AccountsDomain, error) {
 	cache := mem.ValueCache(kv.AccountsDomain)
 
 	if cache != nil {
-		if _, ok := cache.(*lruValueCache[accounts.Address, common.Address, *accounts.Account]); !ok {
-			return nil, fmt.Errorf("unexpected cache initializaton type: got: %T, expected %T", cache, &lruValueCache[accounts.Address, common.Address, *accounts.Account]{})
+		if _, ok := cache.(*lruValueCache[accounts.Address, *accounts.Account]); !ok {
+			return nil, fmt.Errorf("unexpected cache initializaton type: got: %T, expected %T", cache, &lruValueCache[accounts.Address, *accounts.Account]{})
 		}
 	} else {
 		var err error
-		cache, err = newLRUValueCache[accounts.Address, common.Address, *accounts.Account](kv.AccountsDomain, 250_000)
+		cache, err = newLRUValueCache[accounts.Address, common.Address, *accounts.Account](kv.AccountsDomain, 50_000)
 		if err != nil {
 			return nil, err
 		}
@@ -533,8 +699,8 @@ func NewAccountsDomain(mem kv.TemporalMemBatch, storage *StorageDomain, code *Co
 			mem:        mem,
 			commitCtx:  commitCtx,
 			valueCache: cache.(valueCache[accounts.Address, *accounts.Account]),
-			updates:    accountUpdates{},
-			keyOps: elementOps[accounts.Address]{
+			updates:    newValueUpdates[accounts.Address, common.Address, *accounts.Account](),
+			keyOps: keyOps[accounts.Address]{
 				serializer: func(k accounts.Address) []byte {
 					kv := k.Value()
 					return kv[:]
@@ -543,7 +709,7 @@ func NewAccountsDomain(mem kv.TemporalMemBatch, storage *StorageDomain, code *Co
 					return k.Value().Hex()
 				},
 			},
-			valueOps: elementOps[*accounts.Account]{
+			valueOps: valueOps[*accounts.Account]{
 				cmp: func(v0 *accounts.Account, v1 *accounts.Account) bool {
 					return v0.Equals(v1)
 				},
@@ -619,7 +785,7 @@ type storageCache struct {
 	limit uint32
 }
 
-func newStroageCache(limit uint32) (*storageCache, error) {
+func newStorageCache(limit uint32) (*storageCache, error) {
 	type handle[U comparable] struct{ value *U }
 
 	if unsafe.Sizeof(handle[common.Address]{}) != unsafe.Sizeof(unique.Handle[common.Address]{}) {
@@ -654,67 +820,113 @@ func (c *storageCache) Get(key storageLocation) (value ValueWithTxNum[uint256.In
 	return c.lru.GetAndRefresh(key, 5*time.Minute)
 }
 
-type storageUpdates map[accounts.Address]map[accounts.StorageKey][]ValueWithTxNum[uint256.Int]
+type storageUpdates struct {
+	cmap cmap.ConcurrentMap[accounts.Address, *cmap.ConcurrentMap[accounts.StorageKey, []ValueWithTxNum[uint256.Int]]]
+}
+
+func newStorageUpdates() updates[storageLocation, uint256.Int] {
+	type handle[U comparable] struct{ value *U }
+
+	if unsafe.Sizeof(handle[common.Address]{}) != unsafe.Sizeof(unique.Handle[common.Address]{}) {
+		panic("handle type != unique.Handle - check unique.Handle implementation details for this version of go")
+	}
+
+	return &storageUpdates{
+		cmap: cmap.NewWithCustomShardingFunction[accounts.Address, *cmap.ConcurrentMap[accounts.StorageKey, []ValueWithTxNum[uint256.Int]]](
+			func(k accounts.Address) uint32 {
+				return uint32(uintptr(unsafe.Pointer((*handle[common.Address])(unsafe.Pointer(&k)).value)))
+			}),
+	}
+}
 
 func (u storageUpdates) Get(k storageLocation) ([]ValueWithTxNum[uint256.Int], bool) {
-	v, ok := u[k.address][k.key]
-	return v, ok
-}
-
-func (u storageUpdates) Put(k storageLocation, v ValueWithTxNum[uint256.Int]) (bool, error) {
-	if vm, ok := u[k.address]; ok {
-		if values, exists := vm[k.key]; exists {
-			if v.TxNum <= values[len(values)-1].TxNum {
-				return false, fmt.Errorf("can't insert non sequential tx: got: %d, expected > %d", v.TxNum, values[len(values)-1].TxNum)
-			}
-			vm[k.key] = append(values, v)
-			return true, nil
-		} else {
-			vm[k.key] = []ValueWithTxNum[uint256.Int]{v}
-		}
-	} else {
-		u[k.address] = map[accounts.StorageKey][]ValueWithTxNum[uint256.Int]{k.key: []ValueWithTxNum[uint256.Int]{v}}
+	sm, ok := u.cmap.Get(k.address)
+	if !ok {
+		return nil, false
 	}
-
-	return false, nil
+	return sm.Get(k.key)
 }
 
-func (u storageUpdates) Iter() iter.Seq2[storageLocation, []ValueWithTxNum[uint256.Int]] {
+func (u storageUpdates) Put(k storageLocation, v ValueWithTxNum[uint256.Int]) (inserted bool, err error) {
+	u.cmap.Upsert(k.address, nil, func(e bool, valueMap, _ *cmap.ConcurrentMap[accounts.StorageKey, []ValueWithTxNum[uint256.Int]]) *cmap.ConcurrentMap[accounts.StorageKey, []ValueWithTxNum[uint256.Int]] {
+		if e {
+			valueMap.Upsert(k.key, nil, func(e bool, values, _ []ValueWithTxNum[uint256.Int]) []ValueWithTxNum[uint256.Int] {
+				if e {
+					txNum := values[len(values)-1].TxNum
+					switch {
+					case v.TxNum < txNum:
+						err = fmt.Errorf("can't insert non sequential tx: got: %d, expected > %d", v.TxNum, values[len(values)-1].TxNum)
+						return values
+					case v.TxNum == txNum:
+						values[len(values)-1] = v
+						return values
+					default:
+						inserted = true
+						return append(values, v)
+					}
+				}
+				inserted = true
+				return []ValueWithTxNum[uint256.Int]{v}
+			})
+			return valueMap
+		}
+		slots := cmap.NewWithCustomShardingFunction[accounts.StorageKey, []ValueWithTxNum[uint256.Int]](
+			func(k accounts.StorageKey) uint32 {
+				type handle[U comparable] struct{ value *U }
+				return uint32(uintptr(unsafe.Pointer((*handle[common.Hash])(unsafe.Pointer(&k)).value)))
+			})
+		slots.Set(k.key, []ValueWithTxNum[uint256.Int]{v})
+		inserted = true
+		return &slots
+	})
+
+	return inserted, err
+}
+
+func (u *storageUpdates) Iter() iter.Seq2[storageLocation, []ValueWithTxNum[uint256.Int]] {
 	return func(yield func(storageLocation, []ValueWithTxNum[uint256.Int]) bool) {
-		for a, m := range u {
-			for k, v := range m {
-				yield(storageLocation{address: a, key: k}, v)
+		for ta := range u.cmap.IterBuffered() {
+			for ts := range ta.Val.IterBuffered() {
+				yield(storageLocation{address: ta.Key, key: ts.Key}, ts.Val)
 			}
 		}
 	}
 }
 
-func (u storageUpdates) UpdatedSlots(addr accounts.Address) (map[accounts.StorageKey][]ValueWithTxNum[uint256.Int], bool) {
-	vm, ok := u[addr]
-	return vm, ok
+func (u *storageUpdates) UpdatedSlots(addr accounts.Address) (*cmap.ConcurrentMap[accounts.StorageKey, []ValueWithTxNum[uint256.Int]], bool) {
+	return u.cmap.Get(addr)
 }
 
 func (u storageUpdates) SortedIter(addr accounts.Address) iter.Seq2[storageLocation, []ValueWithTxNum[uint256.Int]] {
 	if addr.IsNil() {
-		iter := slices.SortedFunc(maps.Keys(u), func(a, b accounts.Address) int { return a.Value().Cmp(b.Value()) })
+		iter := slices.SortedFunc(slices.Values(u.cmap.Keys()), func(a, b accounts.Address) int { return a.Value().Cmp(b.Value()) })
 		return func(yield func(storageLocation, []ValueWithTxNum[uint256.Int]) bool) {
 			for _, a := range iter {
-				for _, k := range slices.SortedFunc(maps.Keys(u[a]), func(a, b accounts.StorageKey) int { return a.Value().Cmp(b.Value()) }) {
-					yield(storageLocation{address: a, key: k}, u[a][k])
+				if slots, ok := u.cmap.Get(a); ok {
+					for _, k := range slices.SortedFunc(slices.Values(slots.Keys()), func(a, b accounts.StorageKey) int { return a.Value().Cmp(b.Value()) }) {
+						if slot, ok := slots.Get(k); ok {
+							yield(storageLocation{address: a, key: k}, slot)
+						}
+					}
 				}
 			}
 		}
 	}
 
 	return func(yield func(storageLocation, []ValueWithTxNum[uint256.Int]) bool) {
-		for _, k := range slices.SortedFunc(maps.Keys(u[addr]), func(a, b accounts.StorageKey) int { return a.Value().Cmp(b.Value()) }) {
-			yield(storageLocation{address: addr, key: k}, u[addr][k])
+		if slots, ok := u.cmap.Get(addr); ok {
+			for _, k := range slices.SortedFunc(slices.Values(slots.Keys()), func(a, b accounts.StorageKey) int { return a.Value().Cmp(b.Value()) }) {
+				if slot, ok := slots.Get(k); ok {
+					yield(storageLocation{address: addr, key: k}, slot)
+				}
+			}
 		}
 	}
 }
 
-func (u storageUpdates) Clear() updates[storageLocation, uint256.Int] {
-	return storageUpdates{}
+func (u *storageUpdates) Clear() updates[storageLocation, uint256.Int] {
+	*u = *newStorageUpdates().(*storageUpdates)
+	return u
 }
 
 type StorageDomain struct {
@@ -730,7 +942,7 @@ func NewStorageDomain(mem kv.TemporalMemBatch, commitCtx *commitment.CommitmentC
 		}
 	} else {
 		var err error
-		cache, err = newStroageCache(250_000)
+		cache, err = newStorageCache(100_000)
 		if err != nil {
 			return nil, err
 		}
@@ -743,8 +955,8 @@ func NewStorageDomain(mem kv.TemporalMemBatch, commitCtx *commitment.CommitmentC
 			mem:        mem,
 			commitCtx:  commitCtx,
 			valueCache: cache.(*storageCache),
-			updates:    storageUpdates{},
-			keyOps: elementOps[storageLocation]{
+			updates:    newStorageUpdates(),
+			keyOps: keyOps[storageLocation]{
 				serializer: func(k storageLocation) []byte {
 					av := k.address.Value()
 					kv := k.key.Value()
@@ -754,7 +966,7 @@ func NewStorageDomain(mem kv.TemporalMemBatch, commitCtx *commitment.CommitmentC
 					return fmt.Sprintf("%x %x", k.address.Value(), k.key.Value())
 				},
 			},
-			valueOps: elementOps[uint256.Int]{
+			valueOps: valueOps[uint256.Int]{
 				cmp: func(v0 uint256.Int, v1 uint256.Int) bool {
 					return v0 == v1
 				},
@@ -816,7 +1028,7 @@ func (sd *StorageDomain) Del(ctx context.Context, addr accounts.Address, key acc
 
 func (sd *StorageDomain) slotIterator(addr accounts.Address) func(yield func(string, []kv.DataWithTxNum) bool) {
 	sd.lock.RLock()
-	iter := sd.updates.(storageUpdates).SortedIter(addr)
+	iter := sd.updates.(*storageUpdates).SortedIter(addr)
 	sd.lock.RUnlock()
 	return func(yield func(string, []kv.DataWithTxNum) bool) {
 		for k, vs := range iter {
@@ -876,12 +1088,10 @@ func (sd *StorageDomain) DelAll(ctx context.Context, addr accounts.Address, roTx
 }
 
 func (sd *StorageDomain) HasStorage(ctx context.Context, addr accounts.Address, roTx kv.Tx) (bool, error) {
-	sd.lock.RLock()
-	slots, ok := sd.updates.(storageUpdates).UpdatedSlots(addr)
-	sd.lock.RUnlock()
+	slots, ok := sd.updates.(*storageUpdates).UpdatedSlots(addr)
 	if ok {
-		for _, slot := range slots {
-			if slot[len(slot)-1].Value.ByteLen() > 0 {
+		for kv := range slots.IterBuffered() {
+			if kv.Val[len(kv.Val)-1].Value.ByteLen() > 0 {
 				return true, nil
 			}
 		}
@@ -929,12 +1139,31 @@ type CodeWithTxNum struct {
 }
 
 type codeUpdates struct {
-	hashes map[accounts.Address]accounts.CodeHash
-	code   map[accounts.CodeHash][]ValueWithTxNum[codeWithHash]
+	hashes cmap.ConcurrentMap[accounts.Address, accounts.CodeHash]
+	code   cmap.ConcurrentMap[accounts.CodeHash, []ValueWithTxNum[codeWithHash]]
 }
 
-func (u codeUpdates) Get(k accounts.Address) ([]ValueWithTxNum[codeWithHash], bool) {
-	h, ok := u.hashes[k]
+func newCodeUpdates() *codeUpdates {
+	type handle[U comparable] struct{ value *U }
+
+	if unsafe.Sizeof(handle[common.Address]{}) != unsafe.Sizeof(unique.Handle[common.Address]{}) {
+		panic("handle type != unique.Handle - check unique.Handle implementation details for this version of go")
+	}
+
+	return &codeUpdates{
+		hashes: cmap.NewWithCustomShardingFunction[accounts.Address, accounts.CodeHash](
+			func(k accounts.Address) uint32 {
+				return uint32(uintptr(unsafe.Pointer((*handle[common.Address])(unsafe.Pointer(&k)).value)))
+			}),
+		code: cmap.NewWithCustomShardingFunction[accounts.CodeHash, []ValueWithTxNum[codeWithHash]](
+			func(k accounts.CodeHash) uint32 {
+				return uint32(uintptr(unsafe.Pointer((*handle[common.Hash])(unsafe.Pointer(&k)).value)))
+			}),
+	}
+}
+
+func (u *codeUpdates) Get(k accounts.Address) ([]ValueWithTxNum[codeWithHash], bool) {
+	h, ok := u.hashes.Get(k)
 
 	if !ok {
 		return nil, false
@@ -944,44 +1173,46 @@ func (u codeUpdates) Get(k accounts.Address) ([]ValueWithTxNum[codeWithHash], bo
 		return []ValueWithTxNum[codeWithHash]{{Value: codeWithHash{hash: h}}}, true
 	}
 
-	c, ok := u.code[h]
+	c, ok := u.code.Get(h)
 
 	return c, ok
 }
 
-func (u codeUpdates) Put(k accounts.Address, v ValueWithTxNum[codeWithHash]) (bool, error) {
-	h, exists := u.hashes[k]
-
-	if exists {
-		if h != v.Value.hash {
-			u.hashes[k] = v.Value.hash
+func (u *codeUpdates) Put(k accounts.Address, v ValueWithTxNum[codeWithHash]) (inserted bool, err error) {
+	u.hashes.Upsert(k, v.Value.hash, func(e bool, valueInMap, newValue accounts.CodeHash) accounts.CodeHash {
+		if e {
+			if valueInMap != newValue {
+				inserted = true
+			}
 		}
-	} else {
-		u.hashes[k] = v.Value.hash
+		return newValue
+	})
+
+	if inserted && !v.Value.hash.IsEmpty() {
+		u.code.Upsert(v.Value.hash, nil, func(e bool, valueInMap, newValue []ValueWithTxNum[codeWithHash]) []ValueWithTxNum[codeWithHash] {
+			if e {
+				return valueInMap
+			}
+			return []ValueWithTxNum[codeWithHash]{v}
+		})
 	}
 
-	if !v.Value.hash.IsEmpty() {
-		if _, ok := u.code[v.Value.hash]; !ok {
-			u.code[v.Value.hash] = []ValueWithTxNum[codeWithHash]{v}
-		}
-	}
-
-	return !exists, nil
+	return inserted, nil
 }
 
-func (u codeUpdates) Iter() iter.Seq2[accounts.Address, []ValueWithTxNum[codeWithHash]] {
+func (u *codeUpdates) Iter() iter.Seq2[accounts.Address, []ValueWithTxNum[codeWithHash]] {
 	return func(yield func(accounts.Address, []ValueWithTxNum[codeWithHash]) bool) {
-		for a, h := range u.hashes {
-			yield(a, u.code[h])
+		for kv := range u.hashes.IterBuffered() {
+			if code, ok := u.code.Get(kv.Val); ok {
+				yield(kv.Key, code)
+			}
 		}
 	}
 }
 
-func (u codeUpdates) Clear() updates[accounts.Address, codeWithHash] {
-	return codeUpdates{
-		hashes: map[accounts.Address]accounts.CodeHash{},
-		code:   map[accounts.CodeHash][]ValueWithTxNum[codeWithHash]{},
-	}
+func (u *codeUpdates) Clear() updates[accounts.Address, codeWithHash] {
+	*u = *newCodeUpdates()
+	return u
 }
 
 type codeCache struct {
@@ -1089,11 +1320,8 @@ func NewCodeDomain(mem kv.TemporalMemBatch, commitCtx *commitment.CommitmentCont
 			mem:        mem,
 			commitCtx:  commitCtx,
 			valueCache: cache.(valueCache[accounts.Address, codeWithHash]),
-			updates: codeUpdates{
-				hashes: map[accounts.Address]accounts.CodeHash{},
-				code:   map[accounts.CodeHash][]ValueWithTxNum[codeWithHash]{},
-			},
-			keyOps: elementOps[accounts.Address]{
+			updates:    newCodeUpdates(),
+			keyOps: keyOps[accounts.Address]{
 				serializer: func(k accounts.Address) []byte {
 					av := k.Value()
 					return av[:]
@@ -1102,7 +1330,7 @@ func NewCodeDomain(mem kv.TemporalMemBatch, commitCtx *commitment.CommitmentCont
 					return fmt.Sprintf("%x", k.Value())
 				},
 			},
-			valueOps: elementOps[codeWithHash]{
+			valueOps: valueOps[codeWithHash]{
 				cmp: func(v0 codeWithHash, v1 codeWithHash) bool {
 					return bytes.Equal(v0.code, v1.code)
 				},
@@ -1183,22 +1411,22 @@ func (cd *CodeDomain) Del(ctx context.Context, k accounts.Address, roTx kv.Tempo
 }
 
 type CommitmentDomain struct {
-	domain[commitment.Path, commitment.Branch]
+	domain[commitment.Path, commitment.BranchData]
 }
 
 type branchCache struct {
-	state       ValueWithTxNum[commitment.Branch]
-	t0          ValueWithTxNum[commitment.Branch]
-	t1          [16]ValueWithTxNum[commitment.Branch]
-	t2          [256]ValueWithTxNum[commitment.Branch]
-	t3          [4096]ValueWithTxNum[commitment.Branch]
-	t4          [65536]ValueWithTxNum[commitment.Branch]
-	branches    *lruValueCache[commitment.Path, string, commitment.Branch]
+	state       ValueWithTxNum[commitment.BranchData]
+	t0          ValueWithTxNum[commitment.BranchData]
+	t1          [16]ValueWithTxNum[commitment.BranchData]
+	t2          [256]ValueWithTxNum[commitment.BranchData]
+	t3          [4096]ValueWithTxNum[commitment.BranchData]
+	t4          [65536]ValueWithTxNum[commitment.BranchData]
+	branches    *lruValueCache[commitment.Path, commitment.BranchData]
 	branchLimit uint32
 }
 
 func newBranchCache(branchLimit uint32) (*branchCache, error) {
-	c, err := newLRUValueCache[commitment.Path, string, commitment.Branch](kv.CommitmentDomain, branchLimit)
+	c, err := newLRUValueCache[commitment.Path, string, commitment.BranchData](kv.CommitmentDomain, branchLimit)
 
 	if err != nil {
 		return nil, err
@@ -1216,25 +1444,25 @@ func (c *branchCache) Name() kv.Domain {
 
 var statePath = commitment.InternPath([]byte("state"))
 
-func (c *branchCache) Get(key commitment.Path) (ValueWithTxNum[commitment.Branch], bool) {
+func (c *branchCache) Get(key commitment.Path) (ValueWithTxNum[commitment.BranchData], bool) {
 	// see: HexNibblesToCompactBytes for encoding spec
 	switch {
 	case key == statePath:
 		if len(c.state.Value) == 0 {
-			return ValueWithTxNum[commitment.Branch]{}, false
+			return ValueWithTxNum[commitment.BranchData]{}, false
 		}
 		return c.state, true
 	case len(key.Value()) < 4:
 		keyValue := key.Value()
 		switch len(keyValue) {
 		case 0:
-			return ValueWithTxNum[commitment.Branch]{}, false
+			return ValueWithTxNum[commitment.BranchData]{}, false
 		case 1:
 			if keyValue[0]&0x10 == 0 {
 				if len(c.t0.Value) > 0 {
 					return c.t0, true
 				}
-				return ValueWithTxNum[commitment.Branch]{}, false
+				return ValueWithTxNum[commitment.BranchData]{}, false
 			} else {
 				value := c.t1[keyValue[0]&0x0f]
 				return value, len(value.Value) > 0
@@ -1258,11 +1486,11 @@ func (c *branchCache) Get(key commitment.Path) (ValueWithTxNum[commitment.Branch
 	return c.branches.Get(key)
 }
 
-func (c *branchCache) Add(k commitment.Path, v commitment.Branch, txNum uint64) (evicted bool) {
+func (c *branchCache) Add(k commitment.Path, v commitment.BranchData, txNum uint64) (evicted bool) {
 	// see: HexNibblesToCompactBytes for encoding spec
 	switch {
 	case k == statePath:
-		c.state = ValueWithTxNum[commitment.Branch]{Value: v, TxNum: txNum}
+		c.state = ValueWithTxNum[commitment.BranchData]{Value: v, TxNum: txNum}
 		return false
 	case len(k.Value()) < 4:
 		keyValue := k.Value()
@@ -1271,22 +1499,22 @@ func (c *branchCache) Add(k commitment.Path, v commitment.Branch, txNum uint64) 
 			return false
 		case 1:
 			if keyValue[0]&0x10 == 0 {
-				c.t0 = ValueWithTxNum[commitment.Branch]{Value: v, TxNum: txNum}
+				c.t0 = ValueWithTxNum[commitment.BranchData]{Value: v, TxNum: txNum}
 				return false
 			} else {
-				c.t1[keyValue[0]&0x0f] = ValueWithTxNum[commitment.Branch]{Value: v, TxNum: txNum}
+				c.t1[keyValue[0]&0x0f] = ValueWithTxNum[commitment.BranchData]{Value: v, TxNum: txNum}
 				return false
 			}
 		case 2:
 			if keyValue[0]&0x10 == 0 {
-				c.t2[keyValue[1]] = ValueWithTxNum[commitment.Branch]{Value: v, TxNum: txNum}
+				c.t2[keyValue[1]] = ValueWithTxNum[commitment.BranchData]{Value: v, TxNum: txNum}
 			} else {
-				c.t3[uint16(keyValue[0]&0x0f)<<8|uint16(keyValue[1])] = ValueWithTxNum[commitment.Branch]{Value: v, TxNum: txNum}
+				c.t3[uint16(keyValue[0]&0x0f)<<8|uint16(keyValue[1])] = ValueWithTxNum[commitment.BranchData]{Value: v, TxNum: txNum}
 			}
 			return false
 		default:
 			if keyValue[0]&0x10 == 0 {
-				c.t4[uint16(keyValue[1])<<8|uint16(keyValue[2])] = ValueWithTxNum[commitment.Branch]{Value: v, TxNum: txNum}
+				c.t4[uint16(keyValue[1])<<8|uint16(keyValue[2])] = ValueWithTxNum[commitment.BranchData]{Value: v, TxNum: txNum}
 				return false
 			}
 		}
@@ -1301,7 +1529,7 @@ func (c *branchCache) Remove(k commitment.Path) (evicted bool) {
 	switch {
 	case k == statePath:
 		evicted = len(c.state.Value) > 0
-		c.state = ValueWithTxNum[commitment.Branch]{}
+		c.state = ValueWithTxNum[commitment.BranchData]{}
 		return evicted
 	case len(k.Value()) < 4:
 		keyValue := k.Value()
@@ -1311,67 +1539,35 @@ func (c *branchCache) Remove(k commitment.Path) (evicted bool) {
 		case 1:
 			if keyValue[0]&0x10 == 0 {
 				evicted = len(c.t0.Value) > 0
-				c.t0 = ValueWithTxNum[commitment.Branch]{}
+				c.t0 = ValueWithTxNum[commitment.BranchData]{}
 				return evicted
 			} else {
 				evicted := len(c.t1[keyValue[0]&0x0f].Value) > 0
-				c.t1[keyValue[0]&0x0f] = ValueWithTxNum[commitment.Branch]{}
+				c.t1[keyValue[0]&0x0f] = ValueWithTxNum[commitment.BranchData]{}
 				return evicted
 			}
 		case 2:
 			if keyValue[0]&0x10 == 0 {
 				kv := keyValue[1]
 				evicted := len(c.t2[kv].Value) > 0
-				c.t2[kv] = ValueWithTxNum[commitment.Branch]{}
+				c.t2[kv] = ValueWithTxNum[commitment.BranchData]{}
 				return evicted
 			} else {
 				kv := uint16(keyValue[0]&0x0f)<<8 | uint16(keyValue[1])
 				evicted := len(c.t3[kv].Value) > 0
-				c.t3[kv] = ValueWithTxNum[commitment.Branch]{}
+				c.t3[kv] = ValueWithTxNum[commitment.BranchData]{}
 				return evicted
 			}
 		default:
 			if keyValue[0]&0x10 == 0 {
 				kv := uint16(keyValue[1])<<8 | uint16(keyValue[2])
 				evicted := len(c.t4[kv].Value) > 0
-				c.t4[kv] = ValueWithTxNum[commitment.Branch]{}
+				c.t4[kv] = ValueWithTxNum[commitment.BranchData]{}
 				return evicted
 			}
 		}
 	}
 	return c.branches.Remove(k)
-}
-
-type branchUpdates map[commitment.Path][]ValueWithTxNum[commitment.Branch]
-
-func (u branchUpdates) Get(k commitment.Path) ([]ValueWithTxNum[commitment.Branch], bool) {
-	v, ok := u[k]
-	return v, ok
-}
-
-func (u branchUpdates) Put(k commitment.Path, v ValueWithTxNum[commitment.Branch]) (bool, error) {
-	if values, exists := u[k]; exists {
-		if v.TxNum <= values[len(values)-1].TxNum {
-			return false, fmt.Errorf("can't insert non sequential tx: got: %d, expected > %d", v.TxNum, values[len(values)-1].TxNum)
-		}
-		u[k] = append(values, v)
-		return true, nil
-	} else {
-		u[k] = []ValueWithTxNum[commitment.Branch]{v}
-		return false, nil
-	}
-}
-
-func (u branchUpdates) Iter() iter.Seq2[commitment.Path, []ValueWithTxNum[commitment.Branch]] {
-	return func(yield func(commitment.Path, []ValueWithTxNum[commitment.Branch]) bool) {
-		for k, v := range u {
-			yield(k, v)
-		}
-	}
-}
-
-func (u branchUpdates) Clear() updates[commitment.Path, commitment.Branch] {
-	return branchUpdates{}
 }
 
 func NewCommitmentDomain(mem kv.TemporalMemBatch, commitCtx *commitment.CommitmentContext, metrics *DomainMetrics) (*CommitmentDomain, error) {
@@ -1383,7 +1579,7 @@ func NewCommitmentDomain(mem kv.TemporalMemBatch, commitCtx *commitment.Commitme
 		}
 	} else {
 		var err error
-		cache, err = newBranchCache(500_000)
+		cache, err = newBranchCache(50_000)
 		if err != nil {
 			return nil, err
 		}
@@ -1391,13 +1587,13 @@ func NewCommitmentDomain(mem kv.TemporalMemBatch, commitCtx *commitment.Commitme
 	}
 
 	return &CommitmentDomain{
-		domain: domain[commitment.Path, commitment.Branch]{
+		domain: domain[commitment.Path, commitment.BranchData]{
 			metrics:    metrics,
 			mem:        mem,
 			commitCtx:  commitCtx,
-			valueCache: cache.(valueCache[commitment.Path, commitment.Branch]),
-			updates:    branchUpdates{},
-			keyOps: elementOps[commitment.Path]{
+			valueCache: cache.(valueCache[commitment.Path, commitment.BranchData]),
+			updates:    newValueUpdates[commitment.Path, string, commitment.BranchData](),
+			keyOps: keyOps[commitment.Path]{
 				serializer: func(k commitment.Path) []byte {
 					return k.Value()
 				},
@@ -1405,20 +1601,20 @@ func NewCommitmentDomain(mem kv.TemporalMemBatch, commitCtx *commitment.Commitme
 					return fmt.Sprintf("%x", k.Value())
 				},
 			},
-			valueOps: elementOps[commitment.Branch]{
-				cmp: func(v0 commitment.Branch, v1 commitment.Branch) bool {
+			valueOps: valueOps[commitment.BranchData]{
+				cmp: func(v0 commitment.BranchData, v1 commitment.BranchData) bool {
 					return bytes.Equal(v0, v1)
 				},
-				isEmpty: func(v commitment.Branch) bool {
+				isEmpty: func(v commitment.BranchData) bool {
 					return len(v) == 0
 				},
-				serializer: func(v commitment.Branch) []byte {
+				serializer: func(v commitment.BranchData) []byte {
 					return v
 				},
-				deserializer: func(b []byte) (v commitment.Branch, err error) {
-					return commitment.Branch(common.Copy(b)), nil
+				deserializer: func(b []byte) (v commitment.BranchData, err error) {
+					return commitment.BranchData(common.Copy(b)), nil
 				},
-				formatter: func(c commitment.Branch) string {
+				formatter: func(c commitment.BranchData) string {
 					if len(c) > 0 {
 						l, s := printCode(c)
 						return fmt.Sprintf("%p:%d:%s)", &c[0], l, s)
@@ -1430,28 +1626,28 @@ func NewCommitmentDomain(mem kv.TemporalMemBatch, commitCtx *commitment.Commitme
 	}, nil
 }
 
-func (cd *CommitmentDomain) GetBranch(ctx context.Context, k commitment.Path, tx kv.TemporalTx) (v commitment.Branch, txNum uint64, ok bool, err error) {
-	return cd.domain.get(dbg.WithTrace(ctx, true), k, tx)
+func (cd *CommitmentDomain) GetBranch(ctx context.Context, k commitment.Path, tx kv.TemporalTx) (v commitment.BranchData, txNum uint64, ok bool, err error) {
+	return cd.domain.get(dbg.WithTrace(ctx, false), k, tx)
 }
 
-func (cd *CommitmentDomain) PutBranch(ctx context.Context, k commitment.Path, v commitment.Branch, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[commitment.Branch]) error {
+func (cd *CommitmentDomain) PutBranch(ctx context.Context, k commitment.Path, v commitment.BranchData, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[commitment.BranchData]) error {
 	if v == nil {
 		return fmt.Errorf("PutBranch: %s, trying to put nil value. not allowed", kv.CommitmentDomain)
 	}
 
-	var pv *ValueWithTxNum[commitment.Branch]
+	var pv *ValueWithTxNum[commitment.BranchData]
 	if len(prev) != 0 {
 		pv = &prev[0]
 	}
 
-	return cd.domain.put(dbg.WithTrace(ctx, true), k, v, roTx, txNum, pv)
+	return cd.domain.put(dbg.WithTrace(ctx, false), k, v, roTx, txNum, pv)
 }
 
-func (cd *CommitmentDomain) DelBranch(ctx context.Context, k commitment.Path, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[commitment.Branch]) error {
-	var pv *ValueWithTxNum[commitment.Branch]
+func (cd *CommitmentDomain) DelBranch(ctx context.Context, k commitment.Path, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[commitment.BranchData]) error {
+	var pv *ValueWithTxNum[commitment.BranchData]
 	if len(prev) != 0 {
 		pv = &prev[0]
 	}
 
-	return cd.domain.del(dbg.WithTrace(ctx, true), k, roTx, txNum, pv)
+	return cd.domain.del(dbg.WithTrace(ctx, false), k, roTx, txNum, pv)
 }

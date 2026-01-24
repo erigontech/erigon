@@ -14,13 +14,13 @@ func TestBranchCacheTrunk(t *testing.T) {
 	require.NoError(t, err)
 
 	for i := byte(0); i < 16; i++ {
-		cache.Add(commitment.InternPath(commitment.HexNibblesToCompactBytes([]byte{i})), commitment.Branch{i}, 0)
+		cache.Add(commitment.InternPath(commitment.HexNibblesToCompactBytes([]byte{i})), commitment.BranchData{i}, 0)
 		for j := byte(0); j < 16; j++ {
-			cache.Add(commitment.InternPath(commitment.HexNibblesToCompactBytes([]byte{i, j})), commitment.Branch{i, j}, 0)
+			cache.Add(commitment.InternPath(commitment.HexNibblesToCompactBytes([]byte{i, j})), commitment.BranchData{i, j}, 0)
 			for k := byte(0); k < 16; k++ {
-				cache.Add(commitment.InternPath(commitment.HexNibblesToCompactBytes([]byte{i, j, k})), commitment.Branch{i, j, k}, 0)
+				cache.Add(commitment.InternPath(commitment.HexNibblesToCompactBytes([]byte{i, j, k})), commitment.BranchData{i, j, k}, 0)
 				for l := byte(0); l < 16; l++ {
-					cache.Add(commitment.InternPath(commitment.HexNibblesToCompactBytes([]byte{i, j, k, l})), commitment.Branch{i, j, k, l}, 0)
+					cache.Add(commitment.InternPath(commitment.HexNibblesToCompactBytes([]byte{i, j, k, l})), commitment.BranchData{i, j, k, l}, 0)
 				}
 			}
 		}
@@ -29,19 +29,19 @@ func TestBranchCacheTrunk(t *testing.T) {
 	for i := byte(0); i < 16; i++ {
 		valueWithStep, ok := cache.Get(commitment.InternPath(commitment.HexNibblesToCompactBytes([]byte{i})))
 		require.True(t, ok)
-		require.Equal(t, ValueWithStep[commitment.Branch]{Value: commitment.Branch{i}}, valueWithStep)
+		require.Equal(t, ValueWithStep[commitment.BranchData]{Value: commitment.BranchData{i}}, valueWithStep)
 		for j := byte(0); j < 16; j++ {
 			valueWithStep, ok := cache.Get(commitment.InternPath(commitment.HexNibblesToCompactBytes([]byte{i, j})))
 			require.True(t, ok)
-			require.Equal(t, ValueWithStep[commitment.Branch]{Value: commitment.Branch{i, j}}, valueWithStep)
+			require.Equal(t, ValueWithStep[commitment.BranchData]{Value: commitment.BranchData{i, j}}, valueWithStep)
 			for k := byte(0); k < 16; k++ {
 				valueWithStep, ok := cache.Get(commitment.InternPath(commitment.HexNibblesToCompactBytes([]byte{i, j, k})))
 				require.True(t, ok)
-				require.Equal(t, ValueWithStep[commitment.Branch]{Value: commitment.Branch{i, j, k}}, valueWithStep)
+				require.Equal(t, ValueWithStep[commitment.BranchData]{Value: commitment.BranchData{i, j, k}}, valueWithStep)
 				for l := byte(0); l < 16; l++ {
 					valueWithStep, ok := cache.Get(commitment.InternPath(commitment.HexNibblesToCompactBytes([]byte{i, j, k, l})))
 					require.True(t, ok)
-					require.Equal(t, ValueWithStep[commitment.Branch]{Value: commitment.Branch{i, j, k, l}}, valueWithStep)
+					require.Equal(t, ValueWithStep[commitment.BranchData]{Value: commitment.BranchData{i, j, k, l}}, valueWithStep)
 				}
 			}
 		}

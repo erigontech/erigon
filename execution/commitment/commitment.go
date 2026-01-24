@@ -139,8 +139,6 @@ func (p Path) Value() []byte {
 	return toBytesZeroCopy(unique.Handle[string](p).Value())
 }
 
-type Branch []byte
-
 type TrieVariant string
 
 const (

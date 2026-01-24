@@ -1835,16 +1835,16 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 	return at.getLatest(domain, k, tx, math.MaxUint64, nil, time.Time{})
 }
 
-type domainMetrics interface {
+type DomainMetrics interface {
 	UpdateDbReads(domain kv.Domain, start time.Time)
 	UpdateFileReads(domain kv.Domain, start time.Time)
 }
 
-func (at *AggregatorRoTx) MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics domainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
+func (at *AggregatorRoTx) MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
 	return at.getLatest(domain, k, tx, maxStep, metrics, start)
 }
 
-func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics domainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
+func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
 	if domain != kv.CommitmentDomain {
 		return at.d[domain].getLatest(k, tx, maxStep, metrics, start)
 	}

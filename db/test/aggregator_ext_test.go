@@ -363,21 +363,21 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		if txNum%135 == 0 {
 			pv, prevTxNum, ok, err := domains.GetBranch(context.Background(), commitment.InternPath(commKey2), rwTx)
 			require.NoError(t, err)
-			var prev []execstate.ValueWithTxNum[commitment.Branch]
+			var prev []execstate.ValueWithTxNum[commitment.BranchData]
 			if ok {
-				prev = []execstate.ValueWithTxNum[commitment.Branch]{{Value: pv, TxNum: prevTxNum}}
+				prev = []execstate.ValueWithTxNum[commitment.BranchData]{{Value: pv, TxNum: prevTxNum}}
 			}
-			err = domains.PutBranch(context.Background(), commitment.InternPath(commKey2), commitment.Branch(v[:]), rwTx, txNum, prev...)
+			err = domains.PutBranch(context.Background(), commitment.InternPath(commKey2), commitment.BranchData(v[:]), rwTx, txNum, prev...)
 			require.NoError(t, err)
 			otherMaxWrite = txNum
 		} else {
 			pv, prevTxNum, ok, err := domains.GetBranch(context.Background(), commitment.InternPath(commKey1), rwTx)
 			require.NoError(t, err)
-			var prev []execstate.ValueWithTxNum[commitment.Branch]
+			var prev []execstate.ValueWithTxNum[commitment.BranchData]
 			if ok {
-				prev = []execstate.ValueWithTxNum[commitment.Branch]{{Value: pv, TxNum: prevTxNum}}
+				prev = []execstate.ValueWithTxNum[commitment.BranchData]{{Value: pv, TxNum: prevTxNum}}
 			}
-			err = domains.PutBranch(context.Background(), commitment.InternPath(commKey1), commitment.Branch(v[:]), rwTx, txNum, prev...)
+			err = domains.PutBranch(context.Background(), commitment.InternPath(commKey1), commitment.BranchData(v[:]), rwTx, txNum, prev...)
 			require.NoError(t, err)
 			maxWrite = txNum
 		}

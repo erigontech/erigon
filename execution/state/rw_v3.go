@@ -754,7 +754,16 @@ func (r *ReaderV3) readAccountData(address accounts.Address) (*accounts.Account,
 	}
 
 	if r.trace {
-		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", r.tracePrefix, addressValue, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
+		func() {
+			defer func() { // Would prefer this not to crash but rather log the error
+				e := recover()
+				if r != nil {
+					fmt.Println("recovered from panic", "err", e, acc, dbg.Stack())
+				}
+				panic(fmt.Sprintf("%sReadAccountData", r.tracePrefix))
+			}()
+			fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", r.tracePrefix, addressValue, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
+		}()
 	}
 	return acc, nil
 }

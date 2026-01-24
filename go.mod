@@ -84,6 +84,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20
 	github.com/multiformats/go-multiaddr v0.13.0
 	github.com/nyaosorg/go-windows-shortcut v0.0.0-20220529122037-8b0c89bca4c4
+	github.com/orcaman/concurrent-map/v2 v2.0.1
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pelletier/go-toml v1.9.5
 	github.com/pelletier/go-toml/v2 v2.2.4
@@ -128,6 +129,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	pgregory.net/rapid v1.2.0
 	sigs.k8s.io/yaml v1.6.0
+
 )
 
 require (

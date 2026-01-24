@@ -1652,7 +1652,7 @@ func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, 
 	return dt.getLatest(key, roTx, math.MaxInt64, nil, time.Time{})
 }
 
-func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics domainMetrics, start time.Time) ([]byte, kv.Step, bool, error) {
+func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics DomainMetrics, start time.Time) ([]byte, kv.Step, bool, error) {
 	if dt.d.Disable {
 		return nil, 0, false, nil
 	}

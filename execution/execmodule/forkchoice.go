@@ -543,12 +543,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			if err = tx.Commit(); err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 			}
+			rollbackOnReturn = false
 		}
 
 		e.lock.Lock()
 		e.currentContext = currentContext
 		e.lock.Unlock()
-		rollbackOnReturn = false
 	}
 
 	e.runPostForkchoiceInBackground(finishProgressBefore, isSynced, initialCycle)

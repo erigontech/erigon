@@ -146,11 +146,11 @@ func (pd *temporalPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum uint64,
 		}
 		return pd.sd.PutCode(context.Background(), accounts.BytesToAddress(k), accounts.NilCodeHash, v, pd.tx, txNum, prev...)
 	case kv.CommitmentDomain:
-		var prev []ValueWithTxNum[commitment.Branch]
+		var prev []ValueWithTxNum[commitment.BranchData]
 		if prevVal != nil {
-			prev = []ValueWithTxNum[commitment.Branch]{{Value: prevVal, TxNum: prevStep.ToTxNum(pd.tx.StepSize())}}
+			prev = []ValueWithTxNum[commitment.BranchData]{{Value: prevVal, TxNum: prevStep.ToTxNum(pd.tx.StepSize())}}
 		}
-		return pd.sd.PutBranch(context.Background(), commitment.InternPath(k), commitment.Branch(v), pd.tx, txNum, prev...)
+		return pd.sd.PutBranch(context.Background(), commitment.InternPath(k), commitment.BranchData(v), pd.tx, txNum, prev...)
 	}
 	return pd.sd.mem.DomainPut(domain, k, v, txNum, prevVal, prevStep)
 }
@@ -183,9 +183,9 @@ func (pd *temporalPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, pr
 		}
 		return pd.sd.DelCode(context.Background(), accounts.BytesToAddress(k), pd.tx, txNum, prev...)
 	case kv.CommitmentDomain:
-		var prev []ValueWithTxNum[commitment.Branch]
+		var prev []ValueWithTxNum[commitment.BranchData]
 		if prevVal != nil {
-			prev = []ValueWithTxNum[commitment.Branch]{{Value: prevVal, TxNum: prevStep.ToTxNum(pd.tx.StepSize())}}
+			prev = []ValueWithTxNum[commitment.BranchData]{{Value: prevVal, TxNum: prevStep.ToTxNum(pd.tx.StepSize())}}
 		}
 		return pd.sd.DelBranch(context.Background(), commitment.InternPath(k), pd.tx, txNum, prev...)
 	}
@@ -264,8 +264,20 @@ func (gt *temporalGetter) GetLatest(name kv.Domain, k []byte) (v []byte, step kv
 			return b, kv.Step(txNum / gt.tx.StepSize()), nil
 		}
 		return nil, 0, err
+	default:
+		maxStep := kv.Step(math.MaxUint64)
+		start := time.Now()
+
+		if v, step, ok := gt.sd.mem.GetLatest(name, k); ok {
+			gt.sd.metrics.UpdateCacheReads(name, Put, start)
+			return v, step, nil
+		} else {
+			if step > 0 {
+				maxStep = step
+			}
+		}
+		return gt.sd.getLatest(context.Background(), name, gt.tx, maxStep, k, start)
 	}
-	return gt.sd.getLatest(context.Background(), name, gt.tx, k, time.Time{})
 }
 
 func (gt *temporalGetter) HasPrefix(name kv.Domain, prefix []byte) (ok bool, err error) {
@@ -333,20 +345,16 @@ func (sd *ExecutionContext) ClearRam(resetCommitment bool) {
 
 	sd.accountsDomain.FlushUpdates()
 
-	sd.metrics.Lock()
-	defer sd.metrics.Unlock()
-	sd.metrics.CachePutCount = 0
-	sd.metrics.CachePutSize = 0
-	sd.metrics.CachePutKeySize = 0
-	sd.metrics.CachePutValueSize = 0
+	sd.metrics.PutCacheCount.Store(0)
+	sd.metrics.PutCacheSize.Store(0)
+	sd.metrics.PutCacheKeySize.Store(0)
+	sd.metrics.PutCacheValueSize.Store(0)
 }
 
 func (sd *ExecutionContext) SizeEstimate() uint64 {
-	sd.metrics.RLock()
-	defer sd.metrics.RUnlock()
 	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
 	// and muliply 2 more: for Commitment calculation when batch is full
-	return uint64(sd.metrics.CachePutSize) * 4
+	return sd.metrics.PutCacheSize.Load() * 4
 }
 
 const CodeSizeTableFake = "CodeSize"
@@ -443,30 +451,19 @@ func (sd *ExecutionContext) DelCode(ctx context.Context, k accounts.Address, roT
 	return sd.codeDomain.Del(ctx, k, roTx, txNum, prev...)
 }
 
-func (sd *ExecutionContext) GetBranch(ctx context.Context, k commitment.Path, tx kv.TemporalTx) (v commitment.Branch, txNum uint64, ok bool, err error) {
+func (sd *ExecutionContext) GetBranch(ctx context.Context, k commitment.Path, tx kv.TemporalTx) (v commitment.BranchData, txNum uint64, ok bool, err error) {
 	return sd.commitmentDomain.GetBranch(ctx, k, tx)
 }
 
-func (sd *ExecutionContext) PutBranch(ctx context.Context, k commitment.Path, v commitment.Branch, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[commitment.Branch]) error {
+func (sd *ExecutionContext) PutBranch(ctx context.Context, k commitment.Path, v commitment.BranchData, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[commitment.BranchData]) error {
 	return sd.commitmentDomain.PutBranch(ctx, k, v, roTx, txNum, prev...)
 }
 
-func (sd *ExecutionContext) DelBranch(ctx context.Context, k commitment.Path, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[commitment.Branch]) error {
+func (sd *ExecutionContext) DelBranch(ctx context.Context, k commitment.Path, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[commitment.BranchData]) error {
 	return sd.commitmentDomain.DelBranch(ctx, k, roTx, txNum, prev...)
 }
 
-func (sd *ExecutionContext) getLatest(ctx context.Context, domain kv.Domain, tx kv.TemporalTx, k []byte, start time.Time) (v []byte, step kv.Step, err error) {
-	maxStep := kv.Step(math.MaxUint64)
-
-	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
-		sd.metrics.UpdateCacheReads(domain, start)
-		return v, step, nil
-	} else {
-		if step > 0 {
-			maxStep = step
-		}
-	}
-
+func (sd *ExecutionContext) getLatest(ctx context.Context, domain kv.Domain, tx kv.TemporalTx, maxStep kv.Step, k []byte, start time.Time) (v []byte, step kv.Step, err error) {
 	type MeteredGetter interface {
 		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
 	}
@@ -490,31 +487,40 @@ func (sd *ExecutionContext) GetAsOf(domain kv.Domain, key []byte, txNum uint64) 
 	return nil, false, fmt.Errorf("TODO")
 }
 
-func (sd *ExecutionContext) Metrics() *DomainMetrics {
-	return &sd.metrics
+func (sd *ExecutionContext) MetricsSnapshot() *DomainMetricsSnapshot {
+	return sd.metrics.Snapshot()
 }
 
 func (sd *ExecutionContext) LogMetrics() []any {
 	var metrics []any
 
-	sd.metrics.RLock()
-	defer sd.metrics.RUnlock()
-
-	if readCount := sd.metrics.CacheReadCount; readCount > 0 {
+	if readCount := sd.metrics.CacheReadCount.Load(); readCount > 0 {
 		metrics = append(metrics, "cache", common.PrettyCounter(readCount),
-			"puts", common.PrettyCounter(sd.metrics.CachePutCount),
+			"puts", common.PrettyCounter(sd.metrics.PutCacheCount.Load()),
 			"size", fmt.Sprintf("%s(%s/%s)",
-				common.PrettyCounter(sd.metrics.CachePutSize), common.PrettyCounter(sd.metrics.CachePutKeySize), common.PrettyCounter(sd.metrics.CachePutValueSize)),
-			"gets", common.PrettyCounter(sd.metrics.CacheGetCount), "size", common.PrettyCounter(sd.metrics.CacheGetSize),
-			"cdur", common.Round(sd.metrics.CacheReadDuration/time.Duration(readCount), 0))
+				common.PrettyCounter(sd.metrics.PutCacheSize.Load()),
+				common.PrettyCounter(sd.metrics.PutCacheKeySize.Load()),
+				common.PrettyCounter(sd.metrics.PutCacheValueSize.Load())),
+			"gets", fmt.Sprintf("%s(%s/%s)",
+				common.PrettyCounter(sd.metrics.CacheReadCount.Load()),
+				common.PrettyCounter(sd.metrics.PutCacheReadCount.Load()),
+				common.PrettyCounter(sd.metrics.GetCacheReadCount.Load())),
+			"size", fmt.Sprintf("%s(%s/%s)",
+				common.PrettyCounter(sd.metrics.GetCacheSize.Load()),
+				common.PrettyCounter(sd.metrics.GetCacheKeySize.Load()),
+				common.PrettyCounter(sd.metrics.GetCacheValueSize.Load())),
+			"cdur", fmt.Sprintf("%s(%s/%s)",
+				common.Round(sd.metrics.CacheReadDuration.Load()/time.Duration(readCount), 0),
+				common.Round(sd.metrics.PutCacheReadDuration.Load()/time.Duration(sd.metrics.PutCacheReadCount.Load()), 0),
+				common.Round(sd.metrics.GetCacheReadDuration.Load()/time.Duration(sd.metrics.GetCacheReadCount.Load()), 0)))
 	}
 
-	if readCount := sd.metrics.DbReadCount; readCount > 0 {
-		metrics = append(metrics, "db", common.PrettyCounter(readCount), "dbdur", common.Round(sd.metrics.DbReadDuration/time.Duration(readCount), 0))
+	if readCount := sd.metrics.DbReadCount.Load(); readCount > 0 {
+		metrics = append(metrics, "db", common.PrettyCounter(readCount), "dbdur", common.Round(sd.metrics.DbReadDuration.Load()/time.Duration(readCount), 0))
 	}
 
-	if readCount := sd.metrics.FileReadCount; readCount > 0 {
-		metrics = append(metrics, "files", common.PrettyCounter(readCount), "fdur", common.Round(sd.metrics.FileReadDuration/time.Duration(readCount), 0))
+	if readCount := sd.metrics.FileReadCount.Load(); readCount > 0 {
+		metrics = append(metrics, "files", common.PrettyCounter(readCount), "fdur", common.Round(sd.metrics.FileReadDuration.Load()/time.Duration(readCount), 0))
 	}
 
 	return metrics
@@ -529,16 +535,16 @@ func (sd *ExecutionContext) DomainLogMetrics() map[kv.Domain][]any {
 	for domain, dm := range sd.metrics.Domains {
 		var metrics []any
 
-		if readCount := dm.CacheReadCount; readCount > 0 {
-			metrics = append(metrics, "cache", common.PrettyCounter(readCount), "cdur", common.Round(dm.CacheReadDuration/time.Duration(readCount), 0))
+		if readCount := dm.CacheReadCount.Load(); readCount > 0 {
+			metrics = append(metrics, "cache", common.PrettyCounter(readCount), "cdur", common.Round(dm.CacheReadDuration.Load()/time.Duration(readCount), 0))
 		}
 
-		if readCount := dm.DbReadCount; readCount > 0 {
-			metrics = append(metrics, "db", common.PrettyCounter(readCount), "dbdur", common.Round(dm.DbReadDuration/time.Duration(readCount), 0))
+		if readCount := dm.DbReadCount.Load(); readCount > 0 {
+			metrics = append(metrics, "db", common.PrettyCounter(readCount), "dbdur", common.Round(dm.DbReadDuration.Load()/time.Duration(readCount), 0))
 		}
 
-		if readCount := dm.FileReadCount; readCount > 0 {
-			metrics = append(metrics, "files", common.PrettyCounter(readCount), "fdur", common.Round(dm.DbReadDuration/time.Duration(readCount), 0))
+		if readCount := dm.FileReadCount.Load(); readCount > 0 {
+			metrics = append(metrics, "files", common.PrettyCounter(readCount), "fdur", common.Round(dm.DbReadDuration.Load()/time.Duration(readCount), 0))
 		}
 
 		if len(metrics) > 0 {

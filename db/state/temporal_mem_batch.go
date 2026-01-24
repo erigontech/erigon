@@ -31,8 +31,6 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 )
 
-type iodir int
-
 // TemporalMemBatch - temporal read-write interface - which storing updates in RAM. Don't forget to call `.Flush()`
 type TemporalMemBatch struct {
 	aggTx        *AggregatorRoTx
