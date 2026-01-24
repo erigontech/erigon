@@ -109,14 +109,6 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 }
 
 func SpawnStageSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
 	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, logger); err != nil {
 		return err
 	}
@@ -137,11 +129,6 @@ func SpawnStageSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, cfg Sna
 
 	if minProgress > s.BlockNumber {
 		if err = s.Update(tx, minProgress); err != nil {
-			return err
-		}
-	}
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
@@ -382,15 +369,6 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services
 
 // SnapshotsPrune moving block data from db into snapshots, removing old snapshots (if --prune.* enabled)
 func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
 	freezingCfg := cfg.blockReader.FreezingCfg()
 	if freezingCfg.ProduceE2 {
 		//TODO: initialSync maybe save files progress here
@@ -438,13 +416,6 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	if err := pruneCanonicalMarkers(ctx, tx, cfg.blockReader); err != nil {
 		return err
 	}
-
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 

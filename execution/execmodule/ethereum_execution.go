@@ -170,7 +170,6 @@ type EthereumExecutionModule struct {
 	// MDBX database
 	db                kv.TemporalRwDB // main database
 	semaphore         *semaphore.Weighted
-	lock              sync.RWMutex
 	executionPipeline *stagedsync.Sync
 	forkValidator     *engine_helpers.ForkValidator
 
@@ -193,11 +192,13 @@ type EthereumExecutionModule struct {
 	// rules engine
 	engine rules.Engine
 
-	doingPostForkchoice bool
-
+	fcuBackgroundPrune      bool
+	fcuBackgroundCommit     bool
+	onlySnapDownloadOnStart bool
 	// metrics for average mgas/sec
 	avgMgasSec float64
 
+	lock           sync.RWMutex
 	currentContext *execctx.SharedDomains
 
 	executionproto.UnimplementedExecutionServer
@@ -211,24 +212,30 @@ func NewEthereumExecutionModule(ctx context.Context, blockReader services.FullBl
 	stateCache *Cache, stateChangeConsumer shards.StateChangeConsumer,
 	logger log.Logger, engine rules.Engine,
 	syncCfg ethconfig.Sync,
+	fcuBackgroundPrune bool,
+	fcuBackgroundCommit bool,
+	onlySnapDownloadOnStart bool,
 ) *EthereumExecutionModule {
 	em := &EthereumExecutionModule{
-		blockReader:         blockReader,
-		db:                  db,
-		executionPipeline:   executionPipeline,
-		logger:              logger,
-		forkValidator:       forkValidator,
-		builders:            make(map[uint64]*builder.BlockBuilder),
-		builderFunc:         builderFunc,
-		config:              config,
-		semaphore:           semaphore.NewWeighted(1),
-		hook:                hook,
-		accumulator:         accumulator,
-		recentReceipts:      recentReceipts,
-		stateChangeConsumer: stateChangeConsumer,
-		engine:              engine,
-		syncCfg:             syncCfg,
-		bacgroundCtx:        ctx,
+		blockReader:             blockReader,
+		db:                      db,
+		executionPipeline:       executionPipeline,
+		logger:                  logger,
+		forkValidator:           forkValidator,
+		builders:                make(map[uint64]*builder.BlockBuilder),
+		builderFunc:             builderFunc,
+		config:                  config,
+		semaphore:               semaphore.NewWeighted(1),
+		hook:                    hook,
+		accumulator:             accumulator,
+		recentReceipts:          recentReceipts,
+		stateChangeConsumer:     stateChangeConsumer,
+		engine:                  engine,
+		syncCfg:                 syncCfg,
+		bacgroundCtx:            ctx,
+		fcuBackgroundPrune:      fcuBackgroundPrune,
+		fcuBackgroundCommit:     fcuBackgroundCommit,
+		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
 	}
 
 	if stateCache != nil {
@@ -445,7 +452,7 @@ func (e *EthereumExecutionModule) Start(ctx context.Context, hook *stageloop.Hoo
 	}
 	defer e.semaphore.Release(1)
 
-	if err := stageloop.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, hook, e.logger); err != nil {
+	if err := stageloop.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, hook, e.onlySnapDownloadOnStart, e.logger); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}

@@ -20,7 +20,7 @@ on:
         required: false
         type: string
         default: ''
-        description: 'The branch to checkout and build artifacts from (in case of manual run). Default is "" .'
+        description: 'The branch to checkout and build artifacts from (in case of manual run). Important: the Docker image tag is generated automatically from the branch name by removing everything before the last slash. For example, for the branch "feature/user/my-cool-change", the tag will be "my-cool-change". Default is "" .'
 
 jobs:
 

@@ -94,7 +94,7 @@ type parallelExecutor struct {
 
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
-	initialTxNum uint64, inputTxNum uint64, useExternalTx bool, initialCycle bool, rwTx kv.TemporalRwTx,
+	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
 	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
 	var asyncTxChan mdbx.TxApplyChan
@@ -114,7 +114,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	if blockLimit > 0 && min(startBlockNum+blockLimit, maxBlockNum) > startBlockNum+16 || maxBlockNum > startBlockNum+16 {
 		log.Info(fmt.Sprintf("[%s] parallel starting", execStage.LogPrefix()),
 			"from", startBlockNum, "to", maxBlockNum, "limit", startBlockNum+blockLimit-1, "initialTxNum", initialTxNum,
-			"initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx,
+			"initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle,
 			"isForkValidation", pe.isForkValidation, "isBlockProduction", pe.isBlockProduction, "isApplyingBlocks", pe.isApplyingBlocks)
 	}
 
@@ -339,7 +339,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								lastExecutedLog = time.Now()
 							}
 
-							// Warmup is enabled via SetWarmupDB at executor init
+							// Warmup is enabled via EnableTrieWarmup at executor init
 							rh, err := pe.doms.ComputeCommitment(ctx, rwTx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, commitProgress)
 							close(commitProgress)
 							captured := pe.doms.SetTrace(false, false)
@@ -347,6 +347,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								return err
 							}
 							resetCommitmentGauges(ctx)
+
+							// on chain tip we run receipt root verification in parallel alongside commitment computation
+							// make sure to wait for it to finish and check for an error
+							err = pe.getPostValidator().Wait()
+							if err != nil {
+								return err
+							}
 
 							if shouldGenerateChangesets {
 								pe.domains().SavePastChangesetAccumulator(applyResult.BlockHash, applyResult.BlockNum, changeSet)
@@ -637,7 +644,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						} else {
 							_, err =
 								pe.cfg.engine.Finalize(
-									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
+									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, blockReceipts,
 									txTask.Withdrawals, chainReader, syscall, false, pe.logger)
 						}
 

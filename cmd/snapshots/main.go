@@ -26,11 +26,12 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	cli2 "github.com/erigontech/erigon/node/cli"
+
 	"github.com/erigontech/erigon/cmd/snapshots/genfromrpc"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/disk"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/logging"
@@ -40,9 +41,7 @@ func main() {
 	logging.LogVerbosityFlag.Value = log.LvlError.String()
 	logging.LogConsoleVerbosityFlag.Value = log.LvlError.String()
 
-	app := cli.NewApp()
-	app.Name = "snapshots"
-	app.Version = version.VersionWithCommit(version.GitCommit)
+	app := cli2.NewApp("snapshots")
 
 	app.Commands = []*cli.Command{
 		&genfromrpc.Command,
@@ -59,7 +58,7 @@ func main() {
 				goodNames = append(goodNames, c.Name)
 			}
 			_, _ = fmt.Fprintf(os.Stderr, "Command '%s' not found. Available commands: %s\n", context.Args().First(), goodNames)
-			cli.ShowAppHelpAndExit(context, 1)
+			return cli.Exit("", 1) // Exit with error code but no additional output
 		}
 
 		return nil

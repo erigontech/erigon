@@ -32,9 +32,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -81,18 +79,8 @@ func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *t
 	mockSentry.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-	if err := mockSentry.DB.UpdateTemporal(mockSentry.Ctx, func(tx kv.TemporalRwTx) error {
-		sd, err := execctx.NewSharedDomains(mockSentry.Ctx, tx, log.Root())
-		if err != nil {
-			return err
-		}
-		defer sd.Close()
-		if err := stageloop.StageLoopIteration(mockSentry.Ctx, mockSentry.DB, sd, tx, mockSentry.Sync, initialCycle, firstCycle, mockSentry.Log, mockSentry.BlockReader, nil); err != nil {
-			return err
-		}
-
-		return sd.Flush(mockSentry.Ctx, tx)
-	}); err != nil {
+	err = stageloop.StageLoopIteration(mockSentry.Ctx, mockSentry.DB, mockSentry.Sync, initialCycle, firstCycle, mockSentry.Log, mockSentry.BlockReader, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
 }
@@ -125,7 +113,8 @@ func TestGetBlobsV1(t *testing.T) {
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, txPool, DefaultFcuTimeout)
+	fcuTimeout := ethconfig.Defaults.FcuTimeout
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, txPool, fcuTimeout)
 	ctx, cancel := context.WithCancel(ctx)
 	var eg errgroup.Group
 	t.Cleanup(func() {
@@ -175,7 +164,8 @@ func TestGetBlobsV2(t *testing.T) {
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, txPool, DefaultFcuTimeout)
+	fcuTimeout := ethconfig.Defaults.FcuTimeout
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, txPool, fcuTimeout)
 	ctx, cancel := context.WithCancel(ctx)
 	var eg errgroup.Group
 	t.Cleanup(func() {
@@ -234,7 +224,8 @@ func TestGetBlobsV3(t *testing.T) {
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, txPool, DefaultFcuTimeout)
+	fcuTimeout := ethconfig.Defaults.FcuTimeout
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, txPool, fcuTimeout)
 	ctx, cancel := context.WithCancel(ctx)
 	var eg errgroup.Group
 	t.Cleanup(func() {
