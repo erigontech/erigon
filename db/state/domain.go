@@ -1178,12 +1178,6 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 	}
 }
 
-// TODO: exported for idx_optimize.go
-// TODO: this utility can be safely deleted after PR https://github.com/erigontech/erigon/pull/12907/ is rolled out in production
-func BuildHashMapAccessor(ctx context.Context, d *seg.Reader, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) error {
-	return buildHashMapAccessor(ctx, d, idxPath, values, cfg, ps, logger)
-}
-
 func buildHashMapAccessor(ctx context.Context, g *seg.Reader, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger) (err error) {
 	_, fileName := filepath.Split(idxPath)
 	count := g.Count()
@@ -1728,6 +1722,24 @@ func (dt *DomainRoTx) DebugRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit 
 	return s, nil
 }
 
+// DebugRangeLatestFromFiles iterates over keys in .kv snapshot files only,
+// ignoring keys in MDBX.
+func (dt *DomainRoTx) DebugRangeLatestFromFiles(fromKey, toKey []byte, limit int) (*DomainLatestIterFile, error) {
+	s := &DomainLatestIterFile{
+		from: fromKey, to: toKey, limit: limit,
+		orderAscend: order.Asc,
+		aggStep:     dt.stepSize,
+		filesOnly:   true,
+		logger:      dt.d.logger,
+		h:           &CursorHeap{},
+	}
+	if err := s.init(dt); err != nil {
+		s.Close() //it's responsibility of constructor (our) to close resource on error
+		return nil, err
+	}
+	return s, nil
+}
+
 // CanPruneUntil returns true if domain OR history tables can be pruned until txNum
 func (dt *DomainRoTx) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
 	canDomain, _ := dt.canPruneDomainTables(tx, untilTx)
@@ -1769,7 +1781,7 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 		mxPrunableDComm.Set(delta)
 	}
 	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.filenameBase, sm, maxStepToPrune, untilStep)
-	return sm <= min(maxStepToPrune, untilStep), maxStepToPrune
+	return sm <= min(maxStepToPrune, untilStep) && dt.files.EndTxNum() > 0, maxStepToPrune
 }
 
 type DomainPruneStat struct {
@@ -1965,4 +1977,55 @@ func versionTooLowPanic(filename string, version version.Versions) {
 		version.MinSupported,
 		version.Current,
 	))
+}
+
+// [startTxNum, endTxNum)
+func (dt *DomainRoTx) TraceKey(ctx context.Context, key []byte, startTxNum, endTxNum uint64, roTx kv.Tx) (stream.U64V, error) {
+	// need to do this first as TraceKey doesn't work if internal seg readers are seeked into different locations
+	v2, ok, err := dt.GetAsOf(key, endTxNum, roTx)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		v2 = nil
+	}
+
+	ht, err := dt.ht.DebugHistoryTraceKey(ctx, key, startTxNum, endTxNum, roTx)
+	if err != nil {
+		return nil, err
+	}
+
+	prevTxNum := int64(-1)
+	fht := stream.FilterDuo(ht, func(txNum uint64, v []byte) bool {
+		if prevTxNum == -1 {
+			prevTxNum = int64(txNum)
+			return false
+		}
+		return true
+	})
+
+	tfht := stream.TransformDuo(fht, func(txNum uint64, v []byte) (uint64, []byte, error) {
+		defer func() {
+			prevTxNum = int64(txNum)
+		}()
+
+		return uint64(prevTxNum), v, nil
+	})
+
+	// using maxuint64, so that this values goes last in asc order
+	// then when we actually use this value, we adjust the txNum
+	ds := stream.NewSingleDuo(uint64(math.MaxUint64), v2)
+	dst := stream.Union2(tfht, ds, order.Asc, kv.Unlim)
+
+	fdst := stream.FilterDuo(dst, func(txNum uint64, v []byte) bool {
+		return prevTxNum != -1 // is there history value?, if no...we don't want GetAsOf value either
+	})
+
+	return stream.TransformDuo(fdst, func(txNum uint64, v []byte) (uint64, []byte, error) {
+		if txNum == math.MaxUint64 {
+			// prevTxNum has the last txNum in the stream
+			txNum = uint64(prevTxNum)
+		}
+		return txNum, v, nil
+	}), nil
 }

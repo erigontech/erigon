@@ -241,17 +241,17 @@ func NewHistoryRanges(history MergeRange, index MergeRange) HistoryRanges {
 }
 
 func (r HistoryRanges) String(aggStep uint64) string {
-	var str string
+	var str strings.Builder
 	if r.history.needMerge {
-		str += r.history.String("hist", aggStep)
+		str.WriteString(r.history.String("hist", aggStep))
 	}
 	if r.index.needMerge {
-		if str != "" {
-			str += ", "
+		if str.Len() > 0 {
+			str.WriteString(", ")
 		}
-		str += r.index.String("idx", aggStep)
+		str.WriteString(r.index.String("idx", aggStep))
 	}
-	return str
+	return str.String()
 }
 func (r HistoryRanges) any() bool {
 	return r.history.needMerge || r.index.needMerge
@@ -458,7 +458,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			val, _ := g.Next(nil)
 			heap.Push(&cp, &CursorItem{
 				t:          FILE_CURSOR,
-				idx:        g,
+				kvReader:   g,
 				key:        key,
 				val:        val,
 				startTxNum: item.startTxNum,
@@ -484,9 +484,9 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			i++
 			ci1 := heap.Pop(&cp).(*CursorItem)
-			if ci1.idx.HasNext() {
-				ci1.key, _ = ci1.idx.Next(ci1.key[:0])
-				ci1.val, _ = ci1.idx.Next(ci1.val[:0])
+			if ci1.kvReader.HasNext() {
+				ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
+				ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])
 				heap.Push(&cp, ci1)
 			}
 		}
@@ -499,10 +499,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		if keyBuf != nil {
 			if vt != nil {
 				if !bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) { // no replacement for state key
-					valBuf, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
+					valBufRet, err := vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 					if err != nil {
 						return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
 					}
+					valBuf = append(valBuf[:0], valBufRet...)
 				}
 			}
 			if _, err = kvWriter.Write(keyBuf); err != nil {
@@ -520,10 +521,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if keyBuf != nil {
 		if vt != nil {
 			if !bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) { // no replacement for state key
-				valBuf, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
+				valBufRet, err := vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 				if err != nil {
 					return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
 				}
+				valBuf = append(valBuf[:0], valBufRet...)
 			}
 		}
 		if _, err = kvWriter.Write(keyBuf); err != nil {
@@ -636,7 +638,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			//fmt.Printf("heap push %s [%d] %x\n", item.decompressor.FilePath(), item.endTxNum, key)
 			heap.Push(&cp, &CursorItem{
 				t:          FILE_CURSOR,
-				idx:        g,
+				kvReader:   g,
 				key:        key,
 				val:        val,
 				startTxNum: item.startTxNum,
@@ -683,9 +685,9 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 				mergedOnce = true
 			}
 			// fmt.Printf("multi-way %s [%d] %x\n", ii.KeysTable, ci1.endTxNum, ci1.key)
-			if ci1.idx.HasNext() {
-				ci1.key, _ = ci1.idx.Next(ci1.key[:0])
-				ci1.val, _ = ci1.idx.Next(ci1.val[:0])
+			if ci1.kvReader.HasNext() {
+				ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
+				ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])
 				// fmt.Printf("heap next push %s [%d] %x\n", ii.KeysTable, ci1.endTxNum, ci1.key)
 				heap.Push(&cp, ci1)
 			}
@@ -787,7 +789,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		if ht.h.noFsync {
 			comp.DisableFsync()
 		}
-		pagedWr := ht.datarWriter(comp, ht.h.HistoryValuesOnCompressedPage)
+		pagedWr := ht.datarWriter(comp)
 		p := ps.AddNew(path.Base(datPath), 1)
 		defer ps.Delete(p)
 
@@ -800,7 +802,13 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				var g2 *seg.PagedReader
 				for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
 					if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
-						g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), ht.h.HistoryValuesOnCompressedPage, true)
+						compressedPageValuesCount := hi.decompressor.CompressedPageValuesCount()
+
+						if hi.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+							compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
+						}
+
+						g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), compressedPageValuesCount, true)
 						break
 					}
 				}
@@ -811,7 +819,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				val, _ := g.Next(nil)
 				heap.Push(&cp, &CursorItem{
 					t:          FILE_CURSOR,
-					idx:        g,
+					kvReader:   g,
 					hist:       g2,
 					key:        key,
 					val:        val,
@@ -848,9 +856,9 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 
 				// fmt.Printf("fput '%x'->%x\n", lastKey, ci1.val)
 				keyCount += int(count)
-				if ci1.idx.HasNext() {
-					ci1.key, _ = ci1.idx.Next(ci1.key[:0])
-					ci1.val, _ = ci1.idx.Next(ci1.val[:0])
+				if ci1.kvReader.HasNext() {
+					ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
+					ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])
 					heap.Push(&cp, ci1)
 				}
 			}
@@ -865,7 +873,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 		ps.Delete(p)
 
-		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps, OverrideCompactOpts{}); err != nil {
+		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
 			return nil, nil, err
 		}
 

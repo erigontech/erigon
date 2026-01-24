@@ -84,6 +84,12 @@ func TestConfigValueLookup(t *testing.T) {
 	assert.Equal(t, address2, ConfigValueLookup(burntContract, 41874000+1))
 }
 
+func TestEmptyConfigValueLookup(t *testing.T) {
+	blobSchedule := make(map[uint64]*params.BlobConfig)
+	assert.Nil(t, ConfigValueLookup(blobSchedule, 0))
+	assert.Nil(t, ConfigValueLookup(blobSchedule, 1))
+}
+
 func TestNilBlobSchedule(t *testing.T) {
 	var c Config
 	c.CancunTime = big.NewInt(1)

@@ -51,7 +51,7 @@ func NewSignatureFromBytes(b []byte) (*Signature, error) {
 
 // VerifyAggregate verify signature against many public keys.
 func (s Signature) VerifyAggregate(msg []byte, publicKeys []PublicKey) bool {
-	affines := []*blst.P1Affine{}
+	affines := make([]*blst.P1Affine, 0, len(publicKeys))
 	for _, publicKey := range publicKeys {
 		affines = append(affines, publicKey)
 	}

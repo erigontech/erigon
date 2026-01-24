@@ -119,7 +119,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.TorrentPortFlag,
 	&utils.TorrentMaxPeersFlag,
 	&utils.TorrentConnsPerFileFlag,
-	&utils.TorrentDownloadSlotsFlag,
+	&utils.TorrentDownloadSlotsFlag, // Deprecated (v3.0) - kept for backward compatibility, no effect
 	&utils.TorrentStaticPeersFlag,
 	&utils.TorrentDisableTrackers,
 	&utils.TorrentUploadRateFlag,
@@ -131,6 +131,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.P2pProtocolAllowedPorts,
 	&utils.NATFlag,
 	&utils.NoDiscoverFlag,
+	&utils.DiscoveryV4Flag,
 	&utils.DiscoveryV5Flag,
 	&utils.NetrestrictFlag,
 	&utils.NodeKeyFileFlag,
@@ -159,6 +160,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.MinerGasLimitFlag,
 	&utils.MinerEtherbaseFlag,
 	&utils.MinerExtraDataFlag,
+	&utils.BuilderMaxBlobsFlag,
 	&utils.SentryAddrFlag,
 	&utils.SentryLogPeerInfoFlag,
 	&utils.DownloaderAddrFlag,
@@ -175,6 +177,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.AAFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverrideOsakaFlag,
+	&utils.OverrideAmsterdamFlag,
 	&utils.KeepStoredChainConfigFlag,
 
 	&utils.CaplinDiscoveryAddrFlag,

@@ -19,6 +19,14 @@ jobs:
   test-hive-eest:
     runs-on:
       group: hive
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sim: consume-engine
+            sim-limit: ""
+          - sim: consume-rlp
+            sim-limit: ".*eip2930_access_list.*" # all tests take too long
     steps:
       - name: Clean docker system
         run: |
@@ -85,7 +93,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive --sim 'ethereum/eels/consume-engine' --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${{ env.EEST_VERSION }}/fixtures_develop.tar.gz 2>&1 | tee output.log || {
+            ./hive --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${{ env.EEST_VERSION }}/fixtures_develop.tar.gz 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
@@ -115,12 +123,12 @@ jobs:
               exit 1
             fi
           }
-          run_suite eels/consume-engine
+          run_suite ${{ matrix.sim }} ${{ matrix.sim-limit }}
         continue-on-error: true
       - name: Upload output log
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
-          name: hive-workspace-log
+          name: hive-workspace-log-${{ matrix.sim }}
           path: hive/workspace/logs
       - name: Test Results
         run: |

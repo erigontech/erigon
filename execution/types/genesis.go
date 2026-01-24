@@ -98,7 +98,7 @@ func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func DecodeGenesisAlloc(i interface{}) (GenesisAlloc, error) {
+func DecodeGenesisAlloc(i any) (GenesisAlloc, error) {
 	var alloc GenesisAlloc
 
 	b, err := json.Marshal(i)

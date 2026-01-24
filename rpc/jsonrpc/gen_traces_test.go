@@ -58,7 +58,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 	if err = stream.Flush(); err != nil {
 		t.Fatalf("error flushing: %v", err)
 	}
-	var result interface{}
+	var result any
 	if err = json.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatalf("parsing result: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 		  }
 		}
 	]`
-	var expected interface{}
+	var expected any
 	if err = json.Unmarshal([]byte(expectedJSON), &expected); err != nil {
 		t.Fatalf("parsing expected: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 	if err != nil {
 		t.Errorf("marshall result into JSON: %v", err)
 	}
-	var result interface{}
+	var result any
 	if err = json.Unmarshal(buf, &result); err != nil {
 		t.Fatalf("parsing result: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 		  "type": "reward"
 		}
 	  ]`
-	var expected interface{}
+	var expected any
 	if err = json.Unmarshal([]byte(expectedJSON), &expected); err != nil {
 		t.Fatalf("parsing expected: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestGeneratedTraceApiCollision(t *testing.T) {
 	if err != nil {
 		t.Errorf("marshall result into JSON: %v", err)
 	}
-	var result interface{}
+	var result any
 	if err = json.Unmarshal(buf, &result); err != nil {
 		t.Fatalf("parsing result: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestGeneratedTraceApiCollision(t *testing.T) {
     }
 ]
 `
-	var expected interface{}
+	var expected any
 	if err = json.Unmarshal([]byte(expectedJSON), &expected); err != nil {
 		t.Fatalf("parsing expected: %v", err)
 	}

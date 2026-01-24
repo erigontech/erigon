@@ -46,7 +46,7 @@ func TestAccountChangesEncodeRejectsUnsortedReads(t *testing.T) {
 }
 
 func TestDecodeBalanceChangesRejectsOutOfOrderIndices(t *testing.T) {
-	payload, err := rlp.EncodeToBytes([][]interface{}{
+	payload, err := rlp.EncodeToBytes([][]any{
 		{uint64(2), []byte{0x01}},
 		{uint64(1), []byte{0x01}},
 	})
@@ -68,8 +68,8 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 				{
 					Slot: accounts.InternKey(common.HexToHash("0x01")),
 					Changes: []*StorageChange{
-						{Index: 1, Value: *uint256.NewInt(2)},
-						{Index: 5, Value: *uint256.NewInt(3)},
+						{Index: 1, Value: common.Hash(uint256.NewInt(2).Bytes32())},
+						{Index: 5, Value: common.Hash(uint256.NewInt(3).Bytes32())},
 					},
 				},
 			},
@@ -93,7 +93,7 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 		t.Fatalf("encode failed: %v", err)
 	}
 
-	expected := common.FromHex("0xf871f86f9400000000000000000000000000000000000000aae9e8a00000000000000000000000000000000000000000000000000000000000000001c6c20102c20503e1a00000000000000000000000000000000000000000000000000000000000000002c3c20104c3c20907c5c40282beef")
+	expected := common.FromHex("0xf8b4f8b29400000000000000000000000000000000000000aaf86bf869a00000000000000000000000000000000000000000000000000000000000000001f846e201a00000000000000000000000000000000000000000000000000000000000000002e205a00000000000000000000000000000000000000000000000000000000000000003e1a00000000000000000000000000000000000000000000000000000000000000002c3c20104c3c20907c5c40282beef")
 	if !bytes.Equal(encoded, expected) {
 		t.Fatalf("unexpected encoding\nhave: %x\nwant: %x", encoded, expected)
 	}

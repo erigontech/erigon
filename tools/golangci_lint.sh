@@ -1,8 +1,6 @@
 #!/bin/bash
 
-scriptDir=$(dirname "${BASH_SOURCE[0]}")
-scriptName=$(basename "${BASH_SOURCE[0]}")
-version="v2.6.2"
+version="v2.8.0"
 
 if [[ "$1" == "--install-deps" ]]
 then

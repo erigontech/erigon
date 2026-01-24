@@ -123,8 +123,8 @@ func TestWriteAndReadBufferEntry(t *testing.T) {
 
 	entries := make([]sortableBufferEntry, 100)
 	for i := range entries {
-		entries[i].key = []byte(fmt.Sprintf("key-%d", i))
-		entries[i].value = []byte(fmt.Sprintf("value-%d", i))
+		entries[i].key = fmt.Appendf(nil, "key-%d", i)
+		entries[i].value = fmt.Appendf(nil, "value-%d", i)
 		b.Put(entries[i].key, entries[i].value)
 	}
 
@@ -287,11 +287,11 @@ func TestTransformExtractStartKey(t *testing.T) {
 		"", // temp dir
 		testExtractToMapFunc,
 		testLoadFromMapFunc,
-		TransformArgs{ExtractStartKey: []byte(fmt.Sprintf("%10d-key-%010d", 5, 5))},
+		TransformArgs{ExtractStartKey: fmt.Appendf(nil, "%10d-key-%010d", 5, 5)},
 		logger,
 	)
 	require.NoError(t, err)
-	compareBuckets(t, tx, sourceBucket, destBucket, []byte(fmt.Sprintf("%10d-key-%010d", 5, 5)))
+	compareBuckets(t, tx, sourceBucket, destBucket, fmt.Appendf(nil, "%10d-key-%010d", 5, 5))
 }
 
 func TestTransformThroughFiles(t *testing.T) {
@@ -365,8 +365,8 @@ func TestTransformDoubleOnLoad(t *testing.T) {
 func generateTestData(t *testing.T, db kv.Putter, bucket string, count int) {
 	t.Helper()
 	for i := 0; i < count; i++ {
-		k := []byte(fmt.Sprintf("%10d-key-%010d", i, i))
-		v := []byte(fmt.Sprintf("val-%099d", i))
+		k := fmt.Appendf(nil, "%10d-key-%010d", i, i)
+		v := fmt.Appendf(nil, "val-%099d", i)
 		err := db.Put(bucket, k, v)
 		require.NoError(t, err)
 	}
