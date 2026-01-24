@@ -1195,7 +1195,7 @@ func (at *AggregatorRoTx) GreedyPruneHistory(ctx context.Context, domain kv.Doma
 		return err
 	}
 
-	at.a.logger.Debug("commitment history backpressure pruning", "pruned", stat.String())
+	at.a.logger.Info("commitment history backpressure pruning", "pruned", stat.String())
 	return nil
 }
 
