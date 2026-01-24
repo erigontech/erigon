@@ -291,15 +291,10 @@ func (p *ConcurrentPatriciaHashed) Process(ctx context.Context, updates *Updates
 	}
 	switch updates.IsConcurrentCommitment() {
 	case true:
-		rootHash, err = updates.ParallelHashSort(ctx, p)
+		rootHash, err = updates.ParallelHashSort(ctx, p, warmup.CtxFactory)
 		if err != nil {
 			return nil, err
 		}
-		// Apply deferred branch updates in parallel (EncodeBranch runs concurrently)
-		if err = p.root.branchEncoder.ApplyDeferredUpdatesParallel(16, p.root.ctx.PutBranch); err != nil {
-			return nil, fmt.Errorf("apply deferred updates: %w", err)
-		}
-		p.root.branchEncoder.ClearDeferred()
 	default:
 		rootHash, err = p.root.Process(ctx, updates, logPrefix, progress, warmup)
 		if err != nil {
