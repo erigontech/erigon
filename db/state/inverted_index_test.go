@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"runtime"
+	"runtime/debug"
 	"testing"
 	"time"
 
@@ -60,13 +62,20 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 			kv.TblPruningValsProg: kv.TableCfgItem{},
 		}
 	}).MustOpen()
-	tb.Cleanup(db.Close)
 	salt := uint32(1)
 	cfg := statecfg.InvIdxCfg{FilenameBase: "inv", KeysTable: keysTable, ValuesTable: indexTable, FileVersion: statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
 	cfg.Accessors = statecfg.AccessorHashMap
 	ii, err := NewInvertedIndex(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, logger)
 	require.NoError(tb, err)
-	tb.Cleanup(ii.Close)
+	tb.Cleanup(func() {
+		ii.Close()
+		db.Close()
+
+		if runtime.GOOS == "windows" {
+			runtime.GC()
+			debug.FreeOSMemory()
+		}
+	})
 	ii.salt.Store(&salt)
 	ii.DisableFsync()
 	return db, ii
@@ -611,7 +620,6 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 	tb.Helper()
 	db, ii := testDbAndInvertedIndex(tb, aggStep, logger)
 	ctx, require := context.Background(), require.New(tb)
-	tb.Cleanup(db.Close)
 
 	err := db.Update(ctx, func(tx kv.RwTx) error {
 		ic := ii.BeginFilesRo()
