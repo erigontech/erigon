@@ -576,8 +576,9 @@ var (
 		Usage:   "Enables the V4 discovery mechanism",
 	}
 	DiscoveryV5Flag = cli.BoolFlag{
-		Name:    "discovery.v5",
-		Aliases: []string{"discv5"},
+		Name: "discovery.v5",
+		// The first is for old Geth style, and the second is Erigon backward compatibility.
+		Aliases: []string{"discv5", "v5disc"},
 		Usage:   "Enables the V5 discovery mechanism",
 	}
 	NetrestrictFlag = cli.StringFlag{
