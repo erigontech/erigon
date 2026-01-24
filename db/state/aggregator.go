@@ -1026,15 +1026,6 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	fullStat := newAggregatorPruneStat()
 
 	for {
-		//if sptx, ok := tx.(kv.HasSpaceDirty); ok && !furiousPrune && !aggressivePrune {
-		//	spaceDirty, _, err := sptx.SpaceDirty()
-		//	if err != nil {
-		//		return false, err
-		//	}
-		//	if spaceDirty > uint64(statecfg.MaxNonFuriousDirtySpacePerTx) {
-		//		return false, nil
-		//	}
-		//}
 		iterationStarted := time.Now()
 		// `context.Background()` is important here!
 		//     it allows keep DB consistent - prune all keys-related data or noting
