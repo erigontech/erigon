@@ -214,6 +214,8 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 	t.Parallel()
 
 	db, ii, _ := filledInvIndexOfSize(t, 1000, 16, 1, log.New())
+	defer ii.Close()
+	defer db.Close()
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -232,11 +234,11 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 
 	t.Run("no_files_no_force", func(t *testing.T) {
 		ic := ii.BeginFilesRo()
-		t.Cleanup(ic.Close)
+		defer ic.Close()
 
 		icc, err := tx.CursorDupSort(ii.KeysTable)
 		require.NoError(t, err)
-
+		defer icc.Close()
 		count := 0
 		for txn, _, err := icc.Seek(from[:]); txn != nil; txn, _, err = icc.Next() {
 			require.NoError(t, err)
@@ -245,7 +247,7 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 			}
 			count++
 		}
-		t.Cleanup(icc.Close)
+
 		require.Equal(t, count, pruneIters*int(pruneLimit))
 		st := &prune.Stat{
 			MinTxNum:         0,
@@ -313,7 +315,7 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 
 		// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
 		ic := ii.BeginFilesRo()
-		t.Cleanup(ic.Close)
+		defer ic.Close()
 		st := &prune.Stat{
 			MinTxNum:         0,
 			MaxTxNum:         0,
@@ -343,7 +345,7 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 
 		// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
 		ic := ii.BeginFilesRo()
-		t.Cleanup(ic.Close)
+		defer ic.Close()
 		st := &prune.Stat{
 			MinTxNum:         0,
 			MaxTxNum:         0,
@@ -386,7 +388,7 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 	t.Run("force", func(t *testing.T) {
 		t.Skip() //TODO: figure out how to make it pretty
 		ic := ii.BeginFilesRo()
-		t.Cleanup(ic.Close)
+		defer ic.Close()
 		newTHR := 1 * time.Millisecond
 		ctx := context.WithValue(context.Background(), "throttle", &newTHR)
 		// this should prune exactly pruneLimit*pruneIter transactions
