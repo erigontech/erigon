@@ -13,7 +13,7 @@ import (
 )
 
 func TestVersioMonitorHeimdallV2(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())ctx,
 	t.Cleanup(cancel)
 	
 	ctrl := gomock.NewController(t)
