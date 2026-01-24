@@ -30,11 +30,6 @@ import (
 )
 
 var SanitySlots = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
-	// TODO: this is unused, why?
-	var slots int
-	err = spectest.ReadMeta(root, "slots.yaml", &slots)
-	require.NoError(t, err)
-
 	testState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PreSsz)
 	require.NoError(t, err)
 
