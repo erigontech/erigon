@@ -214,7 +214,6 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 	t.Parallel()
 
 	db, ii, _ := filledInvIndexOfSize(t, 1000, 16, 1, log.New())
-	defer ii.Close()
 
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
@@ -233,7 +232,7 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 
 	t.Run("no_files_no_force", func(t *testing.T) {
 		ic := ii.BeginFilesRo()
-		defer ic.Close()
+		t.Cleanup(ic.Close)
 
 		icc, err := tx.CursorDupSort(ii.KeysTable)
 		require.NoError(t, err)
@@ -246,7 +245,7 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 			}
 			count++
 		}
-		icc.Close()
+		t.Cleanup(icc.Close)
 		require.Equal(t, count, pruneIters*int(pruneLimit))
 		st := &prune.Stat{
 			MinTxNum:         0,
@@ -274,8 +273,6 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 		require.NoError(t, err)
 		require.Zero(t, stat.PruneCountTx)
 		require.Zero(t, stat.PruneCountValues)
-
-		ic.Close()
 	})
 
 	t.Run("prune was in progress", func(t *testing.T) {
@@ -316,7 +313,7 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 
 		// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
 		ic := ii.BeginFilesRo()
-		defer ic.Close()
+		t.Cleanup(ic.Close)
 		st := &prune.Stat{
 			MinTxNum:         0,
 			MaxTxNum:         0,
@@ -346,7 +343,7 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 
 		// without `reCalcVisibleFiles` must be nothing to prune - because files are not visible yet.
 		ic := ii.BeginFilesRo()
-		defer ic.Close()
+		t.Cleanup(ic.Close)
 		st := &prune.Stat{
 			MinTxNum:         0,
 			MaxTxNum:         0,
@@ -386,55 +383,55 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 		require.Equal(t, 6, int(stat.PruneCountValues))
 	})
 
-	//TODO: figure out how to make it pretty
-	//t.Run("force", func(t *testing.T) {
-	//	ic := ii.BeginFilesRo()
-	//	defer ic.Close()
-	//	newTHR := 1 * time.Millisecond
-	//	ctx := context.WithValue(context.Background(), "throttle", &newTHR)
-	//	// this should prune exactly pruneLimit*pruneIter transactions
-	//	for i := 0; i < pruneIters; i++ {
-	//		stat, err := ic.TableScanningPrune(ctx, tx, 0, 1000, pruneLimit, logEvery, true, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
-	//		require.NoError(t, err)
-	//		t.Logf("[%d] stats: %v %d %d", i, stat, stat.PruneCountTx, stat.PruneCountValues)
-	//	}
-	//
-	//	// ascending - empty
-	//	it, err := ic.IdxRange(nil, 0, pruneIters*int(pruneLimit), order.Asc, -1, tx)
-	//	require.NoError(t, err)
-	//	require.False(t, it.HasNext())
-	//	it.Close()
-	//
-	//	// descending - empty
-	//	it, err = ic.IdxRange(nil, pruneIters*int(pruneLimit), 0, order.Desc, -1, tx)
-	//	require.NoError(t, err)
-	//	require.False(t, it.HasNext())
-	//	it.Close()
-	//
-	//	// straight from pruned - not empty
-	//	icc, err := tx.CursorDupSort(ii.KeysTable)
-	//	require.NoError(t, err)
-	//	txn, _, err := icc.Seek(from[:])
-	//	require.NoError(t, err)
-	//	println("from", binary.BigEndian.Uint64(from[:]), "txn", binary.BigEndian.Uint64(txn[:]))
-	//
-	//	prunedInStep0 := 16 - 1
-	//	// we pruned by limit so next transaction after prune should be equal to `pruneIters*pruneLimit+1`
-	//	// If we would prune by txnum then txTo prune should be available after prune is finished
-	//	require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInStep0, int(binary.BigEndian.Uint64(txn)-1))
-	//	icc.Close()
-	//
-	//	// check second table
-	//	icc, err = tx.CursorDupSort(ii.ValuesTable)
-	//	require.NoError(t, err)
-	//	key, txn, err := icc.First()
-	//	t.Logf("key: %x, txn: %x", key, txn)
-	//	require.NoError(t, err)
-	//	// we pruned by limit so next transaction after prune should be equal to `pruneIters*pruneLimit+1`
-	//	// If we would prune by txnum then txTo prune should be available after prune is finished
-	//	require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInStep0, int(binary.BigEndian.Uint64(txn)-1))
-	//	icc.Close()
-	//})
+	t.Run("force", func(t *testing.T) {
+		t.Skip() //TODO: figure out how to make it pretty
+		ic := ii.BeginFilesRo()
+		t.Cleanup(ic.Close)
+		newTHR := 1 * time.Millisecond
+		ctx := context.WithValue(context.Background(), "throttle", &newTHR)
+		// this should prune exactly pruneLimit*pruneIter transactions
+		for i := 0; i < pruneIters; i++ {
+			stat, err := ic.TableScanningPrune(ctx, tx, 0, 1000, pruneLimit, logEvery, true, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
+			require.NoError(t, err)
+			t.Logf("[%d] stats: %v %d %d", i, stat, stat.PruneCountTx, stat.PruneCountValues)
+		}
+
+		// ascending - empty
+		it, err := ic.IdxRange(nil, 0, pruneIters*int(pruneLimit), order.Asc, -1, tx)
+		require.NoError(t, err)
+		require.False(t, it.HasNext())
+		it.Close()
+
+		// descending - empty
+		it, err = ic.IdxRange(nil, pruneIters*int(pruneLimit), 0, order.Desc, -1, tx)
+		require.NoError(t, err)
+		require.False(t, it.HasNext())
+		it.Close()
+
+		// straight from pruned - not empty
+		icc, err := tx.CursorDupSort(ii.KeysTable)
+		require.NoError(t, err)
+		txn, _, err := icc.Seek(from[:])
+		require.NoError(t, err)
+		println("from", binary.BigEndian.Uint64(from[:]), "txn", binary.BigEndian.Uint64(txn[:]))
+
+		prunedInStep0 := 16 - 1
+		// we pruned by limit so next transaction after prune should be equal to `pruneIters*pruneLimit+1`
+		// If we would prune by txnum then txTo prune should be available after prune is finished
+		require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInStep0, int(binary.BigEndian.Uint64(txn)-1))
+		icc.Close()
+
+		// check second table
+		icc, err = tx.CursorDupSort(ii.ValuesTable)
+		require.NoError(t, err)
+		key, txn, err := icc.First()
+		t.Logf("key: %x, txn: %x", key, txn)
+		require.NoError(t, err)
+		// we pruned by limit so next transaction after prune should be equal to `pruneIters*pruneLimit+1`
+		// If we would prune by txnum then txTo prune should be available after prune is finished
+		require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInStep0, int(binary.BigEndian.Uint64(txn)-1))
+		icc.Close()
+	})
 
 }
 
