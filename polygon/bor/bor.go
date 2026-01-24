@@ -804,7 +804,7 @@ func (c *Bor) CalculateRewards(config *chain.Config, header *types.Header, uncle
 // Finalize implements rules.Engine, ensuring no uncles are set, nor block
 // rewards given.
 func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
+	uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.FlatRequests, error) {
 	headerNumber := header.Number.Uint64()
@@ -1219,7 +1219,7 @@ func (c *Bor) getHeaderByNumber(ctx context.Context, tx kv.Tx, number uint64) (*
 		return nil, err
 	}
 	if header == nil {
-		_, _ = c.blockReader.HeaderByNumber(dbg.ContextWithDebug(ctx, true), tx, number)
+		_, _ = c.blockReader.HeaderByNumber(dbg.WithDebug(ctx, true), tx, number)
 		return nil, fmt.Errorf("[bor] header not found: %d", number)
 	}
 	return header, nil
@@ -1236,7 +1236,7 @@ func (c *Bor) CommitStates(
 	var events []*types.Message
 	var err error
 
-	ctx := dbg.ContextWithDebug(c.execCtx, true)
+	ctx := dbg.WithDebug(c.execCtx, true)
 	if fetchEventsWithinTime {
 		sprintLength := c.config.CalculateSprintLength(blockNum)
 

@@ -45,14 +45,16 @@ type StateReader interface {
 	WithHistory() bool
 	CheckDataAvailable(d kv.Domain, step kv.Step) error
 	Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error)
+	Clone(tx kv.TemporalTx) StateReader
 }
 
 type LatestStateReader struct {
 	getter kv.TemporalGetter
+	sd     sd
 }
 
-func NewLatestStateReader(getter kv.TemporalGetter) *LatestStateReader {
-	return &LatestStateReader{getter: getter}
+func NewLatestStateReader(tx kv.TemporalTx, sd sd) *LatestStateReader {
+	return &LatestStateReader{getter: sd.AsGetter(tx), sd: sd}
 }
 
 func (r *LatestStateReader) WithHistory() bool {
@@ -73,6 +75,10 @@ func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) 
 		return nil, 0, fmt.Errorf("LatestStateReader(GetLatest) %q: %w", d, err)
 	}
 	return enc, step, nil
+}
+
+func (r *LatestStateReader) Clone(tx kv.TemporalTx) StateReader {
+	return NewLatestStateReader(tx, r.sd)
 }
 
 // HistoryStateReader reads *full* historical state at specified txNum.
@@ -105,20 +111,26 @@ func (r *HistoryStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64)
 	return enc, kv.Step(r.limitReadAsOfTxNum / stepSize), nil
 }
 
+func (r *HistoryStateReader) Clone(tx kv.TemporalTx) StateReader {
+	return NewHistoryStateReader(tx, r.limitReadAsOfTxNum)
+}
+
 // LimitedHistoryStateReader reads from *limited* (i.e. *without-recent-files*) state at specified txNum, otherwise from *latest*.
 // `limitReadAsOfTxNum` here is used for unusual operation: "hide recent .kv files and read the latest state from files".
 type LimitedHistoryStateReader struct {
 	HistoryStateReader
 	getter kv.TemporalGetter
+	sd     sd
 }
 
-func NewLimitedHistoryStateReader(roTx kv.TemporalTx, getter kv.TemporalGetter, limitReadAsOfTxNum uint64) *LimitedHistoryStateReader {
+func NewLimitedHistoryStateReader(roTx kv.TemporalTx, sd sd, limitReadAsOfTxNum uint64) *LimitedHistoryStateReader {
 	return &LimitedHistoryStateReader{
 		HistoryStateReader: HistoryStateReader{
 			roTx:               roTx,
 			limitReadAsOfTxNum: limitReadAsOfTxNum,
 		},
-		getter: getter,
+		getter: sd.AsGetter(roTx),
+		sd:     sd,
 	}
 }
 
@@ -152,6 +164,10 @@ func (r *LimitedHistoryStateReader) Read(d kv.Domain, plainKey []byte, stepSize 
 	return enc, step, nil
 }
 
+func (r *LimitedHistoryStateReader) Clone(tx kv.TemporalTx) StateReader {
+	return NewLimitedHistoryStateReader(tx, r.sd, r.limitReadAsOfTxNum)
+}
+
 type SharedDomainsCommitmentContext struct {
 	sharedDomains sd
 	updates       *commitment.Updates
@@ -159,7 +175,8 @@ type SharedDomainsCommitmentContext struct {
 	justRestored  atomic.Bool // set to true when commitment trie was just restored from snapshot
 	trace         bool
 	stateReader   StateReader
-	warmupDB      kv.TemporalRoDB // if set, enables parallel warmup of MDBX page cache during commitment
+	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
+	trieWarmup    bool            // toggle for parallel trie warmup of MDBX page cache during commitment
 }
 
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
@@ -167,10 +184,15 @@ func (sdc *SharedDomainsCommitmentContext) SetStateReader(stateReader StateReade
 	sdc.stateReader = stateReader
 }
 
-// SetWarmupDB sets the database used for parallel warmup of MDBX page cache during commitment.
+// SetTrieWarmup enables parallel warmup of MDBX page cache during commitment.
 // When set, ComputeCommitment will pre-fetch Branch data in parallel before processing.
-func (sdc *SharedDomainsCommitmentContext) SetWarmupDB(db kv.TemporalRoDB) {
-	sdc.warmupDB = db
+// It requires a DB to be set by calling SetParaTrieDB
+func (sdc *SharedDomainsCommitmentContext) SetTrieWarmup(trieWarmup bool) {
+	sdc.trieWarmup = trieWarmup
+}
+
+func (sdc *SharedDomainsCommitmentContext) SetParaTrieDB(db kv.TemporalRoDB) {
+	sdc.paraTrieDB = db
 }
 
 // SetHistoryStateReader sets the state reader to read *full* historical state at specified txNum.
@@ -180,7 +202,7 @@ func (sdc *SharedDomainsCommitmentContext) SetHistoryStateReader(roTx kv.Tempora
 
 // SetLimitedHistoryStateReader sets the state reader to read *limited* (i.e. *without-recent-files*) historical state at specified txNum.
 func (sdc *SharedDomainsCommitmentContext) SetLimitedHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
-	sdc.SetStateReader(NewLimitedHistoryStateReader(roTx, sdc.sharedDomains.AsGetter(roTx), limitReadAsOfTxNum))
+	sdc.SetStateReader(NewLimitedHistoryStateReader(roTx, sdc.sharedDomains, limitReadAsOfTxNum))
 }
 
 func (sdc *SharedDomainsCommitmentContext) SetTrace(trace bool) {
@@ -202,16 +224,15 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, trieVariant 
 
 func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx) *TrieContext {
 	mainTtx := &TrieContext{
-		roTtx:    tx,
 		getter:   sdc.sharedDomains.AsGetter(tx),
 		putter:   sdc.sharedDomains.AsPutDel(tx),
 		stepSize: sdc.sharedDomains.StepSize(),
 		txNum:    sdc.sharedDomains.TxNum(),
 	}
 	if sdc.stateReader != nil {
-		mainTtx.stateReader = sdc.stateReader
+		mainTtx.stateReader = sdc.stateReader.Clone(tx)
 	} else {
-		mainTtx.stateReader = &LatestStateReader{mainTtx.getter}
+		mainTtx.stateReader = NewLatestStateReader(tx, sdc.sharedDomains)
 	}
 	sdc.patriciaTrie.ResetContext(mainTtx)
 	return mainTtx
@@ -273,8 +294,8 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
 }
 
-// Evaluates commitment for gathered updates.
-// If warmupDB was set via SetWarmupDB, pre-warms MDBX page cache by reading Branch data in parallel before processing.
+// ComputeCommitment Evaluates commitment for gathered updates.
+// If warmup was set via SetTrieWarmup, pre-warms MDBX page cache by reading Branch data in parallel before processing.
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
@@ -305,39 +326,10 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	trieContext := sdc.trieContext(tx)
 
 	var warmupConfig commitment.WarmupConfig
-	if sdc.warmupDB != nil {
-		// avoid races like this
-		db := sdc.warmupDB
-		txNum := sdc.sharedDomains.TxNum()
-		stepSize := sdc.sharedDomains.StepSize()
-		// Create factory for warmup TrieContexts with their own transactions
-		ctxFactory := func() (commitment.PatriciaContext, func()) {
-			roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
-			if err != nil {
-				return &errorTrieContext{err: err}, nil
-			}
-
-			warmupCtx := &TrieContext{
-				roTtx:    roTx,
-				getter:   sdc.sharedDomains.AsGetter(roTx),
-				stepSize: stepSize,
-				txNum:    txNum,
-			}
-			if sdc.stateReader != nil {
-				warmupCtx.stateReader = sdc.stateReader
-			} else {
-				warmupCtx.stateReader = &LatestStateReader{warmupCtx.getter}
-			}
-
-			cleanup := func() {
-				roTx.Rollback()
-			}
-			return warmupCtx, cleanup
-		}
-
+	if sdc.paraTrieDB != nil {
 		warmupConfig = commitment.WarmupConfig{
-			Enabled:    true,
-			CtxFactory: ctxFactory,
+			Enabled:    sdc.trieWarmup,
+			CtxFactory: sdc.trieContextFactory(ctx, sdc.paraTrieDB),
 			NumWorkers: 16,
 			MaxDepth:   commitment.WarmupMaxDepth,
 			LogPrefix:  logPrefix,
@@ -357,6 +349,33 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	}
 
 	return rootHash, err
+}
+
+func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Context, db kv.TemporalRoDB) commitment.TrieContextFactory {
+	// avoid races like this
+	stepSize := sdc.sharedDomains.StepSize()
+	txNum := sdc.sharedDomains.TxNum()
+	return func() (commitment.PatriciaContext, func()) {
+		roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+		if err != nil {
+			return &errorTrieContext{err: err}, nil
+		}
+		warmupCtx := &TrieContext{
+			getter:   sdc.sharedDomains.AsGetter(roTx),
+			putter:   sdc.sharedDomains.AsPutDel(roTx),
+			stepSize: stepSize,
+			txNum:    txNum,
+		}
+		if sdc.stateReader != nil {
+			warmupCtx.stateReader = sdc.stateReader.Clone(roTx)
+		} else {
+			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains)
+		}
+		cleanup := func() {
+			roTx.Rollback()
+		}
+		return warmupCtx, cleanup
+	}
 }
 
 // errorTrieContext is a PatriciaContext that always returns an error.
@@ -466,7 +485,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 	}
 	if len(bnBytes) == 8 {
 		blockNum = binary.BigEndian.Uint64(bnBytes)
-		txNum, err = rawdbv3.TxNums.Max(tx, blockNum)
+		txNum, err = rawdbv3.TxNums.Max(ctx, tx, blockNum)
 		if err != nil {
 			return 0, 0, false, err
 		}
@@ -597,7 +616,6 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 }
 
 type TrieContext struct {
-	roTtx  kv.TemporalTx
 	getter kv.TemporalGetter
 	putter kv.TemporalPutDel
 	txNum  uint64

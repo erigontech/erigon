@@ -880,82 +880,82 @@ func stGas(pc uint64, scope *CallContext) string {
 }
 
 func opSwap1(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap1()
+	scope.Stack.swap(1)
 	return pc, nil, nil
 }
 
 func opSwap2(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap2()
+	scope.Stack.swap(2)
 	return pc, nil, nil
 }
 
 func opSwap3(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap3()
+	scope.Stack.swap(3)
 	return pc, nil, nil
 }
 
 func opSwap4(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap4()
+	scope.Stack.swap(4)
 	return pc, nil, nil
 }
 
 func opSwap5(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap5()
+	scope.Stack.swap(5)
 	return pc, nil, nil
 }
 
 func opSwap6(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap6()
+	scope.Stack.swap(6)
 	return pc, nil, nil
 }
 
 func opSwap7(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap7()
+	scope.Stack.swap(7)
 	return pc, nil, nil
 }
 
 func opSwap8(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap8()
+	scope.Stack.swap(8)
 	return pc, nil, nil
 }
 
 func opSwap9(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap9()
+	scope.Stack.swap(9)
 	return pc, nil, nil
 }
 
 func opSwap10(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap10()
+	scope.Stack.swap(10)
 	return pc, nil, nil
 }
 
 func opSwap11(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap11()
+	scope.Stack.swap(11)
 	return pc, nil, nil
 }
 
 func opSwap12(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap12()
+	scope.Stack.swap(12)
 	return pc, nil, nil
 }
 
 func opSwap13(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap13()
+	scope.Stack.swap(13)
 	return pc, nil, nil
 }
 
 func opSwap14(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap14()
+	scope.Stack.swap(14)
 	return pc, nil, nil
 }
 
 func opSwap15(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap15()
+	scope.Stack.swap(15)
 	return pc, nil, nil
 }
 
 func opSwap16(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.swap16()
+	scope.Stack.swap(16)
 	return pc, nil, nil
 }
 
@@ -1303,6 +1303,104 @@ func opSelfdestruct6780(pc uint64, interpreter *EVMInterpreter, scope *CallConte
 	return pc, nil, errStopToken
 }
 
+func decodeSingle(x byte) int {
+	if x <= 90 {
+		return int(x) + 17
+	}
+	return int(x) - 20
+}
+
+func decodePair(x byte) (int, int) {
+	var k int
+	if x <= 79 {
+		k = int(x)
+	} else {
+		k = int(x) - 48
+	}
+	q, r := k/16, k%16
+	if q < r {
+		return q + 1, r + 1
+	}
+	return r + 1, 29 - q
+}
+
+func opDupN(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
+	code := scope.Contract.Code
+	pc++
+	x := byte(0) // see https://github.com/ethereum/EIPs/pull/11085
+	if pc < uint64(len(code)) {
+		x = code[pc]
+	}
+
+	// This range is excluded to preserve compatibility with existing opcodes.
+	if x > 90 && x < 128 {
+		return pc, nil, &ErrInvalidOpCode{opcode: OpCode(x)}
+	}
+	n := decodeSingle(x)
+
+	// DUPN duplicates the n'th stack item, so the stack must contain at least n elements.
+	if scope.Stack.len() < n {
+		return pc, nil, &ErrStackUnderflow{stackLen: scope.Stack.len(), required: n}
+	}
+
+	//The n‘th stack item is duplicated at the top of the stack.
+	scope.Stack.dup(n)
+	return pc, nil, nil
+}
+
+func opSwapN(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
+	code := scope.Contract.Code
+	pc++
+	x := byte(0) // see https://github.com/ethereum/EIPs/pull/11085
+	if pc < uint64(len(code)) {
+		x = code[pc]
+	}
+
+	// This range is excluded to preserve compatibility with existing opcodes.
+	if x > 90 && x < 128 {
+		return pc, nil, &ErrInvalidOpCode{opcode: OpCode(x)}
+	}
+	n := decodeSingle(x)
+
+	// SWAPN operates on the top and n+1 stack items, so the stack must contain at least n+1 elements.
+	if scope.Stack.len() < n+1 {
+		return pc, nil, &ErrStackUnderflow{stackLen: scope.Stack.len(), required: n + 1}
+	}
+
+	// The (n+1)‘th stack item is swapped with the top of the stack.
+	scope.Stack.swap(n)
+	return pc, nil, nil
+}
+
+func opExchange(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
+	code := scope.Contract.Code
+	pc++
+	x := byte(0) // see https://github.com/ethereum/EIPs/pull/11085
+	if pc < uint64(len(code)) {
+		x = code[pc]
+	}
+
+	// This range is excluded both to preserve compatibility with existing opcodes
+	// and to keep decode_pair’s 16-aligned arithmetic mapping valid (0–79, 128–255).
+	if x > 79 && x < 128 {
+		return pc, nil, &ErrInvalidOpCode{opcode: OpCode(x)}
+	}
+	n, m := decodePair(x)
+	need := max(n, m) + 1
+
+	// EXCHANGE operates on the (n+1)'th and (m+1)'th stack items,
+	// so the stack must contain at least max(n, m)+1 elements.
+	if scope.Stack.len() < need {
+		return pc, nil, &ErrStackUnderflow{stackLen: scope.Stack.len(), required: need}
+	}
+
+	// The (n+1)‘th stack item is swapped with the (m+1)‘th stack item.
+	indexN := scope.Stack.len() - 1 - n
+	indexM := scope.Stack.len() - 1 - m
+	scope.Stack.data[indexN], scope.Stack.data[indexM] = scope.Stack.data[indexM], scope.Stack.data[indexN]
+	return pc, nil, nil
+}
+
 // following functions are used by the instruction jump  table
 
 // make log instruction function
@@ -1386,10 +1484,12 @@ func makePush(size uint64, pushByteSize int) executionFunc {
 		startMin := min(int(pc+1), codeLen)
 		endMin := min(startMin+pushByteSize, codeLen)
 
-		integer := new(uint256.Int)
-		scope.Stack.push(*integer.SetBytes(common.RightPadBytes(
-			// So it doesn't matter what we push onto the stack.
-			scope.Contract.Code[startMin:endMin], pushByteSize)))
+		integer := new(uint256.Int).SetBytes(scope.Contract.Code[startMin:endMin])
+		// Missing bytes: pushByteSize - len(pushData)
+		if missing := pushByteSize - (endMin - startMin); missing > 0 {
+			integer.Lsh(integer, uint(8*missing))
+		}
+		scope.Stack.push(*integer)
 
 		pc += size
 		return pc, nil, nil

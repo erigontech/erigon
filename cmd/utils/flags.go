@@ -576,8 +576,9 @@ var (
 		Usage:   "Enables the V4 discovery mechanism",
 	}
 	DiscoveryV5Flag = cli.BoolFlag{
-		Name:    "discovery.v5",
-		Aliases: []string{"discv5"},
+		Name: "discovery.v5",
+		// The first is for old Geth style, and the second is Erigon backward compatibility.
+		Aliases: []string{"discv5", "v5disc"},
 		Usage:   "Enables the V5 discovery mechanism",
 	}
 	NetrestrictFlag = cli.StringFlag{
@@ -700,11 +701,14 @@ var (
 		Value: "16mb",
 		Usage: "Bytes per second, example: 32mb. Set Inf for no limit.",
 	}
-	// Deprecated. Shouldn't do anything. TODO: Remove.
+	// Deprecated (v3.0): This flag no longer has any effect and will be removed in a future release.
+	// The downloader now manages concurrent downloads automatically based on available resources.
+	// Previously controlled the number of files to download in parallel, but this is now handled
+	// internally by the BitTorrent client's resource management.
 	TorrentDownloadSlotsFlag = cli.IntFlag{
 		Name:   "torrent.download.slots",
-		Value:  32,
-		Usage:  "Amount of files to download in parallel.",
+		Value:  32, // Keep default for backward compatibility
+		Usage:  "(DEPRECATED: No longer has any effect) Amount of files to download in parallel.",
 		Hidden: true,
 	}
 	// TODO: Currently unused.
@@ -1106,6 +1110,31 @@ var (
 		Name:  "experimental.always-generate-changesets",
 		Usage: "Allows to override changesets generation logic",
 	}
+	FcuTimeoutFlag = cli.DurationFlag{
+		Name:  "fcu.timeout",
+		Usage: "FCU timeout before it switches to being process async (use 0 to disable)",
+		Value: ethconfig.Defaults.FcuTimeout,
+	}
+	FcuBackgroundPruneFlag = cli.BoolFlag{
+		Name:  "fcu.background.prune",
+		Usage: "Enables background pruning post fcu",
+		Value: ethconfig.Defaults.FcuBackgroundPrune,
+	}
+	FcuBackgroundCommitFlag = cli.BoolFlag{
+		Name:  "fcu.background.commit",
+		Usage: "Enables background flush and commit",
+		Value: ethconfig.Defaults.FcuBackgroundCommit,
+	}
+	MCPAddrFlag = cli.StringFlag{
+		Name:  "mcp.addr",
+		Usage: "Address for MCP RPC server",
+		Value: "127.0.0.1",
+	}
+	MCPPortFlag = cli.UintFlag{
+		Name:  "mcp.port",
+		Usage: "Port for MCP RPC server",
+		Value: 8553,
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
@@ -1440,6 +1469,8 @@ func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) error {
 	} else {
 		cfg.Dirs = datadir.New(paths.DataDirForNetwork(paths.DefaultDataDir(), ctx.String(ChainFlag.Name)))
 	}
+
+	cfg.Dirs.Log = logging.LogDirPath(ctx)
 
 	cfg.MdbxPageSize = flags.DBPageSizeFlagUnmarshal(ctx, DbPageSizeFlag.Name, DbPageSizeFlag.Usage)
 	if err := cfg.MdbxDBSizeLimit.UnmarshalText([]byte(ctx.String(DbSizeLimitFlag.Name))); err != nil {
@@ -1811,6 +1842,10 @@ func CheckExclusive(ctx *cli.Context, args ...any) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config, logger log.Logger) {
+	if ctx.String(MCPAddrFlag.Name) != "" && ctx.String(MCPPortFlag.Name) != "" {
+		cfg.MCPAddress = fmt.Sprintf("%s:%s", ctx.String(MCPAddrFlag.Name), ctx.String(MCPPortFlag.Name))
+	}
+
 	cfg.CaplinConfig.CaplinDiscoveryAddr = ctx.String(CaplinDiscoveryAddrFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryPort = ctx.Uint64(CaplinDiscoveryPortFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)
@@ -1902,6 +1937,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		statecfg.ExperimentalConcurrentCommitment = true
 	}
 
+	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
+	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)
+	cfg.FcuBackgroundCommit = ctx.Bool(FcuBackgroundCommitFlag.Name)
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.Uint64(RPCGlobalGasCapFlag.Name)
 	}

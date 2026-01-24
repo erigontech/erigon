@@ -20,7 +20,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -28,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -141,24 +145,24 @@ func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br services.FullBl
 }
 
 func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, blockNumber uint64, latest bool, txnIndex int, stateCache kvcache.Cache, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
+	cacheView, err := stateCache.View(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	if latest {
-		cacheView, err := stateCache.View(ctx, tx)
-		if err != nil {
-			return nil, err
-		}
 		return CreateLatestCachedStateReader(cacheView, tx), nil
 	}
-	return CreateHistoryStateReader(tx, blockNumber+1, txnIndex, txNumsReader)
+	return CreateHistoryCachedStateReader(ctx, cacheView, tx, blockNumber+1, txnIndex, txNumsReader)
 }
 
-func CreateHistoryStateReader(tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
-	minTxNum, err := txNumsReader.Min(tx, blockNumber)
+func CreateHistoryStateReader(ctx context.Context, tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
+	minTxNum, err := txNumsReader.Min(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
-	if txNum < state.StateHistoryStartTxNum(tx) {
-		return nil, state.PrunedError
+	if minHistoryTxNum := state.StateHistoryStartTxNum(tx); txNum < minHistoryTxNum {
+		return nil, fmt.Errorf("%w: block tx: %d, min tx: %d", state.PrunedError, txNum, minHistoryTxNum)
 	}
 	return state.NewHistoryReaderV3(tx, txNum), nil
 }
@@ -168,7 +172,7 @@ func NewLatestStateReader(getter kv.TemporalGetter) state.StateReader {
 }
 
 func NewLatestStateWriter(tx kv.TemporalTx, domains *execctx.SharedDomains, blockReader services.FullBlockReader, blockNum uint64) state.StateWriter {
-	minTxNum, err := blockReader.TxnumReader(context.Background()).Min(tx, blockNum)
+	minTxNum, err := blockReader.TxnumReader().Min(context.Background(), tx, blockNum)
 	if err != nil {
 		panic(err)
 	}
@@ -179,4 +183,106 @@ func NewLatestStateWriter(tx kv.TemporalTx, domains *execctx.SharedDomains, bloc
 
 func CreateLatestCachedStateReader(cache kvcache.CacheView, tx kv.TemporalTx) state.StateReader {
 	return state.NewCachedReader3(cache, tx)
+}
+
+type asOfView interface {
+	GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error)
+}
+
+func CreateHistoryCachedStateReader(ctx context.Context, cache kvcache.CacheView, tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
+	asOfView, ok := cache.(asOfView)
+
+	if !ok {
+		return nil, fmt.Errorf("%T does not implement GetAsOf at: %s", cache, dbg.Stack())
+	}
+	minTxNum, err := txNumsReader.Min(ctx, tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
+	if minHistoryTxNum := state.StateHistoryStartTxNum(tx); txNum < minHistoryTxNum {
+		return nil, fmt.Errorf("%w: block tx: %d, min tx: %d", state.PrunedError, txNum, minHistoryTxNum)
+	}
+	return &cachedHistoryReaderV3{asOfView, state.NewHistoryReaderV3(tx, txNum)}, nil
+}
+
+type cachedHistoryReaderV3 struct {
+	cache  asOfView
+	reader *state.HistoryReaderV3
+}
+
+func (hr *cachedHistoryReaderV3) SetTrace(trace bool, tracePrefix string) {
+	hr.reader.SetTrace(trace, tracePrefix)
+}
+
+func (hr *cachedHistoryReaderV3) Trace() bool {
+	return hr.reader.Trace()
+}
+
+func (hr *cachedHistoryReaderV3) TracePrefix() string {
+	return hr.reader.TracePrefix()
+}
+
+func (hr *cachedHistoryReaderV3) GetTxNum() uint64 {
+	return hr.reader.GetTxNum()
+}
+
+func (hr *cachedHistoryReaderV3) SetTxNum(txNum uint64) {
+	hr.reader.SetTxNum(txNum)
+}
+
+func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	addressValue := address.Value()
+	enc, ok, err := hr.cache.GetAsOf(addressValue[:], hr.reader.GetTxNum())
+
+	if err != nil {
+		return nil, err
+	}
+
+	if ok {
+		var a accounts.Account
+		if err := accounts.DeserialiseV3(&a, enc); err != nil {
+			return nil, fmt.Errorf("%sread account data (cache)(%x): %w", hr.TracePrefix(), address, err)
+		}
+		return &a, nil
+	}
+
+	return hr.reader.ReadAccountData(address)
+}
+
+// ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
+// Used to get `prev` account balance
+func (hr *cachedHistoryReaderV3) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
+	return hr.ReadAccountData(address)
+}
+
+func (hr *cachedHistoryReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	addressValue := address.Value()
+	keyValue := key.Value()
+	enc, ok, err := hr.cache.GetAsOf(append(addressValue[:], keyValue[:]...), hr.reader.GetTxNum())
+	if err != nil {
+		return uint256.Int{}, false, err
+	}
+	if ok {
+		var res uint256.Int
+		(&res).SetBytes(enc)
+		return res, ok, err
+	}
+	return hr.reader.ReadAccountStorage(address, key)
+}
+
+func (hr *cachedHistoryReaderV3) HasStorage(address accounts.Address) (bool, error) {
+	return hr.reader.HasStorage(address)
+}
+
+func (hr *cachedHistoryReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
+	return hr.reader.ReadAccountCode(address)
+}
+
+func (hr *cachedHistoryReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
+	return hr.reader.ReadAccountCodeSize(address)
+}
+
+func (hr *cachedHistoryReaderV3) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
+	return 0, nil
 }

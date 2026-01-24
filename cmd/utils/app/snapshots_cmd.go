@@ -57,8 +57,10 @@ import (
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
@@ -281,6 +283,7 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&dryRunFlag,
 				&removeLocalFlag,
+				&preverifiedFlag,
 			},
 		},
 		{
@@ -433,7 +436,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "publishable",
 			Action: func(cliCtx *cli.Context) error {
-				if err := doPublishable(cliCtx); err != nil {
+				if err := doPublishable(cliCtx, nil); err != nil {
 					log.Error("[publishable]", "err", err)
 					return err
 				}
@@ -592,6 +595,7 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 
 func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelete, dryRun bool, stepRange string, domainNames ...string) error {
 	_maxFrom := uint64(0)
+	_maxTo := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
 	commitmentFilesWithState := make([]snaptype.FileInfo, 0)
 
@@ -661,12 +665,14 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 		files = append(files, res)
 		if removeLatest {
 			_maxFrom = max(_maxFrom, res.From)
+			_maxTo = max(_maxTo, res.To)
 		}
 	}
 
 	toRemove := make(map[string]snaptype.FileInfo)
 	if len(domainNames) > 0 {
 		_maxFrom = 0
+		_maxTo = 0
 		domainFiles := make([]snaptype.FileInfo, 0, len(files))
 		for _, domainName := range domainNames {
 			_, err := kv.String2InvertedIdx(domainName)
@@ -685,6 +691,7 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 				}
 				if removeLatest {
 					_maxFrom = max(_maxFrom, res.From)
+					_maxTo = max(_maxTo, res.To)
 				}
 				domainFiles = append(domainFiles, res)
 			}
@@ -734,7 +741,8 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 		}
 
 		if removeLatest {
-			q := fmt.Sprintf("remove latest snapshot files with stepFrom=%d?\n1) RemoveFile\n4) Exit\n (pick number): ", _maxFrom)
+			// domain files have higher merge limit, so latest domain may have From < stepFrom but To == stepTo
+			q := fmt.Sprintf("remove latest snapshot files (stepFrom>=%d) and files ending at stepTo=%d?\n1) RemoveFile\n4) Exit\n (pick number): ", _maxFrom, _maxTo)
 			if promptExit(q) {
 				os.Exit(0)
 			}
@@ -769,6 +777,8 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 
 		for _, res := range files {
 			if res.From >= minS && res.To <= maxS {
+				toRemove[res.Path] = res
+			} else if removeLatest && res.To == _maxTo {
 				toRemove[res.Path] = res
 			}
 		}
@@ -841,8 +851,8 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 	}
 	defer tx.Rollback()
 	reader, _ := br.IO()
-	txNumReader := reader.TxnumReader(ctx)
-	toTxNum, err := txNumReader.Min(tx, blockNum)
+	txNumReader := reader.TxnumReader()
+	toTxNum, err := txNumReader.Min(ctx, tx, blockNum)
 	if err != nil {
 		return err
 	}
@@ -1128,7 +1138,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		case integrity.Publishable:
-			if err := doPublishable(cliCtx); err != nil {
+			if err := doPublishable(cliCtx, chainDB); err != nil {
 				return err
 			}
 		case integrity.CommitmentRoot:
@@ -1377,7 +1387,29 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	return nil
 }
 
-func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
+func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error {
+	// Read feature flags from DB
+	if chainDB == nil {
+		chainDB = dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+		defer chainDB.Close()
+	}
+
+	var persistReceiptCache, commitmentHistory bool
+	if err := chainDB.View(context.Background(), func(tx kv.Tx) error {
+		var err error
+		persistReceiptCache, err = kvcfg.PersistReceipts.Enabled(tx)
+		if err != nil {
+			return fmt.Errorf("failed to read PersistReceipts config: %w", err)
+		}
+		commitmentHistory, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+		if err != nil {
+			return fmt.Errorf("failed to read CommitmentHistory config: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
 	var maxStepDomain uint64 // across all files in SnapDomain
 	var accFiles []snaptype.FileInfo
 
@@ -1536,14 +1568,23 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		prevFrom, prevTo = res.From, res.To
 	}
 
-	viTypes := []string{"accounts", "storage", "code", "rcache", "receipt"}
+	viTypes := []string{"accounts", "storage", "code", "receipt"}
+	iiTypes := []string{"accounts", "storage", "code", "receipt", "logtopics", "logaddrs", "tracesfrom", "tracesto"}
+	if persistReceiptCache {
+		viTypes = append(viTypes, "rcache")
+		iiTypes = append(iiTypes, "rcache")
+	}
+	if commitmentHistory {
+		viTypes = append(viTypes, "commitment")
+		iiTypes = append(iiTypes, "commitment")
+	}
 	for _, res := range accFiles {
 		accName, err := version.ReplaceVersionWithMask(res.Name())
 		if err != nil {
 			return fmt.Errorf("failed to replace version file %s: %w", res.Name(), err)
 		}
 		// do a range check over all snapshots types (sanitizes domain and history folder)
-		for _, snapType := range []string{"accounts", "storage", "code", "rcache", "receipt", "logtopics", "logaddrs", "tracesfrom", "tracesto"} {
+		for _, snapType := range iiTypes {
 			versioned, err := statecfg.Schema.GetVersioned(snapType)
 			if err != nil {
 				return err
@@ -1621,16 +1662,16 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 	if intervals[0].from != 0 {
 		return fmt.Errorf("gap at start: snapshots start at (%d-%d). snaptype: %s", intervals[0].from, intervals[0].to, snapType)
 	}
-	// Check that there are no gaps
-	for i := 1; i < len(intervals); i++ {
-		if intervals[i].from != intervals[i-1].to {
-			return fmt.Errorf("gap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
-		}
-	}
 	// Check that there are no overlaps
 	for i := 1; i < len(intervals); i++ {
 		if intervals[i].from < intervals[i-1].to {
 			return fmt.Errorf("overlap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
+		}
+	}
+	// Check that there are no gaps
+	for i := 1; i < len(intervals); i++ {
+		if intervals[i].from != intervals[i-1].to {
+			return fmt.Errorf("gap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
 		}
 	}
 
@@ -1638,14 +1679,14 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 
 }
 
-func doPublishable(cliCtx *cli.Context) error {
+func doPublishable(cliCtx *cli.Context, chainDB kv.RoDB) error {
 	dat := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	// Check block snapshots sanity
 	if err := checkIfBlockSnapshotsPublishable(dat.Snap); err != nil {
 		return err
 	}
 	// Iterate over all fies in dat.Snap
-	if err := checkIfStateSnapshotsPublishable(dat); err != nil {
+	if err := checkIfStateSnapshotsPublishable(dat, chainDB); err != nil {
 		return err
 	}
 	if err := checkIfCaplinSnapshotsPublishable(dat, true); err != nil {
@@ -1774,14 +1815,14 @@ func doBlkTxNum(cliCtx *cli.Context) error {
 	defer tx.Rollback()
 
 	reader, _ := br.IO()
-	txNumReader := reader.TxnumReader(ctx)
+	txNumReader := reader.TxnumReader()
 
 	if blkNumber >= 0 {
-		min, err := txNumReader.Min(tx, uint64(blkNumber))
+		min, err := txNumReader.Min(ctx, tx, uint64(blkNumber))
 		if err != nil {
 			return err
 		}
-		max, err := txNumReader.Max(tx, uint64(blkNumber))
+		max, err := txNumReader.Max(ctx, tx, uint64(blkNumber))
 		if err != nil {
 			return err
 		}
@@ -1790,7 +1831,7 @@ func doBlkTxNum(cliCtx *cli.Context) error {
 		maxStep := max / stepSize
 		logger.Info("out", "block", blkNumber, "min_txnum", min, "max_txnum", max, "min_step", minStep, "max_step", maxStep)
 	} else {
-		blk, ok, err := txNumReader.FindBlockNum(tx, uint64(txNum))
+		blk, ok, err := txNumReader.FindBlockNum(ctx, tx, uint64(txNum))
 		if err != nil {
 			return err
 		}
@@ -2105,7 +2146,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		ac := res.Aggregator.BeginFilesRo()
 		defer ac.Close()
 		stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-			histBlockNumProgress, _, err := blockReader.TxnumReader(ctx).FindBlockNum(tx, endTxNumMinimax)
+			histBlockNumProgress, _, err := blockReader.TxnumReader().FindBlockNum(ctx, tx, endTxNumMinimax)
 			return histBlockNumProgress, err
 		})
 		return nil
@@ -2545,11 +2586,11 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	txNumsReader := blockReader.TxnumReader(ctx)
+	txNumsReader := blockReader.TxnumReader()
 	var lastTxNum uint64
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)
-		lastTxNum, err = txNumsReader.Max(tx, execProgress)
+		lastTxNum, err = txNumsReader.Max(ctx, tx, execProgress)
 		if err != nil {
 			return err
 		}

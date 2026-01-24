@@ -43,18 +43,18 @@ import (
 // * action: the main function for the application. receives `*cli.Context` with parsed command-line flags.
 // * cliFlags: the list of flags `cli.Flag` that the app should set and parse. By default, use `DefaultFlags()`. If you want to specify your own flag, use `append(DefaultFlags(), myFlag)` for this parameter.
 func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
-	app := cli2.NewApp(version.GitCommit, "erigon")
+	app := cli2.NewApp("erigon")
 	app.Name = name
 	app.UsageText = app.Name + ` [command] [flags]`
 	app.Action = func(context *cli.Context) error {
 		// handle case: unknown sub-command
 		if context.Args().Present() {
-			var goodNames []string
+			goodNames := make([]string, 0, len(app.VisibleCommands()))
 			for _, c := range app.VisibleCommands() {
 				goodNames = append(goodNames, c.Name)
 			}
 			log.Error(fmt.Sprintf("Command '%s' not found. Available commands: %s", context.Args().First(), goodNames))
-			cli.ShowAppHelpAndExit(context, 1)
+			return cli.Exit("", 1) // Exit with error code but no additional output
 		}
 
 		// handle case: config flag

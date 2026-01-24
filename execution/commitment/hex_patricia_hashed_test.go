@@ -290,7 +290,12 @@ func Test_Trie_CorrectSwitchForConcurrentAndSequential(t *testing.T) {
 	toProcess2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	defer toProcess2.Close()
 
-	_, err = paratrie.Process(ctx, toProcess2, "", nil, WarmupConfig{})
+	wc := WarmupConfig{
+		CtxFactory: func() (PatriciaContext, func()) {
+			return ms, func() {}
+		},
+	}
+	_, err = paratrie.Process(ctx, toProcess2, "", nil, wc)
 	require.NoError(t, err)
 
 	canParallel, err = paratrie.CanDoConcurrentNext()
@@ -381,8 +386,12 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 			require.NoError(t, err)
 
 			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[3:], updates[3:])
-
-			rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
+			wc := WarmupConfig{
+				CtxFactory: func() (PatriciaContext, func()) {
+					return stateBatch, func() {}
+				},
+			}
+			rh, err := trieBatch.Process(ctx, updsTwo, "", nil, wc)
 			require.NoError(t, err)
 			t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -428,8 +437,12 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 			require.NoError(t, err)
 
 			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
-
-			rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
+			wc := WarmupConfig{
+				CtxFactory: func() (PatriciaContext, func()) {
+					return stateBatch, func() {}
+				},
+			}
+			rh, err := trieBatch.Process(ctx, updsTwo, "", nil, wc)
 			require.NoError(t, err)
 			t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -479,8 +492,12 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 			require.NoError(t, err)
 
 			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
-
-			rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
+			wc := WarmupConfig{
+				CtxFactory: func() (PatriciaContext, func()) {
+					return stateBatch, func() {}
+				},
+			}
+			rh, err := trieBatch.Process(ctx, updsTwo, "", nil, wc)
 			require.NoError(t, err)
 			t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -600,7 +617,12 @@ func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
 
 		updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
 
-		rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
+		wc := WarmupConfig{
+			CtxFactory: func() (PatriciaContext, func()) {
+				return stateBatch, func() {}
+			},
+		}
+		rh, err := trieBatch.Process(ctx, updsTwo, "", nil, wc)
 		require.NoError(t, err)
 		t.Logf("batch of %d root hash %x\n", len(updates), rh)
 
@@ -1539,9 +1561,13 @@ func Test_ParallelHexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMidd
 		stateBatch.SetConcurrentCommitment(true)
 		trieBatch := NewConcurrentPatriciaHashed(batch, stateBatch)
 		updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:somewhere+1], updates[:somewhere+1])
-
+		wc := WarmupConfig{
+			CtxFactory: func() (PatriciaContext, func()) {
+				return stateBatch, func() {}
+			},
+		}
 		trieBatch.SetTrace(false)
-		rh, err := trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
+		rh, err := trieBatch.Process(ctx, updsTwo, "", nil, wc)
 		require.NoError(t, err)
 		t.Logf("(first half) batch of %d root hash %x\n", somewhere, rh)
 		require.Equal(t, somewhereRoot, rh)
@@ -1549,7 +1575,7 @@ func Test_ParallelHexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMidd
 		// trieBatch.SetParticularTrace(true, 0x9)
 		WrapKeyUpdatesInto(t, updsTwo, plainKeys[somewhere+1:], updates[somewhere+1:])
 
-		rh, err = trieBatch.Process(ctx, updsTwo, "", nil, WarmupConfig{})
+		rh, err = trieBatch.Process(ctx, updsTwo, "", nil, wc)
 		require.NoError(t, err)
 
 		t.Logf("(second half) batch of %d root hash %x\n", len(updates)-somewhere, rh)

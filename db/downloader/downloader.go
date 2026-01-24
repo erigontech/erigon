@@ -333,11 +333,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downl
 
 	d.zeroActiveDownloadRequests.L = &d.activeDownloadRequestsLock
 
-	d.logTorrentClientParams()
-
-	if len(cfg.WebSeedUrls) == 0 {
-		d.log(log.LvlInfo, "downloader has no webseed urls configured")
-	}
+	d.logConfig()
 
 	requestHandler.downloader = d
 
@@ -583,7 +579,7 @@ func (d *Downloader) VerifyData(
 						d.log(log.LvlInfo, "Verify",
 							"progress", fmt.Sprintf("%.2f%%", 100*float64(completedBytes.Load())/float64(totalBytes)),
 							"files", fmt.Sprintf("%d/%d", completedFiles.Load(), len(toVerify)),
-							"sz_gb", downloadercfg.DefaultPieceSize*completedBytes.Load()/1024/1024/1024,
+							"sz_gib", completedBytes.Load()>>30,
 						)
 					}
 				}
@@ -972,7 +968,7 @@ func (d *Downloader) addedFirstDownloader(
 				d.log(log.LvlError, "error loading metainfo from disk", "err", err, "name", name)
 			}
 		} else {
-			d.log(log.LvlInfo, "error fetching metainfo from webseeds", "err", err, "name", name, "infohash", infoHash)
+			d.log(log.LvlWarn, "error fetching metainfo from webseeds", "err", err, "name", name, "infohash", infoHash)
 		}
 	}
 
@@ -1060,6 +1056,7 @@ func (d *Downloader) fetchMetainfoFromWebseeds(ctx context.Context, name string,
 		}
 		return os.WriteFile(d.metainfoFilePathForName(name), buf.Bytes(), 0o666)
 	}
+	err = fmt.Errorf("all webseed urls failed. last error: %w", err)
 	return
 }
 
@@ -1076,12 +1073,22 @@ func (d *Downloader) fetchMetainfoFromWebseed(
 	mi metainfo.MetaInfo,
 	err error,
 ) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, d.webseedMetainfoUrl(webseedUrlBase, name), nil)
+	url := d.webseedMetainfoUrl(webseedUrlBase, name)
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("fetching from %q: %w", url, err)
+		}
+	}()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return
 	}
 	resp, err := d.metainfoHttpClient.Do(req)
 	if err != nil {
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		err = fmt.Errorf("unexpected http response status code: %v", resp.StatusCode)
 		return
 	}
 	defer resp.Body.Close()
@@ -1092,7 +1099,9 @@ func (d *Downloader) fetchMetainfoFromWebseed(
 		err = fmt.Errorf("decoding metainfo response body: %w", err)
 		return
 	}
-	// Do we want dec.ReadEOF here?
+	// Do we want dec.ReadEOF here? Answer: Yes. If we get a response that replies incorrectly with
+	// valid bencoding and then more stuff we're doing the wrong thing.
+	err = dec.ReadEOF()
 	return
 }
 
@@ -1291,10 +1300,10 @@ func newTorrentClient(
 
 // Moved from EthConfig to be as close to torrent client init as possible. Logs important torrent
 // parameters.
-func (d *Downloader) logTorrentClientParams() {
+func (d *Downloader) logConfig() {
 	cfg := d.cfg.ClientConfig
 	d.log(log.LvlInfo,
-		"Torrent client params",
+		"Torrent config",
 		"ipv6-enabled", !cfg.DisableIPv6,
 		"ipv4-enabled", !cfg.DisableIPv4,
 		"download.rate", rateLimitString(torrent.EffectiveDownloadRateLimit(cfg.DownloadRateLimiter)),
@@ -1306,6 +1315,7 @@ func (d *Downloader) logTorrentClientParams() {
 			return "shared with p2p"
 		}(),
 		"upload.rate", rateLimitString(cfg.UploadRateLimiter.Limit()),
+		"webseed-urls", d.cfg.WebSeedUrls,
 	)
 }
 

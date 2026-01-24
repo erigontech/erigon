@@ -52,7 +52,6 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -550,7 +549,6 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 			case <-logEvery.C:
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
-				sendDiagnostics(startIndexingTime, ps.DiagnosticsData(), m.Alloc, m.Sys)
 				a.logger.Info("[snapshots] Indexing", "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			}
 		}
@@ -583,22 +581,6 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 		return err
 	}
 	return nil
-}
-
-func sendDiagnostics(startIndexingTime time.Time, indexPercent map[string]int, alloc uint64, sys uint64) {
-	segmentsStats := make([]diaglib.SnapshotSegmentIndexingStatistics, 0, len(indexPercent))
-	for k, v := range indexPercent {
-		segmentsStats = append(segmentsStats, diaglib.SnapshotSegmentIndexingStatistics{
-			SegmentName: k,
-			Percent:     v,
-			Alloc:       alloc,
-			Sys:         sys,
-		})
-	}
-	diaglib.Send(diaglib.SnapshotIndexingStatistics{
-		Segments:    segmentsStats,
-		TimeElapsed: time.Since(startIndexingTime).Round(time.Second).Seconds(),
-	})
 }
 
 type AggV3Collation struct {
@@ -778,7 +760,7 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 		return 0, 0, 0, true, nil
 	}
 	err = a.db.View(ctx, func(tx kv.Tx) error {
-		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(tx, lastTxNumOfStep(step, a.stepSize))
+		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, lastTxNumOfStep(step, a.stepSize))
 		if err != nil {
 			return err
 		}
@@ -1040,15 +1022,6 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	fullStat := newAggregatorPruneStat()
 
 	for {
-		if sptx, ok := tx.(kv.HasSpaceDirty); ok && !furiousPrune && !aggressivePrune {
-			spaceDirty, _, err := sptx.SpaceDirty()
-			if err != nil {
-				return false, err
-			}
-			if spaceDirty > uint64(statecfg.MaxNonFuriousDirtySpacePerTx) {
-				return false, nil
-			}
-		}
 		iterationStarted := time.Now()
 		// `context.Background()` is important here!
 		//     it allows keep DB consistent - prune all keys-related data or noting
@@ -1816,6 +1789,12 @@ func (at *AggregatorRoTx) RangeAsOf(ctx context.Context, tx kv.Tx, domain kv.Dom
 }
 func (at *AggregatorRoTx) DebugRangeLatest(tx kv.Tx, domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
 	return at.d[domain].DebugRangeLatest(tx, from, to, limit)
+}
+
+// DebugRangeLatestFromFiles iterates over keys in .kv snapshot files only,
+// ignoring keys in MDBX database.
+func (at *AggregatorRoTx) DebugRangeLatestFromFiles(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
+	return at.d[domain].DebugRangeLatestFromFiles(from, to, limit)
 }
 
 func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {

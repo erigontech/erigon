@@ -446,13 +446,13 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	}
 	if blockNrOrHash.BlockNumber.Uint64() < latestBlock {
 		// Get first txnum of blockNumber+1 to ensure that correct state root will be restored as of blockNumber has been executed
-		lastTxnInBlock, err := api._txNumReader.Min(tx, blockNrOrHash.BlockNumber.Uint64()+1)
+		lastTxnInBlock, err := api._txNumReader.Min(ctx, tx, blockNrOrHash.BlockNumber.Uint64()+1)
 		if err != nil {
 			return nil, err
 		}
 		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
 		if lastTxnInBlock < commitmentStartingTxNum {
-			return nil, state.PrunedError
+			return nil, fmt.Errorf("%w: commitment start: %d, last tx: %d", state.PrunedError, commitmentStartingTxNum, lastTxnInBlock)
 		}
 
 		sdCtx.SetHistoryStateReader(roTx, lastTxnInBlock)
@@ -548,7 +548,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		}
 
 		// prepare key path (keccak(address) | keccak(key))
-		var fullKey []byte
+		fullKey := make([]byte, 0, 64)
 		fullKey = append(fullKey, crypto.Keccak256(address.Bytes())...)
 		fullKey = append(fullKey, crypto.Keccak256(storageKey.Hash.Bytes())...)
 
@@ -695,6 +695,12 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	txBatch2 := membatchwithdb.NewMemoryBatch(roTx2, "", logger)
 	defer txBatch2.Rollback()
 
+	domains, err := execctx.NewSharedDomains(ctx, txBatch2, log.New())
+	if err != nil {
+		return nil, err
+	}
+	defer domains.Close()
+
 	// Prepare witness config
 	chainConfig, err := api.chainConfig(ctx, roTx2)
 	if err != nil {
@@ -702,8 +708,8 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	}
 
 	// Unwind to blockNr
-	cfg := stagedsync.StageWitnessCfg(true, 0, chainConfig, engine, api._blockReader, api.dirs)
-	err = stagedsync.RewindStagesForWitness(txBatch2, blockNr, latestBlock, &cfg, regenerateHash, ctx, logger)
+	cfg := stagedsync.StageWitnessCfg(chainConfig, engine, api._blockReader, api.dirs)
+	err = stagedsync.RewindStagesForWitness(domains, txBatch2, blockNr, latestBlock, &cfg, regenerateHash, ctx, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -713,12 +719,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, err
 	}
 
-	domains, err := execctx.NewSharedDomains(ctx, txBatch2, log.New())
-	if err != nil {
-		return nil, err
-	}
 	sdCtx := domains.GetCommitmentContext()
-
 	// execute block #blockNr ephemerally. This will use TrieStateWriter to record touches of accounts and storage keys.
 	_, err = protocol.ExecuteBlockEphemerally(chainConfig, &vm.Config{}, store.GetHashFn, engine, block, store.Tds, store.TrieStateWriter, store.ChainReader, nil, logger)
 	if err != nil {
@@ -844,7 +845,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		}
 		stateReader = rpchelper.CreateLatestCachedStateReader(cacheView, tx)
 	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(tx, blockNumber+1, 0, api._txNumReader)
+		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, blockNumber+1, 0, api._txNumReader)
 		if err != nil {
 			return nil, err
 		}

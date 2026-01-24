@@ -115,7 +115,6 @@ func NewHistoricalTraceWorker(
 		vmCfg:       &vm.Config{},
 	}
 	ie.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, *ie.vmCfg)
-	ie.taskGasPool.AddBlobGas(execArgs.ChainConfig.GetMaxBlobGasPerBlock(0))
 	ie.ibs = state.New(ie.stateReader)
 	return ie
 }
@@ -202,7 +201,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 	default:
 		tracer := calltracer.NewCallTracer(nil)
 		result.Err = func() error {
-			rw.taskGasPool.Reset(txTask.Tx().GetGasLimit(), cc.GetMaxBlobGasPerBlock(header.Time))
+			rw.taskGasPool.Reset(txTask.Tx().GetGasLimit(), txTask.Tx().GetBlobGas())
 			rw.vmCfg.Tracer = tracer.Tracer().Hooks
 			ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 			txn := txTask.Tx()
@@ -496,7 +495,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 					return ret, err
 				}
 
-				_, err := cfg.Engine.Finalize(cfg.ChainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, p.blockResult.Receipts, txTask.Withdrawals, chainReader, syscall, true /* skipReceiptsEval */, logger)
+				_, err := cfg.Engine.Finalize(cfg.ChainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, p.blockResult.Receipts, txTask.Withdrawals, chainReader, syscall, true /* skipReceiptsEval */, logger)
 				if err != nil {
 					result.Err = err
 				}
@@ -531,16 +530,16 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 	br := cfg.BlockReader
 	chainConfig := cfg.ChainConfig
 
-	txNumsReader := cfg.BlockReader.TxnumReader(ctx)
+	txNumsReader := cfg.BlockReader.TxnumReader()
 
-	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
+	fromTxNum, err := txNumsReader.Min(ctx, tx, fromBlock)
 	if err != nil {
 		return err
 	}
 	if toBlock > 0 {
 		toBlock-- // [fromBlock,toBlock)
 	}
-	toTxNum, err := txNumsReader.Max(tx, toBlock)
+	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
 	if err != nil {
 		return err
 	}
@@ -556,7 +555,7 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 	}
 
 	{
-		fromStep, toStep, err := BlkRangeToSteps(tx, fromBlock, toBlock, txNumsReader)
+		fromStep, toStep, err := BlkRangeToSteps(ctx, tx, fromBlock, toBlock, txNumsReader)
 		if err != nil {
 			return err
 		}
@@ -683,12 +682,12 @@ func BlockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader ser
 	}
 	return b, err
 }
-func BlkRangeToSteps(tx kv.TemporalTx, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
-	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
+func BlkRangeToSteps(ctx context.Context, tx kv.TemporalTx, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
+	fromTxNum, err := txNumsReader.Min(ctx, tx, fromBlock)
 	if err != nil {
 		return 0, 0, err
 	}
-	toTxNum, err := txNumsReader.Max(tx, toBlock)
+	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -697,11 +696,11 @@ func BlkRangeToSteps(tx kv.TemporalTx, fromBlock, toBlock uint64, txNumsReader r
 	return float64(fromTxNum) / float64(stepSize), float64(toTxNum) / float64(stepSize), nil
 }
 
-func BlkRangeToStepsOnDB(db kv.TemporalRoDB, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
-	tx, err := db.BeginTemporalRo(context.Background())
+func BlkRangeToStepsOnDB(ctx context.Context, db kv.TemporalRoDB, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
+	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return 0, 0, err
 	}
 	defer tx.Rollback()
-	return BlkRangeToSteps(tx, fromBlock, toBlock, txNumsReader)
+	return BlkRangeToSteps(ctx, tx, fromBlock, toBlock, txNumsReader)
 }

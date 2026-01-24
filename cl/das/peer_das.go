@@ -528,7 +528,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 
 	begin := time.Now()
 	defer func() {
-		slots := []uint64{}
+		slots := make([]uint64, 0, len(blocks))
 		for _, block := range blocks {
 			slots = append(slots, block.Block.Slot)
 		}
@@ -798,7 +798,7 @@ func initializeDownloadRequest(
 func (d *downloadRequest) remainingEntries() []downloadTableEntry {
 	d.tableMutex.RLock()
 	defer d.tableMutex.RUnlock()
-	remaining := []downloadTableEntry{}
+	remaining := make([]downloadTableEntry, 0, len(d.downloadTable))
 	for entry := range d.downloadTable {
 		remaining = append(remaining, entry)
 	}

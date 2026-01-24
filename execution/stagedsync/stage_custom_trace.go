@@ -116,7 +116,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	}
 
 	log.Info("[stage_custom_trace] start params", "produce", cfg.Produce)
-	txNumsReader := cfg.ExecArgs.BlockReader.TxnumReader(ctx)
+	txNumsReader := cfg.ExecArgs.BlockReader.TxnumReader()
 
 	//agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	//stepSize := agg.StepSize()
@@ -136,7 +136,7 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 
 		fromTxNum := progressOfDomains(tx, cfg.Produce)
 		var ok bool
-		startBlock, ok, err = txNumsReader.FindBlockNum(tx, fromTxNum)
+		startBlock, ok, err = txNumsReader.FindBlockNum(ctx, tx, fromTxNum)
 		if err != nil {
 			return fmt.Errorf("getting last executed block: %w", err)
 		}
@@ -193,12 +193,12 @@ Loop:
 		"rcache", tx.Debug().DomainProgress(kv.RCacheDomain))
 
 	if cfg.Produce.ReceiptDomain {
-		if err := integrity.ValidateDomainProgress(cfg.db, kv.ReceiptDomain, txNumsReader); err != nil {
+		if err := integrity.ValidateDomainProgress(ctx, cfg.db, kv.ReceiptDomain, txNumsReader); err != nil {
 			return err
 		}
 	}
 	if cfg.Produce.RCacheDomain {
-		if err := integrity.ValidateDomainProgress(cfg.db, kv.RCacheDomain, txNumsReader); err != nil {
+		if err := integrity.ValidateDomainProgress(ctx, cfg.db, kv.RCacheDomain, txNumsReader); err != nil {
 			return err
 		}
 	}
@@ -304,8 +304,8 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 
 	var cumulativeBlobGasUsedInBlock uint64
 
-	txNumsReader := cfg.BlockReader.TxnumReader(ctx)
-	fromTxNum, _ := txNumsReader.Min(tx, fromBlock)
+	txNumsReader := cfg.BlockReader.TxnumReader()
+	fromTxNum, _ := txNumsReader.Min(ctx, tx, fromBlock)
 	prevTxNumLog := fromTxNum
 
 	var m runtime.MemStats
