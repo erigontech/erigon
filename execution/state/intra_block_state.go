@@ -1541,7 +1541,7 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 				if err == nil {
 					fmt.Printf("%d (%d.%d) Reverting %x, revid: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, revid)
 				} else {
-					fmt.Printf("%d (%d.%d) Reverting %x, revid: %d: %s stack: %s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, revid, err, dbg.Stack())
+					fmt.Printf("%d (%d.%d) Reverting %x, revid: %d: %s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, revid, err)
 				}
 			}
 		}

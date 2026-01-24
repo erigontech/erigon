@@ -262,24 +262,25 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 }
 
 var (
-	gasCallEIP7702         = makeCallVariantGasCallEIP7702(statelessGasCall)
-	gasDelegateCallEIP7702 = makeCallVariantGasCallEIP7702(statelessGasDelegateCall)
-	gasStaticCallEIP7702   = makeCallVariantGasCallEIP7702(statelessGasStaticCall)
-	gasCallCodeEIP7702     = makeCallVariantGasCallEIP7702(statelessGasCallCode)
+	gasCallEIP7702         = makeCallVariantGasCallEIP7702(statelessGasCall, statefulGasCall)
+	gasDelegateCallEIP7702 = makeCallVariantGasCallEIP7702(statelessGasDelegateCall, statefulGasDelegateCall)
+	gasStaticCallEIP7702   = makeCallVariantGasCallEIP7702(statelessGasStaticCall, statefulGasStaticCall)
+	gasCallCodeEIP7702     = makeCallVariantGasCallEIP7702(statelessGasCallCode, statefulGasCallCode)
 )
 
-func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc) gasFunc {
+func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefulCalculator statefulGasFunc) gasFunc {
 	return func(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
 		addr := accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
 		// Check slot presence in the access list
-		var dynCost uint64
+		var gas uint64
+		var accessGas uint64
 		if !evm.intraBlockState.AddressInAccessList(addr) {
 			// The WarmStorageReadCostEIP2929 (100) is already deducted in the form of a constant cost, so
 			// the cost to charge for cold access, if any, is Cold - Warm
-			dynCost = params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
+			accessGas = params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
 			// Charge the remaining difference here already, to correctly calculate available
 			// gas for call
-			if _, ok := useGas(availableGas, dynCost, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
+			if availableGas < accessGas {
 				return 0, ErrOutOfGas
 			}
 
@@ -290,18 +291,28 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc) gasFunc
 		// - create new account
 		// - transfer value
 		// - memory expansion
-		// - 63/64ths rule
-		gas, err := statelessCalculator(evm, callContext, availableGas-dynCost, memorySize, false)
+		statelessBaseGas, transfersValue, err := statelessCalculator(evm, callContext, availableGas, memorySize, false)
 		if err != nil {
 			return 0, err
 		}
-
-		var overflow bool
-		if gas, overflow = math.SafeAdd(gas, dynCost); overflow {
+		if statelessGas, overflow := math.SafeAdd(statelessBaseGas, accessGas); overflow {
 			return 0, ErrGasUintOverflow
+		} else if availableGas < statelessGas {
+			return 0, ErrOutOfGas
 		}
 
-		if _, ok := useGas(availableGas, gas, evm.Config().Tracer, tracing.GasChangeDelegatedDesignation); !ok {
+		statefulBaseGas, err := statefulCalculator(evm, callContext, statelessBaseGas, availableGas-accessGas, transfersValue)
+		if err != nil {
+			return 0, err
+		}
+		var overflow bool
+		if gas, overflow = math.SafeAdd(gas, accessGas); overflow {
+			return 0, ErrGasUintOverflow
+		}
+		if gas, overflow = math.SafeAdd(gas, statefulBaseGas); overflow {
+			return 0, ErrGasUintOverflow
+		}
+		if availableGas < gas {
 			return 0, ErrOutOfGas
 		}
 
@@ -311,22 +322,39 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc) gasFunc
 			return 0, err
 		}
 
+		var delegationGas uint64
 		if ok {
 			if !evm.intraBlockState.AddressInAccessList(dd) {
-				gas += params.ColdAccountAccessCostEIP2929
+				delegationGas = params.ColdAccountAccessCostEIP2929
 			} else {
-				gas += params.WarmStorageReadCostEIP2929
+				delegationGas = params.WarmStorageReadCostEIP2929
 			}
-
 			evm.intraBlockState.GetCode(addr)
 
-			if _, ok := useGas(availableGas, gas, evm.Config().Tracer, tracing.GasChangeDelegatedDesignation); !ok {
+			if gas, overflow = math.SafeAdd(gas, delegationGas); overflow {
+				return 0, ErrGasUintOverflow
+			}
+			if availableGas < gas {
 				return 0, ErrOutOfGas
 			}
 
 			evm.intraBlockState.AddAddressToAccessList(dd)
 		}
 
-		return calcCallGas(evm, callContext, availableGas, gas)
+		// Call the old calculator, which takes into account
+		// - 63/64ths rule
+		callGas, err := calcCallGas(evm, callContext, availableGas-accessGas, statelessBaseGas)
+		if err != nil {
+			return 0, err
+		}
+
+		if gas, overflow = math.SafeAdd(gas, callGas); overflow {
+			return 0, ErrGasUintOverflow
+		}
+		if _, ok := useGas(availableGas, gas, evm.Config().Tracer, tracing.GasChangeCallOpCode); !ok {
+			return 0, ErrOutOfGas
+		}
+
+		return gas, nil
 	}
 }
