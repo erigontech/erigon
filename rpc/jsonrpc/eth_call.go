@@ -708,7 +708,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	}
 
 	// Unwind to blockNr
-	cfg := stagedsync.StageWitnessCfg(true, 0, chainConfig, engine, api._blockReader, api.dirs)
+	cfg := stagedsync.StageWitnessCfg(chainConfig, engine, api._blockReader, api.dirs)
 	err = stagedsync.RewindStagesForWitness(domains, txBatch2, blockNr, latestBlock, &cfg, regenerateHash, ctx, logger)
 	if err != nil {
 		return nil, err

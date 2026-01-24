@@ -31,17 +31,13 @@ import (
 )
 
 type FinishCfg struct {
-	db                kv.RwDB
-	tmpDir            string
 	forkValidator     *engine_helpers.ForkValidator
 	initialCycleStart *time.Time
 }
 
-func StageFinishCfg(db kv.RwDB, tmpDir string, forkValidator *engine_helpers.ForkValidator) FinishCfg {
+func StageFinishCfg(forkValidator *engine_helpers.ForkValidator) FinishCfg {
 	initialCycleStart := time.Now()
 	return FinishCfg{
-		db:                db,
-		tmpDir:            tmpDir,
 		forkValidator:     forkValidator,
 		initialCycleStart: &initialCycleStart,
 	}

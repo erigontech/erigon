@@ -31,7 +31,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/erigontech/secp256k1"
-	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -68,7 +67,6 @@ import (
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/eth"
@@ -81,7 +79,6 @@ import (
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -665,8 +662,8 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 			}
 
 			u := sync.NewUnwindState(stages.Bodies, s.BlockNumber-unwind, s.BlockNumber, true, false)
-			cfg := stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, chainConfig, br, bw)
-			if err := stagedsync.UnwindBodiesStage(u, tx, cfg, ctx); err != nil {
+			cfg := stagedsync.StageBodiesCfg(nil, nil, nil, nil, 0, chainConfig, br, bw)
+			if err := stagedsync.UnwindBodiesStage(u, tx, cfg); err != nil {
 				return err
 			}
 
@@ -752,7 +749,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 		return err
 	}
 
-	cfg := stagedsync.StageSendersCfg(db, chainConfig, sync.Cfg(), false, tmpdir, pm, br, nil)
+	cfg := stagedsync.StageSendersCfg(chainConfig, sync.Cfg(), false /* badBlockHalt */, tmpdir, pm, br, nil /* hd */)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber, true, false)
 		if err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
@@ -996,7 +993,6 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
 	_, _, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
-	chainConfig := fromdb.ChainConfig(db)
 	must(sync.SetCurrentStage(stages.TxLookup))
 	if reset {
 		return db.Update(ctx, rawdbreset.ResetTxLookup)
@@ -1014,7 +1010,7 @@ func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) e
 	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
 	br, _ := blocksIO(db, logger)
-	cfg := stagedsync.StageTxLookupCfg(db, pm, dirs.Tmp, chainConfig.Bor, br)
+	cfg := stagedsync.StageTxLookupCfg(pm, dirs.Tmp, br)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.TxLookup, s.BlockNumber-unwind, s.BlockNumber, true, false)
 		err = stagedsync.UnwindTxLookup(u, s, tx, cfg, ctx, logger)
@@ -1256,20 +1252,10 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 	if err != nil {
 		panic(err)
 	}
-
 	notifications := shards.NewNotifications(nil)
-
-	var signatures *lru.ARCCache[common.Hash, accounts.Address]
-
-	if bor, ok := engine.(*bor.Bor); ok {
-		signatures = bor.Signatures
-	}
 	blockRetire := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, heimdallStore, bridgeStore, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
-
-	stageList := stageloop.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil,
-		signatures, logger, nil)
+	stageList := stageloop.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil, nil)
 	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
-
 	return blockRetire, engine, vmConfig, sync
 }
 
