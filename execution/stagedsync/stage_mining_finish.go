@@ -30,7 +30,6 @@ import (
 )
 
 type MiningFinishCfg struct {
-	db                    kv.RwDB
 	chainConfig           *chain.Config
 	engine                rules.Engine
 	sealCancel            chan struct{}
@@ -40,7 +39,6 @@ type MiningFinishCfg struct {
 }
 
 func StageMiningFinishCfg(
-	db kv.RwDB,
 	chainConfig *chain.Config,
 	engine rules.Engine,
 	miningState MiningState,
@@ -49,7 +47,6 @@ func StageMiningFinishCfg(
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore,
 ) MiningFinishCfg {
 	return MiningFinishCfg{
-		db:                    db,
 		chainConfig:           chainConfig,
 		engine:                engine,
 		miningState:           miningState,
