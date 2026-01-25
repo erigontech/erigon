@@ -310,6 +310,9 @@ func (sd *SharedDomains) FlushHooks(ctx context.Context) error {
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
+	if err := sd.FlushHooks(ctx); err != nil {
+		return err
+	}
 	return sd.mem.Flush(ctx, tx)
 }
 
