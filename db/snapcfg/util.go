@@ -65,6 +65,7 @@ var registry = &preverifiedRegistry{
 		networkname.Gnosis:     fromEmbeddedToml(snapshothashes.Gnosis),
 		networkname.Chiado:     fromEmbeddedToml(snapshothashes.Chiado),
 		networkname.Hoodi:      fromEmbeddedToml(snapshothashes.Hoodi),
+		networkname.Bloatnet:   Preverified{}, // Empty - snapshots managed separately
 	},
 	cached: make(map[string]*Cfg),
 }
@@ -486,6 +487,7 @@ var KnownWebseeds = map[string][]string{
 	networkname.Gnosis:     webseedsParse(webseed.Gnosis),
 	networkname.Chiado:     webseedsParse(webseed.Chiado),
 	networkname.Hoodi:      webseedsParse(webseed.Hoodi),
+	networkname.Bloatnet:   {}, // Custom webseeds TBD
 }
 
 func webseedsParse(in []byte) (res []string) {
@@ -536,6 +538,7 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 		networkname.Gnosis:     webseedsParse(webseed.Gnosis),
 		networkname.Chiado:     webseedsParse(webseed.Chiado),
 		networkname.Hoodi:      webseedsParse(webseed.Hoodi),
+		networkname.Bloatnet:   {}, // Custom webseeds TBD
 	}
 
 	// Re-load the preverified hashes
@@ -547,6 +550,7 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 		networkname.Gnosis:     fromEmbeddedToml(snapshothashes.Gnosis),
 		networkname.Chiado:     fromEmbeddedToml(snapshothashes.Chiado),
 		networkname.Hoodi:      fromEmbeddedToml(snapshothashes.Hoodi),
+		networkname.Bloatnet:   Preverified{}, // Empty - snapshots managed separately
 	})
 	return
 }
