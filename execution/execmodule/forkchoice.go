@@ -584,7 +584,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		go func() {
 			defer e.semaphore.Release(1)
 			err := e.runPostForkchoice(currentContext, finishProgressBefore, isSynced, initialCycle)
-			if err != nil {
+			if err != nil && !errors.Is(err, context.Canceled) {
 				e.logger.Error("Error running background post forkchoice", "err", err)
 			}
 		}()
