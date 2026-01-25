@@ -24,11 +24,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/erigontech/erigon/common/dir"
-	"github.com/erigontech/erigon/common/length"
-
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 

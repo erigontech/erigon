@@ -230,7 +230,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 	if err = env.SetOption(mdbx.OptMaxReaders, kv.ReadersLimit); err != nil {
 		return nil, err
 	}
-	if err = env.SetOption(mdbx.OptRpAugmentLimit, 262144 /*10_000_000*/); err != nil { //default: 262144
+	if err = env.SetOption(mdbx.OptRpAugmentLimit, 10_000_000); err != nil { //default: 262144
 		return nil, err
 	}
 
@@ -1385,14 +1385,6 @@ func (c *MdbxCursor) Put(key []byte, value []byte) error {
 		return fmt.Errorf("label: %s, table: %s, err: %w", c.label, c.bucketName, err)
 	}
 	return nil
-}
-
-func (c *MdbxCursor) PutReserve(key []byte, valLen int) (v []byte, err error) {
-	v, err = c.c.PutReserve(key, valLen, 0)
-	if err != nil {
-		return nil, fmt.Errorf("label: %s, table: %s, err: %w", c.label, c.bucketName, err)
-	}
-	return v, nil
 }
 
 func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
