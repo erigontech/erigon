@@ -280,6 +280,8 @@ type Config struct {
 	FcuTimeout          time.Duration
 	FcuBackgroundPrune  bool
 	FcuBackgroundCommit bool
+
+	MCPAddress string
 }
 
 type Sync struct {
