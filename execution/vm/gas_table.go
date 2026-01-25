@@ -452,14 +452,14 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas uint64, m
 		return 0, false, err
 	}
 
-	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
-		fmt.Printf("%d (%d.%d) Call Gas: call: %d\n",
-			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), callGas)
-	}
-
 	gas, overflow = math.SafeAdd(gas, callGas)
 	if overflow {
 		return 0, false, ErrGasUintOverflow
+	}
+
+	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
+		fmt.Printf("%d (%d.%d) Call Gas: call: %d\n",
+			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gas)
 	}
 
 	return gas, transfersValue, nil
@@ -509,7 +509,18 @@ func statelessGasCallCode(evm *EVM, callContext *CallContext, availableGas uint6
 		return gas, false, nil
 	}
 
-	gas, err = calcCallGas(evm, callContext, availableGas, gas)
+	callGas, err := calcCallGas(evm, callContext, availableGas, gas)
+
+	gas, overflow = math.SafeAdd(gas, callGas)
+	if overflow {
+		return 0, false, ErrGasUintOverflow
+	}
+
+	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
+		fmt.Printf("%d (%d.%d) CallCode Gas: call: %d\n",
+			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gas)
+	}
+
 	return gas, false, err
 }
 
@@ -545,7 +556,18 @@ func statelessGasDelegateCall(evm *EVM, callContext *CallContext, availableGas u
 		return gas, false, nil
 	}
 
-	gas, err = calcCallGas(evm, callContext, availableGas, gas)
+	callGas, err := calcCallGas(evm, callContext, availableGas, gas)
+
+	var overflow bool
+	gas, overflow = math.SafeAdd(gas, callGas)
+	if overflow {
+		return 0, false, ErrGasUintOverflow
+	}
+
+	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
+		fmt.Printf("%d (%d.%d) DelegateCall Gas: call: %d\n",
+			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gas)
+	}
 	return gas, false, err
 }
 
@@ -573,7 +595,18 @@ func statelessGasStaticCall(evm *EVM, callContext *CallContext, availableGas uin
 		return gas, false, nil
 	}
 
-	gas, err = calcCallGas(evm, callContext, availableGas, gas)
+	callGas, err := calcCallGas(evm, callContext, availableGas, gas)
+
+	var overflow bool
+	gas, overflow = math.SafeAdd(gas, callGas)
+	if overflow {
+		return 0, false, ErrGasUintOverflow
+	}
+
+	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
+		fmt.Printf("%d (%d.%d) StaticCall Gas: call: %d\n",
+			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gas)
+	}
 	return gas, false, err
 }
 
