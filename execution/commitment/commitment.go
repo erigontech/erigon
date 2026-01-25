@@ -28,6 +28,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/google/btree"
@@ -412,6 +413,10 @@ func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
 	if numWorkers <= 1 {
 		numWorkers = 1
 	}
+	start := time.Now()
+	defer func() {
+		log.Debug("ApplyDeferredUpdatesParallel completed", "updates", len(be.deferred), "took", time.Since(start))
+	}()
 
 	// Pipeline: workers encode in parallel, results sent to channel, main goroutine writes sequentially
 	type result struct {
