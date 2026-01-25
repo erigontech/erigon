@@ -243,7 +243,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 			return nil
 		}
 
-		if canPutReserve {
+		if canPutReserve && !isDupSort {
 			toV, err := cTyped.PutReserve(k, len(v))
 			copy(toV, v)
 			if err != nil {
