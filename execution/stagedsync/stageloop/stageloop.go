@@ -184,7 +184,6 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 			}
 		}
 
-		doms.CollectDeferredFlushJobs()
 		if err := doms.Flush(ctx, tx); err != nil {
 			return err
 		}
@@ -197,10 +196,6 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		}
 	}
 
-	doms.CollectDeferredFlushJobs()
-	if err := doms.Flush(ctx, tx); err != nil {
-		return err
-	}
 	doms.ClearRam(true)
 
 	if err := tx.Commit(); err != nil {
