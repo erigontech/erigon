@@ -221,11 +221,12 @@ func ExecV3(ctx context.Context,
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
 	isChainTip := maxBlockNum == startBlockNum
-	// Do it only for chain-tip blocks!
-	doms.EnableWarmupCache(isChainTip)
+	recentReorg := rawdb.ReadRecentReorg(applyTx)
+	// Do it only for chain-tip blocks and when no recent reorg
+	doms.EnableWarmupCache(isChainTip && !recentReorg)
 	postValidator := newBlockPostExecutionValidator()
 	doms.SetDeferredHooker(nil)
-	if isChainTip {
+	if isChainTip && !recentReorg {
 		postValidator = newParallelBlockPostExecutionValidator()
 		// Only defer branch updates in fork validation mode (engine API flow)
 		// where MergeExtendingFork will flush the hooks

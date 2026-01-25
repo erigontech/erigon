@@ -412,6 +412,10 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if validationError != nil {
 		validationReceipt.ValidationError = validationError.Error()
 	}
+	// Clear recent reorg flag on successful validation
+	if validationStatus == executionproto.ExecutionStatus_Success {
+		rawdb.WriteRecentReorg(tx, false)
+	}
 	return validationReceipt, tx.Commit()
 }
 
