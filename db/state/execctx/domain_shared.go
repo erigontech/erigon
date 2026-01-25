@@ -299,6 +299,7 @@ func (sd *SharedDomains) Close() {
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
 
+	log.Debug("processing flush hooks", "count", len(sd.flushHooks))
 	// Execute flush hooks in registration order before final flush
 	for _, hook := range sd.flushHooks {
 		if err := hook(ctx, tx); err != nil {
@@ -315,6 +316,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 // Use closures to capture references (e.g., BranchEncoder for deferred updates).
 func (sd *SharedDomains) AddFlushHook(hook func(ctx context.Context, tx kv.RwTx) error) {
 	sd.flushHooks = append(sd.flushHooks, hook)
+	log.Debug("added flush hook", "len", len(sd.flushHooks))
 }
 
 // clearFlushHooks removes all registered flush hooks without executing them.
