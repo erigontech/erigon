@@ -141,21 +141,21 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 }
 
 // FlushExtendingFork flush the current extending fork if fcu chooses its head hash as the its forkchoice.
-func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts) error {
+func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts) error {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	start := time.Now()
 
 	// Flush changes to db.
 	if fv.sharedDom != nil {
-		fv.sharedDom.FlushHooks(ctx)
+		fv.sharedDom.FlushHooks(ctx, tx)
 		sd.Merge(fv.sharedDom)
 		_, err := sd.ComputeCommitment(ctx, tx, true, sd.BlockNum(), sd.TxNum(), "flush-commitment", nil)
 		if err != nil {
 			return err
 		}
 	}
-	sd.FlushHooks(ctx)
+	sd.FlushHooks(ctx, tx)
 	timings, _ := fv.timingsCache.Get(fv.extendingForkHeadHash)
 	timings[BlockTimingsFlushExtendingFork] = time.Since(start)
 	fv.timingsCache.Add(fv.extendingForkHeadHash, timings)

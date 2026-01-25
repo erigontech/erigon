@@ -58,7 +58,7 @@ type keccakState interface {
 // DeferredHooker is an interface for adding deferred flush hooks.
 // SharedDomains implements this interface.
 type DeferredHooker interface {
-	AddFlushHook(func(context.Context) error)
+	AddFlushHook(func(context.Context, kv.TemporalRwTx) error)
 }
 
 // HexPatriciaHashed implements commitment based on patricia merkle tree with radix 16,
@@ -2647,8 +2647,11 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	if hph.deferredHooker != nil {
 		// Capture references for deferred execution
 		be := hph.branchEncoder
-		putBranch := hph.ctx.PutBranch
-		hph.deferredHooker.AddFlushHook(func(context.Context) error {
+		txNum := hph.ctx.TxNum()
+		hph.deferredHooker.AddFlushHook(func(_ context.Context, tx kv.TemporalRwTx) error {
+			putBranch := func(prefix, data, prevData []byte, prevStep kv.Step) error {
+				return tx.DomainPut(kv.CommitmentDomain, prefix, data, txNum, prevData, prevStep)
+			}
 			if err := be.ApplyDeferredUpdatesParallel(runtime.NumCPU(), putBranch); err != nil {
 				return fmt.Errorf("apply deferred updates: %w", err)
 			}
