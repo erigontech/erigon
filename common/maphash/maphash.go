@@ -23,97 +23,91 @@ func Hash(key []byte) uint64 {
 	return maphash.Bytes(seed, key)
 }
 
-// Map is a thread-safe map that uses maphash to hash []byte keys.
+// Map is a non-thread-safe map that uses maphash to hash []byte keys.
 type Map[V any] struct {
-	m  map[uint64]V
-	mu sync.RWMutex
+	m sync.Map
 }
 
 // NewMap creates a new Map.
 func NewMap[V any]() *Map[V] {
-	return &Map[V]{
-		m: make(map[uint64]V),
-	}
+	return &Map[V]{}
 }
 
 // Get retrieves a value by key.
 func (m *Map[V]) Get(key []byte) (V, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
 	h := Hash(key)
-	e, ok := m.m[h]
-	return e, ok
+	v, ok := m.m.Load(h)
+	if !ok {
+		var zero V
+		return zero, false
+	}
+	return v.(V), ok
 }
 
 // Set stores a value with the given key.
 func (m *Map[V]) Set(key []byte, value V) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	h := Hash(key)
-	m.m[h] = value
+	m.m.Store(h, value)
 }
 
 // Delete removes a key from the map.
 func (m *Map[V]) Delete(key []byte) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	h := Hash(key)
-	delete(m.m, h)
+	m.m.Delete(h)
 }
 
 // Len returns the number of entries in the map.
 func (m *Map[V]) Len() int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return len(m.m)
+	count := 0
+	m.m.Range(func(_, _ any) bool {
+		count++
+		return true
+	})
+	return count
 }
 
 // Clear removes all entries from the map.
 func (m *Map[V]) Clear() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	clear(m.m)
+	m.m.Clear()
 }
 
-// UnsafeMap is a non-thread-safe map that uses maphash to hash []byte keys.
+// NonConcurrentMap is a non-thread-safe map that uses maphash to hash []byte keys.
 // Use this when you don't need concurrent access for better performance.
-type UnsafeMap[V any] struct {
+type NonConcurrentMap[V any] struct {
 	m map[uint64]V
 }
 
-// NewUnsafeMap creates a new UnsafeMap.
-func NewUnsafeMap[V any]() *UnsafeMap[V] {
-	return &UnsafeMap[V]{
-		m: make(map[uint64]V),
-	}
+// NewNonConcurrentMap creates a new NonConcurrentMap.
+func NewNonConcurrentMap[V any]() *NonConcurrentMap[V] {
+	return &NonConcurrentMap[V]{m: make(map[uint64]V)}
 }
 
 // Get retrieves a value by key.
-func (m *UnsafeMap[V]) Get(key []byte) (V, bool) {
+func (m *NonConcurrentMap[V]) Get(key []byte) (V, bool) {
 	h := Hash(key)
-	e, ok := m.m[h]
-	return e, ok
+	v, ok := m.m[h]
+	return v, ok
 }
 
 // Set stores a value with the given key.
-func (m *UnsafeMap[V]) Set(key []byte, value V) {
+func (m *NonConcurrentMap[V]) Set(key []byte, value V) {
 	h := Hash(key)
 	m.m[h] = value
 }
 
 // Delete removes a key from the map.
-func (m *UnsafeMap[V]) Delete(key []byte) {
+func (m *NonConcurrentMap[V]) Delete(key []byte) {
 	h := Hash(key)
 	delete(m.m, h)
 }
 
 // Len returns the number of entries in the map.
-func (m *UnsafeMap[V]) Len() int {
+func (m *NonConcurrentMap[V]) Len() int {
 	return len(m.m)
 }
 
 // Clear removes all entries from the map.
-func (m *UnsafeMap[V]) Clear() {
+func (m *NonConcurrentMap[V]) Clear() {
 	clear(m.m)
 }
 

@@ -320,7 +320,7 @@ type BranchEncoder struct {
 	// Deferred updates support
 	deferUpdates    bool
 	deferred        []*DeferredBranchUpdate
-	pendingPrefixes *maphash.UnsafeMap[struct{}] // tracks pending prefixes to detect duplicates
+	pendingPrefixes *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -339,7 +339,7 @@ func (be *BranchEncoder) SetDeferUpdates(defer_ bool) {
 			be.deferred = make([]*DeferredBranchUpdate, 0, 64)
 		}
 		if be.pendingPrefixes == nil {
-			be.pendingPrefixes = maphash.NewUnsafeMap[struct{}]()
+			be.pendingPrefixes = maphash.NewNonConcurrentMap[struct{}]()
 		}
 	}
 }
