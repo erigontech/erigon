@@ -156,7 +156,6 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, sd *execctx.Sha
 			return err
 		}
 	}
-	sd.FlushHooks(ctx, sd.NewDomainPutter(tx))
 	timings, _ := fv.timingsCache.Get(fv.extendingForkHeadHash)
 	timings[BlockTimingsFlushExtendingFork] = time.Since(start)
 	fv.timingsCache.Add(fv.extendingForkHeadHash, timings)
