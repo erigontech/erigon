@@ -582,8 +582,20 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		be.ClearDeferred()
 	}
 
-	prev, prevStep, err := ctx.Branch(prefix)
+	// try to get previous data from cache
+	var (
+		prev         []byte
+		prevStep     kv.Step
+		foundInCache bool
+		err          error
+	)
 
+	if be.cache != nil {
+		prev, prevStep, foundInCache = be.cache.GetAndEvictBranch(prefix)
+	}
+	if !foundInCache {
+		prev, prevStep, err = ctx.Branch(prefix)
+	}
 	if err != nil {
 		return err
 	}
