@@ -338,15 +338,16 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 	return api._blockReader.Header(ctx, tx, hash, *number)
 }
 
-// verify if History state is present or pruned at specific blockNumber
+// Verify whether the state history is present or pruned at a specific block number
 func (api *BaseAPI) checkPruneStateHistory(ctx context.Context, tx kv.TemporalTx, block_number uint64) error {
-	maxTxNum, err := api._txNumReader.Max(ctx, tx, block_number)
+	minTxNum, err := api._txNumReader.Min(ctx, tx, block_number)
 	if err != nil {
 		return err
 	}
 
-	if minTxNum := state.StateHistoryStartTxNum(tx); maxTxNum < minTxNum {
-		return fmt.Errorf("%w: from tx: %d, min tx: %d", state.PrunedError, maxTxNum, minTxNum)
+	if lastAvailTxNum := state.StateHistoryStartTxNum(tx); minTxNum < lastAvailTxNum {
+		bn, _, _ := api._txNumReader.FindBlockNum(ctx, tx, lastAvailTxNum)
+		return fmt.Errorf("%w: min block tx: %d, avail tx: %d last state history bn: %d", state.PrunedError, minTxNum, lastAvailTxNum, bn)
 	}
 	return nil
 }
