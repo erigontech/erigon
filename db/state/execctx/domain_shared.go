@@ -299,10 +299,6 @@ func (sd *SharedDomains) Close() {
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
 
-	// Execute deferred flush jobs from commitment context
-	for _, job := range sd.sdCtx.TakeDeferredFlushJobs() {
-		sd.flushHooks = append(sd.flushHooks, job)
-	}
 	// Execute flush hooks in registration order before final flush
 	for _, hook := range sd.flushHooks {
 		if err := hook(ctx, tx); err != nil {
@@ -572,7 +568,7 @@ func (sd *SharedDomains) EnableWarmupCache(enable bool) {
 	sd.sdCtx.EnableWarmupCache(enable)
 }
 
-// SetDeferToFlush enables deferring heavy trie work to flush time.
-func (sd *SharedDomains) SetDeferToFlush(enable bool) {
-	sd.sdCtx.SetDeferToFlush(enable)
+// SetDeferredHooker sets the deferred hooker for adding flush hooks directly.
+func (sd *SharedDomains) SetDeferredHooker(hooker commitment.DeferredHooker) {
+	sd.sdCtx.SetDeferredHooker(hooker)
 }

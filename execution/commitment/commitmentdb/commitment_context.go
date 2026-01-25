@@ -215,19 +215,11 @@ func (sdc *SharedDomainsCommitmentContext) EnableWarmupCache(enable bool) {
 	sdc.patriciaTrie.EnableWarmupCache(enable)
 }
 
-// SetDeferToFlush enables deferring heavy work (ApplyDeferredUpdatesParallel) to flush time.
-func (sdc *SharedDomainsCommitmentContext) SetDeferToFlush(enable bool) {
+// SetDeferredHooker sets the deferred hooker for adding flush hooks directly.
+func (sdc *SharedDomainsCommitmentContext) SetDeferredHooker(hooker commitment.DeferredHooker) {
 	if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok {
-		hph.SetDeferToFlush(enable)
+		hph.SetDeferredHooker(hooker)
 	}
-}
-
-// TakeDeferredFlushJobs returns and clears deferred flush jobs from the trie.
-func (sdc *SharedDomainsCommitmentContext) TakeDeferredFlushJobs() []func(context.Context, kv.RwTx) error {
-	if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok {
-		return hph.TakeDeferredFlushJobs()
-	}
-	return nil
 }
 
 func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix string) {
