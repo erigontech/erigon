@@ -292,7 +292,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		} else {
 			dirtySpace = estimate.TotalMemory() / 42 // it's default of mdbx, but our package also supports cgroups and GOMEMLIMIT
 			// clamp to max size
-			const dirtySpaceMaxChainDB = uint64(1 * datasize.GB)
+			const dirtySpaceMaxChainDB = uint64(1 * datasize.GB / 4)
 			const dirtySpaceMaxDefault = uint64(64 * datasize.MB)
 
 			if opts.label == dbcfg.ChainDB && dirtySpace > dirtySpaceMaxChainDB {
