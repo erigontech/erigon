@@ -109,7 +109,14 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 	}
 	if label == dbcfg.ChainDB {
 		opts = opts.RemoveFlags(mdbx.NoReadahead) // enable readahead for chaindata by default. Erigon3 require fast updates and prune. Also it's chaindata is small (doesen GB)
+		if dbg.MdbxNoSync {
+			opts = opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.SafeNoSync })
+		}
+		if dbg.MdbxNoSyncUnsafe {
+			opts = opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.UtterlyNoSync | mdbx.NoMetaSync })
+		}
 	}
+
 	return opts
 }
 
@@ -411,7 +418,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	}
 	db.path = opts.path
-	if dbg.MdbxLockInRam() && opts.label == dbcfg.ChainDB {
+	if dbg.MdbxLockInRam && opts.label == dbcfg.ChainDB {
 		log.Info("[dbg] locking db in mem", "label", opts.label)
 		if err := db.View(ctx, func(tx kv.Tx) error { return tx.(*MdbxTx).LockDBInRam() }); err != nil {
 			return nil, err
