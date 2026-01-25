@@ -31,8 +31,9 @@ import (
 )
 
 func init() {
-	// this matches go-freelru sharding
-	cmap.SHARD_COUNT = runtime.GOMAXPROCS(0) * 16
+	if maxprocs := runtime.GOMAXPROCS(0); maxprocs > cmap.SHARD_COUNT {
+		cmap.SHARD_COUNT = maxprocs
+	}
 }
 
 type iodir int
