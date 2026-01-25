@@ -220,16 +220,17 @@ func ExecV3(ctx context.Context,
 
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
+	isChainTip := maxBlockNum == startBlockNum
 	// Do it only for chain-tip blocks!
-	doms.EnableWarmupCache(maxBlockNum == startBlockNum)
+	doms.EnableWarmupCache(isChainTip)
 	postValidator := newBlockPostExecutionValidator()
-	if maxBlockNum == startBlockNum {
-		doms.SetDeferredHooker(doms)
+	if isChainTip {
 		postValidator = newParallelBlockPostExecutionValidator()
+		doms.SetDeferredHooker(doms)
 	} else {
 		doms.SetDeferredHooker(nil)
 	}
-
+	defer doms.SetDeferredHooker(nil)
 	if parallel {
 		pe := &parallelExecutor{
 			txExecutor: txExecutor{
