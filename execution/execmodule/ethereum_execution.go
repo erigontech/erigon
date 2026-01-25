@@ -366,6 +366,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return nil, err
 	}
 	defer tx.Rollback()
+
 	doms, err := execctx.NewSharedDomains(ctx, tx, e.logger)
 	if err != nil {
 		return nil, err

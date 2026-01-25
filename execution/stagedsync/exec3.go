@@ -218,6 +218,11 @@ func ExecV3(ctx context.Context,
 	var lastCommittedTxNum uint64
 	var lastCommittedBlockNum uint64
 
+	doms.EnableParaTrieDB(cfg.db)
+	doms.EnableTrieWarmup(true)
+	// Do it only for chain-tip blocks!
+	doms.EnableWarmupCache(maxBlockNum == startBlockNum)
+	log.Debug("Warmup Cache", "enabled", maxBlockNum == startBlockNum)
 	postValidator := newBlockPostExecutionValidator()
 	if maxBlockNum == startBlockNum {
 		postValidator = newParallelBlockPostExecutionValidator()
@@ -244,8 +249,6 @@ func ExecV3(ctx context.Context,
 			},
 			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
-		pe.doms.EnableParaTrieDB(cfg.db)
-		pe.doms.EnableTrieWarmup(true)
 
 		defer func() {
 			pe.LogComplete(stepsInDb)
@@ -277,8 +280,6 @@ func ExecV3(ctx context.Context,
 				lastCommittedBlockNum: blockNum,
 				postValidator:         postValidator,
 			}}
-		se.doms.EnableParaTrieDB(cfg.db)
-		se.doms.EnableTrieWarmup(true)
 
 		defer func() {
 			se.LogComplete(stepsInDb)
@@ -789,9 +790,6 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
 
-	// Use warmup to pre-fetch branch data in parallel before computing commitment
-	doms.EnableParaTrieDB(cfg.db)
-	doms.EnableTrieWarmup(true)
 	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix(), nil)
 
 	times.ComputeCommitment = time.Since(start)
