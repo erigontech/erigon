@@ -71,7 +71,22 @@ type accHolder interface {
 
 // FlushHook is a function that executes before the final mem.Flush.
 // Hooks can capture references (e.g., BranchEncoder) via closures.
-type FlushHook func(ctx context.Context, tx kv.TemporalRwTx) error
+type FlushHook func(ctx context.Context, dp commitment.DomainPutter) error
+
+// domainPutterWrapper wraps SharedDomains and a TemporalTx to implement commitment.DomainPutter.
+type domainPutterWrapper struct {
+	sd *SharedDomains
+	tx kv.TemporalTx
+}
+
+func (w *domainPutterWrapper) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+	return w.sd.DomainPut(domain, w.tx, k, v, txNum, prevVal, prevStep)
+}
+
+// NewDomainPutter creates a commitment.DomainPutter that wraps SharedDomains and a TemporalTx.
+func (sd *SharedDomains) NewDomainPutter(tx kv.TemporalTx) commitment.DomainPutter {
+	return &domainPutterWrapper{sd: sd, tx: tx}
+}
 
 type SharedDomains struct {
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext
@@ -297,13 +312,13 @@ func (sd *SharedDomains) Close() {
 }
 
 // FlushHooks executes all registered flush hooks in registration order and clears them.
-func (sd *SharedDomains) FlushHooks(ctx context.Context, tx kv.TemporalRwTx) error {
+func (sd *SharedDomains) FlushHooks(ctx context.Context, dp commitment.DomainPutter) error {
 	if len(sd.flushHooks) == 0 {
 		return nil
 	}
 	log.Debug("processing flush hooks", "count", len(sd.flushHooks))
 	for _, hook := range sd.flushHooks {
-		if err := hook(ctx, tx); err != nil {
+		if err := hook(ctx, dp); err != nil {
 			return err
 		}
 	}
@@ -319,7 +334,7 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 // AddFlushHook registers a hook to be executed before mem.Flush.
 // Hooks run in registration order and are cleared after each Flush call.
 // Use closures to capture references (e.g., BranchEncoder for deferred updates).
-func (sd *SharedDomains) AddFlushHook(hook func(context.Context, kv.TemporalRwTx) error) {
+func (sd *SharedDomains) AddFlushHook(hook func(context.Context, commitment.DomainPutter) error) {
 	sd.flushHooks = append(sd.flushHooks, hook)
 	log.Debug("added flush hook", "len", len(sd.flushHooks))
 }
