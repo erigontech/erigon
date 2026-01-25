@@ -224,11 +224,14 @@ func ExecV3(ctx context.Context,
 	// Do it only for chain-tip blocks!
 	doms.EnableWarmupCache(isChainTip)
 	postValidator := newBlockPostExecutionValidator()
+	doms.SetDeferredHooker(nil)
 	if isChainTip {
 		postValidator = newParallelBlockPostExecutionValidator()
-		doms.SetDeferredHooker(doms)
-	} else {
-		doms.SetDeferredHooker(nil)
+		// Only defer branch updates in fork validation mode (engine API flow)
+		// where MergeExtendingFork will flush the hooks
+		if isForkValidation {
+			doms.SetDeferredHooker(doms)
+		}
 	}
 	defer doms.SetDeferredHooker(nil)
 	if parallel {
