@@ -222,7 +222,7 @@ func ExecV3(ctx context.Context,
 	doms.EnableTrieWarmup(true)
 	// Do it only for chain-tip blocks!
 	doms.EnableWarmupCache(maxBlockNum == startBlockNum)
-	log.Debug("Warmup Cache", "enabled", maxBlockNum == startBlockNum)
+	doms.SetDeferToFlush(maxBlockNum == startBlockNum)
 	postValidator := newBlockPostExecutionValidator()
 	if maxBlockNum == startBlockNum {
 		postValidator = newParallelBlockPostExecutionValidator()
