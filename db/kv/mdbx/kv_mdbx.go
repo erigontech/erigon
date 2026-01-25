@@ -286,7 +286,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		if pageSize == 0 {
 			pageSize = DefaultPageSize()
 		}
-		var dirtySpace uint64
+		var dirtySpace uint64 // MDBX_DIRTY_SPACE_MB
 		if opts.dirtySpace > 0 {
 			dirtySpace = opts.dirtySpace
 		} else {
@@ -1385,6 +1385,14 @@ func (c *MdbxCursor) Put(key []byte, value []byte) error {
 		return fmt.Errorf("label: %s, table: %s, err: %w", c.label, c.bucketName, err)
 	}
 	return nil
+}
+
+func (c *MdbxCursor) PutReserve(key []byte, valLen int) (v []byte, err error) {
+	v, err = c.c.PutReserve(key, valLen, 0)
+	if err != nil {
+		return nil, fmt.Errorf("label: %s, table: %s, err: %w", c.label, c.bucketName, err)
+	}
+	return v, nil
 }
 
 func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
