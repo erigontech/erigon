@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datastruct/fusefilter"
 )
@@ -203,7 +204,7 @@ func OpenFilter(filePath string, useFuse bool) (idx *Filter, err error) {
 		return idx, nil
 	}
 	filter := new(bloomfilter.Filter)
-	_, err = filter.UnmarshalFromReaderNoVerify(bufio.NewReaderSize(f, 1*1024*1024))
+	_, err = filter.UnmarshalFromReaderNoVerify(bufio.NewReaderSize(f, length.BufIOSize))
 	if err != nil {
 		return nil, fmt.Errorf("OpenFilter: %w, %s", err, fileName)
 	}
