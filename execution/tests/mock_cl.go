@@ -160,7 +160,7 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 	// get the newly built block
 	newPayload, err := retryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, []error{&engine_helpers.UnknownPayloadErr},
 		func() (*enginetypes.GetPayloadResponse, enginetypes.EngineStatus, error) {
-			r, err := cl.engineApiClient.GetPayloadV5(ctx, *fcuRes.PayloadId)
+			r, err := cl.engineApiClient.GetPayloadV6(ctx, *fcuRes.PayloadId)
 			if err != nil {
 				return nil, "", err
 			}
@@ -179,7 +179,7 @@ func (cl *MockCl) InsertNewPayload(ctx context.Context, p *MockClPayload) (*engi
 	clParentBlockRoot := p.ParentBeaconBlockRoot
 	return retryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
 		func() (*enginetypes.PayloadStatus, enginetypes.EngineStatus, error) {
-			r, err := cl.engineApiClient.NewPayloadV4(ctx, elPayload, []common.Hash{}, clParentBlockRoot, []hexutil.Bytes{})
+			r, err := cl.engineApiClient.NewPayloadV5(ctx, elPayload, []common.Hash{}, clParentBlockRoot, []hexutil.Bytes{})
 			if err != nil {
 				return nil, "", err
 			}
