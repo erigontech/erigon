@@ -300,7 +300,10 @@ func (ii *InvertedIndex) Close() {
 	if ii == nil {
 		return
 	}
-	ii.closeWhatNotInList([]string{})
+	if ii.dirtyFiles != nil {
+		ii.closeWhatNotInList([]string{})
+		ii.dirtyFiles = nil
+	}
 }
 
 // DisableFsync - just for tests

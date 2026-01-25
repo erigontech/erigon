@@ -293,8 +293,8 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 
 	t.Run("prune was in progress", func(t *testing.T) {
 		collation, err := ii.collate(context.Background(), 0, tx)
-		defer collation.Close()
 		require.NoError(t, err)
+		defer collation.Close()
 		sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
 		defer sf.CleanupOnError()
 		txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
