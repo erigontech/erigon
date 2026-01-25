@@ -99,6 +99,11 @@ type HexPatriciaHashed struct {
 	cache             *WarmupCache
 	enableWarmupCache bool // if true, enables warmup cache during Process (false by default)
 
+	// Jobs deferred to flush time. When deferToFlush is true, ApplyDeferredUpdatesParallel
+	// is added here instead of being called inline. Caller retrieves via TakeDeferredFlushJobs().
+	deferToFlush         bool
+	deferredFlushJobs    []func(context.Context, kv.RwTx) error
+
 	//processing metrics
 	metrics       *Metrics
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
@@ -2634,10 +2639,23 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	}
 
 	// Apply deferred branch updates in parallel (EncodeBranch runs concurrently)
-	if err = hph.branchEncoder.ApplyDeferredUpdatesParallel(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
-		return nil, fmt.Errorf("apply deferred updates: %w", err)
+	if hph.deferToFlush {
+		// Capture references for deferred execution
+		be := hph.branchEncoder
+		putBranch := hph.ctx.PutBranch
+		hph.deferredFlushJobs = append(hph.deferredFlushJobs, func(context.Context, kv.RwTx) error {
+			if err := be.ApplyDeferredUpdatesParallel(runtime.NumCPU(), putBranch); err != nil {
+				return fmt.Errorf("apply deferred updates: %w", err)
+			}
+			be.ClearDeferred()
+			return nil
+		})
+	} else {
+		if err = hph.branchEncoder.ApplyDeferredUpdatesParallel(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
+			return nil, fmt.Errorf("apply deferred updates: %w", err)
+		}
+		hph.branchEncoder.ClearDeferred()
 	}
-	hph.branchEncoder.ClearDeferred()
 
 	hph.metrics.CollectFileDepthStats(hph.hadToLoadL)
 	if dbg.KVReadLevelledMetrics {
@@ -2678,6 +2696,19 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 func (hph *HexPatriciaHashed) SetTrace(trace bool)           { hph.trace = trace }
 func (hph *HexPatriciaHashed) SetTraceDomain(trace bool)     { hph.traceDomain = trace }
 func (hph *HexPatriciaHashed) EnableWarmupCache(enable bool) { hph.enableWarmupCache = enable }
+
+// SetDeferToFlush enables deferring heavy work (ApplyDeferredUpdatesParallel) to flush time.
+// When enabled, jobs are collected via TakeDeferredFlushJobs() instead of running inline.
+func (hph *HexPatriciaHashed) SetDeferToFlush(enable bool) { hph.deferToFlush = enable }
+
+// TakeDeferredFlushJobs returns and clears the deferred flush jobs.
+// Caller is responsible for executing these jobs at flush time.
+func (hph *HexPatriciaHashed) TakeDeferredFlushJobs() []func(context.Context, kv.RwTx) error {
+	jobs := hph.deferredFlushJobs
+	hph.deferredFlushJobs = nil
+	return jobs
+}
+
 func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
 	capture := hph.capture
 	if truncate {
