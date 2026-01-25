@@ -418,7 +418,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	}
 	db.path = opts.path
-	if dbg.MdbxLockInRam() && opts.label == dbcfg.ChainDB {
+	if dbg.MdbxLockInRam && opts.label == dbcfg.ChainDB {
 		log.Info("[dbg] locking db in mem", "label", opts.label)
 		if err := db.View(ctx, func(tx kv.Tx) error { return tx.(*MdbxTx).LockDBInRam() }); err != nil {
 			return nil, err
