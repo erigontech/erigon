@@ -26,12 +26,14 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 )
 
 func TestEngineApiGeneratedPayloadIncludesBlockAccessList(t *testing.T) {
+	dbg.Exec3Parallel = true
 	eat := DefaultEngineApiTester(t)
 	receiver := common.HexToAddress("0x333")
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat EngineApiTester) {
