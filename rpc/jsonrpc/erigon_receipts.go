@@ -123,7 +123,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		return nil, fmt.Errorf("end (%d) > MaxUint32", end)
 	}
 
-	return api.getLogsV3(ctx, tx, begin, end, crit)
+	return api.getLogsV3(ctx, tx, begin, end, crit, api.BaseAPI.rangeLimit)
 }
 
 // GetLatestLogs implements erigon_getLatestLogs.

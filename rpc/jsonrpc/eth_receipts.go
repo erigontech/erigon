@@ -42,14 +42,17 @@ import (
 
 var (
 	errInvalidBlockRange    = "invalid block range params"
+	errExceedBlockRange     = "exceed maximum block range"
 	errBlockRangeIntoFuture = "block range extends beyond current head block"
 	errBlockHashWithRange   = "can't specify fromBlock/toBlock with blockHash"
 	errExceedMaxTopics      = "exceed max topics"
+	errExceedLogQueryLimit  = "exceed max addresses or topics per search position"
 )
 
 const (
 	// The maximum number of topic criteria allowed, vm.LOG4 - vm.LOG0
-	maxTopics = 4
+	maxTopics     = 4
+	logQueryLimit = 1000
 )
 
 // getReceipts - checking in-mem cache, or else fallback to db, or else fallback to re-exec of block to re-gen receipts
@@ -91,6 +94,15 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 
 	if len(crit.Topics) > maxTopics {
 		return nil, &rpc.CustomError{Message: errExceedMaxTopics, Code: rpc.ErrCodeInvalidParams}
+	}
+
+	if len(crit.Addresses) > logQueryLimit {
+		return nil, &rpc.CustomError{Message: errExceedLogQueryLimit, Code: rpc.ErrCodeInvalidParams}
+	}
+	for _, topics := range crit.Topics {
+		if len(topics) > logQueryLimit {
+			return nil, &rpc.CustomError{Message: errExceedLogQueryLimit, Code: rpc.ErrCodeInvalidParams}
+		}
 	}
 
 	if crit.BlockHash != nil {
@@ -176,7 +188,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, fmt.Errorf("requested block range [%d, %d] is beyond latest executed block %d (node is still syncing)", begin, end, latestExecuted)
 	}
 
-	erigonLogs, err := api.getLogsV3(ctx, tx, begin, end, crit)
+	erigonLogs, err := api.getLogsV3(ctx, tx, begin, end, crit, api.BaseAPI.rangeLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -267,8 +279,13 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 	return out, nil
 }
 
-func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.ErigonLog, error) {
+func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, rangeLimit int) ([]*types.ErigonLog, error) {
 	logs := []*types.ErigonLog{} //nolint
+
+	fmt.Println("getLogsV3::RangeLimit: ", rangeLimit)
+	if rangeLimit != 0 && (end-begin) > uint64(rangeLimit) {
+		return nil, fmt.Errorf("%s: %d", errExceedBlockRange, rangeLimit)
+	}
 
 	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
 	for _, v := range crit.Addresses {
