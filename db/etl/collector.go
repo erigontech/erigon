@@ -165,10 +165,6 @@ func (c *Collector) Flush() error {
 	return nil
 }
 
-type CanPutReserve interface {
-	PutReserve(key []byte, valLen int) (v []byte, err error)
-}
-
 func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args TransformArgs) error {
 	if c.buf == nil && c.allocator != nil {
 		c.buf = c.allocator.Get()
@@ -200,8 +196,6 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 			return errLast
 		}
 	}
-
-	cTyped, canPutReserve := cursor.(CanPutReserve)
 
 	var canUseAppend bool
 	isDupSort := kv.ChaindataTablesCfg[bucket].Flags&kv.DupSort != 0 && !kv.ChaindataTablesCfg[bucket].AutoDupSortKeysConversion
@@ -242,19 +236,9 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 
 			return nil
 		}
-
-		if canPutReserve && !isDupSort {
-			toV, err := cTyped.PutReserve(k, len(v))
-			copy(toV, v)
-			if err != nil {
-				return fmt.Errorf("%s: put: k=%x, %w", c.logPrefix, k, err)
-			}
-		} else {
-			if err := cursor.Put(k, v); err != nil {
-				return fmt.Errorf("%s: put: k=%x, %w", c.logPrefix, k, err)
-			}
+		if err := cursor.Put(k, v); err != nil {
+			return fmt.Errorf("%s: put: k=%x, %w", c.logPrefix, k, err)
 		}
-
 		return nil
 	}
 
