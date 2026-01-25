@@ -111,7 +111,7 @@ type HexPatriciaHashed struct {
 	cache             *WarmupCache
 	enableWarmupCache bool // if true, enables warmup cache during Process (false by default)
 
-	// When deferredHooker is set, ApplyDeferredUpdatesParallel is added as a flush hook
+	// When deferredHooker is set, ApplyDeferredUpdates is added as a flush hook
 	// instead of being called inline.
 	deferredHooker DeferredHooker
 
@@ -1689,7 +1689,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]byte, kv.Step, error) {
 	be := hph.branchEncoder
 	if be.DeferUpdatesEnabled() && be.HasPendingPrefix(prefix) {
-		if err := be.ApplyDeferredUpdatesParallel(16, hph.ctx.PutBranch); err != nil {
+		if err := be.ApplyDeferredUpdates(16, hph.ctx.PutBranch); err != nil {
 			return nil, 0, err
 		}
 		be.ClearDeferred()
@@ -2658,14 +2658,14 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 			putBranch := func(prefix, data, prevData []byte, prevStep kv.Step) error {
 				return dp.DomainPut(kv.CommitmentDomain, prefix, data, txNum, prevData, prevStep)
 			}
-			if err := be.ApplyDeferredUpdatesParallel(runtime.NumCPU(), putBranch); err != nil {
+			if err := be.ApplyDeferredUpdates(runtime.NumCPU(), putBranch); err != nil {
 				return fmt.Errorf("apply deferred updates: %w", err)
 			}
 			be.ClearDeferred()
 			return nil
 		})
 	} else {
-		if err = hph.branchEncoder.ApplyDeferredUpdatesParallel(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
+		if err = hph.branchEncoder.ApplyDeferredUpdates(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
 			return nil, fmt.Errorf("apply deferred updates: %w", err)
 		}
 		hph.branchEncoder.ClearDeferred()
@@ -2712,7 +2712,7 @@ func (hph *HexPatriciaHashed) SetTraceDomain(trace bool)     { hph.traceDomain =
 func (hph *HexPatriciaHashed) EnableWarmupCache(enable bool) { hph.enableWarmupCache = enable }
 
 // SetDeferredHooker sets the deferred hooker for adding flush hooks.
-// When set, ApplyDeferredUpdatesParallel is added as a flush hook instead of running inline.
+// When set, ApplyDeferredUpdates is added as a flush hook instead of running inline.
 func (hph *HexPatriciaHashed) SetDeferredHooker(hooker DeferredHooker) { hph.deferredHooker = hooker }
 
 func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {

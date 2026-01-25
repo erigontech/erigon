@@ -403,15 +403,15 @@ func encodeDeferredUpdate(
 	return nil
 }
 
-// ApplyDeferredUpdatesParallel computes cell hashes and encodes branch updates in parallel, then writes them.
+// ApplyDeferredUpdates computes cell hashes and encodes branch updates in parallel, then writes them.
 // The putBranch function must be thread-safe for concurrent writes.
-func (be *BranchEncoder) ApplyDeferredUpdatesParallel(
+func (be *BranchEncoder) ApplyDeferredUpdates(
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error,
 ) error {
 	start := time.Now()
 	defer func() {
-		log.Debug("ApplyDeferredUpdatesParallel completed", "updates", len(be.deferred), "took", time.Since(start))
+		log.Debug("ApplyDeferredUpdates completed", "updates", len(be.deferred), "took", time.Since(start))
 	}()
 	if len(be.deferred) == 0 {
 		return nil
@@ -576,7 +576,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	}
 
 	if needsFlush {
-		if err := be.ApplyDeferredUpdatesParallel(16, ctx.PutBranch); err != nil {
+		if err := be.ApplyDeferredUpdates(16, ctx.PutBranch); err != nil {
 			return err
 		}
 		be.ClearDeferred()
