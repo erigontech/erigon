@@ -61,6 +61,10 @@ type StateWriter interface {
 	DeleteAccount(address accounts.Address, original *accounts.Account) error
 	WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error
 	CreateContract(address accounts.Address) error
+
+	SetTrace(trace bool, tracePrefix string)
+	Trace() bool
+	TracePrefix() string
 }
 
 type NoopWriter struct {
@@ -114,6 +118,10 @@ func (nw *NoopWriter) CreateContract(address accounts.Address) error {
 	}
 	return nil
 }
+
+func (nw *NoopWriter) SetTrace(trace bool, _ string) { nw.trace = trace }
+func (*NoopWriter) Trace() bool                      { return false }
+func (*NoopWriter) TracePrefix() string              { return "" }
 
 type NoopReader struct {
 }

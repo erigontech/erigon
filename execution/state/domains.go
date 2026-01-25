@@ -144,7 +144,7 @@ type DomainMetricsSnapshot struct {
 
 func (dm *DomainMetrics) Snapshot() *DomainMetricsSnapshot {
 	dm.RLock()
-	defer dm.Unlock()
+	defer dm.RUnlock()
 	snapshot := DomainMetricsSnapshot{
 		DomainIOMetricsSnapshot: dm.DomainIOMetrics.Snapshot(),
 		Domains:                 map[kv.Domain]*DomainIOMetricsSnapshot{},
@@ -1097,8 +1097,12 @@ func (sd *StorageDomain) HasStorage(ctx context.Context, addr accounts.Address, 
 }
 
 func (sd *StorageDomain) IterateStorage(ctx context.Context, addr accounts.Address, it func(k accounts.StorageKey, v uint256.Int, step kv.Step) (cont bool, err error), roTx kv.Tx) error {
-	addrVal := addr.Value()
-	return sd.mem.IteratePrefix(kv.StorageDomain, addrVal[:], sd.slotIterator(addr), roTx, func(k []byte, v []byte, step kv.Step) (cont bool, err error) {
+	var addrVal []byte
+	if !addr.IsNil() {
+		value := addr.Value()
+		addrVal = value[:]
+	}
+	return sd.mem.IteratePrefix(kv.StorageDomain, addrVal, sd.slotIterator(addr), roTx, func(k []byte, v []byte, step kv.Step) (cont bool, err error) {
 		var i uint256.Int
 		i.SetBytes(v)
 		return it(accounts.BytesToKey(k), i, step)

@@ -30,7 +30,6 @@ import (
 	"unsafe"
 
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/execution/types/accounts"
 
 	"github.com/erigontech/erigon/common"
 )
@@ -275,19 +274,12 @@ func (d *DomainDiff) Len() int {
 }
 
 // RecordDelta records a state change.
-func (d *DomainDiff) DomainUpdate(domain Domain, k []byte, step Step, prevValue []byte, prevStep Step) {
+func (d *DomainDiff) DomainUpdate(k []byte, step Step, prevValue []byte, prevStep Step) {
 	if d.keys == nil {
 		d.keys = make(map[string][]byte, 16)
 		d.prevValues = make(map[string][]byte, 16)
 		d.prevStepBuf = make([]byte, 8)
 		d.currentStepBuf = make([]byte, 8)
-	}
-
-	if domain == AccountsDomain {
-		acc := accounts.Account{}
-		if err := accounts.DeserialiseV3(&acc, prevValue); err != nil {
-			panic(err)
-		}
 	}
 
 	binary.BigEndian.PutUint64(d.prevStepBuf, ^uint64(prevStep))

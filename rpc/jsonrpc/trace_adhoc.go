@@ -690,8 +690,16 @@ func (ot *OeTracer) Stop(err error) {}
 
 // Implements execution/state/StateWriter to provide state diffs
 type StateDiff struct {
-	sdMap map[accounts.Address]*StateDiffAccount
+	sdMap       map[accounts.Address]*StateDiffAccount
+	trace       bool
+	tracePrefix string
 }
+
+func (w *StateDiff) SetTrace(trace bool, tracePrefix string) {
+	w.trace, w.tracePrefix = trace, tracePrefix
+}
+func (w *StateDiff) Trace() bool         { return w.trace }
+func (w *StateDiff) TracePrefix() string { return w.tracePrefix }
 
 func (sd *StateDiff) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	if _, ok := sd.sdMap[address]; !ok {

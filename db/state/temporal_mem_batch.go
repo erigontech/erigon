@@ -97,9 +97,9 @@ func (sd *TemporalMemBatch) DomainDel(domain kv.Domain, k []byte, txNum uint64, 
 
 func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
 	if len(v) == 0 {
-		return sd.domainWriters[domain].DeleteWithPrev(domain, k, txNum, preval, prevStep)
+		return sd.domainWriters[domain].DeleteWithPrev(k, txNum, preval, prevStep)
 	}
-	return sd.domainWriters[domain].PutWithPrev(domain, k, v, txNum, preval, prevStep)
+	return sd.domainWriters[domain].PutWithPrev(k, v, txNum, preval, prevStep)
 }
 
 func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {

@@ -379,7 +379,7 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, mem iter.Seq2[stri
 	var err error
 
 	if mem != nil {
-		next, stop := iter.Pull2[string, []kv.DataWithTxNum](mem)
+		next, stop := iter.Pull2(mem)
 		heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), step: 0, iter: memIter{next, stop}, endTxNum: math.MaxUint64, reverse: true})
 	}
 
