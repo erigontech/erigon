@@ -23,9 +23,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path/filepath"
-	"runtime"
-	"runtime/debug"
 	"testing"
 	"time"
 
@@ -72,17 +69,17 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 		ii.Close()
 		db.Close()
 
-		if runtime.GOOS == "windows" {
-			runtime.GC()
-			debug.FreeOSMemory()
-		}
-
-		accFile := filepath.Join(dirs.SnapAccessors, "v1.0-inv.0-1.efi")
-		err := os.Remove(accFile)
-		tb.Log("remove accessor file after Close:", err, accFile)
-		idxFile := filepath.Join(dirs.SnapIdx, "v1.0-inv.0-1.ef")
-		err = os.Remove(idxFile)
-		tb.Log("remove idx file after Close:", err, idxFile)
+		//if runtime.GOOS == "windows" {
+		//	runtime.GC()
+		//	debug.FreeOSMemory()
+		//}
+		//
+		//accFile := filepath.Join(dirs.SnapAccessors, "v1.0-inv.0-1.efi")
+		//err := os.Remove(accFile)
+		//tb.Log("remove accessor file after Close:", err, accFile)
+		//idxFile := filepath.Join(dirs.SnapIdx, "v1.0-inv.0-1.ef")
+		//err = os.Remove(idxFile)
+		//tb.Log("remove idx file after Close:", err, idxFile)
 	})
 	ii.salt.Store(&salt)
 	ii.DisableFsync()
@@ -296,8 +293,10 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 
 	t.Run("prune was in progress", func(t *testing.T) {
 		collation, err := ii.collate(context.Background(), 0, tx)
+		defer collation.Close()
 		require.NoError(t, err)
 		sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
+		defer sf.CleanupOnError()
 		txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
 		ii.integrateDirtyFiles(sf, txFrom, txTo)
 
@@ -326,7 +325,9 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 	t.Run("prune was done", func(t *testing.T) {
 		collation, err := ii.collate(context.Background(), 0, tx)
 		require.NoError(t, err)
+		defer collation.Close()
 		sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
+		defer sf.CleanupOnError()
 		txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
 		ii.integrateDirtyFiles(sf, txFrom, txTo)
 
