@@ -158,6 +158,12 @@ func (p *ConcurrentPatriciaHashed) SetTraceDomain(b bool) {
 		p.mounts[i].SetTraceDomain(b)
 	}
 }
+func (p *ConcurrentPatriciaHashed) EnableWarmupCache(b bool) {
+	p.root.EnableWarmupCache(b)
+	for i := range p.mounts {
+		p.mounts[i].EnableWarmupCache(b)
+	}
+}
 func (p *ConcurrentPatriciaHashed) GetCapture(truncate bool) []string {
 	capture := p.root.GetCapture(truncate)
 	if truncate {

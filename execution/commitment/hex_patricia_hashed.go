@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -93,6 +94,10 @@ type HexPatriciaHashed struct {
 	memoizationOff bool // if true, do not rely on memoized hashes
 	//temp buffers
 	accValBuf rlp.RlpEncodedBytes
+
+	// Warmup cache for serving reads from pre-warmed data
+	cache             *WarmupCache
+	enableWarmupCache bool // if true, enables warmup cache during Process (false by default)
 
 	//processing metrics
 	metrics       *Metrics
@@ -897,7 +902,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 		} else {
 			if !cell.loaded.storage() {
 				hph.metrics.StorageLoad(cell.storageAddr[:cell.storageAddrLen])
-				update, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
+				update, err := hph.storageFromCacheOrDB(cell.storageAddr[:cell.storageAddrLen])
 				if err != nil {
 					return nil, storageRootHashIsSet, nil, err
 				}
@@ -983,7 +988,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
 			hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
-			update, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
+			update, err := hph.accountFromCacheOrDB(cell.accountAddr[:cell.accountAddrLen])
 			if err != nil {
 				return nil, storageRootHashIsSet, storageRootHash[:], err
 			}
@@ -1071,7 +1076,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			cell.hashedExtension[64-hashedKeyOffset] = terminatorHexByte // Add terminator
 			if !cell.loaded.storage() {
 				return nil, fmt.Errorf("storage %x was not loaded as expected: cell %v", cell.storageAddr[:cell.storageAddrLen], cell.String())
-				// update, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
+				// update, err := hph.storageFromCacheOrDB(cell.storageAddr[:cell.storageAddrLen])
 				// if err != nil {
 				// 	return nil, err
 				// }
@@ -1137,7 +1142,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 			}
 			// storage root update or extension update could invalidate older stateHash, so we need to reload state
 			hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
-			update, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
+			update, err := hph.accountFromCacheOrDB(cell.accountAddr[:cell.accountAddrLen])
 			if err != nil {
 				return nil, err
 			}
@@ -1294,7 +1299,7 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, depth int16, has
 	if err != nil {
 		return nil, err
 	}
-	accountUpdate, err := hph.ctx.Account(c.accountAddr[:c.accountAddrLen])
+	accountUpdate, err := hph.accountFromCacheOrDB(c.accountAddr[:c.accountAddrLen])
 	if err != nil {
 		return nil, err
 	}
@@ -1388,7 +1393,7 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, depth int16, has
 // 			}
 // 			fullNode.Children[i] = accNode
 // 		} else if c.storageAddrLen > 0 { // storage node
-// 			storageUpdate, err := hph.ctx.Storage(c.storageAddr[:c.storageAddrLen])
+// 			storageUpdate, err := hph.storageFromCacheOrDB(c.storageAddr[:c.storageAddrLen])
 // 			if err != nil {
 // 				return nil, err
 // 			}
@@ -1422,7 +1427,7 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, depth int16, has
 // 				return nil, err
 // 			}
 // 		} else if c.storageAddrLen > 0 { // Storage Value
-// 			storageUpdate, err := hph.ctx.Storage(c.storageAddr[:c.storageAddrLen])
+// 			storageUpdate, err := hph.storageFromCacheOrDB(c.storageAddr[:c.storageAddrLen])
 // 			if err != nil {
 // 				return nil, err
 // 			}
@@ -1520,7 +1525,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				nextNode = &trie.ShortNode{Key: extensionKey} // Value will be in the next iteration
 				if keyPos+1 == int16(len(hashedKey)) || keyPos+1 == 64 {
 					if cellToExpand.storageAddrLen > 0 && !depthAdjusted {
-						storageUpdate, err := hph.ctx.Storage(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
+						storageUpdate, err := hph.storageFromCacheOrDB(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
 						if err != nil {
 							return nil, err
 						}
@@ -1548,7 +1553,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				}
 			}
 		} else if cellToExpand.storageAddrLen > 0 { // storage cell
-			storageUpdate, err := hph.ctx.Storage(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
+			storageUpdate, err := hph.storageFromCacheOrDB(cellToExpand.storageAddr[:cellToExpand.storageAddrLen])
 			if err != nil {
 				return nil, err
 			}
@@ -1665,7 +1670,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 
 // readBranchAndCheckForFlushing reads a branch from ctx, flushing deferred updates first if the prefix is pending.
 // This ensures we read fresh data when a prefix has been modified but not yet written.
-func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]byte, uint64, error) {
+func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]byte, kv.Step, error) {
 	be := hph.branchEncoder
 	if be.DeferUpdatesEnabled() && be.HasPendingPrefix(prefix) {
 		if err := be.ApplyDeferredUpdatesParallel(16, hph.ctx.PutBranch); err != nil {
@@ -1673,8 +1678,7 @@ func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]by
 		}
 		be.ClearDeferred()
 	}
-	branchData, step, err := hph.ctx.Branch(prefix)
-	return branchData, uint64(step), err
+	return hph.branchFromCacheOrDB(prefix)
 }
 
 // unfoldBranchNode returns true if unfolding has been done
@@ -1705,7 +1709,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 	if len(branchData) == 0 {
 		log.Warn("got empty branch data during unfold", "key", hex.EncodeToString(key), "row", row, "depth", depth, "deleted", deleted)
 		if hph.trace {
-			branchData, _, _ = hph.ctx.Branch(key)
+			branchData, _, _ = hph.branchFromCacheOrDB(key)
 			fmt.Printf("unfoldBranchNode prefix '%x', nibbles [%x] depth %d row %d '%x' %s\n", key, hph.currentKey[:hph.currentKeyLen], depth, row, branchData, BranchData(branchData).String())
 		}
 		return fmt.Errorf("empty branch data read during unfold, compact prefix %x nibbles %x", key, hph.currentKey[:hph.currentKeyLen])
@@ -2003,6 +2007,9 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
+			if hph.cache != nil {
+				hph.cache.EvictBranch(updateKey)
+			}
 		}
 		hph.activeRows--
 		if upDepth > 0 {
@@ -2086,7 +2093,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			if cell.stateHashLen == 0 { // load state if needed
 				if !cell.loaded.account() && cell.accountAddrLen > 0 {
 					hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
-					upd, err := hph.ctx.Account(cell.accountAddr[:cell.accountAddrLen])
+					upd, err := hph.accountFromCacheOrDB(cell.accountAddr[:cell.accountAddrLen])
 					if err != nil {
 						return err
 					}
@@ -2097,7 +2104,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				}
 				if !cell.loaded.storage() && cell.storageAddrLen > 0 {
 					hph.metrics.StorageLoad(cell.storageAddr[:cell.storageAddrLen])
-					upd, err := hph.ctx.Storage(cell.storageAddr[:cell.storageAddrLen])
+					upd, err := hph.storageFromCacheOrDB(cell.storageAddr[:cell.storageAddrLen])
 					if err != nil {
 						return err
 					}
@@ -2331,13 +2338,13 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 		// Update the cell
 		if int16(len(plainKey)) == hph.accountKeyLen {
 			hph.metrics.AccountLoad(plainKey)
-			stateUpdate, err = hph.ctx.Account(plainKey)
+			stateUpdate, err = hph.accountFromCacheOrDB(plainKey)
 			if err != nil {
 				return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
 			}
 		} else {
 			hph.metrics.StorageLoad(plainKey)
-			stateUpdate, err = hph.ctx.Storage(plainKey)
+			stateUpdate, err = hph.storageFromCacheOrDB(plainKey)
 			if err != nil {
 				return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
 			}
@@ -2425,7 +2432,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 
 		var update *Update
 		if int16(len(plainKey)) == hph.accountKeyLen { // account
-			update, err = hph.ctx.Account(plainKey)
+			update, err = hph.accountFromCacheOrDB(plainKey)
 			if err != nil {
 				return fmt.Errorf("account with plainkey=%x not found: %w", plainKey, err)
 			}
@@ -2434,7 +2441,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 				fmt.Printf("account with plainKey=%x, addrHash=%x FOUND = %v\n", plainKey, addrHash, update)
 			}
 		} else {
-			update, err = hph.ctx.Storage(plainKey)
+			update, err = hph.storageFromCacheOrDB(plainKey)
 			if err != nil {
 				return fmt.Errorf("storage with plainkey=%x not found: %w", plainKey, err)
 			}
@@ -2524,9 +2531,23 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	// Setup warmup if configured
 	var warmuper *Warmuper
 	if warmup.Enabled {
+		warmup.EnableWarmupCache = hph.enableWarmupCache
 		warmuper = NewWarmuper(ctx, warmup)
 		warmuper.Start()
 		defer warmuper.Close()
+		fmt.Println("Warmup enabled:", warmup.EnableWarmupCache)
+		// Set cache on trie if warmup cache is enabled
+		if warmup.EnableWarmupCache {
+			hph.cache = warmuper.Cache()
+			hph.branchEncoder.SetCache(hph.cache)
+			defer func() {
+				hph.cache = nil
+				hph.branchEncoder.SetCache(nil)
+			}()
+		} else {
+			hph.cache = nil
+			hph.branchEncoder.SetCache(nil)
+		}
 	}
 
 	err = updates.HashSort(ctx, warmuper, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
@@ -2552,12 +2573,12 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 			if update == nil {
 				if int16(len(plainKey)) == hph.accountKeyLen {
-					update, err = hph.ctx.Account(plainKey)
+					update, err = hph.accountFromCacheOrDB(plainKey)
 					if err != nil {
 						return fmt.Errorf("GetAccount for key %x failed: %w", plainKey, err)
 					}
 				} else {
-					update, err = hph.ctx.Storage(plainKey)
+					update, err = hph.storageFromCacheOrDB(plainKey)
 					if err != nil {
 						return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
 					}
@@ -2654,8 +2675,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	return rootHash, nil
 }
 
-func (hph *HexPatriciaHashed) SetTrace(trace bool)       { hph.trace = trace }
-func (hph *HexPatriciaHashed) SetTraceDomain(trace bool) { hph.traceDomain = trace }
+func (hph *HexPatriciaHashed) SetTrace(trace bool)           { hph.trace = trace }
+func (hph *HexPatriciaHashed) SetTraceDomain(trace bool)     { hph.traceDomain = trace }
+func (hph *HexPatriciaHashed) EnableWarmupCache(enable bool) { hph.enableWarmupCache = enable }
 func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
 	capture := hph.capture
 	if truncate {
@@ -2688,6 +2710,36 @@ func (hph *HexPatriciaHashed) Reset() {
 
 func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	hph.ctx = ctx
+}
+
+// branchFromCacheOrDB reads branch data from cache if available, otherwise from DB.
+func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, kv.Step, error) {
+	if hph.cache != nil {
+		if data, step, found := hph.cache.GetBranch(key); found {
+			return data, step, nil
+		}
+	}
+	return hph.ctx.Branch(key)
+}
+
+// accountFromCacheOrDB reads account data from cache if available, otherwise from DB.
+func (hph *HexPatriciaHashed) accountFromCacheOrDB(plainKey []byte) (*Update, error) {
+	if hph.cache != nil {
+		if update, found := hph.cache.GetAccount(plainKey); found {
+			return update, nil
+		}
+	}
+	return hph.ctx.Account(plainKey)
+}
+
+// storageFromCacheOrDB reads storage data from cache if available, otherwise from DB.
+func (hph *HexPatriciaHashed) storageFromCacheOrDB(plainKey []byte) (*Update, error) {
+	if hph.cache != nil {
+		if update, found := hph.cache.GetStorage(plainKey); found {
+			return update, nil
+		}
+	}
+	return hph.ctx.Storage(plainKey)
 }
 
 type stateRootFlag int8
@@ -2995,7 +3047,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 			panic("nil ctx")
 		}
 
-		update, err := hph.ctx.Account(hph.root.accountAddr[:hph.root.accountAddrLen])
+		update, err := hph.accountFromCacheOrDB(hph.root.accountAddr[:hph.root.accountAddrLen])
 		if err != nil {
 			return err
 		}
@@ -3005,7 +3057,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 		if hph.ctx == nil {
 			panic("nil ctx")
 		}
-		update, err := hph.ctx.Storage(hph.root.storageAddr[:hph.root.storageAddrLen])
+		update, err := hph.storageFromCacheOrDB(hph.root.storageAddr[:hph.root.storageAddrLen])
 		if err != nil {
 			return err
 		}
