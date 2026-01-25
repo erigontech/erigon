@@ -71,7 +71,7 @@ type accHolder interface {
 
 // FlushHook is a function that executes before the final mem.Flush.
 // Hooks can capture references (e.g., BranchEncoder) via closures.
-type FlushHook func(ctx context.Context, tx kv.RwTx) error
+type FlushHook func(ctx context.Context) error
 
 type SharedDomains struct {
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext
@@ -296,25 +296,27 @@ func (sd *SharedDomains) Close() {
 	sd.sdCtx = nil
 }
 
-func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
-	defer mxFlushTook.ObserveDuration(time.Now())
-
+// FlushHooks executes all registered flush hooks in registration order and clears them.
+func (sd *SharedDomains) FlushHooks(ctx context.Context) error {
 	log.Debug("processing flush hooks", "count", len(sd.flushHooks))
-	// Execute flush hooks in registration order before final flush
 	for _, hook := range sd.flushHooks {
-		if err := hook(ctx, tx); err != nil {
+		if err := hook(ctx); err != nil {
 			return err
 		}
 	}
 	sd.clearFlushHooks()
+	return nil
+}
 
+func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
+	defer mxFlushTook.ObserveDuration(time.Now())
 	return sd.mem.Flush(ctx, tx)
 }
 
 // AddFlushHook registers a hook to be executed before mem.Flush.
 // Hooks run in registration order and are cleared after each Flush call.
 // Use closures to capture references (e.g., BranchEncoder for deferred updates).
-func (sd *SharedDomains) AddFlushHook(hook func(ctx context.Context, tx kv.RwTx) error) {
+func (sd *SharedDomains) AddFlushHook(hook func(ctx context.Context) error) {
 	sd.flushHooks = append(sd.flushHooks, hook)
 	log.Debug("added flush hook", "len", len(sd.flushHooks))
 }
