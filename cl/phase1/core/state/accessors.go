@@ -379,6 +379,91 @@ func GetExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) *cltype
 	return expWithdrawals
 }
 
+// GetBuilderWithdrawals constructs withdrawal entries from builder pending withdrawals,
+// respecting the MAX_WITHDRAWALS_PER_PAYLOAD - 1 limit combined with prior withdrawals.
+// Returns the new withdrawals, updated withdrawal index, and the number of processed entries.
+func GetBuilderWithdrawals(b abstract.BeaconState, withdrawalIndex uint64, priorWithdrawals []*cltypes.Withdrawal) ([]*cltypes.Withdrawal, uint64, uint64) {
+	withdrawalsLimit := int(b.BeaconConfig().MaxWithdrawalsPerPayload) - 1
+	if len(priorWithdrawals) > withdrawalsLimit {
+		log.Warn("GetBuilderWithdrawals: prior withdrawals exceed limit", "prior", len(priorWithdrawals), "limit", withdrawalsLimit)
+		return []*cltypes.Withdrawal{}, withdrawalIndex, 0
+	}
+
+	var processedCount uint64
+	var withdrawals []*cltypes.Withdrawal
+
+	pendingWithdrawals := b.GetBuilderPendingWithdrawals()
+	if pendingWithdrawals == nil {
+		log.Warn("GetBuilderWithdrawals: builder_pending_withdrawals is nil")
+		return withdrawals, withdrawalIndex, processedCount
+	}
+
+	pendingWithdrawals.Range(func(_ int, w *cltypes.BuilderPendingWithdrawal, _ int) bool {
+		if len(priorWithdrawals)+len(withdrawals) >= withdrawalsLimit {
+			return false
+		}
+		withdrawals = append(withdrawals, &cltypes.Withdrawal{
+			Index:     withdrawalIndex,
+			Validator: ConvertBuilderIndexToValidatorIndex(w.BuilderIndex),
+			Address:   w.FeeRecipient,
+			Amount:    w.Amount,
+		})
+		withdrawalIndex++
+		processedCount++
+		return true
+	})
+
+	return withdrawals, withdrawalIndex, processedCount
+}
+
+// GetBuildersSweepWithdrawals sweeps through builders starting from next_withdrawal_builder_index,
+// collecting withdrawals for builders whose withdrawable_epoch has passed and have a positive balance.
+// Returns the new withdrawals, updated withdrawal index, and the number of processed builders.
+func GetBuildersSweepWithdrawals(b abstract.BeaconState, withdrawalIndex uint64, priorWithdrawals []*cltypes.Withdrawal) ([]*cltypes.Withdrawal, uint64, uint64) {
+	epoch := Epoch(b)
+	cfg := b.BeaconConfig()
+
+	builders := b.GetBuilders()
+	if builders == nil {
+		log.Warn("GetBuildersSweepWithdrawals: builders is nil")
+		return nil, withdrawalIndex, 0
+	}
+
+	buildersLen := builders.Len()
+	buildersLimit := min(buildersLen, int(cfg.MaxBuildersPerWithdrawalsSweep))
+	withdrawalsLimit := int(cfg.MaxWithdrawalsPerPayload) - 1
+	if len(priorWithdrawals) > withdrawalsLimit {
+		log.Warn("GetBuildersSweepWithdrawals: prior withdrawals exceed limit", "prior", len(priorWithdrawals), "limit", withdrawalsLimit)
+		return []*cltypes.Withdrawal{}, withdrawalIndex, 0
+	}
+
+	var processedCount uint64
+	var withdrawals []*cltypes.Withdrawal
+	builderIndex := b.GetNextWithdrawalBuilderIndex()
+
+	for range buildersLimit {
+		if len(priorWithdrawals)+len(withdrawals) >= withdrawalsLimit {
+			break
+		}
+
+		builder := builders.Get(int(builderIndex))
+		if builder != nil && builder.WithdrawableEpoch <= epoch && builder.Balance > 0 {
+			withdrawals = append(withdrawals, &cltypes.Withdrawal{
+				Index:     withdrawalIndex,
+				Validator: ConvertBuilderIndexToValidatorIndex(builderIndex),
+				Address:   builder.ExecutionAddress,
+				Amount:    builder.Balance,
+			})
+			withdrawalIndex++
+		}
+
+		builderIndex = cltypes.BuilderIndex((uint64(builderIndex) + 1) % uint64(buildersLen))
+		processedCount++
+	}
+
+	return withdrawals, withdrawalIndex, processedCount
+}
+
 // GetNextSyncCommitteeIndices returns the sync committee indices, with possible duplicates,
 // for the next sync committee.
 // [Modified in Gloas:EIP7732]

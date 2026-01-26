@@ -68,8 +68,11 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 				return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
 			}
 		}
-		if err := impl.ProcessExecutionPayload(s, body); err != nil {
-			return fmt.Errorf("processBlock: failed to process execution payload: %v", err)
+		if s.Version() < clparams.GloasVersion {
+			// DO NOT process execution payload for Gloas and later versions here.
+			if err := impl.ProcessExecutionPayload(s, body); err != nil {
+				return fmt.Errorf("processBlock: failed to process execution payload: %v", err)
+			}
 		}
 	}
 	var signatures, messages, publicKeys [][]byte

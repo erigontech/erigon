@@ -587,3 +587,18 @@ func (b *BeaconState) SetProposerLookahead(proposerLookahead solid.Uint64VectorS
 	b.proposerLookahead = proposerLookahead
 	b.markLeaf(ProposerLookaheadLeafIndex)
 }
+
+func (b *BeaconState) SetExecutionPayloadAvailability(slot uint64, available bool) {
+	b.executionPayloadAvailability.SetBitAt(int(slot%b.beaconConfig.SlotsPerHistoricalRoot), available)
+	b.markLeaf(ExecutionPayloadAvailabilityLeafIndex)
+}
+
+func (b *BeaconState) SetBuilderPendingPayments(payments *solid.VectorSSZ[*cltypes.BuilderPendingPayment]) {
+	b.builderPendingPayments = payments
+	b.markLeaf(BuilderPendingPaymentsLeafIndex)
+}
+
+func (b *BeaconState) SetBuilderPendingWithdrawals(withdrawals *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]) {
+	b.builderPendingWithdrawals = withdrawals
+	b.markLeaf(BuilderPendingWithdrawalsLeafIndex)
+}

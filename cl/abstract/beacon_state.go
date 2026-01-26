@@ -75,6 +75,8 @@ type BeaconStateExtension interface {
 	GetLatestBlockHash() common.Hash
 	GetBuilderPendingWithdrawals() *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]
 	GetBuilderPendingPayments() *solid.VectorSSZ[*cltypes.BuilderPendingPayment]
+	GetBuilderPaymentQuorumThreshold() uint64
+	GetNextWithdrawalBuilderIndex() cltypes.BuilderIndex
 }
 
 type BeaconStateBasic interface {
@@ -148,6 +150,9 @@ type BeaconStateMutator interface {
 	SetConsolidationBalanceToConsume(uint64)
 	SetEarlistConsolidationEpoch(uint64)
 	SetProposerLookahead(proposerLookahead solid.Uint64VectorSSZ)
+	SetExecutionPayloadAvailability(slot uint64, available bool)
+	SetBuilderPendingPayments(*solid.VectorSSZ[*cltypes.BuilderPendingPayment])
+	SetBuilderPendingWithdrawals(withdrawals *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal])
 
 	AddEth1DataVote(vote *cltypes.Eth1Data)
 	AddValidator(validator solid.Validator, balance uint64)
