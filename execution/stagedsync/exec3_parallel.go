@@ -263,7 +263,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||
 							applyResult.Exhausted != nil ||
 							pe.cfg.syncCfg.KeepExecutionProofs ||
-							(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
+							(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum.Load()) {
 
 							resetExecGauges(ctx)
 
@@ -386,8 +386,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 							<-LogCommitmentsDone // make sure no async mutations by LogCommitments can happen at this point
 							// fix these here - they will contain estimates after commit logging
-							pe.txExecutor.lastCommittedBlockNum = lastBlockResult.BlockNum
-							pe.txExecutor.lastCommittedTxNum = lastBlockResult.lastTxNum
+							pe.txExecutor.lastCommittedBlockNum.Store(lastBlockResult.BlockNum)
+							pe.txExecutor.lastCommittedTxNum.Store(lastBlockResult.lastTxNum)
 							uncommittedBlocks = 0
 							uncommittedGas = 0
 							uncommittedTransactions = 0
@@ -441,7 +441,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	}
 
 	if !hasLoggedCommittments && !commitStart.IsZero() {
-		pe.LogCommitments(commitStart, pe.txExecutor.lastCommittedBlockNum, uncommittedTransactions, uint64(uncommittedGas), stepsInDb, lastProgress)
+		pe.LogCommitments(commitStart, pe.txExecutor.lastCommittedBlockNum.Load(), uncommittedTransactions, uint64(uncommittedGas), stepsInDb, lastProgress)
 	}
 
 	if execErr != nil {
@@ -454,7 +454,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		return nil, rwTx, err
 	}
 
-	if err = execStage.Update(rwTx, pe.lastCommittedBlockNum); err != nil {
+	if err = execStage.Update(rwTx, pe.lastCommittedBlockNum.Load()); err != nil {
 		return nil, rwTx, err
 	}
 
@@ -475,9 +475,9 @@ func (pe *parallelExecutor) LogExecution() {
 }
 
 func (pe *parallelExecutor) LogCommitments(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
-	pe.committedGas += int64(committedGas)
-	pe.txExecutor.lastCommittedBlockNum += committedBlocks
-	pe.txExecutor.lastCommittedTxNum += committedTransactions
+	pe.committedGas.Add(int64(committedGas))
+	pe.txExecutor.lastCommittedBlockNum.Add(committedBlocks)
+	pe.txExecutor.lastCommittedTxNum.Add(committedTransactions)
 	pe.progress.LogCommitments(pe.rs.StateV3, pe, commitStart, stepsInDb, lastProgress)
 	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
 		pe.logger.Info(fmt.Sprintf("[%s] domain reads", pe.logPrefix), domainMetrics...)
