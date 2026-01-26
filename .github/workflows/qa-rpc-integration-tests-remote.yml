@@ -159,7 +159,7 @@ jobs:
           LOG_FILE="${{ env.TEST_RESULT_DIR }}/output.log"
 
           cat << 'EOF' > $SUMMARY_FILE
-          # RPC Integration Test Report
+          # ${{ github.workflow }} Report
 
           ## Test Configuration
           - **Chain:** ${{ env.CHAIN }}
