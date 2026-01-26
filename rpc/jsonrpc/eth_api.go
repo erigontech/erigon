@@ -376,7 +376,7 @@ func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
 
 	api._pruneMode.Store(&mode)
 
-	return p, nil
+	return &mode, nil
 }
 
 type bridgeReader interface {
