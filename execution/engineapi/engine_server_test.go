@@ -87,7 +87,7 @@ func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *t
 
 func newBaseApiForTest(m *mock.MockSentry) *jsonrpc.BaseAPI {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	return jsonrpc.NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil)
+	return jsonrpc.NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0)
 }
 
 func TestGetBlobsV1(t *testing.T) {
