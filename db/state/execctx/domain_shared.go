@@ -535,21 +535,22 @@ func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
 }
 
 // TouchChangedKeysFromHistory touches the changed keys in the commitment trie by reading the historical updates.
-func (sd *SharedDomains) TouchChangedKeysFromHistory(tx kv.TemporalTx, fromTxNum, toTxNum uint64) (int, int, int, error) {
-	var accountChanges, storageChanges, codeChanges int
+func (sd *SharedDomains) TouchChangedKeysFromHistory(tx kv.TemporalTx, fromTxNum, toTxNum uint64) (int, int, error) {
+	var accountChanges, storageChanges int
 	var err error
 	accountChanges, err = sd.touchChangedKeys(tx, kv.AccountsDomain, fromTxNum, toTxNum)
 	if err != nil {
-		return accountChanges, storageChanges, codeChanges, err
+		return accountChanges, storageChanges, err
 	}
 	storageChanges, err = sd.touchChangedKeys(tx, kv.StorageDomain, fromTxNum, toTxNum)
 	if err != nil {
-		return accountChanges, storageChanges, codeChanges, err
+		return accountChanges, storageChanges, err
 	}
-	codeChanges, err = sd.touchChangedKeys(tx, kv.CodeDomain, fromTxNum, toTxNum)
-	return accountChanges, storageChanges, codeChanges, err
+	return accountChanges, storageChanges, err
 }
 
+// touchChangedKeys retrieves the stream of changed keys for the specified domain in [fromTxNum, toTxNum) range and
+// touches them onto the commitment trie.
 func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64) (int, error) {
 	changes := 0
 	it, err := tx.HistoryRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)

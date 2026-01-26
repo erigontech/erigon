@@ -625,10 +625,10 @@ func (s *simulator) simulateBlock(
 		}
 		block.HeaderNoCopy().Root = common.BytesToHash(stateRoot)
 	} else {
-		// We compute the state root from state history w/ best-effort timed strategy, otherwise we just use the zero hash (default value).
-		txNum := minTxNum + 1 + uint64(len(bsc.Calls))
-		stateRoot, err := s.computeCommitmentFromStateHistory(ctx, tx, sharedDomains, stateWriter.touchedKeys, parent.Number.Uint64(), txNum)
-		if !errors.Is(err, context.DeadlineExceeded) {
+		// We can efficiently compute the root from state history if it's not frozen, otherwise we just use the zero hash (default value).
+		if s.blockReader.FrozenBlocks() == 0 {
+			txNum := minTxNum + 1 + uint64(len(bsc.Calls))
+			stateRoot, err := s.computeCommitmentFromStateHistory(ctx, tx, sharedDomains, stateWriter.touchedKeys, parent.Number.Uint64(), txNum)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -980,11 +980,6 @@ func (s *simulator) computeCustomCommitmentFromStateHistory(
 	baseBlockNum uint64,
 	deltaComputation func(ctx context.Context, ttx kv.TemporalTx, tsd *execctx.SharedDomains) ([]byte, error),
 ) ([]byte, error) {
-	// Best-effort strategy: arbitrary time limit on commitment computation from state history.
-	const maxTimeout = 5 * time.Second
-	ctx, cancel := context.WithTimeout(ctx, maxTimeout)
-	defer cancel()
-
 	// Prepare a temporary data storage for commitment replay computation
 	db := mdbx.New(dbcfg.TemporaryDB, s.logger).
 		InMem(nil, s.dirs.Tmp).MapSize(2 * datasize.TB).GrowthStep(1 * datasize.MB).MustOpen()
@@ -1041,7 +1036,7 @@ func (s *simulator) computeCustomCommitmentFromStateHistory(
 	}
 	tsd.GetCommitmentCtx().SetStateReader(newReplayStateReader(ttx, tx, tsd, maxTxNum+1))
 	s.logger.Debug("Touch historical keys", "fromTxNum", minTxNum, "toTxNum", maxTxNum+1)
-	_, _, _, err = tsd.TouchChangedKeysFromHistory(tx, minTxNum, maxTxNum+1)
+	_, _, err = tsd.TouchChangedKeysFromHistory(tx, minTxNum, maxTxNum+1)
 	if err != nil {
 		return nil, err
 	}
