@@ -21,9 +21,11 @@ package vm
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -343,16 +345,18 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 
 		// Call the old calculator, which takes into account
 		// - 63/64ths rule
-		callGas, err := calcCallGas(evm, callContext, availableGas-accessGas, statelessBaseGas)
+		callGas, err := calcCallGas(evm, callContext, availableGas-accessGas, statefulBaseGas)
 		if err != nil {
 			return 0, err
 		}
 
+		if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
+			fmt.Printf("%d (%d.%d) Variant Gas: base %d, access: %d, delegation: %d, call: %d\n",
+				evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(),
+				statefulBaseGas, accessGas, delegationGas, callGas)
+		}
 		if gas, overflow = math.SafeAdd(gas, callGas); overflow {
 			return 0, ErrGasUintOverflow
-		}
-		if _, ok := useGas(availableGas, gas, evm.Config().Tracer, tracing.GasChangeCallOpCode); !ok {
-			return 0, ErrOutOfGas
 		}
 
 		return gas, nil
