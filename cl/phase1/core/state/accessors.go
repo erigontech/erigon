@@ -261,6 +261,76 @@ func ComputeTimestampAtSlot(b abstract.BeaconState, slot uint64) uint64 {
 	return b.GenesisTime() + (slot-b.BeaconConfig().GenesisSlot)*b.BeaconConfig().SecondsPerSlot
 }
 
+// GetPendingPartialWithdrawals processes pending partial withdrawals for validators,
+// respecting the combined limit of prior withdrawals + MAX_PENDING_PARTIALS_PER_WITHDRAWALS_SWEEP
+// and MAX_WITHDRAWALS_PER_PAYLOAD - 1.
+// Returns the new withdrawals, updated withdrawal index, and the number of processed entries.
+func GetPendingPartialWithdrawals(b abstract.BeaconState, withdrawalIndex uint64, priorWithdrawals []*cltypes.Withdrawal) ([]*cltypes.Withdrawal, uint64, uint64) {
+	epoch := Epoch(b)
+	cfg := b.BeaconConfig()
+
+	withdrawalsLimit := min(
+		len(priorWithdrawals)+int(cfg.MaxPendingPartialsPerWithdrawalsSweep),
+		int(cfg.MaxWithdrawalsPerPayload)-1,
+	)
+
+	var processedCount uint64
+	var withdrawals []*cltypes.Withdrawal
+
+	b.GetPendingPartialWithdrawals().Range(func(_ int, w *solid.PendingPartialWithdrawal, _ int) bool {
+		isWithdrawable := w.WithdrawableEpoch <= epoch
+		hasReachedLimit := len(priorWithdrawals)+len(withdrawals) >= withdrawalsLimit
+		if !isWithdrawable || hasReachedLimit {
+			return false
+		}
+
+		validator := b.ValidatorSet().Get(int(w.ValidatorIndex))
+		balance := getBalanceAfterWithdrawals(b, w.ValidatorIndex, priorWithdrawals, withdrawals)
+
+		if validator.ExitEpoch() == cfg.FarFutureEpoch &&
+			validator.EffectiveBalance() >= cfg.MinActivationBalance &&
+			balance > cfg.MinActivationBalance {
+
+			withdrawalAmount := min(balance-cfg.MinActivationBalance, w.Amount)
+			wd := validator.WithdrawalCredentials()
+			withdrawals = append(withdrawals, &cltypes.Withdrawal{
+				Index:     withdrawalIndex,
+				Validator: w.ValidatorIndex,
+				Address:   common.BytesToAddress(wd[12:]),
+				Amount:    withdrawalAmount,
+			})
+			withdrawalIndex++
+		}
+
+		processedCount++
+		return true
+	})
+
+	return withdrawals, withdrawalIndex, processedCount
+}
+
+// getBalanceAfterWithdrawals returns a validator's balance minus the total amount
+// already withdrawn across all provided withdrawal slices.
+func getBalanceAfterWithdrawals(b abstract.BeaconState, validatorIndex uint64, withdrawalSets ...[]*cltypes.Withdrawal) uint64 {
+	balance, err := b.ValidatorBalance(int(validatorIndex))
+	if err != nil {
+		log.Warn("Failed to get validator balance", "index", validatorIndex, "error", err)
+		return 0
+	}
+	var totalWithdrawn uint64
+	for _, set := range withdrawalSets {
+		for _, w := range set {
+			if w.Validator == validatorIndex {
+				totalWithdrawn += w.Amount
+			}
+		}
+	}
+	if balance > totalWithdrawn {
+		return balance - totalWithdrawn
+	}
+	return 0
+}
+
 // GetExpectedWithdrawals calculates the expected withdrawals that can be made by validators in the current epoch
 func GetExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) *cltypes.ExpectedWithdrawals {
 	nextWithdrawalIndex := b.NextWithdrawalIndex()
@@ -271,54 +341,11 @@ func GetExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) *cltype
 	partialWithdrawalsCount := uint64(0)
 
 	// [New in Electra:EIP7251] Consume pending partial withdrawals
-	cfg := b.BeaconConfig()
 	if b.Version() >= clparams.ElectraVersion {
-		b.GetPendingPartialWithdrawals().Range(func(index int, w *solid.PendingPartialWithdrawal, length int) bool {
-			if w.WithdrawableEpoch > currentEpoch || len(expWithdrawals.Withdrawals) == int(cfg.MaxPendingPartialsPerWithdrawalsSweep) {
-				return false
-			}
-
-			validator := b.ValidatorSet().Get(int(w.ValidatorIndex))
-			hasSufficientEffectiveBalance := validator.EffectiveBalance() >= cfg.MinActivationBalance
-
-			// Calculate total withdrawn amount for this validator from previous withdrawals
-			totalWithdrawn := uint64(0)
-			for _, withdrawal := range expWithdrawals.Withdrawals {
-				if withdrawal.Validator == w.ValidatorIndex {
-					totalWithdrawn += withdrawal.Amount
-				}
-			}
-
-			balance, err := b.ValidatorBalance(int(w.ValidatorIndex))
-			if err != nil {
-				log.Warn("Failed to get validator balance", "index", w.ValidatorIndex, "error", err)
-				return false
-			}
-			if balance > totalWithdrawn {
-				balance -= totalWithdrawn
-			} else {
-				balance = 0
-			}
-
-			hasExcessBalance := balance > cfg.MinActivationBalance
-
-			if validator.ExitEpoch() == cfg.FarFutureEpoch &&
-				hasSufficientEffectiveBalance &&
-				hasExcessBalance {
-
-				wd := validator.WithdrawalCredentials()
-				withdrawableBalance := min(balance-cfg.MinActivationBalance, w.Amount)
-				expWithdrawals.Withdrawals = append(expWithdrawals.Withdrawals, &cltypes.Withdrawal{
-					Index:     nextWithdrawalIndex,
-					Validator: w.ValidatorIndex,
-					Address:   common.BytesToAddress(wd[12:]),
-					Amount:    withdrawableBalance,
-				})
-				nextWithdrawalIndex++
-			}
-			partialWithdrawalsCount++
-			return true
-		})
+		partialWithdrawals, nextIdx, count := GetPendingPartialWithdrawals(b, nextWithdrawalIndex, nil)
+		expWithdrawals.Withdrawals = append(expWithdrawals.Withdrawals, partialWithdrawals...)
+		nextWithdrawalIndex = nextIdx
+		partialWithdrawalsCount = count
 	}
 
 	// Sweep for remaining withdrawals
