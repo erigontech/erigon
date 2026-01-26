@@ -40,7 +40,6 @@ var (
 	Senders           SyncStage = "Senders"           // "From" recovered from signatures, bodies re-written
 	Execution         SyncStage = "Execution"         // Executing each block w/o building a trie
 	CustomTrace       SyncStage = "CustomTrace"       // Executing each block w/o building a trie
-	Translation       SyncStage = "Translation"       // Translation each marked for translation contract (from EVM to TEVM)
 	WitnessProcessing SyncStage = "WitnessProcessing" // Process buffered witness data for Polygon chains
 	TxLookup          SyncStage = "TxLookup"          // Generating transactions lookup index
 	Finish            SyncStage = "Finish"            // Nominal stage after all other stages
@@ -58,7 +57,6 @@ var AllStages = []SyncStage{
 	Senders,
 	Execution,
 	CustomTrace,
-	Translation,
 	TxLookup,
 	Finish,
 }

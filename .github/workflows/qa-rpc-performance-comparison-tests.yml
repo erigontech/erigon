@@ -83,7 +83,7 @@ jobs:
       GETH_REDIS_KEY: ${{ needs.setup.outputs.geth_redis_key }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Sanity check Redis config
         shell: bash
@@ -123,7 +123,7 @@ jobs:
       GETH_REDIS_KEY: ${{ needs.setup.outputs.geth_redis_key }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Sanity check Redis config
         shell: bash

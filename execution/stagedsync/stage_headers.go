@@ -25,81 +25,52 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/c2h5oh/datasize"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/stagedsync/bodydownload"
 	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/node/shards"
 )
 
-// The number of blocks we should be able to re-org sub-second on commodity hardware.
-// See https://hackmd.io/TdJtNs0dS56q-In8h-ShSg
-const ShortPoSReorgThresholdBlocks = 10
-
 type HeadersCfg struct {
-	db                kv.RwDB
 	hd                *headerdownload.HeaderDownload
-	bodyDownload      *bodydownload.BodyDownload
 	chainConfig       *chain.Config
 	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) ([64]byte, bool)
 	announceNewHashes func(context.Context, []headerdownload.Announce)
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
-	batchSize         datasize.ByteSize
 	noP2PDiscovery    bool
-	tmpdir            string
-
-	blockReader   services.FullBlockReader
-	blockWriter   *blockio.BlockWriter
-	notifications *shards.Notifications
-
-	syncConfig ethconfig.Sync
+	blockReader       services.FullBlockReader
+	syncConfig        ethconfig.Sync
 }
 
 func StageHeadersCfg(
-	db kv.RwDB,
 	headerDownload *headerdownload.HeaderDownload,
-	bodyDownload *bodydownload.BodyDownload,
 	chainConfig *chain.Config,
 	syncConfig ethconfig.Sync,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) ([64]byte, bool),
 	announceNewHashes func(context.Context, []headerdownload.Announce),
 	penalize func(context.Context, []headerdownload.PenaltyItem),
-	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
 	blockReader services.FullBlockReader,
-	blockWriter *blockio.BlockWriter,
-	tmpdir string,
-	notifications *shards.Notifications,
 ) HeadersCfg {
 	return HeadersCfg{
-		db:                db,
 		hd:                headerDownload,
-		bodyDownload:      bodyDownload,
 		chainConfig:       chainConfig,
 		syncConfig:        syncConfig,
 		headerReqSend:     headerReqSend,
 		announceNewHashes: announceNewHashes,
 		penalize:          penalize,
-		batchSize:         batchSize,
-		tmpdir:            tmpdir,
 		noP2PDiscovery:    noP2PDiscovery,
 		blockReader:       blockReader,
-		blockWriter:       blockWriter,
-		notifications:     notifications,
 	}
 }
 
