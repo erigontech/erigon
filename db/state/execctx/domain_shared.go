@@ -525,9 +525,13 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx
 // EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
 // It requires a DB to be enabled via EnableParaTrieDB.
 func (sd *SharedDomains) EnableTrieWarmup(trieWarmup bool) {
-	sd.sdCtx.SetTrieWarmup(trieWarmup)
+	sd.sdCtx.EnableTrieWarmup(trieWarmup)
 }
 
 func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
-	sd.sdCtx.SetParaTrieDB(db)
+	sd.sdCtx.EnableParaTrieDB(db)
+}
+
+func (sd *SharedDomains) EnableWarmupCache(enable bool) {
+	sd.sdCtx.EnableWarmupCache(enable)
 }

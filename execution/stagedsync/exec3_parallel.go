@@ -216,16 +216,25 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
 							bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO, pe.cfg.dirs.DataDir)
 							log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash(), "valid", bal.Validate() == nil)
-
 							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) {
-								headerBALHash := *lastHeader.BlockAccessListHash
-								if headerBALHash != b.BlockAccessList().Hash() {
-									log.Info(fmt.Sprintf("bal from block: %s", b.BlockAccessList().DebugString()))
-									return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, b.BlockAccessList().Hash(), headerBALHash)
+								if lastHeader.BlockAccessListHash == nil {
+									if pe.isBlockProduction {
+										hash := bal.Hash()
+										lastHeader.BlockAccessListHash = &hash
+									} else {
+										return fmt.Errorf("block %d: missing block access list hash", applyResult.BlockNum)
+									}
 								}
-								if headerBALHash != bal.Hash() {
-									log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))
-									return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, applyResult.BlockNum, bal.Hash(), headerBALHash)
+								headerBALHash := *lastHeader.BlockAccessListHash
+								if !pe.isBlockProduction {
+									if headerBALHash != b.BlockAccessList().Hash() {
+										log.Info(fmt.Sprintf("bal from block: %s", b.BlockAccessList().DebugString()))
+										return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, b.BlockAccessList().Hash(), headerBALHash)
+									}
+									if headerBALHash != bal.Hash() {
+										log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))
+										return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, applyResult.BlockNum, bal.Hash(), headerBALHash)
+									}
 								}
 							}
 						}
@@ -1721,4 +1730,39 @@ func mergeReadSets(a state.ReadSet, b state.ReadSet) state.ReadSet {
 		})
 	}
 	return out
+}
+
+func mergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrites {
+	if len(prev) == 0 {
+		return next
+	}
+	if len(next) == 0 {
+		return prev
+	}
+	merged := state.WriteSet{}
+	for _, v := range prev {
+		merged.Set(*v)
+	}
+	for _, v := range next {
+		merged.Set(*v)
+	}
+	out := make(state.VersionedWrites, 0, merged.Len())
+	merged.Scan(func(v *state.VersionedWrite) bool {
+		out = append(out, v)
+		return true
+	})
+	return out
+}
+
+func mergeAccessedAddresses(dst, src map[accounts.Address]struct{}) map[accounts.Address]struct{} {
+	if len(src) == 0 {
+		return dst
+	}
+	if dst == nil {
+		dst = make(map[accounts.Address]struct{}, len(src))
+	}
+	for addr := range src {
+		dst[addr] = struct{}{}
+	}
+	return dst
 }
