@@ -406,7 +406,7 @@ func (s *Merge) GetTransferFunc() evmtypes.TransferFunc {
 }
 
 func (s *Merge) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
-	return misc.LogSelfDestructedAccounts
+	return misc.LogSelfDestructedAccounts // EIP-7708
 }
 
 func (s *Merge) Close() error {

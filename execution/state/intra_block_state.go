@@ -1202,7 +1202,6 @@ func (sdb *IntraBlockState) Selfdestruct6780(addr accounts.Address) (bool, error
 			return true, nil
 		}
 	}
-	// TODO(yperbasis) double check that returning false is OK here in the context of EIP-7708
 	return false, nil
 }
 

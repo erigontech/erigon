@@ -92,7 +92,8 @@ func LogSelfDestructedAccounts(ibs evmtypes.IntraBlockState, sender accounts.Add
 	if !rules.IsAmsterdam {
 		return
 	}
-	// (EIP-7708) Emit SelfDestruct logs where accounts with non-empty balances have been deleted
+	// Emit SelfDestruct logs where accounts with non-empty balances have been deleted
+	// See case (2) in https://eips.ethereum.org/EIPS/eip-7708#selfdestruct-processing
 	removedWithBalance := ibs.GetRemovedAccountsWithBalance()
 	if removedWithBalance != nil {
 		sort.Slice(removedWithBalance, func(i, j int) bool {
