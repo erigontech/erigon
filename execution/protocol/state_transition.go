@@ -84,6 +84,7 @@ type StateTransition struct {
 	gp           *GasPool
 	msg          Message
 	gasRemaining uint64
+	blockGasUsed uint64 // Gas used by the transaction relevant for block limit accounting - see EIP-7778
 	gasPrice     *uint256.Int
 	feeCap       *uint256.Int
 	tipCap       *uint256.Int
@@ -246,6 +247,9 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	if err := st.gp.SubGas(st.msg.Gas()); err != nil {
 		return err
 	}
+	// Correct blockGasUsed will be set later in TransitionDb; set it for the moment to the txn's gas limit
+	// so that st.gp.AddGas(st.blockGasUsed) in the recover block works correctly even if a panic occurs beforehand.
+	st.blockGasUsed = st.msg.Gas()
 
 	if st.evm.Config().Tracer != nil && st.evm.Config().Tracer.OnGasChange != nil {
 		st.evm.Config().Tracer.OnGasChange(0, st.msg.Gas(), tracing.GasChangeTxInitialBalance)
@@ -426,7 +430,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 				if r != state.ErrDependency {
 					log.Debug("Recovered from transition exec failure.", "Error:", r, "stack", dbg.Stack())
 				}
-				st.gp.AddGas(st.gasUsed())
+				st.gp.AddGas(st.blockGasUsed)
 				depTxIndex := st.evm.IntraBlockState().DepTxIndex()
 				if depTxIndex < 0 {
 					err = fmt.Errorf("transition exec failure: %s at: %s", r, dbg.Stack())
@@ -548,21 +552,25 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		if rules.IsLondon {
 			refundQuotient = params.RefundQuotientEIP3529
 		}
+		gasUsed := st.gasUsed()
 		refund := min(st.gasUsed()/refundQuotient, st.state.GetRefund())
-		gasUsedForPaying := adjustGasUsed(st.gasUsed(), refund, rules.IsPrague, floorGas7623)
-		gasUsedForBlockLimit := gasUsedForPaying
+		gasUsed = adjustGasUsed(gasUsed, refund, rules.IsPrague, floorGas7623)
+		st.blockGasUsed = gasUsed
 		if rules.IsAmsterdam {
 			refund = 0 // EIP-7778: Block Gas Accounting without Refunds
-			gasUsedForBlockLimit = adjustGasUsed(st.gasUsed(), refund, rules.IsPrague, floorGas7623)
+			st.blockGasUsed = adjustGasUsed(st.gasUsed(), refund, rules.IsPrague, floorGas7623)
 		}
-		st.refundGas(st.initialGas - gasUsedForPaying)
-		st.gasRemaining = st.initialGas - gasUsedForBlockLimit
+		st.gasRemaining = st.initialGas - gasUsed
+		st.refundGas()
 	} else if rules.IsPrague {
-		st.gasRemaining = st.initialGas - max(floorGas7623, st.gasUsed())
+		st.blockGasUsed = max(floorGas7623, st.gasUsed())
+		st.gasRemaining = st.initialGas - st.blockGasUsed
+	} else {
+		st.blockGasUsed = st.gasUsed()
 	}
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.
-	st.gp.AddGas(st.gasRemaining)
+	st.gp.AddGas(st.initialGas - st.blockGasUsed)
 
 	effectiveTip := *st.gasPrice
 	if rules.IsLondon {
@@ -714,16 +722,16 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 	return verifiedAuthorities, nil
 }
 
-func (st *StateTransition) refundGas(gasRemaining uint64) {
+func (st *StateTransition) refundGas() {
 	// Return ETH for remaining gas, exchanged at the original rate.
-	remaining := u256.Mul(u256.U64(gasRemaining), *st.gasPrice)
+	remaining := u256.Mul(u256.U64(st.gasRemaining), *st.gasPrice)
 	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Handle()) {
-		fmt.Printf("%d (%d.%d) Refund %x: remaining: %d, price: %d val: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), gasRemaining, st.gasPrice, &remaining)
+		fmt.Printf("%d (%d.%d) Refund %x: remaining: %d, price: %d val: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining, st.gasPrice, &remaining)
 	}
 	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
 }
 
-// gasUsed returns the amount of gas used up by the state transition.
+// Gas used by the transaction with refunds (what the user pays) - see EIP-7778
 func (st *StateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gasRemaining
 }
