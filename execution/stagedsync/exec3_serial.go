@@ -200,14 +200,12 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			resetCommitmentGauges(ctx)
 			se.txExecutor.lastCommittedBlockNum = b.NumberU64()
 			se.txExecutor.lastCommittedTxNum = inputTxNum
-			timeStart := time.Now()
 			se.logger.Info(
 				"periodic commit check",
 				"block", se.doms.BlockNum(),
 				"txNum", se.doms.TxNum(),
 				"step", fmt.Sprintf("%.1f", float64(se.doms.TxNum())/float64(se.agg.StepSize())),
 				"commitment", times.ComputeCommitment,
-				"prune", time.Since(timeStart),
 			)
 			if isBatchFull {
 				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
