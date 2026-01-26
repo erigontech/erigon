@@ -109,7 +109,7 @@ jobs:
       - name: Checkout RPC Tests Repository
         run: |
           rm -rf ${{runner.workspace}}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v1.78.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch canepat/perf_fix_sut_name_alive_check https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
           cd ${{runner.workspace}}/rpc-tests
 
       - name: Clean Erigon Build Directory
