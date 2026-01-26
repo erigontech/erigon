@@ -553,12 +553,17 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			refundQuotient = params.RefundQuotientEIP3529
 		}
 		gasUsed := st.gasUsed()
-		refund := min(st.gasUsed()/refundQuotient, st.state.GetRefund())
-		gasUsed = adjustGasUsed(gasUsed, refund, rules.IsPrague, floorGas7623)
 		st.blockGasUsed = gasUsed
+		refund := min(gasUsed/refundQuotient, st.state.GetRefund())
+		gasUsed = gasUsed - refund
+		if rules.IsPrague {
+			gasUsed = max(floorGas7623, gasUsed)
+		}
 		if rules.IsAmsterdam {
-			refund = 0 // EIP-7778: Block Gas Accounting without Refunds
-			st.blockGasUsed = adjustGasUsed(st.gasUsed(), refund, rules.IsPrague, floorGas7623)
+			// EIP-7778: Block Gas Accounting without Refunds
+			st.blockGasUsed = max(floorGas7623, st.blockGasUsed)
+		} else {
+			st.blockGasUsed = gasUsed
 		}
 		st.gasRemaining = st.initialGas - gasUsed
 		st.refundGas()
@@ -734,12 +739,4 @@ func (st *StateTransition) refundGas() {
 // Gas used by the transaction with refunds (what the user pays) - see EIP-7778
 func (st *StateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gasRemaining
-}
-
-func adjustGasUsed(gasUsed, refund uint64, isEip7623 bool, floorGas7623 uint64) uint64 {
-	gasUsed -= refund
-	if isEip7623 {
-		gasUsed = max(gasUsed, floorGas7623)
-	}
-	return gasUsed
 }
