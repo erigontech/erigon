@@ -23,7 +23,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
-	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/common/log/v3"
 
 	"github.com/erigontech/erigon/cl/utils"
@@ -148,7 +147,7 @@ func ComputeBalanceWeightedSelection(
 
 	var preInputs [][32]byte
 	if shuffleIndices {
-		preInputs = shuffling.ComputeShuffledIndexPreInputs(s.BeaconConfig(), seed)
+		preInputs = ComputeShuffledIndexPreInputs(s.BeaconConfig(), seed)
 	}
 
 	selected := make([]uint64, 0, size)
@@ -157,7 +156,7 @@ func ComputeBalanceWeightedSelection(
 		nextIndex := i % total
 		if shuffleIndices {
 			var err error
-			nextIndex, err = shuffling.ComputeShuffledIndex(
+			nextIndex, err = ComputeShuffledIndex(
 				s.BeaconConfig(), nextIndex, total, seed, preInputs, utils.Sha256,
 			)
 			if err != nil {

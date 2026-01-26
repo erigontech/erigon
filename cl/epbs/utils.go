@@ -10,6 +10,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -58,7 +59,7 @@ func IsBuilderWithdrawalCredential(withdrawalCredentials [32]byte, beaconConfig 
 }
 
 // IsAttestationSameSlot checks if the attestation is for the block proposed at the attestation slot.
-func IsAttestationSameSlot(s abstract.BeaconState, data *solid.AttestationData) (bool, error) {
+func IsAttestationSameSlot(s *raw.BeaconState, data *solid.AttestationData) (bool, error) {
 	if data.Slot == 0 {
 		return true, nil
 	}

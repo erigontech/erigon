@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"runtime"
 
+	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -376,4 +377,20 @@ func GetExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) *cltype
 	}
 	expWithdrawals.ProcessedPartialWithdrawalsCount = partialWithdrawalsCount
 	return expWithdrawals
+}
+
+// GetNextSyncCommitteeIndices returns the sync committee indices, with possible duplicates,
+// for the next sync committee.
+// [Modified in Gloas:EIP7732]
+func GetNextSyncCommitteeIndices(b *CachingBeaconState) ([]uint64, error) {
+	conf := b.BeaconConfig()
+	epoch := Epoch(b) + 1
+
+	mixPosition := (epoch + conf.EpochsPerHistoricalVector - conf.MinSeedLookahead - 1) %
+		conf.EpochsPerHistoricalVector
+	mix := b.GetRandaoMix(int(mixPosition))
+	seed := shuffling.GetSeed(conf, mix, epoch, conf.DomainSyncCommittee)
+
+	indices := b.GetActiveValidatorsIndices(epoch)
+	return shuffling.ComputeBalanceWeightedSelection(b.BeaconState, indices, seed, conf.SyncCommitteeSize, true)
 }

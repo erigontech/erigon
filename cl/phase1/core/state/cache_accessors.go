@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/epbs"
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
@@ -243,8 +244,31 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 	if err != nil {
 		return nil, err
 	}
+
 	matchingTarget := data.Target.Root == targetRoot
 	matchingHead := matchingTarget && data.BeaconBlockRoot == headRoot
+
+	if b.Version() >= clparams.GloasVersion {
+		var payloadMatch bool
+		ok, err := epbs.IsAttestationSameSlot(b.BeaconState, data)
+		if err != nil {
+			return nil, fmt.Errorf("GetAttestationParticipationFlagIndicies: failed to check attestation same slot: %w", err)
+		}
+		if ok {
+			// assert data.Index == 0
+			if data.CommitteeIndex != 0 {
+				return nil, fmt.Errorf("GetAttestationParticipationFlagIndicies: committee index is not zero for indexed payload attestation")
+			}
+			payloadMatch = true
+		} else {
+			slotIndex := data.Slot % b.BeaconConfig().SlotsPerHistoricalRoot
+			aval := b.GetExecutionPayloadAvailability()
+			payloadIndex := aval.GetBitAt(int(slotIndex))
+			payloadMatch = data.CommitteeIndex == uint64(payloadIndex)
+		}
+		matchingHead = matchingHead && payloadMatch
+	}
+
 	participationFlagIndicies := []uint8{}
 	if inclusionDelay <= utils.IntegerSquareRoot(b.BeaconConfig().SlotsPerEpoch) {
 		participationFlagIndicies = append(
@@ -292,6 +316,36 @@ func (b *CachingBeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]u
 }
 
 func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, error) {
+	if b.Version() >= clparams.GloasVersion {
+		indicies, err := GetNextSyncCommitteeIndices(b)
+		if err != nil {
+			return nil, err
+		}
+		pubKeys := make([]common.Bytes48, 0, len(indicies))
+		for _, index := range indicies {
+			validator, err := b.ValidatorForValidatorIndex(int(index))
+			if err != nil {
+				return nil, err
+			}
+			pubKeys = append(pubKeys, validator.PublicKey())
+		}
+		// Compute aggregate pubkey
+		formattedKeys := make([][]byte, len(pubKeys))
+		for i := range formattedKeys {
+			formattedKeys[i] = make([]byte, 48)
+			copy(formattedKeys[i], pubKeys[i][:])
+		}
+		aggregatePublicKeyBytes, err := bls.AggregatePublickKeys(formattedKeys)
+		if err != nil {
+			return nil, err
+		}
+		var aggregate common.Bytes48
+		copy(aggregate[:], aggregatePublicKeyBytes)
+
+		return solid.NewSyncCommitteeFromParameters(pubKeys, aggregate), nil
+	}
+
+	// pre-gloas computation
 	beaconConfig := b.BeaconConfig()
 	optimizedHashFunc := utils.OptimizedSha256NotThreadSafe()
 	epoch := Epoch(b) + 1
@@ -350,6 +404,7 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 		}
 		i++
 	}
+
 	// Format public keys.
 	formattedKeys := make([][]byte, cltypes.SyncCommitteeSize)
 	for i := range formattedKeys {
