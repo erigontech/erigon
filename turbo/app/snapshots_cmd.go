@@ -381,6 +381,15 @@ var snapshotCommand = cli.Command{
 				&cli.BoolFlag{Name: "skip-size-check", Required: false, Value: false},
 			}),
 		},
+		{
+			Name:        "du",
+			Action:      doDU,
+			Usage:       "Show snapshot disk usage statistics",
+			Description: "Analyzes snapshot directories and displays file count, total size, and estimated sizes for different node types",
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+			}),
+		},
 	},
 }
 
@@ -2279,4 +2288,248 @@ func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log
 	}
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	return agg
+}
+
+// File categories for disk usage grouping
+var duFileCategories = map[string]string{
+	// Domains
+	".kv": "domains", ".kvi": "domains",
+	// Accessors
+	".bt": "accessors", ".bti": "accessors",
+	// History
+	".v": "history", ".vi": "history",
+	// Ranges (Elias-Fano)
+	".ef": "ranges", ".efi": "ranges",
+	// Blocks + Transactions
+	".seg": "blocks+transactions", ".idx": "blocks+transactions",
+	// Torrents
+	".torrent": "torrents",
+}
+
+func doDU(cliCtx *cli.Context) error {
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+
+	snapDirs := []struct {
+		name string
+		path string
+	}{
+		{"snapshots", dirs.Snap},
+		{"snapshots/idx", dirs.SnapIdx},
+		{"snapshots/history", dirs.SnapHistory},
+		{"snapshots/domain", dirs.SnapDomain},
+		{"snapshots/accessor", dirs.SnapAccessors},
+		{"snapshots/caplin", dirs.SnapCaplin},
+	}
+
+	type dirStats struct {
+		name      string
+		fileCount int
+		totalSize uint64
+	}
+
+	type fileTypeStats struct {
+		ext       string
+		count     int
+		totalSize uint64
+	}
+
+	var totalFiles int
+	var totalSize uint64
+	var allStats []dirStats
+	fileTypes := make(map[string]*fileTypeStats)
+
+	// Track sizes by category for node type estimation
+	categorySizes := make(map[string]uint64)
+	categoryCounts := make(map[string]int)
+
+	// Track block ranges for node type inference
+	var maxHistoryBlock, maxDomainBlock uint64
+	var hasHistory, hasDomain bool
+
+	for _, snapDir := range snapDirs {
+		entries, err := os.ReadDir(snapDir.path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("error reading %s: %w", snapDir.name, err)
+		}
+
+		var dirFileCount int
+		var dirTotalSize uint64
+
+		for _, d := range entries {
+			if d.IsDir() {
+				continue
+			}
+
+			info, err := d.Info()
+			if err != nil {
+				continue
+			}
+
+			dirFileCount++
+			dirTotalSize += uint64(info.Size())
+
+			ext := duGetFileExtension(d.Name())
+			if ext == "" {
+				ext = "(no ext)"
+			}
+			if fileTypes[ext] == nil {
+				fileTypes[ext] = &fileTypeStats{ext: ext}
+			}
+			fileTypes[ext].count++
+			fileTypes[ext].totalSize += uint64(info.Size())
+
+			// Track by category
+			cat := duFileCategories[ext]
+			if cat == "" {
+				cat = "other"
+			}
+			categorySizes[cat] += uint64(info.Size())
+			categoryCounts[cat]++
+
+			// Extract block range
+			blockRange := duExtractBlockRange(d.Name())
+			if snapDir.name == "snapshots/history" && blockRange > maxHistoryBlock {
+				maxHistoryBlock = blockRange
+			}
+			if snapDir.name == "snapshots/domain" && blockRange > maxDomainBlock {
+				maxDomainBlock = blockRange
+			}
+		}
+
+		if dirFileCount > 0 {
+			allStats = append(allStats, dirStats{
+				name:      snapDir.name,
+				fileCount: dirFileCount,
+				totalSize: dirTotalSize,
+			})
+			totalFiles += dirFileCount
+			totalSize += dirTotalSize
+
+			if snapDir.name == "snapshots/history" {
+				hasHistory = true
+			}
+			if snapDir.name == "snapshots/domain" {
+				hasDomain = true
+			}
+		}
+	}
+
+	// Infer node type
+	nodeType := duInferNodeType(hasHistory, hasDomain, maxHistoryBlock, maxDomainBlock)
+
+	// Calculate estimated sizes for different node types
+	minimalSize := categorySizes["domains"] + categorySizes["accessors"] + categorySizes["blocks+transactions"]
+	minimalFiles := categoryCounts["domains"] + categoryCounts["accessors"] + categoryCounts["blocks+transactions"]
+
+	fullSize := minimalSize + categorySizes["ranges"]
+	fullFiles := minimalFiles + categoryCounts["ranges"]
+
+	archiveSize := totalSize - categorySizes["torrents"] - categorySizes["other"]
+	archiveFiles := totalFiles - categoryCounts["torrents"] - categoryCounts["other"]
+
+	// Print results
+	fmt.Println("=== Snapshot Disk Usage ===")
+	fmt.Printf("DataDir: %s\n\n", dirs.DataDir)
+	fmt.Printf("Node Type (inferred): %s\n\n", nodeType)
+
+	// Print estimated sizes for different node types
+	fmt.Println("Estimated size by node type:")
+	fmt.Println(strings.Repeat("-", 55))
+	fmt.Printf("  %-20s %6d files  %12s\n", "minimal", minimalFiles, common.ByteCount(minimalSize))
+	fmt.Printf("  %-20s %6d files  %12s\n", "full", fullFiles, common.ByteCount(fullSize))
+	fmt.Printf("  %-20s %6d files  %12s\n", "archive", archiveFiles, common.ByteCount(archiveSize))
+	fmt.Println(strings.Repeat("-", 55))
+
+	// Print directory breakdown
+	fmt.Println("\nDirectory breakdown:")
+	fmt.Println(strings.Repeat("-", 65))
+	for _, stat := range allStats {
+		pct := float64(0)
+		if totalSize > 0 {
+			pct = float64(stat.totalSize) * 100 / float64(totalSize)
+		}
+		fmt.Printf("  %-25s %6d files  %12s  %5.1f%%\n",
+			stat.name, stat.fileCount, common.ByteCount(stat.totalSize), pct)
+	}
+	fmt.Println(strings.Repeat("-", 65))
+	fmt.Printf("  %-25s %6d files  %12s  %5.1f%%\n", "TOTAL", totalFiles, common.ByteCount(totalSize), 100.0)
+
+	// Print file types breakdown
+	if len(fileTypes) > 0 {
+		fmt.Println("\nFile types breakdown:")
+		fmt.Println(strings.Repeat("-", 65))
+
+		var sortedTypes []string
+		for ext := range fileTypes {
+			sortedTypes = append(sortedTypes, ext)
+		}
+		sort.Slice(sortedTypes, func(i, j int) bool {
+			return fileTypes[sortedTypes[i]].totalSize > fileTypes[sortedTypes[j]].totalSize
+		})
+
+		for _, ext := range sortedTypes {
+			ftStats := fileTypes[ext]
+			cat := duFileCategories[ext]
+			if cat == "" {
+				cat = "other"
+			}
+			pct := float64(0)
+			if totalSize > 0 {
+				pct = float64(ftStats.totalSize) * 100 / float64(totalSize)
+			}
+			fmt.Printf("  %-8s %-16s %6d files  %12s  %5.1f%%\n",
+				ext, "("+cat+")", ftStats.count, common.ByteCount(ftStats.totalSize), pct)
+		}
+	}
+
+	return nil
+}
+
+func duGetFileExtension(filename string) string {
+	compoundExts := []string{".kvi", ".efi", ".bti", ".vi"}
+	for _, ext := range compoundExts {
+		if strings.HasSuffix(filename, ext) {
+			return ext
+		}
+	}
+	return filepath.Ext(filename)
+}
+
+func duExtractBlockRange(filename string) uint64 {
+	parts := strings.Split(filename, "-")
+	if len(parts) < 3 {
+		return 0
+	}
+	var endBlock uint64
+	_, err := fmt.Sscanf(parts[2], "%d", &endBlock)
+	if err != nil {
+		return 0
+	}
+	return endBlock * 1000
+}
+
+func duInferNodeType(hasHistory, hasDomain bool, maxHistoryBlock, maxDomainBlock uint64) string {
+	if !hasDomain {
+		return "unknown (no domain snapshots)"
+	}
+	if !hasHistory {
+		return "minimal (no history snapshots)"
+	}
+	if maxDomainBlock > 0 && maxHistoryBlock > 0 {
+		historyRatio := float64(maxHistoryBlock) / float64(maxDomainBlock)
+		if historyRatio < 0.5 {
+			return "full (partial history)"
+		}
+		if historyRatio >= 0.9 {
+			return "archive (full history)"
+		}
+		return fmt.Sprintf("full (history coverage: %.0f%%)", historyRatio*100)
+	}
+	if hasHistory && hasDomain {
+		return "archive (has both history and domain)"
+	}
+	return "unknown"
 }
