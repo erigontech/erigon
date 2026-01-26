@@ -73,6 +73,8 @@ type BeaconStateExtension interface {
 	GetBuilders() *solid.ListSSZ[*cltypes.Builder]
 	GetLatestExecutionPayloadBid() *cltypes.ExecutionPayloadBid
 	GetLatestBlockHash() common.Hash
+	GetBuilderPendingWithdrawals() *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]
+	GetBuilderPendingPayments() *solid.VectorSSZ[*cltypes.BuilderPendingPayment]
 }
 
 type BeaconStateBasic interface {

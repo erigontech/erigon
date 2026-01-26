@@ -20,6 +20,18 @@ func IsBuilderIndex(validatorIndex uint64) bool {
 	return (validatorIndex & clparams.BuilderIndexFlag) != 0
 }
 
+// ConvertBuilderIndexToValidatorIndex converts a builder index to a validator index
+// by setting the BUILDER_INDEX_FLAG bit.
+func ConvertBuilderIndexToValidatorIndex(builderIndex cltypes.BuilderIndex) uint64 {
+	return uint64(builderIndex) | clparams.BuilderIndexFlag
+}
+
+// ConvertValidatorIndexToBuilderIndex converts a validator index (with builder flag set)
+// to a builder index by clearing the BUILDER_INDEX_FLAG bit.
+func ConvertValidatorIndexToBuilderIndex(validatorIndex uint64) cltypes.BuilderIndex {
+	return cltypes.BuilderIndex(validatorIndex &^ clparams.BuilderIndexFlag)
+}
+
 // IsActiveBuilder checks if the builder at builderIndex is active for the given state.
 // A builder is considered active if:
 // - Its deposit epoch is finalized (deposit_epoch < finalized_checkpoint.epoch)
@@ -123,4 +135,63 @@ func IsParentBlockFull(s abstract.BeaconState) bool {
 		return false
 	}
 	return bid.BlockHash == s.GetLatestBlockHash()
+}
+
+// CanBuilderCoverBid returns true if the builder has enough balance to cover the bid amount
+// after accounting for the minimum deposit and pending withdrawals.
+func CanBuilderCoverBid(s abstract.BeaconState, builderIndex cltypes.BuilderIndex, bidAmount uint64) bool {
+	builders := s.GetBuilders()
+	if builders == nil {
+		log.Warn("builders is nil")
+		return false
+	}
+	builder := builders.Get(int(builderIndex))
+	if builder == nil {
+		log.Warn("builder is nil", "builderIndex", builderIndex)
+		return false
+	}
+
+	builderBalance := builder.Balance
+	pendingWithdrawalsAmount := GetPendingBalanceToWithdrawForBuilder(s, builderIndex)
+	minBalance := s.BeaconConfig().MinDepositAmount + pendingWithdrawalsAmount
+	if builderBalance < minBalance {
+		return false
+	}
+	return builderBalance-minBalance >= bidAmount
+}
+
+// GetPendingBalanceToWithdrawForBuilder returns the total pending balance to withdraw for a builder.
+// This includes:
+// - Amounts from builder_pending_withdrawals (direct withdrawal requests)
+// - Amounts from builder_pending_payments (payments that include withdrawals)
+func GetPendingBalanceToWithdrawForBuilder(s abstract.BeaconState, builderIndex cltypes.BuilderIndex) uint64 {
+	var total uint64
+
+	// Sum from builder_pending_withdrawals
+	pendingWithdrawals := s.GetBuilderPendingWithdrawals()
+	if pendingWithdrawals != nil {
+		pendingWithdrawals.Range(func(_ int, withdrawal *cltypes.BuilderPendingWithdrawal, _ int) bool {
+			if withdrawal != nil && withdrawal.BuilderIndex == builderIndex {
+				total += withdrawal.Amount
+			}
+			return true
+		})
+	} else {
+		log.Warn("builder_pending_withdrawals is nil")
+	}
+
+	// Sum from builder_pending_payments
+	pendingPayments := s.GetBuilderPendingPayments()
+	if pendingPayments != nil {
+		pendingPayments.Range(func(_ int, payment *cltypes.BuilderPendingPayment, _ int) bool {
+			if payment != nil && payment.Withdrawal != nil && payment.Withdrawal.BuilderIndex == builderIndex {
+				total += payment.Withdrawal.Amount
+			}
+			return true
+		})
+	} else {
+		log.Warn("builder_pending_payments is nil")
+	}
+
+	return total
 }
