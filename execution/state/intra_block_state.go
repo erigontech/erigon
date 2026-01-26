@@ -1977,6 +1977,12 @@ func (sdb *IntraBlockState) VersionedReads() ReadSet {
 	return sdb.versionedReads
 }
 
+func (sdb *IntraBlockState) ResetVersionedIO() {
+	sdb.versionedReads = nil
+	sdb.versionedWrites = nil
+	sdb.dep = UnknownDep
+}
+
 // VersionedWrites returns the current versioned write set if this block
 // checkDirty - is mainly for testing, for block processing this is called
 // after the block execution is completed and non dirty writes (due to reversions)

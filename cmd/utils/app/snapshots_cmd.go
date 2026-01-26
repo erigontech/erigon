@@ -595,6 +595,7 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 
 func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelete, dryRun bool, stepRange string, domainNames ...string) error {
 	_maxFrom := uint64(0)
+	_maxTo := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
 	commitmentFilesWithState := make([]snaptype.FileInfo, 0)
 
@@ -664,12 +665,14 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 		files = append(files, res)
 		if removeLatest {
 			_maxFrom = max(_maxFrom, res.From)
+			_maxTo = max(_maxTo, res.To)
 		}
 	}
 
 	toRemove := make(map[string]snaptype.FileInfo)
 	if len(domainNames) > 0 {
 		_maxFrom = 0
+		_maxTo = 0
 		domainFiles := make([]snaptype.FileInfo, 0, len(files))
 		for _, domainName := range domainNames {
 			_, err := kv.String2InvertedIdx(domainName)
@@ -688,6 +691,7 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 				}
 				if removeLatest {
 					_maxFrom = max(_maxFrom, res.From)
+					_maxTo = max(_maxTo, res.To)
 				}
 				domainFiles = append(domainFiles, res)
 			}
@@ -737,7 +741,8 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 		}
 
 		if removeLatest {
-			q := fmt.Sprintf("remove latest snapshot files with stepFrom=%d?\n1) RemoveFile\n4) Exit\n (pick number): ", _maxFrom)
+			// domain files have higher merge limit, so latest domain may have From < stepFrom but To == stepTo
+			q := fmt.Sprintf("remove latest snapshot files (stepFrom>=%d) and files ending at stepTo=%d?\n1) RemoveFile\n4) Exit\n (pick number): ", _maxFrom, _maxTo)
 			if promptExit(q) {
 				os.Exit(0)
 			}
@@ -772,6 +777,8 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 
 		for _, res := range files {
 			if res.From >= minS && res.To <= maxS {
+				toRemove[res.Path] = res
+			} else if removeLatest && res.To == _maxTo {
 				toRemove[res.Path] = res
 			}
 		}
