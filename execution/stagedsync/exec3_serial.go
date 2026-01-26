@@ -14,7 +14,6 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
@@ -39,7 +38,7 @@ type serialExecutor struct {
 
 func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
-	initialTxNum uint64, inputTxNum uint64, useExternalTx bool, initialCycle bool, rwTx kv.TemporalRwTx,
+	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
 	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
 	se.resetWorkers(ctx, se.rs, se.applyTx)
@@ -60,7 +59,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		log.Info(fmt.Sprintf("[%s] serial starting", execStage.LogPrefix()),
 			"from", blockNum, "to", maxBlockNum, "limit", blockNum+blockLimit-1, "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "lastFrozenStep", lastFrozenStep,
-			"initialCycle", initialCycle, "useExternalTx", useExternalTx, "isForkValidation", se.isForkValidation, "isBlockProduction", se.isBlockProduction)
+			"initialCycle", initialCycle, "isForkValidation", se.isForkValidation, "isBlockProduction", se.isBlockProduction)
 	}
 
 	for ; blockNum <= maxBlockNum; blockNum++ {
@@ -132,8 +131,10 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			inputTxNum++
 		}
 
+		start := time.Now()
 		continueLoop, err := se.executeBlock(ctx, txTasks, execStage.CurrentSyncCycle.IsInitialCycle, false)
 
+		log.Debug(fmt.Sprintf("[%s] executed block %d in %s", se.logPrefix, blockNum, time.Since(start)))
 		if err != nil {
 			return nil, rwTx, err
 		}
@@ -180,73 +181,34 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if !se.isApplyingBlocks {
 				break
 			}
-
 			se.LogExecution()
-
-			//TODO: https://github.com/erigontech/erigon/issues/10724
-			//if executor.tx().(dbstate.HasAggTx).AggTx().(*dbstate.AggregatorRoTx).CanPrune(executor.tx(), doms.TxNum()) {
-			//	//small prune cause MDBX_TXN_FULL
-			//	if _, err := executor.tx().(dbstate.HasAggTx).AggTx().(*dbstate.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Hour, executor.tx()); err != nil {
-			//		return err
-			//	}
-			//}
-
 			isBatchFull := se.readState().SizeEstimate() >= se.cfg.batchSize.Bytes()
-			canPrune := dbstate.AggTx(se.applyTx).CanPrune(se.applyTx, se.doms.TxNum())
-			needCalcRoot := isBatchFull || havePartialBlock || canPrune
+			needCalcRoot := isBatchFull || havePartialBlock
 			// If we have a partial first block it may not be validated, then we should compute root hash ASAP for fail-fast
-
 			// this will only happen for the first executed block
 			havePartialBlock = false
-
 			if !needCalcRoot {
 				break
 			}
-
 			resetExecGauges(ctx)
-
 			ok, times, err := computeAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), rwTx, se.doms, se.cfg, execStage, false, se.logger, u, se.isBlockProduction)
 			if err != nil {
 				return nil, rwTx, err
 			} else if !ok {
 				return b.HeaderNoCopy(), rwTx, nil
 			}
-
 			resetCommitmentGauges(ctx)
-
 			se.txExecutor.lastCommittedBlockNum = b.NumberU64()
 			se.txExecutor.lastCommittedTxNum = inputTxNum
-
-			timeStart := time.Now()
-
-			pruneTimeout := 250 * time.Millisecond
-			if initialCycle {
-				pruneTimeout = 10 * time.Hour
-
-				if err = rwTx.GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
-					return nil, rwTx, err
-				}
-			}
-
-			if _, err := rwTx.PruneSmallBatches(ctx, pruneTimeout); err != nil {
-				return nil, rwTx, err
-			}
-
 			se.logger.Info(
 				"periodic commit check",
 				"block", se.doms.BlockNum(),
 				"txNum", se.doms.TxNum(),
 				"step", fmt.Sprintf("%.1f", float64(se.doms.TxNum())/float64(se.agg.StepSize())),
 				"commitment", times.ComputeCommitment,
-				"prune", time.Since(timeStart),
 			)
-
 			if isBatchFull {
 				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
-			}
-
-			if canPrune {
-				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch can be pruned"}
 			}
 		default:
 		}

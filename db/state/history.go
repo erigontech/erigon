@@ -864,7 +864,7 @@ func (h *History) dataWriter(f *seg.Compressor) *seg.PagedWriter {
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0)
+	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0, h.dirs.Tmp)
 }
 func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return ht.h.dataReader(f) }
 func (ht *HistoryRoTx) datarWriter(f *seg.Compressor) *seg.PagedWriter {
@@ -1459,7 +1459,18 @@ func (ht *HistoryRoTx) CompactRange(ctx context.Context, fromTxNum, toTxNum uint
 		return err
 	}
 
-	return ht.deduplicateFiles(ctx, efFiles, vFiles, mergeRange, background.NewProgressSet())
+	for i := 0; i < len(efFiles); i++ {
+		mergeRange = NewHistoryRanges(
+			*NewMergeRange("", true, vFiles[i].startTxNum, vFiles[i].endTxNum),
+			*NewMergeRange("", true, efFiles[i].startTxNum, efFiles[i].endTxNum),
+		)
+
+		if err := ht.deduplicateFiles(ctx, []*FilesItem{efFiles[i]}, []*FilesItem{vFiles[i]}, mergeRange, background.NewProgressSet()); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {

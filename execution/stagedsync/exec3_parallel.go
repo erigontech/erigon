@@ -94,7 +94,7 @@ type parallelExecutor struct {
 
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
-	initialTxNum uint64, inputTxNum uint64, useExternalTx bool, initialCycle bool, rwTx kv.TemporalRwTx,
+	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
 	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
 	var asyncTxChan mdbx.TxApplyChan
@@ -114,7 +114,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	if blockLimit > 0 && min(startBlockNum+blockLimit, maxBlockNum) > startBlockNum+16 || maxBlockNum > startBlockNum+16 {
 		log.Info(fmt.Sprintf("[%s] parallel starting", execStage.LogPrefix()),
 			"from", startBlockNum, "to", maxBlockNum, "limit", startBlockNum+blockLimit-1, "initialTxNum", initialTxNum,
-			"initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx,
+			"initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle,
 			"isForkValidation", pe.isForkValidation, "isBlockProduction", pe.isBlockProduction, "isApplyingBlocks", pe.isApplyingBlocks)
 	}
 
@@ -216,16 +216,25 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
 							bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO, pe.cfg.dirs.DataDir)
 							log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash(), "valid", bal.Validate() == nil)
-
 							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) {
-								headerBALHash := *lastHeader.BlockAccessListHash
-								if headerBALHash != b.BlockAccessList().Hash() {
-									log.Info(fmt.Sprintf("bal from block: %s", b.BlockAccessList().DebugString()))
-									return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, b.BlockAccessList().Hash(), headerBALHash)
+								if lastHeader.BlockAccessListHash == nil {
+									if pe.isBlockProduction {
+										hash := bal.Hash()
+										lastHeader.BlockAccessListHash = &hash
+									} else {
+										return fmt.Errorf("block %d: missing block access list hash", applyResult.BlockNum)
+									}
 								}
-								if headerBALHash != bal.Hash() {
-									log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))
-									return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, applyResult.BlockNum, bal.Hash(), headerBALHash)
+								headerBALHash := *lastHeader.BlockAccessListHash
+								if !pe.isBlockProduction {
+									if headerBALHash != b.BlockAccessList().Hash() {
+										log.Info(fmt.Sprintf("bal from block: %s", b.BlockAccessList().DebugString()))
+										return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, b.BlockAccessList().Hash(), headerBALHash)
+									}
+									if headerBALHash != bal.Hash() {
+										log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))
+										return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, applyResult.BlockNum, bal.Hash(), headerBALHash)
+									}
 								}
 							}
 						}
@@ -347,6 +356,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								return err
 							}
 							resetCommitmentGauges(ctx)
+
+							// on chain tip we run receipt root verification in parallel alongside commitment computation
+							// make sure to wait for it to finish and check for an error
+							err = pe.getPostValidator().Wait()
+							if err != nil {
+								return err
+							}
 
 							if shouldGenerateChangesets {
 								pe.domains().SavePastChangesetAccumulator(applyResult.BlockHash, applyResult.BlockNum, changeSet)
@@ -1714,4 +1730,39 @@ func mergeReadSets(a state.ReadSet, b state.ReadSet) state.ReadSet {
 		})
 	}
 	return out
+}
+
+func mergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrites {
+	if len(prev) == 0 {
+		return next
+	}
+	if len(next) == 0 {
+		return prev
+	}
+	merged := state.WriteSet{}
+	for _, v := range prev {
+		merged.Set(*v)
+	}
+	for _, v := range next {
+		merged.Set(*v)
+	}
+	out := make(state.VersionedWrites, 0, merged.Len())
+	merged.Scan(func(v *state.VersionedWrite) bool {
+		out = append(out, v)
+		return true
+	})
+	return out
+}
+
+func mergeAccessedAddresses(dst, src map[accounts.Address]struct{}) map[accounts.Address]struct{} {
+	if len(src) == 0 {
+		return dst
+	}
+	if dst == nil {
+		dst = make(map[accounts.Address]struct{}, len(src))
+	}
+	for addr := range src {
+		dst[addr] = struct{}{}
+	}
+	return dst
 }

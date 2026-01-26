@@ -17,6 +17,7 @@
 package dbg
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -229,34 +230,67 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 		return
 	}
 
-	// above 45%
+	// above threshold - save heap profile
 	var filePath string
 	if heapProfileFilePath == "" {
 		filePath = filepath.Join(os.TempDir(), "erigon-mem.prof")
 	} else {
 		filePath = heapProfileFilePath
 	}
+
 	if logger != nil {
-		logger.Info("[Experiment] saving heap profile as near OOM", "filePath", filePath)
+		logger.Info("[Experiment] saving heap profile as near OOM", "filePath", filePath, "alloc", common.ByteCount(memStats.Alloc))
 	}
 
-	f, err := os.Create(filePath)
-	if err != nil && logger != nil {
-		logger.Warn("[Experiment] could not create heap profile file", "err", err)
-	}
-
-	defer func() {
-		err := f.Close()
-		if err != nil && logger != nil {
-			logger.Warn("[Experiment] could not close heap profile file", "err", err)
+	// Write heap profile to buffer first
+	var buf bytes.Buffer
+	if err := pprof.WriteHeapProfile(&buf); err != nil {
+		if logger != nil {
+			logger.Warn("[Experiment] could not write heap profile to buffer", "err", err)
 		}
-	}()
-
-	runtime.GC()
-	err = pprof.WriteHeapProfile(f)
-	if err != nil && logger != nil {
-		logger.Warn("[Experiment] could not write heap profile file", "err", err)
+		return
 	}
+	logger.Info("[Experiment] wrote heap profile to buffer", "size", common.ByteCount(uint64(buf.Len())))
+
+	// create temp file-> write buffer -> fsync -> rename
+	// Writing to the temporary file first and then renaming to the output file ensures durability of data in case of an OOM
+	// If there is an OOM crash while writing to the .tmp file we still have the previous heap profile result saved
+	// in the output file. The rename() operation is atomic for POSIX systems, so there is no danger of corruption if the OOM comes
+	// when os.Rename() is being called.
+	tmpPath := filePath + ".tmp"
+	f, err := os.Create(tmpPath)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("[Experiment] could not create heap profile temp file", "err", err)
+		}
+		return
+	}
+	defer f.Close()
+	defer os.Remove(tmpPath) //nolint
+
+	if _, err := f.Write(buf.Bytes()); err != nil {
+		if logger != nil {
+			logger.Warn("[Experiment] could not write heap profile temp file", "err", err)
+		}
+		return
+	}
+
+	if err := f.Sync(); err != nil {
+		if logger != nil {
+			logger.Warn("[Experiment] could not sync heap profile temp file", "err", err)
+		}
+		return
+	}
+
+	// Atomic rename (on linux/mac; best-effort on Windows)
+	if err := os.Rename(tmpPath, filePath); err != nil {
+		if logger != nil {
+			logger.Warn("[Experiment] could not rename heap profile file", "err", err)
+		}
+		return
+	}
+
+	logger.Info("[Experiment] wrote heap profile to disk")
 }
 
 func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOption) {
