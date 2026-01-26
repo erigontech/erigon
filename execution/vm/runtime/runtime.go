@@ -135,7 +135,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 			return nil, nil, err
 		}
 		defer tx.Rollback()
-		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+		sd, err := execctx.NewSharedDomains(context.Background(), tx, nil, log.New())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -192,7 +192,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 			return nil, [20]byte{}, 0, err
 		}
 		defer tx.Rollback()
-		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+		sd, err := execctx.NewSharedDomains(context.Background(), tx, nil, log.New())
 		if err != nil {
 			return nil, [20]byte{}, 0, err
 		}

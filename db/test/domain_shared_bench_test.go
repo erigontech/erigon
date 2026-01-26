@@ -72,7 +72,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, nil, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	maxTx := stepSize * 258
@@ -155,7 +155,7 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 	require.NoError(b, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, nil, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 

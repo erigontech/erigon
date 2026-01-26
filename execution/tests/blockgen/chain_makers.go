@@ -317,7 +317,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	defer tx.Rollback()
 	logger := log.New("generate-chain", config.ChainName)
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
+	domains, err := execctx.NewSharedDomains(ctx, tx, nil, logger)
 	if err != nil {
 		return nil, err
 	}

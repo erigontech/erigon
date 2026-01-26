@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/services"
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -148,8 +149,9 @@ var readDomains = &cobra.Command{
 			return
 		}
 		defer stateDb.Close()
+		br, _ := blocksIO(chainDb, logger)
 
-		if err := requestDomains(chainDb, stateDb, ctx, readFromDomain, addrs, logger); err != nil {
+		if err := requestDomains(chainDb, stateDb, br, ctx, readFromDomain, addrs, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -526,7 +528,7 @@ func makeCompactDomains(ctx context.Context, db kv.RwDB, files []string, dirs da
 	return somethingCompacted, nil
 }
 
-func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
+func requestDomains(chainDb, stateDb kv.RwDB, br services.FullBlockReader, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
 	stateTx, err := stateDb.BeginRw(ctx)
 	must(err)
 	defer stateTx.Rollback()
@@ -534,7 +536,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	if !ok {
 		return errors.New("stateDb transaction is not a temporal transaction")
 	}
-	domains, err := execctx.NewSharedDomains(ctx, temporalTx, logger)
+	domains, err := execctx.NewSharedDomains(ctx, temporalTx, br, logger)
 	if err != nil {
 		return err
 	}

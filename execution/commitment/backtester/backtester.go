@@ -194,7 +194,7 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	if bt.paraTrie {
 		statecfg.ExperimentalConcurrentCommitment = true
 	}
-	sd, err := execctx.NewSharedDomains(ctx, tx, bt.logger)
+	sd, err := execctx.NewSharedDomains(ctx, tx, bt.blockReader, bt.logger)
 	if err != nil {
 		return err
 	}

@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
@@ -76,8 +77,8 @@ func sendForkchoiceErrorWithoutWaiting(logger log.Logger, ch chan forkchoiceOutc
 	return err
 }
 
-func isDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.Logger) bool {
-	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+func isDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, blockReader services.FullBlockReader, logger log.Logger) bool {
+	doms, err := execctx.NewSharedDomains(ctx, tx, blockReader, logger)
 	if err != nil {
 		logger.Debug("domain ahead of blocks", "err", err)
 		return errors.Is(err, commitmentdb.ErrBehindCommitment)
@@ -260,7 +261,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 
-	currentContext, err := execctx.NewSharedDomains(ctx, tx, e.logger)
+	currentContext, err := execctx.NewSharedDomains(ctx, tx, e.blockReader, e.logger)
 
 	if err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
@@ -392,7 +393,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			}
 		}
 	}
-	if isDomainAheadOfBlocks(ctx, tx, e.logger) {
+	if isDomainAheadOfBlocks(ctx, tx, e.blockReader, e.logger) {
 		if err := currentContext.Flush(ctx, tx); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}

@@ -230,7 +230,7 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 		}
 		defer tx.Rollback()
 
-		doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+		doms, err := execctx.NewSharedDomains(ctx, tx, cfg.BlockReader, logger)
 		if err != nil {
 			return err
 		}

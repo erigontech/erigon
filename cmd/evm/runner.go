@@ -186,7 +186,7 @@ func runCmd(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.Root())
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, nil, log.Root())
 	if err != nil {
 		return err
 	}

@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -84,7 +85,7 @@ type SharedDomains struct {
 	metrics           changeset.DomainMetrics
 }
 
-func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
+func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, blockReader services.FullBlockReader, logger log.Logger) (*SharedDomains, error) {
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
@@ -100,6 +101,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) 
 	}
 
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
+	sd.sdCtx.SetBlockReader(blockReader)
 
 	if err := sd.SeekCommitment(ctx, tx); err != nil {
 		return nil, err
@@ -506,6 +508,11 @@ func (sd *SharedDomains) DiscardWrites(d kv.Domain) {
 
 func (sd *SharedDomains) GetCommitmentContext() *commitmentdb.SharedDomainsCommitmentContext {
 	return sd.sdCtx
+}
+
+// SetBlockReader sets the block reader used for accessing block data (e.g., getting the last block number).
+func (sd *SharedDomains) SetBlockReader(blockReader services.FullBlockReader) {
+	sd.sdCtx.SetBlockReader(blockReader)
 }
 
 // SeekCommitment lookups latest available commitment and sets it as current

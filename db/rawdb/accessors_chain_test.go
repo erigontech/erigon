@@ -804,7 +804,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	var txNum uint64
 	{
 		blockNum := header.Number.Uint64()
-		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+		sd, err := execctx.NewSharedDomains(context.Background(), tx, nil, log.New())
 		require.NoError(err)
 		defer sd.Close()
 		base, err := txNumReader.Min(context.Background(), tx, 1)

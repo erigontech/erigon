@@ -270,7 +270,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		var stateWriter state.StateWriter
 
 		if calculatePostState {
-			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root())
+			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, g.blockReader, log.Root())
 			if err != nil {
 				return nil, err
 			}
@@ -447,7 +447,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	var stateWriter state.StateWriter
 	var minTxNum uint64
 	if calculatePostState {
-		sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root())
+		sharedDomains, err = execctx.NewSharedDomains(ctx, tx, g.blockReader, log.Root())
 		if err != nil {
 			return nil, err
 		}

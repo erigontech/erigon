@@ -495,7 +495,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, nil, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 
@@ -614,7 +614,7 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 	assert.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, nil, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
 

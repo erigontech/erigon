@@ -152,7 +152,7 @@ func testTemporalTxSD(t testing.TB, db kv.TemporalRwDB) (kv.TemporalRwTx, *execc
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 
-	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, nil, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 

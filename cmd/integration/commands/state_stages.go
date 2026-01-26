@@ -161,6 +161,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 
 	_, engine, vmConfig, stateStages := newSync(ctx, db, &miningConfig, logger1)
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
+	br, _ := blocksIO(db, logger1)
 
 	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
@@ -168,7 +169,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 	}
 	defer tx.Rollback()
 
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger1)
+	sd, err := execctx.NewSharedDomains(ctx, tx, br, logger1)
 	if err != nil {
 		return err
 	}
@@ -184,8 +185,6 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 	if err != nil {
 		return err
 	}
-
-	br, _ := blocksIO(db, logger1)
 	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications, false, true, dirs, br, nil, spec.Genesis, syncCfg, nil, false)
 
 	execUntilFunc := func(execToBlock uint64) stagedsync.ExecFunc {

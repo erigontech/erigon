@@ -99,7 +99,7 @@ func checkCommitmentRootInFile(ctx context.Context, db kv.TemporalRoDB, br servi
 	if err != nil {
 		return fmt.Errorf("%w: in %s with startTxNum=%d, endTxNum=%d", err, fileName, startTxNum, endTxNum)
 	}
-	sd, err := checkCommitmentRootViaSd(ctx, tx, f, info, logger)
+	sd, err := checkCommitmentRootViaSd(ctx, tx, br, f, info, logger)
 	if err != nil {
 		return fmt.Errorf("%w: in %s with startTxNum=%d, endTxNum=%d", err, fileName, startTxNum, endTxNum)
 	}
@@ -195,9 +195,9 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br se
 	return info, nil
 }
 
-func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.VisibleFile, info commitmentRootInfo, logger log.Logger) (*execctx.SharedDomains, error) {
+func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, f state.VisibleFile, info commitmentRootInfo, logger log.Logger) (*execctx.SharedDomains, error) {
 	maxTxNum := f.EndRootNum() - 1
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+	sd, err := execctx.NewSharedDomains(ctx, tx, br, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -741,7 +741,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		return err
 	}
 	toTxNum := maxTxNum + 1
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+	sd, err := execctx.NewSharedDomains(ctx, tx, br, logger)
 	if err != nil {
 		return err
 	}

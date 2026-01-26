@@ -431,7 +431,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return nil, err
 	}
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, tx, api._blockReader, log.New())
 	if err != nil {
 		return nil, err
 	}
@@ -695,7 +695,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	txBatch2 := membatchwithdb.NewMemoryBatch(roTx2, "", logger)
 	defer txBatch2.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, txBatch2, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, txBatch2, api._blockReader, log.New())
 	if err != nil {
 		return nil, err
 	}

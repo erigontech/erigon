@@ -46,7 +46,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 	require.NoError(f, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, nil, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 
@@ -162,7 +162,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 	require.NoError(f, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, nil, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 

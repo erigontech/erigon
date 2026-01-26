@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/trie"
@@ -177,11 +178,17 @@ type SharedDomainsCommitmentContext struct {
 	stateReader   StateReader
 	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
 	trieWarmup    bool            // toggle for parallel trie warmup of MDBX page cache during commitment
+	blockReader   services.FullBlockReader
 }
 
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
 func (sdc *SharedDomainsCommitmentContext) SetStateReader(stateReader StateReader) {
 	sdc.stateReader = stateReader
+}
+
+// SetBlockReader sets the block reader used for accessing block data (e.g., getting the last block number).
+func (sdc *SharedDomainsCommitmentContext) SetBlockReader(blockReader services.FullBlockReader) {
+	sdc.blockReader = blockReader
 }
 
 // EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
@@ -468,7 +475,12 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 			return 0, 0, false, err
 		}
 		if blockNum > 0 {
-			lastBn, _, err := rawdbv3.TxNums.Last(tx)
+			var lastBn uint64
+			if sdc.blockReader != nil {
+				lastBn, _, err = sdc.blockReader.TxnumReader().Last(tx)
+			} else {
+				lastBn, _, err = rawdbv3.TxNums.Last(tx)
+			}
 			if err != nil {
 				return 0, 0, false, err
 			}

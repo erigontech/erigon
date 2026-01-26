@@ -165,6 +165,7 @@ Examples:
 			return
 		}
 		defer chainDb.Close()
+		br, _ := blocksIO(chainDb, logger)
 
 		// Start a read-only temporal transaction
 		tx, err := chainDb.BeginTemporalRo(ctx)
@@ -173,7 +174,7 @@ Examples:
 			return
 		}
 		defer tx.Rollback()
-		sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+		sd, err := execctx.NewSharedDomains(ctx, tx, br, logger)
 		if err != nil {
 			logger.Error("Failed to create shared domains", "error", err)
 			return
@@ -431,6 +432,7 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 		return fmt.Errorf("opening DB: %w", err)
 	}
 	defer chainDb.Close()
+	br, _ := blocksIO(chainDb, logger)
 
 	agg := chainDb.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	agg.DisableAllDependencies()
@@ -469,7 +471,7 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 		return fmt.Errorf("failed to begin temporal tx: %w", err)
 	}
 	defer tx.Rollback()
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+	sd, err := execctx.NewSharedDomains(ctx, tx, br, logger)
 	if err != nil {
 		return fmt.Errorf("failed to create shared domains: %w", err)
 	}

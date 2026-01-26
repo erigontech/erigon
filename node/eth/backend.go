@@ -924,7 +924,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			stages.ModeBlockProduction,
 		)
 		// We start the mining step
-		if err := stageloop.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir, logger); err != nil {
+		if err := stageloop.MiningStep(ctx, backend.chainDB, blockReader, proposingSync, tmpdir, logger); err != nil {
 			return nil, err
 		}
 		block := <-miningStatePos.MiningResultCh

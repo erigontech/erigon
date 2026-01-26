@@ -124,7 +124,7 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 
 	mb := membatchwithdb.NewMemoryBatch(tx, cfg.tmpdir, logger)
 	defer mb.Close()
-	simSd, err := execctx.NewSharedDomains(ctx, mb, logger)
+	simSd, err := execctx.NewSharedDomains(ctx, mb, cfg.blockReader, logger)
 	if err != nil {
 		return err
 	}
@@ -271,7 +271,7 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 			}
 			if unwrap, ok := tx.(txUnwrapper); ok {
 				if rwTx, ok := unwrap.UnderlyingTx().(kv.TemporalRwTx); ok {
-					tempSd, err := execctx.NewSharedDomains(ctx, rwTx, logger)
+					tempSd, err := execctx.NewSharedDomains(ctx, rwTx, cfg.blockReader, logger)
 					if err != nil {
 						return err
 					}

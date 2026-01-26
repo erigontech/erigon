@@ -132,7 +132,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		return err
 	}
 	defer tx.Rollback()
-	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	doms, err := execctx.NewSharedDomains(ctx, tx, blockReader, logger)
 	if err != nil {
 		return err
 	}
@@ -230,7 +230,7 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 	hasMore := true
 	for hasMore {
 		err = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+			sd, err := execctx.NewSharedDomains(ctx, tx, blockReader, logger)
 			if err != nil {
 				return err
 			}
@@ -543,7 +543,7 @@ func (h *Hook) maybeAnnounceBlockRange(finishStageBeforeSync, finishStageAfterSy
 	h.lastAnnouncedBlockRangeTime = time.Now()
 }
 
-func MiningStep(ctx context.Context, db kv.TemporalRwDB, mining *stagedsync.Sync, tmpDir string, logger log.Logger) (err error) {
+func MiningStep(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, mining *stagedsync.Sync, tmpDir string, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -558,7 +558,7 @@ func MiningStep(ctx context.Context, db kv.TemporalRwDB, mining *stagedsync.Sync
 	mb := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
 	defer mb.Close()
 
-	sd, err := execctx.NewSharedDomains(ctx, mb, logger)
+	sd, err := execctx.NewSharedDomains(ctx, mb, blockReader, logger)
 	if err != nil {
 		return err
 	}

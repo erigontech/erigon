@@ -334,7 +334,7 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	}
 	defer tx.Rollback()
 
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+	sd, err := execctx.NewSharedDomains(ctx, tx, nil, logger)
 	if err != nil {
 		return nil, nil, err
 	}

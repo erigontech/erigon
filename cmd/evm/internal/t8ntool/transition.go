@@ -305,7 +305,7 @@ func Main(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, nil, log.New())
 	if err != nil {
 		return err
 	}
@@ -647,7 +647,7 @@ func CalculateStateRoot(tx kv.TemporalRwTx, blockNum uint64, txNum uint64) (*com
 	defer c.Close()
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, nil, log.New())
 	if err != nil {
 		return nil, fmt.Errorf("NewSharedDomains: %w", err)
 	}

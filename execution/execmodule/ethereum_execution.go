@@ -369,7 +369,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 
 	rawdb.WriteRecentReorg(tx, false)
 
-	doms, err := execctx.NewSharedDomains(ctx, tx, e.logger)
+	doms, err := execctx.NewSharedDomains(ctx, tx, e.blockReader, e.logger)
 	if err != nil {
 		return nil, err
 	}

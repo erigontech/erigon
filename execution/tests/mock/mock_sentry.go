@@ -513,7 +513,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			stages.ModeBlockProduction,
 		)
 		// We start the mining step
-		if err := stageloop.MiningStep(ctx, mock.DB, proposingSync, tmpdir, logger); err != nil {
+		if err := stageloop.MiningStep(ctx, mock.DB, mock.BlockReader, proposingSync, tmpdir, logger); err != nil {
 			return nil, err
 		}
 		block := <-miningStatePos.MiningResultCh

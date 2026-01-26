@@ -66,7 +66,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	require.NoError(b, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, tx, nil, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
 

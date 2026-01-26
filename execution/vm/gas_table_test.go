@@ -103,7 +103,7 @@ func testTemporalTxSD(t *testing.T) (kv.TemporalRwTx, *execctx.SharedDomains) {
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 
-	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, nil, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -174,7 +174,7 @@ func TestCreateGas(t *testing.T) {
 	for i, tt := range createGasTests {
 		address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 
-		domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+		domains, err := execctx.NewSharedDomains(context.Background(), tx, nil, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
 

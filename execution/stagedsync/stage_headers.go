@@ -278,7 +278,7 @@ Loop:
 		if !ok {
 			return errors.New("tx is not a temporal tx")
 		}
-		doms, err := execctx.NewSharedDomains(ctx, temporalTx, logger) //TODO: if remove this line TestBlockchainHeaderchainReorgConsistency failing
+		doms, err := execctx.NewSharedDomains(ctx, temporalTx, cfg.blockReader, logger) //TODO: if remove this line TestBlockchainHeaderchainReorgConsistency failing
 		if err != nil {
 			return err
 		}
