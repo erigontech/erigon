@@ -568,8 +568,8 @@ COMMANDS:
    help, h                                      Shows a list of commands or help for one command
 
 GLOBAL OPTIONS:
-   --datadir value                                                                                                         Data directory for the databases (default: /home/bloxster/.local/share/erigon)
-   --ethash.dagdir value                                                                                                   Directory to store the ethash mining DAGs (default: /home/bloxster/.local/share/erigon-ethash)
+   --datadir value                                                                                                         Data directory for the databases (default: /home/user/.local/share/erigon)
+   --ethash.dagdir value                                                                                                   Directory to store the ethash mining DAGs (default: /home/user/.local/share/erigon-ethash)
    --externalcl                                                                                                            Enables the external consensus layer (default: false)
    --txpool.disable                                                                                                        External pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer. (default: false)
    --txpool.pricelimit value                                                                                               Minimum gas price (fee cap) limit to enforce for acceptance into the pool (default: 1)
@@ -682,7 +682,7 @@ GLOBAL OPTIONS:
                                                                                                                                 "stun:<server>"      Uses STUN to detect an external IP using the given server (host:port)
    --nodiscover                                                                                                            Disables the peer discovery mechanism (manual peer addition) (default: false)
    --discovery.v4, --discv4                                                                                                Enables the V4 discovery mechanism (default: false)
-   --discovery.v5, --discv5                                                                                                Enables the V5 discovery mechanism (default: false)
+   --discovery.v5, --discv5                                                                                                Enables the V5 discovery mechanism (default: true)
    --netrestrict value                                                                                                     Restricts network communication to the given IP networks (CIDR masks)
    --nodekey value                                                                                                         P2P node key file
    --nodekeyhex value                                                                                                      P2P node key as hex (for testing)
