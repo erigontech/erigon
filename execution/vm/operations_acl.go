@@ -331,21 +331,22 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 			} else {
 				delegationGas = params.WarmStorageReadCostEIP2929
 			}
-			evm.intraBlockState.GetCode(addr)
-
+			_, err := evm.intraBlockState.GetCode(addr)
+			if err != nil {
+				return 0, err
+			}
 			if gas, overflow = math.SafeAdd(gas, delegationGas); overflow {
 				return 0, ErrGasUintOverflow
 			}
 			if availableGas < gas {
 				return 0, ErrOutOfGas
 			}
-
 			evm.intraBlockState.AddAddressToAccessList(dd)
 		}
 
 		// Call the old calculator, which takes into account
 		// - 63/64ths rule
-		callGas, err := calcCallGas(evm, callContext, availableGas-accessGas, statefulBaseGas)
+		callGas, err := calcCallGas(evm, callContext, availableGas-accessGas-delegationGas, statefulBaseGas)
 		if err != nil {
 			return 0, err
 		}

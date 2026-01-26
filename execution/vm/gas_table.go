@@ -402,8 +402,8 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas uint64, m
 
 	if !withCallGasCalc {
 		if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
-			fmt.Printf("%d (%d.%d) Call Gas: base: %d memory(%d): %d\n",
-				evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gas-memoryGas, memorySize, memoryGas)
+			fmt.Printf("%d (%d.%d) Call Gas: avail: %d, base: %d memory(%d): %d\n",
+				evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), availableGas, gas-memoryGas, memorySize, memoryGas)
 		}
 		return gas, transfersValue, nil
 	}
@@ -418,8 +418,8 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas uint64, m
 	}
 
 	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
-		fmt.Printf("%d (%d.%d) Call Gas: base: %d memory(%d): %d call: %d\n",
-			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gas-memoryGas, memorySize, memoryGas, callGas)
+		fmt.Printf("%d (%d.%d) Call Gas: avail: %d, base: %d memory(%d): %d call: %d\n",
+			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), availableGas, gas-memoryGas, memorySize, memoryGas, callGas)
 	}
 
 	gas, overflow = math.SafeAdd(gas, callGas)
