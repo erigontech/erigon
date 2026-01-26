@@ -282,7 +282,6 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, rangeLimit int) ([]*types.ErigonLog, error) {
 	logs := []*types.ErigonLog{} //nolint
 
-	fmt.Println("getLogsV3::RangeLimit: ", rangeLimit)
 	if rangeLimit != 0 && (end-begin) > uint64(rangeLimit) {
 		return nil, fmt.Errorf("%s: %d", errExceedBlockRange, rangeLimit)
 	}
