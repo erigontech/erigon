@@ -911,7 +911,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 				if hph.trace {
 					fmt.Printf("leafHashWithKeyVal(singleton) for [%x]=>[%x]\n", cell.hashedExtension[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen])
 				}
-				aux := make([]byte, 0, 33)
+				aux := hph.hashAuxBuffer[:0]
 				if aux, err = hph.leafHashWithKeyVal(aux, cell.hashedExtension[:64-hashedKeyOffset+1], cell.Storage[:cell.StorageLen], true); err != nil {
 					return nil, storageRootHashIsSet, nil, err
 				}
