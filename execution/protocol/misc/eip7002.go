@@ -19,6 +19,7 @@ package misc
 import (
 	"fmt"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -32,7 +33,8 @@ func DequeueWithdrawalRequests7002(syscall rules.SystemCall, state *state.IntraB
 		return nil, err
 	}
 	if codeSize == 0 {
-		return nil, fmt.Errorf("[EIP-7002] Syscall failure: Empty Code at WithdrawalRequestAddress=%x", params.WithdrawalRequestAddress)
+		log.Warn("[EIP-7002] No code deployed to WithdrawalRequestAddress before call to dequeue withdrawal requests")
+		return nil, nil
 	}
 
 	res, err := syscall(params.WithdrawalRequestAddress, nil)

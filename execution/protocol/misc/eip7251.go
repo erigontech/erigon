@@ -19,6 +19,7 @@ package misc
 import (
 	"fmt"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -32,7 +33,8 @@ func DequeueConsolidationRequests7251(syscall rules.SystemCall, state *state.Int
 		return nil, err
 	}
 	if codeSize == 0 {
-		return nil, fmt.Errorf("[EIP-7251] Syscall failure: Empty Code at ConsolidationRequestAddress=%x", params.ConsolidationRequestAddress)
+		log.Warn("[EIP-7251] No code deployed to ConsolidationRequestAddress before call to dequeue consolidation requests")
+		return nil, nil
 	}
 
 	res, err := syscall(params.ConsolidationRequestAddress, nil)

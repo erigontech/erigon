@@ -226,7 +226,10 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 	} else {
 		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock)
 	}
-	_, err = mockCl.BuildCanonicalBlock(ctx) // build 1 empty block before proceeding to properly initialise everything
+	if !args.NoEmptyBlock1 {
+		// build 1 empty block before proceeding to properly initialise everything
+		_, err = mockCl.BuildCanonicalBlock(ctx)
+	}
 	require.NoError(t, err)
 	return EngineApiTester{
 		GenesisBlock:         genesisBlock,
@@ -250,6 +253,7 @@ type EngineApiTesterInitArgs struct {
 	CoinbaseKey      *ecdsa.PrivateKey
 	EthConfigTweaker func(*ethconfig.Config)
 	MockClState      *MockClState
+	NoEmptyBlock1    bool
 }
 
 type EngineApiTester struct {

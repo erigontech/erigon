@@ -4,6 +4,7 @@ package ethconfig
 
 import (
 	"math/big"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -47,6 +48,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		RPCGasCap                           uint64  `toml:",omitempty"`
 		RPCTxFeeCap                         float64 `toml:",omitempty"`
 		StateStream                         bool
+		ExperimentalBAL                     bool
 		HeimdallURL                         string
 		WithoutHeimdall                     bool
 		Ethstats                            string
@@ -69,6 +71,9 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		PolygonPosSingleSlotFinality        bool
 		PolygonPosSingleSlotFinalityBlockAt uint64
 		AllowAA                             bool
+		FcuTimeout                          time.Duration
+		FcuBackgroundPrune                  bool
+		FcuBackgroundCommit                 bool
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
@@ -94,6 +99,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.RPCGasCap = c.RPCGasCap
 	enc.RPCTxFeeCap = c.RPCTxFeeCap
 	enc.StateStream = c.StateStream
+	enc.ExperimentalBAL = c.ExperimentalBAL
 	enc.HeimdallURL = c.HeimdallURL
 	enc.WithoutHeimdall = c.WithoutHeimdall
 	enc.Ethstats = c.Ethstats
@@ -116,6 +122,9 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.PolygonPosSingleSlotFinality = c.PolygonPosSingleSlotFinality
 	enc.PolygonPosSingleSlotFinalityBlockAt = c.PolygonPosSingleSlotFinalityBlockAt
 	enc.AllowAA = c.AllowAA
+	enc.FcuTimeout = c.FcuTimeout
+	enc.FcuBackgroundPrune = c.FcuBackgroundPrune
+	enc.FcuBackgroundCommit = c.FcuBackgroundCommit
 	return &enc, nil
 }
 
@@ -168,6 +177,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		PolygonPosSingleSlotFinality        *bool
 		PolygonPosSingleSlotFinalityBlockAt *uint64
 		AllowAA                             *bool
+		FcuTimeout                          *time.Duration
+		FcuBackgroundPrune                  *bool
+		FcuBackgroundCommit                 *bool
 	}
 	var dec Config
 	if err := unmarshal(&dec); err != nil {
@@ -310,6 +322,15 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.AllowAA != nil {
 		c.AllowAA = *dec.AllowAA
+	}
+	if dec.FcuTimeout != nil {
+		c.FcuTimeout = *dec.FcuTimeout
+	}
+	if dec.FcuBackgroundPrune != nil {
+		c.FcuBackgroundPrune = *dec.FcuBackgroundPrune
+	}
+	if dec.FcuBackgroundCommit != nil {
+		c.FcuBackgroundCommit = *dec.FcuBackgroundCommit
 	}
 	return nil
 }
