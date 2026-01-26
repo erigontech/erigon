@@ -59,6 +59,8 @@ github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03
 github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
 github.com/FastFilter/xorfilter v0.2.1 h1:lbdeLG9BdpquK64ZsleBS8B4xO/QW1IM0gMzF7KaBKc=
 github.com/FastFilter/xorfilter v0.2.1/go.mod h1:aumvdkhscz6YBZF9ZA/6O4fIoNod4YR50kIVGGZ7l9I=
+github.com/Giulio2002/gdbx v0.0.0-20260124213228-4cc1e31dabf6 h1:Up+GxQUHwe+E62wYZSxKTuZxEeAxJM2eW2TTrAJ2Rmw=
+github.com/Giulio2002/gdbx v0.0.0-20260124213228-4cc1e31dabf6/go.mod h1:j7ZPaT7eX4l0jQ7pnMR/mLV8DrF/jVYw3Way9R3cPHo=
 github.com/Giulio2002/gdbx v0.0.0-20260126160557-1c80d354445c h1:B20Yv/G9LooOFaXvY4KxM369KYug0pHiCgFqKTqxn0Q=
 github.com/Giulio2002/gdbx v0.0.0-20260126160557-1c80d354445c/go.mod h1:0MEn6KviX/AZVzCjRzbFx62dENyQ6m6dPySSoUj3d/k=
 github.com/Giulio2002/zero-alloc-go-eth-kzg v0.0.0-20260105034637-43cb6f34f8e0 h1:wWX3lg8PLXojtYeie+Eoug06T1td4fBKeh2/s87AtxY=
@@ -305,8 +307,6 @@ github.com/erigontech/erigon-snapshot v1.3.1-0.20260105114333-2f59a10db72b h1:xX
 github.com/erigontech/erigon-snapshot v1.3.1-0.20260105114333-2f59a10db72b/go.mod h1:ooHlCl+eEYzebiPu+FP6Q6SpPUeMADn8Jxabv3IKb9M=
 github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116 h1:KCFa2uXEfZoBjV4buzjWmCmoqVLXiGCq0ZmQ2OjeRvQ=
 github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116/go.mod h1:8vQ+VjvLu2gkPs8EwdPrOTAAo++WuLuBi54N7NuAF0I=
-github.com/erigontech/mdbx-go v0.40.0 h1:wbjPSyF/jQWafvNYZOkz93m2kZRnh2MN5OkH6kOroGs=
-github.com/erigontech/mdbx-go v0.40.0/go.mod h1:tHUS492F5YZvccRqatNdpTDQAaN+Vv4HRARYq89KqeY=
 github.com/erigontech/secp256k1 v1.2.0 h1:Q/HCBMdYYT0sh1xPZ9ZYEnU30oNyb/vt715cJhj7n7A=
 github.com/erigontech/secp256k1 v1.2.0/go.mod h1:GokhPepsMB+EYDs7I5JZCprxHW6+yfOcJKaKtoZ+Fls=
 github.com/erigontech/silkworm-go v0.24.0 h1:fFe74CjQM5LI7ouMYjmqfFaqIFzQTpMrt+ls+a5PxpE=

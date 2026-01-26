@@ -37,7 +37,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/rpc/mcp"
-	"github.com/erigontech/mdbx-go/mdbx"
+	mdbx "github.com/Giulio2002/gdbx"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"

@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/mdbx-go/mdbx"
+	mdbx "github.com/Giulio2002/gdbx"
 	"github.com/erigontech/secp256k1"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"

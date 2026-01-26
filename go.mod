@@ -10,7 +10,6 @@ require (
 	github.com/Giulio2002/gdbx v0.0.0-20260126160557-1c80d354445c
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20260105114333-2f59a10db72b
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
-	github.com/erigontech/mdbx-go v0.40.0
 	github.com/erigontech/secp256k1 v1.2.0
 	github.com/erigontech/silkworm-go v0.24.0
 )
@@ -326,8 +325,7 @@ require (
 tool (
 	github.com/99designs/gqlgen
 	github.com/99designs/gqlgen/graphql/introspection
-	github.com/erigontech/mdbx-go
-	github.com/erigontech/mdbx-go/libmdbx
+	github.com/Giulio2002/gdbx
 	github.com/fjl/gencodec
 	go.uber.org/mock/mockgen
 	go.uber.org/mock/mockgen/model
