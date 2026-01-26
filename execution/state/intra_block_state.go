@@ -1184,7 +1184,8 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 
 var zeroBalance uint256.Int
 
-func (sdb *IntraBlockState) Selfdestruct6780(addr accounts.Address) (bool, error) {
+// Used for EIP-6780
+func (sdb *IntraBlockState) IsNewContract(addr accounts.Address) (bool, error) {
 	stateObject, err := sdb.getStateObject(addr)
 	if err != nil {
 		return false, err
@@ -1192,17 +1193,15 @@ func (sdb *IntraBlockState) Selfdestruct6780(addr accounts.Address) (bool, error
 	if stateObject == nil {
 		return false, nil
 	}
-	if stateObject.newlyCreated {
-		code, err := sdb.GetCode(addr)
-		if err != nil {
-			return false, err
-		}
-		if _, ok := types.ParseDelegation(code); !ok {
-			sdb.Selfdestruct(addr)
-			return true, nil
-		}
+	if !stateObject.newlyCreated {
+		return false, nil
 	}
-	return false, nil
+	code, err := sdb.GetCode(addr)
+	if err != nil {
+		return false, err
+	}
+	_, delegated := types.ParseDelegation(code)
+	return !delegated, nil
 }
 
 // SetTransientState sets transient storage for a given account. It
