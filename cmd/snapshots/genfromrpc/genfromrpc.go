@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/holiman/uint256"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
@@ -24,8 +26,8 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	turbocli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/rpc"
-	turbocli "github.com/erigontech/erigon/turbo/cli"
 )
 
 // CLI flags
@@ -384,7 +386,8 @@ func makeArbitrumLegacyTxFunc(commonTx *types.CommonTx, rawTx map[string]interfa
 	}
 	sender, ok := commonTx.GetSender()
 	if ok {
-		tx.OverrideSender = &sender
+		senderAddr := sender.Value()
+		tx.OverrideSender = &senderAddr
 	}
 
 	// return types.NewArbitrumLegacyTx(&types.LegacyTx{CommonTx: *commonTx, GasPrice: tx.GasPrice}, tx.HashOverride, tx.EffectiveGasPrice, tx.L1BlockNumber, tx.OverrideSender)
@@ -406,7 +409,7 @@ func makeRetryableTxFunc(commonTx *types.CommonTx, rawTx map[string]interface{})
 
 	// From: expected as a hex string address.
 	if fromHex, ok := rawTx["from"].(string); ok {
-		tx.From = common.HexToAddress(fromHex)
+		tx.From = accounts.InternAddress(common.HexToAddress(fromHex))
 	}
 
 	// L1BaseFee: expected as a hex string.
@@ -474,7 +477,7 @@ func makeArbitrumRetryTx(commonTx *types.CommonTx, rawTx map[string]interface{})
 
 	// From (expected as a hex string address)
 	if fromHex, ok := rawTx["from"].(string); ok {
-		tx.From = common.HexToAddress(fromHex)
+		tx.From = accounts.InternAddress(common.HexToAddress(fromHex))
 	}
 
 	// GasFeeCap (expected as a hex string)
@@ -540,7 +543,7 @@ func makeArbitrumContractTx(commonTx *types.CommonTx, rawTx map[string]interface
 
 	// From (expected as a hex string address)
 	if fromHex, ok := rawTx["from"].(string); ok {
-		tx.From = common.HexToAddress(fromHex)
+		tx.From = accounts.InternAddress(common.HexToAddress(fromHex))
 	}
 
 	// GasFeeCap (expected as a hex string)
@@ -579,7 +582,7 @@ func makeArbitrumUnsignedTx(commonTx *types.CommonTx, rawTx map[string]interface
 
 	// From: expected as a hex string address.
 	if fromHex, ok := rawTx["from"].(string); ok {
-		tx.From = common.HexToAddress(fromHex)
+		tx.From = accounts.InternAddress(common.HexToAddress(fromHex))
 	}
 
 	// Nonce: already parsed and stored in commonTx.
@@ -626,7 +629,7 @@ func makeArbitrumDepositTx(commonTx *types.CommonTx, rawTx map[string]interface{
 
 	// From: expected as a hex string address.
 	if fromHex, ok := rawTx["from"].(string); ok {
-		tx.From = common.HexToAddress(fromHex)
+		tx.From = accounts.InternAddress(common.HexToAddress(fromHex))
 	}
 
 	// To: expected as a hex string address.

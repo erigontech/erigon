@@ -23,7 +23,7 @@ package apitypes
 //
 //	"github.com/erigontech/erigon/common"
 //	"github.com/erigontech/erigon/core/types"
-//	//"github.com/erigontech/erigon/crypto/kzg"
+//	//"github.com/erigontech/erigon/common/crypto/kzg"
 //	"github.com/holiman/uint256"
 //)
 //

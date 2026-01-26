@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/erigontech/erigon/arb/multigas"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
 
@@ -654,8 +656,7 @@ func opGasprice(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uin
 	if true { // MERGE_ARBITRUM
 		gasPrice := interpreter.evm.ProcessingHook.GasPriceOp(interpreter.evm.GasPrice)
 		scope.Stack.push(gasPrice)
-	}
-	else {
+	} else {
 		scope.Stack.push(interpreter.evm.GasPrice)
 	}
 	return pc, nil, nil
@@ -1001,8 +1002,7 @@ func opCreate(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint6
 
 	if true { // MERGE_ARBITRUM
 		scope.Contract.UseMultiGas(multigas.ComputationGas(gas), interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation)
-	}
-	else {
+	} else {
 		scope.useGas(gas, interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation)
 	}
 

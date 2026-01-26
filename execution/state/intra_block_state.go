@@ -1581,8 +1581,8 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 			}
 		}
 	}
-
 	snapshot := sdb.revisions.revertToSnapshot(revid)
+	revision := sdb.revisions.valid[revid]
 	if sdb.arbExtraData != nil {
 		if sdb.arbExtraData.unexpectedBalanceDelta == nil {
 			sdb.arbExtraData.unexpectedBalanceDelta = uint256.NewInt(0)

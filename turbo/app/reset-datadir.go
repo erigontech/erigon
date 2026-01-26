@@ -12,6 +12,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/urfave/cli/v2"
 
+	""
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
@@ -21,7 +22,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/log/v3"
 )
 
 var (

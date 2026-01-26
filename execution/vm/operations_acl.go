@@ -39,9 +39,9 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		}
 		// Gas sentry honoured, do the actual gas calculation based on the stored value
 		var (
-			y, x    = callContext.Stack.Back(1), callContext.Stack.peek()
-			slot    = accounts.InternKey(x.Bytes32())
-			current uint256.Int
+			y, x     = callContext.Stack.Back(1), callContext.Stack.peek()
+			slot     = accounts.InternKey(x.Bytes32())
+			current  uint256.Int
 			multiGas = multigas.ZeroGas()
 		)
 
@@ -166,7 +166,7 @@ func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas uint64, 
 		return multiGas, nil
 	}
 	return multiGas, nil
-}7
+}
 
 // gasEip2929AccountCheck checks whether the first stack item (as address) is present in the access list.
 // If it is, this method returns '0', otherwise 'cold-warm' gas, presuming that the opcode using it
@@ -191,11 +191,10 @@ func gasEip2929AccountCheck(evm *EVM, callContext *CallContext, scopeGas uint64,
 
 func makeCallVariantGasCallEIP2929(oldCalculator gasFunc, addressPosition int) gasFunc {
 	return func(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (multigas.MultiGas, error) {
-		var addr accounts.Address;
+		var addr accounts.Address
 		if true { // MERGE_ARBITRUM
 			addr := accounts.InternAddress(callContext.Stack.Back(addressPosition).Bytes20())
-		}
-		else {
+		} else {
 			addr := accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
 		}
 
@@ -212,8 +211,7 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc, addressPosition int) g
 				if !contract.UseMultiGas(multigas.StorageAccessGas(coldCost), evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess) {
 					return multigas.ZeroGas(), ErrOutOfGas
 				}
-			}
-			else {
+			} else {
 				if _, ok := useGas(scopeGas, coldCost, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
 					return 0, ErrOutOfGas
 				}
@@ -223,8 +221,6 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc, addressPosition int) g
 				scopeGas -= coldCost
 			}
 		}
-
-
 
 		// Now call the old calculator, which takes into account
 		// - create new account
@@ -250,8 +246,7 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc, addressPosition int) g
 				return multigas.ZeroGas(), ErrGasUintOverflow
 			}
 			return multiGas, nil
-		}
-		else {
+		} else {
 			return gas + coldCost, nil
 		}
 	}
@@ -290,7 +285,7 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 	gasFunc := func(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (multigas.MultiGas, error) {
 		var (
 			multiGas = multigas.ZeroGas()
-			address = accounts.InternAddress(callContext.Stack.peek().Bytes20())
+			address  = accounts.InternAddress(callContext.Stack.peek().Bytes20())
 		)
 		if !evm.IntraBlockState().AddressInAccessList(address) {
 			// If the caller cannot afford the cost, this change will be rolled back
@@ -348,8 +343,7 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 				if !contract.UseMultiGas(multigas.StorageAccessGas(dynCost), evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess) {
 					return multigas.ZeroGas(), ErrOutOfGas
 				}
-			}
-			else {
+			} else {
 				if _, ok := useGas(scopeGas, dynCost, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
 					return 0, ErrOutOfGas
 				}

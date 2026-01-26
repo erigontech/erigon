@@ -20,6 +20,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon/arb/multigas"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -148,57 +149,56 @@ type IntraBlockState interface {
 	Incarnation() int
 
 	// Arbitrum deprecated API
-	CreateAccount(common.Address, bool) error
+	CreateAccount(accounts.Address, bool) error
 
-	RemoveEscrowProtection(addr common.Address)
+	RemoveEscrowProtection(addr accounts.Address)
 	ExpectBalanceBurn(amount *uint256.Int)
 	ExpectBalanceMint(amount *uint256.Int)
 
-	GetNonce(common.Address) (uint64, error)
-	SetNonce(common.Address, uint64) error
+	GetNonce(accounts.Address) (uint64, error)
+	SetNonce(accounts.Address, uint64) error
 
-	GetCodeHash(common.Address) (common.Hash, error)
-	GetCode(common.Address) ([]byte, error)
-	SetCode(common.Address, []byte) error
-	GetCodeSize(common.Address) (int, error)
+	GetCodeHash(accounts.Address) (accounts.CodeHash, error)
+	GetCode(accounts.Address) ([]byte, error)
+	SetCode(accounts.Address, []byte) error
+	GetCodeSize(accounts.Address) (int, error)
 
 	// eip-7702; delegated designations
-	ResolveCodeHash(common.Address) (common.Hash, error)
-	ResolveCode(common.Address) ([]byte, error)
-	GetDelegatedDesignation(common.Address) (common.Address, bool, error)
+	ResolveCodeHash(accounts.Address) (accounts.CodeHash, error)
+	ResolveCode(accounts.Address) ([]byte, error)
+	GetDelegatedDesignation(accounts.Address) (accounts.Address, bool, error)
 
 	AddRefund(uint64)
 	GetRefund() uint64
 	SubRefund(gas uint64) error
 
-	GetCommittedState(common.Address, common.Hash, *uint256.Int) error
-	GetState(address common.Address, slot common.Hash, outValue *uint256.Int) error
-	SetState(common.Address, common.Hash, uint256.Int) error
+	GetCommittedState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error)
+	GetState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error)
+	SetState(addr accounts.Address, key accounts.StorageKey, value uint256.Int) error
 
-	GetTransientState(addr common.Address, key common.Hash) uint256.Int
-	SetTransientState(addr common.Address, key common.Hash, value uint256.Int)
+	GetTransientState(addr accounts.Address, key accounts.StorageKey) uint256.Int
+	SetTransientState(addr accounts.Address, key accounts.StorageKey, value uint256.Int)
 
-	Selfdestruct(common.Address) (bool, error)
-	HasSelfdestructed(common.Address) (bool, error)
-	Selfdestruct6780(common.Address) error
+	Selfdestruct(accounts.Address) (bool, error)
+	HasSelfDestructed(addr accounts.Address) bool
+	Selfdestruct6780(accounts.Address) error
 
 	// Exist reports whether the given account exists in state.
 	// Notably this should also return true for suicided accounts.
-	Exist(common.Address) (bool, error)
+	Exist(accounts.Address) (bool, error)
 	// Empty returns whether the given account is empty. Empty
 	// is defined according to EIP161 (balance = nonce = code = 0).
-	Empty(common.Address) (bool, error)
+	Empty(accounts.Address) (bool, error)
 
-	Prepare(rules *chain.Rules, sender, coinbase common.Address, dest *common.Address,
-		precompiles []common.Address, txAccesses types.AccessList, authorities []common.Address) error
+	Prepare(rules *chain.Rules, sender accounts.Address, coinbase accounts.Address, dst accounts.Address, precompiles []accounts.Address, list types.AccessList, authorities []accounts.Address) error
 
-	AddressInAccessList(addr common.Address) bool
+	AddressInAccessList(addr accounts.Address) bool
 	// AddAddressToAccessList adds the given address to the access list. This operation is safe to perform
 	// even if the feature/fork is not active yet
-	AddAddressToAccessList(addr common.Address) (addrMod bool)
+	AddAddressToAccessList(addr accounts.Address) (addrMod bool)
 	// AddSlotToAccessList adds the given (address,slot) to the access list. This operation is safe to perform
 	// even if the feature/fork is not active yet
-	AddSlotToAccessList(addr common.Address, slot common.Hash) (addrMod, slotMod bool)
+	AddSlotToAccessList(addr accounts.Address, slot accounts.StorageKey) (addrMod bool, slotMod bool)
 
 	RevertToSnapshot(int, error)
 	Snapshot() int

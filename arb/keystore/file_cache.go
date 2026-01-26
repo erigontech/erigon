@@ -23,8 +23,8 @@ import (
 	"sync"
 	"time"
 
+	""
 	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/erigontech/erigon/log/v3"
 )
 
 // fileCache is a cache of files seen during scan of keystore.

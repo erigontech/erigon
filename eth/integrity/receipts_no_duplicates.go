@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
+	""
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	"github.com/erigontech/erigon/log/v3"
 	"github.com/erigontech/erigon/turbo/services"
 )
 

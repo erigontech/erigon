@@ -26,6 +26,7 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -136,7 +137,7 @@ func StageExecuteBlocksCfg(
 		syncCfg:         syncCfg,
 		silkworm:        silkworm,
 		experimentalBAL: experimentalBAL,
-		arbitrumWasmDB: arbitrumWasmDB,
+		arbitrumWasmDB:  arbitrumWasmDB,
 	}
 }
 

@@ -21,7 +21,6 @@ package ethash
 
 import (
 	crand "crypto/rand"
-	"encoding/json"
 	"errors"
 	"math"
 	"math/big"

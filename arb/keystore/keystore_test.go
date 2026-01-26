@@ -27,8 +27,8 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	dirs "github.com/erigontech/erigon/common/dir"
-	"github.com/erigontech/erigon/crypto"
 	"github.com/erigontech/erigon/p2p/event"
 	"golang.org/x/exp/slices"
 )

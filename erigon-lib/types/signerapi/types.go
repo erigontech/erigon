@@ -39,7 +39,7 @@ import (
 //	"github.com/erigontech/erigon/common"
 //	"github.com/erigontech/erigon/common/hexutil"
 //	"github.com/erigontech/erigon/common/math"
-//	"github.com/erigontech/erigon/crypto"
+//	"github.com/erigontech/erigon/common/crypto"
 //	"github.com/erigontech/erigon/types/accounts"
 //	"github.com/erigontech/erigon/core/types"
 //	"github.com/holiman/uint256"

@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/nitro-erigon/arbos"
 	"github.com/holiman/uint256"
 
+	""
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/core"
@@ -36,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/consensus"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/log/v3"
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/turbo/services"
