@@ -33,6 +33,14 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
+var (
+	// keccak256('Transfer(address,address,uint256)')
+	EthTransferLogEvent = common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+
+	// keccak256('Selfdestruct(address,uint256)')
+	EthSelfDestructLogEvent = common.HexToHash("0x4bfaba3443c1a1836cd362418edc679fc96cae8449cbefccb6457cdf2c943083")
+)
+
 // EthTransferLog creates and ETH transfer log according to EIP-7708.
 // Specification: https://eips.ethereum.org/EIPS/eip-7708
 func EthTransferLog(from, to common.Address, amount uint256.Int) *types.Log {
@@ -40,7 +48,7 @@ func EthTransferLog(from, to common.Address, amount uint256.Int) *types.Log {
 	return &types.Log{
 		Address: params.SystemAddress.Value(),
 		Topics: []common.Hash{
-			params.EthTransferLogEvent,
+			EthTransferLogEvent,
 			from.Hash(),
 			to.Hash(),
 		},
@@ -55,7 +63,7 @@ func EthSelfDestructLog(from common.Address, amount uint256.Int) *types.Log {
 	return &types.Log{
 		Address: params.SystemAddress.Value(),
 		Topics: []common.Hash{
-			params.EthSelfDestructLogEvent,
+			EthSelfDestructLogEvent,
 			from.Hash(),
 		},
 		Data: amount32[:],
