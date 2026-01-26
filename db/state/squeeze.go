@@ -341,6 +341,20 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 
+	// Check if TxNums index is available - it's required for commitment rebuild
+	roTx, err := a.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	empty, err := txNumsReader.IsEmpty(roTx)
+	roTx.Rollback()
+	if err != nil {
+		return nil, fmt.Errorf("failed to check TxNums index: %w", err)
+	}
+	if empty {
+		return nil, errors.New("TxNums index is empty - restart erigon to build the index first, then retry")
+	}
+
 	// disable hard alignment; allowing commitment and storage/account to have
 	// different visibleFiles
 	a.DisableAllDependencies()

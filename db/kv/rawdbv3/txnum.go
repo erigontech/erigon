@@ -322,6 +322,21 @@ func (TxNumsReader) First(tx kv.Tx) (blockNum, txNum uint64, err error) {
 	return binary.BigEndian.Uint64(k), binary.BigEndian.Uint64(v), nil
 }
 
+// IsEmpty returns true if the TxNums index has no entries.
+func (TxNumsReader) IsEmpty(tx kv.Tx) (bool, error) {
+	c, err := tx.Cursor(kv.MaxTxNum)
+	if err != nil {
+		return false, err
+	}
+	defer c.Close()
+
+	k, _, err := c.First()
+	if err != nil {
+		return false, err
+	}
+	return k == nil, nil
+}
+
 // LastKey
 func LastKey(tx kv.Tx, table string) ([]byte, error) {
 	c, err := tx.Cursor(table)
