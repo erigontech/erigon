@@ -399,8 +399,8 @@ var (
 		Usage: "Sets a cap on gas that can be used in eth_call/estimateGas",
 		Value: 50000000,
 	}
-	RpcRangeLimit = cli.IntFlag{
-		Name:  "rpc.rangeLimit",
+	RpcBlockRangeLimit = cli.IntFlag{
+		Name:  "rpc.blockrange.limit",
 		Usage: "Maximum block range (end - begin) allowed for range queries (0 = unlimited)",
 		Value: 0,
 	}
