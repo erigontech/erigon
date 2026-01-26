@@ -477,7 +477,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 		if blockNum > 0 {
 			var lastBn uint64
 			if sdc.blockReader != nil {
-				lastBn, _, err = sdc.blockReader.TxnumReader().Last(tx)
+				lastBn, err = sdc.blockReader.TxnumReader().Max(ctx, tx, blockNum)
 			} else {
 				lastBn, _, err = rawdbv3.TxNums.Last(tx)
 			}
