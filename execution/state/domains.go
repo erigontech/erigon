@@ -740,7 +740,7 @@ func (ad *AccountsDomain) Get(ctx context.Context, k accounts.Address, tx kv.Tem
 
 func (ad *AccountsDomain) Put(ctx context.Context, k accounts.Address, v *accounts.Account, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[*accounts.Account]) error {
 	if v == nil {
-		return fmt.Errorf("accounts domain: %s, trying to put nil value. not allowed", kv.AccountsDomain)
+		return errors.New("accounts domain: trying to put nil value. not allowed")
 	}
 
 	ad.commitCtx.TouchAccount(k, v)
@@ -980,6 +980,10 @@ func (sd *StorageDomain) Get(ctx context.Context, addr accounts.Address, key acc
 }
 
 func (sd *StorageDomain) Put(ctx context.Context, addr accounts.Address, key accounts.StorageKey, v uint256.Int, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[uint256.Int]) error {
+	if sd.valueOps.isEmpty(v) {
+		return errors.New("storage domain: trying to put zero value. not allowed")
+	}
+
 	sd.commitCtx.TouchStorage(addr, key, v)
 
 	var pv *ValueWithTxNum[uint256.Int]
@@ -1092,7 +1096,15 @@ func (sd *StorageDomain) HasStorage(ctx context.Context, addr accounts.Address, 
 			}
 		}
 		hasPrefix = len(v) > 0
-		return !hasPrefix, nil
+		if hasPrefix {
+			if updateVals, ok := sd.updates.Get(storageLocation{addr, accounts.BytesToKey(k[length.Addr:])}); ok {
+				if updateVals[len(updateVals)-1].Value.ByteLen() == 0 {
+					hasPrefix = false
+				}
+			}
+			return !hasPrefix, nil
+		}
+		return true, nil
 	})
 	return hasPrefix, err
 }

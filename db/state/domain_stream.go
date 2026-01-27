@@ -380,7 +380,12 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, mem iter.Seq2[stri
 
 	if mem != nil {
 		next, stop := iter.Pull2(mem)
-		heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), step: 0, iter: memIter{next, stop}, endTxNum: math.MaxUint64, reverse: true})
+		if mk, mv, ok := next(); ok {
+			k = toBytesZeroCopy(mk)
+			if k != nil && bytes.HasPrefix(k, prefix) {
+				heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(mv[len(mv)-1].Data), step: 0, iter: memIter{next, stop}, endTxNum: math.MaxUint64, reverse: true})
+			}
+		}
 	}
 
 	valsCursor, err := roTx.CursorDupSort(dt.d.ValuesTable)
