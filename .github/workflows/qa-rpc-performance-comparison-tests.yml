@@ -325,8 +325,8 @@ jobs:
 
           #run_perf <workspace> <chain> <method> <pattern> <load-sequence> <client>
           run_perf ${{runner.workspace}} $CHAIN eth_call stress_test_eth_call_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
-          run_perf ${{runner.workspace}} $CHAIN eth_call stress_test_eth_call_002_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
-          run_perf ${{runner.workspace}} $CHAIN eth_call stress_test_eth_getProof_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
+          #run_perf ${{runner.workspace}} $CHAIN eth_call stress_test_eth_call_002_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
+          run_perf ${{runner.workspace}} $CHAIN eth_getProof stress_test_eth_getProof_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
           
           # Save the subsection reached status
           
