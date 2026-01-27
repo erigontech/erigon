@@ -299,11 +299,18 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 					return err
 				}
 
-				if h.CompressorCfg.ValuesOnCompressedPage == 0 {
+				// file not the config is the source of truth for the .v file compression state
+				compressedPageValuesCount := hist.CompressedPageValuesCount()
+
+				if hist.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+					compressedPageValuesCount = h.HistoryValuesOnCompressedPage
+				}
+
+				if compressedPageValuesCount == 0 {
 					valOffset, _ = histReader.Skip()
 				} else {
 					i++
-					if i%h.CompressorCfg.ValuesOnCompressedPage == 0 {
+					if i%compressedPageValuesCount == 0 {
 						valOffset, _ = histReader.Skip()
 					}
 				}
