@@ -95,7 +95,10 @@ func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header 
 func ComputeTxContext(statedb *state.IntraBlockState, engine rules.EngineReader, rules *chain.Rules, signer *types.Signer, block *types.Block, cfg *chain.Config, txIndex int) (protocol.Message, evmtypes.TxContext, error) {
 	txn := block.Transactions()[txIndex]
 	statedb.SetTxContext(block.NumberU64(), txIndex)
-	msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
+	msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
+	if err != nil {
+		return protocol.Message{}, evmtypes.TxContext{}, err
+	}
 	txContext := protocol.NewEVMTxContext(msg)
 	return msg, txContext, nil
 }
