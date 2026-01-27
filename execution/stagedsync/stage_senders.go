@@ -48,34 +48,25 @@ import (
 )
 
 type SendersCfg struct {
-	db              kv.RwDB
 	batchSize       int
 	numOfGoroutines int
-	readChLen       int
 	badBlockHalt    bool
 	tmpdir          string
-	prune           prune.Mode
 	chainConfig     *chain.Config
 	hd              *headerdownload.HeaderDownload
 	blockReader     services.FullBlockReader
-	syncCfg         ethconfig.Sync
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload) SendersCfg {
+func StageSendersCfg(chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload) SendersCfg {
 	const sendersBatchSize = 1000
-
 	return SendersCfg{
-		db:              db,
 		batchSize:       sendersBatchSize,
 		numOfGoroutines: secp256k1.NumOfContexts(), // we can only be as parallels as our crypto library supports,
-		readChLen:       4,
 		badBlockHalt:    badBlockHalt,
 		tmpdir:          tmpdir,
 		chainConfig:     chainCfg,
-		prune:           prune,
 		hd:              hd,
 		blockReader:     blockReader,
-		syncCfg:         syncCfg,
 	}
 }
 
@@ -120,7 +111,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 			defer dbg.LogPanic()
 			defer wg.Done()
 			// each goroutine gets it's own crypto context to make sure they are really parallel
-			recoverSenders(ctx, logPrefix, secp256k1.ContextForThread(threadNo), cfg.chainConfig, jobs, out, quitCh)
+			recoverSenders(ctx, secp256k1.ContextForThread(threadNo), cfg.chainConfig, jobs, out, quitCh)
 		}(i)
 	}
 
@@ -367,7 +358,7 @@ type senderRecoveryJob struct {
 	err         error
 }
 
-func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp256k1.Context, config *chain.Config, in, out chan *senderRecoveryJob, quit <-chan struct{}) {
+func recoverSenders(ctx context.Context, cryptoContext *secp256k1.Context, config *chain.Config, in, out chan *senderRecoveryJob, quit <-chan struct{}) {
 	var job *senderRecoveryJob
 	var ok bool
 	for {

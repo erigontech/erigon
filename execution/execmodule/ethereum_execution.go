@@ -192,8 +192,9 @@ type EthereumExecutionModule struct {
 	// rules engine
 	engine rules.Engine
 
-	fcuBackgroundPrune  bool
-	fcuBackgroundCommit bool
+	fcuBackgroundPrune      bool
+	fcuBackgroundCommit     bool
+	onlySnapDownloadOnStart bool
 	// metrics for average mgas/sec
 	avgMgasSec float64
 
@@ -213,26 +214,28 @@ func NewEthereumExecutionModule(ctx context.Context, blockReader services.FullBl
 	syncCfg ethconfig.Sync,
 	fcuBackgroundPrune bool,
 	fcuBackgroundCommit bool,
+	onlySnapDownloadOnStart bool,
 ) *EthereumExecutionModule {
 	em := &EthereumExecutionModule{
-		blockReader:         blockReader,
-		db:                  db,
-		executionPipeline:   executionPipeline,
-		logger:              logger,
-		forkValidator:       forkValidator,
-		builders:            make(map[uint64]*builder.BlockBuilder),
-		builderFunc:         builderFunc,
-		config:              config,
-		semaphore:           semaphore.NewWeighted(1),
-		hook:                hook,
-		accumulator:         accumulator,
-		recentReceipts:      recentReceipts,
-		stateChangeConsumer: stateChangeConsumer,
-		engine:              engine,
-		syncCfg:             syncCfg,
-		bacgroundCtx:        ctx,
-		fcuBackgroundPrune:  fcuBackgroundPrune,
-		fcuBackgroundCommit: fcuBackgroundCommit,
+		blockReader:             blockReader,
+		db:                      db,
+		executionPipeline:       executionPipeline,
+		logger:                  logger,
+		forkValidator:           forkValidator,
+		builders:                make(map[uint64]*builder.BlockBuilder),
+		builderFunc:             builderFunc,
+		config:                  config,
+		semaphore:               semaphore.NewWeighted(1),
+		hook:                    hook,
+		accumulator:             accumulator,
+		recentReceipts:          recentReceipts,
+		stateChangeConsumer:     stateChangeConsumer,
+		engine:                  engine,
+		syncCfg:                 syncCfg,
+		bacgroundCtx:            ctx,
+		fcuBackgroundPrune:      fcuBackgroundPrune,
+		fcuBackgroundCommit:     fcuBackgroundCommit,
+		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
 	}
 
 	if stateCache != nil {
@@ -363,6 +366,9 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	rawdb.WriteRecentReorg(tx, false)
+
 	doms, err := execctx.NewSharedDomains(ctx, tx, e.logger)
 	if err != nil {
 		return nil, err
@@ -449,7 +455,7 @@ func (e *EthereumExecutionModule) Start(ctx context.Context, hook *stageloop.Hoo
 	}
 	defer e.semaphore.Release(1)
 
-	if err := stageloop.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, hook, e.logger); err != nil {
+	if err := stageloop.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, hook, e.onlySnapDownloadOnStart, e.logger); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}

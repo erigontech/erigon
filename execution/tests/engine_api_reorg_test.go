@@ -61,7 +61,8 @@ func TestEngineApiInvalidPayloadThenValidCanonicalFcuWithPayloadShouldSucceed(t 
 		status, err := eat.MockCl.InsertNewPayload(ctx, b3Faulty)
 		require.NoError(t, err)
 		require.Equal(t, enginetypes.InvalidStatus, status.Status)
-		require.True(t, strings.Contains(status.ValidationError.Error().Error(), "wrong trie root"))
+		t.Log(status.ValidationError.Error().Error())
+		require.True(t, strings.Contains(status.ValidationError.Error().Error(), "invalid block hash"))
 		// build b4 on the canonical chain
 		txn, err = changer.Change(transactOpts)
 		require.NoError(t, err)

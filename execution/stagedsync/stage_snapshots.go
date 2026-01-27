@@ -50,21 +50,19 @@ import (
 )
 
 type SnapshotsCfg struct {
-	db          kv.TemporalRwDB
-	chainConfig *chain.Config
-	dirs        datadir.Dirs
-
+	db                 kv.TemporalRwDB
+	chainConfig        *chain.Config
+	dirs               datadir.Dirs
 	blockRetire        services.BlockRetire
 	snapshotDownloader downloader.Client
 	blockReader        services.FullBlockReader
 	notifier           *shards.Notifications
-
-	caplin      bool
-	blobs       bool
-	caplinState bool
-	silkworm    *silkworm.Silkworm
-	syncConfig  ethconfig.Sync
-	prune       prune.Mode
+	caplin             bool
+	blobs              bool
+	caplinState        bool
+	silkworm           *silkworm.Silkworm
+	syncConfig         ethconfig.Sync
+	prune              prune.Mode
 }
 
 // Returns a seeder client for block management, a noop implementation if no downloader is attached.

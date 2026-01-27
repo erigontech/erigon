@@ -184,14 +184,14 @@ func (sdc *SharedDomainsCommitmentContext) SetStateReader(stateReader StateReade
 	sdc.stateReader = stateReader
 }
 
-// SetTrieWarmup enables parallel warmup of MDBX page cache during commitment.
+// EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
 // When set, ComputeCommitment will pre-fetch Branch data in parallel before processing.
-// It requires a DB to be set by calling SetParaTrieDB
-func (sdc *SharedDomainsCommitmentContext) SetTrieWarmup(trieWarmup bool) {
+// It requires a DB to be set by calling EnableParaTrieDB
+func (sdc *SharedDomainsCommitmentContext) EnableTrieWarmup(trieWarmup bool) {
 	sdc.trieWarmup = trieWarmup
 }
 
-func (sdc *SharedDomainsCommitmentContext) SetParaTrieDB(db kv.TemporalRoDB) {
+func (sdc *SharedDomainsCommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) {
 	sdc.paraTrieDB = db
 }
 
@@ -208,6 +208,11 @@ func (sdc *SharedDomainsCommitmentContext) SetLimitedHistoryStateReader(roTx kv.
 func (sdc *SharedDomainsCommitmentContext) SetTrace(trace bool) {
 	sdc.trace = trace
 	sdc.patriciaTrie.SetTrace(trace)
+}
+
+// EnableWarmupCache enables/disables warmup cache during commitment processing.
+func (sdc *SharedDomainsCommitmentContext) EnableWarmupCache(enable bool) {
+	sdc.patriciaTrie.EnableWarmupCache(enable)
 }
 
 func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix string) {
@@ -295,7 +300,7 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 }
 
 // ComputeCommitment Evaluates commitment for gathered updates.
-// If warmup was set via SetTrieWarmup, pre-warms MDBX page cache by reading Branch data in parallel before processing.
+// If warmup was set via EnableTrieWarmup, pre-warms MDBX page cache by reading Branch data in parallel before processing.
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
