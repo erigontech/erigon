@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -116,9 +117,6 @@ var revisionsPool = sync.Pool{
 		return &revisions{0, make([]revision, 0, 2048)}
 	},
 }
-
-// SystemAddress - sender address for internal state updates.
-var SystemAddress = accounts.InternAddress(common.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe"))
 
 // BalanceIncrease represents the increase of balance of an account that did not require
 // reading the account first
@@ -1227,24 +1225,24 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 
 var zeroBalance uint256.Int
 
-func (sdb *IntraBlockState) Selfdestruct6780(addr accounts.Address) error {
+// Used for EIP-6780
+func (sdb *IntraBlockState) IsNewContract(addr accounts.Address) (bool, error) {
 	stateObject, err := sdb.getStateObject(addr, true)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if stateObject == nil {
-		return nil
+		return false, nil
 	}
-	if stateObject.newlyCreated {
-		code, err := sdb.GetCode(addr)
-		if err != nil {
-			return err
-		}
-		if _, ok := types.ParseDelegation(code); !ok {
-			sdb.Selfdestruct(addr)
-		}
+	if !stateObject.newlyCreated {
+		return false, nil
 	}
-	return nil
+	code, err := sdb.GetCode(addr)
+	if err != nil {
+		return false, err
+	}
+	_, delegated := types.ParseDelegation(code)
+	return !delegated, nil
 }
 
 // SetTransientState sets transient storage for a given account. It
@@ -1562,7 +1560,7 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 }
 
 func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks) error {
-	emptyRemoval := EIP161Enabled && stateObject.data.Empty() && (!isAura || addr != SystemAddress)
+	emptyRemoval := EIP161Enabled && stateObject.data.Empty() && (!isAura || addr != params.SystemAddress)
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		balance := stateObject.Balance()
 		if tracingHooks != nil && tracingHooks.OnBalanceChange != nil && !(&balance).IsZero() && stateObject.selfdestructed {
@@ -1657,6 +1655,24 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 	// Invalidate journal because reverting across transactions is not allowed.
 	sdb.clearJournalAndRefund()
 	return nil
+}
+
+// GetRemovedAccountsWithBalance returns a list of accounts scheduled for
+// removal which still have positive balance. The purpose of this function is
+// to handle a corner case of EIP-7708 where a self-destructed account might
+// still receive funds between sending/burning its previous balance and actual
+// removal. In this case the burning of these remaining balances still need to
+// be logged.
+// Specification EIP-7708: https://eips.ethereum.org/EIPS/eip-7708
+func (sdb *IntraBlockState) GetRemovedAccountsWithBalance() (list []evmtypes.AddressAndBalance) {
+	for addr := range sdb.journal.dirties {
+		if obj, exist := sdb.stateObjects[addr]; exist && obj.selfdestructed {
+			if balance := obj.Balance(); !balance.IsZero() {
+				list = append(list, evmtypes.AddressAndBalance{Address: obj.address.Value(), Balance: balance})
+			}
+		}
+	}
+	return list
 }
 
 func (sdb *IntraBlockState) SoftFinalise() {

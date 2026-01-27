@@ -208,13 +208,13 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		c, err := d.collate(ctx, 0, 0, 16, tx)
 
 		require.NoError(t, err)
-		require.True(t, strings.HasSuffix(c.valuesPath, "v1.1-accounts.0-1.kv"))
+		require.True(t, strings.HasSuffix(c.valuesPath, "v2.0-accounts.0-1.kv"))
 		require.Equal(t, 2, c.valuesCount)
-		require.True(t, strings.HasSuffix(c.historyPath, "v1.2"+
+		require.True(t, strings.HasSuffix(c.historyPath, "v2.0"+
 			"-accounts.0-1.v"))
 
 		require.Equal(t, seg.WordsAmount2PagesAmount(3, d.CompressorCfg.ValuesOnCompressedPage), 1) // 16 valus per page
-		require.Equal(t, 3, c.historyComp.Count()/2)
+		require.Equal(t, 3, c.historyComp.Count())                                                  // no compression on collate
 		require.Equal(t, 2*c.valuesCount, c.efHistoryComp.Count())
 
 		sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
@@ -1150,12 +1150,12 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	c, err := d.collate(ctx, 0, 0, maxTx, tx)
 
 	require.NoError(t, err)
-	require.True(t, strings.HasSuffix(c.valuesPath, "v1.1-accounts.0-1.kv"))
+	require.True(t, strings.HasSuffix(c.valuesPath, "v2.0-accounts.0-1.kv"))
 	require.Equal(t, 3, c.valuesCount)
-	require.True(t, strings.HasSuffix(c.historyPath, "v1.2-accounts.0-1.v"))
+	require.True(t, strings.HasSuffix(c.historyPath, "v2.0-accounts.0-1.v"))
 
 	require.Equal(t, seg.WordsAmount2PagesAmount(int(3*maxTx), d.CompressorCfg.ValuesOnCompressedPage), 469) // because 646 values at one page
-	require.Equal(t, int(3*maxTx), c.historyComp.Count()/2)
+	require.Equal(t, int(3*maxTx), c.historyComp.Count())                                                    // no compression on collate
 	require.Equal(t, 3, c.efHistoryComp.Count()/2)
 
 	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())

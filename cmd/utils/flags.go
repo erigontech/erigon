@@ -574,12 +574,14 @@ var (
 		Name:    "discovery.v4",
 		Aliases: []string{"discv4"},
 		Usage:   "Enables the V4 discovery mechanism",
+		Value:   nodecfg.DefaultConfig.P2P.DiscoveryV4,
 	}
 	DiscoveryV5Flag = cli.BoolFlag{
 		Name: "discovery.v5",
 		// The first is for old Geth style, and the second is Erigon backward compatibility.
 		Aliases: []string{"discv5", "v5disc"},
 		Usage:   "Enables the V5 discovery mechanism",
+		Value:   nodecfg.DefaultConfig.P2P.DiscoveryV5,
 	}
 	NetrestrictFlag = cli.StringFlag{
 		Name:  "netrestrict",
