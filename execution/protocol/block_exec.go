@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
@@ -267,7 +268,7 @@ func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.
 	if isBor {
 		author = accounts.InternAddress(header.Coinbase)
 	} else {
-		author = state.SystemAddress
+		author = params.SystemAddress
 	}
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
 	return SysCallContractWithBlockContext(contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
@@ -276,7 +277,7 @@ func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.
 func SysCallContractWithBlockContext(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, blockContext evmtypes.BlockContext, constCall bool, vmCfg vm.Config) (result []byte, err error) {
 	isBor := chainConfig.Bor != nil
 	msg := types.NewMessage(
-		state.SystemAddress,
+		params.SystemAddress,
 		contract,
 		0, &u256.Num0,
 		SysCallGasLimit,

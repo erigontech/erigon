@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
@@ -641,7 +642,7 @@ func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {
 }
 
 func (c *Clique) GetTransferFunc() evmtypes.TransferFunc {
-	return rules.Transfer
+	return misc.Transfer
 }
 
 func (c *Clique) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
