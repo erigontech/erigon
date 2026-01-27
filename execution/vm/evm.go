@@ -26,6 +26,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/u256"
@@ -64,6 +65,12 @@ type EVM struct {
 	// IntraBlockState gives access to the underlying state
 	intraBlockState *state.IntraBlockState
 
+	// table holds the opcode specific handlers
+	jt *JumpTable
+
+	// depth is the current call stack
+	depth int
+
 	// chainConfig contains information about the current chain
 	chainConfig *chain.Config
 	// chain rules contains the chain rules for the current epoch
@@ -71,9 +78,6 @@ type EVM struct {
 	// virtual machine configuration options used to initialise the
 	// evm.
 	config Config
-	// global (to this context) ethereum virtual machine
-	// used throughout the execution of the tx.
-	interpreter Interpreter
 	// abort is used to abort the EVM calling operations
 	abort atomic.Bool
 	// callGasTemp holds the gas available for the current call. This is needed because the
@@ -82,6 +86,12 @@ type EVM struct {
 	callGasTemp uint64
 	// optional overridden set of precompiled contracts
 	precompiles PrecompiledContracts
+
+	hasher    keccakState // Keccak256 hasher instance shared across opcodes
+	hasherBuf common.Hash // Keccak256 hasher result array shared across opcodes
+
+	readOnly   bool   // Whether to throw on stateful modifications
+	returnData []byte // Last CALL's return data for subsequent reuse
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -100,7 +110,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 		chainConfig:     chainConfig,
 		chainRules:      blockCtx.Rules(chainConfig),
 	}
-	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
+	evm.jt = jumpTable(evm.chainRules, vmConfig)
 
 	return evm
 }
@@ -127,7 +137,9 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.config = vmConfig
 	evm.chainRules = chainRules
 
-	evm.interpreter = NewEVMInterpreter(evm, vmConfig)
+	evm.depth = 0
+	evm.returnData = nil
+	evm.jt = jumpTable(chainRules, vmConfig)
 
 	// ensure the evm is reset to be used again
 	evm.abort.Store(false)
@@ -155,17 +167,12 @@ func (evm *EVM) SetPrecompiles(precompiles PrecompiledContracts) {
 	evm.precompiles = precompiles
 }
 
-// Interpreter returns the current interpreter
-func (evm *EVM) Interpreter() Interpreter {
-	return evm.interpreter
-}
-
 func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, input []byte, gas uint64, value uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
 	if evm.abort.Load() {
 		return ret, leftOverGas, nil
 	}
 
-	depth := evm.interpreter.Depth()
+	depth := evm.depth
 
 	version := evm.intraBlockState.Version()
 	if (dbg.TraceTransactionIO && !dbg.TraceInstructions) && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle())) {
@@ -283,7 +290,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		if typ == STATICCALL {
 			readOnly = true
 		}
-		ret, gas, err = evm.interpreter.Run(contract, gas, input, readOnly)
+		ret, gas, err = evm.Run(contract, gas, input, readOnly)
 	}
 	// When an error was returned by the EVM or when setting the creation code
 	// above we revert to the snapshot and consume any gas remaining. Additionally
@@ -370,7 +377,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		}()
 	}
 
-	depth := evm.interpreter.Depth()
+	depth := evm.depth
 
 	// BAL: record target address even on failed CREATE/CREATE2 calls
 	evm.intraBlockState.MarkAddressAccess(address)
@@ -458,7 +465,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		return nil, address, gasRemaining, nil
 	}
 
-	ret, gasRemaining, err = evm.interpreter.Run(contract, gasRemaining, nil, false)
+	ret, gasRemaining, err = evm.Run(contract, gasRemaining, nil, false)
 
 	// EIP-170: Contract code size limit
 	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > evm.maxCodeSize() {
@@ -604,9 +611,4 @@ func (evm *EVM) captureEnd(depth int, typ OpCode, startGas uint64, leftOverGas u
 	if tracer.OnExit != nil {
 		tracer.OnExit(depth, ret, startGas-leftOverGas, VMErrorFromErr(err), reverted)
 	}
-}
-
-// Depth returns the current depth
-func (evm *EVM) Depth() int {
-	return evm.interpreter.Depth()
 }
