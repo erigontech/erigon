@@ -305,7 +305,7 @@ jobs:
               --repo $client \
               --branch $branch_name \
               --commit $commit_hash \
-              --test_name rpc-performance-comparison-test-$method \
+              --test_name rpc-performance-comparison-test-latest-$method \
               --chain $CHAIN \
               --runner ${{ runner.name }} \
               --db_version $db_version \
