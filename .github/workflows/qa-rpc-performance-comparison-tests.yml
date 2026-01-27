@@ -318,7 +318,7 @@ jobs:
             fi
           
             # Save test results to a directory with timestamp and commit hash
-            cp -r $workspace/rpc-tests/perf/reports/$CHAIN $past_test_dir
+            cp -r $result_dir $past_test_dir
           }
 
           # Launch the RPC performance test runner
@@ -339,6 +339,13 @@ jobs:
             exit 1
           fi
 
+      - name: Upload test results
+        if: steps.test_step.outputs.test_executed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ env.CHAIN }}
+          path: ${{ env.past_test_dir }}
+
       - name: Stop Erigon
         if: always() && matrix.client == 'erigon'
         working-directory: ${{ github.workspace }}/build/bin
@@ -357,7 +364,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: erigon-logs
-          path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/rpcdaemon.log
+          path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/erigon.log
 
       - name: Delete Erigon Testbed Data Directory
         if: always() && matrix.client == 'erigon' && steps.save_datadir_step.outputs.datadir_saved == 'true'
