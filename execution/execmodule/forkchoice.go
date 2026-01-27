@@ -535,17 +535,14 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 
 		e.logHeadUpdated(blockHash, fcuHeader, txnum, "head updated", stateFlushingInParallel)
 
-		if mergeExtendingFork {
-			// TODO: (20/12/25) we really want to commit all changes with the shared domains but
-			// to do that we need to remove all of the rawdb methods and call them via
-			// the domains - which will happen after they transiaiotn to an ExecutionContext
-			// for the moment just commit what we have
-			if err = tx.Commit(); err != nil {
-				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
-			}
-			rollbackOnReturn = false
+		// TODO: (20/12/25) we really want to commit all changes with the shared domains but
+		// to do that we need to remove all of the rawdb methods and call them via
+		// the domains - which will happen after they transiaiotn to an ExecutionContext
+		// for the moment just commit what we have
+		if err = tx.Commit(); err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
-
+		rollbackOnReturn = false
 		e.lock.Lock()
 		e.currentContext = currentContext
 		e.lock.Unlock()
