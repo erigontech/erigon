@@ -1005,7 +1005,7 @@ func TestHistoryScanPruneCorrectness(t *testing.T) {
 	require.Nil(t, stat)
 
 	// this one should prune value of tx=0 due to given range [0,1) (we have first value at tx=0) even it is forced
-	stat, err = hc.Prune(context.Background(), rwTx, 0, 1, pruneLimit, true, logEvery)
+	stat, err = hc.Prune(context.Background(), rwTx, 0, 1, MaxUint64, true, logEvery)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, stat.PruneCountValues)
 	require.EqualValues(t, 1, stat.PruneCountTx)
