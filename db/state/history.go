@@ -301,11 +301,12 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 					return err
 				}
 
-				if h.CompressorCfg.ValuesOnCompressedPage == 0 {
+				// file not the config is the source of truth for the .v file compression state
+				if hist.CompressedPageValuesCount() == 0 {
 					valOffset, _ = histReader.Skip()
 				} else {
 					i++
-					if i%h.CompressorCfg.ValuesOnCompressedPage == 0 {
+					if i%hist.CompressedPageValuesCount() == 0 {
 						valOffset, _ = histReader.Skip()
 					}
 				}
@@ -529,7 +530,8 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		}
 	}()
 
-	_histComp, err = seg.NewCompressor(ctx, "collate hist "+h.FilenameBase, historyPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
+	// `Collate+Build` must be fast -> no Compression. Slowness here means growth of `chaindata`
+	_histComp, err = seg.NewCompressor(ctx, "collate hist "+h.FilenameBase, historyPath, h.dirs.Tmp, h.CompressorCfg.WithValuesOnCompressedPage(0), log.LvlTrace, h.logger)
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.FilenameBase, err)
 	}
@@ -545,7 +547,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	if h.noFsync {
 		_efComp.DisableFsync()
 	}
-	invIndexWriter := h.InvertedIndex.dataWriter(_efComp, true) // coll+build must be fast - no Compression
+	invIndexWriter := h.InvertedIndex.dataWriter(_efComp, true) // `Collate+Build` must be fast -> no Compression. Slowness here means growth of `chaindata`
 
 	keysCursor, err := roTx.CursorDupSort(h.KeysTable)
 	if err != nil {
@@ -869,7 +871,7 @@ func (h *History) dataWriter(f *seg.Compressor) *seg.PagedWriter {
 	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0, h.dirs.Tmp)
 }
 func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return ht.h.dataReader(f) }
-func (ht *HistoryRoTx) datarWriter(f *seg.Compressor) *seg.PagedWriter {
+func (ht *HistoryRoTx) dataWriter(f *seg.Compressor) *seg.PagedWriter {
 	return ht.h.dataWriter(f)
 }
 
@@ -1559,7 +1561,18 @@ func (ht *HistoryRoTx) CompactRange(ctx context.Context, fromTxNum, toTxNum uint
 		return err
 	}
 
-	return ht.deduplicateFiles(ctx, efFiles, vFiles, mergeRange, background.NewProgressSet())
+	for i := 0; i < len(efFiles); i++ {
+		mergeRange = NewHistoryRanges(
+			*NewMergeRange("", true, vFiles[i].startTxNum, vFiles[i].endTxNum),
+			*NewMergeRange("", true, efFiles[i].startTxNum, efFiles[i].endTxNum),
+		)
+
+		if err := ht.deduplicateFiles(ctx, []*FilesItem{efFiles[i]}, []*FilesItem{vFiles[i]}, mergeRange, background.NewProgressSet()); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {

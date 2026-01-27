@@ -561,7 +561,7 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 		}
 	}
 	logger.Info("Progress", "snapshots", progress)
-	return nil
+	return tx.Commit()
 }
 
 func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
