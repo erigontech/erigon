@@ -34,7 +34,7 @@ import (
 
 func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 	return func(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
-		if evm.interpreter.ReadOnly() {
+		if evm.readOnly {
 			return 0, ErrWriteProtection
 		}
 		// If we fail the minimum gas availability invariant, fail (0)
