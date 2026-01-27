@@ -255,9 +255,8 @@ func (sd *TemporalMemBatch) SizeEstimate() uint64 {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 
-	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
-	// and muliply 2 more: for Commitment calculation when batch is full
-	return uint64(sd.metrics.CachePutSize) * 4
+	// multiply by 15 to account for commitment domain and overhead
+	return uint64(sd.metrics.CachePutSize) * 15
 }
 
 func (sd *TemporalMemBatch) ClearRam() {
