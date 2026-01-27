@@ -159,7 +159,7 @@ func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 	// Only zero-gas transactions may be service ones
 	if msg.FeeCap().IsZero() && !msg.IsFree() && engine != nil {
 		blockContext := evm.Context
-		blockContext.Coinbase = state.SystemAddress
+		blockContext.Coinbase = params.SystemAddress
 		syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 			ret, err := SysCallContractWithBlockContext(contract, data, evm.ChainConfig(), evm.IntraBlockState(), blockContext, true, evm.Config())
 			return ret, err
@@ -399,7 +399,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	}
 
 	if st.evm.Context.PostApplyMessage != nil {
-		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result)
+		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result, rules)
 	}
 
 	return result, nil
@@ -614,7 +614,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	result.BurntContractAddress = burntContractAddress
 
 	if st.evm.Context.PostApplyMessage != nil {
-		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result)
+		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result, rules)
 	}
 
 	return result, nil

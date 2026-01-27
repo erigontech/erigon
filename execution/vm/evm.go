@@ -236,7 +236,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			}
 			evm.intraBlockState.CreateAccount(addr, false)
 		}
-		evm.Context.Transfer(evm.intraBlockState, caller, addr, value, bailout)
+		evm.Context.Transfer(evm.intraBlockState, caller, addr, value, bailout, evm.chainRules)
 	} else if typ == STATICCALL {
 		// We do an AddBalance of zero here, just in order to trigger a touch.
 		// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
@@ -449,7 +449,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	if evm.chainRules.IsSpuriousDragon {
 		evm.intraBlockState.SetNonce(address, 1)
 	}
-	evm.Context.Transfer(evm.intraBlockState, caller, address, value, bailout)
+	evm.Context.Transfer(evm.intraBlockState, caller, address, value, bailout, evm.chainRules)
 
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
