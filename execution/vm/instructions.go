@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -1262,15 +1263,16 @@ func opSelfdestruct(pc uint64, interpreter *EVMInterpreter, scope *CallContext) 
 		return pc, nil, ErrWriteProtection
 	}
 	beneficiary := scope.Stack.pop()
-	callerAddr := scope.Contract.Address()
+	self := scope.Contract.Address()
 	beneficiaryAddr := accounts.InternAddress(beneficiary.Bytes20())
-	balance, err := interpreter.evm.IntraBlockState().GetBalance(callerAddr)
+	ibs := interpreter.evm.IntraBlockState()
+	balance, err := ibs.GetBalance(self)
 	if err != nil {
 		return pc, nil, err
 	}
 
-	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
-	interpreter.evm.IntraBlockState().Selfdestruct(callerAddr)
+	ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
+	ibs.Selfdestruct(self)
 	if interpreter.evm.Config().Tracer != nil && interpreter.evm.Config().Tracer.OnEnter != nil {
 		interpreter.evm.Config().Tracer.OnEnter(interpreter.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, 0, balance, nil)
 	}
@@ -1285,15 +1287,37 @@ func opSelfdestruct6780(pc uint64, interpreter *EVMInterpreter, scope *CallConte
 		return pc, nil, ErrWriteProtection
 	}
 	beneficiary := scope.Stack.pop()
-	callerAddr := scope.Contract.Address()
+	self := scope.Contract.Address()
 	beneficiaryAddr := accounts.InternAddress(beneficiary.Bytes20())
-	balance, err := interpreter.evm.IntraBlockState().GetBalance(callerAddr)
+	ibs := interpreter.evm.IntraBlockState()
+	balance, err := ibs.GetBalance(self)
 	if err != nil {
 		return pc, nil, err
 	}
-	interpreter.evm.IntraBlockState().SubBalance(callerAddr, balance, tracing.BalanceDecreaseSelfdestruct)
-	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
-	interpreter.evm.IntraBlockState().Selfdestruct6780(callerAddr)
+	newContract, err := ibs.IsNewContract(self)
+	if err != nil {
+		return pc, nil, err
+	}
+	if newContract { // Contract is new and will actually be deleted.
+		ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct)
+		if self != beneficiaryAddr {
+			ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
+		}
+		_, err = ibs.Selfdestruct(self)
+		if err != nil {
+			return pc, nil, err
+		}
+	} else if self != beneficiaryAddr { // Contract already exists, only do transfer if beneficiary is not self.
+		ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct)
+		ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
+	}
+	if interpreter.evm.ChainRules().IsAmsterdam && !balance.IsZero() { // EIP-7708
+		if self != beneficiaryAddr {
+			ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))
+		} else if newContract {
+			ibs.AddLog(misc.EthTransferLog(self.Value(), common.Address{}, balance))
+		}
+	}
 	if interpreter.evm.Config().Tracer != nil && interpreter.evm.Config().Tracer.OnEnter != nil {
 		interpreter.cfg.Tracer.OnEnter(interpreter.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, 0, balance, nil)
 	}

@@ -56,7 +56,7 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 		return fmt.Errorf("deduo %s history compressor: %w", ht.h.FilenameBase, err)
 	}
 
-	pagedWr := ht.datarWriter(comp)
+	pagedWr := ht.dataWriter(comp)
 
 	var cp CursorHeap
 	heap.Init(&cp)

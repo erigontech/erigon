@@ -152,7 +152,7 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 		incompletes = *optional_incompletes
 	}
 
-	if incompletes == true {
+	if incompletes {
 		return state.IteratorDump{}, fmt.Errorf("not supported incompletes = true")
 	}
 
