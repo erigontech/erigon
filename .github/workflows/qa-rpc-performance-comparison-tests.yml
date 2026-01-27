@@ -345,7 +345,7 @@ jobs:
         if: steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ env.CHAIN }}
+          name: test-results-${{ env.CHAIN }}-${{ matrix.client }}
           path: ${{ env.past_test_dir }}
 
       - name: Stop Erigon
@@ -365,7 +365,7 @@ jobs:
         if: matrix.client == 'erigon' && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v6
         with:
-          name: erigon-logs
+          name: erigon-logs-${{ env.CHAIN }}
           path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/erigon.log
 
       - name: Delete Erigon Testbed Data Directory
