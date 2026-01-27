@@ -223,14 +223,13 @@ func TestExecutionContext_StorageIter(t *testing.T) {
 				p, txNum, ok, err := domains.GetStorage(context.Background(), addr0, accounts.BytesToKey(l0), rwTx)
 				require.NoError(t, err)
 
-				var v uint256.Int
+				var v = u256.U64(uint64(locs + 1)) // zero not a valid storage value (==deleted)
 				var pv []execstate.ValueWithTxNum[uint256.Int]
 
 				if ok {
 					pv = []execstate.ValueWithTxNum[uint256.Int]{{Value: p, TxNum: txNum}}
 				}
 
-				v.SetBytes(l0[24:])
 				err = domains.PutStorage(context.Background(), addr0, accounts.BytesToKey(l0), v, rwTx, txNum, pv...)
 				require.NoError(t, err)
 			}
