@@ -1263,15 +1263,16 @@ func opSelfdestruct(pc uint64, interpreter *EVMInterpreter, scope *CallContext) 
 		return pc, nil, ErrWriteProtection
 	}
 	beneficiary := scope.Stack.pop()
-	callerAddr := scope.Contract.Address()
+	self := scope.Contract.Address()
 	beneficiaryAddr := accounts.InternAddress(beneficiary.Bytes20())
-	balance, err := interpreter.evm.IntraBlockState().GetBalance(callerAddr)
+	ibs := interpreter.evm.IntraBlockState()
+	balance, err := ibs.GetBalance(self)
 	if err != nil {
 		return pc, nil, err
 	}
 
-	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
-	interpreter.evm.IntraBlockState().Selfdestruct(callerAddr)
+	ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
+	ibs.Selfdestruct(self)
 	if interpreter.evm.Config().Tracer != nil && interpreter.evm.Config().Tracer.OnEnter != nil {
 		interpreter.evm.Config().Tracer.OnEnter(interpreter.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, 0, balance, nil)
 	}
