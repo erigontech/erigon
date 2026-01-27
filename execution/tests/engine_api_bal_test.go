@@ -33,7 +33,9 @@ import (
 )
 
 func TestEngineApiGeneratedPayloadIncludesBlockAccessList(t *testing.T) {
-	dbg.Exec3Parallel = true
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
 	eat := DefaultEngineApiTester(t)
 	receiver := common.HexToAddress("0x333")
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat EngineApiTester) {
