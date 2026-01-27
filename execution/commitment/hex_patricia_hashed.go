@@ -55,18 +55,6 @@ type keccakState interface {
 	Read([]byte) (int, error)
 }
 
-// DomainPutter is an interface for putting data into domains.
-// Used by flush hooks to write commitment data.
-type DomainPutter interface {
-	DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error
-}
-
-// DeferredHooker is an interface for adding deferred flush hooks.
-// SharedDomains implements this interface.
-type DeferredHooker interface {
-	AddFlushHook(func(context.Context, DomainPutter) error)
-}
-
 // HexPatriciaHashed implements commitment based on patricia merkle tree with radix 16,
 // with keys pre-hashed by keccak256
 type HexPatriciaHashed struct {
@@ -110,10 +98,6 @@ type HexPatriciaHashed struct {
 	// Warmup cache for serving reads from pre-warmed data
 	cache             *WarmupCache
 	enableWarmupCache bool // if true, enables warmup cache during Process (false by default)
-
-	// When deferredHooker is set, ApplyDeferredUpdates is added as a flush hook
-	// instead of being called inline.
-	deferredHooker DeferredHooker
 
 	//processing metrics
 	metrics       *Metrics
@@ -2649,26 +2633,10 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	}
 
 	// Apply deferred branch updates in parallel (EncodeBranch runs concurrently)
-	if hph.deferredHooker != nil {
-		// Capture references for deferred execution
-		be := hph.branchEncoder
-		txNum := hph.ctx.TxNum()
-		hph.deferredHooker.AddFlushHook(func(_ context.Context, dp DomainPutter) error {
-			putBranch := func(prefix, data, prevData []byte, prevStep kv.Step) error {
-				return dp.DomainPut(kv.CommitmentDomain, prefix, data, txNum, prevData, prevStep)
-			}
-			if err := be.ApplyDeferredUpdates(runtime.NumCPU(), putBranch); err != nil {
-				return fmt.Errorf("apply deferred updates: %w", err)
-			}
-			be.ClearDeferred()
-			return nil
-		})
-	} else {
-		if err = hph.branchEncoder.ApplyDeferredUpdates(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
-			return nil, fmt.Errorf("apply deferred updates: %w", err)
-		}
-		hph.branchEncoder.ClearDeferred()
+	if err = hph.branchEncoder.ApplyDeferredUpdates(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
+		return nil, fmt.Errorf("apply deferred updates: %w", err)
 	}
+	hph.branchEncoder.ClearDeferred()
 
 	hph.metrics.CollectFileDepthStats(hph.hadToLoadL)
 	if dbg.KVReadLevelledMetrics {
@@ -2709,10 +2677,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 func (hph *HexPatriciaHashed) SetTrace(trace bool)           { hph.trace = trace }
 func (hph *HexPatriciaHashed) SetTraceDomain(trace bool)     { hph.traceDomain = trace }
 func (hph *HexPatriciaHashed) EnableWarmupCache(enable bool) { hph.enableWarmupCache = enable }
-
-// SetDeferredHooker sets the deferred hooker for adding flush hooks.
-// When set, ApplyDeferredUpdates is added as a flush hook instead of running inline.
-func (hph *HexPatriciaHashed) SetDeferredHooker(hooker DeferredHooker) { hph.deferredHooker = hooker }
 
 func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
 	capture := hph.capture

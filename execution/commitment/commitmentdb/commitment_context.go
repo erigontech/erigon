@@ -215,13 +215,6 @@ func (sdc *SharedDomainsCommitmentContext) EnableWarmupCache(enable bool) {
 	sdc.patriciaTrie.EnableWarmupCache(enable)
 }
 
-// SetDeferredHooker sets the deferred hooker for adding flush hooks directly.
-func (sdc *SharedDomainsCommitmentContext) SetDeferredHooker(hooker commitment.DeferredHooker) {
-	if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok {
-		hph.SetDeferredHooker(hooker)
-	}
-}
-
 func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix string) {
 	sdc.patriciaTrie.EnableCsvMetrics(filePathPrefix)
 }

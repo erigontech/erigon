@@ -463,10 +463,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			}
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
-		// flush hooks in case there are any pending hooks resulting from execution
-		if err := currentContext.FlushHooks(ctx, currentContext.NewDomainPutter(tx)); err != nil {
-			return sendError("updateForkChoice: flush hooks", err)
-		}
 		if hasMore {
 			err = e.executionPipeline.RunPrune(ctx, e.db, tx, initialCycle, 500*time.Millisecond)
 			if err != nil {

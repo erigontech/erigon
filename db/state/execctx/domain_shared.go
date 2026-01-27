@@ -69,25 +69,6 @@ type accHolder interface {
 	SetChangesetAccumulator(acc *changeset.StateChangeSet)
 }
 
-// FlushHook is a function that executes before the final mem.Flush.
-// Hooks can capture references (e.g., BranchEncoder) via closures.
-type FlushHook func(ctx context.Context, dp commitment.DomainPutter) error
-
-// domainPutterWrapper wraps SharedDomains and a TemporalTx to implement commitment.DomainPutter.
-type domainPutterWrapper struct {
-	sd *SharedDomains
-	tx kv.TemporalTx
-}
-
-func (w *domainPutterWrapper) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
-	return w.sd.DomainPut(domain, w.tx, k, v, txNum, prevVal, prevStep)
-}
-
-// NewDomainPutter creates a commitment.DomainPutter that wraps SharedDomains and a TemporalTx.
-func (sd *SharedDomains) NewDomainPutter(tx kv.TemporalTx) commitment.DomainPutter {
-	return &domainPutterWrapper{sd: sd, tx: tx}
-}
-
 type SharedDomains struct {
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext
 
@@ -101,10 +82,6 @@ type SharedDomains struct {
 	commitmentCapture bool
 	mem               kv.TemporalMemBatch
 	metrics           changeset.DomainMetrics
-
-	// flushHooks are executed in registration order before mem.Flush.
-	// Hooks are cleared after each Flush call.
-	flushHooks []FlushHook
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
@@ -235,7 +212,6 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 		sd.sdCtx.ClearRam()
 	}
 	sd.mem.ClearRam()
-	sd.clearFlushHooks()
 }
 
 func (sd *SharedDomains) SizeEstimate() uint64 {
@@ -305,43 +281,14 @@ func (sd *SharedDomains) Close() {
 	//defer sd.walLock.Unlock()
 
 	sd.mem.Close()
-	sd.clearFlushHooks()
 
 	sd.sdCtx.Close()
 	sd.sdCtx = nil
 }
 
-// FlushHooks executes all registered flush hooks in registration order and clears them.
-func (sd *SharedDomains) FlushHooks(ctx context.Context, dp commitment.DomainPutter) error {
-	if len(sd.flushHooks) == 0 {
-		return nil
-	}
-	log.Debug("processing flush hooks", "count", len(sd.flushHooks))
-	for _, hook := range sd.flushHooks {
-		if err := hook(ctx, dp); err != nil {
-			return err
-		}
-	}
-	sd.clearFlushHooks()
-	return nil
-}
-
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
 	return sd.mem.Flush(ctx, tx)
-}
-
-// AddFlushHook registers a hook to be executed before mem.Flush.
-// Hooks run in registration order and are cleared after each Flush call.
-// Use closures to capture references (e.g., BranchEncoder for deferred updates).
-func (sd *SharedDomains) AddFlushHook(hook func(context.Context, commitment.DomainPutter) error) {
-	sd.flushHooks = append(sd.flushHooks, hook)
-	log.Debug("added flush hook", "len", len(sd.flushHooks))
-}
-
-// clearFlushHooks removes all registered flush hooks without executing them.
-func (sd *SharedDomains) clearFlushHooks() {
-	sd.flushHooks = sd.flushHooks[:0]
 }
 
 // TemporalDomain satisfaction
@@ -588,9 +535,4 @@ func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
 
 func (sd *SharedDomains) EnableWarmupCache(enable bool) {
 	sd.sdCtx.EnableWarmupCache(enable)
-}
-
-// SetDeferredHooker sets the deferred hooker for adding flush hooks directly.
-func (sd *SharedDomains) SetDeferredHooker(hooker commitment.DeferredHooker) {
-	sd.sdCtx.SetDeferredHooker(hooker)
 }
