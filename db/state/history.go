@@ -300,11 +300,17 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 				}
 
 				// file not the config is the source of truth for the .v file compression state
-				if hist.CompressedPageValuesCount() == 0 {
+				compressedPageValuesCount := hist.CompressedPageValuesCount()
+
+				if hist.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+					compressedPageValuesCount = h.HistoryValuesOnCompressedPage
+				}
+
+				if compressedPageValuesCount == 0 {
 					valOffset, _ = histReader.Skip()
 				} else {
 					i++
-					if i%hist.CompressedPageValuesCount() == 0 {
+					if i%compressedPageValuesCount == 0 {
 						valOffset, _ = histReader.Skip()
 					}
 				}
