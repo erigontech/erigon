@@ -1274,11 +1274,12 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 
 	ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
 	ibs.Selfdestruct(self)
-	if evm.Config().Tracer != nil && evm.Config().Tracer.OnEnter != nil {
-		evm.Config().Tracer.OnEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, 0, balance, nil)
+	tracer := evm.Config().Tracer
+	if tracer != nil && tracer.OnEnter != nil {
+		tracer.OnEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, 0, balance, nil)
 	}
-	if evm.Config().Tracer != nil && evm.Config().Tracer.OnExit != nil {
-		evm.Config().Tracer.OnExit(evm.depth, []byte{}, 0, nil, false)
+	if tracer != nil && tracer.OnExit != nil {
+		tracer.OnExit(evm.depth, []byte{}, 0, nil, false)
 	}
 	return pc, nil, errStopToken
 }
@@ -1319,11 +1320,12 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 			ibs.AddLog(misc.EthTransferLog(self.Value(), common.Address{}, balance))
 		}
 	}
-	if evm.Config().Tracer != nil && evm.Config().Tracer.OnEnter != nil {
-		evm.Config().Tracer.OnEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, 0, balance, nil)
+	tracer := evm.Config().Tracer
+	if tracer != nil && tracer.OnEnter != nil {
+		tracer.OnEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, 0, balance, nil)
 	}
-	if evm.Config().Tracer != nil && evm.Config().Tracer.OnExit != nil {
-		evm.config.Tracer.OnExit(evm.depth, []byte{}, 0, nil, false)
+	if tracer != nil && tracer.OnExit != nil {
+		tracer.OnExit(evm.depth, []byte{}, 0, nil, false)
 	}
 	return pc, nil, errStopToken
 }
