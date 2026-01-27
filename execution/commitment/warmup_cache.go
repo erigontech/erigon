@@ -26,17 +26,17 @@ import (
 type branchEntry struct {
 	data      []byte
 	step      kv.Step
-	isEvicted bool
+	isEvicted atomic.Bool
 }
 
 type accountEntry struct {
 	update    *Update
-	isEvicted bool
+	isEvicted atomic.Bool
 }
 
 type storageEntry struct {
 	update    *Update
-	isEvicted bool
+	isEvicted atomic.Bool
 }
 
 // WarmupCache stores pre-fetched data from the warmup phase to avoid
@@ -89,7 +89,7 @@ func (c *WarmupCache) GetBranch(prefix []byte) ([]byte, kv.Step, bool) {
 		return nil, 0, false
 	}
 	entry, found := c.branches.Get(prefix)
-	if !found || entry.isEvicted {
+	if !found || entry.isEvicted.Load() {
 		return nil, 0, false
 	}
 	return entry.data, entry.step, true
@@ -102,10 +102,10 @@ func (c *WarmupCache) GetAndEvictBranch(prefix []byte) ([]byte, kv.Step, bool) {
 		return nil, 0, false
 	}
 	entry, found := c.branches.Get(prefix)
-	if !found || entry.isEvicted {
+	if !found || entry.isEvicted.Load() {
 		return nil, 0, false
 	}
-	entry.isEvicted = true
+	entry.isEvicted.Store(true)
 	return entry.data, entry.step, true
 }
 
@@ -116,7 +116,7 @@ func (c *WarmupCache) EvictBranch(prefix []byte) {
 	}
 	entry, found := c.branches.Get(prefix)
 	if found {
-		entry.isEvicted = true
+		entry.isEvicted.Store(true)
 	}
 }
 
@@ -139,7 +139,7 @@ func (c *WarmupCache) GetAccount(plainKey []byte) (*Update, bool) {
 		return nil, false
 	}
 	entry, found := c.accounts.Get(plainKey)
-	if !found || entry.isEvicted {
+	if !found || entry.isEvicted.Load() {
 		return nil, false
 	}
 	return entry.update, true
@@ -152,10 +152,10 @@ func (c *WarmupCache) GetAndEvictAccount(plainKey []byte) *accountEntry {
 		return nil
 	}
 	entry, found := c.accounts.Get(plainKey)
-	if !found || entry.isEvicted {
+	if !found || entry.isEvicted.Load() {
 		return nil
 	}
-	entry.isEvicted = true
+	entry.isEvicted.Store(true)
 	return entry
 }
 
@@ -166,7 +166,7 @@ func (c *WarmupCache) EvictAccount(plainKey []byte) {
 	}
 	entry, found := c.accounts.Get(plainKey)
 	if found {
-		entry.isEvicted = true
+		entry.isEvicted.Store(true)
 	}
 }
 
@@ -189,7 +189,7 @@ func (c *WarmupCache) GetStorage(plainKey []byte) (*Update, bool) {
 		return nil, false
 	}
 	entry, found := c.storage.Get(plainKey)
-	if !found || entry.isEvicted {
+	if !found || entry.isEvicted.Load() {
 		return nil, false
 	}
 	return entry.update, true
@@ -202,10 +202,10 @@ func (c *WarmupCache) GetAndEvictStorage(plainKey []byte) *storageEntry {
 		return nil
 	}
 	entry, found := c.storage.Get(plainKey)
-	if !found || entry.isEvicted {
+	if !found || entry.isEvicted.Load() {
 		return nil
 	}
-	entry.isEvicted = true
+	entry.isEvicted.Store(true)
 	return entry
 }
 
@@ -216,7 +216,7 @@ func (c *WarmupCache) EvictStorage(plainKey []byte) {
 	}
 	entry, found := c.storage.Get(plainKey)
 	if found {
-		entry.isEvicted = true
+		entry.isEvicted.Store(true)
 	}
 }
 
@@ -227,10 +227,10 @@ func (c *WarmupCache) EvictPlainKey(plainKey []byte) {
 		return
 	}
 	if entry, found := c.accounts.Get(plainKey); found {
-		entry.isEvicted = true
+		entry.isEvicted.Store(true)
 	}
 	if entry, found := c.storage.Get(plainKey); found {
-		entry.isEvicted = true
+		entry.isEvicted.Store(true)
 	}
 }
 

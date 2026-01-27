@@ -367,6 +367,8 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	}
 	defer tx.Rollback()
 
+	rawdb.WriteRecentReorg(tx, false)
+
 	doms, err := execctx.NewSharedDomains(ctx, tx, e.logger)
 	if err != nil {
 		return nil, err

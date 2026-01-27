@@ -217,11 +217,12 @@ func ExecV3(ctx context.Context,
 	var lastCommittedTxNum uint64
 	var lastCommittedBlockNum uint64
 
+	didReorg := rawdb.ReadRecentReorg(rwTx)
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
 	// Do it only for chain-tip blocks!
-	doms.EnableWarmupCache(maxBlockNum == startBlockNum)
-	log.Debug("Warmup Cache", "enabled", maxBlockNum == startBlockNum)
+	doms.EnableWarmupCache(maxBlockNum == startBlockNum && !didReorg)
+	log.Debug("Warmup Cache", "enabled", maxBlockNum == startBlockNum && !didReorg)
 	postValidator := newBlockPostExecutionValidator()
 	if maxBlockNum == startBlockNum {
 		postValidator = newParallelBlockPostExecutionValidator()

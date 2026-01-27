@@ -41,6 +41,10 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 		return nil
 	}
 
+	if len(indexFiles) > 1 || len(historyFiles) > 1 {
+		return fmt.Errorf("wrong deduplication interval from %d to %d", r.history.from, r.history.to)
+	}
+
 	var decomp *seg.Decompressor
 
 	fromStep, toStep := kv.Step(r.history.from/ht.stepSize), kv.Step(r.history.to/ht.stepSize)

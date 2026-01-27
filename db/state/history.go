@@ -1591,7 +1591,18 @@ func (ht *HistoryRoTx) CompactRange(ctx context.Context, fromTxNum, toTxNum uint
 		return err
 	}
 
-	return ht.deduplicateFiles(ctx, efFiles, vFiles, mergeRange, background.NewProgressSet())
+	for i := 0; i < len(efFiles); i++ {
+		mergeRange = NewHistoryRanges(
+			*NewMergeRange("", true, vFiles[i].startTxNum, vFiles[i].endTxNum),
+			*NewMergeRange("", true, efFiles[i].startTxNum, efFiles[i].endTxNum),
+		)
+
+		if err := ht.deduplicateFiles(ctx, []*FilesItem{efFiles[i]}, []*FilesItem{vFiles[i]}, mergeRange, background.NewProgressSet()); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
