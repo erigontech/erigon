@@ -21,6 +21,7 @@ import (
 	"context"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -32,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
@@ -90,8 +92,21 @@ func newBaseApiForTest(m *mock.MockSentry) *jsonrpc.BaseAPI {
 	return jsonrpc.NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil)
 }
 
+func newEthApiForTest(base *jsonrpc.BaseAPI, db kv.TemporalRoDB, txPool txpoolproto.TxpoolClient) *jsonrpc.APIImpl {
+	cfg := &jsonrpc.EthApiConfig{
+		GasCap:                      5000000,
+		FeeCap:                      ethconfig.Defaults.RPCTxFeeCap,
+		ReturnDataLimit:             100_000,
+		AllowUnprotectedTxs:         false,
+		MaxGetProofRewindBlockCount: 100_000,
+		SubscribeLogsChannelSize:    128,
+		RpcTxSyncDefaultTimeout:     20 * time.Second,
+		RpcTxSyncMaxTimeout:         1 * time.Minute,
+	}
+	return jsonrpc.NewEthAPI(base, db, nil, txPool, nil, cfg, log.New())
+}
+
 func TestGetBlobsV1(t *testing.T) {
-	logger := log.New()
 	buf := bytes.NewBuffer(nil)
 	mockSentry, require := mock.MockWithTxPoolCancun(t), require.New(t)
 	oneBlockStep(mockSentry, require, t)
@@ -109,7 +124,7 @@ func TestGetBlobsV1(t *testing.T) {
 	txPool := direct.NewTxPoolClient(mockSentry.TxPoolGrpcServer)
 
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log)
-	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, logger)
+	api := newEthApiForTest(newBaseApiForTest(mockSentry), mockSentry.DB, txPool)
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
@@ -142,7 +157,6 @@ func TestGetBlobsV1(t *testing.T) {
 }
 
 func TestGetBlobsV2(t *testing.T) {
-	logger := log.New()
 	buf := bytes.NewBuffer(nil)
 	mockSentry, require := mock.MockWithTxPoolOsaka(t), require.New(t)
 	oneBlockStep(mockSentry, require, t)
@@ -160,7 +174,7 @@ func TestGetBlobsV2(t *testing.T) {
 	txPool := direct.NewTxPoolClient(mockSentry.TxPoolGrpcServer)
 
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log)
-	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, logger)
+	api := newEthApiForTest(newBaseApiForTest(mockSentry), mockSentry.DB, txPool)
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
@@ -202,7 +216,6 @@ func TestGetBlobsV2(t *testing.T) {
 }
 
 func TestGetBlobsV3(t *testing.T) {
-	logger := log.New()
 	buf := bytes.NewBuffer(nil)
 	mockSentry, require := mock.MockWithTxPoolOsaka(t), require.New(t)
 	oneBlockStep(mockSentry, require, t)
@@ -220,7 +233,7 @@ func TestGetBlobsV3(t *testing.T) {
 	txPool := direct.NewTxPoolClient(mockSentry.TxPoolGrpcServer)
 
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log)
-	api := jsonrpc.NewEthAPI(newBaseApiForTest(mockSentry), mockSentry.DB, nil, txPool, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, logger)
+	api := newEthApiForTest(newBaseApiForTest(mockSentry), mockSentry.DB, txPool)
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)

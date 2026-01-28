@@ -187,6 +187,8 @@ const (
 	// corresponding history tables `Tbl{Account,Storage,Code,Commitment}HistoryKeys` for history
 	// and `Tbl{Account,Storage,Code,Commitment}Idx` for inverted indices
 	TblPruningProgress = "PruningProgress"
+	// tableName -> txTo;last pruned val
+	TblPruningValsProg = "PruningValsProgress"
 
 	// Erigon-CL Objects
 
@@ -379,6 +381,7 @@ var ChaindataTables = []string{
 	TblTracesToIdx,
 
 	TblPruningProgress,
+	TblPruningValsProg,
 
 	MaxTxNum,
 

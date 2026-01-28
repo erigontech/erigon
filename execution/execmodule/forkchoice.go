@@ -669,7 +669,7 @@ func (e *EthereumExecutionModule) runForkchoicePrune(initialCycle bool) ([]any, 
 			return nil
 		}
 		maxTxNum, err := rawdbv3.TxNums.Max(e.bacgroundCtx, tx, currentHeader.Number.Uint64())
-		if err != nil || maxTxNum < tx.Debug().StepSize()/2 {
+		if err != nil || maxTxNum < (tx.Debug().StepSize()*5)/4 {
 			return nil
 		}
 

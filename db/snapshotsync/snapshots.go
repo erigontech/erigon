@@ -1464,11 +1464,10 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 	for _, t := range s.enums {
 		s.dirty[t].Walk(func(segs []*DirtySegment) bool {
 			for _, segment := range segs {
-				info := segment.FileInfo(dir)
-
 				if segment.IsIndexed() {
 					continue
 				}
+				info := segment.FileInfo(dir)
 
 				newIdxBuilt = true
 
