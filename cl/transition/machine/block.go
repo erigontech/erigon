@@ -271,20 +271,18 @@ func processProposerSlashings(impl BlockOperationProcessor, s abstract.BeaconSta
 }
 
 func processVoluntaryExits(impl BlockOperationProcessor, s abstract.BeaconState, blockBody cltypes.GenericBeaconBody) (sigs [][]byte, msgs [][]byte, pubKeys [][]byte, err error) {
+	// TODO: Refactor the batch signature verification
 	// Process each voluntary exit.
 	err = solid.RangeErr[*cltypes.SignedVoluntaryExit](blockBody.GetVoluntaryExits(), func(index int, exit *cltypes.SignedVoluntaryExit, length int) error {
 		voluntaryExit := exit.VoluntaryExit
-		validator, err := s.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
-		if err != nil {
-			return err
-		}
 
 		// We can skip it in some instances if we want to optimistically sync up.
 		if impl.FullValidate() {
+			// Domain is always computed with CAPELLA_FORK_VERSION for >= Deneb
 			var domain []byte
 			if s.Version() < clparams.DenebVersion {
 				domain, err = s.GetDomain(s.BeaconConfig().DomainVoluntaryExit, voluntaryExit.Epoch)
-			} else if s.Version() >= clparams.DenebVersion {
+			} else {
 				domain, err = fork.ComputeDomain(s.BeaconConfig().DomainVoluntaryExit[:], utils.Uint32ToBytes4(uint32(s.BeaconConfig().CapellaForkVersion)), s.GenesisValidatorsRoot())
 			}
 			if err != nil {
@@ -294,7 +292,23 @@ func processVoluntaryExits(impl BlockOperationProcessor, s abstract.BeaconState,
 			if err != nil {
 				return err
 			}
-			pk := validator.PublicKey()
+
+			// [New in Gloas:EIP7732] Get pubkey from builders for builder indices
+			var pk [48]byte
+			if s.Version() >= clparams.GloasVersion && state.IsBuilderIndex(voluntaryExit.ValidatorIndex) {
+				builderIndex := state.ConvertValidatorIndexToBuilderIndex(voluntaryExit.ValidatorIndex)
+				builders := s.GetBuilders()
+				if builders == nil || int(builderIndex) >= builders.Len() {
+					return fmt.Errorf("ProcessVoluntaryExit: invalid builder index %d", builderIndex)
+				}
+				pk = builders.Get(int(builderIndex)).Pubkey
+			} else {
+				validator, err := s.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
+				if err != nil {
+					return err
+				}
+				pk = validator.PublicKey()
+			}
 			sigs, msgs, pubKeys = append(sigs, exit.Signature[:]), append(msgs, signingRoot[:]), append(pubKeys, pk[:])
 		}
 

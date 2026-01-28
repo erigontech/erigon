@@ -244,6 +244,27 @@ func getPendingBalanceToWithdraw(s abstract.BeaconState, validatorIndex uint64) 
 
 func IsVoluntaryExitApplicable(s abstract.BeaconState, voluntaryExit *cltypes.VoluntaryExit) error {
 	currentEpoch := state.Epoch(s)
+
+	// Exits must specify an epoch when they become valid; they are not valid before then
+	if currentEpoch < voluntaryExit.Epoch {
+		return errors.New("ProcessVoluntaryExit: exit is happening in the future")
+	}
+
+	// [New in Gloas:EIP7732] Builder exit path
+	if s.Version() >= clparams.GloasVersion && state.IsBuilderIndex(voluntaryExit.ValidatorIndex) {
+		builderIndex := state.ConvertValidatorIndexToBuilderIndex(voluntaryExit.ValidatorIndex)
+		// Verify the builder is active
+		if !state.IsActiveBuilder(s, builderIndex) {
+			return errors.New("ProcessVoluntaryExit: builder is not active")
+		}
+		// Only exit builder if it has no pending withdrawals in the queue
+		if state.GetPendingBalanceToWithdrawForBuilder(s, builderIndex) != 0 {
+			return errors.New("ProcessVoluntaryExit: builder has pending balance to withdraw")
+		}
+		return nil
+	}
+
+	// Validator exit path
 	validator, err := s.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
 	if err != nil {
 		return err
@@ -257,10 +278,6 @@ func IsVoluntaryExitApplicable(s abstract.BeaconState, voluntaryExit *cltypes.Vo
 		return errors.New(
 			"ProcessVoluntaryExit: another exit for the same validator is already getting processed",
 		)
-	}
-	// Exits must specify an epoch when they become valid; they are not valid before then
-	if currentEpoch < voluntaryExit.Epoch {
-		return errors.New("ProcessVoluntaryExit: exit is happening in the future")
 	}
 	// Verify the validator has been active long enough
 	if currentEpoch < validator.ActivationEpoch()+s.BeaconConfig().ShardCommitteePeriod {
@@ -285,6 +302,13 @@ func (I *impl) ProcessVoluntaryExit(
 	err := IsVoluntaryExitApplicable(s, voluntaryExit)
 	if err != nil {
 		return err
+	}
+
+	// [New in Gloas:EIP7732] Builder exit
+	if s.Version() >= clparams.GloasVersion && state.IsBuilderIndex(voluntaryExit.ValidatorIndex) {
+		builderIndex := state.ConvertValidatorIndexToBuilderIndex(voluntaryExit.ValidatorIndex)
+		s.InitiateBuilderExit(builderIndex)
+		return nil
 	}
 
 	// Do the exit (same process in slashing).
