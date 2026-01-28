@@ -107,4 +107,7 @@ type HttpCfg struct {
 	OtsMaxPageSize uint64
 
 	RPCSlowLogThreshold time.Duration
+
+	RpcTxSyncDefaultTimeout time.Duration // Default timeout for eth_sendRawTransactionSync
+	RpcTxSyncMaxTimeout     time.Duration // Maximum timeout for eth_sendRawTransactionSync
 }

@@ -234,7 +234,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.True(strings.HasSuffix(c.historyPath, h.vFileName(0, 1)))
 		require.Equal(3, c.efHistoryComp.Count()/2)
 		require.Equal(seg.WordsAmount2PagesAmount(6, h.CompressorCfg.ValuesOnCompressedPage), 1) // because page size is 1
-		require.Equal(6, c.historyComp.Count()/2)
+		require.Equal(6, c.historyComp.Count())                                                  // comp disabled on collate
 
 		sf, err := h.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(err)

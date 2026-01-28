@@ -81,7 +81,6 @@ func DefaultEngineApiTesterGenesis(t *testing.T) (*types.Genesis, *ecdsa.Private
 	var chainConfig chain.Config
 	err = copier.CopyWithOption(&chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true})
 	require.NoError(t, err)
-	chainConfig.AmsterdamTime = nil // test uses osaka spec, unset amsterdam config to prevent "unsupported fork" error
 	genesis := &types.Genesis{
 		Config:     &chainConfig,
 		Coinbase:   coinbaseAddr,
@@ -124,6 +123,7 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 	httpConfig := httpcfg.HttpCfg{
 		Enabled:                  true,
 		HttpServerEnabled:        true,
+		WebsocketEnabled:         true,
 		HttpListenAddress:        "127.0.0.1",
 		HttpPort:                 jsonRpcPort,
 		API:                      []string{"eth"},
@@ -132,6 +132,10 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 		JWTSecretPath:            path.Join(args.DataDir, "jwt.hex"),
 		ReturnDataLimit:          100_000,
 		EvmCallTimeout:           rpccfg.DefaultEvmCallTimeout,
+		AuthRpcTimeouts:          rpccfg.DefaultHTTPTimeouts,
+		HTTPTimeouts:             rpccfg.DefaultHTTPTimeouts,
+		RpcTxSyncDefaultTimeout:  rpccfg.DefaultRpcTxSyncDefaultTimeout,
+		RpcTxSyncMaxTimeout:      rpccfg.DefaultRpcTxSyncMaxTimeout,
 	}
 
 	nodeKeyConfig := p2p.NodeKeyConfig{}
