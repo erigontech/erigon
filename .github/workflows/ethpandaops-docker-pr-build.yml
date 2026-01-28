@@ -1,0 +1,130 @@
+name: Build Docker Image on PR
+
+on:
+  pull_request:
+    types: [labeled, synchronize]
+
+env:
+  DOCKER_REPO: ethpandaops/erigone
+
+jobs:
+  build-and-push:
+    # Run when 'build-image' label is present
+    if: |
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'build-image'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract PR information
+        id: pr_info
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_BRANCH="${{ github.event.pull_request.head.ref }}"
+          COMMIT_SHA="${{ github.event.pull_request.head.sha }}"
+          SHORT_SHA="${COMMIT_SHA:0:7}"
+          DOCKER_TAG="pr-${PR_NUMBER}-${SHORT_SHA}"
+          GIT_TAG=$(git describe --tags 2>/dev/null || echo "${SHORT_SHA}")
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "pr_number=${PR_NUMBER}" >> $GITHUB_OUTPUT
+          echo "pr_branch=${PR_BRANCH}" >> $GITHUB_OUTPUT
+          echo "commit_sha=${COMMIT_SHA}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "docker_tag=${DOCKER_TAG}" >> $GITHUB_OUTPUT
+          echo "git_tag=${GIT_TAG}" >> $GITHUB_OUTPUT
+          echo "build_date=${BUILD_DATE}" >> $GITHUB_OUTPUT
+          echo "Building image for PR #${PR_NUMBER} from branch ${PR_BRANCH}"
+          echo "Docker tag: ${DOCKER_TAG}"
+
+      - name: Build and push erigone image (multi-arch)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.ethpandaops
+          build-args: |
+            VERSION=${{ steps.pr_info.outputs.git_tag }}
+            VCS_REF=${{ steps.pr_info.outputs.commit_sha }}
+            BUILD_DATE=${{ steps.pr_info.outputs.build_date }}
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.DOCKER_REPO }}:${{ steps.pr_info.outputs.docker_tag }}
+            ${{ env.DOCKER_REPO }}:${{ steps.pr_info.outputs.commit_sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Comment on PR with Docker image info
+        uses: actions/github-script@v7
+        if: github.event.action == 'labeled'
+        with:
+          script: |
+            const dockerTag = '${{ steps.pr_info.outputs.docker_tag }}';
+            const commitSha = '${{ steps.pr_info.outputs.commit_sha }}';
+            const dockerRepo = process.env.DOCKER_REPO;
+            const prNumber = '${{ steps.pr_info.outputs.pr_number }}';
+            const prBranch = '${{ steps.pr_info.outputs.pr_branch }}';
+
+            const comment = `## Docker Image Built Successfully 🐳
+
+            Multi-architecture (amd64/arm64) image has been built and pushed to Docker Hub:
+
+            **Repository**: \`${dockerRepo}\`
+            **Tags**:
+            - \`${dockerTag}\`
+            - \`${commitSha}\`
+
+            **PR**: #${prNumber} (branch: ${prBranch})
+            **Commit**: \`${commitSha}\`
+            **Architectures**: linux/amd64, linux/arm64
+            **Build Tags**: embedded, nosqlite, noboltdb, nosilkworm
+
+            ### Usage
+            \`\`\`bash
+            docker pull ${dockerRepo}:${dockerTag}
+            docker run ${dockerRepo}:${dockerTag} --help
+            \`\`\`
+
+            Image is tagged with PR number and short commit SHA for easy identification.`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            })
+
+      - name: Create workflow summary
+        run: |
+          cat << EOF >> $GITHUB_STEP_SUMMARY
+          ## Docker Image Published 🐳
+
+          Multi-architecture image has been published to Docker Hub:
+
+          - **Repository**: \`${DOCKER_REPO}\`
+          - **Tags**: \`${{ steps.pr_info.outputs.docker_tag }}\`, \`${{ steps.pr_info.outputs.commit_sha }}\`
+          - **PR**: #${{ steps.pr_info.outputs.pr_number }}
+          - **Branch**: ${{ steps.pr_info.outputs.pr_branch }}
+          - **Commit**: \`${{ steps.pr_info.outputs.commit_sha }}\`
+          - **Architectures**: linux/amd64, linux/arm64
+          - **Build Tags**: embedded, nosqlite, noboltdb, nosilkworm
+
+          ### Usage
+          \`\`\`bash
+          docker pull ${DOCKER_REPO}:${{ steps.pr_info.outputs.docker_tag }}
+          docker run ${DOCKER_REPO}:${{ steps.pr_info.outputs.docker_tag }} --help
+          \`\`\`
+          EOF

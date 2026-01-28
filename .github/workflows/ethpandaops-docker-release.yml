@@ -1,0 +1,94 @@
+name: ethpandaops Docker Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g., v0.0.1)'
+        required: true
+        default: 'latest'
+
+env:
+  DOCKER_REPO: ethpandaops/erigone
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          GIT_COMMIT=$(git rev-parse HEAD)
+          GIT_COMMIT_SHORT=$(git rev-parse --short HEAD)
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "git_commit=${GIT_COMMIT}" >> $GITHUB_OUTPUT
+          echo "git_commit_short=${GIT_COMMIT_SHORT}" >> $GITHUB_OUTPUT
+          echo "build_date=${BUILD_DATE}" >> $GITHUB_OUTPUT
+          echo "Building erigone image for tag: ${TAG}"
+
+      - name: Build and push erigone image (multi-arch)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.ethpandaops
+          build-args: |
+            VERSION=${{ steps.meta.outputs.tag }}
+            VCS_REF=${{ steps.meta.outputs.git_commit }}
+            BUILD_DATE=${{ steps.meta.outputs.build_date }}
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.DOCKER_REPO }}:${{ steps.meta.outputs.tag }}
+            ${{ env.DOCKER_REPO }}:${{ steps.meta.outputs.git_commit_short }}
+            ${{ env.DOCKER_REPO }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create release summary
+        run: |
+          cat << EOF >> $GITHUB_STEP_SUMMARY
+          ## Docker Image Published
+
+          The erigone image has been published to Docker Hub:
+
+          ### Image Tags
+          - \`${DOCKER_REPO}:${{ steps.meta.outputs.tag }}\`
+          - \`${DOCKER_REPO}:${{ steps.meta.outputs.git_commit_short }}\`
+          - \`${DOCKER_REPO}:latest\`
+
+          ### Build Info
+          - **Version**: ${{ steps.meta.outputs.tag }}
+          - **Commit**: ${{ steps.meta.outputs.git_commit }}
+          - **Build Date**: ${{ steps.meta.outputs.build_date }}
+          - **Platforms**: linux/amd64, linux/arm64
+          - **Build Tags**: embedded, nosqlite, noboltdb, nosilkworm
+
+          ### Usage
+          \`\`\`bash
+          docker pull ${DOCKER_REPO}:${{ steps.meta.outputs.tag }}
+          docker run ${DOCKER_REPO}:${{ steps.meta.outputs.tag }} --help
+          \`\`\`
+          EOF
