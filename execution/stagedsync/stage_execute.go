@@ -139,8 +139,6 @@ func StageExecuteBlocksCfg(
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
 func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
-	rawdb.WriteRecentReorg(rwTx, true)
-
 	br := cfg.blockReader
 	txNumsReader := br.TxnumReader()
 
