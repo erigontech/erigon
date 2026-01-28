@@ -337,23 +337,36 @@ func GetExpectedWithdrawals(b abstract.BeaconState, currentEpoch uint64) *cltype
 	expWithdrawals := &cltypes.ExpectedWithdrawals{
 		Withdrawals: []*cltypes.Withdrawal{},
 	}
-	partialWithdrawalsCount := uint64(0)
+
+	// [New in Gloas:EIP7732] Get builder withdrawals
+	if b.Version() >= clparams.GloasVersion {
+		builderWithdrawals, nextIdx, processedBuilderWithdrawalsCount := GetBuilderWithdrawals(b, nextWithdrawalIndex, expWithdrawals.Withdrawals)
+		expWithdrawals.Withdrawals = append(expWithdrawals.Withdrawals, builderWithdrawals...)
+		nextWithdrawalIndex = nextIdx
+		expWithdrawals.ProcessedBuilderWithdrawalsCount = processedBuilderWithdrawalsCount
+	}
 
 	// [New in Electra:EIP7251] Consume pending partial withdrawals
 	if b.Version() >= clparams.ElectraVersion {
-		partialWithdrawals, nextIdx, count := GetPendingPartialWithdrawals(b, nextWithdrawalIndex, nil)
+		partialWithdrawals, nextIdx, count := GetPendingPartialWithdrawals(b, nextWithdrawalIndex, expWithdrawals.Withdrawals)
 		expWithdrawals.Withdrawals = append(expWithdrawals.Withdrawals, partialWithdrawals...)
 		nextWithdrawalIndex = nextIdx
-		partialWithdrawalsCount = count
+		expWithdrawals.ProcessedPartialWithdrawalsCount = count
+	}
+
+	// [New in Gloas:EIP7732] Get builders sweep withdrawals
+	if b.Version() >= clparams.GloasVersion {
+		buildersSweepWithdrawals, nextIdx, processedBuildersSweepCount := GetBuildersSweepWithdrawals(b, nextWithdrawalIndex, expWithdrawals.Withdrawals)
+		expWithdrawals.Withdrawals = append(expWithdrawals.Withdrawals, buildersSweepWithdrawals...)
+		nextWithdrawalIndex = nextIdx
+		expWithdrawals.ProcessedBuildersSweepCount = processedBuildersSweepCount
 	}
 
 	// Sweep for remaining withdrawals
 	sweepWithdrawals, nextIdx, processedValidatorsSweepCount := GetValidatorsSweepWithdrawals(b, nextWithdrawalIndex, currentEpoch, expWithdrawals.Withdrawals)
 	expWithdrawals.Withdrawals = append(expWithdrawals.Withdrawals, sweepWithdrawals...)
-	nextWithdrawalIndex = nextIdx
-	//_ = nextWithdrawalIndex // updated index available for future use
+	_ = nextIdx
 
-	expWithdrawals.ProcessedPartialWithdrawalsCount = partialWithdrawalsCount
 	expWithdrawals.ProcessedSweepWithdrawalsCount = processedValidatorsSweepCount
 	return expWithdrawals
 }
