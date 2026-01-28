@@ -561,14 +561,12 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 
 // HistoryFileBenchStats holds benchmark statistics for a single history file
 type HistoryFileBenchStats struct {
-	FileName      string
-	StartTxNum    uint64
-	EndTxNum      uint64
-	SampleCount   int
-	TotalTime     time.Duration
-	Stats         BenchStats
-	FoundCount    int
-	NotFoundCount int
+	FileName    string
+	StartTxNum  uint64
+	EndTxNum    uint64
+	SampleCount int
+	TotalTime   time.Duration
+	Stats       BenchStats
 }
 
 func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
@@ -693,13 +691,11 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 
 		// Benchmark lookups for this file
 		durations := make([]time.Duration, 0, sampleCount)
-		foundCount := 0
-		notFoundCount := 0
 
 		startTime := time.Now()
 		for _, txNum := range sampledTxNums {
 			lookupStart := time.Now()
-			val, _, err := tx.GetAsOf(kv.CommitmentDomain, compactKey, txNum)
+			_, _, err := tx.GetAsOf(kv.CommitmentDomain, compactKey, txNum)
 			elapsed := time.Since(lookupStart)
 
 			if err != nil {
@@ -708,11 +704,6 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 			}
 
 			durations = append(durations, elapsed)
-			if val != nil {
-				foundCount++
-			} else {
-				notFoundCount++
-			}
 
 			select {
 			case <-ctx.Done():
@@ -729,14 +720,12 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 		}
 
 		fileStats := HistoryFileBenchStats{
-			FileName:      fname,
-			StartTxNum:    startTxNum,
-			EndTxNum:      endTxNum,
-			SampleCount:   len(durations),
-			TotalTime:     totalTime,
-			Stats:         stats,
-			FoundCount:    foundCount,
-			NotFoundCount: notFoundCount,
+			FileName:    fname,
+			StartTxNum:  startTxNum,
+			EndTxNum:    endTxNum,
+			SampleCount: len(durations),
+			TotalTime:   totalTime,
+			Stats:       stats,
 		}
 		allFileStats = append(allFileStats, fileStats)
 
@@ -768,17 +757,16 @@ func printHistoryBenchResultsTable(prefix []byte, compactKey []byte, fileStats [
 	fmt.Println()
 
 	// Print header
-	fmt.Printf("%-45s %12s %12s %8s %10s %10s %10s %10s %10s %8s %8s\n",
-		"File", "StartTxNum", "EndTxNum", "Samples", "Throughput", "Mean", "P50", "P95", "P99", "Found", "NotFnd")
-	fmt.Println(strings.Repeat("-", 155))
+	fmt.Printf("%-45s %12s %12s %8s %10s %10s %10s %10s %10s\n",
+		"File", "StartTxNum", "EndTxNum", "Samples", "Throughput", "Mean", "P50", "P95", "P99")
+	fmt.Println(strings.Repeat("-", 138))
 
 	// Print each file's stats
 	var totalSamples int
-	var totalFound, totalNotFound int
 	var totalDuration time.Duration
 
 	for _, fs := range fileStats {
-		fmt.Printf("%-45s %12d %12d %8d %10.0f %10v %10v %10v %10v %8d %8d\n",
+		fmt.Printf("%-45s %12d %12d %8d %10.0f %10v %10v %10v %10v\n",
 			fs.FileName,
 			fs.StartTxNum,
 			fs.EndTxNum,
@@ -787,17 +775,13 @@ func printHistoryBenchResultsTable(prefix []byte, compactKey []byte, fileStats [
 			fs.Stats.Mean,
 			fs.Stats.P50,
 			fs.Stats.P95,
-			fs.Stats.P99,
-			fs.FoundCount,
-			fs.NotFoundCount)
+			fs.Stats.P99)
 
 		totalSamples += fs.SampleCount
-		totalFound += fs.FoundCount
-		totalNotFound += fs.NotFoundCount
 		totalDuration += fs.TotalTime
 	}
 
-	fmt.Println(strings.Repeat("-", 155))
+	fmt.Println(strings.Repeat("-", 138))
 
 	// Print summary
 	overallThroughput := float64(0)
@@ -805,7 +789,7 @@ func printHistoryBenchResultsTable(prefix []byte, compactKey []byte, fileStats [
 		overallThroughput = float64(totalSamples) / totalDuration.Seconds()
 	}
 
-	fmt.Printf("%-45s %12s %12s %8d %10.0f %10s %10s %10s %10s %8d %8d\n",
+	fmt.Printf("%-45s %12s %12s %8d %10.0f %10s %10s %10s %10s\n",
 		"TOTAL",
 		"",
 		"",
@@ -814,15 +798,12 @@ func printHistoryBenchResultsTable(prefix []byte, compactKey []byte, fileStats [
 		"",
 		"",
 		"",
-		"",
-		totalFound,
-		totalNotFound)
+		"")
 
 	fmt.Println()
 	fmt.Printf("  Total Files:    %d\n", len(fileStats))
 	fmt.Printf("  Total Samples:  %d\n", totalSamples)
 	fmt.Printf("  Total Duration: %v\n", totalDuration)
-	fmt.Printf("  Found/NotFound: %d / %d\n", totalFound, totalNotFound)
 	fmt.Println()
 	fmt.Println("================================================================================")
 	fmt.Println()
