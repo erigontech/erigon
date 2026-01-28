@@ -409,7 +409,10 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Du
 
 func (br *BlockRetire) skipLoop(requestedMinBlockNum, maxBlockNum uint64) bool {
 	minBlockNum := max(br.blockReader.FrozenBlocks(), requestedMinBlockNum)
-	_, _, ok := CanRetire(maxBlockNum, minBlockNum, snaptype.Unknown, br.chainConfig)
+	// 24330613 24329999
+	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, snaptype.Unknown, br.chainConfig)
+	fmt.Println("blockFrom", blockFrom, "blockTo", blockTo, "frozen", br.blockReader.FrozenBlocks(), "maxScheduled", br.maxScheduledBlock.Load()
+		, "requestedMin", requestedMinBlockNum, "maxBlockNum", maxBlockNum)
 	return !ok
 }
 
