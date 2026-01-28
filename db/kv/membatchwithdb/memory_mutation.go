@@ -73,6 +73,10 @@ func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) *MemoryM
 	}
 }
 
+func (m *MemoryMutation) UnderlyingTx() kv.TemporalTx {
+	return m.db
+}
+
 func (m *MemoryMutation) UpdateTxn(tx kv.TemporalTx) {
 	m.db = tx
 	m.statelessCursors = nil

@@ -36,8 +36,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/rpc/mcp"
 	"github.com/erigontech/mdbx-go/mdbx"
-	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
@@ -96,7 +96,6 @@ import (
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/direct"
@@ -173,6 +172,7 @@ type Ethereum struct {
 	stateDiffClient     *direct.StateDiffClientDirect
 	rpcFilters          *rpchelper.Filters
 	rpcDaemonStateCache kvcache.Cache
+	mcpRPC              *mcp.ErigonMCPServer
 
 	miningSealingQuit   chan struct{}
 	pendingBlocks       chan *types.Block
@@ -816,35 +816,53 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.rpcDaemonStateCache = rpcDaemonStateCache
 	backend.rpcFilters = rpcFilters
 
+	baseApi := jsonrpc.NewBaseApi(
+		backend.rpcFilters,
+		backend.rpcDaemonStateCache,
+		blockReader,
+		httpRpcCfg.WithDatadir,
+		httpRpcCfg.EvmCallTimeout,
+		backend.engine,
+		httpRpcCfg.Dirs,
+		backend.polygonBridge,
+	)
+	ethApi := jsonrpc.NewEthAPI(
+		baseApi,
+		backend.chainDB,
+		backend.ethRpcClient,
+		backend.txPoolRpcClient,
+		backend.miningRpcClient,
+		httpRpcCfg.Gascap,
+		httpRpcCfg.Feecap,
+		httpRpcCfg.ReturnDataLimit,
+		httpRpcCfg.AllowUnprotectedTxs,
+		httpRpcCfg.MaxGetProofRewindBlockCount,
+		httpRpcCfg.WebsocketSubscribeLogsChannelSize,
+		logger,
+	)
+
+	erigonApi := jsonrpc.NewErigonAPI(baseApi, backend.chainDB, backend.ethRpcClient)
+
+	otsApi := jsonrpc.NewOtterscanAPI(baseApi, backend.chainDB, stack.Config().Http.OtsMaxPageSize)
+
+	mcpServer := mcp.NewErigonMCPServer(ethApi, erigonApi, otsApi, config.Dirs.Log)
+
+	if config.MCPAddress != "" {
+		go func() {
+			logger.Info("serve MCP on", "addr", config.MCPAddress)
+			mcpErr := mcpServer.ServeSSE(config.MCPAddress)
+			if mcpErr != nil {
+				logger.Error("mcpServer.ServeSSE", "err", err)
+				return
+			}
+		}()
+	}
+
 	if config.Shutter.Enabled {
 		if config.TxPool.Disable {
 			panic("can't enable shutter pool when devp2p txpool is disabled")
 		}
 
-		baseApi := jsonrpc.NewBaseApi(
-			backend.rpcFilters,
-			backend.rpcDaemonStateCache,
-			blockReader,
-			httpRpcCfg.WithDatadir,
-			httpRpcCfg.EvmCallTimeout,
-			backend.engine,
-			httpRpcCfg.Dirs,
-			backend.polygonBridge,
-		)
-		ethApi := jsonrpc.NewEthAPI(
-			baseApi,
-			backend.chainDB,
-			backend.ethRpcClient,
-			backend.txPoolRpcClient,
-			backend.miningRpcClient,
-			httpRpcCfg.Gascap,
-			httpRpcCfg.Feecap,
-			httpRpcCfg.ReturnDataLimit,
-			httpRpcCfg.AllowUnprotectedTxs,
-			httpRpcCfg.MaxGetProofRewindBlockCount,
-			httpRpcCfg.WebsocketSubscribeLogsChannelSize,
-			logger,
-		)
 		contractBackend := contracts.NewDirectBackend(ethApi)
 		baseTxnProvider := backend.txPool
 		currentBlockNumReader := func(ctx context.Context) (*uint64, error) {
@@ -869,23 +887,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	miner := stagedsync.NewMiningState(&config.Miner)
 	backend.pendingBlocks = miner.PendingResultCh
-
-	var signatures *lru.ARCCache[common.Hash, accounts.Address]
-
-	if bor, ok := backend.engine.(*bor.Bor); ok {
-		signatures = bor.Signatures
-	}
-
-	astridEnabled := chainConfig.Bor != nil
-
 	// proof-of-stake mining
 	assembleBlockPOS := func(param *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
 		miningStatePos := stagedsync.NewMiningState(&config.Miner)
 		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
 		proposingSync := stagedsync.New(
 			config.Sync,
-			stagedsync.MiningStages(backend.sentryCtx,
-				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, backend.chainConfig, backend.engine, param, tmpdir, backend.blockReader),
+			stagedsync.MiningStages(
+				backend.sentryCtx,
+				stagedsync.StageMiningCreateBlockCfg(miningStatePos, backend.chainConfig, backend.engine, param, backend.blockReader),
 				stagedsync.StageExecuteBlocksCfg(
 					backend.chainDB,
 					config.Prune,
@@ -895,7 +905,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					&vm.Config{},
 					backend.notifications,
 					config.StateStream,
-					/*badBlockHalt*/ false,
+					false, /*badBlockHalt*/
 					dirs,
 					blockReader,
 					backend.sentriesClient.Hd,
@@ -904,11 +914,15 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					stageloop.SilkwormForExecutionStage(backend.silkworm, config),
 					config.ExperimentalBAL,
 				),
-				stagedsync.StageSendersCfg(backend.chainDB, chainConfig, config.Sync, false, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
-				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, txnProvider, blockReader),
-				stagedsync.StageMiningFinishCfg(backend.chainDB, backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
-				astridEnabled,
-			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder, logger, stages.ModeBlockProduction)
+				stagedsync.StageSendersCfg(chainConfig, config.Sync, false /* badBlockHalt */, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
+				stagedsync.StageMiningExecCfg(miningStatePos, backend.notifications.Events, backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, txnProvider, blockReader),
+				stagedsync.StageMiningFinishCfg(backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
+			),
+			stagedsync.MiningUnwindOrder,
+			stagedsync.MiningPruneOrder,
+			logger,
+			stages.ModeBlockProduction,
+		)
 		// We start the mining step
 		if err := stageloop.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir, logger); err != nil {
 			return nil, err
@@ -983,7 +997,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}()
 
 	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, p2pConfig, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
-		blockReader, blockRetire, backend.silkworm, backend.forkValidator, signatures, logger, tracer)
+		blockReader, blockRetire, backend.silkworm, backend.forkValidator, tracer)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 

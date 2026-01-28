@@ -1056,7 +1056,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 	proofs := txn.Proofs()
 
 	if len(blobs) != len(commitments) {
-		log.Debug(fmt.Sprintf("TX POOL: len(blobs) %d != len(commitments) %d", len(blobs), len(commitments)))
+		p.logger.Debug(fmt.Sprintf("TX POOL: len(blobs) %d != len(commitments) %d", len(blobs), len(commitments)))
 		return txpoolcfg.UnequalBlobTxExt
 	}
 	if p.isOsaka() {
@@ -1065,7 +1065,7 @@ func (p *TxPool) validateBlobTxn(txn *TxnSlot, isLocal bool) txpoolcfg.DiscardRe
 		}
 	} else {
 		if len(commitments) != len(proofs) {
-			log.Debug(fmt.Sprintf("TX POOL: NOT OSAKA len(commitments) %d != len(proofs) %d", len(commitments), len(proofs)))
+			p.logger.Debug(fmt.Sprintf("TX POOL: NOT OSAKA len(commitments) %d != len(proofs) %d", len(commitments), len(proofs)))
 			return txpoolcfg.UnequalBlobTxExt
 		}
 	}
@@ -1990,7 +1990,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 	}
 
 	// Discard worst transactions from the queued sub pool until it is within its capacity limits
-	for _ = p.queued.Worst(); p.queued.Len() > p.queued.limit; _ = p.queued.Worst() {
+	for p.queued.Len() > p.queued.limit {
 		tx := p.queued.PopWorst()
 		p.discardLocked(tx, txpoolcfg.QueuedPoolOverflow)
 	}
@@ -2088,7 +2088,7 @@ func (p *TxPool) Run(ctx context.Context) error {
 					// drain newTxns for emptying newTxn channel
 					// newTxn channel will be filled only with local transactions
 					// early return to avoid outbound transaction propagation
-					log.Debug("[txpool] txn gossip disabled", "state", "drain new transactions")
+					p.logger.Debug("[txpool] txn gossip disabled", "state", "drain new transactions")
 					return
 				}
 
@@ -2175,7 +2175,7 @@ func (p *TxPool) Run(ctx context.Context) error {
 			}
 			if p.cfg.NoGossip {
 				// avoid transaction gossiping for new peers
-				log.Debug("[txpool] txn gossip disabled", "state", "sync new peers")
+				p.logger.Debug("[txpool] txn gossip disabled", "state", "sync new peers")
 				continue
 			}
 			t := time.Now()

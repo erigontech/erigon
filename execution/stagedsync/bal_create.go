@@ -12,6 +12,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -169,7 +170,7 @@ func updateAccountWrite(account *accountState, vw *state.VersionedWrite, accessI
 }
 
 func isSystemBALAddress(addr accounts.Address) bool {
-	return addr == state.SystemAddress
+	return addr == params.SystemAddress
 }
 
 func hasStorageWrite(ac *types.AccountChanges, slot accounts.StorageKey) bool {

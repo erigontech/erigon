@@ -32,37 +32,24 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
 type TxLookupCfg struct {
-	db          kv.RwDB
 	prune       prune.Mode
 	tmpdir      string
-	borConfig   *borcfg.BorConfig
 	blockReader services.FullBlockReader
 }
 
 func StageTxLookupCfg(
-	db kv.RwDB,
 	prune prune.Mode,
 	tmpdir string,
-	borConfigInterface chain.BorConfig,
 	blockReader services.FullBlockReader,
 ) TxLookupCfg {
-	var borConfig *borcfg.BorConfig
-	if borConfigInterface != nil {
-		borConfig = borConfigInterface.(*borcfg.BorConfig)
-	}
-
 	return TxLookupCfg{
-		db:          db,
 		prune:       prune,
 		tmpdir:      tmpdir,
-		borConfig:   borConfig,
 		blockReader: blockReader,
 	}
 }

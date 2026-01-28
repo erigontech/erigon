@@ -89,10 +89,6 @@ func CheckFilesForSchema(schema state.SnapNameSchema, params CheckFilesParams) (
 		return 0, false, fmt.Errorf("last %s snapshot file must end at %d, found at %d (file: %s)", schema.DataTag(), params.checkLastFileTo, dataFiles[len(dataFiles)-1].To, dataFiles[len(dataFiles)-1].Name)
 	}
 
-	if sumRange != dataFiles[len(dataFiles)-1].To-dataFiles[0].From {
-		return 0, false, fmt.Errorf("sum of ranges of %s snapshot files (%d) does not match last 'to' value (%d)", schema.DataTag(), sumRange, dataFiles[len(dataFiles)-1].To)
-	}
-
 	prevFrom, prevTo := dataFiles[0].From, dataFiles[0].To
 	for i := 1; i < len(dataFiles); i++ {
 		df := dataFiles[i]

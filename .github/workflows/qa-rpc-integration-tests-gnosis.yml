@@ -108,7 +108,7 @@ jobs:
         id: test_step
         run: |
           commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD)
-          TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/gnosis_$(date +%Y%m%d_%H%M%S)_integration_${commit}_http/"
+          TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/gnosis_$(date +%Y%m%d_%H%M%S)_integration_${commit}_http"
           echo "TEST_RESULT_DIR=$TEST_RESULT_DIR" >> $GITHUB_ENV
 
           chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_gnosis.sh
@@ -128,6 +128,30 @@ jobs:
             echo "Error detected during RPC tests"
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Generate Summary
+        if: always() && steps.test_step.outputs.test_executed == 'true'
+        run: |
+          SUMMARY_FILE="${{ env.TEST_RESULT_DIR }}/summary.md"
+          LOG_FILE="${{ env.TEST_RESULT_DIR }}/output.log"
+
+          cat << 'EOF' > $SUMMARY_FILE
+          # ${{ github.workflow }} Report
+
+          ## Test Configuration
+          - **Chain:** ${{ env.CHAIN }}
+          - **Result:** ${{ steps.test_step.outputs.TEST_RESULT }}
+
+          ## Test Output
+          ```
+          EOF
+
+          cat $LOG_FILE >> $SUMMARY_FILE
+
+          echo '```' >> $SUMMARY_FILE
+
+          cat $SUMMARY_FILE
+          cat $SUMMARY_FILE >> $GITHUB_STEP_SUMMARY
 
       - name: Stop Erigon RpcDaemon
         if: always()
