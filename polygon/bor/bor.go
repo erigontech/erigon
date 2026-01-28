@@ -146,7 +146,7 @@ func SealHash(header *types.Header, c *borcfg.BorConfig) (hash common.Hash) {
 }
 
 func encodeSigHeader(w io.Writer, header *types.Header, c *borcfg.BorConfig) {
-	enc := []interface{}{
+	enc := []any{
 		header.ParentHash,
 		header.UncleHash,
 		header.Coinbase,
@@ -1219,7 +1219,7 @@ func (c *Bor) getHeaderByNumber(ctx context.Context, tx kv.Tx, number uint64) (*
 		return nil, err
 	}
 	if header == nil {
-		_, _ = c.blockReader.HeaderByNumber(dbg.ContextWithDebug(ctx, true), tx, number)
+		_, _ = c.blockReader.HeaderByNumber(dbg.WithDebug(ctx, true), tx, number)
 		return nil, fmt.Errorf("[bor] header not found: %d", number)
 	}
 	return header, nil
@@ -1236,7 +1236,7 @@ func (c *Bor) CommitStates(
 	var events []*types.Message
 	var err error
 
-	ctx := dbg.ContextWithDebug(c.execCtx, true)
+	ctx := dbg.WithDebug(c.execCtx, true)
 	if fetchEventsWithinTime {
 		sprintLength := c.config.CalculateSprintLength(blockNum)
 

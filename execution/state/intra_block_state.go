@@ -112,7 +112,7 @@ func (r *revisions) revertToSnapshot(revid int) int {
 }
 
 var revisionsPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &revisions{0, make([]revision, 0, 2048)}
 	},
 }
@@ -808,8 +808,8 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 		}
 
 		if stateObject.data.Empty() {
+			versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
 			if _, ok := sdb.journal.dirties[addr]; !ok {
-				versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
 				if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 					fmt.Printf("%d (%d.%d) Touch %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 				}
@@ -901,7 +901,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
 	}
-	if bversion.TxIndex >= readVersion.TxIndex {
+	if bversion.TxIndex > readVersion.TxIndex || (bversion.TxIndex == readVersion.TxIndex && bversion.Incarnation >= readVersion.Incarnation) {
 		if balance.Cmp(&account.Balance) != 0 {
 			if account == readAccount {
 				account = &accounts.Account{}
@@ -909,7 +909,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 			}
 			account.Balance = balance
 		}
-		if bversion.TxIndex > version.TxIndex || (bversion.TxIndex > version.TxIndex && bversion.Incarnation > version.Incarnation) {
+		if bversion.TxIndex > version.TxIndex || (bversion.TxIndex == version.TxIndex && bversion.Incarnation > version.Incarnation) {
 			version = bversion
 			if bsource != source {
 				source = bsource
@@ -921,7 +921,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
 	}
-	if nversion.TxIndex >= readVersion.TxIndex {
+	if nversion.TxIndex > readVersion.TxIndex || (nversion.TxIndex == readVersion.TxIndex && nversion.Incarnation >= readVersion.Incarnation) {
 		if nonce > account.Nonce {
 			if account == readAccount {
 				account = &accounts.Account{}
@@ -929,7 +929,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 			}
 			account.Nonce = nonce
 		}
-		if nversion.TxIndex > version.TxIndex || (nversion.TxIndex > version.TxIndex && nversion.Incarnation > version.Incarnation) {
+		if nversion.TxIndex > version.TxIndex || (nversion.TxIndex == version.TxIndex && nversion.Incarnation > version.Incarnation) {
 			version = nversion
 			if nsource != source {
 				source = nsource
@@ -942,7 +942,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 		return nil, UnknownSource, UnknownVersion, err
 	}
 
-	if cversion.TxIndex >= readVersion.TxIndex {
+	if cversion.TxIndex > readVersion.TxIndex || (cversion.TxIndex == readVersion.TxIndex && cversion.Incarnation >= readVersion.Incarnation) {
 		if codeHash != account.CodeHash {
 			if account == readAccount {
 				account = &accounts.Account{}
@@ -950,7 +950,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 			}
 			account.CodeHash = codeHash
 		}
-		if cversion.TxIndex > version.TxIndex || (cversion.TxIndex > version.TxIndex && cversion.Incarnation > version.Incarnation) {
+		if cversion.TxIndex > version.TxIndex || (cversion.TxIndex == version.TxIndex && cversion.Incarnation > version.Incarnation) {
 			version = cversion
 			if csource != source {
 				source = csource
@@ -1033,7 +1033,7 @@ func printCode(c []byte) (int, string) {
 		return lenc, fmt.Sprintf("%x...", c[0:40])
 	}
 
-	return lenc, fmt.Sprintf("%x...", c)
+	return lenc, fmt.Sprintf("%x", c)
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#code-hash
@@ -1598,6 +1598,9 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			continue
 		}
 
+		if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
+			stateWriter.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
+		}
 		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, so, true, sdb.trace, sdb.tracingHooks); err != nil {
 			return err
 		}
@@ -1676,7 +1679,8 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 				fmt.Printf("%d (%d.%d) Updated Balance: %x%s: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, dirty, &stateObject.data.Balance)
 			}
 		}
-		if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
+		if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
+			stateWriter.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 			fmt.Printf("%d (%d.%d) Update Account %x\n", sdb.blockNum, sdb.txIndex, sdb.version, addr)
 		}
 		if err := updateAccount(chainRules.IsSpuriousDragon, chainRules.IsAura, stateWriter, addr, stateObject, isDirty, sdb.trace, sdb.tracingHooks); err != nil {

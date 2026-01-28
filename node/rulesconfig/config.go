@@ -43,7 +43,7 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
-func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config interface{}, noVerify bool,
+func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config any, noVerify bool,
 	withoutHeimdall bool, blockReader services.FullBlockReader, readonly bool,
 	logger log.Logger, polygonBridge *bridge.Service, heimdallService *heimdall.Service,
 ) rules.Engine {
@@ -135,7 +135,7 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 }
 
 func CreateRulesEngineBareBones(ctx context.Context, chainConfig *chain.Config, logger log.Logger) rules.Engine {
-	var consensusConfig interface{}
+	var consensusConfig any
 
 	if chainConfig.Clique != nil {
 		consensusConfig = chainspec.CliqueSnapshot

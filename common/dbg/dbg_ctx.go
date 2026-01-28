@@ -20,14 +20,46 @@ import (
 	"context"
 )
 
-type debugContextKey struct{}
+type ctxKey int
+
+const (
+	ckTrace ctxKey = iota
+	ckTracePrefix
+	ckDebug
+)
+
+func WithTrace(ctx context.Context, trace bool) context.Context {
+	return context.WithValue(ctx, ckTrace, trace)
+}
+
+func WithTracePrefix(ctx context.Context, tracePrefix string) context.Context {
+	return context.WithValue(ctx, ckTracePrefix, tracePrefix)
+}
+
+func TraceEnabled(ctx context.Context) bool {
+	trace, ok := ctx.Value(ckTrace).(bool)
+	return ok && trace
+}
+
+func TracePrefixValue(ctx context.Context) string {
+	tracePrefix, _ := ctx.Value(ckTracePrefix).(string)
+	return tracePrefix
+}
+
+func TraceValues(ctx context.Context) (string, bool) {
+	if enabled := TraceEnabled(ctx); enabled {
+		return TracePrefixValue(ctx), true
+	}
+	return "", false
+}
 
 // Enabling detailed debugging logs for given context
-func ContextWithDebug(ctx context.Context, v bool) context.Context {
-	return context.WithValue(ctx, debugContextKey{}, v)
+func WithDebug(ctx context.Context, v bool) context.Context {
+	return context.WithValue(ctx, ckDebug, v)
 }
-func Enabled(ctx context.Context) bool {
-	v := ctx.Value(debugContextKey{})
+
+func DebugEnabled(ctx context.Context) bool {
+	v := ctx.Value(ckDebug)
 	if v == nil {
 		return false
 	}

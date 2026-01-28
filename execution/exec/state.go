@@ -184,7 +184,7 @@ func (rw *Worker) Resume() {
 	rw.notifier.Signal()
 }
 
-func (rw *Worker) LogLRUStats() { rw.evm.Config().JumpDestCache.LogStats() }
+func (rw *Worker) LogLRUStats() {}
 
 func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, stateReader state.StateReader, stateWriter state.StateWriter, accumulator *shards.Accumulator) error {
 	rw.lock.Lock()

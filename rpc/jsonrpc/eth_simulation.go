@@ -78,11 +78,11 @@ type CallResult struct {
 	Logs       []*types.RPCLog `json:"logs"`
 	GasUsed    hexutil.Uint64  `json:"gasUsed"`
 	Status     hexutil.Uint64  `json:"status"`
-	Error      interface{}     `json:"error,omitempty"`
+	Error      any             `json:"error,omitempty"`
 }
 
 // SimulatedBlockResult represents the result of the simulated calls for a single block (i.e. one SimulatedBlock).
-type SimulatedBlockResult map[string]interface{}
+type SimulatedBlockResult map[string]any
 
 // SimulationResult represents the result contained in an eth_simulateV1 response.
 type SimulationResult []SimulatedBlockResult
@@ -411,7 +411,7 @@ func (s *simulator) simulateBlock(
 	cumulativeGasUsed := uint64(0)
 	cumulativeBlobGasUsed := uint64(0)
 
-	minTxNum, err := txNumReader.Min(tx, blockNumber)
+	minTxNum, err := txNumReader.Min(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -423,13 +423,13 @@ func (s *simulator) simulateBlock(
 		stateReader = state.NewStateReader(sharedDomains, tx)
 	} else {
 		if minTxNum < state.StateHistoryStartTxNum(tx) {
-			return nil, nil, state.PrunedError
+			return nil, nil, fmt.Errorf("%w: min tx: %d", state.PrunedError, minTxNum)
 		}
 		stateReader = state.NewHistoryReaderV3(tx, minTxNum)
 
 		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
 		if s.commitmentHistory && minTxNum < commitmentStartingTxNum {
-			return nil, nil, state.PrunedError
+			return nil, nil, fmt.Errorf("%w: min commitment: %d, min tx: %d", state.PrunedError, commitmentStartingTxNum, minTxNum)
 		}
 	}
 	intraBlockState := state.New(stateReader)
@@ -539,7 +539,7 @@ func (s *simulator) simulateBlock(
 	}
 
 	// Marshal the block in RPC format including the call results in a custom field.
-	additionalFields := make(map[string]interface{})
+	additionalFields := make(map[string]any)
 	blockResult, err := ethapi.RPCMarshalBlock(block, true, s.fullTransactions, additionalFields)
 	if err != nil {
 		return nil, nil, err
@@ -754,14 +754,17 @@ func clientLimitExceededError(message string) error {
 }
 
 type HistoryCommitmentOnlyReader struct {
-	latestReader  commitment.StateReader
-	historyReader commitment.StateReader
+	latestReader       commitment.StateReader
+	historyReader      commitment.StateReader
+	limitReadAsOfTxNum uint64
 }
 
 func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, getter kv.TemporalGetter, limitReadAsOfTxNum uint64) commitment.StateReader {
-	latestReader := commitment.NewLatestStateReader(getter)
-	historyReader := commitment.NewHistoryStateReader(roTx, limitReadAsOfTxNum)
-	return &HistoryCommitmentOnlyReader{latestReader, historyReader}
+	return &HistoryCommitmentOnlyReader{
+		latestReader:       commitment.NewLatestStateReader(getter),
+		historyReader:      commitment.NewHistoryStateReader(roTx, limitReadAsOfTxNum),
+		limitReadAsOfTxNum: limitReadAsOfTxNum,
+	}
 }
 
 func (r *HistoryCommitmentOnlyReader) WithHistory() bool {
@@ -785,4 +788,8 @@ func (r *HistoryCommitmentOnlyReader) Read(d kv.Domain, plainKey []byte) (enc []
 		return nil, 0, fmt.Errorf("HistoryCommitmentOnlyReader latestReader %q: %w", d, err)
 	}
 	return enc, step, nil
+}
+
+func (r *HistoryCommitmentOnlyReader) Clone(tx kv.TemporalTx, getter kv.TemporalGetter) commitment.StateReader {
+	return newHistoryCommitmentOnlyReader(tx, getter, r.limitReadAsOfTxNum)
 }

@@ -65,7 +65,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 }
 
 // SendTransaction implements eth_sendTransaction. Creates new message call transaction or a contract creation if the data field contains code.
-func (api *APIImpl) SendTransaction(_ context.Context, txObject interface{}) (common.Hash, error) {
+func (api *APIImpl) SendTransaction(_ context.Context, txObject any) (common.Hash, error) {
 	return common.Hash{0}, fmt.Errorf(NotImplemented, "eth_sendTransaction")
 }
 

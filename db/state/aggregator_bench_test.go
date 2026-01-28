@@ -55,6 +55,18 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.TemporalRwDB, *s
 	return db, db.(state.HasAgg).Agg().(*state.Aggregator)
 }
 
+type txwrapper struct {
+	tx kv.TemporalRwTx
+}
+
+func (w txwrapper) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
+	return w.tx
+}
+
+func (w txwrapper) AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel {
+	return w.tx
+}
+
 func BenchmarkAggregator_Processing(b *testing.B) {
 	ctx := b.Context()
 
@@ -92,7 +104,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 			b.StopTimer()
 			domains.Flush(ctx, tx)
 			b.StartTimer()
-			_, err := comitCtx.ComputeCommitment(ctx, tx, tx, true, blockNum, txNum, "", nil)
+			_, err := comitCtx.ComputeCommitment(ctx, txwrapper{tx}, tx, true, blockNum, txNum, "", nil)
 			require.NoError(b, err)
 		}
 	}
@@ -188,7 +200,7 @@ func Benchmark_BTree_SeekVsGetCompressedV(b *testing.B) {
 	getter := seg.NewReader(kv.MakeGetter(), compress)
 
 	b.Run("seek_only_v", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			p := rnd.IntN(len(keys))
 
 			cur, err := bt.Seek(getter, keys[p])
@@ -203,7 +215,7 @@ func Benchmark_BTree_SeekVsGetCompressedV(b *testing.B) {
 	})
 
 	b.Run("get_only_v", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			p := rnd.IntN(len(keys))
 
 			k, _, _, _, err := bt.Get(keys[p], getter)
@@ -230,7 +242,7 @@ func Benchmark_BTree_SeekVsGetCompressedK(b *testing.B) {
 	getter := seg.NewReader(kv.MakeGetter(), compress)
 
 	b.Run("seek_only_k", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			p := rnd.IntN(len(keys))
 
 			cur, err := bt.Seek(getter, keys[p])
@@ -245,7 +257,7 @@ func Benchmark_BTree_SeekVsGetCompressedK(b *testing.B) {
 	})
 
 	b.Run("get_only_k", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			p := rnd.IntN(len(keys))
 
 			k, _, _, _, err := bt.Get(keys[p], getter)
@@ -272,7 +284,7 @@ func Benchmark_BTree_SeekVsGetCompressedKV(b *testing.B) {
 	getter := seg.NewReader(kv.MakeGetter(), compress)
 
 	b.Run("seek_only_kv", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			p := rnd.IntN(len(keys))
 
 			cur, err := bt.Seek(getter, keys[p])
@@ -287,7 +299,7 @@ func Benchmark_BTree_SeekVsGetCompressedKV(b *testing.B) {
 	})
 
 	b.Run("get_only_kv", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			p := rnd.IntN(len(keys))
 
 			k, _, _, _, err := bt.Get(keys[p], getter)
@@ -314,7 +326,7 @@ func Benchmark_BTree_SeekVsGetUncompressed(b *testing.B) {
 	getter := seg.NewReader(kv.MakeGetter(), compress)
 
 	b.Run("seek_only", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			p := rnd.IntN(len(keys))
 
 			cur, err := bt.Seek(getter, keys[p])
@@ -329,7 +341,7 @@ func Benchmark_BTree_SeekVsGetUncompressed(b *testing.B) {
 	})
 
 	b.Run("get_only", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			p := rnd.IntN(len(keys))
 
 			k, _, _, _, err := bt.Get(keys[p], getter)
@@ -356,7 +368,7 @@ func Benchmark_BTree_SeekThenNext(b *testing.B) {
 	getter := seg.NewReader(kv.MakeGetter(), compress)
 
 	b.Run("seek_then_next", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for i := 0; b.Loop(); i++ {
 			p := rnd.IntN(len(keys))
 
 			cur, err := bt.Seek(getter, keys[p])
@@ -447,7 +459,7 @@ func BenchmarkAggregator_BeginFilesRo_Latency(b *testing.B) {
 	_, agg := testDbAndAggregatorBench(b, aggStep)
 
 	b.Run("begin_files_ro", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			agg.BeginFilesRo()
 		}
 	})

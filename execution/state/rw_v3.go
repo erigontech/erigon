@@ -357,6 +357,7 @@ func (s *StateV3Buffered) WithDomains(domains *ExecutionContext) *StateV3Buffere
 type BufferedWriter struct {
 	rs           *StateV3Buffered
 	trace        bool
+	tracePrefix  string
 	writeSet     StateUpdates
 	accountPrevs map[string][]byte
 	accountDels  map[string]*accounts.Account
@@ -375,6 +376,14 @@ func NewBufferedWriter(rs *StateV3Buffered, accumulator *shards.Accumulator) *Bu
 	}
 }
 
+func (w *BufferedWriter) SetTrace(trace bool, tracePrefix string) {
+	if tplen := len(tracePrefix); tplen > 0 && tracePrefix[tplen-1] != ' ' {
+		tracePrefix += " "
+	}
+	w.trace, w.tracePrefix = trace, tracePrefix
+}
+func (w *BufferedWriter) Trace() bool         { return w.trace }
+func (w *BufferedWriter) TracePrefix() string { return w.tracePrefix }
 func (w *BufferedWriter) SetTxNum(ctx context.Context, txNum uint64) {
 	w.txNum = txNum
 	w.rs.domains.SetTxNum(txNum)
@@ -537,6 +546,7 @@ type Writer struct {
 	ec          *ExecutionContext
 	tx          kv.TemporalTx
 	trace       bool
+	tracePrefix string
 	accumulator *shards.Accumulator
 	txNum       uint64
 }
@@ -551,6 +561,15 @@ func NewWriter(ec *ExecutionContext, tx kv.TemporalTx, accumulator *shards.Accum
 	}
 }
 
+func (w *Writer) SetTrace(trace bool, tracePrefix string) {
+	if tplen := len(tracePrefix); tplen > 0 && tracePrefix[tplen-1] != ' ' {
+		tracePrefix += " "
+	}
+	w.trace, w.tracePrefix = trace, tracePrefix
+}
+func (w *Writer) Trace() bool         { return w.trace }
+func (w *Writer) TracePrefix() string { return w.tracePrefix }
+
 func (w *Writer) SetTxNum(v uint64)      { w.txNum = v }
 func (w *Writer) SetTx(tx kv.TemporalTx) { w.tx = tx }
 
@@ -559,16 +578,18 @@ func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account,
 }
 
 func (w *Writer) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
+	ctx := context.Background()
 	if w.trace {
-		fmt.Printf("Writer: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
+		ctx = dbg.WithTrace(dbg.WithTracePrefix(ctx, w.tracePrefix), true)
+		fmt.Printf("%sWriter: acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", w.tracePrefix, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
 	addressValue := address.Value()
 	if original.Incarnation > account.Incarnation {
 		//del, before create: to clanup code/storage
-		if err := w.ec.DelCode(context.Background(), address, w.tx, w.txNum); err != nil {
+		if err := w.ec.DelCode(ctx, address, w.tx, w.txNum); err != nil {
 			return err
 		}
-		if err := w.ec.DelStorage(context.Background(), address, accounts.NilKey, w.tx, w.txNum); err != nil {
+		if err := w.ec.DelStorage(ctx, address, accounts.NilKey, w.tx, w.txNum); err != nil {
 			return err
 		}
 	}
@@ -577,18 +598,20 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 		w.accumulator.ChangeAccount(addressValue, account.Incarnation, value)
 	}
 
-	if err := w.ec.PutAccount(context.Background(), address, account, w.tx, w.txNum); err != nil {
+	if err := w.ec.PutAccount(ctx, address, account, w.tx, w.txNum); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (w *Writer) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
+	ctx := context.Background()
 	if w.trace {
-		fmt.Printf("code: %x, %x, valLen: %d\n", address, codeHash, len(code))
+		ctx = dbg.WithTrace(dbg.WithTracePrefix(ctx, w.tracePrefix), true)
+		fmt.Printf("%scode: %x, %x, valLen: %d\n", w.tracePrefix, address, codeHash, len(code))
 	}
 	addressValue := address.Value()
-	if err := w.ec.PutCode(context.Background(), address, codeHash, code, w.tx, w.txNum); err != nil {
+	if err := w.ec.PutCode(ctx, address, codeHash, code, w.tx, w.txNum); err != nil {
 		return err
 	}
 	if w.accumulator != nil {
@@ -598,10 +621,12 @@ func (w *Writer) UpdateAccountCode(address accounts.Address, incarnation uint64,
 }
 
 func (w *Writer) DeleteAccount(address accounts.Address, original *accounts.Account) error {
+	ctx := context.Background()
 	if w.trace {
-		fmt.Printf("del acc: %x\n", address)
+		ctx = dbg.WithTrace(dbg.WithTracePrefix(ctx, w.tracePrefix), true)
+		fmt.Printf("%sdel acc: %x\n", w.tracePrefix, address)
 	}
-	if err := w.ec.DelAccount(context.Background(), address, w.tx, w.txNum); err != nil {
+	if err := w.ec.DelAccount(ctx, address, w.tx, w.txNum); err != nil {
 		return err
 	}
 	// if w.accumulator != nil { TODO: investigate later. basically this will always panic. keeping this out should be fine anyway.
@@ -620,34 +645,38 @@ func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint6
 	if key.IsNil() {
 		return errors.New("unexpected nil storage key")
 	}
+	ctx := context.Background()
 	if w.trace {
-		fmt.Printf("storage: %x,%x,%x\n", address, key, &value)
+		ctx = dbg.WithTrace(dbg.WithTracePrefix(ctx, w.tracePrefix), true)
+		fmt.Printf("%sstorage: %x,%x,%x\n", w.tracePrefix, address, key, &value)
 	}
-	var prev []ValueWithStep[uint256.Int]
+	var prev []ValueWithTxNum[uint256.Int]
 	if original.ByteLen() < 0 {
-		prev = []ValueWithStep[uint256.Int]{{Value: original}}
+		prev = []ValueWithTxNum[uint256.Int]{{Value: original}}
 	}
 	if value.ByteLen() == 0 {
-		return w.ec.DelStorage(context.Background(), address, key, w.tx, w.txNum, prev...)
+		return w.ec.DelStorage(ctx, address, key, w.tx, w.txNum, prev...)
 	}
 	if w.accumulator != nil {
 		addressValue := address.Value()
 		keyValue := key.Value()
 		w.accumulator.ChangeStorage(addressValue, incarnation, keyValue, value.Bytes())
 	}
-	return w.ec.PutStorage(context.Background(), address, key, value, w.tx, w.txNum, prev...)
+	return w.ec.PutStorage(ctx, address, key, value, w.tx, w.txNum, prev...)
 }
 
 var fastCreate = dbg.EnvBool("FAST_CREATE", false)
 
 func (w *Writer) CreateContract(address accounts.Address) error {
+	ctx := context.Background()
 	if w.trace {
-		fmt.Printf("create contract: %x\n", address)
+		ctx = dbg.WithTrace(dbg.WithTracePrefix(ctx, w.tracePrefix), true)
+		fmt.Printf("%screate contract: %x\n", w.tracePrefix, address)
 	}
 	if fastCreate {
 		return nil
 	}
-	if err := w.ec.DelStorage(context.Background(), address, accounts.NilKey, w.tx, w.txNum); err != nil {
+	if err := w.ec.DelStorage(ctx, address, accounts.NilKey, w.tx, w.txNum); err != nil {
 		return err
 	}
 	return nil
@@ -694,8 +723,13 @@ func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
 		hasStorage, err := r.ec.HasStorage(context.Background(), address, r.tx)
 		return hasStorage, err
 	}
-	av := address.Value()
-	hasStorage, err := r.tx.HasPrefix(kv.StorageDomain, av[:])
+	value := address.Value()
+	// this is an optimization, but also checks the account is checked in the domain
+	// for being deleted on unwind before we try to access the storage
+	if enc, _, err := r.tx.GetLatest(kv.AccountsDomain, value[:]); len(enc) == 0 {
+		return false, err
+	}
+	hasStorage, err := r.tx.HasPrefix(kv.StorageDomain, value[:])
 	return hasStorage, err
 }
 
@@ -708,19 +742,26 @@ func (r *ReaderV3) readAccountData(address accounts.Address) (*accounts.Account,
 	var acc *accounts.Account
 	var ok bool
 	var err error
-	var value common.Address
+	var addressValue common.Address
 
 	if r.ec != nil {
-		acc, _, ok, err = r.ec.GetAccount(context.Background(), address, r.tx)
+		ctx := context.Background()
+		if r.trace {
+			ctx = dbg.WithTrace(dbg.WithTracePrefix(ctx, r.tracePrefix), true)
+		}
+
+		acc, _, ok, err = r.ec.GetAccount(ctx, address, r.tx)
 		if err != nil {
 			return nil, err
 		}
-	} else {
-
-		if !address.IsNil() {
-			value = address.Value()
+		if r.trace && !address.IsNil() {
+			addressValue = address.Value()
 		}
-		enc, _, err := r.tx.GetLatest(kv.AccountsDomain, value[:])
+	} else {
+		if !address.IsNil() {
+			addressValue = address.Value()
+		}
+		enc, _, err := r.tx.GetLatest(kv.AccountsDomain, addressValue[:])
 		if err != nil {
 			return nil, err
 		}
@@ -736,13 +777,13 @@ func (r *ReaderV3) readAccountData(address accounts.Address) (*accounts.Account,
 
 	if !ok {
 		if r.trace {
-			fmt.Printf("%sReadAccountData [%x] => [empty], txNum: %d\n", r.tracePrefix, r.txNum)
+			fmt.Printf("%sReadAccountData [%x] => [empty], txNum: %d\n", r.tracePrefix, addressValue, r.txNum)
 		}
 		return nil, nil
 	}
 
 	if r.trace {
-		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", r.tracePrefix, value, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
+		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", r.tracePrefix, addressValue, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
 	}
 	return acc, nil
 }
@@ -763,9 +804,17 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 	var keyValue common.Hash
 
 	if r.ec != nil {
-		res, _, ok, err = r.ec.GetStorage(context.Background(), address, key, r.tx)
+		ctx := context.Background()
+		if r.trace {
+			ctx = dbg.WithTrace(dbg.WithTracePrefix(ctx, r.tracePrefix), true)
+		}
+		res, _, ok, err = r.ec.GetStorage(ctx, address, key, r.tx)
 		if err != nil {
 			return uint256.Int{}, false, err
+		}
+		if r.trace {
+			addressValue = address.Value()
+			keyValue = key.Value()
 		}
 	} else {
 		var composite [20 + 32]byte
@@ -801,9 +850,16 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	var err error
 	var addressValue common.Address
 	if r.ec != nil {
-		_, code, _, _, err = r.ec.GetCode(context.Background(), address, r.tx)
+		ctx := context.Background()
+		if r.trace {
+			ctx = dbg.WithTrace(dbg.WithTracePrefix(ctx, r.tracePrefix), true)
+		}
+		_, code, _, _, err = r.ec.GetCode(ctx, address, r.tx)
 		if err != nil {
 			return nil, err
+		}
+		if r.trace && !address.IsNil() {
+			addressValue = address.Value()
 		}
 	} else {
 		if !address.IsNil() {
@@ -824,6 +880,11 @@ func (r *ReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	var err error
 	var addressValue common.Address
 	if r.ec != nil {
+		ctx := context.Background()
+		if r.trace {
+			addressValue = address.Value()
+			ctx = dbg.WithTrace(dbg.WithTracePrefix(ctx, r.tracePrefix), true)
+		}
 		_, code, _, _, err = r.ec.GetCode(context.Background(), address, r.tx)
 	} else {
 		if !address.IsNil() {

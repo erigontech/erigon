@@ -19,6 +19,7 @@ package backtester
 import (
 	"container/heap"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"os"
@@ -90,7 +91,7 @@ func (bt Backtester) RunTMinusN(ctx context.Context, n uint64) error {
 		return err
 	}
 	defer tx.Rollback()
-	tnr := bt.blockReader.TxnumReader(ctx)
+	tnr := bt.blockReader.TxnumReader()
 	toBlockNum, _, err := tnr.Last(tx)
 	if err != nil {
 		return err
@@ -119,7 +120,7 @@ func (bt Backtester) run(ctx context.Context, tx kv.TemporalTx, fromBlock uint64
 	if fromBlock > toBlock || fromBlock == 0 {
 		return fmt.Errorf("invalid block range for backtest: fromBlock=%d, toBlock=%d", fromBlock, toBlock)
 	}
-	tnr := bt.blockReader.TxnumReader(ctx)
+	tnr := bt.blockReader.TxnumReader()
 	if toBlock == math.MaxUint64 {
 		var err error
 		toBlock, _, err = tnr.Last(tx)
@@ -127,7 +128,7 @@ func (bt Backtester) run(ctx context.Context, tx kv.TemporalTx, fromBlock uint64
 			return err
 		}
 	}
-	err := checkDataAvailable(tx, fromBlock, toBlock, tnr)
+	err := checkDataAvailable(ctx, tx, fromBlock, toBlock, tnr)
 	if err != nil {
 		return err
 	}
@@ -165,11 +166,11 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	if err != nil {
 		return err
 	}
-	fromTxNum, err := tnr.Min(tx, block)
+	fromTxNum, err := tnr.Min(ctx, tx, block)
 	if err != nil {
 		return err
 	}
-	maxTxNum, err := tnr.Max(tx, block)
+	maxTxNum, err := tnr.Max(ctx, tx, block)
 	if err != nil {
 		return err
 	}
@@ -183,6 +184,12 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 		return err
 	}
 	defer sd.Close()
+	if bt.paraTrie {
+		sd.SetParaTrieDB(bt.db)
+	}
+	//
+	// TODO add flag for warmup too
+	//
 	sd.GetCommitmentCtx().SetStateReader(newBacktestStateReader(tx, fromTxNum, toTxNum))
 	sd.GetCommitmentCtx().SetTrace(bt.logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentCtx().EnableCsvMetrics(deriveBlockMetricsFilePrefix(blockOutputDir))
@@ -285,6 +292,8 @@ func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputD
 	bt.logger.Info("processing results", "fromBlock", fromBlock, "toBlock", toBlock, "runOutputDir", runOutputDir)
 	var chartsPageFilePaths []string
 	var topNSlowest slowestBatchesHeap
+	var branchJumpdestCounts [128][16]uint64
+	var branchKeyLenCounts [128]uint64
 	pageMetrics := make([]MetricValues, 0, bt.metricsPageSize)
 	for pageBlockFrom := fromBlock; pageBlockFrom <= toBlock; pageBlockFrom += bt.metricsPageSize {
 		pageBlockTo := min(pageBlockFrom+bt.metricsPageSize-1, toBlock)
@@ -309,6 +318,19 @@ func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputD
 				heap.Pop(&topNSlowest)
 				heap.Push(&topNSlowest, mv)
 			}
+			for branchKey, branchStats := range mVals[0].Branches {
+				nibbles, err := hex.DecodeString(branchKey)
+				if err != nil {
+					return "", err
+				}
+				if commitment.HasTerm(nibbles) {
+					nibbles = nibbles[:len(nibbles)-1]
+				}
+				lastNibble := nibbles[len(nibbles)-1]
+				depth := len(nibbles) - 1
+				branchJumpdestCounts[depth][lastNibble] += branchStats.LoadBranch
+				branchKeyLenCounts[depth]++
+			}
 			pageMetrics = append(pageMetrics, mv)
 		}
 		chartsPageFilePath, err := renderDetailedPage(pageMetrics, runOutputDir)
@@ -317,10 +339,15 @@ func (bt Backtester) processResults(fromBlock uint64, toBlock uint64, runOutputD
 		}
 		chartsPageFilePaths = append(chartsPageFilePaths, chartsPageFilePath)
 	}
-	return renderOverviewPage(&topNSlowest, chartsPageFilePaths, runOutputDir)
+	agg := crossPageAggMetrics{
+		top:                  &topNSlowest,
+		branchJumpdestCounts: &branchJumpdestCounts,
+		branchKeyLenCounts:   &branchKeyLenCounts,
+	}
+	return renderOverviewPage(agg, chartsPageFilePaths, runOutputDir)
 }
 
-func checkDataAvailable(tx kv.TemporalTx, fromBlock uint64, toBlock uint64, tnr rawdbv3.TxNumsReader) error {
+func checkDataAvailable(ctx context.Context, tx kv.TemporalTx, fromBlock uint64, toBlock uint64, tnr rawdbv3.TxNumsReader) error {
 	firstBlockNum, _, err := tnr.First(tx)
 	if err != nil {
 		return err
@@ -335,7 +362,7 @@ func checkDataAvailable(tx kv.TemporalTx, fromBlock uint64, toBlock uint64, tnr 
 	if toBlock > lastBlockNum {
 		return fmt.Errorf("block not available for given end: %d > %d", toBlock, lastBlockNum)
 	}
-	fromTxNum, err := tnr.Min(tx, fromBlock)
+	fromTxNum, err := tnr.Min(ctx, tx, fromBlock)
 	if err != nil {
 		return err
 	}
@@ -343,7 +370,7 @@ func checkDataAvailable(tx kv.TemporalTx, fromBlock uint64, toBlock uint64, tnr 
 	if fromTxNum < historyAvailableFromTxNum {
 		return fmt.Errorf("history not available for given start: %d < %d", fromTxNum, historyAvailableFromTxNum)
 	}
-	toTxNum, err := tnr.Max(tx, toBlock)
+	toTxNum, err := tnr.Max(ctx, tx, toBlock)
 	if err != nil {
 		return err
 	}

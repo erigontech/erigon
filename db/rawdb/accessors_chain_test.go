@@ -746,7 +746,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	br := m.BlockReader
-	txNumReader := br.TxnumReader(context.Background())
+	txNumReader := br.TxnumReader()
 	require := require.New(t)
 	ctx := m.Ctx
 
@@ -807,7 +807,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 		sd, err := execstate.NewExecutionContext(context.Background(), tx, log.New())
 		require.NoError(err)
 		defer sd.Close()
-		base, err := txNumReader.Min(tx, 1)
+		base, err := txNumReader.Min(context.Background(), tx, 1)
 		require.NoError(err)
 		// Insert the receipt slice into the database and check presence
 		txNum = base

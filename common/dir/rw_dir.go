@@ -17,6 +17,7 @@
 package dir
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -62,11 +63,12 @@ func trackRemovedFiles() {
 	}
 }
 
+// user rwx, group rwx, other rx
+// x is required to navigate through directories. umask 0o022 is the default and will mask final
+// permissions to 0o755 for newly created files (and directories).
+const DirPerm = 0o775
+
 func MustExist(path ...string) {
-	// user rwx, group rwx, other rx
-	// x is required to navigate through directories. umask 0o022 is the default and will mask final
-	// permissions to 0o755 for newly created files (and directories).
-	const perm = 0o775
 	for _, p := range path {
 		exist, err := Exist(p)
 		if err != nil {
@@ -75,7 +77,7 @@ func MustExist(path ...string) {
 		if exist {
 			continue
 		}
-		if err := os.MkdirAll(p, perm); err != nil {
+		if err := os.MkdirAll(p, DirPerm); err != nil {
 			panic(err)
 		}
 	}
@@ -157,6 +159,10 @@ func DeleteFiles(dirs ...string) error {
 	g := errgroup.Group{}
 	for _, dir := range dirs {
 		files, err := ListFiles(dir)
+		if errors.Is(err, os.ErrNotExist) {
+			log.Debug("directory does not exist, skipping deletion", "dir", dir)
+			continue
+		}
 		if err != nil {
 			return err
 		}

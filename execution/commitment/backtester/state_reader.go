@@ -29,12 +29,16 @@ var _ commitment.StateReader = (*backtestStateReader)(nil)
 type backtestStateReader struct {
 	commitmentReader commitment.StateReader
 	plainStateReader commitment.StateReader
+	commitmentAsOf   uint64
+	plainStateAsOf   uint64
 }
 
 func newBacktestStateReader(tx kv.TemporalTx, commitmentAsOf uint64, plainStateAsOf uint64) backtestStateReader {
 	return backtestStateReader{
 		commitmentReader: commitment.NewHistoryStateReader(tx, commitmentAsOf),
 		plainStateReader: commitment.NewHistoryStateReader(tx, plainStateAsOf),
+		commitmentAsOf:   commitmentAsOf,
+		plainStateAsOf:   plainStateAsOf,
 	}
 }
 
@@ -52,4 +56,8 @@ func (b backtestStateReader) Read(d kv.Domain, plainKey []byte) ([]byte, kv.Step
 		return b.commitmentReader.Read(d, plainKey)
 	}
 	return b.plainStateReader.Read(d, plainKey)
+}
+
+func (b backtestStateReader) Clone(tx kv.TemporalTx, _ kv.TemporalGetter) commitment.StateReader {
+	return newBacktestStateReader(tx, b.commitmentAsOf, b.plainStateAsOf)
 }

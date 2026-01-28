@@ -156,12 +156,12 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br se
 	if txNum < startTxNum {
 		return info, fmt.Errorf("%w: commitment root txNum is lt startTxNum: %d < %d", ErrIntegrity, txNum, startTxNum)
 	}
-	txNumReader := br.TxnumReader(ctx)
-	blockMinTxNum, err := txNumReader.Min(tx, blockNum)
+	txNumReader := br.TxnumReader()
+	blockMinTxNum, err := txNumReader.Min(ctx, tx, blockNum)
 	if err != nil {
 		return info, err
 	}
-	blockMaxTxNum, err := txNumReader.Max(tx, blockNum)
+	blockMaxTxNum, err := txNumReader.Max(ctx, tx, blockNum)
 	if err != nil {
 		return info, err
 	}
@@ -203,8 +203,8 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 		return nil, err
 	}
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
-	sd.GetCommitmentCtx().SetLimitedHistoryStateReader(tx, maxTxNum) // to use tx.Debug().GetLatestFromFiles with maxTxNum
-	err = sd.SeekCommitment(ctx, tx)                                 // seek commitment again to use the new state reader instead
+	sd.GetCommitmentCtx().SetLimitedHistoryStateReader(tx, sd.AsGetter(tx), maxTxNum) // to use tx.Debug().GetLatestFromFiles with maxTxNum
+	err = sd.SeekCommitment(ctx, tx)                                                  // seek commitment again to use the new state reader instead
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +244,7 @@ func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *
 		return err
 	}
 	logger.Info("recomputing commitment root after", "touches", touches, "file", filepath.Base(f.Fullpath()))
-	recomputedBytes, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, sd.BlockNum(), sd.TxNum(), "integrity", nil)
+	recomputedBytes, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, sd.BlockNum(), sd.TxNum(), "integrity", nil /* commitProgress */)
 	if err != nil {
 		return err
 	}
@@ -642,7 +642,7 @@ func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.F
 		"bucketStart", bucketStart,
 		"bucketEnd", bucketEnd,
 	)
-	txNumReader := br.TxnumReader(ctx)
+	txNumReader := br.TxnumReader()
 	it, err := tx.HistoryRange(kv.CommitmentDomain, int(bucketStart), int(bucketEnd), order.Asc, -1)
 	if err != nil {
 		return 0, err
@@ -671,7 +671,7 @@ func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.F
 			if err != nil {
 				return 0, fmt.Errorf("issue extracting state root value in %s for [%d,%d) tx nums: %w", fileName, bucketStart, bucketEnd, err)
 			}
-			maxTxNum, err := txNumReader.Max(tx, blockNum)
+			maxTxNum, err := txNumReader.Max(ctx, tx, blockNum)
 			if err != nil {
 				return 0, err
 			}
@@ -732,12 +732,12 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if err != nil {
 		return err
 	}
-	txNumsReader := br.TxnumReader(ctx)
-	minTxNum, err := txNumsReader.Min(tx, blockNum)
+	txNumsReader := br.TxnumReader()
+	minTxNum, err := txNumsReader.Min(ctx, tx, blockNum)
 	if err != nil {
 		return err
 	}
-	maxTxNum, err := txNumsReader.Max(tx, blockNum)
+	maxTxNum, err := txNumsReader.Max(ctx, tx, blockNum)
 	if err != nil {
 		return err
 	}

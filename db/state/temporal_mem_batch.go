@@ -51,9 +51,10 @@ type TemporalMemBatch struct {
 	unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
 }
 
-func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics interface{}) *TemporalMemBatch {
+func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
-		aggTx: AggTx(tx),
+		aggTx:         AggTx(tx),
+		unwindToTxNum: math.MaxUint64,
 	}
 
 	sd.iiWriters = make([]*InvertedIndexBufferedWriter, len(sd.aggTx.iis))
@@ -126,7 +127,7 @@ func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, s
 	return nil, 0, false
 }
 
-func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, memIter iter.Seq2[string, kv.DataWithStep], roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
+func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, memIter iter.Seq2[string, []kv.DataWithTxNum], roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
 	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, memIter, it, roTx)
 }
 
@@ -233,7 +234,7 @@ func (sd *TemporalMemBatch) Close() {
 		}
 	}
 
-	sd.unwindToTxNum = 0
+	sd.unwindToTxNum = math.MaxUint64
 	sd.unwindChangeset = nil
 }
 
@@ -301,7 +302,7 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 					}
 				}
 			}
-			if sd.unwindToTxNum < other.unwindToTxNum {
+			if other.unwindToTxNum < sd.unwindToTxNum {
 				sd.unwindToTxNum = other.unwindToTxNum
 			}
 		}

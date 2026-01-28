@@ -1,4 +1,4 @@
-// Copyright 2025 The Erigon Authors
+// Copyright 2024 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,13 +14,19 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package chain
+package serviceinterface
 
-import "github.com/erigontech/erigon/common"
+import (
+	"context"
 
-// See https://hackmd.io/@filoozom/rycoQITlWl
-type CensoringConfig struct {
-	From          []common.Address `json:"senders"`
-	To            []common.Address `json:"to"`
-	Is7702Enabled bool             `json:"is7702PatchEnabled"`
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/libp2p/go-libp2p/core/peer"
+)
+
+// Note: BlobSidecarService and BlockService are tested in spectests
+
+type Service[T any] interface {
+	Names() []string
+	DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (T, error)
+	ProcessMessage(ctx context.Context, subnet *uint64, msg T) error
 }

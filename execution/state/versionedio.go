@@ -151,7 +151,7 @@ type VersionedRead struct {
 	Key     accounts.StorageKey
 	Source  ReadSource
 	Version Version
-	Val     interface{}
+	Val     any
 }
 
 func (vr VersionedRead) String() string {
@@ -163,7 +163,7 @@ type VersionedWrite struct {
 	Path    AccountPath
 	Key     accounts.StorageKey
 	Version Version
-	Val     interface{}
+	Val     any
 	Reason  tracing.BalanceChangeReason
 }
 

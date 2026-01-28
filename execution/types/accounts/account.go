@@ -86,14 +86,6 @@ func (a *Account) EncodingLengthForHashing() uint {
 	return uint(rlp.ListPrefixLen(structLength) + structLength)
 }
 
-func (a *Account) Encode(w io.Writer) error {
-	return fmt.Errorf("TODO")
-}
-
-func (a *Account) Decode(r io.Reader) error {
-	return fmt.Errorf("TODO")
-}
-
 func (a *Account) EncodeForStorage(buffer []byte) {
 	var fieldSet = 0 // start with first bit set to 0
 	var pos = 1
@@ -170,7 +162,7 @@ func decodeLengthForHashing(buffer []byte, pos int) (length int, structure bool,
 }
 
 var rlpEncodingBufPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		buf := make([]byte, 0, 128)
 		return &buf
 	},
@@ -610,10 +602,17 @@ func (a *Account) SetIncarnation(v uint64) {
 }
 
 func (a *Account) Equals(acc *Account) bool {
-	return a.Nonce == acc.Nonce &&
-		a.CodeHash == acc.CodeHash &&
-		a.Balance.Cmp(&acc.Balance) == 0 &&
-		a.Incarnation == acc.Incarnation
+	switch {
+	case a == nil:
+		return acc == nil
+	case acc == nil:
+		return false
+	default:
+		return a.Nonce == acc.Nonce &&
+			a.CodeHash == acc.CodeHash &&
+			a.Balance.Cmp(&acc.Balance) == 0 &&
+			a.Incarnation == acc.Incarnation
+	}
 }
 
 func ConvertV3toV2(v []byte) ([]byte, error) {
@@ -629,9 +628,9 @@ func ConvertV3toV2(v []byte) ([]byte, error) {
 // DeserialiseV3 - method to deserialize accounts in Erigon22 history
 func DeserialiseV3(a *Account, enc []byte) error {
 	a.Reset()
-	//if len(enc) == 0 {
-	//	return nil
-	//}
+	if len(enc) == 0 {
+		return nil
+	}
 	pos := 0
 	nonceBytes := int(enc[pos])
 	pos++
@@ -665,6 +664,9 @@ func DeserialiseV3(a *Account, enc []byte) error {
 }
 
 func SerialiseV3(a *Account) []byte {
+	if a == nil {
+		return nil
+	}
 	var l int
 	l++
 	if a.Nonce > 0 {

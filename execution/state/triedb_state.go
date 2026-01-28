@@ -791,12 +791,20 @@ func (tds *TrieDbState) ReadAccountIncarnation(address accounts.Address) (uint64
 }
 
 type TrieStateWriter struct {
-	tds *TrieDbState
+	tds         *TrieDbState
+	trace       bool
+	tracePrefix string
 }
 
 func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
 	return &TrieStateWriter{tds: tds}
 }
+
+func (w *TrieStateWriter) SetTrace(trace bool, tracePrefix string) {
+	w.trace, w.tracePrefix = trace, tracePrefix
+}
+func (w *TrieStateWriter) Trace() bool         { return w.trace }
+func (w *TrieStateWriter) TracePrefix() string { return w.tracePrefix }
 
 func (tsw *TrieStateWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	addressValue := address.Value()

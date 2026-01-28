@@ -1549,7 +1549,7 @@ func TestWrappedSixBlobTxnExceedsRlpLimit(t *testing.T) {
 	require.NoError(err)
 }
 
-func TestGetBlobsV1(t *testing.T) {
+func TestGetBlobs(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 5)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
@@ -1775,7 +1775,7 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 
 	// Create test transactions for benchmarking
 	var testTxns TxnSlots
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		var addr [20]byte
 		addr[0] = uint8(i%100 + 1) // Use one of our test accounts
 		txnSlot := &TxnSlot{
@@ -1792,7 +1792,7 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 
 	// Run the benchmark: process transactions one by one
 	// This measures the performance of adding and processing remote transactions
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		pool.AddRemoteTxns(ctx, TxnSlots{testTxns.Txns[i : i+1], testTxns.Senders[i : i+1], testTxns.IsLocal[i : i+1]})
 		err := pool.processRemoteTxns(ctx)
 		require.NoError(err)

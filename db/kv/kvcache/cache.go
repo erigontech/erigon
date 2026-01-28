@@ -141,6 +141,9 @@ type CoherentView struct {
 func (c *CoherentView) Get(k []byte) ([]byte, error) {
 	return c.cache.Get(k, c.tx, c.stateVersionID)
 }
+func (c *CoherentView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
+	return nil, false, nil
+}
 func (c *CoherentView) GetCode(k []byte) ([]byte, error) {
 	return c.cache.GetCode(k, c.tx, c.stateVersionID)
 }
@@ -172,6 +175,7 @@ type CoherentConfig struct {
 	MetricsLabel    string
 	NewBlockWait    time.Duration // how long wait
 	KeepViews       uint64        // keep in memory up to this amount of views, evict older
+	LocalCache      Cache
 }
 
 var DefaultCoherentConfig = CoherentConfig{

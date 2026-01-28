@@ -20,10 +20,7 @@ func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 		log.Info("[integrity] RCacheNoDups: done", "err", err)
 	}()
 
-	logEvery := time.NewTicker(10 * time.Second)
-	defer logEvery.Stop()
-
-	txNumsReader := blockReader.TxnumReader(ctx)
+	txNumsReader := blockReader.TxnumReader()
 
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -33,9 +30,9 @@ func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 
 	rcacheDomainProgress := tx.Debug().DomainProgress(kv.RCacheDomain)
 	fromBlock := uint64(1)
-	toBlock, _, _ := txNumsReader.FindBlockNum(tx, rcacheDomainProgress)
+	toBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, rcacheDomainProgress)
 
-	if err := ValidateDomainProgress(db, kv.RCacheDomain, txNumsReader); err != nil {
+	if err := ValidateDomainProgress(ctx, db, kv.RCacheDomain, txNumsReader); err != nil {
 		return err
 	}
 
@@ -46,9 +43,14 @@ func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, RCacheNoDupsRange)
 }
 
-func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.TemporalTx, blockReader services.FullBlockReader, failFast bool) (err error) {
-	txNumsReader := blockReader.TxnumReader(ctx)
-	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
+func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	txNumsReader := blockReader.TxnumReader()
+	fromTxNum, err := txNumsReader.Min(ctx, tx, fromBlock)
 	if err != nil {
 		return err
 	}
@@ -56,7 +58,7 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.Tem
 		toBlock-- // [fromBlock,toBlock)
 	}
 
-	toTxNum, err := txNumsReader.Max(tx, toBlock)
+	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
 	if err != nil {
 		return err
 	}
@@ -65,8 +67,8 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.Tem
 	expectedFirstLogIdx := uint32(0)
 	blockNum := fromBlock
 	var _min, _max uint64
-	_min, _ = txNumsReader.Min(tx, fromBlock)
-	_max, _ = txNumsReader.Max(tx, fromBlock)
+	_min = fromTxNum
+	_max, _ = txNumsReader.Max(ctx, tx, fromBlock)
 
 	it, err := rawdb.ReceiptCacheV2Stream(tx, fromTxNum, toTxNum)
 	if err != nil {
@@ -87,7 +89,7 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.Tem
 		for txNum > _max {
 			blockNum++
 			_min = _max + 1
-			_max, _ = txNumsReader.Max(tx, blockNum)
+			_max, _ = txNumsReader.Max(ctx, tx, blockNum)
 			expectedFirstLogIdx = 0
 			prevCumUsedGas = -1
 		}
@@ -126,7 +128,7 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, tx kv.Tem
 	return nil
 }
 
-type chunkFn func(ctx context.Context, fromBlock, toBlock uint64, tx kv.TemporalTx, blockReader services.FullBlockReader, failFast bool) error
+type chunkFn func(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) error
 
 func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool, fn chunkFn) (err error) {
 	blockRange := toBlock - fromBlock + 1
@@ -167,13 +169,7 @@ func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.Te
 		chunkEnd := end     // Capture loop variable
 
 		g.Go(func() error {
-			tx, err := db.BeginTemporalRo(ctx)
-			if err != nil {
-				return err
-			}
-			defer tx.Rollback()
-
-			chunkErr := fn(ctx, chunkStart, chunkEnd, tx, blockReader, failFast)
+			chunkErr := fn(ctx, chunkStart, chunkEnd, db, blockReader, failFast)
 			if chunkErr != nil {
 				return chunkErr
 			}

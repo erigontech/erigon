@@ -90,6 +90,7 @@ var (
 	TraceBlocks          = EnvUints("TRACE_BLOCKS", ",", nil)
 	TraceTxIndexes       = EnvInts("TRACE_TXINDEXES", ",", nil)
 	TraceUnwinds         = EnvBool("TRACE_UNWINDS", false)
+	TraceTrie            = EnvBool("TRACE_TRIE", false)
 	traceDomains         = EnvStrings("TRACE_DOMAINS", ",", nil)
 	StopAfterBlock       = EnvUint("STOP_AFTER_BLOCK", 0)
 	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
@@ -98,6 +99,8 @@ var (
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
+
+	RpcDropResponse = EnvBool("RPC_DROP_RESPONSE", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {

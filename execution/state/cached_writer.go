@@ -25,14 +25,22 @@ import (
 
 // CachedWriter is a wrapper for an instance of type StateWriter
 type CachedWriter struct {
-	w     StateWriter
-	cache *shards.StateCache
+	w           StateWriter
+	cache       *shards.StateCache
+	trace       bool
+	tracePrefix string
 }
 
 // NewCachedWriter wraps a given state writer into a cached writer
 func NewCachedWriter(w StateWriter, cache *shards.StateCache) *CachedWriter {
 	return &CachedWriter{w: w, cache: cache}
 }
+
+func (w *CachedWriter) SetTrace(trace bool, tracePrefix string) {
+	w.trace, w.tracePrefix = trace, tracePrefix
+}
+func (w *CachedWriter) Trace() bool         { return w.trace }
+func (w *CachedWriter) TracePrefix() string { return w.tracePrefix }
 
 func (cw *CachedWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	if err := cw.w.UpdateAccountData(address, original, account); err != nil {

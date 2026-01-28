@@ -420,7 +420,12 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 			return shortened, nil
 		}
 
-		return commitment.BranchData(valBuf).ReplacePlainKeys(dt.comBuf[:0], replacer)
+		temp, err := commitment.BranchData(valBuf).ReplacePlainKeys(dt.comBuf[:0], replacer)
+		if err != nil {
+			return nil, err
+		}
+		dt.comBuf = append(dt.comBuf[:0], temp...) // cover branch data case
+		return dt.comBuf, nil
 	}
 
 	return vt, nil

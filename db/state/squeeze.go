@@ -393,7 +393,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, ec execContext,
 		keysPerStep := totalKeys / stepsInShard // how many keys in just one step?
 
 		//shardStepsSize := kv.Step(2)
-		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), 128))
+		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), 16))
 		if uint64(shardStepsSize) != stepsInShard { // processing shard in several smaller steps
 			shardTo = shardFrom + shardStepsSize // if shard is quite big, we will process it in several steps
 		}
@@ -422,8 +422,8 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, ec execContext,
 			return nil, err
 		}
 		keyIter := stream.UnionKV(streamAcc, streamSto, -1)
-		//blockNum, ok, err := txNumsReader.FindBlockNum(roTx, rangeToTxNum-1)
-		blockNum, ok, err := txNumsReader.FindBlockNum(roTx, rangeToTxNum-1)
+		//blockNum, ok, err := txNumsReader.FindBlockNum(ctx, roTx, rangeToTxNum-1)
+		blockNum, ok, err := txNumsReader.FindBlockNum(ctx, roTx, rangeToTxNum-1)
 		if err != nil {
 			return nil, fmt.Errorf("CommitmentRebuild: FindBlockNum(%d) %w", rangeToTxNum, err)
 		}
@@ -454,7 +454,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, ec execContext,
 
 			ec.SetBlockNum(blockNum)
 			ec.SetTxNum(lastTxnumInShard - 1)
-			ec.GetCommitmentCtx().SetLimitedHistoryStateReader(roTx, lastTxnumInShard) // this helps to read state from correct file during commitment
+			ec.GetCommitmentCtx().SetLimitedHistoryStateReader(roTx, ec.AsGetter(roTx), lastTxnumInShard) // this helps to read state from correct file during commitment
 
 			rebuiltCommit, err = rebuildCommitmentShard(ctx, ec, roTx, nextKey, &rebuiltCommitment{
 				StepFrom: shardFrom,
@@ -525,6 +525,7 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, ec execContext,
 	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 
 	logger.Info(fmt.Sprintf("[squeeze] latest root %x", latestRoot))
+	a.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
 
 	actx := a.BeginFilesRo()
 	defer actx.Close()
@@ -535,8 +536,8 @@ func (a *Aggregator) RebuildCommitmentFiles(ctx context.Context, ec execContext,
 		return nil, err
 	}
 	actx.Close()
-	if err = a.OpenFolder(); err != nil {
-		logger.Warn("[squeeze] failed to open folder after sqeeze", "err", err)
+	if err = a.ReloadFiles(); err != nil {
+		logger.Warn("[squeeze] failed to reload folder after sqeeze", "err", err)
 	}
 
 	if err = a.BuildMissedAccessors(ctx, 4); err != nil {
@@ -570,7 +571,7 @@ func rebuildCommitmentShard(ctx context.Context, ec execContext, tx kv.TemporalT
 	}
 
 	collectionSpent := time.Since(sf)
-	rh, err := ec.GetCommitmentCtx().ComputeCommitment(ctx, ec.AsGetter(tx), ec.AsPutDel(tx), true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
+	rh, err := ec.GetCommitmentCtx().ComputeCommitment(ctx, ec, tx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
 	if err != nil {
 		return nil, err
 	}

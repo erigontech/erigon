@@ -62,7 +62,7 @@ func (a *ApiHandler) GetEthV1NodeHealth(w http.ResponseWriter, r *http.Request) 
 
 func (a *ApiHandler) GetEthV1NodeVersion(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	// Get OS and Arch
-	return newBeaconResponse(map[string]interface{}{
+	return newBeaconResponse(map[string]any{
 		"version": fmt.Sprintf("Caplin/%s %s/%s", a.version, runtime.GOOS, runtime.GOARCH),
 	}), nil
 }
@@ -74,7 +74,7 @@ func (a *ApiHandler) GetEthV1NodePeerCount(w http.ResponseWriter, r *http.Reques
 	}
 
 	// all fields should be converted to string
-	return newBeaconResponse(map[string]interface{}{
+	return newBeaconResponse(map[string]any{
 		"connected":     strconv.FormatUint(ret.Connected, 10),
 		"disconnected":  strconv.FormatUint(ret.Disconnected, 10),
 		"connecting":    strconv.FormatUint(ret.Connecting, 10),
@@ -154,12 +154,12 @@ func (a *ApiHandler) GetEthV1NodeIdentity(w http.ResponseWriter, r *http.Request
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 
-	return newBeaconResponse(map[string]interface{}{
+	return newBeaconResponse(map[string]any{
 		"peer_id":             id.Pid,
 		"enr":                 id.Enr,
 		"p2p_addresses":       id.P2PAddresses,
 		"discovery_addresses": id.DiscoveryAddresses,
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"seq":      strconv.FormatUint(id.Metadata.Seq, 10),
 			"attnets":  id.Metadata.Attnets,
 			"syncnets": id.Metadata.Syncnets,
@@ -171,7 +171,7 @@ func (a *ApiHandler) GetEthV1NodeSyncing(w http.ResponseWriter, r *http.Request)
 	currentSlot := a.ethClock.GetCurrentSlot()
 
 	return newBeaconResponse(
-		map[string]interface{}{
+		map[string]any{
 			"head_slot":     strconv.FormatUint(a.syncedData.HeadSlot(), 10),
 			"sync_distance": strconv.FormatUint(currentSlot-a.syncedData.HeadSlot(), 10),
 			"is_syncing":    a.syncedData.Syncing(),

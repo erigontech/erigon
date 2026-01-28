@@ -161,7 +161,11 @@ func GetChainConfig(forkString string) (baseConfig *chain.Config, eips []int, er
 
 // Subtests returns all valid subtests of the test.
 func (t *StateTest) Subtests() []StateSubtest {
-	var sub []StateSubtest
+	totalCount := 0
+	for _, pss := range t.Json.Post {
+		totalCount += len(pss)
+	}
+	sub := make([]StateSubtest, 0, totalCount)
 	for fork, pss := range t.Json.Post {
 		for i := range pss {
 			sub = append(sub, StateSubtest{fork, i})
@@ -359,7 +363,7 @@ func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
 	}
 }
 
-func rlpHash(x interface{}) (h common.Hash) {
+func rlpHash(x any) (h common.Hash) {
 	hw := sha3.NewLegacyKeccak256()
 	if err := rlp.Encode(hw, x); err != nil {
 		panic(err)

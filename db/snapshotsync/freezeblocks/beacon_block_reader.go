@@ -34,11 +34,11 @@ import (
 )
 
 var buffersPool = sync.Pool{
-	New: func() interface{} { return &bytes.Buffer{} },
+	New: func() any { return &bytes.Buffer{} },
 }
 
 var decompressorPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		r, err := zstd.NewReader(nil)
 		if err != nil {
 			panic(err)

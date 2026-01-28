@@ -239,9 +239,9 @@ func (s *GrpcServer) GetBlobs(ctx context.Context, in *txpoolproto.GetBlobsReque
 	blobBundles := s.txPool.GetBlobs(hashes)
 	reply := make([]*txpoolproto.BlobAndProof, len(blobBundles))
 	for i, bb := range blobBundles {
-		var proofs [][]byte
-		for _, p := range bb.Proofs {
-			proofs = append(proofs, p[:])
+		proofs := make([][]byte, len(bb.Proofs))
+		for j, p := range bb.Proofs {
+			proofs[j] = p[:]
 		}
 		reply[i] = &txpoolproto.BlobAndProof{
 			Blob:   bb.Blob,
@@ -378,8 +378,8 @@ func StartGrpc(txPoolServer txpoolproto.TxpoolServer, miningServer txpoolproto.M
 	}
 
 	var (
-		streamInterceptors []grpc.StreamServerInterceptor
-		unaryInterceptors  []grpc.UnaryServerInterceptor
+		streamInterceptors = make([]grpc.StreamServerInterceptor, 0, 2)
+		unaryInterceptors  = make([]grpc.UnaryServerInterceptor, 0, 2)
 	)
 	streamInterceptors = append(streamInterceptors, recovery.StreamServerInterceptor())
 	unaryInterceptors = append(unaryInterceptors, recovery.UnaryServerInterceptor())

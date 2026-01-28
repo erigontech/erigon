@@ -458,7 +458,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			val, _ := g.Next(nil)
 			heap.Push(&cp, &CursorItem{
 				t:          FILE_CURSOR,
-				idx:        g,
+				kvReader:   g,
 				key:        key,
 				val:        val,
 				startTxNum: item.startTxNum,
@@ -484,9 +484,9 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			i++
 			ci1 := heap.Pop(&cp).(*CursorItem)
-			if ci1.idx.HasNext() {
-				ci1.key, _ = ci1.idx.Next(ci1.key[:0])
-				ci1.val, _ = ci1.idx.Next(ci1.val[:0])
+			if ci1.kvReader.HasNext() {
+				ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
+				ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])
 				heap.Push(&cp, ci1)
 			}
 		}
@@ -503,6 +503,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 					if err != nil {
 						return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
 					}
+					valBuf = append(valBuf[:0], valBuf...)
 				}
 			}
 			if _, err = kvWriter.Write(keyBuf); err != nil {
@@ -524,6 +525,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 				if err != nil {
 					return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
 				}
+				valBuf = append(valBuf[:0], valBuf...)
 			}
 		}
 		if _, err = kvWriter.Write(keyBuf); err != nil {
@@ -636,7 +638,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			//fmt.Printf("heap push %s [%d] %x\n", item.decompressor.FilePath(), item.endTxNum, key)
 			heap.Push(&cp, &CursorItem{
 				t:          FILE_CURSOR,
-				idx:        g,
+				kvReader:   g,
 				key:        key,
 				val:        val,
 				startTxNum: item.startTxNum,
@@ -683,9 +685,9 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 				mergedOnce = true
 			}
 			// fmt.Printf("multi-way %s [%d] %x\n", ii.KeysTable, ci1.endTxNum, ci1.key)
-			if ci1.idx.HasNext() {
-				ci1.key, _ = ci1.idx.Next(ci1.key[:0])
-				ci1.val, _ = ci1.idx.Next(ci1.val[:0])
+			if ci1.kvReader.HasNext() {
+				ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
+				ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])
 				// fmt.Printf("heap next push %s [%d] %x\n", ii.KeysTable, ci1.endTxNum, ci1.key)
 				heap.Push(&cp, ci1)
 			}
@@ -817,7 +819,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				val, _ := g.Next(nil)
 				heap.Push(&cp, &CursorItem{
 					t:          FILE_CURSOR,
-					idx:        g,
+					kvReader:   g,
 					hist:       g2,
 					key:        key,
 					val:        val,
@@ -854,9 +856,9 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 
 				// fmt.Printf("fput '%x'->%x\n", lastKey, ci1.val)
 				keyCount += int(count)
-				if ci1.idx.HasNext() {
-					ci1.key, _ = ci1.idx.Next(ci1.key[:0])
-					ci1.val, _ = ci1.idx.Next(ci1.val[:0])
+				if ci1.kvReader.HasNext() {
+					ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
+					ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])
 					heap.Push(&cp, ci1)
 				}
 			}

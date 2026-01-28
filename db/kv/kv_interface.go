@@ -19,7 +19,6 @@ package kv
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"iter"
 	"sync"
@@ -27,7 +26,6 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/mdbx-go/mdbx"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
@@ -463,7 +461,7 @@ type TemporalDebugTx interface {
 	Dirs() datadir.Dirs
 	AllForkableIds() []ForkableId
 
-	NewMemBatch(ioMetrics interface{}) TemporalMemBatch
+	NewMemBatch(ioMetrics any) TemporalMemBatch
 }
 
 type TemporalDebugDB interface {
@@ -479,11 +477,10 @@ type TemporalDebugDB interface {
 	MergeLoop(ctx context.Context) error
 }
 
-type DataWithStep struct {
-	Data []byte
-	Step Step
+type DataWithTxNum struct {
+	Data  []byte
+	TxNum uint64
 }
-
 type TemporalMemBatch interface {
 	DomainPut(domain Domain, k []byte, v []byte, txNum uint64, preval []byte, prevStep Step) error
 	DomainDel(domain Domain, k []byte, txNum uint64, preval []byte, prevStep Step) error
@@ -491,7 +488,7 @@ type TemporalMemBatch interface {
 	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
 	Merge(other TemporalMemBatch) error
 	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
-	IteratePrefix(domain Domain, prefix []byte, mem iter.Seq2[string, DataWithStep], roTx Tx, it func(k []byte, v []byte, step Step) (cont bool, err error)) error
+	IteratePrefix(domain Domain, prefix []byte, mem iter.Seq2[string, []DataWithTxNum], roTx Tx, it func(k []byte, v []byte, step Step) (cont bool, err error)) error
 	Flush(ctx context.Context, tx RwTx) error
 	Close()
 	PutForkable(id ForkableId, num Num, v []byte) error
@@ -657,26 +654,6 @@ func InitSummaries(dbLabel Label) {
 			DbCommitTotal:       metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "total"}),
 		})
 	}
-}
-
-func RecordSummaries(dbLabel Label, latency mdbx.CommitLatency) error {
-	_summaries, ok := MDBXSummaries.Load(string(dbLabel))
-	if !ok {
-		return fmt.Errorf("MDBX summaries not initialized yet for db=%s", string(dbLabel))
-	}
-	// cast to *DBSummaries
-	summaries, ok := _summaries.(*DBSummaries)
-	if !ok {
-		return fmt.Errorf("type casting to *DBSummaries failed")
-	}
-
-	summaries.DbCommitPreparation.Observe(latency.Preparation.Seconds())
-	summaries.DbCommitWrite.Observe(latency.Write.Seconds())
-	summaries.DbCommitSync.Observe(latency.Sync.Seconds())
-	summaries.DbCommitEnding.Observe(latency.Ending.Seconds())
-	summaries.DbCommitTotal.Observe(latency.Whole.Seconds())
-	return nil
-
 }
 
 var MDBXGauges = InitMDBXMGauges() // global mdbx gauges. each gauge can be filtered by db name

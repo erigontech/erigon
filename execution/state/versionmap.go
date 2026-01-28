@@ -117,7 +117,7 @@ func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
 
 }
 
-func (vm *VersionMap) Write(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version, data interface{}, complete bool) {
+func (vm *VersionMap) Write(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version, data any, complete bool) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 
@@ -377,7 +377,7 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 type WriteCell struct {
 	flag        statusFlag
 	incarnation int
-	data        interface{}
+	data        any
 }
 
 type Version struct {
@@ -398,7 +398,7 @@ const (
 type ReadResult struct {
 	depIdx      int
 	incarnation int
-	value       interface{}
+	value       any
 }
 
 func (res *ReadResult) DepString() string {
@@ -416,7 +416,7 @@ func (res *ReadResult) Incarnation() int {
 	return res.incarnation
 }
 
-func (res *ReadResult) Value() interface{} {
+func (res *ReadResult) Value() any {
 	return res.value
 }
 

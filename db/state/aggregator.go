@@ -777,7 +777,7 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 		return 0, 0, 0, true, nil
 	}
 	err = a.db.View(ctx, func(tx kv.Tx) error {
-		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(tx, lastTxNumOfStep(step, a.stepSize))
+		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, lastTxNumOfStep(step, a.stepSize))
 		if err != nil {
 			return err
 		}
@@ -1817,6 +1817,12 @@ func (at *AggregatorRoTx) DebugRangeLatest(tx kv.Tx, domain kv.Domain, from, to 
 	return at.d[domain].DebugRangeLatest(tx, from, to, limit)
 }
 
+// DebugRangeLatestFromFiles iterates over keys in .kv snapshot files only,
+// ignoring keys in MDBX database.
+func (at *AggregatorRoTx) DebugRangeLatestFromFiles(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
+	return at.d[domain].DebugRangeLatestFromFiles(from, to, limit)
+}
+
 func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
 	v, ok, err = at.d[name].GetAsOf(k, ts, tx)
 	if name == kv.CommitmentDomain && !ok {
@@ -1829,16 +1835,16 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 	return at.getLatest(domain, k, tx, math.MaxUint64, nil, time.Time{})
 }
 
-type domainMetrics interface {
+type DomainMetrics interface {
 	UpdateDbReads(domain kv.Domain, start time.Time)
 	UpdateFileReads(domain kv.Domain, start time.Time)
 }
 
-func (at *AggregatorRoTx) MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics domainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
+func (at *AggregatorRoTx) MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
 	return at.getLatest(domain, k, tx, maxStep, metrics, start)
 }
 
-func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics domainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
+func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
 	if domain != kv.CommitmentDomain {
 		return at.d[domain].getLatest(k, tx, maxStep, metrics, start)
 	}
