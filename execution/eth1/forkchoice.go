@@ -238,6 +238,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 
+	e.logger.Debug("execution module updating fork choice", "number", fcuHeader.Number.Uint64(), "hash", fcuHeader.Hash())
 	UpdateForkChoiceArrivalDelay(fcuHeader.Time)
 	metrics.UpdateBlockConsumerPreExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
 	defer metrics.UpdateBlockConsumerPostExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)

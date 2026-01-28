@@ -190,7 +190,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.TemporalRwTx, header *types.Heade
 	}
 	hash := header.Hash()
 	number := header.Number.Uint64()
-	logger.Debug("Execution ForkValidator.ValidatePayload", "number", number, "hash", hash)
+
 	// If the block is stored within the side fork it means it was already validated.
 	if _, ok := fv.validHashes.Get(hash); ok {
 		status = engine_types.ValidStatus
