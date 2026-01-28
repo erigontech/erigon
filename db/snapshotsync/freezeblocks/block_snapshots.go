@@ -420,21 +420,16 @@ func (br *BlockRetire) RetireBlocksInBackground(
 		br.maxScheduledBlock.Store(maxBlockNum)
 	}
 
+	if br.blockReader == nil || br.blockReader.FrozenBlocks()+snaptype.Erigon2MinSegmentSize >= maxBlockNum {
+		return false
+	}
 	if !br.working.CompareAndSwap(false, true) {
 		return false
 	}
-	const cpuRelaxTime = 15 * time.Minute
 
 	go func() {
 		defer onDone()
 		defer br.working.Store(false)
-		// Add a pause before starting snapshot checks as this check is expensive
-		// and takes significant CPU on the profiler.
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(cpuRelaxTime):
-		}
 
 		if br.snBuildAllowed != nil {
 			//we are inside own goroutine - it's fine to block here
