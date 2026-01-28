@@ -591,15 +591,22 @@ func (sd *ExecutionContext) SeekCommitment(ctx context.Context, tx kv.TemporalTx
 	return nil
 }
 
+// ComputeCommitment evaluates commitment for gathered updates.
+// If trieWarmup toggle was enabled via EnableTrieWarmup, pre-warms MDBX page cache by reading Branch data in parallel before processing.
 func (sd *ExecutionContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
 	return sd.sdCtx.ComputeCommitment(ctx, sd, tx, saveStateAfter, blockNum, txNum, logPrefix, commitProgress)
 }
 
-// SetWarmupDB sets the database used for parallel warmup of MDBX page cache during commitment.
-func (sd *ExecutionContext) SetWarmupDB(db kv.TemporalRoDB) {
-	sd.sdCtx.SetWarmupDB(db)
+// EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
+// It requires a DB to be enabled via EnableParaTrieDB.
+func (sd *ExecutionContext) EnableTrieWarmup(trieWarmup bool) {
+	sd.sdCtx.EnableTrieWarmup(trieWarmup)
 }
 
-func (sd *ExecutionContext) SetParaTrieDB(db kv.TemporalRoDB) {
-	sd.sdCtx.SetParaTrieDB(db)
+func (sd *ExecutionContext) EnableParaTrieDB(db kv.TemporalRoDB) {
+	sd.sdCtx.EnableParaTrieDB(db)
+}
+
+func (sd *ExecutionContext) EnableWarmupCache(enable bool) {
+	sd.sdCtx.EnableWarmupCache(enable)
 }
