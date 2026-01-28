@@ -413,7 +413,7 @@ func (br *BlockRetire) skipLoop(requestedMinBlockNum, maxBlockNum uint64) bool {
 	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, snaptype.Unknown, br.chainConfig)
 	fmt.Println("blockFrom", blockFrom, "blockTo", blockTo, "frozen", br.blockReader.FrozenBlocks(), "maxScheduled", br.maxScheduledBlock.Load(),
 		"requestedMin", requestedMinBlockNum, "maxBlockNum", maxBlockNum, "minBlockNum", minBlockNum)
-	return !ok
+	return !ok || blockFrom == blockTo
 }
 
 func (br *BlockRetire) RetireBlocksInBackground(
