@@ -516,7 +516,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		rpcBlockNumValue := rpc.BlockNumber(blockNum)
 		blockNrOrHash.BlockNumber = &rpcBlockNumValue
 
-		stateReader, err = rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+		stateReader, err = rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNum, isLatest, 0, api.stateCache, api._txNumReader)
 	} else {
 		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, blockNum, *simulateContext.TransactionIndex, api._txNumReader)
 	}
