@@ -278,10 +278,13 @@ jobs:
         if: always() && matrix.client == 'erigon'
         working-directory: ${{ github.workspace }}/build/bin
         run: |
+          # the erigon pid is stored in erigon.pid file
+          ERIGON_PID=$(cat ./erigon.pid)
           # Clean up erigon process if it's still running
           if [ -n "$ERIGON_PID" ] && kill -0 $ERIGON_PID 2> /dev/null; then
             echo "Erigon stopping..."
             kill $ERIGON_PID
+            sleep 5
             echo "Erigon stopped"
           else
             echo "Erigon has already terminated"
