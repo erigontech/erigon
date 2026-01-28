@@ -527,6 +527,10 @@ func (sdb *IntraBlockState) TxnIndex() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
+	return sdb.getCode(addr, false)
+}
+
+func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byte, error) {
 	if sdb.versionMap == nil {
 		stateObject, err := sdb.getStateObject(addr)
 		if err != nil {
@@ -548,7 +552,7 @@ func (sdb *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
 		}
 		return nil, nil
 	}
-	code, source, _, err := versionedRead(sdb, addr, CodePath, accounts.NilKey, false, nil,
+	code, source, _, err := versionedRead(sdb, addr, CodePath, accounts.NilKey, commited, nil,
 		func(v []byte) []byte {
 			return v
 		},
@@ -664,19 +668,23 @@ func (sdb *IntraBlockState) ResolveCodeHash(addr accounts.Address) (accounts.Cod
 
 func (sdb *IntraBlockState) ResolveCode(addr accounts.Address) ([]byte, error) {
 	// eip-7702
-	dd, ok, err := sdb.GetDelegatedDesignation(addr)
+	dd, ok, err := sdb.getDelegatedDesignation(addr, true)
 	if ok {
-		return sdb.GetCode(dd)
+		return sdb.getCode(dd, true)
 	}
 	if err != nil {
 		return nil, err
 	}
-	return sdb.GetCode(addr)
+	return sdb.getCode(addr, true)
 }
 
 func (sdb *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (accounts.Address, bool, error) {
+	return sdb.getDelegatedDesignation(addr, false)
+}
+
+func (sdb *IntraBlockState) getDelegatedDesignation(addr accounts.Address, commited bool) (accounts.Address, bool, error) {
 	// eip-7702
-	code, err := sdb.GetCode(addr)
+	code, err := sdb.getCode(addr, commited)
 	if err != nil {
 		return accounts.ZeroAddress, false, err
 	}

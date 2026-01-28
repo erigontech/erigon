@@ -404,7 +404,9 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 	if so, ok := s.stateObjects[addr]; ok && so.deleted {
 		return defaultV, StorageRead, UnknownVersion, nil
 	} else if res := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex); res.Status() == MVReadResultDone {
-		return defaultV, MapRead, Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, nil
+		if !commited || path != CodePath {
+			return defaultV, MapRead, Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, nil
+		}
 	}
 
 	res := s.versionMap.Read(addr, path, key, s.txIndex)
