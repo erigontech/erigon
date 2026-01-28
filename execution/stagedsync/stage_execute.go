@@ -140,14 +140,6 @@ var ErrTooDeepUnwind = errors.New("too deep unwind")
 
 func unwindExec3(u *UnwindState, s *StageState, doms *execstate.ExecutionContext, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
 	br := cfg.blockReader
-
-	if doms == nil {
-		doms, err = execstate.NewExecutionContext(ctx, rwTx, logger)
-		if err != nil {
-			return err
-		}
-		defer doms.Close()
-	}
 	txNumsReader := br.TxnumReader()
 
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
@@ -363,12 +355,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execstate.Executio
 		return nil
 	}
 
-	if doms == nil || rwTx == nil {
-		// to support parallel execution unwind must be called with the same
-		// shared domains and transaction which are used by the execution stage
-		return fmt.Errorf("can't execute: need external domains & tx")
-	}
-
 	prevStageProgress, err := stageProgress(rwTx, cfg.db, stages.Senders)
 	if err != nil {
 		return err
@@ -392,12 +378,6 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execstate.Executi
 	//fmt.Printf("unwind: %d -> %d\n", u.CurrentBlockNumber, u.UnwindPoint)
 	if u.UnwindPoint >= s.BlockNumber {
 		return nil
-	}
-
-	if doms == nil || rwTx == nil {
-		// to support parallel execution unwind must be called with the same
-		// shared domains and transaction which are used by the execution stage
-		return fmt.Errorf("can't unwind: need external domains & tx")
 	}
 
 	logger.Info(fmt.Sprintf("[%s] Unwind Execution", u.LogPrefix()), "from", s.BlockNumber, "to", u.UnwindPoint, "stack", dbg.Stack())
@@ -449,15 +429,6 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execstate.Executi
 }
 
 func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, timeout time.Duration, logger log.Logger) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
 	// on chain-tip:
 	//  - can prune only between blocks (without blocking blocks processing)
 	//  - need also leave some time to prune blocks
@@ -466,7 +437,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	//  - stop prune when `tx.SpaceDirty()` is big
 	//  - and set ~500ms timeout
 	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
-	quickPruneTimeout := 500 * time.Millisecond
+	quickPruneTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond
 
 	if timeout > 0 && timeout > quickPruneTimeout {
 		quickPruneTimeout = timeout
@@ -499,7 +470,6 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 				fmt.Sprintf("[%s] prune changesets timing", s.LogPrefix()),
 				"duration", duration,
 				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
-				"externalTx", useExternalTx,
 			)
 		}
 	}
@@ -510,20 +480,6 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	pruneTimeout := quickPruneTimeout
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneTimeout = 12 * time.Hour
-
-		// allow greedy prune on non-chain-tip
-		greedyPruneCommitmentHistoryStartTime := time.Now()
-		if err = tx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
-			return err
-		}
-		if duration := time.Since(greedyPruneCommitmentHistoryStartTime); duration > quickPruneTimeout {
-			logger.Debug(
-				fmt.Sprintf("[%s] greedy prune commitment history timing", s.LogPrefix()),
-				"duration", duration,
-				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
-				"externalTx", useExternalTx,
-			)
-		}
 	}
 
 	pruneSmallBatchesStartTime := time.Now()
@@ -535,17 +491,10 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 			fmt.Sprintf("[%s] prune small batches timing", s.LogPrefix()),
 			"duration", duration,
 			"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
-			"externalTx", useExternalTx,
 		)
 	}
-
 	if err = s.Done(tx); err != nil {
 		return err
-	}
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
 	}
 	return nil
 }

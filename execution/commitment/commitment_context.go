@@ -154,15 +154,14 @@ func (r *LimitedHistoryStateReader) Clone(tx kv.TemporalTx, getter kv.TemporalGe
 }
 
 type CommitmentContext struct {
-	updates           *Updates
-	patriciaTrie      Trie
-	justRestored      atomic.Bool // set to true when commitment trie was just restored from snapshot
-	trace             bool
-	traceDomain       bool
-	commitmentCapture bool
-	stateReader       StateReader
-	warmupDB          kv.TemporalRoDB // if set, enables parallel warmup of MDBX page cache during commitment
-	paraTrieDB        kv.TemporalRoDB // if set, it's used to set up a trie ctx factory for para trie without warmup (otherwise it uses warmupDB if enabled)
+	sharedDomains sd
+	updates       *commitment.Updates
+	patriciaTrie  commitment.Trie
+	justRestored  atomic.Bool // set to true when commitment trie was just restored from snapshot
+	trace         bool
+	stateReader   StateReader
+	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
+	trieWarmup    bool            // toggle for parallel trie warmup of MDBX page cache during commitment
 }
 
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in CommitmentContext.trieContext).
@@ -170,13 +169,14 @@ func (sdc *CommitmentContext) SetStateReader(stateReader StateReader) {
 	sdc.stateReader = stateReader
 }
 
-// SetWarmupDB sets the database used for parallel warmup of MDBX page cache during commitment.
+// EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
 // When set, ComputeCommitment will pre-fetch Branch data in parallel before processing.
-func (sdc *CommitmentContext) SetWarmupDB(db kv.TemporalRoDB) {
-	sdc.warmupDB = db
+// It requires a DB to be set by calling EnableParaTrieDB
+func (sdc *SharedDomainsCommitmentContext) EnableTrieWarmup(trieWarmup bool) {
+	sdc.trieWarmup = trieWarmup
 }
 
-func (sdc *CommitmentContext) SetParaTrieDB(db kv.TemporalRoDB) {
+func (sdc *SharedDomainsCommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) {
 	sdc.paraTrieDB = db
 }
 
@@ -201,7 +201,12 @@ func (sdc *CommitmentContext) SetTraceDomain(b, capture bool) []string {
 	return sdc.GetCapture(true)
 }
 
-func (sdc *CommitmentContext) EnableCsvMetrics(filePathPrefix string) {
+// EnableWarmupCache enables/disables warmup cache during commitment processing.
+func (sdc *SharedDomainsCommitmentContext) EnableWarmupCache(enable bool) {
+	sdc.patriciaTrie.EnableWarmupCache(enable)
+}
+
+func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix string) {
 	sdc.patriciaTrie.EnableCsvMetrics(filePathPrefix)
 }
 
@@ -301,7 +306,8 @@ type executionContext interface {
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
 }
 
-// Evaluates commitment for gathered updates.
+// ComputeCommitment Evaluates commitment for gathered updates.
+// If warmup was set via EnableTrieWarmup, pre-warms MDBX page cache by reading Branch data in parallel before processing.
 func (sdc *CommitmentContext) ComputeCommitment(ctx context.Context, sd executionContext, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *CommitProgress) (rootHash []byte, err error) {
 	mxCommitmentRunning.Inc()
 	defer mxCommitmentRunning.Dec()
@@ -332,18 +338,13 @@ func (sdc *CommitmentContext) ComputeCommitment(ctx context.Context, sd executio
 	trieContext := sdc.trieContext(tx, sd.AsGetter(tx), sd.AsPutDel(tx), txNum)
 
 	var warmupConfig WarmupConfig
-	if sdc.warmupDB != nil {
+	if sdc.paraTrieDB != nil {
 		warmupConfig = WarmupConfig{
-			Enabled:    true,
-			CtxFactory: sdc.trieContextFactory(ctx, sd, sdc.warmupDB, txNum),
+			Enabled:    sdc.trieWarmup,
+			CtxFactory: sdc.trieContextFactory(ctx, sdc.paraTrieDB),
 			NumWorkers: 16,
 			MaxDepth:   WarmupMaxDepth,
 			LogPrefix:  logPrefix,
-		}
-	} else if sdc.paraTrieDB != nil {
-		// temporarily use WarmupConfig to easily pass CtxFactory to the para trie without too many changes (can improve in future PR)
-		warmupConfig = WarmupConfig{
-			CtxFactory: sdc.trieContextFactory(ctx, sd, sdc.paraTrieDB, txNum),
 		}
 	}
 
@@ -405,6 +406,10 @@ func (e *errorTrieContext) Account(plainKey []byte) (*Update, error) {
 
 func (e *errorTrieContext) Storage(plainKey []byte) (*Update, error) {
 	return nil, e.err
+}
+
+func (e *errorTrieContext) TxNum() uint64 {
+	return 0
 }
 
 // by that key stored latest root hash and tree state
@@ -632,6 +637,10 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, p
 	//}
 
 	return sdc.putter.DomainPut(kv.CommitmentDomain, prefix, data, sdc.txNum, prevData, prevStep)
+}
+
+func (sdc *TrieContext) TxNum() uint64 {
+	return sdc.txNum
 }
 
 // readDomain reads data from domain, dereferences key and returns encoded value and step.

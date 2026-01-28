@@ -29,8 +29,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -95,7 +95,7 @@ func (r *Reader) EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Tim
 	// convert to message
 	for _, event := range events {
 		msg := types.NewMessage(
-			state.SystemAddress,
+			params.SystemAddress,
 			r.stateClientAddress,
 			0, &u256.Num0,
 			protocol.SysCallGasLimit,
@@ -131,7 +131,7 @@ func (r *Reader) Events(ctx context.Context, blockHash common.Hash, blockNum uin
 	// convert to message
 	for _, event := range events {
 		msg := types.NewMessage(
-			state.SystemAddress,
+			params.SystemAddress,
 			r.stateClientAddress,
 			0, &u256.Num0,
 			protocol.SysCallGasLimit,
@@ -227,7 +227,7 @@ func (r *RemoteReader) EnsureVersionCompatibility() bool {
 
 func messageFromData(to accounts.Address, data []byte) *types.Message {
 	msg := types.NewMessage(
-		state.SystemAddress,
+		params.SystemAddress,
 		to,
 		0, &u256.Num0,
 		protocol.SysCallGasLimit,
@@ -249,7 +249,7 @@ func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverCont
 	msgs := make([]*types.Message, len(stateSyncEvents))
 	for i, event := range stateSyncEvents {
 		msg := types.NewMessage(
-			state.SystemAddress, // from
+			params.SystemAddress, // from
 			stateReceiverContract,
 			0,          // nonce
 			&u256.Num0, // amount

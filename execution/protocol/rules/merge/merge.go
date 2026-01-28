@@ -151,11 +151,11 @@ func (s *Merge) CalculateRewards(config *chain.Config, header *types.Header, unc
 }
 
 func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 	chain rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.FlatRequests, error) {
 	if !misc.IsPoSHeader(header) {
-		return s.eth1Engine.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, skipReceiptsEval, logger)
+		return s.eth1Engine.Finalize(config, header, state, uncles, receipts, withdrawals, chain, syscall, skipReceiptsEval, logger)
 	}
 
 	rewards, err := s.CalculateRewards(config, header, uncles, syscall)
@@ -235,7 +235,7 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, call, logger)
 	}
 	header.RequestsHash = nil
-	outRequests, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, false, logger)
+	outRequests, err := s.Finalize(config, header, state, uncles, receipts, withdrawals, chain, syscall, false, logger)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -406,7 +406,7 @@ func (s *Merge) GetTransferFunc() evmtypes.TransferFunc {
 }
 
 func (s *Merge) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
-	return s.eth1Engine.GetPostApplyMessageFunc()
+	return misc.LogSelfDestructedAccounts // EIP-7708
 }
 
 func (s *Merge) Close() error {

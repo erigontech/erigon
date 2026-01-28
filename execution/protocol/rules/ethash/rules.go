@@ -571,7 +571,7 @@ func (ethash *Ethash) Initialize(config *chain.Config, chain rules.ChainHeaderRe
 // Finalize implements rules.Engine, accumulating the block and uncle rewards,
 // setting the final state on the header
 func (ethash *Ethash) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
+	uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.FlatRequests, error) {
 	// Accumulate any block and uncle rewards and commit the final state root
@@ -587,7 +587,7 @@ func (ethash *Ethash) FinalizeAndAssemble(chainConfig *chain.Config, header *typ
 ) (*types.Block, types.FlatRequests, error) {
 
 	// Finalize block
-	_, err := ethash.Finalize(chainConfig, header, state, txs, uncles, r, withdrawals, chain, syscall, false, logger)
+	_, err := ethash.Finalize(chainConfig, header, state, uncles, r, withdrawals, chain, syscall, false, logger)
 	if err != nil {
 		return nil, nil, err
 	}

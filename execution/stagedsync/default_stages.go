@@ -36,7 +36,8 @@ func DefaultStages(ctx context.Context,
 	exec ExecuteBlockCfg,
 	txLookup TxLookupCfg,
 	finish FinishCfg,
-	test bool) []*Stage {
+	test bool,
+) []*Stage {
 	return []*Stage{
 		{
 			ID:          stages.Snapshots,
@@ -164,7 +165,7 @@ func DefaultStages(ctx context.Context,
 				return UnwindFinish(u, tx, finish, ctx)
 			},
 			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
-				return PruneFinish(p, tx, finish, ctx)
+				return nil
 			},
 		},
 	}
@@ -269,7 +270,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return UnwindFinish(u, tx, finish, ctx)
 			},
 			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
-				return PruneFinish(p, tx, finish, ctx)
+				return nil
 			},
 		},
 	)
@@ -297,7 +298,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 				return nil
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *state.ExecutionContext, tx kv.TemporalRwTx, logger log.Logger) error {
-				return UnwindBodiesStage(u, tx, bodies, ctx)
+				return UnwindBodiesStage(u, tx, bodies)
 			},
 		},
 		{
@@ -307,7 +308,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 				return SpawnBlockHashStage(s, tx, blockHashCfg, ctx, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *state.ExecutionContext, tx kv.TemporalRwTx, logger log.Logger) error {
-				return UnwindBlockHashStage(u, tx, blockHashCfg, ctx)
+				return UnwindBlockHashStage(u, tx)
 			},
 		},
 		{

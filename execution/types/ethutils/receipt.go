@@ -192,6 +192,7 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) m
 		}
 		logEntry["topics"] = topics
 		logEntry["data"] = hexutil.Bytes(protoLog.Data)
+		logEntry["transactionHash"] = txHash
 
 		logs = append(logs, logEntry)
 	}

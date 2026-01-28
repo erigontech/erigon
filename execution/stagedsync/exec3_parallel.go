@@ -94,7 +94,7 @@ type parallelExecutor struct {
 
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
-	initialTxNum uint64, inputTxNum uint64, useExternalTx bool, initialCycle bool, rwTx kv.TemporalRwTx,
+	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
 	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
 	var asyncTxChan mdbx.TxApplyChan
@@ -114,7 +114,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	if blockLimit > 0 && min(startBlockNum+blockLimit, maxBlockNum) > startBlockNum+16 || maxBlockNum > startBlockNum+16 {
 		log.Info(fmt.Sprintf("[%s] parallel starting", execStage.LogPrefix()),
 			"from", startBlockNum, "to", maxBlockNum, "limit", startBlockNum+blockLimit-1, "initialTxNum", initialTxNum,
-			"initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx,
+			"initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle,
 			"isForkValidation", pe.isForkValidation, "isBlockProduction", pe.isBlockProduction, "isApplyingBlocks", pe.isApplyingBlocks)
 	}
 
@@ -142,7 +142,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	var uncommittedGas int64
 	var flushPending bool
 	var hasLoggedExecution bool
-	var hasLoggedCommittments bool
+	var hasLoggedCommittments atomic.Bool
 	var commitStart time.Time
 
 	var stepsInDb = rawdbhelpers.IdxStepsCountV3(rwTx, pe.agg.StepSize())
@@ -216,16 +216,25 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
 							bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO, pe.cfg.dirs.DataDir)
 							log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash(), "valid", bal.Validate() == nil)
-
 							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) {
-								headerBALHash := *lastHeader.BlockAccessListHash
-								if headerBALHash != b.BlockAccessList().Hash() {
-									log.Info(fmt.Sprintf("bal from block: %s", b.BlockAccessList().DebugString()))
-									return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, b.BlockAccessList().Hash(), headerBALHash)
+								if lastHeader.BlockAccessListHash == nil {
+									if pe.isBlockProduction {
+										hash := bal.Hash()
+										lastHeader.BlockAccessListHash = &hash
+									} else {
+										return fmt.Errorf("block %d: missing block access list hash", applyResult.BlockNum)
+									}
 								}
-								if headerBALHash != bal.Hash() {
-									log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))
-									return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, applyResult.BlockNum, bal.Hash(), headerBALHash)
+								headerBALHash := *lastHeader.BlockAccessListHash
+								if !pe.isBlockProduction {
+									if headerBALHash != b.BlockAccessList().Hash() {
+										log.Info(fmt.Sprintf("bal from block: %s", b.BlockAccessList().DebugString()))
+										return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, b.BlockAccessList().Hash(), headerBALHash)
+									}
+									if headerBALHash != bal.Hash() {
+										log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))
+										return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, applyResult.BlockNum, bal.Hash(), headerBALHash)
+									}
 								}
 							}
 						}
@@ -254,7 +263,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||
 							applyResult.Exhausted != nil ||
 							pe.cfg.syncCfg.KeepExecutionProofs ||
-							(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
+							(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum.Load()) {
 
 							resetExecGauges(ctx)
 
@@ -292,7 +301,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 										commitedBlocks := uint64(math.Round(float64(uncommittedBlocks) * progress))
 
 										if commitedBlocks > prevCommitedBlocks {
-											hasLoggedCommittments = true
+											hasLoggedCommittments.Store(true)
 											pe.LogCommitments(commitStart,
 												commitedBlocks-prevCommitedBlocks,
 												committedTransactions-prevCommittedTransactions,
@@ -316,8 +325,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 										return
 									case progress, ok := <-commitProgress:
 										if !ok {
-											if !hasLoggedCommittments || time.Since(lastCommitedLog) > logInterval/20 {
-												hasLoggedCommittments = true
+											if !hasLoggedCommittments.Load() || time.Since(lastCommitedLog) > logInterval/20 {
+												hasLoggedCommittments.Store(true)
 												pe.LogCommitments(commitStart,
 													uint64(uncommittedBlocks), uncommittedTransactions,
 													uint64(uncommittedGas), stepsInDb, lastProgress)
@@ -339,7 +348,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								lastExecutedLog = time.Now()
 							}
 
-							// Warmup is enabled via SetWarmupDB at executor init
+							// Warmup is enabled via EnableTrieWarmup at executor init
 							rh, err := pe.doms.ComputeCommitment(ctx, rwTx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, commitProgress)
 							close(commitProgress)
 							captured := pe.doms.SetTrace(false, false)
@@ -347,6 +356,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								return err
 							}
 							resetCommitmentGauges(ctx)
+
+							// on chain tip we run receipt root verification in parallel alongside commitment computation
+							// make sure to wait for it to finish and check for an error
+							err = pe.getPostValidator().Wait()
+							if err != nil {
+								return err
+							}
 
 							if shouldGenerateChangesets {
 								pe.domains().SavePastChangesetAccumulator(applyResult.BlockHash, applyResult.BlockNum, changeSet)
@@ -370,8 +386,8 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 							<-LogCommitmentsDone // make sure no async mutations by LogCommitments can happen at this point
 							// fix these here - they will contain estimates after commit logging
-							pe.txExecutor.lastCommittedBlockNum = lastBlockResult.BlockNum
-							pe.txExecutor.lastCommittedTxNum = lastBlockResult.lastTxNum
+							pe.txExecutor.lastCommittedBlockNum.Store(lastBlockResult.BlockNum)
+							pe.txExecutor.lastCommittedTxNum.Store(lastBlockResult.lastTxNum)
 							uncommittedBlocks = 0
 							uncommittedGas = 0
 							uncommittedTransactions = 0
@@ -424,8 +440,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		pe.LogExecution()
 	}
 
-	if !hasLoggedCommittments && !commitStart.IsZero() {
-		pe.LogCommitments(commitStart, pe.txExecutor.lastCommittedBlockNum, uncommittedTransactions, uint64(uncommittedGas), stepsInDb, lastProgress)
+	// Wait for all goroutines to complete before reading shared state
+	if err := pe.wait(ctx); err != nil {
+		return nil, rwTx, err
+	}
+
+	if !hasLoggedCommittments.Load() && !commitStart.IsZero() {
+		pe.LogCommitments(commitStart, pe.txExecutor.lastCommittedBlockNum.Load(), uncommittedTransactions, uint64(uncommittedGas), stepsInDb, lastProgress)
 	}
 
 	if execErr != nil {
@@ -434,17 +455,10 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		}
 	}
 
-	if err := pe.wait(ctx); err != nil {
+	if err = execStage.Update(rwTx, pe.lastCommittedBlockNum.Load()); err != nil {
 		return nil, rwTx, err
 	}
 
-	if err = execStage.Update(rwTx, pe.lastCommittedBlockNum); err != nil {
-		return nil, rwTx, err
-	}
-
-	if err = pe.wait(ctx); err != nil {
-		return nil, rwTx, fmt.Errorf("wait failed: %w", err)
-	}
 	return lastHeader, rwTx, execErr
 }
 
@@ -459,9 +473,9 @@ func (pe *parallelExecutor) LogExecution() {
 }
 
 func (pe *parallelExecutor) LogCommitments(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
-	pe.committedGas += int64(committedGas)
-	pe.txExecutor.lastCommittedBlockNum += committedBlocks
-	pe.txExecutor.lastCommittedTxNum += committedTransactions
+	pe.committedGas.Add(int64(committedGas))
+	pe.txExecutor.lastCommittedBlockNum.Add(committedBlocks)
+	pe.txExecutor.lastCommittedTxNum.Add(committedTransactions)
 	pe.progress.LogCommitments(pe.rs.StateV3, pe, commitStart, stepsInDb, lastProgress)
 	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
 		pe.logger.Info(fmt.Sprintf("[%s] domain reads", pe.logPrefix), domainMetrics...)
@@ -637,7 +651,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						} else {
 							_, err =
 								pe.cfg.engine.Finalize(
-									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
+									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, blockReceipts,
 									txTask.Withdrawals, chainReader, syscall, false, pe.logger)
 						}
 
@@ -976,9 +990,11 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	}
 	ibs.SetTrace(txTask.Trace)
 
+	rules := txTask.EvmBlockContext.Rules(txTask.Config)
+
 	if task.IsBlockEnd() || txIndex < 0 {
 		if blockNum == 0 || txTask.Config.IsByzantium(blockNum) {
-			if err := ibs.FinalizeTx(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter); err != nil {
+			if err := ibs.FinalizeTx(rules, stateWriter); err != nil {
 				return nil, nil, nil, err
 			}
 		}
@@ -1022,6 +1038,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 					message.From(),
 					result.Coinbase,
 					&execResult,
+					rules,
 				)
 
 				// capture postApplyMessageFunc side affects
@@ -1043,7 +1060,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	vm.SetTrace(false)
 
 	if txTask.Config.IsByzantium(blockNum) {
-		ibs.FinalizeTx(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter)
+		ibs.FinalizeTx(rules, stateWriter)
 	}
 
 	receipt, err := result.CreateNextReceipt(prevReceipt)
@@ -1715,4 +1732,39 @@ func mergeReadSets(a state.ReadSet, b state.ReadSet) state.ReadSet {
 		})
 	}
 	return out
+}
+
+func mergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrites {
+	if len(prev) == 0 {
+		return next
+	}
+	if len(next) == 0 {
+		return prev
+	}
+	merged := state.WriteSet{}
+	for _, v := range prev {
+		merged.Set(*v)
+	}
+	for _, v := range next {
+		merged.Set(*v)
+	}
+	out := make(state.VersionedWrites, 0, merged.Len())
+	merged.Scan(func(v *state.VersionedWrite) bool {
+		out = append(out, v)
+		return true
+	})
+	return out
+}
+
+func mergeAccessedAddresses(dst, src map[accounts.Address]struct{}) map[accounts.Address]struct{} {
+	if len(src) == 0 {
+		return dst
+	}
+	if dst == nil {
+		dst = make(map[accounts.Address]struct{}, len(src))
+	}
+	for addr := range src {
+		dst[addr] = struct{}{}
+	}
+	return dst
 }

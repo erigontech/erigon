@@ -1406,6 +1406,66 @@ func (c *MdbxCursor) Close() {
 
 func (c *MdbxCursor) IsClosed() bool { return c.c == nil }
 
+type MdbxCursorPseudoDupSort struct {
+	*MdbxCursor
+}
+
+func (c *MdbxCursorPseudoDupSort) DeleteExact(k1, k2 []byte) error {
+	return c.Delete(k1)
+}
+
+// NextNoDup - iterate with skipping all duplicates
+func (c *MdbxCursorPseudoDupSort) NextNoDup() ([]byte, []byte, error) {
+	k, v, err := c.Next()
+	if err != nil {
+		if mdbx.IsNotFound(err) {
+			return nil, nil, nil
+		}
+		return []byte{}, nil, fmt.Errorf("in NextNoDup: %w", err)
+	}
+	return k, v, nil
+}
+
+// NextDup - iterate only over duplicates of current key
+func (c *MdbxCursorPseudoDupSort) NextDup() ([]byte, []byte, error) {
+	return nil, nil, nil
+}
+
+func (c *MdbxCursorPseudoDupSort) FirstDup() ([]byte, error) {
+	_, v, err := c.Current()
+	if err != nil {
+		if mdbx.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("in FirstDup: tbl=%s, %w", c.bucketName, err)
+	}
+	return v, nil
+}
+
+func (c *MdbxCursorPseudoDupSort) LastDup() ([]byte, error) {
+	_, v, err := c.Current()
+	if err != nil {
+		if mdbx.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("in FirstDup: tbl=%s, %w", c.bucketName, err)
+	}
+	return v, nil
+}
+
+// DeleteCurrentDuplicates - delete all of the data items for the current key.
+func (c *MdbxCursorPseudoDupSort) DeleteCurrentDuplicates() error {
+	if err := c.DeleteCurrent(); err != nil {
+		return fmt.Errorf("label: %s,in DeleteCurrentDuplicates: %w", c.label, err)
+	}
+	return nil
+}
+
+// CountDuplicates returns the number of duplicates for the current key. See mdb_cursor_count
+func (c *MdbxCursorPseudoDupSort) CountDuplicates() (uint64, error) {
+	return 1, nil
+}
+
 type MdbxDupSortCursor struct {
 	*MdbxCursor
 }
@@ -1442,6 +1502,17 @@ func (c *MdbxDupSortCursor) SeekBothRange(key, value []byte) ([]byte, error) {
 		return nil, fmt.Errorf("in SeekBothRange, table=%s: %w", c.bucketName, err)
 	}
 	return v, nil
+}
+
+func (c *MdbxDupSortCursor) DeleteBothRange(key, value []byte) error {
+	_, _, err := c.c.Get(key, value, mdbx.GetBothRange)
+	if err != nil {
+		if mdbx.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("in SeekBothRange, table=%s: %w", c.bucketName, err)
+	}
+	return c.c.Del(mdbx.Current)
 }
 
 func (c *MdbxDupSortCursor) FirstDup() ([]byte, error) {

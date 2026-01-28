@@ -804,7 +804,7 @@ func (c *Bor) CalculateRewards(config *chain.Config, header *types.Header, uncle
 // Finalize implements rules.Engine, ensuring no uncles are set, nor block
 // rewards given.
 func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
+	uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.FlatRequests, error) {
 	headerNumber := header.Number.Uint64()
@@ -1286,7 +1286,7 @@ func (c *Bor) CommitStates(
 }
 
 // BorTransfer transfer in Bor
-func BorTransfer(db evmtypes.IntraBlockState, sender, recipient accounts.Address, amount uint256.Int, bailout bool) error {
+func BorTransfer(db evmtypes.IntraBlockState, sender, recipient accounts.Address, amount uint256.Int, bailout bool, cr *chain.Rules) error {
 	// get inputs before
 	input1, err := db.GetBalance(sender)
 	if err != nil {
@@ -1297,7 +1297,7 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient accounts.Address
 		return err
 	}
 
-	rules.Transfer(db, sender, recipient, amount, bailout)
+	misc.Transfer(db, sender, recipient, amount, bailout, cr)
 
 	output1, err := db.GetBalance(sender)
 	if err != nil {
@@ -1318,7 +1318,7 @@ func (c *Bor) GetTransferFunc() evmtypes.TransferFunc {
 
 // AddFeeTransferLog adds fee transfer log into state
 // Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
-func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender accounts.Address, coinbase accounts.Address, result *evmtypes.ExecutionResult) {
+func AddFeeTransferLog(ibs evmtypes.IntraBlockState, sender accounts.Address, coinbase accounts.Address, result *evmtypes.ExecutionResult, _ *chain.Rules) {
 	output1 := result.SenderInitBalance
 	output2 := result.CoinbaseInitBalance
 	addTransferLog(

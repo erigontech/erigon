@@ -50,6 +50,7 @@ type MiningBlock struct {
 	Receipts         types.Receipts
 	Withdrawals      []*types.Withdrawal
 	Requests         types.FlatRequests
+	BlockAccessList  types.BlockAccessList
 
 	headerRlpSize         *int
 	withdrawalsRlpSize    *int
@@ -122,30 +123,24 @@ func NewMiningState(cfg *buildercfg.MiningConfig) MiningState {
 }
 
 type MiningCreateBlockCfg struct {
-	db                     kv.RwDB
 	miner                  MiningState
 	chainConfig            *chain.Config
 	engine                 rules.Engine
-	tmpdir                 string
 	blockBuilderParameters *builder.Parameters
 	blockReader            services.FullBlockReader
 }
 
 func StageMiningCreateBlockCfg(
-	db kv.RwDB,
 	miner MiningState,
 	chainConfig *chain.Config,
 	engine rules.Engine,
 	blockBuilderParameters *builder.Parameters,
-	tmpdir string,
 	blockReader services.FullBlockReader,
 ) MiningCreateBlockCfg {
 	return MiningCreateBlockCfg{
-		db:                     db,
 		miner:                  miner,
 		chainConfig:            chainConfig,
 		engine:                 engine,
-		tmpdir:                 tmpdir,
 		blockBuilderParameters: blockBuilderParameters,
 		blockReader:            blockReader,
 	}

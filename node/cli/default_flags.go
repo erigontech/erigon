@@ -43,7 +43,9 @@ var DefaultFlags = []cli.Flag{
 	&PruneBlocksDistanceFlag,
 	&PruneModeFlag,
 	&utils.KeepExecutionProofsFlag,
-
+	&utils.FcuTimeoutFlag,
+	&utils.FcuBackgroundPruneFlag,
+	&utils.FcuBackgroundCommitFlag,
 	&BatchSizeFlag,
 	&BodyCacheLimitFlag,
 	&DatabaseVerbosityFlag,
@@ -84,6 +86,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcAccessListFlag,
 	&utils.RpcTraceCompatFlag,
 	&utils.RpcGasCapFlag,
+	&utils.RpcBlockRangeLimit,
 	&utils.RpcBatchLimit,
 	&utils.RpcReturnDataLimit,
 	&utils.AllowUnprotectedTxs,
@@ -255,4 +258,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.GDBMeFlag,
 
 	&utils.ExperimentalConcurrentCommitmentFlag,
+
+	&utils.MCPAddrFlag,
+	&utils.MCPPortFlag,
 }

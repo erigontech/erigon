@@ -25,106 +25,68 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/c2h5oh/datasize"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/stagedsync/bodydownload"
 	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/node/shards"
 )
 
-// The number of blocks we should be able to re-org sub-second on commodity hardware.
-// See https://hackmd.io/TdJtNs0dS56q-In8h-ShSg
-const ShortPoSReorgThresholdBlocks = 10
-
 type HeadersCfg struct {
-	db                kv.RwDB
 	hd                *headerdownload.HeaderDownload
-	bodyDownload      *bodydownload.BodyDownload
 	chainConfig       *chain.Config
 	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) ([64]byte, bool)
 	announceNewHashes func(context.Context, []headerdownload.Announce)
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
-	batchSize         datasize.ByteSize
 	noP2PDiscovery    bool
-	tmpdir            string
-
-	blockReader   services.FullBlockReader
-	blockWriter   *blockio.BlockWriter
-	notifications *shards.Notifications
-
-	syncConfig ethconfig.Sync
+	blockReader       services.FullBlockReader
+	syncConfig        ethconfig.Sync
 }
 
 func StageHeadersCfg(
-	db kv.RwDB,
 	headerDownload *headerdownload.HeaderDownload,
-	bodyDownload *bodydownload.BodyDownload,
 	chainConfig *chain.Config,
 	syncConfig ethconfig.Sync,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) ([64]byte, bool),
 	announceNewHashes func(context.Context, []headerdownload.Announce),
 	penalize func(context.Context, []headerdownload.PenaltyItem),
-	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
 	blockReader services.FullBlockReader,
-	blockWriter *blockio.BlockWriter,
-	tmpdir string,
-	notifications *shards.Notifications,
 ) HeadersCfg {
 	return HeadersCfg{
-		db:                db,
 		hd:                headerDownload,
-		bodyDownload:      bodyDownload,
 		chainConfig:       chainConfig,
 		syncConfig:        syncConfig,
 		headerReqSend:     headerReqSend,
 		announceNewHashes: announceNewHashes,
 		penalize:          penalize,
-		batchSize:         batchSize,
-		tmpdir:            tmpdir,
 		noP2PDiscovery:    noP2PDiscovery,
 		blockReader:       blockReader,
-		blockWriter:       blockWriter,
-		notifications:     notifications,
 	}
 }
 
 func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, test bool, logger log.Logger) error {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
 	if s.CurrentSyncCycle.IsInitialCycle {
 		if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.blockReader); err != nil {
 			return err
 		}
 	}
 	cfg.hd.Progress()
-	return HeadersPOW(s, u, ctx, tx, cfg, test, useExternalTx, logger)
+	return HeadersPOW(s, u, ctx, tx, cfg, test, logger)
 
 }
 
 // HeadersPOW progresses Headers stage for Proof-of-Work headers
-func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, test bool, useExternalTx bool, logger log.Logger) error {
+func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, test bool, logger log.Logger) error {
 	var err error
 
 	startTime := time.Now()
@@ -340,11 +302,6 @@ Loop:
 			return fmt.Errorf("[%s] saving Headers progress: %w", logPrefix, err)
 		}
 	}
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
 	if stopped {
 		return common.ErrStopped
 	}
@@ -413,15 +370,6 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 
 func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, test bool) (err error) {
 	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
-
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(context.Background())
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
 	// Delete canonical hashes that are being unwound
 	unwindBlock := (u.Reason.Block != nil)
 	badBlock := false
@@ -519,11 +467,6 @@ func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwT
 			return err
 		}
 		if err = s.Update(tx, maxNum); err != nil {
-			return err
-		}
-	}
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}

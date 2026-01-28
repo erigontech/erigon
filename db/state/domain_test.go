@@ -121,7 +121,11 @@ func TestDomain_OpenFolder(t *testing.T) {
 
 	db, d, txs := filledDomain(t, log.New())
 
-	collateAndMerge(t, db, nil, d, txs)
+	err := db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
+		collateAndMerge(t, tx, d, txs)
+		return nil
+	})
+	require.NoError(t, err)
 
 	list := d._visible.files
 	require.NotEmpty(t, list)
@@ -129,7 +133,7 @@ func TestDomain_OpenFolder(t *testing.T) {
 	fn := ff.src.decompressor.FilePath()
 	d.Close()
 
-	err := dir.RemoveFile(fn)
+	err = dir.RemoveFile(fn)
 	require.NoError(t, err)
 	err = os.WriteFile(fn, make([]byte, 33), 0644)
 	require.NoError(t, err)
@@ -204,11 +208,13 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		c, err := d.collate(ctx, 0, 0, 16, tx)
 
 		require.NoError(t, err)
-		require.True(t, strings.HasSuffix(c.valuesPath, "v1.1-accounts.0-1.kv"))
+		require.True(t, strings.HasSuffix(c.valuesPath, "v2.0-accounts.0-1.kv"))
 		require.Equal(t, 2, c.valuesCount)
-		require.True(t, strings.HasSuffix(c.historyPath, "v1.1"+
+		require.True(t, strings.HasSuffix(c.historyPath, "v2.0"+
 			"-accounts.0-1.v"))
-		require.Equal(t, seg.WordsAmount2PagesAmount(3, d.HistoryValuesOnCompressedPage), c.historyComp.Count())
+
+		require.Equal(t, seg.WordsAmount2PagesAmount(3, d.CompressorCfg.ValuesOnCompressedPage), 1) // 16 valus per page
+		require.Equal(t, 3, c.historyComp.Count())                                                  // no compression on collate
 		require.Equal(t, 2*c.valuesCount, c.efHistoryComp.Count())
 
 		sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
@@ -474,28 +480,19 @@ func TestHistory(t *testing.T) {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	db, d, txs := filledDomain(t, logger)
-	//ctx := context.Background()
-	//tx, err := db.BeginRw(ctx)
-	//require.NoError(t, err)
-	//defer tx.Rollback()
-
-	collateAndMerge(t, db, nil, d, txs)
+	err := db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
+		collateAndMerge(t, tx, d, txs)
+		return nil
+	})
+	require.NoError(t, err)
 	checkHistory(t, db, d, txs)
 }
 
-func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64) {
+func collateAndMerge(t *testing.T, tx kv.RwTx, d *Domain, txs uint64) {
 	t.Helper()
-
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	ctx := context.Background()
-	var err error
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = db.BeginRwNosync(ctx)
-		require.NoError(t, err)
-		defer tx.Rollback()
-	}
 	// Leave the last 2 aggregation steps un-collated
 	for step := kv.Step(0); step < kv.Step(txs/d.stepSize)-1; step++ {
 		c, err := d.collate(ctx, step, uint64(step)*d.stepSize, uint64(step+1)*d.stepSize, tx)
@@ -535,13 +532,9 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 			break
 		}
 	}
-	if !useExternalTx {
-		err := tx.Commit()
-		require.NoError(t, err)
-	}
 }
 
-func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prune bool) {
+func collateAndMergeOnceWithScanPrune(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prune bool) {
 	t.Helper()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -582,6 +575,47 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prun
 	}
 }
 
+func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prune bool) {
+	t.Helper()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	ctx := context.Background()
+	txFrom, txTo := uint64(step)*d.stepSize, uint64(step+1)*d.stepSize
+
+	c, err := d.collate(ctx, step, txFrom, txTo, tx)
+	require.NoError(t, err)
+
+	sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
+	require.NoError(t, err)
+	d.integrateDirtyFiles(sf, txFrom, txTo)
+	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+
+	if prune {
+		domainRoTx := d.BeginFilesRo()
+		stat, err := domainRoTx.OldPrune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
+		t.Logf("prune stat: %s  (%d-%d)", stat, txFrom, txTo)
+		require.NoError(t, err)
+		domainRoTx.Close()
+	}
+
+	maxSpan := d.stepSize * config3.DefaultStepsInFrozenFile
+	for {
+		domainRoTx := d.BeginFilesRo()
+		r := domainRoTx.findMergeRange(domainRoTx.files.EndTxNum(), maxSpan)
+		if !r.any() {
+			domainRoTx.Close()
+			break
+		}
+		valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
+		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
+		require.NoError(t, err)
+
+		d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
+		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+		domainRoTx.Close()
+	}
+}
+
 func TestDomain_MergeFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -594,7 +628,7 @@ func TestDomain_MergeFiles(t *testing.T) {
 	rwTx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 
-	collateAndMerge(t, db, rwTx, d, txs)
+	collateAndMerge(t, rwTx, d, txs)
 	err = rwTx.Commit()
 	require.NoError(t, err)
 	checkHistory(t, db, d, txs)
@@ -609,7 +643,11 @@ func TestDomain_ScanFiles(t *testing.T) {
 
 	logger := log.New()
 	db, d, txs := filledDomain(t, logger)
-	collateAndMerge(t, db, nil, d, txs)
+	err := db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
+		collateAndMerge(t, tx, d, txs)
+		return nil
+	})
+	require.NoError(t, err)
 	// Recreate domain and re-scan the files
 	domainRoTx := d.BeginFilesRo()
 	defer domainRoTx.Close()
@@ -707,7 +745,7 @@ func TestDomain_Delete(t *testing.T) {
 	}
 	err = writer.Flush(ctx, tx)
 	require.NoError(err)
-	collateAndMerge(t, db, tx, d, 1000)
+	collateAndMerge(t, tx, d, 1000)
 	domainRoTx.Close()
 
 	// Check the history
@@ -779,7 +817,11 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 	logger := log.New()
 	keyCount, txCount := uint64(4), uint64(64)
 	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, 16, logger)
-	collateAndMerge(t, db, nil, dom, txCount)
+	err := db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
+		collateAndMerge(t, tx, dom, txCount)
+		return nil
+	})
+	require.NoError(t, err)
 	maxFrozenFiles := (txCount / dom.stepSize) / config3.DefaultStepsInFrozenFile
 
 	ctx := context.Background()
@@ -1149,10 +1191,12 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	c, err := d.collate(ctx, 0, 0, maxTx, tx)
 
 	require.NoError(t, err)
-	require.True(t, strings.HasSuffix(c.valuesPath, "v1.1-accounts.0-1.kv"))
+	require.True(t, strings.HasSuffix(c.valuesPath, "v2.0-accounts.0-1.kv"))
 	require.Equal(t, 3, c.valuesCount)
-	require.True(t, strings.HasSuffix(c.historyPath, "v1.1-accounts.0-1.v"))
-	require.Equal(t, seg.WordsAmount2PagesAmount(int(3*maxTx), d.Hist.HistoryValuesOnCompressedPage), c.historyComp.Count())
+	require.True(t, strings.HasSuffix(c.historyPath, "v2.0-accounts.0-1.v"))
+
+	require.Equal(t, seg.WordsAmount2PagesAmount(int(3*maxTx), d.CompressorCfg.ValuesOnCompressedPage), 469) // because 646 values at one page
+	require.Equal(t, int(3*maxTx), c.historyComp.Count())                                                    // no compression on collate
 	require.Equal(t, 3, c.efHistoryComp.Count()/2)
 
 	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
@@ -1482,7 +1526,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	require.NoError(err)
 
 	// aggregate
-	collateAndMerge(t, db, tx, d, totalTx)
+	collateAndMerge(t, tx, d, totalTx)
 	require.NoError(tx.Commit())
 
 	tx, err = db.BeginRw(context.Background())
@@ -1570,7 +1614,7 @@ func TestDomainRange(t *testing.T) {
 	require.NoError(err)
 
 	// aggregate
-	collateAndMerge(t, db, tx, d, totalTx)
+	collateAndMerge(t, tx, d, totalTx)
 	require.NoError(tx.Commit())
 
 	tx, err = db.BeginRw(ctx)
@@ -1625,7 +1669,104 @@ func TestDomainRange(t *testing.T) {
 	}
 }
 
-func TestDomain_CanPruneAfterAggregation(t *testing.T) {
+func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	aggStep, ctx := uint64(25), context.Background()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, aggStep, log.New())
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	d.HistoryLargeValues = false
+	d.History.Compression = seg.CompressKeys | seg.CompressVals
+	d.Compression = seg.CompressKeys | seg.CompressVals
+	d.FilenameBase = kv.CommitmentDomain.String()
+
+	domainRoTx := d.BeginFilesRo()
+	defer domainRoTx.Close()
+	writer := domainRoTx.NewWriter()
+	defer writer.Close()
+
+	keySize1 := uint64(length.Addr)
+	keySize2 := uint64(length.Addr + length.Hash)
+	totalTx := uint64(5000)
+	keyTxsLimit := uint64(50)
+	keyLimit := uint64(200)
+	// Put some kvs
+	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
+	for key, updates := range data {
+		p := []byte{}
+		for i := 0; i < len(updates); i++ {
+			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p, 0)
+			p = common.Copy(updates[i].value)
+		}
+	}
+
+	err = writer.Flush(context.Background(), tx)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+
+	tx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domainRoTx.Close()
+
+	stepToPrune := kv.Step(2)
+	collateAndMergeOnceWithScanPrune(t, d, tx, stepToPrune, true)
+
+	domainRoTx = d.BeginFilesRo()
+
+	can, untilStep := domainRoTx.canScanPruneDomainTables(tx, aggStep)
+	defer domainRoTx.Close()
+	require.Falsef(t, can, "those step is already pruned")
+	require.Equal(t, stepToPrune, untilStep)
+
+	stepToPrune = 3
+	collateAndMergeOnceWithScanPrune(t, d, tx, stepToPrune, false)
+
+	// refresh file list
+	domainRoTx = d.BeginFilesRo()
+	t.Logf("pruning step %d", stepToPrune)
+	can, untilStep = domainRoTx.canScanPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune))
+	require.True(t, can, "third step is not yet pruned")
+	require.LessOrEqual(t, stepToPrune, untilStep)
+
+	can, untilStep = domainRoTx.canScanPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune)+(aggStep/2))
+	require.True(t, can, "third step is not yet pruned, we are checking for a half-step after it and still have something to prune")
+	require.LessOrEqual(t, stepToPrune, untilStep)
+	domainRoTx.Close()
+
+	stepToPrune = 30
+	collateAndMergeOnceWithScanPrune(t, d, tx, stepToPrune, true)
+
+	domainRoTx = d.BeginFilesRo()
+	can, untilStep = domainRoTx.canScanPruneDomainTables(tx, aggStep*uint64(stepToPrune))
+	require.False(t, can, "latter step is not yet pruned")
+	require.Equal(t, stepToPrune, untilStep)
+	domainRoTx.Close()
+
+	stepToPrune = 35
+	collateAndMergeOnceWithScanPrune(t, d, tx, stepToPrune, false)
+
+	domainRoTx = d.BeginFilesRo()
+	t.Logf("pruning step %d", stepToPrune)
+	can, untilStep = domainRoTx.canScanPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune))
+	require.True(t, can, "third step is not yet pruned")
+	require.LessOrEqual(t, stepToPrune, untilStep)
+
+	can, untilStep = domainRoTx.canScanPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune)+(aggStep/2))
+	require.True(t, can, "third step is not yet pruned, we are checking for a half-step after it and still have something to prune")
+	require.LessOrEqual(t, stepToPrune, untilStep)
+	domainRoTx.Close()
+}
+
+func TestDomain_CanHashPruneAfterAggregation(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
@@ -1769,7 +1910,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	require.NoError(t, err)
 
 	// aggregate
-	collateAndMerge(t, db, tx, d, totalTx) // expected to left 2 latest steps in db
+	collateAndMerge(t, tx, d, totalTx) // expected to left 2 latest steps in db
 
 	require.NoError(t, tx.Commit())
 
@@ -2435,7 +2576,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	require.NoError(t, err)
 
 	// aggregate
-	collateAndMerge(t, db, tx, d, totalTx) // expected to left 2 latest steps in db
+	collateAndMerge(t, tx, d, totalTx) // expected to left 2 latest steps in db
 
 	require.NoError(t, tx.Commit())
 
@@ -2543,7 +2684,11 @@ func testTraceKey(t *testing.T, largeVals bool) {
 	d.HistoryLargeValues = largeVals
 
 	txs := fillDomain(t, d, db, logger)
-	collateAndMerge(t, db, nil, d, txs)
+	err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
+		collateAndMerge(t, tx, d, txs)
+		return nil
+	})
+	require.NoError(t, err)
 
 	roTx, err := db.BeginRo(ctx)
 	require.NoError(t, err)
@@ -2644,7 +2789,7 @@ func TestCommitmentDomain_DebugRangeLatest(t *testing.T) {
 	require.NoError(t, err)
 
 	// Collate and merge to create files
-	collateAndMerge(t, db, tx, d, txs)
+	collateAndMerge(t, tx, d, txs)
 	require.NoError(t, tx.Commit())
 
 	// verify iteration
@@ -2754,7 +2899,7 @@ func TestDomain_DebugRangeLatestFromFiles(t *testing.T) {
 	require.NoError(t, err)
 
 	// Collate and merge to create files
-	collateAndMerge(t, db, tx, d, txs)
+	collateAndMerge(t, tx, d, txs)
 	require.NoError(t, tx.Commit())
 
 	// Phase 2: Write keys 11-20 directly to MDBX (will NOT be in files because we will not merge after this step)

@@ -591,7 +591,7 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 
 	curTaskGasPerSec := int64(float64(curTaskGas) / seconds)
 
-	uncommitedGas := uint64(te.executedGas.Load() - te.committedGas)
+	uncommitedGas := uint64(te.executedGas.Load() - te.committedGas.Load())
 	sizeEstimate := rs.SizeEstimate()
 
 	switch ex.(type) {
@@ -745,12 +745,12 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart ti
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevCommitTime)
 
-	committedGasSec := uint64(float64(te.committedGas-p.prevCommittedGas) / interval.Seconds())
+	committedGasSec := uint64(float64(te.committedGas.Load()-p.prevCommittedGas) / interval.Seconds())
 	var committedTxSec uint64
-	if te.lastCommittedTxNum > p.prevCommittedTxNum {
-		committedTxSec = uint64(float64(te.lastCommittedTxNum-p.prevCommittedTxNum) / interval.Seconds())
+	if te.lastCommittedTxNum.Load() > p.prevCommittedTxNum {
+		committedTxSec = uint64(float64(te.lastCommittedTxNum.Load()-p.prevCommittedTxNum) / interval.Seconds())
 	}
-	committedDiffBlocks := max(int64(te.lastCommittedBlockNum)-int64(p.prevCommittedBlockNum), 0)
+	committedDiffBlocks := max(int64(te.lastCommittedBlockNum.Load())-int64(p.prevCommittedBlockNum), 0)
 
 	var commitedBlockDur time.Duration
 
@@ -802,17 +802,17 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart ti
 		"buf", common.ByteCount(uint64(metricsSnapshot.PutCacheSize + metricsSnapshot.GetCacheSize)),
 	}
 
-	p.log("committed", suffix, te, rs, interval, te.lastCommittedBlockNum, committedDiffBlocks,
-		te.lastCommittedTxNum-p.prevCommittedTxNum, committedTxSec, committedGasSec, 0, stepsInDb, commitVals)
+	p.log("committed", suffix, te, rs, interval, te.lastCommittedBlockNum.Load(), committedDiffBlocks,
+		te.lastCommittedTxNum.Load()-p.prevCommittedTxNum, committedTxSec, committedGasSec, 0, stepsInDb, commitVals)
 
 	p.prevDomainMetrics = updateExecDomainMetrics(metricsSnapshot, p.prevDomainMetrics, interval, false)
 
 	p.prevCommitTime = currentTime
 
-	if te.lastCommittedTxNum > 0 {
-		p.prevCommittedTxNum = te.lastCommittedTxNum
-		p.prevCommittedGas = te.committedGas
-		p.prevCommittedBlockNum = te.lastCommittedBlockNum
+	if te.lastCommittedTxNum.Load() > 0 {
+		p.prevCommittedTxNum = te.lastCommittedTxNum.Load()
+		p.prevCommittedGas = te.committedGas.Load()
+		p.prevCommittedBlockNum = te.lastCommittedBlockNum.Load()
 	}
 }
 
@@ -831,19 +831,19 @@ func (p *Progress) LogComplete(rs *state.StateV3, ex executor, stepsInDb float64
 		suffix = " serial"
 	}
 
-	gas := te.committedGas
+	gas := te.committedGas.Load()
 
 	if gas == 0 {
 		gas = te.executedGas.Load()
 	}
 
-	lastTxNum := te.lastCommittedTxNum
+	lastTxNum := te.lastCommittedTxNum.Load()
 
 	if lastTxNum == 0 {
 		lastTxNum = uint64(te.lastExecutedTxNum.Load())
 	}
 
-	lastBlockNum := te.lastCommittedBlockNum
+	lastBlockNum := te.lastCommittedBlockNum.Load()
 
 	if lastBlockNum == 0 {
 		lastBlockNum = uint64(te.lastExecutedBlockNum.Load())
@@ -892,7 +892,7 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 	if stepsInDb > 0 {
 		vals = append(vals, []any{
 			"stepsInDB", fmt.Sprintf("%.2f", stepsInDb),
-			"step", fmt.Sprintf("%.1f", float64(te.lastCommittedTxNum)/float64(te.agg.StepSize())),
+			"step", fmt.Sprintf("%.1f", float64(te.lastCommittedTxNum.Load())/float64(te.agg.StepSize())),
 		}...)
 	}
 

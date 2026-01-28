@@ -147,13 +147,13 @@ func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 	_min = fromTxNum
 	_max, _ = txNumsReader.Max(ctx, tx, fromBlock)
 
-	logIdxAfterTxTx, err := db.BeginTemporalRo(ctx)
+	logIdxTx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
-	defer logIdxAfterTxTx.Rollback()
+	defer logIdxTx.Rollback()
 
-	logIdxAfterTxIt, err := logIdxAfterTxTx.Debug().TraceKey(kv.ReceiptDomain, rawtemporaldb.LogIndexAfterTxKey, fromTxNum, toTxNum+1)
+	logIdxAfterTxIt, err := logIdxTx.Debug().TraceKey(kv.ReceiptDomain, rawtemporaldb.LogIndexAfterTxKey, fromTxNum, toTxNum+1)
 	if err != nil {
 		return err
 	}

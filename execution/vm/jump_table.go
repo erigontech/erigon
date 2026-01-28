@@ -26,7 +26,7 @@ import (
 )
 
 type (
-	executionFunc func(pc uint64, interpreter *EVMInterpreter, callContext *CallContext) (uint64, []byte, error)
+	executionFunc func(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, error)
 	gasFunc       func(*EVM, *CallContext, uint64, uint64) (uint64, error) // last parameter is the requested memory size as a uint64
 	// memorySizeFunc returns the required size, and whether the operation overflowed a uint64
 	memorySizeFunc func(*CallContext) (size uint64, overflow bool)
@@ -67,6 +67,7 @@ var (
 	cancunInstructionSet           = newCancunInstructionSet()
 	pragueInstructionSet           = newPragueInstructionSet()
 	osakaInstructionSet            = newOsakaInstructionSet()
+	amsterdamInstructionSet        = newAmsterdamInstructionSet()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
@@ -88,6 +89,20 @@ func validateAndFillMaxStack(jt *JumpTable) {
 		}
 		op.maxStack = maxStack(op.numPop, op.numPush)
 	}
+}
+
+func newAmsterdamInstructionSet() JumpTable {
+	instructionSet := newOsakaInstructionSet()
+	enable8024(&instructionSet) // EIP-8024 (DUPN, SWAPN, EXCHANGE)
+	validateAndFillMaxStack(&instructionSet)
+	return instructionSet
+}
+
+func newOsakaInstructionSet() JumpTable {
+	instructionSet := newPragueInstructionSet()
+	enable7939(&instructionSet) // EIP-7939 (CLZ opcode)
+	validateAndFillMaxStack(&instructionSet)
+	return instructionSet
 }
 
 // newPragueInstructionSet returns the frontier, homestead, byzantium,
@@ -285,13 +300,6 @@ func newHomesteadInstructionSet() JumpTable {
 		memorySize:  memoryDelegateCall,
 		string:      stDelegateCall,
 	}
-	validateAndFillMaxStack(&instructionSet)
-	return instructionSet
-}
-
-func newOsakaInstructionSet() JumpTable {
-	instructionSet := newPragueInstructionSet()
-	enable7939(&instructionSet) // EIP-7939 (CLZ opcode)
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }

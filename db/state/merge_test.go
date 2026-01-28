@@ -603,7 +603,11 @@ func TestMergeFiles(t *testing.T) {
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	collateAndMerge(t, db, nil, d, txs)
+	err = db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
+		collateAndMerge(t, tx, d, txs)
+		return nil
+	})
+	require.NoError(t, err)
 
 	rwTx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)

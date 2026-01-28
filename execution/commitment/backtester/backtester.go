@@ -25,6 +25,8 @@ import (
 	"os"
 	"path"
 	"runtime/pprof"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/felixge/fgprof"
@@ -45,6 +47,12 @@ type Opt func(bt *Backtester)
 func WithParaTrie(paraTrie bool) Opt {
 	return func(bt *Backtester) {
 		bt.paraTrie = paraTrie
+	}
+}
+
+func WithTrieWarmup(trieWarmup bool) Opt {
+	return func(bt *Backtester) {
+		bt.trieWarmup = trieWarmup
 	}
 }
 
@@ -81,6 +89,7 @@ type Backtester struct {
 	blockReader     services.FullBlockReader
 	outputDir       string
 	paraTrie        bool
+	trieWarmup      bool
 	metricsTopN     uint64
 	metricsPageSize uint64
 }
@@ -132,8 +141,14 @@ func (bt Backtester) run(ctx context.Context, tx kv.TemporalTx, fromBlock uint64
 	if err != nil {
 		return err
 	}
-	runId := fmt.Sprintf("%d_%d_%d", fromBlock, toBlock, start.Unix())
-	runOutputDir := path.Join(bt.outputDir, runId)
+	ri := runId{
+		paraTrie:   bt.paraTrie,
+		trieWarmup: bt.trieWarmup,
+		fromBlock:  fromBlock,
+		toBlock:    toBlock,
+		start:      start,
+	}
+	runOutputDir := path.Join(bt.outputDir, ri.String())
 	err = os.MkdirAll(runOutputDir, 0755)
 	if err != nil {
 		return err
@@ -184,12 +199,13 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 		return err
 	}
 	defer sd.Close()
-	if bt.paraTrie {
-		sd.SetParaTrieDB(bt.db)
+	if bt.trieWarmup {
+		sd.EnableParaTrieDB(bt.db)
+		sd.EnableTrieWarmup(true)
 	}
-	//
-	// TODO add flag for warmup too
-	//
+	if bt.paraTrie {
+		sd.EnableParaTrieDB(bt.db)
+	}
 	sd.GetCommitmentCtx().SetStateReader(newBacktestStateReader(tx, fromTxNum, toTxNum))
 	sd.GetCommitmentCtx().SetTrace(bt.logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentCtx().EnableCsvMetrics(deriveBlockMetricsFilePrefix(blockOutputDir))
@@ -379,6 +395,54 @@ func checkDataAvailable(ctx context.Context, tx kv.TemporalTx, fromBlock uint64,
 		return fmt.Errorf("history not available for given end: %d > %d", toTxNum, historyAvailableToTxNum)
 	}
 	return nil
+}
+
+type runId struct {
+	paraTrie   bool
+	trieWarmup bool
+	fromBlock  uint64
+	toBlock    uint64
+	start      time.Time
+}
+
+func (ri runId) String() string {
+	var sb strings.Builder
+	if ri.paraTrie {
+		sb.WriteString("para")
+	} else {
+		sb.WriteString("hph")
+	}
+	if ri.trieWarmup {
+		sb.WriteString("_warm")
+	} else {
+		sb.WriteString("_nowarm")
+	}
+	return fmt.Sprintf("%s_%d_%d_%d", sb.String(), ri.fromBlock, ri.toBlock, ri.start.Unix())
+}
+
+func extractRunId(s string) runId {
+	parts := strings.Split(s, "_")
+	paraTrie := parts[0] == "para"
+	trieWarmup := parts[1] == "warm"
+	fromBlock, err := strconv.ParseUint(parts[2], 10, 64)
+	if err != nil {
+		panic(fmt.Errorf("extractRunId failed to parse fromBlock: %w", err))
+	}
+	toBlock, err := strconv.ParseUint(parts[3], 10, 64)
+	if err != nil {
+		panic(fmt.Errorf("extractRunId failed to parse toBlock: %w", err))
+	}
+	startUnix, err := strconv.ParseInt(parts[4], 10, 64)
+	if err != nil {
+		panic(fmt.Errorf("extractRunId failed to parse start: %w", err))
+	}
+	return runId{
+		paraTrie:   paraTrie,
+		trieWarmup: trieWarmup,
+		fromBlock:  fromBlock,
+		toBlock:    toBlock,
+		start:      time.Unix(startUnix, 0),
+	}
 }
 
 func deriveBlockOutputDir(runOutputDir string, block uint64) string {

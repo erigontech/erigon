@@ -29,7 +29,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -622,9 +622,7 @@ func calculateBenchStats(durations []time.Duration) BenchStats {
 	// Sort for percentile calculations
 	sorted := make([]time.Duration, len(durations))
 	copy(sorted, durations)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i] < sorted[j]
-	})
+	slices.Sort(sorted)
 
 	// Calculate basic stats
 	var total time.Duration

@@ -41,6 +41,7 @@ func (n *noopPatriciaContext) PutBranch(prefix, data, prevData []byte, prevStep 
 }
 func (n *noopPatriciaContext) Account(plainKey []byte) (*Update, error) { return nil, nil }
 func (n *noopPatriciaContext) Storage(plainKey []byte) (*Update, error) { return nil, nil }
+func (n *noopPatriciaContext) TxNum() uint64                            { return 0 }
 
 func noopCtxFactory() (PatriciaContext, func()) {
 	return &noopPatriciaContext{}, nil
