@@ -79,6 +79,7 @@ var (
 var (
 	benchSampleSize int
 	benchSeed       int64
+	benchUseGetAsOf bool
 )
 
 func init() {
@@ -126,6 +127,7 @@ func init() {
 	withConfig(cmdCommitmentBenchLookup)
 	cmdCommitmentBenchLookup.Flags().IntVar(&benchSampleSize, "sample-size", 10000000, "number of random keys to sample via reservoir sampling")
 	cmdCommitmentBenchLookup.Flags().Int64Var(&benchSeed, "seed", 0, "random seed for sampling (0 = use current time)")
+	cmdCommitmentBenchLookup.Flags().BoolVar(&benchUseGetAsOf, "use-get-as-of", false, "use GetAsOf(math.MaxUint64) instead of GetLatest() for lookups")
 	commitmentCmd.AddCommand(cmdCommitmentBenchLookup)
 
 	rootCmd.AddCommand(commitmentCmd)
@@ -469,12 +471,20 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 		return fmt.Errorf("failed to begin temporal tx: %w", err)
 	}
 	defer tx.Rollback()
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
-	if err != nil {
-		return fmt.Errorf("failed to create shared domains: %w", err)
+
+	var commitmentReader commitmentdb.StateReader
+	if benchUseGetAsOf {
+		logger.Info("Using GetAsOf(math.MaxUint64) for lookups")
+		commitmentReader = commitmentdb.NewHistoryStateReader(tx, math.MaxUint64)
+	} else {
+		logger.Info("Using GetLatest() for lookups")
+		sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+		if err != nil {
+			return fmt.Errorf("failed to create shared domains: %w", err)
+		}
+		defer sd.Close()
+		commitmentReader = commitmentdb.NewLatestStateReader(tx, sd)
 	}
-	defer sd.Close()
-	commitmentReader := commitmentdb.NewLatestStateReader(tx, sd)
 	durations := make([]time.Duration, len(keys))
 	var totalSize int64
 
