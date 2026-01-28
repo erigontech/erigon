@@ -198,8 +198,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				return b.HeaderNoCopy(), rwTx, nil
 			}
 			resetCommitmentGauges(ctx)
-			se.txExecutor.lastCommittedBlockNum = b.NumberU64()
-			se.txExecutor.lastCommittedTxNum = inputTxNum
+			se.txExecutor.lastCommittedBlockNum.Store(b.NumberU64())
+			se.txExecutor.lastCommittedTxNum.Store(inputTxNum)
 			se.logger.Info(
 				"periodic commit check",
 				"block", se.doms.BlockNum(),
@@ -238,9 +238,9 @@ func (se *serialExecutor) LogExecution() {
 }
 
 func (se *serialExecutor) LogCommitments(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
-	se.committedGas += int64(committedGas)
-	se.txExecutor.lastCommittedBlockNum += committedBlocks
-	se.txExecutor.lastCommittedTxNum += committedTransactions
+	se.committedGas.Add(int64(committedGas))
+	se.txExecutor.lastCommittedBlockNum.Add(committedBlocks)
+	se.txExecutor.lastCommittedTxNum.Add(committedTransactions)
 	se.progress.LogCommitments(se.rs.StateV3, se, commitStart, stepsInDb, lastProgress)
 }
 
