@@ -90,16 +90,16 @@ type SharedDomains struct {
 	metrics           changeset.DomainMetrics
 
 	// ctx is a general-purpose context map for storing auxiliary data like caches
-	ctx map[string]interface{}
+	auxilaryObjects map[string]interface{}
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
-		metrics:  changeset.DomainMetrics{Domains: map[kv.Domain]*changeset.DomainIOMetrics{}},
-		stepSize: tx.Debug().StepSize(),
-		ctx:      make(map[string]interface{}),
+		metrics:         changeset.DomainMetrics{Domains: map[kv.Domain]*changeset.DomainIOMetrics{}},
+		stepSize:        tx.Debug().StepSize(),
+		auxilaryObjects: make(map[string]interface{}),
 	}
 
 	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
@@ -220,28 +220,28 @@ func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 // GetCtx returns a value from the context map by key.
 // Returns nil if the key does not exist.
 func (sd *SharedDomains) GetCtx(key string) interface{} {
-	return sd.ctx[key]
+	return sd.auxilaryObjects[key]
 }
 
 // SetCtx stores a value in the context map with the given key.
 func (sd *SharedDomains) SetCtx(key string, value interface{}) {
-	sd.ctx[key] = value
+	sd.auxilaryObjects[key] = value
 }
 
 // HasCtx checks if a key exists in the context map.
 func (sd *SharedDomains) HasCtx(key string) bool {
-	_, ok := sd.ctx[key]
+	_, ok := sd.auxilaryObjects[key]
 	return ok
 }
 
 // DeleteCtx removes a key from the context map.
 func (sd *SharedDomains) DeleteCtx(key string) {
-	delete(sd.ctx, key)
+	delete(sd.auxilaryObjects, key)
 }
 
 // GetCodeCache returns the CodeCache from the context, or nil if not set.
 func (sd *SharedDomains) GetCodeCache() *cache.CodeCache {
-	if cc := sd.ctx[CtxKeyCodeCache]; cc != nil {
+	if cc := sd.auxilaryObjects[CtxKeyCodeCache]; cc != nil {
 		return cc.(*cache.CodeCache)
 	}
 	return nil
