@@ -17,60 +17,19 @@
 package executiontests
 
 import (
-	"crypto/ecdsa"
 	"math/big"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/testlog"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 )
-
-func newTester(t *testing.T, logger log.Logger) (EngineApiTester, *ecdsa.PrivateKey, *chain.Config) {
-	dataDir := t.TempDir()
-	genesis, coinbasePrivateKey := DefaultEngineApiTesterGenesis(t)
-	chainConfig := genesis.Config
-	chainConfig.ChainName = "test"
-	chainConfig.TerminalTotalDifficulty = big.NewInt(0)
-	chainConfig.ShanghaiTime = big.NewInt(0)
-	chainConfig.CancunTime = big.NewInt(0)
-	chainConfig.PragueTime = big.NewInt(0)
-	genesis.Timestamp = uint64(time.Now().Unix() - 1)
-	eat := InitialiseEngineApiTester(t, EngineApiTesterInitArgs{
-		Logger:      logger,
-		DataDir:     dataDir,
-		Genesis:     genesis,
-		CoinbaseKey: coinbasePrivateKey,
-	})
-	return eat, coinbasePrivateKey, chainConfig
-}
-
-func newSimpleTransferSignedTx(value uint64, chainConfig *chain.Config, privateKey *ecdsa.PrivateKey) (types.Transaction, error) {
-	tx, err := types.SignTx(types.NewEIP1559Transaction(
-		*uint256.NewInt(chainConfig.ChainID.Uint64()),
-		0,
-		common.Address{1},
-		uint256.NewInt(value),
-		params.TxGas,
-		uint256.NewInt(10*common.GWei),
-		uint256.NewInt(11*common.GWei),
-		uint256.NewInt(12*common.GWei),
-		nil),
-		*types.LatestSignerForChainID(chainConfig.ChainID),
-		privateKey)
-	return tx, err
-}
 
 func TestSendRawTransactionSync(t *testing.T) {
 	if testing.Short() {
@@ -78,12 +37,9 @@ func TestSendRawTransactionSync(t *testing.T) {
 	}
 
 	assert := require.New(t)
-	logger := testlog.Logger(t, log.LvlError)
+	eat := DefaultEngineApiTester(t)
 
-	eat, coinbasePrivateKey, chainConfig := newTester(t, logger)
-
-	value := uint64(1234)
-	tx, err := newSimpleTransferSignedTx(value, chainConfig, coinbasePrivateKey)
+	tx, err := eat.Transactor.CreateSimpleTransfer(eat.CoinbaseKey, common.Address{1}, big.NewInt(1234))
 	assert.NoError(err)
 
 	// Subscribe to pending transactions to see the arrival of the transaction at the mempool
@@ -125,7 +81,7 @@ func TestSendRawTransactionSync(t *testing.T) {
 	// Wait for eth_sendRawTransactionSync to return and the expected receipt to show up
 	wg.Wait()
 	assert.NoError(errSend)
-	assert.NotNil(t, receipt)
+	assert.NotNil(receipt)
 	assert.Equal(receipt.TxHash, tx.Hash())
 }
 
@@ -135,12 +91,9 @@ func TestSendRawTransactionSyncTimeout(t *testing.T) {
 	}
 
 	assert := require.New(t)
-	logger := testlog.Logger(t, log.LvlError)
+	eat := DefaultEngineApiTester(t)
 
-	eat, coinbasePrivateKey, chainConfig := newTester(t, logger)
-
-	value := uint64(1234)
-	tx, err := newSimpleTransferSignedTx(value, chainConfig, coinbasePrivateKey)
+	tx, err := eat.Transactor.CreateSimpleTransfer(eat.CoinbaseKey, common.Address{1}, big.NewInt(1234))
 	assert.NoError(err)
 
 	// Send the txn first time and just wait for timeout
