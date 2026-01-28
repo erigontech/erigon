@@ -670,7 +670,6 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 
 		logger.Info("Benchmarking file...",
 			"file", fname,
-			"totalFiles", len(historyFiles),
 			"startTxNum", startTxNum,
 			"endTxNum", endTxNum,
 			"range", txnumRange,
