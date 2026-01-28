@@ -25,7 +25,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/arb/multigas"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -65,8 +64,8 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			return multiGas, nil // SLOAD_GAS
 		}
 
+		var original uint256.Int
 		slotCommited := accounts.InternKey(x.Bytes32())
-		var original uint256.Int0
 		original, err := evm.IntraBlockState().GetCommittedState(callContext.Address(), slotCommited)
 		if err != nil {
 			return multigas.ZeroGas(), err
@@ -129,6 +128,9 @@ func gasSLoadEIP2929(evm *EVM, callContext *CallContext, scopeGas uint64, memory
 	loc := callContext.Stack.peek()
 	// If the caller cannot afford the cost, this change will be rolled back
 	// If he does afford it, we can skip checking the same thing later on, during execution
+	//if _, slotPresent := evm.IntraBlockState().SlotInAccessList(contract.Address(), loc.Bytes32()); !slotPresent {
+	//	evm.IntraBlockState().AddSlotToAccessList(contract.Address(), loc.Bytes32())
+
 	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), accounts.InternKey(loc.Bytes32())); slotMod {
 		// Cold slot access considered as storage access.
 		return multigas.MultiGasFromPairs(
@@ -191,12 +193,8 @@ func gasEip2929AccountCheck(evm *EVM, callContext *CallContext, scopeGas uint64,
 
 func makeCallVariantGasCallEIP2929(oldCalculator gasFunc, addressPosition int) gasFunc {
 	return func(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (multigas.MultiGas, error) {
-		var addr accounts.Address
-		if true { // MERGE_ARBITRUM
-			addr := accounts.InternAddress(callContext.Stack.Back(addressPosition).Bytes20())
-		} else {
-			addr := accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
-		}
+		addr := accounts.InternAddress(callContext.Stack.Back(addressPosition).Bytes20())
+		//addr := accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
 
 		// The WarmStorageReadCostEIP2929 (100) is already deducted in the form of a constant cost, so
 		// the cost to charge for cold access, if any, is Cold - Warm
@@ -207,19 +205,11 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc, addressPosition int) g
 		if addrMod {
 			// Charge the remaining difference here already, to correctly calculate available
 			// gas for call
-			if true { // MERGE_ARBITRUM
-				if !contract.UseMultiGas(multigas.StorageAccessGas(coldCost), evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess) {
-					return multigas.ZeroGas(), ErrOutOfGas
-				}
-			} else {
-				if _, ok := useGas(scopeGas, coldCost, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
-					return 0, ErrOutOfGas
-				}
+			// TODO scopeGas should be passed via callContext
+			if !callContext.UseMultiGas(multigas.StorageAccessGas(coldCost), evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess) {
+				return multigas.ZeroGas(), ErrOutOfGas
 			}
-
-			if false { // MERGE_ARBITRUM
-				scopeGas -= coldCost
-			}
+			//if scopeGas/_, ok := useGas(scopeGas, coldCost, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
 		}
 
 		// Now call the old calculator, which takes into account
@@ -235,20 +225,20 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc, addressPosition int) g
 		// add it to the returned gas. By adding it to the return, it will be charged
 		// outside of this function, as part of the dynamic gas, and that will make it
 		// also become correctly reported to tracers.
-		if true { // MERGE_ARBITRUM
-			contract.Gas += coldCost
-			contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindStorageAccess, coldCost)
+		//if true { // MERGE_ARBITRUM
+		callContext.gas += coldCost
+		callContext.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindStorageAccess, coldCost)
 
-			// Cold slot access considered as storage access.
-			// See rationale in: https://github.com/OffchainLabs/nitro/blob/master/docs/decisions/0002-multi-dimensional-gas-metering.md
-			var overflow bool
-			if multiGas, overflow = multiGas.SafeIncrement(multigas.ResourceKindStorageAccess, coldCost); overflow {
-				return multigas.ZeroGas(), ErrGasUintOverflow
-			}
-			return multiGas, nil
-		} else {
-			return gas + coldCost, nil
+		// Cold slot access considered as storage access.
+		// See rationale in: https://github.com/OffchainLabs/nitro/blob/master/docs/decisions/0002-multi-dimensional-gas-metering.md
+		var overflow bool
+		if multiGas, overflow = multiGas.SafeIncrement(multigas.ResourceKindStorageAccess, coldCost); overflow {
+			return multigas.ZeroGas(), ErrGasUintOverflow
 		}
+		return multiGas, nil
+		//} else {
+		//	return gas + coldCost, nil
+		//}
 	}
 }
 
@@ -330,7 +320,7 @@ var (
 func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 	return func(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (multigas.MultiGas, error) {
 		addr := accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
-		multiGas = multigas.ZeroGas()
+		multiGas := multigas.ZeroGas()
 		// Check slot presence in the access list
 		var dynCost uint64
 		if evm.intraBlockState.AddAddressToAccessList(addr) {
@@ -339,15 +329,10 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 			dynCost = params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
 			// Charge the remaining difference here already, to correctly calculate available
 			// gas for call
-			if true { // MERGE_ARBITRUM
-				if !contract.UseMultiGas(multigas.StorageAccessGas(dynCost), evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess) {
-					return multigas.ZeroGas(), ErrOutOfGas
-				}
-			} else {
-				if _, ok := useGas(scopeGas, dynCost, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
-					return 0, ErrOutOfGas
-				}
+			if !callContext.UseMultiGas(multigas.StorageAccessGas(dynCost), evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess) {
+				return multigas.ZeroGas(), ErrOutOfGas
 			}
+			//if _, ok := useGas(scopeGas, dynCost, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
 			// Cold slot access considered as storage access.
 			// See rationale in: https://github.com/OffchainLabs/nitro/blob/master/docs/decisions/0002-multi-dimensional-gas-metering.md
 			multiGas = multiGas.SaturatingIncrement(multigas.ResourceKindStorageAccess, dynCost)
@@ -366,15 +351,10 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 				ddCost = params.WarmStorageReadCostEIP2929
 			}
 
-			if true { // MERGE_ARBITRUM
-				if !contract.UseMultiGas(multigas.StorageAccessGas(ddCost), evm.Config().Tracer, tracing.GasChangeDelegatedDesignation) { // GasChangeCallStorageColdAccess
-					return multigas.ZeroGas(), ErrOutOfGas
-				}
-			} else {
-				if _, ok := useGas(scopeGas, ddCost, evm.Config().Tracer, tracing.GasChangeDelegatedDesignation); !ok {
-					return 0, ErrOutOfGas
-				}
+			if !callContext.UseMultiGas(multigas.StorageAccessGas(ddCost), evm.Config().Tracer, tracing.GasChangeDelegatedDesignation) { // GasChangeCallStorageColdAccess
+				return multigas.ZeroGas(), ErrOutOfGas
 			}
+			//if _, ok := useGas(scopeGas, ddCost, evm.Config().Tracer, tracing.GasChangeDelegatedDesignation); !ok {
 
 			// Target address resolution considered as storage access.
 			// See rationale in: https://github.com/OffchainLabs/nitro/blob/master/docs/decisions/0002-multi-dimensional-gas-metering.md
@@ -395,15 +375,14 @@ func makeCallVariantGasCallEIP7702(oldCalculator gasFunc) gasFunc {
 			// add it to the returned gas. By adding it to the return, it will be charged
 			// outside of this function, as part of the dynamic gas, and that will make it
 			// also become correctly reported to tracers.
-			contract.Gas += multiGas.SingleGas()
-			contract.RetainedMultiGas.SaturatingAddInto(multiGas)
+			callContext.gas += multiGas.SingleGas()
+			callContext.RetainedMultiGas.SaturatingAddInto(multiGas)
 		}
 
 		var overflow bool
 		if multiGas, overflow = multiGas.SafeAdd(multiOld); overflow {
 			return multigas.ZeroGas(), ErrGasUintOverflow
 		}
-
 		return multiGas, nil
 	}
 }

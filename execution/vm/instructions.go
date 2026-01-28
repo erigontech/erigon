@@ -653,12 +653,9 @@ func opExtCodeHash(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (
 }
 
 func opGasprice(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	if true { // MERGE_ARBITRUM
-		gasPrice := interpreter.evm.ProcessingHook.GasPriceOp(interpreter.evm.GasPrice)
-		scope.Stack.push(gasPrice)
-	} else {
-		scope.Stack.push(interpreter.evm.GasPrice)
-	}
+	gasPrice := interpreter.evm.ProcessingHook.GasPriceOp(interpreter.evm)
+	scope.Stack.push(*gasPrice)
+	//scope.Stack.push(interpreter.evm.GasPrice) in main
 	return pc, nil, nil
 }
 
@@ -674,7 +671,7 @@ func opBlockhash(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (ui
 	// Arbitrum
 	upper, err := interpreter.evm.ProcessingHook.L1BlockNumber(interpreter.evm.Context)
 	if err != nil {
-		return nil, err
+		return pc, nil, err
 	}
 	// upper = interpreter.evm.Context.BlockNumber // must be returned by default hook
 	if upper <= params.BlockHashOldWindow {
@@ -719,19 +716,13 @@ func opTimestamp(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (ui
 }
 
 func opNumber(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	if true { // MERGE_ARBITRUM
-		bnum, err := interpreter.evm.ProcessingHook.L1BlockNumber(interpreter.evm.Context)
-		if err != nil {
-			return nil, err
-		}
-
-		v := uint256.NewInt(bnum)
-		scope.Stack.push(v)
-	} else {
-		v := new(uint256.Int).SetUint64(interpreter.evm.Context.BlockNumber)
-		scope.Stack.push(*v)
-
+	bnum, err := interpreter.evm.ProcessingHook.L1BlockNumber(interpreter.evm.Context)
+	if err != nil {
+		return pc, nil, err
 	}
+
+	v := uint256.NewInt(bnum)
+	scope.Stack.push(*v)
 	return pc, nil, nil
 }
 
@@ -1000,13 +991,12 @@ func opCreate(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint6
 	// reuse size int for stackvalue
 	stackvalue := size
 
-	if true { // MERGE_ARBITRUM
-		scope.Contract.UseMultiGas(multigas.ComputationGas(gas), interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation)
-	} else {
-		scope.useGas(gas, interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation)
-	}
+	//if true { // MERGE_ARBITRUM
+	scope.UseMultiGas(multigas.ComputationGas(gas), interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation)
+	//scope.useGas(gas, interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation)
+	//}
 
-	res, addr, returnGas, usedMultiGas, suberr := interpreter.evm.Create(scope.Contract.Address(), input, gas, &value, false)
+	res, addr, returnGas, usedMultiGas, suberr := interpreter.evm.CreateWithContext(scope.Contract.Address(), input, gas, &value, false)
 
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
@@ -1023,10 +1013,11 @@ func opCreate(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint6
 	//scope.Stack.push(stackvalue) // TODO arbiturm does thtat but we get stack corruption if we do that here
 
 	scope.refundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
-	if true { // MERGE_ARBITRUM
-		scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
-		scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
-	}
+	//if true { // MERGE_ARBITRUM
+	scope.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
+	// TODO should be UseMultiGas but which deduction reason to use?
+	scope.UsedMultiGas.SaturatingAddInto(usedMultiGas)
+	//}
 
 	if suberr == ErrExecutionReverted {
 		interpreter.returnData = res // set REVERT data to return data buffer
@@ -1062,10 +1053,10 @@ func opCreate2(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint
 
 	// Apply EIP150
 	gas -= gas / 64
-	scope.Contract.UseMultiGas(multigas.ComputationGas(gas), interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation)
+	scope.UseMultiGas(multigas.ComputationGas(gas), interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation)
 	// reuse size int for stackvalue
 	stackValue := size
-	res, addr, returnGas, usedMultiGas, suberr := interpreter.evm.Create2(scope.Contract.Address(), input, gas, &endowment, &salt, false)
+	res, addr, returnGas, usedMultiGas, suberr := interpreter.evm.Create2(scope.Contract.Address(), input, gas, endowment, &salt, false)
 
 	// Push item on the stack based on the returned error.
 	if suberr != nil {
@@ -1353,11 +1344,11 @@ func opSelfdestruct6780(pc uint64, interpreter *EVMInterpreter, scope *CallConte
 		actingAddress := scope.Contract.Address()
 		code, err := interpreter.evm.intraBlockState.GetCode(actingAddress)
 		if err != nil {
-			return nil, err
+			return pc, nil, err
 		}
 
 		if state.IsStylusProgram(code) {
-			return nil, ErrExecutionReverted
+			return pc, nil, ErrExecutionReverted
 		}
 	}
 
@@ -1373,7 +1364,7 @@ func opSelfdestruct6780(pc uint64, interpreter *EVMInterpreter, scope *CallConte
 	interpreter.evm.IntraBlockState().Selfdestruct6780(callerAddr)
 
 	// TODO arbiturm ??? before we did not needed this one
-	if interpreter.evm.chainConfig.IsArbitrum() && beneficiary.Bytes20() == scope.Contract.Address() {
+	if interpreter.evm.chainConfig.IsArbitrum() && scope.Contract.Address().Cmp(beneficiaryAddr) == 0 {
 		// SelfDestruct6780 only destructs the contract if selfdestructing in the same transaction as contract creation
 		// So we only account for the balance burn if the contract is actually destructed by checking if the balance is zero.
 		if b, err := interpreter.evm.IntraBlockState().GetBalance(scope.Contract.Address()); err == nil && b.Sign() == 0 {

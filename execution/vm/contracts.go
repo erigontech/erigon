@@ -499,30 +499,6 @@ func modExpMultComplexityEip198(x uint32) uint64 {
 	}
 }
 
-// modExpMultComplexityEip198 implements modExp multiplication complexity formula, as defined in EIP-198
-//
-// def mult_complexity(x):
-//
-//	if x <= 64: return x ** 2
-//	elif x <= 1024: return x ** 2 // 4 + 96 * x - 3072
-//	else: return x ** 2 // 16 + 480 * x - 199680
-//
-// where is x is max(base_length, modulus_length)
-func modExpMultComplexityEip198(x uint32) uint64 {
-	xx := uint64(x) * uint64(x)
-	switch {
-	case x <= 64:
-		return xx
-	case x <= 1024:
-		// (x ** 2 // 4 ) + ( 96 * x - 3072)
-		return xx/4 + 96*uint64(x) - 3072
-	default:
-		// (x ** 2 // 16) + (480 * x - 199680)
-		// max value: 0x100001df'dffcf220
-		return xx/16 + 480*uint64(x) - 199680
-	}
-}
-
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bigModExp) RequiredGas(input []byte) uint64 {
 

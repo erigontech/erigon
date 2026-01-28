@@ -23,6 +23,7 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/arb/multigas"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -51,16 +52,32 @@ type Contract struct {
 	CodeHash accounts.CodeHash
 
 	value uint256.Int
+
+	// Arbitrum
+	delegateOrCallcode bool
+	// is the execution frame represented by this object a contract deployment
+	IsDeployment bool
+	IsSystemCall bool
+
+	// Arbitrum: total used multi-dimensional gas
+	Gas              uint64
+	UsedMultiGas     multigas.MultiGas
+	RetainedMultiGas multigas.MultiGas
 }
+
+// arbitrum
+func (c *Contract) IsDelegateOrCallcode() bool { return c.delegateOrCallcode }
 
 var jumpDestCache, _ = lru.New[accounts.CodeHash, bitvec](256)
 
 // NewContract returns a new contract environment for the execution of EVM.
 func NewContract(caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, value uint256.Int) *Contract {
 	return &Contract{
-		caller: callerAddress,
-		addr:   addr,
-		value:  value,
+		caller:           callerAddress,
+		addr:             addr,
+		value:            value,
+		UsedMultiGas:     multigas.ZeroGas(),
+		RetainedMultiGas: multigas.ZeroGas(),
 	}
 }
 

@@ -2,12 +2,13 @@ package chainparams
 
 import (
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // System Arbitrum contracts.
 var (
 	// SystemAddress is where the system-transaction is sent from as per EIP-4788
-	SystemAddress = common.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe")
+	SystemAddress = accounts.InternAddress(common.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe"))
 
 	// EIP-4788 - Beacon block root in the EVM
 	//BeaconRootsAddress = common.HexToAddress("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02")

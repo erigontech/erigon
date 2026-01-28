@@ -2,6 +2,7 @@ package costs
 
 import (
 	"fmt"
+	"github.com/erigontech/erigon/common/log/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/state"
@@ -18,14 +19,12 @@ import (
 
 // Computes the cost of doing a state load in wasm
 // Note: the code here is adapted from gasSLoadEIP2929
-func WasmStateLoadCost(db *state.IntraBlockState, program common.Address, key common.Hash) multigas.MultiGas {
-	programAcc := accounts.InternAddress(program)
-	storageKey := accounts.InternKey(key)
+func WasmStateLoadCost(db *state.IntraBlockState, program accounts.Address, storageKey accounts.StorageKey) multigas.MultiGas {
 	// Check slot presence in the access list
-	if _, slotPresent := db.SlotInAccessList(programAcc, storageKey); !slotPresent {
+	if _, slotPresent := db.SlotInAccessList(program, storageKey); !slotPresent {
 		// If the caller cannot afford the cost, this change will be rolled back
 		// If he does afford it, we can skip checking the same thing later on, during execution
-		db.AddSlotToAccessList(programAcc, storageKey)
+		db.AddSlotToAccessList(program, storageKey)
 
 		// TODO consider that og code counted only params.ColdSloadCostEIP2929
 		// Cold slot access considered as storage access + computation
@@ -41,22 +40,20 @@ func WasmStateLoadCost(db *state.IntraBlockState, program common.Address, key co
 // Computes the cost of doing a state store in wasm
 // Note: the code here is adapted from makeGasSStoreFunc with the most recent parameters as of The Merge
 // Note: the sentry check must be done by the caller
-func WasmStateStoreCost(db *state.IntraBlockState, program common.Address, key, value common.Hash) multigas.MultiGas {
+func WasmStateStoreCost(db *state.IntraBlockState, program accounts.Address, storageKey accounts.StorageKey, value common.Hash) multigas.MultiGas {
 	clearingRefund := params.SstoreClearsScheduleRefundEIP3529
-	programAcc := accounts.InternAddress(program)
-	storageKey := accounts.InternKey(key)
 	current := uint256.Int{}
 	var err error
-	if current, err = db.GetState(programAcc, storageKey); err != nil {
+	if current, err = db.GetState(program, storageKey); err != nil {
 		panic(err)
 	}
 
 	cost := multigas.ZeroGas()
 	// Check slot presence in the access list
-	if addrPresent, slotPresent := db.SlotInAccessList(programAcc, storageKey); !slotPresent {
+	if addrPresent, slotPresent := db.SlotInAccessList(program, storageKey); !slotPresent {
 		cost.SaturatingIncrementInto(multigas.ResourceKindStorageAccess, params.ColdSloadCostEIP2929)
 		// If the caller cannot afford the cost, this change will be rolled back
-		db.AddSlotToAccessList(programAcc, storageKey)
+		db.AddSlotToAccessList(program, storageKey)
 		if !addrPresent {
 			panic(fmt.Sprintf("impossible case: address %v was not present in access list", program))
 		}
@@ -69,7 +66,7 @@ func WasmStateStoreCost(db *state.IntraBlockState, program common.Address, key, 
 	}
 
 	original := uint256.Int{}
-	if original, err = db.GetCommittedState(programAcc, storageKey); err != nil {
+	if original, err = db.GetCommittedState(program, storageKey); err != nil {
 		panic(err)
 	}
 	if original.Eq(&current) {
@@ -85,7 +82,9 @@ func WasmStateStoreCost(db *state.IntraBlockState, program common.Address, key, 
 	}
 	if !original.IsZero() {
 		if current.IsZero() { // recreate slot (2.2.1.1)
-			db.SubRefund(clearingRefund)
+			if err = db.SubRefund(clearingRefund); err != nil {
+				log.Crit("refund underflow in WasmStateStoreCost", "err", err)
+			}
 		} else if value.Cmp(common.Hash{}) == 0 { // delete slot (2.2.1.2)
 			db.AddRefund(clearingRefund)
 		}
@@ -115,7 +114,7 @@ func WasmStateStoreCost(db *state.IntraBlockState, program common.Address, key, 
 // The code here is adapted from the following functions with the most recent parameters as of The Merge
 //   - operations_acl.go makeCallVariantGasCallEIP2929()
 //   - gas_table.go      gasCall()
-func WasmCallCost(db evmtypes.IntraBlockState, contract common.Address, value *uint256.Int, budget uint64) (multigas.MultiGas, error) {
+func WasmCallCost(db evmtypes.IntraBlockState, contract accounts.Address, value *uint256.Int, budget uint64) (multigas.MultiGas, error) {
 	total := multigas.ZeroGas()
 	apply := func(resource multigas.ResourceKind, amount uint64) bool {
 		total.SaturatingIncrementInto(resource, amount)
@@ -158,7 +157,7 @@ func WasmCallCost(db evmtypes.IntraBlockState, contract common.Address, value *u
 
 // Computes the cost of touching an account in wasm
 // Note: the code here is adapted from gasEip2929AccountCheck with the most recent parameters as of The Merge
-func WasmAccountTouchCost(cfg *chain.Config, db evmtypes.IntraBlockState, addr common.Address, withCode bool) multigas.MultiGas {
+func WasmAccountTouchCost(cfg *chain.Config, db evmtypes.IntraBlockState, addr accounts.Address, withCode bool) multigas.MultiGas {
 	cost := multigas.ZeroGas()
 	if withCode {
 		extCodeCost := cfg.MaxCodeSize() / params.MaxCodeSize * params.ExtcodeSizeGasEIP150

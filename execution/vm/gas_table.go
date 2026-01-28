@@ -239,7 +239,7 @@ func gasSStoreEIP2200(evm *EVM, callContext *CallContext, scopeGas uint64, memor
 }
 
 func makeGasLog(n uint64) gasFunc {
-	return func(_ *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (multigas.MultiGas, error) {
+	return func(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (multigas.MultiGas, error) {
 		requestedSize, overflow := callContext.Stack.Back(1).Uint64WithOverflow()
 		if overflow {
 			return multigas.ZeroGas(), ErrGasUintOverflow
@@ -255,7 +255,7 @@ func makeGasLog(n uint64) gasFunc {
 		if multiGas, overflow = multiGas.SafeIncrement(multigas.ResourceKindComputation, params.LogGas); overflow {
 			return multigas.ZeroGas(), ErrGasUintOverflow
 		}
-		if e.chainRules.IsArbitrum {
+		if evm.chainRules.IsArbitrum {
 			// Per-topic cost is split between history growth and computation:
 			// - A fixed number of bytes per topic is persisted in history (topicBytes),
 			//   and those bytes are charged at LogDataGas (gas per byte) as history growth.
@@ -356,7 +356,7 @@ func gasCreate2(_ *EVM, callContext *CallContext, scopeGas uint64, memorySize ui
 	return multiGas, nil
 }
 
-func gasCreateEip3860(_ *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (multigas.MultiGas, error) {
+func gasCreateEip3860(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (multigas.MultiGas, error) {
 	multiGas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return multigas.ZeroGas(), err
@@ -365,10 +365,6 @@ func gasCreateEip3860(_ *EVM, callContext *CallContext, scopeGas uint64, memoryS
 	if overflow {
 		return multigas.ZeroGas(), ErrGasUintOverflow
 	}
-	//var ics = uint64(params.MaxCodeSize)
-	//if evm.chainRules.IsArbitrum {
-	//	ics = evm.chainConfig.MaxInitCodeSize()
-	//}
 	if size > evm.chainConfig.MaxInitCodeSize() {
 		return multigas.ZeroGas(), fmt.Errorf("%w: size %d", ErrMaxInitCodeSizeExceeded, size)
 	}
@@ -383,7 +379,7 @@ func gasCreateEip3860(_ *EVM, callContext *CallContext, scopeGas uint64, memoryS
 	return multiGas, nil
 }
 
-func gasCreate2Eip3860(_ *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (multigas.MultiGas, error) {
+func gasCreate2Eip3860(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (multigas.MultiGas, error) {
 	multiGas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return multigas.ZeroGas(), err
@@ -466,11 +462,11 @@ func gasCall(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uin
 		multiGas = multiGas.SaturatingIncrement(multigas.ResourceKindComputation, params.CallValueTransferGas)
 	}
 
-	memoryMultiGas, err := memoryGasCost(callContext, memorySize)
+	memoryGas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return multigas.ZeroGas(), err
 	}
-	multiGas, overflow := multiGas.SafeAdd(memoryMultiGas)
+	multiGas, overflow := multiGas.SafeAdd(memoryGas)
 	if overflow {
 		return multigas.ZeroGas(), ErrGasUintOverflow
 	}
@@ -485,7 +481,7 @@ func gasCall(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uin
 
 	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
 		fmt.Printf("%d (%d.%d) Call Gas: base: %d memory(%d): %d call: %d\n",
-			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gas-memoryGas, memorySize, memoryGas, callGasTemp)
+			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), multiGas.SingleGas()-memoryGas.SingleGas(), memorySize, memoryGas.SingleGas(), callGasTemp)
 	}
 
 	// Call gas forwarding considered as computation.
@@ -503,14 +499,14 @@ func gasCallCode(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize
 		return multigas.ZeroGas(), err
 	}
 	multiGas := multigas.ZeroGas()
-	if !stack.Back(2).IsZero() {
+	if !callContext.Stack.Back(2).IsZero() {
 		// Value transfer to non-empty account considered as computation.
 		// See rationale in: https://github.com/OffchainLabs/nitro/blob/master/docs/decisions/0002-multi-dimensional-gas-metering.md
 		multiGas = multiGas.SaturatingIncrement(multigas.ResourceKindComputation, params.CallValueTransferGas)
 	}
 
 	var overflow bool
-	multiGas, overflow = multiGas.SafeAdd(memoryMultiGas)
+	multiGas, overflow = multiGas.SafeAdd(memoryGas)
 	if overflow {
 		return multigas.ZeroGas(), ErrGasUintOverflow
 	}
@@ -524,7 +520,7 @@ func gasCallCode(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize
 	}
 	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
 		fmt.Printf("%d (%d.%d) CallCode Gas: base: %d memory(%d): %d call: %d\n",
-			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gas-memoryGas, memorySize, memoryGas, callGasTemp)
+			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), singleGas-memoryGas.SingleGas(), memorySize, memoryGas.SingleGas(), callGasTemp)
 	}
 
 	// Call gas forwarding considered as computation.
@@ -553,7 +549,6 @@ func gasDelegateCall(evm *EVM, callContext *CallContext, scopeGas uint64, memory
 		fmt.Printf("%d (%d.%d) DelegateCall Gas: memory(%d): %d call: %d\n",
 			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), memorySize, gas, callGasTemp)
 	}
-
 
 	// Call gas forwarding considered as computation.
 	// See rationale in: https://github.com/OffchainLabs/nitro/blob/master/docs/decisions/0002-multi-dimensional-gas-metering.md

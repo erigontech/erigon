@@ -303,12 +303,12 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 	}
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 
-	ret, _, err := evm.Call(
+	ret, _, _, err := evm.Call(
 		msg.From(),
 		msg.To(),
 		msg.Data(),
 		msg.Gas(),
-		*msg.Value(),
+		msg.Value(),
 		false,
 	)
 	if isBor && err != nil {
@@ -341,7 +341,7 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author, chainConfig)
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 
-	ret, _, err := evm.SysCreate(
+	ret, _, _, err := evm.SysCreate(
 		msg.From(),
 		msg.Data(),
 		msg.Gas(),

@@ -43,7 +43,7 @@ type TxProcessingHook interface {
 	StartTxHook() (bool, multigas.MultiGas, error, []byte) // return 4-tuple rather than *struct to avoid an import cycle
 	ScheduledTxes() types.Transactions
 	EndTxHook(totalGasUsed uint64, evmSuccess bool)
-	GasChargingHook(gasRemaining *uint64, intrinsicGas uint64) (common.Address, multigas.MultiGas, error)
+	GasChargingHook(gasRemaining *uint64, intrinsicGas uint64) (accounts.Address, multigas.MultiGas, error)
 	ForceRefundGas() uint64
 	NonrefundableGas() uint64
 	DropTip() bool
@@ -66,17 +66,17 @@ type DefaultTxProcessor struct {
 
 func (p DefaultTxProcessor) IsArbitrum() bool { return false }
 
-func (p DefaultTxProcessor) SetMessage(*types.Message, evmtypes.IntraBlockState) {}
+func (p DefaultTxProcessor) SetMessage(_ *types.Message, _ evmtypes.IntraBlockState) {}
 
 func (p DefaultTxProcessor) StartTxHook() (bool, multigas.MultiGas, error, []byte) {
 	return false, multigas.ZeroGas(), nil, nil
 }
 
-func (p DefaultTxProcessor) GasChargingHook(gasRemaining *uint64, intrinsing uint64) (accounts.Address, multigas.MultiGas, error) {
+func (p DefaultTxProcessor) GasChargingHook(_ *uint64, _ uint64) (accounts.Address, multigas.MultiGas, error) {
 	return p.evm.Context.Coinbase, multigas.ZeroGas(), nil
 }
 
-func (p DefaultTxProcessor) PushContract(contract *Contract) {}
+func (p DefaultTxProcessor) PushContract(_ *Contract) {}
 
 func (p DefaultTxProcessor) PopContract() {}
 
@@ -86,7 +86,7 @@ func (p DefaultTxProcessor) NonrefundableGas() uint64 { return 0 }
 
 func (p DefaultTxProcessor) DropTip() bool { return false }
 
-func (p DefaultTxProcessor) EndTxHook(totalGasUsed uint64, evmSuccess bool) {}
+func (p DefaultTxProcessor) EndTxHook(_ uint64, _ bool) {}
 
 func (p DefaultTxProcessor) ScheduledTxes() types.Transactions {
 	return types.Transactions{}
@@ -100,17 +100,17 @@ func (p DefaultTxProcessor) L1BlockHash(blockCtx evmtypes.BlockContext, l1BlocKN
 	return blockCtx.GetHash(l1BlocKNumber)
 }
 
-func (p DefaultTxProcessor) GasPriceOp(evm *EVM) *uint256.Int {
+func (p DefaultTxProcessor) GasPriceOp(_ *EVM) *uint256.Int {
 	return &p.evm.GasPrice
 }
 
-func (p DefaultTxProcessor) FillReceiptInfo(*types.Receipt) {}
+func (p DefaultTxProcessor) FillReceiptInfo(_ *types.Receipt) {}
 
 func (p DefaultTxProcessor) MsgIsNonMutating() bool {
 	return false
 }
 
-func (p DefaultTxProcessor) ExecuteWASM(scope *CallContext, input []byte, interpreter *EVMInterpreter) ([]byte, error) {
+func (p DefaultTxProcessor) ExecuteWASM(_ *CallContext, _ []byte, _ *EVMInterpreter) ([]byte, error) {
 	log.Crit("tried to execute WASM with default processing hook")
 	return nil, nil
 }

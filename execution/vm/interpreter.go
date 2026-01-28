@@ -22,6 +22,7 @@ package vm
 import (
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/arb/multigas"
 	"hash"
 	"slices"
 	"sync"
@@ -79,6 +80,16 @@ type CallContext struct {
 	Memory   Memory
 	Stack    Stack
 	Contract Contract
+
+	// Arbitrum
+	delegateOrCallcode bool
+	// is the execution frame represented by this object a contract deployment
+	IsDeployment bool
+	IsSystemCall bool
+
+	// Arbitrum: total used multi-dimensional gas
+	UsedMultiGas     multigas.MultiGas
+	RetainedMultiGas multigas.MultiGas
 }
 
 var contextPool = sync.Pool{
@@ -98,6 +109,11 @@ func getCallContext(contract Contract, input []byte, gas uint64) *CallContext {
 	ctx.gas = gas
 	ctx.input = input
 	ctx.Contract = contract
+	ctx.UsedMultiGas = multigas.ZeroGas()
+	ctx.RetainedMultiGas = multigas.ZeroGas()
+	ctx.delegateOrCallcode = false
+	ctx.IsDeployment = false
+	ctx.IsSystemCall = false
 	return ctx
 }
 
@@ -141,6 +157,36 @@ func (c *CallContext) refundGas(gas uint64, tracer *tracing.Hooks, reason tracin
 		tracer.OnGasChange(c.gas, c.gas+gas, reason)
 	}
 	c.gas += gas
+}
+
+// UseMultiGas attempts the use gas, subtracts it, increments usedMultiGas, and returns true on success
+//func UseMultiGas(multiGas multigas.MultiGas, logger *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
+//	if remaining, ok := useGas(multiGas.SingleGas(), logger, reason); !ok {
+//		return false
+//	}
+//	c.UsedMultiGas.SaturatingAddInto(multiGas)
+//	return true
+//}
+
+// UseMultiGas attempts the use gas, subtracts it, increments usedMultiGas, and returns true on success
+func (c *CallContext) UseMultiGas(multiGas multigas.MultiGas, logger *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
+	if !c.useGas(multiGas.SingleGas(), logger, reason) {
+		return false
+	}
+	c.UsedMultiGas.SaturatingAddInto(multiGas)
+	return true
+}
+
+func (c *CallContext) GetTotalUsedMultiGas() multigas.MultiGas {
+	var total multigas.MultiGas
+	var underflow bool
+	if total, underflow = c.UsedMultiGas.SafeSub(c.RetainedMultiGas); underflow {
+		// NOTE: This should never happen, but if it does, log it and continue
+		log.Trace("used contract gas underflow", "used", c.UsedMultiGas, "retained", c.RetainedMultiGas)
+		// But since not all places are instrumented yet, clamp to zero for safety
+		return c.UsedMultiGas.SaturatingSub(c.RetainedMultiGas)
+	}
+	return total
 }
 
 // MemoryData returns the underlying memory slice. Callers must not modify the contents
@@ -343,15 +389,15 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 	}
 
 	// Increment the call depth which is restricted to 1024
-	in.depth++
+	in.IncDepth()
 	defer func() {
 		// first: capture data/memory/state/depth/etc... then clenup them
 		if debug && err != nil {
 			if !logged && in.cfg.Tracer.OnOpcode != nil {
-				in.cfg.Tracer.OnOpcode(pcCopy, byte(op), gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err))
+				in.cfg.Tracer.OnOpcode(pcCopy, byte(op), gasCopy, cost, callContext, in.returnData, in.Depth(), VMErrorFromErr(err))
 			}
 			if logged && in.cfg.Tracer.OnFault != nil {
-				in.cfg.Tracer.OnFault(pcCopy, byte(op), gasCopy, cost, callContext, in.depth, VMErrorFromErr(err))
+				in.cfg.Tracer.OnFault(pcCopy, byte(op), gasCopy, cost, callContext, in.Depth(), VMErrorFromErr(err))
 			}
 		}
 		// this function must execute _after_: the `CaptureState` needs the stacks before
@@ -359,13 +405,13 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 		if restoreReadonly {
 			in.readOnly = false
 		}
-		in.depth--
+		in.DecDepth()
 	}()
 
 	// Arbitrum: handle Stylus programs
 	if in.evm.chainRules.IsStylus && state.IsStylusProgram(contract.Code) {
-		ret, err = in.evm.ProcessingHook.ExecuteWASM(callContext, input, in)
-		return
+		ret, err := in.evm.ProcessingHook.ExecuteWASM(callContext, input, in)
+		return ret, callContext.gas, err
 	}
 
 	// The Interpreter main run loop (contextual). This loop runs until either an
@@ -446,19 +492,18 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 			if err != nil {
 				return nil, callContext.gas, fmt.Errorf("%w: %v", ErrOutOfGas, err)
 			}
+			dynamicCost := multigasDynamicCost.SingleGas()
+
 			cost += dynamicCost // for tracing
 			callGas = operation.constantGas + dynamicCost - in.evm.CallGasTemp()
 			if dbg.TraceDyanmicGas && dynamicCost > 0 {
 				fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
 			}
-			dynamicCost := multigasDynamicCost.SingleGas()
-
-			cost += dynamicCost // for tracing
 			// TODO seems it should be once UseMultiGas call
 			if !callContext.useGas(dynamicCost, in.cfg.Tracer, tracing.GasChangeIgnored) {
 				return nil, callContext.gas, ErrOutOfGas
 			}
-			contract.UsedMultiGas.SaturatingAddInto(multigasDynamicCost)
+			callContext.UsedMultiGas.SaturatingAddInto(multigasDynamicCost)
 		}
 
 		// Do gas tracing before memory expansion
@@ -467,7 +512,7 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 				in.cfg.Tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
 			}
 			if in.cfg.Tracer.OnOpcode != nil {
-				in.cfg.Tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err))
+				in.cfg.Tracer.OnOpcode(pc, byte(op), gasCopy, cost, callContext, in.returnData, in.Depth(), VMErrorFromErr(err))
 				logged = true
 			}
 		}

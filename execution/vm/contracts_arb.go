@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"math/big"
 
 	"github.com/erigontech/erigon/arb/multigas"
@@ -8,16 +9,16 @@ import (
 )
 
 var (
-	PrecompiledContractsBeforeArbOS30       = make(map[common.Address]PrecompiledContract)
-	PrecompiledAddressesBeforeArbOS30       []common.Address
-	PrecompiledContractsStartingFromArbOS30 = make(map[common.Address]PrecompiledContract)
-	PrecompiledAddressesStartingFromArbOS30 []common.Address
-	PrecompiledContractsStartingFromArbOS50 = make(map[common.Address]PrecompiledContract)
-	PrecompiledAddressesStartingFromArbOS50 []common.Address
+	PrecompiledContractsBeforeArbOS30       = make(map[accounts.Address]PrecompiledContract)
+	PrecompiledAddressesBeforeArbOS30       []accounts.Address
+	PrecompiledContractsStartingFromArbOS30 = make(map[accounts.Address]PrecompiledContract)
+	PrecompiledAddressesStartingFromArbOS30 []accounts.Address
+	PrecompiledContractsStartingFromArbOS50 = make(map[accounts.Address]PrecompiledContract)
+	PrecompiledAddressesStartingFromArbOS50 []accounts.Address
 )
 
-var PrecompiledContractsP256Verify = map[common.Address]PrecompiledContract{
-	common.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
+var PrecompiledContractsP256Verify = map[accounts.Address]PrecompiledContract{
+	accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{},
 }
 
 type AdvancedPrecompileCall struct {
