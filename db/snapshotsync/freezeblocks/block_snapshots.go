@@ -421,8 +421,10 @@ func (br *BlockRetire) RetireBlocksInBackground(
 	}
 
 	if br.blockReader == nil || br.blockReader.FrozenBlocks()+snaptype.Erigon2MinSegmentSize >= maxBlockNum {
+		fmt.Println("TEST: non-passed", br.blockReader.FrozenBlocks()+snaptype.Erigon2MinSegmentSize, maxBlockNum)
 		return false
 	}
+	fmt.Println("TEST: passed")
 	if !br.working.CompareAndSwap(false, true) {
 		return false
 	}
