@@ -1,6 +1,7 @@
 package aura_test
 
 import (
+	"context"
 	"math/big"
 	"strings"
 	"testing"
@@ -8,14 +9,17 @@ import (
 	"github.com/stretchr/testify/require"
 
 	libcommon "github.com/erigontech/erigon-lib/common"
+	"github.com/erigontech/erigon-lib/common/datadir"
 	"github.com/erigontech/erigon-lib/kv/memdb"
-
+	"github.com/erigontech/erigon-lib/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/accounts/abi"
 	"github.com/erigontech/erigon/consensus/aura"
 	"github.com/erigontech/erigon/core"
 	"github.com/erigontech/erigon/core/state"
 	"github.com/erigontech/erigon/core/types"
+	"github.com/erigontech/erigon/eth/ethconsensusconfig"
+	"github.com/erigontech/erigon/eth/stagedsync"
 	"github.com/erigontech/erigon/turbo/stages/mock"
 	"github.com/erigontech/erigon/turbo/trie"
 )
@@ -120,4 +124,42 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 	require.NotPanics(func() {
 		m.Engine.Initialize(chainConfig, &core.FakeChainReader{}, invalidPostMergeHeader, nil, syscallCustom, nil)
 	})
+}
+
+func TestEmptySystemAccountCreation(t *testing.T) {
+	require := require.New(t)
+	genesis := core.ChiadoGenesisBlock()
+	ctx := context.Background()
+	logger := log.New()
+	_, db, _ := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	config, genesisBlock, err := core.WriteGenesisBlock(tx, genesis, nil, "", logger)
+	require.NoError(err)
+	engine := ethconsensusconfig.CreateConsensusEngineBareBones(ctx, config, logger)
+	time := uint64(1)
+	header := core.MakeEmptyHeader(genesisBlock.Header(), config, time, nil)
+	chain := stagedsync.NewChainReaderImpl(config, tx, nil, nil)
+	header.Difficulty = engine.CalcDifficulty(chain, time,
+		0,
+		genesisBlock.Difficulty(),
+		genesisBlock.NumberU64(),
+		genesisBlock.Hash(),
+		genesisBlock.UncleHash(),
+		genesisBlock.Header().AuRaStep,
+	)
+	header.GasLimit = 12500000
+	stateReader := state.NewPlainStateReader(tx)
+	ibs := state.New(stateReader)
+	err = core.InitializeBlockExecution(engine, chain, header, config, ibs, logger)
+	require.NoError(err)
+	rules := config.Rules(header.Number.Uint64(), header.Time)
+	writer := state.NewChangeSetWriter()
+	err = ibs.MakeWriteSet(rules, writer)
+	require.NoError(err)
+	accountChanges, err := writer.GetAccountChanges()
+	require.NoError(err)
+	require.Equal(1, accountChanges.Len())
+	require.Equal(state.SystemAddress.Bytes(), accountChanges.Changes[0].Key)
 }
