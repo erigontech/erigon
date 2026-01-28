@@ -757,21 +757,20 @@ func printHistoryBenchResultsTable(prefix []byte, compactKey []byte, fileStats [
 	fmt.Println()
 
 	// Print header
-	fmt.Printf("%-45s %12s %12s %8s %10s %10s %10s %10s %10s\n",
-		"File", "StartTxNum", "EndTxNum", "Samples", "Throughput", "Mean", "P50", "P95", "P99")
-	fmt.Println(strings.Repeat("-", 138))
+	fmt.Printf("%-45s %12s %12s %8s %10s %10s %10s %10s\n",
+		"File", "StartTxNum", "EndTxNum", "Samples", "Mean", "P50", "P95", "P99")
+	fmt.Println(strings.Repeat("-", 127))
 
 	// Print each file's stats
 	var totalSamples int
 	var totalDuration time.Duration
 
 	for _, fs := range fileStats {
-		fmt.Printf("%-45s %12d %12d %8d %10.0f %10v %10v %10v %10v\n",
+		fmt.Printf("%-45s %12d %12d %8d %10v %10v %10v %10v\n",
 			fs.FileName,
 			fs.StartTxNum,
 			fs.EndTxNum,
 			fs.SampleCount,
-			fs.Stats.Throughput,
 			fs.Stats.Mean,
 			fs.Stats.P50,
 			fs.Stats.P95,
@@ -781,20 +780,14 @@ func printHistoryBenchResultsTable(prefix []byte, compactKey []byte, fileStats [
 		totalDuration += fs.TotalTime
 	}
 
-	fmt.Println(strings.Repeat("-", 138))
+	fmt.Println(strings.Repeat("-", 127))
 
 	// Print summary
-	overallThroughput := float64(0)
-	if totalDuration > 0 {
-		overallThroughput = float64(totalSamples) / totalDuration.Seconds()
-	}
-
-	fmt.Printf("%-45s %12s %12s %8d %10.0f %10s %10s %10s %10s\n",
+	fmt.Printf("%-45s %12s %12s %8d %10s %10s %10s %10s\n",
 		"TOTAL",
 		"",
 		"",
 		totalSamples,
-		overallThroughput,
 		"",
 		"",
 		"",
