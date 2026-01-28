@@ -475,6 +475,14 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 			return nil
 		}
 	}
+
+	// Update code cache when writing to CodeDomain
+	if domain == kv.CodeDomain && len(k) == 20 {
+		if codeCache := sd.GetCodeCache(); codeCache != nil {
+			codeCache.Put(k, v)
+		}
+	}
+
 	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal, prevStep)
 }
 
@@ -506,6 +514,12 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	case kv.CodeDomain:
 		if prevVal == nil {
 			return nil
+		}
+		// Remove from code cache when deleting code
+		if len(k) == 20 {
+			if codeCache := sd.GetCodeCache(); codeCache != nil {
+				codeCache.Remove(k)
+			}
 		}
 	default:
 		//noop
