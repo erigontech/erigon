@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -176,6 +177,9 @@ type IntraBlockState struct {
 	codeReadCount       int64
 	version             int
 	dep                 int
+
+	// codeCache is an optional LRU cache for contract code
+	codeCache *cache.CodeCache
 }
 
 // Create a new state from a given trie
@@ -242,6 +246,11 @@ func (sdb *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
 
 func (sdb *IntraBlockState) IsVersioned() bool {
 	return sdb.versionMap != nil
+}
+
+// SetCodeCache sets the optional code cache for faster code lookups.
+func (sdb *IntraBlockState) SetCodeCache(codeCache *cache.CodeCache) {
+	sdb.codeCache = codeCache
 }
 
 func (sdb *IntraBlockState) SetHooks(hooks *tracing.Hooks) {
@@ -527,6 +536,17 @@ func (sdb *IntraBlockState) TxnIndex() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
+	// Check code cache first
+	if sdb.codeCache != nil {
+		addrBytes := addr.Value()
+		if code, ok := sdb.codeCache.Get(addrBytes[:]); ok {
+			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
+				fmt.Printf("%d (%d.%d) GetCode (cache) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, len(code))
+			}
+			return code, nil
+		}
+	}
+
 	if sdb.versionMap == nil {
 		stateObject, err := sdb.getStateObject(addr)
 		if err != nil {
@@ -540,6 +560,11 @@ func (sdb *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
 				} else {
 					fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, len(code))
 				}
+			}
+			// Populate code cache on successful read
+			if err == nil && len(code) > 0 && sdb.codeCache != nil {
+				addrBytes := addr.Value()
+				sdb.codeCache.Put(addrBytes[:], code)
 			}
 			return code, err
 		}
@@ -568,11 +593,28 @@ func (sdb *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
 		}
 	}
 
+	// Populate code cache on successful read
+	if err == nil && len(code) > 0 && sdb.codeCache != nil {
+		addrBytes := addr.Value()
+		sdb.codeCache.Put(addrBytes[:], code)
+	}
+
 	return code, err
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
+	// Check code cache first
+	if sdb.codeCache != nil {
+		addrBytes := addr.Value()
+		if code, ok := sdb.codeCache.Get(addrBytes[:]); ok {
+			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
+				fmt.Printf("%d (%d.%d) GetCodeSize (cache) %x: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, len(code))
+			}
+			return len(code), nil
+		}
+	}
+
 	if sdb.versionMap == nil {
 		stateObject, err := sdb.getStateObject(addr)
 		if err != nil {
@@ -1051,6 +1093,12 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte) error {
 	versionWritten(sdb, addr, CodePath, accounts.NilKey, code)
 	versionWritten(sdb, addr, CodeHashPath, accounts.NilKey, codeHash)
 	versionWritten(sdb, addr, CodeSizePath, accounts.NilKey, len(code))
+
+	// Update code cache
+	if sdb.codeCache != nil {
+		addrBytes := addr.Value()
+		sdb.codeCache.Put(addrBytes[:], code)
+	}
 	return nil
 }
 
