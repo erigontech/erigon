@@ -82,7 +82,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	dirs := datadir2.New(t.TempDir())
 	cfg := statecfg.Schema.AccountsDomain
 
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(dirs.Chaindata, false).MustOpen()
 	t.Cleanup(db.Close)
 	salt := uint32(1)
 

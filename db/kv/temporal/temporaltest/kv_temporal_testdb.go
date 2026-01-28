@@ -47,7 +47,7 @@ func NewTestDBWithStepSize(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv
 		ctx = tb.Context()
 		rawDB = memdb.NewTestDB(tb, dbcfg.ChainDB)
 	} else {
-		rawDB = memdb.New(nil, dirs.DataDir, dbcfg.ChainDB)
+		rawDB = memdb.New(dirs.DataDir, dbcfg.ChainDB, true)
 	}
 
 	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, rawDB)

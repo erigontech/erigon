@@ -310,7 +310,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 
 	var db kv.RwDB
 	if config.Dirs.DataDir == "" {
-		db = memdb.New(nil, "", label)
+		db = memdb.New("", label, true)
 		return db, nil
 	}
 

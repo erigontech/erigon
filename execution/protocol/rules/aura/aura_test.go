@@ -47,7 +47,7 @@ import (
 func TestEmptyBlock(t *testing.T) {
 	require := require.New(t)
 	genesis := chainspec.GnosisGenesisBlock()
-	genesisBlock, _, err := genesiswrite.GenesisToBlock(t, genesis, datadir.New(t.TempDir()), log.Root())
+	genesisBlock, _, err := genesiswrite.GenesisToBlock(genesis, datadir.New(t.TempDir()), false, log.Root())
 	require.NoError(err)
 
 	genesis.Config.TerminalTotalDifficultyPassed = false

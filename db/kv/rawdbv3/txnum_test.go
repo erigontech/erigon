@@ -32,7 +32,7 @@ import (
 func TestTxNum(t *testing.T) {
 	require := require.New(t)
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, log.New()).InMem(t, dirs.Chaindata).MustOpen()
+	db := mdbx.New(dbcfg.ChainDB, log.New()).InMem(dirs.Chaindata, false).MustOpen()
 	t.Cleanup(db.Close)
 
 	err := db.Update(context.Background(), func(tx kv.RwTx) error {

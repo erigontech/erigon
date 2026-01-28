@@ -30,7 +30,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"testing"
 	"time"
 	"unsafe"
 
@@ -127,6 +126,7 @@ func (opts MdbxOpts) SyncBytes(threshold datasize.ByteSize) MdbxOpts {
 	opts.syncBytes = &threshold
 	return opts
 }
+func (opts MdbxOpts) Logger(log log.Logger) MdbxOpts           { opts.log = log; return opts }
 func (opts MdbxOpts) DBVerbosity(v kv.DBVerbosityLvl) MdbxOpts { opts.verbosity = v; return opts }
 func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts    { opts.mapSize = sz; return opts }
 func (opts MdbxOpts) WriteMergeThreshold(v uint64) MdbxOpts    { opts.mergeThreshold = v; return opts }
@@ -150,7 +150,7 @@ func (opts MdbxOpts) Readonly(v bool) MdbxOpts   { return opts.boolToFlag(v, mdb
 func (opts MdbxOpts) Accede(v bool) MdbxOpts     { return opts.boolToFlag(v, mdbx.Accede) }
 func (opts MdbxOpts) AutoRemove(v bool) MdbxOpts { opts.autoRemove = v; return opts }
 
-func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
+func (opts MdbxOpts) InMem(tmpDir string, autoRemove bool) MdbxOpts {
 	if tmpDir != "" {
 		if err := os.MkdirAll(tmpDir, 0755); err != nil {
 			panic(err)
@@ -162,7 +162,7 @@ func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
 	}
 	opts.path = path
 	opts.inMem = true
-	opts.autoRemove = tb == nil
+	opts.autoRemove = autoRemove
 	opts.flags = mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit
 	opts.growthStep = 2 * datasize.MB
 	opts.mapSize = 16 * datasize.GB

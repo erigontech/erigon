@@ -34,7 +34,7 @@ import (
 
 func TestNoOverflowPages(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(t, dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
+	db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(dirs.Chaindata, false).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
 	t.Cleanup(db.Close)
 
 	ctx := context.Background()

@@ -27,7 +27,7 @@ func newSpanRangeIndexTest(t *testing.T) spanRangeIndexTest {
 	logger := log.New()
 
 	db, err := mdbx.New(dbcfg.HeimdallDB, logger).
-		InMem(t, tmpDir).
+		InMem(tmpDir, false).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TableCfg{kv.BorSpansIndex: {}} }).
 		MapSize(1 * datasize.GB).
 		Open(ctx)

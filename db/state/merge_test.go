@@ -868,7 +868,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 func TestHistoryAndIIAlignment(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(dirs.Chaindata, false).MustOpen()
 	t.Cleanup(db.Close)
 
 	agg := NewTest(dirs).Logger(logger).StepSize(1).MustOpen(t.Context(), db)

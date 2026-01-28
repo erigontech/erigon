@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"log"
 	"maps"
 	"math"
 	"slices"
@@ -22,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/holiman/uint256"
@@ -1235,4 +1237,12 @@ func (cd *CommitmentDomain) DelBranch(ctx context.Context, k commitment.Path, ro
 			return commitment.Branch(b), nil
 		},
 		roTx, txNum, pv)
+}
+
+type BlockDomain struct {
+	mem *membatchwithdb.MemoryMutation
+}
+
+func NewBlockDomain(tx kv.TemporalTx, tmpDir string, logger log.Logger) (*BlockDomain, error) {
+	mb := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
 }

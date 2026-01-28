@@ -137,7 +137,7 @@ func testDbAndAggregatorv3(tb testing.TB, stepSize uint64) (kv.RwDB, *Aggregator
 	tb.Helper()
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(dirs.Chaindata, false).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	tb.Cleanup(db.Close)
 
 	agg := NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context(), db)
@@ -299,7 +299,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbx.New(dbcfg.ChainDB, logger).InMem(dirs.Chaindata, false).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 
 		touchFn(t, dirs, "v1.0-receipt.0-2048.kv")
@@ -325,7 +325,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbx.New(dbcfg.ChainDB, logger).InMem(dirs.Chaindata, false).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 
 		touchFn(t, dirs, "v1.1-receipt.0-2048.kv")
@@ -351,7 +351,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbx.New(dbcfg.ChainDB, logger).InMem(dirs.Chaindata, false).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 
 		touchFn(t, dirs, "v2.0-receipt.0-2048.kv")
@@ -377,7 +377,7 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require, logger := require.New(t), log.New()
 		dirs := datadir.New(t.TempDir())
 
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		db := mdbx.New(dbcfg.ChainDB, logger).InMem(dirs.Chaindata, false).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 		t.Cleanup(db.Close)
 		agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
 		t.Cleanup(agg.Close)
