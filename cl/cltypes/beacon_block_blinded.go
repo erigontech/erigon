@@ -493,3 +493,7 @@ func (b *BlindedBeaconBody) GetExecutionChanges() *solid.ListSSZ[*SignedBLSToExe
 func (b *BlindedBeaconBody) GetExecutionRequests() *ExecutionRequests {
 	return b.ExecutionRequests
 }
+
+func (b *BlindedBeaconBody) GetSignedExecutionPayloadBid() *SignedExecutionPayloadBid {
+	return nil
+}

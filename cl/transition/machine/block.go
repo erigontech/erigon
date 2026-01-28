@@ -75,8 +75,15 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 			}
 		}
 	}
-	var signatures, messages, publicKeys [][]byte
 
+	if s.Version() >= clparams.GloasVersion {
+		// Process execution payload bid. [New in Gloas:EIP7732]
+		if err := impl.ProcessExecutionPayloadBid(s, block); err != nil {
+			return fmt.Errorf("processBlock: failed to process execution payload bid: %v", err)
+		}
+	}
+
+	var signatures, messages, publicKeys [][]byte
 	// Process each proposer slashing
 	sigs, msgs, pubKeys, err := processRandao(impl, s, body, block)
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 var (
 	_ ssz.HashableSSZ = (*PayloadAttestationData)(nil)
 	_ ssz.HashableSSZ = (*PayloadAttestation)(nil)
+	_ ssz.HashableSSZ = (*ExecutionPayloadBid)(nil)
 
 	_ ssz2.SizedObjectSSZ = (*PayloadAttestationData)(nil)
 	_ ssz2.SizedObjectSSZ = (*PayloadAttestation)(nil)
@@ -199,6 +200,22 @@ type ExecutionPayloadBid struct {
 	Value                  uint64         `json:"value,string"`
 	ExecutionPayment       uint64         `json:"execution_payment,string"`
 	BlobKzgCommitmentsRoot common.Hash    `json:"blob_kzg_commitments_root"`
+}
+
+func (e *ExecutionPayloadBid) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(
+		e.ParentBlockHash[:],
+		e.ParentBlockRoot[:],
+		e.BlockHash[:],
+		e.PrevRandao[:],
+		e.FeeRecipient[:],
+		e.GasLimit,
+		uint64(e.BuilderIndex),
+		e.Slot,
+		e.Value,
+		e.ExecutionPayment,
+		e.BlobKzgCommitmentsRoot[:],
+	)
 }
 
 func (e *ExecutionPayloadBid) EncodingSizeSSZ() int {

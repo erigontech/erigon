@@ -612,3 +612,8 @@ func (b *BeaconState) SetNextWithdrawalBuilderIndex(index cltypes.BuilderIndex) 
 	b.nextWithdrawalBuilderIndex = index
 	b.markLeaf(NextWithdrawalBuilderIndexLeafIndex)
 }
+
+func (b *BeaconState) SetBuilders(builders *solid.ListSSZ[*cltypes.Builder]) {
+	b.builders = builders
+	b.markLeaf(BuildersLeafIndex)
+}

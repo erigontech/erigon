@@ -528,6 +528,10 @@ func (b *BeaconBody) GetExecutionRequests() *ExecutionRequests {
 	return b.ExecutionRequests
 }
 
+func (b *BeaconBody) GetSignedExecutionPayloadBid() *SignedExecutionPayloadBid {
+	return b.SignedExecutionPayloadBid
+}
+
 func (b *BeaconBody) GetExecutionRequestsList() []hexutil.Bytes {
 	return GetExecutionRequestsList(b.beaconCfg, b.ExecutionRequests)
 }

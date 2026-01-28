@@ -417,17 +417,27 @@ func updateNextWithdrawalValidatorIndex(s abstract.BeaconState, withdrawals []*c
 }
 
 func applyWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) error {
-	return solid.RangeErr[*cltypes.Withdrawal](withdrawals, func(_ int, w *cltypes.Withdrawal, _ int) error {
+	builders := s.GetBuilders()
+	buildersModified := false
+	err := solid.RangeErr[*cltypes.Withdrawal](withdrawals, func(_ int, w *cltypes.Withdrawal, _ int) error {
 		// [Modified in Gloas:EIP7732]
 		if s.Version() >= clparams.GloasVersion && state.IsBuilderIndex(w.Validator) {
 			builderIndex := state.ConvertValidatorIndexToBuilderIndex(w.Validator)
-			builders := s.GetBuilders()
 			builder := builders.Get(int(builderIndex))
 			builder.Balance -= min(w.Amount, builder.Balance)
+			builders.Set(int(builderIndex), builder)
+			buildersModified = true
 			return nil
 		}
 		return state.DecreaseBalance(s, w.Validator, w.Amount)
 	})
+	if err != nil {
+		return err
+	}
+	if buildersModified {
+		s.SetBuilders(builders)
+	}
+	return nil
 }
 
 // updatePayloadExpectedWithdrawals stores the withdrawals into state.payload_expected_withdrawals.
@@ -453,6 +463,99 @@ func updateNextWithdrawalBuilderIndex(s abstract.BeaconState, processedBuildersS
 	}
 	nextIndex := uint64(s.GetNextWithdrawalBuilderIndex()) + processedBuildersSweepCount
 	s.SetNextWithdrawalBuilderIndex(cltypes.BuilderIndex(nextIndex % uint64(builders.Len())))
+}
+
+// ProcessExecutionPayloadBid processes the execution payload bid from the block.
+// [New in Gloas:EIP7732]
+func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.GenericBeaconBlock) error {
+	signedBid := block.GetBody().GetSignedExecutionPayloadBid()
+	bid := signedBid.Message
+	builderIndex := bid.BuilderIndex
+	amount := bid.Value
+
+	// For self-builds, amount must be zero regardless of withdrawal credential prefix
+	if builderIndex == cltypes.BuilderIndex(clparams.BuilderIndexSelfBuild) {
+		if amount != 0 {
+			return errors.New("processExecutionPayloadBid: self-build bid must have zero value")
+		}
+		if signedBid.Signature != common.Bytes96(bls.InfiniteSignature) {
+			return errors.New("processExecutionPayloadBid: self-build bid must have infinite signature")
+		}
+	} else {
+		// Verify that the builder is active
+		if !state.IsActiveBuilder(s, builderIndex) {
+			return errors.New("processExecutionPayloadBid: builder is not active")
+		}
+		// Verify that the builder has funds to cover the bid
+		if !state.CanBuilderCoverBid(s, builderIndex, amount) {
+			return errors.New("processExecutionPayloadBid: builder cannot cover bid")
+		}
+		// Verify that the bid signature is valid
+		valid, err := verifyExecutionPayloadBidSignature(s, signedBid)
+		if err != nil {
+			return fmt.Errorf("processExecutionPayloadBid: failed to verify bid signature: %v", err)
+		}
+		if !valid {
+			return errors.New("processExecutionPayloadBid: invalid bid signature")
+		}
+	}
+
+	// Verify that the bid is for the current slot
+	if bid.Slot != block.GetSlot() {
+		return fmt.Errorf("processExecutionPayloadBid: bid slot %d does not match block slot %d", bid.Slot, block.GetSlot())
+	}
+	// Verify that the bid is for the right parent block
+	if bid.ParentBlockHash != s.GetLatestBlockHash() {
+		return errors.New("processExecutionPayloadBid: parent block hash mismatch")
+	}
+	if bid.ParentBlockRoot != block.GetParentRoot() {
+		return errors.New("processExecutionPayloadBid: parent block root mismatch")
+	}
+	if bid.PrevRandao != s.GetRandaoMixes(state.Epoch(s)) {
+		return errors.New("processExecutionPayloadBid: prev randao mismatch")
+	}
+
+	// Record the pending payment if there is some payment
+	if amount > 0 {
+		pendingPayment := &cltypes.BuilderPendingPayment{
+			Weight: 0,
+			Withdrawal: &cltypes.BuilderPendingWithdrawal{
+				FeeRecipient: bid.FeeRecipient,
+				Amount:       amount,
+				BuilderIndex: builderIndex,
+			},
+		}
+		slotsPerEpoch := s.BeaconConfig().SlotsPerEpoch
+		index := int(slotsPerEpoch + bid.Slot%slotsPerEpoch)
+		payments := s.GetBuilderPendingPayments()
+		payments.Set(index, pendingPayment)
+		s.SetBuilderPendingPayments(payments)
+	}
+
+	// Cache the execution payload bid
+	s.SetLatestExecutionPayloadBid(bid)
+
+	return nil
+}
+
+// verifyExecutionPayloadBidSignature verifies the BLS signature of a signed execution payload bid.
+// [New in Gloas:EIP7732]
+func verifyExecutionPayloadBidSignature(s abstract.BeaconState, signedBid *cltypes.SignedExecutionPayloadBid) (bool, error) {
+	builders := s.GetBuilders()
+	builder := builders.Get(int(signedBid.Message.BuilderIndex))
+
+	domain, err := s.GetDomain(s.BeaconConfig().DomainBeaconBuilder, state.Epoch(s))
+	if err != nil {
+		return false, err
+	}
+
+	signingRoot, err := fork.ComputeSigningRoot(signedBid.Message, domain)
+	if err != nil {
+		return false, err
+	}
+
+	pk := builder.Pubkey
+	return bls.Verify(signedBid.Signature[:], signingRoot[:], pk[:])
 }
 
 // ProcessExecutionPayload sets the latest payload header accordinly.

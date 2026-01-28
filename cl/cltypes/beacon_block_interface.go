@@ -29,4 +29,5 @@ type GenericBeaconBody interface {
 	GetBlobKzgCommitments() *solid.ListSSZ[*KZGCommitment]
 	GetExecutionChanges() *solid.ListSSZ[*SignedBLSToExecutionChange]
 	GetExecutionRequests() *ExecutionRequests
+	GetSignedExecutionPayloadBid() *SignedExecutionPayloadBid
 }

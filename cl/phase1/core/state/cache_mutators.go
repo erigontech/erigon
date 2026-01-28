@@ -181,4 +181,6 @@ func (b *CachingBeaconState) InitiateBuilderExit(builderIndex cltypes.BuilderInd
 		return
 	}
 	builder.WithdrawableEpoch = Epoch(b) + b.BeaconConfig().MinBuilderWithdrawabilityDelay
+	builders.Set(int(builderIndex), builder)
+	b.SetBuilders(builders)
 }
