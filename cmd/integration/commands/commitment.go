@@ -780,17 +780,6 @@ func printHistoryBenchResultsTable(prefix []byte, compactKey []byte, fileStats [
 
 	fmt.Println(strings.Repeat("-", 127))
 
-	// Print summary
-	fmt.Printf("%-45s %12s %12s %8d %10s %10s %10s %10s\n",
-		"TOTAL",
-		"",
-		"",
-		totalSamples,
-		"",
-		"",
-		"",
-		"")
-
 	fmt.Println()
 	fmt.Printf("  Total Files:    %d\n", len(fileStats))
 	fmt.Printf("  Total Samples:  %d\n", totalSamples)
