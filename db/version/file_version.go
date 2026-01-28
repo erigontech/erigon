@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -191,7 +190,7 @@ func (v Versions) Supports(ver Version) bool {
 
 // FindFilesWithVersionsByPattern return an filepath by pattern
 func FindFilesWithVersionsByPattern(pattern string) (string, Version, bool, error) {
-	matches, err := filepath.Glob(pattern)
+	matches, err := cachedGlob(pattern)
 	if err != nil {
 		return "", Version{}, false, fmt.Errorf("invalid pattern: %w", err)
 	}
@@ -199,24 +198,18 @@ func FindFilesWithVersionsByPattern(pattern string) (string, Version, bool, erro
 	if len(matches) == 0 {
 		return "", Version{}, false, nil
 	}
-	if len(matches) > 1 {
-		sort.Slice(matches, func(i, j int) bool {
-			_, fName1 := filepath.Split(matches[i])
-			version1, _ := ParseVersion(fName1)
 
-			_, fName2 := filepath.Split(matches[j])
-			version2, _ := ParseVersion(fName2)
+	best := matches[0]
+	bestVer, _ := ParseVersion(filepath.Base(best))
 
-			return version1.Less(version2)
-		})
-		_, fName := filepath.Split(matches[len(matches)-1])
-		ver, _ := ParseVersion(fName)
-
-		return matches[len(matches)-1], ver, true, nil
+	for _, m := range matches[1:] {
+		ver, _ := ParseVersion(filepath.Base(m))
+		if bestVer.Less(ver) {
+			best, bestVer = m, ver
+		}
 	}
-	_, fName := filepath.Split(matches[0])
-	ver, _ := ParseVersion(fName)
-	return matches[0], ver, true, nil
+
+	return best, bestVer, true, nil
 }
 
 func CheckIsThereFileWithSupportedVersion(pattern string, minSup Version) error {
