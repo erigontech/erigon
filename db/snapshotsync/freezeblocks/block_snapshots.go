@@ -407,6 +407,12 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Du
 	return deleted + deletedBorBlocks, nil
 }
 
+func (br *BlockRetire) skipLoop(requestedMinBlockNum, maxBlockNum uint64) bool {
+	minBlockNum := max(br.blockReader.FrozenBlocks(), requestedMinBlockNum)
+	_, _, ok := CanRetire(maxBlockNum, minBlockNum, snaptype.Unknown, br.chainConfig)
+	return !ok
+}
+
 func (br *BlockRetire) RetireBlocksInBackground(
 	ctx context.Context,
 	minBlockNum,
@@ -420,10 +426,11 @@ func (br *BlockRetire) RetireBlocksInBackground(
 		br.maxScheduledBlock.Store(maxBlockNum)
 	}
 
-	if br.blockReader == nil || br.blockReader.FrozenBlocks()+snaptype.Erigon2MinSegmentSize >= maxBlockNum {
-		fmt.Println("TEST: non-passed", br.blockReader.FrozenBlocks()+snaptype.Erigon2MinSegmentSize, maxBlockNum)
+	if br.skipLoop(minBlockNum, maxBlockNum) {
+		fmt.Println("TEST: passed", maxBlockNum, br.blockReader.FrozenBlocks()+snaptype.Erigon2MinSegmentSize)
 		return false
 	}
+
 	fmt.Println("TEST: passed", maxBlockNum, br.blockReader.FrozenBlocks()+snaptype.Erigon2MinSegmentSize)
 	if !br.working.CompareAndSwap(false, true) {
 		return false
