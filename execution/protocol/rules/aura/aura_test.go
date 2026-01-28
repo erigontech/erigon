@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/rulesconfig"
 )
 
@@ -164,12 +165,14 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 		genesisBlock.Header().AuRaStep,
 	)
 	header.GasLimit = 12500000
-	ibs := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	writer := state.NewChangeSetWriter()
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, logger))
+	reader := state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsGetter(tx)))
+	writer := state.NewBufferedWriter(rs, nil)
+	ibs := state.New(reader)
 	err = protocol.InitializeBlockExecution(engine, chain, header, config, ibs, writer, logger, nil)
 	require.NoError(err)
-	accountChanges, err := writer.GetAccountChanges()
+	account, err := reader.ReadAccountData(params.SystemAddress)
 	require.NoError(err)
-	require.Equal(1, accountChanges.Len())
-	require.Equal(params.SystemAddress.Value().Bytes(), accountChanges.Changes[0].Key)
+	require.NotNil(account)
+	require.Equal(accounts.Account{}, account)
 }
