@@ -153,6 +153,8 @@ type BeaconStateMutator interface {
 	SetExecutionPayloadAvailability(slot uint64, available bool)
 	SetBuilderPendingPayments(*solid.VectorSSZ[*cltypes.BuilderPendingPayment])
 	SetBuilderPendingWithdrawals(withdrawals *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal])
+	SetPayloadExpectedWithdrawals(withdrawals *solid.ListSSZ[*cltypes.Withdrawal])
+	SetNextWithdrawalBuilderIndex(index cltypes.BuilderIndex)
 
 	AddEth1DataVote(vote *cltypes.Eth1Data)
 	AddValidator(validator solid.Validator, balance uint64)

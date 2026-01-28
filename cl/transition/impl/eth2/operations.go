@@ -297,11 +297,57 @@ func (I *impl) ProcessWithdrawals(
 	s abstract.BeaconState,
 	withdrawals *solid.ListSSZ[*cltypes.Withdrawal],
 ) error {
-	// Get the list of withdrawals, the expected withdrawals (if performing full validation),
-	// and the beacon configuration.
-	beaconConfig := s.BeaconConfig()
-	numValidators := uint64(s.ValidatorLength())
+	// [Modified in Gloas:EIP7732]
+	if s.Version() >= clparams.GloasVersion {
+		return I.processWithdrawalsGloas(s)
+	}
+	return I.processWithdrawalsPreGloas(s, withdrawals)
+}
 
+// processWithdrawalsGloas implements the Gloas version of process_withdrawals.
+// The payload parameter is removed; withdrawals are computed internally.
+func (I *impl) processWithdrawalsGloas(s abstract.BeaconState) error {
+	// [New in Gloas:EIP7732] Return early if the parent block is empty
+	if !state.IsParentBlockFull(s) {
+		return nil
+	}
+
+	// Get expected withdrawals
+	expected := state.GetExpectedWithdrawals(s, state.Epoch(s))
+
+	// Build a ListSSZ from expected withdrawals for applyWithdrawals
+	withdrawalsList := solid.NewStaticListSSZ[*cltypes.Withdrawal](
+		int(s.BeaconConfig().MaxWithdrawalsPerPayload),
+		new(cltypes.Withdrawal).EncodingSizeSSZ(),
+	)
+	for _, w := range expected.Withdrawals {
+		withdrawalsList.Append(w)
+	}
+
+	// Apply expected withdrawals
+	if err := applyWithdrawals(s, withdrawalsList); err != nil {
+		return err
+	}
+
+	// Update withdrawals fields in the state
+	updateNextWithdrawalIndex(s, expected.Withdrawals)
+	// [New in Gloas:EIP7732]
+	updatePayloadExpectedWithdrawals(s, withdrawalsList)
+	// [New in Gloas:EIP7732]
+	updateBuilderPendingWithdrawals(s, expected.ProcessedBuilderWithdrawalsCount)
+	updatePendingPartialWithdrawals(s, expected.ProcessedPartialWithdrawalsCount)
+	// [New in Gloas:EIP7732]
+	updateNextWithdrawalBuilderIndex(s, expected.ProcessedBuildersSweepCount)
+	updateNextWithdrawalValidatorIndex(s, expected.Withdrawals)
+
+	return nil
+}
+
+// processWithdrawalsPreGloas implements process_withdrawals for pre-Gloas versions.
+func (I *impl) processWithdrawalsPreGloas(
+	s abstract.BeaconState,
+	withdrawals *solid.ListSSZ[*cltypes.Withdrawal],
+) error {
 	// Check if full validation is required and verify expected withdrawals.
 	expectedWithdrawals := state.GetExpectedWithdrawals(s, state.Epoch(s))
 	if I.FullValidation {
@@ -322,38 +368,91 @@ func (I *impl) ProcessWithdrawals(
 		}
 	}
 
-	if s.Version() >= clparams.ElectraVersion {
-		// Update pending partial withdrawals [New in Electra:EIP7251]
-		pendingPartialWithdrawal := s.GetPendingPartialWithdrawals()
-		pendingPartialWithdrawal.Cut(int(expectedWithdrawals.ProcessedPartialWithdrawalsCount))
-		s.SetPendingPartialWithdrawals(pendingPartialWithdrawal)
-	}
-
-	if err := solid.RangeErr[*cltypes.Withdrawal](withdrawals, func(_ int, w *cltypes.Withdrawal, _ int) error {
-		if err := state.DecreaseBalance(s, w.Validator, w.Amount); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
+	if err := applyWithdrawals(s, withdrawals); err != nil {
 		return err
 	}
 
-	// Update next withdrawal index based on number of withdrawals.
-	if withdrawals.Len() > 0 {
-		lastWithdrawalIndex := withdrawals.Get(withdrawals.Len() - 1).Index
-		s.SetNextWithdrawalIndex(lastWithdrawalIndex + 1)
+	// Convert to slice for shared helper functions
+	withdrawalSlice := make([]*cltypes.Withdrawal, withdrawals.Len())
+	for i := 0; i < withdrawals.Len(); i++ {
+		withdrawalSlice[i] = withdrawals.Get(i)
 	}
 
-	// Update next withdrawal validator index based on number of withdrawals.
-	if withdrawals.Len() == int(beaconConfig.MaxWithdrawalsPerPayload) {
-		lastWithdrawalValidatorIndex := withdrawals.Get(withdrawals.Len()-1).Validator + 1
+	updateNextWithdrawalIndex(s, withdrawalSlice)
+	if s.Version() >= clparams.ElectraVersion {
+		updatePendingPartialWithdrawals(s, expectedWithdrawals.ProcessedPartialWithdrawalsCount)
+	}
+	updateNextWithdrawalValidatorIndex(s, withdrawalSlice)
+
+	return nil
+}
+
+// updateNextWithdrawalIndex sets the next_withdrawal_index from the last withdrawal.
+func updateNextWithdrawalIndex(s abstract.BeaconState, withdrawals []*cltypes.Withdrawal) {
+	if len(withdrawals) > 0 {
+		lastWithdrawalIndex := withdrawals[len(withdrawals)-1].Index
+		s.SetNextWithdrawalIndex(lastWithdrawalIndex + 1)
+	}
+}
+
+// updatePendingPartialWithdrawals removes the first processedCount entries from pending_partial_withdrawals.
+// [New in Electra:EIP7251]
+func updatePendingPartialWithdrawals(s abstract.BeaconState, processedCount uint64) {
+	pending := s.GetPendingPartialWithdrawals()
+	pending.Cut(int(processedCount))
+	s.SetPendingPartialWithdrawals(pending)
+}
+
+// updateNextWithdrawalValidatorIndex advances next_withdrawal_validator_index based on processed_validators_sweep_count.
+func updateNextWithdrawalValidatorIndex(s abstract.BeaconState, withdrawals []*cltypes.Withdrawal) {
+	beaconConfig := s.BeaconConfig()
+	numValidators := uint64(s.ValidatorLength())
+	if uint64(len(withdrawals)) == beaconConfig.MaxWithdrawalsPerPayload {
+		lastWithdrawalValidatorIndex := withdrawals[len(withdrawals)-1].Validator + 1
 		s.SetNextWithdrawalValidatorIndex(lastWithdrawalValidatorIndex % numValidators)
 	} else {
 		nextIndex := s.NextWithdrawalValidatorIndex() + beaconConfig.MaxValidatorsPerWithdrawalsSweep
 		s.SetNextWithdrawalValidatorIndex(nextIndex % numValidators)
 	}
+}
 
-	return nil
+func applyWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) error {
+	return solid.RangeErr[*cltypes.Withdrawal](withdrawals, func(_ int, w *cltypes.Withdrawal, _ int) error {
+		// [Modified in Gloas:EIP7732]
+		if s.Version() >= clparams.GloasVersion && state.IsBuilderIndex(w.Validator) {
+			builderIndex := state.ConvertValidatorIndexToBuilderIndex(w.Validator)
+			builders := s.GetBuilders()
+			builder := builders.Get(int(builderIndex))
+			builder.Balance -= min(w.Amount, builder.Balance)
+			return nil
+		}
+		return state.DecreaseBalance(s, w.Validator, w.Amount)
+	})
+}
+
+// updatePayloadExpectedWithdrawals stores the withdrawals into state.payload_expected_withdrawals.
+// [New in Gloas:EIP7732]
+func updatePayloadExpectedWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) {
+	s.SetPayloadExpectedWithdrawals(withdrawals.ShallowCopy())
+}
+
+// updateBuilderPendingWithdrawals removes the first processedCount entries from builder_pending_withdrawals.
+// [New in Gloas:EIP7732]
+func updateBuilderPendingWithdrawals(s abstract.BeaconState, processedCount uint64) {
+	pending := s.GetBuilderPendingWithdrawals().ShallowCopy()
+	pending.Cut(int(processedCount))
+	s.SetBuilderPendingWithdrawals(pending)
+}
+
+// updateNextWithdrawalBuilderIndex advances the next_withdrawal_builder_index by processedCount.
+// [New in Gloas:EIP7732]
+func updateNextWithdrawalBuilderIndex(s abstract.BeaconState, processedBuildersSweepCount uint64) {
+	builders := s.GetBuilders()
+	if builders == nil || builders.Len() == 0 {
+		return
+	}
+	nextIndex := uint64(s.GetNextWithdrawalBuilderIndex()) + processedBuildersSweepCount
+	s.SetNextWithdrawalBuilderIndex(cltypes.BuilderIndex(nextIndex % uint64(builders.Len())))
 }
 
 // ProcessExecutionPayload sets the latest payload header accordinly.
