@@ -72,7 +72,7 @@ jobs:
     name: Benchmark ${{ matrix.client }}
     needs: [setup]
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - client: erigon
@@ -324,9 +324,9 @@ jobs:
           # Launch the RPC performance test runner
 
           #run_perf <workspace> <chain> <method> <pattern> <load-sequence> <client>
-          run_perf ${{runner.workspace}} $CHAIN eth_call stress_test_eth_call_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
-          #run_perf ${{runner.workspace}} $CHAIN eth_call stress_test_eth_call_002_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
-          run_perf ${{runner.workspace}} $CHAIN eth_getProof stress_test_eth_getProof_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
+          #run_perf ${{runner.workspace}} $CHAIN eth_call stress_test_eth_call_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
+          run_perf ${{runner.workspace}} $CHAIN eth_call stress_test_eth_call_002_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
+          #run_perf ${{runner.workspace}} $CHAIN eth_getProof stress_test_eth_getProof_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
           
           # Save the subsection reached status
           
@@ -377,3 +377,10 @@ jobs:
         if: always() && matrix.client == 'erigon'
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
+
+      - name: Send an error status to the other client
+        if: failure()
+        shell: bash
+        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
+        run: |
+          python3 redis_client.py --key ${{ matrix.client == 'erigon' && needs.setup.outputs.erigon_redis_key || needs.setup.outputs.geth_redis_key }} --write "error:workflow failed"
