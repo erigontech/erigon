@@ -36,7 +36,11 @@ func setupSyncCommitteesServiceTest(t *testing.T, ctrl *gomock.Controller) (Sync
 	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
 	syncContributionPool := syncpoolmock.NewMockSyncContributionPool(ctrl)
-	batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
+	
+	verifierCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	batchSignatureVerifier := NewBatchSignatureVerifier(verifierCtx, nil)
 	go batchSignatureVerifier.Start()
 	s := NewSyncCommitteeMessagesService(cfg, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, true)
 	syncContributionPool.EXPECT().AddSyncCommitteeMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
