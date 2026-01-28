@@ -356,7 +356,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	// if we've pruned this history away for this block then just return early
 	// to save any red herring errors
 
-	err = api.BaseAPI.checkPruneStateHistory(ctx, dbtx, fromBlock)
+	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, fromBlock)
 	if err != nil {
 		return err
 	}

@@ -104,7 +104,7 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 		return StorageRangeResult{}, nil
 	}
 
-	err = api.BaseAPI.checkPruneStateHistory(ctx, tx, *number)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, *number)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -197,7 +197,7 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 		blockNumber = header.Number.Uint64()
 	}
 
-	err = api.BaseAPI.checkPruneStateHistory(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
@@ -267,7 +267,7 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum)
 	}
 
-	err = api.BaseAPI.checkPruneStateHistory(ctx, tx, startNum)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, startNum)
 	if err != nil {
 		return nil, err
 	}
@@ -335,6 +335,11 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 		return nil, fmt.Errorf("start block (%d) must be less than end block (%d)", startNum, endNum)
 	}
 
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, startNum)
+	if err != nil {
+		return nil, err
+	}
+
 	//[from, to)
 	startTxNum, err := api._txNumReader.Min(ctx, tx, startNum)
 	if err != nil {
@@ -373,7 +378,7 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 		return nil, errors.New("block hash is not canonical")
 	}
 
-	err = api.BaseAPI.checkPruneStateHistory(ctx, tx, header.Number.Uint64())
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
@@ -453,6 +458,12 @@ func (api *DebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.Bloc
 		}
 		return nil, err
 	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, n)
+	if err != nil {
+		return nil, err
+	}
+
 	block, err := api.blockWithSenders(ctx, tx, h, n)
 	if err != nil {
 		return nil, err
@@ -478,6 +489,12 @@ func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.B
 		}
 		return nil, err
 	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
 	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
@@ -568,6 +585,11 @@ func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.H
 		return nil, err
 	}
 	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, txnHash)
+	if err != nil {
+		return nil, err
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
