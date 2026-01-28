@@ -441,7 +441,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNrOrHash.BlockNumber.Uint64())
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, uint64(header.Number.Uint64()))
 	if err != nil {
 		return nil, err
 	}
