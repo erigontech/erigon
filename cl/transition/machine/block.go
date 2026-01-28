@@ -185,7 +185,7 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 	}
 	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
 
-	if s.Version() >= clparams.ElectraVersion {
+	if clparams.ElectraVersion <= s.Version() && s.Version() < clparams.GloasVersion {
 		if err := forEachProcess(s, blockBody.GetExecutionRequests().Deposits, impl.ProcessDepositRequest); err != nil {
 			return nil, nil, nil, fmt.Errorf("ProcessDepositRequest: %s", err)
 		}

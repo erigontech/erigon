@@ -1269,7 +1269,19 @@ func (I *impl) ProcessDepositRequest(s abstract.BeaconState, depositRequest *sol
 		s.SetDepositRequestsStartIndex(depositRequest.Index)
 	}
 
-	// Create pending deposit
+	// [New in Gloas:EIP7732] Route builder deposits immediately
+	if s.Version() >= clparams.GloasVersion {
+		isBuilder := isBuilderPubkey(s, depositRequest.PubKey)
+		_, isValidator := s.ValidatorIndexByPubkey(depositRequest.PubKey)
+		isBuilderPrefix := state.IsBuilderWithdrawalCredential(depositRequest.WithdrawalCredentials, s.BeaconConfig())
+
+		if isBuilder || (isBuilderPrefix && !isValidator) {
+			applyDepositForBuilder(s, depositRequest.PubKey, depositRequest.WithdrawalCredentials, depositRequest.Amount, depositRequest.Signature)
+			return nil
+		}
+	}
+
+	// Add validator deposits to the queue
 	s.AppendPendingDeposit(&solid.PendingDeposit{
 		PubKey:                depositRequest.PubKey,
 		WithdrawalCredentials: depositRequest.WithdrawalCredentials,
