@@ -109,7 +109,8 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 	}
 
 	if !exists {
-		segCfg := seg.DefaultCfg.WithValuesOnCompressedPage(a.cfg.ValuesOnCompressedPage)
+		segCfg := seg.DefaultCfg
+
 		segCfg.Workers = compressionWorkers
 		segCfg.ExpectMetadata = true
 		sn, err := seg.NewCompressor(ctx, "Snapshot "+Registry.Name(a.id), path, a.dirs.Tmp, segCfg, log.LvlTrace, a.logger)
@@ -161,7 +162,7 @@ func (a *ProtoForkable) BuildFile(ctx context.Context, from, to RootNum, db kv.R
 }
 
 func (a *ProtoForkable) DataWriter(ctx context.Context, f *seg.Compressor, compress bool) *seg.PagedWriter {
-	return seg.NewPagedWriter(ctx, seg.NewWriter(f, a.cfg.Compression), compress)
+	return seg.NewPagedWriter(ctx, seg.NewWriter(f, a.cfg.Compression), a.cfg.ValuesOnCompressedPage, compress)
 }
 
 func (a *ProtoForkable) DataReader(f *seg.Decompressor, compress bool) *seg.Reader {
