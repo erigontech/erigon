@@ -673,7 +673,8 @@ func (e *EthereumExecutionModule) runForkchoicePrune(initialCycle bool) ([]any, 
 			return nil
 		}
 
-		if err := e.executionPipeline.RunPrune(e.bacgroundCtx, e.db, tx, initialCycle, 2*time.Second); err != nil {
+		pruneTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond
+		if err := e.executionPipeline.RunPrune(e.bacgroundCtx, e.db, tx, initialCycle, pruneTimeout); err != nil {
 			return err
 		}
 		return nil
