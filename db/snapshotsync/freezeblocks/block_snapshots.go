@@ -428,7 +428,7 @@ func (br *BlockRetire) RetireBlocksInBackground(
 	}
 
 	if br.skipLoop(minBlockNum, maxBlockNum) {
-		fmt.Println("TEST: passed", maxBlockNum, br.blockReader.FrozenBlocks()+snaptype.Erigon2MinSegmentSize)
+		fmt.Println("TEST: not passed", maxBlockNum, br.blockReader.FrozenBlocks()+snaptype.Erigon2MinSegmentSize)
 		return false
 	}
 
