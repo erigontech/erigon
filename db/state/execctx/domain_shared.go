@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
@@ -69,6 +70,11 @@ type accHolder interface {
 	SetChangesetAccumulator(acc *changeset.StateChangeSet)
 }
 
+// Context keys for SharedDomains.ctx map
+const (
+	CtxKeyCodeCache = "codeCache"
+)
+
 type SharedDomains struct {
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext
 
@@ -82,6 +88,9 @@ type SharedDomains struct {
 	commitmentCapture bool
 	mem               kv.TemporalMemBatch
 	metrics           changeset.DomainMetrics
+
+	// ctx is a general-purpose context map for storing auxiliary data like caches
+	ctx map[string]interface{}
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
@@ -90,6 +99,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) 
 		//trace:   true,
 		metrics:  changeset.DomainMetrics{Domains: map[kv.Domain]*changeset.DomainIOMetrics{}},
 		stepSize: tx.Debug().StepSize(),
+		ctx:      make(map[string]interface{}),
 	}
 
 	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
@@ -207,6 +217,36 @@ func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmen
 }
 func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
+// GetCtx returns a value from the context map by key.
+// Returns nil if the key does not exist.
+func (sd *SharedDomains) GetCtx(key string) interface{} {
+	return sd.ctx[key]
+}
+
+// SetCtx stores a value in the context map with the given key.
+func (sd *SharedDomains) SetCtx(key string, value interface{}) {
+	sd.ctx[key] = value
+}
+
+// HasCtx checks if a key exists in the context map.
+func (sd *SharedDomains) HasCtx(key string) bool {
+	_, ok := sd.ctx[key]
+	return ok
+}
+
+// DeleteCtx removes a key from the context map.
+func (sd *SharedDomains) DeleteCtx(key string) {
+	delete(sd.ctx, key)
+}
+
+// GetCodeCache returns the CodeCache from the context, or nil if not set.
+func (sd *SharedDomains) GetCodeCache() *cache.CodeCache {
+	if cc := sd.ctx[CtxKeyCodeCache]; cc != nil {
+		return cc.(*cache.CodeCache)
+	}
+	return nil
+}
+
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	if resetCommitment && sd.sdCtx != nil {
 		sd.sdCtx.ClearRam()
@@ -308,6 +348,16 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
+	// Check code cache for CodeDomain before expensive DB lookup
+	if domain == kv.CodeDomain && len(k) == 20 {
+		if codeCache := sd.GetCodeCache(); codeCache != nil {
+			if code, ok := codeCache.Get(k); ok {
+				sd.metrics.UpdateCacheReads(domain, start)
+				return code, 0, nil
+			}
+		}
+	}
+
 	type MeteredGetter interface {
 		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
 	}
@@ -319,6 +369,13 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
+	}
+
+	// Populate code cache on successful read
+	if domain == kv.CodeDomain && len(k) == 20 && len(v) > 0 {
+		if codeCache := sd.GetCodeCache(); codeCache != nil {
+			codeCache.Put(k, v)
+		}
 	}
 
 	return v, step, nil

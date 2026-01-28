@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -201,6 +202,9 @@ type EthereumExecutionModule struct {
 	lock           sync.RWMutex
 	currentContext *execctx.SharedDomains
 
+	// codeCache is an LRU cache for contract code, keyed by address
+	codeCache *cache.CodeCache
+
 	executionproto.UnimplementedExecutionServer
 }
 
@@ -216,6 +220,9 @@ func NewEthereumExecutionModule(ctx context.Context, blockReader services.FullBl
 	fcuBackgroundCommit bool,
 	onlySnapDownloadOnStart bool,
 ) *EthereumExecutionModule {
+	// Initialize code cache (ignore error - cache is optional optimization)
+	codeCache, _ := cache.NewDefaultCodeCache()
+
 	em := &EthereumExecutionModule{
 		blockReader:             blockReader,
 		db:                      db,
@@ -236,6 +243,7 @@ func NewEthereumExecutionModule(ctx context.Context, blockReader services.FullBl
 		fcuBackgroundPrune:      fcuBackgroundPrune,
 		fcuBackgroundCommit:     fcuBackgroundCommit,
 		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
+		codeCache:               codeCache,
 	}
 
 	if stateCache != nil {
@@ -372,6 +380,13 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return nil, err
 	}
 
+	// Set code cache in SharedDomains for use during code reading
+	if e.codeCache != nil {
+		// Validate cache version - clear if parent hash doesn't match
+		e.codeCache.ValidateAndPrepare(header.ParentHash)
+		doms.SetCtx(execctx.CtxKeyCodeCache, e.codeCache)
+	}
+
 	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
 		doms.Close()
 		return nil, err
@@ -380,6 +395,18 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
 		return nil, criticalError
+	}
+
+	// Update code cache version after successful execution
+	isInvalid := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
+	if e.codeCache != nil {
+		if isInvalid {
+			// On invalid block, clear cache and reset to parent hash
+			e.codeCache.ClearWithHash(header.ParentHash)
+		} else {
+			// On success, update cache hash to current block
+			e.codeCache.SetBlockHash(blockHash)
+		}
 	}
 
 	// Throw away the tx and start a new one (do not persist changes to the canonical chain)

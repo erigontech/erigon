@@ -318,6 +318,25 @@ func unwindExec3State(ctx context.Context,
 		if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 			return err
 		}
+
+		// Invalidate code cache entries for addresses with code changes
+		if codeCache := sd.GetCodeCache(); codeCache != nil {
+			codeDiffs := changeset[kv.CodeDomain]
+			for _, entry := range codeDiffs {
+				// Key format: address (20 bytes) + step suffix (8 bytes)
+				if len(entry.Key) >= length.Addr {
+					codeCache.Remove(toBytesZeroCopy(entry.Key[:length.Addr]))
+				}
+			}
+
+			// Update cache hash to the canonical hash of the block we're unwinding to
+			unwindToHash, err := rawdb.ReadCanonicalHash(tx, blockUnwindTo)
+			if err != nil {
+				logger.Warn("failed to read canonical hash for cache update", "block", blockUnwindTo, "err", err)
+			} else {
+				codeCache.SetBlockHash(unwindToHash)
+			}
+		}
 	}
 
 	sd.Unwind(txUnwindTo, changeset)
