@@ -227,11 +227,11 @@ func (g *PagedReader) Skip() (uint64, int) {
 	return offset, len(v)
 }
 
-func NewPagedWriter(parent CompressorI, compressionEnabled bool) *PagedWriter {
+func NewPagedWriter(parent CompressorI, pageSize int, compressionEnabled bool) *PagedWriter {
 
 	return &PagedWriter{
 		parent:             parent,
-		pageSize:           parent.GetValuesOnCompressedPage(),
+		pageSize:           pageSize,
 		compressionEnabled: compressionEnabled,
 	}
 }
