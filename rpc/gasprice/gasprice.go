@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"math/rand"
 
 	"github.com/holiman/uint256"
 
@@ -113,6 +114,41 @@ func NewOracle(backend OracleBackend, params gaspricecfg.Config, cache Cache, lo
 	}
 }
 
+// partition partitions values[left:right] around a pivot
+func partition(values []*big.Int, left, right int) int {
+	pivot := values[right]
+	i := left
+	for j := left; j < right; j++ {
+		if values[j].Cmp(pivot) < 0 {
+			values[i], values[j] = values[j], values[i]
+			i++
+		}
+	}
+	values[i], values[right] = values[right], values[i]
+	return i
+}
+
+// findKthUint256 finds the k-th smallest element (0-indexed)
+func findKthUint256(values []*big.Int, k int) *big.Int {
+	if k < 0 || k >= len(values) {
+		return nil
+	}
+	left, right := 0, len(values)-1
+	for left < right {
+		pivot := left + rand.Intn(right-left+1)
+		values[pivot], values[right] = values[right], values[pivot]
+		pos := partition(values, left, right)
+		if pos == k {
+			return values[k]
+		} else if pos < k {
+			left = pos + 1
+		} else {
+			right = pos - 1
+		}
+	}
+	return values[left]
+}
+
 // SuggestTipCap returns a TipCap so that newly created transaction can
 // have a very high chance to be included in the following blocks.
 // NODE: if caller wants legacy txn SuggestedPrice, we need to add
@@ -139,27 +175,22 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*big.Int, error) {
 	}
 
 	number := head.Number.Uint64()
-	txPrices := make(sortingHeap, 0, sampleNumber*oracle.checkBlocks)
-	for txPrices.Len() < sampleNumber*oracle.checkBlocks && number > 0 {
-		err := oracle.getBlockPrices(ctx, number, sampleNumber, oracle.ignorePrice, &txPrices)
-		if err != nil {
+	txPrices := make([]*big.Int, 0, sampleNumber*oracle.checkBlocks)
+	for len(txPrices) < sampleNumber*oracle.checkBlocks && number > 0 {
+		if err := oracle.getBlockPrices(ctx, number, sampleNumber, oracle.ignorePrice, &txPrices); err != nil {
 			return latestPrice, err
 		}
 		number--
 	}
 	price := latestPrice
-	if txPrices.Len() > 0 {
-		// Item with this position needs to be extracted from the sorting heap
-		// so we pop all the items before it
-		percentilePosition := (txPrices.Len() - 1) * oracle.percentile / 100
-		for i := 0; i < percentilePosition; i++ {
-			heap.Pop(&txPrices)
+	if len(txPrices) > 0 {
+		index := (len(txPrices) - 1) * oracle.percentile / 100
+		p := findKthUint256(txPrices, index)
+		if p != nil {
+			price = p
 		}
 	}
-	if txPrices.Len() > 0 {
-		// Don't need to pop it, just take from the top of the heap
-		price = txPrices[0].ToBig()
-	}
+
 	if price.Cmp(oracle.maxPrice) > 0 {
 		price = new(big.Int).Set(oracle.maxPrice)
 	}
@@ -218,7 +249,7 @@ func (t *transactionsByGasPrice) Pop() any {
 // itself(it doesn't make any sense to include this kind of transaction prices for sampling),
 // nil gasprice is returned.
 func (oracle *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit int,
-	ingoreUnderBig *big.Int, s *sortingHeap) error {
+	ingoreUnderBig *big.Int, out *[]*big.Int) error {
 	ignoreUnder, overflow := uint256.FromBig(ingoreUnderBig)
 	if overflow {
 		err := errors.New("overflow in getBlockPrices, gasprice.go: ignoreUnder too large")
@@ -261,7 +292,7 @@ func (oracle *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit
 		}
 		sender, _ := tx.GetSender()
 		if sender.Value() != block.Coinbase() {
-			heap.Push(s, tip)
+			*out = append(*out, tip.ToBig())
 			count = count + 1
 		}
 	}
