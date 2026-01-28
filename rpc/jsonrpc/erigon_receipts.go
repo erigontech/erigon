@@ -123,6 +123,11 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		return nil, fmt.Errorf("end (%d) > MaxUint32", end)
 	}
 
+	err := api.BaseAPI.checkPruneHistory(ctx, tx, begin)
+	if err != nil {
+		return nil, err
+	}
+
 	return api.getLogsV3(ctx, tx, begin, end, crit, api.BaseAPI.rangeLimit)
 }
 
@@ -208,6 +213,11 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 
 	if api.rangeLimit != 0 && (end-begin) > uint64(api.rangeLimit) {
 		return nil, fmt.Errorf("%s: %d", errExceedBlockRange, api.rangeLimit)
+        }
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, begin)
+	if err != nil {
+		return nil, err
 	}
 
 	chainConfig, err := api.chainConfig(ctx, tx)
@@ -380,6 +390,12 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	if err != nil {
 		return nil, err
 	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
 	block, err := api.blockWithSenders(ctx, tx, cannonicalBlockHash, blockNum)
 	if err != nil {
 		return nil, err

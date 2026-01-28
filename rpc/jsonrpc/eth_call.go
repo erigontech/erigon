@@ -405,6 +405,11 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 		return nil, errors.New("block not found")
 	}
 
+	err = api.BaseAPI.checkPruneHistory(ctx, roTx, uint64(requestedBlockNr))
+	if err != nil {
+		return nil, err
+	}
+
 	storageKeysConverted := make([]StorageKeysInfo, len(storageKeys))
 	for i, s := range storageKeys {
 		storageKeysConverted[i].Hash.SetBytes(s)
@@ -437,11 +442,6 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	defer tx.Rollback()
 	// get the root hash from header to validate proofs along the way
 	header, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNrOrHash.BlockNumber.Uint64())
-	if err != nil {
-		return nil, err
-	}
-
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, uint64(header.Number.Uint64()))
 	if err != nil {
 		return nil, err
 	}

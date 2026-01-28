@@ -166,6 +166,10 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 		resultingHeader = beforeHeader
 	}
 
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, uint64(blockNum))
+	if err != nil {
+		return nil, err
+	}
 	response, err := buildBlockResponse(ctx, api._blockReader, tx, uint64(blockNum), fullTx)
 	if err != nil {
 		return nil, err
