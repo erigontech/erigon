@@ -223,7 +223,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	defer tx.Rollback()
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, number.Uint64())
 	if err != nil {
-		return nil, err
+		return nil, nil
 	}
 
 	b, err := api.blockByNumber(ctx, number, tx)

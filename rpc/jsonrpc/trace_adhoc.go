@@ -897,6 +897,11 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
 	if !ok {
 		if chainConfig.Bor == nil {
 			return nil, nil
@@ -985,6 +990,11 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	}
 
 	blockNumber, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
