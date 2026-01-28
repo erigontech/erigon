@@ -647,7 +647,7 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 	var allFileStats []HistoryFileBenchStats
 
 	// Process each history file
-	for fileIdx, f := range historyFiles {
+	for _, f := range historyFiles {
 		fpath := f.Fullpath()
 		fname := filepath.Base(fpath)
 		startTxNum := f.StartRootNum()
@@ -670,7 +670,6 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 
 		logger.Info("Benchmarking file...",
 			"file", fname,
-			"fileIdx", fileIdx+1,
 			"totalFiles", len(historyFiles),
 			"startTxNum", startTxNum,
 			"endTxNum", endTxNum,
