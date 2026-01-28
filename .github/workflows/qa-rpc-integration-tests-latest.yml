@@ -21,7 +21,66 @@ on:
       - ready_for_review
 
 
+env:
+  CHAIN: mainnet
+  ERIGON_QA_PATH: /home/qarunner/erigon-qa
+  RPC_PAST_TEST_DIR: /opt/rpc-past-tests
+
 jobs:
+  setup:
+    name: Setup benchmark run
+    runs-on: [self-hosted, qa]
+    permissions:
+      contents: read
+    outputs:
+      run_id: ${{ steps.vars.outputs.run_id }}
+      redis_key_prefix: ${{ steps.vars.outputs.redis_key_prefix }}
+      network: ${{ steps.vars.outputs.network }}
+      vegeta_duration: ${{ steps.vars.outputs.vegeta_duration }}
+      erigon_redis_key: ${{ steps.vars.outputs.erigon_redis_key }}
+      geth_redis_key: ${{ steps.vars.outputs.geth_redis_key }}
+    steps:
+      - name: Compute shared variables
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Unique namespace for this workflow execution
+          RUN_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          # Prefix for Redis keys, e.g.: bench:<run_id>:erigon
+          REDIS_KEY_PREFIX="bench:${RUN_ID}"
+          
+          # Variables
+          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "redis_key_prefix=${REDIS_KEY_PREFIX}" >> "$GITHUB_OUTPUT"
+          echo "network=${{ env.CHAIN }}" >> "$GITHUB_OUTPUT"
+          echo "vegeta_duration=60s" >> "$GITHUB_OUTPUT"
+          
+          echo "erigon_redis_key=${REDIS_KEY_PREFIX}:erigon" >> "$GITHUB_OUTPUT"
+          echo "geth_redis_key=${REDIS_KEY_PREFIX}:geth" >> "$GITHUB_OUTPUT"
+
+      - name: Print configuration (for logs)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Run ID:             ${{ steps.vars.outputs.run_id }}"
+          echo "Redis key prefix:   ${{ steps.vars.outputs.redis_key_prefix }}"
+          echo "Network:            ${{ steps.vars.outputs.network }}"
+          echo "Vegeta duration:    ${{ steps.vars.outputs.vegeta_duration }}"
+          
+          echo "Erigon Redis key:   ${{ steps.vars.outputs.erigon_redis_key }}"
+          echo "Geth Redis key:     ${{ steps.vars.outputs.geth_redis_key }}"
+
+      - name: Prepare Redis database
+        shell: bash
+        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
+        run: |
+          set -euo pipefail
+          python3 redis_client.py --key ${{ steps.vars.outputs.erigon_redis_key }} --write "created"
+          python3 redis_client.py --key ${{ steps.vars.outputs.geth_redis_key }} --write "created"
+
   mainnet-rpc-integ-tests-latest:
     concurrency:
       group: >-
@@ -111,7 +170,7 @@ jobs:
         id: test_step
         run: |
           commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD)
-          TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_${commit}_http"
+          TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_${commit}_http/"
           echo "TEST_RESULT_DIR=$TEST_RESULT_DIR" >> $GITHUB_ENV
 
           DUMP_RESPONSE=""
@@ -136,30 +195,6 @@ jobs:
             echo "Error detected during RPC tests"
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Generate Summary
-        if: always() && steps.test_step.outputs.test_executed == 'true'
-        run: |
-          SUMMARY_FILE="${{ env.TEST_RESULT_DIR }}/summary.md"
-          LOG_FILE="${{ env.TEST_RESULT_DIR }}/output.log"
-
-          cat << 'EOF' > $SUMMARY_FILE
-          # ${{ github.workflow }} Report
-
-          ## Test Configuration
-          - **Chain:** ${{ env.CHAIN }}
-          - **Result:** ${{ steps.test_step.outputs.TEST_RESULT }}
-
-          ## Test Output
-          ```
-          EOF
-
-          cat $LOG_FILE >> $SUMMARY_FILE
-
-          echo '```' >> $SUMMARY_FILE
-
-          cat $SUMMARY_FILE
-          cat $SUMMARY_FILE >> $GITHUB_STEP_SUMMARY
 
       - name: Stop Erigon 
         if: always()
