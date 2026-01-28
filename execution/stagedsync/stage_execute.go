@@ -480,22 +480,9 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize()) * 100)
 
 	pruneTimeout := quickPruneTimeout
-	//if s.CurrentSyncCycle.IsInitialCycle {
-	//	pruneTimeout = 12 * time.Hour
-	//
-	//	// allow greedy prune on non-chain-tip
-	//	greedyPruneCommitmentHistoryStartTime := time.Now()
-	//	if err = tx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
-	//		return err
-	//	}
-	//	if duration := time.Since(greedyPruneCommitmentHistoryStartTime); duration > quickPruneTimeout {
-	//		logger.Debug(
-	//			fmt.Sprintf("[%s] greedy prune commitment history timing", s.LogPrefix()),
-	//			"duration", duration,
-	//			"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
-	//		)
-	//	}
-	//}
+	if s.CurrentSyncCycle.IsInitialCycle {
+		pruneTimeout = 12 * time.Hour
+	}
 
 	pruneSmallBatchesStartTime := time.Now()
 	if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, pruneTimeout); err != nil {
