@@ -62,6 +62,7 @@ type ExecutionContext struct {
 	commitmentCapture bool
 	mem               kv.TemporalMemBatch
 	metrics           DomainMetrics
+	blockDomain       *BlockDomain
 	accountsDomain    *AccountsDomain
 	storageDomain     *StorageDomain
 	codeDomain        *CodeDomain
@@ -105,6 +106,11 @@ func NewExecutionContext(ctx context.Context, tx kv.TemporalTx, logger log.Logge
 	}
 
 	return sd, nil
+}
+
+func (ec *ExecutionContext) WithBlockDomain(tx kv.TemporalTx, tmpDir string, logger log.Logger) *ExecutionContext {
+	ec.blockDomain = NewBlockDomain(tx, tmpDir, logger)
+	return ec
 }
 
 type temporalPutDel struct {
@@ -408,6 +414,11 @@ func (sd *ExecutionContext) Close() {
 
 func (sd *ExecutionContext) Flush(ctx context.Context, tx kv.RwTx) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
+	if sd.blockDomain != nil {
+		if err := sd.blockDomain.Flush(ctx, tx); err != nil {
+			return err
+		}
+	}
 	sd.accountsDomain.FlushUpdates()
 	sd.storageDomain.FlushUpdates()
 	sd.codeDomain.FlushUpdates()

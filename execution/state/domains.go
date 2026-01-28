@@ -1646,8 +1646,8 @@ type BlockDomain struct {
 	mem *membatchwithdb.MemoryMutation
 }
 
-func NewBlockDomain(tx kv.TemporalTx, tmpDir string, logger log.Logger) (*BlockDomain, error) {
-	return &BlockDomain{mem: membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)}, nil
+func NewBlockDomain(tx kv.TemporalTx, tmpDir string, logger log.Logger) *BlockDomain {
+	return &BlockDomain{mem: membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)}
 }
 
 func (d *BlockDomain) Flush(ctx context.Context, tx kv.RwTx) error {
