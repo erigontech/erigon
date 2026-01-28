@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"log"
 	"math"
 	"runtime"
 	"slices"
@@ -23,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/state"
@@ -1647,5 +1647,24 @@ type BlockDomain struct {
 }
 
 func NewBlockDomain(tx kv.TemporalTx, tmpDir string, logger log.Logger) (*BlockDomain, error) {
-	mb := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
+	return &BlockDomain{mem: membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)}, nil
+}
+
+func (d *BlockDomain) Flush(ctx context.Context, tx kv.RwTx) error {
+	if d.mem != nil {
+		return d.mem.Flush(ctx, tx)
+	}
+	return nil
+}
+
+func (d *BlockDomain) Close() {
+	mem := d.mem
+	if mem != nil {
+		d.mem = nil
+		mem.Close()
+	}
+}
+
+func (d *BlockDomain) RwTx() kv.TemporalRwTx {
+	return d.mem
 }
