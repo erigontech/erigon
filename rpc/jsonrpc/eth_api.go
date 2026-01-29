@@ -107,6 +107,7 @@ type EthAPI interface {
 	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides, blockOverrides *ethapi.BlockOverrides) (hexutil.Bytes, error)
 	EstimateGas(ctx context.Context, argsOrNil *ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides, blockOverrides *ethapi.BlockOverrides) (hexutil.Uint64, error)
 	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
+	SendRawTransactionSync(ctx context.Context, encodedTx hexutil.Bytes, timeoutMs *hexutil.Uint64) (map[string]any, error)
 	SendTransaction(_ context.Context, txObject any) (common.Hash, error)
 	Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error)
 	SignTransaction(_ context.Context, txObject any) (common.Hash, error)
@@ -140,12 +141,13 @@ type BaseAPI struct {
 	bridgeReader bridgeReader
 
 	evmCallTimeout      time.Duration
+	rangeLimit          int
 	dirs                datadir.Dirs
 	receiptsGenerator   *receipts.Generator
 	borReceiptGenerator *receipts.BorGenerator
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine rules.EngineReader, dirs datadir.Dirs, bridgeReader bridgeReader) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine rules.EngineReader, dirs datadir.Dirs, bridgeReader bridgeReader, rangeLimit int) *BaseAPI {
 	var (
 		blocksLRUSize = 128 // ~32Mb
 	)
@@ -171,6 +173,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		borReceiptGenerator: receipts.NewBorGenerator(blockReader, engine, stateCache),
 		dirs:                dirs,
 		bridgeReader:        bridgeReader,
+		rangeLimit:          rangeLimit,
 	}
 }
 
@@ -398,11 +401,26 @@ type APIImpl struct {
 	AllowUnprotectedTxs         bool
 	MaxGetProofRewindBlockCount int
 	SubscribeLogsChannelSize    int
+	RpcTxSyncDefaultTimeout     time.Duration
+	RpcTxSyncMaxTimeout         time.Duration
 	logger                      log.Logger
 }
 
+// EthApiConfig defines the configurable parameters for EthAPI
+type EthApiConfig struct {
+	GasCap                      uint64
+	FeeCap                      float64
+	ReturnDataLimit             int
+	AllowUnprotectedTxs         bool
+	MaxGetProofRewindBlockCount int
+	SubscribeLogsChannelSize    int
+	RpcTxSyncDefaultTimeout     time.Duration
+	RpcTxSyncMaxTimeout         time.Duration
+}
+
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, gascap uint64, feecap float64, returnDataLimit int, allowUnprotectedTxs bool, maxGetProofRewindBlockCount int, subscribeLogsChannelSize int, logger log.Logger) *APIImpl {
+func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, cfg *EthApiConfig, logger log.Logger) *APIImpl {
+	gascap := cfg.GasCap
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
 	}
@@ -415,11 +433,13 @@ func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPo
 		mining:                      mining,
 		gasCache:                    NewGasPriceCache(),
 		GasCap:                      gascap,
-		FeeCap:                      feecap,
-		AllowUnprotectedTxs:         allowUnprotectedTxs,
-		ReturnDataLimit:             returnDataLimit,
-		MaxGetProofRewindBlockCount: maxGetProofRewindBlockCount,
-		SubscribeLogsChannelSize:    subscribeLogsChannelSize,
+		FeeCap:                      cfg.FeeCap,
+		AllowUnprotectedTxs:         cfg.AllowUnprotectedTxs,
+		ReturnDataLimit:             cfg.ReturnDataLimit,
+		MaxGetProofRewindBlockCount: cfg.MaxGetProofRewindBlockCount,
+		SubscribeLogsChannelSize:    cfg.SubscribeLogsChannelSize,
+		RpcTxSyncDefaultTimeout:     cfg.RpcTxSyncDefaultTimeout,
+		RpcTxSyncMaxTimeout:         cfg.RpcTxSyncMaxTimeout,
 		logger:                      logger,
 	}
 }
