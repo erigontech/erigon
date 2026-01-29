@@ -249,7 +249,7 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 	if _, err = s.List(); err != nil {
 		return fmt.Errorf("open Logs: %w", err)
 	}
-	if r.Logs != nil && len(r.Logs) > 0 {
+	if len(r.Logs) > 0 {
 		r.Logs = r.Logs[:0]
 	}
 	for _, err = s.List(); err == nil; _, err = s.List() {
