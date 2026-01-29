@@ -1,4 +1,4 @@
-name: QA - RPC Perf Comparison Tests Latest
+name: QA - RPC Performance Comp Tests Latest
 
 on:
   workflow_dispatch:
@@ -21,11 +21,8 @@ jobs:
       contents: read
     outputs:
       run_id: ${{ steps.vars.outputs.run_id }}
-      redis_key_prefix: ${{ steps.vars.outputs.redis_key_prefix }}
       network: ${{ steps.vars.outputs.network }}
       vegeta_duration: ${{ steps.vars.outputs.vegeta_duration }}
-      erigon_redis_key: ${{ steps.vars.outputs.erigon_redis_key }}
-      geth_redis_key: ${{ steps.vars.outputs.geth_redis_key }}
     steps:
       - name: Compute shared variables
         id: vars
@@ -35,38 +32,27 @@ jobs:
 
           # Unique namespace for this workflow execution
           RUN_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-
-          # Prefix for Redis keys, e.g.: bench:<run_id>:erigon
-          REDIS_KEY_PREFIX="bench:${RUN_ID}"
           
           # Variables
           echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
-          echo "redis_key_prefix=${REDIS_KEY_PREFIX}" >> "$GITHUB_OUTPUT"
           echo "network=${{ env.CHAIN }}" >> "$GITHUB_OUTPUT"
           echo "vegeta_duration=60s" >> "$GITHUB_OUTPUT"
-          
-          echo "erigon_redis_key=${REDIS_KEY_PREFIX}:erigon" >> "$GITHUB_OUTPUT"
-          echo "geth_redis_key=${REDIS_KEY_PREFIX}:geth" >> "$GITHUB_OUTPUT"
 
       - name: Print configuration (for logs)
         shell: bash
         run: |
           set -euo pipefail
           echo "Run ID:             ${{ steps.vars.outputs.run_id }}"
-          echo "Redis key prefix:   ${{ steps.vars.outputs.redis_key_prefix }}"
           echo "Network:            ${{ steps.vars.outputs.network }}"
           echo "Vegeta duration:    ${{ steps.vars.outputs.vegeta_duration }}"
-          
-          echo "Erigon Redis key:   ${{ steps.vars.outputs.erigon_redis_key }}"
-          echo "Geth Redis key:     ${{ steps.vars.outputs.geth_redis_key }}"
 
       - name: Prepare Redis database
         shell: bash
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
           set -euo pipefail
-          python3 redis_client.py --key ${{ steps.vars.outputs.erigon_redis_key }} --write "created"
-          python3 redis_client.py --key ${{ steps.vars.outputs.geth_redis_key }} --write "created"
+          python3 coordinated_start.py --client "erigon" --run-id "${{ steps.vars.outputs.run_id }}" --chain "${{ steps.vars.outputs.network }}" --signal-creation
+          python3 coordinated_start.py --client "geth" --run-id "${{ steps.vars.outputs.run_id }}" --chain "${{ steps.vars.outputs.network }}" --signal-creation
 
   test:
     name: Benchmark ${{ matrix.client }}
@@ -85,11 +71,8 @@ jobs:
       contents: read
     env:
       RUN_ID: ${{ needs.setup.outputs.run_id }}
-      REDIS_KEY_PREFIX: ${{ needs.setup.outputs.redis_key_prefix }}
       NETWORK: ${{ needs.setup.outputs.network }}
       VEGETA_DURATION: ${{ needs.setup.outputs.vegeta_duration }}
-      ERIGON_REDIS_KEY: ${{ needs.setup.outputs.erigon_redis_key }}
-      GETH_REDIS_KEY: ${{ needs.setup.outputs.geth_redis_key }}
       ERIGON_REFERENCE_DIR: /opt/erigon-versions/reference-version
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
@@ -104,7 +87,7 @@ jobs:
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
           set -euo pipefail
-          python3 redis_client.py --key ${{ matrix.client == 'erigon' && needs.setup.outputs.erigon_redis_key || needs.setup.outputs.geth_redis_key }} --read
+          python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$NETWORK" --signal-creation
 
       - name: Checkout RPC Tests Repository
         run: |
@@ -196,11 +179,8 @@ jobs:
           echo "Monitor sync, publish status to Redis, wait barrier, run Vegeta."
           echo "Context:"
           echo "  RUN_ID=${RUN_ID}"
-          echo "  REDIS_KEY_PREFIX=${REDIS_KEY_PREFIX}"
           echo "  NETWORK=${NETWORK}"
           echo "  VEGETA_DURATION=${VEGETA_DURATION}"
-          echo "  ERIGON_REDIS_KEY=${ERIGON_REDIS_KEY}"
-          echo "  GETH_REDIS_KEY=${GETH_REDIS_KEY}"
           # Wait for an agreement between Erigon and Geth
           python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$NETWORK"
 
@@ -383,4 +363,4 @@ jobs:
         shell: bash
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
-          python3 redis_client.py --key ${{ matrix.client == 'erigon' && needs.setup.outputs.erigon_redis_key || needs.setup.outputs.geth_redis_key }} --write "error:workflow failed"
+          python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$NETWORK" --signal-error "workflow failed"
