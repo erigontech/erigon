@@ -669,7 +669,7 @@ func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contra
 			// authority is added to accessed_address in prepare step
 
 			// BAL: captures authorities even if validation fails
-			st.state.MarkAddressAccess(authority)
+			st.state.MarkAddressAccess(authority, false)
 
 			// 4. authority code should be empty or already delegated
 			codeHash, err := st.state.GetCodeHash(authority)

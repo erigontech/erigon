@@ -187,6 +187,9 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	if begin > latestExecuted || end > latestExecuted {
 		return nil, fmt.Errorf("requested block range [%d, %d] is beyond latest executed block %d (node is still syncing)", begin, end, latestExecuted)
 	}
+	if begin == 0 && end == 0 && latestExecuted == 0 {
+		return nil, fmt.Errorf("node is still initializing")
+	}
 
 	erigonLogs, err := api.getLogsV3(ctx, tx, begin, end, crit, api.BaseAPI.rangeLimit)
 	if err != nil {

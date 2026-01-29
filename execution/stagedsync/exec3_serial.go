@@ -88,6 +88,14 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		header := b.HeaderNoCopy()
 		getHashFnMutex := sync.Mutex{}
 
+		// se.cfg.chainConfig.AmsterdamTime != nil && se.cfg.chainConfig.AmsterdamTime.Uint64() > 0 is
+		// temporary to allow for inital non bals amsterdam testing before parallel exec is live by defualt
+		if se.cfg.chainConfig.AmsterdamTime != nil && se.cfg.chainConfig.AmsterdamTime.Uint64() > 0 && se.cfg.chainConfig.IsAmsterdam(header.Time) {
+			se.logger.Error(fmt.Sprintf("[%s] BLOCK PROCESSING FAILED: Amsterdam processing is not supported by serial exec", se.logPrefix), "fork-block", blockNum)
+			se.logger.Error(fmt.Sprintf("[%s] Run erigon with either '--experimental.bal' or 'export ERIGON_EXEC3_PARALLEL=true'", se.logPrefix))
+			return nil, rwTx, fmt.Errorf("amsterdam processing is not supported by serial exec from block: %d", blockNum)
+		}
+
 		blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
 			getHashFnMutex.Lock()
 			defer getHashFnMutex.Unlock()
@@ -145,6 +153,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		if !dbg.BatchCommitments || shouldGenerateChangesets || se.cfg.syncCfg.KeepExecutionProofs {
 			if dbg.TraceBlock(blockNum) {
+				fmt.Println(blockNum, "Commitment")
 				se.doms.SetTrace(true, false)
 			}
 			// Warmup is enabled via EnableTrieWarmup at executor init
