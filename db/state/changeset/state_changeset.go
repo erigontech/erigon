@@ -50,31 +50,39 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 		return append(out, 0, 0, 0, 0, 0) // dict len (1) + diffSet len (4)
 	}
 
-	// Build dictionary and cache lookup indices to avoid double map lookups
-	dict := make(map[string]byte)
-	dictIndices := make([]byte, len(diffSet)) // pre-allocate indices for each entry
-	id := byte(0x00)
+	// Build dictionary using fixed array instead of map.
+	// PrevStepBytes is always 8 bytes, so we use uint64 for fast comparison.
+	// There are typically very few unique values (< 10), so linear search beats map.
+	var dictKeys [256]uint64
+	dictLen := 0
 	totalKeyLen := 0
 	totalValueLen := 0
+
+	// First pass: build dictionary and count sizes
 	for i := range diffSet {
-		diff := &diffSet[i]
-		prevStepS := toStringZeroCopy(diff.PrevStepBytes)
-		if existingID, ok := dict[prevStepS]; ok {
-			dictIndices[i] = existingID
-		} else {
-			dict[prevStepS] = id
-			dictIndices[i] = id
-			id++
+		prevStep := binary.BigEndian.Uint64(diffSet[i].PrevStepBytes)
+
+		// Linear search for existing entry
+		found := false
+		for j := 0; j < dictLen; j++ {
+			if dictKeys[j] == prevStep {
+				found = true
+				break
+			}
 		}
-		totalKeyLen += len(diff.Key)
-		totalValueLen += len(diff.Value)
+		if !found {
+			dictKeys[dictLen] = prevStep
+			dictLen++
+		}
+		totalKeyLen += len(diffSet[i].Key)
+		totalValueLen += len(diffSet[i].Value)
 	}
 
 	// Pre-calculate total size and ensure capacity
-	// dict: 1 + 9*len(dict)
+	// dict: 1 + 9*dictLen
 	// diffSet header: 4
 	// per entry: 4 + keyLen + 4 + valueLen + 1
-	totalSize := len(out) + 1 + 9*len(dict) + 4 + len(diffSet)*(4+4+1) + totalKeyLen + totalValueLen
+	totalSize := len(out) + 1 + 9*dictLen + 4 + len(diffSet)*(4+4+1) + totalKeyLen + totalValueLen
 	if cap(out) < totalSize {
 		ret := make([]byte, len(out), totalSize)
 		copy(ret, out)
@@ -83,27 +91,36 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 	ret := out
 
 	// Write dictionary length
-	ret = append(ret, byte(len(dict)))
+	ret = append(ret, byte(dictLen))
 
 	// Write dictionary entries
-	for k, v := range dict {
-		kBytes := toBytesZeroCopy(k)
-		ret = append(ret, kBytes...) // k is always 8 bytes
-		ret = append(ret, v)         // v is always 1 byte
+	for j := 0; j < dictLen; j++ {
+		ret = binary.BigEndian.AppendUint64(ret, dictKeys[j])
+		ret = append(ret, byte(j))
 	}
 
 	// Write diffSet length
 	ret = binary.BigEndian.AppendUint32(ret, uint32(len(diffSet)))
 
-	// Write diffSet entries using cached indices
+	// Second pass: write entries with dict lookup (dict is small, so this is fast)
 	for i := range diffSet {
-		diff := &diffSet[i]
+		prevStep := binary.BigEndian.Uint64(diffSet[i].PrevStepBytes)
+
+		// Find index in dict
+		var idx byte
+		for j := 0; j < dictLen; j++ {
+			if dictKeys[j] == prevStep {
+				idx = byte(j)
+				break
+			}
+		}
+
 		// write uint32(len(key)) + key + uint32(len(value)) + value + prevStepBytes
-		ret = binary.BigEndian.AppendUint32(ret, uint32(len(diff.Key)))
-		ret = append(ret, diff.Key...)
-		ret = binary.BigEndian.AppendUint32(ret, uint32(len(diff.Value)))
-		ret = append(ret, diff.Value...)
-		ret = append(ret, dictIndices[i])
+		ret = binary.BigEndian.AppendUint32(ret, uint32(len(diffSet[i].Key)))
+		ret = append(ret, diffSet[i].Key...)
+		ret = binary.BigEndian.AppendUint32(ret, uint32(len(diffSet[i].Value)))
+		ret = append(ret, diffSet[i].Value...)
+		ret = append(ret, idx)
 	}
 	return ret
 }
