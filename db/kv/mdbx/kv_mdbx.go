@@ -115,6 +115,9 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 		if dbg.MdbxNoSyncUnsafe {
 			opts = opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.UtterlyNoSync | mdbx.NoMetaSync })
 		}
+		if dbg.MdbxNoMemInit {
+			opts = opts.AddFlags(mdbx.NoMemInit)
+		}
 	}
 
 	return opts
@@ -152,7 +155,7 @@ func (opts MdbxOpts) boolToFlag(enabled bool, flag uint) MdbxOpts {
 	return opts.RemoveFlags(flag)
 }
 func (opts MdbxOpts) WriteMap(v bool) MdbxOpts {
-	return opts.boolToFlag(v, mdbx.WriteMap).boolToFlag(v, mdbx.NoMemInit)
+	return opts.boolToFlag(v, mdbx.WriteMap)
 }
 func (opts MdbxOpts) Exclusive(v bool) MdbxOpts  { return opts.boolToFlag(v, mdbx.Exclusive) }
 func (opts MdbxOpts) Readonly(v bool) MdbxOpts   { return opts.boolToFlag(v, mdbx.Readonly) }
