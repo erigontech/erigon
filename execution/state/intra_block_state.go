@@ -564,7 +564,7 @@ func (sdb *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
 			// Populate code cache on successful read
 			if err == nil && len(code) > 0 && sdb.codeCache != nil {
 				addrBytes := addr.Value()
-				sdb.codeCache.Put(addrBytes[:], code)
+				sdb.codeCache.Put(addrBytes[:], stateObject.data.CodeHash.Value(), code)
 			}
 			return code, err
 		}
@@ -596,7 +596,7 @@ func (sdb *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
 	// Populate code cache on successful read
 	if err == nil && len(code) > 0 && sdb.codeCache != nil {
 		addrBytes := addr.Value()
-		sdb.codeCache.Put(addrBytes[:], code)
+		sdb.codeCache.Put(addrBytes[:], crypto.Keccak256Hash(code), code)
 	}
 
 	return code, err
@@ -1097,7 +1097,7 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte) error {
 	// Update code cache
 	if sdb.codeCache != nil {
 		addrBytes := addr.Value()
-		sdb.codeCache.Put(addrBytes[:], code)
+		sdb.codeCache.Put(addrBytes[:], codeHash.Value(), code)
 	}
 	return nil
 }

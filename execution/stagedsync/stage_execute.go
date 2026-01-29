@@ -325,7 +325,7 @@ func unwindExec3State(ctx context.Context,
 			for _, entry := range codeDiffs {
 				// Key format: address (20 bytes) + step suffix (8 bytes)
 				if len(entry.Key) >= length.Addr {
-					codeCache.Remove(toBytesZeroCopy(entry.Key[:length.Addr]))
+					codeCache.RemoveAddress(toBytesZeroCopy(entry.Key[:length.Addr]))
 				}
 			}
 

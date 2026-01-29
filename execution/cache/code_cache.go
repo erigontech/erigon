@@ -23,50 +23,94 @@ import (
 	"github.com/erigontech/erigon/common/maphash"
 )
 
-const DefaultCodeCacheSize = 512
+const (
+	// DefaultCodeCacheSize is the number of code entries (codeHash → code)
+	DefaultCodeCacheSize = 2048
+	// DefaultAddrCacheSize is the number of address entries (addr → codeHash)
+	// 2^18 = 262144 entries, each storing a 32-byte hash
+	DefaultAddrCacheSize = 1 << 18
+)
 
-// CodeCache is an LRU cache for contract code, keyed by address.
-// It is a read-only cache intended to speed up repeated code lookups.
-// It tracks a block hash to ensure cache consistency across block execution.
+// CodeCache is a two-level LRU cache for contract code.
+// Level 1: addr → codeHash (mutable, cleared on reorg)
+// Level 2: codeHash → code (immutable, never cleared)
+//
+// This design is efficient because:
+// - Multiple addresses can share the same code (common with proxies/clones)
+// - Code hash is immutable - same hash always means same code
+// - Address mappings are small (32 bytes) so we can cache many more
 type CodeCache struct {
-	cache     *maphash.LRU[[]byte]
-	blockHash common.Hash // hash of the last block processed
-	mu        sync.RWMutex
+	addrToHash *maphash.LRU[common.Hash] // addr → codeHash
+	hashToCode *maphash.LRU[[]byte]      // codeHash → code
+	blockHash  common.Hash               // hash of the last block processed
+	mu         sync.RWMutex
 }
 
-// NewCodeCache creates a new CodeCache with the specified size.
-func NewCodeCache(size int) *CodeCache {
-	c, err := maphash.NewLRU[[]byte](size)
+// NewCodeCache creates a new CodeCache with the specified sizes.
+func NewCodeCache(codeSize, addrSize int) *CodeCache {
+	addrToHash, err := maphash.NewLRU[common.Hash](addrSize)
 	if err != nil {
 		panic(err)
 	}
-	return &CodeCache{cache: c}
+	hashToCode, err := maphash.NewLRU[[]byte](codeSize)
+	if err != nil {
+		panic(err)
+	}
+	return &CodeCache{
+		addrToHash: addrToHash,
+		hashToCode: hashToCode,
+	}
 }
 
-// NewDefaultCodeCache creates a new CodeCache with the default size (512).
+// NewDefaultCodeCache creates a new CodeCache with the default sizes.
 func NewDefaultCodeCache() *CodeCache {
-	return NewCodeCache(DefaultCodeCacheSize)
+	return NewCodeCache(DefaultCodeCacheSize, DefaultAddrCacheSize)
 }
 
 // Get retrieves contract code for the given address.
 // Returns the code and true if found, nil and false otherwise.
 func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
-	return c.cache.Get(addr)
+	// First, look up the code hash for this address
+	codeHash, ok := c.addrToHash.Get(addr)
+	if !ok {
+		return nil, false
+	}
+	// Then, look up the code by hash
+	return c.hashToCode.Get(codeHash[:])
 }
 
-// Put stores contract code for the given address.
-func (c *CodeCache) Put(addr []byte, code []byte) {
-	c.cache.Set(addr, code)
+// GetByHash retrieves contract code directly by code hash.
+// This is useful when the code hash is already known.
+func (c *CodeCache) GetByHash(codeHash common.Hash) ([]byte, bool) {
+	return c.hashToCode.Get(codeHash[:])
 }
 
-// Remove removes the code for the given address from the cache.
-func (c *CodeCache) Remove(addr []byte) {
-	c.cache.Delete(addr)
+// Put stores contract code for the given address with its code hash.
+func (c *CodeCache) Put(addr []byte, codeHash common.Hash, code []byte) {
+	// Store addr → codeHash mapping
+	c.addrToHash.Set(addr, codeHash)
+	// Store codeHash → code mapping (immutable, safe to overwrite)
+	if len(code) > 0 {
+		c.hashToCode.Set(codeHash[:], code)
+	}
 }
 
-// Clear removes all items from the cache.
+// RemoveAddress removes the address → codeHash mapping.
+// The codeHash → code mapping is kept since it's immutable.
+func (c *CodeCache) RemoveAddress(addr []byte) {
+	c.addrToHash.Delete(addr)
+}
+
+// Clear removes all address mappings from the cache.
+// The codeHash → code mappings are preserved since they're immutable.
 func (c *CodeCache) Clear() {
-	c.cache.Purge()
+	c.addrToHash.Purge()
+}
+
+// ClearAll removes all entries from both caches.
+func (c *CodeCache) ClearAll() {
+	c.addrToHash.Purge()
+	c.hashToCode.Purge()
 }
 
 // GetBlockHash returns the hash of the last block processed by the cache.
@@ -84,7 +128,8 @@ func (c *CodeCache) SetBlockHash(hash common.Hash) {
 }
 
 // ValidateAndPrepare checks if the given parentHash matches the cache's current blockHash.
-// If there's a mismatch (indicating non-sequential block processing), the cache is cleared.
+// If there's a mismatch (indicating non-sequential block processing), the address cache is cleared.
+// The code cache (codeHash → code) is preserved since code hashes are immutable.
 // Returns true if the cache was valid (hashes matched or cache was empty), false if cleared.
 func (c *CodeCache) ValidateAndPrepare(parentHash common.Hash) bool {
 	c.mu.Lock()
@@ -100,17 +145,28 @@ func (c *CodeCache) ValidateAndPrepare(parentHash common.Hash) bool {
 		return true
 	}
 
-	// Mismatch - clear the cache as we can't trust its contents
-	c.cache.Purge()
+	// Mismatch - clear address mappings (they may be stale)
+	// Keep code mappings since codeHash → code is immutable
+	c.addrToHash.Purge()
 	c.blockHash = common.Hash{}
 	return false
 }
 
-// ClearWithHash clears the cache and sets the block hash.
+// ClearWithHash clears the address cache and sets the block hash.
 // Used during unwind to reset the cache to a known state.
 func (c *CodeCache) ClearWithHash(hash common.Hash) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.cache.Purge()
+	c.addrToHash.Purge()
 	c.blockHash = hash
+}
+
+// Len returns the number of entries in the address cache.
+func (c *CodeCache) Len() int {
+	return c.addrToHash.Len()
+}
+
+// CodeLen returns the number of entries in the code cache.
+func (c *CodeCache) CodeLen() int {
+	return c.hashToCode.Len()
 }
