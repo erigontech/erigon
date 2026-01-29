@@ -126,25 +126,30 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 }
 
 func serializeDiffSetBufLen(diffSet []kv.DomainEntryDiff) int {
-	// Write a small dictionary for prevStepBytes
-	dict := make(map[string]byte)
-	id := byte(0x00)
+	// Count unique prevStepBytes using slice instead of map
+	var dictKeys [256]uint64
+	dictLen := 0
+	totalEntrySize := 0
+
 	for i := range diffSet {
-		prevStepS := toStringZeroCopy(diffSet[i].PrevStepBytes)
-		if _, ok := dict[prevStepS]; ok {
-			continue
+		prevStep := binary.BigEndian.Uint64(diffSet[i].PrevStepBytes)
+
+		// Linear search for existing entry
+		found := false
+		for j := 0; j < dictLen; j++ {
+			if dictKeys[j] == prevStep {
+				found = true
+				break
+			}
 		}
-		dict[prevStepS] = id
-		id++
+		if !found {
+			dictKeys[dictLen] = prevStep
+			dictLen++
+		}
+		totalEntrySize += 4 + len(diffSet[i].Key) + 4 + len(diffSet[i].Value) + 1
 	}
-	// Write the dictionary
-	ret := 1 + 9*len(dict)
-	// Write the diffSet
-	ret += 4
-	for i := range diffSet {
-		ret += 4 + len(diffSet[i].Key) + 4 + len(diffSet[i].Value) + 1
-	}
-	return ret
+	// dict: 1 + 9*dictLen, diffSet header: 4, entries: totalEntrySize
+	return 1 + 9*dictLen + 4 + totalEntrySize
 }
 
 func DeserializeDiffSet(in []byte) []kv.DomainEntryDiff {
