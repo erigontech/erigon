@@ -1375,6 +1375,14 @@ func (c *MdbxCursor) Put(key []byte, value []byte) error {
 	return nil
 }
 
+func (c *MdbxCursor) PutReserve(key []byte, valLen int) (v []byte, err error) {
+	v, err = c.c.PutReserve(key, valLen, 0)
+	if err != nil {
+		return nil, fmt.Errorf("label: %s, table: %s, err: %w", c.label, c.bucketName, err)
+	}
+	return v, nil
+}
+
 func (c *MdbxCursor) SeekExact(key []byte) ([]byte, []byte, error) {
 	k, v, err := c.c.Get(key, nil, mdbx.Set)
 	if err != nil {
