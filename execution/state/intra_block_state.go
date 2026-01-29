@@ -667,27 +667,29 @@ func (sdb *IntraBlockState) ResolveCodeHash(addr accounts.Address) (accounts.Cod
 }
 
 func (sdb *IntraBlockState) ResolveCode(addr accounts.Address) ([]byte, error) {
+	code, err := sdb.getCode(addr, true)
+
 	// eip-7702
-	dd, ok, err := sdb.getDelegatedDesignation(addr, true)
+	dd, ok, err := sdb.getDelegatedDesignation(addr, code)
 	if ok {
 		return sdb.getCode(dd, true)
 	}
 	if err != nil {
 		return nil, err
 	}
-	return sdb.getCode(addr, true)
+	return code, nil
 }
 
 func (sdb *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (accounts.Address, bool, error) {
-	return sdb.getDelegatedDesignation(addr, false)
-}
-
-func (sdb *IntraBlockState) getDelegatedDesignation(addr accounts.Address, commited bool) (accounts.Address, bool, error) {
-	// eip-7702
-	code, err := sdb.getCode(addr, commited)
+	code, err := sdb.getCode(addr, false)
 	if err != nil {
 		return accounts.ZeroAddress, false, err
 	}
+	return sdb.getDelegatedDesignation(addr, code)
+}
+
+func (sdb *IntraBlockState) getDelegatedDesignation(addr accounts.Address, code []byte) (accounts.Address, bool, error) {
+	// eip-7702
 	if delegation, ok := types.ParseDelegation(code); ok {
 		return delegation, true, nil
 	}

@@ -515,7 +515,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 
 	case MVReadResultNone:
 		if versionedReads := s.versionedReads; versionedReads != nil {
-			if pr, ok := versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
+			if pr, ok := versionedReads[addr][AccountKey{Path: path, Key: key}]; ok && !commited {
 				if pr.Version == vr.Version {
 					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d (%d.%d) RD (%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, ReadSetRead, addr, AccountKey{path, key}, valueString(path, pr.Val))
