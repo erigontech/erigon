@@ -322,16 +322,6 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
-	// Check code cache for CodeDomain before expensive DB lookup
-	if domain == kv.CodeDomain && len(k) == 20 {
-		if codeCache := sd.GetCodeCache(); codeCache != nil {
-			if code, ok := codeCache.Get(k); ok {
-				sd.metrics.UpdateCacheReads(domain, start)
-				return code, 0, nil
-			}
-		}
-	}
-
 	type MeteredGetter interface {
 		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
 	}
@@ -343,13 +333,6 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
-	}
-
-	// Populate code cache on successful read
-	if domain == kv.CodeDomain && len(k) == 20 && len(v) > 0 {
-		if codeCache := sd.GetCodeCache(); codeCache != nil {
-			codeCache.Put(k, v)
-		}
 	}
 
 	return v, step, nil
@@ -450,13 +433,6 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		}
 	}
 
-	// Update code cache when writing to CodeDomain
-	if domain == kv.CodeDomain && len(k) == 20 {
-		if codeCache := sd.GetCodeCache(); codeCache != nil {
-			codeCache.Put(k, v)
-		}
-	}
-
 	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal, prevStep)
 }
 
@@ -488,12 +464,6 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	case kv.CodeDomain:
 		if prevVal == nil {
 			return nil
-		}
-		// Remove from code cache when deleting code
-		if len(k) == 20 {
-			if codeCache := sd.GetCodeCache(); codeCache != nil {
-				codeCache.Remove(k)
-			}
 		}
 	default:
 		//noop

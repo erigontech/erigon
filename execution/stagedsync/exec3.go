@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -224,10 +223,10 @@ func ExecV3(ctx context.Context,
 	isChainTip := maxBlockNum == startBlockNum
 	// Do it only for chain-tip blocks!
 	doms.EnableWarmupCache(isChainTip)
-	if doms.GetCodeCache() == nil {
-		doms.SetCodeCache(cache.NewDefaultCodeCache())
-		defer doms.SetCodeCache(nil)
-	}
+	// Only use code cache if it was set by caller (e.g., EthereumExecutionModule).
+	// This ensures proper block hash tracking for cache invalidation.
+	// Note: We no longer create a cache here because it would bypass the
+	// ValidateAndPrepare/SetBlockHash tracking in Ethereum1BlockExecution.
 	postValidator := newBlockPostExecutionValidator()
 	if isChainTip {
 		postValidator = newParallelBlockPostExecutionValidator()

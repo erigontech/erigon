@@ -17,7 +17,6 @@
 package cache
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/erigontech/erigon/common"
@@ -52,20 +51,16 @@ func NewDefaultCodeCache() *CodeCache {
 // Get retrieves contract code for the given address.
 // Returns the code and true if found, nil and false otherwise.
 func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
-	ca, ok := c.cache.Get(addr)
-	fmt.Printf("CodeCache Get: addr=%x, addrID=%d, codeId=%d\n", addr, maphash.Hash(addr), maphash.Hash(ca))
-	return ca, ok
+	return c.cache.Get(addr)
 }
 
 // Put stores contract code for the given address.
 func (c *CodeCache) Put(addr []byte, code []byte) {
-	fmt.Printf("CodeCache Put: addr=%x, addrID=%d, codeId=%d\n", addr, maphash.Hash(addr), maphash.Hash(code))
 	c.cache.Set(addr, code)
 }
 
 // Remove removes the code for the given address from the cache.
 func (c *CodeCache) Remove(addr []byte) {
-	fmt.Printf("CodeCache Remove: addr=%x, addrID=%d\n", addr, maphash.Hash(addr))
 	c.cache.Delete(addr)
 }
 
@@ -95,7 +90,7 @@ func (c *CodeCache) ValidateAndPrepare(parentHash common.Hash) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Empty hash means cache hasn't processed any block yet - always valid
+	// Empty blockHash means cache hasn't processed any block yet - always valid
 	if c.blockHash == (common.Hash{}) {
 		return true
 	}
