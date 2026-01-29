@@ -142,7 +142,7 @@ func init() {
 	withDataDir(cmdCommitmentBenchHistoryLookup)
 	withConfig(cmdCommitmentBenchHistoryLookup)
 	cmdCommitmentBenchHistoryLookup.Flags().StringVar(&benchHistoryPrefix, "prefix", "", "hex-encoded key prefix to look up in commitment domain (empty = root lookup)")
-	cmdCommitmentBenchHistoryLookup.Flags().Float64Var(&benchHistorySamplePct, "sample-percentage", 10.0, "percentage of txnums to sample from each history file's range (0-100)")
+	cmdCommitmentBenchHistoryLookup.Flags().Float64Var(&benchHistorySamplePct, "sample-percentage", 10.0, "percentage of txnums to sample from each history file's range or from MDBX (0-100)")
 	cmdCommitmentBenchHistoryLookup.Flags().Int64Var(&benchHistorySeed, "seed", 0, "random seed for sampling (0 = use current time)")
 	commitmentCmd.AddCommand(cmdCommitmentBenchHistoryLookup)
 
@@ -835,7 +835,7 @@ func benchMdbxHistoryLookup(ctx context.Context, tx kv.TemporalTx, compactKey []
 		stats.Throughput = float64(len(durations)) / totalTime.Seconds()
 	}
 
-	fileStats := &HistoryBenchStats{
+	mdbxStats := &HistoryBenchStats{
 		Name:        "MDBX (high txnums)",
 		StartTxNum:  minTxNum,
 		EndTxNum:    maxTxNum,
@@ -850,7 +850,7 @@ func benchMdbxHistoryLookup(ctx context.Context, tx kv.TemporalTx, compactKey []
 		"p50", stats.P50,
 		"p99", stats.P99)
 
-	return fileStats, nil
+	return mdbxStats, nil
 }
 
 func printHistoryBenchResultsTable(prefix []byte, compactKey []byte, fileStats []HistoryBenchStats) {
