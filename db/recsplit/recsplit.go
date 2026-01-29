@@ -63,6 +63,15 @@ func remix(z uint64) uint64 {
 	return z ^ (z >> 31)
 }
 
+// saltMix combines a precomputed remix value with a salt using fast mixing.
+// This is used in v2+ index format to avoid recomputing remix during salt search.
+// The function provides good avalanche properties for sequential salt values.
+func saltMix(remixed, salt uint64) uint64 {
+	x := remixed ^ salt
+	x *= 0x9E3779B97F4A7C15 // golden ratio constant
+	return x ^ (x >> 27)
+}
+
 // RecSplit is the implementation of Recursive Split algorithm for constructing perfect hash mapping, described in
 // https://arxiv.org/pdf/1910.06416.pdf Emmanuel Esposito, Thomas Mueller Graf, and Sebastiano Vigna.
 // Recsplit: Minimal perfect hashing via recursive splitting. In 2020 Proceedings of the Symposium on Algorithm Engineering and Experiments (ALENEX),
@@ -98,6 +107,7 @@ type RecSplit struct {
 	currentBucketOffs []uint64 // Index offsets for the current bucket
 	offsetBuffer      []uint64
 	buffer            []uint64
+	remixBuffer       []uint64 // Precomputed remix values for faster salt search
 	golombRice        []uint32
 	bucketSizeAcc     []uint64 // Bucket size accumulator
 	// Helper object to encode the sequence of cumulative number of keys in the buckets
@@ -227,6 +237,12 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	rs.currentBucketOffs = make([]uint64, 0, args.BucketSize)
 	rs.bucketSizeAcc = make([]uint64, 1, bucketCount+1)
 	rs.bucketPosAcc = make([]uint64, 1, bucketCount+1)
+	// Pre-allocate buffers used during recsplit
+	rs.buffer = make([]uint64, args.BucketSize)
+	rs.offsetBuffer = make([]uint64, args.BucketSize)
+	rs.remixBuffer = make([]uint64, args.BucketSize)
+	// Pre-allocate GolombRice data: ~2 bits per key on average, plus some overhead
+	rs.gr.data = make([]uint64, 0, args.KeyCount/32+64)
 	if args.LeafSize > MaxLeafSize {
 		return nil, fmt.Errorf("exceeded max leaf size %d: %d", MaxLeafSize, args.LeafSize)
 	}
@@ -466,16 +482,14 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 			}
 		}
 		bitPos := rs.gr.bitCount
-		if rs.buffer == nil {
-			rs.buffer = make([]uint64, len(rs.currentBucket))
-			rs.offsetBuffer = make([]uint64, len(rs.currentBucketOffs))
-		} else {
-			for len(rs.buffer) < len(rs.currentBucket) {
-				rs.buffer = append(rs.buffer, 0)
-				rs.offsetBuffer = append(rs.offsetBuffer, 0)
-			}
+		// Grow buffers if needed (buffers are pre-allocated in NewRecSplit)
+		for len(rs.buffer) < len(rs.currentBucket) {
+			rs.buffer = append(rs.buffer, 0)
+			rs.offsetBuffer = append(rs.offsetBuffer, 0)
 		}
-		unary, err := rs.recsplit(0 /* level */, rs.currentBucket, rs.currentBucketOffs, nil /* unary */)
+		// Pre-allocate unary slice to avoid repeated append allocations during recursion
+		unary := make([]uint64, 0, len(rs.currentBucket))
+		unary, err := rs.recsplit(0 /* level */, rs.currentBucket, rs.currentBucketOffs, unary)
 		if err != nil {
 			return err
 		}
@@ -510,6 +524,15 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 	// Pick initial salt for this level of recursive split
 	salt := rs.startSeed[level]
 	m := uint16(len(bucket))
+
+	// Precompute remix values once - this is the key optimization
+	// Instead of remix(bucket[i]+salt) on every salt try, we compute remix(bucket[i]) once
+	// and use saltMix(remixed, salt) which is much cheaper
+	remixed := rs.remixBuffer[:m]
+	for i := uint16(0); i < m; i++ {
+		remixed[i] = remix(bucket[i])
+	}
+
 	if m <= rs.leafSize {
 		// No need to build aggregation levels - just find bijection
 		var mask uint32
@@ -517,7 +540,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 			mask = 0
 			var fail bool
 			for i := uint16(0); !fail && i < m; i++ {
-				bit := uint32(1) << remap16(remix(bucket[i]+salt), m)
+				bit := uint32(1) << remap16(saltMix(remixed[i], salt), m)
 				if mask&bit != 0 {
 					fail = true
 				} else {
@@ -530,7 +553,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 			salt++
 		}
 		for i := uint16(0); i < m; i++ {
-			j := remap16(remix(bucket[i]+salt), m)
+			j := remap16(saltMix(remixed[i], salt), m)
 			rs.offsetBuffer[j] = offsets[i]
 		}
 		for _, offset := range rs.offsetBuffer[:m] {
@@ -555,7 +578,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 			}
 			var fail bool
 			for i := uint16(0); i < m; i++ {
-				count[remap16(remix(bucket[i]+salt), m)/unit]++
+				count[remap16(saltMix(remixed[i], salt), m)/unit]++
 			}
 			for i := uint16(0); i < fanout-1; i++ {
 				fail = fail || (count[i] != unit)
@@ -570,7 +593,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 			c += unit
 		}
 		for i := uint16(0); i < m; i++ {
-			j := remap16(remix(bucket[i]+salt), m) / unit
+			j := remap16(saltMix(remixed[i], salt), m) / unit
 			rs.buffer[count[j]] = bucket[i]
 			rs.offsetBuffer[count[j]] = offsets[i]
 			count[j]++
@@ -746,7 +769,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.enums && rs.keysAdded > 0 {
 		// Write out elias fano for offsets
 		if err := rs.offsetEf.Write(rs.indexW); err != nil {
-			return fmt.Errorf("writing elias fano for offsets: %w", err)
+			return fmt.Errorf("try writing elias fano for offsets: %w", err)
 		}
 	}
 	if err := rs.flushExistenceFilter(); err != nil {

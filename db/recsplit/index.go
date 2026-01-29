@@ -383,7 +383,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	var level int
 	for m > idx.secondaryAggrBound { // fanout = 2
 		d := gr.ReadNext(idx.golombParam(m))
-		hmod := remap16(remix(fingerprint+idx.startSeed[level]+d), m)
+		hmod := remap16(saltMix(remix(fingerprint), idx.startSeed[level]+d), m)
 		split := (((m+1)/2 + idx.secondaryAggrBound - 1) / idx.secondaryAggrBound) * idx.secondaryAggrBound
 		if hmod < split {
 			m = split
@@ -396,7 +396,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	}
 	if m > idx.primaryAggrBound {
 		d := gr.ReadNext(idx.golombParam(m))
-		hmod := remap16(remix(fingerprint+idx.startSeed[level]+d), m)
+		hmod := remap16(saltMix(remix(fingerprint), idx.startSeed[level]+d), m)
 		part := hmod / idx.primaryAggrBound
 		m = min(idx.primaryAggrBound, m-part*idx.primaryAggrBound)
 		cumKeys += uint64(idx.primaryAggrBound * part)
@@ -408,7 +408,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 
 	if m > idx.leafSize {
 		d := gr.ReadNext(idx.golombParam(m))
-		hmod := remap16(remix(fingerprint+idx.startSeed[level]+d), m)
+		hmod := remap16(saltMix(remix(fingerprint), idx.startSeed[level]+d), m)
 		part := hmod / idx.leafSize
 		m = min(idx.leafSize, m-part*idx.leafSize)
 		cumKeys += uint64(idx.leafSize * part)
