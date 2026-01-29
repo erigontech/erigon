@@ -153,6 +153,10 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	return nil
 }
 
+type CanPutReserve interface {
+	PutReserve(key []byte, valLen int) (v []byte, err error)
+}
+
 // Flush - an optional method (usually user don't need to call it) - forcing sort+flush current buffer.
 // it does trigger background sort and flush, reducing RAM-holding, etc...
 // it's useful when working with many collectors: to trigger background sort for all of them
@@ -197,6 +201,8 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 		}
 	}
 
+	cPutReserve, canPutReserve := cursor.(CanPutReserve)
+
 	var canUseAppend bool
 	isDupSort := kv.ChaindataTablesCfg[bucket].Flags&kv.DupSort != 0 && !kv.ChaindataTablesCfg[bucket].AutoDupSortKeysConversion
 
@@ -236,8 +242,16 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 
 			return nil
 		}
-		if err := cursor.Put(k, v); err != nil {
-			return fmt.Errorf("%s: put: k=%x, %w", c.logPrefix, k, err)
+		if canPutReserve {
+			toV, err := cPutReserve.PutReserve(k, len(v))
+			if err != nil {
+				return fmt.Errorf("%s: put: k=%x, %w", c.logPrefix, k, err)
+			}
+			copy(toV, v)
+		} else {
+			if err := cursor.Put(k, v); err != nil {
+				return fmt.Errorf("%s: put: k=%x, %w", c.logPrefix, k, err)
+			}
 		}
 		return nil
 	}
