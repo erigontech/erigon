@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 
 	"github.com/erigontech/erigon/arb/multigas"
@@ -260,8 +261,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	}
 
 	if tracer := st.evm.Config().Tracer; tracer != nil && tracer.CaptureArbitrumTransfer != nil {
-		var from = st.msg.From()
-		tracer.CaptureArbitrumTransfer(&from, nil, gasVal, true, "feePayment")
+		tracer.CaptureArbitrumTransfer(st.msg.From(), accounts.ZeroAddress, &gasVal, true, "feePayment")
 	}
 
 	// Check for overflow before adding gas
@@ -431,7 +431,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
 	)
 
-	ret, st.gasRemaining, _, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, false)
+	ret, st.gasRemaining, _, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, &st.value, false)
 
 	result := &evmtypes.ExecutionResult{
 		GasUsed:             st.gasUsed(),
@@ -518,13 +518,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	// 6. caller has enough balance to cover asset transfer for **topmost** call
 
 	// Arbitrum: drop tip for delayed (and old) messages
-	if st.evm.ProcessingHook.DropTip() && st.msg.GasPrice().Cmp(st.evm.Context.BaseFee) > 0 {
+	if st.evm.ProcessingHook.DropTip() && st.msg.GasPrice().Cmp(&st.evm.Context.BaseFee) > 0 {
 		mmsg := st.msg.(*types.Message)
-		mmsg.SetGasPrice(st.evm.Context.BaseFee)
+		mmsg.SetGasPrice(&st.evm.Context.BaseFee)
 		mmsg.SetTip(common.Num0)
 		mmsg.TxRunContext = types.NewMessageCommitContext(nil)
 
-		st.gasPrice = st.evm.Context.BaseFee
+		st.gasPrice = &st.evm.Context.BaseFee
 		st.tipCap = common.Num0
 		st.msg = mmsg
 	}
@@ -646,17 +646,17 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		ret   []byte
 		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
 
-		deployedContract = new(common.Address)
+		deployedContract = new(accounts.Address)
 	)
 	if contractCreation {
 		// The reason why we don't increment nonce here is that we need the original
 		// nonce to calculate the address of the contract that is being created
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
-		ret, *deployedContract, st.gasRemaining, multiGas, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value, bailout)
+		ret, *deployedContract, st.gasRemaining, multiGas, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, &st.value, bailout)
 		usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
 	} else {
-		ret, st.gasRemaining, multiGas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
+		ret, st.gasRemaining, multiGas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, &st.value, bailout)
 		// TODO multiGas was not updated since last addition, why add again?
 		usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
 	}
@@ -736,10 +736,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	if !st.noFeeBurnAndTip {
 		// MERGE_ARBITRUM, the following was in arbitrum branch:
 		/*
-		if rules.IsArbitrum {
-			if err := st.state.AddBalance(coinbase, *tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
-				return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
-		}
+			if rules.IsArbitrum {
+				if err := st.state.AddBalance(coinbase, *tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+					return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
+			}
 		*/
 		if err := st.state.AddBalance(coinbase, tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
@@ -750,7 +750,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		// are 0. This avoids a negative effectiveTip being applied to
 		// the coinbase when simulating calls.
 	} else {
-		if err := st.state.AddBalance(tipReceipient, *tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+		if err := st.state.AddBalance(tipReceipient, tipAmount, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
 	}
@@ -786,13 +786,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	// Arbitrum: record the tip
 	if tracer := st.evm.Config().Tracer; tracer != nil && tracer.CaptureArbitrumTransfer != nil && !st.evm.ProcessingHook.DropTip() {
 		if !tracingTipAmount.IsZero() {
-			tracer.CaptureArbitrumTransfer(nil, &tipReceipient, tracingTipAmount, false, "tip")
+			tracer.CaptureArbitrumTransfer(accounts.NilAddress, tipReceipient, tracingTipAmount, false, "tip")
 		}
 	}
 	//fmt.Printf("tx from %x used gas: %d, initGas %d remain %d %s\n", st.msg.From(), st.gasUsed(), st.initialGas, st.gasRemaining, usedMultiGas)
 
 	st.evm.ProcessingHook.EndTxHook(st.gasRemaining, vmerr == nil)
-
+	topLvlDeployed := deployedContract.Value()
 	result = &evmtypes.ExecutionResult{
 		GasUsed:             st.gasUsed(),
 		Err:                 vmerr,
@@ -806,7 +806,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 
 		// Arbitrum
 		ScheduledTxes:    st.evm.ProcessingHook.ScheduledTxes(),
-		TopLevelDeployed: deployedContract,
+		TopLevelDeployed: &topLvlDeployed,
 		UsedMultiGas:     usedMultiGas,
 	}
 
@@ -885,7 +885,6 @@ func (st *StateTransition) handleRevertedTx(msg *types.Message, usedMultiGas mul
 
 	return usedMultiGas, nil
 }
-
 
 func (st *StateTransition) verifyAuthorities(auths []types.Authorization, contractCreation bool, chainID string) ([]accounts.Address, error) {
 	verifiedAuthorities := make([]accounts.Address, 0)
@@ -1116,7 +1115,8 @@ func (st *StateTransition) refundGas() {
 	// Arbitrum: record the gas refund
 	if tracer := st.evm.Config().Tracer; tracer != nil && tracer.CaptureArbitrumTransfer != nil {
 		from := st.msg.From()
-		tracer.CaptureArbitrumTransfer(nil, &from, remaining, false, "gasRefund")
+		// TODO revisit CaptureArbitrumTransfer - set NilADdress somewhere where i set Zero adress and also make non ptr gas passing
+		tracer.CaptureArbitrumTransfer(accounts.NilAddress, from, &remaining, false, "gasRefund")
 	}
 
 	// Also return remaining gas to the block gas counter so it is

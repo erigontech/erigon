@@ -688,13 +688,14 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			sender = senders[j]
 		} else {
 			signer := types.LatestSignerForChainID(chainConfig.ChainID)
-			signerEth, err := txn2.Sender(*signer)
-			signerArb := types.NewArbitrumSigner(*signerEth)
+			//signerEth, err := txn2.Sender(*signer)
+			signerArb := types.NewArbitrumSigner(*signer)
 
-			sender, err = signerArb.Sender(txn2)
+			s, err := signerArb.Sender(txn2)
 			if err != nil {
 				return nil, err
 			}
+			sender = s.Value()
 		}
 
 		valueBuf = valueBuf[:0]

@@ -18,6 +18,7 @@ package vm
 
 import (
 	"fmt"
+	"github.com/erigontech/erigon/arb/multigas"
 	"strings"
 	"testing"
 
@@ -412,7 +413,7 @@ func newTestSequential(env *EVM, currentIdx *int, readonlies []bool, isEVMCalled
 	return &testSequential{env, currentIdx, readonlies, isEVMCalled}
 }
 
-func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, uint64, error) {
+func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, uint64, multigas.MultiGas, error) {
 	*st.currentIdx++
 	//c := NewJumpDestCache(16)
 	nextContract := *NewContract(
@@ -423,7 +424,7 @@ func (st *testSequential) Run(_ *Contract, _ []byte, _ bool) ([]byte, uint64, er
 		//c,
 	)
 
-	return st.env.interpreter.Run(nextContract, 0, nil, st.readOnlys[*st.currentIdx])
+	return st.env.interpreter.Run(nextContract, 0, multigas.ZeroGas(), nil, st.readOnlys[*st.currentIdx])
 }
 
 func trace(isEVMSlice []bool, readOnlySlice []*readOnlyState) string {

@@ -20,6 +20,7 @@
 package protocol
 
 import (
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"math/big"
 
 	"github.com/erigontech/erigon/common"
@@ -44,9 +45,9 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 		err     error
 	)
 
-	rules := evm.ChainRules()
+	chainRules := evm.ChainRules()
 	blockNum := header.Number.Uint64()
-	msg, err := txn.AsMessage(*types.MakeSigner(config, blockNum, header.Time), header.BaseFee, rules)
+	msg, err := txn.AsMessage(*types.MakeSigner(config, blockNum, header.Time), header.BaseFee, chainRules)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -75,7 +76,7 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 		return nil, nil, err
 	}
 	// Update the state with pending changes
-	if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
+	if err = ibs.FinalizeTx(chainRules, stateWriter); err != nil {
 		return nil, nil, err
 	}
 	*gasUsed += result.GasUsed
@@ -160,7 +161,6 @@ func MakeReceipt(
 	return receipt
 }
 
-
 /// TODO move to separate file/package
 
 // Arbiturm modifications.
@@ -170,7 +170,7 @@ func MakeReceipt(
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func applyArbTransaction(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs state.IntraBlockStateArbitrum,
+func applyArbTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPool, ibs state.IntraBlockStateArbitrum,
 	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, usedGas, usedBlobGas *uint64,
 	evm *vm.EVM, cfg vm.Config) (*types.Receipt, *evmtypes.ExecutionResult, error) {
 
@@ -179,9 +179,9 @@ func applyArbTransaction(config *chain.Config, engine consensus.EngineReader, gp
 		err     error
 	)
 
-	rules := evm.ChainRules()
+	chainRules := evm.ChainRules()
 	blockNum := header.Number.Uint64()
-	msg, err := txn.AsMessage(*types.MakeSigner(config, blockNum, header.Time), header.BaseFee, rules)
+	msg, err := txn.AsMessage(*types.MakeSigner(config, blockNum, header.Time), header.BaseFee, chainRules)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -210,7 +210,7 @@ func applyArbTransaction(config *chain.Config, engine consensus.EngineReader, gp
 		return nil, nil, err
 	}
 	// Update the state with pending changes
-	if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
+	if err = ibs.FinalizeTx(chainRules, stateWriter); err != nil {
 		return nil, nil, err
 	}
 	*usedGas += result.GasUsed
@@ -232,8 +232,8 @@ func applyArbTransaction(config *chain.Config, engine consensus.EngineReader, gp
 		receipt.TxHash = txn.Hash()
 		receipt.GasUsed = result.GasUsed
 		// if the transaction created a contract, store the creation address in the receipt.
-		if msg.To() == nil {
-			receipt.ContractAddress = types.CreateAddress(evm.Origin, txn.GetNonce())
+		if msg.To().IsNil() {
+			receipt.ContractAddress = types.CreateAddress(evm.Origin.Value(), txn.GetNonce())
 		}
 		// Set the receipt logs and create a bloom for filtering
 		receipt.Logs = ibs.GetLogs(ibs.TxnIndex(), txn.Hash(), blockNum, header.Hash())
@@ -255,7 +255,7 @@ func applyArbTransaction(config *chain.Config, engine consensus.EngineReader, gp
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func ApplyArbTransaction(config *chain.Config, blockHashFunc func(n uint64) (common.Hash, error), engine consensus.EngineReader,
+func ApplyArbTransaction(config *chain.Config, blockHashFunc func(n uint64) (common.Hash, error), engine rules.EngineReader,
 	author *common.Address, gp *GasPool, ibs state.IntraBlockStateArbitrum, stateWriter state.StateWriter,
 	header *types.Header, txn types.Transaction, usedGas, usedBlobGas *uint64, cfg vm.Config,
 ) (*types.Receipt, *evmtypes.ExecutionResult, error) {
@@ -265,7 +265,7 @@ func ApplyArbTransaction(config *chain.Config, blockHashFunc func(n uint64) (com
 	// about the transaction and calling mechanisms.
 	// cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
 
-	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, config)
+	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, accounts.InternAddress(*author), config)
 	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs.(*state.IntraBlockState), config, cfg)
 
 	// ibss := ibs.(*state.IntraBlockState)
@@ -277,7 +277,7 @@ func ApplyArbTransaction(config *chain.Config, blockHashFunc func(n uint64) (com
 // state database using given environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func ApplyArbTransactionVmenv(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs state.IntraBlockStateArbitrum, stateWriter state.StateWriter,
+func ApplyArbTransactionVmenv(config *chain.Config, engine rules.EngineReader, gp *GasPool, ibs state.IntraBlockStateArbitrum, stateWriter state.StateWriter,
 	header *types.Header, txn types.Transaction, usedGas, usedBlobGas *uint64, cfg vm.Config, vmenv *vm.EVM,
 ) (*types.Receipt, *evmtypes.ExecutionResult, error) {
 	return applyArbTransaction(config, engine, gp, ibs, stateWriter, header, txn, usedGas, usedBlobGas, vmenv, cfg)
@@ -304,7 +304,7 @@ func ProcessParentBlockHash(prevHash common.Hash, evm *vm.EVM) {
 	//}
 	msg := types.NewMessage(
 		state.SystemAddress,
-		&params.HistoryStorageAddress,
+		params.HistoryStorageAddress,
 		0,
 		common.Num0,
 		30_000_000,
@@ -316,6 +316,7 @@ func ProcessParentBlockHash(prevHash common.Hash, evm *vm.EVM) {
 		false,
 		false,
 		false,
+		false,
 		common.Num0,
 	)
 
@@ -324,7 +325,7 @@ func ProcessParentBlockHash(prevHash common.Hash, evm *vm.EVM) {
 	//evm.SetTxContext(NewEVMTxContext(msg))
 	//evm.StateDB.AddAddressToAccessList(params.HistoryStorageAddress)
 
-	_, _, _, err := evm.Call(vm.AccountRef(msg.From()), *msg.To(), msg.Data(), msg.Gas(), common.Num0, false)
+	_, _, _, err := evm.Call(msg.From(), msg.To(), msg.Data(), msg.Gas(), common.Num0, false)
 	if err != nil {
 		panic(err)
 	}

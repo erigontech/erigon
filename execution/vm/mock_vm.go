@@ -18,6 +18,7 @@ package vm
 
 import (
 	"fmt"
+	"github.com/erigontech/erigon/arb/multigas"
 
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/holiman/uint256"
@@ -42,7 +43,7 @@ type testVM struct {
 	depth int
 }
 
-func (evm *testVM) Run(_ Contract, _ uint64, _ []byte, readOnly bool) (ret []byte, gas uint64, err error) {
+func (evm *testVM) Run(contract Contract, gas uint64, multiGas multigas.MultiGas, input []byte, readOnly bool) (ret []byte, gasUsed uint64, multiGasUsed multigas.MultiGas, err error) {
 	currentReadOnly := new(readOnlyState)
 
 	currentReadOnly.outer = readOnly
@@ -64,15 +65,14 @@ func (evm *testVM) Run(_ Contract, _ uint64, _ []byte, readOnly bool) (ret []byt
 	*evm.currentIdx++
 
 	if *evm.currentIdx < len(evm.readOnlySliceTest) {
-		res, _, err := evm.env.interpreter.Run(*NewContract(
+		res, _, _, err := evm.env.interpreter.Run(*NewContract(
 			accounts.ZeroAddress,
 			accounts.ZeroAddress,
 			accounts.ZeroAddress,
 			uint256.Int{},
-		), 0, nil, evm.readOnlySliceTest[*evm.currentIdx])
-		return res, 0, err
+		), gas, multiGas, nil, evm.readOnlySliceTest[*evm.currentIdx])
+		return res, 0, multigas.ZeroGas(), err
 	}
-
 	return
 }
 

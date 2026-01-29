@@ -60,10 +60,10 @@ type revisions struct {
 	valid  []revision
 }
 
-func (r *revisions) snapshot(journal *journal) int {
+func (r *revisions) snapshot(journal *journal, balDelta uint256.Int) int {
 	id := r.nextId
 	r.nextId++
-	r.valid = append(r.valid, revision{id, journal.length(), nil})
+	r.valid = append(r.valid, revision{id, journal.length(), &balDelta})
 	return id
 }
 
@@ -96,7 +96,7 @@ func (r *revisions) put() *revisions {
 	return nil
 }
 
-func (r *revisions) revertToSnapshot(revid int) int {
+func (r *revisions) revertToSnapshot(revid int) revision {
 	// Find the snapshot in the stack of valid snapshots.
 	idx := sort.Search(len(r.valid), func(i int) bool {
 		return r.valid[i].id >= revid
@@ -113,7 +113,7 @@ func (r *revisions) revertToSnapshot(revid int) int {
 	if r.nextId == snapshot.id+1 {
 		r.nextId = snapshot.id
 	}
-	return snapshot.journalIndex
+	return snapshot
 }
 
 var revisionsPool = sync.Pool{
@@ -1238,15 +1238,14 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 			sdb.tracingHooks.OnBalanceChange(addr, prevBalance, zeroBalance, tracing.BalanceDecreaseSelfdestruct)
 		}
 		if sdb.tracingHooks.CaptureArbitrumTransfer != nil {
-			addrValue := addr.Value()
-			sdb.tracingHooks.CaptureArbitrumTransfer(&addrValue, nil, &prevBalance, false, "selfDestruct")
+			sdb.tracingHooks.CaptureArbitrumTransfer(addr, accounts.ZeroAddress, &prevBalance, false, "selfDestruct")
 		}
 	}
 
 	stateObject.markSelfdestructed()
 	sdb.arbExtraData.unexpectedBalanceDelta.Sub(sdb.arbExtraData.unexpectedBalanceDelta, &stateObject.data.Balance)
 	if bi, exist := sdb.balanceInc[addr]; exist && bi.isEscrow {
-		// TODO arbitrum remove log
+		// TODO arbitrum remove log; never seen once
 		fmt.Printf("ESCROW unprotected by selfdestruct %x\n", addr)
 		bi.isEscrow = false
 	}
@@ -1554,12 +1553,7 @@ func (sdb *IntraBlockState) PushSnapshot() int {
 	if sdb.revisions == nil {
 		sdb.revisions = revisionsPool.Get().(*revisions)
 	}
-	// MERGE_ARBITRUM
-	/*
-		sdb.validRevisions = append(sdb.validRevisions,
-				revision{id, sdb.journal.length(), sdb.arbExtraData.unexpectedBalanceDelta.Clone()})
-	*/
-	return sdb.revisions.snapshot(sdb.journal)
+	return sdb.revisions.snapshot(sdb.journal, *sdb.arbExtraData.unexpectedBalanceDelta)
 }
 
 func (sdb *IntraBlockState) PopSnapshot(snapshot int) {
@@ -1581,8 +1575,8 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 			}
 		}
 	}
-	snapshot := sdb.revisions.revertToSnapshot(revid)
-	revision := sdb.revisions.valid[revid]
+	revision := sdb.revisions.revertToSnapshot(revid)
+	//revision := sdb.revisions.valid[revid]
 	if sdb.arbExtraData != nil {
 		if sdb.arbExtraData.unexpectedBalanceDelta == nil {
 			sdb.arbExtraData.unexpectedBalanceDelta = uint256.NewInt(0)
@@ -1590,10 +1584,10 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 		sdb.arbExtraData.unexpectedBalanceDelta.Set(revision.unexpectedBalanceDelta)
 	}
 	// Replay the journal to undo changes and remove invalidated snapshots
-	sdb.journal.revert(sdb, snapshot)
+	sdb.journal.revert(sdb, revision.journalIndex)
 
 	if traced {
-		fmt.Printf("%d (%d.%d) Reverted: %d:%d\n", sdb.blockNum, sdb.txIndex, sdb.version, revid, snapshot)
+		fmt.Printf("%d (%d.%d) Reverted: %d:%d\n", sdb.blockNum, sdb.txIndex, sdb.version, revid, revision.journalIndex)
 	}
 }
 

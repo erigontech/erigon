@@ -21,6 +21,7 @@ package protocol
 
 import (
 	"fmt"
+	"github.com/erigontech/erigon/arb/osver"
 	"math/big"
 	"sync"
 
@@ -127,7 +128,7 @@ func NewEVMTxContext(msg Message) evmtypes.TxContext {
 	}
 	//// TODO arbiturm only? seems like not working/needed
 	if mf := msg.MaxFeePerBlobGas(); mf != nil {
-		etx.BlobFee = mf.Clone()
+		etx.BlobFee = *mf.Clone()
 	}
 	return etx
 }

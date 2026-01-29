@@ -37,7 +37,6 @@ type (
 	BlsToExecutionChangesData = cltypes.SignedBLSToExecutionChange
 	ContributionAndProofData  = cltypes.SignedContributionAndProof
 	BlobSidecarData           = cltypes.BlobSidecar
-	DataColumnSidecarData     = cltypes.DataColumnSidecar
 )
 
 // DataColumnSidecarData includes block_root and slot for SSE events

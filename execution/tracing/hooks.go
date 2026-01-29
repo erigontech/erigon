@@ -164,7 +164,7 @@ type (
 	LogHook = func(log *types.Log)
 
 	// Arbitrum specific hooks
-	CaptureArbitrumTransferHook   = func(from, to *common.Address, value *uint256.Int, before bool, reason string)
+	CaptureArbitrumTransferHook   = func(from, to accounts.Address, value *uint256.Int, before bool, reason string)
 	CaptureArbitrumStorageGetHook = func(key common.Hash, depth int, before bool)
 	CaptureArbitrumStorageSetHook = func(key, value common.Hash, depth int, before bool)
 

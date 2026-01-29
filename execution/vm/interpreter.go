@@ -66,7 +66,7 @@ func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 type Interpreter interface {
 	// Run loops and evaluates the contract's code with the given input data and returns
 	// the return byte-slice and an error if one occurred.
-	Run(contract Contract, gas uint64, input []byte, static bool) ([]byte, uint64, error)
+	Run(contract Contract, gas uint64, mutliGas multigas.MultiGas, input []byte, static bool) ([]byte, uint64, multigas.MultiGas, error)
 	Depth() int // `Depth` returns the current call stack's depth.
 	IncDepth()  // Increments the current call stack's depth.
 	DecDepth()  // Decrements the current call stack's depth
@@ -349,12 +349,15 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 // It's important to note that any errors returned by the interpreter should be
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
-func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readOnly bool) (_ []byte, _ uint64, err error) {
+func (in *EVMInterpreter) Run(contract Contract, gas uint64, mutliGas multigas.MultiGas, input []byte, readOnly bool) (_ []byte, _ uint64, _ multigas.MultiGas, err error) {
 	in.evm.ProcessingHook.PushContract(&contract)
 	defer func() { in.evm.ProcessingHook.PopContract() }()
+	// TODO should be here deferred stack decrement for arbitrum?
+	//      also seemd we do not need external multiGas, all deductions happen in opcodes
+
 	// Don't bother with the execution if there's no code.
 	if len(contract.Code) == 0 {
-		return nil, gas, nil
+		return nil, gas, mutliGas, nil
 	}
 
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
@@ -411,7 +414,7 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 	// Arbitrum: handle Stylus programs
 	if in.evm.chainRules.IsStylus && state.IsStylusProgram(contract.Code) {
 		ret, err := in.evm.ProcessingHook.ExecuteWASM(callContext, input, in)
-		return ret, callContext.gas, err
+		return ret, callContext.gas, callContext.GetTotalUsedMultiGas(), err
 	}
 
 	// The Interpreter main run loop (contextual). This loop runs until either an
@@ -459,14 +462,14 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 		cost = operation.constantGas // For tracing
 		// Validate stack
 		if sLen := callContext.Stack.len(); sLen < operation.numPop {
-			return nil, callContext.gas, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
+			return nil, callContext.gas, callContext.GetTotalUsedMultiGas(), &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
 		} else if sLen > operation.maxStack {
-			return nil, callContext.gas, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+			return nil, callContext.gas, callContext.GetTotalUsedMultiGas(), &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
 		}
 		if !callContext.useGas(cost, in.cfg.Tracer, tracing.GasChangeIgnored) {
-			return nil, callContext.gas, ErrOutOfGas
+			return nil, callContext.gas, callContext.GetTotalUsedMultiGas(), ErrOutOfGas
 		}
-		addConstantMultiGas(&contract.UsedMultiGas, cost, op)
+		addConstantMultiGas(&callContext.UsedMultiGas, cost, op)
 
 		// All ops with a dynamic memory usage also has a dynamic gas cost.
 		var memorySize uint64
@@ -478,30 +481,30 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 			if operation.memorySize != nil {
 				memSize, overflow := operation.memorySize(callContext)
 				if overflow {
-					return nil, callContext.gas, ErrGasUintOverflow
+					return nil, callContext.gas, callContext.GetTotalUsedMultiGas(), ErrGasUintOverflow
 				}
 				// memory is expanded in words of 32 bytes. Gas
 				// is also calculated in words.
 				if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
-					return nil, callContext.gas, ErrGasUintOverflow
+					return nil, callContext.gas, callContext.GetTotalUsedMultiGas(), ErrGasUintOverflow
 				}
 			}
 			// Consume the gas and return an error if not enough gas is available.
 			// cost is explicitly set so that the capture state defer method can get the proper cost
 			multigasDynamicCost, err := operation.dynamicGas(in.evm, callContext, callContext.gas, memorySize)
 			if err != nil {
-				return nil, callContext.gas, fmt.Errorf("%w: %v", ErrOutOfGas, err)
+				return nil, callContext.gas, callContext.GetTotalUsedMultiGas(), fmt.Errorf("%w: %v", ErrOutOfGas, err)
 			}
 			dynamicCost := multigasDynamicCost.SingleGas()
-
 			cost += dynamicCost // for tracing
+
 			callGas = operation.constantGas + dynamicCost - in.evm.CallGasTemp()
 			if dbg.TraceDyanmicGas && dynamicCost > 0 {
 				fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
 			}
-			// TODO seems it should be once UseMultiGas call
 			if !callContext.useGas(dynamicCost, in.cfg.Tracer, tracing.GasChangeIgnored) {
-				return nil, callContext.gas, ErrOutOfGas
+				//if !callContext.UseMultiGas(multigasDynamicCost, in.cfg.Tracer, tracing.GasChangeCallOpCode) {
+				return nil, callContext.gas, callContext.GetTotalUsedMultiGas(), ErrOutOfGas
 			}
 			callContext.UsedMultiGas.SaturatingAddInto(multigasDynamicCost)
 		}
@@ -547,7 +550,7 @@ func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readO
 		err = nil // clear stop token error
 	}
 
-	return res, callContext.gas, err
+	return res, callContext.gas, callContext.GetTotalUsedMultiGas(), err
 }
 
 // Depth returns the current call stack depth.

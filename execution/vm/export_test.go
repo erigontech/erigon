@@ -17,5 +17,9 @@
 package vm
 
 func MemoryGasCost(callContext *CallContext, newMemSize uint64) (uint64, error) {
-	return memoryGasCost(callContext, newMemSize)
+	multiGasCost, err := memoryGasCost(callContext, newMemSize)
+	if err != nil {
+		return 0, err
+	}
+	return multiGasCost.SingleGas(), err
 }

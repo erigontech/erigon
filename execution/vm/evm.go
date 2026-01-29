@@ -182,7 +182,7 @@ func isSystemCall(caller accounts.Address) bool {
 	return caller == chainparams.SystemAddress
 }
 
-func (evm *EVM) call(typ OpCode, caller accounts.Address, addr accounts.Address, input []byte, gas uint64, value uint256.Int, bailout bool, arbInfo *AdvancedPrecompileCall) (ret []byte, leftOverGas uint64, usedMultiGas multigas.MultiGas, err error) {
+func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, input []byte, gas uint64, value uint256.Int, bailout bool, arbInfo *AdvancedPrecompileCall) (ret []byte, leftOverGas uint64, usedMultiGas multigas.MultiGas, err error) {
 	if evm.abort.Load() {
 		return ret, leftOverGas, multigas.ZeroGas(), nil
 	}
@@ -280,60 +280,36 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, addr accounts.Address,
 		if err != nil {
 			return nil, 0, multigas.ZeroGas(), fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
-		var contract Contract
-		if typ == CALLCODE {
-			// ARBITRUM_MERGE:
-			/*
-				    contract = NewContract(caller, caller.Address(), value, gas, evm.config.JumpDestCache)
-					contract.delegateOrCallcode = true
-			*/
-			contract = Contract{
-				caller:   caller,
-				addr:     caller,
-				value:    value,
-				Code:     code,
-				CodeHash: codeHash,
-			}
-		} else if typ == DELEGATECALL {
-			contract = Contract{
-				caller:   caller,
-				addr:     caller,
-				value:    value,
-				Code:     code,
-				CodeHash: codeHash,
-			}
-			contract.delegateOrCallcode = true
-		} else {
-			// ARBITRUM_MERGE
-			/*
-				contract = NewContract(caller, addrCopy, value, gas, evm.config.JumpDestCache)
-			*/
-			contract = Contract{
-				caller:   caller,
-				addr:     addr,
-				value:    value,
-				Code:     code,
-				CodeHash: codeHash,
-			}
+
+		contract := Contract{
+			caller:   caller,
+			addr:     addr,
+			value:    value,
+			Code:     code,
+			CodeHash: codeHash,
 		}
-		// ARBITRUM_MERGE
+
+		if typ == CALLCODE {
+			contract.addr = caller
+			contract.delegateOrCallcode = true
+		}
+		if typ == DELEGATECALL {
+			contract.caller = callerAddress
+			contract.delegateOrCallcode = true
+		}
+
 		contract.IsSystemCall = isSystemCall(caller)
+		// TODO addrCopy could rewrite contract.addr we set in callcode or delegatecall, eh?
 		//contract.SetCallCode(&addrCopy, codeHash, code)
 		readOnly := false
 		if typ == STATICCALL {
 			readOnly = true
 		}
-		ret, gas, err = evm.interpreter.Run(contract, gas, input, readOnly)
+		runGasCost := multigas.ZeroGas()
+		ret, gas, runGasCost, err = evm.interpreter.Run(contract, gas, runGasCost, input, readOnly)
 
-		// ARBITRUM_MERGE
-		/*
-			ret, err = evm.interpreter.Run(contract, input, readOnly)
-			//fmt.Printf("block %d CALLER %s TO %s gas spending %d multigas %s\n",
-			//	evm.Context.BlockNumber, contract.Caller().String(), contract.self.String(), gas-contract.Gas, contract.GetTotalUsedMultiGas().String())
-			gas = contract.Gas
-			usedMultiGas.SaturatingAddInto(contract.GetTotalUsedMultiGas())
-		*/
-		usedMultiGas.SaturatingAddInto(ctx.GetTotalUsedMultiGas())
+		usedMultiGas.SaturatingAddInto(runGasCost)
+		//usedMultiGas.SaturatingAddInto(ctx.GetTotalUsedMultiGas())
 	}
 	// When an error was returned by the EVM or when setting the creation code
 	// above we revert to the snapshot and consume any gas remaining. Additionally
@@ -358,7 +334,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, addr accounts.Address,
 // the necessary steps to create accounts and reverses the state in case of an
 // execution error or failed value transfer.
 func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, usedMultiGas multigas.MultiGas, err error) {
-	return evm.call(CALL, caller, addr, input, gas, *value, bailout, &AdvancedPrecompileCall{
+	return evm.call(CALL, caller, caller, addr, input, gas, *value, bailout, &AdvancedPrecompileCall{
 		PrecompileAddress: addr.Value(),
 		ActingAsAddress:   addr.Value(),
 		Caller:            caller.Value(),
@@ -376,7 +352,7 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 // CallCode differs from Call in the sense that it executes the given address'
 // code with the caller as context.
 func (evm *EVM) CallCode(caller accounts.Address, addr accounts.Address, input []byte, gas uint64, value *uint256.Int) (ret []byte, leftOverGas uint64, usedMultiGas multigas.MultiGas, err error) {
-	return evm.call(CALLCODE, caller, addr, input, gas, *value, false, &AdvancedPrecompileCall{
+	return evm.call(CALLCODE, caller, caller, addr, input, gas, *value, false, &AdvancedPrecompileCall{
 		PrecompileAddress: addr.Value(),
 		ActingAsAddress:   caller.Value(),
 		Caller:            caller.Value(),
@@ -392,7 +368,7 @@ func (evm *EVM) CallCode(caller accounts.Address, addr accounts.Address, input [
 // DelegateCall differs from CallCode in the sense that it executes the given address'
 // code with the caller as context and the caller is set to the caller of the caller.
 func (evm *EVM) DelegateCall(caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, input []byte, value uint256.Int, gas uint64) (ret []byte, leftOverGas uint64, usedMultiGas multigas.MultiGas, err error) {
-	return evm.call(DELEGATECALL, caller, addr, input, gas, u256.Num0, false, &AdvancedPrecompileCall{
+	return evm.call(DELEGATECALL, caller, callerAddress, addr, input, gas, u256.Num0, false, &AdvancedPrecompileCall{
 		PrecompileAddress: addr.Value(),
 		ActingAsAddress:   caller.Value(),
 		Caller:            callerAddress.Value(),
@@ -407,7 +383,7 @@ func (evm *EVM) DelegateCall(caller accounts.Address, callerAddress accounts.Add
 // Opcodes that attempt to perform such modifications will result in exceptions
 // instead of performing the modifications.
 func (evm *EVM) StaticCall(caller accounts.Address, addr accounts.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, usedMultiGas multigas.MultiGas, err error) {
-	return evm.call(STATICCALL, caller, addr, input, gas, u256.Num0, false, &AdvancedPrecompileCall{
+	return evm.call(STATICCALL, caller, caller, addr, input, gas, u256.Num0, false, &AdvancedPrecompileCall{
 		PrecompileAddress: addr.Value(),
 		ActingAsAddress:   addr.Value(),
 		Caller:            caller.Value(),
@@ -435,11 +411,11 @@ func (c *codeAndHash) Hash() accounts.CodeHash {
 
 func (evm *EVM) OverlayCreate(caller accounts.Address, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool) ([]byte, accounts.Address, uint64, multigas.MultiGas, error) {
 	//getCallContext(caller.)
-	return evm.create(caller, codeAndHash, gas, *value, address, typ, incrementNonce, false, ctx)
+	return evm.create(caller, codeAndHash, gas, *value, address, typ, incrementNonce, false)
 }
 
 // create creates a new contract using code as deployment code.
-func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRemaining uint64, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool, bailout bool, ctx *CallContext) (ret []byte, createAddress accounts.Address, leftOverGas uint64, usedMultiGas multigas.MultiGas, err error) {
+func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRemaining uint64, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool, bailout bool) (ret []byte, createAddress accounts.Address, leftOverGas uint64, usedMultiGas multigas.MultiGas, err error) {
 	if dbg.TraceTransactionIO && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle())) {
 		defer func() {
 			version := evm.intraBlockState.Version()
@@ -535,11 +511,15 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		CodeHash: codeAndHash.hash,
 	}
 
+	scope := getCallContext(contract, value.Bytes(), gasRemaining)
+
 	if evm.config.NoRecursion && depth > 0 {
-		return nil, address, gasRemaining, ctx.GetTotalUsedMultiGas(), nil
+		return nil, address, gasRemaining, scope.UsedMultiGas, nil
 	}
 
-	ret, gasRemaining, err = evm.interpreter.Run(contract, gasRemaining, nil, false)
+	multiGasSpent := multigas.ZeroGas()
+	ret, gasRemaining, multiGasSpent, err = evm.interpreter.Run(contract, gasRemaining, multiGasSpent, nil, false)
+	//scope.gas = gasRemaining
 
 	// EIP-170: Contract code size limit
 	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > evm.maxCodeSize() {
@@ -559,13 +539,14 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 			err = nil
 		}
 	}
+
 	// If the contract creation ran successfully and no errors were returned,
 	// calculate the gas required to store the code. If the code could not
 	// be stored due to not enough gas, set an error when we're in Homestead and let it be handled
 	// by the error checking condition below.
 	if err == nil {
 		createDataGas := uint64(len(ret)) * params.CreateDataGas
-		if ctx.UseMultiGas(multigas.StorageGrowthGas(createDataGas), evm.Config().Tracer, tracing.GasChangeCallCodeStorage) {
+		if scope.UseMultiGas(multigas.StorageGrowthGas(createDataGas), evm.Config().Tracer, tracing.GasChangeCallCodeStorage) {
 			evm.intraBlockState.SetCode(address, ret)
 		} else {
 			// If we run out of gas, we do not store the code: the returned code must be empty.
@@ -582,18 +563,17 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
 		evm.intraBlockState.RevertToSnapshot(snapshot, err)
 		if err != ErrExecutionReverted {
-			ctx.UseMultiGas(multigas.ComputationGas(contract.Gas), evm.Config().Tracer, tracing.GasChangeCallFailedExecution)
-			// MERGE_ARBITRUM, main erigon has:
-			/*
-				gasRemaining, _ = useGas(gasRemaining, gasRemaining, evm.Config().Tracer, tracing.GasChangeCallFailedExecution)
+			//scope.UseMultiGas(multigas.ComputationGas(scope.gas), evm.Config().Tracer, tracing.GasChangeCallFailedExecution)
+			scope.UseMultiGas(multiGasSpent, evm.Config().Tracer, tracing.GasChangeCallFailedExecution)
+			/*MERGE_ARBITRUM, main erigon has:
+			gasRemaining, _ = useGas(gasRemaining, gasRemaining, evm.Config().Tracer, tracing.GasChangeCallFailedExecution)
 			*/
 		}
 	}
-	// MERGE_ARBITRUM, main erigon has:
-	/*
-		return ret, address, gasRemaining, err
-	*/
-	return ret, address, contract.Gas, ctx.GetTotalUsedMultiGas(), err
+	//if gasRemaining != scope.gas {
+	//	panic(fmt.Errorf("gas remains %d scope gas %d", gasRemaining, scope.gas))
+	//}
+	return ret, address, scope.Gas(), scope.GetTotalUsedMultiGas(), err
 }
 
 func (evm *EVM) maxCodeSize() int {
@@ -603,23 +583,23 @@ func (evm *EVM) maxCodeSize() int {
 	return params.MaxCodeSize
 }
 
-func (evm *EVM) CreateWithContext(ctx *CallContext) (ret []byte, contractAddr accounts.Address, leftOverGas uint64, usedMultiGas multigas.MultiGas, err error) {
-	caller := ctx.Contract.Address()
-
-	var (
-		value   = ctx.Stack.pop()
-		offset  = ctx.Stack.pop()
-		size    = ctx.Stack.peek()
-		input   = ctx.Memory.GetCopy(offset.Uint64(), size.Uint64())
-		gas     = ctx.gas
-		bailout = false
-	)
-	if evm.ChainRules().IsTangerineWhistle {
-		gas -= gas / 64
-	}
-
-	return evm.create(caller, NewCodeAndHash(input), gas, value, ctx.CreateAddress, CREATE, true, bailout)
-}
+//func (evm *EVM) CreateWithContext(ctx *CallContext) (ret []byte, contractAddr accounts.Address, leftOverGas uint64, usedMultiGas multigas.MultiGas, err error) {
+//	caller := ctx.Contract.Address()
+//
+//	var (
+//		value   = ctx.Stack.pop()
+//		offset  = ctx.Stack.pop()
+//		size    = ctx.Stack.peek()
+//		input   = ctx.Memory.GetCopy(offset.Uint64(), size.Uint64())
+//		gas     = ctx.gas
+//		bailout = false
+//	)
+//	if evm.ChainRules().IsTangerineWhistle {
+//		gas -= gas / 64
+//	}
+//
+//	return evm.create(caller, NewCodeAndHash(input), gas, value, ctx.CreateAddress, CREATE, true, bailout)
+//}
 
 // Create creates a new contract using code as deployment code.
 // DESCRIBED: docs/programmers_guide/guide.md#nonce

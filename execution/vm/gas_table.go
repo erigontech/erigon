@@ -345,9 +345,6 @@ func gasCreate2(_ *EVM, callContext *CallContext, scopeGas uint64, memorySize ui
 	if overflow {
 		return multigas.ZeroGas(), ErrGasUintOverflow
 	}
-	if wordGas, overflow = math.SafeMul(ToWordSize(wordGas), params.Keccak256WordGas); overflow {
-		return multigas.ZeroGas(), ErrGasUintOverflow
-	}
 	// Keccak hashing considered as computation.
 	// See rationale in: https://github.com/OffchainLabs/nitro/blob/master/docs/decisions/0002-multi-dimensional-gas-metering.md
 	if multiGas, overflow = multiGas.SafeIncrement(multigas.ResourceKindComputation, wordGas); overflow {

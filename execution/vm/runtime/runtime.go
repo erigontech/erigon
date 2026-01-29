@@ -162,7 +162,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		contractAsAddress,
 		input,
 		cfg.GasLimit,
-		cfg.Value,
+		&cfg.Value,
 		false, /* bailout */
 	)
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
@@ -212,7 +212,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		sender,
 		input,
 		cfg.GasLimit,
-		cfg.Value,
+		&cfg.Value,
 		false,
 	)
 	_ = usedMultiGas
@@ -242,12 +242,12 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, uint64, 
 	}
 
 	// Call the code with the given configuration.
-	ret, leftOverGas,  _, err := vmenv.Call(
+	ret, leftOverGas, _, err := vmenv.Call(
 		sender.Address(),
 		address,
 		input,
 		cfg.GasLimit,
-		cfg.Value,
+		&cfg.Value,
 		false, /* bailout */
 	)
 
