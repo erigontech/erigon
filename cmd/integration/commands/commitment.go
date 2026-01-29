@@ -836,7 +836,7 @@ func benchMdbxHistoryLookup(ctx context.Context, tx kv.TemporalTx, compactKey []
 	}
 
 	mdbxStats := &HistoryBenchStats{
-		Name:        "MDBX (high txnums)",
+		Name:        "MDBX",
 		StartTxNum:  minTxNum,
 		EndTxNum:    maxTxNum,
 		SampleCount: len(durations),
