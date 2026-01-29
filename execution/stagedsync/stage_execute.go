@@ -322,17 +322,10 @@ func unwindExec3State(ctx context.Context,
 
 		// Invalidate code cache entries for addresses with code changes
 		if codeCache := sd.GetCodeCache(); codeCache != nil {
-			codeDiffs := changeset[kv.CodeDomain]
-			for _, entry := range codeDiffs {
-				fmt.Println("X", len(entry.Key))
-				// Key format: address (20 bytes) + step suffix (8 bytes)
-				if len(entry.Key) >= length.Addr {
-					codeCache.RemoveAddress(toBytesZeroCopy(entry.Key[:length.Addr]))
-				}
-			}
+			fmt.Println("removing shit")
 			accountDiffs := changeset[kv.AccountsDomain]
 			for _, entry := range accountDiffs {
-				codeCache.RemoveAddress(toBytesZeroCopy(entry.Key))
+				codeCache.RemoveAddress(toBytesZeroCopy(entry.Key[:length.Addr]))
 			}
 
 			// Update cache hash to the canonical hash of the block we're unwinding to
