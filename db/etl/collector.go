@@ -220,7 +220,6 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 			if toBucket == kv.TblCommitmentHistoryKeys || toBucket == kv.TblCommitmentHistoryVals || toBucket == kv.TblCommitmentVals || toBucket == kv.TblCommitmentIdx {
 				log.Warn("[dbg] etl", "table", toBucket, "isDupSort", isDupSort, "haveSortingGuaranties", haveSortingGuaranties, "isEndOfBucket", isEndOfBucket, "canUseAppend", canUseAppend)
 			}
-
 		}
 		i++
 
