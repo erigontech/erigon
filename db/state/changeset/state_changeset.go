@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -301,22 +300,7 @@ var writeDiffsetBuf = &threadSafeBuf{}
 func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *StateChangeSet) error {
 	writeDiffsetBuf.Lock()
 	defer writeDiffsetBuf.Unlock()
-	if dbg.TraceUnwinds {
-		var diffStats strings.Builder
-		if diffSet != nil {
-			first := true
-			for d, diff := range &diffSet.Diffs {
-				if first {
-					diffStats.WriteString(" ")
-					first = false
-				} else {
-					diffStats.WriteString(", ")
-				}
-				diffStats.WriteString(fmt.Sprintf("%s: %d", kv.Domain(d), diff.Len()))
-			}
-		}
-		fmt.Printf("diffset (Block:%d) %x:%s %s\n", blockNumber, blockHash, diffStats.String(), dbg.Stack())
-	}
+
 	writeDiffsetBuf.b = diffSet.serializeKeys(writeDiffsetBuf.b[:0], blockNumber)
 	keys := writeDiffsetBuf.b
 
@@ -341,6 +325,23 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 		if err := tx.Put(kv.ChangeSets3, key, keys[start:end]); err != nil {
 			return err
 		}
+	}
+
+	if dbg.TraceUnwinds {
+		var diffStats strings.Builder
+		if diffSet != nil {
+			first := true
+			for d, diff := range &diffSet.Diffs {
+				if first {
+					diffStats.WriteString(" ")
+					first = false
+				} else {
+					diffStats.WriteString(", ")
+				}
+				diffStats.WriteString(fmt.Sprintf("%s: %d", kv.Domain(d), diff.Len()))
+			}
+		}
+		fmt.Printf("diffset (Block:%d) %x:%s chunkCount: %d, %s\n", blockNumber, blockHash, diffStats.String(), chunkCount, dbg.Stack())
 	}
 	return nil
 }
