@@ -403,8 +403,8 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 			// On invalid block, clear cache and reset to parent hash
 			e.codeCache.ClearWithHash(header.ParentHash)
 		} else {
-			// On success, update cache hash to current block
-			e.codeCache.SetBlockHash(blockHash)
+			// On success, update cache hash to current block and print stats
+			e.codeCache.SetBlockHash(blockHash, header.Number.Uint64())
 		}
 	}
 

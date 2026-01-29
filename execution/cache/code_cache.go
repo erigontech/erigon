@@ -17,7 +17,9 @@
 package cache
 
 import (
+	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/maphash"
@@ -44,6 +46,12 @@ type CodeCache struct {
 	hashToCode *maphash.LRU[[]byte]      // codeHash → code
 	blockHash  common.Hash               // hash of the last block processed
 	mu         sync.RWMutex
+
+	// Stats counters (atomic for concurrent access)
+	addrHits   atomic.Uint64
+	addrMisses atomic.Uint64
+	codeHits   atomic.Uint64
+	codeMisses atomic.Uint64
 }
 
 // NewCodeCache creates a new CodeCache with the specified sizes.
@@ -73,10 +81,19 @@ func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
 	// First, look up the code hash for this address
 	codeHash, ok := c.addrToHash.Get(addr)
 	if !ok {
+		c.addrMisses.Add(1)
 		return nil, false
 	}
+	c.addrHits.Add(1)
+
 	// Then, look up the code by hash
-	return c.hashToCode.Get(codeHash[:])
+	code, ok := c.hashToCode.Get(codeHash[:])
+	if !ok {
+		c.codeMisses.Add(1)
+		return nil, false
+	}
+	c.codeHits.Add(1)
+	return code, true
 }
 
 // GetByHash retrieves contract code directly by code hash.
@@ -121,10 +138,16 @@ func (c *CodeCache) GetBlockHash() common.Hash {
 }
 
 // SetBlockHash sets the hash of the current block being processed.
-func (c *CodeCache) SetBlockHash(hash common.Hash) {
+// If blockNum > 0, also prints cache statistics for this block.
+func (c *CodeCache) SetBlockHash(hash common.Hash, blockNum ...uint64) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.blockHash = hash
+	c.mu.Unlock()
+
+	// Print stats if block number provided
+	if len(blockNum) > 0 && blockNum[0] > 0 {
+		c.PrintStatsAndReset(blockNum[0])
+	}
 }
 
 // ValidateAndPrepare checks if the given parentHash matches the cache's current blockHash.
@@ -169,4 +192,29 @@ func (c *CodeCache) Len() int {
 // CodeLen returns the number of entries in the code cache.
 func (c *CodeCache) CodeLen() int {
 	return c.hashToCode.Len()
+}
+
+// PrintStatsAndReset prints cache statistics and resets counters.
+// Call this at the end of each block to see per-block performance.
+func (c *CodeCache) PrintStatsAndReset(blockNum uint64) {
+	addrHits := c.addrHits.Swap(0)
+	addrMisses := c.addrMisses.Swap(0)
+	codeHits := c.codeHits.Swap(0)
+	codeMisses := c.codeMisses.Swap(0)
+
+	addrTotal := addrHits + addrMisses
+	codeTotal := codeHits + codeMisses
+
+	var addrHitRate, codeHitRate float64
+	if addrTotal > 0 {
+		addrHitRate = float64(addrHits) / float64(addrTotal) * 100
+	}
+	if codeTotal > 0 {
+		codeHitRate = float64(codeHits) / float64(codeTotal) * 100
+	}
+
+	fmt.Printf("[CodeCache] block=%d | addr: %d/%d (%.1f%% hit) size=%d | code: %d/%d (%.1f%% hit) size=%d\n",
+		blockNum,
+		addrHits, addrTotal, addrHitRate, c.addrToHash.Len(),
+		codeHits, codeTotal, codeHitRate, c.hashToCode.Len())
 }
