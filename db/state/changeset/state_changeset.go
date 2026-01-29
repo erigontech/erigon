@@ -132,8 +132,7 @@ func serializeDiffSetBufLen(diffSet []kv.DomainEntryDiff) int {
 	totalEntrySize := 0
 
 	for i := range diffSet {
-		diff := &diffSet[i]
-		prevStep := binary.BigEndian.Uint64(diff.PrevStepBytes)
+		prevStep := binary.BigEndian.Uint64(diffSet[i].PrevStepBytes)
 
 		// Linear search for existing entry
 		found := false
@@ -147,7 +146,7 @@ func serializeDiffSetBufLen(diffSet []kv.DomainEntryDiff) int {
 			dictKeys[dictLen] = prevStep
 			dictLen++
 		}
-		totalEntrySize += 4 + len(diff.Key) + 4 + len(diff.Value) + 1
+		totalEntrySize += 4 + len(diffSet[i].Key) + 4 + len(diffSet[i].Value) + 1
 	}
 	// dict: 1 + 9*dictLen, diffSet header: 4, entries: totalEntrySize
 	return 1 + 9*dictLen + 4 + totalEntrySize
