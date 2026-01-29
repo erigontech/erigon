@@ -61,7 +61,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 		}
 	}).MustOpen()
 	salt := uint32(1)
-	cfg := statecfg.InvIdxCfg{FilenameBase: "inv", KeysTable: keysTable, ValuesTable: indexTable, FileVersion: statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
+	cfg := statecfg.InvIdxCfg{FilenameBase: "inv", EventsTable: keysTable, InvIdxTable: indexTable, FileVersion: statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
 	cfg.Accessors = statecfg.AccessorHashMap
 	ii, err := NewInvertedIndex(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, logger)
 	require.NoError(tb, err)
@@ -109,7 +109,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		ic := ii.BeginFilesRo()
 		defer ic.Close()
 
-		icc, err := tx.CursorDupSort(ii.KeysTable)
+		icc, err := tx.CursorDupSort(ii.EventsTable)
 		require.NoError(t, err)
 
 		count := 0
@@ -194,7 +194,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		it.Close()
 
 		// straight from pruned - not empty
-		icc, err := tx.CursorDupSort(ii.KeysTable)
+		icc, err := tx.CursorDupSort(ii.EventsTable)
 		require.NoError(t, err)
 		txn, _, err := icc.Seek(from[:])
 		require.NoError(t, err)
@@ -207,7 +207,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		icc.Close()
 
 		// check second table
-		icc, err = tx.CursorDupSort(ii.ValuesTable)
+		icc, err = tx.CursorDupSort(ii.InvIdxTable)
 		require.NoError(t, err)
 		key, txn, err := icc.First()
 		t.Logf("key: %x, txn: %x", key, txn)
@@ -250,7 +250,7 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 		ic := ii.BeginFilesRo()
 		defer ic.Close()
 
-		icc, err := tx.CursorDupSort(ii.KeysTable)
+		icc, err := tx.CursorDupSort(ii.EventsTable)
 		require.NoError(t, err)
 		defer icc.Close()
 		count := 0
@@ -276,7 +276,7 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 			TxFrom:           0,
 			TxTo:             10,
 		}
-		err = SavePruneValProgress(tx, ic.ii.ValuesTable, st)
+		err = SavePruneValProgress(tx, ic.ii.InvIdxTable, st)
 		require.NoError(t, err)
 		// this one should not prune anything due to forced=false but no files built
 		stat, err := ic.TableScanningPrune(ctx, tx, 0, 10, pruneLimit, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
@@ -316,7 +316,7 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 			TxFrom:           0,
 			TxTo:             10,
 		}
-		err = SavePruneValProgress(tx, ic.ii.ValuesTable, st)
+		err = SavePruneValProgress(tx, ic.ii.InvIdxTable, st)
 		require.NoError(t, err)
 		can := ic.CanPrune(tx, 10)
 		require.True(t, can)
@@ -347,7 +347,7 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 			TxFrom:           0,
 			TxTo:             10,
 		}
-		err = SavePruneValProgress(tx, ic.ii.ValuesTable, st)
+		err = SavePruneValProgress(tx, ic.ii.InvIdxTable, st)
 		require.NoError(t, err)
 		can := ic.CanPrune(tx, 10)
 		require.False(t, can)
@@ -377,7 +377,7 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 			TxFrom:           0,
 			TxTo:             10,
 		}
-		err = SavePruneValProgress(tx, ic.ii.ValuesTable, st)
+		err = SavePruneValProgress(tx, ic.ii.InvIdxTable, st)
 		require.NoError(t, err)
 		stat, err := ic.TableScanningPrune(ctx, tx, 0, 10, pruneLimit, logEvery, false, nil, nil, mxPruneSizeIndex, prune.DefaultStorageMode)
 		require.NoError(t, err)
@@ -429,7 +429,7 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 		it.Close()
 
 		// straight from pruned - not empty
-		icc, err := tx.CursorDupSort(ii.KeysTable)
+		icc, err := tx.CursorDupSort(ii.EventsTable)
 		require.NoError(t, err)
 		txn, _, err := icc.Seek(from[:])
 		require.NoError(t, err)
@@ -442,7 +442,7 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 		icc.Close()
 
 		// check second table
-		icc, err = tx.CursorDupSort(ii.ValuesTable)
+		icc, err = tx.CursorDupSort(ii.InvIdxTable)
 		require.NoError(t, err)
 		key, txn, err := icc.First()
 		t.Logf("key: %x, txn: %x", key, txn)
@@ -600,7 +600,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	for _, table := range []string{ii.KeysTable, ii.ValuesTable} {
+	for _, table := range []string{ii.EventsTable, ii.InvIdxTable} {
 		var cur kv.Cursor
 		cur, err = tx.Cursor(table)
 		require.NoError(t, err)

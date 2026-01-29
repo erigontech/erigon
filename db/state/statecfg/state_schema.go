@@ -205,7 +205,7 @@ var Schema = SchemaGen{
 			HistoryIdx:         kv.AccountsHistoryIdx,
 
 			IiCfg: InvIdxCfg{
-				FilenameBase: kv.AccountsDomain.String(), KeysTable: kv.TblAccountHistoryKeys, ValuesTable: kv.TblAccountIdx,
+				FilenameBase: kv.AccountsDomain.String(), EventsTable: kv.TblAccountHistoryKeys, InvIdxTable: kv.TblAccountIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
 			},
@@ -226,7 +226,7 @@ var Schema = SchemaGen{
 			HistoryIdx:         kv.StorageHistoryIdx,
 
 			IiCfg: InvIdxCfg{
-				FilenameBase: kv.StorageDomain.String(), KeysTable: kv.TblStorageHistoryKeys, ValuesTable: kv.TblStorageIdx,
+				FilenameBase: kv.StorageDomain.String(), EventsTable: kv.TblStorageHistoryKeys, InvIdxTable: kv.TblStorageIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
 			},
@@ -248,7 +248,7 @@ var Schema = SchemaGen{
 			HistoryIdx:         kv.CodeHistoryIdx,
 
 			IiCfg: InvIdxCfg{
-				FilenameBase: kv.CodeDomain.String(), KeysTable: kv.TblCodeHistoryKeys, ValuesTable: kv.TblCodeIdx,
+				FilenameBase: kv.CodeDomain.String(), EventsTable: kv.TblCodeHistoryKeys, InvIdxTable: kv.TblCodeIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
 			},
@@ -274,7 +274,7 @@ var Schema = SchemaGen{
 			HistoryDisabled:   true,
 
 			IiCfg: InvIdxCfg{
-				FilenameBase: kv.CommitmentDomain.String(), KeysTable: kv.TblCommitmentHistoryKeys, ValuesTable: kv.TblCommitmentIdx,
+				FilenameBase: kv.CommitmentDomain.String(), EventsTable: kv.TblCommitmentHistoryKeys, InvIdxTable: kv.TblCommitmentIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
 			},
@@ -296,7 +296,7 @@ var Schema = SchemaGen{
 			HistoryIdx:         kv.ReceiptHistoryIdx,
 
 			IiCfg: InvIdxCfg{
-				FilenameBase: kv.ReceiptDomain.String(), KeysTable: kv.TblReceiptHistoryKeys, ValuesTable: kv.TblReceiptIdx,
+				FilenameBase: kv.ReceiptDomain.String(), EventsTable: kv.TblReceiptHistoryKeys, InvIdxTable: kv.TblReceiptIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
 			},
@@ -322,7 +322,7 @@ var Schema = SchemaGen{
 
 			IiCfg: InvIdxCfg{
 				Disable:      true, // disable everything by default
-				FilenameBase: kv.RCacheDomain.String(), KeysTable: kv.TblRCacheHistoryKeys, ValuesTable: kv.TblRCacheIdx,
+				FilenameBase: kv.RCacheDomain.String(), EventsTable: kv.TblRCacheHistoryKeys, InvIdxTable: kv.TblRCacheIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
 			},
@@ -330,28 +330,28 @@ var Schema = SchemaGen{
 	},
 
 	LogAddrIdx: InvIdxCfg{
-		FilenameBase: kv.FileLogAddressIdx, KeysTable: kv.TblLogAddressKeys, ValuesTable: kv.TblLogAddressIdx,
+		FilenameBase: kv.FileLogAddressIdx, EventsTable: kv.TblLogAddressKeys, InvIdxTable: kv.TblLogAddressIdx,
 
 		Compression: seg.CompressNone,
 		Name:        kv.LogAddrIdx,
 		Accessors:   AccessorHashMap,
 	},
 	LogTopicIdx: InvIdxCfg{
-		FilenameBase: kv.FileLogTopicsIdx, KeysTable: kv.TblLogTopicsKeys, ValuesTable: kv.TblLogTopicsIdx,
+		FilenameBase: kv.FileLogTopicsIdx, EventsTable: kv.TblLogTopicsKeys, InvIdxTable: kv.TblLogTopicsIdx,
 
 		Compression: seg.CompressNone,
 		Name:        kv.LogTopicIdx,
 		Accessors:   AccessorHashMap,
 	},
 	TracesFromIdx: InvIdxCfg{
-		FilenameBase: kv.FileTracesFromIdx, KeysTable: kv.TblTracesFromKeys, ValuesTable: kv.TblTracesFromIdx,
+		FilenameBase: kv.FileTracesFromIdx, EventsTable: kv.TblTracesFromKeys, InvIdxTable: kv.TblTracesFromIdx,
 
 		Compression: seg.CompressNone,
 		Name:        kv.TracesFromIdx,
 		Accessors:   AccessorHashMap,
 	},
 	TracesToIdx: InvIdxCfg{
-		FilenameBase: kv.FileTracesToIdx, KeysTable: kv.TblTracesToKeys, ValuesTable: kv.TblTracesToIdx,
+		FilenameBase: kv.FileTracesToIdx, EventsTable: kv.TblTracesToKeys, InvIdxTable: kv.TblTracesToIdx,
 
 		Compression: seg.CompressNone,
 		Name:        kv.TracesToIdx,

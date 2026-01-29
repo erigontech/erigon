@@ -50,7 +50,7 @@ import (
 
 type History struct {
 	statecfg.HistCfg // keep higher than embedded InvertedIndexis to correctly shadow it's exposed variables
-	*InvertedIndex   // KeysTable contains mapping txNum -> key1+key2, while index table `key -> {txnums}` is omitted.
+	*InvertedIndex   // EventsTable contains mapping txNum -> key1+key2, while index table `key -> {txnums}` is omitted.
 
 	// Schema:
 	//  .v - list of values
@@ -554,7 +554,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	}
 	invIndexWriter := h.InvertedIndex.dataWriter(_efComp, true) // `Collate+Build` must be fast -> no Compression. Slowness here means growth of `chaindata`
 
-	keysCursor, err := roTx.CursorDupSort(h.KeysTable)
+	keysCursor, err := roTx.CursorDupSort(h.EventsTable)
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s history cursor: %w", h.FilenameBase, err)
 	}
@@ -886,7 +886,7 @@ func (h *History) isEmpty(tx kv.Tx) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	k2, err := kv.FirstKey(tx, h.KeysTable)
+	k2, err := kv.FirstKey(tx, h.EventsTable)
 	if err != nil {
 		return false, err
 	}
