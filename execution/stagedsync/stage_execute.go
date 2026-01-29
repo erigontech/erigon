@@ -268,6 +268,7 @@ func unwindExec3State(ctx context.Context,
 	if changeset != nil {
 		accountDiffs := changeset[kv.AccountsDomain]
 		for _, entry := range accountDiffs {
+
 			if dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 				address := entry.Key[:len(entry.Key)-8]
 				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
@@ -329,12 +330,17 @@ func unwindExec3State(ctx context.Context,
 					codeCache.RemoveAddress(toBytesZeroCopy(entry.Key[:length.Addr]))
 				}
 			}
+			accountDiffs := changeset[kv.AccountsDomain]
+			for _, entry := range accountDiffs {
+				codeCache.RemoveAddress(toBytesZeroCopy(entry.Key))
+			}
 
 			// Update cache hash to the canonical hash of the block we're unwinding to
 			unwindToHash, err := rawdb.ReadCanonicalHash(tx, blockUnwindTo)
 			if err != nil {
 				logger.Warn("failed to read canonical hash for cache update", "block", blockUnwindTo, "err", err)
 			} else {
+				fmt.Println(unwindToHash)
 				codeCache.SetBlockHash(unwindToHash)
 			}
 		}
