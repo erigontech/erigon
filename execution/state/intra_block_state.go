@@ -942,10 +942,6 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr common.Address, readAcc
 // SubBalance subtracts amount from the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SubBalance(addr common.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
-	if amount.IsZero() {
-		return nil
-	}
-
 	prev, wasCommited, _ := sdb.getBalance(addr)
 
 	if sdb.trace || dbg.TraceAccount(addr) {
