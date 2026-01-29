@@ -267,7 +267,7 @@ var Schema = SchemaGen{
 			HistoryIdx: kv.CommitmentHistoryIdx,
 			Accessors:  AccessorHashMap,
 
-			HistoryLargeValues:            false,
+			HistoryLargeValues:            true,
 			HistoryValuesOnCompressedPage: 64,
 
 			SnapshotsDisabled: true,
