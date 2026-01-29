@@ -560,9 +560,8 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 	return nil
 }
 
-// HistoryFileBenchStats holds benchmark statistics for a single history file
-type HistoryFileBenchStats struct {
-	FileName    string
+type HistoryBenchStats struct {
+	Name        string
 	StartTxNum  uint64
 	EndTxNum    uint64
 	SampleCount int
@@ -617,25 +616,31 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 		}
 	}
 
-	if len(historyFiles) == 0 {
-		logger.Warn("No commitment history files found (.v files)")
-		return nil
+	// Sort by StartRootNum for consistent ordering
+	if len(historyFiles) > 0 {
+		slices.SortFunc(historyFiles, func(a, b dbstate.VisibleFile) int {
+			if a.StartRootNum() < b.StartRootNum() {
+				return -1
+			}
+			if a.StartRootNum() > b.StartRootNum() {
+				return 1
+			}
+			return 0
+		})
 	}
 
-	// Sort by StartRootNum for consistent ordering
-	slices.SortFunc(historyFiles, func(a, b dbstate.VisibleFile) int {
-		if a.StartRootNum() < b.StartRootNum() {
-			return -1
+	// Find the max txnum covered by history files
+	var maxFileTxNum uint64
+	for _, f := range historyFiles {
+		if f.EndRootNum() > maxFileTxNum {
+			maxFileTxNum = f.EndRootNum()
 		}
-		if a.StartRootNum() > b.StartRootNum() {
-			return 1
-		}
-		return 0
-	})
+	}
 
 	logger.Info("Found commitment history files",
 		"historyFiles", len(historyFiles),
 		"totalFiles", len(commitmentFiles),
+		"maxFileTxNum", maxFileTxNum,
 		"prefix", benchHistoryPrefix,
 		"samplePercentage", benchHistorySamplePct)
 
@@ -645,7 +650,7 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 	}
 	defer tx.Rollback()
 
-	var allFileStats []HistoryFileBenchStats
+	var allFileStats []HistoryBenchStats
 
 	// Process each history file
 	for _, f := range historyFiles {
@@ -688,13 +693,16 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 			sampledTxNums[i], sampledTxNums[j] = sampledTxNums[j], sampledTxNums[i]
 		})
 
-		// Benchmark lookups for this file
+		// Benchmark lookups for this file using HistoryStateReader
 		durations := make([]time.Duration, 0, sampleCount)
 
 		startTime := time.Now()
 		for _, txNum := range sampledTxNums {
+			// Create a HistoryStateReader for this txNum
+			reader := commitmentdb.NewHistoryStateReader(tx, txNum)
+
 			lookupStart := time.Now()
-			_, _, err := tx.GetAsOf(kv.CommitmentDomain, compactKey, txNum)
+			_, _, err := reader.Read(kv.CommitmentDomain, compactKey, config3.DefaultStepSize)
 			elapsed := time.Since(lookupStart)
 
 			if err != nil {
@@ -718,8 +726,8 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 			stats.Throughput = float64(len(durations)) / totalTime.Seconds()
 		}
 
-		fileStats := HistoryFileBenchStats{
-			FileName:    fname,
+		fileStats := HistoryBenchStats{
+			Name:        fname,
 			StartTxNum:  startTxNum,
 			EndTxNum:    endTxNum,
 			SampleCount: len(durations),
@@ -736,13 +744,120 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 			"p99", stats.P99)
 	}
 
+	// Sample and benchmark keys from MDBX (high txnums outside snapshot files)
+	mdbxStats, err := benchMdbxHistoryLookup(ctx, tx, compactKey, maxFileTxNum, benchHistorySamplePct, rng, logger)
+	if err != nil {
+		logger.Warn("Failed to benchmark MDBX history lookups", "error", err)
+	}
+	if mdbxStats != nil {
+		allFileStats = append(allFileStats, *mdbxStats)
+	}
+
 	// Print results table
 	printHistoryBenchResultsTable(prefix, compactKey, allFileStats)
 
 	return nil
 }
 
-func printHistoryBenchResultsTable(prefix []byte, compactKey []byte, fileStats []HistoryFileBenchStats) {
+// benchMdbxHistoryLookup benchmarks history lookups for txnums in the MDBX range
+// (those outside snapshot files). Uses the same approach as file benchmarks:
+// generates random txnums in the MDBX range and looks up the user-provided prefix.
+func benchMdbxHistoryLookup(ctx context.Context, tx kv.TemporalTx, compactKey []byte, minTxNum uint64, samplePct float64, rng *rand.Rand, logger log.Logger) (*HistoryBenchStats, error) {
+	// Get the max txnum in MDBX via DomainProgress API
+	aggTx := dbstate.AggTx(tx)
+	maxTxNum := aggTx.DomainProgress(kv.CommitmentDomain, tx)
+
+	logger.Info("Finding MDBX txnum range...",
+		"minTxNum", minTxNum,
+		"maxTxNum", maxTxNum)
+
+	txnumRange := maxTxNum - minTxNum
+	if txnumRange <= 0 {
+		logger.Info("No MDBX history entries found for txnums > minTxNum",
+			"minTxNum", minTxNum,
+			"maxTxNum", maxTxNum)
+		return nil, nil
+	}
+
+	// Calculate number of samples based on percentage of the range
+	sampleCount := int(float64(txnumRange) * samplePct / 100.0)
+	if sampleCount < 1 {
+		sampleCount = 1
+	}
+	if sampleCount > int(txnumRange) {
+		sampleCount = int(txnumRange)
+	}
+
+	logger.Info("Benchmarking MDBX history lookups...",
+		"minTxNum", minTxNum,
+		"maxTxNum", maxTxNum,
+		"range", txnumRange,
+		"sampleCount", sampleCount)
+
+	// Generate random txnums in [minTxNum, maxTxNum)
+	sampledTxNums := make([]uint64, sampleCount)
+	for i := 0; i < sampleCount; i++ {
+		sampledTxNums[i] = minTxNum + uint64(rng.Int63n(int64(txnumRange)))
+	}
+
+	// Shuffle for random access pattern
+	rng.Shuffle(len(sampledTxNums), func(i, j int) {
+		sampledTxNums[i], sampledTxNums[j] = sampledTxNums[j], sampledTxNums[i]
+	})
+
+	// Benchmark lookups using HistoryStateReader - same API as file benchmarks
+	// The reader has logic to determine whether to look in snapshots or MDBX
+	durations := make([]time.Duration, 0, sampleCount)
+
+	benchStart := time.Now()
+	for _, txNum := range sampledTxNums {
+		// Create a HistoryStateReader for this txNum
+		reader := commitmentdb.NewHistoryStateReader(tx, txNum)
+
+		lookupStart := time.Now()
+		_, _, err := reader.Read(kv.CommitmentDomain, compactKey, config3.DefaultStepSize)
+		elapsed := time.Since(lookupStart)
+
+		if err != nil {
+			logger.Warn("MDBX lookup failed", "txNum", txNum, "error", err)
+			continue
+		}
+
+		durations = append(durations, elapsed)
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+	}
+	totalTime := time.Since(benchStart)
+
+	// Calculate statistics
+	stats := calculateBenchStats(durations)
+	if len(durations) > 0 {
+		stats.Throughput = float64(len(durations)) / totalTime.Seconds()
+	}
+
+	fileStats := &HistoryBenchStats{
+		Name:        "MDBX (high txnums)",
+		StartTxNum:  minTxNum,
+		EndTxNum:    maxTxNum,
+		SampleCount: len(durations),
+		TotalTime:   totalTime,
+		Stats:       stats,
+	}
+
+	logger.Info("MDBX benchmark complete",
+		"samples", len(durations),
+		"throughput", fmt.Sprintf("%.0f ops/sec", stats.Throughput),
+		"p50", stats.P50,
+		"p99", stats.P99)
+
+	return fileStats, nil
+}
+
+func printHistoryBenchResultsTable(prefix []byte, compactKey []byte, fileStats []HistoryBenchStats) {
 	fmt.Println()
 	fmt.Println("================================================================================")
 	fmt.Printf("  HISTORY LOOKUP BENCHMARK RESULTS\n")
@@ -766,7 +881,7 @@ func printHistoryBenchResultsTable(prefix []byte, compactKey []byte, fileStats [
 
 	for _, fs := range fileStats {
 		fmt.Printf("%-45s %12d %12d %8d %10v %10v %10v %10v\n",
-			fs.FileName,
+			fs.Name,
 			fs.StartTxNum,
 			fs.EndTxNum,
 			fs.SampleCount,
