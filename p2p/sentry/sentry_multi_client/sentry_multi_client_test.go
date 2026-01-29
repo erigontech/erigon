@@ -2,6 +2,7 @@ package sentry_multi_client
 
 import (
 	"context"
+	"github.com/erigontech/erigon/node/gointerfaces"
 	"testing"
 
 	"golang.org/x/sync/semaphore"
@@ -16,7 +17,6 @@ import (
 	proto_sentry "github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	proto_types "github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/turbo/services"
 )
 
 type receiptRLP69 struct {

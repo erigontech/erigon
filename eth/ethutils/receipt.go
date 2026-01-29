@@ -17,15 +17,15 @@
 package ethutils
 
 import (
+	"github.com/erigontech/erigon/common/log/v3"
 	"math/big"
 
 	"github.com/holiman/uint256"
 
-	""
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus/misc"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -51,7 +51,8 @@ func MarshalReceipt(
 	var from common.Address
 	if signed {
 		signer := types.NewArbitrumSigner(*types.LatestSignerForChainID(chainId))
-		from, _ = signer.Sender(txn)
+		from1, _ := signer.Sender(txn)
+		from = from1.Value()
 	}
 
 	var logsToMarshal interface{}
