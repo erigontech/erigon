@@ -70,11 +70,6 @@ type accHolder interface {
 	SetChangesetAccumulator(acc *changeset.StateChangeSet)
 }
 
-// Context keys for SharedDomains.ctx map
-const (
-	CtxKeyCodeCache = "codeCache"
-)
-
 type SharedDomains struct {
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext
 
@@ -89,17 +84,16 @@ type SharedDomains struct {
 	mem               kv.TemporalMemBatch
 	metrics           changeset.DomainMetrics
 
-	// ctx is a general-purpose context map for storing auxiliary data like caches
-	auxilaryObjects map[string]interface{}
+	// codeCache is an optional LRU cache for contract code
+	codeCache *cache.CodeCache
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
 	sd := &SharedDomains{
 		logger: logger,
 		//trace:   true,
-		metrics:         changeset.DomainMetrics{Domains: map[kv.Domain]*changeset.DomainIOMetrics{}},
-		stepSize:        tx.Debug().StepSize(),
-		auxilaryObjects: make(map[string]interface{}),
+		metrics:  changeset.DomainMetrics{Domains: map[kv.Domain]*changeset.DomainIOMetrics{}},
+		stepSize: tx.Debug().StepSize(),
 	}
 
 	sd.mem = tx.Debug().NewMemBatch(&sd.metrics)
@@ -217,34 +211,14 @@ func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmen
 }
 func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
-// GetCtx returns a value from the context map by key.
-// Returns nil if the key does not exist.
-func (sd *SharedDomains) GetCtx(key string) interface{} {
-	return sd.auxilaryObjects[key]
+// SetCodeCache sets the code cache for faster code lookups.
+func (sd *SharedDomains) SetCodeCache(codeCache *cache.CodeCache) {
+	sd.codeCache = codeCache
 }
 
-// SetCtx stores a value in the context map with the given key.
-func (sd *SharedDomains) SetCtx(key string, value interface{}) {
-	sd.auxilaryObjects[key] = value
-}
-
-// HasCtx checks if a key exists in the context map.
-func (sd *SharedDomains) HasCtx(key string) bool {
-	_, ok := sd.auxilaryObjects[key]
-	return ok
-}
-
-// DeleteCtx removes a key from the context map.
-func (sd *SharedDomains) DeleteCtx(key string) {
-	delete(sd.auxilaryObjects, key)
-}
-
-// GetCodeCache returns the CodeCache from the context, or nil if not set.
+// GetCodeCache returns the CodeCache, or nil if not set.
 func (sd *SharedDomains) GetCodeCache() *cache.CodeCache {
-	if cc := sd.auxilaryObjects[CtxKeyCodeCache]; cc != nil {
-		return cc.(*cache.CodeCache)
-	}
-	return nil
+	return sd.codeCache
 }
 
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {

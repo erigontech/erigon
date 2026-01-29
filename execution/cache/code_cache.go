@@ -35,16 +35,16 @@ type CodeCache struct {
 }
 
 // NewCodeCache creates a new CodeCache with the specified size.
-func NewCodeCache(size int) (*CodeCache, error) {
+func NewCodeCache(size int) *CodeCache {
 	c, err := maphash.NewLRU[[]byte](size)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
-	return &CodeCache{cache: c}, nil
+	return &CodeCache{cache: c}
 }
 
 // NewDefaultCodeCache creates a new CodeCache with the default size (512).
-func NewDefaultCodeCache() (*CodeCache, error) {
+func NewDefaultCodeCache() *CodeCache {
 	return NewCodeCache(DefaultCodeCacheSize)
 }
 

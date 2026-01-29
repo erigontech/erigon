@@ -220,8 +220,7 @@ func NewEthereumExecutionModule(ctx context.Context, blockReader services.FullBl
 	fcuBackgroundCommit bool,
 	onlySnapDownloadOnStart bool,
 ) *EthereumExecutionModule {
-	// Initialize code cache (ignore error - cache is optional optimization)
-	codeCache, _ := cache.NewDefaultCodeCache()
+	codeCache := cache.NewDefaultCodeCache()
 
 	em := &EthereumExecutionModule{
 		blockReader:             blockReader,
@@ -384,7 +383,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if e.codeCache != nil {
 		// Validate cache version - clear if parent hash doesn't match
 		e.codeCache.ValidateAndPrepare(header.ParentHash)
-		doms.SetCtx(execctx.CtxKeyCodeCache, e.codeCache)
+		doms.SetCodeCache(e.codeCache)
 	}
 
 	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
