@@ -17,17 +17,17 @@
 package cache
 
 import (
-	"fmt"
 	"sync"
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 )
 
 const (
 	// DefaultCodeCacheSize is the number of code entries (codeHash → code)
-	DefaultCodeCacheSize = 2048
+	DefaultCodeCacheSize = 10_000
 	// DefaultAddrCacheSize is the number of address entries (addr → codeHash)
 	// 2^18 = 262144 entries, each storing a 32-byte hash
 	DefaultAddrCacheSize = 1 << 18
@@ -139,39 +139,37 @@ func (c *CodeCache) GetBlockHash() common.Hash {
 
 // SetBlockHash sets the hash of the current block being processed.
 // If blockNum > 0, also prints cache statistics for this block.
-func (c *CodeCache) SetBlockHash(hash common.Hash, blockNum ...uint64) {
+func (c *CodeCache) SetBlockHash(hash common.Hash) {
 	c.mu.Lock()
 	c.blockHash = hash
 	c.mu.Unlock()
-
-	// Print stats if block number provided
-	if len(blockNum) > 0 && blockNum[0] > 0 {
-		c.PrintStatsAndReset(blockNum[0])
-	}
 }
 
 // ValidateAndPrepare checks if the given parentHash matches the cache's current blockHash.
 // If there's a mismatch (indicating non-sequential block processing), the address cache is cleared.
 // The code cache (codeHash → code) is preserved since code hashes are immutable.
 // Returns true if the cache was valid (hashes matched or cache was empty), false if cleared.
-func (c *CodeCache) ValidateAndPrepare(parentHash common.Hash) bool {
+func (c *CodeCache) ValidateAndPrepare(parentHash common.Hash, incomingBlockHash common.Hash) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	// Empty blockHash means cache hasn't processed any block yet - always valid
 	if c.blockHash == (common.Hash{}) {
+		c.addrToHash.Purge()
+		c.blockHash = incomingBlockHash
 		return true
 	}
 
 	// Check if we're continuing from the expected block
 	if c.blockHash == parentHash {
+		c.blockHash = incomingBlockHash
 		return true
 	}
 
 	// Mismatch - clear address mappings (they may be stale)
 	// Keep code mappings since codeHash → code is immutable
 	c.addrToHash.Purge()
-	c.blockHash = common.Hash{}
+	c.blockHash = incomingBlockHash
 	return false
 }
 
@@ -196,7 +194,7 @@ func (c *CodeCache) CodeLen() int {
 
 // PrintStatsAndReset prints cache statistics and resets counters.
 // Call this at the end of each block to see per-block performance.
-func (c *CodeCache) PrintStatsAndReset(blockNum uint64) {
+func (c *CodeCache) PrintStatsAndReset(logger log.Logger) {
 	addrHits := c.addrHits.Swap(0)
 	addrMisses := c.addrMisses.Swap(0)
 	codeHits := c.codeHits.Swap(0)
@@ -213,8 +211,14 @@ func (c *CodeCache) PrintStatsAndReset(blockNum uint64) {
 		codeHitRate = float64(codeHits) / float64(codeTotal) * 100
 	}
 
-	fmt.Printf("[CodeCache] block=%d | addr: %d/%d (%.1f%% hit) size=%d | code: %d/%d (%.1f%% hit) size=%d\n",
-		blockNum,
-		addrHits, addrTotal, addrHitRate, c.addrToHash.Len(),
-		codeHits, codeTotal, codeHitRate, c.hashToCode.Len())
+	logger.Debug("CodeCache stats",
+		"addr_hits", addrHits,
+		"addr_misses", addrMisses,
+		"addr_hit_rate", addrHitRate,
+		"code_hits", codeHits,
+		"code_misses", codeMisses,
+		"code_hit_rate", codeHitRate,
+		"addr_cache_size", c.addrToHash.Len(),
+		"code_cache_size", c.hashToCode.Len(),
+	)
 }

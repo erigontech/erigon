@@ -382,7 +382,6 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	// Set code cache in SharedDomains for use during code reading
 	if e.codeCache != nil {
 		// Validate cache version - clear if parent hash doesn't match
-		e.codeCache.ValidateAndPrepare(header.ParentHash)
 		doms.SetCodeCache(e.codeCache)
 	}
 
@@ -398,14 +397,8 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 
 	// Update code cache version after successful execution
 	isInvalid := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
-	if e.codeCache != nil {
-		if isInvalid {
-			// On invalid block, clear cache and reset to parent hash
-			e.codeCache.ClearWithHash(header.ParentHash)
-		} else {
-			// On success, update cache hash to current block and print stats
-			e.codeCache.SetBlockHash(blockHash, header.Number.Uint64())
-		}
+	if e.codeCache != nil && isInvalid {
+		e.codeCache.ClearWithHash(header.ParentHash)
 	}
 
 	// Throw away the tx and start a new one (do not persist changes to the canonical chain)

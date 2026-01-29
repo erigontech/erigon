@@ -84,6 +84,12 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			return nil, rwTx, fmt.Errorf("nil block %d", blockNum)
 		}
 
+		codeCache := se.doms.GetCodeCache()
+		if codeCache != nil {
+			codeCache.ValidateAndPrepare(b.ParentHash(), b.Hash())
+			codeCache.SetBlockHash(b.Hash())
+		}
+
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		getHashFnMutex := sync.Mutex{}
@@ -137,6 +143,9 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		log.Debug(fmt.Sprintf("[%s] executed block %d in %s", se.logPrefix, blockNum, time.Since(start)))
 		if err != nil {
 			return nil, rwTx, err
+		}
+		if codeCache != nil {
+			codeCache.PrintStatsAndReset(se.logger)
 		}
 
 		if !continueLoop {

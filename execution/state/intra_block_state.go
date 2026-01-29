@@ -536,8 +536,12 @@ func (sdb *IntraBlockState) TxnIndex() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
-	// Check code cache first
-	if sdb.codeCache != nil {
+	// Check if address was already dirty (modified earlier in this block)
+	// We capture this BEFORE getStateObject which would add it to stateObjects
+	_, alreadyDirty := sdb.stateObjects[addr]
+
+	// Check code cache first, but only if address wasn't modified in this block
+	if sdb.codeCache != nil && !alreadyDirty {
 		addrBytes := addr.Value()
 		if code, ok := sdb.codeCache.Get(addrBytes[:]); ok {
 			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
@@ -561,8 +565,8 @@ func (sdb *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
 					fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, len(code))
 				}
 			}
-			// Populate code cache on successful read
-			if err == nil && len(code) > 0 && sdb.codeCache != nil {
+			// Populate code cache on successful read, but only if address wasn't already dirty
+			if err == nil && len(code) > 0 && sdb.codeCache != nil && !alreadyDirty {
 				addrBytes := addr.Value()
 				sdb.codeCache.Put(addrBytes[:], stateObject.data.CodeHash.Value(), code)
 			}
@@ -593,10 +597,14 @@ func (sdb *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
 		}
 	}
 
-	// Populate code cache on successful read
-	if err == nil && len(code) > 0 && sdb.codeCache != nil {
+	// Populate code cache on successful read, but only if address wasn't already dirty
+	if err == nil && len(code) > 0 && sdb.codeCache != nil && !alreadyDirty {
 		addrBytes := addr.Value()
-		sdb.codeCache.Put(addrBytes[:], crypto.Keccak256Hash(code), code)
+		obj, err := sdb.getStateObject(addr)
+		if err != nil {
+			return code, err
+		}
+		sdb.codeCache.Put(addrBytes[:], obj.data.CodeHash.Value(), code)
 	}
 
 	return code, err
@@ -604,8 +612,11 @@ func (sdb *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
-	// Check code cache first
-	if sdb.codeCache != nil {
+	// Check if address was already dirty (modified earlier in this block)
+	_, alreadyDirty := sdb.stateObjects[addr]
+
+	// Check code cache first, but only if address wasn't modified in this block
+	if sdb.codeCache != nil && !alreadyDirty {
 		addrBytes := addr.Value()
 		if code, ok := sdb.codeCache.Get(addrBytes[:]); ok {
 			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
@@ -1226,6 +1237,12 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 
 	versionWritten(sdb, addr, SelfDestructPath, accounts.NilKey, stateObject.selfdestructed)
 	versionWritten(sdb, addr, BalancePath, accounts.NilKey, uint256.Int{})
+
+	// Remove from code cache since this address is being destroyed
+	if sdb.codeCache != nil {
+		addrBytes := addr.Value()
+		sdb.codeCache.RemoveAddress(addrBytes[:])
+	}
 
 	return true, nil
 }
