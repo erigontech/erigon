@@ -372,6 +372,7 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 			ch.account, obj.data.CodeHash, cs, ch.prevhash, obj.original.CodeHash, ps, ch.wasCommited)
 	}
 	obj.setCode(ch.prevhash, ch.prevcode)
+
 	if s.versionMap != nil {
 		if ch.wasCommited {
 			if trace {

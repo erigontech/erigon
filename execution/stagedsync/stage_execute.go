@@ -323,6 +323,7 @@ func unwindExec3State(ctx context.Context,
 		if codeCache := sd.GetCodeCache(); codeCache != nil {
 			codeDiffs := changeset[kv.CodeDomain]
 			for _, entry := range codeDiffs {
+				fmt.Println("X")
 				// Key format: address (20 bytes) + step suffix (8 bytes)
 				if len(entry.Key) >= length.Addr {
 					codeCache.RemoveAddress(toBytesZeroCopy(entry.Key[:length.Addr]))

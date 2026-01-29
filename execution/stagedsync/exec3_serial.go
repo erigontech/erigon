@@ -145,7 +145,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			return nil, rwTx, err
 		}
 		if codeCache != nil {
-			codeCache.PrintStatsAndReset(se.logger)
+			codeCache.PrintStatsAndReset()
 		}
 
 		if !continueLoop {

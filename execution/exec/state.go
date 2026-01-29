@@ -378,13 +378,6 @@ func (rw *Worker) SetReader(reader state.StateReader) {
 	}
 	rw.ibs = state.New(rw.stateReader)
 
-	// Set code cache from SharedDomains if available
-	if rw.rs != nil {
-		if codeCache := rw.rs.Domains().GetCodeCache(); codeCache != nil {
-			rw.ibs.SetCodeCache(codeCache)
-		}
-	}
-
 	switch reader.(type) {
 	case *state.HistoryReaderV3:
 		rw.historyMode = true
