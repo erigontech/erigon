@@ -129,8 +129,8 @@ func serializeDiffSetBufLen(diffSet []kv.DomainEntryDiff) int {
 	// Write a small dictionary for prevStepBytes
 	dict := make(map[string]byte)
 	id := byte(0x00)
-	for _, diff := range diffSet {
-		prevStepS := toStringZeroCopy(diff.PrevStepBytes)
+	for i := range diffSet {
+		prevStepS := toStringZeroCopy(diffSet[i].PrevStepBytes)
 		if _, ok := dict[prevStepS]; ok {
 			continue
 		}
