@@ -1845,9 +1845,6 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 
 	var valsCursor kv.RwCursor
 
-	ancientDomainValsCollector := etl.NewCollectorWithAllocator(dt.name.String()+".domain.collate", dt.d.dirs.Tmp, etl.SmallSortableBuffers, dt.d.logger).LogLvl(log.LvlTrace)
-	defer ancientDomainValsCollector.Close()
-
 	if dt.d.LargeValues {
 		valsCursor, err = rwTx.RwCursor(dt.d.ValuesTable)
 		if err != nil {
@@ -1861,7 +1858,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	}
 	defer valsCursor.Close()
 
-	loadFunc := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+	delFunc := func(k, v []byte) error {
 		if dt.d.LargeValues {
 			return valsCursor.Delete(k)
 		}
@@ -1899,9 +1896,6 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 			continue
 		}
 		if limit == 0 {
-			if err := ancientDomainValsCollector.Load(rwTx, dt.d.ValuesTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-				return stat, fmt.Errorf("load domain values: %w", err)
-			}
 			if err := SaveExecV3PruneProgress(rwTx, dt.d.ValuesTable, k); err != nil {
 				return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.name.String(), err)
 			}
@@ -1909,7 +1903,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		}
 		limit--
 		stat.Values++
-		if err := ancientDomainValsCollector.Collect(k, v); err != nil {
+		if err := delFunc(k, v); err != nil {
 			return nil, err
 		}
 		stat.MinStep = min(stat.MinStep, is)
@@ -1926,9 +1920,6 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		}
 	}
 	mxPruneSizeDomain.AddUint64(stat.Values)
-	if err := ancientDomainValsCollector.Load(rwTx, dt.d.ValuesTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return stat, fmt.Errorf("load domain values: %w", err)
-	}
 	if err := SaveExecV3PruneProgress(rwTx, dt.d.ValuesTable, nil); err != nil {
 		return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.d.FilenameBase, err)
 	}

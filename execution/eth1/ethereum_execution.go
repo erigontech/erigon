@@ -21,7 +21,6 @@ import (
 	"errors"
 	"math/big"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/semaphore"
@@ -120,8 +119,7 @@ type EthereumExecutionModule struct {
 	// rules engine
 	engine rules.Engine
 
-	doingPostForkchoice atomic.Bool
-
+	fcuBackgroundPrune bool
 	// metrics for average mgas/sec
 	avgMgasSec float64
 
@@ -137,6 +135,7 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.Temp
 	logger log.Logger, engine rules.Engine,
 	syncCfg ethconfig.Sync,
 	ctx context.Context,
+	fcuBackgroundPrune bool,
 ) *EthereumExecutionModule {
 	return &EthereumExecutionModule{
 		blockReader:         blockReader,
@@ -155,6 +154,7 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.Temp
 		engine:              engine,
 		syncCfg:             syncCfg,
 		bacgroundCtx:        ctx,
+		fcuBackgroundPrune:  fcuBackgroundPrune,
 	}
 }
 

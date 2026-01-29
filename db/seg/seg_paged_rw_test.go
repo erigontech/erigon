@@ -97,24 +97,26 @@ func TestPagedReader(t *testing.T) {
 
 // multyBytesWriter is a writer for [][]byte, similar to bytes.Writer.
 type multyBytesWriter struct {
-	buffer [][]byte
+	buffer   [][]byte
+	pageSize int
 }
 
 func (w *multyBytesWriter) Write(p []byte) (n int, err error) {
 	w.buffer = append(w.buffer, common.Copy(p))
 	return len(p), nil
 }
-func (w *multyBytesWriter) Bytes() [][]byte    { return w.buffer }
-func (w *multyBytesWriter) FileName() string   { return "" }
-func (w *multyBytesWriter) Count() int         { return 0 }
-func (w *multyBytesWriter) Close()             {}
-func (w *multyBytesWriter) Compress() error    { return nil }
-func (w *multyBytesWriter) Reset()             { w.buffer = nil }
-func (w *multyBytesWriter) SetMetadata([]byte) {}
+func (w *multyBytesWriter) Bytes() [][]byte                { return w.buffer }
+func (w *multyBytesWriter) FileName() string               { return "" }
+func (w *multyBytesWriter) Count() int                     { return 0 }
+func (w *multyBytesWriter) Close()                         {}
+func (w *multyBytesWriter) Compress() error                { return nil }
+func (w *multyBytesWriter) Reset()                         { w.buffer = nil }
+func (w *multyBytesWriter) SetMetadata([]byte)             {}
+func (w *multyBytesWriter) GetValuesOnCompressedPage() int { return w.pageSize }
 
 func TestPage(t *testing.T) {
-	buf, require := &multyBytesWriter{}, require.New(t)
 	sampling := 2
+	buf, require := &multyBytesWriter{pageSize: sampling}, require.New(t)
 	w := NewPagedWriter(buf, sampling, false)
 	for i := 0; i < sampling+1; i++ {
 		k, v := fmt.Sprintf("k %d", i), fmt.Sprintf("v %d", i)
@@ -147,7 +149,7 @@ func TestPage(t *testing.T) {
 }
 
 func BenchmarkName(b *testing.B) {
-	buf := &multyBytesWriter{}
+	buf := &multyBytesWriter{pageSize: 16}
 	w := NewPagedWriter(buf, 16, false)
 	for i := 0; i < 16; i++ {
 		w.Add([]byte{byte(i)}, []byte{10 + byte(i)})
