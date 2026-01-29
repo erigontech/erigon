@@ -37,6 +37,7 @@ func Verify(
 	concurrency int,
 	targetChain g.Option[string],
 ) (err error) {
+	// Causes stalls.
 	panicif.Zero(concurrency)
 	var dirs datadir.Dirs
 	if dataDir != "" {
@@ -57,14 +58,14 @@ func Verify(
 		Transport: downloader.MakeWebseedRoundTripper(),
 	}
 	logger := log.Root()
+	items, ctx := errgroup.WithContext(ctx)
+	items.SetLimit(concurrency)
 	checker := webseedChecker{
 		ctx:        ctx,
 		logger:     logger,
 		httpClient: httpClient,
 	}
 	g.MakeMapWithCap(&checker.state, len(chains))
-	items, ctx := errgroup.WithContext(ctx)
-	items.SetLimit(concurrency)
 	defer func() {
 		items.Wait()
 		// Strict evaluation for the win.
