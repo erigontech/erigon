@@ -139,8 +139,6 @@ func StageExecuteBlocksCfg(
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
 func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
-	rawdb.WriteRecentReorg(rwTx, true)
-
 	br := cfg.blockReader
 	txNumsReader := br.TxnumReader()
 
@@ -439,7 +437,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	//  - stop prune when `tx.SpaceDirty()` is big
 	//  - and set ~500ms timeout
 	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
-	quickPruneTimeout := 1 * time.Second
+	quickPruneTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond
 
 	if timeout > 0 && timeout > quickPruneTimeout {
 		quickPruneTimeout = timeout
@@ -482,19 +480,6 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	pruneTimeout := quickPruneTimeout
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneTimeout = 12 * time.Hour
-
-		// allow greedy prune on non-chain-tip
-		greedyPruneCommitmentHistoryStartTime := time.Now()
-		if err = tx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
-			return err
-		}
-		if duration := time.Since(greedyPruneCommitmentHistoryStartTime); duration > quickPruneTimeout {
-			logger.Debug(
-				fmt.Sprintf("[%s] greedy prune commitment history timing", s.LogPrefix()),
-				"duration", duration,
-				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
-			)
-		}
 	}
 
 	pruneSmallBatchesStartTime := time.Now()

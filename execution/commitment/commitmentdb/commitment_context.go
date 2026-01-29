@@ -405,6 +405,10 @@ func (e *errorTrieContext) Storage(plainKey []byte) (*commitment.Update, error) 
 	return nil, e.err
 }
 
+func (e *errorTrieContext) TxNum() uint64 {
+	return 0
+}
+
 // by that key stored latest root hash and tree state
 const keyCommitmentStateS = "state"
 
@@ -647,6 +651,10 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, p
 	//}
 
 	return sdc.putter.DomainPut(kv.CommitmentDomain, prefix, data, sdc.txNum, prevData, prevStep)
+}
+
+func (sdc *TrieContext) TxNum() uint64 {
+	return sdc.txNum
 }
 
 // readDomain reads data from domain, dereferences key and returns encoded value and step.

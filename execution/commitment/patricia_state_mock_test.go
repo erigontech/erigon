@@ -160,6 +160,8 @@ func (ms *MockState) Storage(plainKey []byte) (*Update, error) {
 	return &ex, nil
 }
 
+func (ms *MockState) TxNum() uint64 { return 0 }
+
 // / called sequentially outside of the trie so no need to protect
 func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) error {
 	for i, key := range plainKeys {
