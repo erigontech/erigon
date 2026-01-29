@@ -160,7 +160,7 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	}
 	defer tx.Rollback()
 
-        reader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	reader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
 	}
