@@ -17,6 +17,7 @@
 package cache
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/erigontech/erigon/common"
@@ -51,27 +52,21 @@ func NewDefaultCodeCache() *CodeCache {
 // Get retrieves contract code for the given address.
 // Returns the code and true if found, nil and false otherwise.
 func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
-	return c.cache.Get(addr)
+	ca, ok := c.cache.Get(addr)
+	fmt.Printf("CodeCache Get: addr=%x, addrID=%d, codeId=%d\n", addr, maphash.Hash(addr), maphash.Hash(ca))
+	return ca, ok
 }
 
 // Put stores contract code for the given address.
 func (c *CodeCache) Put(addr []byte, code []byte) {
+	fmt.Printf("CodeCache Put: addr=%x, addrID=%d, codeId=%d\n", addr, maphash.Hash(addr), maphash.Hash(code))
 	c.cache.Set(addr, code)
-}
-
-// Contains checks if the cache contains code for the given address.
-func (c *CodeCache) Contains(addr []byte) bool {
-	return c.cache.Contains(addr)
 }
 
 // Remove removes the code for the given address from the cache.
 func (c *CodeCache) Remove(addr []byte) {
+	fmt.Printf("CodeCache Remove: addr=%x, addrID=%d\n", addr, maphash.Hash(addr))
 	c.cache.Delete(addr)
-}
-
-// Len returns the number of items in the cache.
-func (c *CodeCache) Len() int {
-	return c.cache.Len()
 }
 
 // Clear removes all items from the cache.
