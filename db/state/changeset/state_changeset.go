@@ -321,7 +321,6 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 	keys := writeDiffsetBuf.b
 
 	chunkCount := (len(keys) + DiffChunkLen - 1) / DiffChunkLen
-	log.Warn("[dbg] WriteDiffSet", "chunkCount", chunkCount)
 	// Data Format
 	// dbutils.BlockBodyKey(blockNumber, blockHash) -> chunkCount
 	// dbutils.BlockBodyKey(blockNumber, blockHash) + index -> chunk
