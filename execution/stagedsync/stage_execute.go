@@ -443,10 +443,10 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 		quickPruneTimeout = timeout
 	}
 
-	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth && !cfg.syncCfg.AlwaysGenerateChangesets {
+	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth {
 		// (chunkLen is 8Kb) * (1_000 chunks) = 8mb
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
-		var pruneDiffsLimitOnChainTip = 1_000 * 10
+		var pruneDiffsLimitOnChainTip = 1_000
 		pruneTimeout := quickPruneTimeout
 		if s.CurrentSyncCycle.IsInitialCycle {
 			pruneDiffsLimitOnChainTip = math.MaxInt
