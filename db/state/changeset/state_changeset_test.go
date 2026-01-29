@@ -136,7 +136,7 @@ func BenchmarkWriteDiffSet(b *testing.B) {
 	b.Cleanup(db.Close)
 
 	// Create a realistic StateChangeSet
-	diffSet := createTestDiffSet(b, 100, 500, 50, 100)
+	diffSet := createTestDiffSet(b, 10, 100, 10, 100)
 
 	blockHash := common.Hash{0x01, 0x02, 0x03}
 
@@ -149,6 +149,7 @@ func BenchmarkWriteDiffSet(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
+		defer tx.Rollback()
 		if err := changeset.WriteDiffSet(tx, uint64(i), blockHash, diffSet); err != nil {
 			tx.Rollback()
 			b.Fatal(err)
@@ -163,7 +164,7 @@ func BenchmarkWriteDiffSetLarge(b *testing.B) {
 	b.Cleanup(db.Close)
 
 	// Create a large StateChangeSet (simulating a heavy block)
-	diffSet := createTestDiffSet(b, 500, 5000, 200, 500)
+	diffSet := createTestDiffSet(b, 1000, 5000, 10, 10_000)
 
 	blockHash := common.Hash{0x01, 0x02, 0x03}
 
