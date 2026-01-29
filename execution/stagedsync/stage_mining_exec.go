@@ -571,7 +571,6 @@ func addTransactionsToMiningBlock(
 			return nil, err
 		}
 		protocol.SetGasUsed(header, gasUsed)
-
 		current.AddTxn(txn)
 		current.Receipts = append(current.Receipts, receipt)
 		return receipt.Logs, nil

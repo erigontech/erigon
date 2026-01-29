@@ -1226,10 +1226,10 @@ type blockExecutor struct {
 	// Stats for debugging purposes
 	cntExec, cntSpecExec, cntSuccess, cntAbort, cntTotalValidations, cntValidationFail, cntFinalized int
 
-	// cummulative gas for this block
-	gasUsed     uint64
-	blobGasUsed uint64
-	gasPool     *protocol.GasPool
+	// cumulative gas for this block
+	blockGasUsed uint64
+	blobGasUsed  uint64
+	gasPool      *protocol.GasPool
 
 	execFailed, execAborted []int
 
@@ -1553,7 +1553,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			if result.Receipt != nil {
 				applyResult.blockGasUsed += int64(result.ExecutionResult.BlockGasUsed)
-				be.gasUsed += result.Receipt.GasUsed
+				be.blockGasUsed += result.ExecutionResult.BlockGasUsed
 				applyResult.receipt = result.Receipt
 			}
 
@@ -1608,7 +1608,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			txTask.ParentHash(),
 			txTask.BlockRoot(),
 			nil,
-			be.gasUsed,
+			be.blockGasUsed,
 			be.blobGasUsed,
 			txTask.Version().TxNum,
 			true,
@@ -1639,7 +1639,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		txTask.ParentHash(),
 		txTask.BlockRoot(),
 		nil,
-		be.gasUsed,
+		be.blockGasUsed,
 		be.blobGasUsed,
 		lastTxNum,
 		false,
