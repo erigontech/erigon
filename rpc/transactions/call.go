@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/nitro-erigon/arbos"
 )
 
 type BlockOverrides struct {
@@ -124,15 +125,15 @@ func DoCall(
 	headerReader services.HeaderReader,
 	callTimeout time.Duration,
 ) (*evmtypes.ExecutionResult, error) {
-	// todo: Pending state is only known by the miner
+	// todo: Pending ibs is only known by the miner
 	/*
 		if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
-			block, state, _ := b.eth.miner.Pending()
-			return state, block.Header(), nil
+			block, ibs, _ := b.eth.miner.Pending()
+			return ibs, block.Header(), nil
 		}
 	*/
 
-	state := state.New(stateReader)
+	ibs := state.New(stateReader)
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -165,7 +166,7 @@ func DoCall(
 		blockOverrides.Override(&blockCtx)
 	}
 	txCtx := protocol.NewEVMTxContext(msg)
-	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
+	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})
 	// Wait for the context to be done and cancel the evm. Even if the
 	// EVM has finished, cancelling may be done (repeatedly)
 	go func() {
@@ -173,11 +174,17 @@ func DoCall(
 		evm.Cancel()
 	}()
 
+	if chainConfig.IsArbitrum() {
+		//message := types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), msg.Gas(), msg.GasPrice(), msg.FeeCap(), msg.TipCap(), msg.Data(), msg.AccessList(), false, false, true, msg.MaxFeePerBlobGas())
+		msg.Tx, _ = args.ToTransaction(gasCap, baseFee)
+		evm.ProcessingHook = arbos.NewTxProcessorIBS(evm, state.NewArbitrum(ibs), msg)
+	}
+
 	// Override the fields of specified contracts before execution.
 	if stateOverrides != nil {
 		rules := blockCtx.Rules(chainConfig)
 		precompiles := vm.ActivePrecompiledContracts(rules)
-		if err := stateOverrides.Override(state, precompiles, blockCtx.Rules(chainConfig)); err != nil {
+		if err := stateOverrides.Override(ibs, precompiles, blockCtx.Rules(chainConfig)); err != nil {
 			return nil, err
 		}
 		evm.SetPrecompiles(precompiles)

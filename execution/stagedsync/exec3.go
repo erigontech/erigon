@@ -23,13 +23,11 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/db/config3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -55,75 +53,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/shards"
 )
-
-const (
-	maxUnwindJumpAllowance = 1000 // Maximum number of blocks we are allowed to unwind
-)
-
-func NewProgress(prevOutputBlockNum, commitThreshold uint64, workersCount int, logPrefix string, logger log.Logger) *Progress {
-	return &Progress{prevTime: time.Now(), prevOutputBlockNum: prevOutputBlockNum, commitThreshold: commitThreshold, workersCount: workersCount, logPrefix: logPrefix, logger: logger}
-}
-
-type Progress struct {
-	prevTime           time.Time
-	prevTxCount        uint64
-	prevGasUsed        uint64
-	prevOutputBlockNum uint64
-	prevRepeatCount    uint64
-	commitThreshold    uint64
-
-	workersCount int
-	logPrefix    string
-	logger       log.Logger
-}
-
-func (p *Progress) Log(suffix string, rs *state.ParallelExecutionState, in *state.QueueWithRetry, rws *state.ResultsQueue, txCount uint64, gas uint64, inputBlockNum uint64, outputBlockNum uint64, outTxNum uint64, repeatCount uint64, idxStepsAmountInDB float64, commitEveryBlock bool, inMemExec bool) {
-	mxExecStepsInDB.Set(idxStepsAmountInDB * 100)
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
-	sizeEstimate := rs.SizeEstimate()
-	currentTime := time.Now()
-	interval := currentTime.Sub(p.prevTime)
-	//var repeatRatio float64
-	//if doneCount > p.prevCount {
-	//	repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(doneCount-p.prevCount)
-	//}
-
-	if len(suffix) > 0 {
-		suffix = " " + suffix
-	}
-
-	if commitEveryBlock {
-		suffix += " Commit every block"
-	}
-
-	gasSec := uint64(float64(gas-p.prevGasUsed) / interval.Seconds())
-	txSec := uint64(float64(txCount-p.prevTxCount) / interval.Seconds())
-	diffBlocks := max(int(outputBlockNum)-int(p.prevOutputBlockNum)+1, 0)
-
-	p.logger.Info(fmt.Sprintf("[%s]"+suffix, p.logPrefix),
-		"blk", outputBlockNum,
-		"blks", diffBlocks,
-		"blk/s", fmt.Sprintf("%.1f", float64(diffBlocks)/interval.Seconds()),
-		"txs", txCount-p.prevTxCount,
-		"tx/s", common.PrettyCounter(txSec),
-		"gas/s", common.PrettyCounter(gasSec),
-		//"pipe", fmt.Sprintf("(%d+%d)->%d/%d->%d/%d", in.NewTasksLen(), in.RetriesLen(), rws.ResultChLen(), rws.ResultChCap(), rws.Len(), rws.Limit()),
-		//"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
-		//"workers", p.workersCount,
-		"buf", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
-		"stepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
-		"step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(config3.DefaultStepSize)),
-		"inMem", inMemExec,
-		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-	)
-
-	p.prevTime = currentTime
-	p.prevTxCount = txCount
-	p.prevGasUsed = gas
-	p.prevOutputBlockNum = outputBlockNum
-	p.prevRepeatCount = repeatCount
-}
 
 // Cases:
 //  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
@@ -247,11 +176,6 @@ func ExecV3(ctx context.Context,
 
 	if maxBlockNum < blockNum {
 		return nil
-	}
-
-	if maxBlockNum > blockNum+16 {
-		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
-			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx, "inMem", inMemExec)
 	}
 
 	if execStage.SyncMode() == stages.ModeApplyingBlocks {
@@ -760,44 +684,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 
 			te.execRequests <- &execRequest{
 				b.Number().Uint64(), b.Hash(),
-				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time(), 0)),
+				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
 				b.BlockAccessList(),
 				txTasks, applyResults, false, exhausted,
 			}
-
-			// ARBITRUM_MERGE
-			/*
-				if ERIGON_COMMIT_EACH_BLOCK || shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs {
-						start := time.Now()
-						if blockNum == 0 {
-							executor.domains().GetCommitmentContext().Trie().SetTrace(true)
-						} else {
-							executor.domains().GetCommitmentContext().Trie().SetTrace(false)
-						}
-						rh, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix())
-						if err != nil {
-							return err
-						}
-
-						if ERIGON_COMMIT_EACH_BLOCK {
-							if !bytes.Equal(rh, header.Root.Bytes()) {
-								logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", execStage.LogPrefix(), header.Number.Uint64(), rh, header.Root.Bytes(), header.Hash()))
-								return errors.New("wrong trie root")
-							}
-						}
-
-						computeCommitmentDuration += time.Since(start)
-						if shouldGenerateChangesets {
-							executor.domains().SavePastChangesetAccumulator(b.Hash(), blockNum, changeSet)
-							if !inMemExec {
-								if err := changeset2.WriteDiffSet(executor.tx(), blockNum, b.Hash(), changeSet); err != nil {
-									return err
-								}
-							}
-						}
-						executor.domains().SetChangesetAccumulator(nil)
-					}
-			*/
 
 			mxExecBlocks.Add(1)
 
@@ -864,8 +754,6 @@ func (te *txExecutor) commit(ctx context.Context, execStage *StageState, tx kv.T
 
 	return tx, t2, nil
 }
-
-var ERIGON_COMMIT_EACH_BLOCK = dbg.EnvBool("ERIGON_COMMIT_EACH_BLOCK", false)
 
 // nolint
 func dumpPlainStateDebug(tx kv.TemporalRwTx, doms *execctx.SharedDomains) {
