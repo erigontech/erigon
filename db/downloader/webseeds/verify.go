@@ -1,14 +1,17 @@
 package webseeds
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha1"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"iter"
 	"maps"
 	"net/http"
+	"os"
 	"slices"
 	"sync/atomic"
 	"unsafe"
@@ -20,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/preverified"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"golang.org/x/sync/errgroup"
 )
@@ -58,14 +62,17 @@ func Verify(
 		logger:     logger,
 		httpClient: httpClient,
 	}
+	g.MakeMapWithCap(&checker.state, len(chains))
+	items, ctx := errgroup.WithContext(ctx)
+	items.SetLimit(concurrency)
 	defer func() {
+		items.Wait()
+		// Strict evaluation for the win.
+		err = cmp.Or(err, json.NewEncoder(os.Stdout).Encode(checker.state))
 		logger.Info("finished check",
 			"total bytes read", checker.totalBytesRead.Load(),
 			"total request count", checker.totalRequestCount.Load())
 	}()
-	items, ctx := errgroup.WithContext(ctx)
-	items.SetLimit(concurrency)
-addItems:
 	for _, chain := range chains {
 		// Shift left?
 		//
@@ -83,24 +90,9 @@ addItems:
 		panicif.True(preverified.Local)
 		//
 		// end shift left?
-		for _, item := range preverified.Items {
-			if checker.ctx.Err() != nil {
-				break addItems
-			}
-			items.Go(func() (err error) {
-				for range 3 {
-					if err != nil {
-						logger.Warn("retrying failed preverified item check", "baseUrl", baseUrl, "item", item, "err", err)
-					}
-					var done bool
-					done, err = checker.checkPreverifiedItem(baseUrl, item)
-					if done || ctx.Err() != nil {
-						return err
-					}
-					panicif.True(err == nil && !done)
-				}
-				return
-			})
+		err = checker.submitChain(chain, baseUrl, preverified.Items, items)
+		if err != nil {
+			return fmt.Errorf("while submitting chain %q for verification: %w", chain, err)
 		}
 	}
 	return items.Wait()
@@ -123,9 +115,68 @@ type webseedChecker struct {
 	httpClient        *http.Client
 	totalBytesRead    atomic.Int64
 	totalRequestCount atomic.Int64
+	state             state
 }
 
-func (me *webseedChecker) checkPreverifiedItem(baseUrl string, item snapcfg.PreverifiedItem) (done bool, err error) {
+// itemState is a pointer so it can be owned by each worker.
+type state map[string]map[string]*itemState
+
+type itemState struct {
+	ExpectedInfoHash   string
+	ActualInfoHash     string
+	CorrectInfoHash    bool
+	DataMatchesTorrent bool
+	Err                string `json:",omitempty"`
+	Length             int64
+	Etag               string
+}
+
+func (checker *webseedChecker) submitChain(
+	chain string,
+	baseUrl string,
+	items []preverified.Item,
+	group *errgroup.Group,
+) error {
+	ctx := checker.ctx
+	chainState := make(map[string]*itemState, len(items))
+	g.MapMustAssignNew(checker.state, chain, chainState)
+	for _, item := range items {
+		if ctx.Err() != nil {
+			return context.Cause(ctx)
+		}
+		state := itemState{
+			// This needs to always be lowercase hex string?
+			ExpectedInfoHash: item.Hash,
+		}
+		g.MapMustAssignNew(chainState, item.Name, &state)
+		group.Go(func() (err error) {
+			defer func() {
+				if err != nil {
+					state.Err = err.Error()
+				}
+			}()
+			for range 3 {
+				if err != nil {
+					checker.logger.Warn("retrying failed preverified item check", "baseUrl", baseUrl, "item", item, "err", err)
+				}
+				var done bool
+				done, err = checker.checkPreverifiedItem(baseUrl, item, &state)
+				if done || ctx.Err() != nil {
+					break
+				}
+				panicif.True(err == nil && !done)
+			}
+			return
+		})
+	}
+	return nil
+}
+
+func (me *webseedChecker) checkPreverifiedItem(
+	baseUrl string,
+	item snapcfg.PreverifiedItem,
+	stateItem *itemState,
+) (done bool, err error) {
 	ctx := me.ctx
 	httpClient := me.httpClient
 	me.logger.Debug("checking preverified item", "webseed", baseUrl, "item", item)
@@ -135,6 +186,12 @@ func (me *webseedChecker) checkPreverifiedItem(baseUrl string, item snapcfg.Prev
 		return
 	}
 	me.totalRequestCount.Add(1)
+	actualInfoHash := mi.HashInfoBytes().HexString()
+	stateItem.ActualInfoHash = actualInfoHash
+	stateItem.CorrectInfoHash = stateItem.ExpectedInfoHash == actualInfoHash
+	if !stateItem.CorrectInfoHash {
+		me.logger.Warn("wrong infohash")
+	}
 	info, err := mi.UnmarshalInfo()
 	panicif.Err(err)
 	me.logger.Debug("got metainfo", "piece length", info.PieceLength, "length", info.Length)
@@ -151,9 +208,12 @@ func (me *webseedChecker) checkPreverifiedItem(baseUrl string, item snapcfg.Prev
 		err = fmt.Errorf("bad http response status code: %v", resp.StatusCode)
 		return
 	}
-	me.logger.Debug("item response", "etag", resp.Header.Get("etag"), "content length", resp.ContentLength)
-	done, err = me.matchHashes(&info, resp)
+	etag := resp.Header.Get("ETag")
+	stateItem.Etag = etag
+	me.logger.Debug("item response", "etag", etag, "content length", resp.ContentLength)
+	done, err = me.matchHashes(&info, resp, stateItem)
 	if err == nil {
+		stateItem.DataMatchesTorrent = true
 		me.logger.Info("snapshot matches",
 			"url", dataUrl,
 			//"name", item.Name,
@@ -165,14 +225,22 @@ func (me *webseedChecker) checkPreverifiedItem(baseUrl string, item snapcfg.Prev
 }
 
 // Keep this open to multiple bodies, and matching ETags.
-func (me *webseedChecker) matchHashes(info *metainfo.Info, resp *http.Response) (
+func (me *webseedChecker) matchHashes(info *metainfo.Info, resp *http.Response, stateItem *itemState) (
 	done bool, // Trying again won't change anything
 	err error,
 ) {
 	if resp.ContentLength != -1 {
 		panicif.NotEq(resp.ContentLength, info.Length)
 	}
-	nextHash, stop := iter.Pull(me.yieldHashes(resp.Body, info.PieceLength))
+	stateItem.Length = 0
+	nextHash, stop := iter.Pull(me.yieldHashes(
+		resp.Body,
+		info.PieceLength,
+		func(n int64) {
+			me.totalBytesRead.Add(n)
+			stateItem.Length += n
+		},
+	))
 	defer stop()
 	for i := range info.NumPieces() {
 		p := info.Piece(i)
@@ -202,13 +270,13 @@ func (me *webseedChecker) matchHashes(info *metainfo.Info, resp *http.Response) 
 	return
 }
 
-func (me *webseedChecker) yieldHashes(r io.Reader, pieceLength int64) iter.Seq[g.Result[metainfo.Hash]] {
+func (me *webseedChecker) yieldHashes(r io.Reader, pieceLength int64, onReadN func(n int64)) iter.Seq[g.Result[metainfo.Hash]] {
 	return func(yield func(g.Result[metainfo.Hash]) bool) {
 		h := sha1.New()
 		for {
 			h.Reset()
 			n, err := io.CopyN(h, r, pieceLength)
-			me.totalBytesRead.Add(n)
+			onReadN(n)
 			if err != nil {
 				if err != io.EOF {
 					yield(result.Err[metainfo.Hash](err))

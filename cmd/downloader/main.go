@@ -176,9 +176,9 @@ func init() {
 	}
 	rootCmd.AddCommand(printTorrentHashes)
 
-	withChainFlag(&verifyWebseedCmd)
-	rootCmd.AddCommand(&verifyWebseedCmd)
-	utils.CobraFlags(&verifyWebseedCmd, []cli.Flag{&app.PreverifiedFlag})
+	withChainFlag(&verifyWebseedsCmd)
+	rootCmd.AddCommand(&verifyWebseedsCmd)
+	utils.CobraFlags(&verifyWebseedsCmd, []cli.Flag{&app.PreverifiedFlag})
 }
 
 func withDataDir(cmd *cobra.Command) {
@@ -436,8 +436,10 @@ var manifestVerifyCmd = &cobra.Command{
 	},
 }
 
-var verifyWebseedCmd = cobra.Command{
-	Use: "webseed_verify",
+var verifyWebseedsCmd = cobra.Command{
+	Use:   "verify_webseeds [--chain chain] [--preverified { local | remote | embedded }]",
+	Short: "verify webseed metainfos and data match preverified",
+	Long:  "Loads preverified for the specified chain or all known chains, and checks the metainfohashes matches, then the data matches the metainfo hashes. Outputs it all to JSON.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return webseeds.Verify(
 			cmd.Context(),
