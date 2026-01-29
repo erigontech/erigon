@@ -326,6 +326,12 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 	writeDiffsetBuf.b = diffSet.serializeKeys(writeDiffsetBuf.b[:0], blockNumber)
 	keys := writeDiffsetBuf.b
 
+	c, err := tx.RwCursor(kv.ChangeSets3)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
 	chunkCount := (len(keys) + DiffChunkLen - 1) / DiffChunkLen
 	// Data Format
 	// dbutils.BlockBodyKey(blockNumber, blockHash) -> chunkCount
@@ -344,7 +350,7 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 		end := min((i+1)*DiffChunkLen, len(keys))
 		binary.BigEndian.PutUint64(key[40:], uint64(i))
 
-		if err := tx.Put(kv.ChangeSets3, key, keys[start:end]); err != nil {
+		if err := c.Put(key, keys[start:end]); err != nil {
 			return err
 		}
 	}
