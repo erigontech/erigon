@@ -35,7 +35,7 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	stepSize := 5 // 2 for block 0 and 3 for block 1
+	stepSize := 5 // 2 for block 0 (0,1) and 3 for block 1 (2,3,4)
 	m := mock.MockWithGenesis(t, genesis, privKey, false, mock.WithStepSize(stepSize))
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
@@ -50,7 +50,6 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	require.Len(t, chainPack.Blocks, 1)
 	newBlock := eth1utils.ConvertBlockToRPC(chainPack.Blocks[0])
 	exec := m.Eth1ExecutionService
-	exec.Start(ctx, nil /* hook */)
 	insertRes, err := exec.InsertBlocks(ctx, &executionproto.InsertBlocksRequest{
 		Blocks: []*executionproto.Block{newBlock},
 	})
@@ -76,9 +75,9 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), inMemBlockNum)
-	// previously the bug was that we stored the commitment state key as if it was at block 1 txNum 4
-	// when it should have been at txNum 5
-	require.Equal(t, uint64(5), inMemTxNum)
+	// previously the bug was that we stored the commitment state key as if it was at block 1 txNum 3
+	// when it should have been at txNum 4
+	require.Equal(t, uint64(4), inMemTxNum)
 	root, err := extendingSd.GetCommitmentCtx().Trie().RootHash()
 	require.NoError(t, err)
 	require.Equal(t, chainPack.Headers[0].Root, common.BytesToHash(root))

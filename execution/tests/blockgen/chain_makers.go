@@ -28,12 +28,12 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/protocol/rules/misc"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -296,15 +296,6 @@ func (cp *ChainPack) Copy() *ChainPack {
 	}
 }
 
-func (cp *ChainPack) NumberOfPoWBlocks() int {
-	for i, header := range cp.Headers {
-		if header.Difficulty.Cmp(merge.ProofOfStakeDifficulty) == 0 {
-			return i
-		}
-	}
-	return len(cp.Headers)
-}
-
 // GenerateChain creates a chain of n blocks. The first block's
 // parent will be the provided parent. db is used to store
 // intermediate states and should contain the parent's state trie.
@@ -340,11 +331,14 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	stateReader := state.NewReaderV3(domains.AsGetter(tx))
 	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
 
-	txNum := -1
+	txNum, err := rawdbv3.TxNums.Max(tx, parent.NumberU64())
+	if err != nil {
+		return nil, err
+	}
 	txNumIncrement := func() {
 		txNum++
-		stateWriter.SetTxNum(uint64(txNum))
-		domains.SetTxNum(uint64(txNum))
+		stateWriter.SetTxNum(txNum)
+		domains.SetTxNum(txNum)
 	}
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
 		stateWriter state.StateWriter) (*types.Block, types.Receipts, error) {
