@@ -367,7 +367,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		PeerId:             gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots:     allSnapshots,
 		BlockReader:        br,
-		ReceiptsReader:     receipts.NewGenerator(br, engine, nil, 5*time.Second),
+		ReceiptsReader:     receipts.NewGenerator(dirs, br, engine, nil, 5*time.Second),
 		HistoryV3:          true,
 		cfg:                cfg,
 	}
@@ -475,6 +475,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
 
 	mock.sentriesClient, err = sentry_multi_client.NewMultiClient(
+		mock.Dirs,
 		mock.DB,
 		mock.ChainConfig,
 		mock.Engine,
