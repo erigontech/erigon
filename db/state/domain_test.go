@@ -208,13 +208,13 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		c, err := d.collate(ctx, 0, 0, 16, tx)
 
 		require.NoError(t, err)
-		require.True(t, strings.HasSuffix(c.valuesPath, "v1.1-accounts.0-1.kv"))
+		require.True(t, strings.HasSuffix(c.valuesPath, "v2.0-accounts.0-1.kv"))
 		require.Equal(t, 2, c.valuesCount)
-		require.True(t, strings.HasSuffix(c.historyPath, "v1.2"+
+		require.True(t, strings.HasSuffix(c.historyPath, "v2.0"+
 			"-accounts.0-1.v"))
 
 		require.Equal(t, seg.WordsAmount2PagesAmount(3, d.CompressorCfg.ValuesOnCompressedPage), 1) // 16 valus per page
-		require.Equal(t, 3, c.historyComp.Count()/2)
+		require.Equal(t, 3, c.historyComp.Count())                                                  // no compression on collate
 		require.Equal(t, 2*c.valuesCount, c.efHistoryComp.Count())
 
 		sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
@@ -534,7 +534,7 @@ func collateAndMerge(t *testing.T, tx kv.RwTx, d *Domain, txs uint64) {
 	}
 }
 
-func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prune bool) {
+func collateAndMergeOnceWithScanPrune(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prune bool) {
 	t.Helper()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -552,6 +552,47 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prun
 	if prune {
 		domainRoTx := d.BeginFilesRo()
 		stat, err := domainRoTx.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
+		t.Logf("prune stat: %s  (%d-%d)", stat, txFrom, txTo)
+		require.NoError(t, err)
+		domainRoTx.Close()
+	}
+
+	maxSpan := d.stepSize * config3.DefaultStepsInFrozenFile
+	for {
+		domainRoTx := d.BeginFilesRo()
+		r := domainRoTx.findMergeRange(domainRoTx.files.EndTxNum(), maxSpan)
+		if !r.any() {
+			domainRoTx.Close()
+			break
+		}
+		valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
+		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
+		require.NoError(t, err)
+
+		d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
+		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+		domainRoTx.Close()
+	}
+}
+
+func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prune bool) {
+	t.Helper()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	ctx := context.Background()
+	txFrom, txTo := uint64(step)*d.stepSize, uint64(step+1)*d.stepSize
+
+	c, err := d.collate(ctx, step, txFrom, txTo, tx)
+	require.NoError(t, err)
+
+	sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
+	require.NoError(t, err)
+	d.integrateDirtyFiles(sf, txFrom, txTo)
+	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+
+	if prune {
+		domainRoTx := d.BeginFilesRo()
+		stat, err := domainRoTx.OldPrune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
 		t.Logf("prune stat: %s  (%d-%d)", stat, txFrom, txTo)
 		require.NoError(t, err)
 		domainRoTx.Close()
@@ -1150,12 +1191,12 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	c, err := d.collate(ctx, 0, 0, maxTx, tx)
 
 	require.NoError(t, err)
-	require.True(t, strings.HasSuffix(c.valuesPath, "v1.1-accounts.0-1.kv"))
+	require.True(t, strings.HasSuffix(c.valuesPath, "v2.0-accounts.0-1.kv"))
 	require.Equal(t, 3, c.valuesCount)
-	require.True(t, strings.HasSuffix(c.historyPath, "v1.2-accounts.0-1.v"))
+	require.True(t, strings.HasSuffix(c.historyPath, "v2.0-accounts.0-1.v"))
 
 	require.Equal(t, seg.WordsAmount2PagesAmount(int(3*maxTx), d.CompressorCfg.ValuesOnCompressedPage), 469) // because 646 values at one page
-	require.Equal(t, int(3*maxTx), c.historyComp.Count()/2)
+	require.Equal(t, int(3*maxTx), c.historyComp.Count())                                                    // no compression on collate
 	require.Equal(t, 3, c.efHistoryComp.Count()/2)
 
 	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
@@ -1628,7 +1669,104 @@ func TestDomainRange(t *testing.T) {
 	}
 }
 
-func TestDomain_CanPruneAfterAggregation(t *testing.T) {
+func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	aggStep, ctx := uint64(25), context.Background()
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, aggStep, log.New())
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	d.HistoryLargeValues = false
+	d.History.Compression = seg.CompressKeys | seg.CompressVals
+	d.Compression = seg.CompressKeys | seg.CompressVals
+	d.FilenameBase = kv.CommitmentDomain.String()
+
+	domainRoTx := d.BeginFilesRo()
+	defer domainRoTx.Close()
+	writer := domainRoTx.NewWriter()
+	defer writer.Close()
+
+	keySize1 := uint64(length.Addr)
+	keySize2 := uint64(length.Addr + length.Hash)
+	totalTx := uint64(5000)
+	keyTxsLimit := uint64(50)
+	keyLimit := uint64(200)
+	// Put some kvs
+	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
+	for key, updates := range data {
+		p := []byte{}
+		for i := 0; i < len(updates); i++ {
+			writer.PutWithPrev([]byte(key), updates[i].value, updates[i].txNum, p, 0)
+			p = common.Copy(updates[i].value)
+		}
+	}
+
+	err = writer.Flush(context.Background(), tx)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+
+	tx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domainRoTx.Close()
+
+	stepToPrune := kv.Step(2)
+	collateAndMergeOnceWithScanPrune(t, d, tx, stepToPrune, true)
+
+	domainRoTx = d.BeginFilesRo()
+
+	can, untilStep := domainRoTx.canScanPruneDomainTables(tx, aggStep)
+	defer domainRoTx.Close()
+	require.Falsef(t, can, "those step is already pruned")
+	require.Equal(t, stepToPrune, untilStep)
+
+	stepToPrune = 3
+	collateAndMergeOnceWithScanPrune(t, d, tx, stepToPrune, false)
+
+	// refresh file list
+	domainRoTx = d.BeginFilesRo()
+	t.Logf("pruning step %d", stepToPrune)
+	can, untilStep = domainRoTx.canScanPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune))
+	require.True(t, can, "third step is not yet pruned")
+	require.LessOrEqual(t, stepToPrune, untilStep)
+
+	can, untilStep = domainRoTx.canScanPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune)+(aggStep/2))
+	require.True(t, can, "third step is not yet pruned, we are checking for a half-step after it and still have something to prune")
+	require.LessOrEqual(t, stepToPrune, untilStep)
+	domainRoTx.Close()
+
+	stepToPrune = 30
+	collateAndMergeOnceWithScanPrune(t, d, tx, stepToPrune, true)
+
+	domainRoTx = d.BeginFilesRo()
+	can, untilStep = domainRoTx.canScanPruneDomainTables(tx, aggStep*uint64(stepToPrune))
+	require.False(t, can, "latter step is not yet pruned")
+	require.Equal(t, stepToPrune, untilStep)
+	domainRoTx.Close()
+
+	stepToPrune = 35
+	collateAndMergeOnceWithScanPrune(t, d, tx, stepToPrune, false)
+
+	domainRoTx = d.BeginFilesRo()
+	t.Logf("pruning step %d", stepToPrune)
+	can, untilStep = domainRoTx.canScanPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune))
+	require.True(t, can, "third step is not yet pruned")
+	require.LessOrEqual(t, stepToPrune, untilStep)
+
+	can, untilStep = domainRoTx.canScanPruneDomainTables(tx, 1+aggStep*uint64(stepToPrune)+(aggStep/2))
+	require.True(t, can, "third step is not yet pruned, we are checking for a half-step after it and still have something to prune")
+	require.LessOrEqual(t, stepToPrune, untilStep)
+	domainRoTx.Close()
+}
+
+func TestDomain_CanHashPruneAfterAggregation(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}

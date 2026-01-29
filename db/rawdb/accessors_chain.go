@@ -274,27 +274,6 @@ func WriteForkchoiceFinalized(db kv.Putter, hash common.Hash) {
 	}
 }
 
-// ReadRecentReorg returns true if there was a recent reorg that hasn't been validated yet.
-func ReadRecentReorg(db kv.Getter) bool {
-	data, err := db.GetOne(kv.DatabaseInfo, kv.RecentReorgKey)
-	if err != nil {
-		log.Error("ReadRecentReorg failed", "err", err)
-		return false
-	}
-	return len(data) > 0 && data[0] == 1
-}
-
-// WriteRecentReorg sets the recent reorg flag.
-func WriteRecentReorg(db kv.Putter, reorg bool) {
-	val := []byte{0}
-	if reorg {
-		val = []byte{1}
-	}
-	if err := db.Put(kv.DatabaseInfo, kv.RecentReorgKey, val); err != nil {
-		log.Crit("Failed to store recent reorg flag", "err", err)
-	}
-}
-
 // ReadHeaderRLP retrieves a block header in its raw RLP database encoding.
 func ReadHeaderRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
 	data, err := db.GetOne(kv.Headers, dbutils.HeaderKey(number, hash))

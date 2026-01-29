@@ -218,38 +218,37 @@ func ExecV3(ctx context.Context,
 	var lastCommittedTxNum uint64
 	var lastCommittedBlockNum uint64
 
-	didReorg := rawdb.ReadRecentReorg(rwTx)
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
+	isChainTip := maxBlockNum == startBlockNum
 	// Do it only for chain-tip blocks!
-	doms.EnableWarmupCache(maxBlockNum == startBlockNum && !didReorg)
-	log.Debug("Warmup Cache", "enabled", maxBlockNum == startBlockNum && !didReorg)
+	doms.EnableWarmupCache(isChainTip)
+	log.Debug("Warmup Cache", "enabled", isChainTip)
 	postValidator := newBlockPostExecutionValidator()
-	if maxBlockNum == startBlockNum {
+	if isChainTip {
 		postValidator = newParallelBlockPostExecutionValidator()
 	}
-
 	if parallel {
 		pe := &parallelExecutor{
 			txExecutor: txExecutor{
-				cfg:                   cfg,
-				rs:                    rs,
-				doms:                  doms,
-				agg:                   agg,
-				isBlockProduction:     isBlockProduction,
-				isForkValidation:      isForkValidation,
-				isApplyingBlocks:      isApplyingBlocks,
-				logger:                logger,
-				logPrefix:             execStage.LogPrefix(),
-				progress:              NewProgress(blockNum, inputTxNum, commitThreshold, false, execStage.LogPrefix(), logger),
-				enableChaosMonkey:     execStage.CurrentSyncCycle.IsInitialCycle,
-				hooks:                 hooks,
-				lastCommittedTxNum:    doms.TxNum(),
-				lastCommittedBlockNum: blockNum,
-				postValidator:         postValidator,
+				cfg:               cfg,
+				rs:                rs,
+				doms:              doms,
+				agg:               agg,
+				isBlockProduction: isBlockProduction,
+				isForkValidation:  isForkValidation,
+				isApplyingBlocks:  isApplyingBlocks,
+				logger:            logger,
+				logPrefix:         execStage.LogPrefix(),
+				progress:          NewProgress(blockNum, inputTxNum, commitThreshold, false, execStage.LogPrefix(), logger),
+				enableChaosMonkey: execStage.CurrentSyncCycle.IsInitialCycle,
+				hooks:             hooks,
+				postValidator:     postValidator,
 			},
 			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
+		pe.lastCommittedTxNum.Store(doms.TxNum())
+		pe.lastCommittedBlockNum.Store(blockNum)
 
 		defer func() {
 			pe.LogComplete(stepsInDb)
@@ -258,29 +257,29 @@ func ExecV3(ctx context.Context,
 		lastHeader, applyTx, execErr = pe.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
 			initialTxNum, inputTxNum, initialCycle, applyTx, accumulator, readAhead, logEvery)
 
-		lastCommittedBlockNum = pe.lastCommittedBlockNum
-		lastCommittedTxNum = pe.lastCommittedTxNum
+		lastCommittedBlockNum = pe.lastCommittedBlockNum.Load()
+		lastCommittedTxNum = pe.lastCommittedTxNum.Load()
 	} else {
 		se := &serialExecutor{
 			txExecutor: txExecutor{
-				cfg:                   cfg,
-				rs:                    rs,
-				doms:                  doms,
-				agg:                   agg,
-				u:                     u,
-				isBlockProduction:     isBlockProduction,
-				isForkValidation:      isForkValidation,
-				isApplyingBlocks:      isApplyingBlocks,
-				applyTx:               applyTx,
-				logger:                logger,
-				logPrefix:             execStage.LogPrefix(),
-				progress:              NewProgress(blockNum, inputTxNum, commitThreshold, false, execStage.LogPrefix(), logger),
-				enableChaosMonkey:     execStage.CurrentSyncCycle.IsInitialCycle,
-				hooks:                 hooks,
-				lastCommittedTxNum:    doms.TxNum(),
-				lastCommittedBlockNum: blockNum,
-				postValidator:         postValidator,
+				cfg:               cfg,
+				rs:                rs,
+				doms:              doms,
+				agg:               agg,
+				u:                 u,
+				isBlockProduction: isBlockProduction,
+				isForkValidation:  isForkValidation,
+				isApplyingBlocks:  isApplyingBlocks,
+				applyTx:           applyTx,
+				logger:            logger,
+				logPrefix:         execStage.LogPrefix(),
+				progress:          NewProgress(blockNum, inputTxNum, commitThreshold, false, execStage.LogPrefix(), logger),
+				enableChaosMonkey: execStage.CurrentSyncCycle.IsInitialCycle,
+				hooks:             hooks,
+				postValidator:     postValidator,
 			}}
+		se.lastCommittedTxNum.Store(doms.TxNum())
+		se.lastCommittedBlockNum.Store(blockNum)
 
 		defer func() {
 			se.LogComplete(stepsInDb)
@@ -302,9 +301,9 @@ func ExecV3(ctx context.Context,
 						return err
 					}
 
-					se.lastCommittedBlockNum = lastHeader.Number.Uint64()
-					committedTransactions := se.domains().TxNum() - se.lastCommittedTxNum
-					se.lastCommittedTxNum = se.domains().TxNum()
+					se.lastCommittedBlockNum.Store(lastHeader.Number.Uint64())
+					committedTransactions := se.domains().TxNum() - se.lastCommittedTxNum.Load()
+					se.lastCommittedTxNum.Store(se.domains().TxNum())
 
 					commitStart := time.Now()
 					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
@@ -334,8 +333,8 @@ func ExecV3(ctx context.Context,
 			}
 		}
 
-		lastCommittedBlockNum = se.lastCommittedBlockNum
-		lastCommittedTxNum = se.lastCommittedTxNum
+		lastCommittedBlockNum = se.lastCommittedBlockNum.Load()
+		lastCommittedTxNum = se.lastCommittedTxNum.Load()
 	}
 
 	if false && !isForkValidation {
@@ -426,9 +425,9 @@ type txExecutor struct {
 	lastExecutedBlockNum  atomic.Int64
 	lastExecutedTxNum     atomic.Int64
 	executedGas           atomic.Int64
-	lastCommittedBlockNum uint64
-	lastCommittedTxNum    uint64
-	committedGas          int64
+	lastCommittedBlockNum atomic.Uint64
+	lastCommittedTxNum    atomic.Uint64
+	committedGas          atomic.Int64
 
 	execLoopGroup *errgroup.Group
 

@@ -825,19 +825,25 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.engine,
 		httpRpcCfg.Dirs,
 		backend.polygonBridge,
+		httpRpcCfg.RangeLimit,
 	)
+	ethApiConfig := &jsonrpc.EthApiConfig{
+		GasCap:                      httpRpcCfg.Gascap,
+		FeeCap:                      httpRpcCfg.Feecap,
+		ReturnDataLimit:             httpRpcCfg.ReturnDataLimit,
+		AllowUnprotectedTxs:         httpRpcCfg.AllowUnprotectedTxs,
+		MaxGetProofRewindBlockCount: httpRpcCfg.MaxGetProofRewindBlockCount,
+		SubscribeLogsChannelSize:    httpRpcCfg.WebsocketSubscribeLogsChannelSize,
+		RpcTxSyncDefaultTimeout:     httpRpcCfg.RpcTxSyncDefaultTimeout,
+		RpcTxSyncMaxTimeout:         httpRpcCfg.RpcTxSyncMaxTimeout,
+	}
 	ethApi := jsonrpc.NewEthAPI(
 		baseApi,
 		backend.chainDB,
 		backend.ethRpcClient,
 		backend.txPoolRpcClient,
 		backend.miningRpcClient,
-		httpRpcCfg.Gascap,
-		httpRpcCfg.Feecap,
-		httpRpcCfg.ReturnDataLimit,
-		httpRpcCfg.AllowUnprotectedTxs,
-		httpRpcCfg.MaxGetProofRewindBlockCount,
-		httpRpcCfg.WebsocketSubscribeLogsChannelSize,
+		ethApiConfig,
 		logger,
 	)
 
@@ -862,7 +868,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if config.TxPool.Disable {
 			panic("can't enable shutter pool when devp2p txpool is disabled")
 		}
-
 		contractBackend := contracts.NewDirectBackend(ethApi)
 		baseTxnProvider := backend.txPool
 		currentBlockNumReader := func(ctx context.Context) (*uint64, error) {

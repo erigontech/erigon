@@ -123,7 +123,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		return nil, fmt.Errorf("end (%d) > MaxUint32", end)
 	}
 
-	return api.getLogsV3(ctx, tx, begin, end, crit)
+	return api.getLogsV3(ctx, tx, begin, end, crit, api.BaseAPI.rangeLimit)
 }
 
 // GetLatestLogs implements erigon_getLatestLogs.
@@ -204,6 +204,10 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	}
 	if end < begin {
 		return nil, fmt.Errorf("end (%d) < begin (%d)", end, begin)
+	}
+
+	if api.rangeLimit != 0 && (end-begin) > uint64(api.rangeLimit) {
+		return nil, fmt.Errorf("%s: %d", errExceedBlockRange, api.rangeLimit)
 	}
 
 	chainConfig, err := api.chainConfig(ctx, tx)

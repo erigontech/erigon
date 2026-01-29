@@ -399,6 +399,11 @@ var (
 		Usage: "Sets a cap on gas that can be used in eth_call/estimateGas",
 		Value: 50000000,
 	}
+	RpcBlockRangeLimit = cli.IntFlag{
+		Name:  "rpc.blockrange.limit",
+		Usage: "Maximum block range (end - begin) allowed for range queries (0 = unlimited)",
+		Value: 0,
+	}
 	RpcTraceCompatFlag = cli.BoolFlag{
 		Name:  "trace.compat",
 		Usage: "Bug for bug compatibility with OE for trace_ routines",
@@ -574,12 +579,14 @@ var (
 		Name:    "discovery.v4",
 		Aliases: []string{"discv4"},
 		Usage:   "Enables the V4 discovery mechanism",
+		Value:   nodecfg.DefaultConfig.P2P.DiscoveryV4,
 	}
 	DiscoveryV5Flag = cli.BoolFlag{
 		Name: "discovery.v5",
 		// The first is for old Geth style, and the second is Erigon backward compatibility.
 		Aliases: []string{"discv5", "v5disc"},
 		Usage:   "Enables the V5 discovery mechanism",
+		Value:   nodecfg.DefaultConfig.P2P.DiscoveryV5,
 	}
 	NetrestrictFlag = cli.StringFlag{
 		Name:  "netrestrict",
