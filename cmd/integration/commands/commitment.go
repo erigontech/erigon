@@ -649,9 +649,32 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 	}
 	defer tx.Rollback()
 
+	// Benchmark lookup in snapshot history files
+	allFileStats, err := benchSnapshotsHistoryLookup(ctx, tx, historyFiles, compactKey, benchHistorySamplePct, rng, logger)
+	if err != nil {
+		return err
+	}
+
+	// Sample and benchmark keys from MDBX
+	mdbxStats, err := benchMdbxHistoryLookup(ctx, tx, compactKey, maxFileTxNum, benchHistorySamplePct, rng, logger)
+	if err != nil {
+		logger.Warn("Failed to benchmark MDBX history lookups", "error", err)
+	}
+	var allStats = allFileStats
+	if mdbxStats != nil {
+		allStats = append(allStats, *mdbxStats)
+	}
+
+	// Print results table
+	printHistoryBenchResultsTable(prefix, compactKey, allStats)
+
+	return nil
+}
+
+// benchSnapshotsHistoryLookup benchmarks history lookups across snapshot files
+func benchSnapshotsHistoryLookup(ctx context.Context, tx kv.TemporalTx, historyFiles []dbstate.VisibleFile, compactKey []byte, samplePct float64, rng *rand.Rand, logger log.Logger) ([]HistoryBenchStats, error) {
 	var allFileStats []HistoryBenchStats
 
-	// Process each history file
 	for _, f := range historyFiles {
 		fpath := f.Fullpath()
 		fname := filepath.Base(fpath)
@@ -665,13 +688,7 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 		}
 
 		// Calculate number of samples based on percentage
-		sampleCount := int(float64(txnumRange) * benchHistorySamplePct / 100.0)
-		if sampleCount < 1 {
-			sampleCount = 1
-		}
-		if sampleCount > int(txnumRange) {
-			sampleCount = int(txnumRange)
-		}
+		sampleCount := int(float64(txnumRange) * samplePct / 100.0)
 
 		logger.Info("Benchmarking file...",
 			"file", fname,
@@ -713,7 +730,7 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return nil, ctx.Err()
 			default:
 			}
 		}
@@ -743,24 +760,10 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 			"p99", stats.P99)
 	}
 
-	// Sample and benchmark keys from MDBX (high txnums outside snapshot files)
-	mdbxStats, err := benchMdbxHistoryLookup(ctx, tx, compactKey, maxFileTxNum, benchHistorySamplePct, rng, logger)
-	if err != nil {
-		logger.Warn("Failed to benchmark MDBX history lookups", "error", err)
-	}
-	if mdbxStats != nil {
-		allFileStats = append(allFileStats, *mdbxStats)
-	}
-
-	// Print results table
-	printHistoryBenchResultsTable(prefix, compactKey, allFileStats)
-
-	return nil
+	return allFileStats, nil
 }
 
 // benchMdbxHistoryLookup benchmarks history lookups for txnums in the MDBX range
-// (those outside snapshot files). Uses the same approach as file benchmarks:
-// generates random txnums in the MDBX range and looks up the user-provided prefix.
 func benchMdbxHistoryLookup(ctx context.Context, tx kv.TemporalTx, compactKey []byte, minTxNum uint64, samplePct float64, rng *rand.Rand, logger log.Logger) (*HistoryBenchStats, error) {
 	// Get the max txnum in MDBX via DomainProgress API
 	aggTx := dbstate.AggTx(tx)
@@ -778,14 +781,8 @@ func benchMdbxHistoryLookup(ctx context.Context, tx kv.TemporalTx, compactKey []
 		return nil, nil
 	}
 
-	// Calculate number of samples based on percentage of the range
+	// Calculate number of samples based on sampling percentage
 	sampleCount := int(float64(txnumRange) * samplePct / 100.0)
-	if sampleCount < 1 {
-		sampleCount = 1
-	}
-	if sampleCount > int(txnumRange) {
-		sampleCount = int(txnumRange)
-	}
 
 	logger.Info("Benchmarking MDBX history lookups...",
 		"minTxNum", minTxNum,
