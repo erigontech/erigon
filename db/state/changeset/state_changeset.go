@@ -300,6 +300,7 @@ var writeDiffsetBuf = &threadSafeBuf{}
 func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *StateChangeSet) error {
 	writeDiffsetBuf.Lock()
 	defer writeDiffsetBuf.Unlock()
+	t := time.Now()
 
 	writeDiffsetBuf.b = diffSet.serializeKeys(writeDiffsetBuf.b[:0], blockNumber)
 	keys := writeDiffsetBuf.b
@@ -316,7 +317,9 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 	key := make([]byte, DiffChunkKeyLen)
 	binary.BigEndian.PutUint64(key, blockNumber)
 	copy(key[8:], blockHash[:])
+	took1 := time.Since(t)
 
+	t = time.Now()
 	for i := 0; i < chunkCount; i++ {
 		start := i * DiffChunkLen
 		end := min((i+1)*DiffChunkLen, len(keys))
@@ -326,6 +329,7 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 			return err
 		}
 	}
+	took2 := time.Since(t)
 
 	if dbg.TraceUnwinds {
 		var diffStats strings.Builder
@@ -341,7 +345,7 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 				diffStats.WriteString(fmt.Sprintf("%s: %d", kv.Domain(d), diff.Len()))
 			}
 		}
-		fmt.Printf("[dbg] diffset (Block:%d) %x:%s chunkCount: %d, %s\n", blockNumber, blockHash, diffStats.String(), chunkCount, dbg.Stack())
+		fmt.Printf("[dbg] diffset (Block:%d) %x:%s chunkCount=%d, ser=%s, put=%s, %s\n", blockNumber, blockHash, diffStats.String(), chunkCount, took1, took2, dbg.Stack())
 	}
 	return nil
 }
