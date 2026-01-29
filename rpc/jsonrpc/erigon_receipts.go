@@ -52,6 +52,15 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 		}
 		defer tx.Rollback()
 
+		blockNumber, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(hash, true), tx, api._blockReader, api.filters)
+		if err != nil {
+			return nil, err
+		}
+		err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+		if err != nil {
+			return nil, err
+		}
+
 		block, err := api.blockByHashWithSenders(ctx, tx, hash)
 		if err != nil {
 			return nil, err
