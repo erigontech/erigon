@@ -356,7 +356,7 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 		start := i * DiffChunkLen
 		end := min((i+1)*DiffChunkLen, len(keys))
 		binary.BigEndian.PutUint64(key[40:], uint64(i))
-		if err := tx.Put(kv.ChangeSets3, key, keys[start:end]); err != nil {
+		if err := c.Put(key, keys[start:end]); err != nil {
 			return err
 		}
 	}
