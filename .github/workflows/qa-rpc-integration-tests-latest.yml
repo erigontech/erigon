@@ -66,8 +66,8 @@ jobs:
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
           set -euo pipefail
-          python3 coordinated_start.py --client "erigon" --run-id "${{ steps.vars.outputs.run_id }}" --chain "${{ steps.vars.outputs.network }}" --signal-creation
-          python3 coordinated_start.py --client "geth" --run-id "${{ steps.vars.outputs.run_id }}" --chain "${{ steps.vars.outputs.network }}" --signal-creation
+          python3 coordinated_start.py --client "erigon" --run-id "${{ steps.vars.outputs.run_id }}" --chain "$CHAIN" --signal-creation
+          python3 coordinated_start.py --client "geth" --run-id "${{ steps.vars.outputs.run_id }}" --chain "$CHAIN" --signal-creation
 
   test:
     name: RPC Integ Test Latest ${{ matrix.client }}
@@ -86,6 +86,7 @@ jobs:
       contents: read
     env:
       RUN_ID: ${{ needs.setup.outputs.run_id }}
+      CLIENT: ${{ matrix.client }}
       ERIGON_REFERENCE_DIR: /opt/erigon-versions/reference-version
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
@@ -103,7 +104,7 @@ jobs:
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
           set -euo pipefail
-          python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$NETWORK" --signal-creation
+          python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$CHAIN" --signal-creation
 
       - name: Checkout RPC Tests Repository
         if: matrix.client == 'erigon'
@@ -197,7 +198,7 @@ jobs:
           echo "Context:"
           echo "  RUN_ID=${RUN_ID}"
           # Wait for an agreement between Erigon and Geth
-          python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$NETWORK"
+          python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$CHAIN"
 
       - name: Run RPC Performance Tests
         if: matrix.client == 'erigon'
@@ -241,7 +242,7 @@ jobs:
           echo "  RUN_ID=${RUN_ID}"
           # Wait for an agreement between Erigon and Geth
           MODIFIED_RUN_ID="$RUN_ID-end"
-          python3 coordinated_start.py --client "$CLIENT" --run-id "$MODIFIED_RUN_ID" --chain "$NETWORK"
+          python3 coordinated_start.py --client "$CLIENT" --run-id "$MODIFIED_RUN_ID" --chain "$CHAIN"
 
       - name: Generate Summary
         if: always() && matrix.client == 'erigon' && steps.test_step.outputs.test_executed == 'true'
@@ -320,7 +321,7 @@ jobs:
         shell: bash
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
-          python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$NETWORK" --signal-error "workflow failed"
+          python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$CHAIN" --signal-error "workflow failed"
 
       - name: Action to check failure condition
         if: failure()
