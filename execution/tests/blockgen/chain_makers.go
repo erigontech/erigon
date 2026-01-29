@@ -50,10 +50,11 @@ type BlockGen struct {
 	stateReader state.StateReader
 	ibs         *state.IntraBlockState
 
-	gasPool  *protocol.GasPool
-	txs      []types.Transaction
-	receipts []*types.Receipt
-	uncles   []*types.Header
+	gasPool     *protocol.GasPool
+	txs         []types.Transaction
+	receipts    []*types.Receipt
+	uncles      []*types.Header
+	withdrawals []*types.Withdrawal
 
 	config *chain.Config
 	engine rules.Engine
@@ -151,6 +152,10 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 // chain processing. This is best used in conjunction with raw block insertion.
 func (b *BlockGen) AddUncheckedTx(tx types.Transaction) {
 	b.txs = append(b.txs, tx)
+}
+
+func (b *BlockGen) AddWithdrawal(withdrawal *types.Withdrawal) {
+	b.withdrawals = append(b.withdrawals, withdrawal)
 }
 
 // Number returns the block number of the block being generated.
@@ -350,6 +355,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				txNumIncrement()
 			},
 		}
+		if chainreader.Config().IsPrague(parent.Time()) {
+			b.withdrawals = []*types.Withdrawal{}
+		}
 		b.header = makeHeader(chainreader, parent, ibs, b.engine)
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
@@ -391,7 +399,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			b.header.Root = common.BytesToHash(stateRoot)
 
 			// Recreating block to make sure Root makes it into the header
-			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, nil /* withdrawals */)
+			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, b.withdrawals)
 			return block, b.receipts, nil
 		}
 		return nil, nil, errors.New("no engine to generate blocks")

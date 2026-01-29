@@ -119,6 +119,7 @@ type MockSentry struct {
 	StreamWg             sync.WaitGroup
 	ReceiveWg            sync.WaitGroup
 	Address              common.Address
+	ForkValidator        *engine_helpers.ForkValidator
 	Eth1ExecutionService *eth1.EthereumExecutionModule
 	retirementStart      chan bool
 	retirementDone       chan struct{}
@@ -245,8 +246,28 @@ func (ms *MockSentry) NodeInfo(context.Context, *emptypb.Empty) (*typesproto.Nod
 
 const blockBufferSize = 128
 
-func MockWithGenesis(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, withPosDownloader bool) *MockSentry {
-	return MockWithGenesisPruneMode(tb, gspec, key, blockBufferSize, prune.MockMode, withPosDownloader)
+type Option func(*options)
+
+func WithStepSize(stepSize int) Option {
+	return func(opts *options) {
+		opts.stepSize = &stepSize
+	}
+}
+
+type options struct {
+	stepSize *int
+}
+
+func applyOptions(opts []Option) options {
+	var opt options
+	for _, o := range opts {
+		o(&opt)
+	}
+	return opt
+}
+
+func MockWithGenesis(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, withPosDownloader bool, opts ...Option) *MockSentry {
+	return MockWithGenesisPruneMode(tb, gspec, key, blockBufferSize, prune.MockMode, withPosDownloader, opts...)
 }
 
 func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine rules.Engine, withPosDownloader bool) *MockSentry {
@@ -254,7 +275,7 @@ func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine rules.Eng
 	return MockWithEverything(tb, gspec, key, prune.MockMode, engine, blockBufferSize, false, withPosDownloader)
 }
 
-func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, blockBufferSize int, prune prune.Mode, withPosDownloader bool) *MockSentry {
+func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, blockBufferSize int, prune prune.Mode, withPosDownloader bool, opts ...Option) *MockSentry {
 	var engine rules.Engine
 
 	switch {
@@ -264,10 +285,11 @@ func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.Pr
 		engine = ethash.NewFaker()
 	}
 
-	return MockWithEverything(tb, gspec, key, prune, engine, blockBufferSize, false, withPosDownloader)
+	return MockWithEverything(tb, gspec, key, prune, engine, blockBufferSize, false, withPosDownloader, opts...)
 }
 
-func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine rules.Engine, blockBufferSize int, withTxPool, withPosDownloader bool) *MockSentry {
+func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine rules.Engine, blockBufferSize int, withTxPool, withPosDownloader bool, opts ...Option) *MockSentry {
+	opt := applyOptions(opts)
 	tmpdir := os.TempDir()
 	if tb != nil {
 		tmpdir = tb.TempDir()
@@ -287,6 +309,9 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
 	cfg.Genesis = gspec
+	if opt.stepSize != nil {
+		cfg.ErigonDBStepSize = *opt.stepSize
+	}
 
 	logLvl := log.LvlError
 	if lvl, ok := os.LookupEnv("MOCK_SENTRY_LOG_LEVEL"); ok {
@@ -402,7 +427,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			dirs, notifications, mock.BlockReader, blockWriter, nil, terseLogger)
 		chainReader := consensuschain.NewReader(mock.ChainConfig, tx, mock.BlockReader, logger)
 		// We start the mining step
-		if err := stageloop.StateStep(ctx, chainReader, mock.Engine, sd, tx, stateSync, unwindPoint, headersChain, bodiesChain, true); err != nil {
+		if err := stageloop.StateStep(ctx, chainReader, mock.Engine, sd, tx, stateSync, unwindPoint, headersChain, bodiesChain, false); err != nil {
 			logger.Warn("Could not validate block", "err", err)
 			return err
 		}
@@ -418,6 +443,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		return nil
 	}
 	forkValidator := engine_helpers.NewForkValidator(ctx, 1, inMemoryExecution, dirs.Tmp, mock.BlockReader)
+	mock.ForkValidator = forkValidator
 
 	statusDataProvider := sentry.NewStatusDataProvider(
 		db,
