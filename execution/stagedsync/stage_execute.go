@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math"
 	"time"
 	"unsafe"
 
@@ -448,10 +447,10 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 		// Some blocks on bor-mainnet have 400 chunks of diff = 3mb
 		var pruneDiffsLimitOnChainTip = 1_000 * 10
 		pruneTimeout := quickPruneTimeout
-		if s.CurrentSyncCycle.IsInitialCycle {
-			pruneDiffsLimitOnChainTip = math.MaxInt
-			pruneTimeout = time.Hour
-		}
+		//if s.CurrentSyncCycle.IsInitialCycle {
+		//pruneDiffsLimitOnChainTip = math.MaxInt
+		//pruneTimeout = time.Hour
+		//}
 		pruneChangeSetsStartTime := time.Now()
 		if err := rawdb.PruneTable(
 			tx,
