@@ -213,7 +213,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 
 	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(blockHash, true), tx, api._blockReader, api.filters)
 	if err != nil {
-		return nil, err
+		return nil, nil
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
