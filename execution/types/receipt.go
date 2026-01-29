@@ -522,6 +522,13 @@ func (rs Receipts) AssertLogIndex(blockNum uint64) {
 	}
 }
 
+func (rs Receipts) CumulativeGasUsed() uint64 {
+	if rs.Len() == 0 {
+		return 0
+	}
+	return rs[rs.Len()-1].CumulativeGasUsed
+}
+
 // receiptEncoder69 wraps a receipt to delegate to EncodeRLP69 during list encoding.
 type receiptEncoder69 struct{ r *Receipt }
 

@@ -38,8 +38,8 @@ type GasUsed struct {
 	Blob    uint64 // Blob gas - see EIP-4844
 }
 
-func NewGasUsed(h *types.Header) *GasUsed {
-	gu := &GasUsed{Block: h.GasUsed}
+func NewGasUsed(h *types.Header, receiptGas uint64) *GasUsed {
+	gu := &GasUsed{Receipt: receiptGas, Block: h.GasUsed}
 	if h.BlobGasUsed != nil {
 		gu.Blob = *h.BlobGasUsed
 	}
