@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -320,6 +321,7 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 	keys := writeDiffsetBuf.b
 
 	chunkCount := (len(keys) + DiffChunkLen - 1) / DiffChunkLen
+	log.Warn("[dbg] WriteDiffSet", "chunkCount", chunkCount)
 	// Data Format
 	// dbutils.BlockBodyKey(blockNumber, blockHash) -> chunkCount
 	// dbutils.BlockBodyKey(blockNumber, blockHash) + index -> chunk
