@@ -214,6 +214,9 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 		if i == 0 {
 			isEndOfBucket := lastKey == nil || bytes.Compare(lastKey, k) == -1
 			canUseAppend = haveSortingGuaranties && isEndOfBucket
+			if toBucket == kv.TblCommitmentHistoryKeys || toBucket == kv.TblCommitmentHistoryVals || toBucket == kv.TblCommitmentVals {
+				log.Warn("[dbg] etl", "table", toBucket, "isDupSort", isDupSort, "haveSortingGuaranties", haveSortingGuaranties, "isEndOfBucket", isEndOfBucket, "canUseAppend", canUseAppend)
+			}
 		}
 		i++
 
