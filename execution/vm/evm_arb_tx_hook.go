@@ -55,7 +55,7 @@ type TxProcessingHook interface {
 	PopContract()
 
 	// vm ops
-	GasPriceOp(evm *EVM) *uint256.Int
+	GasPriceOp(evm *EVM) uint256.Int
 	L1BlockNumber(blockCtx evmtypes.BlockContext) (uint64, error)
 	L1BlockHash(blockCtx evmtypes.BlockContext, l1BlocKNumber uint64) (common.Hash, error)
 }
@@ -100,8 +100,8 @@ func (p DefaultTxProcessor) L1BlockHash(blockCtx evmtypes.BlockContext, l1BlocKN
 	return blockCtx.GetHash(l1BlocKNumber)
 }
 
-func (p DefaultTxProcessor) GasPriceOp(_ *EVM) *uint256.Int {
-	return &p.evm.GasPrice
+func (p DefaultTxProcessor) GasPriceOp(_ *EVM) uint256.Int {
+	return p.evm.GasPrice
 }
 
 func (p DefaultTxProcessor) FillReceiptInfo(_ *types.Receipt) {}

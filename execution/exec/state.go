@@ -19,6 +19,8 @@ package exec
 import (
 	"context"
 	"fmt"
+	"github.com/erigontech/nitro-erigon/arbos"
+	"github.com/erigontech/nitro-erigon/gethhook"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -41,6 +43,13 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/shards"
 )
+
+var arbTrace bool
+
+func init() {
+	gethhook.RequireHookedGeth()
+	arbTrace = dbg.EnvBool("ARB_TRACE", false)
+}
 
 var noop = state.NewNoopWriter()
 
@@ -411,6 +420,21 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 				Task: txTask,
 				Err:  err,
 			}
+		}
+	}
+
+	if rw.chainConfig.IsArbitrum() && txTask.BlockNumber() > 0 {
+		txm, err := txTask.TxMessage()
+		if err != nil {
+			return &TxResult{
+				Task: txTask,
+				Err:  fmt.Errorf("failed to get tx message: %w", err),
+			}
+		}
+		if rw.evm.ProcessingHookSet.CompareAndSwap(false, true) {
+			rw.evm.ProcessingHook = arbos.NewTxProcessorIBS(rw.evm, state.NewArbitrum(rw.ibs), txm)
+		} else {
+			rw.evm.ProcessingHook.SetMessage(txm, state.NewArbitrum(rw.ibs))
 		}
 	}
 

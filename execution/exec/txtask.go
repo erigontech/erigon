@@ -21,6 +21,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/nitro-erigon/arbos/arbosState"
+	"github.com/erigontech/nitro-erigon/arbos/arbostypes"
+	"github.com/erigontech/nitro-erigon/statetransfer"
 	"math/big"
 	"sync"
 	"time"
@@ -475,6 +478,34 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			}
 			// For Genesis, rules should be empty, so that empty accounts can be included
 			rules = &chain.Rules{}
+
+			if txTask.Config.IsArbitrum() { // initialize arbos once
+				ibsa := state.NewArbitrum(ibs)
+				accountsPerSync := uint(100000) // const for sep-rollup
+				initMessage, err := arbostypes.GetSepoliaRollupInitMessage()
+				if err != nil {
+					txTask.Logger.Error("Failed to get Sepolia Rollup init message", "err", err)
+					return &TxResult{
+						Task: txTask,
+						Err:  err,
+					}
+				}
+
+				initData := statetransfer.ArbosInitializationInfo{
+					NextBlockNumber: 0,
+				}
+				initReader := statetransfer.NewMemoryInitDataReader(&initData)
+				stateRoot, err := arbosState.InitializeArbosInDatabase(ibsa, txTask.rs.Domains(), txTask.rs.TemporalPutDel(), initReader, txTask.Config, initMessage, txTask.evm.Context.Time, accountsPerSync)
+				if err != nil {
+					txTask.Logger.Error("Failed to init ArbOS", "err", err)
+					return &TxResult{
+						Task: txTask,
+						Err:  err,
+					}
+				}
+				_ = stateRoot
+				txTask.Logger.Info("ArbOS initialized", "stateRoot", stateRoot) // todo this produces invalid state isnt it?
+			}
 			break
 		}
 
@@ -499,6 +530,8 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			result.TraceTos[accounts.InternAddress(uncle.Coinbase)] = struct{}{}
 		}
 	default:
+		txTask.gasPool.Reset(txTask.Tx().GetGasLimit(), txTask.Config.GetMaxBlobGasPerBlock(header.Time, rules.ArbOSVersion)) // ARBITRUM only
+
 		if txTask.Tx().Type() == types.AccountAbstractionTxType {
 			if !chainConfig.AllowAA {
 				result.Err = errors.New("account abstraction transactions are not allowed")

@@ -895,7 +895,7 @@ type ArbitrumRetryTx struct {
 	Value               *big.Int        // wei amount
 	Data                []byte          // contract invocation input data
 	TicketId            common.Hash
-	RefundTo            common.Address
+	RefundTo            accounts.Address
 	MaxRefund           *big.Int // the maximum refund sent to RefundTo (the rest goes to From)
 	SubmissionFeeRefund *big.Int // the submission fee to refund if successful (capped by MaxRefund)
 	Timeboosted         *bool
@@ -1426,9 +1426,9 @@ type ArbitrumSubmitRetryableTx struct {
 	Gas              uint64          // gas limit for the retryable tx, actual gas spending is EffectiveGasUsed
 	RetryTo          *common.Address `rlp:"nil"` // nil means contract creation
 	RetryValue       *big.Int        // wei amount
-	Beneficiary      common.Address
+	Beneficiary      accounts.Address
 	MaxSubmissionFee *big.Int
-	FeeRefundAddr    common.Address
+	FeeRefundAddr    accounts.Address
 	RetryData        []byte // contract invocation input data
 	EffectiveGasUsed uint64
 }
@@ -1518,9 +1518,9 @@ func (tx *ArbitrumSubmitRetryableTx) GetData() []byte {
 	data = append(data, math.U256Bytes(new(big.Int).SetUint64(tx.Gas))...)
 	data = append(data, math.U256Bytes(tx.MaxSubmissionFee)...)
 	data = append(data, make([]byte, 12)...)
-	data = append(data, tx.FeeRefundAddr.Bytes()...)
+	data = append(data, tx.FeeRefundAddr.Value().Bytes()...)
 	data = append(data, make([]byte, 12)...)
-	data = append(data, tx.Beneficiary.Bytes()...)
+	data = append(data, tx.Beneficiary.Value().Bytes()...)
 	data = append(data, make([]byte, 12)...)
 	data = append(data, retryTo.Bytes()...)
 	offset := len(data) + 32
@@ -1650,7 +1650,7 @@ func (tx *ArbitrumSubmitRetryableTx) encodePayload(w io.Writer, b []byte, payloa
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(tx.Beneficiary[:]); err != nil {
+	if _, err := w.Write(tx.Beneficiary.Value().Bytes()); err != nil {
 		return err
 	}
 	if err := rlp.EncodeBigInt(tx.MaxSubmissionFee, w, b); err != nil {
@@ -1662,7 +1662,7 @@ func (tx *ArbitrumSubmitRetryableTx) encodePayload(w io.Writer, b []byte, payloa
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(tx.FeeRefundAddr[:]); err != nil {
+	if _, err := w.Write(tx.FeeRefundAddr.Value().Bytes()); err != nil {
 		return err
 	}
 	if err := rlp.EncodeString(tx.RetryData, w, b); err != nil {
@@ -1879,7 +1879,7 @@ func (tx *ArbitrumSubmitRetryableTx) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for Beneficiary: %d", len(b))
 	}
-	copy(tx.Beneficiary[:], b)
+	copy(tx.Beneficiary.Value().Bytes(), b)
 
 	// Decode MaxSubmissionFee (*big.Int)
 	if b, err = s.Bytes(); err != nil {
@@ -1894,7 +1894,7 @@ func (tx *ArbitrumSubmitRetryableTx) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for FeeRefundAddr: %d", len(b))
 	}
-	copy(tx.FeeRefundAddr[:], b)
+	copy(tx.FeeRefundAddr.Value().Bytes(), b)
 
 	// Decode RetryData ([]byte)
 	if tx.RetryData, err = s.Bytes(); err != nil {

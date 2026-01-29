@@ -1,8 +1,11 @@
 package txn
 
-import "github.com/erigontech/erigon/common"
+import (
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types/accounts"
+)
 
-var ArbosAddress = common.HexToAddress("0xa4b05")
+var ArbosAddress = accounts.InternAddress(common.HexToAddress("0xa4b05"))
 var ArbosStateAddress = common.HexToAddress("0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")
 var ArbSysAddress = common.HexToAddress("0x64")
 var ArbInfoAddress = common.HexToAddress("0x65")

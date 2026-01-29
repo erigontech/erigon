@@ -24,7 +24,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"math/big"
 	"slices"
 	"sort"
@@ -350,9 +349,7 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
-	//head, withdrawals := rawdb.GenesisWithoutStateToBlock(g)
 	_ = g.Alloc //nil-check
-<<<<<<<< HEAD:execution/state/genesiswrite/genesis_write.go
 
 	head, withdrawals := GenesisWithoutStateToBlock(g)
 

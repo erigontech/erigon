@@ -443,7 +443,7 @@ func makeRetryableTxFunc(commonTx *types.CommonTx, rawTx map[string]interface{})
 
 	// Beneficiary: expected as a hex string address.
 	if beneficiaryHex, ok := rawTx["beneficiary"].(string); ok {
-		tx.Beneficiary = common.HexToAddress(beneficiaryHex)
+		tx.Beneficiary = accounts.InternAddress(common.HexToAddress(beneficiaryHex))
 	}
 
 	// MaxSubmissionFee: expected as a hex string.
@@ -453,7 +453,7 @@ func makeRetryableTxFunc(commonTx *types.CommonTx, rawTx map[string]interface{})
 
 	// FeeRefundAddr: expected as a hex string address.
 	if feeRefundAddrHex, ok := rawTx["refundTo"].(string); ok {
-		tx.FeeRefundAddr = common.HexToAddress(feeRefundAddrHex)
+		tx.FeeRefundAddr = accounts.InternAddress(common.HexToAddress(feeRefundAddrHex))
 	}
 
 	// RetryData: expected as a hex string (with "0x" prefix) that will be decoded to bytes.
@@ -510,7 +510,7 @@ func makeArbitrumRetryTx(commonTx *types.CommonTx, rawTx map[string]interface{})
 
 	// RefundTo (expected as a hex string address)
 	if refundToHex, ok := rawTx["refundTo"].(string); ok {
-		tx.RefundTo = common.HexToAddress(refundToHex)
+		tx.RefundTo = accounts.InternAddress(common.HexToAddress(refundToHex))
 	}
 
 	// MaxRefund (expected as a hex string)
