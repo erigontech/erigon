@@ -50,31 +50,31 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 		return append(out, 0, 0, 0, 0, 0) // dict len (1) + diffSet len (4)
 	}
 
-	// Build dictionary using fixed arrays instead of map.
+	// Build dictionary using fixed array instead of map.
 	// PrevStepBytes is always 8 bytes, so we use uint64 for fast comparison.
 	// There are typically very few unique values (< 10), so linear search beats map.
 	var dictKeys [256]uint64
-	var dictIndices [256]byte // reuse for per-entry indices (max diffSet size limited by byte index)
 	dictLen := 0
 	totalKeyLen := 0
 	totalValueLen := 0
 
+	// First pass: build dictionary and count sizes
 	for i := range diffSet {
 		diff := &diffSet[i]
 		prevStep := binary.BigEndian.Uint64(diff.PrevStepBytes)
 
-		// Linear search for existing entry (faster than map for small N)
-		idx := byte(dictLen)
+		// Linear search for existing entry
+		found := false
 		for j := 0; j < dictLen; j++ {
 			if dictKeys[j] == prevStep {
-				idx = byte(j)
-				goto found
+				found = true
+				break
 			}
 		}
-		dictKeys[dictLen] = prevStep
-		dictLen++
-	found:
-		dictIndices[i] = idx
+		if !found {
+			dictKeys[dictLen] = prevStep
+			dictLen++
+		}
 		totalKeyLen += len(diff.Key)
 		totalValueLen += len(diff.Value)
 	}
@@ -103,15 +103,26 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 	// Write diffSet length
 	ret = binary.BigEndian.AppendUint32(ret, uint32(len(diffSet)))
 
-	// Write diffSet entries using cached indices
+	// Second pass: write entries with dict lookup (dict is small, so this is fast)
 	for i := range diffSet {
 		diff := &diffSet[i]
+		prevStep := binary.BigEndian.Uint64(diff.PrevStepBytes)
+
+		// Find index in dict
+		var idx byte
+		for j := 0; j < dictLen; j++ {
+			if dictKeys[j] == prevStep {
+				idx = byte(j)
+				break
+			}
+		}
+
 		// write uint32(len(key)) + key + uint32(len(value)) + value + prevStepBytes
 		ret = binary.BigEndian.AppendUint32(ret, uint32(len(diff.Key)))
 		ret = append(ret, diff.Key...)
 		ret = binary.BigEndian.AppendUint32(ret, uint32(len(diff.Value)))
 		ret = append(ret, diff.Value...)
-		ret = append(ret, dictIndices[i])
+		ret = append(ret, idx)
 	}
 	return ret
 }
@@ -448,8 +459,6 @@ func toStringZeroCopy(v []byte) string {
 	}
 	return unsafe.String(&v[0], len(v))
 }
-
-func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
 
 type DomainIOMetrics struct {
 	CacheReadCount    int64
