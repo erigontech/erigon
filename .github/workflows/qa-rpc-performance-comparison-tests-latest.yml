@@ -92,7 +92,7 @@ jobs:
       - name: Checkout RPC Tests Repository
         run: |
           rm -rf ${{runner.workspace}}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch canepat/perf_fix_sut_name_alive_check https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch main https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
           cd ${{runner.workspace}}/rpc-tests
 
       - name: Clean Erigon Build Directory
@@ -157,6 +157,8 @@ jobs:
 
       - name: Wait for port 8545 to be opened
         run: |
+          # Geth is expected to be pre-running for the rpc-latest-geth runner
+          # Erigon was started above
           for i in {1..30}; do
             if nc -z localhost 8545; then
               echo "Port 8545 is open"
@@ -250,7 +252,11 @@ jobs:
           
               # Save all vegeta binary reports
               echo "Save current vegeta binary files"
-              cp -r $workspace/rpc-tests/perf/reports/bin $bin_past_test_dir
+              if [ -d "$workspace/rpc-tests/perf/reports/bin" ]; then
+                cp -r "$workspace/rpc-tests/perf/reports/bin" "$bin_past_test_dir"
+              else
+                echo "::warning::vegeta binary reports directory '$workspace/rpc-tests/perf/reports/bin' not found; skipping copy."
+              fi
                     
               echo "Execute Latency Percentile HDR Analysis"
               cd $result_dir
@@ -258,6 +264,10 @@ jobs:
                 --test_name $client-$method \
                 --input_file ./$result_file \
                 --output_file ./$client-$method-latency_hdr_analysis.pdf
+              perf_hdr_status=$?
+              if [ $perf_hdr_status -ne 0 ]; then
+                echo "::warning::perf_hdr_analysis.py failed with exit code $perf_hdr_status"
+              fi
             else
               failed_test=1
               outcome=failure
@@ -298,7 +308,11 @@ jobs:
             fi
           
             # Save test results to a directory with timestamp and commit hash
-            cp -r $result_dir $past_test_dir
+            if [ -d "$result_dir" ]; then
+              cp -r "$result_dir" "$past_test_dir"
+            else
+              echo "::warning::Result directory '$result_dir' does not exist; skipping archival to $past_test_dir"
+            fi
           }
 
           # Launch the RPC performance test runner
@@ -323,7 +337,7 @@ jobs:
 
       - name: Upload test results
         if: steps.test_step.outputs.test_executed == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: test-results-${{ env.CHAIN }}-${{ matrix.client }}
           path: ${{ env.past_test_dir }}
@@ -346,7 +360,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: erigon-logs-${{ env.CHAIN }}
-          path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/erigon.log
+          path: ${{ github.workspace }}/build/bin/erigon.log
 
       - name: Delete Erigon Testbed Data Directory
         if: always() && matrix.client == 'erigon' && steps.save_datadir_step.outputs.datadir_saved == 'true'
