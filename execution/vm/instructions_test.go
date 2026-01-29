@@ -311,7 +311,7 @@ func opBenchmark(b *testing.B, op executionFunc, args ...string) {
 	}
 	pc := uint64(0)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		for _, arg := range byteArgs {
 			a := *new(uint256.Int).SetBytes(arg)
 			callContext.Stack.push(a)

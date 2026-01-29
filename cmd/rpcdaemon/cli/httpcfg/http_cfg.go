@@ -59,6 +59,7 @@ type HttpCfg struct {
 
 	API                               []string
 	Gascap                            uint64
+	RangeLimit                        int
 	Feecap                            float64
 	MaxTraces                         uint64
 	WebsocketPort                     int

@@ -108,6 +108,9 @@ type HexPatriciaHashed struct {
 // Clones current trie state to allow concurrent processing.
 func (hph *HexPatriciaHashed) SpawnSubTrie(ctx PatriciaContext, forNibble int) *HexPatriciaHashed {
 	subTrie := NewHexPatriciaHashed(hph.accountKeyLen, ctx)
+	// Disable deferred updates for sub-tries since they fold directly
+	// and their deferred updates would never be applied
+	subTrie.branchEncoder.SetDeferUpdates(false)
 
 	subTrie.mountTo(hph, forNibble)
 	return subTrie
@@ -127,6 +130,7 @@ func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext) *HexPatricia
 	}
 
 	hph.branchEncoder.setMetrics(hph.metrics)
+	hph.branchEncoder.SetDeferUpdates(true) // Enable deferred branch updates by default
 	return hph
 }
 
@@ -1664,12 +1668,25 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 	return tr, nil
 }
 
+// readBranchAndCheckForFlushing reads a branch from ctx, flushing deferred updates first if the prefix is pending.
+// This ensures we read fresh data when a prefix has been modified but not yet written.
+func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]byte, kv.Step, error) {
+	be := hph.branchEncoder
+	if be.DeferUpdatesEnabled() && be.HasPendingPrefix(prefix) {
+		if err := be.ApplyDeferredUpdates(16, hph.ctx.PutBranch); err != nil {
+			return nil, 0, err
+		}
+		be.ClearDeferred()
+	}
+	return hph.branchFromCacheOrDB(prefix)
+}
+
 // unfoldBranchNode returns true if unfolding has been done
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bool) error {
 	key := HexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 
-	branchData, step, err := hph.branchFromCacheOrDB(key)
+	branchData, step, err := hph.readBranchAndCheckForFlushing(key)
 	if err != nil {
 		return err
 	}
@@ -2112,18 +2129,57 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		}
 
 		b := [...]byte{0x80}
-		cellGetter := hph.createCellGetter(b[:], updateKey, row, depth)
-		lastNibble, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter)
-		if err != nil {
-			return fmt.Errorf("failed to encode branch update: %w", err)
-		}
 
-		for i := lastNibble; i < 17; i++ {
-			if _, err := hph.keccak2.Write(b[:]); err != nil {
-				return err
+		if hph.branchEncoder.DeferUpdatesEnabled() {
+			// Deferred path: compute cell hashes and feed keccak2, but defer EncodeBranch
+			for bitset, lastNib := hph.afterMap[row], 0; ; {
+				if bitset == 0 {
+					// Write remaining empty cells to keccak2
+					for i := lastNib; i < 17; i++ {
+						if _, err := hph.keccak2.Write(b[:]); err != nil {
+							return err
+						}
+					}
+					break
+				}
+				bit := bitset & -bitset
+				nibble := bits.TrailingZeros16(bit)
+				// Write empty cells before this nibble
+				for i := lastNib; i < nibble; i++ {
+					if _, err := hph.keccak2.Write(b[:]); err != nil {
+						return err
+					}
+				}
+				lastNib = nibble + 1
+
+				cell := &hph.grid[row][nibble]
+				cellHash, err := hph.computeCellHash(cell, depth, hph.hashAuxBuffer[:0])
+				if err != nil {
+					return err
+				}
+				if _, err := hph.keccak2.Write(cellHash); err != nil {
+					return err
+				}
+				bitset ^= bit
 			}
-			if hph.trace {
-				fmt.Printf("  %x: empty(%d, %x, depth=%d)\n", i, row, i, depth)
+			// Defer the branch encoding
+			if err := hph.branchEncoder.CollectDeferredUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], &hph.grid[row], depth); err != nil {
+				return fmt.Errorf("failed to collect deferred branch update: %w", err)
+			}
+		} else {
+			// Normal path: EncodeBranch with cellGetter that feeds keccak2
+			cellGetter := hph.createCellGetter(b[:], updateKey, row, depth)
+			lastNibble, err := hph.branchEncoder.CollectUpdate(hph.ctx, updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter)
+			if err != nil {
+				return fmt.Errorf("failed to encode branch update: %w", err)
+			}
+			for i := lastNibble; i < 17; i++ {
+				if _, err := hph.keccak2.Write(b[:]); err != nil {
+					return err
+				}
+				if hph.trace {
+					fmt.Printf("  %x: empty(%d, %x, depth=%d)\n", i, row, i, depth)
+				}
 			}
 		}
 		upCell.extLen = depth - upDepth - 1
@@ -2572,6 +2628,15 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	if hph.trace {
 		fmt.Printf("root hash %x updates %d\n", rootHash, updatesCount)
 	}
+	if warmuper != nil {
+		warmuper.DrainPending()
+	}
+
+	// Apply deferred branch updates in parallel (EncodeBranch runs concurrently)
+	if err = hph.branchEncoder.ApplyDeferredUpdates(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
+		return nil, fmt.Errorf("apply deferred updates: %w", err)
+	}
+	hph.branchEncoder.ClearDeferred()
 
 	hph.metrics.CollectFileDepthStats(hph.hadToLoadL)
 	if dbg.KVReadLevelledMetrics {
@@ -2612,6 +2677,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 func (hph *HexPatriciaHashed) SetTrace(trace bool)           { hph.trace = trace }
 func (hph *HexPatriciaHashed) SetTraceDomain(trace bool)     { hph.traceDomain = trace }
 func (hph *HexPatriciaHashed) EnableWarmupCache(enable bool) { hph.enableWarmupCache = enable }
+
 func (hph *HexPatriciaHashed) GetCapture(truncate bool) []string {
 	capture := hph.capture
 	if truncate {
@@ -2627,6 +2693,12 @@ func (hph *HexPatriciaHashed) EnableCsvMetrics(filePathPrefix string) {
 }
 
 func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaTrie }
+
+// SetDeferBranchUpdates enables or disables deferred branch update collection.
+// When enabled, branch updates are collected during fold() and applied at the end of Process().
+func (hph *HexPatriciaHashed) SetDeferBranchUpdates(defer_ bool) {
+	hph.branchEncoder.SetDeferUpdates(defer_)
+}
 
 // Reset allows HexPatriciaHashed instance to be reused for the new commitment calculation
 func (hph *HexPatriciaHashed) Reset() {
