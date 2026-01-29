@@ -897,11 +897,6 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-
 	if !ok {
 		if chainConfig.Bor == nil {
 			return nil, nil
@@ -917,6 +912,11 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		}
 
 		isBorStateSyncTxn = true
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
 	}
 
 	header, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNum), tx)
