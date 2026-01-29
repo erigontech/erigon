@@ -41,7 +41,9 @@ func ListenSignals(handle func(), logger log.Logger) {
 		select {
 		case <-sigc:
 			logger.Info("Got interrupt, shutting down...")
-			go handle()
+			if handle != nil {
+				go handle()
+			}
 			for i := 10; i > 0; i-- {
 				<-sigc
 				if i > 1 {

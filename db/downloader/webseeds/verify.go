@@ -1,4 +1,4 @@
-package app
+package webseeds
 
 import (
 	"context"
@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"maps"
 	"net/http"
+	"slices"
 	"sync/atomic"
 	"unsafe"
 
@@ -15,30 +17,38 @@ import (
 	"github.com/anacrolix/generics/result"
 	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/snapcfg"
-	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 )
 
-func verifyWebseeds(cliCtx *cli.Context) (err error) {
+func Verify(
+	ctx context.Context,
+	// local, embedded, preverified etc. Perhaps this should be done exclusively by callers.
+	preverifiedFlagValue,
+	// If empty, no datadir. This may be okay depending on what preverified set is used.
+	dataDir string,
+	concurrency int,
+	targetChain g.Option[string],
+) (err error) {
+	panicif.Zero(concurrency)
 	var dirs datadir.Dirs
-	if cliCtx.IsSet(utils.DataDirFlag.Name) {
-		dirs = datadir.Open(cliCtx.String(utils.DataDirFlag.Name))
+	if dataDir != "" {
+		dirs = datadir.Open(dataDir)
 	}
-	err = handlePreverifiedFlag(cliCtx, &dirs)
+	err = snapcfg.LoadPreverified(ctx, preverifiedFlagValue, &dirs)
 	if err != nil {
 		return
 	}
 	allPreverified := snapcfg.GetAllCurrentPreverified()
-	for chain, webseeds := range snapcfg.KnownWebseeds {
-		log.Info("loaded preverified", "chain", chain, "webseeds", webseeds)
-		panicif.False(g.MapContains(allPreverified, chain))
+	chains := selectChains(targetChain, snapcfg.KnownWebseeds)
+	if len(chains) == 0 {
+		err = errors.New("no matching chains")
+		return
 	}
-	ctx := cliCtx.Context
+	log.Info("selected chains", "chains", chains)
 	httpClient := &http.Client{
 		Transport: downloader.MakeWebseedRoundTripper(),
 	}
@@ -54,17 +64,12 @@ func verifyWebseeds(cliCtx *cli.Context) (err error) {
 			"total request count", checker.totalRequestCount.Load())
 	}()
 	items, ctx := errgroup.WithContext(ctx)
-	items.SetLimit(concurrencyFlag.Get(cliCtx))
-	var targetChain g.Option[string]
-	if cliCtx.IsSet(verifyChainFlag.Name) {
-		targetChain.Set(verifyChainFlag.Get(cliCtx))
-	}
+	items.SetLimit(concurrency)
 addItems:
-	for chain, webseeds := range snapcfg.KnownWebseeds {
-		logger.Debug("maybe skip chain", "target", targetChain, "chain", chain)
-		if targetChain.Ok && targetChain.Value != chain {
-			continue
-		}
+	for _, chain := range chains {
+		// Shift left?
+		//
+		webseeds := g.MapMustGet(snapcfg.KnownWebseeds, chain)
 		var baseUrl string
 		err := errors.New("no valid webseeds")
 		for _, webseed := range webseeds {
@@ -76,6 +81,8 @@ addItems:
 		panicif.Err(err)
 		preverified := g.MapMustGet(allPreverified, chain)
 		panicif.True(preverified.Local)
+		//
+		// end shift left?
 		for _, item := range preverified.Items {
 			if checker.ctx.Err() != nil {
 				break addItems
@@ -97,6 +104,17 @@ addItems:
 		}
 	}
 	return items.Wait()
+}
+
+// Also choose a valid webseed to shift left?
+func selectChains[V any](target g.Option[string], known map[string]V) []string {
+	if !target.Ok {
+		return slices.Collect(maps.Keys(known))
+	}
+	if g.MapContains(known, target.Value) {
+		return []string{target.Value}
+	}
+	return nil
 }
 
 type webseedChecker struct {
@@ -207,6 +225,5 @@ func (me *webseedChecker) yieldHashes(r io.Reader, pieceLength int64) iter.Seq[g
 				return
 			}
 		}
-
 	}
 }
