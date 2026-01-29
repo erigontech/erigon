@@ -23,17 +23,13 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"math"
 	"path/filepath"
 	"strings"
 	"time"
 
-	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/prune"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -41,7 +37,9 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/bitmapdb"
+	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
@@ -386,15 +384,16 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 	if w.largeValues {
 		lk := len(k)
 
-		w.historyKey = append(append(w.historyKey[:0], k...), w.ii.txNumBytes[:]...)
-		historyKey := w.historyKey[:lk+8]
+		// DB key format: txNum + key (inverted from previous key + txNum)
+		w.historyKey = append(append(w.historyKey[:0], w.ii.txNumBytes[:]...), k...)
+		historyKey := w.historyKey[:8+lk]
 
 		if err := w.historyVals.Collect(historyKey, original); err != nil {
 			return err
 		}
 
 		if !w.ii.discard {
-			if err := w.ii.indexKeys.Collect(w.ii.txNumBytes[:], historyKey[:lk]); err != nil {
+			if err := w.ii.indexKeys.Collect(w.ii.txNumBytes[:], k); err != nil {
 				return err
 			}
 		}
@@ -656,7 +655,8 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 				}
 				continue
 			}
-			keyBuf = append(append(keyBuf[:0], prevKey...), numBuf...)
+			// DB key format: txNum + key (inverted)
+			keyBuf = append(append(keyBuf[:0], numBuf...), prevKey...)
 			key, val, err := c.SeekExact(keyBuf)
 			if err != nil {
 				return fmt.Errorf("seekExact %s history val [%x]: %w", h.FilenameBase, key, err)
@@ -1095,7 +1095,7 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 			return nil, err
 		}
 		defer valsC.Close()
-		mode = prune.KeyStorageMode
+		mode = prune.TxnKeyStorageMode // txNum + key format (inverted)
 
 		switch c := valsC.(type) {
 		case *mdbx2.MdbxCursor:
@@ -1160,7 +1160,7 @@ func (ht *HistoryRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 			return nil, err
 		}
 		defer valsC.Close()
-		mode = prune.KeyStorageMode
+		mode = prune.TxnKeyStorageMode // txNum + key format (inverted)
 
 		switch c := valsC.(type) {
 		case *mdbx2.MdbxCursor:
@@ -1327,15 +1327,16 @@ func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]by
 		if err != nil {
 			return nil, false, err
 		}
-		seek := make([]byte, len(key)+8)
-		copy(seek, key)
-		binary.BigEndian.PutUint64(seek[len(key):], txNum)
+		// DB key format: txNum + key (inverted)
+		seek := make([]byte, 8+len(key))
+		binary.BigEndian.PutUint64(seek, txNum)
+		copy(seek[8:], key)
 
-		kAndTxNum, val, err := c.Seek(seek)
+		txNumAndKey, val, err := c.Seek(seek)
 		if err != nil {
 			return nil, false, err
 		}
-		if kAndTxNum == nil || !bytes.Equal(kAndTxNum[:len(kAndTxNum)-8], key) {
+		if txNumAndKey == nil || !bytes.Equal(txNumAndKey[8:], key) {
 			return nil, false, nil
 		}
 		// val == []byte{}, means key was created in this txNum and doesn't exist before.
@@ -1583,28 +1584,38 @@ func (ht *HistoryRoTx) CompactRange(ctx context.Context, fromTxNum, toTxNum uint
 
 func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
 	if ht.h.HistoryLargeValues {
-		from := make([]byte, len(key)+8)
-		copy(from, key)
-		var fromTxNum uint64
+		// DB key format: txNum + key (inverted)
+		// We scan by txNum prefix and filter by key suffix
+		var from, to []byte
 		if startTxNum >= 0 {
-			fromTxNum = uint64(startTxNum)
+			from = make([]byte, 8)
+			binary.BigEndian.PutUint64(from, uint64(startTxNum))
 		}
-		binary.BigEndian.PutUint64(from[len(key):], fromTxNum)
-		to := common.Copy(from)
-		toTxNum := uint64(math.MaxUint64)
 		if endTxNum >= 0 {
-			toTxNum = uint64(endTxNum)
+			to = make([]byte, 8)
+			binary.BigEndian.PutUint64(to, uint64(endTxNum))
 		}
-		binary.BigEndian.PutUint64(to[len(key):], toTxNum)
+		// For descending order with 16-byte keys (txNum+key), Range continues while
+		// key > to (8-byte prefix). A key [txNum, key...] is > [txNum] because it's
+		// longer. To correctly exclude keys with txNum <= endTxNum (the exclusive
+		// lower bound), we use to = [endTxNum+1]. Then:
+		//   [endTxNum, key...] < [endTxNum+1] -> stop (correctly excluded)
+		//   [endTxNum+1, key...] > [endTxNum+1] -> continue (correctly included)
+		if !asc && endTxNum >= 0 {
+			binary.BigEndian.PutUint64(to, uint64(endTxNum+1))
+		}
 		it, err := roTx.Range(ht.h.ValuesTable, from, to, asc, limit)
 		if err != nil {
 			return nil, err
 		}
-		return stream.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
+		// Filter by key and extract txNum
+		return stream.TransformKV2U64(stream.FilterKV(it, func(k, v []byte) bool {
 			if len(k) < 8 {
-				return 0, fmt.Errorf("unexpected large key length %d", len(k))
+				return false
 			}
-			return binary.BigEndian.Uint64(k[len(k)-8:]), nil
+			return bytes.Equal(k[8:], key)
+		}), func(k, v []byte) (uint64, error) {
+			return binary.BigEndian.Uint64(k[:8]), nil
 		}), nil
 	}
 

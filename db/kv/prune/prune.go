@@ -57,6 +57,7 @@ const (
 	PrefixValStorageMode //TODO: change name
 	StepValueStorageMode
 	StepKeyStorageMode
+	TxnKeyStorageMode // txNum + key format (inverted from KeyStorageMode)
 )
 
 func HashSeekingPrune(
@@ -121,6 +122,12 @@ func HashSeekingPrune(
 		case KeyStorageMode:
 			//seek := make([]byte, 8, 256)
 			seek := append(bytes.Clone(key), txnm...)
+			if err := valDelCursor.Delete(seek); err != nil {
+				return err
+			}
+		case TxnKeyStorageMode:
+			// txNum + key format (inverted)
+			seek := append(bytes.Clone(txnm), key...)
 			if err := valDelCursor.Delete(seek); err != nil {
 				return err
 			}
@@ -285,6 +292,9 @@ func TableScanningPrune(
 		switch mode {
 		case KeyStorageMode:
 			return binary.BigEndian.Uint64(key[len(key)-8:])
+		case TxnKeyStorageMode:
+			// txNum is at the beginning of the key
+			return binary.BigEndian.Uint64(key[:8])
 		case PrefixValStorageMode:
 			return binary.BigEndian.Uint64(val)
 		case StepValueStorageMode:
