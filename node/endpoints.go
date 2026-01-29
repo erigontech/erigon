@@ -177,7 +177,7 @@ func CheckTimeouts(timeouts *rpccfg.HTTPTimeouts) {
 		if timeouts.IdleTimeout > 0 {
 			log.Warn("Sanitizing invalid HTTP idle timeout", "provided", timeouts.IdleTimeout, "updated", rpccfg.DefaultHTTPTimeouts.IdleTimeout)
 		} else {
-			log.Debug("Sanitizing invalid HTTP write timeout", "provided", timeouts.WriteTimeout, "updated", rpccfg.DefaultHTTPTimeouts.WriteTimeout)
+			log.Debug("Sanitizing invalid HTTP idle timeout", "provided", timeouts.IdleTimeout, "updated", rpccfg.DefaultHTTPTimeouts.IdleTimeout)
 		}
 		timeouts.IdleTimeout = rpccfg.DefaultHTTPTimeouts.IdleTimeout
 	}

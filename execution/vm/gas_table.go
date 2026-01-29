@@ -510,10 +510,8 @@ func statelessGasCallCode(evm *EVM, callContext *CallContext, availableGas uint6
 	callGas, err := calcCallGas(evm, callContext, availableGas, gas)
 
 	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
-		if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
-			fmt.Printf("%d (%d.%d) CallCode Gas: base: %d memory(%d): %d call: %d\n",
-				evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gas-memoryGas, memorySize, memoryGas, callGas)
-		}
+		fmt.Printf("%d (%d.%d) CallCode Gas: base: %d memory(%d): %d call: %d\n",
+			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gas-memoryGas, memorySize, memoryGas, callGas)
 	}
 
 	gas, overflow = math.SafeAdd(gas, callGas)
