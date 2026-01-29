@@ -177,6 +177,7 @@ func BenchmarkWriteDiffSetLarge(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
+		defer tx.Rollback()
 		if err := changeset.WriteDiffSet(tx, uint64(i), blockHash, diffSet); err != nil {
 			tx.Rollback()
 			b.Fatal(err)
