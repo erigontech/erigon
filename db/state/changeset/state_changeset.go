@@ -141,8 +141,8 @@ func serializeDiffSetBufLen(diffSet []kv.DomainEntryDiff) int {
 	ret := 1 + 9*len(dict)
 	// Write the diffSet
 	ret += 4
-	for _, diff := range diffSet {
-		ret += 4 + len(diff.Key) + 4 + len(diff.Value) + 1
+	for i := range diffSet {
+		ret += 4 + len(diffSet[i].Key) + 4 + len(diffSet[i].Value) + 1
 	}
 	return ret
 }
