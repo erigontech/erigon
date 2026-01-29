@@ -307,6 +307,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
 	cfg.Genesis = gspec
+	cfg.Prune = prune
 	if opt.stepSize != nil {
 		cfg.ErigonDBStepSize = *opt.stepSize
 	}
@@ -763,15 +764,8 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 
 	tipHash := chain.TopBlock.Hash()
 
-	status, _, lvh, err := wr.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
-
+	status, _, _, err := wr.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
 	if err != nil {
-		return err
-	}
-	if err := ms.DB.UpdateNosync(ms.Ctx, func(tx kv.RwTx) error {
-		rawdb.WriteHeadBlockHash(tx, lvh)
-		return nil
-	}); err != nil {
 		return err
 	}
 	if status != executionproto.ExecutionStatus_Success {
