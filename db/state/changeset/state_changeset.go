@@ -344,7 +344,9 @@ func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet
 				diffStats.WriteString(fmt.Sprintf("%s: %d", kv.Domain(d), diff.Len()))
 			}
 		}
-		fmt.Printf("[dbg] diffset (Block:%d) %x:%s chunkCount: %d, ser=%s, put=%s, %s\n", blockNumber, blockHash, diffStats.String(), chunkCount, took1, took2, dbg.Stack())
+		if took1 > time.Millisecond {
+			fmt.Printf("[dbg] diffset (Block:%d) %x:%s chunkCount: %d, ser=%s, put=%s, %s\n", blockNumber, blockHash, diffStats.String(), chunkCount, took1, took2, dbg.Stack())
+		}
 	}
 	return nil
 }
