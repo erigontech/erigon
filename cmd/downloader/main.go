@@ -30,11 +30,16 @@ import (
 	"strings"
 	"time"
 
+	g "github.com/anacrolix/generics"
+	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/erigontech/erigon/cmd/utils/app"
+	"github.com/erigontech/erigon/db/downloader/webseeds"
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
+	"github.com/urfave/cli/v2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
@@ -80,8 +85,7 @@ func main() {
 }
 
 var (
-	webseeds                       string
-	datadirCli, chain              string
+	chain                          string
 	filePath                       string
 	forceRebuild                   bool
 	verify                         bool
@@ -107,13 +111,19 @@ var (
 	all                  bool
 )
 
+var cobraFlagValues struct {
+	webseeds string
+	//preverifiedSource string
+	datadir string
+}
+
 func init() {
 	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 
 	withDataDir(rootCmd)
 	withChainFlag(rootCmd)
 
-	rootCmd.Flags().StringVar(&webseeds, utils.WebSeedsFlag.Name, utils.WebSeedsFlag.Value, utils.WebSeedsFlag.Usage)
+	rootCmd.Flags().StringVar(&cobraFlagValues.webseeds, utils.WebSeedsFlag.Name, utils.WebSeedsFlag.Value, utils.WebSeedsFlag.Usage)
 	rootCmd.Flags().StringVar(&natSetting, "nat", utils.NATFlag.Value, utils.NATFlag.Usage)
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
 	rootCmd.Flags().StringVar(&downloadRateStr, "torrent.download.rate", utils.TorrentDownloadRateFlag.Value, utils.TorrentDownloadRateFlag.Usage)
@@ -151,7 +161,7 @@ func init() {
 	rootCmd.AddCommand(manifestCmd)
 	manifestCmd.Flags().BoolVar(&all, "all", true, "Produce all possible .torrent files")
 
-	manifestVerifyCmd.Flags().StringVar(&webseeds, utils.WebSeedsFlag.Name, utils.WebSeedsFlag.Value, utils.WebSeedsFlag.Usage)
+	manifestVerifyCmd.Flags().StringVar(&cobraFlagValues.webseeds, utils.WebSeedsFlag.Name, utils.WebSeedsFlag.Value, utils.WebSeedsFlag.Usage)
 	manifestVerifyCmd.PersistentFlags().BoolVar(&verifyFailfast, "verify.failfast", false, "Stop on first found error. Report it and exit")
 	withChainFlag(manifestVerifyCmd)
 	rootCmd.AddCommand(manifestVerifyCmd)
@@ -166,17 +176,22 @@ func init() {
 	}
 	rootCmd.AddCommand(printTorrentHashes)
 
+	withChainFlag(&verifyWebseedCmd)
+	rootCmd.AddCommand(&verifyWebseedCmd)
+	utils.CobraFlags(&verifyWebseedCmd, []cli.Flag{&app.PreverifiedFlag})
 }
 
 func withDataDir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
-	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
-	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
+	cmd.Flags().StringVar(&cobraFlagValues.datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	panicif.Err(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
+	panicif.Err(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 }
+
 func withChainFlag(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&chain, utils.ChainFlag.Name, utils.ChainFlag.Value, utils.ChainFlag.Usage)
-	must(cmd.MarkFlagRequired(utils.ChainFlag.Name))
+	panicif.Err(cmd.MarkFlagRequired(utils.ChainFlag.Name))
 }
+
 func withFile(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&filePath, "file", "", "")
 	if err := cmd.MarkFlagFilename("file"); err != nil {
@@ -184,13 +199,8 @@ func withFile(cmd *cobra.Command) {
 	}
 }
 
-func must(err error) {
-	if err != nil {
-		panic(err)
-	}
-}
-
 var logger log.Logger
+
 var rootCmd = &cobra.Command{
 	Use:          "",
 	Short:        "snapshot downloader",
@@ -212,7 +222,7 @@ var rootCmd = &cobra.Command{
 
 func Downloader(cmd *cobra.Command, logger log.Logger) error {
 	ctx := cmd.Context()
-	dirs := datadir.New(datadirCli)
+	dirs := datadir.New(cobraFlagValues.datadir)
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return err
 	}
@@ -242,7 +252,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 		"ipv4-enabled", !disableIPV4,
 		"download.rate", downloadRateStr,
 		"upload.rate", uploadRateStr,
-		"webseed", webseeds,
+		"webseed", cobraFlagValues.webseeds,
 	)
 
 	// Warn if deprecated flag was explicitly set by user
@@ -257,7 +267,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 
 	version := "erigon: " + version.VersionWithCommit(version.GitCommit)
 
-	webseedsList := common.CliString2Array(webseeds)
+	webseedsList := common.CliString2Array(cobraFlagValues.webseeds)
 	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
 		webseedsList = append(webseedsList, known...)
 	}
@@ -375,7 +385,7 @@ var createTorrent = &cobra.Command{
 	Use:     "torrent_create",
 	Example: "go run ./cmd/downloader torrent_create --datadir=<your_datadir> --file=<relative_file_path> ",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dirs := datadir.New(datadirCli)
+		dirs := datadir.New(cobraFlagValues.datadir)
 		if err := checkChainName(cmd.Context(), dirs, chain); err != nil {
 			return err
 		}
@@ -426,6 +436,19 @@ var manifestVerifyCmd = &cobra.Command{
 	},
 }
 
+var verifyWebseedCmd = cobra.Command{
+	Use: "webseed_verify",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return webseeds.Verify(
+			cmd.Context(),
+			app.PreverifiedFlag.Value,
+			cobraFlagValues.datadir,
+			app.ConcurrencyFlag.Value,
+			g.Some(chain),
+		)
+	},
+}
+
 var torrentCat = &cobra.Command{
 	Use:     "torrent_cat",
 	Example: "go run ./cmd/downloader torrent_cat <path_to_torrent_file>",
@@ -458,7 +481,7 @@ var torrentClean = &cobra.Command{
 	Short:   "RemoveFile all .torrent files from datadir directory",
 	Example: "go run ./cmd/downloader torrent_clean --datadir=<datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		dirs := datadir.New(datadirCli)
+		dirs := datadir.New(cobraFlagValues.datadir)
 
 		logger.Info("[snapshots.webseed] processing local file etags")
 		removedTorrents := 0
@@ -509,11 +532,11 @@ var torrentMagnet = &cobra.Command{
 }
 
 func manifestVerify(ctx context.Context, logger log.Logger) error {
-	webseedsList := common.CliString2Array(webseeds)
+	webseedsList := common.CliString2Array(cobraFlagValues.webseeds)
 	if len(webseedsList) == 0 { // fallback to default if exact list not passed
 		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
 			for _, s := range known {
-				//TODO: enable validation of this buckets also. skipping to make CI useful.k
+				//TODO: enable validation of this buckets also. skipping to make CI useful.
 				if strings.Contains(s, "erigon2-v2") {
 					continue
 				}
@@ -543,20 +566,17 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 			continue
 		}
 
-		if strings.HasPrefix(webseed, "v1:") {
-			withoutVersionPrefix := webseed[3:]
-			if !strings.HasPrefix(withoutVersionPrefix, "https:") {
-				continue
-			}
-			uri, err := url.ParseRequestURI(withoutVersionPrefix)
-			if err != nil {
-				log.Warn("[webseed] can't parse url", "err", err, "url", withoutVersionPrefix)
-				continue
-			}
-			webseedHttpProviders = append(webseedHttpProviders, uri)
-		} else {
+		withoutVersionPrefix, err := snapcfg.WebseedToUrl(webseed)
+		if err != nil {
+			log.Warn("[webseed] skipping webseed", "webseed", webseed, "err", err)
 			continue
 		}
+		uri, err := url.ParseRequestURI(withoutVersionPrefix)
+		if err != nil {
+			log.Warn("[webseed] can't parse url", "err", err, "url", withoutVersionPrefix)
+			continue
+		}
+		webseedHttpProviders = append(webseedHttpProviders, uri)
 	}
 	if len(webseedFileProviders) > 0 {
 		logger.Warn("file providers are not supported yet", "fileProviders", webseedFileProviders)
@@ -567,7 +587,7 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 }
 
 func manifest(ctx context.Context, logger log.Logger) error {
-	dirs := datadir.New(datadirCli)
+	dirs := datadir.New(cobraFlagValues.datadir)
 
 	files, err := downloader.SeedableFiles(dirs, chain, true)
 	if err != nil {
@@ -611,7 +631,7 @@ func manifest(ctx context.Context, logger log.Logger) error {
 }
 
 func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
-	dirs := datadir.New(datadirCli)
+	dirs := datadir.New(cobraFlagValues.datadir)
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return err
 	}
