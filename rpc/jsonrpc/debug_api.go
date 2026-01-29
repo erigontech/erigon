@@ -590,7 +590,7 @@ func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.H
 	}
 
 	if !ok {
-		return nil, fmt.Errorf("transaction not found: %v", txnHash)
+		return nil, nil
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)

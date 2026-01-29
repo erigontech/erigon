@@ -290,7 +290,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 
 	blockNumber, _, _, err := rpchelper.GetBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
-		return nil, err
+		return nil, nil
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
