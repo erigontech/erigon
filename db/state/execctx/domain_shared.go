@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -535,4 +536,40 @@ func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
 
 func (sd *SharedDomains) EnableWarmupCache(enable bool) {
 	sd.sdCtx.EnableWarmupCache(enable)
+}
+
+// TouchChangedKeysFromHistory touches the changed keys in the commitment trie by reading the historical updates.
+func (sd *SharedDomains) TouchChangedKeysFromHistory(tx kv.TemporalTx, fromTxNum, toTxNum uint64) (int, int, error) {
+	var accountChanges, storageChanges int
+	var err error
+	accountChanges, err = sd.touchChangedKeys(tx, kv.AccountsDomain, fromTxNum, toTxNum)
+	if err != nil {
+		return accountChanges, storageChanges, err
+	}
+	storageChanges, err = sd.touchChangedKeys(tx, kv.StorageDomain, fromTxNum, toTxNum)
+	if err != nil {
+		return accountChanges, storageChanges, err
+	}
+	return accountChanges, storageChanges, err
+}
+
+// touchChangedKeys retrieves the stream of changed keys for the specified domain in [fromTxNum, toTxNum) range and
+// touches them onto the commitment trie.
+func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64) (int, error) {
+	changes := 0
+	it, err := tx.HistoryRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
+	if err != nil {
+		return changes, err
+	}
+	defer it.Close()
+	var k []byte
+	for it.HasNext() {
+		k, _, err = it.Next()
+		if err != nil {
+			return changes, err
+		}
+		sd.GetCommitmentContext().TouchKey(d, string(k), nil)
+		changes++
+	}
+	return changes, nil
 }
