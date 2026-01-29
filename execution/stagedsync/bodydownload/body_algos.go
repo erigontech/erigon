@@ -305,7 +305,6 @@ Loop:
 				undelivered++
 				continue
 			}
-			//deliveredNums = append(deliveredNums, blockNum)
 			if req, ok := bd.requests[blockNum]; ok {
 				for _, blockNum := range req.BlockNums {
 					toClean[blockNum] = struct{}{}
@@ -319,18 +318,13 @@ Loop:
 			dataflow.BlockBodyDownloadStates.AddChange(blockNum, dataflow.BlockBodyReceived)
 		}
 		// Clean up the requests
-		//var clearedNums []uint64
 		for blockNum := range toClean {
 			delete(bd.requests, blockNum)
 			if !bd.delivered.Contains(blockNum) {
 				// Delivery was requested but was skipped due to the limitation on the size of the response
 				dataflow.BlockBodyDownloadStates.AddChange(blockNum, dataflow.BlockBodySkipped)
 			}
-			//clearedNums = append(clearedNums, blockNum)
 		}
-		//sort.Slice(deliveredNums, func(i, j int) bool { return deliveredNums[i] < deliveredNums[j] })
-		//sort.Slice(clearedNums, func(i, j int) bool { return clearedNums[i] < clearedNums[j] })
-		//log.Debug("Delivered", "blockNums", fmt.Sprintf("%d", deliveredNums), "clearedNums", fmt.Sprintf("%d", clearedNums))
 		total := delivered + undelivered
 		if total > 0 {
 			// Approximate numbers
