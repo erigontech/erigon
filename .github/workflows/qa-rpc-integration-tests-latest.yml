@@ -36,7 +36,7 @@ env:
 
 jobs:
   setup:
-    name: Setup benchmark run
+    name: Setup RPC Integ Test Latest
     runs-on: [self-hosted, qa]
     permissions:
       contents: read
