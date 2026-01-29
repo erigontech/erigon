@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"golang.org/x/crypto/sha3"
@@ -401,17 +400,11 @@ func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader
 
 var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
 
-func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, h *types.Header, isMining bool, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
-	if gasUsed != h.GasUsed {
-		var txgas strings.Builder
-		sep := ""
-		for _, receipt := range receipts {
-			txgas.WriteString(fmt.Sprintf("%s%d=%d", sep, receipt.TransactionIndex, receipt.GasUsed))
-			sep = ", "
-		}
-		logger.Warn("gas used mismatch", "block", h.Number.Uint64(), "header", h.GasUsed, "execution", gasUsed, "txgas", txgas.String())
+func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, h *types.Header, isMining bool, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
+	if blockGasUsed != h.GasUsed {
+		logger.Warn("gas used mismatch", "block", h.Number.Uint64(), "header", h.GasUsed, "execution", blockGasUsed)
 		return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x",
-			gasUsed, h.GasUsed, h.Number.Uint64(), h.Hash())
+			blockGasUsed, h.GasUsed, h.Number.Uint64(), h.Hash())
 	}
 
 	if h.BlobGasUsed != nil && blobGasUsed != *h.BlobGasUsed {

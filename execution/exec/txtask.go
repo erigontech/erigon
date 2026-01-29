@@ -638,6 +638,7 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	}
 
 	result.ExecutionResult.ReceiptGasUsed = gasUsed
+	result.ExecutionResult.BlockGasUsed = gasUsed
 	// Update the state with pending changes
 	ibs.SoftFinalise()
 	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
