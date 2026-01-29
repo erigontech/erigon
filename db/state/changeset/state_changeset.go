@@ -80,6 +80,7 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 	}
 	return ret
 }
+
 func serializeDiffSetBufLen(diffSet []kv.DomainEntryDiff) int {
 	// Write a small dictionary for prevStepBytes
 	dict := make(map[string]byte)
