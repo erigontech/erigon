@@ -2137,7 +2137,7 @@ func CobraFlags(cmd *cobra.Command, urfaveCliFlagsLists ...[]cli.Flag) {
 			case *cli.UintFlag:
 				flags.Uint(f.Name, f.Value, f.Usage)
 			case *cli.StringFlag:
-				flags.String(f.Name, f.Value, f.Usage)
+				flags.StringVar(&f.Value, f.Name, f.Value, f.Usage)
 			case *cli.StringSliceFlag:
 				var val []string
 				if f.Value != nil {
