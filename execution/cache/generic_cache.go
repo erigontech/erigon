@@ -34,47 +34,52 @@ const (
 )
 
 // GenericCache is a bounded concurrent cache for key-value data.
-type GenericCache struct {
-	data        *maphash.Map[[]byte]
+type GenericCache[T any] struct {
+	data        *maphash.Map[T]
 	capacityB   datasize.ByteSize
 	currentSize atomic.Int64
 	blockHash   common.Hash
 	mu          sync.RWMutex
 	hits        atomic.Uint64
 	misses      atomic.Uint64
+	sizeFunc    func(T) int // calculates size of value in bytes
 }
 
 // NewGenericCache creates a new GenericCache with the specified byte capacity.
-func NewGenericCache(capacityBytes datasize.ByteSize) *GenericCache {
-	return &GenericCache{
-		data:      maphash.NewMap[[]byte](),
+func NewGenericCache[T any](capacityBytes datasize.ByteSize, sizeFunc func(T) int) *GenericCache[T] {
+	return &GenericCache[T]{
+		data:      maphash.NewMap[T](),
 		capacityB: capacityBytes,
+		sizeFunc:  sizeFunc,
 	}
 }
 
+// NewBytesCache creates a new GenericCache for []byte values.
+func NewBytesCache(capacityBytes datasize.ByteSize) *GenericCache[[]byte] {
+	return NewGenericCache[[]byte](capacityBytes, func(v []byte) int { return len(v) })
+}
+
 // Get retrieves data for the given key.
-func (c *GenericCache) Get(key []byte) ([]byte, bool) {
+func (c *GenericCache[T]) Get(key []byte) (T, bool) {
 	value, ok := c.data.Get(key)
 	if !ok {
 		c.misses.Add(1)
-		return nil, false
+		var zero T
+		return zero, false
 	}
 	c.hits.Add(1)
 	return value, true
 }
 
 // Put stores data for the given key.
-func (c *GenericCache) Put(key []byte, value []byte) {
-	entrySize := int64(len(key) + len(value))
+func (c *GenericCache[T]) Put(key []byte, value T) {
+	entrySize := int64(len(key) + c.sizeFunc(value))
 
 	// Check if key already exists
 	if existing, ok := c.data.Get(key); ok {
-		oldSize := int64(len(key) + len(existing))
+		oldSize := int64(len(key) + c.sizeFunc(existing))
 		sizeDiff := entrySize - oldSize
-
-		// Always allocate a new slice to avoid modifying shared backing arrays.
-		// External code (like diffset) may hold references to the old slice.
-		c.data.Set(key, common.Copy(value))
+		c.data.Set(key, value)
 		c.currentSize.Add(sizeDiff)
 		return
 	}
@@ -84,41 +89,41 @@ func (c *GenericCache) Put(key []byte, value []byte) {
 		return
 	}
 
-	c.data.Set(key, common.Copy(value))
+	c.data.Set(key, value)
 	c.currentSize.Add(entrySize)
 }
 
 // Delete removes the data for the given key.
-func (c *GenericCache) Delete(key []byte) {
+func (c *GenericCache[T]) Delete(key []byte) {
 	if existing, ok := c.data.Get(key); ok {
-		entrySize := int64(len(key) + len(existing))
+		entrySize := int64(len(key) + c.sizeFunc(existing))
 		c.data.Delete(key)
 		c.currentSize.Add(-entrySize)
 	}
 }
 
 // Clear removes all entries from the cache.
-func (c *GenericCache) Clear() {
+func (c *GenericCache[T]) Clear() {
 	c.data.Clear()
 	c.currentSize.Store(0)
 }
 
 // GetBlockHash returns the hash of the last block processed by the cache.
-func (c *GenericCache) GetBlockHash() common.Hash {
+func (c *GenericCache[T]) GetBlockHash() common.Hash {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.blockHash
 }
 
 // SetBlockHash sets the hash of the current block being processed.
-func (c *GenericCache) SetBlockHash(hash common.Hash) {
+func (c *GenericCache[T]) SetBlockHash(hash common.Hash) {
 	c.mu.Lock()
 	c.blockHash = hash
 	c.mu.Unlock()
 }
 
 // ValidateAndPrepare checks if the given parentHash matches the cache's current blockHash.
-func (c *GenericCache) ValidateAndPrepare(parentHash common.Hash, incomingBlockHash common.Hash) bool {
+func (c *GenericCache[T]) ValidateAndPrepare(parentHash common.Hash, incomingBlockHash common.Hash) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -141,7 +146,7 @@ func (c *GenericCache) ValidateAndPrepare(parentHash common.Hash, incomingBlockH
 }
 
 // ClearWithHash clears the cache and sets the block hash.
-func (c *GenericCache) ClearWithHash(hash common.Hash) {
+func (c *GenericCache[T]) ClearWithHash(hash common.Hash) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.data.Clear()
@@ -150,22 +155,22 @@ func (c *GenericCache) ClearWithHash(hash common.Hash) {
 }
 
 // Len returns the number of entries in the cache.
-func (c *GenericCache) Len() int {
+func (c *GenericCache[T]) Len() int {
 	return c.data.Len()
 }
 
 // SizeBytes returns the current size of the cache in bytes.
-func (c *GenericCache) SizeBytes() int64 {
+func (c *GenericCache[T]) SizeBytes() int64 {
 	return c.currentSize.Load()
 }
 
 // CapacityBytes returns the capacity of the cache in bytes.
-func (c *GenericCache) CapacityBytes() datasize.ByteSize {
+func (c *GenericCache[T]) CapacityBytes() datasize.ByteSize {
 	return c.capacityB
 }
 
 // PrintStatsAndReset prints cache statistics and resets counters.
-func (c *GenericCache) PrintStatsAndReset(name string) {
+func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 	hits := c.hits.Swap(0)
 	misses := c.misses.Swap(0)
 	total := hits + misses

@@ -20,11 +20,23 @@
 package vm
 
 import (
-	lru "github.com/hashicorp/golang-lru/v2"
+	"unsafe"
+
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+// codeHashToBytes converts a CodeHash to []byte without allocation using unsafe.
+// SAFETY: The returned slice MUST NOT be modified - it points to interned memory
+// shared by all Handles with the same value. Safe for read-only use (cache keys).
+// Relies on unique.Handle[T] layout: struct { value *T }
+func codeHashToBytes(h accounts.CodeHash) []byte {
+	ptr := *(*unsafe.Pointer)(unsafe.Pointer(&h))
+	return unsafe.Slice((*byte)(ptr), 32)
+}
 
 // AccountRef is a reference to an account address.
 //
@@ -53,7 +65,8 @@ type Contract struct {
 	value uint256.Int
 }
 
-var jumpDestCache, _ = lru.New[accounts.CodeHash, bitvec](256)
+// around 64MB cache in the worst case.
+var jumpDestCache = cache.NewGenericCache[bitvec](64*datasize.MB, func(v bitvec) int { return len(v) })
 
 // NewContract returns a new contract environment for the execution of EVM.
 func NewContract(caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, value uint256.Int) *Contract {
@@ -88,7 +101,7 @@ func (c *Contract) isCode(udest uint64) bool {
 	}
 
 	if !c.CodeHash.IsZero() {
-		if analysis, ok := jumpDestCache.Get(c.CodeHash); ok {
+		if analysis, ok := jumpDestCache.Get(codeHashToBytes(c.CodeHash)); ok {
 			c.analysis = analysis
 			return c.analysis.codeSegment(udest)
 		}
@@ -97,7 +110,7 @@ func (c *Contract) isCode(udest uint64) bool {
 	c.analysis = codeBitmap(c.Code)
 
 	if !c.CodeHash.IsZero() {
-		jumpDestCache.Add(c.CodeHash, c.analysis)
+		jumpDestCache.Put(codeHashToBytes(c.CodeHash), c.analysis)
 	}
 
 	return c.analysis.codeSegment(udest)

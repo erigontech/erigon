@@ -37,8 +37,8 @@ type StateCache struct {
 // NewStateCache creates a new StateCache with the specified byte capacities.
 func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.ByteSize) *StateCache {
 	sc := &StateCache{}
-	sc.caches[kv.AccountsDomain] = NewGenericCache(accountBytes)
-	sc.caches[kv.StorageDomain] = NewGenericCache(storageBytes)
+	sc.caches[kv.AccountsDomain] = NewBytesCache(accountBytes)
+	sc.caches[kv.StorageDomain] = NewBytesCache(storageBytes)
 	sc.caches[kv.CodeDomain] = NewCodeCache(codeBytes, addrBytes)
 	return sc
 }
@@ -126,10 +126,10 @@ func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s)
 
 // PrintStatsAndReset prints cache statistics for all domains and resets counters.
 func (c *StateCache) PrintStatsAndReset() {
-	if acc, ok := c.caches[kv.AccountsDomain].(*GenericCache); ok {
+	if acc, ok := c.caches[kv.AccountsDomain].(*GenericCache[[]byte]); ok {
 		acc.PrintStatsAndReset("Account")
 	}
-	if stor, ok := c.caches[kv.StorageDomain].(*GenericCache); ok {
+	if stor, ok := c.caches[kv.StorageDomain].(*GenericCache[[]byte]); ok {
 		stor.PrintStatsAndReset("Storage")
 	}
 	if code, ok := c.caches[kv.CodeDomain].(*CodeCache); ok {
