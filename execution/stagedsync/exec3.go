@@ -153,11 +153,9 @@ func ExecV3(ctx context.Context,
 
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if !inMemExec && !isMining {
-		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	} else {
 		agg.SetCompressWorkers(1)
-		agg.SetCollateAndBuildWorkers(1)
 	}
 
 	var err error

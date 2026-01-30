@@ -113,7 +113,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, stepSize, stepsInFroz
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		ps:                     background.NewProgressSet(),
 		logger:                 logger,
-		collateAndBuildWorkers: 1,
+		collateAndBuildWorkers: int(dbg.AggCollateWorkers),
 		mergeWorkers:           1,
 
 		produce: true,
