@@ -792,7 +792,11 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
-	s := stage(sync, nil, db, stages.Execution)
+	var s *stagedsync.StageState
+	db.View(ctx, func(tx kv.Tx) error {
+		s = stage(sync, nil, db, stages.Execution)
+		return nil
+	})
 	if chainTipMode {
 		s.CurrentSyncCycle.IsFirstCycle = false
 		s.CurrentSyncCycle.IsInitialCycle = false
