@@ -314,8 +314,6 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 	}
 
 	if r.history.needMerge {
-		// Get history files from HistoryRoTx (no "garbage/overalps"), but index files not from InvertedIndexRoTx
-		// because index files may already be merged (before `kill -9`) and it means not visible in InvertedIndexRoTx
 		for _, item := range ht.files {
 			if item.startTxNum < r.history.from {
 				continue
@@ -325,13 +323,21 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 			}
 
 			historyFiles = append(historyFiles, item.src)
-			idxFile, ok := ht.h.InvertedIndex.dirtyFiles.Get(item.src)
-			if ok {
-				indexFiles = append(indexFiles, idxFile)
-			} else {
-				walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s-%s.%d-%d.efi", ht.h.InvertedIndex.FileVersion.AccessorEFI.String(), ht.h.FilenameBase, item.startTxNum/ht.stepSize, item.endTxNum/ht.stepSize)
-				return nil, nil, walkErr
+
+			found := false
+			for _, iiItem := range ht.iit.files {
+				if iiItem.startTxNum == item.startTxNum && iiItem.endTxNum == item.endTxNum {
+					indexFiles = append(indexFiles, iiItem.src)
+					found = true
+					break
+				}
 			}
+			if found {
+				continue
+			}
+
+			walkErr := fmt.Errorf("History.staticFilesInRange: required file not found: %s-%s.%d-%d.efi", ht.h.InvertedIndex.FileVersion.AccessorEFI.String(), ht.h.FilenameBase, item.startTxNum/ht.stepSize, item.endTxNum/ht.stepSize)
+			return nil, nil, walkErr
 		}
 
 		for _, f := range historyFiles {
