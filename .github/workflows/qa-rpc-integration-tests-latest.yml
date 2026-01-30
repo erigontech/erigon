@@ -262,7 +262,7 @@ jobs:
         if: always() && matrix.client == 'erigon'
         working-directory: ${{ github.workspace }}/build/bin
         env:
-          ERIGON_PID=${{ env.ERIGON_PID }}
+          ERIGON_PID: ${{ env.ERIGON_PID }}
         run: |
           # Clean up erigon process if it's still running
           if [ -n "$ERIGON_PID" ] && kill -0 $ERIGON_PID 2> /dev/null; then
