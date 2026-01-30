@@ -98,8 +98,8 @@ func retryBusy[T any](ctx context.Context, f func() (T, executionproto.Execution
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	var b backoff.BackOff
-	b = backoff.WithContext(b, ctx)
 	b = backoff.NewConstantBackOff(time.Millisecond)
+	b = backoff.WithContext(b, ctx)
 	return backoff.RetryWithData(
 		func() (T, error) {
 			r, s, err := f()
