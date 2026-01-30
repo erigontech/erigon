@@ -1119,14 +1119,14 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 // witnessStateless is a StateReader/StateWriter implementation that operates on a witness trie.
 // It's used for stateless block verification.
 type witnessStateless struct {
-	t              *trie.Trie                                   // Witness trie decoded from ExecutionWitnessResult.State
-	codeMap        map[common.Hash][]byte                       // Code hash -> bytecode
-	codeUpdates    map[common.Hash][]byte                       // Code updates during execution
-	storageWrites  map[common.Hash]map[common.Hash]uint256.Int  // addrHash -> keyHash -> value
-	storageDeletes map[common.Hash]map[common.Hash]struct{}     // addrHash -> keyHash
-	accountUpdates map[common.Hash]*accounts.Account            // addrHash -> account
-	deleted        map[common.Hash]struct{}                     // deleted accounts
-	created        map[common.Hash]struct{}                     // created contracts
+	t              *trie.Trie                                  // Witness trie decoded from ExecutionWitnessResult.State
+	codeMap        map[common.Hash][]byte                      // Code hash -> bytecode
+	codeUpdates    map[common.Hash][]byte                      // Code updates during execution
+	storageWrites  map[common.Hash]map[common.Hash]uint256.Int // addrHash -> keyHash -> value
+	storageDeletes map[common.Hash]map[common.Hash]struct{}    // addrHash -> keyHash
+	accountUpdates map[common.Hash]*accounts.Account           // addrHash -> account
+	deleted        map[common.Hash]struct{}                    // deleted accounts
+	created        map[common.Hash]struct{}                    // created contracts
 	trace          bool
 }
 
@@ -1528,12 +1528,6 @@ var _ rules.ChainReader = (*statelessChainReader)(nil)
 // verifyExecutionWitnessResult verifies the execution witness by re-executing the block statelessly.
 // It decodes the witness trie, executes all transactions, and verifies the resulting state root
 // matches the block's state root.
-//
-// NOTE: This verification is currently disabled because there's a fundamental mismatch:
-// - The witness is generated using HexPatriciaHashed (commitment trie)
-// - The verification uses trie.Trie (legacy trie) with different account encoding
-// This causes state root mismatches even when the logical state is correct.
-// TODO: Either use HexPatriciaHashed for verification, or generate witness compatible with trie.Trie
 func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config) error {
 	// Skip verification for genesis block - it has no transactions to execute
 	// but has pre-allocated accounts which would cause a state root mismatch
@@ -1545,35 +1539,6 @@ func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.B
 	if len(result.State) == 0 {
 		return nil
 	}
-
-	// Run verification in a deferred recovery block since the witness may not contain
-	// all state needed for full re-execution (e.g., contract storage reads)
-	var verifyErr error
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Debug("Execution witness verification: recovered from panic",
-					"block", block.NumberU64(),
-					"panic", r,
-					"note", "Witness may not contain all state for re-execution")
-			}
-		}()
-
-		verifyErr = doVerifyExecutionWitness(result, block, chainConfig)
-	}()
-
-	if verifyErr != nil {
-		log.Debug("Execution witness verification failed",
-			"block", block.NumberU64(),
-			"err", verifyErr,
-			"note", "This may be expected if witness doesn't contain all accessed state")
-	}
-
-	return nil
-}
-
-// doVerifyExecutionWitness performs the actual verification logic
-func doVerifyExecutionWitness(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config) error {
 	// Create stateless state from the witness - this is both reader and writer
 	stateless, err := newWitnessStateless(result)
 	if err != nil {
@@ -1646,14 +1611,7 @@ func doVerifyExecutionWitness(result *ExecutionWitnessResult, block *types.Block
 	// Verify the root matches the block's state root
 	expectedRoot := block.Root()
 	if newStateRoot != expectedRoot {
-		// Log warning but don't fail - there's a known mismatch between
-		// HexPatriciaHashed (used for witness generation) and trie.Trie (used here)
-		// which causes different encodings even for identical logical state
-		log.Warn("Execution witness verification: state root mismatch",
-			"block", block.NumberU64(),
-			"got", newStateRoot,
-			"expected", expectedRoot,
-			"note", "This may be due to trie implementation differences")
+		return fmt.Errorf("state root mismatch: got %x, expected %x", newStateRoot, expectedRoot)
 	}
 
 	return nil
