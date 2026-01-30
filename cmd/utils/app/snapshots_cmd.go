@@ -36,9 +36,11 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
+
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/db/downloader"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
@@ -53,7 +55,6 @@ import (
 	"github.com/erigontech/erigon/db/compress"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -1964,7 +1965,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 
 		t := time.Now()
 		g := decompressor.MakeGetter()
-		buf := make([]byte, 0, 16*etl.BufIOSize)
+		buf := make([]byte, 0, 16*length.BufIOSize)
 		for g.HasNext() {
 			buf, _ = g.Next(buf[:0])
 		}

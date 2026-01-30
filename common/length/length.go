@@ -38,3 +38,6 @@ const (
 	// Incarnation length of uint64 for contract incarnations
 	Incarnation = 8
 )
+
+// BufIOSize - 128 pages | default is 1 page | increasing over `64 * 4096` doesn't show speedup on SSD/NVMe, but show speedup in cloud drives
+const BufIOSize = 4 * 4096
