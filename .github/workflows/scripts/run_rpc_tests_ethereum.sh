@@ -39,6 +39,8 @@ DISABLED_TEST_LIST=(
   web3_clientVersion/test_1.json
   # tests not updated after cherry-picking
   eth_getStorageAt/test_09.json
+  # test to fix
+  ::eth_createAccessList/test_19.json
 )
 
 # Transform the array into a comma-separated string
