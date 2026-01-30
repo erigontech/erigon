@@ -1,15 +1,20 @@
 package eth1_test
 
 import (
+	"context"
 	"encoding/binary"
+	"errors"
 	"math/big"
 	"testing"
+	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
@@ -50,8 +55,14 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	require.Len(t, chainPack.Blocks, 1)
 	newBlock := eth1utils.ConvertBlockToRPC(chainPack.Blocks[0])
 	exec := m.Eth1ExecutionService
-	insertRes, err := exec.InsertBlocks(ctx, &executionproto.InsertBlocksRequest{
-		Blocks: []*executionproto.Block{newBlock},
+	insertRes, err := retrySyncingStatus(ctx, func() (*executionproto.InsertionResult, executionproto.ExecutionStatus, error) {
+		r, err := exec.InsertBlocks(ctx, &executionproto.InsertBlocksRequest{
+			Blocks: []*executionproto.Block{newBlock},
+		})
+		if err != nil {
+			return nil, 0, err
+		}
+		return r, r.Result, nil
 	})
 	require.NoError(t, err)
 	require.Equal(t, executionproto.ExecutionStatus_Success, insertRes.Result)
@@ -81,4 +92,25 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	root, err := extendingSd.GetCommitmentCtx().Trie().RootHash()
 	require.NoError(t, err)
 	require.Equal(t, chainPack.Headers[0].Root, common.BytesToHash(root))
+}
+
+func retrySyncingStatus[T any](ctx context.Context, f func() (T, executionproto.ExecutionStatus, error)) (T, error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	var b backoff.BackOff
+	b = backoff.WithContext(b, ctx)
+	b = backoff.NewConstantBackOff(time.Millisecond)
+	return backoff.RetryWithData(
+		func() (T, error) {
+			r, s, err := f()
+			if err != nil {
+				return generics.Zero[T](), backoff.Permanent(err)
+			}
+			if s == executionproto.ExecutionStatus_Busy {
+				return generics.Zero[T](), errors.New("retrying busy")
+			}
+			return r, nil
+		},
+		b,
+	)
 }
