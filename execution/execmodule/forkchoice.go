@@ -351,7 +351,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
 		// Run the unwind
-		if err := e.executionPipeline.RunUnwind(e.db, currentContext, tx); err != nil {
+		if err := e.executionPipeline.RunUnwind(currentContext, tx); err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
@@ -451,7 +451,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 
 	for hasMore := true; hasMore; {
-		hasMore, err = e.executionPipeline.Run(e.db, currentContext, tx, initialCycle, firstCycle)
+		hasMore, err = e.executionPipeline.Run(currentContext, tx, initialCycle, firstCycle)
 		if err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
@@ -465,7 +465,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 		if hasMore {
-			err = e.executionPipeline.RunPrune(ctx, e.db, tx, initialCycle, 500*time.Millisecond)
+			err = e.executionPipeline.RunPrune(ctx, tx, initialCycle, 500*time.Millisecond)
 			if err != nil {
 				return sendError("updateForkChoice: RunPrune after hasMore", err)
 			}
@@ -675,7 +675,7 @@ func (e *EthereumExecutionModule) runForkchoicePrune(initialCycle bool) ([]any, 
 		}
 
 		pruneTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond / 2
-		if err := e.executionPipeline.RunPrune(e.bacgroundCtx, e.db, tx, initialCycle, pruneTimeout); err != nil {
+		if err := e.executionPipeline.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout); err != nil {
 			return err
 		}
 		return nil
