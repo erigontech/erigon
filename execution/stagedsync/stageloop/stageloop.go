@@ -230,7 +230,7 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 	hasMore := true
 	for hasMore {
 		err = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+			sd, err := state.NewExecutionContext(ctx, tx, logger)
 			if err != nil {
 				return err
 			}

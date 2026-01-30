@@ -28,12 +28,9 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
@@ -76,18 +73,7 @@ func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *t
 
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
 
-	if err := mockSentry.DB.UpdateTemporal(mockSentry.Ctx, func(tx kv.TemporalRwTx) error {
-		sd, err := state.NewExecutionContext(mockSentry.Ctx, tx, log.Root())
-		if err != nil {
-			return err
-		}
-		defer sd.Close()
-		if err := stageloop.StageLoopIteration(mockSentry.Ctx, mockSentry.DB, sd, tx, mockSentry.Sync, initialCycle, firstCycle, log.New(), mockSentry.BlockReader, nil); err != nil {
-			return err
-		}
-
-		return sd.Flush(mockSentry.Ctx, tx)
-	}); err != nil {
+	if err = stageloop.StageLoopIteration(mockSentry.Ctx, mockSentry.DB, mockSentry.Sync, initialCycle, firstCycle, log.New(), mockSentry.BlockReader, nil); err != nil {
 		t.Fatal(err)
 	}
 }

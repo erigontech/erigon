@@ -78,7 +78,7 @@ func DefaultStages(ctx context.Context,
 				return SpawnBlockHashStage(s, tx, blockHashCfg, ctx, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *state.ExecutionContext, tx kv.TemporalRwTx, logger log.Logger) error {
-				return UnwindBlockHashStage(u, tx, blockHashCfg, ctx)
+				return UnwindBlockHashStage(u, tx)
 			},
 			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
 				return nil
@@ -91,7 +91,7 @@ func DefaultStages(ctx context.Context,
 				return BodiesForward(s, u, ctx, tx, bodies, test, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *state.ExecutionContext, tx kv.TemporalRwTx, logger log.Logger) error {
-				return UnwindBodiesStage(u, tx, bodies, ctx)
+				return UnwindBodiesStage(u, tx, bodies)
 			},
 			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
 				return nil
@@ -162,7 +162,7 @@ func DefaultStages(ctx context.Context,
 				return FinishForward(s, tx, finish)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *state.ExecutionContext, tx kv.TemporalRwTx, logger log.Logger) error {
-				return UnwindFinish(u, tx, finish, ctx)
+				return UnwindFinish(u, tx)
 			},
 			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
 				return nil
@@ -196,7 +196,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return SpawnBlockHashStage(s, tx, blockHashCfg, ctx, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *state.ExecutionContext, tx kv.TemporalRwTx, logger log.Logger) error {
-				return UnwindBlockHashStage(u, tx, blockHashCfg, ctx)
+				return UnwindBlockHashStage(u, tx)
 			},
 			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
 				return nil
@@ -235,7 +235,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 			ID:          stages.WitnessProcessing,
 			Description: "Process buffered witness data",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *state.ExecutionContext, tx kv.TemporalRwTx, logger log.Logger) error {
-				return SpawnStageWitnessProcessing(s, tx, *witnessProcessing, ctx, logger)
+				return SpawnStageWitnessProcessing(tx, *witnessProcessing, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *state.ExecutionContext, tx kv.TemporalRwTx, logger log.Logger) error {
 				return UnwindWitnessProcessingStage(u, s, tx, ctx, *witnessProcessing, logger)
@@ -267,7 +267,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return FinishForward(s, tx, finish)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *state.ExecutionContext, tx kv.TemporalRwTx, logger log.Logger) error {
-				return UnwindFinish(u, tx, finish, ctx)
+				return UnwindFinish(u, tx)
 			},
 			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
 				return nil

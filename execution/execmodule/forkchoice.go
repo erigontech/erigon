@@ -600,7 +600,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}, stateFlushingInParallel)
 }
 
-func (e *EthereumExecutionModule) runPostForkchoice(sd *execctx.SharedDomains, finishProgressBefore uint64, isSynced bool, initialCycle bool) error {
+func (e *EthereumExecutionModule) runPostForkchoice(sd *state.ExecutionContext, finishProgressBefore uint64, isSynced bool, initialCycle bool) error {
 	var timings []any
 	if e.fcuBackgroundCommit && sd != nil {
 		err := e.db.UpdateTemporal(e.bacgroundCtx, func(tx kv.TemporalRwTx) error {
@@ -687,7 +687,7 @@ func (e *EthereumExecutionModule) runPostForkchoice(sd *execctx.SharedDomains, f
 	return nil
 }
 
-func (e *EthereumExecutionModule) runForkchoiceCommit(sd *execctx.SharedDomains, tx kv.TemporalRwTx, finishProgressBefore uint64, isSynced bool) ([]any, error) {
+func (e *EthereumExecutionModule) runForkchoiceCommit(sd *state.ExecutionContext, tx kv.TemporalRwTx, finishProgressBefore uint64, isSynced bool) ([]any, error) {
 	var timings []any
 	flushStart := time.Now()
 	if err := sd.Flush(e.bacgroundCtx, tx); err != nil {

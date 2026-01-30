@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/node/direct"
@@ -82,18 +81,7 @@ func TestEthSubscribe(t *testing.T) {
 	highestSeenHeader := chain.TopBlock.NumberU64()
 
 	hook := stageloop.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, nil, nil, nil)
-	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
-		sd, err := state.NewExecutionContext(m.Ctx, tx, log.Root())
-		if err != nil {
-			return err
-		}
-		defer sd.Close()
-		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, logger, m.BlockReader, hook); err != nil {
-			return err
-		}
-
-		return sd.Flush(m.Ctx, tx)
-	}); err != nil {
+	if err = stageloop.StageLoopIteration(m.Ctx, m.DB, m.Sync, initialCycle, firstCycle, logger, m.BlockReader, hook); err != nil {
 		t.Fatal(err)
 	}
 
@@ -145,17 +133,7 @@ func TestEthSubscribeReceipts(t *testing.T) {
 	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
 
 	hook := stageloop.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, nil, nil, nil)
-	if err := m.DB.UpdateTemporal(m.Ctx, func(tx kv.TemporalRwTx) error {
-		sd, err := state.NewExecutionContext(m.Ctx, tx, log.Root())
-		if err != nil {
-			return err
-		}
-		defer sd.Close()
-		if err := stageloop.StageLoopIteration(m.Ctx, m.DB, sd, tx, m.Sync, initialCycle, firstCycle, logger, m.BlockReader, hook); err != nil {
-			return err
-		}
-		return sd.Flush(m.Ctx, tx)
-	}); err != nil {
+	if err = stageloop.StageLoopIteration(m.Ctx, m.DB, m.Sync, initialCycle, firstCycle, logger, m.BlockReader, hook); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("Successfully created receipt subscription with ID: %v", id)

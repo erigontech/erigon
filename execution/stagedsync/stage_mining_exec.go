@@ -270,7 +270,7 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *state.Executio
 			}
 			if unwrap, ok := tx.(txUnwrapper); ok {
 				if rwTx, ok := unwrap.UnderlyingTx().(kv.TemporalRwTx); ok {
-					tempSd, err := execctx.NewSharedDomains(ctx, rwTx, logger)
+					tempSd, err := state.NewExecutionContext(ctx, rwTx, logger)
 					if err != nil {
 						return err
 					}

@@ -154,14 +154,15 @@ func (r *LimitedHistoryStateReader) Clone(tx kv.TemporalTx, getter kv.TemporalGe
 }
 
 type CommitmentContext struct {
-	sharedDomains sd
-	updates       *commitment.Updates
-	patriciaTrie  commitment.Trie
-	justRestored  atomic.Bool // set to true when commitment trie was just restored from snapshot
-	trace         bool
-	stateReader   StateReader
-	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
-	trieWarmup    bool            // toggle for parallel trie warmup of MDBX page cache during commitment
+	updates           *Updates
+	patriciaTrie      Trie
+	justRestored      atomic.Bool // set to true when commitment trie was just restored from snapshot
+	trace             bool
+	stateReader       StateReader
+	paraTrieDB        kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
+	trieWarmup        bool            // toggle for parallel trie warmup of MDBX page cache during commitment
+	traceDomain       bool
+	commitmentCapture bool
 }
 
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in CommitmentContext.trieContext).
@@ -172,11 +173,11 @@ func (sdc *CommitmentContext) SetStateReader(stateReader StateReader) {
 // EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
 // When set, ComputeCommitment will pre-fetch Branch data in parallel before processing.
 // It requires a DB to be set by calling EnableParaTrieDB
-func (sdc *SharedDomainsCommitmentContext) EnableTrieWarmup(trieWarmup bool) {
+func (sdc *CommitmentContext) EnableTrieWarmup(trieWarmup bool) {
 	sdc.trieWarmup = trieWarmup
 }
 
-func (sdc *SharedDomainsCommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) {
+func (sdc *CommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) {
 	sdc.paraTrieDB = db
 }
 
@@ -202,11 +203,11 @@ func (sdc *CommitmentContext) SetTraceDomain(b, capture bool) []string {
 }
 
 // EnableWarmupCache enables/disables warmup cache during commitment processing.
-func (sdc *SharedDomainsCommitmentContext) EnableWarmupCache(enable bool) {
+func (sdc *CommitmentContext) EnableWarmupCache(enable bool) {
 	sdc.patriciaTrie.EnableWarmupCache(enable)
 }
 
-func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix string) {
+func (sdc *CommitmentContext) EnableCsvMetrics(filePathPrefix string) {
 	sdc.patriciaTrie.EnableCsvMetrics(filePathPrefix)
 }
 
@@ -341,7 +342,7 @@ func (sdc *CommitmentContext) ComputeCommitment(ctx context.Context, sd executio
 	if sdc.paraTrieDB != nil {
 		warmupConfig = WarmupConfig{
 			Enabled:    sdc.trieWarmup,
-			CtxFactory: sdc.trieContextFactory(ctx, sdc.paraTrieDB),
+			CtxFactory: sdc.trieContextFactory(ctx, sd, sdc.paraTrieDB, txNum),
 			NumWorkers: 16,
 			MaxDepth:   WarmupMaxDepth,
 			LogPrefix:  logPrefix,
