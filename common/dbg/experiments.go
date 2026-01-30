@@ -36,7 +36,8 @@ import (
 )
 
 var (
-	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 512)
+	MaxReorgDepth     = EnvUint("MAX_REORG_DEPTH", 512)
+	AggCollateWorkers = EnvUint("AGG_COLLATE_WORKERS", 2)
 
 	noMemstat            = EnvBool("NO_MEMSTAT", false)
 	saveHeapProfile      = EnvBool("SAVE_HEAP_PROFILE", false)
