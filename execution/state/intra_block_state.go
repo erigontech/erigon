@@ -178,8 +178,8 @@ type IntraBlockState struct {
 	storageReadCount    int64
 	codeReadDuration    time.Duration
 	codeReadCount       int64
-	version int
-	dep     int
+	version             int
+	dep                 int
 }
 
 // Create a new state from a given trie
@@ -537,9 +537,6 @@ func (sdb *IntraBlockState) TxnIndex() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
-	// Note: Code cache reads are handled at the SharedDomains level (in GetLatest).
-	// IntraBlockState only handles cache writes (SetCode, Selfdestruct, journal revert).
-
 	if sdb.versionMap == nil {
 		stateObject, err := sdb.getStateObject(addr, true)
 		if err != nil {
@@ -586,8 +583,6 @@ func (sdb *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
-	// Note: Code cache reads are handled at the SharedDomains level.
-
 	if sdb.versionMap == nil {
 		stateObject, err := sdb.getStateObject(addr, true)
 		if err != nil {

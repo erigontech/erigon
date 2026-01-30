@@ -22,10 +22,11 @@ package state
 import (
 	"fmt"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/holiman/uint256"
 )
 
 // journalEntry is a modification entry in the state change journal that can be
@@ -382,7 +383,6 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 			ch.account, obj.data.CodeHash, cs, ch.prevhash, obj.original.CodeHash, ps, ch.wasCommited)
 	}
 	obj.setCode(ch.prevhash, ch.prevcode)
-
 	if s.versionMap != nil {
 		if ch.wasCommited {
 			if trace {
