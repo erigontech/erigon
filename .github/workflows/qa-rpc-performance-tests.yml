@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   mainnet-rpc-perf-tests:
-    name: RPC Perf Test ${{ matrix.client }}
+    name: Benchmark ${{ matrix.client }}
     strategy:
       fail-fast: false
       matrix:
@@ -223,7 +223,7 @@ jobs:
               --repo $client \
               --branch $branch_name \
               --commit $commit_hash \
-              --test_name rpc-performance-test-latest-$method \
+              --test_name rpc-performance-test-$client-$method \
               --chain $CHAIN \
               --runner ${{ runner.name }} \
               --db_version $db_version \
