@@ -132,7 +132,7 @@ func (c *CodeCache) Put(addr []byte, code []byte) {
 	if c.codeSize.Load()+codeEntrySize > int64(c.codeCapacityB) {
 		return // no-op when full
 	}
-	c.hashToCode.Store(codeHash, common.Copy(code))
+	c.hashToCode.Store(codeHash, code)
 	c.codeSize.Add(codeEntrySize)
 }
 

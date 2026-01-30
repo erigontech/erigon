@@ -56,7 +56,7 @@ func NewGenericCache[T any](capacityBytes datasize.ByteSize, sizeFunc func(T) in
 
 // NewBytesCache creates a new GenericCache for []byte values.
 func NewBytesCache(capacityBytes datasize.ByteSize) *GenericCache[[]byte] {
-	return NewGenericCache[[]byte](capacityBytes, func(v []byte) int { return len(v) })
+	return NewGenericCache(capacityBytes, func(v []byte) int { return len(v) })
 }
 
 // Get retrieves data for the given key.

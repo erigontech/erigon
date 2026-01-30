@@ -69,7 +69,7 @@ func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte) {
 	if cache == nil {
 		return
 	}
-	cache.Put(key, value)
+	cache.Put(key, common.Copy(value))
 }
 
 // Delete removes the data for the given domain and key.
