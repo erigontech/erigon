@@ -119,6 +119,20 @@ func (se *StateEvents) CopyBytes() []byte {
 	return common.Copy(se.buf)
 }
 
+// CollectTo forwards the internal buffer to a collector without doing an extra allocation/copy.
+//
+// The collector is expected to copy inputs during CollectNoFlush. Flushing is done outside the StateEvents lock
+// (via FlushIfNeeded) to avoid holding the lock across potentially expensive I/O.
+func (se *StateEvents) CollectTo(collector interface {
+	CollectNoFlush(k, v []byte)
+	FlushIfNeeded() error
+}, k []byte) error {
+	se.mu.Lock()
+	collector.CollectNoFlush(k, se.buf)
+	se.mu.Unlock()
+	return collector.FlushIfNeeded()
+}
+
 func (se *StateEvents) Reset() {
 	se.mu.Lock()
 	defer se.mu.Unlock()

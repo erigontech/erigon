@@ -104,6 +104,23 @@ func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, k, v)
 }
 
+// CollectNoFlush does copy `k` and `v`, but does not flush even if the buffer is full.
+// Call FlushIfNeeded afterwards if you want the same semantics as Collect without flushing while holding external locks.
+func (c *Collector) CollectNoFlush(k, v []byte) {
+	if c.buf == nil && c.allocator != nil {
+		c.buf = c.allocator.Get()
+	}
+	c.buf.Put(k, v)
+}
+
+// FlushIfNeeded flushes the buffer if it has reached the configured flush threshold.
+func (c *Collector) FlushIfNeeded() error {
+	if c.buf == nil || !c.buf.CheckFlushSize() {
+		return nil
+	}
+	return c.flushBuffer(false)
+}
+
 func (c *Collector) LogLvl(v log.Lvl) *Collector {
 	c.logLvl = v
 	return c
