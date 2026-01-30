@@ -32,6 +32,9 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
+	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/prune"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
@@ -1742,7 +1745,7 @@ func (dt *DomainRoTx) DebugRangeLatestFromFiles(fromKey, toKey []byte, limit int
 
 // CanPruneUntil returns true if domain OR history tables can be pruned until txNum
 func (dt *DomainRoTx) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
-	canDomain, _ := dt.canPruneDomainTables(tx, untilTx)
+	canDomain, _ := dt.canScanPruneDomainTables(tx, untilTx)
 	canHistory, _ := dt.ht.canPruneUntil(tx, untilTx)
 	return canHistory || canDomain
 }
@@ -1752,9 +1755,6 @@ func (dt *DomainRoTx) canBuild(dbtx kv.Tx) bool { //nolint
 	return maxStepInFiles < dt.d.maxStepInDB(dbtx)
 }
 
-// checks if there is anything to prune in DOMAIN tables.
-// everything that aggregated is prunable.
-// history.CanPrune should be called separately because it responsible for different tables
 func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, maxStepToPrune kv.Step) {
 	if m := dt.files.EndTxNum(); m > 0 {
 		maxStepToPrune = kv.Step((m - 1) / dt.stepSize)
@@ -1784,15 +1784,49 @@ func (dt *DomainRoTx) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, 
 	return sm <= min(maxStepToPrune, untilStep) && dt.files.EndTxNum() > 0, maxStepToPrune
 }
 
+// checks if there is anything to prune in DOMAIN tables.
+// everything that aggregated is prunable.
+// history.CanPrune should be called separately because it responsible for different tables
+func (dt *DomainRoTx) canScanPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, maxStepToPrune kv.Step) {
+	if m := dt.files.EndTxNum(); m > 0 {
+		maxStepToPrune = kv.Step((m - 1) / dt.stepSize)
+	}
+
+	prg, err := GetPruneValProgress(tx, []byte(dt.d.ValuesTable))
+	if err != nil {
+		dt.d.logger.Error("get domain pruning progress", "name", dt.d.FilenameBase, "error", err)
+		return false, maxStepToPrune
+	}
+
+	done := prg.KeyProgress == prune.Done && prg.ValueProgress == prune.Done && untilTx <= prg.TxTo
+	minStep := kv.Step(dt.d.minStepInDB(tx))
+	delta := float64(max(maxStepToPrune, minStep) - min(maxStepToPrune, minStep)) // maxStep could be 0
+	switch dt.d.FilenameBase {
+	case "account":
+		mxPrunableDAcc.Set(delta)
+	case "storage":
+		mxPrunableDSto.Set(delta)
+	case "code":
+		mxPrunableDCode.Set(delta)
+	case "commitment":
+		mxPrunableDComm.Set(delta)
+	}
+	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dt.d.FilenameBase, minStep, maxStepToPrune, untilTx)
+	//println("in d", dt.d.FilenameBase, done, prg.TxTo)
+	return !done, maxStepToPrune
+}
+
 type DomainPruneStat struct {
-	MinStep kv.Step
-	MaxStep kv.Step
-	Values  uint64
-	History *InvertedIndexPruneStat
+	MinStep  kv.Step
+	MaxStep  kv.Step
+	Values   uint64
+	Dups     uint64
+	Progress prune.Progress
+	History  *InvertedIndexPruneStat
 }
 
 func (dc *DomainPruneStat) PrunedNothing() bool {
-	return dc.Values == 0 && (dc.History == nil || dc.History.PrunedNothing())
+	return dc.Values == 0 && dc.Progress == prune.Done && (dc.History == nil || dc.History.PrunedNothing())
 }
 
 func (dc *DomainPruneStat) String() (kvstr string) {
@@ -1800,7 +1834,7 @@ func (dc *DomainPruneStat) String() (kvstr string) {
 		return ""
 	}
 	if dc.Values > 0 {
-		kvstr = fmt.Sprintf("kv: %s from steps %d-%d", common.PrettyCounter(dc.Values), dc.MinStep, dc.MaxStep)
+		kvstr = fmt.Sprintf("kv: %s %s from steps %d-%d; status: %s", common.PrettyCounter(dc.Values), common.PrettyCounter(dc.Dups), dc.MinStep, dc.MaxStep, dc.Progress)
 	}
 	if dc.History != nil {
 		if kvstr != "" {
@@ -1818,6 +1852,7 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 	dc.MinStep = min(dc.MinStep, other.MinStep)
 	dc.MaxStep = max(dc.MaxStep, other.MaxStep)
 	dc.Values += other.Values
+	dc.Progress = min(dc.Progress, other.Progress)
 	if dc.History == nil {
 		if other.History != nil {
 			dc.History = other.History
@@ -1825,6 +1860,24 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 	} else {
 		dc.History.Accumulate(other.History)
 	}
+}
+
+func (dt *DomainRoTx) OldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
+	if dt.files.EndTxNum() > 0 {
+		txTo = min(txTo, dt.files.EndTxNum())
+	}
+	err = SavePruneValProgress(rwTx, dt.d.ValuesTable, &prune.Stat{
+		LastPrunedValue: nil,
+		LastPrunedKey:   nil,
+		KeyProgress:     prune.Done,
+		ValueProgress:   prune.Done,
+		TxFrom:          txFrom,
+		TxTo:            txTo,
+	})
+	if err != nil {
+		dt.d.logger.Error("prune val progress", "name", dt.name, "err", err)
+	}
+	return dt.oldPrune(ctx, rwTx, step, txFrom, txTo, limit, logEvery)
 }
 
 func (dt *DomainRoTx) Prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
@@ -1838,8 +1891,95 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	if limit == 0 {
 		limit = math.MaxUint64
 	}
+	st := time.Now()
+	defer mxPruneTookDomain.ObserveDuration(st)
+	stat = &DomainPruneStat{MinStep: math.MaxUint64}
+	if stat.History, err = dt.ht.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
+		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
+	}
+	prg, err := GetPruneValProgress(rwTx, []byte(dt.d.ValuesTable))
+	if err != nil {
+		return stat, err
+	}
+	if prg != nil && prg.TxFrom == txFrom && prg.TxTo == txTo && prg.ValueProgress == prune.Done {
+		stat.Progress = prune.Done
+		return stat, nil
+	}
+
+	defer func() {
+		dt.d.logger.Debug("scan domain pruning res", "name", dt.name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "vals", stat.Values, "spent ms", time.Since(st).Milliseconds())
+	}()
+
+	mxPruneInProgress.Inc()
+	defer mxPruneInProgress.Dec()
+	defer func(t time.Time) { mxPruneTookDomain.ObserveDuration(t) }(time.Now())
+	var valsCursor kv.PseudoDupSortRwCursor
+	var mode prune.StorageMode
+	if dt.d.LargeValues {
+		mode = prune.StepKeyStorageMode
+		valsRwCursor, err := rwTx.RwCursor(dt.d.ValuesTable)
+		if err != nil {
+			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
+		}
+		defer valsRwCursor.Close()
+
+		switch c := valsRwCursor.(type) {
+		case *mdbx2.MdbxCursor:
+			valsCursor = &mdbx2.MdbxCursorPseudoDupSort{MdbxCursor: c}
+		case *mdbx2.MdbxDupSortCursor:
+			valsCursor = valsRwCursor.(*mdbx2.MdbxDupSortCursor)
+		default:
+			return stat, fmt.Errorf("unexpected cursor type %T for table %s", valsRwCursor, dt.d.ValuesTable)
+		}
+		defer valsCursor.Close()
+	} else {
+		mode = prune.StepValueStorageMode
+		valsCursor, err = rwTx.RwCursorDupSort(dt.d.ValuesTable)
+		if err != nil {
+			return stat, fmt.Errorf("create %s domain values cursor: %w", dt.name.String(), err)
+		}
+		defer valsCursor.Close()
+	}
+
+	prg.KeyProgress = prune.Done // domains don't have key tables
+
+	pruneStat, err := prune.TableScanningPrune(ctx, "domain "+dt.name.String(), dt.d.FilenameBase, txFrom, txTo, limit, dt.stepSize,
+		logEvery, dt.d.logger, nil, valsCursor, asserts, prg, mode)
+	if err != nil {
+		return stat, err
+	}
+	defer func() {
+		pruneStat.TxFrom, pruneStat.TxTo = txFrom, txTo
+		err = SavePruneValProgress(rwTx, dt.d.ValuesTable, pruneStat)
+		if err != nil {
+			dt.d.logger.Error("prune val progress", "name", dt.name, "err", err)
+		}
+	}()
+	if pruneStat == nil {
+		return stat, errors.New("prune stat is nil")
+	}
+	mxPruneSizeDomain.AddUint64(pruneStat.PruneCountValues)
+	mxDupsPruneSizeIndex.AddUint64(pruneStat.DupsDeleted)
+
+	stat.MinStep = kv.Step(pruneStat.MinTxNum / dt.stepSize)
+	stat.MaxStep = kv.Step(pruneStat.MinTxNum / dt.stepSize)
+	stat.Values = pruneStat.PruneCountValues
+	stat.Dups = pruneStat.DupsDeleted
+	stat.Progress = pruneStat.ValueProgress
+
+	return stat, err
+}
+
+func (dt *DomainRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
+	if limit == 0 {
+		limit = math.MaxUint64
+	}
+	st := time.Now()
 
 	stat = &DomainPruneStat{MinStep: math.MaxUint64}
+	defer func() {
+		dt.d.logger.Debug("scan domain pruning res", "name", dt.name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "vals", stat.Values, "spent ms", time.Since(st).Milliseconds())
+	}()
 	if stat.History, err = dt.ht.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
 		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
@@ -1851,14 +1991,13 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		step = maxPrunableStep
 	}
 
-	st := time.Now()
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
 
 	var valsCursor kv.RwCursor
 
-	ancientDomainValsCollector := etl.NewCollectorWithAllocator(dt.name.String()+".domain.collate", dt.d.dirs.Tmp, etl.SmallSortableBuffers, dt.d.logger).LogLvl(log.LvlTrace)
-	defer ancientDomainValsCollector.Close()
+	//ancientDomainValsCollector := etl.NewCollectorWithAllocator(dt.name.String()+".domain.collate", dt.d.dirs.Tmp, etl.SmallSortableBuffers, dt.d.logger).LogLvl(log.LvlTrace)
+	//defer ancientDomainValsCollector.Close()
 
 	if dt.d.LargeValues {
 		valsCursor, err = rwTx.RwCursor(dt.d.ValuesTable)
@@ -1873,7 +2012,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	}
 	defer valsCursor.Close()
 
-	loadFunc := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+	delFunc := func(k, v []byte) error {
 		if dt.d.LargeValues {
 			return valsCursor.Delete(k)
 		}
@@ -1911,8 +2050,9 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 			continue
 		}
 		if limit == 0 {
-			if err := ancientDomainValsCollector.Load(rwTx, dt.d.ValuesTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-				return stat, fmt.Errorf("load domain values: %w", err)
+			err = delFunc(k, v)
+			if err != nil {
+				return stat, err
 			}
 			if err := SaveExecV3PruneProgress(rwTx, dt.d.ValuesTable, k); err != nil {
 				return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.name.String(), err)
@@ -1921,8 +2061,9 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		}
 		limit--
 		stat.Values++
-		if err := ancientDomainValsCollector.Collect(k, v); err != nil {
-			return nil, err
+		err = delFunc(k, v)
+		if err != nil {
+			return stat, err
 		}
 		stat.MinStep = min(stat.MinStep, is)
 		stat.MaxStep = max(stat.MaxStep, is)
@@ -1938,9 +2079,10 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		}
 	}
 	mxPruneSizeDomain.AddUint64(stat.Values)
-	if err := ancientDomainValsCollector.Load(rwTx, dt.d.ValuesTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return stat, fmt.Errorf("load domain values: %w", err)
-	}
+	//if err := ancientDomainValsCollector.Load(rwTx, dt.d.ValuesTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	//	return stat, fmt.Errorf("load domain values: %w", err)
+	//}
+
 	if err := SaveExecV3PruneProgress(rwTx, dt.d.ValuesTable, nil); err != nil {
 		return stat, fmt.Errorf("save domain pruning progress: %s, %w", dt.d.FilenameBase, err)
 	}

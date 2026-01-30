@@ -274,27 +274,6 @@ func WriteForkchoiceFinalized(db kv.Putter, hash common.Hash) {
 	}
 }
 
-// ReadRecentReorg returns true if there was a recent reorg that hasn't been validated yet.
-func ReadRecentReorg(db kv.Getter) bool {
-	data, err := db.GetOne(kv.DatabaseInfo, kv.RecentReorgKey)
-	if err != nil {
-		log.Error("ReadRecentReorg failed", "err", err)
-		return false
-	}
-	return len(data) > 0 && data[0] == 1
-}
-
-// WriteRecentReorg sets the recent reorg flag.
-func WriteRecentReorg(db kv.Putter, reorg bool) {
-	val := []byte{0}
-	if reorg {
-		val = []byte{1}
-	}
-	if err := db.Put(kv.DatabaseInfo, kv.RecentReorgKey, val); err != nil {
-		log.Crit("Failed to store recent reorg flag", "err", err)
-	}
-}
-
 // ReadHeaderRLP retrieves a block header in its raw RLP database encoding.
 func ReadHeaderRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
 	data, err := db.GetOne(kv.Headers, dbutils.HeaderKey(number, hash))
@@ -312,7 +291,7 @@ func ReadHeader(db kv.Getter, hash common.Hash, number uint64) *types.Header {
 	}
 	header := new(types.Header)
 	if err := rlp.DecodeBytes(data, header); err != nil {
-		log.Error("Invalid block header RLP", "hash", hash, "err", err)
+		log.Error("Invalid block header RLP", "hash", hash, "number", number, "err", err)
 		return nil
 	}
 	return header
@@ -361,7 +340,7 @@ func ReadHeadersByNumber(db kv.Tx, number uint64) (res []*types.Header, err erro
 		}
 		header := new(types.Header)
 		if err := rlp.DecodeBytes(v, header); err != nil {
-			return nil, fmt.Errorf("invalid block header RLP: hash=%x, err=%w", k[8:], err)
+			return nil, fmt.Errorf("invalid block header RLP: hash=%x, number=%d, err=%w", k[8:], number, err)
 		}
 		res = append(res, header)
 	}

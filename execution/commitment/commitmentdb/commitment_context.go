@@ -307,12 +307,10 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
 
 	updateCount := sdc.updates.Size()
-	if sdc.trace {
-		start := time.Now()
-		defer func() {
-			log.Trace("ComputeCommitment", "block", blockNum, "keys", common.PrettyCounter(updateCount), "mode", sdc.updates.Mode(), "spent", time.Since(start))
-		}()
-	}
+	start := time.Now()
+	defer func() {
+		log.Debug("[commitment] processed", "block", blockNum, "txNum", txNum, "keys", common.PrettyCounter(updateCount), "mode", sdc.updates.Mode(), "spent", time.Since(start))
+	}()
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
 		return rootHash, err
@@ -403,6 +401,10 @@ func (e *errorTrieContext) Account(plainKey []byte) (*commitment.Update, error) 
 
 func (e *errorTrieContext) Storage(plainKey []byte) (*commitment.Update, error) {
 	return nil, e.err
+}
+
+func (e *errorTrieContext) TxNum() uint64 {
+	return 0
 }
 
 // by that key stored latest root hash and tree state
@@ -647,6 +649,10 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, p
 	//}
 
 	return sdc.putter.DomainPut(kv.CommitmentDomain, prefix, data, sdc.txNum, prevData, prevStep)
+}
+
+func (sdc *TrieContext) TxNum() uint64 {
+	return sdc.txNum
 }
 
 // readDomain reads data from domain, dereferences key and returns encoded value and step.

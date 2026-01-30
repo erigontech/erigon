@@ -145,9 +145,11 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, sd *execctx.Sha
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	start := time.Now()
+
 	// Flush changes to db.
 	if fv.sharedDom != nil {
 		sd.Merge(fv.sharedDom)
+
 		_, err := sd.ComputeCommitment(ctx, tx, true, sd.BlockNum(), sd.TxNum(), "flush-commitment", nil)
 		if err != nil {
 			return err
@@ -354,4 +356,10 @@ func (fv *ForkValidator) GetTimings(hash common.Hash) BlockTimings {
 		return timings
 	}
 	return BlockTimings{}
+}
+
+func (fv *ForkValidator) ExtendingFork() (common.Hash, uint64, *execctx.SharedDomains) {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	return fv.extendingForkHeadHash, fv.extendingForkNumber, fv.sharedDom
 }

@@ -226,12 +226,6 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 }
 
 func (s *GrpcServer) GetBlobs(ctx context.Context, in *txpoolproto.GetBlobsRequest) (*txpoolproto.GetBlobsReply, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
 	hashes := make([]common.Hash, len(in.BlobHashes))
 	for i := range in.BlobHashes {
 		hashes[i] = gointerfaces.ConvertH256ToHash(in.BlobHashes[i])

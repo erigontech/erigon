@@ -196,9 +196,6 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		}
 	}
 
-	if err := doms.Flush(ctx, tx); err != nil {
-		return err
-	}
 	doms.ClearRam(true)
 
 	if err := tx.Commit(); err != nil {
@@ -473,9 +470,7 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync, finishStageAft
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
 	if (h.notifications.Accumulator != nil) && (currentHeader != nil) {
-		if currentHeader.Number.Sign() >= 0 {
-			h.notifications.Accumulator.StartChange(currentHeader, nil, false)
-		}
+		h.notifications.Accumulator.StartChange(currentHeader, nil, false)
 
 		pendingBaseFee := misc.CalcBaseFee(h.chainConfig, currentHeader)
 		pendingBlobFee := h.chainConfig.GetMinBlobGasPrice()
