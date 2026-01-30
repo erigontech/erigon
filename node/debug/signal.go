@@ -19,7 +19,6 @@
 package debug
 
 import (
-	"io"
 	"os"
 	"os/signal"
 	"runtime/pprof"
@@ -30,7 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-func ListenSignals(stack io.Closer, logger log.Logger) {
+func ListenSignals(handle func(), logger log.Logger) {
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, unix.SIGINT, unix.SIGTERM)
 	dbg.GetSigC(&sigc)
@@ -42,8 +41,8 @@ func ListenSignals(stack io.Closer, logger log.Logger) {
 		select {
 		case <-sigc:
 			logger.Info("Got interrupt, shutting down...")
-			if stack != nil {
-				go stack.Close()
+			if handle != nil {
+				go handle()
 			}
 			for i := 10; i > 0; i-- {
 				<-sigc
