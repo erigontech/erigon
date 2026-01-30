@@ -26,6 +26,8 @@ func (p AccountPath) String() string {
 		return "Balance"
 	case NoncePath:
 		return "Nonce"
+	case IncarnationPath:
+		return "Incarnation"
 	case CodePath:
 		return "Code"
 	case CodeHashPath:
@@ -45,6 +47,7 @@ const (
 	AddressPath AccountPath = iota
 	BalancePath
 	NoncePath
+	IncarnationPath
 	CodePath
 	CodeHashPath
 	CodeSizePath
@@ -320,7 +323,7 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 			valid = VersionInvalid
 		} else {
 			if valid = checkVersion(version, version); valid == VersionValid {
-				if path == BalancePath || path == NoncePath || path == CodeHashPath {
+				if path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath {
 					if valid = vm.validateRead(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
 						version, checkVersion, traceInvalid, tracePrefix); valid == VersionValid {
 						valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,

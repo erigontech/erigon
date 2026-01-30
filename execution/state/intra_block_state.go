@@ -945,6 +945,26 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 		}
 	}
 
+	incarnation, isource, iversion, err := versionedRead(sdb, addr, IncarnationPath, accounts.NilKey, false, account.Nonce, nil, nil)
+	if err != nil {
+		return nil, UnknownSource, UnknownVersion, err
+	}
+	if iversion.TxIndex > readVersion.TxIndex || (iversion.TxIndex == readVersion.TxIndex && iversion.Incarnation >= readVersion.Incarnation) {
+		if incarnation > account.Incarnation {
+			if account == readAccount {
+				account = &accounts.Account{}
+				account.Copy(readAccount)
+			}
+			account.Incarnation = incarnation
+		}
+		if iversion.TxIndex > version.TxIndex || (iversion.TxIndex == version.TxIndex && iversion.Incarnation > version.Incarnation) {
+			version = iversion
+			if isource != source {
+				source = isource
+			}
+		}
+	}
+
 	codeHash, csource, cversion, err := versionedRead(sdb, addr, CodeHashPath, accounts.NilKey, false, account.CodeHash, nil, nil)
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
@@ -1139,19 +1159,37 @@ func (sdb *IntraBlockState) SetIncarnation(addr accounts.Address, incarnation ui
 	}
 	if stateObject != nil {
 		stateObject.setIncarnation(incarnation)
+		versionWritten(sdb, addr, IncarnationPath, accounts.NilKey, stateObject.data.Incarnation)
 	}
 	return nil
 }
 
 func (sdb *IntraBlockState) GetIncarnation(addr accounts.Address) (uint64, error) {
-	stateObject, err := sdb.getStateObject(addr)
-	if err != nil {
-		return 0, err
+	if sdb.versionMap == nil {
+		stateObject, err := sdb.getStateObject(addr)
+		if err != nil {
+			return 0, err
+		}
+		if stateObject != nil {
+			return stateObject.data.Incarnation, nil
+		}
+		return 0, nil
 	}
-	if stateObject != nil {
-		return stateObject.data.Incarnation, nil
+
+	incarnation, _, _, err := versionedRead(sdb, addr, IncarnationPath, accounts.NilKey, false, 0,
+		func(v uint64) uint64 { return v },
+		func(s *stateObject) (uint64, error) {
+			if s != nil && !s.deleted {
+				return s.data.Incarnation, nil
+			}
+			return 0, nil
+		})
+
+	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
+		fmt.Printf("%d (%d.%d) GetIncarnation %x: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, incarnation)
 	}
-	return 0, nil
+
+	return incarnation, err
 }
 
 // Selfdestruct marks the given account as suicided.
@@ -1469,6 +1507,9 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	if contractCreation {
 		newObj.createdContract = true
 		newObj.data.Incarnation = prevInc + 1
+		if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
+			fmt.Printf("%d (%d.%d) New Incarnation %x: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, newObj.data.Incarnation)
+		}
 	} else {
 		newObj.selfdestructed = false
 	}
@@ -1476,7 +1517,9 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	// for newly created accounts these synthetic read/writes are used so that account
 	// creation clashes between trnascations get detected
 	versionRead[uint256.Int](sdb, addr, BalancePath, accounts.NilKey, source, version, newObj.Balance())
+	versionRead[uint256.Int](sdb, addr, IncarnationPath, accounts.NilKey, source, version, prevInc)
 	versionWritten(sdb, addr, BalancePath, accounts.NilKey, newObj.Balance())
+	versionWritten(sdb, addr, IncarnationPath, accounts.NilKey, newObj.data.Incarnation)
 
 	return nil
 }
@@ -2055,6 +2098,11 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 			case NoncePath:
 				nonce := val.(uint64)
 				if err := sdb.SetNonce(addr, nonce); err != nil {
+					return err
+				}
+			case IncarnationPath:
+				incarnation := val.(uint64)
+				if err := sdb.SetIncarnation(addr, incarnation); err != nil {
 					return err
 				}
 			case CodePath:
