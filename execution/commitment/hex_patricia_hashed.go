@@ -2632,11 +2632,13 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		warmuper.DrainPending()
 	}
 
-	// Apply deferred branch updates in parallel (EncodeBranch runs concurrently)
-	if err = hph.branchEncoder.ApplyDeferredUpdates(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
-		return nil, fmt.Errorf("apply deferred updates: %w", err)
+	if hph.branchEncoder.DeferUpdatesEnabled() {
+		// Apply deferred branch updates in parallel (EncodeBranch runs concurrently)
+		if err = hph.branchEncoder.ApplyDeferredUpdates(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
+			return nil, fmt.Errorf("apply deferred updates: %w", err)
+		}
+		hph.branchEncoder.ClearDeferred()
 	}
-	hph.branchEncoder.ClearDeferred()
 
 	hph.metrics.CollectFileDepthStats(hph.hadToLoadL)
 	if dbg.KVReadLevelledMetrics {
