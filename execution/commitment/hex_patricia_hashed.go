@@ -1985,7 +1985,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 	updateKind, nibblesLeftAfterUpdate := afterMapUpdateKind(hph.afterMap[row])
 	switch updateKind {
 	case updateKindDelete: // Everything deleted
-		fmt.Printf("UPDATEKINDDELETE: key=%x\n", hph.currentKey[:hph.currentKeyLen])
+		// fmt.Printf("UPDATEKINDDELETE: key=%x\n", hph.currentKey[:hph.currentKeyLen])
 		if hph.touchMap[row] != 0 {
 			if row == 0 {
 				// Root is deleted because the tree is empty
