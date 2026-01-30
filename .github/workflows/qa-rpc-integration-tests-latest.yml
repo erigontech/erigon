@@ -175,6 +175,8 @@ jobs:
 
       - name: Wait for port 8545 to be opened
         run: |
+          # Geth is expected to be pre-running for the rpc-latest-geth runner
+          # Erigon was started above
           for i in {1..30}; do
             if nc -z localhost 8545; then
               echo "Port 8545 is open"
@@ -258,9 +260,9 @@ jobs:
       - name: Stop Erigon
         if: always() && matrix.client == 'erigon'
         working-directory: ${{ github.workspace }}/build/bin
+        env:
+          ERIGON_PID=${{ env.ERIGON_PID }}
         run: |
-          # the erigon pid is stored in erigon.pid file
-          ERIGON_PID=$(cat ./erigon.pid)
           # Clean up erigon process if it's still running
           if [ -n "$ERIGON_PID" ] && kill -0 $ERIGON_PID 2> /dev/null; then
             echo "Erigon stopping..."
@@ -296,7 +298,11 @@ jobs:
       - name: Delete Erigon Testbed Data Directory
         if: always() && matrix.client == 'erigon' && steps.save_datadir_step.outputs.datadir_saved == 'true'
         run: |
-          rm -rf $ERIGON_TESTBED_DATA_DIR
+          if [ -d "$ERIGON_TESTBED_DATA_DIR" ]; then
+            rm -rf "$ERIGON_TESTBED_DATA_DIR"
+          else
+            echo "Erigon testbed data directory does not exist: $ERIGON_TESTBED_DATA_DIR"
+          fi
 
       - name: Resume the Erigon instance dedicated to db maintenance
         if: always() && matrix.client == 'erigon'
