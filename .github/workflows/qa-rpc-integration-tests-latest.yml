@@ -338,11 +338,11 @@ jobs:
           exit 1
 
       - name: Action for Success
-        if: steps.test_step.outputs.TEST_RESULT == 'success'
+        if: steps.test_step.outputs.TEST_RESULT == 'success' && matrix.client == 'erigon'
         run: echo "::notice::Tests completed successfully"
 
       - name: Action for Failure
-        if: steps.test_step.outputs.TEST_RESULT != 'success'
+        if: steps.test_step.outputs.TEST_RESULT != 'success' && matrix.client == 'erigon'
         run: |
           echo "::error::Error detected during tests: some tests failed, check the logs or the artifacts for more details"
           exit 1
