@@ -53,7 +53,12 @@ func benchmarkCategory(t *testing.T, category string) {
 	preAllocDir := filepath.Join(engineXDir, "pre_alloc")
 	engineXRunner, err := NewEngineXTestRunner(t, logger, preAllocDir)
 	require.NoError(t, err)
-	tm := new(testMatcher)
+	tm := testMatcher{
+		// we re-use the same engine for tests,
+		// and we want to do sequential new payloads
+		// without getting SYNCING responses
+		noparallel: true,
+	}
 	// if wanting to run only a particular test, use this, e.g.:
 	//tm.whitelist(".*log\\.json")
 	//tm.whitelist(".*codecopy\\.json")

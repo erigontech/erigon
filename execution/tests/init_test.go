@@ -80,6 +80,7 @@ type testMatcher struct {
 	skiploadpat  []*regexp.Regexp
 	slowpat      []*regexp.Regexp
 	whitelistpat *regexp.Regexp
+	noparallel   bool
 }
 
 type testConfig struct {
@@ -204,7 +205,9 @@ func (tm *testMatcher) walk(t *testing.T, dir string, runTest any) {
 }
 
 func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest any) {
-	t.Parallel()
+	if !tm.noparallel {
+		t.Parallel()
+	}
 	if r, _ := tm.findSkip(name); r != "" {
 		t.Skip(r)
 	}
