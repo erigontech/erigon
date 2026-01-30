@@ -584,7 +584,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		go func() {
 			defer e.semaphore.Release(1)
 			err := e.runPostForkchoice(currentContext, finishProgressBefore, isSynced, initialCycle)
-			if err != nil {
+			if err != nil && !errors.Is(err, context.Canceled) {
 				e.logger.Error("Error running background post forkchoice", "err", err)
 			}
 		}()
@@ -660,9 +660,21 @@ func (e *EthereumExecutionModule) runForkchoicePrune(initialCycle bool) ([]any, 
 	var timings []any
 	pruneStart := time.Now()
 	defer UpdateForkChoicePruneDuration(pruneStart)
-	if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
-		pruneTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond
-		if err := e.executionPipeline.RunPrune(e.bacgroundCtx, e.db, tx, initialCycle, pruneTimeout); err != nil && !errors.Is(err, context.DeadlineExceeded) {
+	if err := e.db.UpdateTemporal(e.bacgroundCtx, func(tx kv.TemporalRwTx) error {
+		// check that the current header isn't less than a step, this
+		// is mainly to prevent noise in testing on short chains with
+		// no snapshots and no need for pruning
+		currentHeader := rawdb.ReadCurrentHeader(tx)
+		if currentHeader == nil {
+			return nil
+		}
+		maxTxNum, err := rawdbv3.TxNums.Max(e.bacgroundCtx, tx, currentHeader.Number.Uint64())
+		if err != nil || maxTxNum < (tx.Debug().StepSize()*5)/4 {
+			return nil
+		}
+
+		pruneTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond / 2
+		if err := e.executionPipeline.RunPrune(e.bacgroundCtx, e.db, tx, initialCycle, pruneTimeout); err != nil {
 			return err
 		}
 		return nil

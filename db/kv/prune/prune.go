@@ -133,7 +133,7 @@ func HashSeekingPrune(
 				return fmt.Errorf("prune history %s got invalid value length: %d < 8", filenameBase, len(vv))
 			}
 			if vtx := binary.BigEndian.Uint64(vv); vtx != binary.BigEndian.Uint64(txnm) {
-				return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", filenameBase, vtx, 1132)
+				return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", filenameBase, vtx, binary.BigEndian.Uint64(txnm))
 			}
 			if err = valDelCursor.DeleteCurrent(); err != nil {
 				return err

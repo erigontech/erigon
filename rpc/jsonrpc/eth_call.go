@@ -400,10 +400,10 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 		storageKeysConverted[i].Hash.SetBytes(s)
 		storageKeysConverted[i].KeyLength = len(s)
 	}
-	return api.getProof(ctx, roTx, address, storageKeysConverted, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(requestedBlockNr)), api.db, api.logger)
+	return api.getProof(ctx, roTx, address, storageKeysConverted, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(requestedBlockNr)), api.logger)
 }
 
-func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address common.Address, storageKeys []StorageKeysInfo, blockNrOrHash rpc.BlockNumberOrHash, db kv.RoDB, logger log.Logger) (*accounts.AccProofResult, error) {
+func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address common.Address, storageKeys []StorageKeysInfo, blockNrOrHash rpc.BlockNumberOrHash, logger log.Logger) (*accounts.AccProofResult, error) {
 
 	// Output key encoding is a bit special: if the input was a 32-byte hash, it is
 	// returned as such. Otherwise, we apply the QUANTITY encoding mandated by the
