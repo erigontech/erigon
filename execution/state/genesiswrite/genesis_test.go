@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -57,7 +58,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 
 	t.Parallel()
 	logger := log.New()
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := testutil.TemporalDB(t)
 	check := func(network string) {
 		spec, err := chainspec.ChainSpecByName(network)
 		require.NoError(t, err)
@@ -112,7 +113,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 func TestCommitGenesisIdempotency(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := testutil.TemporalDB(t)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()

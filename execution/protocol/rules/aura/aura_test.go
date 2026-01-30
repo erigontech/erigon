@@ -17,6 +17,7 @@
 package aura_test
 
 import (
+	"context"
 	"math/big"
 	"strings"
 	"testing"
@@ -33,13 +34,19 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/aura"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/rulesconfig"
 )
 
 // Check that the first block of Gnosis Chain, which doesn't have any transactions,
@@ -134,4 +141,38 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 	invalidPostMergeHeader := invalidPreMergeHeader
 	invalidPostMergeHeader.Difficulty = big.NewInt(0) //zero difficulty detected as PoS
 	require.NoError(m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, invalidPostMergeHeader, nil, syscallCustom, nil, nil))
+}
+
+func TestEmptySystemAccountCreation(t *testing.T) {
+	require := require.New(t)
+	genesis := chainspec.ChiadoGenesisBlock()
+	ctx := context.Background()
+	logger := log.New()
+	db := testutil.TemporalDB(t)
+	tx, domains := testutil.TemporalTxSD(t, db)
+	config, genesisBlock, err := genesiswrite.WriteGenesisBlock(tx, genesis, nil, nil, false, datadir.New(t.TempDir()), logger)
+	require.NoError(err)
+	engine := rulesconfig.CreateRulesEngineBareBones(ctx, config, logger)
+	time := uint64(1)
+	header := builder.MakeEmptyHeader(genesisBlock.Header(), config, time, nil)
+	chain := stagedsync.NewChainReaderImpl(config, tx, nil, nil)
+	header.Difficulty = engine.CalcDifficulty(chain, time,
+		0,
+		genesisBlock.Difficulty(),
+		genesisBlock.NumberU64(),
+		genesisBlock.Hash(),
+		genesisBlock.UncleHash(),
+		genesisBlock.Header().AuRaStep,
+	)
+	header.GasLimit = 12500000
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, logger))
+	reader := state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsGetter(tx)))
+	writer := state.NewBufferedWriter(rs, nil)
+	ibs := state.New(reader)
+	err = protocol.InitializeBlockExecution(engine, chain, header, config, ibs, writer, logger, nil)
+	require.NoError(err)
+	account, err := reader.ReadAccountData(params.SystemAddress)
+	require.NoError(err)
+	require.NotNil(account)
+	require.Equal(accounts.Account{}, account)
 }
