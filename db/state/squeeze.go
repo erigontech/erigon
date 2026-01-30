@@ -237,7 +237,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 			}
 
 			ki := 0
-			var k, v []byte
+			var k, v, v2 []byte
 			for reader.HasNext() {
 				k, _ = reader.Next(k[:0])
 				v, _ = reader.Next(v[:0])
@@ -249,15 +249,17 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 				}
 
 				if !bytes.Equal(k, commitmentdb.KeyCommitmentState) {
-					v, err = vt(v, af.startTxNum, af.endTxNum)
+					v2, err = vt(v, af.startTxNum, af.endTxNum)
 					if err != nil {
 						return fmt.Errorf("failed to transform commitment value: %w", err)
 					}
+				} else {
+					v2 = v
 				}
 				if _, err = writer.Write(k); err != nil {
 					return fmt.Errorf("write key word: %w", err)
 				}
-				if _, err = writer.Write(v); err != nil {
+				if _, err = writer.Write(v2); err != nil {
 					return fmt.Errorf("write value word: %w", err)
 				}
 
