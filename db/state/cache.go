@@ -19,8 +19,7 @@ type u128 struct{ hi, lo uint64 }      //nolint
 type u192 struct{ hi, lo, ext uint64 } //nolint
 
 type DomainGetFromFileCache struct {
-	sync.RWMutex
-	*freelru.LRU[uint64, domainGetFromFileCacheItem]
+	*freelru.ShardedLRU[uint64, domainGetFromFileCacheItem]
 	enabled, trace bool
 	limit          uint32
 }
@@ -32,29 +31,25 @@ type domainGetFromFileCacheItem struct {
 }
 
 var (
-	domainGetFromFileCacheLimit   = uint32(dbg.EnvInt("D_LRU", 10_000))
+	domainGetFromFileCacheLimit   = uint32(dbg.EnvInt("D_LRU", 1_000_000))
 	domainGetFromFileCacheTrace   = dbg.EnvBool("D_LRU_TRACE", false)
 	domainGetFromFileCacheEnabled = dbg.EnvBool("D_LRU_ENABLED", true)
 )
 
 func NewDomainGetFromFileCache(limit uint32) *DomainGetFromFileCache {
-	c, err := freelru.New[uint64, domainGetFromFileCacheItem](limit, u64noHash)
+	c, err := freelru.NewSharded[uint64, domainGetFromFileCacheItem](limit, u64noHash)
 	if err != nil {
 		panic(err)
 	}
-	return &DomainGetFromFileCache{LRU: c, enabled: domainGetFromFileCacheEnabled, trace: domainGetFromFileCacheTrace, limit: limit}
+	return &DomainGetFromFileCache{ShardedLRU: c, enabled: domainGetFromFileCacheEnabled, trace: domainGetFromFileCacheTrace, limit: limit}
 }
 
 func (c *DomainGetFromFileCache) Add(key uint64, value domainGetFromFileCacheItem) (evicted bool) {
-	c.Lock()
-	defer c.Unlock()
-	return c.LRU.Add(key, value)
+	return c.ShardedLRU.Add(key, value)
 }
 
 func (c *DomainGetFromFileCache) Get(key uint64) (value domainGetFromFileCacheItem, ok bool) {
-	c.Lock() // get upates cache vars
-	defer c.Unlock()
-	return c.LRU.Get(key)
+	return c.ShardedLRU.Get(key)
 }
 
 func (c *DomainGetFromFileCache) SetTrace(v bool) { c.trace = v }
@@ -62,8 +57,6 @@ func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
 	if c == nil {
 		return
 	}
-	c.RLock()
-	defer c.RUnlock()
 	if !c.enabled || !c.trace {
 		return
 	}
@@ -72,33 +65,11 @@ func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
 }
 
 func newDomainVisible(name kv.Domain, files []visibleFile) *domainVisible {
-	d := &domainVisible{
+	return &domainVisible{
 		name:  name,
 		files: files,
+		cache: newDomainCache(name),
 	}
-	limit := domainGetFromFileCacheLimit
-	if name == kv.CodeDomain {
-		limit = limit / 10 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
-	}
-	if limit == 0 {
-		domainGetFromFileCacheEnabled = false
-	}
-	d.caches = &sync.Pool{New: func() any { return NewDomainGetFromFileCache(limit) }}
-	return d
-}
-
-func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
-	if !domainGetFromFileCacheEnabled {
-		return nil
-	}
-	return v.caches.Get().(*DomainGetFromFileCache)
-}
-func (v *domainVisible) returnGetFromFileCache(c *DomainGetFromFileCache) {
-	if c == nil {
-		return
-	}
-	c.LogStats(v.name)
-	v.caches.Put(c)
 }
 
 var (
