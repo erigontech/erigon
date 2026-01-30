@@ -57,7 +57,7 @@ jobs:
           python3 coordinated_start.py --client "geth" --run-id "${{ steps.vars.outputs.run_id }}" --chain "${{ steps.vars.outputs.network }}" --signal-creation
 
   test:
-    name: Benchmark ${{ matrix.client }}
+    name: Benchmark Latest ${{ matrix.client }}
     needs: [setup]
     strategy:
       fail-fast: false
