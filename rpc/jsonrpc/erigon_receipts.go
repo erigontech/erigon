@@ -222,7 +222,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 
 	if api.rangeLimit != 0 && (end-begin) > uint64(api.rangeLimit) {
 		return nil, fmt.Errorf("%s: %d", errExceedBlockRange, api.rangeLimit)
-        }
+	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, begin)
 	if err != nil {
