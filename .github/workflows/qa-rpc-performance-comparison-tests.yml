@@ -1,4 +1,4 @@
-name: QA - RPC Performance Comp Tests Latest
+name: QA - RPC Performance Tests Latest
 
 on:
   workflow_dispatch:
@@ -297,7 +297,7 @@ jobs:
               --repo $client \
               --branch $branch_name \
               --commit $commit_hash \
-              --test_name rpc-performance-comparison-test-latest-$method \
+              --test_name rpc-performance-test-latest-$method \
               --chain $CHAIN \
               --runner ${{ runner.name }} \
               --db_version $db_version \
