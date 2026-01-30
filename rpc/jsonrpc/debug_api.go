@@ -27,9 +27,11 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -979,9 +981,16 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		allCode[addr] = code // Modified code takes precedence
 	}
 
+	// Build codeReads map for witness generation (keyed by code hash)
+	codeReads := make(map[common.Hash]witnesstypes.CodeWithHash)
 	for _, code := range allCode {
 		if len(code) > 0 {
 			result.Codes = append(result.Codes, code)
+			codeHash := crypto.Keccak256Hash(code)
+			codeReads[codeHash] = witnesstypes.CodeWithHash{
+				Code:     code,
+				CodeHash: accounts.InternCodeHash(codeHash),
+			}
 		}
 	}
 
@@ -1049,7 +1058,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	// Generate the witness trie with all proofs
-	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, nil, "debug_executionWitness")
+	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, codeReads, "debug_executionWitness")
 	if err != nil {
 		return nil, err
 	}
