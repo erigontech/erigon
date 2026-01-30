@@ -315,16 +315,10 @@ jobs:
           python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
       - name: Find a consensus on a common time to end the benchmark
-        shell: bash
-        working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
+        if: matrix.client == 'geth'
         run: |
-          set -euo pipefail
-          echo "Wait for an agreement between Erigon and Geth to end the benchmark"
-          echo "Context:"
-          echo "  RUN_ID=${RUN_ID}"
-          # Wait for an agreement between Erigon and Geth
-          MODIFIED_RUN_ID="$RUN_ID-end"
-          python3 coordinated_start.py --client "$CLIENT" --run-id "$MODIFIED_RUN_ID" --chain "$CHAIN"
+          # Wait that erigon job terminates the rpc integration tests
+          sleep 300
 
       - name: Send an error status to the other client
         if: failure()
