@@ -168,7 +168,7 @@ func (d *Domain) kvBtAccessorFilePathMask(fromStep, toStep kv.Step) string {
 
 // maxStepInDB - return the latest available step in db (at-least 1 value in such step)
 func (d *Domain) maxStepInDB(tx kv.Tx) (lstInDb kv.Step) {
-	lstIdx, _ := kv.LastKey(tx, d.History.KeysTable)
+	lstIdx, _ := kv.LastKey(tx, d.History.EventsTable)
 	if len(lstIdx) == 0 {
 		return 0
 	}
@@ -201,7 +201,7 @@ func (d *Domain) maxStepInDBNoHistory(tx kv.Tx) (lstInDb kv.Step) {
 }
 
 func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
-	lstIdx, _ := kv.FirstKey(tx, d.History.KeysTable)
+	lstIdx, _ := kv.FirstKey(tx, d.History.EventsTable)
 	if len(lstIdx) == 0 {
 		return 0
 	}
@@ -2079,7 +2079,7 @@ func (dt *DomainRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, step kv.Step, 
 		}
 	}
 	mxPruneSizeDomain.AddUint64(stat.Values)
-	//if err := ancientDomainValsCollector.Load(rwTx, dt.d.ValuesTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	//if err := ancientDomainValsCollector.Load(rwTx, dt.d.InvIdxTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 	//	return stat, fmt.Errorf("load domain values: %w", err)
 	//}
 
@@ -2099,7 +2099,7 @@ func (dt *DomainRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 }
 
 func (dt *DomainRoTx) Tables() (res []string) {
-	return []string{dt.d.ValuesTable, dt.ht.h.ValuesTable, dt.ht.iit.ii.KeysTable, dt.ht.iit.ii.ValuesTable}
+	return []string{dt.d.ValuesTable, dt.ht.h.ValuesTable, dt.ht.iit.ii.EventsTable, dt.ht.iit.ii.InvIdxTable}
 }
 
 func (dt *DomainRoTx) Files() (res VisibleFiles) {

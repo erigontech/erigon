@@ -24,7 +24,7 @@ type DomainCfg struct {
 }
 
 func (d DomainCfg) Tables() []string {
-	return []string{d.ValuesTable, d.Hist.ValuesTable, d.Hist.IiCfg.KeysTable, d.Hist.IiCfg.ValuesTable}
+	return []string{d.ValuesTable, d.Hist.ValuesTable, d.Hist.IiCfg.EventsTable, d.Hist.IiCfg.InvIdxTable}
 }
 
 func (d DomainCfg) GetVersions() VersionTypes {
@@ -80,8 +80,8 @@ type InvIdxCfg struct {
 	FileVersion IIVersionTypes
 
 	FilenameBase string // filename base for all files of this inverted index
-	KeysTable    string // bucket name for index keys;    txnNum_u64 -> key (k+auto_increment)
-	ValuesTable  string // bucket name for index values;  k -> txnNum_u64 , Needs to be table with DupSort
+	EventsTable  string // bucket name for index keys;    txnNum_u64 -> key (k+auto_increment)
+	InvIdxTable  string // bucket name for index values;  k -> txnNum_u64 , Needs to be table with DupSort
 	Name         kv.InvertedIdx
 
 	Compression   seg.FileCompression // compression type for inverted index keys and values

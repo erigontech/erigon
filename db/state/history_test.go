@@ -370,7 +370,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 
 		require.NoError(err)
 
-		for _, table := range []string{h.KeysTable, h.ValuesTable, h.ValuesTable} {
+		for _, table := range []string{h.EventsTable, h.ValuesTable, h.ValuesTable} {
 			var cur kv.Cursor
 			cur, err = tx.Cursor(table)
 			require.NoError(err)
@@ -652,7 +652,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	hc := h.BeginFilesRo()
 	defer hc.Close()
 
-	itable, err := rwTx.CursorDupSort(hc.iit.ii.ValuesTable)
+	itable, err := rwTx.CursorDupSort(hc.iit.ii.InvIdxTable)
 	require.NoError(t, err)
 	defer itable.Close()
 	limits := 10
@@ -667,7 +667,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 		fmt.Printf("k=%x [%d] v=%x\n", k, binary.BigEndian.Uint64(k), v)
 	}
 	canHist, txTo := hc.canHashPruneUntil(rwTx, math.MaxUint64)
-	t.Logf("canPrune=%t [%s] to=%d", canHist, hc.h.KeysTable, txTo)
+	t.Logf("canPrune=%t [%s] to=%d", canHist, hc.h.EventsTable, txTo)
 
 	stat, err := hc.OldPrune(context.Background(), rwTx, 0, txTo, 50, false, logEvery)
 	require.NoError(t, err)
@@ -687,7 +687,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	require.NoError(t, err)
 	t.Logf("stat=%v", stat)
 
-	icc, err := rwTx.CursorDupSort(h.ValuesTable)
+	icc, err := rwTx.Cursor(h.ValuesTable)
 	require.NoError(t, err)
 	defer icc.Close()
 
@@ -695,7 +695,8 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 
 	k, _, err := icc.First()
 	require.NoError(t, err)
-	require.EqualValues(t, nonPruned, binary.BigEndian.Uint64(k[len(k)-8:]))
+	// With largeValues=true and txNum+key format, txNum is at the start of key
+	require.EqualValues(t, nonPruned, binary.BigEndian.Uint64(k[:8]))
 
 	// limits = 10
 
@@ -711,7 +712,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	// }
 
 	// fmt.Printf("start index table:\n")
-	itable, err = rwTx.CursorDupSort(hc.iit.ii.ValuesTable)
+	itable, err = rwTx.CursorDupSort(hc.iit.ii.InvIdxTable)
 	require.NoError(t, err)
 	defer itable.Close()
 
@@ -734,7 +735,7 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	// }
 
 	// fmt.Printf("start index keys table:\n")
-	itable, err = rwTx.CursorDupSort(hc.iit.ii.KeysTable)
+	itable, err = rwTx.CursorDupSort(hc.iit.ii.EventsTable)
 	require.NoError(t, err)
 	defer itable.Close()
 
@@ -782,7 +783,7 @@ func TestHistoryScanPruneCorrectnessWithFiles(t *testing.T) {
 	hc := h.BeginFilesRo()
 	defer hc.Close()
 
-	itable, err := rwTx.CursorDupSort(hc.iit.ii.ValuesTable)
+	itable, err := rwTx.CursorDupSort(hc.iit.ii.InvIdxTable)
 	require.NoError(t, err)
 	defer itable.Close()
 	limits := 10
@@ -797,7 +798,7 @@ func TestHistoryScanPruneCorrectnessWithFiles(t *testing.T) {
 		fmt.Printf("k=%x [%d] v=%x\n", k, binary.BigEndian.Uint64(k), v)
 	}
 	canHist, txTo := hc.canPruneUntil(rwTx, math.MaxUint64)
-	t.Logf("canPrune=%t [%s] to=%d", canHist, hc.h.KeysTable, txTo)
+	t.Logf("canPrune=%t [%s] to=%d", canHist, hc.h.EventsTable, txTo)
 
 	//TODO: figure out pretty way to do this check
 	t.Skip()
@@ -843,7 +844,7 @@ func TestHistoryScanPruneCorrectnessWithFiles(t *testing.T) {
 	// }
 
 	// fmt.Printf("start index table:\n")
-	itable, err = rwTx.CursorDupSort(hc.iit.ii.ValuesTable)
+	itable, err = rwTx.CursorDupSort(hc.iit.ii.InvIdxTable)
 	require.NoError(t, err)
 	defer itable.Close()
 
@@ -866,7 +867,7 @@ func TestHistoryScanPruneCorrectnessWithFiles(t *testing.T) {
 	// }
 
 	// fmt.Printf("start index keys table:\n")
-	itable, err = rwTx.CursorDupSort(hc.iit.ii.KeysTable)
+	itable, err = rwTx.CursorDupSort(hc.iit.ii.EventsTable)
 	require.NoError(t, err)
 	defer itable.Close()
 
@@ -909,14 +910,16 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 	binary.BigEndian.PutUint64(from[:], uint64(0))
 	binary.BigEndian.PutUint64(to[:], uint64(pruneIters)*pruneLimit)
 
-	icc, err := rwTx.CursorDupSort(h.ValuesTable)
+	// With largeValues=true and txNum+key format, txNum is at the start of key
+	icc, err := rwTx.Cursor(h.ValuesTable)
 	require.NoError(t, err)
 
 	count := 0
 	for key, _, err := icc.Seek(from[:]); key != nil; key, _, err = icc.Next() {
 		require.NoError(t, err)
 		//t.Logf("key %x\n", key)
-		if bytes.Compare(key[len(key)-8:], to[:]) >= 0 {
+		// txNum is at the beginning of the key for txNum+key format
+		if bytes.Compare(key[:8], to[:]) >= 0 {
 			break
 		}
 		count++
@@ -945,16 +948,18 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 		t.Logf("[%d] stats: %v", i, stat)
 	}
 
-	icc, err = rwTx.CursorDupSort(h.ValuesTable)
+	// With txNum+key format, txNum is at the beginning
+	icc, err = rwTx.Cursor(h.ValuesTable)
 	require.NoError(t, err)
 	defer icc.Close()
 
 	key, _, err := icc.First()
 	require.NoError(t, err)
 	require.NotNil(t, key)
-	require.EqualValues(t, pruneIters*int(pruneLimit), binary.BigEndian.Uint64(key[len(key)-8:])-1)
+	// txNum is at the start of the key for txNum+key format
+	require.EqualValues(t, pruneIters*int(pruneLimit), binary.BigEndian.Uint64(key[:8])-1)
 
-	icc, err = rwTx.CursorDupSort(h.ValuesTable)
+	icc, err = rwTx.Cursor(h.ValuesTable)
 	require.NoError(t, err)
 	defer icc.Close()
 }
@@ -981,14 +986,16 @@ func TestHistoryScanPruneCorrectness(t *testing.T) {
 	binary.BigEndian.PutUint64(from[:], uint64(0))
 	binary.BigEndian.PutUint64(to[:], uint64(pruneIters)*pruneLimit)
 
-	icc, err := rwTx.CursorDupSort(h.ValuesTable)
+	// With largeValues=true and txNum+key format, txNum is at the start of key
+	icc, err := rwTx.Cursor(h.ValuesTable)
 	require.NoError(t, err)
 
 	count := 0
 	for key, _, err := icc.Seek(from[:]); key != nil; key, _, err = icc.Next() {
 		require.NoError(t, err)
 		//t.Logf("key %x\n", key)
-		if bytes.Compare(key[len(key)-8:], to[:]) >= 0 {
+		// txNum is at the beginning of the key for txNum+key format
+		if bytes.Compare(key[:8], to[:]) >= 0 {
 			break
 		}
 		count++
@@ -1018,7 +1025,7 @@ func TestHistoryScanPruneCorrectness(t *testing.T) {
 	//	t.Logf("[%d] stats: %v", i, stat)
 	//}
 	//
-	//icc, err = rwTx.CursorDupSort(h.ValuesTable)
+	//icc, err = rwTx.CursorDupSort(h.InvIdxTable)
 	//require.NoError(t, err)
 	//defer icc.Close()
 	//
@@ -1027,7 +1034,7 @@ func TestHistoryScanPruneCorrectness(t *testing.T) {
 	//require.NotNil(t, key)
 	//require.EqualValues(t, pruneIters*int(pruneLimit), binary.BigEndian.Uint64(key[len(key)-8:])-1)
 	//
-	//icc, err = rwTx.CursorDupSort(h.ValuesTable)
+	//icc, err = rwTx.CursorDupSort(h.InvIdxTable)
 	//require.NoError(t, err)
 	//defer icc.Close()
 }

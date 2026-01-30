@@ -294,7 +294,7 @@ func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 	closeWhatNotInList(ii.dirtyFiles, fNames)
 }
 
-func (ii *InvertedIndex) Tables() []string { return []string{ii.KeysTable, ii.ValuesTable} }
+func (ii *InvertedIndex) Tables() []string { return []string{ii.EventsTable, ii.InvIdxTable} }
 
 func (ii *InvertedIndex) Close() {
 	if ii == nil {
@@ -395,8 +395,8 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIn
 		filenameBase: iit.ii.FilenameBase,
 		stepSize:     iit.stepSize,
 
-		indexKeysTable: iit.ii.KeysTable,
-		indexTable:     iit.ii.ValuesTable,
+		indexKeysTable: iit.ii.EventsTable,
+		indexTable:     iit.ii.InvIdxTable,
 	}
 	if !discard {
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
@@ -643,7 +643,7 @@ func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNu
 		to = make([]byte, 8)
 		binary.BigEndian.PutUint64(to, uint64(endTxNum))
 	}
-	it, err := roTx.RangeDupSort(iit.ii.ValuesTable, key, from, to, asc, limit)
+	it, err := roTx.RangeDupSort(iit.ii.InvIdxTable, key, from, to, asc, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -667,7 +667,7 @@ func (iit *InvertedIndexRoTx) iterateRangeOnFiles(key []byte, startTxNum, endTxN
 		key:         key,
 		startTxNum:  startTxNum,
 		endTxNum:    endTxNum,
-		indexTable:  iit.ii.ValuesTable,
+		indexTable:  iit.ii.InvIdxTable,
 		orderAscend: asc,
 		limit:       limit,
 		seq:         &multiencseq.SequenceReader{},
@@ -725,7 +725,7 @@ func (iit *InvertedIndexRoTx) CanHashPrune(tx kv.Tx) bool {
 }
 
 func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
-	stat, err := GetPruneValProgress(tx, []byte(iit.ii.ValuesTable))
+	stat, err := GetPruneValProgress(tx, []byte(iit.ii.InvIdxTable))
 	if err != nil {
 		iit.ii.logger.Warn("CanPrune GetPruneValProgress error", "err", err)
 		return iit.ii.minTxNumInDB(tx) < iit.files.EndTxNum()
@@ -822,13 +822,13 @@ func (iit *InvertedIndexRoTx) hashSeekingPrune(ctx context.Context, rwTx kv.RwTx
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
 	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
-	keysCursor, err := rwTx.RwCursorDupSort(iit.ii.KeysTable)
+	keysCursor, err := rwTx.RwCursorDupSort(iit.ii.EventsTable)
 	if err != nil {
 		return stat, fmt.Errorf("create %s keys cursor: %w", iit.ii.FilenameBase, err)
 	}
 	defer keysCursor.Close()
 	if valDelCursor == nil {
-		valDelCursor, err = rwTx.RwCursorDupSort(iit.ii.ValuesTable)
+		valDelCursor, err = rwTx.RwCursorDupSort(iit.ii.InvIdxTable)
 		if err != nil {
 			return nil, err
 		}
@@ -860,13 +860,13 @@ func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.Rw
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
 	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
-	keysCursor, err := rwTx.RwCursorDupSort(iit.ii.KeysTable)
+	keysCursor, err := rwTx.RwCursorDupSort(iit.ii.EventsTable)
 	if err != nil {
 		return stat, fmt.Errorf("create %s keys cursor: %w", iit.ii.FilenameBase, err)
 	}
 	defer keysCursor.Close()
 	if valDelCursor == nil {
-		valDelCursor, err = rwTx.RwCursorDupSort(iit.ii.ValuesTable)
+		valDelCursor, err = rwTx.RwCursorDupSort(iit.ii.InvIdxTable)
 		if err != nil {
 			return nil, err
 		}
@@ -882,7 +882,7 @@ func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.Rw
 		vtbl = *valTable
 		name = "history: " + iit.name.String()
 	} else {
-		vtbl = iit.ii.ValuesTable
+		vtbl = iit.ii.InvIdxTable
 		name = "ii: " + iit.name.String()
 	}
 
@@ -931,7 +931,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 	start := time.Now()
 	defer mxCollateTookIndex.ObserveDuration(start)
 
-	keysCursor, err := roTx.CursorDupSort(ii.KeysTable)
+	keysCursor, err := roTx.CursorDupSort(ii.EventsTable)
 	if err != nil {
 		return InvertedIndexCollation{}, fmt.Errorf("create %s keys cursor: %w", ii.FilenameBase, err)
 	}
@@ -1188,11 +1188,11 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 }
 
 func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
-	fst, _ := kv.FirstKey(tx, iit.ii.KeysTable)
+	fst, _ := kv.FirstKey(tx, iit.ii.EventsTable)
 	if len(fst) > 0 {
 		from = float64(binary.BigEndian.Uint64(fst)) / float64(iit.stepSize)
 	}
-	lst, _ := kv.LastKey(tx, iit.ii.KeysTable)
+	lst, _ := kv.LastKey(tx, iit.ii.EventsTable)
 	if len(lst) > 0 {
 		to = float64(binary.BigEndian.Uint64(lst)) / float64(iit.stepSize)
 	}
@@ -1204,7 +1204,7 @@ func (iit *InvertedIndexRoTx) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 }
 
 func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) uint64 {
-	fst, _ := kv.FirstKey(tx, ii.KeysTable)
+	fst, _ := kv.FirstKey(tx, ii.EventsTable)
 	if len(fst) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
 		return fstInDb
@@ -1213,7 +1213,7 @@ func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) uint64 {
 }
 
 func (ii *InvertedIndex) maxTxNumInDB(tx kv.Tx) uint64 {
-	lst, _ := kv.LastKey(tx, ii.KeysTable)
+	lst, _ := kv.LastKey(tx, ii.EventsTable)
 	if len(lst) > 0 {
 		lstInDb := binary.BigEndian.Uint64(lst)
 		return lstInDb
