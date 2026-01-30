@@ -201,7 +201,11 @@ jobs:
           echo "Context:"
           echo "  RUN_ID=${RUN_ID}"
           # Wait for an agreement between Erigon and Geth
-          python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$CHAIN"
+          if [ "${{ matrix.client }}" == "erigon" ]; then
+            python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$CHAIN" --deadline-timeout $TOTAL_TIME_SECONDS
+          else
+            python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$CHAIN" --deadline-timeout 3600
+          fi
 
       - name: Run RPC Performance Tests
         if: matrix.client == 'erigon'
