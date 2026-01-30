@@ -274,6 +274,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			if err != nil {
 				return nil, err
 			}
+			sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
 
 			genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, 0)
 			if err != nil {
@@ -451,6 +452,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		if err != nil {
 			return nil, err
 		}
+		sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
 		minTxNum, err = g.txNumReader.Min(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err

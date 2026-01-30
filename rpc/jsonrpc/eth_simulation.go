@@ -164,6 +164,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 	defer sharedDomains.Close()
+	sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
 
 	// Iterate over each given SimulatedBlock
 	parent := sim.base
@@ -1008,6 +1009,7 @@ func (s *simulator) computeCustomCommitmentFromStateHistory(
 		return nil, err
 	}
 	defer tsd.Close()
+	tsd.GetCommitmentContext().SetDeferBranchUpdates(false)
 
 	// We must compute genesis commitment from scratch because there's no history for block 0
 	genesis, err := rawdb.ReadGenesis(tx)
