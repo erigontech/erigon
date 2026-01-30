@@ -123,7 +123,7 @@ func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllo
 	genesis := alloc.Genesis
 	genesis.Alloc = alloc.Alloc
 	genesis.Config = forkConfig
-	engineApiClientTimeout := time.Minute
+	engineApiClientTimeout := 10 * time.Minute
 	tester := InitialiseEngineApiTester(extr.t, EngineApiTesterInitArgs{
 		Logger:                 extr.logger,
 		DataDir:                extr.t.TempDir(),

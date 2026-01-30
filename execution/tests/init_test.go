@@ -229,11 +229,7 @@ func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest any)
 		for _, key := range keys {
 			i++
 			name := name + "/" + key
-			subTestName := key
-			if len(subTestName) > 32 {
-				subTestName = fmt.Sprintf("%s_%s_%d", key[:20], key[len(key)-20:], i)
-			}
-			t.Run(subTestName, func(t *testing.T) {
+			t.Run(key, func(t *testing.T) {
 				if r, _ := tm.findSkip(name); r != "" {
 					t.Skip(r)
 				}

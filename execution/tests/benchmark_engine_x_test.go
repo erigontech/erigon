@@ -27,7 +27,19 @@ import (
 	"github.com/erigontech/erigon/common/testlog"
 )
 
-func TestBenchmarkEngineX(t *testing.T) {
+func TestBenchmarkEngineXInstruction(t *testing.T) {
+	benchmarkCategory(t, "instruction")
+}
+
+func TestBenchmarkEngineXPrecompile(t *testing.T) {
+	benchmarkCategory(t, "precompile")
+}
+
+func TestBenchmarkEngineXScenario(t *testing.T) {
+	benchmarkCategory(t, "scenario")
+}
+
+func benchmarkCategory(t *testing.T, category string) {
 	if !dbg.EnvBool("BENCH_ENGINE_X_MANUAL_ALLOW", false) {
 		t.Skip("benchmark engine x tests are for manual use; enable via BENCH_ENGINE_X_MANUAL_ALLOW=true")
 	}
@@ -37,10 +49,10 @@ func TestBenchmarkEngineX(t *testing.T) {
 	t.Parallel()
 	logger := testlog.Logger(t, log.LvlDebug)
 	engineXDir := filepath.Join(eestDir, "benchmark", "blockchain_tests_engine_x")
+	testsDir := filepath.Join(engineXDir, "benchmark", "compute", category)
 	preAllocDir := filepath.Join(engineXDir, "pre_alloc")
 	engineXRunner, err := NewEngineXTestRunner(t, logger, preAllocDir)
 	require.NoError(t, err)
-	testsDir := filepath.Join(engineXDir, "benchmark")
 	tm := new(testMatcher)
 	// if wanting to run only a particular test, use this, e.g.:
 	//tm.whitelist(".*log\\.json")
