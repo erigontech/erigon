@@ -1556,6 +1556,9 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	versionRead[uint256.Int](sdb, addr, IncarnationPath, accounts.NilKey, source, version, prevInc)
 	versionWritten(sdb, addr, BalancePath, accounts.NilKey, newObj.Balance())
 	versionWritten(sdb, addr, IncarnationPath, accounts.NilKey, newObj.data.Incarnation)
+	if previous == nil || previous.selfdestructed && !newObj.selfdestructed {
+		versionWritten(sdb, addr, SelfDestructPath, accounts.NilKey, false)
+	}
 
 	return nil
 }
@@ -2101,7 +2104,7 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 			var appends = make(VersionedWrites, 0, len(vwrites))
 			var selfDestructed bool
 			for _, v := range vwrites {
-				if v.Path == SelfDestructPath {
+				if v.Path == SelfDestructPath && v.Val.(bool) {
 					selfDestructed = true
 					prevs := appends
 					appends = VersionedWrites{v}

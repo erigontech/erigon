@@ -405,11 +405,20 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		return val, StorageRead, UnknownVersion, err
 	}
 
+	var destrcutedVersion Version
 	if so, ok := s.stateObjects[addr]; ok && so.deleted {
 		return defaultV, StorageRead, UnknownVersion, nil
-	} else if res := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex); res.Status() == MVReadResultDone {
-		if !commited || path != CodePath {
-			return defaultV, MapRead, Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, nil
+	} else if !commited {
+		if res := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex); res.Status() == MVReadResultDone && res.value.(bool) {
+			if path != CodePath {
+				if vw, ok := s.versionedWrite(addr, SelfDestructPath, key); !ok || vw.Val.(bool) {
+					return defaultV, MapRead, Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, nil
+				}
+				destrcutedVersion = Version{
+					TxIndex:     res.DepIdx(),
+					Incarnation: res.Incarnation(),
+				}
+			}
 		}
 	}
 
@@ -430,7 +439,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		if vw, ok := s.versionedWrite(addr, path, key); ok {
 			if res.Status() == MVReadResultDone {
 				if pr, ok := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
-					if vr.Version != pr.Version {
+					if vr.Version.TxIndex > destrcutedVersion.TxIndex && vr.Version != pr.Version {
 						if vr.Version.TxIndex > s.dep {
 							s.dep = vr.Version.TxIndex
 						}
@@ -490,6 +499,13 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		var ok bool
 		if v, ok = res.Value().(T); !ok {
 			return defaultV, UnknownSource, vr.Version, fmt.Errorf("unexpected type: got: %T, expected %v", res.Value(), reflect.TypeFor[T]())
+		}
+
+		if path == CodePath {
+			sdres := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex)
+			if sdres.Status() == MVReadResultDone && sdres.Value().(bool) && sdres.DepIdx() >= res.DepIdx() {
+				return defaultV, MapRead, Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, nil
+			}
 		}
 
 		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
