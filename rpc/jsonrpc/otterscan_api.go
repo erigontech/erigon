@@ -97,6 +97,11 @@ func (api *OtterscanAPIImpl) getTransactionByHash(ctx context.Context, tx kv.Tx,
 		return nil, nil, common.Hash{}, 0, 0, nil
 	}
 
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	if err != nil {
+		return nil, nil, common.Hash{}, 0, 0, err
+	}
+
 	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 	if err != nil {
 		return nil, nil, common.Hash{}, 0, 0, err
@@ -215,6 +220,11 @@ func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr 
 	}
 	defer dbtx.Rollback()
 
+	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
 	return api.searchTransactionsBeforeV3(dbtx, ctx, addr, blockNum, pageSize)
 }
 
@@ -237,6 +247,10 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	}
 	defer dbtx.Rollback()
 
+	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNum)
+	if err != nil {
+		return nil, err
+	}
 	return api.searchTransactionsAfterV3(dbtx, ctx, addr, blockNum, pageSize)
 }
 
@@ -392,6 +406,11 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, number.Uint64())
+	if err != nil {
+		return nil, err
+	}
 
 	b, _, err := api.getBlockWithSenders(ctx, number, tx)
 	if err != nil {
