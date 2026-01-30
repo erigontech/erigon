@@ -563,13 +563,14 @@ func addTransactionsToMiningBlock(
 			return receipt.Logs, nil
 		}
 
-		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader), engine, coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, header.BlobGasUsed, *vmConfig)
+		gasUsed := protocol.NewGasUsed(header, current.Receipts.CumulativeGasUsed())
+		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader), engine, coinbase, gasPool, ibs, noop, header, txn, gasUsed, *vmConfig)
 		if err != nil {
 			ibs.RevertToSnapshot(snap, err)
 			gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap) // restore gasPool as well as ibs
 			return nil, err
 		}
-
+		protocol.SetGasUsed(header, gasUsed)
 		current.AddTxn(txn)
 		current.Receipts = append(current.Receipts, receipt)
 		return receipt.Logs, nil

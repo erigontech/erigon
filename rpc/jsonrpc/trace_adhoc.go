@@ -1169,7 +1169,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 	if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-		ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.GasUsed}, nil)
+		ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
 	}
 	traceResult.Output = common.Copy(execResult.ReturnData)
 	if traceTypeStateDiff {
@@ -1473,7 +1473,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		}
 
 		if tracer != nil && tracer.Hooks.OnTxEnd != nil {
-			tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.GasUsed}, nil)
+			tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
 		}
 
 		chainRules := blockCtx.Rules(chainConfig)

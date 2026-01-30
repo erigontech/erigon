@@ -30,7 +30,7 @@ type serialExecutor struct {
 	txExecutor
 	// outputs
 	txCount         uint64
-	gasUsed         uint64
+	blockGasUsed    uint64
 	blobGasUsed     uint64
 	lastBlockResult *blockResult
 	worker          *exec.Worker
@@ -330,7 +330,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			}
 
 			se.txCount++
-			se.gasUsed += result.ExecutionResult.GasUsed
+			se.blockGasUsed += result.ExecutionResult.BlockGasUsed
 			mxExecTransactions.Add(1)
 
 			if txTask.Tx() != nil {
@@ -373,7 +373,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-					if err := se.getPostValidator().Process(se.gasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isBlockProduction, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
+					if err := se.getPostValidator().Process(se.blockGasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isBlockProduction, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
@@ -397,7 +397,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					if err != nil {
 						return err
 					}
-					receipt, err = result.CreateReceipt(int(txTask.TxNum), cumGasUsed+result.ExecutionResult.GasUsed, logIndexAfterTx)
+					receipt, err = result.CreateReceipt(int(txTask.TxNum), cumGasUsed+result.ExecutionResult.ReceiptGasUsed, logIndexAfterTx)
 					if err != nil {
 						return err
 					}
@@ -488,7 +488,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 							}
 						}
 						lastReceipt, err = result.CreateReceipt(txTask.TxIndex-1,
-							cumulativeGasUsed+result.ExecutionResult.GasUsed, logIndexAfterTx)
+							cumulativeGasUsed+result.ExecutionResult.ReceiptGasUsed, logIndexAfterTx)
 						if err != nil {
 							return false, err
 						}
@@ -534,8 +534,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		se.lastExecutedBlockNum.Store(int64(txTask.BlockNumber()))
 
 		if task.IsBlockEnd() {
-			se.executedGas.Add(int64(se.gasUsed))
-			se.gasUsed = 0
+			se.executedGas.Add(int64(se.blockGasUsed))
+			se.blockGasUsed = 0
 			se.blobGasUsed = 0
 			gasPool = nil
 		}

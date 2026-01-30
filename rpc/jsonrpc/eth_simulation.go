@@ -714,7 +714,7 @@ func (s *simulator) simulateCall(
 	if evm.Cancelled() {
 		return nil, nil, nil, fmt.Errorf("execution aborted (timeout = %v)", s.evmCallTimeout)
 	}
-	*cumulativeGasUsed += result.GasUsed
+	*cumulativeGasUsed += result.ReceiptGasUsed
 	receipt := protocol.MakeReceipt(header.Number, common.Hash{}, msg, txn, *cumulativeGasUsed, result, intraBlockState, evm)
 	*cumulativeBlobGasUsed += receipt.BlobGasUsed
 
@@ -725,7 +725,7 @@ func (s *simulator) simulateCall(
 		logs = receipt.Logs
 	}
 
-	callResult := CallResult{GasUsed: hexutil.Uint64(result.GasUsed)}
+	callResult := CallResult{GasUsed: hexutil.Uint64(result.ReceiptGasUsed)}
 	callResult.Logs = make([]*types.RPCLog, 0, len(logs))
 	for _, l := range logs {
 		rpcLog := &types.RPCLog{
