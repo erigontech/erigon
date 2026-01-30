@@ -190,7 +190,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		txHash := txn.Hash().String()
 		jsonResult := map[string]any{
 			"txHash":  txHash,
-			"gasUsed": result.GasUsed,
+			"gasUsed": result.ReceiptGasUsed,
 		}
 		bundleHash.Write(txn.Hash().Bytes())
 		if result.Err != nil {
