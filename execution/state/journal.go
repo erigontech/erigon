@@ -22,10 +22,11 @@ package state
 import (
 	"fmt"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/holiman/uint256"
 )
 
 // journalEntry is a modification entry in the state change journal that can be
@@ -153,7 +154,7 @@ type (
 	addLogChange struct {
 		txIndex int
 	}
-	touchChange struct {
+	touchAccount struct {
 		account accounts.Address
 	}
 
@@ -176,7 +177,7 @@ type (
 //type journalEntry2 interface {
 //	createObjectChange | resetObjectChange | selfdestructChange | balanceChange | balanceIncrease | balanceIncreaseTransfer |
 //		nonceChange | storageChange | fakeStorageChange | codeChange |
-//		refundChange | addLogChange | touchChange | accessListAddAccountChange | accessListAddSlotChange | transientStorageChange
+//		refundChange | addLogChange | touchAccount | accessListAddAccountChange | accessListAddSlotChange | transientStorageChange
 //}
 
 func (ch createObjectChange) revert(s *IntraBlockState) error {
@@ -199,7 +200,7 @@ func (ch resetObjectChange) dirtied() (accounts.Address, bool) {
 }
 
 func (ch selfdestructChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(ch.account, false)
 	if err != nil {
 		return err
 	}
@@ -249,14 +250,24 @@ func (ch selfdestructChange) dirtied() (accounts.Address, bool) {
 
 var ripemd = accounts.InternAddress(common.HexToAddress("0000000000000000000000000000000000000003"))
 
-func (ch touchChange) revert(s *IntraBlockState) error {
+func (ch touchAccount) revert(s *IntraBlockState) error {
+	if reads, ok := s.versionedReads[ch.account]; ok {
+		if len(reads) == 1 {
+			if _, ok := reads[AccountKey{Path: AddressPath}]; ok {
+				if opts, ok := s.addressAccess[ch.account]; !ok || opts.revertable {
+					delete(s.versionedReads, ch.account)
+					delete(s.addressAccess, ch.account)
+				}
+			}
+		}
+	}
 	return nil
 }
 
-func (ch touchChange) dirtied() (accounts.Address, bool) { return ch.account, true }
+func (ch touchAccount) dirtied() (accounts.Address, bool) { return ch.account, true }
 
 func (ch balanceChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(ch.account, false)
 	if err != nil {
 		return err
 	}
@@ -319,7 +330,7 @@ func (ch balanceIncreaseTransfer) revert(s *IntraBlockState) error {
 	return nil
 }
 func (ch nonceChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(ch.account, false)
 	if err != nil {
 		return err
 	}
@@ -357,7 +368,7 @@ func (ch nonceChange) dirtied() (accounts.Address, bool) {
 }
 
 func (ch codeChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(ch.account, false)
 	if err != nil {
 		return err
 	}
@@ -376,7 +387,7 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 		if ch.wasCommited {
 			if trace {
 				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodeHashPath}]; ok {
-					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, v.Val.(common.Hash), ch.prevhash)
+					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, v.Val.(accounts.CodeHash), ch.prevhash)
 				}
 				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodePath}]; ok {
 					_, cs := printCode(v.Val.([]byte))
@@ -411,7 +422,7 @@ func (ch codeChange) dirtied() (accounts.Address, bool) {
 }
 
 func (ch storageChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(ch.account, false)
 	if err != nil {
 		return err
 	}
@@ -453,7 +464,7 @@ func (ch storageChange) dirtied() (accounts.Address, bool) {
 }
 
 func (ch fakeStorageChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(ch.account, false)
 	if err != nil {
 		return err
 	}

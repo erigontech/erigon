@@ -369,7 +369,10 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 			var dynamicCost uint64
 			dynamicCost, err = operation.dynamicGas(evm, callContext, callContext.gas, memorySize)
 			if err != nil {
-				return nil, callContext.gas, fmt.Errorf("%w: %v", ErrOutOfGas, err)
+				if !errors.Is(err, ErrOutOfGas) {
+					err = fmt.Errorf("%w: %v", ErrOutOfGas, err)
+				}
+				return nil, callContext.gas, err
 			}
 			cost += dynamicCost // for tracing
 			callGas = operation.constantGas + dynamicCost - evm.CallGasTemp()
