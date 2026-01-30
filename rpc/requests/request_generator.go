@@ -308,7 +308,6 @@ func (req *requestGenerator) PingErigonRpc() PingResult {
 
 	res.Response = body
 	res.Took = time.Since(start)
-	res.Err = err
 	return PingResult(res)
 }
 
