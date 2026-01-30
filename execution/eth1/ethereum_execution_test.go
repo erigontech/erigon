@@ -55,7 +55,7 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	require.Len(t, chainPack.Blocks, 1)
 	newBlock := eth1utils.ConvertBlockToRPC(chainPack.Blocks[0])
 	exec := m.Eth1ExecutionService
-	insertRes, err := retrySyncingStatus(ctx, func() (*executionproto.InsertionResult, executionproto.ExecutionStatus, error) {
+	insertRes, err := retryBusy(ctx, func() (*executionproto.InsertionResult, executionproto.ExecutionStatus, error) {
 		r, err := exec.InsertBlocks(ctx, &executionproto.InsertBlocksRequest{
 			Blocks: []*executionproto.Block{newBlock},
 		})
@@ -94,7 +94,7 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	require.Equal(t, chainPack.Headers[0].Root, common.BytesToHash(root))
 }
 
-func retrySyncingStatus[T any](ctx context.Context, f func() (T, executionproto.ExecutionStatus, error)) (T, error) {
+func retryBusy[T any](ctx context.Context, f func() (T, executionproto.ExecutionStatus, error)) (T, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	var b backoff.BackOff
@@ -104,7 +104,7 @@ func retrySyncingStatus[T any](ctx context.Context, f func() (T, executionproto.
 		func() (T, error) {
 			r, s, err := f()
 			if err != nil {
-				return generics.Zero[T](), backoff.Permanent(err)
+				return generics.Zero[T](), backoff.Permanent(err) // no retries
 			}
 			if s == executionproto.ExecutionStatus_Busy {
 				return generics.Zero[T](), errors.New("retrying busy")
