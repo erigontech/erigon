@@ -280,7 +280,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 		var stateWriter state.StateWriter
 
-		if calculatePostState {
+		if calculatePostState && postState.CommitmentHistory {
 			sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root())
 			if err != nil {
 				return nil, err
@@ -297,7 +297,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 				return nil, err
 			}
 
-			// commitment are indexed by txNum of the first tx (system-tx) of the block
+			// commitment is indexed by txNum of the first tx (system-tx) of the block
 			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
 			if err := sharedDomains.SeekCommitment(ctx, tx); err != nil {
 				return nil, err
@@ -464,18 +464,18 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		}
 	}()
 
+	minTxNum, err := g.txNumReader.Min(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
 	var stateWriter state.StateWriter
-	var minTxNum uint64
-	if calculatePostState {
+	if calculatePostState && commitmentHistory {
 		sharedDomains, err = execctx.NewSharedDomains(ctx, tx, log.Root())
 		if err != nil {
 			return nil, err
 		}
 		sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
-		minTxNum, err = g.txNumReader.Min(ctx, tx, blockNum)
-		if err != nil {
-			return nil, err
-		}
 		// commitment are indexed by txNum of the first tx (system-tx) of the block
 		sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
 		if err := sharedDomains.SeekCommitment(ctx, tx); err != nil {
@@ -647,7 +647,7 @@ func (g *Generator) computeCommitmentFromStateHistory(ctx context.Context, tx kv
 		if err != nil {
 			return nil, err
 		}
-		log.Error("Touch historical keys", "fromTxNum", minTxNum, "toTxNum", txNum+1)
+		log.Debug("Touch historical keys", "fromTxNum", minTxNum, "toTxNum", txNum+1)
 		_, _, err = tsd.TouchChangedKeysFromHistory(tx, minTxNum, txNum+1)
 		if err != nil {
 			return nil, err
@@ -656,7 +656,7 @@ func (g *Generator) computeCommitmentFromStateHistory(ctx context.Context, tx kv
 		if err != nil {
 			return nil, err
 		}
-		log.Error("Historical state", "blockNum", blockNum, "txNum", txNum, "root", common.Bytes2Hex(root))
+		log.Debug("Historical state", "blockNum", blockNum, "txNum", txNum, "root", common.Bytes2Hex(root))
 		return root, nil
 	}
 	if dbg.AssertEnabled && blockNum == 0 {

@@ -214,8 +214,11 @@ func (ms *MockSentry) SendMessageToAll(_ context.Context, r *sentryproto.Outboun
 	ms.sentMessages = append(ms.sentMessages, r)
 	return nil, nil
 }
-func (ms *MockSentry) SentMessage(i int) *sentryproto.OutboundMessageData {
-	return ms.sentMessages[i]
+func (ms *MockSentry) SentMessage(i int) (*sentryproto.OutboundMessageData, error) {
+	if i < 0 || i >= len(ms.sentMessages) {
+		return nil, fmt.Errorf("no sent message for index %d found", i)
+	}
+	return ms.sentMessages[i], nil
 }
 
 func (ms *MockSentry) Messages(req *sentryproto.MessagesRequest, stream sentryproto.Sentry_MessagesServer) error {

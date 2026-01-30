@@ -254,7 +254,8 @@ func TestGetBlockHeaders(t *testing.T) {
 		expect, err := rlp.EncodeToBytes(eth.BlockHeadersPacket66{RequestId: 1, BlockHeadersPacket: expectedHeaders})
 		require.NoError(t, err)
 		backend.ReceiveWg.Wait()
-		sentMessage := backend.SentMessage(i)
+		sentMessage, err := backend.SentMessage(i)
+		require.NoError(t, err)
 		require.Equal(t, eth.ToProto[backend.SentryClient.Protocol()][eth.BlockHeadersMsg], sentMessage.Id)
 		require.Equal(t, expect, sentMessage.Data)
 	}
@@ -337,7 +338,8 @@ func TestGetBlockReceipts(t *testing.T) {
 	expect, err := rlp.EncodeToBytes(eth.ReceiptsRLPPacket66{RequestId: 1, ReceiptsRLPPacket: receipts})
 	require.NoError(t, err)
 	m.ReceiveWg.Wait()
-	sent := m.SentMessage(0)
+	sent, err := m.SentMessage(0)
+	require.NoError(t, err)
 	require.Equal(t, eth.ToProto[m.SentryClient.Protocol()][eth.ReceiptsMsg], sent.Id)
 	require.Equal(t, expect, sent.Data)
 }
