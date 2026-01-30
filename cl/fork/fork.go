@@ -70,16 +70,11 @@ func Domain(fork *cltypes.Fork, epoch uint64, domainType [4]byte, genesisRoot co
 	if fork == nil {
 		return []byte{}, errors.New("nil fork or domain type")
 	}
-	var forkVersion []byte
+	var version [4]byte
 	if epoch < fork.Epoch {
-		forkVersion = fork.PreviousVersion[:]
+		version = fork.PreviousVersion
 	} else {
-		forkVersion = fork.CurrentVersion[:]
+		version = fork.CurrentVersion
 	}
-	if len(forkVersion) != 4 {
-		return []byte{}, errors.New("fork version length is not 4 byte")
-	}
-	var forkVersionArray [4]byte
-	copy(forkVersionArray[:], forkVersion[:4])
-	return ComputeDomain(domainType[:], forkVersionArray, genesisRoot)
+	return ComputeDomain(domainType[:], version, genesisRoot)
 }
