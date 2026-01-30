@@ -436,6 +436,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return nil, err
 	}
 	sdCtx := domains.GetCommitmentContext()
+	sdCtx.SetDeferBranchUpdates(false)
 
 	latestBlock, err := rpchelper.GetLatestBlockNumber(roTx)
 	if err != nil {
