@@ -325,7 +325,7 @@ func unwindExec3State(ctx context.Context,
 			fmt.Println("removing shit")
 			accountDiffs := changeset[kv.AccountsDomain]
 			for _, entry := range accountDiffs {
-				codeCache.RemoveAddress(toBytesZeroCopy(entry.Key[:length.Addr]))
+				codeCache.Delete(toBytesZeroCopy(entry.Key[:length.Addr]))
 			}
 
 			// Update cache hash to the canonical hash of the block we're unwinding to

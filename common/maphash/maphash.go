@@ -158,3 +158,18 @@ func (l *LRU[V]) Contains(key []byte) bool {
 func (l *LRU[V]) Purge() {
 	l.cache.Purge()
 }
+
+// GetByHash retrieves a value by a pre-computed hash.
+func (l *LRU[V]) GetByHash(hash uint64) (V, bool) {
+	return l.cache.Get(hash)
+}
+
+// SetByHash stores a value with a pre-computed hash.
+func (l *LRU[V]) SetByHash(hash uint64, value V) {
+	l.cache.Add(hash, value)
+}
+
+// ContainsByHash checks if a hash exists in the cache.
+func (l *LRU[V]) ContainsByHash(hash uint64) bool {
+	return l.cache.Contains(hash)
+}
