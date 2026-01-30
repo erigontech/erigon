@@ -20,17 +20,17 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
 )
 
 const (
-	// DefaultCodeCacheSize is the number of code entries (hash → code)
-	DefaultCodeCacheSize = 1 << 15 // 2^15 = 32768 entries
-	// DefaultAddrCacheSize is the number of address entries (addr → hash)
-	// 2^19 = 524288 entries, each storing an 8-byte hash
-	DefaultAddrCacheSize = 1 << 19
+	// DefaultCodeCacheBytes is the byte limit for code cache (512 MB)
+	DefaultCodeCacheBytes = 512 * datasize.MB
+	// DefaultAddrCacheBytes is the byte limit for address cache (16 MB)
+	DefaultAddrCacheBytes = 16 * datasize.MB
 )
 
 // CodeCache is a two-level concurrent cache for contract code.
@@ -42,34 +42,39 @@ const (
 // - Uses fast maphash instead of cryptographic Keccak256
 // - Address mappings are small (8 bytes) so we can cache many more
 // - Thread-safe via sync.Map
+//
+// Capacity is byte-based. Once full, new puts are no-ops but
+// modifications to existing entries and deletions are still allowed.
 type CodeCache struct {
-	addrToHash   *maphash.Map[uint64] // addr → maphash(code), concurrent
-	addrCapacity int                  // max entries in addrToHash
-	hashToCode   sync.Map             // maphash(code) → code, concurrent
-	codeCapacity int                  // max entries in hashToCode
-	codeLen      atomic.Int64         // track hashToCode size
-	blockHash    common.Hash          // hash of the last block processed
-	mu           sync.RWMutex
+	addrToHash *maphash.Map[uint64] // addr → maphash(code), concurrent
+	addrSize   atomic.Int64         // current size in bytes
+	hashToCode sync.Map             // maphash(code) → code, concurrent
+	codeSize   atomic.Int64         // current size in bytes (code only, hash is fixed 8 bytes)
+	blockHash  common.Hash          // hash of the last block processed
+	mu         sync.RWMutex
 
 	// Stats counters (atomic for concurrent access)
 	addrHits   atomic.Uint64
 	addrMisses atomic.Uint64
 	codeHits   atomic.Uint64
 	codeMisses atomic.Uint64
+
+	addrCapacityB datasize.ByteSize // capacity in bytes
+	codeCapacityB datasize.ByteSize // capacity in bytes
 }
 
-// NewCodeCache creates a new CodeCache with the specified sizes.
-func NewCodeCache(codeSize, addrSize int) *CodeCache {
+// NewCodeCache creates a new CodeCache with the specified byte capacities.
+func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeCache {
 	return &CodeCache{
-		addrToHash:   maphash.NewMap[uint64](),
-		addrCapacity: addrSize,
-		codeCapacity: codeSize,
+		addrToHash:    maphash.NewMap[uint64](),
+		addrCapacityB: addrCapacityBytes,
+		codeCapacityB: codeCapacityBytes,
 	}
 }
 
 // NewDefaultCodeCache creates a new CodeCache with the default sizes.
 func NewDefaultCodeCache() *CodeCache {
-	return NewCodeCache(DefaultCodeCacheSize, DefaultAddrCacheSize)
+	return NewCodeCache(DefaultCodeCacheBytes, DefaultAddrCacheBytes)
 }
 
 // Get retrieves contract code for the given address.
@@ -95,49 +100,64 @@ func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
 
 // Put stores contract code for the given address.
 // Uses fast maphash to compute the code identifier.
+// If caches are at capacity, new entries are no-ops but updates are allowed.
 func (c *CodeCache) Put(addr []byte, code []byte) {
 	if len(code) == 0 {
 		return
 	}
 
 	codeHash := maphash.Hash(code)
+	addrEntrySize := int64(len(addr) + 8) // addr + uint64 hash
 
-	// Check if we need to skip addr cache due to capacity
-	if c.addrToHash.Len() >= c.addrCapacity {
-		c.addrToHash.Clear()
+	// Check if addr already exists - updates are always allowed
+	if _, exists := c.addrToHash.Get(addr); exists {
+		c.addrToHash.Set(addr, codeHash)
+	} else {
+		// New addr entry - check capacity
+		if c.addrSize.Load()+addrEntrySize <= int64(c.addrCapacityB) {
+			c.addrToHash.Set(addr, codeHash)
+			c.addrSize.Add(addrEntrySize)
+		}
+		// else: no-op when full
 	}
-	c.addrToHash.Set(addr, codeHash)
 
 	// Check if code already stored
 	if _, exists := c.hashToCode.Load(codeHash); exists {
 		return
 	}
 
-	// Check if we need to skip code cache due to capacity
-	if int(c.codeLen.Load()) >= c.codeCapacity {
-		return
+	// New code entry - check capacity
+	codeEntrySize := int64(8 + len(code)) // hash + code
+	if c.codeSize.Load()+codeEntrySize > int64(c.codeCapacityB) {
+		return // no-op when full
 	}
 	c.hashToCode.Store(codeHash, common.Copy(code))
-	c.codeLen.Add(1)
+	c.codeSize.Add(codeEntrySize)
 }
 
 // Delete removes the address → codeHash mapping.
 // The codeHash → code mapping is kept since it's immutable.
 func (c *CodeCache) Delete(addr []byte) {
-	c.addrToHash.Delete(addr)
+	if _, exists := c.addrToHash.Get(addr); exists {
+		addrEntrySize := int64(len(addr) + 8)
+		c.addrToHash.Delete(addr)
+		c.addrSize.Add(-addrEntrySize)
+	}
 }
 
 // Clear removes all address mappings from the cache.
 // The codeHash → code mappings are preserved since they're immutable.
 func (c *CodeCache) Clear() {
 	c.addrToHash.Clear()
+	c.addrSize.Store(0)
 }
 
 // ClearAll removes all entries from both caches.
 func (c *CodeCache) ClearAll() {
 	c.addrToHash.Clear()
+	c.addrSize.Store(0)
 	c.hashToCode.Clear()
-	c.codeLen.Store(0)
+	c.codeSize.Store(0)
 }
 
 // GetBlockHash returns the hash of the last block processed by the cache.
@@ -165,6 +185,7 @@ func (c *CodeCache) ValidateAndPrepare(parentHash common.Hash, incomingBlockHash
 	// Empty blockHash means cache hasn't processed any block yet - always valid
 	if c.blockHash == (common.Hash{}) {
 		c.addrToHash.Clear()
+		c.addrSize.Store(0)
 		c.blockHash = incomingBlockHash
 		return true
 	}
@@ -178,6 +199,7 @@ func (c *CodeCache) ValidateAndPrepare(parentHash common.Hash, incomingBlockHash
 	// Mismatch - clear address mappings (they may be stale)
 	// Keep code mappings since hash → code is immutable
 	c.addrToHash.Clear()
+	c.addrSize.Store(0)
 	c.blockHash = incomingBlockHash
 	return false
 }
@@ -188,6 +210,7 @@ func (c *CodeCache) ClearWithHash(hash common.Hash) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.addrToHash.Clear()
+	c.addrSize.Store(0)
 	c.blockHash = hash
 }
 
@@ -198,7 +221,29 @@ func (c *CodeCache) Len() int {
 
 // CodeLen returns the number of entries in the code cache.
 func (c *CodeCache) CodeLen() int {
-	return int(c.codeLen.Load())
+	// Estimate based on average code size - this is approximate
+	// since we now track bytes, not count
+	codeBytes := c.codeSize.Load()
+	if codeBytes == 0 {
+		return 0
+	}
+	// Count entries by iterating (less efficient but accurate)
+	count := 0
+	c.hashToCode.Range(func(_, _ any) bool {
+		count++
+		return true
+	})
+	return count
+}
+
+// AddrSizeBytes returns the current size of the address cache in bytes.
+func (c *CodeCache) AddrSizeBytes() int64 {
+	return c.addrSize.Load()
+}
+
+// CodeSizeBytes returns the current size of the code cache in bytes.
+func (c *CodeCache) CodeSizeBytes() int64 {
+	return c.codeSize.Load()
 }
 
 // PrintStatsAndReset prints cache statistics and resets counters.
@@ -220,6 +265,11 @@ func (c *CodeCache) PrintStatsAndReset() {
 		codeHitRate = float64(codeHits) / float64(codeTotal) * 100
 	}
 
+	addrSizeB := c.addrSize.Load()
+	codeSizeB := c.codeSize.Load()
+	addrUsagePct := float64(addrSizeB) / float64(c.addrCapacityB) * 100
+	codeUsagePct := float64(codeSizeB) / float64(c.codeCapacityB) * 100
+
 	log.Debug("CodeCache stats",
 		"addr_hits", addrHits,
 		"addr_misses", addrMisses,
@@ -227,7 +277,10 @@ func (c *CodeCache) PrintStatsAndReset() {
 		"code_hits", codeHits,
 		"code_misses", codeMisses,
 		"code_hit_rate", codeHitRate,
-		"addr_cache_size", c.addrToHash.Len(),
-		"code_cache_size", c.codeLen.Load(),
+		"addr_entries", c.addrToHash.Len(),
+		"addr_size_mb", addrSizeB/(1024*1024),
+		"addr_usage_pct", addrUsagePct,
+		"code_size_mb", codeSizeB/(1024*1024),
+		"code_usage_pct", codeUsagePct,
 	)
 }

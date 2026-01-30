@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/stretchr/testify/assert"
@@ -58,10 +59,12 @@ func TestGenericCache_NewGenericCache(t *testing.T) {
 	assert.Equal(t, common.Hash{}, c.GetBlockHash())
 }
 
-func TestGenericCache_NewDefaultGenericCache(t *testing.T) {
-	c := NewDefaultGenericCache()
+func TestGenericCache_NewWithByteCapacity(t *testing.T) {
+	c := NewGenericCache(1 * datasize.MB) // 1MB
 	require.NotNil(t, c)
 	assert.Equal(t, 0, c.Len())
+	assert.Equal(t, int64(0), c.SizeBytes())
+	assert.Equal(t, 1*datasize.MB, c.CapacityBytes())
 }
 
 func TestGenericCache_GetPut(t *testing.T) {
@@ -102,20 +105,30 @@ func TestGenericCache_PutReusesSlice(t *testing.T) {
 }
 
 func TestGenericCache_PutCapacityLimit(t *testing.T) {
-	c := NewGenericCache(2)
+	// Each entry is 20 (addr) + 3 (value) = 23 bytes
+	// Set capacity to 50 bytes - enough for 2 entries but not 3
+	c := NewGenericCache(50)
 
 	// Fill to capacity
 	c.Put(makeAddr(1), makeValue(1))
 	c.Put(makeAddr(2), makeValue(2))
 	assert.Equal(t, 2, c.Len())
+	assert.Equal(t, int64(46), c.SizeBytes()) // 2 * 23 = 46
 
-	// Try to add more - should be ignored
+	// Try to add more - should be ignored (no-op when full)
 	c.Put(makeAddr(3), makeValue(3))
 	assert.Equal(t, 2, c.Len())
 
-	// Existing key should still work
+	// New key should not exist
 	_, ok := c.Get(makeAddr(3))
 	assert.False(t, ok)
+
+	// But updating existing key should still work
+	newValue := []byte{100, 101, 102}
+	c.Put(makeAddr(1), newValue)
+	v, ok := c.Get(makeAddr(1))
+	assert.True(t, ok)
+	assert.Equal(t, newValue, v)
 }
 
 func TestGenericCache_Delete(t *testing.T) {
@@ -316,24 +329,37 @@ func TestCodeCache_CodeDeduplication(t *testing.T) {
 }
 
 func TestCodeCache_AddrCapacityLimit(t *testing.T) {
-	c := NewCodeCache(100, 2)
+	// Each addr entry is 20 (addr) + 8 (uint64 hash) = 28 bytes
+	// Set addr capacity to 60 bytes - enough for 2 entries but not 3
+	c := NewCodeCache(1024*1024, 60) // 1MB code, 60 bytes addr
 
 	// Fill to addr capacity
 	c.Put(makeAddr(1), makeCode(1))
 	c.Put(makeAddr(2), makeCode(2))
 	assert.Equal(t, 2, c.Len())
 
-	// Adding more should clear and add new
+	// Adding more should be no-op for addr (at capacity)
 	c.Put(makeAddr(3), makeCode(3))
-	// After clear, only the new entry exists
-	assert.Equal(t, 1, c.Len())
+	assert.Equal(t, 2, c.Len()) // addr not added
 
-	// Code cache should have all 3 codes
+	// Code cache should have all 3 codes (code capacity not reached)
 	assert.Equal(t, 3, c.CodeLen())
+
+	// Can't get addr3 since it wasn't added
+	_, ok := c.Get(makeAddr(3))
+	assert.False(t, ok)
+
+	// But updating existing addr should work
+	c.Put(makeAddr(1), makeCode(4))
+	v, ok := c.Get(makeAddr(1))
+	assert.True(t, ok)
+	assert.Equal(t, makeCode(4), v)
 }
 
 func TestCodeCache_CodeCapacityLimit(t *testing.T) {
-	c := NewCodeCache(2, 100)
+	// Each code entry is 8 (hash) + 3 (code bytes) = 11 bytes
+	// Set code capacity to 25 bytes - enough for 2 entries but not 3
+	c := NewCodeCache(25, 1024*1024) // 25 bytes code, 1MB addr
 
 	// Fill code capacity
 	c.Put(makeAddr(1), makeCode(1))
@@ -343,7 +369,7 @@ func TestCodeCache_CodeCapacityLimit(t *testing.T) {
 	// Try to add more code - addr mapping added, but code not stored
 	c.Put(makeAddr(3), makeCode(3))
 	assert.Equal(t, 3, c.Len())     // addr mapping added
-	assert.Equal(t, 2, c.CodeLen()) // code not added
+	assert.Equal(t, 2, c.CodeLen()) // code not added (at capacity)
 
 	// Get for addr3 should fail (code not in cache)
 	_, ok := c.Get(makeAddr(3))
@@ -478,7 +504,7 @@ func TestCodeCache_PrintStatsAndReset_NoOps(t *testing.T) {
 }
 
 func TestCodeCache_GetMissingCode(t *testing.T) {
-	c := NewCodeCache(100, 200)
+	c := NewCodeCache(1024*1024, 1024*1024) // 1MB each
 
 	// Manually set addr mapping without code (simulates capacity limit scenario)
 	addr := makeAddr(1)
@@ -487,7 +513,7 @@ func TestCodeCache_GetMissingCode(t *testing.T) {
 
 	// Clear the code cache but keep addr mapping
 	c.hashToCode.Clear()
-	c.codeLen.Store(0)
+	c.codeSize.Store(0)
 
 	// Get should fail at code lookup stage
 	_, ok := c.Get(addr)

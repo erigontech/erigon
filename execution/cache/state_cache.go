@@ -17,19 +17,11 @@
 package cache
 
 import (
+	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 )
 
-const (
-	// DefaultAccountCacheSize is the number of account entries
-	// 2^20 = 1048576 entries, ~110 MB worst case (100 bytes per account)
-	DefaultAccountCacheSize = 1 << 20
-
-	// DefaultStorageCacheSize is the number of storage entries
-	// 2^20 = 1048576 entries
-	DefaultStorageCacheSize = 1 << 20
-)
 
 // StateCache is a unified cache for domain data (Account, Storage, Code).
 // Uses an array indexed by kv.Domain. Only Account, Storage, and Code domains
@@ -41,22 +33,23 @@ type StateCache struct {
 	caches [kv.DomainLen]Cache
 }
 
-// NewStateCache creates a new StateCache with the specified sizes.
-func NewStateCache(accountSize, storageSize, codeSize, codeAddrSize int) *StateCache {
+// NewStateCache creates a new StateCache with the specified byte capacities.
+func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.ByteSize) *StateCache {
 	sc := &StateCache{}
-	sc.caches[kv.AccountsDomain] = NewGenericCache(accountSize)
-	sc.caches[kv.StorageDomain] = NewGenericCache(storageSize)
-	sc.caches[kv.CodeDomain] = NewCodeCache(codeSize, codeAddrSize)
+	sc.caches[kv.AccountsDomain] = NewGenericCache(accountBytes)
+	sc.caches[kv.StorageDomain] = NewGenericCache(storageBytes)
+	sc.caches[kv.CodeDomain] = NewCodeCache(codeBytes, addrBytes)
 	return sc
 }
 
-// NewDefaultStateCache creates a new StateCache with default sizes.
+// NewDefaultStateCache creates a new StateCache with default byte capacities.
+// Account: 256MB, Storage: 512MB, Code: 512MB, Addr: 16MB
 func NewDefaultStateCache() *StateCache {
 	return NewStateCache(
-		DefaultAccountCacheSize,
-		DefaultStorageCacheSize,
-		DefaultCodeCacheSize,
-		DefaultAddrCacheSize,
+		DefaultAccountCacheBytes,
+		DefaultStorageCacheBytes,
+		DefaultCodeCacheBytes,
+		DefaultAddrCacheBytes,
 	)
 }
 
