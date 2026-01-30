@@ -320,22 +320,14 @@ func unwindExec3State(ctx context.Context,
 			return err
 		}
 
-		// Invalidate code cache entries for addresses with code changes
-		if codeCache := sd.GetCodeCache(); codeCache != nil {
-			fmt.Println("removing shit")
-			accountDiffs := changeset[kv.AccountsDomain]
-			for _, entry := range accountDiffs {
-				codeCache.Delete(toBytesZeroCopy(entry.Key[:length.Addr]))
-			}
-
-			// Update cache hash to the canonical hash of the block we're unwinding to
+		// Invalidate state cache entries affected by the unwind
+		if stateCache := sd.GetStateCache(); stateCache != nil {
 			unwindToHash, err := rawdb.ReadCanonicalHash(tx, blockUnwindTo)
 			if err != nil {
 				logger.Warn("failed to read canonical hash for cache update", "block", blockUnwindTo, "err", err)
-			} else {
-				fmt.Println(unwindToHash)
-				codeCache.SetBlockHash(unwindToHash)
+				unwindToHash = common.Hash{}
 			}
+			stateCache.RevertWithDiffset(*changeset, unwindToHash)
 		}
 	}
 

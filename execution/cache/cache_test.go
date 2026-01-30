@@ -585,7 +585,7 @@ func TestStateCache_GetPut_Storage(t *testing.T) {
 }
 
 func TestStateCache_GetPut_Code(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
+	c := NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
 
 	addr := makeAddr(1)
 	code := makeCode(1)
@@ -772,7 +772,7 @@ func TestCodeCache_ConcurrentAccess(t *testing.T) {
 // =============================================================================
 
 func TestStateCache_DomainIsolation(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
+	c := NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
 
 	addr := makeAddr(1)
 	accountData := []byte("account")

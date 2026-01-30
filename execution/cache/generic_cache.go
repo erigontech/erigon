@@ -34,22 +34,14 @@ const (
 )
 
 // GenericCache is a bounded concurrent cache for key-value data.
-// Stores key → value (serialized []byte).
-// Used for accounts and storage. Must be cleared on reorg.
-// Thread-safe via maphash.Map (sync.Map internally).
-//
-// Capacity is byte-based. Once full, new puts are no-ops but
-// modifications to existing entries and deletions are still allowed.
 type GenericCache struct {
-	data        *maphash.Map[[]byte] // key → value, concurrent
-	capacityB   datasize.ByteSize    // max bytes
-	currentSize atomic.Int64         // current size in bytes
-	blockHash   common.Hash          // hash of the last block processed
+	data        *maphash.Map[[]byte]
+	capacityB   datasize.ByteSize
+	currentSize atomic.Int64
+	blockHash   common.Hash
 	mu          sync.RWMutex
-
-	// Stats counters (atomic for concurrent access)
-	hits   atomic.Uint64
-	misses atomic.Uint64
+	hits        atomic.Uint64
+	misses      atomic.Uint64
 }
 
 // NewGenericCache creates a new GenericCache with the specified byte capacity.
@@ -61,7 +53,6 @@ func NewGenericCache(capacityBytes datasize.ByteSize) *GenericCache {
 }
 
 // Get retrieves data for the given key.
-// Returns the data and true if found, nil and false otherwise.
 func (c *GenericCache) Get(key []byte) ([]byte, bool) {
 	value, ok := c.data.Get(key)
 	if !ok {
@@ -73,31 +64,24 @@ func (c *GenericCache) Get(key []byte) ([]byte, bool) {
 }
 
 // Put stores data for the given key.
-// If the key exists, updates the value (always allowed).
-// If the key is new and cache is at capacity, this is a no-op.
 func (c *GenericCache) Put(key []byte, value []byte) {
 	entrySize := int64(len(key) + len(value))
 
-	// Check if key already exists - updates are always allowed
+	// Check if key already exists
 	if existing, ok := c.data.Get(key); ok {
 		oldSize := int64(len(key) + len(existing))
 		sizeDiff := entrySize - oldSize
 
-		// Reuse existing slice if capacity is sufficient
-		if cap(existing) >= len(value) {
-			existing = existing[:len(value)]
-			copy(existing, value)
-			c.data.Set(key, existing)
-		} else {
-			c.data.Set(key, common.Copy(value))
-		}
+		// Always allocate a new slice to avoid modifying shared backing arrays.
+		// External code (like diffset) may hold references to the old slice.
+		c.data.Set(key, common.Copy(value))
 		c.currentSize.Add(sizeDiff)
 		return
 	}
 
-	// New key - check if we have capacity
+	// New key
 	if c.currentSize.Load()+entrySize > int64(c.capacityB) {
-		return // no-op when full
+		return
 	}
 
 	c.data.Set(key, common.Copy(value))
@@ -134,13 +118,10 @@ func (c *GenericCache) SetBlockHash(hash common.Hash) {
 }
 
 // ValidateAndPrepare checks if the given parentHash matches the cache's current blockHash.
-// If there's a mismatch (indicating non-sequential block processing), the cache is cleared.
-// Returns true if the cache was valid (hashes matched or cache was empty), false if cleared.
 func (c *GenericCache) ValidateAndPrepare(parentHash common.Hash, incomingBlockHash common.Hash) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Empty blockHash means cache hasn't processed any block yet - always valid
 	if c.blockHash == (common.Hash{}) {
 		c.data.Clear()
 		c.currentSize.Store(0)
@@ -148,13 +129,11 @@ func (c *GenericCache) ValidateAndPrepare(parentHash common.Hash, incomingBlockH
 		return true
 	}
 
-	// Check if we're continuing from the expected block
 	if c.blockHash == parentHash {
 		c.blockHash = incomingBlockHash
 		return true
 	}
 
-	// Mismatch - clear all mappings (they may be stale)
 	c.data.Clear()
 	c.currentSize.Store(0)
 	c.blockHash = incomingBlockHash
@@ -162,7 +141,6 @@ func (c *GenericCache) ValidateAndPrepare(parentHash common.Hash, incomingBlockH
 }
 
 // ClearWithHash clears the cache and sets the block hash.
-// Used during unwind to reset the cache to a known state.
 func (c *GenericCache) ClearWithHash(hash common.Hash) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -187,28 +165,19 @@ func (c *GenericCache) CapacityBytes() datasize.ByteSize {
 }
 
 // PrintStatsAndReset prints cache statistics and resets counters.
-// Call this at the end of each block to see per-block performance.
 func (c *GenericCache) PrintStatsAndReset(name string) {
 	hits := c.hits.Swap(0)
 	misses := c.misses.Swap(0)
-
 	total := hits + misses
-
 	var hitRate float64
 	if total > 0 {
 		hitRate = float64(hits) / float64(total) * 100
 	}
-
 	sizeBytes := c.currentSize.Load()
 	usagePct := float64(sizeBytes) / float64(c.capacityB) * 100
-
 	log.Debug(name+" cache stats",
-		"hits", hits,
-		"misses", misses,
-		"hit_rate", hitRate,
-		"entries", c.data.Len(),
-		"size_mb", sizeBytes/(1024*1024),
-		"capacity_mb", c.capacityB/datasize.MB,
-		"usage_pct", usagePct,
+		"hits", hits, "misses", misses, "hit_rate", hitRate,
+		"entries", c.data.Len(), "size_mb", sizeBytes/(1024*1024),
+		"capacity_mb", c.capacityB/datasize.MB, "usage_pct", usagePct,
 	)
 }

@@ -233,9 +233,9 @@ func ExecV3(ctx context.Context,
 		postValidator = newParallelBlockPostExecutionValidator()
 	}
 
-	if doms.GetCodeCache() == nil {
-		doms.SetCodeCache(cache.NewDefaultCodeCache())
-		defer doms.SetCodeCache(nil)
+	if doms.GetStateCache() == nil {
+		doms.SetStateCache(cache.NewDefaultStateCache())
+		defer doms.SetStateCache(nil)
 	}
 
 	if parallel {

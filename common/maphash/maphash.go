@@ -3,6 +3,7 @@ package maphash
 import (
 	"hash/maphash"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -23,9 +24,10 @@ func Hash(key []byte) uint64 {
 	return maphash.Bytes(seed, key)
 }
 
-// Map is a non-thread-safe map that uses maphash to hash []byte keys.
+// Map is a concurrent map that uses maphash to hash []byte keys.
 type Map[V any] struct {
-	m sync.Map
+	m   sync.Map
+	len atomic.Int64
 }
 
 // NewMap creates a new Map.
@@ -47,28 +49,30 @@ func (m *Map[V]) Get(key []byte) (V, bool) {
 // Set stores a value with the given key.
 func (m *Map[V]) Set(key []byte, value V) {
 	h := Hash(key)
-	m.m.Store(h, value)
+	_, loaded := m.m.Swap(h, value)
+	if !loaded {
+		m.len.Add(1)
+	}
 }
 
 // Delete removes a key from the map.
 func (m *Map[V]) Delete(key []byte) {
 	h := Hash(key)
-	m.m.Delete(h)
+	_, loaded := m.m.LoadAndDelete(h)
+	if loaded {
+		m.len.Add(-1)
+	}
 }
 
 // Len returns the number of entries in the map.
 func (m *Map[V]) Len() int {
-	count := 0
-	m.m.Range(func(_, _ any) bool {
-		count++
-		return true
-	})
-	return count
+	return int(m.len.Load())
 }
 
 // Clear removes all entries from the map.
 func (m *Map[V]) Clear() {
 	m.m.Clear()
+	m.len.Store(0)
 }
 
 // NonConcurrentMap is a non-thread-safe map that uses maphash to hash []byte keys.

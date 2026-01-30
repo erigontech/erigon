@@ -17,11 +17,12 @@
 package cache
 
 import (
+	"unsafe"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 )
-
 
 // StateCache is a unified cache for domain data (Account, Storage, Code).
 // Uses an array indexed by kv.Domain. Only Account, Storage, and Code domains
@@ -119,4 +120,37 @@ func (c *StateCache) GetCache(domain kv.Domain) Cache {
 		return nil
 	}
 	return c.caches[domain]
+}
+
+func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
+
+// PrintStatsAndReset prints cache statistics for all domains and resets counters.
+func (c *StateCache) PrintStatsAndReset() {
+	if acc, ok := c.caches[kv.AccountsDomain].(*GenericCache); ok {
+		acc.PrintStatsAndReset("Account")
+	}
+	if stor, ok := c.caches[kv.StorageDomain].(*GenericCache); ok {
+		stor.PrintStatsAndReset("Storage")
+	}
+	if code, ok := c.caches[kv.CodeDomain].(*CodeCache); ok {
+		code.PrintStatsAndReset()
+	}
+}
+
+func (c *StateCache) RevertWithDiffset(diffset [6][]kv.DomainEntryDiff, newBlockHash common.Hash) {
+	for _, entry := range diffset[kv.AccountsDomain] {
+		k := toBytesZeroCopy(entry.Key[:len(entry.Key)-8])
+		c.Delete(kv.CodeDomain, k)
+		c.Delete(kv.AccountsDomain, k)
+	}
+	for _, entry := range diffset[kv.StorageDomain] {
+		k := toBytesZeroCopy(entry.Key[:len(entry.Key)-8])
+		c.Delete(kv.StorageDomain, k)
+	}
+	// Update block hash on all caches after unwind so ValidateAndPrepare works correctly
+	for _, cache := range c.caches {
+		if cache != nil {
+			cache.SetBlockHash(newBlockHash)
+		}
+	}
 }

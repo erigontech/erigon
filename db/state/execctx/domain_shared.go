@@ -85,8 +85,8 @@ type SharedDomains struct {
 	mem               kv.TemporalMemBatch
 	metrics           changeset.DomainMetrics
 
-	// codeCache is an optional LRU cache for contract code
-	codeCache *cache.CodeCache
+	// stateCache is an optional cache for state data (accounts, storage, code)
+	stateCache *cache.StateCache
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
@@ -212,14 +212,14 @@ func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmen
 }
 func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
-// SetCodeCache sets the code cache for faster code lookups.
-func (sd *SharedDomains) SetCodeCache(codeCache *cache.CodeCache) {
-	sd.codeCache = codeCache
+// SetStateCache sets the state cache for faster lookups.
+func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
+	sd.stateCache = stateCache
 }
 
-// GetCodeCache returns the CodeCache, or nil if not set.
-func (sd *SharedDomains) GetCodeCache() *cache.CodeCache {
-	return sd.codeCache
+// GetStateCache returns the StateCache, or nil if not set.
+func (sd *SharedDomains) GetStateCache() *cache.StateCache {
+	return sd.stateCache
 }
 
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
@@ -314,6 +314,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	start := time.Now()
 	maxStep := kv.Step(math.MaxUint64)
 
+	// Check mem batch first - it has the current transaction's uncommitted state
 	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
 		sd.metrics.UpdateCacheReads(domain, start)
 		return v, step, nil
@@ -323,10 +324,10 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
-	// Check code cache for CodeDomain before hitting storage
-	if domain == kv.CodeDomain && sd.codeCache != nil {
-		if code, ok := sd.codeCache.Get(k); ok {
-			return code, 0, nil
+	// Check state cache before hitting storage
+	if sd.stateCache != nil {
+		if v, ok := sd.stateCache.Get(domain, k); ok {
+			return v, 0, nil
 		}
 	}
 
@@ -343,9 +344,9 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
-	// Populate code cache on successful storage read
-	if domain == kv.CodeDomain && sd.codeCache != nil && len(v) > 0 {
-		sd.codeCache.Put(k, v)
+	// Populate state cache on successful storage read
+	if sd.stateCache != nil && len(v) > 0 {
+		sd.stateCache.Put(domain, k, v)
 	}
 
 	return v, step, nil
@@ -446,9 +447,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		}
 	}
 
-	// Update code cache when writing code
-	if domain == kv.CodeDomain && sd.codeCache != nil {
-		sd.codeCache.Delete(k)
+	// Invalidate state cache when writing (will be repopulated on next read)
+	if sd.stateCache != nil {
+		sd.stateCache.Put(domain, k, v)
 	}
 
 	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal, prevStep)
@@ -478,18 +479,24 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		if err := sd.DomainDel(kv.CodeDomain, tx, k, txNum, nil, 0); err != nil {
 			return err
 		}
-		// Remove from code cache when account is deleted
-		if sd.codeCache != nil {
-			sd.codeCache.Delete(k)
+		// Remove from state cache when account is deleted
+		if sd.stateCache != nil {
+			sd.stateCache.Delete(kv.AccountsDomain, k)
+			sd.stateCache.Delete(kv.CodeDomain, k)
 		}
 		return sd.mem.DomainDel(kv.AccountsDomain, ks, txNum, prevVal, prevStep)
+	case kv.StorageDomain:
+		// Remove from state cache when storage is deleted
+		if sd.stateCache != nil {
+			sd.stateCache.Delete(kv.StorageDomain, k)
+		}
 	case kv.CodeDomain:
 		if prevVal == nil {
 			return nil
 		}
-		// Remove from code cache when code is deleted
-		if sd.codeCache != nil {
-			sd.codeCache.Delete(k)
+		// Remove from state cache when code is deleted
+		if sd.stateCache != nil {
+			sd.stateCache.Delete(kv.CodeDomain, k)
 		}
 	default:
 		//noop

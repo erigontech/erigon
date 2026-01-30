@@ -642,6 +642,7 @@ func DeserialiseV3(a *Account, enc []byte) error {
 	if codeHashBytes > 0 {
 		var codeHashValue common.Hash
 		copy(codeHashValue[:], enc[pos:pos+codeHashBytes])
+		a.CodeHash = InternCodeHash(codeHashValue)
 		pos += codeHashBytes
 	}
 	if pos >= len(enc) {

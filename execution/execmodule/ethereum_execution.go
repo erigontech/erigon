@@ -202,8 +202,8 @@ type EthereumExecutionModule struct {
 	lock           sync.RWMutex
 	currentContext *execctx.SharedDomains
 
-	// codeCache is an LRU cache for contract code, keyed by address
-	codeCache *cache.CodeCache
+	// stateCache is a cache for state data (accounts, storage, code)
+	stateCache *cache.StateCache
 
 	executionproto.UnimplementedExecutionServer
 }
@@ -220,7 +220,7 @@ func NewEthereumExecutionModule(ctx context.Context, blockReader services.FullBl
 	fcuBackgroundCommit bool,
 	onlySnapDownloadOnStart bool,
 ) *EthereumExecutionModule {
-	codeCache := cache.NewDefaultCodeCache()
+	domainCache := cache.NewDefaultStateCache()
 
 	em := &EthereumExecutionModule{
 		blockReader:             blockReader,
@@ -242,7 +242,7 @@ func NewEthereumExecutionModule(ctx context.Context, blockReader services.FullBl
 		fcuBackgroundPrune:      fcuBackgroundPrune,
 		fcuBackgroundCommit:     fcuBackgroundCommit,
 		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
-		codeCache:               codeCache,
+		stateCache:              domainCache,
 	}
 
 	if stateCache != nil {
@@ -379,10 +379,9 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return nil, err
 	}
 
-	// Set code cache in SharedDomains for use during code reading
-	if e.codeCache != nil {
-		// Validate cache version - clear if parent hash doesn't match
-		doms.SetCodeCache(e.codeCache)
+	// Set state cache in SharedDomains for use during state reading
+	if e.stateCache != nil {
+		doms.SetStateCache(e.stateCache)
 	}
 
 	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
@@ -395,10 +394,10 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return nil, criticalError
 	}
 
-	// Update code cache version after successful execution
+	// Clear state cache on invalid block
 	isInvalid := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
-	if e.codeCache != nil && isInvalid {
-		e.codeCache.ClearWithHash(header.ParentHash)
+	if e.stateCache != nil && isInvalid {
+		e.stateCache.ClearWithHash(header.ParentHash)
 	}
 
 	// Throw away the tx and start a new one (do not persist changes to the canonical chain)

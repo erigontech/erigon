@@ -118,7 +118,8 @@ func (c *CodeCache) Put(addr []byte, code []byte) {
 			c.addrToHash.Set(addr, codeHash)
 			c.addrSize.Add(addrEntrySize)
 		}
-		// else: no-op when full
+		// Even if addr cache is full, continue to store the code
+		// (it may be shared by other addresses)
 	}
 
 	// Check if code already stored
@@ -278,6 +279,7 @@ func (c *CodeCache) PrintStatsAndReset() {
 		"code_misses", codeMisses,
 		"code_hit_rate", codeHitRate,
 		"addr_entries", c.addrToHash.Len(),
+		"code_entries", c.CodeLen(),
 		"addr_size_mb", addrSizeB/(1024*1024),
 		"addr_usage_pct", addrUsagePct,
 		"code_size_mb", codeSizeB/(1024*1024),
