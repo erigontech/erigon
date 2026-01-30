@@ -1079,10 +1079,6 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	if evm.readOnly && !value.IsZero() {
-		return pc, nil, ErrWriteProtection
-	}
-
 	if !value.IsZero() {
 		if evm.readOnly {
 			return pc, nil, ErrWriteProtection
