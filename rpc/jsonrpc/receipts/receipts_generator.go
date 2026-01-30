@@ -659,6 +659,9 @@ func (g *Generator) computeCommitmentFromStateHistory(ctx context.Context, tx kv
 		log.Error("Historical state", "blockNum", blockNum, "txNum", txNum, "root", common.Bytes2Hex(root))
 		return root, nil
 	}
+	if dbg.AssertEnabled && blockNum == 0 {
+		panic("assert: blockNum=0 in computeCommitmentFromStateHistory")
+	}
 	baseBlockNum := blockNum - 1
 	return g.commitmentReplay.ComputeCustomCommitmentFromStateHistory(ctx, tx, baseBlockNum, receiptComputeCommitment)
 }

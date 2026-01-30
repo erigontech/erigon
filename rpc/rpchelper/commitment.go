@@ -129,6 +129,7 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 		return nil, err
 	}
 	defer tsd.Close()
+	tsd.GetCommitmentContext().SetDeferBranchUpdates(false)
 
 	// We must compute genesis commitment from scratch because there's no history for block 0
 	genesis, err := rawdb.ReadGenesis(tx)
