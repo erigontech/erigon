@@ -164,6 +164,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 	defer sharedDomains.Close()
+	sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
 
 	// Iterate over each given SimulatedBlock
 	parent := sim.base
@@ -713,7 +714,7 @@ func (s *simulator) simulateCall(
 	if evm.Cancelled() {
 		return nil, nil, nil, fmt.Errorf("execution aborted (timeout = %v)", s.evmCallTimeout)
 	}
-	*cumulativeGasUsed += result.GasUsed
+	*cumulativeGasUsed += result.ReceiptGasUsed
 	receipt := protocol.MakeReceipt(header.Number, common.Hash{}, msg, txn, *cumulativeGasUsed, result, intraBlockState, evm)
 	*cumulativeBlobGasUsed += receipt.BlobGasUsed
 
@@ -724,7 +725,7 @@ func (s *simulator) simulateCall(
 		logs = receipt.Logs
 	}
 
-	callResult := CallResult{GasUsed: hexutil.Uint64(result.GasUsed)}
+	callResult := CallResult{GasUsed: hexutil.Uint64(result.ReceiptGasUsed)}
 	callResult.Logs = make([]*types.RPCLog, 0, len(logs))
 	for _, l := range logs {
 		rpcLog := &types.RPCLog{
@@ -1008,6 +1009,7 @@ func (s *simulator) computeCustomCommitmentFromStateHistory(
 		return nil, err
 	}
 	defer tsd.Close()
+	tsd.GetCommitmentContext().SetDeferBranchUpdates(false)
 
 	// We must compute genesis commitment from scratch because there's no history for block 0
 	genesis, err := rawdb.ReadGenesis(tx)

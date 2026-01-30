@@ -176,7 +176,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	}
 
 	if tracer != nil && tracer.Hooks.OnTxEnd != nil {
-		tracer.OnTxEnd(&types.Receipt{GasUsed: result.GasUsed}, nil)
+		tracer.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
 	}
 	return result, nil
 }
