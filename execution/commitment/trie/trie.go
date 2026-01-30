@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -1437,4 +1438,361 @@ func (t *Trie) TrieSize() int {
 
 func (t *Trie) NumberOfAccounts() int {
 	return calcSubtreeNodes(t.RootNode)
+}
+
+// RLPEncode traverses the trie from root to leaves and collects
+// all unique RLP-encoded nodes. This is useful for building execution witnesses.
+// The first element is always the root node.
+func (t *Trie) RLPEncode() ([][]byte, error) {
+	if t == nil || t.RootNode == nil {
+		return nil, nil
+	}
+
+	var nodes [][]byte
+	seen := make(map[common.Hash]struct{})
+	h := newHasher(t.valueNodesRLPEncoded)
+	defer returnHasherToPool(h)
+
+	var collect func(node Node) error
+	collect = func(node Node) error {
+		if node == nil {
+			return nil
+		}
+
+		switch n := node.(type) {
+		case *ShortNode:
+			nodeRLP, err := h.hashChildren(n, 0)
+			if err != nil {
+				return err
+			}
+			hash := crypto.Keccak256Hash(nodeRLP)
+			if _, ok := seen[hash]; !ok {
+				seen[hash] = struct{}{}
+				nodes = append(nodes, common.Copy(nodeRLP))
+			}
+			return collect(n.Val)
+
+		case *DuoNode:
+			nodeRLP, err := h.hashChildren(n, 0)
+			if err != nil {
+				return err
+			}
+			hash := crypto.Keccak256Hash(nodeRLP)
+			if _, ok := seen[hash]; !ok {
+				seen[hash] = struct{}{}
+				nodes = append(nodes, common.Copy(nodeRLP))
+			}
+			if err := collect(n.child1); err != nil {
+				return err
+			}
+			return collect(n.child2)
+
+		case *FullNode:
+			nodeRLP, err := h.hashChildren(n, 0)
+			if err != nil {
+				return err
+			}
+			hash := crypto.Keccak256Hash(nodeRLP)
+			if _, ok := seen[hash]; !ok {
+				seen[hash] = struct{}{}
+				nodes = append(nodes, common.Copy(nodeRLP))
+			}
+			for i := 0; i < 17; i++ {
+				if n.Children[i] != nil {
+					if err := collect(n.Children[i]); err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+
+		case *AccountNode:
+			// AccountNode may have a storage trie
+			if n.Storage != nil {
+				return collect(n.Storage)
+			}
+			return nil
+
+		case ValueNode:
+			// Leaf value, nothing to collect
+			return nil
+
+		case *HashNode:
+			// HashNode means this subtrie wasn't expanded
+			return nil
+
+		default:
+			return nil
+		}
+	}
+
+	if err := collect(t.RootNode); err != nil {
+		return nil, err
+	}
+
+	return nodes, nil
+}
+
+// RLPDecode reconstructs a trie from RLP-encoded nodes produced by RLPEncode.
+// The first element must be the root node.
+func RLPDecode(encodedNodes [][]byte) (*Trie, error) {
+	if len(encodedNodes) == 0 {
+		return New(common.Hash{}), nil
+	}
+
+	// Build a map from hash -> decoded node
+	nodeMap := make(map[common.Hash]Node)
+	for _, encoded := range encodedNodes {
+		hash := crypto.Keccak256Hash(encoded)
+		node, err := decodeTrieNode(encoded)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode node: %w", err)
+		}
+		nodeMap[hash] = node
+	}
+
+	// Decode the root node (first in the list)
+	rootHash := crypto.Keccak256Hash(encodedNodes[0])
+	rootNode, ok := nodeMap[rootHash]
+	if !ok {
+		return nil, errors.New("root node not found in map")
+	}
+
+	// Resolve all HashNodes by looking them up in the map
+	resolved, err := resolveHashNodes(rootNode, nodeMap)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewInMemoryTrie(resolved), nil
+}
+
+// decodeTrieNode decodes an RLP-encoded trie node for trie reconstruction.
+// Unlike decodeNode (used for proof verification), this fully decodes leaf values.
+func decodeTrieNode(encoded []byte) (Node, error) {
+	if len(encoded) == 0 {
+		return nil, errors.New("nodes must not be zero length")
+	}
+	elems, _, err := rlp.SplitList(encoded)
+	if err != nil {
+		return nil, err
+	}
+	switch c, _ := rlp.CountValues(elems); c {
+	case 2:
+		return decodeTrieShort(elems)
+	case 17:
+		return decodeTrieFull(elems)
+	default:
+		return nil, fmt.Errorf("invalid number of list elements: %v", c)
+	}
+}
+
+// decodeTrieShort decodes a short node (extension or leaf) for trie reconstruction.
+func decodeTrieShort(elems []byte) (*ShortNode, error) {
+	kbuf, rest, err := rlp.SplitString(elems)
+	if err != nil {
+		return nil, err
+	}
+	kb := CompactToKeybytes(kbuf)
+	if kb.Terminating {
+		// For leaf nodes, the value is double-RLP encoded
+		// First rlp.SplitString gets the outer RLP string
+		val, _, err := rlp.SplitString(rest)
+		if err != nil {
+			return nil, err
+		}
+		// Decode the inner RLP string to get the raw value
+		rawVal, _, err := rlp.SplitString(val)
+		if err != nil {
+			// If inner decode fails, value might be empty or already raw
+			return &ShortNode{
+				Key: kb.ToHex(),
+				Val: ValueNode(val),
+			}, nil
+		}
+		return &ShortNode{
+			Key: kb.ToHex(),
+			Val: ValueNode(rawVal),
+		}, nil
+	}
+
+	val, _, err := decodeTrieRef(rest)
+	if err != nil {
+		return nil, err
+	}
+	return &ShortNode{
+		Key: kb.ToHex(),
+		Val: val,
+	}, nil
+}
+
+// decodeTrieFull decodes a full node (branch) for trie reconstruction.
+func decodeTrieFull(elems []byte) (*FullNode, error) {
+	n := &FullNode{}
+	for i := 0; i < 16; i++ {
+		var err error
+		n.Children[i], elems, err = decodeTrieRef(elems)
+		if err != nil {
+			return nil, err
+		}
+	}
+	val, _, err := rlp.SplitString(elems)
+	if err != nil {
+		return nil, err
+	}
+	if len(val) > 0 {
+		// Decode inner RLP for the value
+		rawVal, _, err := rlp.SplitString(val)
+		if err != nil {
+			n.Children[16] = ValueNode(val)
+		} else {
+			n.Children[16] = ValueNode(rawVal)
+		}
+	}
+	return n, nil
+}
+
+// decodeTrieRef decodes a node reference for trie reconstruction.
+func decodeTrieRef(buf []byte) (Node, []byte, error) {
+	kind, val, rest, err := rlp.Split(buf)
+	if err != nil {
+		return nil, nil, err
+	}
+	switch {
+	case kind == rlp.List:
+		if len(buf)-len(rest) >= 32 {
+			return nil, nil, errors.New("embedded nodes must be less than hash size")
+		}
+		n, err := decodeTrieNode(buf)
+		if err != nil {
+			return nil, nil, err
+		}
+		return n, rest, nil
+	case kind == rlp.String && len(val) == 0:
+		return nil, rest, nil
+	case kind == rlp.String && len(val) == 32:
+		return HashNode{hash: val}, rest, nil
+	default:
+		return nil, nil, fmt.Errorf("invalid RLP string size %d (want 0 through 32)", len(val))
+	}
+}
+
+// tryDecodeAccountNode attempts to decode a ValueNode as an AccountNode.
+// Returns the AccountNode if successful, or nil if the value is not valid account data.
+func tryDecodeAccountNode(val ValueNode, nodeMap map[common.Hash]Node) *AccountNode {
+	if len(val) == 0 {
+		return nil
+	}
+
+	// Try to decode as account RLP: [nonce, balance, storageRoot, codeHash]
+	acc := new(accounts.Account)
+	if err := acc.DecodeForHashing(val); err != nil {
+		return nil
+	}
+
+	// Successfully decoded as account
+	an := &AccountNode{
+		Account:     *acc,
+		RootCorrect: true,
+	}
+
+	// If account has non-empty storage root, try to find it in nodeMap
+	if acc.Root != EmptyRoot && acc.Root != (common.Hash{}) {
+		if storageNode, ok := nodeMap[acc.Root]; ok {
+			an.Storage = storageNode
+		} else {
+			// Storage root exists but we don't have the nodes - use HashNode
+			an.Storage = HashNode{hash: acc.Root[:]}
+		}
+	}
+
+	return an
+}
+
+// resolveHashNodes recursively replaces HashNodes with their actual nodes from the map
+// and converts ValueNodes containing account data back into AccountNodes.
+func resolveHashNodes(node Node, nodeMap map[common.Hash]Node) (Node, error) {
+	if node == nil {
+		return nil, nil
+	}
+
+	switch n := node.(type) {
+	case *ShortNode:
+		resolved, err := resolveHashNodes(n.Val, nodeMap)
+		if err != nil {
+			return nil, err
+		}
+
+		// Check if this is a leaf node (terminating key) with a ValueNode
+		// that might be account data
+		if vn, ok := resolved.(ValueNode); ok && len(n.Key) > 0 && n.Key[len(n.Key)-1] == 16 {
+			// Key ends with terminator (16), this is a leaf
+			if an := tryDecodeAccountNode(vn, nodeMap); an != nil {
+				// Resolve storage if present
+				if an.Storage != nil {
+					resolvedStorage, err := resolveHashNodes(an.Storage, nodeMap)
+					if err != nil {
+						return nil, err
+					}
+					an.Storage = resolvedStorage
+				}
+				return &ShortNode{
+					Key: n.Key,
+					Val: an,
+				}, nil
+			}
+		}
+
+		return &ShortNode{
+			Key: n.Key,
+			Val: resolved,
+		}, nil
+
+	case *FullNode:
+		newNode := &FullNode{}
+		for i := 0; i < 17; i++ {
+			if n.Children[i] != nil {
+				resolved, err := resolveHashNodes(n.Children[i], nodeMap)
+				if err != nil {
+					return nil, err
+				}
+				newNode.Children[i] = resolved
+			}
+		}
+		return newNode, nil
+
+	case HashNode:
+		hash := common.BytesToHash(n.hash)
+		if resolved, ok := nodeMap[hash]; ok {
+			// Recursively resolve the looked-up node
+			return resolveHashNodes(resolved, nodeMap)
+		}
+		// HashNode not in map, keep as is (partial trie)
+		return n, nil
+
+	case *HashNode:
+		hash := common.BytesToHash(n.hash)
+		if resolved, ok := nodeMap[hash]; ok {
+			return resolveHashNodes(resolved, nodeMap)
+		}
+		return n, nil
+
+	case ValueNode:
+		return n, nil
+
+	case *AccountNode:
+		if n.Storage != nil {
+			resolved, err := resolveHashNodes(n.Storage, nodeMap)
+			if err != nil {
+				return nil, err
+			}
+			newNode := *n
+			newNode.Storage = resolved
+			return &newNode, nil
+		}
+		return n, nil
+
+	default:
+		return n, nil
+	}
 }

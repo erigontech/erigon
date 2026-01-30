@@ -23,9 +23,13 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestHexCompact(t *testing.T) {
@@ -144,4 +148,262 @@ func BenchmarkHexToKeybytes(b *testing.B) {
 	for b.Loop() {
 		hexToKeybytes(testBytes)
 	}
+}
+
+func TestRLPEncodeDecodeRoundtrip(t *testing.T) {
+	// Create a trie and populate it with some values
+	tr := newEmpty()
+
+	// Use 32-byte keys to avoid prefix conflicts (like hashed account addresses)
+	testData := []struct {
+		key   []byte
+		value []byte
+	}{
+		{common.FromHex("1111111111111111111111111111111111111111111111111111111111111111"), []byte("value1")},
+		{common.FromHex("2222222222222222222222222222222222222222222222222222222222222222"), []byte("value2")},
+		{common.FromHex("1111111111111111111111111111111111111111111111111111111111111112"), []byte("value3")},
+		{common.FromHex("3333333333333333333333333333333333333333333333333333333333333333"), []byte("value4")},
+		{common.FromHex("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"), []byte("value5")},
+	}
+
+	for _, td := range testData {
+		tr.Update(td.key, td.value)
+	}
+
+	// Compute the original hash before encoding
+	originalHash := tr.Hash()
+
+	// Encode the trie
+	encoded, err := tr.RLPEncode()
+	assert.NoError(t, err)
+	assert.NotEmpty(t, encoded, "encoded nodes should not be empty")
+
+	// Decode the trie
+	decoded, err := RLPDecode(encoded)
+	assert.NoError(t, err)
+	assert.NotNil(t, decoded)
+
+	// Verify the decoded trie has the same hash
+	decodedHash := decoded.Hash()
+	assert.Equal(t, originalHash, decodedHash, "hashes should match after roundtrip")
+
+	// Verify all values can be retrieved from the decoded trie
+	for _, td := range testData {
+		got, found := decoded.Get(td.key)
+		assert.True(t, found, "key %x should be found", td.key)
+		assert.Equal(t, td.value, got, "value for key %x should match", td.key)
+	}
+}
+
+func TestRLPEncodeDecodeEmpty(t *testing.T) {
+	// Test with empty trie
+	tr := newEmpty()
+
+	encoded, err := tr.RLPEncode()
+	assert.NoError(t, err)
+	assert.Empty(t, encoded, "empty trie should produce no nodes")
+
+	decoded, err := RLPDecode(encoded)
+	assert.NoError(t, err)
+	assert.NotNil(t, decoded)
+	assert.Equal(t, EmptyRoot, decoded.Hash())
+}
+
+func TestRLPEncodeDecodeSingleValue(t *testing.T) {
+	tr := newEmpty()
+	tr.Update([]byte("test"), []byte("value"))
+
+	originalHash := tr.Hash()
+
+	encoded, err := tr.RLPEncode()
+	assert.NoError(t, err)
+	assert.NotEmpty(t, encoded)
+
+	decoded, err := RLPDecode(encoded)
+	assert.NoError(t, err)
+
+	assert.Equal(t, originalHash, decoded.Hash())
+
+	got, found := decoded.Get([]byte("test"))
+	assert.True(t, found)
+	assert.Equal(t, []byte("value"), got)
+}
+
+func TestRLPEncodeDecodeWithAccountsAndStorage(t *testing.T) {
+	// This test creates a single trie containing accounts with embedded storage subtries.
+	// - Accounts are created using UpdateAccount (creates AccountNode entries)
+	// - Storage is added using Update with composite keys (addressHash + storageKeyHash)
+	// - Storage gets embedded into AccountNode.Storage subtries
+	//
+	// Note: This test verifies that encoding captures all nodes (accounts + storage),
+	// and that the storage subtrie hashes match. Full roundtrip decode with AccountNode
+	// reconstruction is not yet implemented.
+
+	stateTrie := newEmpty()
+
+	// Define test addresses
+	addresses := []common.Address{
+		common.HexToAddress("0x1111111111111111111111111111111111111111"), // EOA
+		common.HexToAddress("0x2222222222222222222222222222222222222222"), // Contract with storage
+		common.HexToAddress("0x3333333333333333333333333333333333333333"), // EOA
+		common.HexToAddress("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"), // Contract with storage
+	}
+
+	// Hash the addresses for trie keys
+	addrHashes := make([]common.Hash, len(addresses))
+	for i, addr := range addresses {
+		addrHashes[i] = crypto.Keccak256Hash(addr.Bytes())
+	}
+
+	// Create accounts
+	testAccounts := []*accounts.Account{
+		{
+			Nonce:       1,
+			Balance:     *uint256.NewInt(1000000000000000000), // 1 ETH
+			Root:        EmptyRoot,
+			CodeHash:    accounts.EmptyCodeHash,
+			Incarnation: 0,
+		},
+		{
+			Nonce:       42,
+			Balance:     *uint256.NewInt(10000000000000000000), // 10 ETH
+			Root:        EmptyRoot,                             // Will be updated when storage is added
+			CodeHash:    accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0x60, 0x80, 0x60, 0x40})),
+			Incarnation: 1,
+		},
+		{
+			Nonce:       0,
+			Balance:     *uint256.NewInt(0),
+			Root:        EmptyRoot,
+			CodeHash:    accounts.EmptyCodeHash,
+			Incarnation: 0,
+		},
+		{
+			Nonce:       999,
+			Balance:     *uint256.NewInt(0xffffffffffffffff),
+			Root:        EmptyRoot,
+			CodeHash:    accounts.InternCodeHash(crypto.Keccak256Hash([]byte("contract code"))),
+			Incarnation: 2,
+		},
+	}
+
+	// Insert accounts using UpdateAccount (creates AccountNode entries)
+	for i, addr := range addresses {
+		key := crypto.Keccak256(addr.Bytes())
+		stateTrie.UpdateAccount(key, testAccounts[i])
+	}
+
+	// Define storage for contract at index 1
+	contract1AddrHash := addrHashes[1]
+	storageSlots1 := []struct {
+		slot  common.Hash
+		value []byte
+	}{
+		{common.HexToHash("0x0"), common.HexToHash("0x1").Bytes()},
+		{common.HexToHash("0x1"), common.HexToHash("0xdeadbeef").Bytes()},
+		{common.HexToHash("0x2"), common.HexToHash("0x1234567890abcdef").Bytes()},
+		{common.HexToHash("0x100"), common.HexToHash("0xff").Bytes()},
+	}
+
+	// Insert storage using composite keys: addressHash + keccak256(slot)
+	// This inserts into AccountNode.Storage
+	for _, slot := range storageSlots1 {
+		compositeKey := make([]byte, 64)
+		copy(compositeKey[:32], contract1AddrHash[:])
+		copy(compositeKey[32:], crypto.Keccak256(slot.slot.Bytes()))
+		stateTrie.Update(compositeKey, slot.value)
+	}
+
+	// Define storage for contract at index 3
+	contract2AddrHash := addrHashes[3]
+	storageSlots2 := []struct {
+		slot  common.Hash
+		value []byte
+	}{
+		{common.HexToHash("0x0"), common.HexToHash("0xabcd").Bytes()},
+		{common.HexToHash("0x5"), common.HexToHash("0x9999").Bytes()},
+	}
+
+	for _, slot := range storageSlots2 {
+		compositeKey := make([]byte, 64)
+		copy(compositeKey[:32], contract2AddrHash[:])
+		copy(compositeKey[32:], crypto.Keccak256(slot.slot.Bytes()))
+		stateTrie.Update(compositeKey, slot.value)
+	}
+
+	// Get the storage root hashes via DeepHash
+	_, storageRoot1 := stateTrie.DeepHash(contract1AddrHash[:])
+	_, storageRoot2 := stateTrie.DeepHash(contract2AddrHash[:])
+
+	// Compute original state root BEFORE encoding
+	originalStateRoot := stateTrie.Hash()
+
+	// Encode the unified trie (includes accounts AND their storage subtries)
+	encoded, err := stateTrie.RLPEncode()
+	require.NoError(t, err)
+	require.NotEmpty(t, encoded)
+
+	t.Logf("Unified state trie: %d nodes, %d bytes", len(encoded), totalSize(encoded))
+	t.Logf("Contains %d accounts (%d with storage), %d total storage slots",
+		len(addresses), 2, len(storageSlots1)+len(storageSlots2))
+	t.Logf("Original state root: %s", originalStateRoot.Hex())
+	t.Logf("Storage root 1: %s", storageRoot1.Hex())
+	t.Logf("Storage root 2: %s", storageRoot2.Hex())
+
+	// Decode the unified trie back
+	decodedStateTrie, err := RLPDecode(encoded)
+	require.NoError(t, err)
+
+	// Verify the decoded trie hash matches the original
+	decodedStateRoot := decodedStateTrie.Hash()
+	assert.Equal(t, originalStateRoot, decodedStateRoot, "decoded state trie hash should match original")
+
+	// Verify that encoding captured all expected nodes:
+	// - Account trie nodes
+	// - Storage subtrie nodes for both contracts
+	assert.GreaterOrEqual(t, len(encoded), 10, "should have multiple nodes for accounts + storage")
+
+	// Create expected storage tries separately to verify their roots match
+	expectedStorageTrie1 := newEmpty()
+	for _, slot := range storageSlots1 {
+		slotKey := crypto.Keccak256(slot.slot.Bytes())
+		expectedStorageTrie1.Update(slotKey, slot.value)
+	}
+	expectedStorageRoot1 := expectedStorageTrie1.Hash()
+
+	expectedStorageTrie2 := newEmpty()
+	for _, slot := range storageSlots2 {
+		slotKey := crypto.Keccak256(slot.slot.Bytes())
+		expectedStorageTrie2.Update(slotKey, slot.value)
+	}
+	expectedStorageRoot2 := expectedStorageTrie2.Hash()
+
+	// Verify storage roots match
+	assert.Equal(t, expectedStorageRoot1, storageRoot1, "storage root 1 should match expected")
+	assert.Equal(t, expectedStorageRoot2, storageRoot2, "storage root 2 should match expected")
+
+	// Verify we can encode/decode the storage subtries independently and get matching hashes
+	t.Run("StorageSubtrie1", func(t *testing.T) {
+		encoded1, err := expectedStorageTrie1.RLPEncode()
+		require.NoError(t, err)
+		decoded1, err := RLPDecode(encoded1)
+		require.NoError(t, err)
+		assert.Equal(t, expectedStorageRoot1, decoded1.Hash())
+	})
+
+	t.Run("StorageSubtrie2", func(t *testing.T) {
+		encoded2, err := expectedStorageTrie2.RLPEncode()
+		require.NoError(t, err)
+		decoded2, err := RLPDecode(encoded2)
+		require.NoError(t, err)
+		assert.Equal(t, expectedStorageRoot2, decoded2.Hash())
+	})
+}
+
+func totalSize(nodes [][]byte) int {
+	size := 0
+	for _, n := range nodes {
+		size += len(n)
+	}
+	return size
 }

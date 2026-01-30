@@ -24,21 +24,29 @@ import (
 	"runtime"
 	"runtime/debug"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/erigon/rpc/transactions"
 )
 
 // AccountRangeMaxResults is the maximum number of results to be returned
@@ -65,6 +73,7 @@ type PrivateDebugAPI interface {
 	GetRawReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]hexutil.Bytes, error)
 	GetBadBlocks(ctx context.Context) ([]map[string]any, error)
 	GetRawTransaction(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
+	ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (*ExecutionWitnessResult, error)
 	FreeOSMemory()
 	SetGCPercent(v int) int
 	SetMemoryLimit(limit int64) int64
@@ -585,6 +594,503 @@ func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.H
 	}
 
 	return nil, nil
+}
+
+// RecordingStateReader wraps a StateReader and records all state accesses (accounts, storage, code).
+// This is used for building execution witnesses.
+type RecordingStateReader struct {
+	inner  state.StateReader
+	trace  bool
+	prefix string
+	// Recorded accesses
+	AccessedAccounts map[common.Address]struct{}
+	AccessedStorage  map[common.Address]map[common.Hash]struct{}
+	AccessedCode     map[common.Address][]byte
+}
+
+// NewRecordingStateReader creates a new RecordingStateReader wrapping the given inner reader.
+func NewRecordingStateReader(inner state.StateReader) *RecordingStateReader {
+	return &RecordingStateReader{
+		inner:            inner,
+		AccessedAccounts: make(map[common.Address]struct{}),
+		AccessedStorage:  make(map[common.Address]map[common.Hash]struct{}),
+		AccessedCode:     make(map[common.Address][]byte),
+	}
+}
+
+func (r *RecordingStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	r.AccessedAccounts[address.Value()] = struct{}{}
+	return r.inner.ReadAccountData(address)
+}
+
+func (r *RecordingStateReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
+	r.AccessedAccounts[address.Value()] = struct{}{}
+	return r.inner.ReadAccountDataForDebug(address)
+}
+
+func (r *RecordingStateReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	r.AccessedAccounts[address.Value()] = struct{}{}
+	if r.AccessedStorage[address.Value()] == nil {
+		r.AccessedStorage[address.Value()] = make(map[common.Hash]struct{})
+	}
+	r.AccessedStorage[address.Value()][key.Value()] = struct{}{}
+	return r.inner.ReadAccountStorage(address, key)
+}
+
+func (r *RecordingStateReader) HasStorage(address accounts.Address) (bool, error) {
+	r.AccessedAccounts[address.Value()] = struct{}{}
+	return r.inner.HasStorage(address)
+}
+
+func (r *RecordingStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
+	code, err := r.inner.ReadAccountCode(address)
+	if err != nil {
+		return nil, err
+	}
+	r.AccessedAccounts[address.Value()] = struct{}{}
+	if len(code) > 0 {
+		r.AccessedCode[address.Value()] = code
+	}
+	return code, nil
+}
+
+func (r *RecordingStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
+	r.AccessedAccounts[address.Value()] = struct{}{}
+	return r.inner.ReadAccountCodeSize(address)
+}
+
+func (r *RecordingStateReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
+	r.AccessedAccounts[address.Value()] = struct{}{}
+	return r.inner.ReadAccountIncarnation(address)
+}
+
+func (r *RecordingStateReader) SetTrace(trace bool, tracePrefix string) {
+	r.trace = trace
+	r.prefix = tracePrefix
+}
+
+func (r *RecordingStateReader) Trace() bool {
+	return r.trace
+}
+
+func (r *RecordingStateReader) TracePrefix() string {
+	return r.prefix
+}
+
+// GetAccessedKeys returns slices of all accessed account addresses and storage keys
+func (r *RecordingStateReader) GetAccessedKeys() ([]common.Address, map[common.Address][]common.Hash) {
+	addresses := make([]common.Address, 0, len(r.AccessedAccounts))
+	for addr := range r.AccessedAccounts {
+		addresses = append(addresses, addr)
+	}
+
+	storageKeys := make(map[common.Address][]common.Hash)
+	for addr, keys := range r.AccessedStorage {
+		keySlice := make([]common.Hash, 0, len(keys))
+		for key := range keys {
+			keySlice = append(keySlice, key)
+		}
+		storageKeys[addr] = keySlice
+	}
+
+	return addresses, storageKeys
+}
+
+// GetAccessedCode returns all accessed contract code
+func (r *RecordingStateReader) GetAccessedCode() map[common.Address][]byte {
+	result := make(map[common.Address][]byte, len(r.AccessedCode))
+	for addr, code := range r.AccessedCode {
+		result[addr] = common.Copy(code)
+	}
+	return result
+}
+
+// RecordingStateWriter wraps a StateWriter and records all state modifications (accounts, storage, code).
+// This is used for building execution witnesses to capture all written keys.
+type RecordingStateWriter struct {
+	inner state.StateWriter
+	// Recorded modifications
+	ModifiedAccounts map[common.Address]struct{}
+	ModifiedStorage  map[common.Address]map[common.Hash]struct{}
+	ModifiedCode     map[common.Address][]byte
+	DeletedAccounts  map[common.Address]struct{}
+	CreatedContracts map[common.Address]struct{}
+}
+
+// NewRecordingStateWriter creates a new RecordingStateWriter wrapping the given inner writer.
+func NewRecordingStateWriter(inner state.StateWriter) *RecordingStateWriter {
+	return &RecordingStateWriter{
+		inner:            inner,
+		ModifiedAccounts: make(map[common.Address]struct{}),
+		ModifiedStorage:  make(map[common.Address]map[common.Hash]struct{}),
+		ModifiedCode:     make(map[common.Address][]byte),
+		DeletedAccounts:  make(map[common.Address]struct{}),
+		CreatedContracts: make(map[common.Address]struct{}),
+	}
+}
+
+func (w *RecordingStateWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
+	w.ModifiedAccounts[address.Value()] = struct{}{}
+	return w.inner.UpdateAccountData(address, original, account)
+}
+
+func (w *RecordingStateWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
+	w.ModifiedAccounts[address.Value()] = struct{}{}
+	if len(code) > 0 {
+		w.ModifiedCode[address.Value()] = common.Copy(code)
+	}
+	return w.inner.UpdateAccountCode(address, incarnation, codeHash, code)
+}
+
+func (w *RecordingStateWriter) DeleteAccount(address accounts.Address, original *accounts.Account) error {
+	w.ModifiedAccounts[address.Value()] = struct{}{}
+	w.DeletedAccounts[address.Value()] = struct{}{}
+	return w.inner.DeleteAccount(address, original)
+}
+
+func (w *RecordingStateWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
+	w.ModifiedAccounts[address.Value()] = struct{}{}
+	if w.ModifiedStorage[address.Value()] == nil {
+		w.ModifiedStorage[address.Value()] = make(map[common.Hash]struct{})
+	}
+	w.ModifiedStorage[address.Value()][key.Value()] = struct{}{}
+	return w.inner.WriteAccountStorage(address, incarnation, key, original, value)
+}
+
+func (w *RecordingStateWriter) CreateContract(address accounts.Address) error {
+	w.ModifiedAccounts[address.Value()] = struct{}{}
+	w.CreatedContracts[address.Value()] = struct{}{}
+	return w.inner.CreateContract(address)
+}
+
+// GetModifiedKeys returns slices of all modified account addresses and storage keys
+func (w *RecordingStateWriter) GetModifiedKeys() ([]common.Address, map[common.Address][]common.Hash) {
+	addresses := make([]common.Address, 0, len(w.ModifiedAccounts))
+	for addr := range w.ModifiedAccounts {
+		addresses = append(addresses, addr)
+	}
+
+	storageKeys := make(map[common.Address][]common.Hash)
+	for addr, keys := range w.ModifiedStorage {
+		keySlice := make([]common.Hash, 0, len(keys))
+		for key := range keys {
+			keySlice = append(keySlice, key)
+		}
+		storageKeys[addr] = keySlice
+	}
+
+	return addresses, storageKeys
+}
+
+// GetModifiedCode returns all modified contract code
+func (w *RecordingStateWriter) GetModifiedCode() map[common.Address][]byte {
+	result := make(map[common.Address][]byte, len(w.ModifiedCode))
+	for addr, code := range w.ModifiedCode {
+		result[addr] = common.Copy(code)
+	}
+	return result
+}
+
+// ExecutionWitnessResult is the response format for debug_executionWitness
+// Compatible with Geth/Reth format
+type ExecutionWitnessResult struct {
+	// State contains the list of RLP-encoded trie nodes in the witness trie
+	State []hexutil.Bytes `json:"state"`
+	// Codes is the list of accessed/created bytecodes during block execution
+	Codes []hexutil.Bytes `json:"codes"`
+	// Keys is the list of account and storage keys accessed/created during execution
+	Keys []hexutil.Bytes `json:"keys"`
+	// Headers is a list of RLP-encoded block headers needed for BLOCKHASH opcode support
+	Headers []hexutil.Bytes `json:"headers,omitempty"`
+}
+
+// ExecutionWitness implements debug_executionWitness.
+// It executes a block using a historical state reader, records all state accesses
+// (accounts, storage, code), and builds merkle proofs for the accessed keys.
+// This is compatible with the Geth/Reth format for execution witnesses.
+func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (*ExecutionWitnessResult, error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, fmt.Errorf("block %d not found", blockNum)
+	}
+
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	engine := api.engine()
+
+	// Create a state reader at the parent block state
+	var stateReader state.StateReader
+	var parentNum uint64
+	if blockNum == 0 {
+		// For genesis block, use empty state as parent since there's no block before it
+		// The genesis allocations are what get accessed during block 0 execution
+		stateReader = state.NewNoopReader()
+		parentNum = 0
+	} else {
+		parentNum = blockNum - 1
+		parentHash := block.ParentHash()
+		parentBlockNum := rpc.BlockNumber(parentNum)
+		parentNrOrHash := rpc.BlockNumberOrHash{
+			BlockNumber:      &parentBlockNum,
+			BlockHash:        &parentHash,
+			RequireCanonical: true,
+		}
+		stateReader, err = rpchelper.CreateStateReader(ctx, tx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Wrap with recording reader to track all state accesses
+	recordingReader := NewRecordingStateReader(stateReader)
+
+	// Create the in-block state with the recording reader
+	ibs := state.New(recordingReader)
+
+	// Get header for block context
+	header := block.Header()
+
+	// Create EVM block context
+	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader, chainConfig)
+	blockRules := blockCtx.Rules(chainConfig)
+	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
+
+	// Track accessed block hashes for BLOCKHASH opcode
+	var accessedBlockHashes []uint64
+	originalGetHash := blockCtx.GetHash
+	blockCtx.GetHash = func(n uint64) (common.Hash, error) {
+		accessedBlockHashes = append(accessedBlockHashes, n)
+		return originalGetHash(n)
+	}
+
+	// Create recording writer to track all state modifications
+	noop := state.NewNoopWriter()
+	recordingWriter := NewRecordingStateWriter(noop)
+
+	// Execute all transactions in the block
+	for txIndex, txn := range block.Transactions() {
+		msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert tx %d to message: %w", txIndex, err)
+		}
+
+		txCtx := protocol.NewEVMTxContext(msg)
+		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
+
+		gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
+		ibs.SetTxContext(blockNum, txIndex)
+
+		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
+		if err != nil {
+			return nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
+		}
+
+		if err = ibs.FinalizeTx(blockRules, recordingWriter); err != nil {
+			return nil, fmt.Errorf("failed to finalize tx %d: %w", txIndex, err)
+		}
+	}
+
+	if err = ibs.CommitBlock(blockRules, recordingWriter); err != nil {
+		return nil, fmt.Errorf("failed to commit block: %w", err)
+	}
+
+	// Build the execution witness result
+	result := &ExecutionWitnessResult{
+		State: []hexutil.Bytes{},
+		Codes: []hexutil.Bytes{},
+		Keys:  []hexutil.Bytes{},
+	}
+
+	// Collect all accessed keys (reads) for the Keys field
+	readAddresses, readStorageKeys := recordingReader.GetAccessedKeys()
+
+	// Collect all modified keys (writes) for the Keys field
+	writeAddresses, writeStorageKeys := recordingWriter.GetModifiedKeys()
+
+	// Merge read and write addresses into a deduplicated set
+	allAddresses := make(map[common.Address]struct{})
+	for _, addr := range readAddresses {
+		allAddresses[addr] = struct{}{}
+	}
+	for _, addr := range writeAddresses {
+		allAddresses[addr] = struct{}{}
+	}
+
+	// Merge read and write storage keys into a deduplicated set
+	allStorageKeys := make(map[common.Address]map[common.Hash]struct{})
+	for addr, keys := range readStorageKeys {
+		if allStorageKeys[addr] == nil {
+			allStorageKeys[addr] = make(map[common.Hash]struct{})
+		}
+		for _, key := range keys {
+			allStorageKeys[addr][key] = struct{}{}
+		}
+	}
+	for addr, keys := range writeStorageKeys {
+		if allStorageKeys[addr] == nil {
+			allStorageKeys[addr] = make(map[common.Hash]struct{})
+		}
+		for _, key := range keys {
+			allStorageKeys[addr][key] = struct{}{}
+		}
+	}
+
+	// Add account keys
+	for addr := range allAddresses {
+		result.Keys = append(result.Keys, addr.Bytes())
+	}
+
+	// Add storage keys
+	for addr, keys := range allStorageKeys {
+		for key := range keys {
+			// Storage keys are represented as composite keys (address + key)
+			compositeKey := append(addr.Bytes(), key.Bytes()...)
+			result.Keys = append(result.Keys, compositeKey)
+		}
+	}
+
+	// Collect codes from both reads and writes
+	accessedCode := recordingReader.GetAccessedCode()
+	modifiedCode := recordingWriter.GetModifiedCode()
+
+	// Merge codes (deduplicated by address, prefer modified if both exist)
+	allCode := make(map[common.Address][]byte)
+	for addr, code := range accessedCode {
+		allCode[addr] = code
+	}
+	for addr, code := range modifiedCode {
+		allCode[addr] = code // Modified code takes precedence
+	}
+
+	for _, code := range allCode {
+		if len(code) > 0 {
+			result.Codes = append(result.Codes, code)
+		}
+	}
+
+	// Build merkle proofs for all accessed accounts
+	// Use the proof infrastructure from the commitment context
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	if err != nil {
+		return nil, err
+	}
+	defer domains.Close()
+	sdCtx := domains.GetCommitmentContext()
+	sdCtx.SetDeferBranchUpdates(false)
+
+	// Get the expected parent state root for verification
+	var expectedParentRoot common.Hash
+	if blockNum == 0 {
+		// For genesis, parent state is empty trie
+		expectedParentRoot = empty.RootHash
+	} else {
+		// Get the parent header for state root verification
+		parentHeader, err := api._blockReader.HeaderByNumber(ctx, tx, parentNum)
+		if err != nil {
+			return nil, err
+		}
+		if parentHeader == nil {
+			return nil, fmt.Errorf("parent header %d not found", parentNum)
+		}
+		expectedParentRoot = parentHeader.Root
+
+		// Get first txnum of parentNum+1 to ensure that correct state root will be restored
+		lastTxnInBlock, err := api._txNumReader.Min(ctx, tx, parentNum+1)
+		if err != nil {
+			return nil, err
+		}
+
+		latestBlock, err := rpchelper.GetLatestBlockNumber(tx)
+		if err != nil {
+			return nil, err
+		}
+
+		if parentNum < latestBlock {
+			commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+			if lastTxnInBlock < commitmentStartingTxNum {
+				return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, lastTxnInBlock)
+			}
+
+			sdCtx.SetHistoryStateReader(tx, lastTxnInBlock)
+			if err := domains.SeekCommitment(context.Background(), tx); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	// Touch all accessed/modified accounts for proof generation
+	for addr := range allAddresses {
+		sdCtx.TouchKey(kv.AccountsDomain, string(addr.Bytes()), nil)
+	}
+
+	// Touch all accessed/modified storage keys
+	for addr, keys := range allStorageKeys {
+		for key := range keys {
+			storageKey := string(common.FromHex(addr.Hex()[2:] + key.Hex()[2:]))
+			sdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
+		}
+	}
+
+	// Generate the witness trie with all proofs
+	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, nil, "debug_executionWitness")
+	if err != nil {
+		return nil, err
+	}
+
+	// Verify root matches parent state root
+	if !bytes.Equal(witnessRoot, expectedParentRoot[:]) {
+		log.Warn("Witness root mismatch", "calculated", common.BytesToHash(witnessRoot), "expected", expectedParentRoot)
+	}
+
+	// Collect all unique RLP-encoded trie nodes by traversing from root to leaves
+	// This avoids duplicates that would occur when calling Prove() separately for each key
+	allNodes, err := witnessTrie.RLPEncode()
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode trie nodes: %w", err)
+	}
+	for _, node := range allNodes {
+		result.State = append(result.State, node)
+	}
+
+	// Collect headers for BLOCKHASH opcode support
+	// Include headers from accessed block numbers
+	seenBlockNums := make(map[uint64]struct{})
+	for _, bn := range accessedBlockHashes {
+		if _, seen := seenBlockNums[bn]; seen {
+			continue
+		}
+		seenBlockNums[bn] = struct{}{}
+
+		blockHeader, err := api._blockReader.HeaderByNumber(ctx, tx, bn)
+		if err != nil || blockHeader == nil {
+			continue
+		}
+
+		headerRLP, err := rlp.EncodeToBytes(blockHeader)
+		if err != nil {
+			continue
+		}
+		result.Headers = append(result.Headers, headerRLP)
+	}
+
+	return result, nil
 }
 
 // MemStats returns detailed runtime memory statistics.
