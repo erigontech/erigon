@@ -2,6 +2,8 @@ name: QA - RPC Performance Comp Tests Latest
 
 on:
   workflow_dispatch:
+  schedule:
+  - cron: '0 2 * * *'  # Run daily at 02:00 UTC (every night)
 
 concurrency:
   group: erigon-vs-geth-benchmark-${{ github.ref }}
