@@ -1,21 +1,18 @@
 // Copyright 2020 The go-ethereum Authors
-// (original work)
-// Copyright 2024 The Erigon Authors
-// (modifications)
-// This file is part of Erigon.
+// This file is part of the go-ethereum library.
 //
-// Erigon is free software: you can redistribute it and/or modify
+// The go-ethereum library is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// Erigon is distributed in the hope that it will be useful,
+// The go-ethereum library is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
 package v5wire
 
@@ -25,10 +22,9 @@ import (
 	"encoding/binary"
 	"time"
 
-	"github.com/hashicorp/golang-lru/v2/simplelru"
-
-	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/lru"
 	"github.com/erigontech/erigon/common/mclock"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
@@ -37,7 +33,7 @@ const handshakeTimeout = time.Second
 // The SessionCache keeps negotiated encryption keys and
 // state for in-progress handshakes in the Discovery v5 wire protocol.
 type SessionCache struct {
-	sessions   *simplelru.LRU[sessionID, *session]
+	sessions   lru.BasicLRU[sessionID, *session]
 	handshakes map[sessionID]*Whoareyou
 	clock      mclock.Clock
 
@@ -58,20 +54,17 @@ type session struct {
 	writeKey     []byte
 	readKey      []byte
 	nonceCounter uint32
+	node         *enode.Node
 }
 
 // keysFlipped returns a copy of s with the read and write keys flipped.
 func (s *session) keysFlipped() *session {
-	return &session{s.readKey, s.writeKey, s.nonceCounter}
+	return &session{s.readKey, s.writeKey, s.nonceCounter, s.node}
 }
 
 func NewSessionCache(maxItems int, clock mclock.Clock) *SessionCache {
-	cache, err := simplelru.NewLRU[sessionID, *session](maxItems, nil)
-	if err != nil {
-		panic("can't create session cache")
-	}
 	return &SessionCache{
-		sessions:        cache,
+		sessions:        lru.NewBasicLRU[sessionID, *session](maxItems),
 		handshakes:      make(map[sessionID]*Whoareyou),
 		clock:           clock,
 		nonceGen:        generateNonce,
@@ -99,10 +92,7 @@ func (sc *SessionCache) nextNonce(s *session) (Nonce, error) {
 
 // session returns the current session for the given node, if any.
 func (sc *SessionCache) session(id enode.ID, addr string) *session {
-	item, ok := sc.sessions.Get(sessionID{id, addr})
-	if !ok {
-		return nil
-	}
+	item, _ := sc.sessions.Get(sessionID{id, addr})
 	return item
 }
 
@@ -114,8 +104,19 @@ func (sc *SessionCache) readKey(id enode.ID, addr string) []byte {
 	return nil
 }
 
+func (sc *SessionCache) readNode(id enode.ID, addr string) *enode.Node {
+	if s := sc.session(id, addr); s != nil {
+		return s.node
+	}
+	return nil
+}
+
 // storeNewSession stores new encryption keys in the cache.
-func (sc *SessionCache) storeNewSession(id enode.ID, addr string, s *session) {
+func (sc *SessionCache) storeNewSession(id enode.ID, addr string, s *session, n *enode.Node) {
+	if n == nil {
+		panic("nil node in storeNewSession")
+	}
+	s.node = n
 	sc.sessions.Add(sessionID{id, addr}, s)
 }
 

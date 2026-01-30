@@ -1,4 +1,4 @@
-// Copyright 2017 The go-ethereum Authors
+// Copyright 2022 The go-ethereum Authors
 // (original work)
 // Copyright 2024 The Erigon Authors
 // (modifications)
@@ -151,7 +151,7 @@ func parseTag(field Field, lastPublic int) (Tags, error) {
 	name := field.Name
 	tag := reflect.StructTag(field.Tag)
 	var ts Tags
-	for t := range strings.SplitSeq(tag.Get("rlp"), ",") {
+	for _, t := range strings.Split(tag.Get("rlp"), ",") {
 		switch t = strings.TrimSpace(t); t {
 		case "":
 			// empty tag is allowed for some reason

@@ -1,21 +1,18 @@
 // Copyright 2016 The go-ethereum Authors
-// (original work)
-// Copyright 2024 The Erigon Authors
-// (modifications)
-// This file is part of Erigon.
+// This file is part of the go-ethereum library.
 //
-// Erigon is free software: you can redistribute it and/or modify
+// The go-ethereum library is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// Erigon is distributed in the hope that it will be useful,
+// The go-ethereum library is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
 // Contains the NTP time drift detection via the SNTP protocol:
 //   https://tools.ietf.org/html/rfc4330
@@ -25,10 +22,9 @@ package discover
 import (
 	"fmt"
 	"net"
-	"sort"
+	"slices"
 	"time"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -37,18 +33,9 @@ const (
 	ntpChecks = 3              // Number of measurements to do against the NTP server
 )
 
-// durationSlice attaches the methods of sort.Interface to []time.Duration,
-// sorting in increasing order.
-type durationSlice []time.Duration
-
-func (s durationSlice) Len() int           { return len(s) }
-func (s durationSlice) Less(i, j int) bool { return s[i] < s[j] }
-func (s durationSlice) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
-
 // checkClockDrift queries an NTP server for clock drifts and warns the user if
 // one large enough is detected.
 func checkClockDrift() {
-	defer dbg.LogPanic()
 	drift, err := sntpDrift(ntpChecks)
 	if err != nil {
 		return
@@ -57,7 +44,7 @@ func checkClockDrift() {
 		log.Warn(fmt.Sprintf("System clock seems off by %v, which can prevent network connectivity", drift))
 		log.Warn("Please enable network time synchronisation in system settings.")
 	} else {
-		log.Trace("NTP sanity check done", "drift", drift)
+		log.Debug("NTP sanity check done", "drift", drift)
 	}
 }
 
@@ -108,13 +95,13 @@ func sntpDrift(measurements int) (time.Duration, error) {
 
 		nanosec := sec*1e9 + (frac*1e9)>>32
 
-		t := time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(nanosec)).Local() //nolint:gosmopolitan
+		t := time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(nanosec)).Local()
 
 		// Calculate the drift based on an assumed answer time of RRT/2
 		drifts = append(drifts, sent.Sub(t)+elapsed/2)
 	}
-	// Calculate average drif (drop two extremities to avoid outliers)
-	sort.Sort(durationSlice(drifts))
+	// Calculate average drift (drop two extremities to avoid outliers)
+	slices.Sort(drifts)
 
 	drift := time.Duration(0)
 	for i := 1; i < len(drifts)-1; i++ {

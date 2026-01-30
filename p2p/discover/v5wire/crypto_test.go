@@ -1,21 +1,18 @@
 // Copyright 2020 The go-ethereum Authors
-// (original work)
-// Copyright 2024 The Erigon Authors
-// (modifications)
-// This file is part of Erigon.
+// This file is part of the go-ethereum library.
 //
-// Erigon is free software: you can redistribute it and/or modify
+// The go-ethereum library is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 //
-// Erigon is distributed in the hope that it will be useful,
+// The go-ethereum library is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
-// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
 package v5wire
 
@@ -28,9 +25,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
@@ -45,11 +41,10 @@ func TestVector_ECDH(t *testing.T) {
 }
 
 func TestVector_KDF(t *testing.T) {
-	logger := log.New()
 	var (
 		ephKey = hexPrivkey("0xfb757dc581730490a1d7a00deea65e9b1936924caaea8f44d476014856b68736")
 		cdata  = hexutil.MustDecode("0x000000000000000000000000000000006469736376350001010102030405060708090a0b0c00180102030405060708090a0b0c0d0e0f100000000000000000")
-		net    = newHandshakeTest(t.TempDir(), logger)
+		net    = newHandshakeTest()
 	)
 	defer net.close()
 

@@ -215,7 +215,7 @@ var nodeDBInt64Tests = []struct {
 
 func TestDBInt64(t *testing.T) {
 	tmpDir := t.TempDir()
-	db, err := OpenDB(context.Background(), "", tmpDir, log.Root())
+	db, err := OpenDB("")
 	if err != nil {
 		panic(err)
 	}
@@ -251,7 +251,7 @@ func TestDBFetchStore(t *testing.T) {
 	inst := time.Now()
 	num := 314
 
-	db, err := OpenDB(context.Background(), "", tmpDir, log.Root())
+	db, err := OpenDB("")
 	if err != nil {
 		panic(err)
 	}
@@ -394,7 +394,7 @@ func TestDBSeedQuery(t *testing.T) {
 }
 
 func testSeedQuery(tmpDir string) error {
-	db, err := OpenDB(context.Background(), "", tmpDir, log.Root())
+	db, err := OpenDB("")
 	if err != nil {
 		panic(err)
 	}
@@ -558,7 +558,7 @@ var nodeDBExpirationNodes = []struct {
 
 func TestDBExpiration(t *testing.T) {
 	tmpDir := t.TempDir()
-	db, err := OpenDB(context.Background(), "", tmpDir, log.Root())
+	db, err := OpenDB("")
 	if err != nil {
 		panic(err)
 	}
@@ -605,7 +605,7 @@ func TestDBExpiration(t *testing.T) {
 // in the database.
 func TestDBExpireV5(t *testing.T) {
 	tmpDir := t.TempDir()
-	db, err := OpenDB(context.Background(), "", tmpDir, log.Root())
+	db, err := OpenDB("")
 	if err != nil {
 		panic(err)
 	}
