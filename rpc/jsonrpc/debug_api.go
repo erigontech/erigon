@@ -31,11 +31,11 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -1065,7 +1065,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	// Verify root matches parent state root
 	if !bytes.Equal(witnessRoot, expectedParentRoot[:]) {
-		log.Warn("Witness root mismatch", "calculated", common.BytesToHash(witnessRoot), "expected", expectedParentRoot)
+		return nil, fmt.Errorf("Witness root mismatch: calculated=%x , expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
 	}
 
 	// Collect all unique RLP-encoded trie nodes by traversing from root to leaves

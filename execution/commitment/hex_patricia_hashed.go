@@ -1809,6 +1809,9 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 		hph.afterMap[row] = uint16(1) << nibble
 	}
 
+	if nibble == 16 {
+		fmt.Printf("ILLEGAL NIBBLE")
+	}
 	cell := &hph.grid[row][nibble]
 	cell.fillFromUpperCell(upCell, depth, min(unfolding, upCell.hashedExtLen))
 	if hph.trace {

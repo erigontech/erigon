@@ -38,7 +38,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
@@ -633,4 +635,89 @@ func TestGetRawTransaction(t *testing.T) {
 		}
 	}
 	require.True(testedOnce, "Test flow didn't touch the target flow")
+}
+
+func TestExecutionWitness(t *testing.T) {
+	// Enable historical commitment to allow witness generation for historical blocks
+	statecfg.EnableHistoricalCommitment()
+
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
+	ctx := context.Background()
+
+	// Get the latest block number
+	var latestBlockNum uint64
+	err := m.DB.View(ctx, func(tx kv.Tx) error {
+		latestBlockNum, _ = stages.GetStageProgress(tx, stages.Execution)
+		return nil
+	})
+	require.NoError(t, err)
+	require.Greater(t, latestBlockNum, uint64(0), "test chain should have at least one block")
+	t.Run("genesis block", func(t *testing.T) {
+		// Genesis block (block 0) should work without historical state
+		blockNum := rpc.BlockNumber(0)
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
+
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.NotNil(t, result.State, "State should not be nil")
+		require.NotNil(t, result.Keys, "Keys should not be nil")
+		require.NotNil(t, result.Codes, "Codes should not be nil")
+
+		t.Logf("Genesis: %d state nodes, %d codes, %d keys",
+			len(result.State), len(result.Codes), len(result.Keys))
+	})
+
+	t.Run("by block number", func(t *testing.T) {
+		// Test with block number 1 (first non-genesis block)
+		blockNum := rpc.BlockNumber(1)
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
+
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.NotNil(t, result.State, "State should not be nil")
+		require.NotNil(t, result.Keys, "Keys should not be nil")
+
+		t.Logf("Block 1: %d state nodes, %d codes, %d keys, %d headers",
+			len(result.State), len(result.Codes), len(result.Keys), len(result.Headers))
+	})
+
+	t.Run("by block hash", func(t *testing.T) {
+		var blockHash common.Hash
+		err := m.DB.View(ctx, func(tx kv.Tx) error {
+			blockHash, _, _ = m.BlockReader.CanonicalHash(ctx, tx, 1)
+			return nil
+		})
+		require.NoError(t, err)
+
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockHash: &blockHash})
+
+		require.NoError(t, err)
+		require.NotNil(t, result)
+
+		t.Logf("Block hash %s: %d state nodes, %d codes, %d keys",
+			blockHash.Hex()[:10], len(result.State), len(result.Codes), len(result.Keys))
+	})
+
+	t.Run("multiple blocks", func(t *testing.T) {
+		// Test first 3 blocks (block 4+ may trigger a known bug in unfold)
+		for blockNum := uint64(1); blockNum <= latestBlockNum; blockNum++ {
+			bn := rpc.BlockNumber(blockNum)
+			result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+
+			require.NoError(t, err, "ExecutionWitness failed for block %d", blockNum)
+			require.NotNil(t, result, "Result should not be nil for block %d", blockNum)
+			require.NotNil(t, result.State, "State should not be nil for block %d", blockNum)
+
+			t.Logf("Block %d: %d state nodes, %d codes, %d keys",
+				blockNum, len(result.State), len(result.Codes), len(result.Keys))
+		}
+	})
+
+	t.Run("non-existent block", func(t *testing.T) {
+		// Very high block number that doesn't exist
+		blockNum := rpc.BlockNumber(999999999)
+		_, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
+		require.Error(t, err, "should error for non-existent block")
+	})
 }
