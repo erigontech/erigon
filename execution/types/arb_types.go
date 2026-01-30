@@ -1112,7 +1112,7 @@ func (t *ArbitrumRetryTx) encodePayload(w io.Writer, b []byte, payloadSize, nonc
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if _, err := w.Write(t.RefundTo[:]); err != nil {
+	if _, err := w.Write(t.RefundTo.Value().Bytes()); err != nil {
 		return err
 	}
 
@@ -1300,7 +1300,7 @@ func (t *ArbitrumRetryTx) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for RefundTo: %d", len(b))
 	}
-	copy(t.RefundTo[:], b)
+	copy(t.RefundTo.Value().Bytes(), b)
 
 	// Decode MaxRefund (*big.Int)
 	if b, err = s.Bytes(); err != nil {
@@ -1476,14 +1476,17 @@ func (tx *ArbitrumSubmitRetryableTx) copy() *ArbitrumSubmitRetryableTx {
 	return cpy
 }
 
-func (tx *ArbitrumSubmitRetryableTx) Type() byte                         { return ArbitrumSubmitRetryableTxType }
-func (tx *ArbitrumSubmitRetryableTx) GetBlobHashes() []common.Hash       { return []common.Hash{} }
-func (tx *ArbitrumSubmitRetryableTx) GetGasLimit() uint64                { return tx.Gas }
-func (tx *ArbitrumSubmitRetryableTx) GetBlobGas() uint64                 { return 0 }
-func (tx *ArbitrumSubmitRetryableTx) GetNonce() uint64                   { return 0 }
-func (tx *ArbitrumSubmitRetryableTx) GetTipCap() *uint256.Int            { return uintZero }
-func (tx *ArbitrumSubmitRetryableTx) GetValue() *uint256.Int             { return uintZero }
-func (tx *ArbitrumSubmitRetryableTx) GetTo() *common.Address             { return &ArbRetryableTxAddress }
+func (tx *ArbitrumSubmitRetryableTx) Type() byte                   { return ArbitrumSubmitRetryableTxType }
+func (tx *ArbitrumSubmitRetryableTx) GetBlobHashes() []common.Hash { return []common.Hash{} }
+func (tx *ArbitrumSubmitRetryableTx) GetGasLimit() uint64          { return tx.Gas }
+func (tx *ArbitrumSubmitRetryableTx) GetBlobGas() uint64           { return 0 }
+func (tx *ArbitrumSubmitRetryableTx) GetNonce() uint64             { return 0 }
+func (tx *ArbitrumSubmitRetryableTx) GetTipCap() *uint256.Int      { return uintZero }
+func (tx *ArbitrumSubmitRetryableTx) GetValue() *uint256.Int       { return uintZero }
+func (tx *ArbitrumSubmitRetryableTx) GetTo() *common.Address {
+	a := ArbRetryableTxAddress.Value()
+	return &a
+}
 func (tx *ArbitrumSubmitRetryableTx) GetAccessList() AccessList          { return nil }
 func (tx *ArbitrumSubmitRetryableTx) GetAuthorizations() []Authorization { return nil }
 func (tx *ArbitrumSubmitRetryableTx) GetChainID() *uint256.Int {

@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/db/snaptype"
 	"io"
 	"math"
 	"net/http"

@@ -653,8 +653,7 @@ func opExtCodeHash(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (
 }
 
 func opGasprice(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
-	gasPrice := interpreter.evm.ProcessingHook.GasPriceOp(interpreter.evm)
-	scope.Stack.push(*gasPrice)
+	scope.Stack.push(interpreter.evm.ProcessingHook.GasPriceOp(interpreter.evm))
 	//scope.Stack.push(interpreter.evm.GasPrice) in main
 	return pc, nil, nil
 }
