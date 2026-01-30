@@ -794,7 +794,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 
 	var s *stagedsync.StageState
 	db.View(ctx, func(tx kv.Tx) error {
-		s = stage(sync, nil, db, stages.Execution)
+		s = stage(sync, tx, db, stages.Execution)
 		return nil
 	})
 	if chainTipMode {
