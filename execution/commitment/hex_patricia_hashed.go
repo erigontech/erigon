@@ -47,6 +47,17 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+// deferBranchUpdatesDefault controls whether deferred branch updates are enabled by default
+// when creating new HexPatriciaHashed instances. This can be disabled for testing purposes.
+var deferBranchUpdatesDefault = true
+
+// DisableDeferredBranchUpdates disables deferred branch updates by default for all new
+// HexPatriciaHashed instances. This is useful for testing when you want commitment to
+// be computed without deferred updates during chain execution.
+func DisableDeferredBranchUpdates() {
+	deferBranchUpdatesDefault = false
+}
+
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
 // Read to get a variable amount of data from the hash state. Read is faster than Sum
 // because it doesn't copy the internal state, but also modifies the internal state.
@@ -130,7 +141,7 @@ func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext) *HexPatricia
 	}
 
 	hph.branchEncoder.setMetrics(hph.metrics)
-	hph.branchEncoder.SetDeferUpdates(true) // Enable deferred branch updates by default
+	hph.branchEncoder.SetDeferUpdates(deferBranchUpdatesDefault)
 	return hph
 }
 
@@ -1234,6 +1245,19 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int16 {
 		fmt.Printf("cpl=%d cell.hashedExtension=[%x] hashedKey[depth=%d:]=[%x]\n", cpl, cell.hashedExtension[:cell.hashedExtLen], depth, hashedKey[depth:])
 	}
 	unfolding := int16(cpl + 1)
+
+	// Check if the nibble at position (unfolding-1) is a terminator.
+	// This can happen when:
+	// 1. The extension ends with a terminator (leaf node)
+	// 2. The terminator is at the account/storage boundary (position 64)
+	// In either case, we can't unfold through a terminator - it marks the end of a path segment.
+	if unfolding > 0 && unfolding <= cell.hashedExtLen && cell.hashedExtension[unfolding-1] == terminatorHexByte {
+		if hph.trace {
+			fmt.Printf("needUnfolding: terminator at position %d, no unfolding needed\n", unfolding-1)
+		}
+		return 0
+	}
+
 	if depth < 64 && depth+unfolding > 64 {
 		// This is to make sure that unfolding always breaks at the level where storage subtrees start
 		unfolding = 64 - depth
@@ -1802,6 +1826,13 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 		copyLen = upCell.hashedExtLen - 1
 	}
 
+	// Safety check: nibble should never be the terminator (16) here.
+	// needUnfolding() should have returned 0 for leaf nodes with terminators.
+	// If we hit this, it indicates a bug in needUnfolding().
+	if nibble == terminatorHexByte {
+		return fmt.Errorf("unfold: unexpected terminator nibble at depth %d (bug in needUnfolding?)", depth)
+	}
+
 	if touched {
 		hph.touchMap[row] = uint16(1) << nibble
 	}
@@ -1809,9 +1840,6 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 		hph.afterMap[row] = uint16(1) << nibble
 	}
 
-	if nibble == 16 {
-		fmt.Printf("ILLEGAL NIBBLE")
-	}
 	cell := &hph.grid[row][nibble]
 	cell.fillFromUpperCell(upCell, depth, min(unfolding, upCell.hashedExtLen))
 	if hph.trace {

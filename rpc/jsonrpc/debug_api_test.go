@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
@@ -640,6 +641,8 @@ func TestGetRawTransaction(t *testing.T) {
 func TestExecutionWitness(t *testing.T) {
 	// Enable historical commitment to allow witness generation for historical blocks
 	statecfg.EnableHistoricalCommitment()
+	// Disable deferred branch updates during chain creation for consistent commitment storage
+	commitment.DisableDeferredBranchUpdates()
 
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
@@ -700,8 +703,8 @@ func TestExecutionWitness(t *testing.T) {
 	})
 
 	t.Run("multiple blocks", func(t *testing.T) {
-		// Test first 3 blocks (block 4+ may trigger a known bug in unfold)
-		for blockNum := uint64(1); blockNum <= latestBlockNum; blockNum++ {
+		// Test all blocks except the latest (latest block's parent commitment may not be in history yet)
+		for blockNum := uint64(1); blockNum < latestBlockNum; blockNum++ {
 			bn := rpc.BlockNumber(blockNum)
 			result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
 
