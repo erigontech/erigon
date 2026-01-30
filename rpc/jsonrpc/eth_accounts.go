@@ -176,10 +176,6 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
 	}
 
-	if err != nil {
-		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
-	}
-
 	addr := accounts.InternAddress(address)
 	acc, err := reader.ReadAccountData(addr)
 	if acc == nil || err != nil {

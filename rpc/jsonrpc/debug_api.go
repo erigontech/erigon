@@ -605,10 +605,9 @@ func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.H
 		if err != nil {
 			return nil, err
 		}
-	}
-
-	if !ok {
-		return nil, nil
+		if !ok {
+			return nil, nil
+		}
 	}
 
 	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)

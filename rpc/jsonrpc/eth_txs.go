@@ -54,15 +54,6 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		return nil, err
 	}
 
-	if !ok {
-		return nil, nil
-	}
-
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-
 	// Private API returns 0 if transaction is not found.
 	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
 	if isBorStateSyncTx {
@@ -72,6 +63,11 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		}
 	}
 	if ok {
+		err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+		if err != nil {
+			return nil, err
+		}
+
 		txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err
