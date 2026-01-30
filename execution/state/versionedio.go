@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 
 	"github.com/heimdalr/dag"
@@ -392,7 +393,7 @@ func (writes VersionedWrites) HasNewWrite(cmpSet []*VersionedWrite) bool {
 
 func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, commited bool, defaultV T, copyV func(T) T, readStorage func(sdb *stateObject) (T, error)) (T, ReadSource, Version, error) {
 	if s.versionMap == nil {
-		so, err := s.getStateObject(addr)
+		so, err := s.getStateObject(addr, true)
 
 		if err != nil || readStorage == nil {
 			return defaultV, StorageRead, UnknownVersion, err
@@ -483,7 +484,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 
 		var ok bool
 		if v, ok = res.Value().(T); !ok {
-			return defaultV, MapRead, vr.Version, fmt.Errorf("unexpected type: %T", res.Value())
+			return defaultV, UnknownSource, vr.Version, fmt.Errorf("unexpected type: got: %T, expected %v", res.Value(), reflect.TypeFor[T]())
 		}
 
 		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
@@ -568,7 +569,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 
 		if so == nil {
 			vr.Source = StorageRead
-			so, err = s.getStateObject(addr)
+			so, err = s.getStateObject(addr, true)
 			if err != nil {
 				return defaultV, StorageRead, UnknownVersion, err
 			}
@@ -606,6 +607,10 @@ type VersionedIO struct {
 
 func (io *VersionedIO) Inputs() []versionedReadSet {
 	return io.inputs
+}
+
+func (io *VersionedIO) Outputs() []VersionedWrites {
+	return io.outputs
 }
 
 func (io *VersionedIO) ReadSet(txnIdx int) ReadSet {
