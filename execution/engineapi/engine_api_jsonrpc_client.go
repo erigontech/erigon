@@ -33,24 +33,37 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-type JsonRpcClientOption func(*JsonRpcClient)
+type JsonRpcClientOption func(*jsonRpcClientOptions)
 
 func WithJsonRpcClientMaxRetries(maxRetries uint64) JsonRpcClientOption {
-	return func(client *JsonRpcClient) {
-		client.maxRetries = maxRetries
+	return func(opts *jsonRpcClientOptions) {
+		opts.maxRetries = maxRetries
 	}
 }
 
 func WithJsonRpcClientRetryBackOff(retryBackOff time.Duration) JsonRpcClientOption {
-	return func(client *JsonRpcClient) {
-		client.retryBackOff = retryBackOff
+	return func(opts *jsonRpcClientOptions) {
+		opts.retryBackOff = retryBackOff
+	}
+}
+
+func WithJsonRpcClientTimeout(timeout time.Duration) JsonRpcClientOption {
+	return func(opts *jsonRpcClientOptions) {
+		opts.timeout = timeout
 	}
 }
 
 func WithRetryableErrCheckers(retryableErrCheckers ...RetryableErrChecker) JsonRpcClientOption {
-	return func(client *JsonRpcClient) {
-		client.retryableErrCheckers = retryableErrCheckers
+	return func(opts *jsonRpcClientOptions) {
+		opts.retryableErrCheckers = retryableErrCheckers
 	}
+}
+
+type jsonRpcClientOptions struct {
+	maxRetries           uint64
+	retryBackOff         time.Duration
+	timeout              time.Duration
+	retryableErrCheckers []RetryableErrChecker
 }
 
 type JsonRpcClient struct {
@@ -75,23 +88,25 @@ func ErrContainsRetryableErrChecker(sub string) RetryableErrChecker {
 }
 
 func DialJsonRpcClient(url string, jwtSecret []byte, logger log.Logger, opts ...JsonRpcClientOption) (*JsonRpcClient, error) {
+	options := jsonRpcClientOptions{
+		maxRetries:   10,
+		retryBackOff: 100 * time.Millisecond,
+		timeout:      30 * time.Second,
+	}
+	for _, opt := range opts {
+		opt(&options)
+	}
 	jwtRoundTripper := jwt.NewHttpRoundTripper(http.DefaultTransport, jwtSecret)
-	httpClient := &http.Client{Timeout: 30 * time.Second, Transport: jwtRoundTripper}
+	httpClient := &http.Client{Timeout: options.timeout, Transport: jwtRoundTripper}
 	client, err := rpc.DialHTTPWithClient(url, httpClient, logger)
 	if err != nil {
 		return nil, err
 	}
-
 	res := &JsonRpcClient{
 		rpcClient:    client,
-		maxRetries:   10,
-		retryBackOff: 100 * time.Millisecond,
+		maxRetries:   options.maxRetries,
+		retryBackOff: options.retryBackOff,
 	}
-
-	for _, opt := range opts {
-		opt(res)
-	}
-
 	return res, nil
 }
 

@@ -209,19 +209,25 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 	rpcApiClient := requests.NewRequestGenerator(rpcDaemonHttpUrl, logger)
 	contractBackend := contracts.NewJsonRpcBackend(rpcDaemonHttpUrl, logger)
 	//goland:noinspection HttpUrlsUsage
-	engineApiUrl := fmt.Sprintf("http://%s:%d", httpConfig.AuthRpcHTTPListenAddress, httpConfig.AuthRpcPort)
-	engineApiClient, err := engineapi.DialJsonRpcClient(
-		engineApiUrl,
-		jwtSecret,
-		logger,
+	engineApiClientOpts := []engineapi.JsonRpcClientOption{
 		// requests should not take more than 5 secs in a test env, yet we can spam frequently
-		engineapi.WithJsonRpcClientRetryBackOff(50*time.Millisecond),
+		engineapi.WithJsonRpcClientRetryBackOff(50 * time.Millisecond),
 		engineapi.WithJsonRpcClientMaxRetries(100),
 		engineapi.WithRetryableErrCheckers(
 			engineapi.ErrContainsRetryableErrChecker("connection refused"),
 			// below happened on win CI
 			engineapi.ErrContainsRetryableErrChecker("No connection could be made because the target machine actively refused it"),
 		),
+	}
+	if args.EngineApiClientTimeout != nil {
+		engineApiClientOpts = append(engineApiClientOpts, engineapi.WithJsonRpcClientTimeout(*args.EngineApiClientTimeout))
+	}
+	engineApiUrl := fmt.Sprintf("http://%s:%d", httpConfig.AuthRpcHTTPListenAddress, httpConfig.AuthRpcPort)
+	engineApiClient, err := engineapi.DialJsonRpcClient(
+		engineApiUrl,
+		jwtSecret,
+		logger,
+		engineApiClientOpts...,
 	)
 	require.NoError(t, err)
 	var mockCl *MockCl
@@ -251,13 +257,14 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 }
 
 type EngineApiTesterInitArgs struct {
-	Logger           log.Logger
-	DataDir          string
-	Genesis          *types.Genesis
-	CoinbaseKey      *ecdsa.PrivateKey
-	EthConfigTweaker func(*ethconfig.Config)
-	MockClState      *MockClState
-	NoEmptyBlock1    bool
+	Logger                 log.Logger
+	DataDir                string
+	Genesis                *types.Genesis
+	CoinbaseKey            *ecdsa.PrivateKey
+	EthConfigTweaker       func(*ethconfig.Config)
+	MockClState            *MockClState
+	NoEmptyBlock1          bool
+	EngineApiClientTimeout *time.Duration
 }
 
 type EngineApiTester struct {
