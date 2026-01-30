@@ -33,6 +33,11 @@ import (
 	"github.com/holiman/uint256"
 )
 
+const (
+	EmptyStringCode = 0x80
+	EmptyListCode   = 0xc0
+)
+
 var (
 	// Common encoded values.
 	// These are useful when implementing EncodeRLP.
@@ -40,7 +45,7 @@ var (
 	// EmptyString is the encoding of an empty string.
 	EmptyString = []byte{0x80}
 	// EmptyList is the encoding of an empty list.
-	EmptyList = []byte{0xC0}
+	EmptyList = []byte{EmptyListCode}
 )
 
 var ErrNegativeBigInt = errors.New("rlp: cannot encode negative big.Int")

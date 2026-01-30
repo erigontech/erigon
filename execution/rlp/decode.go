@@ -48,7 +48,9 @@ var (
 	ErrCanonSize        = errors.New("rlp: non-canonical size information")
 	ErrElemTooLarge     = errors.New("rlp: element is larger than containing list")
 	ErrValueTooLarge    = errors.New("rlp: value size exceeds available input length")
-	ErrMoreThanOneValue = errors.New("rlp: input contains more than one value")
+	ErrMoreThanOneValue    = errors.New("rlp: input contains more than one value")
+	ErrWrongTxTypePrefix   = errors.New("rlp: only 1-byte tx type prefix is supported")
+	ErrUnknownTxTypePrefix = errors.New("rlp: unknown tx type prefix")
 
 	// internal errors
 	errNotInList     = errors.New("rlp: call of ListEnd outside of any list")
@@ -62,6 +64,23 @@ var (
 		New: func() interface{} { return new(Stream) },
 	}
 )
+
+// IsInvalidRLPError reports whether err is an RLP decoding error.
+func IsInvalidRLPError(err error) bool {
+	return errors.Is(err, ErrExpectedString) ||
+		errors.Is(err, ErrExpectedList) ||
+		errors.Is(err, ErrCanonInt) ||
+		errors.Is(err, ErrCanonSize) ||
+		errors.Is(err, ErrElemTooLarge) ||
+		errors.Is(err, ErrValueTooLarge) ||
+		errors.Is(err, ErrMoreThanOneValue) ||
+		errors.Is(err, ErrWrongTxTypePrefix) ||
+		errors.Is(err, ErrUnknownTxTypePrefix) ||
+		errors.Is(err, errNotInList) ||
+		errors.Is(err, errNotAtEOL) ||
+		errors.Is(err, errUintOverflow) ||
+		errors.Is(err, errUint256Large)
+}
 
 // Decoder is implemented by types that require custom RLP decoding rules or need to decode
 // into private fields.
@@ -143,11 +162,28 @@ func wrapStreamError(err error, typ reflect.Type) error {
 	return err
 }
 
+// WrapStreamError wraps a Stream decoding error.
+func WrapStreamError(err error, typ reflect.Type) error {
+	return wrapStreamError(err, typ)
+}
+
 func addErrorContext(err error, ctx string) error {
 	if decErr, ok := err.(*decodeError); ok {
 		decErr.ctx = append(decErr.ctx, ctx)
 	}
 	return err
+}
+
+// DecodeBytesPartial parses RLP data from b into val.
+// Unlike DecodeBytes, it does not require that all bytes are consumed.
+func DecodeBytesPartial(b []byte, val any) error {
+	r := (*sliceReader)(&b)
+
+	stream := streamPool.Get().(*Stream)
+	defer streamPool.Put(stream)
+
+	stream.Reset(r, uint64(len(b)))
+	return stream.Decode(val)
 }
 
 var (
@@ -599,6 +635,11 @@ type Stream struct {
 	limited   bool     // true if input limit is in effect
 }
 
+// Remaining returns number of bytes remaining to be read.
+func (s *Stream) Remaining() uint64 {
+	return s.remaining
+}
+
 // NewStream creates a new decoding stream reading from r.
 //
 // If r implements the ByteReader interface, Stream will
@@ -630,6 +671,15 @@ func NewListStream(r io.Reader, len uint64) *Stream {
 	s.kind = List
 	s.size = len
 	return s
+}
+
+// NewStreamFromPool returns a Stream from the pool.
+func NewStreamFromPool(r io.Reader, inputLimit uint64) (stream *Stream, done func()) {
+	stream = streamPool.Get().(*Stream)
+	stream.Reset(r, inputLimit)
+	return stream, func() {
+		streamPool.Put(stream)
+	}
 }
 
 // Bytes reads an RLP string and returns its contents as a byte slice.
@@ -817,6 +867,13 @@ func (s *Stream) List() (size uint64, err error) {
 	return size, nil
 }
 
+// NewList starts decoding an RLP list, but without reading its prefix.
+func (s *Stream) NewList(size uint64) {
+	s.stack = append(s.stack, size)
+	s.kind = -1
+	s.size = 0
+}
+
 // ListEnd returns to the enclosing list.
 // The input reader must be positioned at the end of a list.
 func (s *Stream) ListEnd() error {
@@ -928,6 +985,40 @@ func (s *Stream) ReadUint256(dst *uint256.Int) error {
 	// Set the integer bytes.
 	dst.SetBytes(buffer)
 	return nil
+}
+
+// Uint256Bytes decodes the next value as a uint256 and returns the raw bytes.
+func (s *Stream) Uint256Bytes() ([]byte, error) {
+	var buffer []byte
+	kind, size, err := s.Kind()
+	switch {
+	case err != nil:
+		return nil, err
+	case kind == List:
+		return nil, ErrExpectedString
+	case kind == Byte:
+		buffer = s.uintbuf[:1]
+		buffer[0] = s.byteval
+		s.kind = -1 // re-arm Kind
+	case size == 0:
+		s.kind = -1
+	case size <= uint64(len(s.uintbuf)):
+		buffer = s.uintbuf[:size]
+		if err := s.readFull(buffer); err != nil {
+			return nil, err
+		}
+		if size == 1 && buffer[0] < 128 {
+			return nil, ErrCanonSize
+		}
+	default:
+		return nil, errUint256Large
+	}
+	if len(buffer) > 0 && buffer[0] == 0 {
+		return nil, ErrCanonInt
+	}
+	out := make([]byte, len(buffer))
+	copy(out, buffer)
+	return out, nil
 }
 
 // Decode decodes a value and stores the result in the value pointed
