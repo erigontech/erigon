@@ -46,7 +46,7 @@ import (
 )
 
 // Do 1 step to start txPool
-func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *testing.T) {
+func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions) {
 	chain, err := blockgen.GenerateChain(mockSentry.ChainConfig, mockSentry.Genesis, mockSentry.Engine, mockSentry.DB, 1 /*number of blocks:*/, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
@@ -77,7 +77,7 @@ func newEthApiForTest(base *jsonrpc.BaseAPI, db kv.TemporalRoDB, txPool txpoolpr
 func TestGetBlobsV1(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
 	mockSentry, require := mock.MockWithTxPoolCancun(t), require.New(t)
-	oneBlockStep(mockSentry, require, t)
+	oneBlockStep(mockSentry, require)
 
 	wrappedTxn := types.MakeWrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
 	txn, err := types.SignTx(wrappedTxn, *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
@@ -127,7 +127,7 @@ func TestGetBlobsV1(t *testing.T) {
 func TestGetBlobsV2(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
 	mockSentry, require := mock.MockWithTxPoolOsaka(t), require.New(t)
-	oneBlockStep(mockSentry, require, t)
+	oneBlockStep(mockSentry, require)
 
 	wrappedTxn := types.MakeV1WrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
 	txn, err := types.SignTx(wrappedTxn, *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
@@ -186,7 +186,7 @@ func TestGetBlobsV2(t *testing.T) {
 func TestGetBlobsV3(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
 	mockSentry, require := mock.MockWithTxPoolOsaka(t), require.New(t)
-	oneBlockStep(mockSentry, require, t)
+	oneBlockStep(mockSentry, require)
 
 	wrappedTxn := types.MakeV1WrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
 	txn, err := types.SignTx(wrappedTxn, *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
