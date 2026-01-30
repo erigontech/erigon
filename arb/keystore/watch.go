@@ -23,7 +23,6 @@ import (
 	"os"
 	"time"
 
-	""
 	"github.com/fsnotify/fsnotify"
 )
 
