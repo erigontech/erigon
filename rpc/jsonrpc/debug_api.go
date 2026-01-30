@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -1109,7 +1110,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	if err != nil {
 		return nil, fmt.Errorf("failed to get chain config: %w", err)
 	}
-	if err := verifyExecutionWitnessResult(result, block, chainCfg); err != nil {
+	if err = verifyExecutionWitnessResult(result, block, chainCfg, api.engine(), expectedParentRoot, readAddresses); err != nil {
 		return nil, fmt.Errorf("witness verification failed: %w", err)
 	}
 
@@ -1403,21 +1404,82 @@ func (s *witnessStateless) CreateContract(address accounts.Address) error {
 	return nil
 }
 
+// debugPrintPendingUpdates prints all pending state changes for debugging
+func (s *witnessStateless) debugPrintPendingUpdates(blockNum uint64) {
+	fmt.Printf("=== Block %d: Pending state updates before Finalize ===\n", blockNum)
+	fmt.Printf("Initial trie root: %x\n", s.t.Hash())
+	fmt.Printf("Trie root node type: %T\n", s.t.RootNode)
+
+	fmt.Printf("\n--- Account Updates (%d) ---\n", len(s.accountUpdates))
+	for addrHash, acc := range s.accountUpdates {
+		// Check if account exists in trie
+		existingAcc, existsInTrie := s.t.GetAccount(addrHash[:])
+		if acc != nil {
+			if existsInTrie && existingAcc != nil {
+				fmt.Printf("  UPDATE %x: Nonce=%d, Balance=%s, CodeHash=%x, Root=%x (exists in trie)\n",
+					addrHash[:], acc.Nonce, acc.Balance.String(), acc.CodeHash, acc.Root)
+			} else {
+				fmt.Printf("  INSERT %x: Nonce=%d, Balance=%s, CodeHash=%x, Root=%x (NEW - not in trie)\n",
+					addrHash[:], acc.Nonce, acc.Balance.String(), acc.CodeHash, acc.Root)
+			}
+		} else {
+			fmt.Printf("  DELETE %x\n", addrHash[:])
+		}
+	}
+
+	fmt.Printf("\n--- Created Contracts (%d) ---\n", len(s.created))
+	for addrHash := range s.created {
+		fmt.Printf("  CREATED %x\n", addrHash[:])
+	}
+
+	fmt.Printf("\n--- Deleted Accounts (%d) ---\n", len(s.deleted))
+	for addrHash := range s.deleted {
+		fmt.Printf("  DELETED %x\n", addrHash[:])
+	}
+
+	fmt.Printf("\n--- Storage Writes ---\n")
+	for addrHash, storageMap := range s.storageWrites {
+		fmt.Printf("  Account %x (%d slots):\n", addrHash[:8], len(storageMap))
+		for keyHash, value := range storageMap {
+			fmt.Printf("    %x = %s\n", keyHash[:], value.String())
+		}
+	}
+
+	fmt.Printf("\n--- Storage Deletes ---\n")
+	for addrHash, storageMap := range s.storageDeletes {
+		fmt.Printf("  Account %x (%d slots):\n", addrHash[:8], len(storageMap))
+		for keyHash := range storageMap {
+			fmt.Printf("    %x\n", keyHash[:])
+		}
+	}
+
+	fmt.Printf("\n--- Code Updates (%d) ---\n", len(s.codeUpdates))
+	for codeHash, code := range s.codeUpdates {
+		fmt.Printf("  %x: %d bytes\n", codeHash[:], len(code))
+	}
+	fmt.Println("=== End of pending updates ===")
+}
+
 // Finalize applies all pending updates to the trie and returns the new root hash
 func (s *witnessStateless) Finalize() common.Hash {
+	fmt.Printf("\n=== Finalize: Applying updates ===\n")
+
 	// Handle created contracts - clear their storage subtries
 	for addrHash := range s.created {
 		if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
 			account.Root = trie.EmptyRoot
 		}
 		s.t.DeleteSubtree(addrHash[:])
+		fmt.Printf("  Created contract %x: cleared subtrie\n", addrHash[:8])
 	}
 
 	// Apply account updates
 	for addrHash, account := range s.accountUpdates {
 		if account != nil {
+			fmt.Printf("  UpdateAccount %x: Nonce=%d, Balance=%s\n", addrHash[:8], account.Nonce, account.Balance.String())
 			s.t.UpdateAccount(addrHash[:], account)
 		} else {
+			fmt.Printf("  Delete %x\n", addrHash[:8])
 			s.t.Delete(addrHash[:])
 		}
 	}
@@ -1432,7 +1494,9 @@ func (s *witnessStateless) Finalize() common.Hash {
 		updatedAccounts[addrHash] = struct{}{}
 		for keyHash, v := range m {
 			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
+			fmt.Printf("  Storage write: account=%x, key=%x, value=%x\n", addrHash[:8], keyHash[:8], v.Bytes())
 			s.t.Update(cKey, v.Bytes())
+			// Don't call Hash() here - it would cache node refs and interfere with later updates
 		}
 	}
 
@@ -1449,13 +1513,16 @@ func (s *witnessStateless) Finalize() common.Hash {
 	}
 
 	// Update storage roots for modified accounts
+	// DeepHash computes the storage root, then we update the account with it
 	for addrHash := range updatedAccounts {
 		if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
-			ok, root := s.t.DeepHash(addrHash[:])
-			if ok {
+			gotRoot, root := s.t.DeepHash(addrHash[:])
+			fmt.Printf("  Storage root for %x: gotRoot=%v, root=%x\n", addrHash[:8], gotRoot, root)
+			if gotRoot {
+				// Update the account's storage root and re-apply to trie
 				account.Root = root
-			} else {
-				account.Root = trie.EmptyRoot
+				s.t.UpdateAccount(addrHash[:], account)
+				fmt.Printf("  Updated account %x with storage root %x\n", addrHash[:8], root)
 			}
 		}
 	}
@@ -1469,9 +1536,13 @@ func (s *witnessStateless) Finalize() common.Hash {
 			account.Root = trie.EmptyRoot
 		}
 		s.t.DeleteSubtree(addrHash[:])
+		fmt.Printf("  Deleted account subtrie %x, hash=%x\n", addrHash[:8], s.t.Hash())
 	}
 
-	return s.t.Hash()
+	// Compute and return the final hash
+	finalHash := s.t.Hash()
+	fmt.Printf("=== Finalize complete: final hash=%x ===\n\n", finalHash)
+	return finalHash
 }
 
 // statelessChainReader is a minimal ChainReader implementation for stateless execution
@@ -1528,7 +1599,7 @@ var _ rules.ChainReader = (*statelessChainReader)(nil)
 // verifyExecutionWitnessResult verifies the execution witness by re-executing the block statelessly.
 // It decodes the witness trie, executes all transactions, and verifies the resulting state root
 // matches the block's state root.
-func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config) error {
+func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config, engine rules.EngineReader, expectedParentRoot common.Hash, readAddresses []common.Address) error {
 	// Skip verification for genesis block - it has no transactions to execute
 	// but has pre-allocated accounts which would cause a state root mismatch
 	if block.NumberU64() == 0 {
@@ -1568,6 +1639,51 @@ func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.B
 	header := block.Header()
 	blockNum := block.NumberU64()
 
+	// Debug: print block info and verify pre-state
+	fmt.Printf("\n=== Block %d verification ===\n", blockNum)
+	fmt.Printf("Expected parent state root: %x\n", expectedParentRoot)
+	fmt.Printf("Witness trie root: %x\n", stateless.t.Hash())
+	fmt.Printf("Block state root (expected after execution): %x\n", block.Root())
+
+	// Verify witness trie root matches expected parent state root
+	witnessRoot := stateless.t.Hash()
+	if witnessRoot != expectedParentRoot {
+		return fmt.Errorf("witness trie root %x does not match expected parent state root %x", witnessRoot, expectedParentRoot)
+	}
+	fmt.Printf("✓ Witness trie root matches expected parent state root\n")
+
+	// Check that all accounts read during original execution are present in the witness trie
+	fmt.Printf("\n--- Pre-state check: verifying %d read addresses exist in witness trie ---\n", len(readAddresses))
+	missingAccounts := 0
+	for _, addr := range readAddresses {
+		addrHash, _ := common.HashData(addr[:])
+		acc, found := stateless.t.GetAccount(addrHash[:])
+		if found && acc != nil {
+			fmt.Printf("  ✓ %s (hash %x): Nonce=%d, Balance=%s\n", addr.Hex(), addrHash[:8], acc.Nonce, acc.Balance.String())
+		} else {
+			fmt.Printf("  ✗ %s (hash %x): NOT FOUND in witness trie!\n", addr.Hex(), addrHash[:8])
+			missingAccounts++
+		}
+	}
+	// Check the trie structure - specifically look at what's at each branch
+	fmt.Printf("\n--- Checking trie structure at root FullNode ---\n")
+	if fn, ok := stateless.t.RootNode.(*trie.FullNode); ok {
+		for i := 0; i < 16; i++ {
+			child := fn.Children[i]
+			if child != nil {
+				fmt.Printf("  Branch [%x]: %T = %v\n", i, child, child)
+			}
+		}
+	}
+
+	// Check what paths the read addresses use
+	fmt.Printf("\n--- Address paths ---\n")
+	for _, addr := range readAddresses {
+		addrHash, _ := common.HashData(addr[:])
+		firstNibble := addrHash[0] >> 4
+		fmt.Printf("  %s (hash %x...): first nibble = 0x%x\n", addr.Hex()[:10], addrHash[:4], firstNibble)
+	}
+
 	// Create EVM block context - pass header.Coinbase as the author/beneficiary
 	// This ensures gas fees go to the correct address based on the block header
 	coinbase := accounts.InternAddress(header.Coinbase)
@@ -1600,10 +1716,42 @@ func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.B
 		}
 	}
 
-	// Commit block - final state changes
+	// Use engine.CalculateRewards to get the proper rewards for this block
+	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
+		// For stateless verification, syscalls are not expected to be needed
+		return nil, nil
+	}
+
+	// check func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error) {
+	rewards, err := engine.CalculateRewards(chainConfig, header, block.Uncles(), syscall)
+	if err != nil {
+		return fmt.Errorf("verification: CalculateRewards failed: %w", err)
+	}
+
+	// Apply rewards to the IBS - map RewardKind to BalanceChangeReason
+	for _, r := range rewards {
+		var reason tracing.BalanceChangeReason
+		switch r.Kind {
+		case rules.RewardAuthor:
+			reason = tracing.BalanceIncreaseRewardMineBlock
+		case rules.RewardUncle:
+			reason = tracing.BalanceIncreaseRewardMineUncle
+		default:
+			reason = tracing.BalanceChangeUnspecified
+		}
+		ibs.AddBalance(r.Beneficiary, r.Amount, reason)
+		fmt.Printf("  Reward: %s receives %s wei (kind=%d)\n", r.Beneficiary.Value().Hex(), r.Amount.String(), r.Kind)
+	}
+
+	fmt.Printf("\n--- Block rewards applied via engine.CalculateRewards ---\n")
+
+	// Commit block - final state changes (includes rewards applied by engine.Finalize)
 	if err = ibs.CommitBlock(blockRules, stateless); err != nil {
 		return fmt.Errorf("verification: failed to commit block: %w", err)
 	}
+
+	// Debug: print all pending updates before Finalize
+	stateless.debugPrintPendingUpdates(block.NumberU64())
 
 	// Finalize and compute the resulting state root
 	newStateRoot := stateless.Finalize()
