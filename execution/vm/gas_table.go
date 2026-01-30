@@ -401,7 +401,7 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas uint64, m
 	}
 
 	if !withCallGasCalc {
-		if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
+		if dbg.TraceDynamicGas && evm.intraBlockState.Trace() {
 			fmt.Printf("%d (%d.%d) Call Gas: avail: %d, base: %d memory(%d): %d\n",
 				evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), availableGas, gas-memoryGas, memorySize, memoryGas)
 		}
@@ -417,7 +417,7 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas uint64, m
 		return 0, false, err
 	}
 
-	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
+	if dbg.TraceDynamicGas && evm.intraBlockState.Trace() {
 		fmt.Printf("%d (%d.%d) Call Gas: avail: %d, base: %d memory(%d): %d call: %d\n",
 			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), availableGas, gas-memoryGas, memorySize, memoryGas, callGas)
 	}
@@ -456,7 +456,7 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas uint64, availableGa
 		return 0, ErrGasUintOverflow
 	}
 
-	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
+	if dbg.TraceDynamicGas && evm.intraBlockState.Trace() {
 		fmt.Printf("%d (%d.%d) Call Gas: account: %d\n",
 			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), accountGas)
 	}
@@ -500,7 +500,7 @@ func statelessGasCallCode(evm *EVM, callContext *CallContext, availableGas uint6
 	}
 
 	if !withCallGasCalc {
-		if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
+		if dbg.TraceDynamicGas && evm.intraBlockState.Trace() {
 			fmt.Printf("%d (%d.%d) CallCode Gas: base: %d memory(%d): %d\n",
 				evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gas-memoryGas, memorySize, memoryGas)
 		}
@@ -509,7 +509,7 @@ func statelessGasCallCode(evm *EVM, callContext *CallContext, availableGas uint6
 
 	callGas, err := calcCallGas(evm, callContext, availableGas, gas)
 
-	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
+	if dbg.TraceDynamicGas && evm.intraBlockState.Trace() {
 		fmt.Printf("%d (%d.%d) CallCode Gas: base: %d memory(%d): %d call: %d\n",
 			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gas-memoryGas, memorySize, memoryGas, callGas)
 	}
@@ -546,7 +546,7 @@ func statelessGasDelegateCall(evm *EVM, callContext *CallContext, availableGas u
 	}
 
 	if !withCallGasCalc {
-		if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
+		if dbg.TraceDynamicGas && evm.intraBlockState.Trace() {
 			fmt.Printf("%d (%d.%d) DelegateCall Gas: memory(%d): %d\n",
 				evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), memorySize, gas)
 		}
@@ -555,7 +555,7 @@ func statelessGasDelegateCall(evm *EVM, callContext *CallContext, availableGas u
 
 	callGas, err := calcCallGas(evm, callContext, availableGas, gas)
 
-	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
+	if dbg.TraceDynamicGas && evm.intraBlockState.Trace() {
 		fmt.Printf("%d (%d.%d) DelegateCall Gas: memory(%d): %d call: %d\n",
 			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), memorySize, gas, callGas)
 	}
@@ -585,7 +585,7 @@ func statelessGasStaticCall(evm *EVM, callContext *CallContext, availableGas uin
 	}
 
 	if !withCallGasCalc {
-		if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
+		if dbg.TraceDynamicGas && evm.intraBlockState.Trace() {
 			fmt.Printf("%d (%d.%d) StaticCall Gas: memory(%d): %d\n",
 				evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), memorySize, gas)
 		}
@@ -594,7 +594,7 @@ func statelessGasStaticCall(evm *EVM, callContext *CallContext, availableGas uin
 
 	callGas, err := calcCallGas(evm, callContext, availableGas, gas)
 
-	if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
+	if dbg.TraceDynamicGas && evm.intraBlockState.Trace() {
 		fmt.Printf("%d (%d.%d) StaticCall Gas: memory(%d): %d call: %d\n",
 			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), memorySize, gas, callGas)
 	}

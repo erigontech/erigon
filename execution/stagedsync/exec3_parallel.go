@@ -993,10 +993,8 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	rules := txTask.EvmBlockContext.Rules(txTask.Config)
 
 	if task.IsBlockEnd() || txIndex < 0 {
-		if blockNum == 0 || txTask.Config.IsByzantium(blockNum) {
-			if err := ibs.FinalizeTx(rules, stateWriter); err != nil {
-				return nil, nil, nil, err
-			}
+		if err := ibs.FinalizeTx(rules, stateWriter); err != nil {
+			return nil, nil, nil, err
 		}
 		return nil, ibs.VersionedReads(), ibs.VersionedWrites(true), nil
 	}
@@ -1058,10 +1056,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 
 	vm.FlushVersionedWrites(allWrites, true, tracePrefix)
 	vm.SetTrace(false)
-
-	if txTask.Config.IsByzantium(blockNum) {
-		ibs.FinalizeTx(rules, stateWriter)
-	}
+	ibs.FinalizeTx(rules, stateWriter)
 
 	receipt, err := result.CreateNextReceipt(prevReceipt)
 

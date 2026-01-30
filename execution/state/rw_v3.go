@@ -758,7 +758,7 @@ func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.
 	}
 	if len(enc) == 0 {
 		if r.trace {
-			fmt.Printf("%sReadAccountData [%x] => [empty], txNum: %d stack=%s\n", r.tracePrefix, address, r.txNum, dbg.Stack())
+			fmt.Printf("%sReadAccountData [%x] => [empty], txNum: %d\n", r.tracePrefix, address, r.txNum)
 		}
 		return nil, nil, nil
 	}
@@ -768,7 +768,7 @@ func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.
 		return nil, nil, err
 	}
 	if r.trace {
-		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d stack=%s\n", r.tracePrefix, address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum, dbg.Stack())
+		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", r.tracePrefix, address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
 	}
 	return enc, &acc, nil
 }
