@@ -76,10 +76,13 @@ import (
 )
 
 func main() {
-	ctx, cancel := common.RootContext()
-	defer cancel()
-
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
+	var err error
+	common.WithProfilersMain(func() {
+		ctx, cancel := common.RootContext()
+		defer cancel()
+		err = rootCmd.ExecuteContext(ctx)
+	})
+	if err != nil {
 		os.Exit(1)
 	}
 }
