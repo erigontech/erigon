@@ -17,11 +17,13 @@
 package cache
 
 import (
+	"bytes"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 // StateCache is a unified cache for domain data (Account, Storage, Code).
@@ -40,6 +42,7 @@ func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.Byt
 	sc.caches[kv.AccountsDomain] = NewBytesCache(accountBytes)
 	sc.caches[kv.StorageDomain] = NewBytesCache(storageBytes)
 	sc.caches[kv.CodeDomain] = NewCodeCache(codeBytes, addrBytes)
+	sc.caches[kv.CommitmentDomain] = NewBytesCache(storageBytes)
 	return sc
 }
 
@@ -67,6 +70,9 @@ func (c *StateCache) Get(domain kv.Domain, key []byte) ([]byte, bool) {
 func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte) {
 	cache := c.caches[domain]
 	if cache == nil {
+		return
+	}
+	if domain == kv.CommitmentDomain && bytes.Equal(key, commitmentdb.KeyCommitmentState) {
 		return
 	}
 	cache.Put(key, common.Copy(value))
@@ -132,20 +138,32 @@ func (c *StateCache) PrintStatsAndReset() {
 	if stor, ok := c.caches[kv.StorageDomain].(*GenericCache[[]byte]); ok {
 		stor.PrintStatsAndReset("Storage")
 	}
+	if stor, ok := c.caches[kv.CommitmentDomain].(*GenericCache[[]byte]); ok {
+		stor.PrintStatsAndReset("Commitment")
+	}
 	if code, ok := c.caches[kv.CodeDomain].(*CodeCache); ok {
 		code.PrintStatsAndReset()
 	}
 }
 
-func (c *StateCache) RevertWithDiffset(diffset [6][]kv.DomainEntryDiff, newBlockHash common.Hash) {
+func (c *StateCache) RevertWithDiffset(diffset *[6][]kv.DomainEntryDiff, newBlockHash common.Hash) {
 	for _, entry := range diffset[kv.AccountsDomain] {
 		k := toBytesZeroCopy(entry.Key[:len(entry.Key)-8])
 		c.Delete(kv.CodeDomain, k)
-		c.Delete(kv.AccountsDomain, k)
+		c.Put(kv.AccountsDomain, k, entry.Value)
+	}
+	for _, entry := range diffset[kv.CodeDomain] {
+		k := toBytesZeroCopy(entry.Key[:len(entry.Key)-8])
+		c.Delete(kv.CodeDomain, k)
 	}
 	for _, entry := range diffset[kv.StorageDomain] {
 		k := toBytesZeroCopy(entry.Key[:len(entry.Key)-8])
-		c.Delete(kv.StorageDomain, k)
+		c.Put(kv.StorageDomain, k, entry.Value)
+	}
+	// still adding kv.CommitmentDomain for expandability.
+	for _, entry := range diffset[kv.CommitmentDomain] {
+		k := toBytesZeroCopy(entry.Key[:len(entry.Key)-8])
+		c.Put(kv.CommitmentDomain, k, entry.Value)
 	}
 	// Update block hash on all caches after unwind so ValidateAndPrepare works correctly
 	for _, cache := range c.caches {

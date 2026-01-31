@@ -2,11 +2,10 @@ package maphash
 
 import (
 	"hash/maphash"
-	"sync"
-	"sync/atomic"
 	"unsafe"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/puzpuzpuz/xsync/v3"
 )
 
 var seed maphash.Seed
@@ -26,53 +25,40 @@ func Hash(key []byte) uint64 {
 
 // Map is a concurrent map that uses maphash to hash []byte keys.
 type Map[V any] struct {
-	m   sync.Map
-	len atomic.Int64
+	m *xsync.MapOf[uint64, V]
 }
 
 // NewMap creates a new Map.
 func NewMap[V any]() *Map[V] {
-	return &Map[V]{}
+	return &Map[V]{m: xsync.NewMapOf[uint64, V]()}
 }
 
 // Get retrieves a value by key.
 func (m *Map[V]) Get(key []byte) (V, bool) {
 	h := Hash(key)
-	v, ok := m.m.Load(h)
-	if !ok {
-		var zero V
-		return zero, false
-	}
-	return v.(V), ok
+	return m.m.Load(h)
 }
 
 // Set stores a value with the given key.
 func (m *Map[V]) Set(key []byte, value V) {
 	h := Hash(key)
-	_, loaded := m.m.Swap(h, value)
-	if !loaded {
-		m.len.Add(1)
-	}
+	m.m.Store(h, value)
 }
 
 // Delete removes a key from the map.
 func (m *Map[V]) Delete(key []byte) {
 	h := Hash(key)
-	_, loaded := m.m.LoadAndDelete(h)
-	if loaded {
-		m.len.Add(-1)
-	}
+	m.m.Delete(h)
 }
 
 // Len returns the number of entries in the map.
 func (m *Map[V]) Len() int {
-	return int(m.len.Load())
+	return m.m.Size()
 }
 
 // Clear removes all entries from the map.
 func (m *Map[V]) Clear() {
 	m.m.Clear()
-	m.len.Store(0)
 }
 
 // NonConcurrentMap is a non-thread-safe map that uses maphash to hash []byte keys.

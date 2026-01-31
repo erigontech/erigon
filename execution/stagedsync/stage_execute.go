@@ -327,7 +327,7 @@ func unwindExec3State(ctx context.Context,
 				logger.Warn("failed to read canonical hash for cache update", "block", blockUnwindTo, "err", err)
 				unwindToHash = common.Hash{}
 			}
-			stateCache.RevertWithDiffset(*changeset, unwindToHash)
+			stateCache.RevertWithDiffset(changeset, unwindToHash)
 		}
 	}
 

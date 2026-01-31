@@ -82,7 +82,7 @@ func NewDefaultCodeCache() *CodeCache {
 func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
 	// First, look up the code hash for this address
 	codeHash, ok := c.addrToHash.Get(addr)
-	if !ok {
+	if !ok || codeHash == 0 {
 		c.addrMisses.Add(1)
 		return nil, false
 	}
@@ -94,8 +94,13 @@ func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
 		c.codeMisses.Add(1)
 		return nil, false
 	}
+	ret := code.([]byte)
+	if len(ret) == 0 {
+		c.codeMisses.Add(1)
+		return nil, false
+	}
 	c.codeHits.Add(1)
-	return code.([]byte), true
+	return ret, true
 }
 
 // Put stores contract code for the given address.

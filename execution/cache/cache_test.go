@@ -53,14 +53,14 @@ func makeValue(i int) []byte {
 // =============================================================================
 
 func TestGenericCache_NewGenericCache(t *testing.T) {
-	c := NewGenericCache(100)
+	c := NewBytesCache(100)
 	require.NotNil(t, c)
 	assert.Equal(t, 0, c.Len())
 	assert.Equal(t, common.Hash{}, c.GetBlockHash())
 }
 
 func TestGenericCache_NewWithByteCapacity(t *testing.T) {
-	c := NewGenericCache(1 * datasize.MB) // 1MB
+	c := NewBytesCache(1 * datasize.MB) // 1MB
 	require.NotNil(t, c)
 	assert.Equal(t, 0, c.Len())
 	assert.Equal(t, int64(0), c.SizeBytes())
@@ -68,7 +68,7 @@ func TestGenericCache_NewWithByteCapacity(t *testing.T) {
 }
 
 func TestGenericCache_GetPut(t *testing.T) {
-	c := NewGenericCache(100)
+	c := NewBytesCache(100)
 
 	addr := makeAddr(1)
 	value := makeValue(1)
@@ -86,28 +86,27 @@ func TestGenericCache_GetPut(t *testing.T) {
 	assert.Equal(t, 1, c.Len())
 }
 
-func TestGenericCache_PutReusesSlice(t *testing.T) {
-	c := NewGenericCache(100)
+func TestGenericCache_PutUpdateValue(t *testing.T) {
+	c := NewBytesCache(100)
 
 	addr := makeAddr(1)
 	value1 := []byte{1, 2, 3, 4, 5, 6, 7, 8} // 8 bytes
-	value2 := []byte{9, 10, 11}              // 3 bytes, fits in existing
+	value2 := []byte{9, 10, 11}              // 3 bytes
 
 	c.Put(addr, value1)
 
-	// Update with smaller value - should reuse slice
+	// Update with different value
 	c.Put(addr, value2)
-	v2, _ := c.Get(addr)
+	v2, ok := c.Get(addr)
 
+	assert.True(t, ok)
 	assert.Equal(t, value2, v2)
-	// The underlying slice should have capacity >= 8 (reused from value1)
-	assert.GreaterOrEqual(t, cap(v2), len(value1))
 }
 
 func TestGenericCache_PutCapacityLimit(t *testing.T) {
 	// Each entry is 20 (addr) + 3 (value) = 23 bytes
 	// Set capacity to 50 bytes - enough for 2 entries but not 3
-	c := NewGenericCache(50)
+	c := NewBytesCache(50)
 
 	// Fill to capacity
 	c.Put(makeAddr(1), makeValue(1))
@@ -132,7 +131,7 @@ func TestGenericCache_PutCapacityLimit(t *testing.T) {
 }
 
 func TestGenericCache_Delete(t *testing.T) {
-	c := NewGenericCache(100)
+	c := NewBytesCache(100)
 
 	addr := makeAddr(1)
 	c.Put(addr, makeValue(1))
@@ -146,7 +145,7 @@ func TestGenericCache_Delete(t *testing.T) {
 }
 
 func TestGenericCache_Clear(t *testing.T) {
-	c := NewGenericCache(100)
+	c := NewBytesCache(100)
 
 	c.Put(makeAddr(1), makeValue(1))
 	c.Put(makeAddr(2), makeValue(2))
@@ -157,7 +156,7 @@ func TestGenericCache_Clear(t *testing.T) {
 }
 
 func TestGenericCache_BlockHash(t *testing.T) {
-	c := NewGenericCache(100)
+	c := NewBytesCache(100)
 
 	assert.Equal(t, common.Hash{}, c.GetBlockHash())
 
@@ -167,7 +166,7 @@ func TestGenericCache_BlockHash(t *testing.T) {
 }
 
 func TestGenericCache_ValidateAndPrepare_EmptyCache(t *testing.T) {
-	c := NewGenericCache(100)
+	c := NewBytesCache(100)
 
 	parentHash := makeHash(1)
 	incomingHash := makeHash(2)
@@ -179,7 +178,7 @@ func TestGenericCache_ValidateAndPrepare_EmptyCache(t *testing.T) {
 }
 
 func TestGenericCache_ValidateAndPrepare_MatchingParent(t *testing.T) {
-	c := NewGenericCache(100)
+	c := NewBytesCache(100)
 
 	block1 := makeHash(1)
 	block2 := makeHash(2)
@@ -196,7 +195,7 @@ func TestGenericCache_ValidateAndPrepare_MatchingParent(t *testing.T) {
 }
 
 func TestGenericCache_ValidateAndPrepare_Mismatch(t *testing.T) {
-	c := NewGenericCache(100)
+	c := NewBytesCache(100)
 
 	block1 := makeHash(1)
 	block2 := makeHash(2)
@@ -214,7 +213,7 @@ func TestGenericCache_ValidateAndPrepare_Mismatch(t *testing.T) {
 }
 
 func TestGenericCache_ClearWithHash(t *testing.T) {
-	c := NewGenericCache(100)
+	c := NewBytesCache(100)
 
 	c.Put(makeAddr(1), makeValue(1))
 	c.SetBlockHash(makeHash(1))
@@ -227,7 +226,7 @@ func TestGenericCache_ClearWithHash(t *testing.T) {
 }
 
 func TestGenericCache_PrintStatsAndReset(t *testing.T) {
-	c := NewGenericCache(100)
+	c := NewBytesCache(100)
 
 	// Generate some hits and misses
 	c.Put(makeAddr(1), makeValue(1))
@@ -243,13 +242,13 @@ func TestGenericCache_PrintStatsAndReset(t *testing.T) {
 }
 
 func TestGenericCache_PrintStatsAndReset_NoOps(t *testing.T) {
-	c := NewGenericCache(100)
+	c := NewBytesCache(100)
 	// No operations - should handle zero total gracefully
 	c.PrintStatsAndReset("test")
 }
 
 func TestGenericCache_ImplementsInterface(t *testing.T) {
-	var _ Cache = (*GenericCache)(nil)
+	var _ Cache = (*GenericCache[[]byte])(nil)
 }
 
 // =============================================================================
@@ -532,13 +531,13 @@ func TestStateCache_NewStateCache(t *testing.T) {
 	c := NewStateCache(10, 20, 30, 40)
 	require.NotNil(t, c)
 
-	// Account, Storage, Code should be initialized
+	// Account, Storage, Code, Commitment should be initialized
 	assert.NotNil(t, c.GetCache(kv.AccountsDomain))
 	assert.NotNil(t, c.GetCache(kv.StorageDomain))
 	assert.NotNil(t, c.GetCache(kv.CodeDomain))
+	assert.NotNil(t, c.GetCache(kv.CommitmentDomain))
 
 	// Other domains should be nil
-	assert.Nil(t, c.GetCache(kv.CommitmentDomain))
 	assert.Nil(t, c.GetCache(kv.ReceiptDomain))
 	assert.Nil(t, c.GetCache(kv.RCacheDomain))
 }
@@ -599,9 +598,9 @@ func TestStateCache_GetPut_Code(t *testing.T) {
 func TestStateCache_GetPut_UnsupportedDomain(t *testing.T) {
 	c := NewStateCache(100, 100, 100, 100)
 
-	// CommitmentDomain is not supported
-	c.Put(kv.CommitmentDomain, makeAddr(1), makeValue(1))
-	v, ok := c.Get(kv.CommitmentDomain, makeAddr(1))
+	// ReceiptDomain is not supported
+	c.Put(kv.ReceiptDomain, makeAddr(1), makeValue(1))
+	v, ok := c.Get(kv.ReceiptDomain, makeAddr(1))
 	assert.False(t, ok)
 	assert.Nil(t, v)
 }
@@ -698,11 +697,11 @@ func TestStateCache_GetCache_OutOfBounds(t *testing.T) {
 	assert.Nil(t, cache)
 }
 
-func TestStateCache_OnlyAccountStorageCodeSupported(t *testing.T) {
+func TestStateCache_OnlyAccountStorageCodeCommitmentSupported(t *testing.T) {
 	c := NewDefaultStateCache()
 
-	supportedDomains := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain}
-	unsupportedDomains := []kv.Domain{kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain}
+	supportedDomains := []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain}
+	unsupportedDomains := []kv.Domain{kv.ReceiptDomain, kv.RCacheDomain}
 
 	for _, d := range supportedDomains {
 		assert.NotNil(t, c.GetCache(d), "domain %d should be supported", d)
@@ -718,7 +717,7 @@ func TestStateCache_OnlyAccountStorageCodeSupported(t *testing.T) {
 // =============================================================================
 
 func TestGenericCache_ConcurrentAccess(t *testing.T) {
-	c := NewGenericCache(1000)
+	c := NewBytesCache(1000)
 
 	done := make(chan bool)
 
