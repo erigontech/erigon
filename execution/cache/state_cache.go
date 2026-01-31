@@ -18,6 +18,7 @@ package cache
 
 import (
 	"bytes"
+	"fmt"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -62,12 +63,16 @@ func NewDefaultStateCache() *StateCache {
 func (c *StateCache) Get(domain kv.Domain, key []byte) ([]byte, bool) {
 	cache := c.caches[domain]
 	if kv.AccountsDomain == domain && bytes.Equal(key, common.Hex2Bytes("0xdBBE3D8c2d2b22A2611c5A94A9a12C2fCD49Eb29")) {
-
+		fmt.Println("READ 0xdBBE3D8c2d2b22A2611c5A94A9a12C2fCD49Eb29")
 	}
 	if cache == nil {
 		return nil, false
 	}
-	return cache.Get(key)
+	ret, ok := cache.Get(key)
+	if kv.AccountsDomain == domain && bytes.Equal(key, common.Hex2Bytes("0xdBBE3D8c2d2b22A2611c5A94A9a12C2fCD49Eb29")) {
+		fmt.Println("GOT 0xdBBE3D8c2d2b22A2611c5A94A9a12C2fCD49Eb29", "ok:", ok, "len:", len(ret), "ret:", common.Bytes2Hex(ret))
+	}
+	return ret, ok
 }
 
 // Put stores data for the given domain and key.
@@ -75,6 +80,9 @@ func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte) {
 	cache := c.caches[domain]
 	if cache == nil {
 		return
+	}
+	if kv.AccountsDomain == domain && bytes.Equal(key, common.Hex2Bytes("0xdBBE3D8c2d2b22A2611c5A94A9a12C2fCD49Eb29")) {
+		fmt.Println("PUT 0xdBBE3D8c2d2b22A2611c5A94A9a12C2fCD49Eb29", "value len:", len(value), "value:", common.Bytes2Hex(value))
 	}
 	if domain == kv.CommitmentDomain && bytes.Equal(key, commitmentdb.KeyCommitmentState) {
 		return
