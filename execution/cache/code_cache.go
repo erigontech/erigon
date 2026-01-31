@@ -158,14 +158,6 @@ func (c *CodeCache) Clear() {
 	c.addrSize.Store(0)
 }
 
-// ClearAll removes all entries from both caches.
-func (c *CodeCache) ClearAll() {
-	c.addrToHash.Clear()
-	c.addrSize.Store(0)
-	c.hashToCode.Clear()
-	c.codeSize.Store(0)
-}
-
 // GetBlockHash returns the hash of the last block processed by the cache.
 func (c *CodeCache) GetBlockHash() common.Hash {
 	c.mu.RLock()

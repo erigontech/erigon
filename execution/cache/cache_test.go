@@ -403,17 +403,6 @@ func TestCodeCache_Clear(t *testing.T) {
 	assert.Equal(t, 2, c.CodeLen())
 }
 
-func TestCodeCache_ClearAll(t *testing.T) {
-	c := NewCodeCache(100, 200)
-
-	c.Put(makeAddr(1), makeCode(1))
-	c.Put(makeAddr(2), makeCode(2))
-
-	c.ClearAll()
-	assert.Equal(t, 0, c.Len())
-	assert.Equal(t, 0, c.CodeLen())
-}
-
 func TestCodeCache_BlockHash(t *testing.T) {
 	c := NewCodeCache(100, 200)
 

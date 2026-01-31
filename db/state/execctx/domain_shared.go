@@ -316,9 +316,6 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 
 	// Check mem batch first - it has the current transaction's uncommitted state
 	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
-		if kv.AccountsDomain == domain && bytes.Equal(k, common.Hex2Bytes("dBBE3D8c2d2b22A2611c5A94A9a12C2fCD49Eb29")) {
-			fmt.Println("GET dBBE3D8c2d2b22A2611c5A94A9a12C2fCD49Eb29", "value len:", len(v), "value:", common.Bytes2Hex(v))
-		}
 		sd.metrics.UpdateCacheReads(domain, start)
 		return v, step, nil
 	} else {
@@ -329,7 +326,6 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 
 	// Check state cache before hitting storage
 	if sd.stateCache != nil {
-		fmt.Println("NOT HERE")
 		if v, ok := sd.stateCache.Get(domain, k); ok {
 			return v, 0, nil
 		}
@@ -348,9 +344,6 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
-	if kv.AccountsDomain == domain && bytes.Equal(k, common.Hex2Bytes("dBBE3D8c2d2b22A2611c5A94A9a12C2fCD49Eb29")) {
-		fmt.Println("GET 0xdBBE3D8c2d2b22A2611c5A94A9a12C2fCD49Eb29", "value len:", len(v), "value:", common.Bytes2Hex(v))
-	}
 	// Populate state cache on successful storage read
 	if sd.stateCache != nil && len(v) > 0 {
 		sd.stateCache.Put(domain, k, v)
