@@ -2314,20 +2314,30 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 	//}
 	// Keep folding until the currentKey is the prefix of the key we modify
 	for hph.needFolding(hashedKey) {
-		foldDone := hph.metrics.StartFolding(plainKey)
+		var foldDone func()
+		if dbg.KVReadLevelledMetrics {
+			foldDone = hph.metrics.StartFolding(plainKey)
+		}
 		if err := hph.fold(); err != nil {
 			return fmt.Errorf("fold: %w", err)
 		}
-		foldDone()
+		if foldDone != nil {
+			foldDone()
+		}
 	}
 	// Now unfold until we step on an empty cell
 	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
 		printLater := hph.currentKeyLen == 0 && hph.mounted && hph.trace
-		unfoldDone := hph.metrics.StartUnfolding(plainKey)
+		var unfoldDone func()
+		if dbg.KVReadLevelledMetrics {
+			unfoldDone = hph.metrics.StartUnfolding(plainKey)
+		}
 		if err := hph.unfold(hashedKey, unfolding); err != nil {
 			return fmt.Errorf("unfold: %w", err)
 		}
-		unfoldDone()
+		if unfoldDone != nil {
+			unfoldDone()
+		}
 		if printLater {
 			fmt.Printf("[%x] subtrie pref '%x' d=%d\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.depths[max(0, hph.activeRows-1)])
 		}
@@ -2614,11 +2624,16 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
-		foldDone := hph.metrics.StartFolding(nil)
+		var foldDone func()
+		if dbg.KVReadLevelledMetrics {
+			foldDone = hph.metrics.StartFolding(nil)
+		}
 		if err = hph.fold(); err != nil {
 			return nil, fmt.Errorf("final fold: %w", err)
 		}
-		foldDone()
+		if foldDone != nil {
+			foldDone()
+		}
 	}
 
 	rootHash, err = hph.RootHash()

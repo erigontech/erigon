@@ -1675,14 +1675,14 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics
 		return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}
 	if found && foundStep <= maxStep {
-		if metrics != nil {
+		if metrics != nil && dbg.KVReadLevelledMetrics {
 			metrics.UpdateDbReads(dt.name, start)
 		}
 		return v, foundStep, true, nil
 	}
 
 	v, foundInFile, _, endTxNum, err := dt.getLatestFromFiles(key, 0)
-	if metrics != nil {
+	if metrics != nil && dbg.KVReadLevelledMetrics {
 		metrics.UpdateFileReads(dt.name, start)
 	}
 
