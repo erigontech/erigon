@@ -61,6 +61,16 @@ func (m *Map[V]) Clear() {
 	m.m.Clear()
 }
 
+// GetByHash retrieves a value by a pre-computed hash.
+func (m *Map[V]) GetByHash(hash uint64) (V, bool) {
+	return m.m.Load(hash)
+}
+
+// SetByHash stores a value with a pre-computed hash.
+func (m *Map[V]) SetByHash(hash uint64, value V) {
+	m.m.Store(hash, value)
+}
+
 // NonConcurrentMap is a non-thread-safe map that uses maphash to hash []byte keys.
 // Use this when you don't need concurrent access for better performance.
 type NonConcurrentMap[V any] struct {
