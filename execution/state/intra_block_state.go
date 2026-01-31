@@ -327,6 +327,15 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.dep = UnknownDep
 }
 
+// Release returns pooled resources (like journal) back to their pools.
+// Call this when the IntraBlockState is no longer needed.
+func (sdb *IntraBlockState) Release() {
+	if sdb.journal != nil {
+		sdb.journal.release()
+		sdb.journal = nil
+	}
+}
+
 func (sdb *IntraBlockState) AddLog(log *types.Log) {
 	sdb.journal.append(addLogChange{txIndex: sdb.txIndex})
 	log.TxIndex = uint(sdb.txIndex)
