@@ -20,23 +20,13 @@
 package vm
 
 import (
-	"unsafe"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
-
-// codeHashToBytes converts a CodeHash to []byte without allocation using unsafe.
-// SAFETY: The returned slice MUST NOT be modified - it points to interned memory
-// shared by all Handles with the same value. Safe for read-only use (cache keys).
-// Relies on unique.Handle[T] layout: struct { value *T }
-func codeHashToBytes(h accounts.CodeHash) []byte {
-	ptr := *(*unsafe.Pointer)(unsafe.Pointer(&h))
-	return unsafe.Slice((*byte)(ptr), 32)
-}
 
 // AccountRef is a reference to an account address.
 //
@@ -99,9 +89,13 @@ func (c *Contract) isCode(udest uint64) bool {
 	if c.analysis != nil {
 		return c.analysis.codeSegment(udest)
 	}
+	var codeHash common.Hash
+	if !c.CodeHash.IsZero() {
+		codeHash = c.CodeHash.Value()
+	}
 
 	if !c.CodeHash.IsZero() {
-		if analysis, ok := jumpDestCache.Get(codeHashToBytes(c.CodeHash)); ok {
+		if analysis, ok := jumpDestCache.Get(codeHash[:]); ok {
 			c.analysis = analysis
 			return c.analysis.codeSegment(udest)
 		}
@@ -110,7 +104,7 @@ func (c *Contract) isCode(udest uint64) bool {
 	c.analysis = codeBitmap(c.Code)
 
 	if !c.CodeHash.IsZero() {
-		jumpDestCache.Put(codeHashToBytes(c.CodeHash), c.analysis)
+		jumpDestCache.Put(codeHash[:], c.analysis)
 	}
 
 	return c.analysis.codeSegment(udest)
