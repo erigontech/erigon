@@ -168,7 +168,7 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 		return nil, err
 	}
 	if block == nil {
-		return nil, nil
+		return nil, fmt.Errorf("block not found: %d", blockNum)
 	}
 	var txn types.Transaction
 	for _, transaction := range block.Transactions() {
@@ -356,7 +356,7 @@ func (api *APIImpl) GetRawTransactionByBlockNumberAndIndex(ctx context.Context, 
 		return nil, err
 	}
 
-	block, err := api.blockByRPCNumber(ctx, blockNr, tx)
+	block, err := api.blockByNumberWithSenders(ctx, tx, blockNr.Uint64())
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645

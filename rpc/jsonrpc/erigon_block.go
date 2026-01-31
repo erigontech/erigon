@@ -54,7 +54,7 @@ func (api *ErigonImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.Bl
 	}
 	defer tx.Rollback()
 
-	header, err := api.headerByRPCNumber(ctx, blockNumber, tx)
+	header, err := api.headerByNumber(ctx, blockNumber, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +101,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	currentHeaderTime := currentHeader.Time
 	highestNumber := currentHeader.Number.Uint64()
 
-	firstHeader, err := api.headerByRPCNumber(ctx, 0, tx)
+	firstHeader, err := api.headerByNumber(ctx, 0, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +143,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 		return currentHeader.Time >= uintTimestamp
 	})
 
-	resultingHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNum), tx)
+	resultingHeader, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNum), tx)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +153,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	}
 
 	for resultingHeader.Time > uintTimestamp {
-		beforeHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNum)-1, tx)
+		beforeHeader, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNum)-1, tx)
 		if err != nil {
 			return nil, err
 		}

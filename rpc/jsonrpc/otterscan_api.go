@@ -107,7 +107,7 @@ func (api *OtterscanAPIImpl) getTransactionByHash(ctx context.Context, tx kv.Tx,
 		return nil, nil, common.Hash{}, 0, 0, err
 	}
 	if block == nil {
-		return nil, nil, common.Hash{}, 0, 0, nil
+		return nil, nil, common.Hash{}, 0, 0, fmt.Errorf("block not found: %d", blockNum)
 	}
 	blockHash := block.Hash()
 	var txnIndex uint64

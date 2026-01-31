@@ -379,7 +379,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	if err != nil {
 		return fmt.Errorf("create state reader: %v", err)
 	}
-	header, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNumber), dbtx)
+	header, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNumber), dbtx)
 	if err != nil {
 		return fmt.Errorf("could not fetch header %d(%x): %v", blockNumber, hash, err)
 	}
@@ -499,7 +499,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	}
 
 	var header *types.Header
-	header, err = api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNum), tx)
+	header, err = api.headerByNumber(ctx, rpc.BlockNumber(blockNum), tx)
 	if err != nil {
 		return err
 	}
