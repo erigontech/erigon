@@ -18,7 +18,6 @@ package cache
 
 import (
 	"bytes"
-	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/common"
@@ -133,8 +132,6 @@ func (c *StateCache) GetCache(domain kv.Domain) Cache {
 	return c.caches[domain]
 }
 
-func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
-
 // PrintStatsAndReset prints cache statistics for all domains and resets counters.
 func (c *StateCache) PrintStatsAndReset() {
 	if acc, ok := c.caches[kv.AccountsDomain].(*GenericCache[[]byte]); ok {
@@ -153,22 +150,22 @@ func (c *StateCache) PrintStatsAndReset() {
 
 func (c *StateCache) RevertWithDiffset(diffset *[6][]kv.DomainEntryDiff, newBlockHash common.Hash) {
 	for _, entry := range diffset[kv.AccountsDomain] {
-		k := toBytesZeroCopy(entry.Key[:len(entry.Key)-8])
+		k := []byte(entry.Key[:len(entry.Key)-8])
 		c.Delete(kv.CodeDomain, k)
-		c.Put(kv.AccountsDomain, k, entry.Value)
+		c.Delete(kv.AccountsDomain, k)
 	}
 	for _, entry := range diffset[kv.CodeDomain] {
-		k := toBytesZeroCopy(entry.Key[:len(entry.Key)-8])
+		k := []byte(entry.Key[:len(entry.Key)-8])
 		c.Delete(kv.CodeDomain, k)
 	}
 	for _, entry := range diffset[kv.StorageDomain] {
-		k := toBytesZeroCopy(entry.Key[:len(entry.Key)-8])
-		c.Put(kv.StorageDomain, k, entry.Value)
+		k := []byte(entry.Key[:len(entry.Key)-8])
+		c.Delete(kv.StorageDomain, k)
 	}
 	// still adding kv.CommitmentDomain for expandability.
 	for _, entry := range diffset[kv.CommitmentDomain] {
-		k := toBytesZeroCopy(entry.Key[:len(entry.Key)-8])
-		c.Put(kv.CommitmentDomain, k, entry.Value)
+		k := []byte(entry.Key[:len(entry.Key)-8])
+		c.Delete(kv.CommitmentDomain, k)
 	}
 	// Update block hash on all caches after unwind so ValidateAndPrepare works correctly
 	for _, cache := range c.caches {
