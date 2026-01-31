@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -231,11 +230,6 @@ func ExecV3(ctx context.Context,
 	postValidator := newBlockPostExecutionValidator()
 	if isChainTip {
 		postValidator = newParallelBlockPostExecutionValidator()
-	}
-
-	if doms.GetStateCache() == nil {
-		doms.SetStateCache(cache.NewDefaultStateCache())
-		defer doms.SetStateCache(nil)
 	}
 
 	if parallel {
