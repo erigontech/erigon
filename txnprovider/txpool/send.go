@@ -69,7 +69,7 @@ func (f *Send) BroadcastPooledTxns(rlps [][]byte, maxPeers uint64) (txnSentTo []
 	}
 	txnSentTo = make([]int, len(rlps))
 	var prev, size int
-	for i, l := 0, len(rlps); i < len(rlps); i++ {
+	for i, l := 0, len(rlps); i < l; i++ {
 		size += len(rlps[i])
 		// Wait till the combined size of rlps so far is greater than a threshold and
 		// send them all at once. Then wait till end of array or this threshold hits again
