@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/db/datadir"
 	"golang.org/x/sync/semaphore"
 
 	"google.golang.org/grpc"
@@ -218,6 +219,7 @@ type MultiClient struct {
 var _ eth.ReceiptsGetter = new(receipts.Generator) // compile-time interface-check
 
 func NewMultiClient(
+	dirs datadir.Dirs,
 	db kv.TemporalRoDB,
 	chainConfig *chain.Config,
 	engine rules.Engine,
@@ -287,7 +289,7 @@ func NewMultiClient(
 		disableBlockDownload:              disableBlockDownload,
 		logger:                            logger,
 		getReceiptsActiveGoroutineNumber:  semaphore.NewWeighted(1),
-		ethApiWrapper:                     receipts.NewGenerator(blockReader, engine, nil, 5*time.Minute),
+		ethApiWrapper:                     receipts.NewGenerator(dirs, blockReader, engine, nil, 5*time.Minute),
 	}
 
 	return cs, nil

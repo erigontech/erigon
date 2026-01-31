@@ -214,8 +214,11 @@ func (ms *MockSentry) SendMessageToAll(_ context.Context, r *sentryproto.Outboun
 	ms.sentMessages = append(ms.sentMessages, r)
 	return nil, nil
 }
-func (ms *MockSentry) SentMessage(i int) *sentryproto.OutboundMessageData {
-	return ms.sentMessages[i]
+func (ms *MockSentry) SentMessage(i int) (*sentryproto.OutboundMessageData, error) {
+	if i < 0 || i >= len(ms.sentMessages) {
+		return nil, fmt.Errorf("no sent message for index %d found", i)
+	}
+	return ms.sentMessages[i], nil
 }
 
 func (ms *MockSentry) Messages(req *sentryproto.MessagesRequest, stream sentryproto.Sentry_MessagesServer) error {
@@ -367,7 +370,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		PeerId:             gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots:     allSnapshots,
 		BlockReader:        br,
-		ReceiptsReader:     receipts.NewGenerator(br, engine, nil, 5*time.Second),
+		ReceiptsReader:     receipts.NewGenerator(dirs, br, engine, nil, 5*time.Second),
 		HistoryV3:          true,
 		cfg:                cfg,
 	}
@@ -475,6 +478,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
 
 	mock.sentriesClient, err = sentry_multi_client.NewMultiClient(
+		mock.Dirs,
 		mock.DB,
 		mock.ChainConfig,
 		mock.Engine,

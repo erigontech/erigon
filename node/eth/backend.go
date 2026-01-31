@@ -729,6 +729,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	const sentryMcDisableBlockDownload = true
 	backend.sentriesClient, err = sentry_multi_client.NewMultiClient(
+		stack.Config().Dirs,
 		backend.chainDB,
 		chainConfig,
 		backend.engine,

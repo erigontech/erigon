@@ -390,7 +390,10 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 
 	m.ReceiveWg.Wait()
 
-	msg := m.SentMessage(0)
+	msg, err := m.SentMessage(0)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	require.Equal(sentryproto.MessageId_RECEIPTS_66, msg.Id)
 
