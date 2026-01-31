@@ -53,6 +53,11 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		// If the caller cannot afford the cost, this change will be rolled back
 		if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(callContext.Address(), slot); slotMod {
 			cost = params.ColdSloadCostEIP2929
+			// Abort gas evaluation if there isn’t enough gas left,
+			// ensuring no state access happens afterward.
+			if callContext.gas < cost {
+				return 0, ErrOutOfGas
+			}
 		}
 		var value uint256.Int
 		value.Set(y)
@@ -228,6 +233,9 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 			gas     uint64
 			address = accounts.InternAddress(callContext.Stack.peek().Bytes20())
 		)
+		if evm.readOnly {
+			return 0, ErrWriteProtection
+		}
 		// If the caller cannot afford the cost, this change will be rolled back
 		if !evm.IntraBlockState().AddressInAccessList(address) {
 			gas = params.ColdAccountAccessCostEIP2929
