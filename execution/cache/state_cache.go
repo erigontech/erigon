@@ -65,7 +65,7 @@ func (c *StateCache) Get(domain kv.Domain, key []byte) ([]byte, bool) {
 	}
 	ret, ok := cache.Get(key)
 	if domain != kv.CodeDomain && ok {
-		return common.Copy(ret), ok
+		return ret, ok
 	}
 	return ret, ok
 }
