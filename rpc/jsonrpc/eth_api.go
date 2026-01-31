@@ -189,7 +189,7 @@ func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chai
 		return cc, genesisBlock, nil
 	}
 
-	genesisBlock, err := api.blockByRPCNumber(ctx, 0, tx)
+	genesisBlock, err := api.blockByNumberWithSenders(ctx, tx, 0)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -219,24 +219,24 @@ func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash
 }
 
 func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
-	hash, ok, hashErr := api._blockReader.CanonicalHash(ctx, tx, number)
-	if hashErr != nil {
-		return nil, hashErr
-	}
-	if !ok {
-		return nil, nil
-	}
-	return api.blockWithSenders(ctx, tx, hash, number)
-}
-
-func (api *BaseAPI) blockByRPCNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
-	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
-	if err != nil {
-		return nil, err
+    var blockNumber uint64
+	var hash common.Hash
+	if (number == rpc.EarliestBlock.BlockNumber.Uint64()) {
+		hash = *rpc.EarliestBlock.BlockHash
+	} else {
+		var ok bool
+		var err error
+		blockNumber, hash, ok, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(number)), tx, api._blockReader, api.filters)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			// If the block is not found, no error is returned, but 'block' will be null. The caller must verify this.
+			return nil, nil
+		}
 	}
 	return 	api.blockWithSenders(ctx, tx, hash, blockNumber)
 }
-
 
 func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash) (*types.Block, error) {
 	if api.blocksLRU != nil {

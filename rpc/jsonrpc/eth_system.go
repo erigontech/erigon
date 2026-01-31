@@ -371,7 +371,7 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 	return header, nil
 }
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
-	return b.baseApi.blockByRPCNumber(ctx, number, b.tx)
+	return b.baseApi.blockByNumberWithSenders(ctx, b.tx, number.Uint64())
 }
 func (b *GasPriceOracleBackend) ChainConfig() *chain.Config {
 	cc, _ := b.baseApi.chainConfig(context.Background(), b.tx)
