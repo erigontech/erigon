@@ -1975,10 +1975,8 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		upCell = &hph.grid[upRow][nibble]
 	}
 
-	var depth int16
-	if dbg.KVReadLevelledMetrics {
-		depth = hph.depths[row]
-	}
+	depth := hph.depths[row]
+
 	updateKey := HexNibblesToCompactBytes(hph.currentKey[:updateKeyLen])
 	defer func() { hph.depthsToTxNum[depth] = 0 }()
 
