@@ -322,6 +322,7 @@ func unwindExec3State(ctx context.Context,
 
 		// Invalidate state cache entries affected by the unwind
 		if stateCache := sd.GetStateCache(); stateCache != nil {
+			fmt.Println("TOUCH")
 			unwindToHash, err := rawdb.ReadCanonicalHash(tx, blockUnwindTo)
 			if err != nil {
 				logger.Warn("failed to read canonical hash for cache update", "block", blockUnwindTo, "err", err)
