@@ -278,7 +278,7 @@ func unwindExec3State(ctx context.Context,
 	if changeset != nil {
 		accountDiffs := changeset[kv.AccountsDomain]
 		for _, entry := range accountDiffs {
-			fmt.Println("ACCOUNT DIFF", entry.Key, entry.Value)
+			fmt.Println("ACCOUNT DIFF", []byte(entry.Key), entry.Value, entry.PrevStepBytes)
 			if dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 				address := entry.Key[:len(entry.Key)-8]
 				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
