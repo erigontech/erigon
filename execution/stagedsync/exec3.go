@@ -223,11 +223,15 @@ func ExecV3(ctx context.Context,
 	isChainTip := maxBlockNum == startBlockNum
 	// Do it only for chain-tip blocks!
 	doms.EnableWarmupCache(isChainTip)
-	log.Debug("Warmup Cache", "enabled", isChainTip)
+	// Only use code cache if it was set by caller (e.g., EthereumExecutionModule).
+	// This ensures proper block hash tracking for cache invalidation.
+	// Note: We no longer create a cache here because it would bypass the
+	// ValidateAndPrepare/SetBlockHash tracking in Ethereum1BlockExecution.
 	postValidator := newBlockPostExecutionValidator()
 	if isChainTip {
 		postValidator = newParallelBlockPostExecutionValidator()
 	}
+
 	if parallel {
 		pe := &parallelExecutor{
 			txExecutor: txExecutor{

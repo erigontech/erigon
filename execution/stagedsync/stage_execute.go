@@ -265,9 +265,20 @@ func unwindExec3State(ctx context.Context,
 	defer stateChanges.Close()
 	stateChanges.SortAndFlushInBackground(true)
 
+	// Invalidate state cache entries affected by the unwind
+	if stateCache := sd.GetStateCache(); stateCache != nil {
+		fmt.Println("TOUCH")
+		// unwindToHash, err := rawdb.ReadCanonicalHash(tx, blockUnwindTo)
+		// if err != nil {
+		// 	logger.Warn("failed to read canonical hash for cache update", "block", blockUnwindTo, "err", err)
+		// 	unwindToHash = common.Hash{}
+		// }
+		stateCache.Clear()
+	}
 	if changeset != nil {
 		accountDiffs := changeset[kv.AccountsDomain]
 		for _, entry := range accountDiffs {
+			fmt.Println("ACCOUNT DIFF", []byte(entry.Key), entry.Value, entry.PrevStepBytes)
 			if dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 				address := entry.Key[:len(entry.Key)-8]
 				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
@@ -315,9 +326,11 @@ func unwindExec3State(ctx context.Context,
 				}
 			}
 		}
+
 		if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 			return err
 		}
+
 	}
 
 	sd.Unwind(txUnwindTo, changeset)
