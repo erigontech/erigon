@@ -219,23 +219,14 @@ func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash
 }
 
 func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
-    var blockNumber uint64
-	var hash common.Hash
-	if (number == rpc.EarliestBlock.BlockNumber.Uint64()) {
-		hash = *rpc.EarliestBlock.BlockHash
-	} else {
-		var ok bool
-		var err error
-		blockNumber, hash, ok, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(number)), tx, api._blockReader, api.filters)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			// If the block is not found, no error is returned, but 'block' will be null. The caller must verify this.
+	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(number)), tx, api._blockReader, api.filters)
+	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil
 		}
+		return nil, err
 	}
-	return 	api.blockWithSenders(ctx, tx, hash, blockNumber)
+	return api.blockWithSenders(ctx, tx, hash, blockNumber)
 }
 
 func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash) (*types.Block, error) {
@@ -313,7 +304,7 @@ func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrO
 			return it.Header(), false, nil
 		}
 	}
-	
+
 	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return nil, false, err
@@ -321,7 +312,6 @@ func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrO
 	// header can be nil
 	return header, isLatest, nil
 }
-
 
 func (api *BaseAPI) headerByNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Header, error) {
 	n, h, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
