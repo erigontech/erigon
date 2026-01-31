@@ -1341,12 +1341,12 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 			destructed, _, _, err := versionedRead(sdb, addr, SelfDestructPath, accounts.NilKey, false, false, nil, nil)
 
 			if destructed || err != nil {
-				sdb.setStateObject(addr, &stateObject{
-					db:             sdb,
-					address:        addr,
-					selfdestructed: destructed,
-					deleted:        destructed,
-				})
+				so := stateObjectPool.Get().(*stateObject)
+				so.db = sdb
+				so.address = addr
+				so.selfdestructed = destructed
+				so.deleted = destructed
+				sdb.setStateObject(addr, so)
 				return nil, err
 			}
 		} else {

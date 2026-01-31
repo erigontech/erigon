@@ -105,19 +105,28 @@ type stateObject struct {
 }
 
 func (so *stateObject) deepCopy(db *IntraBlockState) *stateObject {
-	stateObject := &stateObject{db: db, address: so.address}
-	stateObject.data.Copy(&so.data)
-	stateObject.original.Copy(&so.original)
-	stateObject.code = so.code
-	stateObject.dirtyStorage = so.dirtyStorage.Copy()
-	stateObject.originStorage = so.originStorage.Copy()
-	stateObject.blockOriginStorage = so.blockOriginStorage.Copy()
-	stateObject.selfdestructed = so.selfdestructed
-	stateObject.dirtyCode = so.dirtyCode
-	stateObject.deleted = so.deleted
-	stateObject.newlyCreated = so.newlyCreated
-	stateObject.createdContract = so.createdContract
-	return stateObject
+	obj := stateObjectPool.Get().(*stateObject)
+	obj.db = db
+	obj.address = so.address
+	obj.data.Copy(&so.data)
+	obj.original.Copy(&so.original)
+	obj.code = so.code
+	// Clear and copy storage maps
+	clear(obj.dirtyStorage)
+	maps.Copy(obj.dirtyStorage, so.dirtyStorage)
+	clear(obj.originStorage)
+	maps.Copy(obj.originStorage, so.originStorage)
+	clear(obj.blockOriginStorage)
+	maps.Copy(obj.blockOriginStorage, so.blockOriginStorage)
+	if so.fakeStorage != nil {
+		obj.fakeStorage = so.fakeStorage.Copy()
+	}
+	obj.selfdestructed = so.selfdestructed
+	obj.dirtyCode = so.dirtyCode
+	obj.deleted = so.deleted
+	obj.newlyCreated = so.newlyCreated
+	obj.createdContract = so.createdContract
+	return obj
 }
 
 // newObject creates a state object from the pool.
