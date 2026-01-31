@@ -329,6 +329,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 
 	// Check state cache before hitting storage
 	if sd.stateCache != nil {
+		fmt.Println("NOT HERE")
 		if v, ok := sd.stateCache.Get(domain, k); ok {
 			return v, 0, nil
 		}
@@ -346,6 +347,8 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
+
+	fmt.Println("GET 0xdBBE3D8c2d2b22A2611c5A94A9a12C2fCD49Eb29", "value len:", len(v), "value:", common.Bytes2Hex(v))
 
 	// Populate state cache on successful storage read
 	if sd.stateCache != nil && len(v) > 0 {
