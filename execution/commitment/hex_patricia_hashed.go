@@ -1988,7 +1988,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 	updateKind, nibblesLeftAfterUpdate := afterMapUpdateKind(hph.afterMap[row])
 	switch updateKind {
 	case updateKindDelete: // Everything deleted
-		if dbg.KVReadLevelledMetrics && hph.touchMap[row] != 0 {
+		if hph.touchMap[row] != 0 {
 			if row == 0 {
 				// Root is deleted because the tree is empty
 				hph.rootTouched = true
@@ -2021,7 +2021,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 			hph.currentKeyLen = 0
 		}
 	case updateKindPropagate: // Leaf or extension node
-		if dbg.KVReadLevelledMetrics && hph.touchMap[row] != 0 {
+		if hph.touchMap[row] != 0 {
 			// any modifications
 			if row == 0 {
 				hph.rootTouched = true
