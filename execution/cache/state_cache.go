@@ -38,10 +38,10 @@ type StateCache struct {
 // NewStateCache creates a new StateCache with the specified byte capacities.
 func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes, commitmentBytes datasize.ByteSize) *StateCache {
 	sc := &StateCache{}
-	sc.caches[kv.AccountsDomain] = NewBytesCache(accountBytes)
-	sc.caches[kv.StorageDomain] = NewBytesCache(storageBytes)
+	sc.caches[kv.AccountsDomain] = NewDomainCache(accountBytes)
+	sc.caches[kv.StorageDomain] = NewDomainCache(storageBytes)
 	sc.caches[kv.CodeDomain] = NewCodeCache(codeBytes, addrBytes)
-	sc.caches[kv.CommitmentDomain] = NewBytesCache(commitmentBytes)
+	sc.caches[kv.CommitmentDomain] = NewDomainCache(commitmentBytes)
 	return sc
 }
 
@@ -57,21 +57,17 @@ func NewDefaultStateCache() *StateCache {
 	)
 }
 
-// Get retrieves data for the given domain and key.
-func (c *StateCache) Get(domain kv.Domain, key []byte) ([]byte, bool) {
+// Get retrieves data and step for the given domain and key.
+func (c *StateCache) Get(domain kv.Domain, key []byte) ([]byte, kv.Step, bool) {
 	cache := c.caches[domain]
 	if cache == nil {
-		return nil, false
+		return nil, 0, false
 	}
-	ret, ok := cache.Get(key)
-	if domain != kv.CodeDomain && ok {
-		return ret, ok
-	}
-	return ret, ok
+	return cache.Get(key)
 }
 
-// Put stores data for the given domain and key.
-func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte) {
+// Put stores data with its step for the given domain and key.
+func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte, step kv.Step) {
 	cache := c.caches[domain]
 	if cache == nil {
 		return
@@ -79,7 +75,7 @@ func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte) {
 	if domain == kv.CommitmentDomain && bytes.Equal(key, commitmentdb.KeyCommitmentState) {
 		return
 	}
-	cache.Put(key, common.Copy(value))
+	cache.Put(key, common.Copy(value), step)
 }
 
 // Delete removes the data for the given domain and key.
@@ -134,14 +130,14 @@ func (c *StateCache) GetCache(domain kv.Domain) Cache {
 
 // PrintStatsAndReset prints cache statistics for all domains and resets counters.
 func (c *StateCache) PrintStatsAndReset() {
-	if acc, ok := c.caches[kv.AccountsDomain].(*GenericCache[[]byte]); ok {
+	if acc, ok := c.caches[kv.AccountsDomain].(*DomainCache); ok {
 		acc.PrintStatsAndReset("Account")
 	}
-	if stor, ok := c.caches[kv.StorageDomain].(*GenericCache[[]byte]); ok {
+	if stor, ok := c.caches[kv.StorageDomain].(*DomainCache); ok {
 		stor.PrintStatsAndReset("Storage")
 	}
-	if stor, ok := c.caches[kv.CommitmentDomain].(*GenericCache[[]byte]); ok {
-		stor.PrintStatsAndReset("Commitment")
+	if commit, ok := c.caches[kv.CommitmentDomain].(*DomainCache); ok {
+		commit.PrintStatsAndReset("Commitment")
 	}
 	if code, ok := c.caches[kv.CodeDomain].(*CodeCache); ok {
 		code.PrintStatsAndReset()

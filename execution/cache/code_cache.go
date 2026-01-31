@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 const (
@@ -77,14 +78,15 @@ func NewDefaultCodeCache() *CodeCache {
 	return NewCodeCache(DefaultCodeCacheBytes, DefaultAddrCacheBytes)
 }
 
-// Get retrieves contract code for the given address.
-// Returns the code and true if found, nil and false otherwise.
-func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
+// Get retrieves contract code for the given address, implementing the Cache interface.
+// Returns the code, step (always 0 for code), and true if found.
+// Code is immutable so step tracking is not needed.
+func (c *CodeCache) Get(addr []byte) ([]byte, kv.Step, bool) {
 	// First, look up the code hash for this address
 	codeHash, ok := c.addrToHash.Get(addr)
 	if !ok || codeHash == 0 {
 		c.addrMisses.Add(1)
-		return nil, false
+		return nil, 0, false
 	}
 	c.addrHits.Add(1)
 
@@ -92,21 +94,22 @@ func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
 	code, ok := c.hashToCode.Load(codeHash)
 	if !ok {
 		c.codeMisses.Add(1)
-		return nil, false
+		return nil, 0, false
 	}
 	ret := code.([]byte)
 	if len(ret) == 0 {
 		c.codeMisses.Add(1)
-		return nil, false
+		return nil, 0, false
 	}
 	c.codeHits.Add(1)
-	return ret, true
+	return ret, 0, true
 }
 
-// Put stores contract code for the given address.
+// Put stores contract code for the given address, implementing the Cache interface.
 // Uses fast maphash to compute the code identifier.
 // If caches are at capacity, new entries are no-ops but updates are allowed.
-func (c *CodeCache) Put(addr []byte, code []byte) {
+// The step parameter is ignored since code is immutable.
+func (c *CodeCache) Put(addr []byte, code []byte, _ kv.Step) {
 	if len(code) == 0 {
 		return
 	}

@@ -326,8 +326,8 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 
 	// Check state cache before hitting storage
 	if sd.stateCache != nil {
-		if v, ok := sd.stateCache.Get(domain, k); ok {
-			return v, 0, nil
+		if v, step, ok := sd.stateCache.Get(domain, k); ok {
+			return v, step, nil
 		}
 	}
 
@@ -346,7 +346,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 
 	// Populate state cache on successful storage read
 	if sd.stateCache != nil && len(v) > 0 {
-		sd.stateCache.Put(domain, k, v)
+		sd.stateCache.Put(domain, k, v, step)
 	}
 
 	return v, step, nil
@@ -447,9 +447,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		}
 	}
 
-	// Invalidate state cache when writing (will be repopulated on next read)
+	// Update state cache when writing
 	if sd.stateCache != nil {
-		sd.stateCache.Put(domain, k, v)
+		sd.stateCache.Put(domain, k, v, kv.Step(txNum/sd.stepSize))
 	}
 
 	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal, prevStep)
