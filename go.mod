@@ -94,6 +94,7 @@ require (
 	github.com/protolambda/ztyp v0.2.2
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20240618144021-706c95b2dd15
 	github.com/prysmaticlabs/gohashtree v0.0.4-beta
+	github.com/puzpuzpuz/xsync/v3 v3.5.1
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/quic-go/quic-go v0.49.1
 	github.com/rs/cors v1.11.1
@@ -278,7 +279,6 @@ require (
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/protolambda/ctxlock v0.1.0 // indirect
-	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
 	github.com/quic-go/webtransport-go v0.8.1-0.20241018022711-4ac2c9250e66 // indirect
 	github.com/raulk/go-watchdog v1.3.0 // indirect
