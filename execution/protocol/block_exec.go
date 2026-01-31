@@ -91,6 +91,7 @@ func ExecuteBlockEphemerally(
 ) (res *EphemeralExecResult, executeBlockErr error) {
 	defer blockExecutionTimer.ObserveDuration(time.Now())
 	ibs := state.New(stateReader)
+	defer ibs.Release(false)
 	ibs.SetHooks(vmConfig.Tracer)
 	header := block.Header()
 
