@@ -175,7 +175,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 			case applyResult := <-applyResults:
 				switch applyResult := applyResult.(type) {
 				case *txResult:
-					uncommittedGas += applyResult.gasUsed
+					if applyResult.receipt != nil {
+						uncommittedGas += int64(applyResult.receipt.GasUsed)
+					}
 					uncommittedTransactions++
 					pe.rs.SetTxNum(applyResult.blockNum, applyResult.txNum)
 					if dbg.TraceApply && dbg.TraceBlock(applyResult.blockNum) {
@@ -184,7 +186,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					}
 					blockUpdateCount += applyResult.stateUpdates.UpdateCount()
 					err := pe.rs.ApplyTxState(ctx, rwTx, applyResult.blockNum, applyResult.txNum, applyResult.stateUpdates,
-						nil, applyResult.receipt, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
+						nil, applyResult.receipt, applyResult.cummulativeBlobGas, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
 						pe.cfg.chainConfig, applyResult.rules, false)
 					blockApplyCount += applyResult.stateUpdates.UpdateCount()
 					pe.rs.SetTrace(false)
@@ -927,15 +929,15 @@ type blockResult struct {
 }
 
 type txResult struct {
-	blockNum     uint64
-	txNum        uint64
-	gasUsed      int64
-	receipt      *types.Receipt
-	logs         []*types.Log
-	traceFroms   map[accounts.Address]struct{}
-	traceTos     map[accounts.Address]struct{}
-	stateUpdates state.StateUpdates
-	rules        *chain.Rules
+	blockNum           uint64
+	txNum              uint64
+	receipt            *types.Receipt
+	cummulativeBlobGas uint64
+	logs               []*types.Log
+	traceFroms         map[accounts.Address]struct{}
+	traceTos           map[accounts.Address]struct{}
+	stateUpdates       state.StateUpdates
+	rules              *chain.Rules
 }
 
 type execTask struct {
@@ -1547,18 +1549,17 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			if result.Receipt != nil {
-				applyResult.gasUsed += int64(result.Receipt.GasUsed)
 				be.gasUsed += result.Receipt.GasUsed
 				applyResult.receipt = result.Receipt
+				applyResult.logs = append(applyResult.logs, result.Receipt.Logs...)
+				pe.executedGas.Add(int64(result.Receipt.GasUsed))
 			}
 
-			applyResult.logs = append(applyResult.logs, result.Logs...)
 			maps.Copy(applyResult.traceFroms, result.TraceFroms)
 			maps.Copy(applyResult.traceTos, result.TraceTos)
 			be.cntFinalized++
 			be.publishTasks.markComplete(tx)
 
-			pe.executedGas.Add(int64(applyResult.gasUsed))
 			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
 			if result.stateUpdates != nil {
 				applyResult.stateUpdates = *result.stateUpdates

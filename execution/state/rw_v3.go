@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
@@ -193,6 +194,7 @@ func (rs *StateV3) ApplyTxState(ctx context.Context,
 	accountUpdates StateUpdates,
 	balanceIncreases map[accounts.Address]uint256.Int,
 	receipt *types.Receipt,
+	cummulativeBlobGas uint64,
 	logs []*types.Log,
 	traceFroms map[accounts.Address]struct{},
 	traceTos map[accounts.Address]struct{},
@@ -208,7 +210,7 @@ func (rs *StateV3) ApplyTxState(ctx context.Context,
 		return fmt.Errorf("StateV3.ApplyState: %w", err)
 	}
 
-	if err := rs.applyLogsAndTraces4(roTx, txNum, receipt, logs, traceFroms, traceTos); err != nil {
+	if err := rs.applyLogsAndTraces4(roTx, txNum, receipt, cummulativeBlobGas, logs, traceFroms, traceTos, historyExecution); err != nil {
 		return fmt.Errorf("StateV3.ApplyLogsAndTraces: %w", err)
 	}
 
@@ -225,7 +227,7 @@ func (rs *StateV3) ApplyTxState(ctx context.Context,
 	return nil
 }
 
-func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, logs []*types.Log, traceFroms map[accounts.Address]struct{}, traceTos map[accounts.Address]struct{}) error {
+func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, cummulativeBlobGas uint64, logs []*types.Log, traceFroms map[accounts.Address]struct{}, traceTos map[accounts.Address]struct{}, historyExecution bool) error {
 	domains := rs.domains
 	for addr := range traceFroms {
 		addrValue := addr.Value()
@@ -252,9 +254,21 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 		}
 	}
 
-	if rs.syncCfg.PersistReceiptsCacheV2 {
-		if err := rawdb.WriteReceiptCacheV2(rs.domains.AsPutDel(tx), receipt, txNum); err != nil {
-			return err
+	if receipt != nil {
+		if !historyExecution {
+			blockLogIndex := receipt.FirstLogIndexWithinBlock
+			if !rawtemporaldb.ReceiptStoresFirstLogIdx(tx) {
+				blockLogIndex += uint32(len(receipt.Logs))
+			}
+			if err := rawtemporaldb.AppendReceipt(rs.domains.AsPutDel(tx), blockLogIndex, receipt.CumulativeGasUsed, cummulativeBlobGas, txNum); err != nil {
+				return err
+			}
+		}
+
+		if rs.syncCfg.PersistReceiptsCacheV2 {
+			if err := rawdb.WriteReceiptCacheV2(rs.domains.AsPutDel(tx), receipt, txNum); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -758,7 +772,7 @@ func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.
 	}
 	if len(enc) == 0 {
 		if r.trace {
-			fmt.Printf("%sReadAccountData [%x] => [empty], txNum: %d\n", r.tracePrefix, address, r.txNum)
+			fmt.Printf("%sReadAccountData [%x] => [empty], txNum: %d stack=%s\n", r.tracePrefix, address, r.txNum, dbg.Stack())
 		}
 		return nil, nil, nil
 	}
@@ -768,7 +782,7 @@ func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.
 		return nil, nil, err
 	}
 	if r.trace {
-		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d\n", r.tracePrefix, address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum)
+		fmt.Printf("%sReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x], txNum: %d stack=%s\n", r.tracePrefix, address, acc.Nonce, &acc.Balance, acc.CodeHash, r.txNum, dbg.Stack())
 	}
 	return enc, &acc, nil
 }
