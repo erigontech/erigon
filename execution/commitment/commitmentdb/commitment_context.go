@@ -195,6 +195,12 @@ func (sdc *SharedDomainsCommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) 
 	sdc.paraTrieDB = db
 }
 
+func (sdc *SharedDomainsCommitmentContext) SetDeferBranchUpdates(deferBranchUpdates bool) {
+	if sdc.patriciaTrie.Variant() == commitment.VariantHexPatriciaTrie {
+		sdc.patriciaTrie.(*commitment.HexPatriciaHashed).SetDeferBranchUpdates(deferBranchUpdates)
+	}
+}
+
 // SetHistoryStateReader sets the state reader to read *full* historical state at specified txNum.
 func (sdc *SharedDomainsCommitmentContext) SetHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
 	sdc.SetStateReader(NewHistoryStateReader(roTx, limitReadAsOfTxNum))
@@ -307,12 +313,10 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
 
 	updateCount := sdc.updates.Size()
-	if sdc.trace {
-		start := time.Now()
-		defer func() {
-			log.Trace("ComputeCommitment", "block", blockNum, "keys", common.PrettyCounter(updateCount), "mode", sdc.updates.Mode(), "spent", time.Since(start))
-		}()
-	}
+	start := time.Now()
+	defer func() {
+		log.Debug("[commitment] processed", "block", blockNum, "txNum", txNum, "keys", common.PrettyCounter(updateCount), "mode", sdc.updates.Mode(), "spent", time.Since(start))
+	}()
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
 		return rootHash, err

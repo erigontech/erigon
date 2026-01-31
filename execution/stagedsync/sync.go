@@ -83,7 +83,7 @@ func (s *Sync) NewUnwindState(id stages.SyncStage, unwindPoint, currentProgress 
 }
 
 // PruneStageState Get the current prune status from the DB
-func (s *Sync) PruneStageState(id stages.SyncStage, forwardProgress uint64, tx kv.Tx, db kv.RwDB, initialCycle bool) (*PruneState, error) {
+func (s *Sync) PruneStageState(id stages.SyncStage, forwardProgress uint64, tx kv.Tx, initialCycle bool) (*PruneState, error) {
 	pruneProgress, err := stages.GetStagePruneProgress(tx, id)
 	if err != nil {
 		return nil, err
@@ -245,7 +245,7 @@ func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, prune
 	}
 }
 
-func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, db kv.RoDB, initialCycle, firstCycle bool) (*StageState, error) {
+func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, initialCycle, firstCycle bool) (*StageState, error) {
 	blockNum, err := stages.GetStageProgress(tx, stage)
 	if err != nil {
 		return nil, err
@@ -253,17 +253,17 @@ func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, db kv.RoDB, initialC
 	return &StageState{s, stage, blockNum, CurrentSyncCycleInfo{initialCycle, firstCycle}}, nil
 }
 
-func (s *Sync) RunSnapshots(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
+func (s *Sync) RunSnapshots(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 	for _, stage := range s.stages {
 		if stage.ID == stages.Snapshots {
-			_, err := s.runStage(stage, db, sd, tx, true, true, false)
+			_, err := s.runStage(stage, sd, tx, true, true, false)
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *Sync) RunUnwind(db kv.RwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
+func (s *Sync) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 	if s.unwindPoint == nil {
 		return nil
 	}
@@ -271,7 +271,7 @@ func (s *Sync) RunUnwind(db kv.RwDB, sd *execctx.SharedDomains, tx kv.TemporalRw
 		if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 			continue
 		}
-		if err := s.unwindStage(false, s.unwindOrder[j], db, sd, tx); err != nil {
+		if err := s.unwindStage(false, s.unwindOrder[j], sd, tx); err != nil {
 			return err
 		}
 	}
@@ -284,7 +284,7 @@ func (s *Sync) RunUnwind(db kv.RwDB, sd *execctx.SharedDomains, tx kv.TemporalRw
 	return nil
 }
 
-func (s *Sync) RunNoInterrupt(db kv.RwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx) (bool, error) {
+func (s *Sync) RunNoInterrupt(sd *execctx.SharedDomains, tx kv.TemporalRwTx) (bool, error) {
 	var hasMore bool
 	initialCycle, firstCycle := false, false
 	s.prevUnwindPoint = nil
@@ -298,7 +298,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, sd *execctx.SharedDomains, tx kv.Tempo
 				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 					continue
 				}
-				if err := s.unwindStage(initialCycle, s.unwindOrder[j], db, sd, tx); err != nil {
+				if err := s.unwindStage(initialCycle, s.unwindOrder[j], sd, tx); err != nil {
 					return false, err
 				}
 			}
@@ -328,7 +328,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, sd *execctx.SharedDomains, tx kv.Tempo
 			continue
 		}
 
-		stageHasMore, err := s.runStage(stage, db, sd, tx, initialCycle, firstCycle, badBlockUnwind)
+		stageHasMore, err := s.runStage(stage, sd, tx, initialCycle, firstCycle, badBlockUnwind)
 		if err != nil {
 			return false, err
 		}
@@ -371,7 +371,7 @@ func (e *ErrLoopExhausted) Is(err error) bool {
 	return errors.As(err, &errExhausted)
 }
 
-func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, firstCycle bool) (more bool, err error) {
+func (s *Sync) Run(sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, firstCycle bool) (more bool, err error) {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
 
@@ -383,7 +383,7 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.Temporal
 				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 					continue
 				}
-				if err := s.unwindStage(initialCycle, s.unwindOrder[j], db, sd, tx); err != nil {
+				if err := s.unwindStage(initialCycle, s.unwindOrder[j], sd, tx); err != nil {
 					return false, err
 				}
 			}
@@ -416,7 +416,7 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.Temporal
 			s.NextStage()
 			continue
 		}
-		stageHasMore, err := s.runStage(stage, db, sd, tx, initialCycle, firstCycle, badBlockUnwind)
+		stageHasMore, err := s.runStage(stage, sd, tx, initialCycle, firstCycle, badBlockUnwind)
 		if err != nil {
 			return false, err
 		}
@@ -429,19 +429,8 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.Temporal
 		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
 			s.logger.Warn("--sync.loop.break.after caused stage break")
 			if s.posTransition != nil {
-				ptx := tx.(kv.Tx)
-
-				if ptx == nil {
-					if tx, err := db.BeginTemporalRo(context.Background()); err == nil {
-						ptx = tx
-						defer tx.Rollback()
-					}
-				}
-
-				if ptx != nil {
-					if progress, err := stages.GetStageProgress(ptx, stage.ID); err == nil {
-						more = progress < *s.posTransition
-					}
+				if progress, err := stages.GetStageProgress(tx, stage.ID); err == nil {
+					more = progress < *s.posTransition
 				}
 			} else {
 				more = true
@@ -461,13 +450,13 @@ func (s *Sync) Run(db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.Temporal
 }
 
 // RunPrune pruning for stages as per the defined pruning order, if enabled for that stage
-func (s *Sync) RunPrune(ctx context.Context, db kv.RwDB, tx kv.RwTx, initialCycle bool, timeout time.Duration) error {
+func (s *Sync) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) error {
 	s.timings = s.timings[:0]
 	for i := 0; i < len(s.pruningOrder); i++ {
 		if s.pruningOrder[i] == nil || s.pruningOrder[i].Disabled || s.pruningOrder[i].Prune == nil {
 			continue
 		}
-		if err := s.pruneStage(ctx, initialCycle, s.pruningOrder[i], db, tx, timeout); err != nil {
+		if err := s.pruneStage(ctx, initialCycle, s.pruningOrder[i], tx, timeout); err != nil {
 			return err
 		}
 	}
@@ -500,10 +489,10 @@ func (s *Sync) PrintTimings() []any {
 	return logCtx
 }
 
-func (s *Sync) runStage(stage *Stage, db kv.RwDB, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, initialCycle, firstCycle bool, badBlockUnwind bool) (bool, error) {
+func (s *Sync) runStage(stage *Stage, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, initialCycle, firstCycle bool, badBlockUnwind bool) (bool, error) {
 	start := time.Now()
 	s.logger.Debug(fmt.Sprintf("[%s] Starting Stage run", s.LogPrefix()))
-	stageState, err := s.StageState(stage.ID, rwTx, db, initialCycle, firstCycle)
+	stageState, err := s.StageState(stage.ID, rwTx, initialCycle, firstCycle)
 	if err != nil {
 		return false, err
 	}
@@ -535,9 +524,9 @@ func (s *Sync) logRunStageDone(stageState *StageState, start time.Time) {
 	s.metricsCache.stageRunDurationSummary(stageState.ID).Observe(took.Seconds())
 }
 
-func (s *Sync) unwindStage(initialCycle bool, stage *Stage, db kv.RwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
+func (s *Sync) unwindStage(initialCycle bool, stage *Stage, sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
 	start := time.Now()
-	stageState, err := s.StageState(stage.ID, tx, db, initialCycle, false)
+	stageState, err := s.StageState(stage.ID, tx, initialCycle, false)
 	if err != nil {
 		return err
 	}
@@ -569,15 +558,15 @@ func (s *Sync) unwindStage(initialCycle bool, stage *Stage, db kv.RwDB, sd *exec
 }
 
 // Run the pruning function for the given stage
-func (s *Sync) pruneStage(ctx context.Context, initialCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx, timeout time.Duration) error {
+func (s *Sync) pruneStage(ctx context.Context, initialCycle bool, stage *Stage, tx kv.RwTx, timeout time.Duration) error {
 	start := time.Now()
 
-	stageState, err := s.StageState(stage.ID, tx, db, initialCycle, false)
+	stageState, err := s.StageState(stage.ID, tx, initialCycle, false)
 	if err != nil {
 		return err
 	}
 
-	pruneState, err := s.PruneStageState(stage.ID, stageState.BlockNumber, tx, db, initialCycle)
+	pruneState, err := s.PruneStageState(stage.ID, stageState.BlockNumber, tx, initialCycle)
 	if err != nil {
 		return err
 	}

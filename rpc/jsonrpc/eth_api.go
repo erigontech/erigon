@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -359,7 +360,7 @@ func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint6
 		}
 		prunedTo := p.History.PruneTo(latest)
 		if block < prunedTo {
-			return errors.New("history has been pruned for this block")
+			return state.PrunedError
 		}
 	}
 

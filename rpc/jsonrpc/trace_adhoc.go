@@ -914,6 +914,11 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		isBorStateSyncTxn = true
 	}
 
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
 	header, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNum), tx)
 	if err != nil {
 		return nil, err
@@ -989,6 +994,11 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		return nil, err
 	}
 
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
 	// Extract transactions from block
 	block, bErr := api.blockWithSenders(ctx, tx, blockHash, blockNumber)
 	if bErr != nil {
@@ -1059,7 +1069,12 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		blockNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
 
-	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, *blockNrOrHash, tx, api._blockReader, api.filters)
+	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, *blockNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1072,7 +1087,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, *blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1169,7 +1184,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 	if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-		ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.GasUsed}, nil)
+		ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
 	}
 	traceResult.Output = common.Copy(execResult.ReturnData)
 	if traceTypeStateDiff {
@@ -1245,7 +1260,12 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		var num = rpc.LatestBlockNumber
 		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
-	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, tx, api._blockReader, api.filters)
+	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1278,7 +1298,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		}
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, *parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1473,7 +1493,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		}
 
 		if tracer != nil && tracer.Hooks.OnTxEnd != nil {
-			tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.GasUsed}, nil)
+			tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
 		}
 
 		chainRules := blockCtx.Rules(chainConfig)
