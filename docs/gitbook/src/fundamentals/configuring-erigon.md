@@ -74,14 +74,14 @@ These flags control database performance and memory usage.
 
 Flags for managing how old chain data is handled and stored.
 
-* `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`). See also [Sync Modes](../fundamentals/sync-modes.md)
+* `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`). See also [Sync Modes](sync-modes.md)
   * Default: `"full"`
 * `--prune.distance value`: Keeps state history for the latest `N` blocks.
   * Default: `0`
 * `--prune.distance.blocks value`: Keeps block history for the latest `N` blocks.
   * Default: `0`
 * `--prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables faster `eth_getProof` for executed blocks.
-  * Default: `false`&#x20;
+  * Default: `false`
 * `--prune.include-commitment-history` : (experimental) Enables the storage of commitment history. When enabled, it allows for blazing fast retrieval of Merkle proofs for executed blocks using the `eth_getProof` JSON-RPC method.
   * Default: `false`
 * `--snap.keepblocks`: Keeps ancient blocks in the database for debugging.
@@ -557,7 +557,7 @@ USAGE:
    erigon [command] [flags]
 
 VERSION:
-   3.3.0-dev-fc7a858a
+   3.3.4-745451f6
 
 COMMANDS:
    init                                         Bootstrap and initialize a new genesis block
@@ -591,6 +591,8 @@ GLOBAL OPTIONS:
                                                                                                                                  archive: Keep the entire state history and all blocks,
                                                                                                                                  minimal: Keep only latest state (default: "full")
    --prune.include-commitment-history, --experimental.commitment-history, --prune.experimental.include-commitment-history  Enables blazing fast eth_getProof for executed block (default: false)
+   --fcu.timeout value                                                                                                     FCU timeout before it switches to being process async (use 0 to disable) (default: 1s)
+   --fcu.background.prune                                                                                                  Enables background pruning post fcu (default: true)
    --batchSize value                                                                                                       Batch size for the execution stage (default: "512M")
    --bodies.cache value                                                                                                    Limit on the cache for block bodies (default: "268435456")
    --database.verbosity value                                                                                              Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning. (default: 2)
@@ -602,7 +604,6 @@ GLOBAL OPTIONS:
    --tls.key value                                                                                                         Specify key file
    --tls.cacert value                                                                                                      Specify certificate authority
    --state.stream.disable                                                                                                  Disable streaming of state changes from core to RPC daemon (default: false)
-   --experimental.bal                                                                                                      generate block access list (default: false)
    --sync.loop.throttle value                                                                                              Sets the minimum time between sync loop starts (e.g. 1h30m, default is none)
    --bad.block value                                                                                                       Marks block with given hex string as bad and forces initial reorg before normal staged sync
    --http                                                                                                                  JSON-RPC server (enabled by default). Use --http=false to disable it (default: true)
@@ -636,6 +637,7 @@ GLOBAL OPTIONS:
    --rpc.txfeecap value                                                                                                    Sets a cap on transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap) (default: 1)
    --txpool.api.addr value                                                                                                 TxPool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)
    --trace.maxtraces value                                                                                                 Sets a limit on traces that can be returned in trace_filter (default: 200)
+   --experimental.always-generate-changesets                                                                               Allows to override changesets generation logic (default: false)
    --http.timeouts.read value                                                                                              Maximum duration for reading the entire request, including the body. (default: 30s)
    --http.timeouts.write value                                                                                             Maximum duration before timing out writes of the response. It is reset whenever a new request's header is read. (default: 30m0s)
    --http.timeouts.idle value                                                                                              Maximum amount of time to wait for the next request when keep-alive connections are enabled. If http.timeouts.idle is zero, the value of http.timeouts.read is used. (default: 2m0s)
@@ -679,7 +681,8 @@ GLOBAL OPTIONS:
                                                                                                                                 "stun"               Uses STUN to detect an external IP using a default server
                                                                                                                                 "stun:<server>"      Uses STUN to detect an external IP using the given server (host:port)
    --nodiscover                                                                                                            Disables the peer discovery mechanism (manual peer addition) (default: false)
-   --v5disc                                                                                                                Enables the experimental RLPx V5 (Topic Discovery) mechanism (default: false)
+   --discovery.v4, --discv4                                                                                                Enables the V4 discovery mechanism (default: false)
+   --discovery.v5, --discv5                                                                                                Enables the V5 discovery mechanism (default: true)
    --netrestrict value                                                                                                     Restricts network communication to the given IP networks (CIDR masks)
    --nodekey value                                                                                                         P2P node key file
    --nodekeyhex value                                                                                                      P2P node key as hex (for testing)
@@ -723,6 +726,7 @@ GLOBAL OPTIONS:
    --aa                                                                                                                    Enable AA transactions (default: false)
    --ethstats value                                                                                                        Reporting URL of a ethstats service (nodename:secret@host:port)
    --override.osaka value                                                                                                  Manually specify the Osaka fork time, overriding the bundled setting (default: 0)
+   --override.balancer value                                                                                               Manually specify the Balancer fork time, overriding the bundled setting (default: 0)
    --keep.stored.chain.config                                                                                              Avoid overriding chain config already stored in the DB (default: false)
    --caplin.discovery.addr value                                                                                           Address for Caplin DISCV5 protocol (default: "0.0.0.0")
    --caplin.discovery.port value                                                                                           Port for Caplin DISCV5 protocol (default: 4000)
@@ -773,7 +777,7 @@ GLOBAL OPTIONS:
    --caplin.custom-genesis value                                                                                           set the custom genesis for caplin
    --caplin.use-engine-api                                                                                                 Use engine API for internal Caplin. useful for testing and if CL network is degraded (default: false)
    --trusted-setup-file value                                                                                              Absolute path to trusted_setup.json file
-   --rpc.slow value                                                                                                        Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Excluded methods: eth_getBlock,eth_getBlockByNumber,eth_getBlockByHash,eth_blockNumber,erigon_blockNumber,erigon_getHeaderByNumber,erigon_getHeaderByHash,erigon_getBlockByTimestamp,eth_call (default: 0s)
+   --rpc.slow value                                                                                                        Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Exluded methods: eth_getBlock,eth_getBlockByNumber,eth_getBlockByHash,eth_blockNumber,erigon_blockNumber,erigon_getHeaderByNumber,erigon_getHeaderByHash,erigon_getBlockByTimestamp,eth_call (default: 0s)
    --txpool.gossip.disable                                                                                                 Disabling p2p gossip of txs. Any txs received by p2p - will be dropped. Some networks like 'Optimism execution engine'/'Optimistic Rollup' - using it to protect against MEV attacks (default: false)
    --sync.loop.block.limit value                                                                                           Sets the maximum number of blocks to process per loop iteration (default: 5000)
    --sync.loop.break.after value                                                                                           Sets the last stage of the sync loop to run
@@ -812,5 +816,6 @@ GLOBAL OPTIONS:
    --config value                                                                                                          Sets erigon flags from YAML/TOML file
    --help, -h                                                                                                              show help
    --version, -v                                                                                                           print the version
+
 ```
 {% endcode %}

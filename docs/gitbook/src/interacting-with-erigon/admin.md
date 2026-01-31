@@ -1,5 +1,9 @@
 ---
 description: Security-Sensitive Methods for Node Operators
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/interacting-with-erigon/interacting-with-erigon/admin
 ---
 
 # admin
@@ -34,7 +38,9 @@ The admin namespace must be explicitly enabled using the `--http.api` flag when 
 
 ***
 
-## **admin\_nodeInfo**
+## **JSON-RPC Specification**
+
+### **admin\_nodeInfo**
 
 Returns information about the running node, including network details, protocols, and node identification.
 
@@ -56,9 +62,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":"1"}
 | ------ | --------------------------------------------------------------- |
 | Object | Node information object containing network and protocol details |
 
-***
-
-## **admin\_peers**
+### **admin\_peers**
 
 Returns information about connected peers, including their network addresses, protocols, and connection status.
 
@@ -82,7 +86,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"admin_peers","params":[],"id":"1"}' -
 
 ***
 
-## **admin\_addPeer**
+### **admin\_addPeer**
 
 Attempts to add a new peer to the node's peer list by connecting to the specified enode URL.
 
@@ -106,9 +110,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"admin_addPeer","params":["enode://a97
 | ------- | -------------------------------------------------------- |
 | Boolean | True if the peer was successfully added, false otherwise |
 
-***
-
-## **admin\_removePeer**
+### **admin\_removePeer**
 
 Removes a peer from the node's peer list by disconnecting from the specified enode URL.
 

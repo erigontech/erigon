@@ -1,12 +1,18 @@
 ---
 description: Internal Methods for Erigon Development and Debugging
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/interacting-with-erigon/interacting-with-erigon/internal
 ---
 
 # internal
 
 The **`internal_`** methods are for development and debugging utilities and must be explicitly included in the `--http.api` flag if customizing enabled namespaces.
 
-## **internal\_getTxNumInfo**
+## JSON-RPC Specification
+
+### **`internal_getTxNumInfo`**
 
 Returns transaction number information for development and debugging purposes. This is part of Erigon's internal APIs and may change without notice.
 

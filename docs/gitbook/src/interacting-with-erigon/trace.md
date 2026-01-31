@@ -1,5 +1,9 @@
 ---
 description: Inspecting Transaction Execution with Trace, VMTrace, and StateDiff
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/interacting-with-erigon/interacting-with-erigon/trace
 ---
 
 # trace
@@ -58,7 +62,9 @@ then it should look something like:
 
 `[ {A: []}, {B: [0]}, {G: [0, 0]}, {C: [1]}, {G: [1, 0]} ]`
 
-## JSON-RPC methods
+***
+
+## JSON-RPC Specification
 
 #### Ad-hoc Tracing
 
@@ -74,8 +80,6 @@ then it should look something like:
 * [trace\_filter](trace.md#trace_filter)
 * [trace\_get](trace.md#trace_get)
 * [trace\_transaction](trace.md#trace_transaction)
-
-## JSON-RPC API Reference
 
 ### trace\_call
 
@@ -124,8 +128,6 @@ Response
   }
 }
 ```
-
-***
 
 ### trace\_callMany
 
@@ -229,8 +231,6 @@ Response
 }
 ```
 
-***
-
 ### trace\_rawTransaction
 
 Traces a call to `eth_sendRawTransaction` without making the call, returning the traces
@@ -286,8 +286,6 @@ Response
   }
 }
 ```
-
-***
 
 ### trace\_replayBlockTransactions
 
@@ -347,8 +345,6 @@ Response
 }
 ```
 
-***
-
 ### trace\_replayTransaction
 
 Replays a transaction, returning the traces.
@@ -402,8 +398,6 @@ Response
   }
 }
 ```
-
-***
 
 ### trace\_block
 
@@ -465,8 +459,6 @@ Response
   ]
 }
 ```
-
-***
 
 ### trace\_filter
 
@@ -539,8 +531,6 @@ Response
 }
 ```
 
-***
-
 ### trace\_get
 
 Returns trace at given position.
@@ -602,8 +592,6 @@ Response
   }
 }
 ```
-
-***
 
 ### trace\_transaction
 
