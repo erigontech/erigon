@@ -78,7 +78,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, err
 		}
 		if block == nil {
-			return nil, fmt.Errorf ("block not found %d", blockNumber)
+			return nil, fmt.Errorf("block not found %d", blockNumber)
 		}
 		var txn types.Transaction
 		for _, transaction := range block.Transactions() {

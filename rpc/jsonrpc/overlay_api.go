@@ -135,7 +135,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	if block == nil {
 		return nil, fmt.Errorf("block not found: %d", blockNum)
 	}
-	
+
 	// -1 is a default value for transaction index.
 	// If it's -1, we will try to replay every single transaction in that block
 	transactionIndex := -1
