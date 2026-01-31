@@ -375,10 +375,15 @@ func (so *stateObject) Code() ([]byte, error) {
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle()))) {
 		so.db.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", so.db.blockNum, so.db.txIndex, so.db.version))
 	}
-	readStart := time.Now()
+	var readStart time.Time
+	if dbg.KVReadLevelledMetrics {
+		readStart = time.Now()
+	}
 	code, err := so.db.stateReader.ReadAccountCode(so.Address())
-	so.db.codeReadDuration += time.Since(readStart)
-	so.db.codeReadCount++
+	if dbg.KVReadLevelledMetrics {
+		so.db.codeReadDuration += time.Since(readStart)
+		so.db.codeReadCount++
+	}
 	so.db.stateReader.SetTrace(false, "")
 
 	if err != nil {
