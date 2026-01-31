@@ -285,7 +285,7 @@ func (api *APIImpl) Config(ctx context.Context, blockTimeOverride *hexutil.Uint6
 		// optional utility arg to aid with testing
 		currentBlockTime = blockTimeOverride.Uint64()
 	} else {
-		h, err := api.headerByRPCNumber(ctx, rpc.LatestBlockNumber, tx)
+		h, err := api.headerByNumber(ctx, rpc.LatestBlockNumber, tx)
 		if err != nil {
 			return nil, err
 		}
@@ -361,7 +361,7 @@ func NewGasPriceOracleBackend(tx kv.TemporalTx, baseApi *BaseAPI) *GasPriceOracl
 }
 
 func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
-	header, err := b.baseApi.headerByRPCNumber(ctx, number, b.tx)
+	header, err := b.baseApi.headerByNumber(ctx, number, b.tx)
 	if err != nil {
 		return nil, err
 	}

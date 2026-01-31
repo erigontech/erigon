@@ -183,6 +183,33 @@ func (api *BaseAPI) chainConfig(ctx context.Context, tx kv.Tx) (*chain.Config, e
 	return cfg, err
 }
 
+func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chain.Config, *types.Block, error) {
+	cc, genesisBlock := api._chainConfig.Load(), api._genesis.Load()
+	if cc != nil && genesisBlock != nil {
+		return cc, genesisBlock, nil
+	}
+
+	genesisBlock, err := api.blockByRPCNumber(ctx, 0, tx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if genesisBlock == nil {
+		return nil, nil, errors.New("genesis block not found in database")
+	}
+	cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+	if err != nil {
+		return nil, nil, err
+	}
+	if cc != nil {
+		api._genesis.Store(genesisBlock)
+		api._chainConfig.Store(cc)
+	}
+	return cc, genesisBlock, nil
+}
+
+func (api *BaseAPI) pendingBlock() *types.Block {
+	return api.filters.LastPendingBlock()
+}
 func (api *BaseAPI) engine() rules.EngineReader {
 	return api._engine
 }
@@ -202,6 +229,15 @@ func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, numb
 	return api.blockWithSenders(ctx, tx, hash, number)
 }
 
+func (api *BaseAPI) blockByRPCNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
+	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, err
+	}
+	return 	api.blockWithSenders(ctx, tx, hash, blockNumber)
+}
+
+
 func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash) (*types.Block, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
@@ -217,24 +253,6 @@ func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash c
 	}
 
 	return api.blockWithSenders(ctx, tx, hash, *number)
-}
-
-func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
-	if api.blocksLRU != nil {
-		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.Header().Number.Uint64(), nil
-		}
-	}
-	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
-	if err != nil {
-		return 0, err
-	}
-
-	if number == nil {
-		return 0, errors.New("header number not found")
-	}
-	return *number, nil
-
 }
 
 func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
@@ -266,46 +284,46 @@ func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.
 	return block, nil
 }
 
-func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chain.Config, *types.Block, error) {
-	cc, genesisBlock := api._chainConfig.Load(), api._genesis.Load()
-	if cc != nil && genesisBlock != nil {
-		return cc, genesisBlock, nil
+func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
+	if api.blocksLRU != nil {
+		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
+			return it.Header().Number.Uint64(), nil
+		}
+	}
+	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
+	if err != nil {
+		return 0, err
 	}
 
-	genesisBlock, err := api.blockByRPCNumber(ctx, 0, tx)
-	if err != nil {
-		return nil, nil, err
+	if number == nil {
+		return 0, errors.New("header number not found")
 	}
-	if genesisBlock == nil {
-		return nil, nil, errors.New("genesis block not found in database")
-	}
-	cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
-	if err != nil {
-		return nil, nil, err
-	}
-	if cc != nil {
-		api._genesis.Store(genesisBlock)
-		api._chainConfig.Store(cc)
-	}
-	return cc, genesisBlock, nil
+	return *number, nil
+
 }
 
-func (api *BaseAPI) pendingBlock() *types.Block {
-	return api.filters.LastPendingBlock()
-}
-
-func (api *BaseAPI) blockByRPCNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
-	n, h, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+// headerByNumberOrHash - intent to read recent headers only, tries from the lru cache before reading from the db
+func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, bool, error) {
+	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-
-	// it's ok to use context.Background(), because in "Remote RPCDaemon" `tx` already contains internal ctx
-	block, err := api.blockWithSenders(ctx, tx, h, n)
-	return block, err
+	if api.blocksLRU != nil {
+		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
+			return it.Header(), false, nil
+		}
+	}
+	
+	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
+	if err != nil {
+		return nil, false, err
+	}
+	// header can be nil
+	return header, isLatest, nil
 }
 
-func (api *BaseAPI) headerByRPCNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Header, error) {
+
+func (api *BaseAPI) headerByNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Header, error) {
 	n, h, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
