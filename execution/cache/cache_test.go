@@ -528,7 +528,7 @@ func TestCodeCache_ImplementsInterface(t *testing.T) {
 // =============================================================================
 
 func TestStateCache_NewStateCache(t *testing.T) {
-	c := NewStateCache(10, 20, 30, 40)
+	c := NewStateCache(10, 20, 30, 40, 40)
 	require.NotNil(t, c)
 
 	// Account, Storage, Code, Commitment should be initialized
@@ -552,7 +552,7 @@ func TestStateCache_NewDefaultStateCache(t *testing.T) {
 }
 
 func TestStateCache_GetPut_Account(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100, 100)
 
 	addr := makeAddr(1)
 	value := makeValue(1)
@@ -570,7 +570,7 @@ func TestStateCache_GetPut_Account(t *testing.T) {
 }
 
 func TestStateCache_GetPut_Storage(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100, 100)
 
 	key := make([]byte, 52) // addr(20) + slot(32)
 	copy(key, makeAddr(1))
@@ -584,7 +584,7 @@ func TestStateCache_GetPut_Storage(t *testing.T) {
 }
 
 func TestStateCache_GetPut_Code(t *testing.T) {
-	c := NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
+	c := NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
 
 	addr := makeAddr(1)
 	code := makeCode(1)
@@ -596,7 +596,7 @@ func TestStateCache_GetPut_Code(t *testing.T) {
 }
 
 func TestStateCache_GetPut_UnsupportedDomain(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100, 100)
 
 	// ReceiptDomain is not supported
 	c.Put(kv.ReceiptDomain, makeAddr(1), makeValue(1))
@@ -606,7 +606,7 @@ func TestStateCache_GetPut_UnsupportedDomain(t *testing.T) {
 }
 
 func TestStateCache_Delete(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100, 100)
 
 	addr := makeAddr(1)
 	c.Put(kv.AccountsDomain, addr, makeValue(1))
@@ -617,14 +617,14 @@ func TestStateCache_Delete(t *testing.T) {
 }
 
 func TestStateCache_Delete_UnsupportedDomain(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100, 100)
 
 	// Should not panic
-	c.Delete(kv.CommitmentDomain, makeAddr(1))
+	c.Delete(kv.ReceiptDomain, makeAddr(1))
 }
 
 func TestStateCache_Clear(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100, 100)
 
 	c.Put(kv.AccountsDomain, makeAddr(1), makeValue(1))
 	c.Put(kv.StorageDomain, makeAddr(2), makeValue(2))
@@ -642,7 +642,7 @@ func TestStateCache_Clear(t *testing.T) {
 }
 
 func TestStateCache_ValidateAndPrepare_AllValid(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100, 100)
 
 	block1 := makeHash(1)
 	block2 := makeHash(2)
@@ -657,7 +657,7 @@ func TestStateCache_ValidateAndPrepare_AllValid(t *testing.T) {
 }
 
 func TestStateCache_ValidateAndPrepare_SomeMismatch(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100, 100)
 
 	block1 := makeHash(1)
 	block2 := makeHash(2)
@@ -673,7 +673,7 @@ func TestStateCache_ValidateAndPrepare_SomeMismatch(t *testing.T) {
 }
 
 func TestStateCache_ClearWithHash(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100, 100)
 
 	c.Put(kv.AccountsDomain, makeAddr(1), makeValue(1))
 	c.Put(kv.StorageDomain, makeAddr(2), makeValue(2))
@@ -687,7 +687,7 @@ func TestStateCache_ClearWithHash(t *testing.T) {
 }
 
 func TestStateCache_GetCache_OutOfBounds(t *testing.T) {
-	c := NewStateCache(100, 100, 100, 100)
+	c := NewStateCache(100, 100, 100, 100, 100)
 
 	// Domain >= DomainLen should return nil
 	cache := c.GetCache(kv.DomainLen)
@@ -771,7 +771,7 @@ func TestCodeCache_ConcurrentAccess(t *testing.T) {
 // =============================================================================
 
 func TestStateCache_DomainIsolation(t *testing.T) {
-	c := NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
+	c := NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB)
 
 	addr := makeAddr(1)
 	accountData := []byte("account")

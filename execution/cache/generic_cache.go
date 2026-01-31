@@ -31,6 +31,8 @@ const (
 	DefaultAccountCacheBytes = 256 * datasize.MB
 	// DefaultStorageCacheBytes is the byte limit for storage cache (512 MB)
 	DefaultStorageCacheBytes = 512 * datasize.MB
+	// DefaultCommitmentCacheBytes is the byte limit for commitment cache (256 MB)
+	DefaultCommitmentCacheBytes = 128 * datasize.MB
 )
 
 // GenericCache is a bounded concurrent cache for key-value data.

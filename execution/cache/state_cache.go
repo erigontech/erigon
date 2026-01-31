@@ -37,12 +37,12 @@ type StateCache struct {
 }
 
 // NewStateCache creates a new StateCache with the specified byte capacities.
-func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.ByteSize) *StateCache {
+func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes, commitmentBytes datasize.ByteSize) *StateCache {
 	sc := &StateCache{}
 	sc.caches[kv.AccountsDomain] = NewBytesCache(accountBytes)
 	sc.caches[kv.StorageDomain] = NewBytesCache(storageBytes)
 	sc.caches[kv.CodeDomain] = NewCodeCache(codeBytes, addrBytes)
-	sc.caches[kv.CommitmentDomain] = NewBytesCache(storageBytes)
+	sc.caches[kv.CommitmentDomain] = NewBytesCache(commitmentBytes)
 	return sc
 }
 
@@ -54,6 +54,7 @@ func NewDefaultStateCache() *StateCache {
 		DefaultStorageCacheBytes,
 		DefaultCodeCacheBytes,
 		DefaultAddrCacheBytes,
+		DefaultCommitmentCacheBytes,
 	)
 }
 
