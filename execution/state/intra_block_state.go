@@ -303,6 +303,9 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 // the underlying state trie to avoid reloading data for the next operations.
 func (sdb *IntraBlockState) Reset() {
 	sdb.nilAccounts = map[accounts.Address]struct{}{}
+	for _, so := range sdb.stateObjects {
+		so.release()
+	}
 	sdb.stateObjects = map[accounts.Address]*stateObject{}
 	sdb.stateObjectsDirty = map[accounts.Address]struct{}{}
 	for i := range sdb.logs {
@@ -327,9 +330,13 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.dep = UnknownDep
 }
 
-// Release returns pooled resources (like journal) back to their pools.
+// Release returns pooled resources (like journal, stateObjects) back to their pools.
 // Call this when the IntraBlockState is no longer needed.
 func (sdb *IntraBlockState) Release() {
+	for _, so := range sdb.stateObjects {
+		so.release()
+	}
+	sdb.stateObjects = nil
 	if sdb.journal != nil {
 		sdb.journal.release()
 		sdb.journal = nil

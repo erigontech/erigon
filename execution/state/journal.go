@@ -194,6 +194,9 @@ type (
 //}
 
 func (ch createObjectChange) revert(s *IntraBlockState) error {
+	if so, ok := s.stateObjects[ch.account]; ok {
+		so.release()
+	}
 	delete(s.stateObjects, ch.account)
 	delete(s.stateObjectsDirty, ch.account)
 	return nil
@@ -204,6 +207,9 @@ func (ch createObjectChange) dirtied() (accounts.Address, bool) {
 }
 
 func (ch resetObjectChange) revert(s *IntraBlockState) error {
+	if current, ok := s.stateObjects[ch.account]; ok && current != ch.prev {
+		current.release()
+	}
 	s.setStateObject(ch.account, ch.prev)
 	return nil
 }

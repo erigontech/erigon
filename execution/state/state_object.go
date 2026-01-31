@@ -26,6 +26,7 @@ import (
 	"maps"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -38,6 +39,16 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+var stateObjectPool = sync.Pool{
+	New: func() any {
+		return &stateObject{
+			originStorage:      make(Storage),
+			blockOriginStorage: make(Storage),
+			dirtyStorage:       make(Storage),
+		}
+	},
+}
 
 type Code []byte
 
@@ -109,15 +120,11 @@ func (so *stateObject) deepCopy(db *IntraBlockState) *stateObject {
 	return stateObject
 }
 
-// newObject creates a state object.
+// newObject creates a state object from the pool.
 func newObject(db *IntraBlockState, address accounts.Address, data, original *accounts.Account) *stateObject {
-	var so = stateObject{
-		db:                 db,
-		address:            address,
-		originStorage:      make(Storage),
-		blockOriginStorage: make(Storage),
-		dirtyStorage:       make(Storage),
-	}
+	so := stateObjectPool.Get().(*stateObject)
+	so.db = db
+	so.address = address
 	so.data.Copy(data)
 	if !so.data.Initialised {
 		so.data.Balance.SetUint64(0)
@@ -130,7 +137,26 @@ func newObject(db *IntraBlockState, address accounts.Address, data, original *ac
 		so.data.Root = empty.RootHash
 	}
 	so.original.Copy(original)
-	return &so
+	return so
+}
+
+// release returns the stateObject to the pool after resetting it.
+func (so *stateObject) release() {
+	so.db = nil
+	so.address = accounts.NilAddress
+	so.data = accounts.Account{}
+	so.original = accounts.Account{}
+	so.code = nil
+	clear(so.originStorage)
+	clear(so.blockOriginStorage)
+	clear(so.dirtyStorage)
+	so.fakeStorage = nil
+	so.dirtyCode = false
+	so.selfdestructed = false
+	so.deleted = false
+	so.newlyCreated = false
+	so.createdContract = false
+	stateObjectPool.Put(so)
 }
 
 // EncodeRLP implements rlp.Encoder.
