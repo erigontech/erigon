@@ -52,12 +52,18 @@ const (
 //
 // Capacity is byte-based. Once full, new puts are no-ops but
 // modifications to existing entries and deletions are still allowed.
+
+type versionedAddressID struct {
+	addrID uint64
+	step   kv.Step
+}
+
 type CodeCache struct {
-	addrToHash *maphash.Map[uint64] // addr → maphash(code), concurrent
-	addrSize   atomic.Int64         // current size in bytes
-	hashToCode *maphash.Map[[]byte] // maphash(code) → code, concurrent
-	codeSize   atomic.Int64         // current size in bytes (code only, hash is fixed 8 bytes)
-	blockHash  common.Hash          // hash of the last block processed
+	addrToHash *maphash.Map[versionedAddressID] // addr → maphash(code), concurrent
+	addrSize   atomic.Int64                     // current size in bytes
+	hashToCode *maphash.Map[[]byte]             // maphash(code) → code, concurrent
+	codeSize   atomic.Int64                     // current size in bytes (code only, hash is fixed 8 bytes)
+	blockHash  common.Hash                      // hash of the last block processed
 	mu         sync.RWMutex
 
 	// Stats counters (atomic for concurrent access)
@@ -73,7 +79,7 @@ type CodeCache struct {
 // NewCodeCache creates a new CodeCache with the specified byte capacities.
 func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeCache {
 	return &CodeCache{
-		addrToHash:    maphash.NewMap[uint64](),
+		addrToHash:    maphash.NewMap[versionedAddressID](),
 		hashToCode:    maphash.NewMap[[]byte](),
 		addrCapacityB: addrCapacityBytes,
 		codeCapacityB: codeCapacityBytes,
@@ -90,28 +96,28 @@ func NewDefaultCodeCache() *CodeCache {
 // Code is immutable so step tracking is not needed.
 func (c *CodeCache) Get(addr []byte) ([]byte, kv.Step, bool) {
 	// First, look up the code hash for this address
-	codeHash, ok := c.addrToHash.Get(addr)
-	if !ok || codeHash == 0 {
+	vID, ok := c.addrToHash.Get(addr)
+	if !ok || vID.addrID == 0 {
 		c.addrMisses.Add(1)
 		return nil, 0, false
 	}
 	c.addrHits.Add(1)
 
 	// Then, look up the code by hash
-	code, ok := c.hashToCode.Get(uint64AsBytes(&codeHash))
+	code, ok := c.hashToCode.Get(uint64AsBytes(&vID.addrID))
 	if !ok || len(code) == 0 {
 		c.codeMisses.Add(1)
 		return nil, 0, false
 	}
 	c.codeHits.Add(1)
-	return code, 0, true
+	return code, vID.step, true
 }
 
 // Put stores contract code for the given address, implementing the Cache interface.
 // Uses fast maphash to compute the code identifier.
 // If caches are at capacity, new entries are no-ops but updates are allowed.
 // The step parameter is ignored since code is immutable.
-func (c *CodeCache) Put(addr []byte, code []byte, _ kv.Step) {
+func (c *CodeCache) Put(addr []byte, code []byte, step kv.Step) {
 	if len(code) == 0 {
 		return
 	}
@@ -121,9 +127,9 @@ func (c *CodeCache) Put(addr []byte, code []byte, _ kv.Step) {
 
 	// Check if addr already exists - updates are always allowed
 	if _, exists := c.addrToHash.Get(addr); exists {
-		c.addrToHash.Set(addr, codeHash)
+		c.addrToHash.Set(addr, versionedAddressID{addrID: codeHash, step: step})
 	} else if c.addrSize.Load()+addrEntrySize <= int64(c.addrCapacityB) {
-		c.addrToHash.Set(addr, codeHash)
+		c.addrToHash.Set(addr, versionedAddressID{addrID: codeHash, step: step})
 		c.addrSize.Add(addrEntrySize)
 	}
 
