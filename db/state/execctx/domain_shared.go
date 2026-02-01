@@ -363,7 +363,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 
 	if okStep && step != cacheStep {
-		fmt.Println("differing step not in mem", okStep, step, cacheStep, len(cacheV))
+		fmt.Println("differing step not in mem", okStep, step, cacheStep, len(cacheV), domain)
 	}
 	// Populate state cache on successful storage read
 	if !okStep && sd.stateCache != nil && len(v) > 0 && step > 0 {
