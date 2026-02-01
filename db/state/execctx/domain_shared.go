@@ -334,7 +334,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	// Only return cached value if its step is within the allowed range
 	if sd.stateCache != nil {
 		if v, step, ok := sd.stateCache.Get(domain, k); ok && step <= maxStep {
-			if step <= tx.StepsInFiles() {
+			if step <= tx.StepsInFiles(domain) {
 				step = 0 // just assume it is in files...
 			}
 			return v, step, nil
