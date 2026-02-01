@@ -1876,7 +1876,7 @@ func (hph *HexPatriciaHashed) createCellGetter(b []byte, updateKey []byte, row i
 			fmt.Printf("  %x: computeCellHash(%d, %x, depth=%d)=[%x]\n", nibble, row, nibble, depth, cellHash)
 		}
 
-		if hashBefore != nil && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
+		if dbg.KVReadLevelledMetrics && hashBefore != nil && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
 			counters := hph.hadToLoadL[hph.depthsToTxNum[depth]]
 			if !bytes.Equal(hashBefore, cell.stateHash[:cell.stateHashLen]) {
 				if cell.accountAddrLen > 0 {
@@ -2074,7 +2074,10 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				cell.stateHashLen = 0
 			}
 			/* memoization of state hashes*/
-			counters := hph.hadToLoadL[hph.depthsToTxNum[depth]]
+			var counters skipStat
+			if dbg.KVReadLevelledMetrics {
+				counters = hph.hadToLoadL[hph.depthsToTxNum[depth]]
+			}
 			if cell.stateHashLen > 0 && (hph.touchMap[row]&hph.afterMap[row]&uint16(1<<nibble) > 0 || cell.stateHashLen != length.Hash) {
 				// drop state hash if updated or hashLen < 32 (corner case, may even not encode such leaf hashes)
 				if hph.trace {
@@ -2115,7 +2118,9 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 				}
 				// computeCellHash can reset hash as well so have to check if node has been skipped  right after computeCellHash.
 			}
-			hph.hadToLoadL[hph.depthsToTxNum[depth]] = counters
+			if dbg.KVReadLevelledMetrics {
+				hph.hadToLoadL[hph.depthsToTxNum[depth]] = counters
+			}
 			/* end of memoization */
 
 			totalBranchLen += hph.computeCellHashLen(cell, depth)
@@ -2655,8 +2660,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		hph.branchEncoder.ClearDeferred()
 	}
 
-	hph.metrics.CollectFileDepthStats(hph.hadToLoadL)
 	if dbg.KVReadLevelledMetrics {
+		hph.metrics.CollectFileDepthStats(hph.hadToLoadL)
 		log.Debug("commitment finished, counters updated (no reset)",
 			//"hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),
 			//"hadToReset", common.PrettyCounter(hadToReset.Load()),
