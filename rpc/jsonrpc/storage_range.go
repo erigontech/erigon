@@ -17,7 +17,8 @@
 package jsonrpc
 
 import (
-	"github.com/holiman/uint256"
+	"bytes"
+	"sort"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
@@ -39,10 +40,17 @@ type StorageEntry struct {
 	Value common.Hash  `json:"value"`
 }
 
+type tempEntry struct {
+	SecKey common.Hash // Keccak256 of key
+	Key    common.Hash // clear key
+	Value  common.Hash
+}
+
 func storageRangeAt(ttx kv.TemporalTx, contractAddress common.Address, start []byte, txNum uint64, maxResult int) (StorageRangeResult, error) {
 	result := StorageRangeResult{Storage: storageMap{}}
 
-	fromKey := append(common.Copy(contractAddress.Bytes()), start...)
+	// We use only the contract address to fetch ALL the storage
+	fromKey := common.Copy(contractAddress.Bytes())
 	toKey, _ := kv.NextSubtree(contractAddress.Bytes())
 
 	r, err := ttx.RangeAsOf(kv.StorageDomain, fromKey, toKey, txNum, order.Asc, kv.Unlim) //no limit because need skip empty records
@@ -50,7 +58,10 @@ func storageRangeAt(ttx kv.TemporalTx, contractAddress common.Address, start []b
 		return StorageRangeResult{}, err
 	}
 	defer r.Close()
-	for len(result.Storage) < maxResult && r.HasNext() {
+
+	var entries []tempEntry
+
+	for r.HasNext() {
 		k, v, err := r.Next()
 		if err != nil {
 			return StorageRangeResult{}, err
@@ -58,27 +69,48 @@ func storageRangeAt(ttx kv.TemporalTx, contractAddress common.Address, start []b
 		if len(v) == 0 {
 			continue // Skip deleted entries
 		}
+
 		key := common.BytesToHash(k[20:])
-		seckey, err := common.HashData(k[20:])
+		secKey, err := common.HashData(k[20:])
 		if err != nil {
 			return StorageRangeResult{}, err
 		}
-		var value uint256.Int
-		value.SetBytes(v)
-		result.Storage[seckey] = StorageEntry{Key: &key, Value: value.Bytes32()}
+
+		entries = append(entries, tempEntry{
+			SecKey: secKey,
+			Key:    key,
+			Value:  common.BytesToHash(v),
+		})
 	}
 
-	for r.HasNext() { // not `if` because need skip empty vals
-		k, v, err := r.Next()
-		if err != nil {
-			return StorageRangeResult{}, err
-		}
-		if len(v) == 0 {
+	// sorted the list according secKey
+	sort.Slice(entries, func(i, j int) bool {
+		return bytes.Compare(entries[i].SecKey.Bytes(), entries[j].SecKey.Bytes()) < 0
+	})
+
+	keyStartHash := common.BytesToHash(start)
+
+	count := 0
+	for _, e := range entries {
+
+		// fetch SecKey >= keyStart requested by user
+		if bytes.Compare(e.SecKey.Bytes(), keyStartHash.Bytes()) < 0 {
 			continue
 		}
-		key := common.BytesToHash(k[20:])
-		result.NextKey = &key
-		break
+
+		if count < maxResult {
+			k := e.Key
+			result.Storage[e.SecKey] = StorageEntry{
+				Key:   &k,
+				Value: e.Value,
+			}
+			count++
+		} else {
+			// get next Key
+			next := e.SecKey
+			result.NextKey = &next
+			break
+		}
 	}
 	return result, nil
 }
