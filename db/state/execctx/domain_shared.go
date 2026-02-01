@@ -318,6 +318,16 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 	maxStep := kv.Step(math.MaxUint64)
 
+	var (
+		cacheV    []byte
+		cacheStep kv.Step
+		cacheOk   bool
+	)
+
+	if sd.stateCache != nil {
+		cacheV, cacheStep, cacheOk = sd.stateCache.Get(domain, k)
+	}
+
 	// Check mem batch first - it has the current transaction's uncommitted state
 	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
 		if dbg.KVReadLevelledMetrics {
@@ -333,12 +343,6 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
-	if sd.stateCache != nil {
-		if v, step, ok := sd.stateCache.Get(domain, k); ok && step <= maxStep {
-			return v, step, nil
-		}
-	}
-
 	type MeteredGetter interface {
 		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
 	}
@@ -350,6 +354,10 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
+	}
+
+	if cacheOk && step != cacheStep {
+		fmt.Println("mismatch found", domain, common.Bytes2Hex(k), step, cacheStep)
 	}
 
 	// Populate state cache on successful storage read
