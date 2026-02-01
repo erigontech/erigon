@@ -1893,9 +1893,11 @@ func (hph *HexPatriciaHashed) createCellGetter(b []byte, updateKey []byte, row i
 				}
 				if cell.storageAddrLen > 0 && (!loadedBefore.storage() && !cell.loaded.storage()) {
 					counters.storSkipped++
+
 				}
+
+				hph.hadToLoadL[hph.depthsToTxNum[depth]] = counters
 			}
-			hph.hadToLoadL[hph.depthsToTxNum[depth]] = counters
 		}
 		if _, err := hph.keccak2.Write(cellHash); err != nil {
 			return nil, err
@@ -1974,6 +1976,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 	}
 
 	depth := hph.depths[row]
+
 	updateKey := HexNibblesToCompactBytes(hph.currentKey[:updateKeyLen])
 	defer func() { hph.depthsToTxNum[depth] = 0 }()
 
@@ -2659,6 +2662,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		}
 		hph.branchEncoder.ClearDeferred()
 	}
+
 
 	if dbg.KVReadLevelledMetrics {
 		hph.metrics.CollectFileDepthStats(hph.hadToLoadL)
