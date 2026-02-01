@@ -327,6 +327,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	// Only return cached value if its step is within the allowed range
 	if sd.stateCache != nil {
 		_, cacheStep, okStep = sd.stateCache.Get(domain, k)
+		fmt.Println(okStep, len(v))
 	}
 	// Check mem batch first - it has the current transaction's uncommitted state
 	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
