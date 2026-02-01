@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -311,12 +312,17 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	if tx == nil {
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
 	}
-	start := time.Now()
+	var start time.Time
+	if dbg.KVReadLevelledMetrics {
+		start = time.Now()
+	}
 	maxStep := kv.Step(math.MaxUint64)
 
 	// Check mem batch first - it has the current transaction's uncommitted state
 	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
-		sd.metrics.UpdateCacheReads(domain, start)
+		if dbg.KVReadLevelledMetrics {
+			sd.metrics.UpdateCacheReads(domain, start)
+		}
 		return v, step, nil
 	} else {
 		if step > 0 {
