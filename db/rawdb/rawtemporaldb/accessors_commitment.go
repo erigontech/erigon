@@ -4,13 +4,13 @@ import (
 	"math"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/diffsetdb"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 func CanUnwindToBlockNum(tx kv.TemporalTx) (uint64, error) {
-	minUnwindale, err := changeset.ReadLowestUnwindableBlock(tx)
+	minUnwindale, err := diffsetdb.Open(tx.Debug().Dirs()).ReadLowestUnwindableBlock()
 	if err != nil {
 		return 0, err
 	}

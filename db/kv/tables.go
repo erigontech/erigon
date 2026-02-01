@@ -31,8 +31,6 @@ import (
 // 6.1 - Canonical/NonCanonical/BadBlock transitions now stored in same table: kv.EthTx. Add kv.BadBlockNumber table
 var DBSchemaVersion = typesproto.VersionReply{Major: 7, Minor: 0, Patch: 0}
 
-const ChangeSets3 = "ChangeSets3"
-
 const (
 
 	//HashedAccounts
@@ -310,7 +308,6 @@ var ChaindataTables = []string{
 	DatabaseInfo,
 	SyncStageProgress,
 	PlainState,
-	ChangeSets3,
 	Senders,
 	HeadBlockKey,
 	HeadHeaderKey,

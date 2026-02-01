@@ -19,7 +19,6 @@ package changeset
 import (
 	"encoding/binary"
 	"fmt"
-	"math"
 	"strings"
 	"sync"
 	"time"
@@ -29,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -259,131 +257,15 @@ func deserializeKeys(in []byte) [kv.DomainLen][]kv.DomainEntryDiff {
 	return ret
 }
 
-const DiffChunkKeyLen = 48
-const DiffChunkLen = 4*1024 - 32
-
-type threadSafeBuf struct {
-	b []byte
-	sync.Mutex
+func SerializeStateChangeSet(diffSet *StateChangeSet, blockNumber uint64) []byte {
+	if diffSet == nil {
+		return nil
+	}
+	return diffSet.serializeKeys(nil, blockNumber)
 }
 
-var writeDiffsetBuf = &threadSafeBuf{}
-
-func WriteDiffSet(tx kv.RwTx, blockNumber uint64, blockHash common.Hash, diffSet *StateChangeSet) error {
-	writeDiffsetBuf.Lock()
-	defer writeDiffsetBuf.Unlock()
-	if dbg.TraceUnwinds {
-		var diffStats strings.Builder
-		if diffSet != nil {
-			first := true
-			for d, diff := range &diffSet.Diffs {
-				if first {
-					diffStats.WriteString(" ")
-					first = false
-				} else {
-					diffStats.WriteString(", ")
-				}
-				diffStats.WriteString(fmt.Sprintf("%s: %d", kv.Domain(d), diff.Len()))
-			}
-		}
-		fmt.Printf("diffset (Block:%d) %x:%s %s\n", blockNumber, blockHash, diffStats.String(), dbg.Stack())
-	}
-	writeDiffsetBuf.b = diffSet.serializeKeys(writeDiffsetBuf.b[:0], blockNumber)
-	keys := writeDiffsetBuf.b
-
-	chunkCount := (len(keys) + DiffChunkLen - 1) / DiffChunkLen
-	// Data Format
-	// dbutils.BlockBodyKey(blockNumber, blockHash) -> chunkCount
-	// dbutils.BlockBodyKey(blockNumber, blockHash) + index -> chunk
-	// Write the chunk count
-	if err := tx.Put(kv.ChangeSets3, dbutils.BlockBodyKey(blockNumber, blockHash), dbutils.EncodeBlockNumber(uint64(chunkCount))); err != nil {
-		return err
-	}
-
-	key := make([]byte, DiffChunkKeyLen)
-	binary.BigEndian.PutUint64(key, blockNumber)
-	copy(key[8:], blockHash[:])
-
-	for i := 0; i < chunkCount; i++ {
-		start := i * DiffChunkLen
-		end := min((i+1)*DiffChunkLen, len(keys))
-		binary.BigEndian.PutUint64(key[40:], uint64(i))
-
-		if err := tx.Put(kv.ChangeSets3, key, keys[start:end]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error) {
-	// Read the diffSet from the database
-	chunkCountBytes, err := tx.GetOne(kv.ChangeSets3, dbutils.BlockBodyKey(blockNumber, blockHash))
-	if err != nil {
-		return [kv.DomainLen][]kv.DomainEntryDiff{}, false, err
-	}
-	if len(chunkCountBytes) == 0 {
-		return [kv.DomainLen][]kv.DomainEntryDiff{}, false, nil
-	}
-	chunkCount, err := dbutils.DecodeBlockNumber(chunkCountBytes)
-	if err != nil {
-		return [kv.DomainLen][]kv.DomainEntryDiff{}, false, err
-	}
-
-	key := make([]byte, 48)
-	val := make([]byte, 0, DiffChunkLen*chunkCount)
-	for i := uint64(0); i < chunkCount; i++ {
-		binary.BigEndian.PutUint64(key, blockNumber)
-		copy(key[8:], blockHash[:])
-		binary.BigEndian.PutUint64(key[40:], i)
-		chunk, err := tx.GetOne(kv.ChangeSets3, key)
-		if err != nil {
-			return [kv.DomainLen][]kv.DomainEntryDiff{}, false, err
-		}
-		if len(chunk) == 0 {
-			return [kv.DomainLen][]kv.DomainEntryDiff{}, false, nil
-		}
-		val = append(val, chunk...)
-	}
-
-	return deserializeKeys(val), true, nil
-}
-func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
-	//TODO: move this function somewhere from `commitment`/`state` pkg
-	changesetsCursor, err := tx.Cursor(kv.ChangeSets3)
-	if err != nil {
-		return 0, err
-	}
-	defer changesetsCursor.Close()
-
-	/* Rationale */
-	/*
-		We need to find the first block number in the changesets table that has a valid block number, however we need to avoid gaps.
-		In the table there are 2 kinds of keys:
-			1. BlockBodyKey(blockNumber, blockHash) -> chunkCount
-			2. BlockBodyKey(blockNumber, blockHash) + index -> chunk
-		Since key 1 is always lexigographically smaller than key 2, then if we have key 1, we also must have all key 2s for that block number without gaps in chunks.
-		Therefore, we can iterate over the keys and find the first key that conform to key 1 (aka len(key) == 40).
-	*/
-	var first []byte
-	for first, _, err = changesetsCursor.First(); first != nil; first, _, err = changesetsCursor.Next() {
-		if err != nil {
-			return 0, err
-		}
-		if len(first) == 40 {
-			break
-		}
-	}
-	if len(first) < 8 {
-		return math.MaxUint64, nil
-	}
-
-	blockNumber, err := dbutils.DecodeBlockNumber(first[:8])
-	if err != nil {
-		return 0, err
-	}
-	return blockNumber, nil
-
+func DeserializeStateChangeSet(in []byte) [kv.DomainLen][]kv.DomainEntryDiff {
+	return deserializeKeys(in)
 }
 func toStringZeroCopy(v []byte) string {
 	if len(v) == 0 {
@@ -391,8 +273,6 @@ func toStringZeroCopy(v []byte) string {
 	}
 	return unsafe.String(&v[0], len(v))
 }
-
-func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
 
 type DomainIOMetrics struct {
 	CacheReadCount    int64

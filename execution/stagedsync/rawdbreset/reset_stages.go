@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/diffsetdb"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
@@ -126,11 +127,14 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
 	cleanupList = append(cleanupList, db.Debug().DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain)...)
 	cleanupList = append(cleanupList, db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx)...)
 
-	return db.Update(ctx, func(tx kv.RwTx) error {
+	return db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 		if err := clearStageProgress(tx, stages.Execution); err != nil {
 			return err
 		}
 
+		if err := diffsetdb.Open(tx.Debug().Dirs()).Clear(); err != nil {
+			return fmt.Errorf("clearing diffset files: %w", err)
+		}
 		if err := backup.ClearTables(ctx, tx, cleanupList...); err != nil {
 			return fmt.Errorf("clearing exec state tables: %w", err)
 		}
@@ -174,7 +178,6 @@ var stateBuckets = []string{
 }
 var stateHistoryBuckets = []string{
 	kv.TblPruningProgress,
-	kv.ChangeSets3,
 }
 
 func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {

@@ -17,43 +17,14 @@
 package changeset_test
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/state/changeset"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
-
-func TestNoOverflowPages(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(t, dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
-	t.Cleanup(db.Close)
-
-	ctx := context.Background()
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	k, v := make([]byte, changeset.DiffChunkKeyLen), make([]byte, changeset.DiffChunkLen)
-	k[0] = 0
-	_ = tx.Put(kv.ChangeSets3, k, v)
-	k[0] = 1
-	_ = tx.Put(kv.ChangeSets3, k, v)
-	st, err := tx.(*mdbx.MdbxTx).BucketStat(kv.ChangeSets3)
-	require.NoError(t, err)
-
-	// no ofverflow pages: no problems with FreeList maintainance costs
-	require.Equal(t, 0, int(st.OverflowPages))
-	require.Equal(t, 1, int(st.LeafPages))
-	require.Equal(t, 2, int(st.Entries))
-}
 
 func TestSerializeDeserializeDiff(t *testing.T) {
 	t.Parallel()

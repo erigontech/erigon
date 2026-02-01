@@ -1,0 +1,245 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package diffsetdb
+
+import (
+	"context"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"math"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/changeset"
+)
+
+const diffsetExt = ".diffset"
+
+var diffsetDBByDir sync.Map
+
+// DiffsetDatabase stores per-block diffsets as files in the datadir.
+type DiffsetDatabase struct {
+	dir string
+	mu  sync.RWMutex
+}
+
+func Open(dirs datadir.Dirs) *DiffsetDatabase {
+	if dirs.DataDir == "" {
+		return &DiffsetDatabase{}
+	}
+	key := filepath.Clean(dirs.DataDir)
+	if cached, ok := diffsetDBByDir.Load(key); ok {
+		return cached.(*DiffsetDatabase)
+	}
+	db := &DiffsetDatabase{dir: dirs.Diffsets}
+	actual, _ := diffsetDBByDir.LoadOrStore(key, db)
+	return actual.(*DiffsetDatabase)
+}
+
+func (db *DiffsetDatabase) Dir() string {
+	return db.dir
+}
+
+func (db *DiffsetDatabase) WriteDiffSet(blockNumber uint64, blockHash common.Hash, diffSet *changeset.StateChangeSet) error {
+	if diffSet == nil {
+		return errors.New("diffset is nil")
+	}
+	if err := db.ensureDir(); err != nil {
+		return err
+	}
+	if dbg.TraceUnwinds {
+		var diffStats strings.Builder
+		first := true
+		for d, diff := range &diffSet.Diffs {
+			if first {
+				diffStats.WriteString(" ")
+				first = false
+			} else {
+				diffStats.WriteString(", ")
+			}
+			diffStats.WriteString(fmt.Sprintf("%s: %d", kv.Domain(d), diff.Len()))
+		}
+		fmt.Printf("diffset (Block:%d) %x:%s %s\n", blockNumber, blockHash, diffStats.String(), dbg.Stack())
+	}
+
+	data := changeset.SerializeStateChangeSet(diffSet, blockNumber)
+	path := db.diffsetPath(blockNumber, blockHash)
+
+	errCh := make(chan error, 1)
+	db.mu.Lock()
+	go func() {
+		defer db.mu.Unlock()
+		errCh <- dir.WriteFileWithFsync(path, data, 0o644)
+	}()
+	return <-errCh
+}
+
+func (db *DiffsetDatabase) ReadDiffSet(blockNumber uint64, blockHash common.Hash) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error) {
+	if db.dir == "" {
+		return [kv.DomainLen][]kv.DomainEntryDiff{}, false, errors.New("diffset database requires datadir")
+	}
+	path := db.diffsetPath(blockNumber, blockHash)
+	db.mu.RLock()
+	data, err := os.ReadFile(path)
+	db.mu.RUnlock()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return [kv.DomainLen][]kv.DomainEntryDiff{}, false, nil
+		}
+		return [kv.DomainLen][]kv.DomainEntryDiff{}, false, err
+	}
+	if len(data) == 0 {
+		return [kv.DomainLen][]kv.DomainEntryDiff{}, false, nil
+	}
+	return changeset.DeserializeStateChangeSet(data), true, nil
+}
+
+func (db *DiffsetDatabase) ReadLowestUnwindableBlock() (uint64, error) {
+	if db.dir == "" {
+		return math.MaxUint64, errors.New("diffset database requires datadir")
+	}
+	db.mu.RLock()
+	entries, err := os.ReadDir(db.dir)
+	db.mu.RUnlock()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return math.MaxUint64, nil
+		}
+		return 0, err
+	}
+	minBlock := uint64(math.MaxUint64)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		blockNum, _, ok := parseFileName(entry.Name())
+		if !ok {
+			continue
+		}
+		if blockNum < minBlock {
+			minBlock = blockNum
+		}
+	}
+	return minBlock, nil
+}
+
+func (db *DiffsetDatabase) PruneBefore(ctx context.Context, cutoff uint64, limit int, timeout time.Duration) (int, error) {
+	if db.dir == "" {
+		return 0, errors.New("diffset database requires datadir")
+	}
+	start := time.Now()
+	removed := 0
+	deadline := time.Time{}
+	if timeout > 0 {
+		deadline = start.Add(timeout)
+	}
+
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	entries, err := os.ReadDir(db.dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	for _, entry := range entries {
+		if limit >= 0 && removed >= limit {
+			break
+		}
+		if !deadline.IsZero() && time.Now().After(deadline) {
+			break
+		}
+		if ctx != nil {
+			select {
+			case <-ctx.Done():
+				return removed, ctx.Err()
+			default:
+			}
+		}
+		if entry.IsDir() {
+			continue
+		}
+		blockNum, _, ok := parseFileName(entry.Name())
+		if !ok || blockNum >= cutoff {
+			continue
+		}
+		if err := os.Remove(filepath.Join(db.dir, entry.Name())); err != nil && !os.IsNotExist(err) {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, nil
+}
+
+func (db *DiffsetDatabase) Clear() error {
+	if db.dir == "" {
+		return errors.New("diffset database requires datadir")
+	}
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	return os.RemoveAll(db.dir)
+}
+
+func (db *DiffsetDatabase) ensureDir() error {
+	if db.dir == "" {
+		return errors.New("diffset database requires datadir")
+	}
+	return os.MkdirAll(db.dir, dir.DirPerm)
+}
+
+func (db *DiffsetDatabase) diffsetPath(blockNumber uint64, blockHash common.Hash) string {
+	return filepath.Join(db.dir, diffsetFileName(blockNumber, blockHash))
+}
+
+func diffsetFileName(blockNumber uint64, blockHash common.Hash) string {
+	return fmt.Sprintf("%d+%x%s", blockNumber, blockHash[:], diffsetExt)
+}
+
+func parseFileName(name string) (uint64, common.Hash, bool) {
+	if !strings.HasSuffix(name, diffsetExt) {
+		return 0, common.Hash{}, false
+	}
+	trimmed := strings.TrimSuffix(name, diffsetExt)
+	parts := strings.SplitN(trimmed, "+", 2)
+	if len(parts) != 2 {
+		return 0, common.Hash{}, false
+	}
+	blockNum, err := strconv.ParseUint(parts[0], 10, 64)
+	if err != nil {
+		return 0, common.Hash{}, false
+	}
+	decoded, err := hex.DecodeString(parts[1])
+	if err != nil || len(decoded) != length.Hash {
+		return 0, common.Hash{}, false
+	}
+	var hash common.Hash
+	copy(hash[:], decoded)
+	return blockNum, hash, true
+}

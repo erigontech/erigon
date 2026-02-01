@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/diffsetdb"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -453,15 +454,11 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 			pruneTimeout = time.Hour
 		}
 		pruneChangeSetsStartTime := time.Now()
-		if err := rawdb.PruneTable(
-			tx,
-			kv.ChangeSets3,
-			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
+		if _, err := diffsetdb.Open(cfg.dirs).PruneBefore(
 			ctx,
+			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
 			pruneDiffsLimitOnChainTip,
 			pruneTimeout,
-			logger,
-			s.LogPrefix(),
 		); err != nil {
 			return err
 		}
