@@ -361,7 +361,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 
 	// Populate state cache on successful storage read
-	if sd.stateCache != nil && len(v) > 0 && step > 0 {
+	if sd.stateCache != nil {
 		sd.stateCache.Put(domain, k, v, step)
 	}
 
