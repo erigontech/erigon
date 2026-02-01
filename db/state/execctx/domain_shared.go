@@ -319,14 +319,14 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	maxStep := kv.Step(math.MaxUint64)
 
 	var (
-		//cacheV    []byte
+		cacheV    []byte
 		cacheStep kv.Step
 		okStep    bool
 	)
 	// Check state cache before hitting storage
 	// Only return cached value if its step is within the allowed range
 	if sd.stateCache != nil {
-		_, cacheStep, okStep = sd.stateCache.Get(domain, k)
+		cacheV, cacheStep, okStep = sd.stateCache.Get(domain, k)
 	}
 	// Check mem batch first - it has the current transaction's uncommitted state
 	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
@@ -363,7 +363,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 
 	if okStep && step != cacheStep {
-		fmt.Println("differing step not in mem", step, cacheStep)
+		fmt.Println("differing step not in mem", okStep, step, cacheStep, len(cacheV))
 	}
 	// Populate state cache on successful storage read
 	if !okStep && sd.stateCache != nil && len(v) > 0 {
