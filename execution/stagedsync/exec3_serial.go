@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"time"
 
@@ -38,14 +39,14 @@ type serialExecutor struct {
 
 func warmTxsHashes(txs types.Transactions) {
 	n := len(txs)
-	const minTxsForParallelHashing = 100
+	const minTxsForParallelHashing = 4
 	if n < minTxsForParallelHashing {
 		for _, tx := range txs {
 			tx.Hash()
 		}
 		return
 	}
-	workers := min(4, n)
+	workers := min(runtime.NumCPU(), n)
 	var wg sync.WaitGroup
 	wg.Add(workers)
 	chunkSize := (n + workers - 1) / workers
