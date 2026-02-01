@@ -44,8 +44,8 @@ var diffsetDBByDir sync.Map
 
 // DiffsetDatabase stores per-block diffsets as files in the datadir.
 type DiffsetDatabase struct {
-	dir string
-	mu  sync.RWMutex
+	dir string       // absolute path to datadir diffsets folder
+	mu  sync.RWMutex // guards file reads/writes
 }
 
 func Open(dirs datadir.Dirs) *DiffsetDatabase {
@@ -61,10 +61,12 @@ func Open(dirs datadir.Dirs) *DiffsetDatabase {
 	return actual.(*DiffsetDatabase)
 }
 
+// Dir returns the diffset directory path.
 func (db *DiffsetDatabase) Dir() string {
 	return db.dir
 }
 
+// WriteDiffSet serializes and writes a block diffset to its per-block file.
 func (db *DiffsetDatabase) WriteDiffSet(blockNumber uint64, blockHash common.Hash, diffSet *changeset.StateChangeSet) error {
 	if diffSet == nil {
 		return errors.New("diffset is nil")
@@ -99,6 +101,7 @@ func (db *DiffsetDatabase) WriteDiffSet(blockNumber uint64, blockHash common.Has
 	return <-errCh
 }
 
+// ReadDiffSet loads a block diffset from its per-block file.
 func (db *DiffsetDatabase) ReadDiffSet(blockNumber uint64, blockHash common.Hash) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error) {
 	if db.dir == "" {
 		return [kv.DomainLen][]kv.DomainEntryDiff{}, false, errors.New("diffset database requires datadir")
@@ -119,6 +122,7 @@ func (db *DiffsetDatabase) ReadDiffSet(blockNumber uint64, blockHash common.Hash
 	return changeset.DeserializeStateChangeSet(data), true, nil
 }
 
+// ReadLowestUnwindableBlock scans diffset files and returns the smallest block number found.
 func (db *DiffsetDatabase) ReadLowestUnwindableBlock() (uint64, error) {
 	if db.dir == "" {
 		return math.MaxUint64, errors.New("diffset database requires datadir")
@@ -148,6 +152,7 @@ func (db *DiffsetDatabase) ReadLowestUnwindableBlock() (uint64, error) {
 	return minBlock, nil
 }
 
+// PruneBefore removes diffset files with block numbers lower than cutoff.
 func (db *DiffsetDatabase) PruneBefore(ctx context.Context, cutoff uint64, limit int, timeout time.Duration) (int, error) {
 	if db.dir == "" {
 		return 0, errors.New("diffset database requires datadir")
@@ -198,6 +203,7 @@ func (db *DiffsetDatabase) PruneBefore(ctx context.Context, cutoff uint64, limit
 	return removed, nil
 }
 
+// Clear deletes the entire diffset directory.
 func (db *DiffsetDatabase) Clear() error {
 	if db.dir == "" {
 		return errors.New("diffset database requires datadir")
@@ -207,6 +213,7 @@ func (db *DiffsetDatabase) Clear() error {
 	return os.RemoveAll(db.dir)
 }
 
+// ensureDir creates the diffset directory if it does not exist.
 func (db *DiffsetDatabase) ensureDir() error {
 	if db.dir == "" {
 		return errors.New("diffset database requires datadir")
@@ -214,14 +221,17 @@ func (db *DiffsetDatabase) ensureDir() error {
 	return os.MkdirAll(db.dir, dir.DirPerm)
 }
 
+// diffsetPath builds the path for a given block's diffset file.
 func (db *DiffsetDatabase) diffsetPath(blockNumber uint64, blockHash common.Hash) string {
 	return filepath.Join(db.dir, diffsetFileName(blockNumber, blockHash))
 }
 
+// diffsetFileName formats the on-disk filename for a block diffset.
 func diffsetFileName(blockNumber uint64, blockHash common.Hash) string {
 	return fmt.Sprintf("%d+%x%s", blockNumber, blockHash[:], diffsetExt)
 }
 
+// parseFileName extracts block number and hash from a diffset filename.
 func parseFileName(name string) (uint64, common.Hash, bool) {
 	if !strings.HasSuffix(name, diffsetExt) {
 		return 0, common.Hash{}, false
