@@ -36,9 +36,9 @@ type CacheEntry struct {
 const (
 	// DefaultAccountCacheBytes is the byte limit for account cache (256 MB)
 	DefaultAccountCacheBytes = 256 * datasize.MB
-	// DefaultStorageCacheBytes is the byte limit for storage cache (512 MB)
-	DefaultStorageCacheBytes = 512 * datasize.MB
-	// DefaultCommitmentCacheBytes is the byte limit for commitment cache (256 MB)
+	// DefaultStorageCacheBytes is the byte limit for storage cache (128 MB)
+	DefaultStorageCacheBytes = 128 * datasize.MB
+	// DefaultCommitmentCacheBytes is the byte limit for commitment cache (128 MB)
 	DefaultCommitmentCacheBytes = 128 * datasize.MB
 )
 
