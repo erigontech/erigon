@@ -81,6 +81,10 @@ func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte, step kv.Ste
 	if domain == kv.CommitmentDomain && bytes.Equal(key, commitmentdb.KeyCommitmentState) {
 		return
 	}
+	if len(value) == 0 {
+		cache.Delete(key)
+		return
+	}
 	cache.Put(key, common.Copy(value), step)
 }
 
