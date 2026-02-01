@@ -674,12 +674,10 @@ func BlockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader ser
 		}
 		defer tx.Rollback()
 	}
-	s := time.Now()
 	b, err = blockReader.BlockByNumber(context.Background(), tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("EXECUTE BLOCK", time.Since(s))
 	if b == nil {
 		return nil, nil
 	}
