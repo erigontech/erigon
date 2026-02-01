@@ -318,16 +318,6 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 	maxStep := kv.Step(math.MaxUint64)
 
-	var (
-		cacheV    []byte
-		cacheStep kv.Step
-		okStep    bool
-	)
-	// Check state cache before hitting storage
-	// Only return cached value if its step is within the allowed range
-	if sd.stateCache != nil {
-		cacheV, cacheStep, okStep = sd.stateCache.Get(domain, k)
-	}
 	// Check mem batch first - it has the current transaction's uncommitted state
 	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
 		if dbg.KVReadLevelledMetrics {
@@ -336,16 +326,16 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		if sd.stateCache != nil && len(v) > 0 && step > 0 {
 			sd.stateCache.Put(domain, k, v, step)
 		}
-		if sd.stateCache != nil {
-			_, cacheStep, okStep = sd.stateCache.Get(domain, k)
-			if okStep && step != cacheStep {
-				fmt.Println("differing step in mem", step, cacheStep)
-			}
-		}
 		return v, step, nil
 	} else {
 		if step > 0 {
 			maxStep = step
+		}
+	}
+
+	if sd.stateCache != nil {
+		if v, step, ok := sd.stateCache.Get(domain, k); ok && step <= maxStep {
+			return v, step, nil
 		}
 	}
 
@@ -362,11 +352,8 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
-	if okStep && step != cacheStep {
-		fmt.Println("differing step not in mem", okStep, step, cacheStep, len(cacheV), domain)
-	}
 	// Populate state cache on successful storage read
-	if !okStep && sd.stateCache != nil && len(v) > 0 && step > 0 {
+	if sd.stateCache != nil && len(v) > 0 && step > 0 {
 		sd.stateCache.Put(domain, k, v, step)
 	}
 
