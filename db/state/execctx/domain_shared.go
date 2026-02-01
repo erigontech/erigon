@@ -457,7 +457,6 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 
 	// Update state cache when writing
 	if sd.stateCache != nil {
-		fmt.Println(kv.Step(txNum/sd.stepSize), txNum, sd.stepSize)
 		sd.stateCache.Put(domain, k, v, kv.Step(txNum/sd.stepSize))
 	}
 
