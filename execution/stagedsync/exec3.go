@@ -583,6 +583,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			if b == nil {
 				return fmt.Errorf("nil block %d", blockNum)
 			}
+			go warmTxsHashes(b)
 
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()
@@ -632,7 +633,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 				txTasks = append(txTasks, txTask)
 				inputTxNum++
 			}
-			go warmTxsHashes(txTasks)
 
 			lastExecutedStep := kv.Step(inputTxNum / te.doms.StepSize())
 

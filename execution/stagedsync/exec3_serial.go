@@ -36,10 +36,11 @@ type serialExecutor struct {
 	worker          *exec.Worker
 }
 
-func warmTxsHashes(tasks []exec.Task) {
-	for _, t := range tasks {
-		_ = t.TxHash()
+func warmTxsHashes(block *types.Block) {
+	for _, t := range block.Transactions() {
+		_ = t.Hash()
 	}
+	_ = block.Hash()
 }
 
 func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
@@ -89,6 +90,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			// TODO: panic here and see that overall process deadlock
 			return nil, rwTx, fmt.Errorf("nil block %d", blockNum)
 		}
+		go warmTxsHashes(b)
 
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
@@ -144,7 +146,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			txTasks = append(txTasks, txTask)
 			inputTxNum++
 		}
-		go warmTxsHashes(txTasks)
 
 		start := time.Now()
 		continueLoop, err := se.executeBlock(ctx, txTasks, execStage.CurrentSyncCycle.IsInitialCycle, false)
