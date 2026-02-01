@@ -337,13 +337,6 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	// Only return cached value if its step is within the allowed range
 	if sd.stateCache != nil {
 		if v, step, ok := sd.stateCache.Get(domain, k); ok && step <= maxStep {
-			// Values from files have file-boundary steps, not actual write steps.
-			// If the cached step is within the frozen file range, treat it as step=0
-			// (very old) so it passes maxStep filtering. This is safe because frozen
-			// file values are committed historical data from before recent blocks.
-			if step <= tx.StepsInFiles(domain) {
-				step = 0
-			}
 			return v, step, nil
 		}
 	}
