@@ -366,7 +366,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		fmt.Println("differing step not in mem", okStep, step, cacheStep, len(cacheV))
 	}
 	// Populate state cache on successful storage read
-	if !okStep && sd.stateCache != nil && len(v) > 0 {
+	if !okStep && sd.stateCache != nil && len(v) > 0 && step > 0 {
 		sd.stateCache.Put(domain, k, v, step)
 	}
 
