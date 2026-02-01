@@ -18,6 +18,7 @@ package executiontests
 
 import (
 	"math/big"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -56,6 +57,9 @@ func TestSendRawTransactionSync(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		timeoutMillis := hexutil.Uint64(1000)
+		if runtime.GOOS == "windows" {
+			timeoutMillis = hexutil.Uint64(10000) // windows on ci is very slow
+		}
 		receipt, errSend = eat.RpcApiClient.SendRawTransactionSync(tx, &timeoutMillis)
 	}()
 
