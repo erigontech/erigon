@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 	"sync"
 	"time"
 
@@ -38,29 +37,9 @@ type serialExecutor struct {
 }
 
 func warmTxsHashes(txs types.Transactions) {
-	n := len(txs)
-	const minTxsForParallelHashing = 4
-	if n < minTxsForParallelHashing {
-		for _, tx := range txs {
-			tx.Hash()
-		}
-		return
+	for _, txs := range txs {
+		_ = txs.Hash()
 	}
-	workers := min(runtime.NumCPU(), n)
-	var wg sync.WaitGroup
-	wg.Add(workers)
-	chunkSize := (n + workers - 1) / workers
-	for i := range workers {
-		start := i * chunkSize
-		end := min(start+chunkSize, n)
-		go func() {
-			for _, tx := range txs[start:end] {
-				tx.Hash()
-			}
-			wg.Done()
-		}()
-	}
-	wg.Wait()
 }
 
 func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
@@ -113,7 +92,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		txs := b.Transactions()
 		s := time.Now()
-		warmTxsHashes(txs)
+		go warmTxsHashes(txs)
 		fmt.Println("HASHED", blockNum, time.Since(s))
 		header := b.HeaderNoCopy()
 		getHashFnMutex := sync.Mutex{}
