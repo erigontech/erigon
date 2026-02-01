@@ -260,10 +260,6 @@ func (t *TxTask) TxType() uint8 {
 }
 
 func (t *TxTask) TxHash() common.Hash {
-	s := time.Now()
-	defer func() {
-		fmt.Println("time spent h", time.Since(s), t.TxIndex)
-	}()
 	if t.TxIndex < 0 || t.TxIndex >= len(t.Txs) {
 		return common.Hash{}
 	}
