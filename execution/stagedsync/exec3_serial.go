@@ -36,6 +36,32 @@ type serialExecutor struct {
 	worker          *exec.Worker
 }
 
+func warmTxsHashes(txs types.Transactions) {
+	n := len(txs)
+	const minTxsForParallelHashing = 100
+	if n < minTxsForParallelHashing {
+		for _, tx := range txs {
+			tx.Hash()
+		}
+		return
+	}
+	workers := min(4, n)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	chunkSize := (n + workers - 1) / workers
+	for i := range workers {
+		start := i * chunkSize
+		end := min(start+chunkSize, n)
+		go func() {
+			for _, tx := range txs[start:end] {
+				tx.Hash()
+			}
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+}
+
 func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
