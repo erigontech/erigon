@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"runtime/debug"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/common"
@@ -85,9 +84,6 @@ func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte, step kv.Ste
 	if len(value) == 0 {
 		cache.Delete(key)
 		return
-	}
-	if step == 0 {
-		debug.PrintStack()
 	}
 	cache.Put(key, common.Copy(value), step)
 }
