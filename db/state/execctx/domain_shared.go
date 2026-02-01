@@ -357,7 +357,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 
 	if cacheOk && step != cacheStep {
-		fmt.Println("mismatch found", domain, common.Bytes2Hex(k), step, cacheStep)
+		fmt.Println("mismatch found", domain, common.Bytes2Hex(k), step, cacheStep, len(cacheV))
 	}
 
 	// Populate state cache on successful storage read
