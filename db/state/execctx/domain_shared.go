@@ -334,6 +334,9 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 
 	if sd.stateCache != nil {
+		// This is fine, we will have some extra entries into domain worst case.
+		// regarding file determinism: probability of non-deterministic goes to 0 as we do
+		// files merge so this is not a problem in practice.
 		if v, _, ok := sd.stateCache.Get(domain, k); ok {
 			return v, kv.Step(sd.txNum / sd.stepSize), nil
 		}
