@@ -632,6 +632,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 				txTasks = append(txTasks, txTask)
 				inputTxNum++
 			}
+			go warmTxsHashes(txTasks)
 
 			lastExecutedStep := kv.Step(inputTxNum / te.doms.StepSize())
 
