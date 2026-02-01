@@ -108,11 +108,11 @@ func (c *GenericCache[T]) Get(key []byte) (T, bool) {
 
 // Put stores data for the given key.
 func (c *GenericCache[T]) Put(key []byte, value T) {
-	entrySize := int64(len(key) + c.sizeFunc(value))
+	entrySize := int64(8 + c.sizeFunc(value))
 
 	// Check if key already exists
 	if existing, ok := c.data.Get(key); ok {
-		oldSize := int64(len(key) + c.sizeFunc(existing))
+		oldSize := int64(8 + c.sizeFunc(existing))
 		sizeDiff := entrySize - oldSize
 		c.data.Set(key, value)
 		c.currentSize.Add(sizeDiff)
@@ -131,7 +131,7 @@ func (c *GenericCache[T]) Put(key []byte, value T) {
 // Delete removes the data for the given key.
 func (c *GenericCache[T]) Delete(key []byte) {
 	if existing, ok := c.data.Get(key); ok {
-		entrySize := int64(len(key) + c.sizeFunc(existing))
+		entrySize := int64(8 + c.sizeFunc(existing))
 		c.data.Delete(key)
 		c.currentSize.Add(-entrySize)
 	}
