@@ -36,9 +36,9 @@ type serialExecutor struct {
 	worker          *exec.Worker
 }
 
-func warmTxsHashes(txs types.Transactions) {
-	for _, txs := range txs {
-		_ = txs.Hash()
+func warmTxsHashes(tasks []exec.Task) {
+	for _, t := range tasks {
+		_ = t.TxHash()
 	}
 }
 
@@ -91,7 +91,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 
 		txs := b.Transactions()
-		go warmTxsHashes(txs)
 		header := b.HeaderNoCopy()
 		getHashFnMutex := sync.Mutex{}
 
@@ -145,6 +144,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			txTasks = append(txTasks, txTask)
 			inputTxNum++
 		}
+		go warmTxsHashes(txTasks)
 
 		start := time.Now()
 		continueLoop, err := se.executeBlock(ctx, txTasks, execStage.CurrentSyncCycle.IsInitialCycle, false)
