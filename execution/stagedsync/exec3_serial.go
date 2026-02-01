@@ -85,6 +85,11 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 
 		txs := b.Transactions()
+		s := time.Now()
+		for _, t := range txs {
+			t.Hash()
+		}
+		fmt.Println("HASHED", blockNum, time.Since(s))
 		header := b.HeaderNoCopy()
 		getHashFnMutex := sync.Mutex{}
 
