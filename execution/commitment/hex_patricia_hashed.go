@@ -1875,25 +1875,25 @@ func (hph *HexPatriciaHashed) createCellGetter(b []byte, updateKey []byte, row i
 		if hph.trace {
 			fmt.Printf("  %x: computeCellHash(%d, %x, depth=%d)=[%x]\n", nibble, row, nibble, depth, cellHash)
 		}
-		if dbg.KVReadLevelledMetrics {
-			if hashBefore != nil && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
-				counters := hph.hadToLoadL[hph.depthsToTxNum[depth]]
-				if !bytes.Equal(hashBefore, cell.stateHash[:cell.stateHashLen]) {
-					if cell.accountAddrLen > 0 {
-						counters.accReset++
-						counters.accLoaded++
-					}
-					if cell.storageAddrLen > 0 {
-						counters.storReset++
-						counters.storLoaded++
-					}
-				} else {
-					if cell.accountAddrLen > 0 && (!loadedBefore.account() && !cell.loaded.account()) {
-						counters.accSkipped++
-					}
-					if cell.storageAddrLen > 0 && (!loadedBefore.storage() && !cell.loaded.storage()) {
-						counters.storSkipped++
-					}
+
+		if dbg.KVReadLevelledMetrics && hashBefore != nil && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
+			counters := hph.hadToLoadL[hph.depthsToTxNum[depth]]
+			if !bytes.Equal(hashBefore, cell.stateHash[:cell.stateHashLen]) {
+				if cell.accountAddrLen > 0 {
+					counters.accReset++
+					counters.accLoaded++
+				}
+				if cell.storageAddrLen > 0 {
+					counters.storReset++
+					counters.storLoaded++
+				}
+			} else {
+				if cell.accountAddrLen > 0 && (!loadedBefore.account() && !cell.loaded.account()) {
+					counters.accSkipped++
+				}
+				if cell.storageAddrLen > 0 && (!loadedBefore.storage() && !cell.loaded.storage()) {
+					counters.storSkipped++
+
 				}
 
 				hph.hadToLoadL[hph.depthsToTxNum[depth]] = counters
@@ -2322,20 +2322,30 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 	//}
 	// Keep folding until the currentKey is the prefix of the key we modify
 	for hph.needFolding(hashedKey) {
-		foldDone := hph.metrics.StartFolding(plainKey)
+		var foldDone func()
+		if dbg.KVReadLevelledMetrics {
+			foldDone = hph.metrics.StartFolding(plainKey)
+		}
 		if err := hph.fold(); err != nil {
 			return fmt.Errorf("fold: %w", err)
 		}
-		foldDone()
+		if foldDone != nil {
+			foldDone()
+		}
 	}
 	// Now unfold until we step on an empty cell
 	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
 		printLater := hph.currentKeyLen == 0 && hph.mounted && hph.trace
-		unfoldDone := hph.metrics.StartUnfolding(plainKey)
+		var unfoldDone func()
+		if dbg.KVReadLevelledMetrics {
+			unfoldDone = hph.metrics.StartUnfolding(plainKey)
+		}
 		if err := hph.unfold(hashedKey, unfolding); err != nil {
 			return fmt.Errorf("unfold: %w", err)
 		}
-		unfoldDone()
+		if unfoldDone != nil {
+			unfoldDone()
+		}
 		if printLater {
 			fmt.Printf("[%x] subtrie pref '%x' d=%d\n", hph.mountedNib, hph.currentKey[:hph.currentKeyLen], hph.depths[max(0, hph.activeRows-1)])
 		}
@@ -2622,11 +2632,16 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
-		foldDone := hph.metrics.StartFolding(nil)
+		var foldDone func()
+		if dbg.KVReadLevelledMetrics {
+			foldDone = hph.metrics.StartFolding(nil)
+		}
 		if err = hph.fold(); err != nil {
 			return nil, fmt.Errorf("final fold: %w", err)
 		}
-		foldDone()
+		if foldDone != nil {
+			foldDone()
+		}
 	}
 
 	rootHash, err = hph.RootHash()
@@ -2650,8 +2665,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	if dbg.KVReadLevelledMetrics {
 		hph.metrics.CollectFileDepthStats(hph.hadToLoadL)
-	}
-	if dbg.KVReadLevelledMetrics {
 		log.Debug("commitment finished, counters updated (no reset)",
 			//"hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),
 			//"hadToReset", common.PrettyCounter(hadToReset.Load()),
