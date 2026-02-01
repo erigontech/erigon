@@ -2663,7 +2663,6 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		hph.branchEncoder.ClearDeferred()
 	}
 
-
 	if dbg.KVReadLevelledMetrics {
 		hph.metrics.CollectFileDepthStats(hph.hadToLoadL)
 		log.Debug("commitment finished, counters updated (no reset)",
