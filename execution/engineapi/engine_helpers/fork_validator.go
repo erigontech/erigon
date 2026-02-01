@@ -149,12 +149,14 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, sd *execctx.Sha
 	// Flush changes to db.
 	if fv.sharedDom != nil {
 		sd.Merge(fv.sharedDom)
+		fv.sharedDom.FlushHooks(ctx, sd.NewDomainPutter(tx))
 
 		_, err := sd.ComputeCommitment(ctx, tx, true, sd.BlockNum(), sd.TxNum(), "flush-commitment", nil)
 		if err != nil {
 			return err
 		}
 	}
+	sd.FlushHooks(ctx, sd.NewDomainPutter(tx))
 	timings, _ := fv.timingsCache.Get(fv.extendingForkHeadHash)
 	timings[BlockTimingsFlushExtendingFork] = time.Since(start)
 	fv.timingsCache.Add(fv.extendingForkHeadHash, timings)

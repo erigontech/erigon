@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 type iodir int
@@ -66,7 +67,10 @@ type TemporalMemBatch struct {
 	currentChangesAccumulator *changeset.StateChangeSet
 	pastChangesAccumulator    map[string]*changeset.StateChangeSet
 
-	unwindToTxNum   uint64
+	// pastChangesetTxNums maps changeset keys to their ending txNum (for matching commitment writes)
+	pastChangesetTxNums map[string]uint64
+
+	unwindToTxNum uint64
 	unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
 
 	metrics *changeset.DomainMetrics
@@ -329,6 +333,24 @@ func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockN
 		}, true, nil
 	}
 	return changeset.ReadDiffSet(tx, blockNumber, blockHash)
+}
+
+// AddCommitmentWritesToChangesets adds commitment writes to all past changesets.
+// This is used when commitment branch updates are deferred and need to be added to changesets after the fact.
+func (sd *TemporalMemBatch) AddCommitmentWritesToChangesets(writes []commitment.CommitmentWrite, stepSize uint64) {
+	if len(writes) == 0 || len(sd.pastChangesAccumulator) == 0 {
+		return
+	}
+
+	// Add each write to all past changesets
+	// Note: In fork validation mode, all past changesets belong to the same fork
+	// and all need the commitment data for proper unwinding
+	for _, cs := range sd.pastChangesAccumulator {
+		for _, w := range writes {
+			step := kv.Step(w.TxNum / stepSize)
+			cs.Diffs[kv.CommitmentDomain].DomainUpdate(w.Key, step, w.PrevVal, w.PrevStep)
+		}
+	}
 }
 
 func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {

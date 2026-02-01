@@ -83,6 +83,10 @@ type SharedDomains struct {
 	commitmentCapture bool
 	mem               kv.TemporalMemBatch
 	metrics           changeset.DomainMetrics
+
+	// flushHooks are callbacks to be executed when FlushHooks is called.
+	// Used by commitment to defer branch updates until a transaction commit.
+	flushHooks []func(context.Context, commitment.DomainPutter) error
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
@@ -130,6 +134,51 @@ func (sd *SharedDomains) AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel {
 	return &temporalPutDel{sd, tx}
 }
 
+// capturingDomainPutter wraps a DomainPutter and captures commitment writes.
+type capturingDomainPutter struct {
+	inner    commitment.DomainPutter
+	writes   []commitment.CommitmentWrite
+	stepSize uint64
+}
+
+func (c *capturingDomainPutter) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+	if domain == kv.CommitmentDomain {
+		c.writes = append(c.writes, commitment.CommitmentWrite{
+			Key:      common.Copy(k),
+			Value:    common.Copy(v),
+			TxNum:    txNum,
+			PrevVal:  common.Copy(prevVal),
+			PrevStep: prevStep,
+		})
+	}
+	return c.inner.DomainPut(domain, k, v, txNum, prevVal, prevStep)
+}
+
+// NewDomainPutter returns a commitment.DomainPutter for use with FlushHooks.
+func (sd *SharedDomains) NewDomainPutter(tx kv.TemporalTx) commitment.DomainPutter {
+	return &temporalPutDel{sd, tx}
+}
+
+// NewCapturingDomainPutter returns a DomainPutter that captures commitment writes.
+func (sd *SharedDomains) NewCapturingDomainPutter(tx kv.TemporalTx) *capturingDomainPutter {
+	return &capturingDomainPutter{
+		inner:    &temporalPutDel{sd, tx},
+		stepSize: sd.stepSize,
+	}
+}
+
+// CommitmentChangesetAdder is implemented by TemporalMemBatch to add commitment writes to past changesets.
+type CommitmentChangesetAdder interface {
+	AddCommitmentWritesToChangesets(writes []commitment.CommitmentWrite, stepSize uint64)
+}
+
+// AddCommitmentWritesToChangesets adds the captured commitment writes to the appropriate past changesets.
+func (sd *SharedDomains) AddCommitmentWritesToChangesets(writes []commitment.CommitmentWrite) {
+	if adder, ok := sd.mem.(CommitmentChangesetAdder); ok {
+		adder.AddCommitmentWritesToChangesets(writes, sd.stepSize)
+	}
+}
+
 func (sd *SharedDomains) Merge(other *SharedDomains) error {
 	if sd.txNum > other.txNum {
 		return fmt.Errorf("can't merge backwards: txnum: %d > %d", sd.txNum, other.txNum)
@@ -141,6 +190,42 @@ func (sd *SharedDomains) Merge(other *SharedDomains) error {
 
 	sd.txNum = other.txNum
 	sd.blockNum.Store(other.blockNum.Load())
+	return nil
+}
+
+// AddFlushHook adds a callback to be executed when FlushHooks is called.
+// This is used by commitment to defer branch updates until a transaction commit.
+// Implements commitment.DeferredHooker interface.
+func (sd *SharedDomains) AddFlushHook(hook func(context.Context, commitment.DomainPutter) error) {
+	sd.flushHooks = append(sd.flushHooks, hook)
+}
+
+// FlushHooks executes all registered flush hooks and clears them.
+// Used during transaction commit to apply deferred commitment updates.
+// It captures commitment writes and adds them to the past changesets.
+func (sd *SharedDomains) FlushHooks(ctx context.Context, dp commitment.DomainPutter) error {
+	if len(sd.flushHooks) == 0 {
+		return nil
+	}
+
+	// Use capturing putter to record commitment writes
+	capturing := &capturingDomainPutter{
+		inner:    dp,
+		stepSize: sd.stepSize,
+	}
+
+	for _, hook := range sd.flushHooks {
+		if err := hook(ctx, capturing); err != nil {
+			return err
+		}
+	}
+	sd.flushHooks = sd.flushHooks[:0]
+
+	// Add captured commitment writes to past changesets
+	if len(capturing.writes) > 0 {
+		sd.AddCommitmentWritesToChangesets(capturing.writes)
+	}
+
 	return nil
 }
 
@@ -536,6 +621,13 @@ func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
 
 func (sd *SharedDomains) EnableWarmupCache(enable bool) {
 	sd.sdCtx.EnableWarmupCache(enable)
+}
+
+// SetDeferredHooker sets the deferred hooker for adding flush hooks.
+// When set (typically to the SharedDomains itself), commitment branch updates
+// are deferred and added as flush hooks to be executed during transaction commit.
+func (sd *SharedDomains) SetDeferredHooker(hooker commitment.DeferredHooker) {
+	sd.sdCtx.SetDeferredHooker(hooker)
 }
 
 // TouchChangedKeysFromHistory touches the changed keys in the commitment trie by reading the historical updates.

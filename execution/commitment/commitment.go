@@ -403,10 +403,8 @@ func encodeDeferredUpdate(
 	return nil
 }
 
-// ApplyDeferredUpdates computes cell hashes and encodes branch updates in parallel, then writes them.
-// The putBranch function must be thread-safe for concurrent writes.
+// ApplyDeferredUpdates encodes branch updates sequentially and writes them.
 func (be *BranchEncoder) ApplyDeferredUpdates(
-	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error,
 ) error {
 	start := time.Now()
@@ -416,74 +414,21 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 	if len(be.deferred) == 0 {
 		return nil
 	}
-	if numWorkers <= 1 {
-		numWorkers = 1
-	}
 
-	// Pipeline: workers encode in parallel, results sent to channel, main goroutine writes sequentially
-	type result struct {
-		upd *DeferredBranchUpdate
-		err error
-	}
-	resultCh := make(chan result, maxDeferredUpdates)
-	workCh := make(chan *DeferredBranchUpdate, maxDeferredUpdates)
-
-	// Start workers - each with its own encoder and merger
-	var wg sync.WaitGroup
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			encoder := NewBranchEncoder(1024)
-			merger := NewHexBranchMerger(512)
-
-			for upd := range workCh {
-				err := encodeDeferredUpdate(upd, encoder, merger)
-				resultCh <- result{upd: upd, err: err}
-			}
-		}()
-	}
-
-	// Close resultCh when all workers are done
-	go func() {
-		wg.Wait()
-		close(resultCh)
-	}()
-
-	// Send work in background
-	go func() {
-		for _, upd := range be.deferred {
-			workCh <- upd
-		}
-		close(workCh)
-	}()
-
-	// Process results as they come in - write to storage immediately
-	var firstErr error
+	// Process updates sequentially
 	var written int
-	for res := range resultCh {
-		if res.err != nil {
-			if firstErr == nil {
-				firstErr = res.err
-			}
-			continue
+	for _, upd := range be.deferred {
+		if err := encodeDeferredUpdate(upd, be, be.merger); err != nil {
+			return err
 		}
-		if res.upd.encoded == nil {
+		if upd.encoded == nil {
 			continue // skip unchanged
 		}
-		if firstErr != nil {
-			continue // drain channel but don't write after error
-		}
-		if err := putBranch(res.upd.prefix, res.upd.encoded, res.upd.prev, res.upd.prevStep); err != nil {
-			firstErr = err
-			continue
+		if err := putBranch(upd.prefix, upd.encoded, upd.prev, upd.prevStep); err != nil {
+			return err
 		}
 		mxTrieBranchesUpdated.Inc()
 		written++
-	}
-
-	if firstErr != nil {
-		return firstErr
 	}
 
 	if be.metrics != nil {
@@ -576,7 +521,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	}
 
 	if needsFlush {
-		if err := be.ApplyDeferredUpdates(16, ctx.PutBranch); err != nil {
+		if err := be.ApplyDeferredUpdates(ctx.PutBranch); err != nil {
 			return err
 		}
 		be.ClearDeferred()

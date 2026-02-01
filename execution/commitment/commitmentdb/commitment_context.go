@@ -201,6 +201,14 @@ func (sdc *SharedDomainsCommitmentContext) SetDeferBranchUpdates(deferBranchUpda
 	}
 }
 
+// SetDeferredHooker sets the deferred hooker for adding flush hooks.
+// When set, commitment branch updates are deferred and added as flush hooks.
+func (sdc *SharedDomainsCommitmentContext) SetDeferredHooker(hooker commitment.DeferredHooker) {
+	if sdc.patriciaTrie.Variant() == commitment.VariantHexPatriciaTrie {
+		sdc.patriciaTrie.(*commitment.HexPatriciaHashed).SetDeferredHooker(hooker)
+	}
+}
+
 // SetHistoryStateReader sets the state reader to read *full* historical state at specified txNum.
 func (sdc *SharedDomainsCommitmentContext) SetHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
 	sdc.SetStateReader(NewHistoryStateReader(roTx, limitReadAsOfTxNum))
