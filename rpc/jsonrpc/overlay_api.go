@@ -282,6 +282,11 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 		return nil, err
 	}
 
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, begin)
+	if err != nil {
+		return nil, err
+	}
+
 	numBlocks := end - begin + 1
 	var (
 		results = make([]*blockReplayResult, numBlocks)
