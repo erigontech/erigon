@@ -198,6 +198,8 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		// Try to reuse buffer, fall back to allocation if concurrent access
 		var allLogs types.Logs
 		reuseBuffer := s.logsBufMu.TryLock()
+		defer s.logsBufMu.Unlock()
+
 		if reuseBuffer {
 			allLogs = s.logsBuf[:0]
 		} else {
@@ -208,7 +210,6 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			if rec == nil {
 				if reuseBuffer {
 					s.logsBuf = allLogs
-					s.logsBufMu.Unlock()
 				}
 				return nil, fmt.Errorf("nil receipt: block %d, txId %d, receipts %s", header.Number, i, receipts)
 			}
@@ -217,7 +218,6 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		depositReqs, err := misc.ParseDepositLogs(allLogs, config.DepositContract)
 		if reuseBuffer {
 			s.logsBuf = allLogs // save back (might have grown)
-			s.logsBufMu.Unlock()
 		}
 		if err != nil {
 			return nil, fmt.Errorf("error: could not parse requests logs: %v", err)
