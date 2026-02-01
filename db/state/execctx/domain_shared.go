@@ -336,9 +336,11 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		if sd.stateCache != nil && len(v) > 0 {
 			sd.stateCache.Put(domain, k, v, step)
 		}
-		_, cacheStep, okStep = sd.stateCache.Get(domain, k)
-		if okStep && step != cacheStep {
-			fmt.Println("differing step in mem", step, cacheStep)
+		if sd.stateCache != nil {
+			_, cacheStep, okStep = sd.stateCache.Get(domain, k)
+			if okStep && step != cacheStep {
+				fmt.Println("differing step in mem", step, cacheStep)
+			}
 		}
 		return v, step, nil
 	} else {
