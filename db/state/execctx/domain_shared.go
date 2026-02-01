@@ -323,7 +323,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		if dbg.KVReadLevelledMetrics {
 			sd.metrics.UpdateCacheReads(domain, start)
 		}
-		if sd.stateCache != nil && len(v) > 0 && step > 0 {
+		if sd.stateCache != nil {
 			sd.stateCache.Put(domain, k, v, step)
 		}
 		return v, step, nil
@@ -353,7 +353,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 
 	// Populate state cache on successful storage read
-	if sd.stateCache != nil && len(v) > 0 && step > 0 {
+	if sd.stateCache != nil {
 		sd.stateCache.Put(domain, k, v, step)
 	}
 
@@ -457,7 +457,6 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 
 	// Update state cache when writing
 	if sd.stateCache != nil {
-		fmt.Println(kv.Step(txNum/sd.stepSize), txNum, sd.stepSize)
 		sd.stateCache.Put(domain, k, v, kv.Step(txNum/sd.stepSize))
 	}
 
