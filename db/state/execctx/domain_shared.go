@@ -333,7 +333,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		if dbg.KVReadLevelledMetrics {
 			sd.metrics.UpdateCacheReads(domain, start)
 		}
-		if sd.stateCache != nil && len(v) > 0 {
+		if sd.stateCache != nil && len(v) > 0 && step > 0 {
 			sd.stateCache.Put(domain, k, v, step)
 		}
 		if sd.stateCache != nil {
