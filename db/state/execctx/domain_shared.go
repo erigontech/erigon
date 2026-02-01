@@ -318,16 +318,6 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 	maxStep := kv.Step(math.MaxUint64)
 
-	var (
-		cacheV    []byte
-		cacheStep kv.Step
-		cacheOk   bool
-	)
-
-	if sd.stateCache != nil {
-		cacheV, cacheStep, cacheOk = sd.stateCache.Get(domain, k)
-	}
-
 	// Check mem batch first - it has the current transaction's uncommitted state
 	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
 		if dbg.KVReadLevelledMetrics {
@@ -340,6 +330,12 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	} else {
 		if step > 0 {
 			maxStep = step
+		}
+	}
+
+	if sd.stateCache != nil {
+		if v, step, ok := sd.stateCache.Get(domain, k); ok {
+			return v, step, nil
 		}
 	}
 
@@ -356,12 +352,8 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
-	if cacheOk && step != cacheStep {
-		fmt.Println("mismatch found", domain, common.Bytes2Hex(k), step, cacheStep, len(cacheV))
-	}
-
 	// Populate state cache on successful storage read
-	if sd.stateCache != nil {
+	if sd.stateCache != nil && len(v) > 0 && step > 0 {
 		sd.stateCache.Put(domain, k, v, step)
 	}
 
@@ -465,6 +457,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 
 	// Update state cache when writing
 	if sd.stateCache != nil {
+		fmt.Println(kv.Step(txNum/sd.stepSize), txNum, sd.stepSize)
 		sd.stateCache.Put(domain, k, v, kv.Step(txNum/sd.stepSize))
 	}
 
