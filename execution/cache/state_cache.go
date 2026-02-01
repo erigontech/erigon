@@ -65,7 +65,11 @@ func (c *StateCache) Get(domain kv.Domain, key []byte) ([]byte, kv.Step, bool) {
 	if cache == nil {
 		return nil, 0, false
 	}
-	return cache.Get(key)
+	v, step, ok := cache.Get(key)
+	if len(v) == 0 {
+		return nil, 0, false
+	}
+	return v, step, ok
 }
 
 // Put stores data with its step for the given domain and key.
