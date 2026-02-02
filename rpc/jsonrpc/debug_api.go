@@ -1193,7 +1193,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	// Print expected post-state in human-readable format
-	printExpectedPostState(blockNum, block.Root(), expectedState, expectedStorage)
+	// printExpectedPostState(blockNum, block.Root(), expectedState, expectedStorage)
 
 	if err = verifyExecutionWitnessResult(result, block, chainCfg, api.engine(), expectedParentRoot, readAddresses, expectedState, expectedStorage); err != nil {
 		return nil, fmt.Errorf("witness verification failed: %w", err)
@@ -1918,7 +1918,7 @@ func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.B
 		ibs.SetTxContext(blockNum, txIndex)
 
 		// Apply the message - gasBailout must be false to properly deduct gas from sender
-		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, nil)
+		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
 			return fmt.Errorf("verification: failed to apply tx %d: %w", txIndex, err)
 		}
