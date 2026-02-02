@@ -1110,11 +1110,159 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	if err != nil {
 		return nil, fmt.Errorf("failed to get chain config: %w", err)
 	}
-	if err = verifyExecutionWitnessResult(result, block, chainCfg, api.engine(), expectedParentRoot, readAddresses); err != nil {
+
+	// Query the expected state for all modified accounts from the actual state DB
+	// This lets us compare what we compute vs what's actually in the state after this block
+	// We use the commitment context to get correct storage roots (not stored in DB to save space)
+	expectedState := make(map[common.Address]*accounts.Account)
+	expectedStorage := make(map[common.Address]map[common.Hash]uint256.Int)
+
+	// Create commitment context for accurate storage roots
+	postDomains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create post-state domains: %w", err)
+	}
+	defer postDomains.Close()
+	postSdCtx := postDomains.GetCommitmentContext()
+	postSdCtx.SetDeferBranchUpdates(false)
+
+	// Set up to read state at current block (after execution)
+	latestBlock, err := rpchelper.GetLatestBlockNumber(tx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get latest block: %w", err)
+	}
+	if blockNum < latestBlock {
+		// Get first txnum of blockNum+1 to ensure correct state root
+		lastTxnInBlock, err := api._txNumReader.Min(ctx, tx, blockNum+1)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get last txn in block: %w", err)
+		}
+		postSdCtx.SetHistoryStateReader(tx, lastTxnInBlock)
+		if err := postDomains.SeekCommitment(context.Background(), tx); err != nil {
+			return nil, fmt.Errorf("failed to seek commitment: %w", err)
+		}
+	}
+
+	// Touch all modified accounts and storage keys for the post-state trie
+	for _, addr := range writeAddresses {
+		postSdCtx.TouchKey(kv.AccountsDomain, string(addr.Bytes()), nil)
+	}
+	for addr, keys := range writeStorageKeys {
+		for _, key := range keys {
+			storageKey := string(common.FromHex(addr.Hex()[2:] + key.Hex()[2:]))
+			postSdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
+		}
+	}
+
+	// Generate the trie with correct storage roots
+	postTrie, postRoot, err := postSdCtx.Witness(ctx, nil, "debug_executionWitness_postState")
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate post-state trie: %w", err)
+	}
+
+	// Verify the post-state root matches the block's state root
+	if !bytes.Equal(postRoot, block.Root().Bytes()) {
+		fmt.Printf("Warning: post-state trie root %x doesn't match block root %x\n", postRoot, block.Root())
+	}
+
+	// Read account data from the post-state trie (with correct storage roots)
+	for _, addr := range writeAddresses {
+		addrHash := crypto.Keccak256(addr.Bytes())
+		acc, _ := postTrie.GetAccount(addrHash)
+		expectedState[addr] = acc
+	}
+
+	// Read storage values from the state reader
+	currentBlockNum := rpc.BlockNumber(blockNum)
+	currentNrOrHash := rpc.BlockNumberOrHash{BlockNumber: &currentBlockNum}
+	postStateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, currentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create postStateReader: %w", err)
+	}
+	for addr, keys := range writeStorageKeys {
+		expectedStorage[addr] = make(map[common.Hash]uint256.Int)
+		for _, key := range keys {
+			storageKey := accounts.InternKey(key)
+			val, _, err := postStateReader.ReadAccountStorage(accounts.InternAddress(addr), storageKey)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read expected account in post state: %x %w", addr, err)
+			}
+			expectedStorage[addr][key] = val
+
+		}
+	}
+
+	// Print expected post-state in human-readable format
+	printExpectedPostState(blockNum, block.Root(), expectedState, expectedStorage)
+
+	if err = verifyExecutionWitnessResult(result, block, chainCfg, api.engine(), expectedParentRoot, readAddresses, expectedState, expectedStorage); err != nil {
 		return nil, fmt.Errorf("witness verification failed: %w", err)
 	}
 
 	return result, nil
+}
+
+// printExpectedPostState prints the expected post-state in a human-readable format
+func printExpectedPostState(blockNum uint64, expectedStateRoot common.Hash, expectedState map[common.Address]*accounts.Account, expectedStorage map[common.Address]map[common.Hash]uint256.Int) {
+	fmt.Printf("\n")
+	fmt.Printf("╔══════════════════════════════════════════════════════════════════════════════╗\n")
+	fmt.Printf("║              EXPECTED POST-STATE FOR BLOCK %-5d                             ║\n", blockNum)
+	fmt.Printf("╠══════════════════════════════════════════════════════════════════════════════╣\n")
+	fmt.Printf("║ Expected State Root: %x ║\n", expectedStateRoot)
+	fmt.Printf("╚══════════════════════════════════════════════════════════════════════════════╝\n")
+	fmt.Printf("\n")
+
+	// Sort addresses for consistent output
+	addrs := make([]common.Address, 0, len(expectedState))
+	for addr := range expectedState {
+		addrs = append(addrs, addr)
+	}
+
+	for _, addr := range addrs {
+		acc := expectedState[addr]
+		addrHash, _ := common.HashData(addr[:])
+
+		fmt.Printf("┌─────────────────────────────────────────────────────────────────────────────┐\n")
+		fmt.Printf("│ Account: %s\n", addr.Hex())
+		fmt.Printf("│ Hash:    %x\n", addrHash)
+		fmt.Printf("├─────────────────────────────────────────────────────────────────────────────┤\n")
+
+		if acc == nil {
+			fmt.Printf("│ Status: DELETED\n")
+		} else {
+			fmt.Printf("│ Nonce:        %d\n", acc.Nonce)
+			fmt.Printf("│ Balance:      %s wei\n", acc.Balance.String())
+
+			// Storage Root
+			if acc.Root == trie.EmptyRoot {
+				fmt.Printf("│ Storage Root: %x (empty)\n", acc.Root)
+			} else {
+				fmt.Printf("│ Storage Root: %x\n", acc.Root)
+			}
+
+			// Code Hash
+			if acc.CodeHash == accounts.EmptyCodeHash {
+				fmt.Printf("│ Code Hash:    %x (empty - EOA)\n", acc.CodeHash)
+			} else {
+				fmt.Printf("│ Code Hash:    %x (contract)\n", acc.CodeHash)
+			}
+		}
+
+		// Print storage for this account
+		if storage, ok := expectedStorage[addr]; ok && len(storage) > 0 {
+			fmt.Printf("├─────────────────────────────────────────────────────────────────────────────┤\n")
+			fmt.Printf("│ Storage (%d slots):\n", len(storage))
+			for key, val := range storage {
+				keyHash, _ := common.HashData(key[:])
+				fmt.Printf("│   Slot %x... (hash %x...):\n", key[:8], keyHash[:8])
+				fmt.Printf("│     Value: %s\n", val.String())
+				fmt.Printf("│     Hex:   0x%x\n", val.Bytes())
+			}
+		}
+
+		fmt.Printf("└─────────────────────────────────────────────────────────────────────────────┘\n")
+		fmt.Printf("\n")
+	}
 }
 
 // witnessStateless is a StateReader/StateWriter implementation that operates on a witness trie.
@@ -1484,6 +1632,20 @@ func (s *witnessStateless) Finalize() common.Hash {
 		}
 	}
 
+	// Apply code updates - must be done after account updates so accounts exist in trie
+	for addrHash, account := range s.accountUpdates {
+		if account == nil {
+			continue
+		}
+		codeHashValue := account.CodeHash.Value()
+		if code, ok := s.codeUpdates[codeHashValue]; ok {
+			fmt.Printf("  UpdateAccountCode %x: codeHash=%x, len=%d\n", addrHash[:8], codeHashValue[:8], len(code))
+			if err := s.t.UpdateAccountCode(addrHash[:], code); err != nil {
+				fmt.Printf("  Warning: failed to update account code for %x: %v\n", addrHash[:8], err)
+			}
+		}
+	}
+
 	updatedAccounts := map[common.Hash]struct{}{}
 
 	// Apply storage writes
@@ -1599,7 +1761,7 @@ var _ rules.ChainReader = (*statelessChainReader)(nil)
 // verifyExecutionWitnessResult verifies the execution witness by re-executing the block statelessly.
 // It decodes the witness trie, executes all transactions, and verifies the resulting state root
 // matches the block's state root.
-func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config, engine rules.EngineReader, expectedParentRoot common.Hash, readAddresses []common.Address) error {
+func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config, engine rules.EngineReader, expectedParentRoot common.Hash, readAddresses []common.Address, expectedState map[common.Address]*accounts.Account, expectedStorage map[common.Address]map[common.Hash]uint256.Int) error {
 	// Skip verification for genesis block - it has no transactions to execute
 	// but has pre-allocated accounts which would cause a state root mismatch
 	if block.NumberU64() == 0 {
@@ -1755,6 +1917,63 @@ func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.B
 
 	// Finalize and compute the resulting state root
 	newStateRoot := stateless.Finalize()
+
+	// Compare computed state vs expected state for all modified accounts
+	fmt.Printf("\n=== Comparing computed vs expected state ===\n")
+	for addr, expectedAcc := range expectedState {
+		addrHash, _ := common.HashData(addr[:])
+		computedAcc, found := stateless.t.GetAccount(addrHash[:])
+
+		fmt.Printf("\nAccount %s (hash %x):\n", addr.Hex(), addrHash[:8])
+		if expectedAcc != nil {
+			fmt.Printf("  EXPECTED: Nonce=%d, Balance=%s, Root=%x, CodeHash=%x\n",
+				expectedAcc.Nonce, expectedAcc.Balance.String(), expectedAcc.Root, expectedAcc.CodeHash)
+		} else {
+			fmt.Printf("  EXPECTED: nil (deleted)\n")
+		}
+		if found && computedAcc != nil {
+			fmt.Printf("  COMPUTED: Nonce=%d, Balance=%s, Root=%x, CodeHash=%x\n",
+				computedAcc.Nonce, computedAcc.Balance.String(), computedAcc.Root, computedAcc.CodeHash)
+			// Check for differences
+			if expectedAcc != nil {
+				if expectedAcc.Nonce != computedAcc.Nonce {
+					fmt.Printf("    ❌ NONCE MISMATCH!\n")
+				}
+				if !expectedAcc.Balance.Eq(&computedAcc.Balance) {
+					fmt.Printf("    ❌ BALANCE MISMATCH!\n")
+				}
+				if expectedAcc.Root != computedAcc.Root {
+					fmt.Printf("    ❌ STORAGE ROOT MISMATCH!\n")
+				}
+				if expectedAcc.CodeHash != computedAcc.CodeHash {
+					fmt.Printf("    ❌ CODE HASH MISMATCH!\n")
+				}
+			}
+		} else {
+			fmt.Printf("  COMPUTED: NOT FOUND or nil\n")
+		}
+	}
+
+	// Compare storage values
+	for addr, expectedKeys := range expectedStorage {
+		addrHash, _ := common.HashData(addr[:])
+		fmt.Printf("\nStorage for %s (hash %x):\n", addr.Hex(), addrHash[:8])
+		for key, expectedVal := range expectedKeys {
+			keyHash, _ := common.HashData(key[:])
+			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
+			computedBytes, found := stateless.t.Get(cKey)
+			var computedVal uint256.Int
+			if found && len(computedBytes) > 0 {
+				computedVal.SetBytes(computedBytes)
+			}
+			fmt.Printf("  Key %x (hash %x):\n", key[:8], keyHash[:8])
+			fmt.Printf("    EXPECTED: %s (hex: %x)\n", expectedVal.String(), expectedVal.Bytes())
+			fmt.Printf("    COMPUTED: %s (hex: %x)\n", computedVal.String(), computedVal.Bytes())
+			if !expectedVal.Eq(&computedVal) {
+				fmt.Printf("    ❌ STORAGE VALUE MISMATCH!\n")
+			}
+		}
+	}
 
 	// Verify the root matches the block's state root
 	expectedRoot := block.Root()
