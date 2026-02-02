@@ -504,6 +504,7 @@ func init() {
 	withChaosMonkey(cmdStageHeaders)
 	withL2RPCaddress(cmdStageHeaders)
 	withL2RPCReceiptAddress(cmdStageHeaders)
+	withL2RPCBlockMetadataAddress(cmdStageHeaders)
 	rootCmd.AddCommand(cmdStageHeaders)
 
 	withConfig(cmdStageBodies)

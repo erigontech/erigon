@@ -67,6 +67,7 @@ var Command = cli.Command{
 	Flags: []cli.Flag{
 		&utils.DataDirFlag, &RpcAddr, &Verify, &FromBlock, &Arbitrum,
 		&turbocli.L2RPCReceiptAddrFlag,
+		&turbocli.L2RPCBlockMetadataAddrFlag,
 		&turbocli.L2RPCBlockRPSFlag, &turbocli.L2RPCBlockBurstFlag,
 		&turbocli.L2RPCReceiptRPSFlag, &turbocli.L2RPCReceiptBurstFlag,
 	},
@@ -713,6 +714,17 @@ func genFromRPc(cliCtx *cli.Context) error {
 		log.Info("Connected to receipt RPC", "url", receiptRpcAddr)
 	}
 
+	blockMetadataRpcAddr := cliCtx.String(turbocli.L2RPCBlockMetadataAddrFlag.Name)
+	var blockMetadataClient *rpc.Client
+	if isArbitrum && blockMetadataRpcAddr != "" {
+		blockMetadataClient, err = rpc.Dial(blockMetadataRpcAddr, log.Root())
+		if err != nil {
+			log.Warn("Error connecting to block metadata RPC", "err", err, "url", blockMetadataRpcAddr)
+			return err
+		}
+		log.Info("Connected to block metadata RPC", "url", blockMetadataRpcAddr)
+	}
+
 	db := mdbx.MustOpen(dirs.Chaindata)
 	defer db.Close()
 	var start uint64
@@ -757,7 +769,7 @@ func genFromRPc(cliCtx *cli.Context) error {
 	receiptRPS := cliCtx.Int(turbocli.L2RPCReceiptRPSFlag.Name)
 	receiptBurst := cliCtx.Int(turbocli.L2RPCReceiptBurstFlag.Name)
 
-	_, err = GetAndCommitBlocks(context.Background(), db, nil, client, receiptClient, start, latestBlock.Uint64(), verification, isArbitrum, noWrite, nil, blockRPS, blockBurst, receiptRPS, receiptBurst)
+	_, err = GetAndCommitBlocks(context.Background(), db, nil, client, receiptClient, blockMetadataClient, start, latestBlock.Uint64(), verification, isArbitrum, noWrite, nil, blockRPS, blockBurst, receiptRPS, receiptBurst)
 	return err
 }
 
@@ -766,7 +778,7 @@ var (
 	prevReceiptTime = new(atomic.Uint64)
 )
 
-func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, receiptClient *rpc.Client, startBlockNum, endBlockNum uint64, verify, isArbitrum, dryRun bool, f func(tx kv.RwTx, lastBlockNum uint64) error, blockRPS, blockBurst, receiptRPS, receiptBurst int) (lastBlockNum uint64, err error) {
+func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, receiptClient, blockMetadataClient *rpc.Client, startBlockNum, endBlockNum uint64, verify, isArbitrum, dryRun bool, f func(tx kv.RwTx, lastBlockNum uint64) error, blockRPS, blockBurst, receiptRPS, receiptBurst int) (lastBlockNum uint64, err error) {
 	var (
 		batchSize = uint64(5)
 
@@ -784,7 +796,7 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, r
 	client.SetRequestLimit(rate.Limit(blockRPS), blockBurst)
 
 	for prev := startBlockNum; prev < endBlockNum; {
-		blocks, err := FetchBlocksBatch(client, receiptClient, prev, endBlockNum, batchSize, verify, isArbitrum)
+		blocks, err := FetchBlocksBatch(client, receiptClient, blockMetadataClient, prev, endBlockNum, batchSize, verify, isArbitrum)
 		if err != nil {
 			log.Warn("Error fetching block batch", "startBlockNum", prev, "err", err)
 			return lastBlockNum, err
@@ -1113,7 +1125,7 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 }
 
 // FetchBlocksBatch fetches multiple blocks concurrently and returns them sorted by block number
-func FetchBlocksBatch(client, receiptClient *rpc.Client, startBlock, endBlock, batchSize uint64, verify, isArbitrum bool) ([]*types.Block, error) {
+func FetchBlocksBatch(client, receiptClient, blockMetadataClient *rpc.Client, startBlock, endBlock, batchSize uint64, verify, isArbitrum bool) ([]*types.Block, error) {
 	if startBlock >= endBlock {
 		return nil, nil
 	}
@@ -1126,7 +1138,7 @@ func FetchBlocksBatch(client, receiptClient *rpc.Client, startBlock, endBlock, b
 	// Fetch block metadata for the batch in one RPC call
 	var metadataMap map[uint64][]byte
 	var err error
-	metadataMap, err = FetchBlockMetadataBatch(context.Background(), client, startBlock, startBlock+actualBatchSize)
+	metadataMap, err = FetchBlockMetadataBatch(context.Background(), blockMetadataClient, startBlock, startBlock+actualBatchSize)
 	if err != nil {
 		log.Crit("Failed to fetch block metadata batch", "err", err)
 	}

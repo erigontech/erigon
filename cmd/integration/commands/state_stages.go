@@ -145,6 +145,7 @@ func init() {
 	//withChaosMonkey(stateStages)
 	withL2RPCaddress(stateStages)
 	withL2RPCReceiptAddress(stateStages)
+	withL2RPCBlockMetadataAddress(stateStages)
 	rootCmd.AddCommand(stateStages)
 
 	withConfig(loopExecCmd)
@@ -157,6 +158,7 @@ func init() {
 	withChaosMonkey(loopExecCmd)
 	withL2RPCaddress(loopExecCmd)
 	withL2RPCReceiptAddress(loopExecCmd)
+	withL2RPCBlockMetadataAddress(loopExecCmd)
 	rootCmd.AddCommand(loopExecCmd)
 }
 

@@ -84,6 +84,11 @@ var (
 		Usage: "address of Arbitrum L2 rpc server to fetch receipts from (if different from l2rpc)",
 		Value: "",
 	}
+	L2RPCBlockMetadataAddrFlag = cli.StringFlag{
+		Name:  "l2rpc.blockmetadata",
+		Usage: "address of Arbitrum L2 rpc server to fetch block metadata from (if different from l2rpc)",
+		Value: "",
+	}
 	L2RPCBlockRPSFlag = cli.IntFlag{
 		Name:  "l2rpc.block.rps.limit",
 		Usage: "requests per second limit for block fetching from L2 RPC",
@@ -576,6 +581,14 @@ func applyL2RPCFlagsFromCli(ctx *cli.Context, cfg *ethconfig.Config) {
 		log.Info("[Arbitrum] Using L2 RPC server to fetch receipts", "address", cfg.L2RPC.ReceiptAddr)
 	}
 
+	cfg.L2RPC.BlockMetadataAddr = ctx.String(L2RPCBlockMetadataAddrFlag.Name)
+	if cfg.L2RPC.BlockMetadataAddr == "" {
+		cfg.L2RPC.BlockMetadataAddr = cfg.L2RPC.Addr
+	}
+	if cfg.L2RPC.BlockMetadataAddr != "" {
+		log.Info("[Arbitrum] Using L2 RPC server to fetch block metadata", "address", cfg.L2RPC.BlockMetadataAddr)
+	}
+
 	cfg.L2RPC.BlockRPS = ctx.Int(L2RPCBlockRPSFlag.Name)
 	cfg.L2RPC.BlockBurst = ctx.Int(L2RPCBlockBurstFlag.Name)
 	cfg.L2RPC.ReceiptRPS = ctx.Int(L2RPCReceiptRPSFlag.Name)
@@ -598,6 +611,16 @@ func applyL2RPCFlagsFromCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	}
 	if cfg.L2RPC.ReceiptAddr != "" {
 		log.Info("[Arbitrum] Using L2 RPC server to fetch receipts", "address", cfg.L2RPC.ReceiptAddr)
+	}
+
+	if flg := f.Lookup(L2RPCBlockMetadataAddrFlag.Name); flg != nil {
+		cfg.L2RPC.BlockMetadataAddr = flg.Value.String()
+	}
+	if cfg.L2RPC.BlockMetadataAddr == "" {
+		cfg.L2RPC.BlockMetadataAddr = cfg.L2RPC.Addr
+	}
+	if cfg.L2RPC.BlockMetadataAddr != "" {
+		log.Info("[Arbitrum] Using L2 RPC server to fetch block metadata", "address", cfg.L2RPC.BlockMetadataAddr)
 	}
 
 	if v, err := f.GetInt(L2RPCBlockRPSFlag.Name); err == nil {
