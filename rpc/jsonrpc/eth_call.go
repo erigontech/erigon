@@ -184,6 +184,18 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 
 	blockNum := *(header.Number)
 
+	// Validate execution progress only for explicit block numbers/hashes
+	// Skip for semantic tags (latest, pending, safe, finalized, earliest)
+	if rpchelper.ShouldValidateExecutionProgress(*blockNrOrHash) {
+		executedBlock, err := rpchelper.GetLatestExecutedBlockNumber(dbtx)
+		if err != nil {
+			return 0, err
+		}
+		if blockNum.Uint64() > executedBlock {
+			return 0, fmt.Errorf("state for block %d not available (execution at block %d)", blockNum.Uint64(), executedBlock)
+		}
+	}
+
 	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, blockNum.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return 0, err

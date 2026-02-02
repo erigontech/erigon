@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
@@ -671,5 +672,195 @@ func doPrune(t *testing.T, db kv.RwDB, pruneTo uint64) {
 	//require.NoError(t, err)
 
 	err = tx.Commit()
+	require.NoError(t, err)
+}
+
+// TestEthCallToUnexecutedBlock tests that eth_call returns an error when
+// requesting state from a block that has headers but hasn't been executed yet.
+func TestEthCallToUnexecutedBlock(t *testing.T) {
+	m, bankAddress, contractAddress, _ := chainWithDeployedContract(t)
+	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+
+	// Simulate a syncing node by setting execution stage progress to block 3
+	// while the chain has headers up to block 6
+	ctx := context.Background()
+	tx, err := m.DB.BeginRw(ctx)
+	require.NoError(t, err)
+	err = stages.SaveStageProgress(tx, stages.Execution, 3)
+	require.NoError(t, err)
+	err = tx.Commit()
+	require.NoError(t, err)
+
+	callData := hexutil.MustDecode("0x2e64cec1") // retrieve() function
+	callDataBytes := hexutil.Bytes(callData)
+
+	// Request block 5 which is beyond execution progress (3)
+	blockNr := rpc.BlockNumber(5)
+	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNr)
+
+	_, err = api.Call(ctx, ethapi.CallArgs{
+		From: &bankAddress,
+		To:   &contractAddress,
+		Data: &callDataBytes,
+	}, &blockNrOrHash, nil, nil)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "state for block 5 not available")
+	require.Contains(t, err.Error(), "execution at block 3")
+}
+
+// TestEthCallLatestDuringSync tests that eth_call with "latest" tag works
+// even when the node is syncing (forkchoiceHead > execution progress).
+func TestEthCallLatestDuringSync(t *testing.T) {
+	m, bankAddress, contractAddress, _ := chainWithDeployedContract(t)
+	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+
+	callData := hexutil.MustDecode("0x2e64cec1") // retrieve() function
+	callDataBytes := hexutil.Bytes(callData)
+
+	// Request with "latest" tag should work regardless of execution progress
+	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+
+	_, err := api.Call(context.Background(), ethapi.CallArgs{
+		From: &bankAddress,
+		To:   &contractAddress,
+		Data: &callDataBytes,
+	}, &blockNrOrHash, nil, nil)
+
+	require.NoError(t, err)
+}
+
+// TestGetBalanceUnexecutedBlock tests that eth_getBalance returns an error
+// when requesting state from a block that hasn't been executed yet.
+func TestGetBalanceUnexecutedBlock(t *testing.T) {
+	m, bankAddress, _, _ := chainWithDeployedContract(t)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+
+	// Simulate a syncing node by setting execution stage progress to block 3
+	ctx := context.Background()
+	tx, err := m.DB.BeginRw(ctx)
+	require.NoError(t, err)
+	err = stages.SaveStageProgress(tx, stages.Execution, 3)
+	require.NoError(t, err)
+	err = tx.Commit()
+	require.NoError(t, err)
+
+	// Request block 5 which is beyond execution progress (3)
+	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(5))
+
+	_, err = api.GetBalance(ctx, bankAddress, blockNrOrHash)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "state for block 5 not available")
+	require.Contains(t, err.Error(), "execution at block 3")
+}
+
+// TestGetCodeUnexecutedBlock tests that eth_getCode returns an error
+// when requesting state from a block that hasn't been executed yet.
+func TestGetCodeUnexecutedBlock(t *testing.T) {
+	m, _, contractAddress, _ := chainWithDeployedContract(t)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+
+	// Simulate a syncing node by setting execution stage progress to block 3
+	ctx := context.Background()
+	tx, err := m.DB.BeginRw(ctx)
+	require.NoError(t, err)
+	err = stages.SaveStageProgress(tx, stages.Execution, 3)
+	require.NoError(t, err)
+	err = tx.Commit()
+	require.NoError(t, err)
+
+	// Request block 5 which is beyond execution progress (3)
+	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(5))
+
+	_, err = api.GetCode(ctx, contractAddress, blockNrOrHash)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "state for block 5 not available")
+	require.Contains(t, err.Error(), "execution at block 3")
+}
+
+// TestGetStorageAtUnexecutedBlock tests that eth_getStorageAt returns an error
+// when requesting state from a block that hasn't been executed yet.
+func TestGetStorageAtUnexecutedBlock(t *testing.T) {
+	m, _, contractAddress, _ := chainWithDeployedContract(t)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+
+	// Simulate a syncing node by setting execution stage progress to block 3
+	ctx := context.Background()
+	tx, err := m.DB.BeginRw(ctx)
+	require.NoError(t, err)
+	err = stages.SaveStageProgress(tx, stages.Execution, 3)
+	require.NoError(t, err)
+	err = tx.Commit()
+	require.NoError(t, err)
+
+	// Request block 5 which is beyond execution progress (3)
+	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(5))
+
+	_, err = api.GetStorageAt(ctx, contractAddress, "0x0", blockNrOrHash)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "state for block 5 not available")
+	require.Contains(t, err.Error(), "execution at block 3")
+}
+
+// TestEstimateGasUnexecutedBlock tests that eth_estimateGas returns an error
+// when requesting state from a block that hasn't been executed yet.
+func TestEstimateGasUnexecutedBlock(t *testing.T) {
+	m, bankAddress, contractAddress, _ := chainWithDeployedContract(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mock.Mock(t))
+	mining := txpoolproto.NewMiningClient(conn)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log)
+	api := NewEthAPI(NewBaseApi(ff, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+
+	// Simulate a syncing node by setting execution stage progress to block 3
+	tx, err := m.DB.BeginRw(ctx)
+	require.NoError(t, err)
+	err = stages.SaveStageProgress(tx, stages.Execution, 3)
+	require.NoError(t, err)
+	err = tx.Commit()
+	require.NoError(t, err)
+
+	callData := hexutil.MustDecode("0x2e64cec1") // retrieve() function
+	callDataBytes := hexutil.Bytes(callData)
+
+	// Request block 5 which is beyond execution progress (3)
+	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(5))
+
+	_, err = api.EstimateGas(ctx, &ethapi.CallArgs{
+		From: &bankAddress,
+		To:   &contractAddress,
+		Data: &callDataBytes,
+	}, &blockNrOrHash, nil, nil)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "state for block 5 not available")
+	require.Contains(t, err.Error(), "execution at block 3")
+}
+
+// TestEstimateGasLatestDuringSync tests that eth_estimateGas with "latest" tag works
+// even when the node is syncing (forkchoiceHead > execution progress).
+func TestEstimateGasLatestDuringSync(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mock.Mock(t))
+	mining := txpoolproto.NewMiningClient(conn)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log)
+	api := NewEthAPI(NewBaseApi(ff, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+
+	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+
+	// Request with "latest" tag should work
+	_, err := api.EstimateGas(ctx, &ethapi.CallArgs{
+		From: &from,
+		To:   &to,
+	}, nil, nil, nil)
+
 	require.NoError(t, err)
 }
