@@ -320,7 +320,7 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 
 	for {
 		steps++
-		if steps%5000 == 0 && evm.Cancelled() {
+		if steps%50_000 == 0 && evm.Cancelled() {
 			break
 		}
 		if dbg.TraceDyanmicGas || debug || trace {

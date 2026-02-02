@@ -63,6 +63,11 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		}
 	}
 	if ok {
+		err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+		if err != nil {
+			return nil, err
+		}
+
 		txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err
@@ -152,6 +157,12 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 	if !ok {
 		return nil, nil
 	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
 	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
@@ -192,6 +203,16 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 	}
 	defer tx.Rollback()
 	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(blockHash, true), tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, nil
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -240,6 +261,16 @@ func (api *APIImpl) GetRawTransactionByBlockHashAndIndex(ctx context.Context, bl
 	}
 	defer tx.Rollback()
 
+	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(blockHash, true), tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, nil
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
 	block, err := api.blockByHashWithSenders(ctx, tx, blockHash)
 	if err != nil {
 		return nil, err
@@ -269,6 +300,11 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 		}
+		return nil, err
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	if err != nil {
 		return nil, err
 	}
 
@@ -314,6 +350,11 @@ func (api *APIImpl) GetRawTransactionByBlockNumberAndIndex(ctx context.Context, 
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNr.Uint64())
+	if err != nil {
+		return nil, err
+	}
 
 	block, err := api.blockByRPCNumber(ctx, blockNr, tx)
 	if err != nil {
