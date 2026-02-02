@@ -82,8 +82,15 @@ func (extr *EngineXTestRunner) Run(ctx context.Context, test EngineXTestDefiniti
 	if err != nil {
 		return err
 	}
+	if len(test.NewPayloads) > 0 {
+		// make sure each test begins at genesis
+		err = processFcu(ctx, tester, tester.GenesisBlock.Hash(), test.NewPayloads[0].FcuVersion)
+		if err != nil {
+			return err
+		}
+	}
 	for _, newPayload := range test.NewPayloads {
-		err := processNewPayload(ctx, tester, newPayload)
+		err = processNewPayload(ctx, tester, newPayload)
 		if err != nil {
 			return err
 		}
@@ -203,18 +210,29 @@ func processFcu(ctx context.Context, tester EngineApiTester, head common.Hash, v
 		SafeBlockHash:      common.Hash{},
 		FinalizedBlockHash: common.Hash{},
 	}
-	var r *enginetypes.ForkChoiceUpdatedResponse
-	var err error
-	switch version {
-	case "1":
-		r, err = tester.EngineApiClient.ForkchoiceUpdatedV1(ctx, &fcu, nil)
-	case "2":
-		r, err = tester.EngineApiClient.ForkchoiceUpdatedV2(ctx, &fcu, nil)
-	case "3":
-		r, err = tester.EngineApiClient.ForkchoiceUpdatedV3(ctx, &fcu, nil)
-	default:
-		return fmt.Errorf("unsupported fcu version: %s", version)
-	}
+	r, err := retryEngine(
+		ctx,
+		[]enginetypes.EngineStatus{enginetypes.SyncingStatus},
+		nil,
+		func() (*enginetypes.ForkChoiceUpdatedResponse, enginetypes.EngineStatus, error) {
+			var r *enginetypes.ForkChoiceUpdatedResponse
+			var err error
+			switch version {
+			case "1":
+				r, err = tester.EngineApiClient.ForkchoiceUpdatedV1(ctx, &fcu, nil)
+			case "2":
+				r, err = tester.EngineApiClient.ForkchoiceUpdatedV2(ctx, &fcu, nil)
+			case "3":
+				r, err = tester.EngineApiClient.ForkchoiceUpdatedV3(ctx, &fcu, nil)
+			default:
+				return nil, "", fmt.Errorf("unsupported fcu version: %s", version)
+			}
+			if err != nil {
+				return nil, "", err
+			}
+			return r, r.PayloadStatus.Status, nil
+		},
+	)
 	if err != nil {
 		return err
 	}
