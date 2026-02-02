@@ -43,6 +43,16 @@ func TestSerializeDeserializeDiff(t *testing.T) {
 	require.Equal(t, d, deserialized)
 }
 
+func TestSerializeDeserializeDiffEmpty(t *testing.T) {
+	t.Parallel()
+
+	var empty []kv.DomainEntryDiff
+	serialized := changeset.SerializeDiffSet(empty, nil)
+	require.Equal(t, []byte{0, 0, 0, 0, 0}, serialized) // dict len (1) + diffSet len (4)
+	deserialized := changeset.DeserializeDiffSet(serialized)
+	require.Empty(t, deserialized)
+}
+
 func TestMergeDiffSet(t *testing.T) {
 	t.Parallel()
 
@@ -65,4 +75,73 @@ func TestMergeDiffSet(t *testing.T) {
 	require.Equal(t, d1[1], merged[1])
 	require.Equal(t, d2[1], merged[2])
 	require.Equal(t, d2[2], merged[3])
+}
+
+func BenchmarkSerializeDiffSet(b *testing.B) {
+	// Create a realistic diffSet with varying sizes
+	var d []kv.DomainEntryDiff
+	steps := [][8]byte{{1}, {2}, {3}, {4}}
+	for i := 0; i < 1000; i++ {
+		key := fmt.Sprintf("key%08d_padding", i)
+		value := make([]byte, 32+i%64) // varying value sizes
+		d = append(d, kv.DomainEntryDiff{
+			Key:           key,
+			Value:         value,
+			PrevStepBytes: steps[i%len(steps)][:],
+		})
+	}
+
+	out := make([]byte, 0, 128*1024)
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		out = changeset.SerializeDiffSet(d, out[:0])
+	}
+}
+
+// createTestDiffSet creates a StateChangeSet with realistic data
+func createTestDiffSet(tb testing.TB, numAccounts, numStorage, numCode, numCommitment int) *changeset.StateChangeSet {
+	tb.Helper()
+
+	diffSet := &changeset.StateChangeSet{}
+
+	// Accounts domain - 20 byte addresses with account data
+	for i := 0; i < numAccounts; i++ {
+		key := make([]byte, 20)
+		key[0] = byte(i >> 8)
+		key[1] = byte(i)
+		value := make([]byte, 70) // typical account encoding size
+		diffSet.Diffs[kv.AccountsDomain].DomainUpdate(key, kv.Step(100), value, kv.Step(99))
+	}
+
+	// Storage domain - 20 byte address + 32 byte location
+	for i := 0; i < numStorage; i++ {
+		key := make([]byte, 52)
+		key[0] = byte(i >> 16)
+		key[1] = byte(i >> 8)
+		key[2] = byte(i)
+		value := make([]byte, 32) // storage value
+		diffSet.Diffs[kv.StorageDomain].DomainUpdate(key, kv.Step(100), value, kv.Step(99))
+	}
+
+	// Code domain - 20 byte address with code hash
+	for i := 0; i < numCode; i++ {
+		key := make([]byte, 20)
+		key[0] = byte(i >> 8)
+		key[1] = byte(i)
+		value := make([]byte, 32) // code hash
+		diffSet.Diffs[kv.CodeDomain].DomainUpdate(key, kv.Step(100), value, kv.Step(99))
+	}
+
+	// Commitment domain - variable key with trie node data
+	for i := 0; i < numCommitment; i++ {
+		key := make([]byte, 8+i%32) // variable length keys
+		key[0] = byte(i >> 8)
+		key[1] = byte(i)
+		value := make([]byte, 64+i%64) // variable length values
+		diffSet.Diffs[kv.CommitmentDomain].DomainUpdate(key, kv.Step(100), value, kv.Step(99))
+	}
+
+	return diffSet
 }
