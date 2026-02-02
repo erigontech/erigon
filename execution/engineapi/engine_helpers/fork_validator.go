@@ -141,13 +141,13 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 }
 
 // MergeExtendingFork merges the shared domains of the current extending fork into the current shared domains if fcu chooses its head hash as the fork choice.
-func (fv *ForkValidator) MergeExtendingFork(sd *execctx.SharedDomains, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts) error {
+func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts) error {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	start := time.Now()
 	if fv.sharedDom != nil {
 		err := sd.Merge(fv.sharedDom)
-    fv.sharedDom.FlushHooks(ctx, sd.NewDomainPutter(tx))
+		fv.sharedDom.FlushHooks(ctx, sd.NewDomainPutter(tx))
 		if err != nil {
 			return err
 		}
