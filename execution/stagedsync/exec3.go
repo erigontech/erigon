@@ -816,6 +816,7 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 }
 
 func shouldGenerateChangeSets(cfg ExecuteBlockCfg, blockNum, maxBlockNum uint64, initialCycle bool) bool {
+	return true
 	if cfg.syncCfg.AlwaysGenerateChangesets {
 		return true
 	}
