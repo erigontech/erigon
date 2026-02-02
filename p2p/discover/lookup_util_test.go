@@ -21,13 +21,11 @@ package discover
 
 import (
 	"crypto/ecdsa"
-	"fmt"
 	"net"
 	"slices"
 	"sort"
 	"testing"
 
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/p2p/discover/v4wire"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
@@ -177,44 +175,6 @@ func (tn *preminedTestnet) privateKeys() []*ecdsa.PrivateKey {
 		keys = append(keys, tn.dists[d]...)
 	}
 	return keys
-}
-
-var _ = (*preminedTestnet).mine // avoid linter warning about mine being dead code.
-
-// mine generates a testnet struct literal with nodes at
-// various distances to the network's target.
-func (tn *preminedTestnet) mine() {
-	// Clear existing slices first (useful when re-mining).
-	for i := range tn.dists {
-		tn.dists[i] = nil
-	}
-
-	targetSha := tn.target.ID()
-	found, need := 0, 40
-	for found < need {
-		k := newkey()
-		ld := enode.LogDist(targetSha, enode.PubkeyToIDV4(&k.PublicKey))
-		if len(tn.dists[ld]) < 8 {
-			tn.dists[ld] = append(tn.dists[ld], k)
-			found++
-			fmt.Printf("found ID with ld %d (%d/%d)\n", ld, found, need)
-		}
-	}
-	fmt.Printf("&preminedTestnet{\n")
-	fmt.Printf("	target: hexEncPubkey(\"%x\"),\n", tn.target[:])
-	fmt.Printf("	dists: [%d][]*ecdsa.PrivateKey{\n", len(tn.dists))
-	for ld, ns := range tn.dists {
-		if len(ns) == 0 {
-			continue
-		}
-		fmt.Printf("		%d: {\n", ld)
-		for _, key := range ns {
-			fmt.Printf("			hexEncPrivkey(\"%x\"),\n", crypto.FromECDSA(key))
-		}
-		fmt.Printf("		},\n")
-	}
-	fmt.Printf("	},\n")
-	fmt.Printf("}\n")
 }
 
 // checkLookupResults verifies that the results of a lookup are the closest nodes to

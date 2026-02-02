@@ -357,3 +357,9 @@ func (fv *ForkValidator) GetTimings(hash common.Hash) BlockTimings {
 	}
 	return BlockTimings{}
 }
+
+func (fv *ForkValidator) ExtendingFork() (common.Hash, uint64, *execctx.SharedDomains) {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	return fv.extendingForkHeadHash, fv.extendingForkNumber, fv.sharedDom
+}

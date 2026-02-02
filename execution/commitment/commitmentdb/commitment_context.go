@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -195,6 +196,12 @@ func (sdc *SharedDomainsCommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) 
 	sdc.paraTrieDB = db
 }
 
+func (sdc *SharedDomainsCommitmentContext) SetDeferBranchUpdates(deferBranchUpdates bool) {
+	if sdc.patriciaTrie.Variant() == commitment.VariantHexPatriciaTrie {
+		sdc.patriciaTrie.(*commitment.HexPatriciaHashed).SetDeferBranchUpdates(deferBranchUpdates)
+	}
+}
+
 // SetHistoryStateReader sets the state reader to read *full* historical state at specified txNum.
 func (sdc *SharedDomainsCommitmentContext) SetHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
 	sdc.SetStateReader(NewHistoryStateReader(roTx, limitReadAsOfTxNum))
@@ -302,17 +309,17 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 // ComputeCommitment Evaluates commitment for gathered updates.
 // If warmup was set via EnableTrieWarmup, pre-warms MDBX page cache by reading Branch data in parallel before processing.
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {
-	mxCommitmentRunning.Inc()
-	defer mxCommitmentRunning.Dec()
-	defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
+	if dbg.KVReadLevelledMetrics {
+		mxCommitmentRunning.Inc()
+		defer mxCommitmentRunning.Dec()
+		defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
+	}
 
 	updateCount := sdc.updates.Size()
-	if sdc.trace {
-		start := time.Now()
-		defer func() {
-			log.Trace("ComputeCommitment", "block", blockNum, "keys", common.PrettyCounter(updateCount), "mode", sdc.updates.Mode(), "spent", time.Since(start))
-		}()
-	}
+	start := time.Now()
+	defer func() {
+		log.Debug("[commitment] processed", "block", blockNum, "txNum", txNum, "keys", common.PrettyCounter(updateCount), "mode", sdc.updates.Mode(), "spent", time.Since(start))
+	}()
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
 		return rootHash, err
