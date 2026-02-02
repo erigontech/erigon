@@ -1265,6 +1265,75 @@ func printExpectedPostState(blockNum uint64, expectedStateRoot common.Hash, expe
 	}
 }
 
+// compareComputedVsExpectedState compares the state computed by witnessStateless against the expected state.
+func compareComputedVsExpectedState(stateless *witnessStateless, expectedState map[common.Address]*accounts.Account, expectedStorage map[common.Address]map[common.Hash]uint256.Int) {
+	fmt.Printf("\n=== Comparing computed vs expected state ===\n")
+	for addr, expectedAcc := range expectedState {
+		addrHash, _ := common.HashData(addr[:])
+		computedAcc, found := stateless.t.GetAccount(addrHash[:])
+
+		fmt.Printf("\nAccount %s (hash %x):\n", addr.Hex(), addrHash[:8])
+		if expectedAcc != nil {
+			fmt.Printf("  EXPECTED: Nonce=%d, Balance=%s, Root=%x, CodeHash=%x\n",
+				expectedAcc.Nonce, expectedAcc.Balance.String(), expectedAcc.Root, expectedAcc.CodeHash)
+		} else {
+			fmt.Printf("  EXPECTED: nil (deleted)\n")
+		}
+		if found && computedAcc != nil {
+			fmt.Printf("  COMPUTED: Nonce=%d, Balance=%s, Root=%x, CodeHash=%x\n",
+				computedAcc.Nonce, computedAcc.Balance.String(), computedAcc.Root, computedAcc.CodeHash)
+			// Check for differences - only print mismatches or a single tick if all match
+			if expectedAcc != nil {
+				allMatch := true
+				if expectedAcc.Nonce != computedAcc.Nonce {
+					fmt.Printf("    ❌ NONCE MISMATCH!\n")
+					allMatch = false
+				}
+				if !expectedAcc.Balance.Eq(&computedAcc.Balance) {
+					fmt.Printf("    ❌ BALANCE MISMATCH! (diff: %d wei)\n", new(uint256.Int).Sub(&expectedAcc.Balance, &computedAcc.Balance).Uint64())
+					allMatch = false
+				}
+				if expectedAcc.Root != computedAcc.Root {
+					fmt.Printf("    ❌ STORAGE ROOT MISMATCH!\n")
+					allMatch = false
+				}
+				if expectedAcc.CodeHash != computedAcc.CodeHash {
+					fmt.Printf("    ❌ CODE HASH MISMATCH!\n")
+					allMatch = false
+				}
+				if allMatch {
+					fmt.Printf("    ✅ All fields match\n")
+				}
+			}
+		} else {
+			fmt.Printf("  COMPUTED: NOT FOUND or nil\n")
+		}
+	}
+
+	// Compare storage values
+	for addr, expectedKeys := range expectedStorage {
+		addrHash, _ := common.HashData(addr[:])
+		fmt.Printf("\nStorage for %s (hash %x):\n", addr.Hex(), addrHash[:8])
+		for key, expectedVal := range expectedKeys {
+			keyHash, _ := common.HashData(key[:])
+			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
+			computedBytes, found := stateless.t.Get(cKey)
+			var computedVal uint256.Int
+			if found && len(computedBytes) > 0 {
+				computedVal.SetBytes(computedBytes)
+			}
+			fmt.Printf("  Key %x (hash %x):\n", key[:8], keyHash[:8])
+			fmt.Printf("    EXPECTED: %s (hex: %x)\n", expectedVal.String(), expectedVal.Bytes())
+			fmt.Printf("    COMPUTED: %s (hex: %x)\n", computedVal.String(), computedVal.Bytes())
+			if !expectedVal.Eq(&computedVal) {
+				fmt.Printf("    ❌ STORAGE VALUE MISMATCH!\n")
+			} else {
+				fmt.Printf("    ✅\n")
+			}
+		}
+	}
+}
+
 // witnessStateless is a StateReader/StateWriter implementation that operates on a witness trie.
 // It's used for stateless block verification.
 type witnessStateless struct {
@@ -1866,8 +1935,8 @@ func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.B
 		gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
 		ibs.SetTxContext(blockNum, txIndex)
 
-		// Apply the message - use nil engine since we don't need consensus validation
-		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, nil)
+		// Apply the message - gasBailout must be false to properly deduct gas from sender
+		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, nil)
 		if err != nil {
 			return fmt.Errorf("verification: failed to apply tx %d: %w", txIndex, err)
 		}
@@ -1918,62 +1987,8 @@ func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.B
 	// Finalize and compute the resulting state root
 	newStateRoot := stateless.Finalize()
 
-	// Compare computed state vs expected state for all modified accounts
-	fmt.Printf("\n=== Comparing computed vs expected state ===\n")
-	for addr, expectedAcc := range expectedState {
-		addrHash, _ := common.HashData(addr[:])
-		computedAcc, found := stateless.t.GetAccount(addrHash[:])
-
-		fmt.Printf("\nAccount %s (hash %x):\n", addr.Hex(), addrHash[:8])
-		if expectedAcc != nil {
-			fmt.Printf("  EXPECTED: Nonce=%d, Balance=%s, Root=%x, CodeHash=%x\n",
-				expectedAcc.Nonce, expectedAcc.Balance.String(), expectedAcc.Root, expectedAcc.CodeHash)
-		} else {
-			fmt.Printf("  EXPECTED: nil (deleted)\n")
-		}
-		if found && computedAcc != nil {
-			fmt.Printf("  COMPUTED: Nonce=%d, Balance=%s, Root=%x, CodeHash=%x\n",
-				computedAcc.Nonce, computedAcc.Balance.String(), computedAcc.Root, computedAcc.CodeHash)
-			// Check for differences
-			if expectedAcc != nil {
-				if expectedAcc.Nonce != computedAcc.Nonce {
-					fmt.Printf("    ❌ NONCE MISMATCH!\n")
-				}
-				if !expectedAcc.Balance.Eq(&computedAcc.Balance) {
-					fmt.Printf("    ❌ BALANCE MISMATCH!\n")
-				}
-				if expectedAcc.Root != computedAcc.Root {
-					fmt.Printf("    ❌ STORAGE ROOT MISMATCH!\n")
-				}
-				if expectedAcc.CodeHash != computedAcc.CodeHash {
-					fmt.Printf("    ❌ CODE HASH MISMATCH!\n")
-				}
-			}
-		} else {
-			fmt.Printf("  COMPUTED: NOT FOUND or nil\n")
-		}
-	}
-
-	// Compare storage values
-	for addr, expectedKeys := range expectedStorage {
-		addrHash, _ := common.HashData(addr[:])
-		fmt.Printf("\nStorage for %s (hash %x):\n", addr.Hex(), addrHash[:8])
-		for key, expectedVal := range expectedKeys {
-			keyHash, _ := common.HashData(key[:])
-			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
-			computedBytes, found := stateless.t.Get(cKey)
-			var computedVal uint256.Int
-			if found && len(computedBytes) > 0 {
-				computedVal.SetBytes(computedBytes)
-			}
-			fmt.Printf("  Key %x (hash %x):\n", key[:8], keyHash[:8])
-			fmt.Printf("    EXPECTED: %s (hex: %x)\n", expectedVal.String(), expectedVal.Bytes())
-			fmt.Printf("    COMPUTED: %s (hex: %x)\n", computedVal.String(), computedVal.Bytes())
-			if !expectedVal.Eq(&computedVal) {
-				fmt.Printf("    ❌ STORAGE VALUE MISMATCH!\n")
-			}
-		}
-	}
+	// Compare computed state vs expected state
+	compareComputedVsExpectedState(stateless, expectedState, expectedStorage)
 
 	// Verify the root matches the block's state root
 	expectedRoot := block.Root()
