@@ -161,6 +161,7 @@ type IntraBlockState struct {
 	journal       *journal
 	revisions     *revisions
 	trace         bool
+	isAuraChain   bool
 	tracingHooks  *tracing.Hooks
 	balanceInc    map[accounts.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
 	addressAccess map[accounts.Address]*accessOptions
@@ -254,6 +255,14 @@ func (sdb *IntraBlockState) SetHooks(hooks *tracing.Hooks) {
 
 func (sdb *IntraBlockState) SetTrace(trace bool) {
 	sdb.trace = trace
+}
+
+func (sdb *IntraBlockState) SetIsAura(isAura bool) {
+	sdb.isAuraChain = isAura
+}
+
+func (sdb *IntraBlockState) IsAura() bool {
+	return sdb.isAuraChain
 }
 
 func (sdb *IntraBlockState) hasWrite(addr accounts.Address, path AccountPath, key accounts.StorageKey) bool {
@@ -996,6 +1005,11 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 // SubBalance subtracts amount from the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
+
+	if amount.IsZero() && !sdb.isAuraChain {
+		return nil
+	}
+
 	prev, wasCommited, _ := sdb.getBalance(addr)
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
