@@ -88,9 +88,8 @@ func (db *DiffsetDatabase) WriteDiffSet(blockNumber uint64, blockHash common.Has
 	if err := db.ensureDir(); err != nil {
 		return err
 	}
-
+	db.mu.Lock()
 	go func() {
-		db.mu.Lock()
 		defer db.mu.Unlock()
 
 		if dbg.TraceUnwinds {
