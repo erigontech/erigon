@@ -113,7 +113,7 @@ func (db *DiffsetDatabase) WriteDiffSet(blockNumber uint64, blockHash common.Has
 		// Build path using auxiliary buffers
 		path := db.diffsetPathZeroAlloc(blockNumber, blockHash)
 
-		if err := dir.WriteFileWithFsync(path, db.serializeBuf, 0o644); err != nil {
+		if err := os.WriteFile(path, db.serializeBuf, 0o644); err != nil {
 			log.Error("DiffsetDatabase.WriteDiffSet: write error", "blockNumber", blockNumber, "blockHash", blockHash, "err", err)
 		}
 	}()
