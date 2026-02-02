@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -84,7 +83,7 @@ func (extr *EngineXTestRunner) Run(ctx context.Context, test EngineXTestDefiniti
 		return err
 	}
 	for _, newPayload := range test.NewPayloads {
-		err := extr.processNewPayload(ctx, tester, newPayload)
+		err := processNewPayload(ctx, tester, newPayload)
 		if err != nil {
 			return err
 		}
@@ -135,7 +134,7 @@ func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllo
 	return testersPerAlloc[preAllocHash], nil
 }
 
-func (extr *EngineXTestRunner) processNewPayload(ctx context.Context, tester EngineApiTester, payload EngineXTestNewPayload) error {
+func processNewPayload(ctx context.Context, tester EngineApiTester, payload EngineXTestNewPayload) error {
 	var enginePayload enginetypes.ExecutionPayload
 	var blobHashes []common.Hash
 	var parentBeaconRoot common.Hash
@@ -162,10 +161,6 @@ func (extr *EngineXTestRunner) processNewPayload(ctx context.Context, tester Eng
 			return err
 		}
 	}
-	payloadVersion, err := strconv.ParseUint(payload.NewPayloadVersion, 10, 64)
-	if err != nil {
-		return err
-	}
 	enginePayloadStatus, err := retryEngine(
 		ctx,
 		[]enginetypes.EngineStatus{enginetypes.SyncingStatus},
@@ -173,19 +168,19 @@ func (extr *EngineXTestRunner) processNewPayload(ctx context.Context, tester Eng
 		func() (*enginetypes.PayloadStatus, enginetypes.EngineStatus, error) {
 			var r *enginetypes.PayloadStatus
 			var err error
-			switch payloadVersion {
-			case 1:
+			switch payload.NewPayloadVersion {
+			case "1":
 				r, err = tester.EngineApiClient.NewPayloadV1(ctx, &enginePayload)
-			case 2:
+			case "2":
 				r, err = tester.EngineApiClient.NewPayloadV2(ctx, &enginePayload)
-			case 3:
+			case "3":
 				r, err = tester.EngineApiClient.NewPayloadV3(ctx, &enginePayload, blobHashes, &parentBeaconRoot)
-			case 4:
+			case "4":
 				r, err = tester.EngineApiClient.NewPayloadV4(ctx, &enginePayload, blobHashes, &parentBeaconRoot, executionRequests)
-			case 5:
+			case "5":
 				r, err = tester.EngineApiClient.NewPayloadV5(ctx, &enginePayload, blobHashes, &parentBeaconRoot, executionRequests)
 			default:
-				return nil, "", fmt.Errorf("unsupported new payload version %d", payloadVersion)
+				return nil, "", fmt.Errorf("unsupported new payload version: %s", payload.NewPayloadVersion)
 			}
 			if err != nil {
 				return nil, "", err
@@ -199,6 +194,33 @@ func (extr *EngineXTestRunner) processNewPayload(ctx context.Context, tester Eng
 	if enginePayloadStatus.Status != enginetypes.ValidStatus {
 		return fmt.Errorf("payload status is not valid: %s", enginePayloadStatus.Status)
 	}
+	return processFcu(ctx, tester, enginePayload.BlockHash, payload.FcuVersion)
+}
+
+func processFcu(ctx context.Context, tester EngineApiTester, head common.Hash, version string) error {
+	fcu := enginetypes.ForkChoiceState{
+		HeadHash:           head,
+		SafeBlockHash:      common.Hash{},
+		FinalizedBlockHash: common.Hash{},
+	}
+	var r *enginetypes.ForkChoiceUpdatedResponse
+	var err error
+	switch version {
+	case "1":
+		r, err = tester.EngineApiClient.ForkchoiceUpdatedV1(ctx, &fcu, nil)
+	case "2":
+		r, err = tester.EngineApiClient.ForkchoiceUpdatedV2(ctx, &fcu, nil)
+	case "3":
+		r, err = tester.EngineApiClient.ForkchoiceUpdatedV3(ctx, &fcu, nil)
+	default:
+		return fmt.Errorf("unsupported fcu version: %s", version)
+	}
+	if err != nil {
+		return err
+	}
+	if r.PayloadStatus.Status != enginetypes.ValidStatus {
+		return fmt.Errorf("payload status of fcu is not valid: %s", r.PayloadStatus.Status)
+	}
 	return nil
 }
 
@@ -211,7 +233,7 @@ type EngineXTestDefinition struct {
 type EngineXTestNewPayload struct {
 	Params            []json.RawMessage `json:"params"`
 	NewPayloadVersion string            `json:"newPayloadVersion"`
-	FcuVersion        string            `json:"fcuVersion"`
+	FcuVersion        string            `json:"forkchoiceUpdatedVersion"`
 }
 
 type PreAllocHash string
