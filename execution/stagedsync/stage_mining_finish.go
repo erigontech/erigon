@@ -59,23 +59,23 @@ func StageMiningFinishCfg(
 
 func SpawnMiningFinishStage(s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg MiningFinishCfg, quit <-chan struct{}, logger log.Logger) error {
 	logPrefix := s.LogPrefix()
-	current := cfg.miningState.MiningBlock
+	blockAssembler := cfg.miningState.BlockAssembler
 
 	// Short circuit when receiving duplicate result caused by resubmitting.
 	//if w.chain.HasBlock(block.Hash(), block.NumberU64()) {
 	//	continue
 	//}
 
-	block := types.NewBlockForAsembling(current.Header, current.Txns, current.Uncles, current.Receipts, current.Withdrawals)
-	if current.BlockAccessList != nil {
-		block.SetBlockAccessList(current.BlockAccessList)
+	block := types.NewBlockForAsembling(blockAssembler.Header, blockAssembler.Txns, blockAssembler.Uncles, blockAssembler.Receipts, blockAssembler.Withdrawals)
+	if blockAssembler.BlockAccessList != nil {
+		block.SetBlockAccessList(blockAssembler.BlockAccessList)
 		if block.BlockAccessListHash() == nil {
 			hash := empty.BlockAccessListHash
 			block.HeaderNoCopy().BlockAccessListHash = &hash
 		}
 	}
-	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: current.Receipts, Requests: current.Requests}
-	*current = MiningBlock{} // hack to clean global data
+	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: blockAssembler.Receipts, Requests: blockAssembler.Requests}
+	cfg.miningState.BlockAssembler = nil
 
 	//sealHash := engine.SealHash(block.Header())
 	// Reject duplicate sealing work due to resubmitting.

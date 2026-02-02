@@ -900,7 +900,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			config.Sync,
 			stagedsync.MiningStages(
 				backend.sentryCtx,
-				stagedsync.StageMiningCreateBlockCfg(miningStatePos, backend.chainConfig, backend.engine, param, backend.blockReader),
+				stagedsync.StageMiningCreateBlockCfg(miningStatePos, backend.chainConfig, backend.engine, param, backend.blockReader, config.ExperimentalBAL),
 				stagedsync.StageExecuteBlocksCfg(
 					backend.chainDB,
 					config.Prune,

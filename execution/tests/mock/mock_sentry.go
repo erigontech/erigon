@@ -262,8 +262,15 @@ func WithStepSize(stepSize uint64) Option {
 	}
 }
 
+func WithLogLevel(logLevel log.Lvl) Option {
+	return func(opts *options) {
+		opts.logLevel = &logLevel
+	}
+}
+
 type options struct {
 	stepSize *uint64
+	logLevel *log.Lvl
 }
 
 func applyOptions(opts []Option) options {
@@ -328,6 +335,9 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.FcuBackgroundPrune = true
 
 	logLvl := log.LvlError
+	if opt.logLevel != nil {
+		logLvl = *opt.logLevel
+	}
 	if lvl, ok := os.LookupEnv("MOCK_SENTRY_LOG_LEVEL"); ok {
 		logLvl, err = log.LvlFromString(lvl)
 		if err != nil {
@@ -521,7 +531,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			cfg.Sync,
 			stagedsync.MiningStages(
 				mock.Ctx,
-				stagedsync.StageMiningCreateBlockCfg(miner, mock.ChainConfig, mock.Engine, nil, mock.BlockReader),
+				stagedsync.StageMiningCreateBlockCfg(miner, mock.ChainConfig, mock.Engine, nil, mock.BlockReader, false),
 				stagedsync.StageExecuteBlocksCfg(
 					mock.DB,
 					prune,
@@ -537,9 +547,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 					mock.sentriesClient.Hd,
 					gspec,
 					cfg.Sync,
-					nil,
-					false, /*experimentalBAL*/
-				),
+					nil, false),
 				stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd),
 				stagedsync.StageMiningExecCfg(miner, nil, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, mock.BlockReader),
 				stagedsync.StageMiningFinishCfg(mock.ChainConfig, mock.Engine, miner, miningCancel, mock.BlockReader, latestBlockBuiltStore),
@@ -620,7 +628,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		cfg.Sync,
 		stagedsync.MiningStages(
 			mock.Ctx,
-			stagedsync.StageMiningCreateBlockCfg(miner, mock.ChainConfig, mock.Engine, nil, mock.BlockReader),
+			stagedsync.StageMiningCreateBlockCfg(miner, mock.ChainConfig, mock.Engine, nil, mock.BlockReader, false),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
 				prune,
