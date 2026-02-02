@@ -24,6 +24,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -195,7 +196,7 @@ func (t *muxTracer) CaptureArbitrumStorageSet(key, value common.Hash, depth int,
 	}
 }
 
-func (t *muxTracer) CaptureArbitrumTransfer(from, to *common.Address, value *uint256.Int, before bool, reason string) {
+func (t *muxTracer) CaptureArbitrumTransfer(from, to accounts.Address, value *uint256.Int, before bool, reason string) {
 	for _, t := range t.tracers {
 		if t.CaptureArbitrumTransfer != nil {
 			t.CaptureArbitrumTransfer(from, to, value, before, reason)

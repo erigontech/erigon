@@ -37,15 +37,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
-
-	"github.com/erigontech/mdbx-go/mdbx"
-	lru "github.com/hashicorp/golang-lru/arc/v2"
-	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/protobuf/types/known/emptypb"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -136,9 +127,17 @@ import (
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
+	"github.com/erigontech/mdbx-go/mdbx"
 
 	_ "github.com/erigontech/erigon/arb/chain"     // Register Arbitrum chains
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
+
+	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -417,7 +416,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.chainDB = temporalDb
 
 	// Can happen in some configurations
-	if err := backend.setUpSnapDownloader(ctx, stack.Config(), config.Downloader, chainConfig); err != nil {
+	if err := backend.setUpSnapDownloader(ctx, stack.Config(), config.Downloader /*, chainConfig*/); err != nil {
 		return nil, err
 	}
 
@@ -1205,7 +1204,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	return nil
 }
 
-func (s *Ethereum) Engine() consensus.Engine {
+func (s *Ethereum) Engine() rules.Engine {
 	return s.engine
 }
 

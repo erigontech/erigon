@@ -108,10 +108,10 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnTxStart: t.OnTxStart,
-			OnTxEnd:   t.OnTxEnd,
-			OnOpcode:  t.OnOpcode,
-			OnExit:    t.OnExit,
+			OnTxStart:                 t.OnTxStart,
+			OnTxEnd:                   t.OnTxEnd,
+			OnOpcode:                  t.OnOpcode,
+			OnExit:                    t.OnExit,
 			CaptureArbitrumStorageGet: t.CaptureArbitrumStorageGet,
 			CaptureArbitrumStorageSet: t.CaptureArbitrumStorageSet,
 		},
@@ -167,7 +167,7 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 		addr := accounts.InternAddress(stackData[stackLen-1].Bytes20())
 		t.lookupAccount(addr)
 		if op == vm.SELFDESTRUCT {
-			if t.env.ChainConfig.IsCancun(t.env.Time) {
+			if t.env.ChainConfig.IsCancun(t.env.Time, t.env.BlockNumber) {
 				// EIP-6780: Post Dancum/Cancun only delete if created in same transaction
 				if t.created[caller] {
 					t.deleted[caller] = true
@@ -182,7 +182,7 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 		addr := accounts.InternAddress(stackData[stackLen-2].Bytes20())
 		t.lookupAccount(addr)
 		// Lookup the delegation target
-		if t.env.ChainConfig.IsPrague(t.env.Time) {
+		if t.env.ChainConfig.IsPrague(t.env.Time, t.env.BlockNumber) {
 			code, _ := t.env.IntraBlockState.GetCode(addr)
 			if target, ok := types.ParseDelegation(code); ok {
 				t.lookupAccount(target)
@@ -222,7 +222,7 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 		t.to = accounts.InternAddress(*tx.GetTo())
 		t.create = false
 		// Lookup the delegation target
-		if t.env.ChainConfig.IsPrague(t.env.Time) {
+		if t.env.ChainConfig.IsPrague(t.env.Time, t.env.BlockNumber) {
 			code, _ := t.env.IntraBlockState.GetCode(t.to)
 			if target, ok := types.ParseDelegation(code); ok {
 				t.lookupAccount(target)
@@ -233,21 +233,11 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	t.lookupAccount(from)
 	t.lookupAccount(t.to)
 	t.lookupAccount(env.Coinbase)
-	t.lookupAccount(params.HistoryStorageAddress)
-	if env.ChainConfig.IsArbitrum() {
-		t.lookupAccount(types.ArbosStateAddress)
-	}
-
-	// Add accounts with authorizations to the prestate before they get applied.
-	var b [32]byte
-	data := bytes.NewBuffer(nil)
-	for _, auth := range tx.GetAuthorizations() {
-		data.Reset()
-		addr, err := auth.RecoverSigner(data, b[:])
-		if err != nil {
-			continue
+	if t.env.ChainConfig.IsArbitrum() {
+		t.lookupAccount(params.HistoryStorageAddress)
+		if env.ChainConfig.IsArbitrum() {
+			t.lookupAccount(types.ArbosStateAddress)
 		}
-		t.lookupAccount(*addr)
 	}
 
 	// Add accounts with authorizations to the prestate before they get applied.
