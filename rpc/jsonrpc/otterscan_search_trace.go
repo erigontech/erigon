@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
-func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.Address, chainConfig *chain.Config, idx int, bNum uint64, results []*TransactionsWithReceipts) {
+func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.Address, chainConfig *chain.Config, idx int, blockNumber uint64, results []*TransactionsWithReceipts) {
 	// Trace block for Txs
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -44,7 +44,12 @@ func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.A
 	}
 	defer tx.Rollback()
 
-	_, result, err := api.traceBlock(tx, ctx, bNum, addr, chainConfig)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return
+	}
+
+	_, result, err := api.traceBlock(tx, ctx, blockNumber, addr, chainConfig)
 	if err != nil {
 		log.Error("Search trace error", "err", err)
 		results[idx] = nil

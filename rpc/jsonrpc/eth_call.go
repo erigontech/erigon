@@ -93,6 +93,11 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, fmt.Errorf("header not found")
 	}
 
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, header.Number.Uint64())
+	if err != nil {
+		return nil, err
+	}
+
 	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
@@ -184,6 +189,11 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 
 	blockNum := *(header.Number)
+
+	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNum.Uint64())
+	if err != nil {
+		return 0, err
+	}
 
 	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, blockNum.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
@@ -393,6 +403,11 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 		return nil, err
 	} else if requestedBlockNr == 0 {
 		return nil, errors.New("block not found")
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, roTx, uint64(requestedBlockNr))
+	if err != nil {
+		return nil, err
 	}
 
 	storageKeysConverted := make([]StorageKeysInfo, len(storageKeys))
@@ -650,6 +665,11 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return buf.Bytes(), nil
 	}
 
+	err = api.checkPruneHistory(ctx, roTx, blockNr)
+	if err != nil {
+		return nil, err
+	}
+
 	block, err := api.blockWithSenders(ctx, roTx, hash, blockNr)
 	if err != nil {
 		return nil, err
@@ -846,6 +866,12 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		}
 		stateReader = rpchelper.CreateLatestCachedStateReader(cacheView, tx)
 	} else {
+
+		err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber+1)
+		if err != nil {
+			return nil, err
+		}
+
 		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, blockNumber+1, 0, api._txNumReader)
 		if err != nil {
 			return nil, err
