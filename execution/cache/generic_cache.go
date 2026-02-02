@@ -24,14 +24,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
-	"github.com/erigontech/erigon/db/kv"
 )
-
-// CacheEntry holds a cached value along with its step.
-type CacheEntry struct {
-	Value []byte
-	Step  kv.Step
-}
 
 const (
 	// DefaultAccountCacheBytes is the byte limit for account cache (256 MB)
@@ -63,30 +56,30 @@ func NewGenericCache[T any](capacityBytes datasize.ByteSize, sizeFunc func(T) in
 	}
 }
 
-// DomainCache wraps GenericCache[CacheEntry] to implement the Cache interface.
+// DomainCache wraps GenericCache[[]byte] to implement the Cache interface.
 type DomainCache struct {
-	*GenericCache[CacheEntry]
+	*GenericCache[[]byte]
 }
 
-// NewDomainCache creates a new cache for domain data with value and step.
+// NewDomainCache creates a new cache for domain data.
 func NewDomainCache(capacityBytes datasize.ByteSize) *DomainCache {
 	return &DomainCache{
-		GenericCache: NewGenericCache(capacityBytes, func(e CacheEntry) int { return len(e.Value) + 8 }),
+		GenericCache: NewGenericCache(capacityBytes, func(v []byte) int { return len(v) }),
 	}
 }
 
-// Get retrieves data and step for the given key, implementing the Cache interface.
-func (c *DomainCache) Get(key []byte) ([]byte, kv.Step, bool) {
+// Get retrieves data for the given key, implementing the Cache interface.
+func (c *DomainCache) Get(key []byte) ([]byte, bool) {
 	entry, ok := c.GenericCache.Get(key)
 	if !ok {
-		return nil, 0, false
+		return nil, false
 	}
-	return entry.Value, entry.Step, true
+	return entry, true
 }
 
-// Put stores data with its step for the given key, implementing the Cache interface.
-func (c *DomainCache) Put(key []byte, value []byte, step kv.Step) {
-	c.GenericCache.Put(key, CacheEntry{Value: value, Step: step})
+// Put stores data for the given key, implementing the Cache interface.
+func (c *DomainCache) Put(key []byte, value []byte) {
+	c.GenericCache.Put(key, value)
 }
 
 // Delete removes the data for the given key, delegating to GenericCache.

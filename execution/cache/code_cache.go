@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
-	"github.com/erigontech/erigon/db/kv"
 )
 
 // uint64AsBytes returns a []byte view of a uint64 without allocation.
@@ -55,7 +54,6 @@ const (
 
 type versionedAddressID struct {
 	addrID uint64
-	step   kv.Step
 }
 
 type CodeCache struct {
@@ -92,14 +90,12 @@ func NewDefaultCodeCache() *CodeCache {
 }
 
 // Get retrieves contract code for the given address, implementing the Cache interface.
-// Returns the code, step (always 0 for code), and true if found.
-// Code is immutable so step tracking is not needed.
-func (c *CodeCache) Get(addr []byte) ([]byte, kv.Step, bool) {
+func (c *CodeCache) Get(addr []byte) ([]byte, bool) {
 	// First, look up the code hash for this address
 	vID, ok := c.addrToHash.Get(addr)
 	if !ok || vID.addrID == 0 {
 		c.addrMisses.Add(1)
-		return nil, 0, false
+		return nil, false
 	}
 	c.addrHits.Add(1)
 
@@ -107,17 +103,16 @@ func (c *CodeCache) Get(addr []byte) ([]byte, kv.Step, bool) {
 	code, ok := c.hashToCode.Get(uint64AsBytes(&vID.addrID))
 	if !ok || len(code) == 0 {
 		c.codeMisses.Add(1)
-		return nil, 0, false
+		return nil, false
 	}
 	c.codeHits.Add(1)
-	return code, vID.step, true
+	return code, true
 }
 
 // Put stores contract code for the given address, implementing the Cache interface.
 // Uses fast maphash to compute the code identifier.
 // If caches are at capacity, new entries are no-ops but updates are allowed.
-// The step parameter is ignored since code is immutable.
-func (c *CodeCache) Put(addr []byte, code []byte, step kv.Step) {
+func (c *CodeCache) Put(addr []byte, code []byte) {
 	if len(code) == 0 {
 		return
 	}
@@ -127,9 +122,9 @@ func (c *CodeCache) Put(addr []byte, code []byte, step kv.Step) {
 
 	// Check if addr already exists - updates are always allowed
 	if _, exists := c.addrToHash.Get(addr); exists {
-		c.addrToHash.Set(addr, versionedAddressID{addrID: codeHash, step: step})
+		c.addrToHash.Set(addr, versionedAddressID{addrID: codeHash})
 	} else if c.addrSize.Load()+addrEntrySize <= int64(c.addrCapacityB) {
-		c.addrToHash.Set(addr, versionedAddressID{addrID: codeHash, step: step})
+		c.addrToHash.Set(addr, versionedAddressID{addrID: codeHash})
 		c.addrSize.Add(addrEntrySize)
 	}
 

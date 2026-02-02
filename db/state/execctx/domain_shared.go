@@ -324,7 +324,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 			sd.metrics.UpdateCacheReads(domain, start)
 		}
 		if sd.stateCache != nil {
-			sd.stateCache.Put(domain, k, v, step)
+			sd.stateCache.Put(domain, k, v)
 		}
 		return v, step, nil
 	} else {
@@ -338,7 +338,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		// regarding file determinism: probability of non-deterministic goes to 0 as we do
 		// files merge so this is not a problem in practice. file 0-1 will be non-deterministic
 		// but file 0-2 will be deterministic as it will include all entries from file 0-1 and so on.
-		if v, _, ok := sd.stateCache.Get(domain, k); ok {
+		if v, ok := sd.stateCache.Get(domain, k); ok {
 			return v, kv.Step(sd.txNum / sd.stepSize), nil
 		}
 	}
@@ -358,7 +358,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 
 	// Populate state cache on successful storage read
 	if sd.stateCache != nil {
-		sd.stateCache.Put(domain, k, v, step)
+		sd.stateCache.Put(domain, k, v)
 	}
 
 	return v, step, nil
@@ -461,7 +461,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 
 	// Update state cache when writing
 	if sd.stateCache != nil {
-		sd.stateCache.Put(domain, k, v, kv.Step(txNum/sd.stepSize))
+		sd.stateCache.Put(domain, k, v)
 	}
 
 	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal, prevStep)

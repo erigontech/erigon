@@ -59,21 +59,21 @@ func NewDefaultStateCache() *StateCache {
 	)
 }
 
-// Get retrieves data and step for the given domain and key.
-func (c *StateCache) Get(domain kv.Domain, key []byte) ([]byte, kv.Step, bool) {
+// Get retrieves data for the given domain and key.
+func (c *StateCache) Get(domain kv.Domain, key []byte) ([]byte, bool) {
 	cache := c.caches[domain]
 	if cache == nil {
-		return nil, 0, false
+		return nil, false
 	}
-	v, step, ok := cache.Get(key)
+	v, ok := cache.Get(key)
 	if len(v) == 0 {
-		return nil, 0, false
+		return nil, false
 	}
-	return v, step, ok
+	return v, ok
 }
 
-// Put stores data with its step for the given domain and key.
-func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte, step kv.Step) {
+// Put stores data for the given domain and key.
+func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte) {
 	cache := c.caches[domain]
 	if cache == nil {
 		return
@@ -81,11 +81,11 @@ func (c *StateCache) Put(domain kv.Domain, key []byte, value []byte, step kv.Ste
 	if domain == kv.CommitmentDomain && bytes.Equal(key, commitmentdb.KeyCommitmentState) {
 		return
 	}
-	if len(value) == 0 || step == 0 {
+	if len(value) == 0 {
 		cache.Delete(key)
 		return
 	}
-	cache.Put(key, common.Copy(value), step)
+	cache.Put(key, common.Copy(value))
 }
 
 // Delete removes the data for the given domain and key.

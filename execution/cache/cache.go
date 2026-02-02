@@ -16,19 +16,16 @@
 
 package cache
 
-import (
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv"
-)
+import "github.com/erigontech/erigon/common"
 
 // Cache is the interface for domain caches.
 // Implementations: GenericCache (for Account/Storage), CodeCache (for Code).
 type Cache interface {
-	// Get retrieves data and step for the given key.
-	Get(key []byte) ([]byte, kv.Step, bool)
+	// Get retrieves data for the given key.
+	Get(key []byte) ([]byte, bool)
 
-	// Put stores data with its step for the given key.
-	Put(key []byte, value []byte, step kv.Step)
+	// Put stores data for the given key.
+	Put(key []byte, value []byte)
 
 	// Delete removes the data for the given key.
 	Delete(key []byte)

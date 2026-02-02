@@ -74,17 +74,15 @@ func TestDomainCache_GetPut(t *testing.T) {
 	value := makeValue(1)
 
 	// Get non-existent
-	v, step, ok := c.Get(addr)
+	v, ok := c.Get(addr)
 	assert.False(t, ok)
 	assert.Nil(t, v)
-	assert.Equal(t, kv.Step(0), step)
 
 	// Put and Get
-	c.Put(addr, value, 5)
-	v, step, ok = c.Get(addr)
+	c.Put(addr, value)
+	v, ok = c.Get(addr)
 	assert.True(t, ok)
 	assert.Equal(t, value, v)
-	assert.Equal(t, kv.Step(5), step)
 	assert.Equal(t, 1, c.Len())
 }
 
@@ -95,39 +93,38 @@ func TestDomainCache_PutUpdateValue(t *testing.T) {
 	value1 := []byte{1, 2, 3, 4, 5, 6, 7, 8} // 8 bytes
 	value2 := []byte{9, 10, 11}              // 3 bytes
 
-	c.Put(addr, value1, 1)
+	c.Put(addr, value1)
 
-	// Update with different value and step
-	c.Put(addr, value2, 2)
-	v, step, ok := c.Get(addr)
+	// Update with different value
+	c.Put(addr, value2)
+	v, ok := c.Get(addr)
 
 	assert.True(t, ok)
 	assert.Equal(t, value2, v)
-	assert.Equal(t, kv.Step(2), step)
 }
 
 func TestDomainCache_PutCapacityLimit(t *testing.T) {
-	// Each entry is 20 (addr) + 3 (value) + 8 (step) = 31 bytes
-	// Set capacity to 70 bytes - enough for 2 entries but not 3
-	c := NewDomainCache(70)
+	// Each entry is 8 (overhead) + 3 (value) = 11 bytes
+	// Set capacity to 22 bytes - enough for 2 entries but not 3
+	c := NewDomainCache(22)
 
 	// Fill to capacity
-	c.Put(makeAddr(1), makeValue(1), 0)
-	c.Put(makeAddr(2), makeValue(2), 0)
+	c.Put(makeAddr(1), makeValue(1))
+	c.Put(makeAddr(2), makeValue(2))
 	assert.Equal(t, 2, c.Len())
 
 	// Try to add more - should be ignored (no-op when full)
-	c.Put(makeAddr(3), makeValue(3), 0)
+	c.Put(makeAddr(3), makeValue(3))
 	assert.Equal(t, 2, c.Len())
 
 	// New key should not exist
-	_, _, ok := c.Get(makeAddr(3))
+	_, ok := c.Get(makeAddr(3))
 	assert.False(t, ok)
 
 	// But updating existing key should still work
 	newValue := []byte{100, 101, 102}
-	c.Put(makeAddr(1), newValue, 0)
-	v, _, ok := c.Get(makeAddr(1))
+	c.Put(makeAddr(1), newValue)
+	v, ok := c.Get(makeAddr(1))
 	assert.True(t, ok)
 	assert.Equal(t, newValue, v)
 }
@@ -136,21 +133,21 @@ func TestDomainCache_Delete(t *testing.T) {
 	c := NewDomainCache(100)
 
 	addr := makeAddr(1)
-	c.Put(addr, makeValue(1), 0)
+	c.Put(addr, makeValue(1))
 	assert.Equal(t, 1, c.Len())
 
 	c.Delete(addr)
 	assert.Equal(t, 0, c.Len())
 
-	_, _, ok := c.Get(addr)
+	_, ok := c.Get(addr)
 	assert.False(t, ok)
 }
 
 func TestDomainCache_Clear(t *testing.T) {
 	c := NewDomainCache(100)
 
-	c.Put(makeAddr(1), makeValue(1), 0)
-	c.Put(makeAddr(2), makeValue(2), 0)
+	c.Put(makeAddr(1), makeValue(1))
+	c.Put(makeAddr(2), makeValue(2))
 	assert.Equal(t, 2, c.Len())
 
 	c.Clear()
@@ -186,7 +183,7 @@ func TestDomainCache_ValidateAndPrepare_MatchingParent(t *testing.T) {
 	block2 := makeHash(2)
 
 	c.SetBlockHash(block1)
-	c.Put(makeAddr(1), makeValue(1), 0)
+	c.Put(makeAddr(1), makeValue(1))
 
 	// Parent matches current block hash
 	valid := c.ValidateAndPrepare(block1, block2)
@@ -204,7 +201,7 @@ func TestDomainCache_ValidateAndPrepare_Mismatch(t *testing.T) {
 	block3 := makeHash(3)
 
 	c.SetBlockHash(block1)
-	c.Put(makeAddr(1), makeValue(1), 0)
+	c.Put(makeAddr(1), makeValue(1))
 
 	// Parent doesn't match - should clear
 	valid := c.ValidateAndPrepare(block2, block3)
@@ -217,7 +214,7 @@ func TestDomainCache_ValidateAndPrepare_Mismatch(t *testing.T) {
 func TestDomainCache_ClearWithHash(t *testing.T) {
 	c := NewDomainCache(100)
 
-	c.Put(makeAddr(1), makeValue(1), 0)
+	c.Put(makeAddr(1), makeValue(1))
 	c.SetBlockHash(makeHash(1))
 
 	newHash := makeHash(2)
@@ -231,7 +228,7 @@ func TestDomainCache_PrintStatsAndReset(t *testing.T) {
 	c := NewDomainCache(100)
 
 	// Generate some hits and misses
-	c.Put(makeAddr(1), makeValue(1), 0)
+	c.Put(makeAddr(1), makeValue(1))
 	c.Get(makeAddr(1)) // hit
 	c.Get(makeAddr(1)) // hit
 	c.Get(makeAddr(2)) // miss
@@ -251,28 +248,6 @@ func TestDomainCache_PrintStatsAndReset_NoOps(t *testing.T) {
 
 func TestDomainCache_ImplementsInterface(t *testing.T) {
 	var _ Cache = (*DomainCache)(nil)
-}
-
-func TestDomainCache_StepTracking(t *testing.T) {
-	c := NewDomainCache(100)
-
-	addr := makeAddr(1)
-	value := makeValue(1)
-
-	// Put with step 10
-	c.Put(addr, value, 10)
-	v, step, ok := c.Get(addr)
-	assert.True(t, ok)
-	assert.Equal(t, value, v)
-	assert.Equal(t, kv.Step(10), step)
-
-	// Update with step 20
-	newValue := makeValue(2)
-	c.Put(addr, newValue, 20)
-	v, step, ok = c.Get(addr)
-	assert.True(t, ok)
-	assert.Equal(t, newValue, v)
-	assert.Equal(t, kv.Step(20), step)
 }
 
 // =============================================================================
@@ -301,17 +276,15 @@ func TestCodeCache_GetPut(t *testing.T) {
 	code := makeCode(1)
 
 	// Get non-existent
-	v, step, ok := c.Get(addr)
+	v, ok := c.Get(addr)
 	assert.False(t, ok)
 	assert.Nil(t, v)
-	assert.Equal(t, kv.Step(0), step)
 
-	// Put and Get (step ignored for code)
-	c.Put(addr, code, 5)
-	v, step, ok = c.Get(addr)
+	// Put and Get
+	c.Put(addr, code)
+	v, ok = c.Get(addr)
 	assert.True(t, ok)
 	assert.Equal(t, code, v)
-	assert.Equal(t, kv.Step(0), step) // Code always returns step 0
 	assert.Equal(t, 1, c.Len())
 	assert.Equal(t, 1, c.CodeLen())
 }
@@ -320,7 +293,7 @@ func TestCodeCache_PutEmptyCode(t *testing.T) {
 	c := NewCodeCache(100, 200)
 
 	addr := makeAddr(1)
-	c.Put(addr, []byte{}, 0)
+	c.Put(addr, []byte{})
 
 	// Should not store empty code
 	assert.Equal(t, 0, c.Len())
@@ -336,18 +309,18 @@ func TestCodeCache_CodeDeduplication(t *testing.T) {
 	addr3 := makeAddr(3)
 
 	// Three addresses with same code
-	c.Put(addr1, code, 0)
-	c.Put(addr2, code, 0)
-	c.Put(addr3, code, 0)
+	c.Put(addr1, code)
+	c.Put(addr2, code)
+	c.Put(addr3, code)
 
 	// Should have 3 address mappings but only 1 code entry
 	assert.Equal(t, 3, c.Len())
 	assert.Equal(t, 1, c.CodeLen())
 
 	// All should return the same code
-	v1, _, _ := c.Get(addr1)
-	v2, _, _ := c.Get(addr2)
-	v3, _, _ := c.Get(addr3)
+	v1, _ := c.Get(addr1)
+	v2, _ := c.Get(addr2)
+	v3, _ := c.Get(addr3)
 	assert.Equal(t, code, v1)
 	assert.Equal(t, code, v2)
 	assert.Equal(t, code, v3)
@@ -359,24 +332,24 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 	c := NewCodeCache(1024*1024, 60) // 1MB code, 60 bytes addr
 
 	// Fill to addr capacity
-	c.Put(makeAddr(1), makeCode(1), 0)
-	c.Put(makeAddr(2), makeCode(2), 0)
+	c.Put(makeAddr(1), makeCode(1))
+	c.Put(makeAddr(2), makeCode(2))
 	assert.Equal(t, 2, c.Len())
 
 	// Adding more should be no-op for addr (at capacity)
-	c.Put(makeAddr(3), makeCode(3), 0)
+	c.Put(makeAddr(3), makeCode(3))
 	assert.Equal(t, 2, c.Len()) // addr not added
 
 	// Code cache should have all 3 codes (code capacity not reached)
 	assert.Equal(t, 3, c.CodeLen())
 
 	// Can't get addr3 since it wasn't added
-	_, _, ok := c.Get(makeAddr(3))
+	_, ok := c.Get(makeAddr(3))
 	assert.False(t, ok)
 
 	// But updating existing addr should work
-	c.Put(makeAddr(1), makeCode(4), 0)
-	v, _, ok := c.Get(makeAddr(1))
+	c.Put(makeAddr(1), makeCode(4))
+	v, ok := c.Get(makeAddr(1))
 	assert.True(t, ok)
 	assert.Equal(t, makeCode(4), v)
 }
@@ -387,17 +360,17 @@ func TestCodeCache_CodeCapacityLimit(t *testing.T) {
 	c := NewCodeCache(25, 1024*1024) // 25 bytes code, 1MB addr
 
 	// Fill code capacity
-	c.Put(makeAddr(1), makeCode(1), 0)
-	c.Put(makeAddr(2), makeCode(2), 0)
+	c.Put(makeAddr(1), makeCode(1))
+	c.Put(makeAddr(2), makeCode(2))
 	assert.Equal(t, 2, c.CodeLen())
 
 	// Try to add more code - addr mapping added, but code not stored
-	c.Put(makeAddr(3), makeCode(3), 0)
+	c.Put(makeAddr(3), makeCode(3))
 	assert.Equal(t, 3, c.Len())     // addr mapping added
 	assert.Equal(t, 2, c.CodeLen()) // code not added (at capacity)
 
 	// Get for addr3 should fail (code not in cache)
-	_, _, ok := c.Get(makeAddr(3))
+	_, ok := c.Get(makeAddr(3))
 	assert.False(t, ok)
 }
 
@@ -406,22 +379,22 @@ func TestCodeCache_Delete(t *testing.T) {
 
 	addr := makeAddr(1)
 	code := makeCode(1)
-	c.Put(addr, code, 0)
+	c.Put(addr, code)
 
 	c.Delete(addr)
 	assert.Equal(t, 0, c.Len())
 	// Code should still exist (immutable)
 	assert.Equal(t, 1, c.CodeLen())
 
-	_, _, ok := c.Get(addr)
+	_, ok := c.Get(addr)
 	assert.False(t, ok)
 }
 
 func TestCodeCache_Clear(t *testing.T) {
 	c := NewCodeCache(100, 200)
 
-	c.Put(makeAddr(1), makeCode(1), 0)
-	c.Put(makeAddr(2), makeCode(2), 0)
+	c.Put(makeAddr(1), makeCode(1))
+	c.Put(makeAddr(2), makeCode(2))
 
 	c.Clear()
 	assert.Equal(t, 0, c.Len())
@@ -457,7 +430,7 @@ func TestCodeCache_ValidateAndPrepare_MatchingParent(t *testing.T) {
 	block2 := makeHash(2)
 
 	c.SetBlockHash(block1)
-	c.Put(makeAddr(1), makeCode(1), 0)
+	c.Put(makeAddr(1), makeCode(1))
 
 	valid := c.ValidateAndPrepare(block1, block2)
 	assert.True(t, valid)
@@ -474,7 +447,7 @@ func TestCodeCache_ValidateAndPrepare_Mismatch(t *testing.T) {
 	block3 := makeHash(3)
 
 	c.SetBlockHash(block1)
-	c.Put(makeAddr(1), makeCode(1), 0)
+	c.Put(makeAddr(1), makeCode(1))
 
 	valid := c.ValidateAndPrepare(block2, block3)
 	assert.False(t, valid)
@@ -488,7 +461,7 @@ func TestCodeCache_ValidateAndPrepare_Mismatch(t *testing.T) {
 func TestCodeCache_ClearWithHash(t *testing.T) {
 	c := NewCodeCache(100, 200)
 
-	c.Put(makeAddr(1), makeCode(1), 0)
+	c.Put(makeAddr(1), makeCode(1))
 	c.SetBlockHash(makeHash(1))
 
 	newHash := makeHash(2)
@@ -503,7 +476,7 @@ func TestCodeCache_ClearWithHash(t *testing.T) {
 func TestCodeCache_PrintStatsAndReset(t *testing.T) {
 	c := NewCodeCache(100, 200)
 
-	c.Put(makeAddr(1), makeCode(1), 0)
+	c.Put(makeAddr(1), makeCode(1))
 	c.Get(makeAddr(1)) // hit
 	c.Get(makeAddr(2)) // miss
 
@@ -523,14 +496,14 @@ func TestCodeCache_GetMissingCode(t *testing.T) {
 	// Manually set addr mapping without code (simulates capacity limit scenario)
 	addr := makeAddr(1)
 	code := makeCode(1)
-	c.Put(addr, code, 0)
+	c.Put(addr, code)
 
 	// Clear the code cache but keep addr mapping
 	c.hashToCode.Clear()
 	c.codeSize.Store(0)
 
 	// Get should fail at code lookup stage
-	_, _, ok := c.Get(addr)
+	_, ok := c.Get(addr)
 	assert.False(t, ok)
 }
 
@@ -573,17 +546,15 @@ func TestStateCache_GetPut_Account(t *testing.T) {
 	value := makeValue(1)
 
 	// Get non-existent
-	v, step, ok := c.Get(kv.AccountsDomain, addr)
+	v, ok := c.Get(kv.AccountsDomain, addr)
 	assert.False(t, ok)
 	assert.Nil(t, v)
-	assert.Equal(t, kv.Step(0), step)
 
 	// Put and Get
-	c.Put(kv.AccountsDomain, addr, value, 5)
-	v, step, ok = c.Get(kv.AccountsDomain, addr)
+	c.Put(kv.AccountsDomain, addr, value)
+	v, ok = c.Get(kv.AccountsDomain, addr)
 	assert.True(t, ok)
 	assert.Equal(t, value, v)
-	assert.Equal(t, kv.Step(5), step)
 }
 
 func TestStateCache_GetPut_Storage(t *testing.T) {
@@ -594,11 +565,10 @@ func TestStateCache_GetPut_Storage(t *testing.T) {
 	key[51] = 1
 	value := makeValue(1)
 
-	c.Put(kv.StorageDomain, key, value, 3)
-	v, step, ok := c.Get(kv.StorageDomain, key)
+	c.Put(kv.StorageDomain, key, value)
+	v, ok := c.Get(kv.StorageDomain, key)
 	assert.True(t, ok)
 	assert.Equal(t, value, v)
-	assert.Equal(t, kv.Step(3), step)
 }
 
 func TestStateCache_GetPut_Code(t *testing.T) {
@@ -607,20 +577,18 @@ func TestStateCache_GetPut_Code(t *testing.T) {
 	addr := makeAddr(1)
 	code := makeCode(1)
 
-	c.Put(kv.CodeDomain, addr, code, 7)
-	v, step, ok := c.Get(kv.CodeDomain, addr)
+	c.Put(kv.CodeDomain, addr, code)
+	v, ok := c.Get(kv.CodeDomain, addr)
 	assert.True(t, ok)
 	assert.Equal(t, code, v)
-	// Code cache ignores step, always returns 0
-	assert.Equal(t, kv.Step(0), step)
 }
 
 func TestStateCache_GetPut_UnsupportedDomain(t *testing.T) {
 	c := NewStateCache(100, 100, 100, 100, 100)
 
 	// ReceiptDomain is not supported
-	c.Put(kv.ReceiptDomain, makeAddr(1), makeValue(1), 0)
-	v, _, ok := c.Get(kv.ReceiptDomain, makeAddr(1))
+	c.Put(kv.ReceiptDomain, makeAddr(1), makeValue(1))
+	v, ok := c.Get(kv.ReceiptDomain, makeAddr(1))
 	assert.False(t, ok)
 	assert.Nil(t, v)
 }
@@ -629,10 +597,10 @@ func TestStateCache_Delete(t *testing.T) {
 	c := NewStateCache(100, 100, 100, 100, 100)
 
 	addr := makeAddr(1)
-	c.Put(kv.AccountsDomain, addr, makeValue(1), 0)
+	c.Put(kv.AccountsDomain, addr, makeValue(1))
 	c.Delete(kv.AccountsDomain, addr)
 
-	_, _, ok := c.Get(kv.AccountsDomain, addr)
+	_, ok := c.Get(kv.AccountsDomain, addr)
 	assert.False(t, ok)
 }
 
@@ -646,15 +614,15 @@ func TestStateCache_Delete_UnsupportedDomain(t *testing.T) {
 func TestStateCache_Clear(t *testing.T) {
 	c := NewStateCache(100, 100, 100, 100, 100)
 
-	c.Put(kv.AccountsDomain, makeAddr(1), makeValue(1), 0)
-	c.Put(kv.StorageDomain, makeAddr(2), makeValue(2), 0)
-	c.Put(kv.CodeDomain, makeAddr(3), makeCode(3), 0)
+	c.Put(kv.AccountsDomain, makeAddr(1), makeValue(1))
+	c.Put(kv.StorageDomain, makeAddr(2), makeValue(2))
+	c.Put(kv.CodeDomain, makeAddr(3), makeCode(3))
 
 	c.Clear()
 
-	_, _, ok1 := c.Get(kv.AccountsDomain, makeAddr(1))
-	_, _, ok2 := c.Get(kv.StorageDomain, makeAddr(2))
-	_, _, ok3 := c.Get(kv.CodeDomain, makeAddr(3))
+	_, ok1 := c.Get(kv.AccountsDomain, makeAddr(1))
+	_, ok2 := c.Get(kv.StorageDomain, makeAddr(2))
+	_, ok3 := c.Get(kv.CodeDomain, makeAddr(3))
 
 	assert.False(t, ok1)
 	assert.False(t, ok2)
@@ -695,8 +663,8 @@ func TestStateCache_ValidateAndPrepare_SomeMismatch(t *testing.T) {
 func TestStateCache_ClearWithHash(t *testing.T) {
 	c := NewStateCache(100, 100, 100, 100, 100)
 
-	c.Put(kv.AccountsDomain, makeAddr(1), makeValue(1), 0)
-	c.Put(kv.StorageDomain, makeAddr(2), makeValue(2), 0)
+	c.Put(kv.AccountsDomain, makeAddr(1), makeValue(1))
+	c.Put(kv.StorageDomain, makeAddr(2), makeValue(2))
 
 	newHash := makeHash(5)
 	c.ClearWithHash(newHash)
@@ -744,7 +712,7 @@ func TestDomainCache_ConcurrentAccess(t *testing.T) {
 	// Writer goroutine
 	go func() {
 		for i := 0; i < 100; i++ {
-			c.Put(makeAddr(i), makeValue(i), kv.Step(i))
+			c.Put(makeAddr(i), makeValue(i))
 		}
 		done <- true
 	}()
@@ -769,7 +737,7 @@ func TestCodeCache_ConcurrentAccess(t *testing.T) {
 	// Writer goroutine
 	go func() {
 		for i := 0; i < 100; i++ {
-			c.Put(makeAddr(i), makeCode(i), 0)
+			c.Put(makeAddr(i), makeCode(i))
 		}
 		done <- true
 	}()
@@ -798,13 +766,13 @@ func TestStateCache_DomainIsolation(t *testing.T) {
 	storageData := []byte("storage")
 	codeData := []byte{0x60, 0x00, 0x60, 0x00} // valid code
 
-	c.Put(kv.AccountsDomain, addr, accountData, 0)
-	c.Put(kv.StorageDomain, addr, storageData, 0)
-	c.Put(kv.CodeDomain, addr, codeData, 0)
+	c.Put(kv.AccountsDomain, addr, accountData)
+	c.Put(kv.StorageDomain, addr, storageData)
+	c.Put(kv.CodeDomain, addr, codeData)
 
-	v1, _, ok1 := c.Get(kv.AccountsDomain, addr)
-	v2, _, ok2 := c.Get(kv.StorageDomain, addr)
-	v3, _, ok3 := c.Get(kv.CodeDomain, addr)
+	v1, ok1 := c.Get(kv.AccountsDomain, addr)
+	v2, ok2 := c.Get(kv.StorageDomain, addr)
+	v3, ok3 := c.Get(kv.CodeDomain, addr)
 
 	assert.True(t, ok1)
 	assert.True(t, ok2)
@@ -830,13 +798,13 @@ func TestBlockContinuity_Sequential(t *testing.T) {
 	// Block 1 (parent = empty)
 	valid := c.ValidateAndPrepare(block0, block1)
 	assert.True(t, valid)
-	c.Put(kv.AccountsDomain, makeAddr(1), makeValue(1), 0)
+	c.Put(kv.AccountsDomain, makeAddr(1), makeValue(1))
 
 	// Block 2 (parent = block1)
 	valid = c.ValidateAndPrepare(block1, block2)
 	assert.True(t, valid)
 	// Data from block 1 should still be there
-	_, _, ok := c.Get(kv.AccountsDomain, makeAddr(1))
+	_, ok := c.Get(kv.AccountsDomain, makeAddr(1))
 	assert.True(t, ok)
 
 	// Block 3 (parent = block2)
@@ -853,7 +821,7 @@ func TestBlockContinuity_Reorg(t *testing.T) {
 
 	// Build on block 1
 	c.ValidateAndPrepare(common.Hash{}, block1)
-	c.Put(kv.AccountsDomain, makeAddr(1), makeValue(1), 0)
+	c.Put(kv.AccountsDomain, makeAddr(1), makeValue(1))
 
 	// Continue to block 2
 	c.ValidateAndPrepare(block1, block2)
