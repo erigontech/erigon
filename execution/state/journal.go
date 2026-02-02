@@ -495,12 +495,12 @@ func (ch refundChange) dirtied() (accounts.Address, bool) {
 }
 
 func (ch addLogChange) revert(s *IntraBlockState) error {
-	if ch.txIndex >= len(s.logs) {
+	if ch.txIndex+1 >= len(s.logs) {
 		panic(fmt.Sprintf("can't revert log index %v, max: %v", ch.txIndex, len(s.logs)-1))
 	}
-	txnLogs := s.logs[ch.txIndex]
-	s.logs[ch.txIndex] = txnLogs[:len(txnLogs)-1] // revert 1 log
-	if len(s.logs[ch.txIndex]) == 0 {
+	txnLogs := s.logs[ch.txIndex+1]
+	s.logs[ch.txIndex+1] = txnLogs[:len(txnLogs)-1] // revert 1 log
+	if len(s.logs[ch.txIndex+1]) == 0 {
 		s.logs = s.logs[:len(s.logs)-1] // revert txn
 	}
 	s.logSize--
