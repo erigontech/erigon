@@ -43,7 +43,7 @@ func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes, commitmentB
 	sc.caches[kv.AccountsDomain] = NewDomainCache(accountBytes)
 	sc.caches[kv.StorageDomain] = NewDomainCache(storageBytes)
 	sc.caches[kv.CodeDomain] = NewCodeCache(codeBytes, addrBytes)
-	sc.caches[kv.CommitmentDomain] = NewDomainCache(commitmentBytes)
+	//sc.caches[kv.CommitmentDomain] = NewDomainCache(commitmentBytes)
 	return sc
 }
 
