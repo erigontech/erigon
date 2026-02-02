@@ -40,7 +40,7 @@ import (
 
 func NewEngineXTestRunner(t *testing.T, logger log.Logger, preAllocsDir string) (*EngineXTestRunner, error) {
 	preAllocs := make(map[PreAllocHash]*PreAlloc)
-	err := filepath.Walk(preAllocsDir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.WalkDir(preAllocsDir, func(path string, info os.DirEntry, err error) error {
 		if info.IsDir() {
 			return nil
 		}
