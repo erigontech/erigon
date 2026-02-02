@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/maphash"
@@ -30,9 +31,9 @@ const (
 	// DefaultAccountCacheBytes is the byte limit for account cache (256 MB)
 	DefaultAccountCacheBytes = 256 * datasize.MB
 	// DefaultStorageCacheBytes is the byte limit for storage cache (128 MB)
-	DefaultStorageCacheBytes = 128 * datasize.MB
+	DefaultStorageCacheBytes = 10 * 128 * datasize.MB
 	// DefaultCommitmentCacheBytes is the byte limit for commitment cache (128 MB)
-	DefaultCommitmentCacheBytes = 128 * datasize.MB
+	DefaultCommitmentCacheBytes = 10 * 128 * datasize.MB
 )
 
 // GenericCache is a bounded concurrent cache for key-value data.
