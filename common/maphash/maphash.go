@@ -5,7 +5,7 @@ import (
 	"unsafe"
 
 	lru "github.com/hashicorp/golang-lru/v2"
-	"github.com/puzpuzpuz/xsync/v3"
+	"github.com/puzpuzpuz/xsync/v4"
 )
 
 var seed maphash.Seed
