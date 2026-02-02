@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/rpc"
@@ -78,12 +79,12 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 		return nil, nil
 	}
 
-	getBlockRes, err := api.delegateGetBlockByNumber(tx, block, blockNumber, false)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	chainConfig, err := api.chainConfig(ctx, tx)
+	getBlockRes, err := api.delegateGetBlockByNumber(tx, block, blockNumber, false, chainConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -146,9 +147,9 @@ func (api *GraphQLAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.B
 	return block, block.Body().SendersFromTxs(), nil
 }
 
-func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]any, error) {
+func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool, chainConfig *chain.Config) (map[string]any, error) {
 	additionalFields := make(map[string]any)
-	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, additionalFields)
+	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, additionalFields, chainConfig.IsArbitrumNitro(b.Number()))
 	if !inclTx {
 		delete(response, "transactions") // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
 	}

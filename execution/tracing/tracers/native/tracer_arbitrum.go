@@ -24,6 +24,7 @@ import (
 
 	libcommon "github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type arbitrumTransfer struct {
@@ -33,18 +34,18 @@ type arbitrumTransfer struct {
 	Value   string  `json:"value"`
 }
 
-func (t *callTracer) CaptureArbitrumTransfer(from, to *libcommon.Address, value *uint256.Int, before bool, reason string) {
+func (t *callTracer) CaptureArbitrumTransfer(from, to accounts.Address, value *uint256.Int, before bool, reason string) {
 	transfer := arbitrumTransfer{
 		Purpose: reason,
 		Value:   value.Hex(),
 	}
-	if from != nil {
-		from := from.String()
-		transfer.From = &from
+	if !from.IsNil() {
+		fromStr := from.Value().String()
+		transfer.From = &fromStr
 	}
-	if to != nil {
-		to := to.String()
-		transfer.To = &to
+	if !to.IsNil() {
+		toStr := to.Value().String()
+		transfer.To = &toStr
 	}
 	if before {
 		t.beforeEVMTransfers = append(t.beforeEVMTransfers, transfer)

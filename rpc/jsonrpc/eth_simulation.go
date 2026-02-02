@@ -559,7 +559,7 @@ func (s *simulator) simulateBlock(
 	}
 	// Marshal the block in RPC format including the call results in a custom field.
 	additionalFields := make(map[string]any)
-	blockResult, err := ethapi.RPCMarshalBlock(block, true, s.fullTransactions, additionalFields)
+	blockResult, err := ethapi.RPCMarshalBlock(block, true, s.fullTransactions, additionalFields, s.chainConfig.IsArbitrumNitro(block.Number()))
 	if err != nil {
 		return nil, nil, err
 	}
