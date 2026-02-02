@@ -95,8 +95,8 @@ func (db *DiffsetDatabase) WriteDiffSet(blockNumber uint64, blockHash common.Has
 	go func() {
 		data := changeset.SerializeStateChangeSet(diffSet, blockNumber)
 		db.mu.Lock()
-		errCh <- dir.WriteFileWithFsync(path, data, 0o644)
 		defer db.mu.Unlock()
+		errCh <- dir.WriteFileWithFsync(path, data, 0o644)
 	}()
 	return nil
 	//return <-errCh
