@@ -28,18 +28,21 @@ import (
 )
 
 func TestBenchmarkEngineXInstruction(t *testing.T) {
-	benchmarkCategory(t, "instruction")
+	// if wanting to run only a particular test, pass a whitelist, e.g.
+	//benchmarkCategory(t, "instruction", ".*log\\.json", nil)
+	//benchmarkCategory(t, "instruction", ".*codecopy\\.json", nil)
+	benchmarkCategory(t, "instruction", "", nil)
 }
 
 func TestBenchmarkEngineXPrecompile(t *testing.T) {
-	benchmarkCategory(t, "precompile")
+	benchmarkCategory(t, "precompile", "", nil)
 }
 
 func TestBenchmarkEngineXScenario(t *testing.T) {
-	benchmarkCategory(t, "scenario")
+	benchmarkCategory(t, "scenario", "", nil)
 }
 
-func benchmarkCategory(t *testing.T, category string) {
+func benchmarkCategory(t *testing.T, category string, whitelist string, skipload []string) {
 	if !dbg.EnvBool("BENCH_ENGINE_X_MANUAL_ALLOW", false) {
 		t.Skip("benchmark engine x tests are for manual use; enable via BENCH_ENGINE_X_MANUAL_ALLOW=true")
 	}
@@ -59,9 +62,12 @@ func benchmarkCategory(t *testing.T, category string) {
 		// without getting SYNCING responses
 		noparallel: true,
 	}
-	// if wanting to run only a particular test, use this, e.g.:
-	//tm.whitelist(".*log\\.json")
-	//tm.whitelist(".*codecopy\\.json")
+	if whitelist != "" {
+		tm.whitelist(whitelist)
+	}
+	for _, s := range skipload {
+		tm.skipLoad(s)
+	}
 	tm.walk(t, testsDir, func(t *testing.T, name string, test EngineXTestDefinition) {
 		err := engineXRunner.Run(t.Context(), test)
 		require.NoError(t, err)
