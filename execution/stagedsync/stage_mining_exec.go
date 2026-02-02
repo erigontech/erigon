@@ -101,7 +101,6 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 
 	stateReader := state.NewReaderV3(sd.AsGetter(tx))
 	ibs := state.New(stateReader)
-	defer ibs.Release(false)
 	var balIO *state.VersionedIO
 	var systemReads state.ReadSet
 	var systemWrites state.VersionedWrites
