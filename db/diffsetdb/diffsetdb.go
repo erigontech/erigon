@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -88,31 +89,36 @@ func (db *DiffsetDatabase) WriteDiffSet(blockNumber uint64, blockHash common.Has
 		return err
 	}
 
-	db.mu.Lock()
-	defer db.mu.Unlock()
+	go func() {
+		db.mu.Lock()
+		defer db.mu.Unlock()
 
-	if dbg.TraceUnwinds {
-		var diffStats strings.Builder
-		first := true
-		for d, diff := range &diffSet.Diffs {
-			if first {
-				diffStats.WriteString(" ")
-				first = false
-			} else {
-				diffStats.WriteString(", ")
+		if dbg.TraceUnwinds {
+			var diffStats strings.Builder
+			first := true
+			for d, diff := range &diffSet.Diffs {
+				if first {
+					diffStats.WriteString(" ")
+					first = false
+				} else {
+					diffStats.WriteString(", ")
+				}
+				diffStats.WriteString(fmt.Sprintf("%s: %d", kv.Domain(d), diff.Len()))
 			}
-			diffStats.WriteString(fmt.Sprintf("%s: %d", kv.Domain(d), diff.Len()))
+			fmt.Printf("diffset (Block:%d) %x:%s %s\n", blockNumber, blockHash, diffStats.String(), dbg.Stack())
 		}
-		fmt.Printf("diffset (Block:%d) %x:%s %s\n", blockNumber, blockHash, diffStats.String(), dbg.Stack())
-	}
 
-	// Serialize the diffset
-	db.serializeBuf = diffSet.SerializeTo(db.serializeBuf[:0], blockNumber)
+		// Serialize the diffset
+		db.serializeBuf = diffSet.SerializeTo(db.serializeBuf[:0], blockNumber)
 
-	// Build path using auxiliary buffers
-	path := db.diffsetPathZeroAlloc(blockNumber, blockHash)
+		// Build path using auxiliary buffers
+		path := db.diffsetPathZeroAlloc(blockNumber, blockHash)
 
-	return dir.WriteFileWithFsync(path, db.serializeBuf, 0o644)
+		if err := dir.WriteFileWithFsync(path, db.serializeBuf, 0o644); err != nil {
+			log.Error("DiffsetDatabase.WriteDiffSet: write error", "blockNumber", blockNumber, "blockHash", blockHash, "err", err)
+		}
+	}()
+	return nil
 }
 
 // ReadDiffSet loads a block diffset from its per-block file.
