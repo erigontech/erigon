@@ -89,11 +89,11 @@ func (db *DiffsetDatabase) WriteDiffSet(blockNumber uint64, blockHash common.Has
 		fmt.Printf("diffset (Block:%d) %x:%s %s\n", blockNumber, blockHash, diffStats.String(), dbg.Stack())
 	}
 
+	data := changeset.SerializeStateChangeSet(diffSet, blockNumber)
 	path := db.diffsetPath(blockNumber, blockHash)
 
 	errCh := make(chan error, 1)
 	go func() {
-		data := changeset.SerializeStateChangeSet(diffSet, blockNumber)
 		db.mu.Lock()
 		defer db.mu.Unlock()
 		errCh <- dir.WriteFileWithFsync(path, data, 0o644)
