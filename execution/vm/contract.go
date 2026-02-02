@@ -90,11 +90,12 @@ func (c *Contract) isCode(udest uint64) bool {
 		return c.analysis.codeSegment(udest)
 	}
 	var codeHash common.Hash
-	if !c.CodeHash.IsZero() {
+	isCodeHashZero := c.CodeHash.IsZero()
+	if !isCodeHashZero {
 		codeHash = c.CodeHash.Value()
 	}
 
-	if !c.CodeHash.IsZero() {
+	if !isCodeHashZero {
 		if analysis, ok := jumpDestCache.Get(codeHash[:]); ok {
 			c.analysis = analysis
 			return c.analysis.codeSegment(udest)
@@ -103,7 +104,7 @@ func (c *Contract) isCode(udest uint64) bool {
 
 	c.analysis = codeBitmap(c.Code)
 
-	if !c.CodeHash.IsZero() {
+	if !isCodeHashZero {
 		jumpDestCache.Put(codeHash[:], c.analysis)
 	}
 
