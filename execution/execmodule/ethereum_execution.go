@@ -310,13 +310,8 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(sd *execctx.SharedDoma
 	if err := e.hook.BeforeRun(tx, true); err != nil {
 		return err
 	}
-	rng, _ := math.RandInt64()
-	n := currentHeader.Number.Uint64()
-	if rng%8 == 0 {
-		n--
-	}
 
-	if err := e.executionPipeline.UnwindTo(n, stagedsync.ExecUnwind, tx); err != nil {
+	if err := e.executionPipeline.UnwindTo(currentHeader.Number.Uint64(), stagedsync.ExecUnwind, tx); err != nil {
 		return err
 	}
 	if err := e.executionPipeline.RunUnwind(sd, tx); err != nil {
