@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
@@ -641,8 +640,6 @@ func TestGetRawTransaction(t *testing.T) {
 func TestExecutionWitness(t *testing.T) {
 	// Enable historical commitment to allow witness generation for historical blocks
 	statecfg.EnableHistoricalCommitment()
-	// Disable deferred branch updates during chain creation for consistent commitment storage
-	commitment.DisableDeferredBranchUpdates()
 
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
