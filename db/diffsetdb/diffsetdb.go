@@ -51,13 +51,9 @@ type DiffsetDatabase struct {
 	mu  sync.Mutex // guards file reads/writes
 
 	// Auxiliary buffers for zero-allocation serialization
-	serializeBuf []byte            // reusable buffer for serialization
-	pathBuf      []byte            // reusable buffer for file path construction
-	filenameBuf  []byte            // reusable buffer for filename construction
-	dictBuf      map[string]byte   // reusable dictionary for serialization
-	dictRevBuf   map[byte][]byte   // reusable reverse dictionary for deserialization
-	tmp4         [4]byte           // reusable 4-byte temp buffer
-	hexBuf       [length.Hash * 2]byte // reusable hex encoding buffer
+	serializeBuf []byte // reusable buffer for serialization
+	pathBuf      []byte // reusable buffer for file path construction
+	filenameBuf  []byte // reusable buffer for filename construction
 }
 
 func Open(dirs datadir.Dirs) *DiffsetDatabase {
@@ -69,12 +65,10 @@ func Open(dirs datadir.Dirs) *DiffsetDatabase {
 		return cached.(*DiffsetDatabase)
 	}
 	db := &DiffsetDatabase{
-		dir:         dirs.Diffsets,
+		dir:          dirs.Diffsets,
 		serializeBuf: make([]byte, 0, 1024*1024), // 1MB initial capacity
 		pathBuf:      make([]byte, 0, 256),
 		filenameBuf:  make([]byte, 0, 128),
-		dictBuf:      make(map[string]byte, 64),
-		dictRevBuf:   make(map[byte][]byte, 64),
 	}
 	actual, _ := diffsetDBByDir.LoadOrStore(key, db)
 	return actual.(*DiffsetDatabase)
@@ -112,9 +106,8 @@ func (db *DiffsetDatabase) WriteDiffSet(blockNumber uint64, blockHash common.Has
 		fmt.Printf("diffset (Block:%d) %x:%s %s\n", blockNumber, blockHash, diffStats.String(), dbg.Stack())
 	}
 
-	// Serialize using auxiliary buffer (zero-alloc reuse)
-	db.serializeBuf = db.serializeBuf[:0]
-	db.serializeBuf = changeset.SerializeStateChangeSetTo(diffSet, blockNumber, db.serializeBuf, db.dictBuf, &db.tmp4)
+	// Serialize the diffset
+	db.serializeBuf = diffSet.SerializeTo(db.serializeBuf[:0], blockNumber)
 
 	// Build path using auxiliary buffers
 	path := db.diffsetPathZeroAlloc(blockNumber, blockHash)

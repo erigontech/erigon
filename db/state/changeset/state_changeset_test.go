@@ -43,6 +43,16 @@ func TestSerializeDeserializeDiff(t *testing.T) {
 	require.Equal(t, d, deserialized)
 }
 
+func TestSerializeDeserializeDiffEmpty(t *testing.T) {
+	t.Parallel()
+
+	var empty []kv.DomainEntryDiff
+	serialized := changeset.SerializeDiffSet(empty, nil)
+	require.Equal(t, []byte{0, 0, 0, 0, 0}, serialized) // dict len (1) + diffSet len (4)
+	deserialized := changeset.DeserializeDiffSet(serialized)
+	require.Empty(t, deserialized)
+}
+
 func TestMergeDiffSet(t *testing.T) {
 	t.Parallel()
 
@@ -65,4 +75,27 @@ func TestMergeDiffSet(t *testing.T) {
 	require.Equal(t, d1[1], merged[1])
 	require.Equal(t, d2[1], merged[2])
 	require.Equal(t, d2[2], merged[3])
+}
+
+func BenchmarkSerializeDiffSet(b *testing.B) {
+	// Create a realistic diffSet with varying sizes
+	var d []kv.DomainEntryDiff
+	steps := [][8]byte{{1}, {2}, {3}, {4}}
+	for i := 0; i < 1000; i++ {
+		key := fmt.Sprintf("key%08d_padding", i)
+		value := make([]byte, 32+i%64) // varying value sizes
+		d = append(d, kv.DomainEntryDiff{
+			Key:           key,
+			Value:         value,
+			PrevStepBytes: steps[i%len(steps)][:],
+		})
+	}
+
+	out := make([]byte, 0, 128*1024)
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		out = changeset.SerializeDiffSet(d, out[:0])
+	}
 }

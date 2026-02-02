@@ -210,30 +210,6 @@ func BenchmarkWriteDiffSet(b *testing.B) {
 	}
 }
 
-func BenchmarkSerializeStateChangeSet(b *testing.B) {
-	diffSet := makeLargeDiffset(100)
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		_ = changeset.SerializeStateChangeSet(diffSet, uint64(i))
-	}
-}
-
-func BenchmarkSerializeStateChangeSetTo(b *testing.B) {
-	diffSet := makeLargeDiffset(100)
-	buf := make([]byte, 0, 1024*1024)
-	dictBuf := make(map[string]byte, 64)
-	var tmp4 [4]byte
-
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		buf = buf[:0]
-		_ = changeset.SerializeStateChangeSetTo(diffSet, uint64(i), buf, dictBuf, &tmp4)
-	}
-}
-
 func BenchmarkReadDiffSet(b *testing.B) {
 	dirs := datadir.New(b.TempDir())
 	db := diffsetdb.Open(dirs)
