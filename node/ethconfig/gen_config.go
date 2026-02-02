@@ -74,6 +74,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		FcuTimeout                          time.Duration
 		FcuBackgroundPrune                  bool
 		FcuBackgroundCommit                 bool
+		MCPAddress                          string
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
@@ -125,6 +126,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.FcuTimeout = c.FcuTimeout
 	enc.FcuBackgroundPrune = c.FcuBackgroundPrune
 	enc.FcuBackgroundCommit = c.FcuBackgroundCommit
+	enc.MCPAddress = c.MCPAddress
 	return &enc, nil
 }
 
@@ -180,6 +182,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		FcuTimeout                          *time.Duration
 		FcuBackgroundPrune                  *bool
 		FcuBackgroundCommit                 *bool
+		MCPAddress                          *string
 	}
 	var dec Config
 	if err := unmarshal(&dec); err != nil {
@@ -331,6 +334,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.FcuBackgroundCommit != nil {
 		c.FcuBackgroundCommit = *dec.FcuBackgroundCommit
+	}
+	if dec.MCPAddress != nil {
+		c.MCPAddress = *dec.MCPAddress
 	}
 	return nil
 }
