@@ -198,8 +198,9 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		// Try to reuse buffer, fall back to allocation if concurrent access
 		var allLogs types.Logs
 		reuseBuffer := s.logsBufMu.TryLock()
-		defer s.logsBufMu.Unlock()
-
+		if reuseBuffer {
+			defer s.logsBufMu.Unlock()
+		}
 		if reuseBuffer {
 			allLogs = s.logsBuf[:0]
 		} else {
