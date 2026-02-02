@@ -79,7 +79,13 @@ func IsInvalidRLPError(err error) bool {
 		errors.Is(err, errNotInList) ||
 		errors.Is(err, errNotAtEOL) ||
 		errors.Is(err, errUintOverflow) ||
-		errors.Is(err, errUint256Large)
+		errors.Is(err, errUint256Large) ||
+		// wrapStreamError produces *decodeError which doesn't implement Is()
+		strings.Contains(err.Error(), "rlp: input list has too many elements") ||
+		strings.Contains(err.Error(), "rlp: expected input string or byte") ||
+		strings.Contains(err.Error(), "rlp: expected input list") ||
+		strings.Contains(err.Error(), "rlp: non-canonical size information") ||
+		strings.Contains(err.Error(), "rlp: non-canonical integer (leading zero bytes)")
 }
 
 // Decoder is implemented by types that require custom RLP decoding rules or need to decode
@@ -156,6 +162,8 @@ func wrapStreamError(err error, typ reflect.Type) error {
 		return &decodeError{msg: "expected input string or byte", typ: typ}
 	case errUintOverflow:
 		return &decodeError{msg: "input string too long", typ: typ}
+	case errUint256Large:
+		return &decodeError{msg: "input string too long", typ: typ}
 	case errNotAtEOL:
 		return &decodeError{msg: "input list has too many elements", typ: typ}
 	}
@@ -211,6 +219,8 @@ func makeDecoder(typ reflect.Type, tags rlpstruct.Tags) (dec decoder, err error)
 		return decodeDecoder, nil
 	case isUint(kind):
 		return decodeUint, nil
+	case isInt(kind):
+		return decodeInt, nil
 	case kind == reflect.Bool:
 		return decodeBool, nil
 	case kind == reflect.String:
@@ -242,6 +252,16 @@ func decodeUint(s *Stream, val reflect.Value) error {
 		return wrapStreamError(err, val.Type())
 	}
 	val.SetUint(num)
+	return nil
+}
+
+func decodeInt(s *Stream, val reflect.Value) error {
+	typ := val.Type()
+	num, err := s.uint(typ.Bits())
+	if err != nil {
+		return wrapStreamError(err, val.Type())
+	}
+	val.SetInt(int64(num))
 	return nil
 }
 
@@ -865,13 +885,6 @@ func (s *Stream) List() (size uint64, err error) {
 	s.kind = -1
 	s.size = 0
 	return size, nil
-}
-
-// NewList starts decoding an RLP list, but without reading its prefix.
-func (s *Stream) NewList(size uint64) {
-	s.stack = append(s.stack, size)
-	s.kind = -1
-	s.size = 0
 }
 
 // ListEnd returns to the enclosing list.

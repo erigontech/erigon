@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 // Keys in the node database.
@@ -223,6 +224,7 @@ func splitNodeItemKey(key []byte) (id ID, ip netip.Addr, field string) {
 	key = key[len(dbDiscoverRoot)+1:]
 	// Split out the IP.
 	ip, _ = netip.AddrFromSlice(key[:16])
+	ip = ip.Unmap()
 	key = key[16+1:]
 	// Field is the remainder of key.
 	field = string(key)
@@ -331,13 +333,13 @@ func (db *DB) Node(id ID) *Node {
 }
 
 func mustDecodeNode(id, data []byte) *Node {
-	node := new(Node)
-	if err := rlp.DecodeBytes(data, &node.r); err != nil {
+	var r enr.Record
+	if err := rlp.DecodeBytes(data, &r); err != nil {
 		panic(fmt.Errorf("p2p/enode: can't decode node %x in DB: %w", id, err))
 	}
-	// Restore node id cache.
-	copy(node.id[:], id)
-	return node
+	var nodeID ID
+	copy(nodeID[:], id)
+	return newNodeWithID(&r, nodeID)
 }
 
 // UpdateNode inserts - potentially overwriting - a node into the peer database.

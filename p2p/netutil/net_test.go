@@ -22,6 +22,7 @@ package netutil
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"reflect"
 	"testing"
 	"testing/quick"
@@ -32,7 +33,7 @@ import (
 func TestParseNetlist(t *testing.T) {
 	var tests = []struct {
 		input    string
-		wantErr  error
+		wantErr  bool
 		wantList *Netlist
 	}{
 		{
@@ -41,26 +42,25 @@ func TestParseNetlist(t *testing.T) {
 		},
 		{
 			input:    "127.0.0.0/8",
-			wantErr:  nil,
-			wantList: &Netlist{{IP: net.IP{127, 0, 0, 0}, Mask: net.CIDRMask(8, 32)}},
+			wantList: &Netlist{netip.MustParsePrefix("127.0.0.0/8")},
 		},
 		{
 			input:   "127.0.0.0/44",
-			wantErr: &net.ParseError{Type: "CIDR address", Text: "127.0.0.0/44"},
+			wantErr: true,
 		},
 		{
 			input: "127.0.0.0/16, 23.23.23.23/24,",
 			wantList: &Netlist{
-				{IP: net.IP{127, 0, 0, 0}, Mask: net.CIDRMask(16, 32)},
-				{IP: net.IP{23, 23, 23, 0}, Mask: net.CIDRMask(24, 32)},
+				netip.MustParsePrefix("127.0.0.0/16"),
+				netip.MustParsePrefix("23.23.23.23/24"),
 			},
 		},
 	}
 
 	for _, test := range tests {
 		l, err := ParseNetlist(test.input)
-		if !reflect.DeepEqual(err, test.wantErr) {
-			t.Errorf("%q: got error %q, want %q", test.input, err, test.wantErr)
+		if (err != nil) != test.wantErr {
+			t.Errorf("%q: got error %q, wantErr=%v", test.input, err, test.wantErr)
 			continue
 		}
 		if !reflect.DeepEqual(l, test.wantList) {

@@ -147,6 +147,10 @@ func structFields(typ reflect.Type) (fields []field, err error) {
 			tagErr.StructType = typ.String()
 			return nil, tagErr
 		}
+		if optErr, ok := err.(rlpstruct.OptionalFieldError); ok {
+			optErr.StructType = typ.String()
+			return nil, optErr
+		}
 		return nil, err
 	}
 
@@ -234,6 +238,10 @@ func typeNilKind(typ reflect.Type, tags rlpstruct.Tags) Kind {
 
 func isUint(k reflect.Kind) bool {
 	return k >= reflect.Uint && k <= reflect.Uintptr
+}
+
+func isInt(k reflect.Kind) bool {
+	return k >= reflect.Int && k <= reflect.Int64
 }
 
 func isByte(typ reflect.Type) bool {

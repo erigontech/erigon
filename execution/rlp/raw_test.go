@@ -23,7 +23,6 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"reflect"
 	"testing"
 	"testing/quick"
 )

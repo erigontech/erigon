@@ -166,6 +166,8 @@ func makeWriter(typ reflect.Type, ts rlpstruct.Tags) (writer, error) {
 		return makeEncoderWriter(typ), nil
 	case isUint(kind):
 		return writeUint, nil
+	case isInt(kind):
+		return writeInt, nil
 	case kind == reflect.Bool:
 		return writeBool, nil
 	case kind == reflect.String:
@@ -192,6 +194,15 @@ func writeRawValue(val reflect.Value, w *encBuffer) error {
 
 func writeUint(val reflect.Value, w *encBuffer) error {
 	w.writeUint64(val.Uint())
+	return nil
+}
+
+func writeInt(val reflect.Value, w *encBuffer) error {
+	i := val.Int()
+	if i < 0 {
+		return fmt.Errorf("rlp: type %v -ve values are not RLP-serializable", val.Type())
+	}
+	w.writeUint64(uint64(i))
 	return nil
 }
 
