@@ -60,7 +60,7 @@ type CallArgs struct {
 	SkipL1Charging *bool `json:"skipL1Charging"` // Arbitrum
 }
 
-func (args *CallArgs) FromOrEmpty() common.Address {
+func (args *CallArgs) FromOrEmpty() accounts.Address {
 	return args.from()
 }
 
@@ -675,7 +675,8 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockNumber
 	case *types.ArbitrumRetryTx:
 		result.GasPrice = (*hexutil.Big)(tx.GasFeeCap)
 		result.TicketId = &tx.TicketId
-		result.RefundTo = &tx.RefundTo
+		refTo := tx.RefundTo.Value()
+		result.RefundTo = &refTo
 		result.MaxFeePerGas = (*hexutil.Big)(tx.GasFeeCap)
 		result.MaxRefund = (*hexutil.Big)(tx.MaxRefund)
 		result.SubmissionFeeRefund = (*hexutil.Big)(tx.SubmissionFeeRefund)
@@ -687,8 +688,10 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockNumber
 		result.RetryTo = tx.RetryTo
 		result.RetryValue = (*hexutil.Big)(tx.RetryValue)
 		result.RetryData = (*hexutil.Bytes)(&tx.RetryData)
-		result.Beneficiary = &tx.Beneficiary
-		result.RefundTo = &tx.FeeRefundAddr
+		benef := tx.Beneficiary.Value()
+		result.Beneficiary = &benef
+		refTo := tx.FeeRefundAddr.Value()
+		result.RefundTo = &refTo
 		result.MaxSubmissionFee = (*hexutil.Big)(tx.MaxSubmissionFee)
 		result.MaxFeePerGas = (*hexutil.Big)(tx.GasFeeCap)
 	case *types.ArbitrumUnsignedTx:
@@ -696,7 +699,9 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockNumber
 	}
 
 	signer := types.NewArbitrumSigner(*types.LatestSignerForChainID(chainId.ToBig()))
-	from, err := txn.Sender(*signer)
+
+	//from, err := txn.Sender(*signer)
+	from, err := signer.Sender(txn)
 	if err != nil {
 		log.Warn("sender recovery", "err", err)
 	} else {
