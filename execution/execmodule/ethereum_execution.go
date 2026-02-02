@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -201,6 +202,9 @@ type EthereumExecutionModule struct {
 	lock           sync.RWMutex
 	currentContext *execctx.SharedDomains
 
+	// stateCache is a cache for state data (accounts, storage, code)
+	stateCache *cache.StateCache
+
 	executionproto.UnimplementedExecutionServer
 }
 
@@ -216,6 +220,8 @@ func NewEthereumExecutionModule(ctx context.Context, blockReader services.FullBl
 	fcuBackgroundCommit bool,
 	onlySnapDownloadOnStart bool,
 ) *EthereumExecutionModule {
+	domainCache := cache.NewDefaultStateCache()
+
 	em := &EthereumExecutionModule{
 		blockReader:             blockReader,
 		db:                      db,
@@ -236,6 +242,7 @@ func NewEthereumExecutionModule(ctx context.Context, blockReader services.FullBl
 		fcuBackgroundPrune:      fcuBackgroundPrune,
 		fcuBackgroundCommit:     fcuBackgroundCommit,
 		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
+		stateCache:              domainCache,
 	}
 
 	if stateCache != nil {
@@ -303,6 +310,7 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(sd *execctx.SharedDoma
 	if err := e.hook.BeforeRun(tx, true); err != nil {
 		return err
 	}
+
 	if err := e.executionPipeline.UnwindTo(currentHeader.Number.Uint64(), stagedsync.ExecUnwind, tx); err != nil {
 		return err
 	}
@@ -372,6 +380,11 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return nil, err
 	}
 
+	// Set state cache in SharedDomains for use during state reading
+	if e.stateCache != nil {
+		doms.SetStateCache(e.stateCache)
+	}
+
 	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
 		doms.Close()
 		return nil, err
@@ -380,6 +393,12 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
 		return nil, criticalError
+	}
+
+	// Clear state cache on invalid block
+	isInvalid := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
+	if e.stateCache != nil && isInvalid {
+		e.stateCache.ClearWithHash(header.ParentHash)
 	}
 
 	// Throw away the tx and start a new one (do not persist changes to the canonical chain)
