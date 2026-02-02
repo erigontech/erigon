@@ -643,10 +643,15 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 			if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
 				sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 			}
-			readStart := time.Now()
+			var readStart time.Time
+			if dbg.KVReadLevelledMetrics {
+				readStart = time.Now()
+			}
 			l, err := sdb.stateReader.ReadAccountCodeSize(addr)
-			sdb.codeReadDuration += time.Since(readStart)
-			sdb.codeReadCount++
+			if dbg.KVReadLevelledMetrics {
+				sdb.codeReadDuration += time.Since(readStart)
+				sdb.codeReadCount++
+			}
 			sdb.stateReader.SetTrace(false, "")
 			if err != nil {
 				return l, err
@@ -824,10 +829,15 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 				if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
 					sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 				}
-				readStart := time.Now()
+				var readStart time.Time
+				if dbg.KVReadLevelledMetrics {
+					readStart = time.Now()
+				}
 				account, _ := sdb.stateReader.ReadAccountDataForDebug(addr)
-				sdb.accountReadDuration += time.Since(readStart)
-				sdb.accountReadCount++
+				if dbg.KVReadLevelledMetrics {
+					sdb.accountReadDuration += time.Since(readStart)
+					sdb.accountReadCount++
+				}
 				sdb.stateReader.SetTrace(false, "")
 				if account != nil {
 					prev.Add(&account.Balance, &bi.increase)
@@ -921,10 +931,15 @@ func (sdb *IntraBlockState) getVersionedAccount(addr accounts.Address, readStora
 			if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
 				sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 			}
-			readStart := time.Now()
+			var readStart time.Time
+			if dbg.KVReadLevelledMetrics {
+				readStart = time.Now()
+			}
 			readAccount, err = sdb.stateReader.ReadAccountData(addr)
-			sdb.accountReadDuration += time.Since(readStart)
-			sdb.accountReadCount++
+			if dbg.KVReadLevelledMetrics {
+				sdb.accountReadDuration += time.Since(readStart)
+				sdb.accountReadCount++
+			}
 			source = StorageRead
 			sdb.stateReader.SetTrace(false, "")
 		}
@@ -1329,10 +1344,15 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
 		sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
 	}
-	readStart := time.Now()
+	var readStart time.Time
+	if dbg.KVReadLevelledMetrics {
+		readStart = time.Now()
+	}
 	readAccount, err := sdb.stateReader.ReadAccountData(addr)
-	sdb.accountReadDuration += time.Since(readStart)
-	sdb.accountReadCount++
+	if dbg.KVReadLevelledMetrics {
+		sdb.accountReadDuration += time.Since(readStart)
+		sdb.accountReadCount++
+	}
 	sdb.stateReader.SetTrace(false, "")
 
 	accountSource := StorageRead
