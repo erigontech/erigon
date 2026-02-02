@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/stateifs"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -57,24 +58,14 @@ type keccakState interface {
 
 // DomainPutter is an interface for putting data into domains.
 // Used by flush hooks to write commitment data.
-type DomainPutter interface {
-	DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error
-}
+type DomainPutter = stateifs.DomainPutter
 
 // DeferredHooker is an interface for adding deferred flush hooks.
 // SharedDomains implements this interface.
-type DeferredHooker interface {
-	AddFlushHook(func(context.Context, DomainPutter) error)
-}
+type DeferredHooker = stateifs.DeferredHooker
 
 // CommitmentWrite represents a commitment domain write that needs to be added to changesets.
-type CommitmentWrite struct {
-	Key      []byte
-	Value    []byte
-	TxNum    uint64
-	PrevVal  []byte
-	PrevStep kv.Step
-}
+type CommitmentWrite = stateifs.CommitmentWrite
 
 // HexPatriciaHashed implements commitment based on patricia merkle tree with radix 16,
 // with keys pre-hashed by keccak256
