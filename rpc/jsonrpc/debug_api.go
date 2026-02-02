@@ -1896,24 +1896,6 @@ func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.B
 			missingAccounts++
 		}
 	}
-	// Check the trie structure - specifically look at what's at each branch
-	fmt.Printf("\n--- Checking trie structure at root FullNode ---\n")
-	if fn, ok := stateless.t.RootNode.(*trie.FullNode); ok {
-		for i := 0; i < 16; i++ {
-			child := fn.Children[i]
-			if child != nil {
-				fmt.Printf("  Branch [%x]: %T = %v\n", i, child, child)
-			}
-		}
-	}
-
-	// Check what paths the read addresses use
-	fmt.Printf("\n--- Address paths ---\n")
-	for _, addr := range readAddresses {
-		addrHash, _ := common.HashData(addr[:])
-		firstNibble := addrHash[0] >> 4
-		fmt.Printf("  %s (hash %x...): first nibble = 0x%x\n", addr.Hex()[:10], addrHash[:4], firstNibble)
-	}
 
 	// Create EVM block context - pass header.Coinbase as the author/beneficiary
 	// This ensures gas fees go to the correct address based on the block header
