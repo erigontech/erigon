@@ -19,11 +19,12 @@ package exec
 import (
 	"context"
 	"fmt"
-	"github.com/erigontech/nitro-erigon/arbos"
-	"github.com/erigontech/nitro-erigon/gethhook"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/nitro-erigon/arbos"
+	"github.com/erigontech/nitro-erigon/gethhook"
 
 	"golang.org/x/sync/errgroup"
 

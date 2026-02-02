@@ -495,7 +495,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 					NextBlockNumber: 0,
 				}
 				initReader := statetransfer.NewMemoryInitDataReader(&initData)
-				stateRoot, err := arbosState.InitializeArbosInDatabase(ibsa, txTask.rs.Domains(), txTask.rs.TemporalPutDel(), initReader, txTask.Config, initMessage, txTask.evm.Context.Time, accountsPerSync)
+				stateRoot, err := arbosState.InitializeArbosInDatabase(ibsa, txTask.rs.Domains(), txTask.rs.TemporalPutDel(), initReader, txTask.Config, initMessage, txTask.EvmBlockContext.Time, accountsPerSync)
 				if err != nil {
 					txTask.Logger.Error("Failed to init ArbOS", "err", err)
 					return &TxResult{

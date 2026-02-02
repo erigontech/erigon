@@ -55,7 +55,7 @@ type TxProcessingHook interface {
 	PopContract()
 
 	// vm ops
-	GasPriceOp(evm *EVM) uint256.Int
+	GasPriceOp(evm *EVM) *uint256.Int
 	L1BlockNumber(blockCtx evmtypes.BlockContext) (uint64, error)
 	L1BlockHash(blockCtx evmtypes.BlockContext, l1BlocKNumber uint64) (common.Hash, error)
 }
