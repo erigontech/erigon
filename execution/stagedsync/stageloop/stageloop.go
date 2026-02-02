@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	execp2p "github.com/erigontech/erigon/execution/p2p"
@@ -125,7 +126,7 @@ func StageLoop(
 	}
 }
 
-func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook, onlySnapDownload bool, logger log.Logger) error {
+func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader, sync *stagedsync.Sync, hook *Hook, onlySnapDownload bool, logger log.Logger, stateCache *cache.StateCache) error {
 	sawZeroBlocksTimes := 0
 	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
@@ -137,6 +138,12 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		return err
 	}
 	defer doms.Close()
+
+	// Set state cache in SharedDomains for use during state reading
+	if stateCache != nil {
+		doms.SetStateCache(stateCache)
+	}
+
 	// run stages first time - it will download blocks
 	err = sync.RunSnapshots(doms, tx)
 	if err != nil {

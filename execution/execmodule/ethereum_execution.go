@@ -472,7 +472,7 @@ func (e *EthereumExecutionModule) Start(ctx context.Context, hook *stageloop.Hoo
 	}
 	defer e.semaphore.Release(1)
 
-	if err := stageloop.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, hook, e.onlySnapDownloadOnStart, e.logger); err != nil {
+	if err := stageloop.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, hook, e.onlySnapDownloadOnStart, e.logger, e.stateCache); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}
