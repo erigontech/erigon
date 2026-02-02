@@ -144,6 +144,19 @@ func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br services.FullBl
 	if !found {
 		return nil, rpc.BlockNotFoundErr{BlockId: blockNrOrHash.String()}
 	}
+
+	// Validate execution progress only for explicit block numbers/hashes
+	// Skip for semantic tags (latest, pending, safe, finalized, earliest)
+	if ShouldValidateExecutionProgress(blockNrOrHash) {
+		executedBlock, err := GetLatestExecutedBlockNumber(tx)
+		if err != nil {
+			return nil, err
+		}
+		if blockNumber > executedBlock {
+			return nil, fmt.Errorf("state for block %d not available (execution at block %d)", blockNumber, executedBlock)
+		}
+	}
+
 	return CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, txnIndex, stateCache, txNumReader)
 }
 
@@ -289,4 +302,29 @@ func (hr *cachedHistoryReaderV3) ReadAccountCodeSize(address accounts.Address) (
 
 func (hr *cachedHistoryReaderV3) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
 	return 0, nil
+}
+
+// ShouldValidateExecutionProgress returns true if the block reference
+// requires validation against execution stage (explicit block number or hash).
+// Returns false for semantic tags (latest, pending, safe, finalized, earliest).
+func ShouldValidateExecutionProgress(blockNrOrHash rpc.BlockNumberOrHash) bool {
+	// If block hash is specified, we need to validate
+	if _, ok := blockNrOrHash.Hash(); ok {
+		return true
+	}
+	// Check block number tag
+	if blockNrOrHash.BlockNumber == nil {
+		return false
+	}
+	switch *blockNrOrHash.BlockNumber {
+	case rpc.LatestBlockNumber,
+		rpc.PendingBlockNumber,
+		rpc.FinalizedBlockNumber,
+		rpc.SafeBlockNumber,
+		rpc.EarliestBlockNumber,
+		rpc.LatestExecutedBlockNumber:
+		return false // Semantic tags - no validation needed
+	default:
+		return true // Explicit block number - validation required
+	}
 }
