@@ -795,11 +795,13 @@ func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart ti
 	mxCommitmentMGasSec.Set(float64(committedGasSec / 1e6))
 	mxCommitmentBlockDuration.Set(float64(commitedBlockDur))
 
+	rs.Domains().Metrics().RLock()
 	commitVals := []any{
 		"bdur", common.Round(commitedBlockDur, 0),
 		"progress", fmt.Sprintf("%s/%s", common.PrettyCounter(lastProgress.KeyIndex), common.PrettyCounter(lastProgress.UpdateCount)),
 		"buf", common.ByteCount(uint64(rs.Domains().Metrics().CachePutSize + rs.Domains().Metrics().CacheGetSize)),
 	}
+	rs.Domains().Metrics().RUnlock()
 
 	p.log("committed", suffix, te, rs, interval, te.lastCommittedBlockNum.Load(), committedDiffBlocks,
 		te.lastCommittedTxNum.Load()-p.prevCommittedTxNum, committedTxSec, committedGasSec, 0, stepsInDb, commitVals)
