@@ -892,6 +892,10 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	noop := state.NewNoopWriter()
 	recordingWriter := NewRecordingStateWriter(noop)
 
+	if blockNum == 4 {
+		fmt.Printf("BLOCK 4\n")
+	}
+
 	// Execute all transactions in the block
 	for txIndex, txn := range block.Transactions() {
 		msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
@@ -1195,7 +1199,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	// Print expected post-state in human-readable format
 	// printExpectedPostState(blockNum, block.Root(), expectedState, expectedStorage)
 
-	if err = verifyExecutionWitnessResult(result, block, chainCfg, api.engine(), expectedParentRoot, readAddresses, expectedState, expectedStorage); err != nil {
+	if err = verifyExecutionWitnessResult(result, block, chainCfg, api.engine(), expectedParentRoot, readAddresses, writeAddresses, readStorageKeys, writeStorageKeys, expectedState, expectedStorage); err != nil {
 		return nil, fmt.Errorf("witness verification failed: %w", err)
 	}
 
@@ -1262,6 +1266,118 @@ func printExpectedPostState(blockNum uint64, expectedStateRoot common.Hash, expe
 
 		fmt.Printf("└─────────────────────────────────────────────────────────────────────────────┘\n")
 		fmt.Printf("\n")
+	}
+}
+
+// printPreStateCheck prints the pre-state status of all touched accounts and storage.
+// Missing items aren't necessarily errors - they could be created during block execution.
+func printPreStateCheck(stateless *witnessStateless, readAddresses, writeAddresses []common.Address, readStorageKeys, writeStorageKeys map[common.Address][]common.Hash) {
+	// Merge all addresses into a deduplicated map with their access type
+	type accessInfo struct {
+		read  bool
+		write bool
+	}
+	allAddrs := make(map[common.Address]*accessInfo)
+	for _, addr := range readAddresses {
+		if allAddrs[addr] == nil {
+			allAddrs[addr] = &accessInfo{}
+		}
+		allAddrs[addr].read = true
+	}
+	for _, addr := range writeAddresses {
+		if allAddrs[addr] == nil {
+			allAddrs[addr] = &accessInfo{}
+		}
+		allAddrs[addr].write = true
+	}
+
+	fmt.Printf("\n--- Pre-state check: %d touched accounts ---\n", len(allAddrs))
+	for addr, info := range allAddrs {
+		addrHash, _ := common.HashData(addr[:])
+		acc, found := stateless.t.GetAccount(addrHash[:])
+
+		accessType := ""
+		if info.read && info.write {
+			accessType = "R/W"
+		} else if info.read {
+			accessType = "R"
+		} else {
+			accessType = "W"
+		}
+
+		if found && acc != nil {
+			fmt.Printf("  [%s] %s (hash %x): Nonce=%d, Balance=%s, Root=%x\n",
+				accessType, addr.Hex(), addrHash[:8], acc.Nonce, acc.Balance.String(), acc.Root[:8])
+		} else {
+			fmt.Printf("  [%s] %s (hash %x): not in pre-state (may be created)\n",
+				accessType, addr.Hex(), addrHash[:8])
+		}
+	}
+
+	// Merge all storage keys into a deduplicated map
+	type storageAccessInfo struct {
+		read  bool
+		write bool
+	}
+	allStorage := make(map[common.Address]map[common.Hash]*storageAccessInfo)
+	for addr, keys := range readStorageKeys {
+		if allStorage[addr] == nil {
+			allStorage[addr] = make(map[common.Hash]*storageAccessInfo)
+		}
+		for _, key := range keys {
+			if allStorage[addr][key] == nil {
+				allStorage[addr][key] = &storageAccessInfo{}
+			}
+			allStorage[addr][key].read = true
+		}
+	}
+	for addr, keys := range writeStorageKeys {
+		if allStorage[addr] == nil {
+			allStorage[addr] = make(map[common.Hash]*storageAccessInfo)
+		}
+		for _, key := range keys {
+			if allStorage[addr][key] == nil {
+				allStorage[addr][key] = &storageAccessInfo{}
+			}
+			allStorage[addr][key].write = true
+		}
+	}
+
+	// Count total storage keys
+	totalStorageKeys := 0
+	for _, keys := range allStorage {
+		totalStorageKeys += len(keys)
+	}
+
+	if totalStorageKeys > 0 {
+		fmt.Printf("\n--- Pre-state check: %d touched storage slots ---\n", totalStorageKeys)
+		for addr, keys := range allStorage {
+			addrHash, _ := common.HashData(addr[:])
+			fmt.Printf("  Account %s (hash %x):\n", addr.Hex(), addrHash[:8])
+			for key, info := range keys {
+				keyHash, _ := common.HashData(key[:])
+				cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
+
+				accessType := ""
+				if info.read && info.write {
+					accessType = "R/W"
+				} else if info.read {
+					accessType = "R"
+				} else {
+					accessType = "W"
+				}
+
+				if val, found := stateless.t.Get(cKey); found {
+					var valInt uint256.Int
+					valInt.SetBytes(val)
+					fmt.Printf("    [%s] Key %x (hash %x): value=%s\n",
+						accessType, key[:8], keyHash[:8], valInt.String())
+				} else {
+					fmt.Printf("    [%s] Key %x (hash %x): not in pre-state (may be created)\n",
+						accessType, key[:8], keyHash[:8])
+				}
+			}
+		}
 	}
 }
 
@@ -1830,7 +1946,7 @@ var _ rules.ChainReader = (*statelessChainReader)(nil)
 // verifyExecutionWitnessResult verifies the execution witness by re-executing the block statelessly.
 // It decodes the witness trie, executes all transactions, and verifies the resulting state root
 // matches the block's state root.
-func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config, engine rules.EngineReader, expectedParentRoot common.Hash, readAddresses []common.Address, expectedState map[common.Address]*accounts.Account, expectedStorage map[common.Address]map[common.Hash]uint256.Int) error {
+func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config, engine rules.EngineReader, expectedParentRoot common.Hash, readAddresses, writeAddresses []common.Address, readStorageKeys, writeStorageKeys map[common.Address][]common.Hash, expectedState map[common.Address]*accounts.Account, expectedStorage map[common.Address]map[common.Hash]uint256.Int) error {
 	// Skip verification for genesis block - it has no transactions to execute
 	// but has pre-allocated accounts which would cause a state root mismatch
 	if block.NumberU64() == 0 {
@@ -1883,19 +1999,9 @@ func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.B
 	}
 	fmt.Printf("✓ Witness trie root matches expected parent state root\n")
 
-	// Check that all accounts read during original execution are present in the witness trie
-	fmt.Printf("\n--- Pre-state check: verifying %d read addresses exist in witness trie ---\n", len(readAddresses))
-	missingAccounts := 0
-	for _, addr := range readAddresses {
-		addrHash, _ := common.HashData(addr[:])
-		acc, found := stateless.t.GetAccount(addrHash[:])
-		if found && acc != nil {
-			fmt.Printf("  ✓ %s (hash %x): Nonce=%d, Balance=%s\n", addr.Hex(), addrHash[:8], acc.Nonce, acc.Balance.String())
-		} else {
-			fmt.Printf("  ✗ %s (hash %x): NOT FOUND in witness trie!\n", addr.Hex(), addrHash[:8])
-			missingAccounts++
-		}
-	}
+	// Pre-state check: verify all touched accounts and storage exist in witness trie
+	// Note: missing items aren't necessarily errors - they could be created during block execution
+	printPreStateCheck(stateless, readAddresses, writeAddresses, readStorageKeys, writeStorageKeys)
 
 	// Create EVM block context - pass header.Coinbase as the author/beneficiary
 	// This ensures gas fees go to the correct address based on the block header
