@@ -587,6 +587,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			if b == nil {
 				return fmt.Errorf("nil block %d", blockNum)
 			}
+			go warmTxsHashes(b)
 
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()
