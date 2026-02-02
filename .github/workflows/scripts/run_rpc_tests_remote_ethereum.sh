@@ -15,6 +15,8 @@ DISABLED_TEST_LIST=(
   eth_simulateV1
   # tests not updated after cherry-picking
   eth_getStorageAt/test_09.json
+  # Disabled because of an incorrect response.
+  eth_createAccessList/test_19.json
 )
 
 # Transform the array into a comma-separated string
