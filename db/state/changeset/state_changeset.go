@@ -43,9 +43,16 @@ func (s *StateChangeSet) Copy() *StateChangeSet {
 	return &res
 }
 func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
-	ret := out
-	// Write a small dictionary for prevStepBytes
 	dict := make(map[string]byte)
+	var tmp [4]byte
+	return serializeDiffSetTo(diffSet, out, dict, &tmp)
+}
+
+// serializeDiffSetTo is a zero-allocation version that reuses provided buffers.
+func serializeDiffSetTo(diffSet []kv.DomainEntryDiff, out []byte, dict map[string]byte, tmp *[4]byte) []byte {
+	ret := out
+	// Clear and reuse the dictionary
+	clear(dict)
 	id := byte(0x00)
 	for _, diff := range diffSet {
 		prevStepS := toStringZeroCopy(diff.PrevStepBytes)
@@ -58,11 +65,10 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 	// Write the dictionary
 	ret = append(ret, byte(len(dict)))
 	for k, v := range dict {
-		ret = append(ret, []byte(k)...) // k is always 8 bytes
-		ret = append(ret, v)            // v is always 1 byte
+		ret = append(ret, k...) // k is always 8 bytes
+		ret = append(ret, v)    // v is always 1 byte
 	}
 	// Write the diffSet
-	var tmp [4]byte
 	binary.BigEndian.PutUint32(tmp[:], uint32(len(diffSet)))
 	ret = append(ret, tmp[:]...)
 	for _, diff := range diffSet {
@@ -79,21 +85,36 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 }
 
 func serializeDiffSetBufLen(diffSet []kv.DomainEntryDiff) int {
-	// Write a small dictionary for prevStepBytes
-	dict := make(map[string]byte)
-	id := byte(0x00)
-	for _, diff := range diffSet {
-		prevStepS := toStringZeroCopy(diff.PrevStepBytes)
-		if _, ok := dict[prevStepS]; ok {
-			continue
+	return serializeDiffSetBufLenWithDict(diffSet, nil)
+}
+
+// serializeDiffSetBufLenWithDict calculates buffer length using an optional reusable map.
+func serializeDiffSetBufLenWithDict(diffSet []kv.DomainEntryDiff, dictBuf map[string]byte) int {
+	// Count unique prevStepBytes entries for dictionary size
+	var dictLen int
+	if dictBuf != nil {
+		clear(dictBuf)
+		for _, diff := range diffSet {
+			prevStepS := toStringZeroCopy(diff.PrevStepBytes)
+			if _, ok := dictBuf[prevStepS]; !ok {
+				dictBuf[prevStepS] = byte(dictLen)
+				dictLen++
+			}
 		}
-		dict[prevStepS] = id
-		id++
+	} else {
+		// Fallback: create temporary map
+		dict := make(map[string]byte)
+		for _, diff := range diffSet {
+			prevStepS := toStringZeroCopy(diff.PrevStepBytes)
+			if _, ok := dict[prevStepS]; !ok {
+				dict[prevStepS] = byte(dictLen)
+				dictLen++
+			}
+		}
 	}
-	// Write the dictionary
-	ret := 1 + 9*len(dict)
-	// Write the diffSet
-	ret += 4
+	// Calculate total size
+	ret := 1 + 9*dictLen // dictionary: 1 byte count + (8 bytes key + 1 byte id) per entry
+	ret += 4             // diffSet length
 	for _, diff := range diffSet {
 		ret += 4 + len(diff.Key) + 4 + len(diff.Value) + 1
 	}
@@ -172,13 +193,18 @@ func MergeDiffSets(newer, older []kv.DomainEntryDiff) []kv.DomainEntryDiff {
 }
 
 func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
-	// Do  diff_length + diffSet
+	dict := make(map[string]byte)
+	var tmp [4]byte
+	return d.serializeKeysTo(out, blockNumber, dict, &tmp)
+}
+
+// serializeKeysTo is a zero-allocation version that reuses provided buffers.
+func (d *StateChangeSet) serializeKeysTo(out []byte, blockNumber uint64, dictBuf map[string]byte, tmp *[4]byte) []byte {
 	ret := out
-	tmp := make([]byte, 4)
 	for i := range d.Diffs {
 		diffSet := d.Diffs[i].GetDiffSet()
-		binary.BigEndian.PutUint32(tmp, uint32(serializeDiffSetBufLen(diffSet)))
-		ret = append(ret, tmp...)
+		binary.BigEndian.PutUint32(tmp[:], uint32(serializeDiffSetBufLenWithDict(diffSet, dictBuf)))
+		ret = append(ret, tmp[:]...)
 
 		if dbg.TraceUnwinds {
 			if i == int(kv.AccountsDomain) && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
@@ -241,7 +267,7 @@ func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
 				}
 			}
 		}
-		ret = SerializeDiffSet(diffSet, ret)
+		ret = serializeDiffSetTo(diffSet, ret, dictBuf, tmp)
 	}
 	return ret
 }
@@ -262,6 +288,16 @@ func SerializeStateChangeSet(diffSet *StateChangeSet, blockNumber uint64) []byte
 		return nil
 	}
 	return diffSet.serializeKeys(nil, blockNumber)
+}
+
+// SerializeStateChangeSetTo serializes the diffset into the provided buffer (zero-alloc).
+// dictBuf is a reusable map for building the dictionary.
+// tmp4 is a reusable 4-byte buffer for encoding lengths.
+func SerializeStateChangeSetTo(diffSet *StateChangeSet, blockNumber uint64, out []byte, dictBuf map[string]byte, tmp4 *[4]byte) []byte {
+	if diffSet == nil {
+		return out
+	}
+	return diffSet.serializeKeysTo(out, blockNumber, dictBuf, tmp4)
 }
 
 func DeserializeStateChangeSet(in []byte) [kv.DomainLen][]kv.DomainEntryDiff {

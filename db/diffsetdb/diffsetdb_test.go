@@ -170,3 +170,83 @@ func makeDiffset() *changeset.StateChangeSet {
 	diffSet.Diffs[kv.StorageDomain].DomainUpdate([]byte("slot"), kv.Step(3), []byte("prev-slot"), kv.Step(2))
 	return &diffSet
 }
+
+// makeLargeDiffset creates a diffset with many entries for benchmarking.
+func makeLargeDiffset(numEntries int) *changeset.StateChangeSet {
+	var diffSet changeset.StateChangeSet
+	for i := 0; i < numEntries; i++ {
+		key := make([]byte, 20)
+		key[0] = byte(i >> 24)
+		key[1] = byte(i >> 16)
+		key[2] = byte(i >> 8)
+		key[3] = byte(i)
+		value := make([]byte, 32)
+		value[0] = byte(i)
+		diffSet.Diffs[kv.AccountsDomain].DomainUpdate(key, kv.Step(uint64(i+2)), value, kv.Step(uint64(i+1)))
+	}
+	for i := 0; i < numEntries*2; i++ {
+		key := make([]byte, 52) // address + slot
+		key[0] = byte(i >> 24)
+		key[1] = byte(i >> 16)
+		key[2] = byte(i >> 8)
+		key[3] = byte(i)
+		value := make([]byte, 32)
+		value[0] = byte(i)
+		diffSet.Diffs[kv.StorageDomain].DomainUpdate(key, kv.Step(uint64(i+2)), value, kv.Step(uint64(i+1)))
+	}
+	return &diffSet
+}
+
+func BenchmarkWriteDiffSet(b *testing.B) {
+	dirs := datadir.New(b.TempDir())
+	db := diffsetdb.Open(dirs)
+	diffSet := makeLargeDiffset(100)
+	hash := common.HexToHash("0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20")
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = db.WriteDiffSet(uint64(i), hash, diffSet)
+	}
+}
+
+func BenchmarkSerializeStateChangeSet(b *testing.B) {
+	diffSet := makeLargeDiffset(100)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = changeset.SerializeStateChangeSet(diffSet, uint64(i))
+	}
+}
+
+func BenchmarkSerializeStateChangeSetTo(b *testing.B) {
+	diffSet := makeLargeDiffset(100)
+	buf := make([]byte, 0, 1024*1024)
+	dictBuf := make(map[string]byte, 64)
+	var tmp4 [4]byte
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		buf = buf[:0]
+		_ = changeset.SerializeStateChangeSetTo(diffSet, uint64(i), buf, dictBuf, &tmp4)
+	}
+}
+
+func BenchmarkReadDiffSet(b *testing.B) {
+	dirs := datadir.New(b.TempDir())
+	db := diffsetdb.Open(dirs)
+	diffSet := makeLargeDiffset(100)
+	hash := common.HexToHash("0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20")
+
+	if err := db.WriteDiffSet(1, hash, diffSet); err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_, _, _ = db.ReadDiffSet(1, hash)
+	}
+}

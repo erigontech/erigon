@@ -40,12 +40,24 @@ import (
 
 const diffsetExt = ".diffset"
 
+// Pre-computed hex lookup table for zero-allocation hex encoding
+var hexTable = [16]byte{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'}
+
 var diffsetDBByDir sync.Map
 
 // DiffsetDatabase stores per-block diffsets as files in the datadir.
 type DiffsetDatabase struct {
-	dir string       // absolute path to datadir diffsets folder
-	mu  sync.RWMutex // guards file reads/writes
+	dir string     // absolute path to datadir diffsets folder
+	mu  sync.Mutex // guards file reads/writes
+
+	// Auxiliary buffers for zero-allocation serialization
+	serializeBuf []byte            // reusable buffer for serialization
+	pathBuf      []byte            // reusable buffer for file path construction
+	filenameBuf  []byte            // reusable buffer for filename construction
+	dictBuf      map[string]byte   // reusable dictionary for serialization
+	dictRevBuf   map[byte][]byte   // reusable reverse dictionary for deserialization
+	tmp4         [4]byte           // reusable 4-byte temp buffer
+	hexBuf       [length.Hash * 2]byte // reusable hex encoding buffer
 }
 
 func Open(dirs datadir.Dirs) *DiffsetDatabase {
@@ -56,7 +68,14 @@ func Open(dirs datadir.Dirs) *DiffsetDatabase {
 	if cached, ok := diffsetDBByDir.Load(key); ok {
 		return cached.(*DiffsetDatabase)
 	}
-	db := &DiffsetDatabase{dir: dirs.Diffsets}
+	db := &DiffsetDatabase{
+		dir:         dirs.Diffsets,
+		serializeBuf: make([]byte, 0, 1024*1024), // 1MB initial capacity
+		pathBuf:      make([]byte, 0, 256),
+		filenameBuf:  make([]byte, 0, 128),
+		dictBuf:      make(map[string]byte, 64),
+		dictRevBuf:   make(map[byte][]byte, 64),
+	}
 	actual, _ := diffsetDBByDir.LoadOrStore(key, db)
 	return actual.(*DiffsetDatabase)
 }
@@ -74,6 +93,10 @@ func (db *DiffsetDatabase) WriteDiffSet(blockNumber uint64, blockHash common.Has
 	if err := db.ensureDir(); err != nil {
 		return err
 	}
+
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
 	if dbg.TraceUnwinds {
 		var diffStats strings.Builder
 		first := true
@@ -89,16 +112,14 @@ func (db *DiffsetDatabase) WriteDiffSet(blockNumber uint64, blockHash common.Has
 		fmt.Printf("diffset (Block:%d) %x:%s %s\n", blockNumber, blockHash, diffStats.String(), dbg.Stack())
 	}
 
-	data := changeset.SerializeStateChangeSet(diffSet, blockNumber)
-	path := db.diffsetPath(blockNumber, blockHash)
+	// Serialize using auxiliary buffer (zero-alloc reuse)
+	db.serializeBuf = db.serializeBuf[:0]
+	db.serializeBuf = changeset.SerializeStateChangeSetTo(diffSet, blockNumber, db.serializeBuf, db.dictBuf, &db.tmp4)
 
-	errCh := make(chan error, 1)
-	db.mu.Lock()
-	go func() {
-		defer db.mu.Unlock()
-		errCh <- dir.WriteFileWithFsync(path, data, 0o644)
-	}()
-	return <-errCh
+	// Build path using auxiliary buffers
+	path := db.diffsetPathZeroAlloc(blockNumber, blockHash)
+
+	return dir.WriteFileWithFsync(path, db.serializeBuf, 0o644)
 }
 
 // ReadDiffSet loads a block diffset from its per-block file.
@@ -107,9 +128,9 @@ func (db *DiffsetDatabase) ReadDiffSet(blockNumber uint64, blockHash common.Hash
 		return [kv.DomainLen][]kv.DomainEntryDiff{}, false, errors.New("diffset database requires datadir")
 	}
 	path := db.diffsetPath(blockNumber, blockHash)
-	db.mu.RLock()
+	db.mu.Lock()
 	data, err := os.ReadFile(path)
-	db.mu.RUnlock()
+	db.mu.Unlock()
 	if err != nil {
 		if os.IsNotExist(err) {
 			return [kv.DomainLen][]kv.DomainEntryDiff{}, false, nil
@@ -127,9 +148,9 @@ func (db *DiffsetDatabase) ReadLowestUnwindableBlock() (uint64, error) {
 	if db.dir == "" {
 		return math.MaxUint64, errors.New("diffset database requires datadir")
 	}
-	db.mu.RLock()
+	db.mu.Lock()
 	entries, err := os.ReadDir(db.dir)
-	db.mu.RUnlock()
+	db.mu.Unlock()
 	if err != nil {
 		if os.IsNotExist(err) {
 			return math.MaxUint64, nil
@@ -195,7 +216,7 @@ func (db *DiffsetDatabase) PruneBefore(ctx context.Context, cutoff uint64, limit
 		if !ok || blockNum >= cutoff {
 			continue
 		}
-		if err := os.Remove(filepath.Join(db.dir, entry.Name())); err != nil && !os.IsNotExist(err) {
+		if err := dir.RemoveFile(filepath.Join(db.dir, entry.Name())); err != nil && !os.IsNotExist(err) {
 			return removed, err
 		}
 		removed++
@@ -210,7 +231,7 @@ func (db *DiffsetDatabase) Clear() error {
 	}
 	db.mu.Lock()
 	defer db.mu.Unlock()
-	return os.RemoveAll(db.dir)
+	return dir.RemoveAll(db.dir)
 }
 
 // ensureDir creates the diffset directory if it does not exist.
@@ -224,6 +245,28 @@ func (db *DiffsetDatabase) ensureDir() error {
 // diffsetPath builds the path for a given block's diffset file.
 func (db *DiffsetDatabase) diffsetPath(blockNumber uint64, blockHash common.Hash) string {
 	return filepath.Join(db.dir, diffsetFileName(blockNumber, blockHash))
+}
+
+// diffsetPathZeroAlloc builds the path using pre-allocated buffers (zero-alloc).
+// Must be called under lock as it uses shared buffers.
+func (db *DiffsetDatabase) diffsetPathZeroAlloc(blockNumber uint64, blockHash common.Hash) string {
+	// Build filename into filenameBuf
+	db.filenameBuf = db.filenameBuf[:0]
+	db.filenameBuf = strconv.AppendUint(db.filenameBuf, blockNumber, 10)
+	db.filenameBuf = append(db.filenameBuf, '+')
+	// Hex encode the hash directly into buffer
+	for _, b := range blockHash {
+		db.filenameBuf = append(db.filenameBuf, hexTable[b>>4], hexTable[b&0x0f])
+	}
+	db.filenameBuf = append(db.filenameBuf, diffsetExt...)
+
+	// Build full path
+	db.pathBuf = db.pathBuf[:0]
+	db.pathBuf = append(db.pathBuf, db.dir...)
+	db.pathBuf = append(db.pathBuf, filepath.Separator)
+	db.pathBuf = append(db.pathBuf, db.filenameBuf...)
+
+	return string(db.pathBuf)
 }
 
 // diffsetFileName formats the on-disk filename for a block diffset.
