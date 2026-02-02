@@ -94,7 +94,7 @@ require (
 	github.com/protolambda/ztyp v0.2.2
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20240618144021-706c95b2dd15
 	github.com/prysmaticlabs/gohashtree v0.0.4-beta
-	github.com/puzpuzpuz/xsync/v3 v3.5.1
+	github.com/puzpuzpuz/xsync/v4 v4.4.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/quic-go/quic-go v0.49.1
 	github.com/rs/cors v1.11.1
