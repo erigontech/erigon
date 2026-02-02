@@ -1718,8 +1718,8 @@ func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.B
 
 	// Use engine.CalculateRewards to get the proper rewards for this block
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		// For stateless verification, syscalls are not expected to be needed
-		return nil, nil
+		ret, err := protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vm.Config{})
+		return ret, err
 	}
 
 	// check func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error) {
