@@ -98,7 +98,8 @@ func (db *DiffsetDatabase) WriteDiffSet(blockNumber uint64, blockHash common.Has
 		defer db.mu.Unlock()
 		errCh <- dir.WriteFileWithFsync(path, data, 0o644)
 	}()
-	return <-errCh
+	return nil
+	//return <-errCh
 }
 
 // ReadDiffSet loads a block diffset from its per-block file.
