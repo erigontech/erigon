@@ -18,8 +18,6 @@ package cache
 
 import (
 	"bytes"
-	"encoding/binary"
-	"fmt"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/common"
@@ -155,27 +153,17 @@ func (c *StateCache) PrintStatsAndReset() {
 }
 
 func (c *StateCache) RevertWithDiffset(diffset *[6][]kv.DomainEntryDiff, newBlockHash common.Hash) {
-	for _, entry := range diffset[kv.AccountsDomain] {
-		k := []byte(entry.Key[:len(entry.Key)-8])
-		c.Delete(kv.CodeDomain, k)
-		c.Delete(kv.AccountsDomain, k)
-		prevStep := ^binary.BigEndian.Uint64(entry.PrevStepBytes)
-		currStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-		fmt.Println(common.Bytes2Hex(k), "prevStep", prevStep, "currStep", currStep)
+	for domain, diffList := range diffset {
+		for _, entry := range diffList {
+			k := []byte(entry.Key[:len(entry.Key)-8])
+			if len(entry.Value) == 0 {
+				c.Delete(kv.Domain(domain), k)
+			} else {
+				c.Put(kv.Domain(domain), k, entry.Value)
+			}
+		}
 	}
-	for _, entry := range diffset[kv.CodeDomain] {
-		k := []byte(entry.Key[:len(entry.Key)-8])
-		c.Delete(kv.CodeDomain, k)
-	}
-	for _, entry := range diffset[kv.StorageDomain] {
-		k := []byte(entry.Key[:len(entry.Key)-8])
-		c.Delete(kv.StorageDomain, k)
-	}
-	// still adding kv.CommitmentDomain for expandability.
-	for _, entry := range diffset[kv.CommitmentDomain] {
-		k := []byte(entry.Key[:len(entry.Key)-8])
-		c.Delete(kv.CommitmentDomain, k)
-	}
+
 	// Update block hash on all caches after unwind so ValidateAndPrepare works correctly
 	for _, cache := range c.caches {
 		if cache != nil {
