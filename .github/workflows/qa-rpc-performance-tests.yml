@@ -5,42 +5,105 @@ on:
     branches:
       - 'release/3.*'
   workflow_dispatch:
+    inputs:
+      run_geth:
+        description: 'Run the Geth benchmark besides the Erigon one'
+        type: boolean
+        required: false
+        default: false
   schedule:
-    - cron: '0 20 * * *'  # Run every night at 20:00 (08:00 PM) UTC
+  - cron: '0 3 * * *'  # Run daily at 03:00 UTC
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: rpc-performance-historic-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  CHAIN: mainnet
+  ERIGON_QA_PATH: /home/qarunner/erigon-qa
+  RPC_PAST_TEST_DIR: /opt/rpc-past-tests
+
 jobs:
-  mainnet-rpc-perf-tests:
-    name: Benchmark ${{ matrix.client }}
+  setup:
+    name: Setup benchmark run
+    runs-on: [self-hosted, qa]
+    permissions:
+      contents: read
+    outputs:
+      run_id: ${{ steps.vars.outputs.run_id }}
+      network: ${{ steps.vars.outputs.network }}
+      run_geth: ${{ steps.vars.outputs.run_geth }}
+    steps:
+      - name: Compute shared variables
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Unique namespace for this workflow execution
+          RUN_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          # Decide whether to run geth:
+          # - schedule: only on Sunday (UTC)
+          # - workflow_dispatch: controlled by input
+          RUN_GETH="false"
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            DOW="$(date -u +%w)"
+            if [ "$DOW" = "0" ]; then  # Sunday, (0..6 = Sun..Sat)
+              RUN_GETH="true"
+            fi
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ github.event.inputs.run_geth }}" = "true" ]; the
+              RUN_GETH="true"
+            fi
+          fi
+          
+          # Variables
+          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "network=${{ env.CHAIN }}" >> "$GITHUB_OUTPUT"
+          echo "run_geth=${RUN_GETH}" >> "$GITHUB_OUTPUT"
+
+      - name: Print configuration (for logs)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Run ID:             ${{ steps.vars.outputs.run_id }}"
+          echo "Network:            ${{ steps.vars.outputs.network }}"
+          echo "Run Erigon:         true"
+          echo "Run Geth:           ${{ steps.vars.outputs.run_geth }}"
+
+  test:
+    name: Benchmark Historic ${{ matrix.client }}
+    needs: [setup]
     strategy:
       fail-fast: false
       matrix:
         include:
           - client: erigon
-            runs-on: [ self-hosted, qa, Ethereum, rpc-performance ]
+            runs-on: [self-hosted, qa, Ethereum, rpc-performance]
           - client: geth
-            runs-on: [ self-hosted, qa, Ethereum, rpc-historical ]
+            runs-on: [self-hosted, qa, Ethereum, rpc-historical]
     runs-on: ${{ matrix.runs-on }}
     env:
+      RUN_ID: ${{ needs.setup.outputs.run_id }}
+      NETWORK: ${{ needs.setup.outputs.network }}
       ERIGON_REFERENCE_DIR: /opt/erigon-versions/reference-version
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       GETH_INSTALL_DIR: /opt/go-ethereum
       CLIENT: ${{ matrix.client }}
-      CHAIN: mainnet
 
     steps:
       - name: Checkout Erigon repository
+        if: matrix.client == 'erigon'
         uses: actions/checkout@v6
         with:
           submodules: recursive
           fetch-depth: "0"
 
       - name: Checkout RPC Tests Repository
+        if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
         run: |
           rm -rf ${{runner.workspace}}/rpc-tests
           git -c advice.detachedHead=false clone --depth 1 --branch v1.78.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
@@ -97,6 +160,7 @@ jobs:
           echo "RpcDaemon started"
 
       - name: Wait for port 8545 to be opened
+        if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
         run: |
           # Geth is expected to be pre-running for the rpc-latest-geth runner
           # Erigon was started above
@@ -116,6 +180,7 @@ jobs:
 
       - name: Run RPC Performance Tests
         id: test_step
+        if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
         run: |
           set +e # Disable exit on error
           
@@ -265,6 +330,7 @@ jobs:
           else
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
             echo "Error detected during tests"
+            echo "::error::Error detected during tests"
             exit 1
           fi
 
@@ -318,7 +384,7 @@ jobs:
           fi
 
       - name: Upload test results
-        if: steps.test_step.outputs.test_executed == 'true'
+        if: (matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true') && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v6
         with:
           name: test-results-${{ env.CHAIN }}-${{ matrix.client }}
@@ -335,9 +401,3 @@ jobs:
       - name: Action for Success
         if: steps.test_step.outputs.TEST_RESULT == 'success'
         run: echo "::notice::Tests completed successfully"
-
-      - name: Action for Failure
-        if: steps.test_step.outputs.TEST_RESULT != 'success'
-        run: |
-          echo "::error::Error detected during tests"
-          exit 1
