@@ -22,7 +22,7 @@ package p2p
 import (
 	"container/heap"
 
-	"github.com/erigontech/erigon/common/mclock"
+	"github.com/ethereum/go-ethereum/common/mclock"
 )
 
 // expHeap tracks strings and their expiry time.

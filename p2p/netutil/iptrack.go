@@ -23,7 +23,7 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/erigontech/erigon/common/mclock"
+	"github.com/ethereum/go-ethereum/common/mclock"
 )
 
 // IPTracker predicts the external endpoint, i.e. IP address and port, of the local host

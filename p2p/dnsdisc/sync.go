@@ -24,7 +24,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/erigontech/erigon/common/mclock"
+	"github.com/ethereum/go-ethereum/common/mclock"
 	"github.com/erigontech/erigon/p2p/enode"
 )
 

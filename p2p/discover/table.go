@@ -32,7 +32,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/mclock"
+	"github.com/ethereum/go-ethereum/common/mclock"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/event"
 	"github.com/erigontech/erigon/p2p/netutil"

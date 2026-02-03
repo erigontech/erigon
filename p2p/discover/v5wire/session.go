@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common/lru"
-	"github.com/erigontech/erigon/common/mclock"
+	"github.com/ethereum/go-ethereum/common/mclock"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/p2p/enode"
 )
