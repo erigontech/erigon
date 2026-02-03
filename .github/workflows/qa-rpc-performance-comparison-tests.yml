@@ -50,7 +50,7 @@ jobs:
               RUN_GETH="true"
             fi
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "${{ github.event.inputs.run_geth }}" = "true" ]; the
+            if [ "${{ github.event.inputs.run_geth }}" = "true" ]; then
               RUN_GETH="true"
             fi
           fi
