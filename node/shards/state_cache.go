@@ -27,7 +27,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/common/metrics"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 

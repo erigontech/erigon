@@ -20,7 +20,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/common/metrics"
 )
 
 type (

@@ -1,7 +1,7 @@
 package stagedsync
 
 import (
-	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/common/metrics"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 

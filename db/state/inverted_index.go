@@ -33,7 +33,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/common/metrics"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"

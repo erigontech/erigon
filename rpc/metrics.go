@@ -24,7 +24,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/common/metrics"
 )
 
 var (

@@ -24,7 +24,7 @@ import (
 
 	"github.com/shirou/gopsutil/v4/process"
 
-	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/common/metrics"
 )
 
 var (

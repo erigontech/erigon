@@ -24,7 +24,7 @@ package p2p
 import (
 	"net"
 
-	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/common/metrics"
 )
 
 const (
