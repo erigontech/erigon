@@ -45,7 +45,7 @@ type HashBuilder struct {
 	sha       keccakState           // Keccak primitive that can absorb data (Write), and get squeezed to the hash out (Read)
 	hashBuf   [hashStackStride]byte // RLP representation of hash (or un-hashes value)
 	keyPrefix [1]byte
-	lenPrefix [4]byte
+	lenPrefix [9]byte
 	valBuf    [128]byte // Enough to accommodate hash encoding of any account
 	b         [1]byte   // Buffer for single byte
 	prefixBuf [8]byte
