@@ -165,6 +165,9 @@ func ExecV3(ctx context.Context,
 		return err
 	}
 
+	defer func() {
+		state.Acc = 0
+	}()
 	if maxTxNum == 0 {
 		// nothing to exec, make sure the stage is in sync with the sd
 		if execStage.BlockNumber < blockNum {
