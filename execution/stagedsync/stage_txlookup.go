@@ -40,6 +40,7 @@ type TxLookupCfg struct {
 	prune       prune.Mode
 	tmpdir      string
 	blockReader services.FullBlockReader
+	skip        bool
 }
 
 func StageTxLookupCfg(

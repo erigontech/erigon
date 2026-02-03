@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
@@ -203,7 +204,7 @@ func (rs *StateV3) ApplyTxState(ctx context.Context,
 		return nil
 	}
 	//defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
-
+	s := time.Now()
 	if err := rs.applyUpdates(roTx, blockNum, txNum, accountUpdates, balanceIncreases, rules); err != nil {
 		return fmt.Errorf("StateV3.ApplyState: %w", err)
 	}
@@ -211,6 +212,7 @@ func (rs *StateV3) ApplyTxState(ctx context.Context,
 	if err := rs.applyLogsAndTraces4(roTx, txNum, receipt, logs, traceFroms, traceTos); err != nil {
 		return fmt.Errorf("StateV3.ApplyLogsAndTraces: %w", err)
 	}
+	fmt.Println("applyUpdatesTook", time.Since(s))
 
 	if (txNum+1)%rs.domains.StepSize() == 0 /*&& txTask.TxNum > 0 */ && !dbg.DiscardCommitment() {
 		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
