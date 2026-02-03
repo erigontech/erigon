@@ -36,6 +36,13 @@ type serialExecutor struct {
 	worker          *exec.Worker
 }
 
+func warmTxsHashes(block *types.Block) {
+	for _, t := range block.Transactions() {
+		_ = t.Hash()
+	}
+	_ = block.Hash()
+}
+
 func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
@@ -82,6 +89,12 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		if b == nil {
 			// TODO: panic here and see that overall process deadlock
 			return nil, rwTx, fmt.Errorf("nil block %d", blockNum)
+		}
+		go warmTxsHashes(b)
+
+		stateCache := se.doms.GetStateCache()
+		if stateCache != nil {
+			stateCache.ValidateAndPrepare(b.ParentHash(), b.Hash())
 		}
 
 		txs := b.Transactions()
@@ -145,6 +158,9 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		log.Debug(fmt.Sprintf("[%s] executed block %d in %s", se.logPrefix, blockNum, time.Since(start)))
 		if err != nil {
 			return nil, rwTx, err
+		}
+		if stateCache != nil {
+			stateCache.PrintStatsAndReset()
 		}
 
 		if !continueLoop {

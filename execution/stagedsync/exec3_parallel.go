@@ -722,6 +722,18 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 }
 
 func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *execRequest) (err error) {
+	// Validate state cache before processing block - ensures cache is cleared after reorgs
+	// This matches the behavior in serial execution (exec3_serial.go)
+	if len(execRequest.tasks) > 0 {
+		if txTask, ok := execRequest.tasks[0].(*exec.TxTask); ok && txTask.Header != nil {
+			parentHash := txTask.Header.ParentHash
+			blockHash := execRequest.blockHash
+			if stateCache := pe.doms.GetStateCache(); stateCache != nil {
+				stateCache.ValidateAndPrepare(parentHash, blockHash)
+			}
+		}
+	}
+
 	prevSenderTx := map[accounts.Address]int{}
 	var scheduleable *blockExecutor
 	var executor *blockExecutor
