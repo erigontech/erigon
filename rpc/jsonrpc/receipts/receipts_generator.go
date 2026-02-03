@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc/transactions"
+	"github.com/erigontech/nitro-erigon/arbos"
 )
 
 type Generator struct {
@@ -232,7 +233,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return nil, err
 	}
 
-	var evm *vm.EVM
 	if txn.Type() == types.AccountAbstractionTxType {
 		genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, index)
 		if err != nil {
@@ -349,7 +349,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			} else {
 				evm.ProcessingHook.SetMessage(msg, state.NewArbitrum(genEnv.ibs))
 			}
-			receipt, _, err = core.ApplyArbTransactionVmenv(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{}, evm)
+			receipt, _, err = protocol.ApplyArbTransactionVmenv(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{}, evm)
 		} else {
 			receipt, _, err = protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{}, evm)
 		}
@@ -454,9 +454,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	}
 	//genEnv.ibs.SetTrace(true)
 
-	vmCfg := vm.Config{
-		JumpDestCache: vm.NewJumpDestCache(16),
-	}
+	vmCfg := vm.Config{}
 
 	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 	defer cancel()
@@ -516,9 +514,9 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			} else {
 				evm.ProcessingHook.SetMessage(msg, state.NewArbitrum(genEnv.ibs))
 			}
-			receipt, _, err = core.ApplyArbTransactionVmenv(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vmCfg, evm)
+			receipt, _, err = protocol.ApplyArbTransactionVmenv(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vmCfg, evm)
 		} else {
-			receipt, _, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vmCfg, evm)
+			receipt, _, err = protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vmCfg, evm)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)

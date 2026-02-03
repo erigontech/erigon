@@ -124,6 +124,10 @@ func (c *CallContext) put() {
 	contextPool.Put(c)
 }
 
+func (c *CallContext) UseGas(gas uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
+	return c.useGas(gas, tracer, reason)
+}
+
 // UseGas attempts the use gas and subtracts it and returns true on success
 // We collect the gas change reason today, future changes will add gas change(s) tracking with reason
 func (c *CallContext) useGas(gas uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {

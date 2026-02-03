@@ -495,16 +495,16 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 					NextBlockNumber: 0,
 				}
 				initReader := statetransfer.NewMemoryInitDataReader(&initData)
-				stateRoot, err := arbosState.InitializeArbosInDatabase(ibsa, txTask.rs.Domains(), txTask.rs.TemporalPutDel(), initReader, txTask.Config, initMessage, txTask.EvmBlockContext.Time, accountsPerSync)
-				if err != nil {
-					txTask.Logger.Error("Failed to init ArbOS", "err", err)
-					return &TxResult{
-						Task: txTask,
-						Err:  err,
-					}
-				}
-				_ = stateRoot
-				txTask.Logger.Info("ArbOS initialized", "stateRoot", stateRoot) // todo this produces invalid state isnt it?
+				//stateRoot, err := arbosState.InitializeArbosInDatabaseNoCommit(ibsa, txTask.rs.Domains(), stateWriter, initReader, txTask.Config, initMessage, evm.Context.Time, accountsPerSync)
+				//if err != nil {
+				//	txTask.Logger.Error("Failed to init ArbOS", "err", err)
+				//	return &TxResult{
+				//		Task: txTask,
+				//		Err:  err,
+				//	}
+				//}
+				//_ = stateRoot
+				//txTask.Logger.Info("ArbOS initialized", "stateRoot", stateRoot) // todo this produces invalid state isnt it?
 			}
 			break
 		}
