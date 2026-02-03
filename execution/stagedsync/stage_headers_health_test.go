@@ -18,7 +18,7 @@ import (
 func TestCheckL2RPCEndpointsHealth_NilClients(t *testing.T) {
 	ctx := context.Background()
 
-	err := checkL2RPCEndpointsHealth(ctx, nil, nil, nil, 100, "", "", "")
+	err := checkL2RPCEndpointsHealth(ctx, nil, nil, 100, "", "")
 	require.NoError(t, err)
 }
 
@@ -33,6 +33,7 @@ func TestCheckL2RPCEndpointsHealth_NilReceiptClient(t *testing.T) {
 				},
 			},
 		},
+		"arb_getRawBlockMetadata": nil,
 	}
 	srv := newMockRPCServer(t, responses)
 	defer srv.Close()
@@ -41,7 +42,7 @@ func TestCheckL2RPCEndpointsHealth_NilReceiptClient(t *testing.T) {
 	require.NoError(t, err)
 	defer client.Close()
 
-	err = checkL2RPCEndpointsHealth(context.Background(), client, nil, nil, 100, srv.URL, "", "")
+	err = checkL2RPCEndpointsHealth(context.Background(), client, nil, 100, srv.URL, "")
 	require.NoError(t, err)
 }
 
@@ -70,7 +71,7 @@ func TestCheckL2RPCEndpointsHealth_Success(t *testing.T) {
 	require.NoError(t, err)
 	defer client.Close()
 
-	err = checkL2RPCEndpointsHealth(context.Background(), client, client, client, 100, srv.URL, srv.URL, srv.URL)
+	err = checkL2RPCEndpointsHealth(context.Background(), client, client, 100, srv.URL, srv.URL)
 	require.NoError(t, err)
 }
 
@@ -85,7 +86,7 @@ func TestCheckL2RPCEndpointsHealth_BlockError(t *testing.T) {
 	require.NoError(t, err)
 	defer client.Close()
 
-	err = checkL2RPCEndpointsHealth(context.Background(), client, client, nil, 100, srv.URL, srv.URL, "")
+	err = checkL2RPCEndpointsHealth(context.Background(), client, client, 100, srv.URL, srv.URL)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "returned nil for block")
 }
@@ -106,6 +107,7 @@ func TestCheckL2RPCEndpointsHealth_ReceiptMismatch(t *testing.T) {
 			"transactionHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
 			"status":          "0x0",
 		},
+		"arb_getRawBlockMetadata": nil,
 	}
 	srv := newMockRPCServer(t, responses)
 	defer srv.Close()
@@ -114,7 +116,7 @@ func TestCheckL2RPCEndpointsHealth_ReceiptMismatch(t *testing.T) {
 	require.NoError(t, err)
 	defer client.Close()
 
-	err = checkL2RPCEndpointsHealth(context.Background(), client, client, nil, 100, srv.URL, srv.URL, "")
+	err = checkL2RPCEndpointsHealth(context.Background(), client, client, 100, srv.URL, srv.URL)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "returned mismatched receipt")
 }
@@ -126,6 +128,7 @@ func TestCheckL2RPCEndpointsHealth_EmptyTransactions(t *testing.T) {
 			"hash":         "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
 			"transactions": []interface{}{},
 		},
+		"arb_getRawBlockMetadata": nil,
 	}
 	srv := newMockRPCServer(t, responses)
 	defer srv.Close()
@@ -134,7 +137,7 @@ func TestCheckL2RPCEndpointsHealth_EmptyTransactions(t *testing.T) {
 	require.NoError(t, err)
 	defer client.Close()
 
-	err = checkL2RPCEndpointsHealth(context.Background(), client, client, nil, 100, srv.URL, srv.URL, "")
+	err = checkL2RPCEndpointsHealth(context.Background(), client, client, 100, srv.URL, srv.URL)
 	require.NoError(t, err)
 }
 
@@ -151,6 +154,7 @@ func TestCheckL2RPCEndpointsHealth_NilReceipt(t *testing.T) {
 			},
 		},
 		"eth_getTransactionReceipt": nil,
+		"arb_getRawBlockMetadata": nil,
 	}
 	srv := newMockRPCServer(t, responses)
 	defer srv.Close()
@@ -159,7 +163,7 @@ func TestCheckL2RPCEndpointsHealth_NilReceipt(t *testing.T) {
 	require.NoError(t, err)
 	defer client.Close()
 
-	err = checkL2RPCEndpointsHealth(context.Background(), client, client, nil, 100, srv.URL, srv.URL, "")
+	err = checkL2RPCEndpointsHealth(context.Background(), client, client, 100, srv.URL, srv.URL)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "returned nil for tx")
 }
@@ -189,7 +193,7 @@ func TestCheckL2RPCEndpointsHealth_BlockMetadataMethodNotSupported(t *testing.T)
 	require.NoError(t, err)
 	defer client.Close()
 
-	err = checkL2RPCEndpointsHealth(context.Background(), client, client, client, 100, srv.URL, srv.URL, srv.URL)
+	err = checkL2RPCEndpointsHealth(context.Background(), client, client, 100, srv.URL, srv.URL)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "arb_getRawBlockMetadata")
 }
@@ -295,25 +299,10 @@ func TestCheckL2RPCEndpointsHealth_Integration(t *testing.T) {
 		defer receiptClient.Close()
 	}
 
-	l2rpcBlockMetadata := os.Getenv("L2RPC_BLOCK_METADATA")
-	if l2rpcBlockMetadata == "" {
-		l2rpcBlockMetadata = l2rpc
-	}
-
-	var blockMetadataClient *rpc.Client
-	if l2rpcBlockMetadata == l2rpc {
-		blockMetadataClient = blockClient
-	} else {
-		blockMetadataClient, err = rpc.Dial(l2rpcBlockMetadata, logger)
-		require.NoError(t, err, "failed to connect to L2RPC_BLOCK_METADATA endpoint")
-		defer blockMetadataClient.Close()
-	}
-
-	err = checkL2RPCEndpointsHealth(context.Background(), blockClient, receiptClient, blockMetadataClient, blockNum, l2rpc, l2rpcReceipt, l2rpcBlockMetadata)
+	err = checkL2RPCEndpointsHealth(context.Background(), blockClient, receiptClient, blockNum, l2rpc, l2rpcReceipt)
 	require.NoError(t, err)
 
 	t.Logf("Health check passed for block %d", blockNum)
-	t.Logf("  Block endpoint: %s", l2rpc)
+	t.Logf("  Block metadata endpoint: %s", l2rpc)
 	t.Logf("  Receipt endpoint: %s", l2rpcReceipt)
-	t.Logf("  Block metadata endpoint: %s", l2rpcBlockMetadata)
 }

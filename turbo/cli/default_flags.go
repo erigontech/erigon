@@ -42,7 +42,6 @@ var DefaultFlags = []cli.Flag{
 	&PruneDistanceFlag,
 	&L2RPCAddrFlag,
 	&L2RPCReceiptAddrFlag,
-	&L2RPCBlockMetadataAddrFlag,
 	&L2RPCBlockRPSFlag,
 	&L2RPCBlockBurstFlag,
 	&L2RPCReceiptRPSFlag,

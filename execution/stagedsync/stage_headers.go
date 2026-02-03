@@ -160,37 +160,28 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	var receiptClient *rpc.Client
 
 	const chainTipThreshold = 20
-	isChainTipMode := latestRemoteBlock.Uint64() > 0 && (latestRemoteBlock.Uint64()-topDumpedBlock) <= chainTipThreshold
+	// isChainTipMode := latestRemoteBlock.Uint64() > 0 && (latestRemoteBlock.Uint64()-topDumpedBlock) <= chainTipThreshold
 
-	if isChainTipMode {
-		// In chain tip mode, use public feed which has receipts for recent blocks
-		chainID := cfg.chainConfig.ChainID.Uint64()
-		if publicFeed := getPublicReceiptFeed(chainID); publicFeed != "" {
-			receiptRPCAddr = publicFeed
-			receiptClient, err = rpc.Dial(publicFeed, log.Root())
-			if err != nil {
-				log.Warn("Error connecting to public receipt feed, falling back to configured endpoint", "url", publicFeed, "err", err)
-				receiptRPCAddr = cfg.L2RPC.ReceiptAddr
-				receiptClient = nil
-			} else {
-				log.Info("[Arbitrum] Chain tip mode: using public feed for receipts", "feed", publicFeed, "blocksAhead", latestRemoteBlock.Uint64()-topDumpedBlock)
-			}
-		}
-	}
+	// if isChainTipMode {
+	// 	// In chain tip mode, use public feed which has receipts for recent blocks
+	// 	chainID := cfg.chainConfig.ChainID.Uint64()
+	// 	if publicFeed := getPublicReceiptFeed(chainID); publicFeed != "" {
+	// 		receiptRPCAddr = publicFeed
+	// 		receiptClient, err = rpc.Dial(publicFeed, log.Root())
+	// 		if err != nil {
+	// 			log.Warn("Error connecting to public receipt feed, falling back to configured endpoint", "url", publicFeed, "err", err)
+	// 			receiptRPCAddr = cfg.L2RPC.ReceiptAddr
+	// 			receiptClient = nil
+	// 		} else {
+	// 			log.Info("[Arbitrum] Chain tip mode: using public feed for receipts", "feed", publicFeed, "blocksAhead", latestRemoteBlock.Uint64()-topDumpedBlock)
+	// 		}
+	// 	}
+	// }
 
 	if receiptClient == nil && receiptRPCAddr != "" {
 		receiptClient, err = rpc.Dial(receiptRPCAddr, log.Root())
 		if err != nil {
 			log.Warn("Error connecting to receipt RPC", "err", err, "url", receiptRPCAddr)
-			return err
-		}
-	}
-
-	var blockMetadataClient *rpc.Client
-	if blockMetadataAddr := cfg.L2RPC.BlockMetadataAddr; blockMetadataAddr != "" {
-		blockMetadataClient, err = rpc.Dial(blockMetadataAddr, log.Root())
-		if err != nil {
-			log.Warn("Error connecting to block metadata RPC", "err", err, "url", blockMetadataAddr)
 			return err
 		}
 	}
@@ -201,7 +192,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	firstBlock := topDumpedBlock
 	var healthCheckErr error
 	l2RPCHealthCheckOnce.Do(func() {
-		healthCheckErr = checkL2RPCEndpointsHealth(ctx, client, receiptClient, blockMetadataClient, firstBlock, cfg.L2RPC.Addr, receiptRPCAddr, cfg.L2RPC.BlockMetadataAddr)
+		healthCheckErr = checkL2RPCEndpointsHealth(ctx, client, receiptClient, firstBlock, cfg.L2RPC.Addr, receiptRPCAddr)
 	})
 	if healthCheckErr != nil {
 		return healthCheckErr
@@ -241,7 +232,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		return nil
 	}
 
-	lastCommittedBlockNum, err := snapshots.GetAndCommitBlocks(ctx, cfg.db, tx, client, receiptClient, blockMetadataClient, firstBlock, latestRemoteBlock.Uint64(), false, true, false, finaliseState, cfg.L2RPC.BlockRPS, cfg.L2RPC.BlockBurst, cfg.L2RPC.ReceiptRPS, cfg.L2RPC.ReceiptBurst)
+	lastCommittedBlockNum, err := snapshots.GetAndCommitBlocks(ctx, cfg.db, tx, client, receiptClient, firstBlock, latestRemoteBlock.Uint64(), false, true, false, finaliseState, cfg.L2RPC.BlockRPS, cfg.L2RPC.BlockBurst, cfg.L2RPC.ReceiptRPS, cfg.L2RPC.ReceiptBurst)
 	if err != nil {
 		return fmt.Errorf("error fetching and committing blocks from rpc: %w", err)
 	}
@@ -262,19 +253,27 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	return nil
 }
 
-func checkL2RPCEndpointsHealth(ctx context.Context, blockClient, receiptClient, blockMetadataClient *rpc.Client, blockNum uint64, blockRPCAddr, receiptRPCAddr, blockMetadataRPCAddr string) error {
-	if blockClient == nil {
+func checkL2RPCEndpointsHealth(ctx context.Context, blockMetadataClient, receiptClient *rpc.Client, blockNum uint64, blockMetadataRPCAddr, receiptRPCAddr string) error {
+	if blockMetadataClient == nil {
 		return nil
 	}
 
 	checkBlockNum := fmt.Sprintf("0x%x", blockNum)
 
 	var blockResult map[string]interface{}
-	if err := blockClient.CallContext(ctx, &blockResult, "eth_getBlockByNumber", checkBlockNum, true); err != nil {
-		return fmt.Errorf("--l2rpc %q cannot respond to eth_getBlockByNumber for block %d: %w", blockRPCAddr, blockNum, err)
+	if err := blockMetadataClient.CallContext(ctx, &blockResult, "eth_getBlockByNumber", checkBlockNum, true); err != nil {
+		return fmt.Errorf("--l2rpc %q cannot respond to eth_getBlockByNumber for block %d: %w", blockMetadataRPCAddr, blockNum, err)
 	}
 	if blockResult == nil {
-		return fmt.Errorf("--l2rpc %q returned nil for block %d", blockRPCAddr, blockNum)
+		return fmt.Errorf("--l2rpc %q returned nil for block %d", blockMetadataRPCAddr, blockNum)
+	}
+
+	// Just verify the RPC method exists and the call doesn't fail.
+	// Old blocks may return null result, which is fine.
+	var metadataResult interface{}
+	if err := blockMetadataClient.CallContext(ctx, &metadataResult, "arb_getRawBlockMetadata",
+		fmt.Sprintf("0x%x", blockNum), fmt.Sprintf("0x%x", blockNum+1)); err != nil {
+		return fmt.Errorf("--l2rpc.blockmetadata %q cannot respond to arb_getRawBlockMetadata for block %d: %w", blockMetadataRPCAddr, blockNum, err)
 	}
 
 	txs, ok := blockResult["transactions"].([]interface{})
@@ -314,19 +313,7 @@ func checkL2RPCEndpointsHealth(ctx context.Context, blockClient, receiptClient, 
 		return fmt.Errorf("--l2rpc.receipt %q returned mismatched receipt: requested tx %s but got %s", receiptRPCAddr, txHash, receiptTxHash)
 	}
 
-	if blockMetadataClient != nil {
-		// Just verify the RPC method exists and the call doesn't fail.
-		// Old blocks may return null result, which is fine.
-		var metadataResult interface{}
-		if err := blockMetadataClient.CallContext(ctx, &metadataResult, "arb_getRawBlockMetadata",
-			fmt.Sprintf("0x%x", blockNum), fmt.Sprintf("0x%x", blockNum+1)); err != nil {
-			return fmt.Errorf("--l2rpc.blockmetadata %q cannot respond to arb_getRawBlockMetadata for block %d: %w", blockMetadataRPCAddr, blockNum, err)
-		}
-	} else {
-		log.Info("[Arbitrum] L2 RPC health check: block metadata client not configured, skipping metadata check", "block", blockNum)
-	}
-
-	log.Info("[Arbitrum] L2 RPC endpoints health check passed", "blockEndpoint", blockRPCAddr, "receiptEndpoint", receiptRPCAddr, "blockMetadataEndpoint", blockMetadataRPCAddr, "checkedBlock", blockNum)
+	log.Info("[Arbitrum] L2 RPC endpoints health check passed", "blockMetadataEndpoint", blockMetadataRPCAddr, "receiptEndpoint", receiptRPCAddr, "checkedBlock", blockNum)
 	return nil
 }
 
