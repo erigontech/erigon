@@ -1250,7 +1250,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	if err = verifyExecutionWitnessResult(result, block, chainCfg, api.engine(), expectedParentRoot, readAddresses, writeAddresses, readStorageKeys, writeStorageKeys, expectedState, expectedStorage); err != nil {
 		return nil, fmt.Errorf("witness verification failed: %w", err)
 	}
-
+	fmt.Printf("Witness for block %d successfully verified 🚀\n", blockNum)
 	return result, nil
 }
 
