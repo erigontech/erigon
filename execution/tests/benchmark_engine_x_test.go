@@ -17,6 +17,7 @@
 package executiontests
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -72,4 +73,10 @@ func benchmarkCategory(t *testing.T, category string, whitelist string, skipload
 		err := engineXRunner.Run(t.Context(), test)
 		require.NoError(t, err)
 	})
+}
+
+func TestUnwind(t *testing.T) {
+	err := os.Setenv("BENCH_ENGINE_X_MANUAL_ALLOW", "true")
+	require.NoError(t, err)
+	benchmarkCategory(t, "instruction", ".*ext_account_query_cold\\.json", nil)
 }
