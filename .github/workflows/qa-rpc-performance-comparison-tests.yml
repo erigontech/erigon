@@ -101,9 +101,14 @@ jobs:
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       GETH_INSTALL_DIR: /opt/go-ethereum
       CLIENT: ${{ matrix.client }}
+
     steps:
-      - name: Checkout
+      - name: Checkout Erigon repository
+        if: matrix.client == 'erigon'
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: "0"
 
       - name: Sanity check Redis config
         if: needs.setup.outputs.run_geth == 'true'
@@ -359,6 +364,7 @@ jobs:
           else
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
             echo "Error detected during tests"
+            echo "::error::Error detected during tests"
             exit 1
           fi
 
