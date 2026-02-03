@@ -435,12 +435,16 @@ func (s *DirtySegment) closeAndRemoveFiles() {
 }
 
 func (s *DirtySegment) OpenIdxIfNeed(dir string, optimistic bool) (err error) {
+	return s.OpenIdxIfNeedWithCache(dir, optimistic, nil)
+}
+
+func (s *DirtySegment) OpenIdxIfNeedWithCache(dir string, optimistic bool, cache *version.DirEntryCache) (err error) {
 	if len(s.Type().IdxFileNames(s.from, s.to)) == 0 {
 		return nil
 	}
 
 	if s.refcount.Load() == 0 {
-		err = s.openIdx(dir)
+		err = s.openIdx(dir, cache)
 
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
@@ -456,7 +460,7 @@ func (s *DirtySegment) OpenIdxIfNeed(dir string, optimistic bool) (err error) {
 	return nil
 }
 
-func (s *DirtySegment) openIdx(dir string) (err error) {
+func (s *DirtySegment) openIdx(dir string, cache *version.DirEntryCache) (err error) {
 	if s.Decompressor == nil {
 		return nil
 	}
@@ -473,7 +477,14 @@ func (s *DirtySegment) openIdx(dir string) (err error) {
 		if err != nil {
 			return fmt.Errorf("[open index] can't replace with mask in file %s: %w", fileName, err)
 		}
-		fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+
+		var fPath string
+		var ok bool
+		if cache != nil {
+			fPath, _, ok, err = version.FindFilesWithVersionsByPatternWithCache(fPathMask, cache)
+		} else {
+			fPath, _, ok, err = version.FindFilesWithVersionsByPattern(fPathMask)
+		}
 		if err != nil {
 			return fmt.Errorf("%w, fileName: %s", err, fileName)
 		}

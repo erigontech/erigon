@@ -73,6 +73,8 @@ type CaplinSnapshots struct {
 	logger      log.Logger
 	// chain cfg
 	beaconCfg *clparams.BeaconChainConfig
+	// cache for directory listings to speed up file lookups
+	dirCache *version.DirEntryCache
 }
 
 // NewCaplinSnapshots - opens all snapshots. But to simplify everything:
@@ -85,8 +87,9 @@ func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.Beacon
 		log.Debug("[dbg] NewCaplinSnapshots created with empty ChainName", "stack", dbg.Stack())
 	}
 	c := &CaplinSnapshots{dir: dirs.Snap, tmpdir: dirs.Tmp, cfg: cfg, logger: logger, beaconCfg: beaconCfg,
-		dirty:   make([]*btree.BTreeG[*snapshotsync.DirtySegment], snaptype.MaxEnum),
-		visible: make([]snapshotsync.VisibleSegments, snaptype.MaxEnum),
+		dirty:    make([]*btree.BTreeG[*snapshotsync.DirtySegment], snaptype.MaxEnum),
+		visible:  make([]snapshotsync.VisibleSegments, snaptype.MaxEnum),
+		dirCache: version.NewDirEntryCache(),
 	}
 	c.dirty[snaptype.BeaconBlocks.Enum()] = btree.NewBTreeGOptions[*snapshotsync.DirtySegment](snapshotsync.DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
 	c.dirty[snaptype.BlobSidecars.Enum()] = btree.NewBTreeGOptions[*snapshotsync.DirtySegment](snapshotsync.DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
@@ -160,6 +163,9 @@ func (s *CaplinSnapshots) OpenList(fileNames []string, optimistic bool) error {
 	s.dirtyLock.Lock()
 	defer s.dirtyLock.Unlock()
 
+	// Invalidate dir cache since files may have changed
+	s.dirCache.Clear()
+
 	s.closeWhatNotInList(fileNames)
 	var segmentsMax uint64
 	var segmentsMaxSet bool
@@ -215,7 +221,7 @@ Loop:
 				// then make segment available even if index open may fail
 				s.dirty[snaptype.BeaconBlocks.Enum()].Set(sn)
 			}
-			if err := sn.OpenIdxIfNeed(s.dir, optimistic); err != nil {
+			if err := sn.OpenIdxIfNeedWithCache(s.dir, optimistic, s.dirCache); err != nil {
 				return err
 			}
 			// Only bob sidecars count for progression
@@ -271,7 +277,7 @@ Loop:
 				// then make segment available even if index open may fail
 				s.dirty[snaptype.BlobSidecars.Enum()].Set(sn)
 			}
-			if err := sn.OpenIdxIfNeed(s.dir, optimistic); err != nil {
+			if err := sn.OpenIdxIfNeedWithCache(s.dir, optimistic, s.dirCache); err != nil {
 				return err
 			}
 		}
