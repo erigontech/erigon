@@ -28,6 +28,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
@@ -381,7 +382,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	}
 
 	// Set state cache in SharedDomains for use during state reading
-	if e.stateCache != nil {
+	if e.stateCache != nil && dbg.UseStateCache {
 		doms.SetStateCache(e.stateCache)
 	}
 
