@@ -1,26 +1,9 @@
-// Copyright 2024 The Erigon Authors
-// This file is part of Erigon.
-//
-// Erigon is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// Erigon is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
-
 package metrics
 
 import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 var (
@@ -28,18 +11,18 @@ var (
 
 	DelayLoggingEnabled bool
 
-	BlockConsumerHeaderDownloadDelay = metrics.NewSummary(`block_consumer_delay{type="header_download"}`)
-	BlockConsumerBodyDownloadDelay   = metrics.NewSummary(`block_consumer_delay{type="body_download"}`)
-	BlockConsumerPreExecutionDelay   = metrics.NewSummary(`block_consumer_delay{type="pre_execution"}`)
-	BlockConsumerPostExecutionDelay  = metrics.NewSummary(`block_consumer_delay{type="post_execution"}`)
-	BlockProducerProductionDelay     = metrics.NewSummary(`block_producer_delay{type="production"}`)
+	BlockConsumerHeaderDownloadDelay = NewSummary(`block_consumer_delay{type="header_download"}`)
+	BlockConsumerBodyDownloadDelay   = NewSummary(`block_consumer_delay{type="body_download"}`)
+	BlockConsumerPreExecutionDelay   = NewSummary(`block_consumer_delay{type="pre_execution"}`)
+	BlockConsumerPostExecutionDelay  = NewSummary(`block_consumer_delay{type="post_execution"}`)
+	BlockProducerProductionDelay     = NewSummary(`block_producer_delay{type="production"}`)
 
-	ChainTipMgasPerSec = metrics.NewGauge(`chain_tip_mgas_per_sec`)
+	ChainTipMgasPerSec = NewGauge(`chain_tip_mgas_per_sec`)
 
-	BlockConsumerHeaderDownloadDelayHistogram = metrics.NewHistogram(`block_consumer_delay_hist{type="header_download"}`, delayBuckets)
-	BlockConsumerBodyDownloadDelayHistogram   = metrics.NewHistogram(`block_consumer_delay_hist{type="body_download"}`, delayBuckets)
-	BlockConsumerPreExecutionDelayHistogram   = metrics.NewHistogram(`block_consumer_delay_hist{type="pre_execution"}`, delayBuckets)
-	BlockConsumerPostExecutionDelayHistogram  = metrics.NewHistogram(`block_consumer_delay_hist{type="post_execution"}`, delayBuckets)
+	BlockConsumerHeaderDownloadDelayHistogram = NewHistogram(`block_consumer_delay_hist{type="header_download"}`, delayBuckets)
+	BlockConsumerBodyDownloadDelayHistogram   = NewHistogram(`block_consumer_delay_hist{type="body_download"}`, delayBuckets)
+	BlockConsumerPreExecutionDelayHistogram   = NewHistogram(`block_consumer_delay_hist{type="pre_execution"}`, delayBuckets)
+	BlockConsumerPostExecutionDelayHistogram  = NewHistogram(`block_consumer_delay_hist{type="post_execution"}`, delayBuckets)
 )
 
 func UpdateBlockConsumerHeaderDownloadDelay(blockTime uint64, blockNumber uint64, log log.Logger) {

@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mclock"
-	"github.com/erigontech/erigon/common/metrics"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/event"
 	"github.com/erigontech/erigon/p2p/netutil"
@@ -573,9 +572,7 @@ func (tab *Table) nodeAdded(b *bucket, n *tableNode) {
 	if tab.nodeAddedHook != nil {
 		tab.nodeAddedHook(b, n)
 	}
-	if metrics.Enabled() {
-		bucketsCounter[b.index].Inc(1)
-	}
+	bucketsCounter[b.index].Inc()
 }
 
 func (tab *Table) nodeRemoved(b *bucket, n *tableNode) {
@@ -583,9 +580,7 @@ func (tab *Table) nodeRemoved(b *bucket, n *tableNode) {
 	if tab.nodeRemovedHook != nil {
 		tab.nodeRemovedHook(b, n)
 	}
-	if metrics.Enabled() {
-		bucketsCounter[b.index].Dec(1)
-	}
+	bucketsCounter[b.index].Dec()
 }
 
 // deleteInBucket removes node n from the table.

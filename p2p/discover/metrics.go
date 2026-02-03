@@ -21,27 +21,27 @@ import (
 	"net"
 	"net/netip"
 
-	"github.com/erigontech/erigon/common/metrics"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 const (
 	moduleName = "discover"
 	// ingressMeterName is the prefix of the per-packet inbound metrics.
-	ingressMeterName = moduleName + "/ingress"
+	ingressMeterName = moduleName + "_ingress"
 
 	// egressMeterName is the prefix of the per-packet outbound metrics.
-	egressMeterName = moduleName + "/egress"
+	egressMeterName = moduleName + "_egress"
 )
 
 var (
-	bucketsCounter      []*metrics.Counter
-	ingressTrafficMeter = metrics.NewRegisteredMeter(ingressMeterName, nil)
-	egressTrafficMeter  = metrics.NewRegisteredMeter(egressMeterName, nil)
+	bucketsCounter      []metrics.Gauge
+	ingressTrafficMeter = metrics.NewCounter(ingressMeterName)
+	egressTrafficMeter  = metrics.NewCounter(egressMeterName)
 )
 
 func init() {
 	for i := 0; i < nBuckets; i++ {
-		bucketsCounter = append(bucketsCounter, metrics.NewRegisteredCounter(fmt.Sprintf("%s/bucket/%d/count", moduleName, i), nil))
+		bucketsCounter = append(bucketsCounter, metrics.NewGauge(fmt.Sprintf("%s_bucket_%d_count", moduleName, i)))
 	}
 }
 
@@ -52,10 +52,6 @@ type meteredUdpConn struct {
 }
 
 func newMeteredConn(conn UDPConn) UDPConn {
-	// Short circuit if metrics are disabled
-	if !metrics.Enabled() {
-		return conn
-	}
 	return &meteredUdpConn{udpConn: conn}
 }
 
@@ -70,13 +66,13 @@ func (c *meteredUdpConn) LocalAddr() net.Addr {
 // ReadFromUDPAddrPort delegates a network read to the underlying connection, bumping the udp ingress traffic meter along the way.
 func (c *meteredUdpConn) ReadFromUDPAddrPort(b []byte) (n int, addr netip.AddrPort, err error) {
 	n, addr, err = c.udpConn.ReadFromUDPAddrPort(b)
-	ingressTrafficMeter.Mark(int64(n))
+	ingressTrafficMeter.Add(float64(n))
 	return n, addr, err
 }
 
 // WriteToUDPAddrPort delegates a network write to the underlying connection, bumping the udp egress traffic meter along the way.
 func (c *meteredUdpConn) WriteToUDPAddrPort(b []byte, addr netip.AddrPort) (n int, err error) {
 	n, err = c.udpConn.WriteToUDPAddrPort(b, addr)
-	egressTrafficMeter.Mark(int64(n))
+	egressTrafficMeter.Add(float64(n))
 	return n, err
 }
