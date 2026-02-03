@@ -26,7 +26,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
-	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -195,7 +194,7 @@ func GetValidatorsCustodyRequirement(s abstract.BeaconState, validatorIndices []
 }
 
 // IsAttestationSameSlot checks if the attestation is for the block proposed at the attestation slot.
-func IsAttestationSameSlot(s *raw.BeaconState, data *solid.AttestationData) (bool, error) {
+func IsAttestationSameSlot(s abstract.BeaconState, data *solid.AttestationData) (bool, error) {
 	if data.Slot == 0 {
 		return true, nil
 	}

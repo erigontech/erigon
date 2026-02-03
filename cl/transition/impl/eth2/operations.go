@@ -827,9 +827,15 @@ func (I *impl) processAttestationPostAltair(
 	beaconConfig := s.BeaconConfig()
 
 	if s.Version() >= clparams.ElectraVersion {
-		// assert index == 0
-		if data.CommitteeIndex != 0 {
-			return nil, errors.New("processAttestationPostAltair: committee index must be 0")
+		// [Modified in Gloas:EIP7732] assert data.index < 2
+		if s.Version() >= clparams.GloasVersion {
+			if data.CommitteeIndex >= 2 {
+				return nil, errors.New("processAttestationPostAltair: committee index must be less than 2")
+			}
+		} else {
+			if data.CommitteeIndex != 0 {
+				return nil, errors.New("processAttestationPostAltair: committee index must be 0")
+			}
 		}
 		// check committee
 		committeeIndices := attestation.CommitteeBits.GetOnIndices()
@@ -880,6 +886,25 @@ func (I *impl) processAttestationPostAltair(
 
 	isCurrentEpoch := data.Target.Epoch == currentEpoch
 
+	// [New in Gloas:EIP7732] Read builder pending payment for weight accumulation
+	var payment *cltypes.BuilderPendingPayment
+	var paymentIndex int
+	var isSameSlot bool
+	if s.Version() >= clparams.GloasVersion {
+		slotsPerEpoch := beaconConfig.SlotsPerEpoch
+		if isCurrentEpoch {
+			paymentIndex = int(slotsPerEpoch + data.Slot%slotsPerEpoch)
+		} else {
+			paymentIndex = int(data.Slot % slotsPerEpoch)
+		}
+		payments := s.GetBuilderPendingPayments()
+		payment = payments.Get(paymentIndex)
+		isSameSlot, err = state.IsAttestationSameSlot(s, data)
+		if err != nil {
+			return nil, fmt.Errorf("processAttestationPostAltair: failed to check attestation same slot: %w", err)
+		}
+	}
+
 	for _, attesterIndex := range attestingIndicies {
 		val, err := s.ValidatorEffectiveBalance(int(attesterIndex))
 		if err != nil {
@@ -887,6 +912,7 @@ func (I *impl) processAttestationPostAltair(
 		}
 
 		baseReward := (val / beaconConfig.EffectiveBalanceIncrement) * baseRewardPerIncrement
+		willSetNewFlag := false // [New in Gloas:EIP7732]
 		for flagIndex, weight := range beaconConfig.ParticipationWeights() {
 			flagParticipation := s.EpochParticipationForValidatorIndex(
 				isCurrentEpoch,
@@ -902,8 +928,25 @@ func (I *impl) processAttestationPostAltair(
 				flagParticipation.Add(flagIndex),
 			)
 			proposerRewardNumerator += baseReward * weight
+			willSetNewFlag = true // [New in Gloas:EIP7732]
+		}
+
+		// [New in Gloas:EIP7732] Accumulate payment weight for same-slot attestations
+		if s.Version() >= clparams.GloasVersion &&
+			willSetNewFlag &&
+			isSameSlot &&
+			payment != nil && payment.Withdrawal != nil && payment.Withdrawal.Amount > 0 {
+			payment.Weight += val
 		}
 	}
+
+	// [New in Gloas:EIP7732] Write back updated payment weight
+	if s.Version() >= clparams.GloasVersion && payment != nil {
+		payments := s.GetBuilderPendingPayments()
+		payments.Set(paymentIndex, payment)
+		s.SetBuilderPendingPayments(payments)
+	}
+
 	// Reward proposer
 	proposer, err := s.GetBeaconProposerIndex()
 	if err != nil {

@@ -250,7 +250,7 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 
 	if b.Version() >= clparams.GloasVersion {
 		var payloadMatch bool
-		ok, err := IsAttestationSameSlot(b.BeaconState, data)
+		ok, err := IsAttestationSameSlot(b, data)
 		if err != nil {
 			return nil, fmt.Errorf("GetAttestationParticipationFlagIndicies: failed to check attestation same slot: %w", err)
 		}
