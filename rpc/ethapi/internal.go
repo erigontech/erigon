@@ -25,8 +25,8 @@ import (
 )
 
 // nolint
-func RPCMarshalBlock(b *types.Block, inclTx bool, fullTx bool, additional map[string]any) (map[string]any, error) {
-	fields, err := RPCMarshalBlockDeprecated(b, inclTx, fullTx)
+func RPCMarshalBlock(b *types.Block, inclTx bool, fullTx bool, additional map[string]any, isArbitrumNitro bool) (map[string]any, error) {
+	fields, err := RPCMarshalBlockDeprecated(b, inclTx, fullTx, isArbitrumNitro)
 	if err != nil {
 		return nil, err
 	}
@@ -37,8 +37,8 @@ func RPCMarshalBlock(b *types.Block, inclTx bool, fullTx bool, additional map[st
 }
 
 // nolint
-func RPCMarshalBlockEx(b *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash common.Hash, additional map[string]any) (map[string]any, error) {
-	fields, err := RPCMarshalBlockExDeprecated(b, inclTx, fullTx, borTx, borTxHash)
+func RPCMarshalBlockEx(b *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash common.Hash, additional map[string]any, isArbitrumNitro bool) (map[string]any, error) {
+	fields, err := RPCMarshalBlockExDeprecated(b, inclTx, fullTx, borTx, borTxHash, isArbitrumNitro)
 	if err != nil {
 		return nil, err
 	}

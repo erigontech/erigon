@@ -20,6 +20,7 @@
 package native
 
 import (
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/erigontech/erigon/common"
@@ -33,16 +34,16 @@ type arbitrumTransfer struct {
 	Value   string  `json:"value"`
 }
 
-func (t *callTracer) CaptureArbitrumTransfer(from, to *libcommon.Address, value *uint256.Int, before bool, reason string) {
+func (t *callTracer) CaptureArbitrumTransfer(from, to accounts.Address, value *uint256.Int, before bool, reason string) {
 	transfer := arbitrumTransfer{
 		Purpose: reason,
 		Value:   value.Hex(),
 	}
-	if from != nil {
+	if from != accounts.NilAddress {
 		from := from.String()
 		transfer.From = &from
 	}
-	if to != nil {
+	if to != accounts.NilAddress {
 		to := to.String()
 		transfer.To = &to
 	}
