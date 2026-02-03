@@ -160,23 +160,23 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	var receiptClient *rpc.Client
 
 	const chainTipThreshold = 20
-	// isChainTipMode := latestRemoteBlock.Uint64() > 0 && (latestRemoteBlock.Uint64()-topDumpedBlock) <= chainTipThreshold
+	isChainTipMode := latestRemoteBlock.Uint64() > 0 && (latestRemoteBlock.Uint64()-topDumpedBlock) <= chainTipThreshold
 
-	// if isChainTipMode {
-	// 	// In chain tip mode, use public feed which has receipts for recent blocks
-	// 	chainID := cfg.chainConfig.ChainID.Uint64()
-	// 	if publicFeed := getPublicReceiptFeed(chainID); publicFeed != "" {
-	// 		receiptRPCAddr = publicFeed
-	// 		receiptClient, err = rpc.Dial(publicFeed, log.Root())
-	// 		if err != nil {
-	// 			log.Warn("Error connecting to public receipt feed, falling back to configured endpoint", "url", publicFeed, "err", err)
-	// 			receiptRPCAddr = cfg.L2RPC.ReceiptAddr
-	// 			receiptClient = nil
-	// 		} else {
-	// 			log.Info("[Arbitrum] Chain tip mode: using public feed for receipts", "feed", publicFeed, "blocksAhead", latestRemoteBlock.Uint64()-topDumpedBlock)
-	// 		}
-	// 	}
-	// }
+	if isChainTipMode {
+		// In chain tip mode, use public feed which has receipts for recent blocks
+		chainID := cfg.chainConfig.ChainID.Uint64()
+		if publicFeed := getPublicReceiptFeed(chainID); publicFeed != "" {
+			receiptRPCAddr = publicFeed
+			receiptClient, err = rpc.Dial(publicFeed, log.Root())
+			if err != nil {
+				log.Warn("Error connecting to public receipt feed, falling back to configured endpoint", "url", publicFeed, "err", err)
+				receiptRPCAddr = cfg.L2RPC.ReceiptAddr
+				receiptClient = nil
+			} else {
+				log.Info("[Arbitrum] Chain tip mode: using public feed for receipts", "feed", publicFeed, "blocksAhead", latestRemoteBlock.Uint64()-topDumpedBlock)
+			}
+		}
+	}
 
 	if receiptClient == nil && receiptRPCAddr != "" {
 		receiptClient, err = rpc.Dial(receiptRPCAddr, log.Root())
