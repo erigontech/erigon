@@ -11,8 +11,11 @@ import (
 )
 
 func TestInvalidReceiptHashHighMgas(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
 	ctx := t.Context()
-	logger := testlog.Logger(t, log.LvlDebug)
+	logger := testlog.Logger(t, log.LvlCrit)
 	testDir := path.Join(cornersDir, "invalid-receipt-hash-high-mgas")
 	preAllocsDir := path.Join(testDir, "pre_alloc")
 	payloadsDir := path.Join(testDir, "payloads")
