@@ -157,10 +157,6 @@ func (c *StateCache) PrintStatsAndReset() {
 func (c *StateCache) RevertWithDiffset(diffset *[6][]kv.DomainEntryDiff, newBlockHash common.Hash) {
 	for _, entry := range diffset[kv.AccountsDomain] {
 		k := []byte(entry.Key[:len(entry.Key)-8])
-		prevStep := ^binary.BigEndian.Uint64(entry.PrevStepBytes)
-		currStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-
-		fmt.Println(common.Bytes2Hex(k), "prevStep", prevStep, "currStep", currStep)
 		c.Delete(kv.CodeDomain, k)
 		c.Delete(kv.AccountsDomain, k)
 	}
@@ -174,7 +170,11 @@ func (c *StateCache) RevertWithDiffset(diffset *[6][]kv.DomainEntryDiff, newBloc
 	}
 	// still adding kv.CommitmentDomain for expandability.
 	for _, entry := range diffset[kv.CommitmentDomain] {
+		prevStep := ^binary.BigEndian.Uint64(entry.PrevStepBytes)
+		currStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
 		k := []byte(entry.Key[:len(entry.Key)-8])
+
+		fmt.Println(common.Bytes2Hex(k), "prevStep", prevStep, "currStep", currStep)
 		c.Delete(kv.CommitmentDomain, k)
 	}
 	// Update block hash on all caches after unwind so ValidateAndPrepare works correctly
