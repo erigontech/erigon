@@ -560,7 +560,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 			return nil, err
 		}
 		if block == nil {
-			return nil, nil
+			return nil, fmt.Errorf("getReceipt block not found: %d", blockNum)
 		}
 		txs := block.Transactions()
 		postState = &receipts.PostStateInfo{
