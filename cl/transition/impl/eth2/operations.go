@@ -547,6 +547,15 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 		}
 	}
 
+	// Verify commitments are under limit
+	epoch := state.Epoch(s)
+	if bid.BlobKzgCommitments.Len() > int(s.BeaconConfig().GetBlobParameters(epoch).MaxBlobsPerBlock) {
+		return fmt.Errorf("processExecutionPayloadBid: too many blob kzg commitments: %d > %d",
+			bid.BlobKzgCommitments.Len(),
+			s.BeaconConfig().GetBlobParameters(epoch).MaxBlobsPerBlock,
+		)
+	}
+
 	// Verify that the bid is for the current slot
 	if bid.Slot != block.GetSlot() {
 		return fmt.Errorf("processExecutionPayloadBid: bid slot %d does not match block slot %d", bid.Slot, block.GetSlot())

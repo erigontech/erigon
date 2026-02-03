@@ -190,17 +190,17 @@ func (i *IndexedPayloadAttestation) Clone() clonable.Clonable {
 
 // ExecutionPayloadBid represents a bid for an execution payload from a builder.
 type ExecutionPayloadBid struct {
-	ParentBlockHash        common.Hash    `json:"parent_block_hash"`
-	ParentBlockRoot        common.Hash    `json:"parent_block_root"`
-	BlockHash              common.Hash    `json:"block_hash"`
-	PrevRandao             common.Hash    `json:"prev_randao"`
-	FeeRecipient           common.Address `json:"fee_recipient"`
-	GasLimit               uint64         `json:"gas_limit,string"`
-	BuilderIndex           BuilderIndex   `json:"builder_index,string"`
-	Slot                   uint64         `json:"slot,string"`
-	Value                  uint64         `json:"value,string"`
-	ExecutionPayment       uint64         `json:"execution_payment,string"`
-	BlobKzgCommitmentsRoot common.Hash    `json:"blob_kzg_commitments_root"`
+	ParentBlockHash    common.Hash                   `json:"parent_block_hash"`
+	ParentBlockRoot    common.Hash                   `json:"parent_block_root"`
+	BlockHash          common.Hash                   `json:"block_hash"`
+	PrevRandao         common.Hash                   `json:"prev_randao"`
+	FeeRecipient       common.Address                `json:"fee_recipient"`
+	GasLimit           uint64                        `json:"gas_limit,string"`
+	BuilderIndex       BuilderIndex                  `json:"builder_index,string"`
+	Slot               uint64                        `json:"slot,string"`
+	Value              uint64                        `json:"value,string"`
+	ExecutionPayment   uint64                        `json:"execution_payment,string"`
+	BlobKzgCommitments solid.ListSSZ[*KZGCommitment] `json:"blob_kzg_commitments"`
 }
 
 func (e *ExecutionPayloadBid) HashSSZ() ([32]byte, error) {
@@ -215,16 +215,17 @@ func (e *ExecutionPayloadBid) HashSSZ() ([32]byte, error) {
 		e.Slot,
 		e.Value,
 		e.ExecutionPayment,
-		e.BlobKzgCommitmentsRoot[:],
+		e.BlobKzgCommitments,
 	)
 }
 
 func (e *ExecutionPayloadBid) EncodingSizeSSZ() int {
-	return length.Hash*5 + length.Addr + 8 + 8 + 8 + 8 + 8
+	return length.Hash*4 + length.Addr + 8 + 8 + 8 + 8 + 8 +
+		e.BlobKzgCommitments.EncodingSizeSSZ()
 }
 
 func (e *ExecutionPayloadBid) Static() bool {
-	return true
+	return false
 }
 
 func (e *ExecutionPayloadBid) EncodeSSZ(buf []byte) ([]byte, error) {
@@ -239,7 +240,7 @@ func (e *ExecutionPayloadBid) EncodeSSZ(buf []byte) ([]byte, error) {
 		e.Slot,
 		e.Value,
 		e.ExecutionPayment,
-		e.BlobKzgCommitmentsRoot[:],
+		e.BlobKzgCommitments,
 	)
 }
 
@@ -255,7 +256,7 @@ func (e *ExecutionPayloadBid) DecodeSSZ(buf []byte, version int) error {
 		&e.Slot,
 		&e.Value,
 		&e.ExecutionPayment,
-		e.BlobKzgCommitmentsRoot[:],
+		e.BlobKzgCommitments,
 	)
 }
 
@@ -265,17 +266,17 @@ func (e *ExecutionPayloadBid) Clone() clonable.Clonable {
 
 func (e *ExecutionPayloadBid) Copy() *ExecutionPayloadBid {
 	return &ExecutionPayloadBid{
-		ParentBlockHash:        e.ParentBlockHash,
-		ParentBlockRoot:        e.ParentBlockRoot,
-		BlockHash:              e.BlockHash,
-		PrevRandao:             e.PrevRandao,
-		FeeRecipient:           e.FeeRecipient,
-		GasLimit:               e.GasLimit,
-		BuilderIndex:           e.BuilderIndex,
-		Slot:                   e.Slot,
-		Value:                  e.Value,
-		ExecutionPayment:       e.ExecutionPayment,
-		BlobKzgCommitmentsRoot: e.BlobKzgCommitmentsRoot,
+		ParentBlockHash:    e.ParentBlockHash,
+		ParentBlockRoot:    e.ParentBlockRoot,
+		BlockHash:          e.BlockHash,
+		PrevRandao:         e.PrevRandao,
+		FeeRecipient:       e.FeeRecipient,
+		GasLimit:           e.GasLimit,
+		BuilderIndex:       e.BuilderIndex,
+		Slot:               e.Slot,
+		Value:              e.Value,
+		ExecutionPayment:   e.ExecutionPayment,
+		BlobKzgCommitments: e.BlobKzgCommitments,
 	}
 }
 
@@ -311,24 +312,22 @@ func (s *SignedExecutionPayloadBid) Clone() clonable.Clonable {
 
 // ExecutionPayloadEnvelope represents an execution payload envelope with associated metadata.
 type ExecutionPayloadEnvelope struct {
-	Payload            *Eth1Block                     `json:"payload"`
-	ExecutionRequests  *ExecutionRequests             `json:"execution_requests"`
-	BuilderIndex       BuilderIndex                   `json:"builder_index,string"`
-	BeaconBlockRoot    common.Hash                    `json:"beacon_block_root"`
-	Slot               uint64                         `json:"slot,string"`
-	BlobKzgCommitments *solid.ListSSZ[*KZGCommitment] `json:"blob_kzg_commitments"`
-	StateRoot          common.Hash                    `json:"state_root"`
+	Payload           *Eth1Block         `json:"payload"`
+	ExecutionRequests *ExecutionRequests  `json:"execution_requests"`
+	BuilderIndex      BuilderIndex       `json:"builder_index,string"`
+	BeaconBlockRoot   common.Hash        `json:"beacon_block_root"`
+	Slot              uint64             `json:"slot,string"`
+	StateRoot         common.Hash        `json:"state_root"`
 }
 
 func NewExecutionPayloadEnvelope(cfg *clparams.BeaconChainConfig) *ExecutionPayloadEnvelope {
 	return &ExecutionPayloadEnvelope{
-		Payload:            NewEth1Block(clparams.BellatrixVersion, cfg),
-		ExecutionRequests:  NewExecutionRequests(cfg),
-		BuilderIndex:       0,
-		BeaconBlockRoot:    common.Hash{},
-		Slot:               0,
-		BlobKzgCommitments: solid.NewStaticListSSZ[*KZGCommitment](int(cfg.MaxBlobCommittmentsPerBlock), 48),
-		StateRoot:          common.Hash{},
+		Payload:           NewEth1Block(clparams.BellatrixVersion, cfg),
+		ExecutionRequests: NewExecutionRequests(cfg),
+		BuilderIndex:      0,
+		BeaconBlockRoot:   common.Hash{},
+		Slot:              0,
+		StateRoot:         common.Hash{},
 	}
 }
 
@@ -339,7 +338,6 @@ func (e *ExecutionPayloadEnvelope) HashSSZ() ([32]byte, error) {
 		uint64(e.BuilderIndex),
 		e.BeaconBlockRoot[:],
 		e.Slot,
-		e.BlobKzgCommitments,
 		e.StateRoot[:],
 	)
 }
@@ -355,7 +353,6 @@ func (e *ExecutionPayloadEnvelope) EncodeSSZ(buf []byte) ([]byte, error) {
 		e.BuilderIndex,
 		e.BeaconBlockRoot[:],
 		e.Slot,
-		e.BlobKzgCommitments,
 		e.StateRoot[:],
 	)
 }
@@ -367,7 +364,6 @@ func (e *ExecutionPayloadEnvelope) DecodeSSZ(buf []byte, version int) error {
 		&e.BuilderIndex,
 		e.BeaconBlockRoot[:],
 		&e.Slot,
-		e.BlobKzgCommitments,
 		e.StateRoot[:],
 	)
 }
@@ -375,18 +371,17 @@ func (e *ExecutionPayloadEnvelope) DecodeSSZ(buf []byte, version int) error {
 func (e *ExecutionPayloadEnvelope) EncodingSizeSSZ() int {
 	return e.Payload.EncodingSizeSSZ() +
 		e.ExecutionRequests.EncodingSizeSSZ() +
-		8 + length.Hash + 8 + e.BlobKzgCommitments.EncodingSizeSSZ() + length.Hash
+		8 + length.Hash + 8 + length.Hash
 }
 
 func (e *ExecutionPayloadEnvelope) Clone() clonable.Clonable {
 	return &ExecutionPayloadEnvelope{
-		Payload:            e.Payload,
-		ExecutionRequests:  e.ExecutionRequests,
-		BuilderIndex:       e.BuilderIndex,
-		BeaconBlockRoot:    e.BeaconBlockRoot,
-		Slot:               e.Slot,
-		BlobKzgCommitments: e.BlobKzgCommitments.Clone().(*solid.ListSSZ[*KZGCommitment]),
-		StateRoot:          e.StateRoot,
+		Payload:           e.Payload,
+		ExecutionRequests: e.ExecutionRequests,
+		BuilderIndex:      e.BuilderIndex,
+		BeaconBlockRoot:   e.BeaconBlockRoot,
+		Slot:              e.Slot,
+		StateRoot:         e.StateRoot,
 	}
 }
 

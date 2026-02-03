@@ -983,7 +983,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	BuilderRegistryLimit:           1 << 40,
 	BuilderPendingWithdrawalsLimit: 1 << 20,
 	MaxBuildersPerWithdrawalsSweep: 1 << 14,
-	MinBuilderWithdrawabilityDelay: 1 << 12,
+	MinBuilderWithdrawabilityDelay: 64,
 }
 
 func mainnetConfig() BeaconChainConfig {
