@@ -43,9 +43,9 @@ For validators and block producers, this directly affects:
 
 A high peer count alone does not guarantee good transaction propagation if most peers are outbound-only.
 
-### NAT modes explained (practical behavior)
+## NAT modes explained (practical behavior)
 
-#### `nat: none`
+### `nat: none`
 
 Disables external address advertisement.
 
@@ -61,7 +61,7 @@ Erigon will not advertise a reachable address to peers. In practice, this often 
 * non-proposing archive / RPC nodes
 * restricted environments where inbound connectivity is intentionally disabled
 
-#### `nat: extip` (recommended for datacenters & VPS)
+### `nat: extip:` (recommended for datacenters & VPS)
 
 Explicitly advertises the given public IPv4 address to peers.
 
@@ -83,7 +83,7 @@ Example:
 nat: "extip:203.0.113.114"
 ```
 
-#### `nat: any`
+### `nat: any`
 
 Enables automatic NAT detection (e.g. UPnP / NAT-PMP where available).
 
@@ -94,7 +94,7 @@ Suitable for:
 
 Less deterministic than extip, but generally better than none.
 
-#### `nat: stun`
+### `nat: stun`
 
 Uses STUN to discover the external address.
 
