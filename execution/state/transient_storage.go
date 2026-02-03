@@ -32,6 +32,15 @@ func newTransientStorage() transientStorage {
 	return make(transientStorage)
 }
 
+// Reset clears the transient storage for reuse.
+func (t transientStorage) Reset() {
+	for addr := range t {
+		// Clear the inner map to help GC
+		clear(t[addr])
+		delete(t, addr)
+	}
+}
+
 // Set sets the transient-storage `value` for `key` at the given `addr`.
 func (t transientStorage) Set(addr accounts.Address, key accounts.StorageKey, value uint256.Int) {
 	if _, ok := t[addr]; !ok {

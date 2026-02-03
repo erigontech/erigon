@@ -122,8 +122,11 @@ func (j *journal) release() {
 }
 
 func (j *journal) Reset() {
-	// Clear entries but keep capacity
+	// Release any stateObjects held in journal entries before clearing
 	for i := range j.entries {
+		if j.entries[i].kind == kindResetObject && j.entries[i].prevObject != nil {
+			j.entries[i].prevObject.release()
+		}
 		j.entries[i] = journalEntry{} // Clear to help GC
 	}
 	j.entries = j.entries[:0]

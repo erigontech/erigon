@@ -613,11 +613,64 @@ func BenchmarkOpKeccak256(bench *testing.B) {
 	callContext.Memory.Resize(32)
 	pc := uint64(0)
 	start := uint256.Int{}
+	size := uint256.NewInt(32)
 
 	for bench.Loop() {
-		callContext.Stack.push(*uint256.NewInt(32))
+		callContext.Stack.push(*size)
 		callContext.Stack.push(start)
 		opKeccak256(pc, evm, callContext)
+	}
+}
+
+func BenchmarkOpAddress(bench *testing.B) {
+	var (
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+		callContext = &CallContext{Contract: *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})}
+	)
+	pc := uint64(0)
+
+	for bench.Loop() {
+		opAddress(pc, evm, callContext)
+		callContext.Stack.pop()
+	}
+}
+
+func BenchmarkOpTimestamp(bench *testing.B) {
+	var (
+		evm         = NewEVM(evmtypes.BlockContext{Time: 1234567890}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+		callContext = &CallContext{}
+	)
+	pc := uint64(0)
+
+	for bench.Loop() {
+		opTimestamp(pc, evm, callContext)
+		callContext.Stack.pop()
+	}
+}
+
+func BenchmarkOpNumber(bench *testing.B) {
+	var (
+		evm         = NewEVM(evmtypes.BlockContext{BlockNumber: 12345678}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+		callContext = &CallContext{}
+	)
+	pc := uint64(0)
+
+	for bench.Loop() {
+		opNumber(pc, evm, callContext)
+		callContext.Stack.pop()
+	}
+}
+
+func BenchmarkOpGas(bench *testing.B) {
+	var (
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+		callContext = &CallContext{gas: 1000000}
+	)
+	pc := uint64(0)
+
+	for bench.Loop() {
+		opGas(pc, evm, callContext)
+		callContext.Stack.pop()
 	}
 }
 

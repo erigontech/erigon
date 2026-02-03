@@ -145,6 +145,12 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.abort.Store(false)
 }
 
+// Release returns pooled resources to their pools.
+// Should be called when the EVM is no longer needed.
+func (evm *EVM) Release() {
+	evm.Context.ReleaseRules()
+}
+
 // Cancel cancels any running EVM operation. This may be called concurrently and
 // it's safe to be called multiple times.
 func (evm *EVM) Cancel() { evm.abort.Store(true) }

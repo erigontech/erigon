@@ -50,6 +50,9 @@ type BlockContext struct {
 	BaseFee     uint256.Int      // Provides information for BASEFEE
 	PrevRanDao  *common.Hash     // Provides information for PREVRANDAO
 	BlobBaseFee uint256.Int      // Provides information for BLOBBASEFEE
+
+	// Cached rules - computed once per block
+	cachedRules *chain.Rules
 }
 
 // TxContext provides the EVM with information about a transaction.

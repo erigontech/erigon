@@ -1893,8 +1893,16 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 		}
 	}
 	// Reset transient storage at the beginning of transaction execution
-	sdb.transientStorage = newTransientStorage()
-	sdb.addressAccess = make(map[accounts.Address]*accessOptions)
+	if sdb.transientStorage == nil {
+		sdb.transientStorage = newTransientStorage()
+	} else {
+		sdb.transientStorage.Reset()
+	}
+	if sdb.addressAccess == nil {
+		sdb.addressAccess = make(map[accounts.Address]*accessOptions)
+	} else {
+		clear(sdb.addressAccess)
+	}
 	sdb.recordAccess = true
 	return nil
 }

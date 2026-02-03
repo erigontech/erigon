@@ -149,6 +149,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		sender  = cfg.Origin
 		rules   = vmenv.ChainRules()
 	)
+	defer vmenv.Release()
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil, nil)
 	cfg.State.CreateAccount(address, true)
 	// set the receiver's (the executing contract) code for execution.
@@ -205,6 +206,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		sender = cfg.Origin
 		rules  = vmenv.ChainRules()
 	)
+	defer vmenv.Release()
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil, nil)
 
 	// Call the code with the given configuration.
@@ -227,6 +229,7 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, uint64, 
 	setDefaults(cfg)
 
 	vmenv := NewEnv(cfg)
+	defer vmenv.Release()
 
 	sender, err := cfg.State.GetOrNewStateObject(cfg.Origin)
 	if err != nil {

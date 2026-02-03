@@ -18,35 +18,61 @@ package evmtypes
 
 import (
 	"math/big"
+	"sync"
 
 	"github.com/erigontech/erigon/execution/chain"
 )
 
-// Rules ensures c's ChainID is not nil and returns a new Rules instance
+var rulesPool = sync.Pool{
+	New: func() any {
+		return &chain.Rules{
+			ChainID: new(big.Int),
+		}
+	},
+}
+
+// Rules ensures c's ChainID is not nil and returns the cached Rules instance.
+// The returned Rules pointer is valid for the lifetime of the BlockContext.
 func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
+	// Return cached rules if already computed
+	if bc.cachedRules != nil {
+		return bc.cachedRules
+	}
+
 	chainID := c.ChainID
 	if chainID == nil {
 		chainID = new(big.Int)
 	}
 
-	return &chain.Rules{
-		ChainID:            new(big.Int).Set(chainID),
-		IsHomestead:        c.IsHomestead(bc.BlockNumber),
-		IsTangerineWhistle: c.IsTangerineWhistle(bc.BlockNumber),
-		IsSpuriousDragon:   c.IsSpuriousDragon(bc.BlockNumber),
-		IsByzantium:        c.IsByzantium(bc.BlockNumber),
-		IsConstantinople:   c.IsConstantinople(bc.BlockNumber),
-		IsPetersburg:       c.IsPetersburg(bc.BlockNumber),
-		IsIstanbul:         c.IsIstanbul(bc.BlockNumber),
-		IsBerlin:           c.IsBerlin(bc.BlockNumber),
-		IsLondon:           c.IsLondon(bc.BlockNumber),
-		IsShanghai:         c.IsShanghai(bc.Time) || c.IsAgra(bc.BlockNumber),
-		IsCancun:           c.IsCancun(bc.Time),
-		IsNapoli:           c.IsNapoli(bc.BlockNumber),
-		IsBhilai:           c.IsBhilai(bc.BlockNumber),
-		IsPrague:           c.IsPrague(bc.Time) || c.IsBhilai(bc.BlockNumber),
-		IsOsaka:            c.IsOsaka(bc.Time),
-		IsAmsterdam:        c.IsAmsterdam(bc.Time),
-		IsAura:             c.Aura != nil,
+	rules := rulesPool.Get().(*chain.Rules)
+	rules.ChainID.Set(chainID)
+	rules.IsHomestead = c.IsHomestead(bc.BlockNumber)
+	rules.IsTangerineWhistle = c.IsTangerineWhistle(bc.BlockNumber)
+	rules.IsSpuriousDragon = c.IsSpuriousDragon(bc.BlockNumber)
+	rules.IsByzantium = c.IsByzantium(bc.BlockNumber)
+	rules.IsConstantinople = c.IsConstantinople(bc.BlockNumber)
+	rules.IsPetersburg = c.IsPetersburg(bc.BlockNumber)
+	rules.IsIstanbul = c.IsIstanbul(bc.BlockNumber)
+	rules.IsBerlin = c.IsBerlin(bc.BlockNumber)
+	rules.IsLondon = c.IsLondon(bc.BlockNumber)
+	rules.IsShanghai = c.IsShanghai(bc.Time) || c.IsAgra(bc.BlockNumber)
+	rules.IsCancun = c.IsCancun(bc.Time)
+	rules.IsNapoli = c.IsNapoli(bc.BlockNumber)
+	rules.IsBhilai = c.IsBhilai(bc.BlockNumber)
+	rules.IsPrague = c.IsPrague(bc.Time) || c.IsBhilai(bc.BlockNumber)
+	rules.IsOsaka = c.IsOsaka(bc.Time)
+	rules.IsAmsterdam = c.IsAmsterdam(bc.Time)
+	rules.IsAura = c.Aura != nil
+
+	bc.cachedRules = rules
+	return rules
+}
+
+// ReleaseRules returns the cached rules to the pool.
+// Should be called when the BlockContext is no longer needed.
+func (bc *BlockContext) ReleaseRules() {
+	if bc.cachedRules != nil {
+		rulesPool.Put(bc.cachedRules)
+		bc.cachedRules = nil
 	}
 }
