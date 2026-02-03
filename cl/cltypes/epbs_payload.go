@@ -15,6 +15,7 @@ var (
 	_ ssz.HashableSSZ = (*PayloadAttestationData)(nil)
 	_ ssz.HashableSSZ = (*PayloadAttestation)(nil)
 	_ ssz.HashableSSZ = (*ExecutionPayloadBid)(nil)
+	_ ssz.HashableSSZ = (*ExecutionPayloadEnvelope)(nil)
 
 	_ ssz2.SizedObjectSSZ = (*PayloadAttestationData)(nil)
 	_ ssz2.SizedObjectSSZ = (*PayloadAttestation)(nil)
@@ -329,6 +330,18 @@ func NewExecutionPayloadEnvelope(cfg *clparams.BeaconChainConfig) *ExecutionPayl
 		BlobKzgCommitments: solid.NewStaticListSSZ[*KZGCommitment](int(cfg.MaxBlobCommittmentsPerBlock), 48),
 		StateRoot:          common.Hash{},
 	}
+}
+
+func (e *ExecutionPayloadEnvelope) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(
+		e.Payload,
+		e.ExecutionRequests,
+		uint64(e.BuilderIndex),
+		e.BeaconBlockRoot[:],
+		e.Slot,
+		e.BlobKzgCommitments,
+		e.StateRoot[:],
+	)
 }
 
 func (e *ExecutionPayloadEnvelope) Static() bool {

@@ -81,6 +81,29 @@ func (I *impl) ProcessProposerSlashing(
 		return fmt.Errorf("proposer is not slashable: %v", proposer)
 	}
 
+	// [New in Gloas:EIP7732] Remove the BuilderPendingPayment corresponding to
+	// this proposal if it is still in the 2-epoch window.
+	if s.Version() >= clparams.GloasVersion {
+		slot := h1.Slot
+		beaconConfig := s.BeaconConfig()
+		proposalEpoch := state.GetEpochAtSlot(beaconConfig, slot)
+		currentEpoch := state.Epoch(s)
+		var paymentIndex int
+		clear := false
+		if proposalEpoch == currentEpoch {
+			paymentIndex = int(beaconConfig.SlotsPerEpoch + slot%beaconConfig.SlotsPerEpoch)
+			clear = true
+		} else if proposalEpoch == state.PreviousEpoch(s) {
+			paymentIndex = int(slot % beaconConfig.SlotsPerEpoch)
+			clear = true
+		}
+		if clear {
+			payments := s.GetBuilderPendingPayments()
+			payments.Set(paymentIndex, &cltypes.BuilderPendingPayment{})
+			s.SetBuilderPendingPayments(payments)
+		}
+	}
+
 	// Set whistleblower index to 0 so current proposer gets reward.
 	pr, err := s.SlashValidator(h1.ProposerIndex, nil)
 	if I.BlockRewardsCollector != nil {
@@ -580,6 +603,152 @@ func verifyExecutionPayloadBidSignature(s abstract.BeaconState, signedBid *cltyp
 
 	pk := builder.Pubkey
 	return bls.Verify(signedBid.Signature[:], signingRoot[:], pk[:])
+}
+
+// ProcessExecutionPayloadEnvelope processes the execution payload envelope for the Gloas fork.
+// [New in Gloas:EIP7732]
+func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	envelope := signedEnvelope.Message
+	payload := envelope.Payload
+	beaconConfig := s.BeaconConfig()
+
+	// Verify signature
+	if I.FullValidation {
+		valid, err := verifyExecutionPayloadEnvelopeSignature(s, signedEnvelope)
+		if err != nil {
+			return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to verify signature: %w", err)
+		}
+		if !valid {
+			return errors.New("ProcessExecutionPayloadEnvelope: invalid envelope signature")
+		}
+	}
+
+	// Cache latest block header state root
+	previousStateRoot, err := s.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to compute state root: %w", err)
+	}
+	latestBlockHeader := s.LatestBlockHeader()
+	if latestBlockHeader.Root == [32]byte{} {
+		latestBlockHeader.Root = previousStateRoot
+		s.SetLatestBlockHeader(&latestBlockHeader)
+	}
+
+	// Verify consistency with the beacon block
+	latestBlockHeader = s.LatestBlockHeader()
+	headerRoot, err := latestBlockHeader.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to hash block header: %w", err)
+	}
+	if envelope.BeaconBlockRoot != headerRoot {
+		return fmt.Errorf("ProcessExecutionPayloadEnvelope: beacon_block_root %v does not match latest_block_header root %v", envelope.BeaconBlockRoot, headerRoot)
+	}
+	if envelope.Slot != s.Slot() {
+		return fmt.Errorf("ProcessExecutionPayloadEnvelope: envelope slot %d != state slot %d", envelope.Slot, s.Slot())
+	}
+
+	// Verify consistency with the committed bid
+	committedBid := s.GetLatestExecutionPayloadBid()
+	if envelope.BuilderIndex != committedBid.BuilderIndex {
+		return fmt.Errorf("ProcessExecutionPayloadEnvelope: builder_index %d != committed bid builder_index %d", envelope.BuilderIndex, committedBid.BuilderIndex)
+	}
+	payloadHeader, err := payload.PayloadHeader()
+	if err != nil {
+		return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to get payload header: %w", err)
+	}
+	if committedBid.PrevRandao != payloadHeader.PrevRandao {
+		return errors.New("ProcessExecutionPayloadEnvelope: prev_randao mismatch with committed bid")
+	}
+
+	// Verify consistency with expected withdrawals
+	payloadWithdrawals := payload.Withdrawals
+	expectedWithdrawals := s.GetPayloadExpectedWithdrawals()
+	payloadWithdrawalsRoot, err := payloadWithdrawals.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to hash payload withdrawals: %w", err)
+	}
+	expectedWithdrawalsRoot, err := expectedWithdrawals.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to hash expected withdrawals: %w", err)
+	}
+	if payloadWithdrawalsRoot != expectedWithdrawalsRoot {
+		return errors.New("ProcessExecutionPayloadEnvelope: withdrawals root mismatch with expected")
+	}
+
+	// Verify the gas_limit
+	if committedBid.GasLimit != payloadHeader.GasLimit {
+		return fmt.Errorf("ProcessExecutionPayloadEnvelope: gas_limit %d != committed bid gas_limit %d", payloadHeader.GasLimit, committedBid.GasLimit)
+	}
+	// Verify the block hash
+	if committedBid.BlockHash != payloadHeader.BlockHash {
+		return errors.New("ProcessExecutionPayloadEnvelope: block_hash mismatch with committed bid")
+	}
+	// Verify consistency of the parent hash with respect to the previous execution payload
+	if payloadHeader.ParentHash != s.GetLatestBlockHash() {
+		return errors.New("ProcessExecutionPayloadEnvelope: parent_hash mismatch with latest block hash")
+	}
+	// Verify timestamp
+	if payloadHeader.Time != state.ComputeTimestampAtSlot(s, s.Slot()) {
+		return errors.New("ProcessExecutionPayloadEnvelope: invalid timestamp")
+	}
+
+	// NOTE: execution_engine.verify_and_notify_new_payload is handled outside state transition
+
+	// Process execution requests
+	requests := envelope.ExecutionRequests
+	if requests != nil {
+		if requests.Deposits != nil {
+			if err := solid.RangeErr[*solid.DepositRequest](requests.Deposits, func(_ int, req *solid.DepositRequest, _ int) error {
+				return I.ProcessDepositRequest(s, req)
+			}); err != nil {
+				return fmt.Errorf("ProcessExecutionPayloadEnvelope: ProcessDepositRequest: %w", err)
+			}
+		}
+		if requests.Withdrawals != nil {
+			if err := solid.RangeErr[*solid.WithdrawalRequest](requests.Withdrawals, func(_ int, req *solid.WithdrawalRequest, _ int) error {
+				return I.ProcessWithdrawalRequest(s, req)
+			}); err != nil {
+				return fmt.Errorf("ProcessExecutionPayloadEnvelope: ProcessWithdrawalRequest: %w", err)
+			}
+		}
+		if requests.Consolidations != nil {
+			if err := solid.RangeErr[*solid.ConsolidationRequest](requests.Consolidations, func(_ int, req *solid.ConsolidationRequest, _ int) error {
+				return I.ProcessConsolidationRequest(s, req)
+			}); err != nil {
+				return fmt.Errorf("ProcessExecutionPayloadEnvelope: ProcessConsolidationRequest: %w", err)
+			}
+		}
+	}
+
+	// Queue the builder payment
+	slotsPerEpoch := beaconConfig.SlotsPerEpoch
+	paymentIndex := int(slotsPerEpoch + s.Slot()%slotsPerEpoch)
+	payments := s.GetBuilderPendingPayments()
+	payment := payments.Get(paymentIndex)
+	if payment != nil && payment.Withdrawal != nil && payment.Withdrawal.Amount > 0 {
+		withdrawals := s.GetBuilderPendingWithdrawals()
+		withdrawals.Append(payment.Withdrawal)
+		s.SetBuilderPendingWithdrawals(withdrawals)
+	}
+	payments.Set(paymentIndex, &cltypes.BuilderPendingPayment{})
+	s.SetBuilderPendingPayments(payments)
+
+	// Cache the execution payload hash
+	s.SetExecutionPayloadAvailability(s.Slot(), true)
+	s.SetLatestBlockHash(payloadHeader.BlockHash)
+
+	// Verify the state root
+	if I.FullValidation {
+		stateRoot, err := s.HashSSZ()
+		if err != nil {
+			return fmt.Errorf("ProcessExecutionPayloadEnvelope: failed to compute final state root: %w", err)
+		}
+		if envelope.StateRoot != stateRoot {
+			return fmt.Errorf("ProcessExecutionPayloadEnvelope: state_root mismatch: expected %v, got %v", envelope.StateRoot, stateRoot)
+		}
+	}
+
+	return nil
 }
 
 // ProcessExecutionPayload sets the latest payload header accordinly.

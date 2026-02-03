@@ -78,6 +78,7 @@ type BeaconStateExtension interface {
 	GetBuilderPendingPayments() *solid.VectorSSZ[*cltypes.BuilderPendingPayment]
 	GetBuilderPaymentQuorumThreshold() uint64
 	GetNextWithdrawalBuilderIndex() cltypes.BuilderIndex
+	GetPayloadExpectedWithdrawals() *solid.ListSSZ[*cltypes.Withdrawal]
 	GetIndexedPayloadAttestation(payloadAttestation *cltypes.PayloadAttestation) (*cltypes.IndexedPayloadAttestation, error)
 }
 
@@ -156,6 +157,7 @@ type BeaconStateMutator interface {
 	SetBuilderPendingPayments(*solid.VectorSSZ[*cltypes.BuilderPendingPayment])
 	SetBuilderPendingWithdrawals(withdrawals *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal])
 	SetPayloadExpectedWithdrawals(withdrawals *solid.ListSSZ[*cltypes.Withdrawal])
+	SetLatestBlockHash(hash common.Hash)
 	SetNextWithdrawalBuilderIndex(index cltypes.BuilderIndex)
 	SetBuilders(builders *solid.ListSSZ[*cltypes.Builder])
 	SetLatestExecutionPayloadBid(bid *cltypes.ExecutionPayloadBid)

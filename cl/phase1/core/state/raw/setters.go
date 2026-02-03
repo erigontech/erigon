@@ -603,6 +603,11 @@ func (b *BeaconState) SetBuilderPendingWithdrawals(withdrawals *solid.ListSSZ[*c
 	b.markLeaf(BuilderPendingWithdrawalsLeafIndex)
 }
 
+func (b *BeaconState) SetLatestBlockHash(hash common.Hash) {
+	b.latestBlockHash = hash
+	b.markLeaf(LatestBlockHashLeafIndex)
+}
+
 func (b *BeaconState) SetPayloadExpectedWithdrawals(withdrawals *solid.ListSSZ[*cltypes.Withdrawal]) {
 	b.payloadExpectedWithdrawals = withdrawals
 	b.markLeaf(PayloadExpectedWithdrawalsLeafIndex)
