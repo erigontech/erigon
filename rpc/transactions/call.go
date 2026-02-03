@@ -150,7 +150,8 @@ func DoCall(
 	var ibs *state.IntraBlockState
 	if pooled := intraBlockStatePool.Get(); pooled != nil {
 		ibs = pooled.(*state.IntraBlockState)
-		ibs.FullReset(stateReader)
+		ibs.Reset()
+		ibs.SetStateReader(stateReader)
 	} else {
 		ibs = state.New(stateReader)
 	}
@@ -290,7 +291,8 @@ func (r *ReusableCaller) DoCallWithNewGas(
 	var ibs *state.IntraBlockState
 	if pooled := intraBlockStatePool.Get(); pooled != nil {
 		ibs = pooled.(*state.IntraBlockState)
-		ibs.FullReset(r.stateReader)
+		ibs.Reset()
+		ibs.SetStateReader(r.stateReader)
 	} else {
 		ibs = state.New(r.stateReader)
 	}

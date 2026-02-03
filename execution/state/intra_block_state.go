@@ -299,6 +299,10 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 	return sdb.stateReader.HasStorage(addr)
 }
 
+func (sdb *IntraBlockState) SetStateReader(stateReader StateReader) {
+	sdb.stateReader = stateReader
+}
+
 // Reset clears out all ephemeral state objects from the state db, but keeps
 // the underlying state trie to avoid reloading data for the next operations.
 func (sdb *IntraBlockState) Reset() {
@@ -312,12 +316,17 @@ func (sdb *IntraBlockState) Reset() {
 		clear(sdb.logs[i]) // free pointers
 		sdb.logs[i] = sdb.logs[i][:0]
 	}
+	sdb.accessList = newAccessList()
+	sdb.transientStorage = newTransientStorage()
 	sdb.balanceInc = map[accounts.Address]*BalanceIncrease{}
 	sdb.journal.Reset()
 	sdb.revisions = sdb.revisions.put()
 	sdb.refund = 0
 	sdb.txIndex = 0
 	sdb.logSize = 0
+	sdb.recordAccess = false
+	sdb.trace = false
+	sdb.addressAccess = nil
 	sdb.versionMap = nil
 	sdb.versionedReads = nil
 	sdb.versionedWrites = nil
