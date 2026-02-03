@@ -1521,7 +1521,7 @@ func (I *impl) ProcessDepositRequest(s abstract.BeaconState, depositRequest *sol
 		isBuilderPrefix := state.IsBuilderWithdrawalCredential(depositRequest.WithdrawalCredentials, s.BeaconConfig())
 
 		if isBuilder || (isBuilderPrefix && !isValidator) {
-			applyDepositForBuilder(s, depositRequest.PubKey, depositRequest.WithdrawalCredentials, depositRequest.Amount, depositRequest.Signature)
+			applyDepositForBuilder(s, depositRequest.PubKey, depositRequest.WithdrawalCredentials, depositRequest.Amount, depositRequest.Signature, s.Slot())
 			return nil
 		}
 	}

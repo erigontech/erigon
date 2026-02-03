@@ -28,19 +28,6 @@ func isBuilderPubkey(s abstract.BeaconState, pubkey common.Bytes48) bool {
 	return false
 }
 
-// getBuilderFromDeposit creates a new Builder from deposit parameters.
-// [New in Gloas:EIP7732]
-func getBuilderFromDeposit(s abstract.BeaconState, pubkey common.Bytes48, withdrawalCredentials [32]byte, amount uint64) *cltypes.Builder {
-	return &cltypes.Builder{
-		Pubkey:            pubkey,
-		Version:           withdrawalCredentials[0],
-		ExecutionAddress:  common.BytesToAddress(withdrawalCredentials[12:]),
-		Balance:           amount,
-		DepositEpoch:      state.Epoch(s),
-		WithdrawableEpoch: s.BeaconConfig().FarFutureEpoch,
-	}
-}
-
 // getIndexForNewBuilder returns the first builder index that is reusable
 // (withdrawable_epoch <= current_epoch and balance == 0), or len(state.builders)
 // if no such slot exists.
@@ -63,9 +50,16 @@ func getIndexForNewBuilder(s abstract.BeaconState) cltypes.BuilderIndex {
 // addBuilderToRegistry adds a new builder to the registry, reusing a vacant slot if available,
 // otherwise appending to the end of the builders list.
 // [New in Gloas:EIP7732]
-func addBuilderToRegistry(s abstract.BeaconState, pubkey common.Bytes48, withdrawalCredentials [32]byte, amount uint64) {
+func addBuilderToRegistry(s abstract.BeaconState, pubkey common.Bytes48, withdrawalCredentials [32]byte, amount uint64, slot uint64) {
 	index := getIndexForNewBuilder(s)
-	builder := getBuilderFromDeposit(s, pubkey, withdrawalCredentials, amount)
+	builder := &cltypes.Builder{
+		Pubkey:            pubkey,
+		Version:           withdrawalCredentials[0],
+		ExecutionAddress:  common.BytesToAddress(withdrawalCredentials[12:]),
+		Balance:           amount,
+		DepositEpoch:      state.GetEpochAtSlot(s.BeaconConfig(), slot),
+		WithdrawableEpoch: s.BeaconConfig().FarFutureEpoch,
+	}
 	builders := s.GetBuilders()
 	if int(index) < builders.Len() {
 		builders.Set(int(index), builder)
@@ -78,7 +72,7 @@ func addBuilderToRegistry(s abstract.BeaconState, pubkey common.Bytes48, withdra
 // applyDepositForBuilder processes a builder deposit: if the pubkey is new and the signature is valid,
 // registers a new builder; if the pubkey already exists, increases the builder's balance.
 // [New in Gloas:EIP7732]
-func applyDepositForBuilder(s abstract.BeaconState, pubkey common.Bytes48, withdrawalCredentials [32]byte, amount uint64, signature common.Bytes96) {
+func applyDepositForBuilder(s abstract.BeaconState, pubkey common.Bytes48, withdrawalCredentials [32]byte, amount uint64, signature common.Bytes96, slot uint64) {
 	builders := s.GetBuilders()
 
 	// Check if pubkey already exists in builders
@@ -106,7 +100,7 @@ func applyDepositForBuilder(s abstract.BeaconState, pubkey common.Bytes48, withd
 			return
 		}
 		if valid {
-			addBuilderToRegistry(s, pubkey, withdrawalCredentials, amount)
+			addBuilderToRegistry(s, pubkey, withdrawalCredentials, amount, slot)
 		}
 	} else {
 		// Existing builder: increase balance
