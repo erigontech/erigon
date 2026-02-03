@@ -169,6 +169,10 @@ func (sd *SharedDomains) Merge(other *SharedDomains) error {
 		return err
 	}
 
+	// Transfer flush hooks from other to sd (other's mem is invalidated after merge)
+	sd.flushHooks = append(sd.flushHooks, other.flushHooks...)
+	other.flushHooks = other.flushHooks[:0]
+
 	sd.txNum = other.txNum
 	sd.blockNum.Store(other.blockNum.Load())
 	return nil
