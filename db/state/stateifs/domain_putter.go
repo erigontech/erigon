@@ -31,7 +31,7 @@ type DomainPutter interface {
 // DeferredHooker is an interface for adding deferred flush hooks.
 // SharedDomains implements this interface.
 type DeferredHooker interface {
-	AddFlushHook(func(context.Context, DomainPutter) error)
+	AddFlushHook(hook func(context.Context, DomainPutter) error)
 }
 
 // CommitmentWrite represents a commitment domain write that needs to be added to changesets.

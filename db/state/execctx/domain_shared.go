@@ -73,6 +73,13 @@ type accHolder interface {
 	SetChangesetAccumulator(acc *changeset.StateChangeSet)
 }
 
+// flushHook pairs a flush callback with the block it was created for.
+type flushHook struct {
+	blockHash common.Hash
+	blockNum  uint64
+	fn        func(context.Context, stateifs.DomainPutter) error
+}
+
 type SharedDomains struct {
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext
 
@@ -82,6 +89,7 @@ type SharedDomains struct {
 
 	txNum             uint64
 	blockNum          atomic.Uint64
+	blockHash         common.Hash
 	trace             bool //nolint
 	commitmentCapture bool
 	mem               kv.TemporalMemBatch
@@ -89,7 +97,8 @@ type SharedDomains struct {
 
 	// flushHooks are callbacks to be executed when FlushHooks is called.
 	// Used by commitment to defer branch updates until a transaction commit.
-	flushHooks []func(context.Context, stateifs.DomainPutter) error
+	// Each hook is paired with the blockNum it was created for.
+	flushHooks []flushHook
 	// stateCache is an optional cache for state data (accounts, storage, code)
 	stateCache *cache.StateCache
 }
@@ -139,49 +148,16 @@ func (sd *SharedDomains) AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel {
 	return &temporalPutDel{sd, tx}
 }
 
-// capturingDomainPutter wraps a DomainPutter and captures commitment writes.
-type capturingDomainPutter struct {
-	inner    stateifs.DomainPutter
-	writes   []stateifs.CommitmentWrite
-	stepSize uint64
-}
-
-func (c *capturingDomainPutter) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
-	if domain == kv.CommitmentDomain {
-		c.writes = append(c.writes, stateifs.CommitmentWrite{
-			Key:      common.Copy(k),
-			Value:    common.Copy(v),
-			TxNum:    txNum,
-			PrevVal:  common.Copy(prevVal),
-			PrevStep: prevStep,
-		})
-	}
-	return c.inner.DomainPut(domain, k, v, txNum, prevVal, prevStep)
-}
-
 // NewDomainPutter returns a stateifs.DomainPutter for use with FlushHooks.
 func (sd *SharedDomains) NewDomainPutter(tx kv.TemporalTx) stateifs.DomainPutter {
 	return &temporalPutDel{sd, tx}
 }
 
-// NewCapturingDomainPutter returns a DomainPutter that captures commitment writes.
-func (sd *SharedDomains) NewCapturingDomainPutter(tx kv.TemporalTx) *capturingDomainPutter {
-	return &capturingDomainPutter{
-		inner:    &temporalPutDel{sd, tx},
-		stepSize: sd.stepSize,
-	}
-}
-
-// CommitmentChangesetAdder is implemented by TemporalMemBatch to add commitment writes to past changesets.
-type CommitmentChangesetAdder interface {
-	AddCommitmentWritesToChangesets(writes []stateifs.CommitmentWrite, stepSize uint64)
-}
-
-// AddCommitmentWritesToChangesets adds the captured commitment writes to the appropriate past changesets.
-func (sd *SharedDomains) AddCommitmentWritesToChangesets(writes []stateifs.CommitmentWrite) {
-	if adder, ok := sd.mem.(CommitmentChangesetAdder); ok {
-		adder.AddCommitmentWritesToChangesets(writes, sd.stepSize)
-	}
+// changesetSwitcher is implemented by TemporalMemBatch to get/set changesets for deferred writes.
+type changesetSwitcher interface {
+	GetChangesetByBlockNum(blockNumber uint64) *changeset.StateChangeSet
+	SetChangesetAccumulator(acc *changeset.StateChangeSet)
+	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet)
 }
 
 func (sd *SharedDomains) Merge(other *SharedDomains) error {
@@ -202,35 +178,49 @@ func (sd *SharedDomains) Merge(other *SharedDomains) error {
 // This is used by commitment to defer branch updates until a transaction commit.
 // Implements commitment.DeferredHooker interface.
 func (sd *SharedDomains) AddFlushHook(hook func(context.Context, stateifs.DomainPutter) error) {
-	sd.flushHooks = append(sd.flushHooks, hook)
+	sd.flushHooks = append(sd.flushHooks, flushHook{
+		blockHash: sd.blockHash,
+		blockNum:  sd.blockNum.Load(),
+		fn:        hook,
+	})
 }
 
 // FlushHooks executes all registered flush hooks and clears them.
 // Used during transaction commit to apply deferred commitment updates.
-// It captures commitment writes and adds them to the past changesets.
+// For each hook, it sets the corresponding block's changeset as the accumulator
+// so writes go directly to the correct changeset.
 func (sd *SharedDomains) FlushHooks(ctx context.Context, dp stateifs.DomainPutter) error {
 	if len(sd.flushHooks) == 0 {
 		return nil
 	}
 
-	// Use capturing putter to record commitment writes
-	capturing := &capturingDomainPutter{
-		inner:    dp,
-		stepSize: sd.stepSize,
+	switcher, ok := sd.mem.(changesetSwitcher)
+	if !ok {
+		// Fallback: just run hooks without changeset routing
+		for _, hook := range sd.flushHooks {
+			if err := hook.fn(ctx, dp); err != nil {
+				return err
+			}
+		}
+		sd.flushHooks = sd.flushHooks[:0]
+		return nil
 	}
 
 	for _, hook := range sd.flushHooks {
-		if err := hook(ctx, capturing); err != nil {
+		// Set the block's changeset as accumulator so writes go there
+		cs := switcher.GetChangesetByBlockNum(hook.blockNum)
+		switcher.SetChangesetAccumulator(cs)
+
+		if err := hook.fn(ctx, dp); err != nil {
+			switcher.SetChangesetAccumulator(nil)
 			return err
 		}
+
+		switcher.SavePastChangesetAccumulator(hook.blockHash, hook.blockNum, cs)
 	}
+
+	switcher.SetChangesetAccumulator(nil)
 	sd.flushHooks = sd.flushHooks[:0]
-
-	// Add captured commitment writes to past changesets
-	if len(capturing.writes) > 0 {
-		sd.AddCommitmentWritesToChangesets(capturing.writes)
-	}
-
 	return nil
 }
 
@@ -339,6 +329,12 @@ func (sd *SharedDomains) BlockNum() uint64 { return sd.blockNum.Load() }
 
 func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 	sd.blockNum.Store(blockNum)
+}
+
+func (sd *SharedDomains) BlockHash() common.Hash { return sd.blockHash }
+
+func (sd *SharedDomains) SetBlockHash(blockHash common.Hash) {
+	sd.blockHash = blockHash
 }
 
 func (sd *SharedDomains) SetTrace(b, capture bool) []string {

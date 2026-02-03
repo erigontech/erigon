@@ -254,6 +254,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						uncommittedBlocks++
 						pe.doms.SetTxNum(applyResult.lastTxNum)
 						pe.doms.SetBlockNum(applyResult.BlockNum)
+						pe.doms.SetBlockHash(applyResult.BlockHash)
 						lastBlockResult = *applyResult
 					}
 
