@@ -425,6 +425,9 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 			maxStep = step
 		}
 	}
+	if maxStep != math.MaxUint64 {
+		fmt.Println("maxStep1", maxStep, kv.Step(sd.txNum/sd.stepSize))
+	}
 
 	if sd.stateCache != nil {
 		// This is fine, we will have some extra entries into domain worst case.
