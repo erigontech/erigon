@@ -539,6 +539,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			se.cfg.chainConfig, txTask.Rules(), txTask.HistoryExecution); err != nil {
 			return false, err
 		}
+		fmt.Println(state.Acc)
 
 		se.doms.SetTxNum(txTask.TxNum)
 		se.doms.SetBlockNum(txTask.BlockNumber())

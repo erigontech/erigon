@@ -187,6 +187,8 @@ func (rs *StateV3) SetTxNum(blockNum, txNum uint64) {
 	rs.domains.SetBlockNum(blockNum)
 }
 
+var Acc time.Duration
+
 func (rs *StateV3) ApplyTxState(ctx context.Context,
 	roTx kv.TemporalTx,
 	blockNum uint64,
@@ -212,7 +214,7 @@ func (rs *StateV3) ApplyTxState(ctx context.Context,
 	if err := rs.applyLogsAndTraces4(roTx, txNum, receipt, logs, traceFroms, traceTos); err != nil {
 		return fmt.Errorf("StateV3.ApplyLogsAndTraces: %w", err)
 	}
-	fmt.Println("applyUpdatesTook", time.Since(s))
+	Acc += time.Since(s)
 
 	if (txNum+1)%rs.domains.StepSize() == 0 /*&& txTask.TxNum > 0 */ && !dbg.DiscardCommitment() {
 		// We do not update txNum before commitment cuz otherwise committed state will be in the beginning of next file, not in the latest.
