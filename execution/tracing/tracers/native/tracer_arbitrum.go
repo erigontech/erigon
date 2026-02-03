@@ -39,13 +39,13 @@ func (t *callTracer) CaptureArbitrumTransfer(from, to accounts.Address, value *u
 		Purpose: reason,
 		Value:   value.Hex(),
 	}
-	if !from.IsNil() {
-		fromStr := from.Value().String()
-		transfer.From = &fromStr
+	if from != accounts.NilAddress {
+		from := from.String()
+		transfer.From = &from
 	}
-	if !to.IsNil() {
-		toStr := to.Value().String()
-		transfer.To = &toStr
+	if to != accounts.NilAddress {
+		to := to.String()
+		transfer.To = &to
 	}
 	if before {
 		t.beforeEVMTransfers = append(t.beforeEVMTransfers, transfer)

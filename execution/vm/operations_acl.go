@@ -262,7 +262,7 @@ var (
 	// SSTORE_RESET_GAS 	5000 	5000 - COLD_SLOAD_COST
 	//
 	//The other parameters defined in EIP 2200 are unchanged.
-	// see gasSStoreEIP2200(...) in core/vm/gas_table.go for more info about how EIP 2200 is specified
+	// see gasSStoreEIP2200(...) in execution/vm/gas_table.go for more info about how EIP 2200 is specified
 	gasSStoreEIP2929 = makeGasSStoreFunc(params.SstoreClearsScheduleRefundEIP2200)
 
 	// gasSStoreEIP2539 implements gas cost for SSTORE according to EPI-2539

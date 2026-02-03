@@ -22,10 +22,11 @@ package vm
 import (
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/arb/multigas"
 	"hash"
 	"slices"
 	"sync"
+
+	"github.com/erigontech/erigon/arb/multigas"
 
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/holiman/uint256"
@@ -232,6 +233,27 @@ func (ctx *CallContext) CodeHash() accounts.CodeHash {
 
 func (ctx *CallContext) Gas() uint64 {
 	return ctx.gas
+}
+
+// UseGas attempts the use gas and subtracts it and returns true on success
+func (ctx *CallContext) UseGas(gas uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
+	// We collect the gas change reason today, future changes will add gas change(s) tracking with reason
+	_ = reason
+
+	if ctx.gas < gas {
+		return false
+	}
+
+	if tracer != nil && tracer.OnGasChange != nil && reason != tracing.GasChangeIgnored {
+		tracer.OnGasChange(ctx.gas, ctx.gas-gas, reason)
+	}
+	ctx.gas -= gas
+	return true
+}
+
+// This is exposed only for the purpose of stylus calls (Arbitrum specific)
+func (ctx *CallContext) GasPtr() *uint64 {
+	return &ctx.gas
 }
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
