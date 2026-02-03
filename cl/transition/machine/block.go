@@ -197,6 +197,13 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 		}
 	}
 
+	// [New in Gloas:EIP7732] Process payload attestations
+	if s.Version() >= clparams.GloasVersion {
+		if err := forEachProcess(s, blockBody.GetPayloadAttestations(), impl.ProcessPayloadAttestation); err != nil {
+			return nil, nil, nil, fmt.Errorf("ProcessPayloadAttestation: %s", err)
+		}
+	}
+
 	return
 }
 
@@ -370,3 +377,4 @@ func processBlsToExecutionChanges(impl BlockOperationProcessor, s abstract.Beaco
 
 	return
 }
+

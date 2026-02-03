@@ -64,5 +64,6 @@ type BlockOperationProcessor interface {
 	ProcessDepositRequest(s abstract.BeaconState, depositRequest *solid.DepositRequest) error
 	ProcessWithdrawalRequest(s abstract.BeaconState, withdrawalRequest *solid.WithdrawalRequest) error
 	ProcessConsolidationRequest(s abstract.BeaconState, consolidationRequest *solid.ConsolidationRequest) error
+	ProcessPayloadAttestation(s abstract.BeaconState, payloadAttestation *cltypes.PayloadAttestation) error
 	FullValidate() bool
 }

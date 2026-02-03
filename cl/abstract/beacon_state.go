@@ -78,6 +78,7 @@ type BeaconStateExtension interface {
 	GetBuilderPendingPayments() *solid.VectorSSZ[*cltypes.BuilderPendingPayment]
 	GetBuilderPaymentQuorumThreshold() uint64
 	GetNextWithdrawalBuilderIndex() cltypes.BuilderIndex
+	GetIndexedPayloadAttestation(payloadAttestation *cltypes.PayloadAttestation) (*cltypes.IndexedPayloadAttestation, error)
 }
 
 type BeaconStateBasic interface {

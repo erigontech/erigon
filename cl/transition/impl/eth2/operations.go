@@ -1594,3 +1594,31 @@ func computeConsolidationEpochAndUpdateChurn(s abstract.BeaconState, consolidati
 	s.SetEarlistConsolidationEpoch(earlistConsolidationEpoch)
 	return earlistConsolidationEpoch
 }
+
+// ProcessPayloadAttestation validates a single payload attestation.
+// [New in Gloas:EIP7732]
+func (I *impl) ProcessPayloadAttestation(s abstract.BeaconState, payloadAttestation *cltypes.PayloadAttestation) error {
+	data := payloadAttestation.Data
+	// Check that the attestation is for the parent beacon block
+	header := s.LatestBlockHeader()
+	if data.BeaconBlockRoot != header.ParentRoot {
+		return fmt.Errorf("ProcessPayloadAttestation: beacon_block_root %v does not match latest_block_header.parent_root %v", data.BeaconBlockRoot, header.ParentRoot)
+	}
+	// Check that the attestation is for the previous slot
+	if data.Slot+1 != s.Slot() {
+		return fmt.Errorf("ProcessPayloadAttestation: attestation slot %d + 1 != state slot %d", data.Slot, s.Slot())
+	}
+	// Verify signature
+	indexedPayloadAttestation, err := s.GetIndexedPayloadAttestation(payloadAttestation)
+	if err != nil {
+		return fmt.Errorf("ProcessPayloadAttestation: failed to get indexed payload attestation: %w", err)
+	}
+	valid, err := state.IsValidIndexedPayloadAttestation(s, indexedPayloadAttestation)
+	if err != nil {
+		return fmt.Errorf("ProcessPayloadAttestation: %w", err)
+	}
+	if !valid {
+		return errors.New("ProcessPayloadAttestation: invalid indexed payload attestation")
+	}
+	return nil
+}

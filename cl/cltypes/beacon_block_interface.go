@@ -30,4 +30,5 @@ type GenericBeaconBody interface {
 	GetExecutionChanges() *solid.ListSSZ[*SignedBLSToExecutionChange]
 	GetExecutionRequests() *ExecutionRequests
 	GetSignedExecutionPayloadBid() *SignedExecutionPayloadBid
+	GetPayloadAttestations() *solid.ListSSZ[*PayloadAttestation]
 }

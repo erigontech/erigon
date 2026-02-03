@@ -532,6 +532,10 @@ func (b *BeaconBody) GetSignedExecutionPayloadBid() *SignedExecutionPayloadBid {
 	return b.SignedExecutionPayloadBid
 }
 
+func (b *BeaconBody) GetPayloadAttestations() *solid.ListSSZ[*PayloadAttestation] {
+	return b.PayloadAttestations
+}
+
 func (b *BeaconBody) GetExecutionRequestsList() []hexutil.Bytes {
 	return GetExecutionRequestsList(b.beaconCfg, b.ExecutionRequests)
 }
