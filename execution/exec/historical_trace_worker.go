@@ -487,6 +487,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 				// End of block transaction in a block
 				reader := state.NewHistoryReaderV3(tx, outputTxNum)
 				ibs := state.New(reader)
+				defer ibs.Release(false)
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 					ret, err := protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{
