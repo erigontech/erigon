@@ -99,6 +99,7 @@ jobs:
       ERIGON_REFERENCE_DIR: /opt/erigon-versions/reference-version
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
+      TOTAL_TIME_SECONDS: 1200 # 20 minutes
       GETH_INSTALL_DIR: /opt/go-ethereum
       CLIENT: ${{ matrix.client }}
 
@@ -215,7 +216,7 @@ jobs:
           echo "  RUN_ID=${RUN_ID}"
           echo "  NETWORK=${NETWORK}"
           # Wait for an agreement between Erigon and Geth
-          python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$NETWORK"
+          python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$NETWORK" --deadline-timeout $TOTAL_TIME_SECONDS
 
       - name: Run RPC Performance Tests
         id: test_step
