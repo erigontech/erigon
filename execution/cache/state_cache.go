@@ -164,11 +164,7 @@ func (c *StateCache) RevertWithDiffset(diffset *[6][]kv.DomainEntryDiff, newBloc
 
 				fmt.Println(common.Bytes2Hex(k), " step ", step, " prevStep ", prevStep)
 			}
-			//if len(entry.Value) == 0 {
 			c.Delete(kv.Domain(domain), k)
-			// } else {
-			// 	c.Put(kv.Domain(domain), k, entry.Value)
-			// }
 		}
 	}
 
