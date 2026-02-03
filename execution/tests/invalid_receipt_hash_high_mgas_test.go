@@ -18,6 +18,7 @@ package executiontests
 
 import (
 	"path"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -29,6 +30,9 @@ import (
 func TestInvalidReceiptHashHighMgas(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("windows CI is extremely slow")
 	}
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlCrit)
