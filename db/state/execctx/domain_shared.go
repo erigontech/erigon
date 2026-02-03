@@ -213,6 +213,14 @@ func (sd *SharedDomains) FlushHooks(ctx context.Context, dp stateifs.DomainPutte
 	for _, hook := range sd.flushHooks {
 		// Set the block's changeset as accumulator so writes go there
 		cs := switcher.GetChangesetByBlockNum(hook.blockNum)
+		if cs == nil {
+			// No changeset for this block - run hook without changeset routing
+			if err := hook.fn(ctx, dp); err != nil {
+				return err
+			}
+			continue
+		}
+
 		switcher.SetChangesetAccumulator(cs)
 
 		if err := hook.fn(ctx, dp); err != nil {
