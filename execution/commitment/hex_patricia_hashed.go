@@ -116,7 +116,7 @@ type HexPatriciaHashed struct {
 	deferredHooker DeferredHooker
 
 	//processing metrics
-	metrics *Metrics
+	metrics       *Metrics
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
 	hadToLoadL    map[uint64]skipStat
 }

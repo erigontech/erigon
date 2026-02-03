@@ -70,7 +70,7 @@ type TemporalMemBatch struct {
 	// pastChangesetTxNums maps changeset keys to their ending txNum (for matching commitment writes)
 	pastChangesetTxNums map[string]uint64
 
-	unwindToTxNum uint64
+	unwindToTxNum   uint64
 	unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
 
 	metrics *changeset.DomainMetrics
