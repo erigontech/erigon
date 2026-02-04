@@ -29,9 +29,9 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -967,6 +967,21 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		}
 	}
 
+	// Run block finalization (rewards, withdrawals) to track all state changes
+	fullEngine, ok := engine.(rules.Engine)
+	if !ok {
+		return nil, fmt.Errorf("engine does not support full rules.Engine interface")
+	}
+
+	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
+		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
+	}
+	chainReader := consensuschain.NewReader(chainConfig, tx, api._blockReader, log.Root())
+
+	if _, err = fullEngine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), nil /* receipts */, block.Withdrawals(), chainReader, syscall, true /* skipReceiptsEval */, log.Root()); err != nil {
+		return nil, fmt.Errorf("failed to finalize block: %w", err)
+	}
+
 	if err = ibs.CommitBlock(blockRules, recordingWriter); err != nil {
 		return nil, fmt.Errorf("failed to commit block: %w", err)
 	}
@@ -1064,36 +1079,31 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	// Get the expected parent state root for verification
 	var expectedParentRoot common.Hash
-	if blockNum == 0 {
-		// For genesis, parent state is empty trie
-		expectedParentRoot = empty.RootHash
-	} else {
-		// Get the parent header for state root verification
-		parentHeader, err := api._blockReader.HeaderByNumber(ctx, tx, parentNum)
-		if err != nil {
-			return nil, err
-		}
-		if parentHeader == nil {
-			return nil, fmt.Errorf("parent header %d not found", parentNum)
-		}
-		expectedParentRoot = parentHeader.Root
 
-		// Get first txnum of parentNum+1 to ensure that correct state root will be restored
-		lastTxnInBlock, err := api._txNumReader.Min(ctx, tx, parentNum+1)
-		if err != nil {
-			return nil, err
-		}
+	// Get the parent header for state root verification
+	parentHeader, err := api._blockReader.HeaderByNumber(ctx, tx, parentNum)
+	if err != nil {
+		return nil, err
+	}
+	if parentHeader == nil {
+		return nil, fmt.Errorf("parent header %d not found", parentNum)
+	}
+	expectedParentRoot = parentHeader.Root
 
-		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
-		if lastTxnInBlock < commitmentStartingTxNum {
-			return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, lastTxnInBlock)
-		}
+	// Get first txnum of parentNum+1 to ensure that correct state root will be restored
+	lastTxnInBlock, err := api._txNumReader.Min(ctx, tx, parentNum+1)
+	if err != nil {
+		return nil, err
+	}
 
-		sdCtx.SetHistoryStateReader(tx, lastTxnInBlock)
-		if err := domains.SeekCommitment(context.Background(), tx); err != nil {
-			return nil, err
-		}
+	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+	if lastTxnInBlock < commitmentStartingTxNum {
+		return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, lastTxnInBlock)
+	}
 
+	sdCtx.SetHistoryStateReader(tx, lastTxnInBlock)
+	if err := domains.SeekCommitment(context.Background(), tx); err != nil {
+		return nil, err
 	}
 
 	if len(allAddresses)+len(allStorageKeys) == 0 { // nothing touched, return empty witness

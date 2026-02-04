@@ -654,7 +654,6 @@ func TestExecutionWitness(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, latestBlockNum, uint64(0), "test chain should have at least one block")
 	t.Run("genesis block", func(t *testing.T) {
-		// Genesis block (block 0) should work without historical state
 		blockNum := rpc.BlockNumber(0)
 		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
 
@@ -669,7 +668,7 @@ func TestExecutionWitness(t *testing.T) {
 	})
 
 	t.Run("by block number", func(t *testing.T) {
-		// Test with block number 1 (first non-genesis block)
+		// Test with block number 1
 		blockNum := rpc.BlockNumber(1)
 		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
 
@@ -700,8 +699,7 @@ func TestExecutionWitness(t *testing.T) {
 	})
 
 	t.Run("multiple blocks", func(t *testing.T) {
-		// Test all blocks except the latest
-		for blockNum := uint64(1); blockNum < latestBlockNum; blockNum++ {
+		for blockNum := uint64(1); blockNum <= latestBlockNum; blockNum++ {
 			bn := rpc.BlockNumber(blockNum)
 			result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
 
