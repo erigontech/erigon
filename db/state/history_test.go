@@ -734,26 +734,30 @@ func TestHistoryPruneCorrectnessWithFiles(t *testing.T) {
 	// 	fmt.Printf("k=%x [%d] v=%x\n", k, binary.BigEndian.Uint64(v), v)
 	// }
 
-	// fmt.Printf("start index keys table:\n")
-	itable, err = rwTx.CursorDupSort(hc.iit.ii.EventsTable)
-	require.NoError(t, err)
-	defer itable.Close()
+	// For largeValues=true, EventsTable is not populated (only InvIdxTable is used)
+	// So skip this check when largeValues is true
+	if !h.HistoryLargeValues {
+		// fmt.Printf("start index keys table:\n")
+		itable, err = rwTx.CursorDupSort(hc.iit.ii.EventsTable)
+		require.NoError(t, err)
+		defer itable.Close()
 
-	k, _, err = itable.First()
-	require.NoError(t, err)
-	require.EqualValues(t, nonPruned, binary.BigEndian.Uint64(k))
+		k, _, err = itable.First()
+		require.NoError(t, err)
+		require.EqualValues(t, nonPruned, binary.BigEndian.Uint64(k))
 
-	// limits = 10
-	// for k, v, err := itable.First(); k != nil; k, v, err = itable.Next() {
-	// 	if err != nil {
-	// 		t.Fatalf("err: %v", err)
-	// 	}
-	// 	if limits == 0 {
-	// 		break
-	// 	}
-	// 	limits--
-	// 	fmt.Printf("k=%x [%d] v=%x\n", k, binary.BigEndian.Uint64(k), v)
-	// }
+		// limits = 10
+		// for k, v, err := itable.First(); k != nil; k, v, err = itable.Next() {
+		// 	if err != nil {
+		// 		t.Fatalf("err: %v", err)
+		// 	}
+		// 	if limits == 0 {
+		// 		break
+		// 	}
+		// 	limits--
+		// 	fmt.Printf("k=%x [%d] v=%x\n", k, binary.BigEndian.Uint64(k), v)
+		// }
+	}
 }
 
 func TestHistoryScanPruneCorrectnessWithFiles(t *testing.T) {

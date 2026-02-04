@@ -168,6 +168,15 @@ func (d *Domain) kvBtAccessorFilePathMask(fromStep, toStep kv.Step) string {
 
 // maxStepInDB - return the latest available step in db (at-least 1 value in such step)
 func (d *Domain) maxStepInDB(tx kv.Tx) (lstInDb kv.Step) {
+	if d.History.HistoryLargeValues {
+		// For largeValues, EventsTable is not used; use History's maxTxNumInDB instead
+		maxTxNum := d.History.maxTxNumInDB(tx)
+		if maxTxNum == 0 {
+			return 0
+		}
+		return kv.Step(maxTxNum / d.stepSize)
+	}
+	// For small values, read directly from EventsTable (original behavior)
 	lstIdx, _ := kv.LastKey(tx, d.History.EventsTable)
 	if len(lstIdx) == 0 {
 		return 0

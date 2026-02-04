@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/bitmapdb"
-	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -393,7 +392,8 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 		}
 
 		if !w.ii.discard {
-			if err := w.ii.indexKeys.Collect(w.ii.txNumBytes[:], k); err != nil {
+			// InvIdxTable: key -> txNum (for seeking by key first, and pruning iteration)
+			if err := w.ii.index.Collect(k, w.ii.txNumBytes[:]); err != nil {
 				return err
 			}
 		}
@@ -554,33 +554,98 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 	}
 	invIndexWriter := h.InvertedIndex.dataWriter(_efComp, true) // `Collate+Build` must be fast -> no Compression. Slowness here means growth of `chaindata`
 
-	keysCursor, err := roTx.CursorDupSort(h.EventsTable)
-	if err != nil {
-		return HistoryCollation{}, fmt.Errorf("create %s history cursor: %w", h.FilenameBase, err)
-	}
-	defer keysCursor.Close()
-
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	collector := etl.NewCollectorWithAllocator(h.FilenameBase+".collate.hist", h.dirs.Tmp, etl.SmallSortableBuffers, h.logger).LogLvl(log.LvlTrace)
 	defer collector.Close()
 	collector.SortAndFlushInBackground(false)
 
-	for txnmb, k, err := keysCursor.Seek(txKey[:]); txnmb != nil; txnmb, k, err = keysCursor.Next() {
+	if h.HistoryLargeValues {
+		// For largeValues, iterate InvIdxTable (key -> txNum) instead of EventsTable
+		invIdxCursor, err := roTx.CursorDupSort(h.InvertedIndex.InvIdxTable)
 		if err != nil {
-			return HistoryCollation{}, fmt.Errorf("iterate over %s history cursor: %w", h.FilenameBase, err)
+			return HistoryCollation{}, fmt.Errorf("create %s invIdx cursor: %w", h.FilenameBase, err)
 		}
-		txNum := binary.BigEndian.Uint64(txnmb)
-		if txNum >= txTo { // [txFrom; txTo)
-			break
-		}
-		if err := collector.Collect(k, txnmb); err != nil {
-			return HistoryCollation{}, fmt.Errorf("collect %s history key [%x]=>txn %d [%x]: %w", h.FilenameBase, k, txNum, txnmb, err)
-		}
+		defer invIdxCursor.Close()
 
-		select {
-		case <-ctx.Done():
-			return HistoryCollation{}, ctx.Err()
-		default:
+		binary.BigEndian.PutUint64(txKey[:], txFrom)
+
+		var lastKey []byte
+		for {
+			var k []byte
+			var err error
+
+			if lastKey == nil {
+				k, _, err = invIdxCursor.First()
+			} else {
+				// Seek to key > lastKey
+				k, _, err = invIdxCursor.Seek(lastKey)
+				if err != nil {
+					return HistoryCollation{}, fmt.Errorf("seek %s invIdx cursor: %w", h.FilenameBase, err)
+				}
+				if k != nil && bytes.Equal(k, lastKey) {
+					k, _, err = invIdxCursor.NextNoDup()
+				}
+			}
+			if err != nil {
+				return HistoryCollation{}, fmt.Errorf("iterate over %s invIdx cursor: %w", h.FilenameBase, err)
+			}
+			if k == nil {
+				break
+			}
+
+			lastKey = append(lastKey[:0], k...)
+
+			// Find txNums in range [txFrom, txTo) for this key
+			txnmb, err := invIdxCursor.SeekBothRange(k, txKey[:])
+			if err != nil {
+				return HistoryCollation{}, fmt.Errorf("seek %s invIdx cursor: %w", h.FilenameBase, err)
+			}
+
+			for txnmb != nil {
+				txNum := binary.BigEndian.Uint64(txnmb)
+				if txNum >= txTo {
+					break
+				}
+				if err := collector.Collect(k, txnmb); err != nil {
+					return HistoryCollation{}, fmt.Errorf("collect %s history key [%x]=>txn %d [%x]: %w", h.FilenameBase, k, txNum, txnmb, err)
+				}
+				_, txnmb, err = invIdxCursor.NextDup()
+				if err != nil {
+					return HistoryCollation{}, fmt.Errorf("nextDup %s invIdx cursor: %w", h.FilenameBase, err)
+				}
+			}
+
+			select {
+			case <-ctx.Done():
+				return HistoryCollation{}, ctx.Err()
+			default:
+			}
+		}
+	} else {
+		keysCursor, err := roTx.CursorDupSort(h.EventsTable)
+		if err != nil {
+			return HistoryCollation{}, fmt.Errorf("create %s history cursor: %w", h.FilenameBase, err)
+		}
+		defer keysCursor.Close()
+
+		binary.BigEndian.PutUint64(txKey[:], txFrom)
+
+		for txnmb, k, err := keysCursor.Seek(txKey[:]); txnmb != nil; txnmb, k, err = keysCursor.Next() {
+			if err != nil {
+				return HistoryCollation{}, fmt.Errorf("iterate over %s history cursor: %w", h.FilenameBase, err)
+			}
+			txNum := binary.BigEndian.Uint64(txnmb)
+			if txNum >= txTo { // [txFrom; txTo)
+				break
+			}
+			if err := collector.Collect(k, txnmb); err != nil {
+				return HistoryCollation{}, fmt.Errorf("collect %s history key [%x]=>txn %d [%x]: %w", h.FilenameBase, k, txNum, txnmb, err)
+			}
+
+			select {
+			case <-ctx.Done():
+				return HistoryCollation{}, ctx.Err()
+			default:
+			}
 		}
 	}
 
@@ -935,6 +1000,50 @@ func (h *History) BeginFilesRo() *HistoryRoTx {
 	}
 }
 
+// minTxNumInDB returns the minimum transaction number in the database.
+// For largeValues=true, reads from ValuesTable (key format: txNum + key).
+// For largeValues=false, delegates to InvertedIndex (reads from EventsTable).
+func (h *History) minTxNumInDB(tx kv.Tx) uint64 {
+	if h.HistoryLargeValues {
+		// ValuesTable key format: txNum (8 bytes) + key
+		fst, _ := kv.FirstKey(tx, h.ValuesTable)
+		if len(fst) >= 8 {
+			return binary.BigEndian.Uint64(fst[:8])
+		}
+		return 0
+	}
+	// For small values, delegate to InvertedIndex (reads EventsTable)
+	return h.InvertedIndex.minTxNumInDB(tx)
+}
+
+// maxTxNumInDB returns the maximum transaction number in the database.
+// For largeValues=true, reads from ValuesTable (key format: txNum + key).
+// For largeValues=false, delegates to InvertedIndex (reads from EventsTable).
+func (h *History) maxTxNumInDB(tx kv.Tx) uint64 {
+	if h.HistoryLargeValues {
+		// ValuesTable key format: txNum (8 bytes) + key
+		lst, _ := kv.LastKey(tx, h.ValuesTable)
+		if len(lst) >= 8 {
+			return binary.BigEndian.Uint64(lst[:8])
+		}
+		return 0
+	}
+	// For small values, delegate to InvertedIndex (reads EventsTable)
+	return h.InvertedIndex.maxTxNumInDB(tx)
+}
+
+// canPruneIdx checks if index data can be pruned.
+// For largeValues, checks the ValuesTable since EventsTable is not used.
+// For small values, delegates to InvertedIndex's CanPrune.
+func (ht *HistoryRoTx) canPruneIdx(tx kv.Tx, untilTx uint64) bool {
+	if ht.h.HistoryLargeValues {
+		// For largeValues, EventsTable is not used, so we check ValuesTable
+		min := ht.h.minTxNumInDB(tx)
+		return min < ht.files.EndTxNum()
+	}
+	return ht.iit.CanPrune(tx, untilTx)
+}
+
 func (ht *HistoryRoTx) statelessGetter(i int) *seg.Reader {
 	if ht.getters == nil {
 		ht.getters = make([]*seg.Reader, len(ht.files))
@@ -965,7 +1074,14 @@ func (ht *HistoryRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 }
 
 func (ht *HistoryRoTx) canHashPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
-	minIdxTx, maxIdxTx := ht.iit.ii.minTxNumInDB(tx), ht.iit.ii.maxTxNumInDB(tx)
+	// For largeValues, use History's min/maxTxNumInDB which reads from ValuesTable
+	// For small values, use InvertedIndex's methods which read from EventsTable
+	var minIdxTx, maxIdxTx uint64
+	if ht.h.HistoryLargeValues {
+		minIdxTx, maxIdxTx = ht.h.minTxNumInDB(tx), ht.h.maxTxNumInDB(tx)
+	} else {
+		minIdxTx, maxIdxTx = ht.iit.ii.minTxNumInDB(tx), ht.iit.ii.maxTxNumInDB(tx)
+	}
 	//defer func() {
 	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t txTo %d idxTx [%d-%d] keepRecentTxInDB=%d; result %t\n",
 	//		ht.h.filenameBase, untilTx, ht.h.dontProduceHistoryFiles, txTo, minIdxTx, maxIdxTx, ht.h.keepRecentTxInDB, minIdxTx < txTo)
@@ -977,7 +1093,14 @@ func (ht *HistoryRoTx) canHashPruneUntil(tx kv.Tx, untilTx uint64) (can bool, tx
 		}
 		txTo = min(maxIdxTx-ht.h.KeepRecentTxnInDB, untilTx) // bound pruning
 	} else {
-		canPruneIdx := ht.iit.CanPrune(tx, untilTx)
+		var canPruneIdx bool
+		if ht.h.HistoryLargeValues {
+			// For largeValues, EventsTable is not used, so we check ValuesTable
+			min := ht.h.minTxNumInDB(tx)
+			canPruneIdx = min < ht.files.EndTxNum()
+		} else {
+			canPruneIdx = ht.iit.CanPrune(tx, untilTx)
+		}
 		if !canPruneIdx {
 			return false, 0
 		}
@@ -1004,7 +1127,14 @@ func (ht *HistoryRoTx) canHashPruneUntil(tx kv.Tx, untilTx uint64) (can bool, tx
 }
 
 func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
-	minIdxTx, maxIdxTx := ht.iit.ii.minTxNumInDB(tx), ht.iit.ii.maxTxNumInDB(tx)
+	// For largeValues, use History's min/maxTxNumInDB which reads from ValuesTable
+	// For small values, use InvertedIndex's methods which read from EventsTable
+	var minIdxTx, maxIdxTx uint64
+	if ht.h.HistoryLargeValues {
+		minIdxTx, maxIdxTx = ht.h.minTxNumInDB(tx), ht.h.maxTxNumInDB(tx)
+	} else {
+		minIdxTx, maxIdxTx = ht.iit.ii.minTxNumInDB(tx), ht.iit.ii.maxTxNumInDB(tx)
+	}
 	//defer func() {
 	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t txTo %d idxTx [%d-%d] keepRecentTxInDB=%d; result %t\n",
 	//		ht.h.filenameBase, untilTx, ht.h.dontProduceHistoryFiles, txTo, minIdxTx, maxIdxTx, ht.h.keepRecentTxInDB, minIdxTx < txTo)
@@ -1023,7 +1153,14 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 		}
 		txTo = min(maxIdxTx-ht.h.KeepRecentTxnInDB, untilTx) // bound pruning
 	} else {
-		canPruneIdx := ht.iit.CanPrune(tx, untilTx)
+		var canPruneIdx bool
+		if ht.h.HistoryLargeValues {
+			// For largeValues, EventsTable is not used, so we check ValuesTable
+			min := ht.h.minTxNumInDB(tx)
+			canPruneIdx = min < ht.files.EndTxNum()
+		} else {
+			canPruneIdx = ht.iit.CanPrune(tx, untilTx)
+		}
 		if !canPruneIdx {
 			return false, 0
 		}
@@ -1072,46 +1209,135 @@ func (ht *HistoryRoTx) prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, li
 	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", ht.h.filenameBase, ht.CanPruneUntil(rwTx), txFrom, txTo)
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
 
-	var (
-		//	seek     = make([]byte, 8, 256)
-		valsCDup kv.RwCursorDupSort
-		valsC    kv.RwCursor
-		valsCP   kv.PseudoDupSortRwCursor
-		err      error
-		mode     prune.StorageMode
-	)
-
-	if !ht.h.HistoryLargeValues {
-		valsCDup, err = rwTx.RwCursorDupSort(ht.h.ValuesTable)
-		if err != nil {
-			return nil, err
-		}
-		defer valsCDup.Close()
-		valsCP = valsCDup
-		mode = prune.PrefixValStorageMode
-	} else {
-		valsC, err = rwTx.RwCursor(ht.h.ValuesTable)
-		if err != nil {
-			return nil, err
-		}
-		defer valsC.Close()
-		mode = prune.TxnKeyStorageMode // txNum + key format (inverted)
-
-		switch c := valsC.(type) {
-		case *mdbx2.MdbxCursor:
-			valsCP = &mdbx2.MdbxCursorPseudoDupSort{MdbxCursor: c}
-		case *mdbx2.MdbxDupSortCursor:
-			valsCP = valsC.(*mdbx2.MdbxDupSortCursor)
-		default:
-			return nil, fmt.Errorf("unexpected cursor type %T for table %s", valsC, ht.h.ValuesTable)
-		}
-	}
-
 	if !forced && ht.h.SnapshotsDisabled {
 		forced = true // or index.CanPrune will return false cuz no snapshots made
 	}
 
-	return ht.iit.TableScanningPrune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, valsCP, &ht.h.ValuesTable, mxPruneSizeHistory, mode)
+	if !ht.h.HistoryLargeValues {
+		valsCDup, err := rwTx.RwCursorDupSort(ht.h.ValuesTable)
+		if err != nil {
+			return nil, err
+		}
+		defer valsCDup.Close()
+		return ht.iit.TableScanningPrune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, valsCDup, &ht.h.ValuesTable, mxPruneSizeHistory, prune.PrefixValStorageMode)
+	}
+
+	// For largeValues: iterate InvIdxTable (key -> txNum) and prune
+	return ht.pruneLargeValues(ctx, rwTx, txFrom, txTo, limit, logEvery)
+}
+
+// pruneLargeValues prunes History with largeValues=true by iterating InvIdxTable
+func (ht *HistoryRoTx) pruneLargeValues(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
+	stat := &InvertedIndexPruneStat{MinTxNum: ^uint64(0)}
+
+	// Collect all entries to delete first to avoid cursor state issues
+	type entry struct {
+		key   []byte
+		txNum uint64
+	}
+	var toDelete []entry
+
+	// Read phase: collect entries to delete
+	invIdxC, err := rwTx.CursorDupSort(ht.iit.ii.InvIdxTable)
+	if err != nil {
+		return nil, err
+	}
+
+	var txFromBytes, txToBytes [8]byte
+	binary.BigEndian.PutUint64(txFromBytes[:], txFrom)
+	binary.BigEndian.PutUint64(txToBytes[:], txTo)
+
+	for key, txNumBytes, err := invIdxC.First(); key != nil; key, txNumBytes, err = invIdxC.NextNoDup() {
+		if err != nil {
+			invIdxC.Close()
+			return nil, err
+		}
+
+		// For this key, find txNums in range [txFrom, txTo)
+		txNumBytes, err = invIdxC.SeekBothRange(key, txFromBytes[:])
+		if err != nil {
+			invIdxC.Close()
+			return nil, err
+		}
+
+		for txNumBytes != nil {
+			txNum := binary.BigEndian.Uint64(txNumBytes)
+			if txNum >= txTo {
+				break
+			}
+
+			toDelete = append(toDelete, entry{key: append([]byte{}, key...), txNum: txNum})
+
+			if limit > 0 && uint64(len(toDelete)) >= limit {
+				break
+			}
+
+			_, txNumBytes, err = invIdxC.NextDup()
+			if err != nil {
+				invIdxC.Close()
+				return nil, err
+			}
+		}
+
+		if limit > 0 && uint64(len(toDelete)) >= limit {
+			break
+		}
+
+		select {
+		case <-ctx.Done():
+			invIdxC.Close()
+			return stat, ctx.Err()
+		default:
+		}
+	}
+	invIdxC.Close()
+
+	// Delete phase: delete collected entries
+	invIdxCW, err := rwTx.RwCursorDupSort(ht.iit.ii.InvIdxTable)
+	if err != nil {
+		return nil, err
+	}
+	defer invIdxCW.Close()
+
+	valsC, err := rwTx.RwCursor(ht.h.ValuesTable)
+	if err != nil {
+		return nil, err
+	}
+	defer valsC.Close()
+
+	for _, e := range toDelete {
+		// Delete from ValuesTable: txNum + key -> value
+		seek := make([]byte, 8+len(e.key))
+		binary.BigEndian.PutUint64(seek, e.txNum)
+		copy(seek[8:], e.key)
+		if err := valsC.Delete(seek); err != nil {
+			return nil, err
+		}
+
+		// Delete from InvIdxTable: key -> txNum
+		var txNumBytes [8]byte
+		binary.BigEndian.PutUint64(txNumBytes[:], e.txNum)
+		if err := invIdxCW.DeleteExact(e.key, txNumBytes[:]); err != nil {
+			return nil, err
+		}
+
+		stat.MinTxNum = min(stat.MinTxNum, e.txNum)
+		stat.MaxTxNum = max(stat.MaxTxNum, e.txNum)
+		stat.PruneCountTx++
+		stat.PruneCountValues++
+
+		select {
+		case <-ctx.Done():
+			return stat, ctx.Err()
+		case <-logEvery.C:
+			ht.h.logger.Info("[snapshots] prune history", "name", ht.h.FilenameBase, "pruned", stat.PruneCountValues)
+		default:
+		}
+	}
+
+	// Mark progress as done so PrunedNothing() returns true when there's nothing left
+	stat.Progress = prune.Done
+	return stat, nil
 }
 
 // Prune [txFrom; txTo)
@@ -1137,46 +1363,21 @@ func (ht *HistoryRoTx) oldPrune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", ht.h.filenameBase, ht.CanPruneUntil(rwTx), txFrom, txTo)
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
 
-	var (
-		//	seek     = make([]byte, 8, 256)
-		valsCDup kv.RwCursorDupSort
-		valsC    kv.RwCursor
-		valsCP   kv.PseudoDupSortRwCursor
-		err      error
-		mode     prune.StorageMode
-	)
-
-	if !ht.h.HistoryLargeValues {
-		valsCDup, err = rwTx.RwCursorDupSort(ht.h.ValuesTable)
-		if err != nil {
-			return nil, err
-		}
-		defer valsCDup.Close()
-		valsCP = valsCDup
-		mode = prune.PrefixValStorageMode
-	} else {
-		valsC, err = rwTx.RwCursor(ht.h.ValuesTable)
-		if err != nil {
-			return nil, err
-		}
-		defer valsC.Close()
-		mode = prune.TxnKeyStorageMode // txNum + key format (inverted)
-
-		switch c := valsC.(type) {
-		case *mdbx2.MdbxCursor:
-			valsCP = &mdbx2.MdbxCursorPseudoDupSort{MdbxCursor: c}
-		case *mdbx2.MdbxDupSortCursor:
-			valsCP = valsC.(*mdbx2.MdbxDupSortCursor)
-		default:
-			return nil, fmt.Errorf("unexpected cursor type %T for table %s", valsC, ht.h.ValuesTable)
-		}
-	}
-
 	if !forced && ht.h.SnapshotsDisabled {
 		forced = true // or index.CanPrune will return false cuz no snapshots made
 	}
 
-	return ht.iit.HashSeekingPrune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, valsCP, mxPruneSizeHistory, mode)
+	if !ht.h.HistoryLargeValues {
+		valsCDup, err := rwTx.RwCursorDupSort(ht.h.ValuesTable)
+		if err != nil {
+			return nil, err
+		}
+		defer valsCDup.Close()
+		return ht.iit.HashSeekingPrune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, valsCDup, mxPruneSizeHistory, prune.PrefixValStorageMode)
+	}
+
+	// For largeValues: iterate InvIdxTable (key -> txNum) and prune
+	return ht.pruneLargeValues(ctx, rwTx, txFrom, txTo, limit, logEvery)
 }
 
 func (ht *HistoryRoTx) Close() {
@@ -1323,20 +1524,34 @@ func (ht *HistoryRoTx) valsCursorDup(tx kv.Tx) (c kv.CursorDupSort, err error) {
 
 func (ht *HistoryRoTx) historySeekInDB(key []byte, txNum uint64, tx kv.Tx) ([]byte, bool, error) {
 	if ht.h.HistoryLargeValues {
-		c, err := ht.valsCursor(tx)
+		// Step 1: Seek InvIdxTable to find first txNum >= requested for this key
+		idxC, err := tx.CursorDupSort(ht.iit.ii.InvIdxTable)
 		if err != nil {
 			return nil, false, err
 		}
-		// DB key format: txNum + key (inverted)
+		defer idxC.Close()
+
+		var txNumBytes [8]byte
+		binary.BigEndian.PutUint64(txNumBytes[:], txNum)
+		foundTxNumBytes, err := idxC.SeekBothRange(key, txNumBytes[:])
+		if err != nil {
+			return nil, false, err
+		}
+		if foundTxNumBytes == nil {
+			return nil, false, nil
+		}
+		foundTxNum := binary.BigEndian.Uint64(foundTxNumBytes)
+
+		// Step 2: Get value from ValuesTable using foundTxNum + key
 		seek := make([]byte, 8+len(key))
-		binary.BigEndian.PutUint64(seek, txNum)
+		binary.BigEndian.PutUint64(seek, foundTxNum)
 		copy(seek[8:], key)
 
-		txNumAndKey, val, err := c.Seek(seek)
+		val, err := tx.GetOne(ht.h.ValuesTable, seek)
 		if err != nil {
 			return nil, false, err
 		}
-		if txNumAndKey == nil || !bytes.Equal(txNumAndKey[8:], key) {
+		if val == nil {
 			return nil, false, nil
 		}
 		// val == []byte{}, means key was created in this txNum and doesn't exist before.
@@ -1378,6 +1593,7 @@ func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, t
 		largeValues: ht.h.HistoryLargeValues,
 		roTx:        roTx,
 		valsTable:   ht.h.ValuesTable,
+		invIdxTable: ht.iit.ii.InvIdxTable,
 		from:        from, toPrefix: to, limit: kv.Unlim, orderAscend: asc,
 
 		startTxNum: startTxNum,
@@ -1453,6 +1669,7 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 		roTx:        roTx,
 		largeValues: ht.h.HistoryLargeValues,
 		valsTable:   ht.h.ValuesTable,
+		invIdxTable: ht.iit.ii.InvIdxTable,
 		limit:       limit,
 	}
 	if fromTxNum >= 0 {
@@ -1584,8 +1801,7 @@ func (ht *HistoryRoTx) CompactRange(ctx context.Context, fromTxNum, toTxNum uint
 
 func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
 	if ht.h.HistoryLargeValues {
-		// DB key format: txNum + key (inverted)
-		// We scan by txNum prefix and filter by key suffix
+		// Use InvIdxTable (key -> txNums) for efficient lookup by key
 		var from, to []byte
 		if startTxNum >= 0 {
 			from = make([]byte, 8)
@@ -1595,27 +1811,12 @@ func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc or
 			to = make([]byte, 8)
 			binary.BigEndian.PutUint64(to, uint64(endTxNum))
 		}
-		// For descending order with 16-byte keys (txNum+key), Range continues while
-		// key > to (8-byte prefix). A key [txNum, key...] is > [txNum] because it's
-		// longer. To correctly exclude keys with txNum <= endTxNum (the exclusive
-		// lower bound), we use to = [endTxNum+1]. Then:
-		//   [endTxNum, key...] < [endTxNum+1] -> stop (correctly excluded)
-		//   [endTxNum+1, key...] > [endTxNum+1] -> continue (correctly included)
-		if !asc && endTxNum >= 0 {
-			binary.BigEndian.PutUint64(to, uint64(endTxNum+1))
-		}
-		it, err := roTx.Range(ht.h.ValuesTable, from, to, asc, limit)
+		it, err := roTx.RangeDupSort(ht.iit.ii.InvIdxTable, key, from, to, asc, limit)
 		if err != nil {
 			return nil, err
 		}
-		// Filter by key and extract txNum
-		return stream.TransformKV2U64(stream.FilterKV(it, func(k, v []byte) bool {
-			if len(k) < 8 {
-				return false
-			}
-			return bytes.Equal(k[8:], key)
-		}), func(k, v []byte) (uint64, error) {
-			return binary.BigEndian.Uint64(k[:8]), nil
+		return stream.TransformKV2U64(it, func(_, v []byte) (uint64, error) {
+			return binary.BigEndian.Uint64(v), nil
 		}), nil
 	}
 
@@ -1669,6 +1870,7 @@ func (ht *HistoryRoTx) DebugHistoryTraceKey(ctx context.Context, key []byte, fro
 		largeValues: ht.h.HistoryLargeValues,
 		roTx:        roTx,
 		valsTable:   ht.h.ValuesTable,
+		invIdxTable: ht.iit.ii.InvIdxTable,
 		fromTxNum:   fromTxNum,
 		toTxNum:     toTxNum,
 		key:         key,
