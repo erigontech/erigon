@@ -380,7 +380,7 @@ jobs:
       - name: Generate Summary
         if: always() && steps.test_step.outputs.test_executed == 'true'
         run: |
-          SUMMARY_FILE="${{ env.past_test_dir }}/summary.md"
+          SUMMARY_FILE="${{ env.result_dir }}/summary.md"
           LOG_FILE="${{ env.result_dir }}/output.log"
 
           cat << 'EOF' > $SUMMARY_FILE
