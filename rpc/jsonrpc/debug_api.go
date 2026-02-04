@@ -45,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/tracing"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -1255,7 +1254,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	// Print expected post-state in human-readable format
 	// printExpectedPostState(blockNum, block.Root(), expectedState, expectedStorage)
 
-	if err = verifyExecutionWitnessResult(result, block, chainCfg, api.engine(), expectedParentRoot, readAddresses, writeAddresses, readStorageKeys, writeStorageKeys, expectedState, expectedStorage); err != nil {
+	if err = verifyExecutionWitnessResult(result, block, chainCfg, fullEngine, expectedParentRoot, readAddresses, writeAddresses, readStorageKeys, writeStorageKeys, expectedState, expectedStorage); err != nil {
 		return nil, fmt.Errorf("witness verification failed: %w", err)
 	}
 	fmt.Printf("Witness for block %d successfully verified 🚀\n", blockNum)
@@ -2002,7 +2001,7 @@ var _ rules.ChainReader = (*statelessChainReader)(nil)
 // verifyExecutionWitnessResult verifies the execution witness by re-executing the block statelessly.
 // It decodes the witness trie, executes all transactions, and verifies the resulting state root
 // matches the block's state root.
-func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config, engine rules.EngineReader, expectedParentRoot common.Hash, readAddresses, writeAddresses []common.Address, readStorageKeys, writeStorageKeys map[common.Address][]common.Hash, expectedState map[common.Address]*accounts.Account, expectedStorage map[common.Address]map[common.Hash]uint256.Int) error {
+func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config, engine rules.Engine, expectedParentRoot common.Hash, readAddresses, writeAddresses []common.Address, readStorageKeys, writeStorageKeys map[common.Address][]common.Hash, expectedState map[common.Address]*accounts.Account, expectedStorage map[common.Address]map[common.Hash]uint256.Int) error {
 	// Skip verification for genesis block - it has no transactions to execute
 	// but has pre-allocated accounts which would cause a state root mismatch
 	if block.NumberU64() == 0 {
@@ -2091,38 +2090,15 @@ func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.B
 		}
 	}
 
-	// Use engine.CalculateRewards to get the proper rewards for this block
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		ret, err := protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vm.Config{})
-		return ret, err
+		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vm.Config{})
 	}
-
-	// check func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error) {
-	rewards, err := engine.CalculateRewards(chainConfig, header, block.Uncles(), syscall)
+	// only Bor and AuRa engine use ChainReader. And the ChainReader is only used to read headers. This means their
+	// witness may need to be augmented with headers accessed during their engine.Finalize(). This is something that
+	// can be implemented later. For now use ChainReader = nil, as this is sufficient for Ethereum.
+	_, err = engine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles() /*receipts */, nil, block.Withdrawals() /*chainReader */, nil, syscall /*skipReceiptsEval*/, true, log.Root())
 	if err != nil {
-		return fmt.Errorf("verification: CalculateRewards failed: %w", err)
-	}
-
-	// Apply rewards to the IBS - map RewardKind to BalanceChangeReason
-	for _, r := range rewards {
-		var reason tracing.BalanceChangeReason
-		switch r.Kind {
-		case rules.RewardAuthor:
-			reason = tracing.BalanceIncreaseRewardMineBlock
-		case rules.RewardUncle:
-			reason = tracing.BalanceIncreaseRewardMineUncle
-		default:
-			reason = tracing.BalanceChangeUnspecified
-		}
-		ibs.AddBalance(r.Beneficiary, r.Amount, reason)
-		fmt.Printf("  Reward: %s receives %s wei (kind=%d)\n", r.Beneficiary.Value().Hex(), r.Amount.String(), r.Kind)
-	}
-
-	fmt.Printf("\n--- Block rewards applied via engine.CalculateRewards ---\n")
-
-	// Commit block - final state changes (includes rewards applied by engine.Finalize)
-	if err = ibs.CommitBlock(blockRules, stateless); err != nil {
-		return fmt.Errorf("verification: failed to commit block: %w", err)
+		return fmt.Errorf("[verifyExecutionWitnessResult] engine.Finalize failed : %w", err)
 	}
 
 	// Debug: print all pending updates before Finalize
