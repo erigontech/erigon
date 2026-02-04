@@ -1128,6 +1128,8 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
+	printPreStateCheck(witnessTrie, readAddresses, writeAddresses, readStorageKeys, writeStorageKeys)
+
 	// Verify root matches parent state root
 	if !bytes.Equal(witnessRoot, expectedParentRoot[:]) {
 		return nil, fmt.Errorf("Witness root mismatch: calculated=%x , expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
@@ -1252,9 +1254,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	// Print expected post-state in human-readable format
-	// printExpectedPostState(blockNum, block.Root(), expectedState, expectedStorage)
-
-	if err = verifyExecutionWitnessResult(result, block, chainCfg, fullEngine, expectedParentRoot, readAddresses, writeAddresses, readStorageKeys, writeStorageKeys, expectedState, expectedStorage); err != nil {
+	if err = verifyExecutionWitnessResult(result, block, chainCfg, fullEngine, expectedState, expectedStorage); err != nil {
 		return nil, fmt.Errorf("witness verification failed: %w", err)
 	}
 	fmt.Printf("Witness for block %d successfully verified 🚀\n", blockNum)
@@ -1326,7 +1326,7 @@ func printExpectedPostState(blockNum uint64, expectedStateRoot common.Hash, expe
 
 // printPreStateCheck prints the pre-state status of all touched accounts and storage.
 // Missing items aren't necessarily errors - they could be created during block execution.
-func printPreStateCheck(stateless *witnessStateless, readAddresses, writeAddresses []common.Address, readStorageKeys, writeStorageKeys map[common.Address][]common.Hash) {
+func printPreStateCheck(witnessTrie *trie.Trie, readAddresses, writeAddresses []common.Address, readStorageKeys, writeStorageKeys map[common.Address][]common.Hash) {
 	// Merge all addresses into a deduplicated map with their access type
 	type accessInfo struct {
 		read  bool
@@ -1349,7 +1349,7 @@ func printPreStateCheck(stateless *witnessStateless, readAddresses, writeAddress
 	fmt.Printf("\n--- Pre-state check: %d touched accounts ---\n", len(allAddrs))
 	for addr, info := range allAddrs {
 		addrHash, _ := common.HashData(addr[:])
-		acc, found := stateless.t.GetAccount(addrHash[:])
+		acc, found := witnessTrie.GetAccount(addrHash[:])
 
 		accessType := ""
 		if info.read && info.write {
@@ -1422,7 +1422,7 @@ func printPreStateCheck(stateless *witnessStateless, readAddresses, writeAddress
 					accessType = "W"
 				}
 
-				if val, found := stateless.t.Get(cKey); found {
+				if val, found := witnessTrie.Get(cKey); found {
 					var valInt uint256.Int
 					valInt.SetBytes(val)
 					fmt.Printf("    [%s] Key %x (hash %x): value=%s\n",
@@ -2001,7 +2001,7 @@ var _ rules.ChainReader = (*statelessChainReader)(nil)
 // verifyExecutionWitnessResult verifies the execution witness by re-executing the block statelessly.
 // It decodes the witness trie, executes all transactions, and verifies the resulting state root
 // matches the block's state root.
-func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config, engine rules.Engine, expectedParentRoot common.Hash, readAddresses, writeAddresses []common.Address, readStorageKeys, writeStorageKeys map[common.Address][]common.Hash, expectedState map[common.Address]*accounts.Account, expectedStorage map[common.Address]map[common.Hash]uint256.Int) error {
+func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config, engine rules.Engine, expectedState map[common.Address]*accounts.Account, expectedStorage map[common.Address]map[common.Hash]uint256.Int) error {
 	// Skip verification for genesis block - it has no transactions to execute
 	// but has pre-allocated accounts which would cause a state root mismatch
 	if block.NumberU64() == 0 {
@@ -2043,20 +2043,8 @@ func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.B
 
 	// Debug: print block info and verify pre-state
 	fmt.Printf("\n=== Block %d verification ===\n", blockNum)
-	fmt.Printf("Expected parent state root: %x\n", expectedParentRoot)
 	fmt.Printf("Witness trie root: %x\n", stateless.t.Hash())
 	fmt.Printf("Block state root (expected after execution): %x\n", block.Root())
-
-	// Verify witness trie root matches expected parent state root
-	witnessRoot := stateless.t.Hash()
-	if witnessRoot != expectedParentRoot {
-		return fmt.Errorf("witness trie root %x does not match expected parent state root %x", witnessRoot, expectedParentRoot)
-	}
-	fmt.Printf("✓ Witness trie root matches expected parent state root\n")
-
-	// Pre-state check: verify all touched accounts and storage exist in witness trie
-	// Note: missing items aren't necessarily errors - they could be created during block execution
-	printPreStateCheck(stateless, readAddresses, writeAddresses, readStorageKeys, writeStorageKeys)
 
 	// Create EVM block context - pass header.Coinbase as the author/beneficiary
 	// This ensures gas fees go to the correct address based on the block header
@@ -2105,9 +2093,6 @@ func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.B
 	if err != nil {
 		return fmt.Errorf("[verifyExecutionWitnessReulst] ibs.CommitBlock() failed : %w", err)
 	}
-
-	// Debug: print all pending updates before Finalize
-	stateless.debugPrintPendingUpdates(block.NumberU64())
 
 	// Finalize and compute the resulting state root
 	newStateRoot := stateless.Finalize()
