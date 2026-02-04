@@ -78,6 +78,10 @@ func ProcessEpoch(s abstract.BeaconState) error {
 		ProcessPendingConsolidations(s)
 	}
 
+	if s.Version() >= clparams.GloasVersion {
+		ProcessBuilderPendingPayments(s)
+	}
+
 	if err := ProcessEffectiveBalanceUpdates(s); err != nil {
 		return err
 	}
