@@ -114,6 +114,26 @@ type ReceiptJson struct {
 	GasUsed         *hexutil.Big   `json:"gasUsed,omitempty"`
 }
 
+// BlockMetadataJson holds the response from arb_getRawBlockMetadata
+type BlockMetadataJson struct {
+	BlockNumber uint64        `json:"blockNumber"`
+	RawMetadata hexutil.Bytes `json:"rawMetadata"`
+}
+
+// IsTxTimeboosted returns whether the tx at txIndex was timeboosted based on the raw metadata.
+// The first byte is version, remaining bytes are a bitmask where bit N = 1 means tx N is timeboosted.
+func IsTxTimeboosted(rawMetadata []byte, txIndex int) *bool {
+	if len(rawMetadata) == 0 || txIndex < 0 {
+		return nil
+	}
+	maxTxCount := (len(rawMetadata) - 1) * 8
+	if txIndex >= maxTxCount {
+		return nil
+	}
+	result := rawMetadata[1+(txIndex/8)]&(1<<(txIndex%8)) != 0
+	return &result
+}
+
 // convertHexToBigInt converts a hex string (with a "0x" prefix) to a *big.Int.
 func convertHexToBigInt(hexStr string) *big.Int {
 	bi := new(big.Int)
@@ -662,8 +682,6 @@ var timeboostedTxTypes = map[string]bool{
 	"0x3":  true,
 	"0x4":  true,
 	"0x68": true,
-
-	"0x69": true, // no timbeoosted but for simplicity of checking
 }
 
 // genFromRPc connects to the RPC, fetches blocks starting from the given block,
@@ -883,8 +901,29 @@ func commitUpdate(tx kv.RwTx, blocks []*types.Block) error {
 	return nil
 }
 
+// FetchBlockMetadataBatch fetches raw block metadata for a range of blocks using arb_getRawBlockMetadata
+func FetchBlockMetadataBatch(ctx context.Context, client *rpc.Client, startBlock, endBlock uint64) (map[uint64][]byte, error) {
+	if client == nil {
+		return nil, nil
+	}
+
+	var result []BlockMetadataJson
+	err := client.CallContext(ctx, &result, "arb_getRawBlockMetadata",
+		fmt.Sprintf("0x%x", startBlock),
+		fmt.Sprintf("0x%x", endBlock))
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch block metadata for range %d-%d: %w", startBlock, endBlock, err)
+	}
+
+	metadataMap := make(map[uint64][]byte, len(result))
+	for _, item := range result {
+		metadataMap[item.BlockNumber] = item.RawMetadata
+	}
+	return metadataMap, nil
+}
+
 // GetBlockByNumber retrieves a block via RPC, decodes it, and (if requested) verifies its hash.
-func GetBlockByNumber(ctx context.Context, client, receiptClient *rpc.Client, blockNumber *big.Int, verify, isArbitrum bool) (*types.Block, error) {
+func GetBlockByNumber(ctx context.Context, client, receiptClient *rpc.Client, blockNumber *big.Int, verify, isArbitrum bool, blockMetadata []byte) (*types.Block, error) {
 	var block BlockJson
 	err := client.CallContext(ctx, &block, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), true)
 	if err != nil {
@@ -892,7 +931,7 @@ func GetBlockByNumber(ctx context.Context, client, receiptClient *rpc.Client, bl
 	}
 
 	timeboostActivated := block.Number.Uint64() > 327_000_000 // for arb1
-	txs, err := unMarshalTransactions(ctx, receiptClient, block.Transactions, verify, isArbitrum, timeboostActivated)
+	txs, err := unMarshalTransactions(ctx, receiptClient, block.Transactions, verify, isArbitrum, blockMetadata, timeboostActivated)
 	if err != nil {
 		return nil, err
 	}
@@ -942,7 +981,7 @@ func GetBlockByNumber(ctx context.Context, client, receiptClient *rpc.Client, bl
 	return blk, nil
 }
 
-func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool, timeboostActivated bool) (types.Transactions, error) {
+func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool, blockMetadata []byte, timeboostActivated bool) (types.Transactions, error) {
 	txs := make(types.Transactions, len(rawTxs))
 
 	receiptsEnabled := client != nil
@@ -1000,9 +1039,16 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 				return fmt.Errorf("unknown tx type: %s at index %d", typeTx, idx)
 			}
 
-			needsReceipt := typeTx == "0x69" || (timeboostActivated && timeboostedTxTypes[typeTx])
+			// Set timeboosted from block metadata if available
+			if timeboostActivated && len(blockMetadata) > 0 && timeboostedTxTypes[typeTx] {
+				timeboosted := IsTxTimeboosted(blockMetadata, idx)
+				if timeboosted != nil {
+					tx.SetTimeboosted(timeboosted)
+				}
+			}
 
-			if receiptsEnabled && needsReceipt {
+			// For ArbitrumSubmitRetryableTxType, we still need to fetch receipt to get EffectiveGasUsed
+			if receiptsEnabled && tx.Type() == types.ArbitrumSubmitRetryableTxType {
 				if txData["hash"] == "" {
 					return errors.New("missing tx hash for receipt fetch")
 				}
@@ -1044,16 +1090,15 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 						"receipt", fmt.Sprintf("%+v", receipt))
 					return fmt.Errorf("receipt tx hash mismatch for tx %s", txData["hash"])
 				}
+				// can use receipts if blockMetadata is not available
+				//if receipt.Timeboosted != nil {
+				//	tx.SetTimeboosted(receipt.Timeboosted)
+				//}
 
-				if receipt.Timeboosted != nil {
-					tx.SetTimeboosted(receipt.Timeboosted)
-				}
-				if tx.Type() == types.ArbitrumSubmitRetryableTxType {
-					if egu := receipt.GasUsed; egu != nil && egu.Uint64() > 0 {
-						if srtx, ok := tx.(*types.ArbitrumSubmitRetryableTx); ok {
-							srtx.EffectiveGasUsed = egu.Uint64()
-							tx = srtx
-						}
+				if egu := receipt.GasUsed; egu != nil && egu.Uint64() > 0 {
+					if srtx, ok := tx.(*types.ArbitrumSubmitRetryableTx); ok {
+						srtx.EffectiveGasUsed = egu.Uint64()
+						tx = srtx
 					}
 				}
 			}
@@ -1081,16 +1126,25 @@ func FetchBlocksBatch(client, receiptClient *rpc.Client, startBlock, endBlock, b
 		actualBatchSize = endBlock - startBlock
 	}
 
+	// Fetch block metadata for the batch in one RPC call
+	var metadataMap map[uint64][]byte
+	var err error
+	metadataMap, err = FetchBlockMetadataBatch(context.Background(), client, startBlock, startBlock+actualBatchSize)
+	if err != nil {
+		log.Crit("Failed to fetch block metadata batch", "err", err)
+	}
+
 	blocks := make([]*types.Block, actualBatchSize)
 	var eg errgroup.Group
 
 	for i := uint64(0); i < actualBatchSize; i++ {
 		idx := i
 		blockNum := startBlock + i
+		blockMetadata := metadataMap[blockNum]
 
 		eg.Go(func() error {
 			blockNumber := new(big.Int).SetUint64(blockNum)
-			blk, err := GetBlockByNumber(context.Background(), client, receiptClient, blockNumber, verify, isArbitrum)
+			blk, err := GetBlockByNumber(context.Background(), client, receiptClient, blockNumber, verify, isArbitrum, blockMetadata)
 			if err != nil {
 				return fmt.Errorf("error fetching block %d: %w", blockNum, err)
 			}
