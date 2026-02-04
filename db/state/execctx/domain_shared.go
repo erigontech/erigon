@@ -455,6 +455,9 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		}
 	}
 
+	if domain == kv.AccountsDomain {
+		fmt.Println("up", common.Bytes2Hex(k))
+	}
 	// Update state cache when writing
 	if sd.stateCache != nil {
 		sd.stateCache.Put(domain, k, v)
