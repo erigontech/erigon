@@ -69,7 +69,11 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 	b.inactivityScores.CopyTo(dst.inactivityScores)
 
 	if b.version >= clparams.BellatrixVersion {
-		dst.latestExecutionPayloadHeader = b.latestExecutionPayloadHeader.Copy()
+		if b.version >= clparams.GloasVersion {
+			dst.latestExecutionPayloadBid = b.latestExecutionPayloadBid.Copy()
+		} else {
+			dst.latestExecutionPayloadHeader = b.latestExecutionPayloadHeader.Copy()
+		}
 	}
 	dst.nextWithdrawalIndex = b.nextWithdrawalIndex
 	dst.nextWithdrawalValidatorIndex = b.nextWithdrawalValidatorIndex
@@ -95,6 +99,15 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 		dst.proposerLookahead = b.proposerLookahead
 	}
 
+	if b.version >= clparams.GloasVersion {
+		dst.builders = b.builders.ShallowCopy()
+		dst.nextWithdrawalBuilderIndex = b.nextWithdrawalBuilderIndex
+		b.executionPayloadAvailability.CopyTo(dst.executionPayloadAvailability)
+		b.builderPendingPayments.CopyTo(dst.builderPendingPayments)
+		dst.builderPendingWithdrawals = b.builderPendingWithdrawals.ShallowCopy()
+		dst.latestBlockHash = b.latestBlockHash
+		dst.payloadExpectedWithdrawals = b.payloadExpectedWithdrawals.ShallowCopy()
+	}
 	dst.version = b.version
 	// Now sync internals
 	copy(dst.leaves, b.leaves)
