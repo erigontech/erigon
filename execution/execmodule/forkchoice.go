@@ -238,6 +238,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 
+	e.logger.Debug("[execmodule] updating fork choice", "number", fcuHeader.Number.Uint64(), "hash", fcuHeader.Hash())
 	UpdateForkChoiceArrivalDelay(fcuHeader.Time)
 	metrics.UpdateBlockConsumerPreExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
 	defer metrics.UpdateBlockConsumerPostExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
@@ -350,7 +351,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
 		// Run the unwind
-		if err := e.executionPipeline.RunUnwind(e.db, currentContext, tx); err != nil {
+		if err := e.executionPipeline.RunUnwind(currentContext, tx); err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
@@ -434,7 +435,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			}, false)
 			e.logHeadUpdated(blockHash, fcuHeader, 0, "head validated", false)
 		}
-		if err := e.forkValidator.MergeExtendingFork(ctx, currentContext, tx, e.accumulator, e.recentReceipts); err != nil {
+		if err := e.forkValidator.MergeExtendingFork(currentContext, e.accumulator, e.recentReceipts); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 		rawdb.WriteHeadBlockHash(tx, blockHash)
@@ -450,7 +451,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 
 	for hasMore := true; hasMore; {
-		hasMore, err = e.executionPipeline.Run(e.db, currentContext, tx, initialCycle, firstCycle)
+		hasMore, err = e.executionPipeline.Run(currentContext, tx, initialCycle, firstCycle)
 		if err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
@@ -464,7 +465,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 		if hasMore {
-			err = e.executionPipeline.RunPrune(ctx, e.db, tx, initialCycle, 500*time.Millisecond)
+			err = e.executionPipeline.RunPrune(ctx, tx, initialCycle, 500*time.Millisecond)
 			if err != nil {
 				return sendError("updateForkChoice: RunPrune after hasMore", err)
 			}
@@ -584,7 +585,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		go func() {
 			defer e.semaphore.Release(1)
 			err := e.runPostForkchoice(currentContext, finishProgressBefore, isSynced, initialCycle)
-			if err != nil {
+			if err != nil && !errors.Is(err, context.Canceled) {
 				e.logger.Error("Error running background post forkchoice", "err", err)
 			}
 		}()
@@ -660,9 +661,21 @@ func (e *EthereumExecutionModule) runForkchoicePrune(initialCycle bool) ([]any, 
 	var timings []any
 	pruneStart := time.Now()
 	defer UpdateForkChoicePruneDuration(pruneStart)
-	if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
-		pruneTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond
-		if err := e.executionPipeline.RunPrune(e.bacgroundCtx, e.db, tx, initialCycle, pruneTimeout); err != nil && !errors.Is(err, context.DeadlineExceeded) {
+	if err := e.db.UpdateTemporal(e.bacgroundCtx, func(tx kv.TemporalRwTx) error {
+		// check that the current header isn't less than a step, this
+		// is mainly to prevent noise in testing on short chains with
+		// no snapshots and no need for pruning
+		currentHeader := rawdb.ReadCurrentHeader(tx)
+		if currentHeader == nil {
+			return nil
+		}
+		maxTxNum, err := rawdbv3.TxNums.Max(e.bacgroundCtx, tx, currentHeader.Number.Uint64())
+		if err != nil || maxTxNum < (tx.Debug().StepSize()*5)/4 {
+			return nil
+		}
+
+		pruneTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond / 2
+		if err := e.executionPipeline.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout); err != nil {
 			return err
 		}
 		return nil

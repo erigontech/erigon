@@ -175,7 +175,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 			case applyResult := <-applyResults:
 				switch applyResult := applyResult.(type) {
 				case *txResult:
-					uncommittedGas += applyResult.gasUsed
+					uncommittedGas += applyResult.blockGasUsed
 					uncommittedTransactions++
 					pe.rs.SetTxNum(applyResult.blockNum, applyResult.txNum)
 					if dbg.TraceApply && dbg.TraceBlock(applyResult.blockNum) {
@@ -239,7 +239,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							}
 						}
 
-						if err := pe.getPostValidator().Process(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
+						if err := pe.getPostValidator().Process(applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
 							lastHeader, pe.isBlockProduction, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
 							dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
 							return fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
@@ -622,6 +622,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							reader = state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
 						}
 						ibs := state.New(state.NewBufferedReader(pe.rs, reader))
+						defer ibs.Release(true)
 						ibs.SetVersion(finalVersion.Incarnation)
 						localVersionMap := state.NewVersionMap(nil)
 						ibs.SetVersionMap(localVersionMap)
@@ -721,6 +722,18 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 }
 
 func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *execRequest) (err error) {
+	// Validate state cache before processing block - ensures cache is cleared after reorgs
+	// This matches the behavior in serial execution (exec3_serial.go)
+	if len(execRequest.tasks) > 0 {
+		if txTask, ok := execRequest.tasks[0].(*exec.TxTask); ok && txTask.Header != nil {
+			parentHash := txTask.Header.ParentHash
+			blockHash := execRequest.blockHash
+			if stateCache := pe.doms.GetStateCache(); stateCache != nil {
+				stateCache.ValidateAndPrepare(parentHash, blockHash)
+			}
+		}
+	}
+
 	prevSenderTx := map[accounts.Address]int{}
 	var scheduleable *blockExecutor
 	var executor *blockExecutor
@@ -906,30 +919,30 @@ func (pe *parallelExecutor) wait(ctx context.Context) error {
 type applyResult any
 
 type blockResult struct {
-	BlockNum    uint64
-	BlockTime   uint64
-	BlockHash   common.Hash
-	ParentHash  common.Hash
-	StateRoot   common.Hash
-	Err         error
-	GasUsed     uint64
-	BlobGasUsed uint64
-	lastTxNum   uint64
-	complete    bool
-	isPartial   bool
-	ApplyCount  int
-	TxIO        *state.VersionedIO
-	Receipts    types.Receipts
-	Stats       map[int]ExecutionStat
-	Deps        *state.DAG
-	AllDeps     map[int]map[int]bool
-	Exhausted   *ErrLoopExhausted
+	BlockNum     uint64
+	BlockTime    uint64
+	BlockHash    common.Hash
+	ParentHash   common.Hash
+	StateRoot    common.Hash
+	Err          error
+	BlockGasUsed uint64
+	BlobGasUsed  uint64
+	lastTxNum    uint64
+	complete     bool
+	isPartial    bool
+	ApplyCount   int
+	TxIO         *state.VersionedIO
+	Receipts     types.Receipts
+	Stats        map[int]ExecutionStat
+	Deps         *state.DAG
+	AllDeps      map[int]map[int]bool
+	Exhausted    *ErrLoopExhausted
 }
 
 type txResult struct {
 	blockNum     uint64
 	txNum        uint64
-	gasUsed      int64
+	blockGasUsed int64
 	receipt      *types.Receipt
 	logs         []*types.Log
 	traceFroms   map[accounts.Address]struct{}
@@ -982,6 +995,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	}
 
 	ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
+	// defer ibs.Release(true) - do not release this one because it is long lived. TODO: fix.
 	ibs.SetTxContext(blockNum, txIndex)
 	ibs.SetVersion(txIncarnation)
 	ibs.SetVersionMap(&state.VersionMap{})
@@ -1226,10 +1240,10 @@ type blockExecutor struct {
 	// Stats for debugging purposes
 	cntExec, cntSpecExec, cntSuccess, cntAbort, cntTotalValidations, cntValidationFail, cntFinalized int
 
-	// cummulative gas for this block
-	gasUsed     uint64
-	blobGasUsed uint64
-	gasPool     *protocol.GasPool
+	// cumulative gas for this block
+	blockGasUsed uint64
+	blobGasUsed  uint64
+	gasPool      *protocol.GasPool
 
 	execFailed, execAborted []int
 
@@ -1457,7 +1471,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				txResult := be.results[tx]
 
-				if err := be.gasPool.SubGas(txResult.ExecutionResult.GasUsed); err != nil {
+				if err := be.gasPool.SubGas(txResult.ExecutionResult.BlockGasUsed); err != nil {
 					return nil, err
 				}
 
@@ -1552,8 +1566,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			if result.Receipt != nil {
-				applyResult.gasUsed += int64(result.Receipt.GasUsed)
-				be.gasUsed += result.Receipt.GasUsed
+				applyResult.blockGasUsed += int64(result.ExecutionResult.BlockGasUsed)
+				be.blockGasUsed += result.ExecutionResult.BlockGasUsed
 				applyResult.receipt = result.Receipt
 			}
 
@@ -1563,7 +1577,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.cntFinalized++
 			be.publishTasks.markComplete(tx)
 
-			pe.executedGas.Add(int64(applyResult.gasUsed))
+			pe.executedGas.Add(int64(applyResult.blockGasUsed))
 			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
 			if result.stateUpdates != nil {
 				applyResult.stateUpdates = *result.stateUpdates
@@ -1608,7 +1622,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			txTask.ParentHash(),
 			txTask.BlockRoot(),
 			nil,
-			be.gasUsed,
+			be.blockGasUsed,
 			be.blobGasUsed,
 			txTask.Version().TxNum,
 			true,
@@ -1639,7 +1653,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		txTask.ParentHash(),
 		txTask.BlockRoot(),
 		nil,
-		be.gasUsed,
+		be.blockGasUsed,
 		be.blobGasUsed,
 		lastTxNum,
 		false,

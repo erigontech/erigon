@@ -142,11 +142,11 @@ func TraceTx(
 			return result, err
 		} else {
 			if tracer != nil && tracer.OnTxEnd != nil {
-				tracer.OnTxEnd(&types.Receipt{GasUsed: result.GasUsed}, nil)
+				tracer.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
 			}
 		}
 
-		gasUsed = result.GasUsed
+		gasUsed = result.ReceiptGasUsed
 		return result, err
 	}
 
@@ -242,7 +242,7 @@ func ExecuteTraceTx(
 		stream.WriteArrayEnd()
 		stream.WriteMore()
 		stream.WriteObjectField("gas")
-		stream.WriteUint64(result.GasUsed)
+		stream.WriteUint64(result.ReceiptGasUsed)
 		stream.WriteMore()
 		stream.WriteObjectField("failed")
 		stream.WriteBool(result.Failed())

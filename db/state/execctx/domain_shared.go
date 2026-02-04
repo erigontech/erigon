@@ -27,11 +27,14 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
@@ -82,6 +85,9 @@ type SharedDomains struct {
 	commitmentCapture bool
 	mem               kv.TemporalMemBatch
 	metrics           changeset.DomainMetrics
+
+	// stateCache is an optional cache for state data (accounts, storage, code)
+	stateCache *cache.StateCache
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
@@ -207,6 +213,16 @@ func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmen
 }
 func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
+// SetStateCache sets the state cache for faster lookups.
+func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
+	sd.stateCache = stateCache
+}
+
+// GetStateCache returns the StateCache, or nil if not set.
+func (sd *SharedDomains) GetStateCache() *cache.StateCache {
+	return sd.stateCache
+}
+
 func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	if resetCommitment && sd.sdCtx != nil {
 		sd.sdCtx.ClearRam()
@@ -296,15 +312,34 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	if tx == nil {
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
 	}
-	start := time.Now()
+	var start time.Time
+	if dbg.KVReadLevelledMetrics {
+		start = time.Now()
+	}
 	maxStep := kv.Step(math.MaxUint64)
 
+	// Check mem batch first - it has the current transaction's uncommitted state
 	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
-		sd.metrics.UpdateCacheReads(domain, start)
+		if dbg.KVReadLevelledMetrics {
+			sd.metrics.UpdateCacheReads(domain, start)
+		}
+		if sd.stateCache != nil {
+			sd.stateCache.Put(domain, k, v)
+		}
 		return v, step, nil
 	} else {
 		if step > 0 {
 			maxStep = step
+		}
+	}
+
+	if sd.stateCache != nil {
+		// This is fine, we will have some extra entries into domain worst case.
+		// regarding file determinism: probability of non-deterministic goes to 0 as we do
+		// files merge so this is not a problem in practice. file 0-1 will be non-deterministic
+		// but file 0-2 will be deterministic as it will include all entries from file 0-1 and so on.
+		if v, ok := sd.stateCache.Get(domain, k); ok {
+			return v, kv.Step(sd.txNum / sd.stepSize), nil
 		}
 	}
 
@@ -319,6 +354,11 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
+	}
+
+	// Populate state cache on successful storage read
+	if sd.stateCache != nil {
+		sd.stateCache.Put(domain, k, v)
 	}
 
 	return v, step, nil
@@ -418,6 +458,12 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 			return nil
 		}
 	}
+
+	// Update state cache when writing
+	if sd.stateCache != nil {
+		sd.stateCache.Put(domain, k, v)
+	}
+
 	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal, prevStep)
 }
 
@@ -445,10 +491,24 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		if err := sd.DomainDel(kv.CodeDomain, tx, k, txNum, nil, 0); err != nil {
 			return err
 		}
+		// Remove from state cache when account is deleted
+		if sd.stateCache != nil {
+			sd.stateCache.Delete(kv.AccountsDomain, k)
+			sd.stateCache.Delete(kv.CodeDomain, k)
+		}
 		return sd.mem.DomainDel(kv.AccountsDomain, ks, txNum, prevVal, prevStep)
+	case kv.StorageDomain:
+		// Remove from state cache when storage is deleted
+		if sd.stateCache != nil {
+			sd.stateCache.Delete(kv.StorageDomain, k)
+		}
 	case kv.CodeDomain:
 		if prevVal == nil {
 			return nil
+		}
+		// Remove from state cache when code is deleted
+		if sd.stateCache != nil {
+			sd.stateCache.Delete(kv.CodeDomain, k)
 		}
 	default:
 		//noop
@@ -535,4 +595,40 @@ func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
 
 func (sd *SharedDomains) EnableWarmupCache(enable bool) {
 	sd.sdCtx.EnableWarmupCache(enable)
+}
+
+// TouchChangedKeysFromHistory touches the changed keys in the commitment trie by reading the historical updates.
+func (sd *SharedDomains) TouchChangedKeysFromHistory(tx kv.TemporalTx, fromTxNum, toTxNum uint64) (int, int, error) {
+	var accountChanges, storageChanges int
+	var err error
+	accountChanges, err = sd.touchChangedKeys(tx, kv.AccountsDomain, fromTxNum, toTxNum)
+	if err != nil {
+		return accountChanges, storageChanges, err
+	}
+	storageChanges, err = sd.touchChangedKeys(tx, kv.StorageDomain, fromTxNum, toTxNum)
+	if err != nil {
+		return accountChanges, storageChanges, err
+	}
+	return accountChanges, storageChanges, err
+}
+
+// touchChangedKeys retrieves the stream of changed keys for the specified domain in [fromTxNum, toTxNum) range and
+// touches them onto the commitment trie.
+func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64) (int, error) {
+	changes := 0
+	it, err := tx.HistoryRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
+	if err != nil {
+		return changes, err
+	}
+	defer it.Close()
+	var k []byte
+	for it.HasNext() {
+		k, _, err = it.Next()
+		if err != nil {
+			return changes, err
+		}
+		sd.GetCommitmentContext().TouchKey(d, string(k), nil)
+		changes++
+	}
+	return changes, nil
 }

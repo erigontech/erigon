@@ -2,10 +2,10 @@ package maphash
 
 import (
 	"hash/maphash"
-	"sync"
 	"unsafe"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/puzpuzpuz/xsync/v4"
 )
 
 var seed maphash.Seed
@@ -23,25 +23,20 @@ func Hash(key []byte) uint64 {
 	return maphash.Bytes(seed, key)
 }
 
-// Map is a non-thread-safe map that uses maphash to hash []byte keys.
+// Map is a concurrent map that uses maphash to hash []byte keys.
 type Map[V any] struct {
-	m sync.Map
+	m *xsync.MapOf[uint64, V]
 }
 
 // NewMap creates a new Map.
 func NewMap[V any]() *Map[V] {
-	return &Map[V]{}
+	return &Map[V]{m: xsync.NewMapOf[uint64, V]()}
 }
 
 // Get retrieves a value by key.
 func (m *Map[V]) Get(key []byte) (V, bool) {
 	h := Hash(key)
-	v, ok := m.m.Load(h)
-	if !ok {
-		var zero V
-		return zero, false
-	}
-	return v.(V), ok
+	return m.m.Load(h)
 }
 
 // Set stores a value with the given key.
@@ -58,12 +53,7 @@ func (m *Map[V]) Delete(key []byte) {
 
 // Len returns the number of entries in the map.
 func (m *Map[V]) Len() int {
-	count := 0
-	m.m.Range(func(_, _ any) bool {
-		count++
-		return true
-	})
-	return count
+	return m.m.Size()
 }
 
 // Clear removes all entries from the map.
@@ -157,4 +147,19 @@ func (l *LRU[V]) Contains(key []byte) bool {
 // Purge clears all entries from the cache.
 func (l *LRU[V]) Purge() {
 	l.cache.Purge()
+}
+
+// GetByHash retrieves a value by a pre-computed hash.
+func (l *LRU[V]) GetByHash(hash uint64) (V, bool) {
+	return l.cache.Get(hash)
+}
+
+// SetByHash stores a value with a pre-computed hash.
+func (l *LRU[V]) SetByHash(hash uint64, value V) {
+	l.cache.Add(hash, value)
+}
+
+// ContainsByHash checks if a hash exists in the cache.
+func (l *LRU[V]) ContainsByHash(hash uint64) bool {
+	return l.cache.Contains(hash)
 }

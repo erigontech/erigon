@@ -138,7 +138,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	}
 	defer doms.Close()
 	// run stages first time - it will download blocks
-	err = sync.RunSnapshots(db, doms, tx)
+	err = sync.RunSnapshots(doms, tx)
 	if err != nil {
 		return err
 	}
@@ -157,12 +157,12 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	}
 	initialCycle, firstCycle := true, false
 	for more := true; more; {
-		more, err = sync.Run(db, doms, tx, initialCycle, firstCycle)
+		more, err = sync.Run(doms, tx, initialCycle, firstCycle)
 		if err != nil {
 			return err
 		}
 
-		if err := sync.RunPrune(ctx, db, tx, initialCycle, 0); err != nil {
+		if err := sync.RunPrune(ctx, tx, initialCycle, 0); err != nil {
 			return err
 		}
 
@@ -204,7 +204,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 
 	if hook != nil {
 		if err := db.View(ctx, func(tx kv.Tx) error {
-			headersProgress, _, _, err := stagesHeadersAndFinish(db, tx)
+			headersProgress, _, _, err := stagesHeadersAndFinish(tx)
 			if err != nil {
 				return err
 			}
@@ -232,7 +232,7 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 				return err
 			}
 			defer sd.Close()
-			hasMore, err = stageLoopIteration(ctx, db, sd, tx, sync, initialCycle, firstCycle, logger, blockReader, hook)
+			hasMore, err = stageLoopIteration(ctx, sd, tx, sync, initialCycle, firstCycle, logger, blockReader, hook)
 			if err != nil {
 				return err
 			}
@@ -245,8 +245,8 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 	return nil
 }
 
-func stageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sd *execctx.SharedDomains, tx kv.TemporalRwTx, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (hasMore bool, err error) {
-	finishProgressBefore, headersProgressBefore, gasUsed, err := stagesHeadersAndFinish(db, tx)
+func stageLoopIteration(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (hasMore bool, err error) {
+	finishProgressBefore, headersProgressBefore, gasUsed, err := stagesHeadersAndFinish(tx)
 	if err != nil {
 		return false, err
 	}
@@ -263,7 +263,7 @@ func stageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sd *execctx.Sha
 	if err = hook.BeforeRun(tx, isSynced); err != nil {
 		return false, err
 	}
-	hasMore, err = sync.Run(db, sd, tx, initialCycle, firstCycle)
+	hasMore, err = sync.Run(sd, tx, initialCycle, firstCycle)
 	if err != nil {
 		return false, err
 	}
@@ -299,41 +299,23 @@ func stageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sd *execctx.Sha
 	logger.Info("Timings", logCtx...)
 	// -- send notifications END
 	// -- Prune+commit(sync)
-	err = sync.RunPrune(ctx, db, tx, initialCycle, 0)
+	err = sync.RunPrune(ctx, tx, initialCycle, 0)
 	if err != nil {
 		return false, err
 	}
 	return hasMore, nil
 }
 
-func stagesHeadersAndFinish(db kv.RoDB, tx kv.Tx) (head, fin uint64, gasUsed uint64, err error) {
-	if tx != nil {
-		if fin, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
-			return head, fin, gasUsed, err
-		}
-		if head, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
-			return head, fin, gasUsed, err
-		}
-		h := rawdb.ReadHeaderByNumber(tx, head)
-		if h != nil {
-			gasUsed = h.GasUsed
-		}
-		return head, fin, gasUsed, nil
-	}
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		if fin, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
-			return err
-		}
-		if head, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
-			return err
-		}
-		h := rawdb.ReadHeaderByNumber(tx, head)
-		if h != nil {
-			gasUsed = h.GasUsed
-		}
-		return nil
-	}); err != nil {
+func stagesHeadersAndFinish(tx kv.Tx) (head, fin uint64, gasUsed uint64, err error) {
+	if fin, err = stages.GetStageProgress(tx, stages.Finish); err != nil {
 		return head, fin, gasUsed, err
+	}
+	if head, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
+		return head, fin, gasUsed, err
+	}
+	h := rawdb.ReadHeaderByNumber(tx, head)
+	if h != nil {
+		gasUsed = h.GasUsed
 	}
 	return head, fin, gasUsed, nil
 }
@@ -470,9 +452,7 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync, finishStageAft
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
 	if (h.notifications.Accumulator != nil) && (currentHeader != nil) {
-		if currentHeader.Number.Sign() == 0 {
-			h.notifications.Accumulator.StartChange(currentHeader, nil, false)
-		}
+		h.notifications.Accumulator.StartChange(currentHeader, nil, false)
 
 		pendingBaseFee := misc.CalcBaseFee(h.chainConfig, currentHeader)
 		pendingBlobFee := h.chainConfig.GetMinBlobGasPrice()
@@ -561,7 +541,7 @@ func MiningStep(ctx context.Context, db kv.TemporalRwDB, mining *stagedsync.Sync
 	}
 	defer sd.Close()
 
-	hasMore, err := mining.Run(nil, sd, mb, false /* firstCycle */, false)
+	hasMore, err := mining.Run(sd, mb, false /* firstCycle */, false)
 	if err != nil {
 		return err
 	}
@@ -647,7 +627,7 @@ func StateStep(ctx context.Context, chainReader rules.ChainReader, engine rules.
 		if err := stateSync.UnwindTo(unwindPoint, stagedsync.StagedUnwind, nil); err != nil {
 			return err
 		}
-		if err = stateSync.RunUnwind(nil, sd, tx); err != nil {
+		if err = stateSync.RunUnwind(sd, tx); err != nil {
 			return err
 		}
 	}
@@ -665,7 +645,7 @@ func StateStep(ctx context.Context, chainReader rules.ChainReader, engine rules.
 		}
 		// Run state sync
 		if !test {
-			hasMore, err := stateSync.RunNoInterrupt(nil, sd, tx)
+			hasMore, err := stateSync.RunNoInterrupt(sd, tx)
 			if err != nil {
 				// Don't lose the original error, like cancellation or common.ErrStopped.
 				return errors.Join(err, cleanupProgressIfNeeded(tx, currentHeader))

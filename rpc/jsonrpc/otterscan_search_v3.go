@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	"github.com/erigontech/erigon/common"
@@ -81,6 +82,9 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			block, err = api.blockByNumberWithSenders(ctx, tx, blockNum)
 			if err != nil {
 				return nil, nil, false, err
+			}
+			if block == nil {
+				return nil, nil, false, fmt.Errorf("block not found: %d", blockNum)
 			}
 			mustReadBlock = false
 		}
