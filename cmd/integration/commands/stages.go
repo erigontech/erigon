@@ -29,6 +29,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/arb/ethdb"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/erigontech/secp256k1"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -943,6 +945,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			break
 		}
 	}
+	return nil
 }
 
 func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {

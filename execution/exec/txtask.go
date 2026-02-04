@@ -21,14 +21,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/nitro-erigon/arbos/arbosState"
-	"github.com/erigontech/nitro-erigon/arbos/arbostypes"
-	"github.com/erigontech/nitro-erigon/statetransfer"
 	"math/big"
 	"sync"
 	"time"
 
-	"github.com/holiman/uint256"
+	"github.com/erigontech/nitro-erigon/arbos/arbostypes"
+	"github.com/erigontech/nitro-erigon/statetransfer"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -216,7 +214,7 @@ type TxTask struct {
 	Withdrawals        types.Withdrawals
 	EvmBlockContext    evmtypes.BlockContext
 	HistoryExecution   bool // use history reader for that txn instead of state reader
-	BalanceIncreaseSet map[accounts.Address]uint256.Int
+	BalanceIncreaseSet map[accounts.Address]state.BalanceIncreaseEntry
 
 	Incarnation           int
 	Tracer                *calltracer.CallTracer
@@ -481,8 +479,11 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 			if txTask.Config.IsArbitrum() { // initialize arbos once
 				ibsa := state.NewArbitrum(ibs)
+				_ = ibsa
 				accountsPerSync := uint(100000) // const for sep-rollup
+				_ = accountsPerSync
 				initMessage, err := arbostypes.GetSepoliaRollupInitMessage()
+				_ = initMessage
 				if err != nil {
 					txTask.Logger.Error("Failed to get Sepolia Rollup init message", "err", err)
 					return &TxResult{
@@ -495,6 +496,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 					NextBlockNumber: 0,
 				}
 				initReader := statetransfer.NewMemoryInitDataReader(&initData)
+				_ = initReader
 				//stateRoot, err := arbosState.InitializeArbosInDatabaseNoCommit(ibsa, txTask.rs.Domains(), stateWriter, initReader, txTask.Config, initMessage, evm.Context.Time, accountsPerSync)
 				//if err != nil {
 				//	txTask.Logger.Error("Failed to init ArbOS", "err", err)

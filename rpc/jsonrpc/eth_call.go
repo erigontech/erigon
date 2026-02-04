@@ -232,7 +232,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if err != nil {
 			return 0, err
 		}
-		posterCost, _ := state.L1PricingState().PosterDataCost(msg, l1pricing.BatchPosterAddress, brotliCompressionLevel)
+		posterCost, _ := state.L1PricingState().PosterDataCost(msg, l1pricing.BatchPosterAddress.Value(), brotliCompressionLevel)
 		// Use estimate mode because this is used to raise the gas cap, so we don't want to underestimate.
 		postingGas := arbos.GetPosterGas(state, header.BaseFee, types.NewMessageGasEstimationContext(), posterCost)
 		api.GasCap += postingGas
@@ -246,7 +246,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		hi = header.GasLimit
 	}
 	var arbosVersion uint64
-	if hi > params.MaxTxnGasLimit && chainConfig.IsOsaka(header.Time, arbosVersion) {
+	if hi > params.MaxTxnGasLimit && chainConfig.IsOsaka(header.Number.Uint64(), header.Time, arbosVersion) {
 		// Cap the maximum gas allowance according to EIP-7825 if Osaka
 		hi = params.MaxTxnGasLimit
 	}
@@ -267,7 +267,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 			return 0, errors.New("can't get the current state")
 		}
 
-		balance, err := state.GetBalance(accounts.InternAddress(*args.From)) // from can't be nil
+		balance, err := stateDb.GetBalance(accounts.InternAddress(*args.From)) // from can't be nil
 		if err != nil {
 			return 0, err
 		}

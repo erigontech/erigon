@@ -335,8 +335,8 @@ func fillForkConfig(chainConfig *chain.Config, forkId [4]byte, activationTime ui
 	forkConfig.ChainId = hexutil.Uint(chainConfig.ChainID.Uint64())
 	forkConfig.ForkId = forkId[:]
 	blockContext := evmtypes.BlockContext{
-		BlockNumber: math.MaxUint64,
-		Time:        activationTime,
+		BlockNumber:  math.MaxUint64,
+		Time:         activationTime,
 		ArbOSVersion: 0,
 	}
 	precompiles := vm.Precompiles(blockContext.Rules(chainConfig))

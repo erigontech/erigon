@@ -310,9 +310,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	log.Debug(fmt.Sprintf("bal from header: %s", blockAccessList.DebugString()))
 
 	if (!s.config.IsCancun(header.Time, 0) && version >= clparams.DenebVersion) ||
-		(s.config.IsCancun(header.Time 0) && version < clparams.DenebVersion) ||
-		(!s.config.IsPrague(header.Time 0) && version >= clparams.ElectraVersion) ||
-		(s.config.IsPrague(header.Time 0) && version < clparams.ElectraVersion) || // osaka has no new newPayload method
+		(s.config.IsCancun(header.Time, 0) && version < clparams.DenebVersion) ||
+		(!s.config.IsPrague(header.Time, 0) && version >= clparams.ElectraVersion) ||
+		(s.config.IsPrague(header.Time, 0) && version < clparams.ElectraVersion) || // osaka has no new newPayload method
 		(!s.config.IsAmsterdam(header.Time) && version >= clparams.GloasVersion) ||
 		(s.config.IsAmsterdam(header.Time) && version < clparams.GloasVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
@@ -598,8 +598,8 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		(s.config.IsCancun(ts, arbosVersion) && version < clparams.DenebVersion) ||
 		(!s.config.IsPrague(ts, arbosVersion) && version >= clparams.ElectraVersion) ||
 		(s.config.IsPrague(ts, arbosVersion) && version < clparams.ElectraVersion) ||
-		(!s.config.IsOsaka(ts, arbosVersion) && version >= clparams.FuluVersion) ||
-		(s.config.IsOsaka(ts, arbosVersion) && version < clparams.FuluVersion) ||
+		(!s.config.IsOsaka(bn, ts, arbosVersion) && version >= clparams.FuluVersion) ||
+		(s.config.IsOsaka(bn, ts, arbosVersion) && version < clparams.FuluVersion) ||
 		(!s.config.IsAmsterdam(ts) && version >= clparams.GloasVersion) ||
 		(s.config.IsAmsterdam(ts) && version < clparams.GloasVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}

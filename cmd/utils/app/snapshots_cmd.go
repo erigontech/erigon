@@ -903,22 +903,6 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 	return nil
 }
 
-func doRmStateSnapshots(cliCtx *cli.Context) error {
-	dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
-	if err != nil {
-		return err
-	}
-	defer l.Unlock()
-
-	removeLatest := cliCtx.Bool("latest")
-	stepRange := cliCtx.String("step")
-	domainNames := cliCtx.StringSlice("domain")
-	dryRun := cliCtx.Bool("dry-run")
-	promptUser := true // CLI should always prompt the user
-
-	return DeleteStateSnapshots(dirs, removeLatest, promptUser, dryRun, stepRange, domainNames...)
-}
-
 func doBtSearch(cliCtx *cli.Context) error {
 	_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
 	if err != nil {
@@ -1172,10 +1156,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 			}
 		case integrity.CommitmentHistVal:
 			if err := integrity.CheckCommitmentHistVal(ctx, db, blockReader, failFast, logger); err != nil {
-				return err
-			}
-		case integrity.Publishable:
-			if err := doPublishable(cliCtx); err != nil {
 				return err
 			}
 		default:

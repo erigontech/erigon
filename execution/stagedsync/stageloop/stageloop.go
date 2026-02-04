@@ -23,6 +23,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/db/downloader"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
@@ -780,7 +781,7 @@ func NewDefaultStages(ctx context.Context,
 		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 		stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, controlServer.ChainConfig, blockReader, blockWriter),
 		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, cfg.Sync, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd),
-		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, false, dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, SilkwormForExecutionStage(silkworm, cfg), cfg.ExperimentalBAL, wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm),
+		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, false, dirs, blockReader, controlServer.Hd, cfg.Genesis, cfg.Sync, SilkwormForExecutionStage(silkworm, cfg), cfg.ExperimentalBAL, wasmdb.OpenArbitrumWasmDB(ctx, dirs.ArbitrumWasm)),
 		stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
 		stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator), runInTestMode)
 }

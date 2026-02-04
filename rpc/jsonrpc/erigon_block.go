@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"

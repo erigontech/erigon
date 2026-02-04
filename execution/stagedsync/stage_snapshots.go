@@ -347,21 +347,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	return nil
 }
 
-func firstNonGenesisCheck(tx kv.RwTx, snapshots snapshotsync.BlockSnapshots, logPrefix string, dirs datadir.Dirs) error {
-	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
-	if err != nil {
-		return err
-	}
-	if firstNonGenesis != nil {
-		firstNonGenesisBlockNumber := binary.BigEndian.Uint64(firstNonGenesis)
-		if snapshots.SegmentsMax()+1 < firstNonGenesisBlockNumber {
-			log.Warn(fmt.Sprintf("[%s] Some blocks are not in snapshots and not in db. This could have happened because the node was stopped at the wrong time; you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", logPrefix, dirs.Chaindata), "max_in_snapshots", snapshots.SegmentsMax(), "min_in_db", firstNonGenesisBlockNumber)
-			return fmt.Errorf("some blocks are not in snapshots and not in db. This could have happened because the node was stopped at the wrong time; you can fix this with 'rm -rf %s' (this is not equivalent to a full resync)", dirs.Chaindata)
-		}
-	}
-	return nil
-}
-
 func firstNonGenesisCheck(tx kv.RwTx, snapshots services.BlockSnapshots, logPrefix string, dirs datadir.Dirs) error {
 	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
 	if err != nil {
@@ -437,7 +422,6 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			cfg.blockRetire.SetWorkers(1)
 		}
 
-		noDl := cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()
 		started := cfg.blockRetire.RetireBlocksInBackground(
 			ctx,
 			minBlockNumber,

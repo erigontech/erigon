@@ -140,10 +140,6 @@ func withConcurrentCommitment(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&statecfg.ExperimentalConcurrentCommitment, utils.ExperimentalConcurrentCommitmentFlag.Name, utils.ExperimentalConcurrentCommitmentFlag.Value, utils.ExperimentalConcurrentCommitmentFlag.Usage)
 }
 
-func withConcurrentCommitment(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&statecfg.ExperimentalConcurrentCommitment, utils.ExperimentalConcurrentCommitmentFlag.Name, utils.ExperimentalConcurrentCommitmentFlag.Value, utils.ExperimentalConcurrentCommitmentFlag.Usage)
-}
-
 func withBatchSize(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&batchSizeStr, "batchSize", cli.BatchSizeFlag.Value, cli.BatchSizeFlag.Usage)
 }

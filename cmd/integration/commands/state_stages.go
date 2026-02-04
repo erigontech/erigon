@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/cmd/hack/tool/fromdb"

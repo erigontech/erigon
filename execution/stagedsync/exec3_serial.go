@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -378,7 +379,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		txTask := task.(*exec.TxTask)
 
 		if gasPool == nil {
-			gasPool = protocol.NewGasPool(task.BlockGasLimit(), se.cfg.chainConfig.GetMaxBlobGasPerBlock(tasks[0].BlockTime()))
+			gasPool = protocol.NewGasPool(task.BlockGasLimit(), se.cfg.chainConfig.GetMaxBlobGasPerBlock(tasks[0].BlockTime(), 0 /* currentArbosVer */))
 		}
 
 		txTask.ResetGasPool(gasPool)
@@ -436,10 +437,10 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				if !se.isMining && startTxIndex == 0 && !isInitialCycle {
 					se.cfg.notifications.RecentReceipts.Add(blockReceipts, txTask.Txs, txTask.Header)
 				}
-				checkReceipts := (!se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts && !se.isMining);
+				checkReceipts := (!se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts && !se.isMining)
 				// TODO arbitrum enable receipt checking
 				if se.cfg.chainConfig.IsArbitrum() {
-					checkReceipts = false;
+					checkReceipts = false
 				}
 
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {

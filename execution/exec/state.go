@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/nitro-erigon/arbos"
 	"github.com/erigontech/nitro-erigon/gethhook"
 
@@ -468,6 +469,12 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 	}
 
 	return result
+}
+
+func (rw *Worker) SetArbitrumWasmDB(wasmDB wasmdb.WasmIface) {
+	if rw.chainConfig.IsArbitrum() {
+		rw.ibs.SetWasmDB(wasmDB)
+	}
 }
 
 func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,

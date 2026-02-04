@@ -416,8 +416,6 @@ func (s *simulator) simulateBlock(
 	if err != nil {
 		return nil, nil, err
 	}
-	txnIndex := len(bsc.Calls)
-	txNum := minTxNum + 1 + uint64(txnIndex)
 	sharedDomains.SetBlockNum(blockNumber)
 	sharedDomains.SetTxNum(minTxNum)
 
@@ -503,7 +501,7 @@ func (s *simulator) simulateBlock(
 	}
 
 	var withdrawals types.Withdrawals
-	if s.chainConfig.IsShanghai(header.Time) {
+	if s.chainConfig.IsShanghai(header.Time, 0) {
 		withdrawals = types.Withdrawals{}
 	}
 	systemCall := func(contract accounts.Address, data []byte) ([]byte, error) {
@@ -541,25 +539,9 @@ func (s *simulator) simulateBlock(
 		// We cannot compute the state root for historical state w/o commitment history, so we just use the zero hash (default value).
 	}
 
-	var withdrawals types.Withdrawals
-	if s.chainConfig.IsShanghai(header.Time, 0) {
-		withdrawals = types.Withdrawals{}
-	}
-	engine, ok := s.engine.(consensus.Engine)
-	if !ok {
-		return nil, nil, errors.New("consensus engine reader does not support full consensus.Engine")
-	}
-	systemCall := func(contract common.Address, data []byte) ([]byte, error) {
-		return core.SysCallContract(contract, data, s.chainConfig, intraBlockState, header, engine, false /* constCall */, vmConfig)
-	}
-	block, _, err := engine.FinalizeAndAssemble(s.chainConfig, header, intraBlockState, txnList, nil,
-		receiptList, withdrawals, nil, systemCall, nil, s.logger)
-	if err != nil {
-		return nil, nil, err
-	}
 	// Marshal the block in RPC format including the call results in a custom field.
 	additionalFields := make(map[string]any)
-	blockResult, err := ethapi.RPCMarshalBlock(block, true, s.fullTransactions, additionalFields, s.chainConfig.IsArbitrumNitro(block.Number()))
+	blockResult, err := ethapi.RPCMarshalBlock(block, true, s.fullTransactions, additionalFields, false)
 	if err != nil {
 		return nil, nil, err
 	}
