@@ -1,5 +1,9 @@
 ---
 description: Remote Procedure Call Daemon
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/fundamentals/modules/rpc-daemon
 ---
 
 # RPC Daemon
