@@ -36,7 +36,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
@@ -308,12 +307,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	ctrl := gomock.NewController(tb)
 	dirs := datadir.New(tmpdir)
 	var err error
-
-	if !dbg.Exec3Parallel {
-		// Amsterdam required parallel processing
-		// - remove this once all tests pass with parallel as default
-		gspec.Config.AmsterdamTime = nil
-	}
 
 	cfg := ethconfig.Defaults
 	cfg.StateStream = true
