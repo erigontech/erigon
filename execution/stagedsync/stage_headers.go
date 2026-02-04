@@ -857,7 +857,14 @@ func (cr ChainReaderImpl) HasBlock(hash common.Hash, number uint64) bool {
 func DebugFetchSingleBlock(ctx context.Context, tx kv.RwTx, client, receiptClient *rpc.Client, blockNum uint64) error {
 	log.Info("[Debug] Fetching single block", "block", blockNum)
 
-	blk, err := snapshots.GetBlockByNumber(ctx, client, receiptClient, new(big.Int).SetUint64(blockNum), true, true)
+	var metadataMap map[uint64][]byte
+	var err error
+	metadataMap, err = snapshots.FetchBlockMetadataBatch(context.Background(), client, blockNum, blockNum+1)
+	if err != nil {
+		log.Crit("Failed to fetch block metadata batch", "err", err)
+	}
+
+	blk, err := snapshots.GetBlockByNumber(ctx, client, receiptClient, new(big.Int).SetUint64(blockNum), true, true, metadataMap[blockNum])
 	if err != nil {
 		return fmt.Errorf("failed to fetch block %d: %w", blockNum, err)
 	}
