@@ -2,13 +2,18 @@ name: QA - RPC Performance Tests Latest
 
 on:
   workflow_dispatch:
+    inputs:
+      run_geth:
+        description: 'Run the Geth benchmark besides the Erigon one'
+        type: boolean
+        required: false
+        default: false
   schedule:
-  - cron: '0 2 * * *'  # Run daily at 02:00 UTC (every night)
+  - cron: '0 2 * * *'  # Run daily at 02:00 UTC
 
 concurrency:
-  group: erigon-vs-geth-benchmark-${{ github.ref }}
+  group: rpc-performance-latest-${{ github.ref }}
   cancel-in-progress: false
-
 
 env:
   CHAIN: mainnet
@@ -24,7 +29,7 @@ jobs:
     outputs:
       run_id: ${{ steps.vars.outputs.run_id }}
       network: ${{ steps.vars.outputs.network }}
-      vegeta_duration: ${{ steps.vars.outputs.vegeta_duration }}
+      run_geth: ${{ steps.vars.outputs.run_geth }}
     steps:
       - name: Compute shared variables
         id: vars
@@ -34,11 +39,26 @@ jobs:
 
           # Unique namespace for this workflow execution
           RUN_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          # Decide whether to run geth:
+          # - schedule: only on Sunday (UTC)
+          # - workflow_dispatch: controlled by input
+          RUN_GETH="false"
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            DOW="$(date -u +%w)"
+            if [ "$DOW" = "0" ]; then  # Sunday, (0..6 = Sun..Sat)
+              RUN_GETH="true"
+            fi
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ github.event.inputs.run_geth }}" = "true" ]; then
+              RUN_GETH="true"
+            fi
+          fi
           
           # Variables
           echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
           echo "network=${{ env.CHAIN }}" >> "$GITHUB_OUTPUT"
-          echo "vegeta_duration=60s" >> "$GITHUB_OUTPUT"
+          echo "run_geth=${RUN_GETH}" >> "$GITHUB_OUTPUT"
 
       - name: Print configuration (for logs)
         shell: bash
@@ -46,9 +66,11 @@ jobs:
           set -euo pipefail
           echo "Run ID:             ${{ steps.vars.outputs.run_id }}"
           echo "Network:            ${{ steps.vars.outputs.network }}"
-          echo "Vegeta duration:    ${{ steps.vars.outputs.vegeta_duration }}"
+          echo "Run Erigon:         true"
+          echo "Run Geth:           ${{ steps.vars.outputs.run_geth }}"
 
       - name: Prepare Redis database
+        if: steps.vars.outputs.run_geth == 'true'
         shell: bash
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
@@ -74,17 +96,23 @@ jobs:
     env:
       RUN_ID: ${{ needs.setup.outputs.run_id }}
       NETWORK: ${{ needs.setup.outputs.network }}
-      VEGETA_DURATION: ${{ needs.setup.outputs.vegeta_duration }}
       ERIGON_REFERENCE_DIR: /opt/erigon-versions/reference-version
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
+      TOTAL_TIME_SECONDS: 1200 # 20 minutes
       GETH_INSTALL_DIR: /opt/go-ethereum
       CLIENT: ${{ matrix.client }}
+
     steps:
-      - name: Checkout
+      - name: Checkout Erigon repository
+        if: matrix.client == 'erigon'
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: "0"
 
       - name: Sanity check Redis config
+        if: needs.setup.outputs.run_geth == 'true'
         shell: bash
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
@@ -92,6 +120,7 @@ jobs:
           python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$NETWORK" --signal-creation
 
       - name: Checkout RPC Tests Repository
+        if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
         run: |
           rm -rf ${{runner.workspace}}/rpc-tests
           git -c advice.detachedHead=false clone --depth 1 --branch main https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
@@ -158,6 +187,7 @@ jobs:
           echo "Erigon started"
 
       - name: Wait for port 8545 to be opened
+        if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
         run: |
           # Geth is expected to be pre-running for the rpc-latest-geth runner
           # Erigon was started above
@@ -176,6 +206,7 @@ jobs:
           fi
 
       - name: Find a consensus on a common time to run the benchmark
+        if: needs.setup.outputs.run_geth == 'true'
         shell: bash
         working-directory: ${{ env.ERIGON_QA_PATH }}/test_system/qa-tests/rpc-tests
         run: |
@@ -184,12 +215,12 @@ jobs:
           echo "Context:"
           echo "  RUN_ID=${RUN_ID}"
           echo "  NETWORK=${NETWORK}"
-          echo "  VEGETA_DURATION=${VEGETA_DURATION}"
           # Wait for an agreement between Erigon and Geth
-          python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$NETWORK"
+          python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$NETWORK" --deadline-timeout $TOTAL_TIME_SECONDS
 
       - name: Run RPC Performance Tests
         id: test_step
+        if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
         run: |
           set +e # Disable exit on error
           
@@ -334,11 +365,12 @@ jobs:
           else
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
             echo "Error detected during tests"
+            echo "::error::Error detected during tests"
             exit 1
           fi
 
       - name: Upload test results
-        if: steps.test_step.outputs.test_executed == 'true'
+        if: (matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true') && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v6
         with:
           name: test-results-${{ env.CHAIN }}-${{ matrix.client }}
