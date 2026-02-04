@@ -615,12 +615,12 @@ func (a *ApiHandler) produceBeaconBody(
 		timeoutForBlockBuilding := 2 * time.Second // keep asking for 2 seconds for block
 		retryTime := 10 * time.Millisecond
 		feeRecipient, _ := a.validatorParams.GetFeeRecipient(proposerIndex)
-		clWithdrawals, _ := state.ExpectedWithdrawals(
+		clWithdrawals := state.GetExpectedWithdrawals(
 			baseState,
 			targetSlot/a.beaconChainCfg.SlotsPerEpoch,
 		)
-		withdrawals := make([]*types.Withdrawal, 0, len(clWithdrawals))
-		for _, w := range clWithdrawals {
+		withdrawals := make([]*types.Withdrawal, 0, len(clWithdrawals.Withdrawals))
+		for _, w := range clWithdrawals.Withdrawals {
 			withdrawals = append(withdrawals, &types.Withdrawal{
 				Index:     w.Index,
 				Amount:    w.Amount,
