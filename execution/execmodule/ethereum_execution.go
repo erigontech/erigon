@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"math/big"
-	"math/rand/v2"
 	"strings"
 	"sync"
 	"time"
@@ -308,12 +307,6 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(sd *execctx.SharedDoma
 		if currentHeader == nil {
 			return makeErrMissingChainSegment(parentBlockHash)
 		}
-	}
-
-	n := currentHeader.Number.Uint64()
-	rn := rand.IntN(3)
-	if rn%3 == 0 {
-		n--
 	}
 
 	if err := e.hook.BeforeRun(tx, true); err != nil {

@@ -18,8 +18,6 @@ package cache
 
 import (
 	"bytes"
-	"encoding/binary"
-	"fmt"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/common"
@@ -158,12 +156,12 @@ func (c *StateCache) RevertWithDiffset(diffset *[6][]kv.DomainEntryDiff, newBloc
 	for domain, diffList := range diffset {
 		for _, entry := range diffList {
 			k := []byte(entry.Key[:len(entry.Key)-8])
-			if domain == int(kv.AccountsDomain) {
-				step := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-				prevStep := ^binary.BigEndian.Uint64(entry.PrevStepBytes)
+			// if domain == int(kv.AccountsDomain) {
+			// 	step := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
+			// 	prevStep := ^binary.BigEndian.Uint64(entry.PrevStepBytes)
 
-				fmt.Println(common.Bytes2Hex(k), " step ", step, " prevStep ", prevStep)
-			}
+			// 	fmt.Println(common.Bytes2Hex(k), " step ", step, " prevStep ", prevStep)
+			// }
 			c.Delete(kv.Domain(domain), k)
 		}
 	}
