@@ -21,7 +21,7 @@ package disk
 import (
 	"runtime"
 
-	"github.com/erigontech/erigon/common/metrics"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 var cgoCount = metrics.NewGauge(`go_cgo_calls_count`)

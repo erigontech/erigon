@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/common/metrics"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 var (

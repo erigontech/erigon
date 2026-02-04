@@ -18,7 +18,7 @@ package state
 
 import (
 	"github.com/erigontech/erigon/common/clonable"
-	"github.com/erigontech/erigon/common/metrics"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 func (b *CachingBeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
