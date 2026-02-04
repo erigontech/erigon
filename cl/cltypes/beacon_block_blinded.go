@@ -497,3 +497,7 @@ func (b *BlindedBeaconBody) GetExecutionRequests() *ExecutionRequests {
 func (b *BlindedBeaconBody) GetSignedExecutionPayloadBid() *SignedExecutionPayloadBid {
 	return nil
 }
+
+func (b *BlindedBeaconBody) GetPayloadAttestations() *solid.ListSSZ[*PayloadAttestation] {
+	return nil
+}
