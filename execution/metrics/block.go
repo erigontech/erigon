@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	diagmetrics "github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 var (
@@ -27,18 +28,18 @@ var (
 
 	DelayLoggingEnabled bool
 
-	BlockConsumerHeaderDownloadDelay = NewSummary(`block_consumer_delay{type="header_download"}`)
-	BlockConsumerBodyDownloadDelay   = NewSummary(`block_consumer_delay{type="body_download"}`)
-	BlockConsumerPreExecutionDelay   = NewSummary(`block_consumer_delay{type="pre_execution"}`)
-	BlockConsumerPostExecutionDelay  = NewSummary(`block_consumer_delay{type="post_execution"}`)
-	BlockProducerProductionDelay     = NewSummary(`block_producer_delay{type="production"}`)
+	BlockConsumerHeaderDownloadDelay = diagmetrics.NewSummary(`block_consumer_delay{type="header_download"}`)
+	BlockConsumerBodyDownloadDelay   = diagmetrics.NewSummary(`block_consumer_delay{type="body_download"}`)
+	BlockConsumerPreExecutionDelay   = diagmetrics.NewSummary(`block_consumer_delay{type="pre_execution"}`)
+	BlockConsumerPostExecutionDelay  = diagmetrics.NewSummary(`block_consumer_delay{type="post_execution"}`)
+	BlockProducerProductionDelay     = diagmetrics.NewSummary(`block_producer_delay{type="production"}`)
 
-	ChainTipMgasPerSec = NewGauge(`chain_tip_mgas_per_sec`)
+	ChainTipMgasPerSec = diagmetrics.NewGauge(`chain_tip_mgas_per_sec`)
 
-	BlockConsumerHeaderDownloadDelayHistogram = NewHistogram(`block_consumer_delay_hist{type="header_download"}`, delayBuckets)
-	BlockConsumerBodyDownloadDelayHistogram   = NewHistogram(`block_consumer_delay_hist{type="body_download"}`, delayBuckets)
-	BlockConsumerPreExecutionDelayHistogram   = NewHistogram(`block_consumer_delay_hist{type="pre_execution"}`, delayBuckets)
-	BlockConsumerPostExecutionDelayHistogram  = NewHistogram(`block_consumer_delay_hist{type="post_execution"}`, delayBuckets)
+	BlockConsumerHeaderDownloadDelayHistogram = diagmetrics.NewHistogram(`block_consumer_delay_hist{type="header_download"}`, delayBuckets)
+	BlockConsumerBodyDownloadDelayHistogram   = diagmetrics.NewHistogram(`block_consumer_delay_hist{type="body_download"}`, delayBuckets)
+	BlockConsumerPreExecutionDelayHistogram   = diagmetrics.NewHistogram(`block_consumer_delay_hist{type="pre_execution"}`, delayBuckets)
+	BlockConsumerPostExecutionDelayHistogram  = diagmetrics.NewHistogram(`block_consumer_delay_hist{type="post_execution"}`, delayBuckets)
 )
 
 func UpdateBlockConsumerHeaderDownloadDelay(blockTime uint64, blockNumber uint64, log log.Logger) {
