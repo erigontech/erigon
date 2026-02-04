@@ -655,6 +655,7 @@ func (d *domain[K, V]) Merge(other *domain[K, V]) {
 func (d *domain[K, V]) FlushUpdates() {
 	d.lock.Lock()
 	defer d.lock.Unlock()
+	fmt.Println("FLUSH", d.name(), d.updates)
 	for k, vs := range d.updates.Iter() {
 		if len(vs) > 0 {
 			// the value cache only handles latest values for the moment

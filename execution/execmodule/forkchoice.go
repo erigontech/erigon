@@ -396,7 +396,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		if err := currentContext.Flush(ctx, tx); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
-		currentContext.ClearRam(true)
 		if err := tx.Commit(); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
@@ -471,7 +470,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			if err := currentContext.Flush(ctx, tx); err != nil {
 				return sendError("updateForkChoice:flush sd after hasMore", err)
 			}
-			currentContext.ClearRam(true)
 			if err = tx.Commit(); err != nil {
 				return sendError("updateForkChoice: tx commit after hasMore", err)
 			}

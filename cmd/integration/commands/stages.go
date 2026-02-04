@@ -892,7 +892,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 				if err := doms.Flush(ctx, tx); err != nil {
 					return err
 				}
-				doms.ClearRam(true)
+
 				if err := tx.Commit(); err != nil {
 					return err
 				}
@@ -904,7 +904,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		if err := doms.Flush(ctx, tx); err != nil {
 			return err
 		}
-		doms.ClearRam(true)
+		
 		return nil
 	}
 
@@ -918,7 +918,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		if err := doms.Flush(ctx, tx); err != nil {
 			return err
 		}
-		doms.ClearRam(true)
+		
 		if !noCommit {
 			if err := tx.Commit(); err != nil {
 				return err

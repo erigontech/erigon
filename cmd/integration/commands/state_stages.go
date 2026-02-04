@@ -285,7 +285,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 			if err = sd.Flush(ctx, tx); err != nil {
 				return err
 			}
-			sd.ClearRam(true)
+			
 			if err = tx.Commit(); err != nil {
 				return err
 			}

@@ -344,19 +344,6 @@ func (sd *ExecutionContext) GetCommitmentCtx() *commitment.CommitmentContext {
 }
 func (sd *ExecutionContext) Logger() log.Logger { return sd.logger }
 
-func (sd *ExecutionContext) ClearRam(resetCommitment bool) {
-	if resetCommitment && sd.sdCtx != nil {
-		sd.sdCtx.ClearRam()
-	}
-
-	sd.accountsDomain.FlushUpdates()
-
-	sd.metrics.PutCacheCount.Store(0)
-	sd.metrics.PutCacheSize.Store(0)
-	sd.metrics.PutCacheKeySize.Store(0)
-	sd.metrics.PutCacheValueSize.Store(0)
-}
-
 func (sd *ExecutionContext) SizeEstimate() uint64 {
 	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
 	// and muliply 2 more: for Commitment calculation when batch is full
@@ -567,7 +554,7 @@ func (sd *ExecutionContext) DomainLogMetrics() map[kv.Domain][]any {
 }
 
 // DiscardWrites disables updates collection for further flushing into db.
-// Instead, it keeps them temporarily available until .ClearRam/.Close will make them unavailable.
+// Instead, it keeps them temporarily available until .Close will make them unavailable.
 func (sd *ExecutionContext) DiscardWrites(d kv.Domain) {
 	// TODO: Deprecated - need convert this method to Constructor-Builder configuration
 	if d >= kv.DomainLen {
