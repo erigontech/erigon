@@ -145,6 +145,12 @@ var (
 		Value: true,
 	}
 
+	CompressionWorkersFlag = cli.IntFlag{
+		Name:  "compression.workers",
+		Usage: "Limit compression workers for snapshot creation (0 = auto based on RAM/CPU)",
+		Value: 0,
+	}
+
 	BadBlockFlag = cli.StringFlag{
 		Name:  "bad.block",
 		Usage: "Marks block with given hex string as bad and forces initial reorg before normal staged sync",
@@ -304,6 +310,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		cfg.Sync.LoopBlockLimit = limit
 	}
 	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
+	cfg.Sync.CompressWorkerLimit = ctx.Int(CompressionWorkersFlag.Name)
 
 	if ctx.String(BadBlockFlag.Name) != "" {
 		bytes, err := hexutil.Decode(ctx.String(BadBlockFlag.Name))

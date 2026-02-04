@@ -246,6 +246,7 @@ var DefaultFlags = []cli.Flag{
 	&SyncLoopBlockLimitFlag,
 	&SyncLoopBreakAfterFlag,
 	&SyncParallelStateFlushing,
+	&CompressionWorkersFlag,
 
 	&utils.ChaosMonkeyFlag,
 
