@@ -1084,22 +1084,20 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 			return nil, err
 		}
 
-		latestBlock, err := rpchelper.GetLatestBlockNumber(tx)
-		if err != nil {
+		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		if lastTxnInBlock < commitmentStartingTxNum {
+			return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, lastTxnInBlock)
+		}
+
+		sdCtx.SetHistoryStateReader(tx, lastTxnInBlock)
+		if err := domains.SeekCommitment(context.Background(), tx); err != nil {
 			return nil, err
 		}
 
-		if parentNum < latestBlock {
-			commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
-			if lastTxnInBlock < commitmentStartingTxNum {
-				return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, lastTxnInBlock)
-			}
+	}
 
-			sdCtx.SetHistoryStateReader(tx, lastTxnInBlock)
-			if err := domains.SeekCommitment(context.Background(), tx); err != nil {
-				return nil, err
-			}
-		}
+	if len(allAddresses)+len(allStorageKeys) == 0 { // nothing touched, return empty witness
+		return result, nil
 	}
 
 	// Touch all accessed/modified accounts for proof generation

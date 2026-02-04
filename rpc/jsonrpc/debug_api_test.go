@@ -700,7 +700,7 @@ func TestExecutionWitness(t *testing.T) {
 	})
 
 	t.Run("multiple blocks", func(t *testing.T) {
-		// Test all blocks except the latest (latest block's parent commitment may not be in history yet)
+		// Test all blocks except the latest
 		for blockNum := uint64(1); blockNum < latestBlockNum; blockNum++ {
 			bn := rpc.BlockNumber(blockNum)
 			result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
@@ -712,6 +712,17 @@ func TestExecutionWitness(t *testing.T) {
 			t.Logf("Block %d: %d state nodes, %d codes, %d keys",
 				blockNum, len(result.State), len(result.Codes), len(result.Keys))
 		}
+	})
+
+	t.Run("latest block", func(t *testing.T) {
+		blockNum := rpc.LatestBlockNumber
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.NotNil(t, result.State, "State should not be nil")
+		require.NotNil(t, result.Keys, "Keys should not be nil")
+		t.Logf("Latest block: %d state nodes, %d codes, %d keys",
+			len(result.State), len(result.Codes), len(result.Keys))
 	})
 
 	t.Run("non-existent block", func(t *testing.T) {
