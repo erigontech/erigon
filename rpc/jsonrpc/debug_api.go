@@ -2101,6 +2101,11 @@ func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.B
 		return fmt.Errorf("[verifyExecutionWitnessResult] engine.Finalize failed : %w", err)
 	}
 
+	err = ibs.CommitBlock(blockRules, stateless)
+	if err != nil {
+		return fmt.Errorf("[verifyExecutionWitnessReulst] ibs.CommitBlock() failed : %w", err)
+	}
+
 	// Debug: print all pending updates before Finalize
 	stateless.debugPrintPendingUpdates(block.NumberU64())
 
