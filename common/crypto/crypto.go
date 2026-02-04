@@ -34,7 +34,6 @@ import (
 	"sync"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/keccak"
@@ -103,7 +102,7 @@ func Keccak256Hash(data ...[]byte) (h common.Hash) {
 
 // Keccak512 calculates and returns the Keccak512 hash of the input data.
 func Keccak512(data ...[]byte) []byte {
-	d := sha3.NewLegacyKeccak512()
+	d := keccak.NewLegacyKeccak512()
 	for _, b := range data {
 		d.Write(b)
 	}
