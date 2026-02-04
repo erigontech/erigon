@@ -59,21 +59,31 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	if version >= clparams.BellatrixVersion && executionEnabled(s, payloadHeader.BlockHash) {
 		if s.Version() >= clparams.CapellaVersion {
 			// Process withdrawals in the execution payload.
-			expect, _ := state.ExpectedWithdrawals(s, state.Epoch(s))
+			expect := state.GetExpectedWithdrawals(s, state.Epoch(s))
 			expectWithdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(s.BeaconConfig().MaxWithdrawalsPerPayload), 44)
-			for i := range expect {
-				expectWithdrawals.Append(expect[i])
+			for i := range expect.Withdrawals {
+				expectWithdrawals.Append(expect.Withdrawals[i])
 			}
 			if err := impl.ProcessWithdrawals(s, expectWithdrawals); err != nil {
 				return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
 			}
 		}
-		if err := impl.ProcessExecutionPayload(s, body); err != nil {
-			return fmt.Errorf("processBlock: failed to process execution payload: %v", err)
+		if s.Version() < clparams.GloasVersion {
+			// DO NOT process execution payload for Gloas and later versions here.
+			if err := impl.ProcessExecutionPayload(s, body); err != nil {
+				return fmt.Errorf("processBlock: failed to process execution payload: %v", err)
+			}
 		}
 	}
-	var signatures, messages, publicKeys [][]byte
 
+	if s.Version() >= clparams.GloasVersion {
+		// Process execution payload bid. [New in Gloas:EIP7732]
+		if err := impl.ProcessExecutionPayloadBid(s, block); err != nil {
+			return fmt.Errorf("processBlock: failed to process execution payload bid: %v", err)
+		}
+	}
+
+	var signatures, messages, publicKeys [][]byte
 	// Process each proposer slashing
 	sigs, msgs, pubKeys, err := processRandao(impl, s, body, block)
 	if err != nil {
@@ -175,7 +185,7 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 	}
 	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
 
-	if s.Version() >= clparams.ElectraVersion {
+	if clparams.ElectraVersion <= s.Version() && s.Version() < clparams.GloasVersion {
 		if err := forEachProcess(s, blockBody.GetExecutionRequests().Deposits, impl.ProcessDepositRequest); err != nil {
 			return nil, nil, nil, fmt.Errorf("ProcessDepositRequest: %s", err)
 		}
@@ -184,6 +194,13 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 		}
 		if err := forEachProcess(s, blockBody.GetExecutionRequests().Consolidations, impl.ProcessConsolidationRequest); err != nil {
 			return nil, nil, nil, fmt.Errorf("ProcessConsolidationRequest: %s", err)
+		}
+	}
+
+	// [New in Gloas:EIP7732] Process payload attestations
+	if s.Version() >= clparams.GloasVersion {
+		if err := forEachProcess(s, blockBody.GetPayloadAttestations(), impl.ProcessPayloadAttestation); err != nil {
+			return nil, nil, nil, fmt.Errorf("ProcessPayloadAttestation: %s", err)
 		}
 	}
 
@@ -261,20 +278,18 @@ func processProposerSlashings(impl BlockOperationProcessor, s abstract.BeaconSta
 }
 
 func processVoluntaryExits(impl BlockOperationProcessor, s abstract.BeaconState, blockBody cltypes.GenericBeaconBody) (sigs [][]byte, msgs [][]byte, pubKeys [][]byte, err error) {
+	// TODO: Refactor the batch signature verification
 	// Process each voluntary exit.
 	err = solid.RangeErr[*cltypes.SignedVoluntaryExit](blockBody.GetVoluntaryExits(), func(index int, exit *cltypes.SignedVoluntaryExit, length int) error {
 		voluntaryExit := exit.VoluntaryExit
-		validator, err := s.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
-		if err != nil {
-			return err
-		}
 
 		// We can skip it in some instances if we want to optimistically sync up.
 		if impl.FullValidate() {
+			// Domain is always computed with CAPELLA_FORK_VERSION for >= Deneb
 			var domain []byte
 			if s.Version() < clparams.DenebVersion {
 				domain, err = s.GetDomain(s.BeaconConfig().DomainVoluntaryExit, voluntaryExit.Epoch)
-			} else if s.Version() >= clparams.DenebVersion {
+			} else {
 				domain, err = fork.ComputeDomain(s.BeaconConfig().DomainVoluntaryExit[:], utils.Uint32ToBytes4(uint32(s.BeaconConfig().CapellaForkVersion)), s.GenesisValidatorsRoot())
 			}
 			if err != nil {
@@ -284,7 +299,23 @@ func processVoluntaryExits(impl BlockOperationProcessor, s abstract.BeaconState,
 			if err != nil {
 				return err
 			}
-			pk := validator.PublicKey()
+
+			// [New in Gloas:EIP7732] Get pubkey from builders for builder indices
+			var pk [48]byte
+			if s.Version() >= clparams.GloasVersion && state.IsBuilderIndex(voluntaryExit.ValidatorIndex) {
+				builderIndex := state.ConvertValidatorIndexToBuilderIndex(voluntaryExit.ValidatorIndex)
+				builders := s.GetBuilders()
+				if builders == nil || int(builderIndex) >= builders.Len() {
+					return fmt.Errorf("ProcessVoluntaryExit: invalid builder index %d", builderIndex)
+				}
+				pk = builders.Get(int(builderIndex)).Pubkey
+			} else {
+				validator, err := s.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
+				if err != nil {
+					return err
+				}
+				pk = validator.PublicKey()
+			}
 			sigs, msgs, pubKeys = append(sigs, exit.Signature[:]), append(msgs, signingRoot[:]), append(pubKeys, pk[:])
 		}
 
@@ -346,3 +377,4 @@ func processBlsToExecutionChanges(impl BlockOperationProcessor, s abstract.Beaco
 
 	return
 }
+

@@ -43,6 +43,7 @@ type BeaconStateUpgradable interface {
 type BeaconStateExtension interface {
 	SlashValidator(slashedInd uint64, whistleblowerInd *uint64) (uint64, error)
 	InitiateValidatorExit(index uint64) error
+	InitiateBuilderExit(builderIndex cltypes.BuilderIndex)
 	GetActiveValidatorsIndices(epoch uint64) (indicies []uint64)
 	GetTotalActiveBalance() uint64
 	ComputeCommittee(indicies []uint64, slot uint64, index, count uint64) ([]uint64, error)
@@ -70,6 +71,15 @@ type BeaconStateExtension interface {
 	ComputeExitEpochAndUpdateChurn(exitBalance uint64) uint64
 	GetConsolidationBalanceToConsume() uint64
 	GetProposerLookahead() solid.Uint64VectorSSZ
+	GetBuilders() *solid.ListSSZ[*cltypes.Builder]
+	GetLatestExecutionPayloadBid() *cltypes.ExecutionPayloadBid
+	GetLatestBlockHash() common.Hash
+	GetBuilderPendingWithdrawals() *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]
+	GetBuilderPendingPayments() *solid.VectorSSZ[*cltypes.BuilderPendingPayment]
+	GetBuilderPaymentQuorumThreshold() uint64
+	GetNextWithdrawalBuilderIndex() cltypes.BuilderIndex
+	GetPayloadExpectedWithdrawals() *solid.ListSSZ[*cltypes.Withdrawal]
+	GetIndexedPayloadAttestation(payloadAttestation *cltypes.PayloadAttestation) (*cltypes.IndexedPayloadAttestation, error)
 }
 
 type BeaconStateBasic interface {
@@ -143,6 +153,14 @@ type BeaconStateMutator interface {
 	SetConsolidationBalanceToConsume(uint64)
 	SetEarlistConsolidationEpoch(uint64)
 	SetProposerLookahead(proposerLookahead solid.Uint64VectorSSZ)
+	SetExecutionPayloadAvailability(slot uint64, available bool)
+	SetBuilderPendingPayments(*solid.VectorSSZ[*cltypes.BuilderPendingPayment])
+	SetBuilderPendingWithdrawals(withdrawals *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal])
+	SetPayloadExpectedWithdrawals(withdrawals *solid.ListSSZ[*cltypes.Withdrawal])
+	SetLatestBlockHash(hash common.Hash)
+	SetNextWithdrawalBuilderIndex(index cltypes.BuilderIndex)
+	SetBuilders(builders *solid.ListSSZ[*cltypes.Builder])
+	SetLatestExecutionPayloadBid(bid *cltypes.ExecutionPayloadBid)
 
 	AddEth1DataVote(vote *cltypes.Eth1Data)
 	AddValidator(validator solid.Validator, balance uint64)
