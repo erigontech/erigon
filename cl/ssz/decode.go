@@ -79,6 +79,13 @@ func UnmarshalSSZ(buf []byte, version int, schema ...any) (err error) {
 			// If the element is a byte slice, copy the corresponding data from the buf to the slice
 			copy(obj, buf[position:])
 			position += len(obj)
+		case *bool:
+			if len(buf) < position+1 {
+				return ssz.ErrLowBufferSize
+			}
+			// If the element is a pointer to bool, decode it from the buf
+			*obj = buf[position] != 0
+			position += 1
 		case SizedObjectSSZ:
 			// If the element implements the SizedObjectSSZ interface
 			if obj.Static() {
