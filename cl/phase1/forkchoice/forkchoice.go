@@ -148,10 +148,6 @@ type ForkChoiceStore struct {
 	probabilisticHeadGetter bool
 }
 
-type LatestMessage struct {
-	Epoch uint64
-	Root  common.Hash
-}
 
 type childrens struct {
 	childrenHashes []common.Hash

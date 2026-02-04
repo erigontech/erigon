@@ -19,6 +19,7 @@ package forkchoice
 import (
 	"errors"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
@@ -78,7 +79,7 @@ func (f *ForkChoiceStore) OnAttestation(
 	}
 
 	// Lastly update latest messages.
-	f.processAttestingIndicies(attestation, attestationIndicies)
+	f.updateLatestMessages(attestation, attestationIndicies)
 
 	return nil
 }
@@ -89,7 +90,7 @@ func (f *ForkChoiceStore) ProcessAttestingIndicies(
 ) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.processAttestingIndicies(attestation, attestionIndicies)
+	f.updateLatestMessages(attestation, attestionIndicies)
 }
 
 func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(
@@ -180,7 +181,19 @@ func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
 	f.equivocatingIndicies[index] |= 1 << uint(subIndex)
 }
 
-func (f *ForkChoiceStore) processAttestingIndicies(
+func (f *ForkChoiceStore) updateLatestMessages(
+	attestation *solid.Attestation,
+	indicies []uint64,
+) {
+	currentEpoch := f.computeEpochAtSlot(f.Slot())
+	if f.beaconCfg.GetCurrentStateVersion(currentEpoch) >= clparams.GloasVersion {
+		f.updateLatestMessagesGloas(attestation, indicies)
+	} else {
+		f.updateLatestMessagesPreGloas(attestation, indicies)
+	}
+}
+
+func (f *ForkChoiceStore) updateLatestMessagesPreGloas(
 	attestation *solid.Attestation,
 	indicies []uint64,
 ) {
@@ -196,6 +209,32 @@ func (f *ForkChoiceStore) processAttestingIndicies(
 			f.setLatestMessage(index, LatestMessage{
 				Epoch: target.Epoch,
 				Root:  beaconBlockRoot,
+			})
+		}
+	}
+}
+
+// updateLatestMessagesGloas updates latest messages using slot-based comparison
+// and tracks payload_present from the attestation index.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) updateLatestMessagesGloas(
+	attestation *solid.Attestation,
+	indicies []uint64,
+) {
+	slot := attestation.Data.Slot
+	beaconBlockRoot := attestation.Data.BeaconBlockRoot
+	payloadPresent := attestation.Data.CommitteeIndex == 1
+
+	for _, index := range indicies {
+		if f.isUnequivocating(index) {
+			continue
+		}
+		validatorMessage, has := f.getLatestMessage(index)
+		if !has || slot > validatorMessage.Slot {
+			f.setLatestMessage(index, LatestMessage{
+				Slot:           slot,
+				Root:           beaconBlockRoot,
+				PayloadPresent: payloadPresent,
 			})
 		}
 	}
