@@ -237,8 +237,8 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 		return err
 	}
 	withdrawals := []*types.Withdrawal{}
-	expWithdrawals, _ := state.ExpectedWithdrawals(s, epoch)
-	for _, w := range expWithdrawals {
+	expWithdrawals := state.GetExpectedWithdrawals(s, epoch)
+	for _, w := range expWithdrawals.Withdrawals {
 		withdrawals = append(withdrawals, &types.Withdrawal{
 			Amount:    w.Amount,
 			Index:     w.Index,

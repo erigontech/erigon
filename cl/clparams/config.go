@@ -519,6 +519,9 @@ type BeaconChainConfig struct {
 	DomainApplicationBuilder          common.Bytes4 `json:"-"`                                                                                              // DomainApplicationBuilder defines the BLS signature domain for application builder.
 	DomainBLSToExecutionChange        common.Bytes4 `json:"-"`                                                                                              // DomainBLSToExecutionChange defines the BLS signature domain to change withdrawal addresses to ETH1 prefix
 	DomainBlobSideCar                 common.Bytes4 `yaml:"DOMAIN_BLOB_SIDECAR" spec:"true" json:"DOMAIN_BLOB_SIDECAR"`                                     // DomainBlobSideCar defines the BLS signature domain for blob sidecar verification
+	DomainBeaconBuilder               common.Bytes4 `json:"-"`                                                                                              // DomainBeaconBuilder defines the BLS signature domain for beacon builder.
+	DomainPtcAttester                 common.Bytes4 `json:"-"`                                                                                              // DomainPtcAttester defines the BLS signature domain for proto-danksharding attestation verification.
+	DomainProposerPreferences         common.Bytes4 `json:"-"`                                                                                              // DomainProposerPreferences defines the BLS signature domain for proposer preferences.
 
 	// Slasher constants.
 	PruneSlasherStoragePeriod uint64 `json:"-"` // PruneSlasherStoragePeriod defines the time period expressed in number of epochs were proof of stake network should prune attestation and block header store.
@@ -638,6 +641,14 @@ type BeaconChainConfig struct {
 	// Fulu
 	ValidatorCustodyRequirement      uint64 `yaml:"VALIDATOR_CUSTODY_REQUIREMENT" spec:"true" json:"VALIDATOR_CUSTODY_REQUIREMENT,string"`               // ValidatorCustodyRequirement defines the custody requirement for validators.
 	BalancePerAdditionalCustodyGroup uint64 `yaml:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP" spec:"true" json:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP,string"` // BalancePerAdditionalCustodyGroup defines the balance required per additional custody group.
+
+	// Gloas
+	BuilderWithdrawalPrefix        ConfigByte `yaml:"-" json:"-"`
+	MaxPayloadAttestations         uint64     `yaml:"MAX_PAYLOAD_ATTESTATIONS" spec:"true" json:"MAX_PAYLOAD_ATTESTATIONS,string"`                     // MaxPayloadAttestations defines the maximum number of payload attestations in a block.
+	BuilderRegistryLimit           uint64     `yaml:"BUILDER_REGISTRY_LIMIT" spec:"true" json:"BUILDER_REGISTRY_LIMIT,string"`                         // BuilderRegistryLimit defines the upper bound of builders can participate in eth2.
+	BuilderPendingWithdrawalsLimit uint64     `yaml:"BUILDER_PENDING_WITHDRAWALS_LIMIT" spec:"true" json:"BUILDER_PENDING_WITHDRAWALS_LIMIT,string"`   // BuilderPendingWithdrawalsLimit defines the maximum number of pending withdrawals for builders.
+	MaxBuildersPerWithdrawalsSweep uint64     `yaml:"MAX_BUILDERS_PER_WITHDRAWALS_SWEEP" spec:"true" json:"MAX_BUILDERS_PER_WITHDRAWALS_SWEEP,string"` // MaxBuildersPerWithdrawalsSweep bounds the size of the sweep searching for builder withdrawals per slot.
+	MinBuilderWithdrawabilityDelay uint64     `yaml:"MIN_BUILDER_WITHDRAWABILITY_DELAY" spec:"true" json:"MIN_BUILDER_WITHDRAWABILITY_DELAY,string"`   // MinBuilderWithdrawabilityDelay is the shortest amount of time a builder has to wait to withdraw.
 }
 
 // GetBlobParameters returns the blob parameters at a given epoch
@@ -845,6 +856,9 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	DomainApplicationMask:             utils.Uint32ToBytes4(0x00000001),
 	DomainApplicationBuilder:          utils.Uint32ToBytes4(0x00000001),
 	DomainBLSToExecutionChange:        utils.Uint32ToBytes4(0x0A000000),
+	DomainBeaconBuilder:               utils.Uint32ToBytes4(0x0B000000),
+	DomainPtcAttester:                 utils.Uint32ToBytes4(0x0C000000),
+	DomainProposerPreferences:         utils.Uint32ToBytes4(0x0D000000),
 
 	// Prysm constants.
 	ConfigName: "mainnet",
@@ -963,6 +977,14 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 		{412672, 15},
 		{419072, 21},
 	},
+
+	// Gloas
+	BuilderWithdrawalPrefix:        0x03,
+	MaxPayloadAttestations:         4,
+	BuilderRegistryLimit:           1 << 40,
+	BuilderPendingWithdrawalsLimit: 1 << 20,
+	MaxBuildersPerWithdrawalsSweep: 1 << 14,
+	MinBuilderWithdrawabilityDelay: 64,
 }
 
 func mainnetConfig() BeaconChainConfig {
