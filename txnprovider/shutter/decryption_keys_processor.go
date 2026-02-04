@@ -118,25 +118,20 @@ func (dkp *DecryptionKeysProcessor) processKeys(ctx context.Context) error {
 }
 
 func (dkp *DecryptionKeysProcessor) process(msg *proto.DecryptionKeys) error {
-	gnoExtraData := msg.GetGnosis()
-	if gnoExtraData == nil {
-		dkp.logger.Debug("skipping decryption keys message - missing gnosis extra data")
-		return nil
-	}
 	processingTimeStart := time.Now()
-	slot := gnoExtraData.Slot
+	slot := msg.GetGnosis().Slot
 	eonIndex := EonIndex(msg.Eon)
 	dkp.logger.Debug(
 		"processing decryption keys message",
 		"instanceId", msg.InstanceId,
 		"eonIndex", eonIndex,
 		"slot", slot,
-		"txnIndex", gnoExtraData.TxPointer,
+		"txnIndex", msg.GetGnosis().TxPointer,
 		"keys", len(msg.Keys),
 	)
 
 	keys := msg.Keys[1:] // skip placeholder (we can safely do this because msg has already been validated)
-	from := TxnIndex(gnoExtraData.TxPointer)
+	from := TxnIndex(msg.GetGnosis().TxPointer)
 	to := from + TxnIndex(len(keys)) // [from,to)
 	processedMark := ProcessedMark{Slot: slot, Eon: eonIndex, From: from, To: to}
 	if dkp.processed.Contains(processedMark) {
