@@ -682,8 +682,6 @@ var timeboostedTxTypes = map[string]bool{
 	"0x3":  true,
 	"0x4":  true,
 	"0x68": true,
-
-	"0x69": true, // no timbeoosted but for simplicity of checking
 }
 
 // genFromRPc connects to the RPC, fetches blocks starting from the given block,
@@ -1130,7 +1128,6 @@ func FetchBlocksBatch(client, receiptClient *rpc.Client, startBlock, endBlock, b
 	if err != nil {
 		log.Crit("Failed to fetch block metadata batch", "err", err)
 	}
-
 
 	blocks := make([]*types.Block, actualBatchSize)
 	var eg errgroup.Group
