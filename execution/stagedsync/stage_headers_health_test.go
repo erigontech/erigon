@@ -33,6 +33,7 @@ func TestCheckL2RPCEndpointsHealth_NilReceiptClient(t *testing.T) {
 				},
 			},
 		},
+		"arb_getRawBlockMetadata": nil,
 	}
 	srv := newMockRPCServer(t, responses)
 	defer srv.Close()
@@ -61,6 +62,7 @@ func TestCheckL2RPCEndpointsHealth_Success(t *testing.T) {
 			"transactionHash": txHash,
 			"status":          "0x1",
 		},
+		"arb_getRawBlockMetadata": nil,
 	}
 	srv := newMockRPCServer(t, responses)
 	defer srv.Close()
@@ -105,6 +107,7 @@ func TestCheckL2RPCEndpointsHealth_ReceiptMismatch(t *testing.T) {
 			"transactionHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
 			"status":          "0x0",
 		},
+		"arb_getRawBlockMetadata": nil,
 	}
 	srv := newMockRPCServer(t, responses)
 	defer srv.Close()
@@ -125,6 +128,7 @@ func TestCheckL2RPCEndpointsHealth_EmptyTransactions(t *testing.T) {
 			"hash":         "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
 			"transactions": []interface{}{},
 		},
+		"arb_getRawBlockMetadata": nil,
 	}
 	srv := newMockRPCServer(t, responses)
 	defer srv.Close()
@@ -150,6 +154,7 @@ func TestCheckL2RPCEndpointsHealth_NilReceipt(t *testing.T) {
 			},
 		},
 		"eth_getTransactionReceipt": nil,
+		"arb_getRawBlockMetadata": nil,
 	}
 	srv := newMockRPCServer(t, responses)
 	defer srv.Close()
@@ -161,6 +166,36 @@ func TestCheckL2RPCEndpointsHealth_NilReceipt(t *testing.T) {
 	err = checkL2RPCEndpointsHealth(context.Background(), client, client, 100, srv.URL, srv.URL)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "returned nil for tx")
+}
+
+func TestCheckL2RPCEndpointsHealth_BlockMetadataMethodNotSupported(t *testing.T) {
+	txHash := "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+	responses := map[string]interface{}{
+		"eth_getBlockByNumber": map[string]interface{}{
+			"number": "0x64",
+			"hash":   "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+			"transactions": []interface{}{
+				map[string]interface{}{
+					"hash": txHash,
+				},
+			},
+		},
+		"eth_getTransactionReceipt": map[string]interface{}{
+			"transactionHash": txHash,
+			"status":          "0x1",
+		},
+		// arb_getRawBlockMetadata
+	}
+	srv := newMockRPCServer(t, responses)
+	defer srv.Close()
+
+	client, err := rpc.Dial(srv.URL, log.New())
+	require.NoError(t, err)
+	defer client.Close()
+
+	err = checkL2RPCEndpointsHealth(context.Background(), client, client, 100, srv.URL, srv.URL)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "arb_getRawBlockMetadata")
 }
 
 func newMockRPCServer(t *testing.T, responses map[string]interface{}) *httptest.Server {
@@ -268,6 +303,6 @@ func TestCheckL2RPCEndpointsHealth_Integration(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Logf("Health check passed for block %d", blockNum)
-	t.Logf("  Block endpoint: %s", l2rpc)
+	t.Logf("  Block metadata endpoint: %s", l2rpc)
 	t.Logf("  Receipt endpoint: %s", l2rpcReceipt)
 }

@@ -253,19 +253,27 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 	return nil
 }
 
-func checkL2RPCEndpointsHealth(ctx context.Context, blockClient, receiptClient *rpc.Client, blockNum uint64, blockRPCAddr, receiptRPCAddr string) error {
-	if blockClient == nil {
+func checkL2RPCEndpointsHealth(ctx context.Context, blockMetadataClient, receiptClient *rpc.Client, blockNum uint64, blockMetadataRPCAddr, receiptRPCAddr string) error {
+	if blockMetadataClient == nil {
 		return nil
 	}
 
 	checkBlockNum := fmt.Sprintf("0x%x", blockNum)
 
 	var blockResult map[string]interface{}
-	if err := blockClient.CallContext(ctx, &blockResult, "eth_getBlockByNumber", checkBlockNum, true); err != nil {
-		return fmt.Errorf("--l2rpc %q cannot respond to eth_getBlockByNumber for block %d: %w", blockRPCAddr, blockNum, err)
+	if err := blockMetadataClient.CallContext(ctx, &blockResult, "eth_getBlockByNumber", checkBlockNum, true); err != nil {
+		return fmt.Errorf("--l2rpc %q cannot respond to eth_getBlockByNumber for block %d: %w", blockMetadataRPCAddr, blockNum, err)
 	}
 	if blockResult == nil {
-		return fmt.Errorf("--l2rpc %q returned nil for block %d", blockRPCAddr, blockNum)
+		return fmt.Errorf("--l2rpc %q returned nil for block %d", blockMetadataRPCAddr, blockNum)
+	}
+
+	// Just verify the RPC method exists and the call doesn't fail.
+	// Old blocks may return null result, which is fine.
+	var metadataResult interface{}
+	if err := blockMetadataClient.CallContext(ctx, &metadataResult, "arb_getRawBlockMetadata",
+		fmt.Sprintf("0x%x", blockNum), fmt.Sprintf("0x%x", blockNum+1)); err != nil {
+		return fmt.Errorf("--l2rpc.blockmetadata %q cannot respond to arb_getRawBlockMetadata for block %d: %w", blockMetadataRPCAddr, blockNum, err)
 	}
 
 	txs, ok := blockResult["transactions"].([]interface{})
@@ -305,7 +313,7 @@ func checkL2RPCEndpointsHealth(ctx context.Context, blockClient, receiptClient *
 		return fmt.Errorf("--l2rpc.receipt %q returned mismatched receipt: requested tx %s but got %s", receiptRPCAddr, txHash, receiptTxHash)
 	}
 
-	log.Info("[Arbitrum] L2 RPC endpoints health check passed", "blockEndpoint", blockRPCAddr, "receiptEndpoint", receiptRPCAddr, "checkedBlock", blockNum)
+	log.Info("[Arbitrum] L2 RPC endpoints health check passed", "blockMetadataEndpoint", blockMetadataRPCAddr, "receiptEndpoint", receiptRPCAddr, "checkedBlock", blockNum)
 	return nil
 }
 
