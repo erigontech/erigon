@@ -56,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 )
 
+//goland:noinspection DuplicatedCode
 func TestPoolCleanup(t *testing.T) {
 	t.Parallel()
 	pt := PoolTest{t}
@@ -123,6 +124,7 @@ func TestPoolCleanup(t *testing.T) {
 
 func TestPoolCleanupShouldNotDeleteNewEncTxnsDueToConsecutiveEmptyDecrMsgs(t *testing.T) {
 	/*
+		see https://github.com/erigontech/erigon/issues/18263
 		Reproduces the following bug:
 			1. we were getting decryption key messages for our slots with 0 keys for transactions (valid behaviour when no transactions to decrypt)
 			2. we got an encrypted txn submission at block 19,182,545
@@ -196,6 +198,7 @@ func TestPoolCleanupShouldNotDeleteNewEncTxnsDueToConsecutiveEmptyDecrMsgs(t *te
 	})
 }
 
+//goland:noinspection DuplicatedCode
 func TestPoolSkipsBlobTxns(t *testing.T) {
 	t.Parallel()
 	pt := PoolTest{t}
@@ -242,6 +245,7 @@ func TestPoolSkipsBlobTxns(t *testing.T) {
 	})
 }
 
+//goland:noinspection DuplicatedCode
 func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
 	t.Parallel()
 	pt := PoolTest{t}
@@ -298,6 +302,47 @@ func TestPoolProvideTxnsUsesGasTargetAndTxnsIdFilter(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, txnsRes2, 1)
 		require.Equal(t, 2, txnsIdFilter.Cardinality())
+	})
+}
+
+//goland:noinspection DuplicatedCode
+func TestPoolWithDecryptionKeysThatDoNotFollowTxnIndexOrder(t *testing.T) {
+	// see https://github.com/erigontech/erigon/issues/18780
+	t.Parallel()
+	pt := PoolTest{t}
+	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {
+		// simulate expected contract calls for reading the first ekg after the first block event
+		ekg, err := testhelpers.MockEonKeyGeneration(shutter.EonIndex(0), 1, 2, 1)
+		require.NoError(t, err)
+		handle.SimulateInitialEonRead(t, ekg)
+		// simulate loadSubmissions after the first block
+		handle.SimulateFilterLogs(common.HexToAddress(handle.config.SequencerContractAddress), []types.Log{})
+		// simulate the first block
+		err = handle.SimulateNewBlockChange(ctx)
+		require.NoError(t, err)
+		synctest.Wait()
+		require.Len(t, pool.AllEncryptedTxns(), 0)
+		require.Len(t, pool.AllDecryptedTxns(), 0)
+		// simulate some encrypted txn submissions and simulate a new block
+		encTxn1 := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon())
+		encTxn2 := MockEncryptedTxn(t, handle.config.ChainId, ekg.Eon())
+		err = handle.SimulateLogEvents(ctx, []types.Log{
+			MockTxnSubmittedEventLog(t, handle.config, ekg.Eon(), 1, encTxn1),
+			MockTxnSubmittedEventLog(t, handle.config, ekg.Eon(), 2, encTxn2),
+		})
+		require.NoError(t, err)
+		handle.SimulateCachedEonRead(t, ekg)
+		err = handle.SimulateNewBlockChange(ctx)
+		require.NoError(t, err)
+		synctest.Wait()
+		require.Len(t, pool.AllEncryptedTxns(), 2)
+		require.Len(t, pool.AllDecryptedTxns(), 0)
+		// simulate decryption keys but in reverse order
+		handle.SimulateCurrentSlot()
+		handle.SimulateDecryptionKeys(ctx, t, ekg, 1, encTxn2.IdentityPreimage, encTxn1.IdentityPreimage)
+		synctest.Wait()
+		require.Len(t, pool.AllEncryptedTxns(), 2)
+		require.Len(t, pool.AllDecryptedTxns(), 2)
 	})
 }
 
@@ -845,6 +890,7 @@ func MockTxnSubmittedEventData(
 	return data
 }
 
+//goland:noinspection DuplicatedCode
 func MockEncryptedTxn(t *testing.T, chainId *uint256.Int, eon shutter.Eon) testhelpers.EncryptedSubmission {
 	senderPrivKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -883,6 +929,7 @@ func MockEncryptedTxn(t *testing.T, chainId *uint256.Int, eon shutter.Eon) testh
 	}
 }
 
+//goland:noinspection DuplicatedCode
 func MockEncryptedBlobTxn(t *testing.T, chainId *uint256.Int, eon shutter.Eon) testhelpers.EncryptedSubmission {
 	senderPrivKey, err := crypto.GenerateKey()
 	require.NoError(t, err)

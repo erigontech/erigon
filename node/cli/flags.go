@@ -469,6 +469,9 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 
 		StateCache:          kvcache.DefaultCoherentConfig,
 		RPCSlowLogThreshold: ctx.Duration(utils.RPCSlowFlag.Name),
+
+		RpcTxSyncDefaultTimeout: ctx.Duration(utils.RpcTxSyncDefaultTimeoutFlag.Name),
+		RpcTxSyncMaxTimeout:     ctx.Duration(utils.RpcTxSyncMaxTimeoutFlag.Name),
 	}
 
 	if ctx.IsSet(utils.WSSubscribeLogsChannelSize.Name) {
