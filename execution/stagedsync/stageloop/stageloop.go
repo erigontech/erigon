@@ -135,7 +135,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	defer tx.Rollback()
 	if isDomainAheadOfBlocks(ctx, tx, logger) {
 		log.Warn("[dbg] alex4 ProcessFrozenBlocks isDomainAheadOfBlocks")
-		return nil
+		return tx.Commit()
 	}
 
 	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
