@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
@@ -253,7 +254,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	currentContext, err := execctx.NewSharedDomains(ctx, tx, e.logger)
 
 	if err != nil {
-		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		if !errors.Is(err, commitmentdb.ErrBehindCommitment) {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		}
 	}
 
 	defer func() {
