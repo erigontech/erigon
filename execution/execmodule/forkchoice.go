@@ -393,8 +393,11 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			}
 		}
 	}
-
 	if isDomainAheadOfBlocks(ctx, tx, e.logger) {
+		if err := currentContext.Flush(ctx, tx); err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		}
+		currentContext.ClearRam(true)
 		if err := tx.Commit(); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
