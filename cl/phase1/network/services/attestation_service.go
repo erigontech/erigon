@@ -295,13 +295,13 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	// [REJECT] The attestation's target block is an ancestor of the block named in the LMD vote -- i.e.
 	// get_checkpoint_block(store, attestation.data.beacon_block_root, attestation.data.target.epoch) == attestation.data.target.root
 	startSlotAtEpoch := targetEpoch * s.beaconCfg.SlotsPerEpoch
-	if targetBlock := s.forkchoiceStore.Ancestor(root, startSlotAtEpoch); targetBlock != data.Target.Root {
-		return fmt.Errorf("invalid target block. root %v targetEpoch %v attTargetBlockRoot %v targetBlock %v", root.Hex(), targetEpoch, data.Target.Root.Hex(), targetBlock.Hex())
+	if targetBlock := s.forkchoiceStore.Ancestor(root, startSlotAtEpoch); targetBlock.Root != data.Target.Root {
+		return fmt.Errorf("invalid target block. root %v targetEpoch %v attTargetBlockRoot %v targetBlock %v", root.Hex(), targetEpoch, data.Target.Root.Hex(), targetBlock.Root.Hex())
 	}
 	// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by attestation.data.beacon_block_root --
 	// i.e. get_checkpoint_block(store, attestation.data.beacon_block_root, store.finalized_checkpoint.epoch) == store.finalized_checkpoint.root
 	startSlotAtEpoch = s.forkchoiceStore.FinalizedCheckpoint().Epoch * s.beaconCfg.SlotsPerEpoch
-	if s.forkchoiceStore.Ancestor(root, startSlotAtEpoch) != s.forkchoiceStore.FinalizedCheckpoint().Root {
+	if s.forkchoiceStore.Ancestor(root, startSlotAtEpoch).Root != s.forkchoiceStore.FinalizedCheckpoint().Root {
 		return fmt.Errorf("invalid finalized checkpoint %w", ErrIgnore)
 	}
 

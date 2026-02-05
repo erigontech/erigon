@@ -20,6 +20,7 @@ import (
 	"errors"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/transition"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -110,19 +111,38 @@ func (f *ForkChoiceStore) computeSlotsSinceEpochStart(slot uint64) uint64 {
 }
 
 // Ancestor returns the ancestor to the given root.
-func (f *ForkChoiceStore) Ancestor(root common.Hash, slot uint64) common.Hash {
-	header, has := f.forkGraph.GetHeader(root)
-	if !has {
-		return common.Hash{}
+// [Modified in Gloas:EIP7732] Returns ForkChoiceNode with payload status.
+func (f *ForkChoiceStore) Ancestor(root common.Hash, slot uint64) ForkChoiceNode {
+	block, has := f.forkGraph.GetBlock(root)
+	if !has || block == nil {
+		return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
 	}
-	for header.Slot > slot {
-		root = header.ParentRoot
-		header, has = f.forkGraph.GetHeader(header.ParentRoot)
-		if !has {
-			return common.Hash{}
+
+	// If block.slot <= slot, return with PENDING status (original: return root directly)
+	if block.Block.Slot <= slot {
+		return ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending}
+	}
+
+	// Traverse up the chain until parent.slot <= slot
+	parentBlock, has := f.forkGraph.GetBlock(block.Block.ParentRoot)
+	if !has || parentBlock == nil {
+		return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
+	}
+
+	for parentBlock.Block.Slot > slot {
+		block = parentBlock
+		parentBlock, has = f.forkGraph.GetBlock(block.Block.ParentRoot)
+		if !has || parentBlock == nil {
+			return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
 		}
 	}
-	return root
+
+	// Return parent root with payload status
+	// For pre-Gloas compatibility, the Root is the same as before
+	return ForkChoiceNode{
+		Root:          block.Block.ParentRoot,
+		PayloadStatus: f.getParentPayloadStatus(block.Block),
+	}
 }
 
 // getCheckpointState computes and caches checkpoint states.

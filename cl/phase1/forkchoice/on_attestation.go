@@ -255,11 +255,11 @@ func (f *ForkChoiceStore) ValidateOnAttestation(attestation *solid.Attestation) 
 	}
 	// LMD vote must be consistent with FFG vote target
 	targetSlot := f.computeStartSlotAtEpoch(target.Epoch)
-	ancestorRoot := f.Ancestor(attestation.Data.BeaconBlockRoot, targetSlot)
-	if ancestorRoot == (common.Hash{}) {
+	ancestorNode := f.Ancestor(attestation.Data.BeaconBlockRoot, targetSlot)
+	if ancestorNode.Root == (common.Hash{}) {
 		return errors.New("could not retrieve ancestor")
 	}
-	if ancestorRoot != target.Root {
+	if ancestorNode.Root != target.Root {
 		return errors.New("ancestor root mismatches with target")
 	}
 
