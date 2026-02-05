@@ -536,7 +536,7 @@ func TestHistoryCanPrune(t *testing.T) {
 				binary.BigEndian.PutUint64(val, i)
 			}
 
-			err = writer.AddPrevValue(append(addr[:], val...), i, prev)
+			err = writer.AddPrevValue(append(addr, val...), i, prev)
 			require.NoError(err)
 
 			prev = common.Copy(val)
@@ -558,8 +558,8 @@ func TestHistoryCanPrune(t *testing.T) {
 			writeKey(t, h, db)
 
 			rwTx, err := db.BeginRw(context.Background())
-			defer rwTx.Rollback()
 			require.NoError(t, err)
+			defer rwTx.Rollback()
 
 			hc := h.BeginFilesRo()
 			defer hc.Close()
@@ -597,8 +597,8 @@ func TestHistoryCanPrune(t *testing.T) {
 		writeKey(t, h, db)
 
 		rwTx, err := db.BeginRw(context.Background())
-		defer rwTx.Rollback()
 		require.NoError(t, err)
+		defer rwTx.Rollback()
 
 		hc := h.BeginFilesRo()
 		defer hc.Close()

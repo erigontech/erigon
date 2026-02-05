@@ -42,6 +42,7 @@ func TestKvServer_renew(t *testing.T) {
 	require.NoError(db.Update(ctx, func(tx kv.RwTx) error {
 		wc, err := tx.RwCursorDupSort(kv.TblAccountVals)
 		require.NoError(err)
+		defer wc.Close()
 		require.NoError(wc.Append([]byte{1}, []byte{1}))
 		require.NoError(wc.Append([]byte{1}, []byte{2}))
 		require.NoError(wc.Append([]byte{2}, []byte{1}))

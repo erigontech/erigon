@@ -118,8 +118,8 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 	)
 
 	for i, test := range tests {
-		x := *new(uint256.Int).SetBytes(common.Hex2Bytes(test.X))
-		y := *new(uint256.Int).SetBytes(common.Hex2Bytes(test.Y))
+		x := *uint256.NewInt(0).SetBytes(common.Hex2Bytes(test.X))
+		y := *uint256.NewInt(0).SetBytes(common.Hex2Bytes(test.Y))
 		expected := new(uint256.Int).SetBytes(common.Hex2Bytes(test.Expected))
 		callContext.Stack.push(x)
 		callContext.Stack.push(y)
