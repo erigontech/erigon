@@ -143,19 +143,16 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		return nil
 	}
 
+	// after StageSnapshots (files downloading): if domains are ahead of block files, then nothing to execute.
+	if isDomainAheadOfBlocks(ctx, tx, logger) {
+		return tx.Commit()
+	}
+
 	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
 		return err
 	}
 	defer doms.Close()
-
-	// after StageSnapshots (files downloading): if domains are ahead of block files, then nothing to execute.
-	if isDomainAheadOfBlocks(ctx, tx, logger) {
-		if err := doms.Flush(ctx, tx); err != nil {
-			return err
-		}
-		return tx.Commit()
-	}
 
 	var finishStageBeforeSync uint64
 	if hook != nil {
