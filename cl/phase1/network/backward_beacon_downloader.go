@@ -247,7 +247,6 @@ func (b *BackwardBeaconDownloader) trySkipToExistingBlock(ctx context.Context) e
 	elFrozenBlocks := uint64(math.MaxUint64)
 	if b.engine != nil && b.engine.SupportInsertion() {
 		elFrozenBlocks = b.engine.FrozenBlocks(ctx)
-		log.Warn("[dbg] alex3 trySkipToExistingBlock", "elFrozenBlocks", elFrozenBlocks)
 	}
 
 	clFrozenBlocks := uint64(0)
@@ -267,7 +266,6 @@ func (b *BackwardBeaconDownloader) trySkipToExistingBlock(ctx context.Context) e
 			}
 			if b.engine != nil && b.engine.SupportInsertion() {
 				elFrozenBlocks = b.engine.FrozenBlocks(ctx)
-				log.Warn("[dbg] alex3 trySkipToExistingBlock", "elFrozenBlocks", elFrozenBlocks)
 			}
 		default:
 		}
