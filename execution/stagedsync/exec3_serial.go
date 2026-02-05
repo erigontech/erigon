@@ -356,6 +356,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
 				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsGetter(se.applyTx)))
+				defer ibs.Release(true)
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 					ret, err := protocol.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, *se.cfg.vmConfig)

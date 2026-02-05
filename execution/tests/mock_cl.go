@@ -270,7 +270,7 @@ func retryEngine[T any](ctx context.Context, retryStatuses []enginetypes.EngineS
 		return res, nil
 	}
 	// don't retry for too long
-	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	var backOff backoff.BackOff
 	backOff = backoff.NewConstantBackOff(50 * time.Millisecond)
