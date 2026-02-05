@@ -312,7 +312,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	if dbg.KVReadLevelledMetrics {
 		mxCommitmentRunning.Inc()
 		defer mxCommitmentRunning.Dec()
-		defer func(s time.Time) { mxCommitmentTook.ObserveDuration(s) }(time.Now())
+		defer mxCommitmentTook.ObserveDuration(time.Now())
 	}
 
 	updateCount := sdc.updates.Size()
