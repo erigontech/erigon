@@ -247,9 +247,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 						h, err := cfg.engine.CurrentHeader(ctx)
 						if err != nil || h == nil {
+							log.Warn("[dbg] alex1 CurrentHeader", "err", err)
 							log.Debug("could not log progress", "err", err)
 							lowestBlockToReach = cfg.engine.FrozenBlocks(ctx)
 						} else {
+							log.Warn("[dbg] alex1 CurrentHeader", "h", h.Number.Uint64())
 							lowestBlockToReach = h.Number.Uint64()
 						}
 					}

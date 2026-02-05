@@ -266,6 +266,11 @@ func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch 
 	if err != nil {
 		p.logger.Warn("[BlockCollector] Failed to get current header", "err", err)
 	}
+	if currentHeader == nil {
+		log.Warn("[dbg] alex2 CurrentHeader is nil")
+	} else {
+		log.Warn("[dbg] alex2 CurrentHeader is nil", "h", currentHeader.Number.Uint64())
+	}
 
 	isForkchoiceNeeded := currentHeader == nil || blocksBatch[len(blocksBatch)-1].NumberU64() > currentHeader.Number.Uint64()
 	if *inserted >= p.syncBackLoop {
