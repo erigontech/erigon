@@ -488,14 +488,6 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 				if err != nil {
 					return 0, 0, false, err
 				}
-				var stageSnaphotsProgress uint64
-				if len(bnBytes) == 8 {
-					stageSnaphotsProgress = binary.BigEndian.Uint64(bnBytes)
-				}
-				log.Warn("[dbg] SeekCommitment", "err", fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d, %s", ErrBehindCommitment, lastBn, blockNum, dbg.Stack()).Error(), "stageSnaphotsProgress", stageSnaphotsProgress)
-				if stageSnaphotsProgress > 0 {
-					return 0, 0, false, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d, %s", ErrBehindCommitment, lastBn, blockNum, dbg.Stack())
-				}
 				return 0, 0, false, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d, %s", ErrBehindCommitment, lastBn, blockNum, dbg.Stack())
 			}
 		}
