@@ -167,11 +167,11 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	for more := true; more; {
 		more, err = sync.Run(doms, tx, initialCycle, firstCycle)
 		if err != nil {
-			return err
+			return fmt.Errorf("ProcessFrozenBlocks: %w", err)
 		}
 
 		if err := sync.RunPrune(ctx, tx, initialCycle, 0); err != nil {
-			return err
+			return fmt.Errorf("ProcessFrozenBlocks: %w", err)
 		}
 
 		var finStageProgress uint64
@@ -193,7 +193,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		}
 
 		if err := doms.Flush(ctx, tx); err != nil {
-			return err
+			return fmt.Errorf("ProcessFrozenBlocks: %w", err)
 		}
 		doms.ClearRam(true)
 		if err := tx.Commit(); err != nil {
