@@ -145,6 +145,14 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	if onlySnapDownload {
 		return nil
 	}
+	// after StageSnapshots (files downloading): if domains are ahead of block files, then nothing to execute.
+	if execctx.IsDomainAheadOfBlocks(ctx, tx, logger) {
+		if err := doms.Flush(ctx, tx); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+
 	var finishStageBeforeSync uint64
 	if hook != nil {
 		finishStageBeforeSync, err = stages.GetStageProgress(tx, stages.Finish)

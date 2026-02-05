@@ -72,6 +72,16 @@ type accHolder interface {
 	SetChangesetAccumulator(acc *changeset.StateChangeSet)
 }
 
+func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.Logger) bool {
+	doms, err := NewSharedDomains(ctx, tx, logger)
+	if err != nil {
+		logger.Debug("domain ahead of blocks", "err", err)
+		return errors.Is(err, commitmentdb.ErrBehindCommitment)
+	}
+	defer doms.Close()
+	return false
+}
+
 type SharedDomains struct {
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext
 

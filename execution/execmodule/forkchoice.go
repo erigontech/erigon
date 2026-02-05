@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
@@ -74,16 +73,6 @@ func sendForkchoiceErrorWithoutWaiting(logger log.Logger, ch chan forkchoiceOutc
 	}
 
 	return err
-}
-
-func isDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.Logger) bool {
-	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
-	if err != nil {
-		logger.Debug("domain ahead of blocks", "err", err)
-		return errors.Is(err, commitmentdb.ErrBehindCommitment)
-	}
-	defer doms.Close()
-	return false
 }
 
 // verifyForkchoiceHashes verifies the finalized and safe hash of the forkchoice state
@@ -393,7 +382,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			}
 		}
 	}
-	if isDomainAheadOfBlocks(ctx, tx, e.logger) {
+	if execctx.IsDomainAheadOfBlocks(ctx, tx, e.logger) {
 		if err := currentContext.Flush(ctx, tx); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
