@@ -3,12 +3,14 @@ package exec
 import (
 	"context"
 	"sync/atomic"
+	"time"
 
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -112,8 +114,9 @@ func (bra *blockReadAheader) warmBody(ctx context.Context, db kv.RoDB, body *typ
 			}
 
 			// Capture loop variables for closure
-			workerStart, workerEnd := start, end
+			workerStart, workerEnd, workerID := start, end, w
 			wg.Go(func() error {
+				startTime := time.Now()
 				tx, err := db.BeginRo(ctx)
 				if err != nil {
 					return err
@@ -146,6 +149,7 @@ func (bra *blockReadAheader) warmBody(ctx context.Context, db kv.RoDB, body *typ
 						stateReader.ReadAccountStorage(acctChanges.Address, slot)
 					}
 				}
+				log.Debug("[warmBody] BAL worker finished", "worker", workerID, "entries", workerEnd-workerStart, "elapsed", time.Since(startTime))
 				return nil
 			})
 		}
@@ -177,8 +181,9 @@ func (bra *blockReadAheader) warmBody(ctx context.Context, db kv.RoDB, body *typ
 		}
 
 		// Capture loop variables for closure
-		workerStart, workerEnd := start, end
+		workerStart, workerEnd, workerID := start, end, w
 		wg.Go(func() error {
+			startTime := time.Now()
 			tx, err := db.BeginRo(ctx)
 			if err != nil {
 				return err
@@ -219,6 +224,7 @@ func (bra *blockReadAheader) warmBody(ctx context.Context, db kv.RoDB, body *typ
 					}
 				}
 			}
+			log.Debug("[warmBody] TX worker finished", "worker", workerID, "txns", workerEnd-workerStart, "elapsed", time.Since(startTime))
 			return nil
 		})
 	}
