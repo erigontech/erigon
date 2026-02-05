@@ -185,3 +185,102 @@ func (f *ForkChoiceStore) getParentPayloadStatus(block *cltypes.BeaconBlock) clt
 func (f *ForkChoiceStore) isParentNodeFull(block *cltypes.BeaconBlock) bool {
 	return f.getParentPayloadStatus(block) == cltypes.PayloadStatusFull
 }
+
+// isSupportingVote returns whether a vote for message.Root supports the chain
+// containing the beacon block node.Root with the payload contents indicated by
+// node.PayloadStatus as head.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) isSupportingVote(node ForkChoiceNode, message LatestMessage) bool {
+	block, has := f.forkGraph.GetBlock(node.Root)
+	if !has || block == nil {
+		return false
+	}
+
+	if node.Root == message.Root {
+		// Same root case
+		if node.PayloadStatus == cltypes.PayloadStatusPending {
+			return true
+		}
+		if message.Slot <= block.Block.Slot {
+			return false
+		}
+		if message.PayloadPresent {
+			return node.PayloadStatus == cltypes.PayloadStatusFull
+		} else {
+			return node.PayloadStatus == cltypes.PayloadStatusEmpty
+		}
+	} else {
+		// Different root case - check ancestor
+		ancestor := f.Ancestor(message.Root, block.Block.Slot)
+		return node.Root == ancestor.Root && (node.PayloadStatus == cltypes.PayloadStatusPending ||
+			node.PayloadStatus == ancestor.PayloadStatus)
+	}
+}
+
+// shouldExtendPayload returns whether the payload for the given root should be extended.
+// Returns true if:
+// - The payload is timely (received enough PTC votes), OR
+// - There's no proposer boost root, OR
+// - The proposer boost root's parent is not this root, OR
+// - The proposer boost root's parent node has FULL payload status
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) shouldExtendPayload(root common.Hash) bool {
+	// Check if payload is timely
+	if f.isPayloadTimely(root) {
+		return true
+	}
+
+	// Get proposer boost root
+	proposerRoot := f.ProposerBoostRoot()
+
+	// If no proposer boost root, return true
+	if proposerRoot == (common.Hash{}) {
+		return true
+	}
+
+	// Get the proposer boost block
+	proposerBlock, has := f.forkGraph.GetBlock(proposerRoot)
+	if !has || proposerBlock == nil {
+		return true
+	}
+
+	// If proposer boost root's parent is not this root, return true
+	if proposerBlock.Block.ParentRoot != root {
+		return true
+	}
+
+	// Check if parent node is full
+	return f.isParentNodeFull(proposerBlock.Block)
+}
+
+// getPayloadStatusTiebreaker returns a tiebreaker value for fork choice comparison.
+// Used to decide between chains with different payload statuses.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) getPayloadStatusTiebreaker(node ForkChoiceNode) uint8 {
+	// If status is PENDING, return as-is
+	if node.PayloadStatus == cltypes.PayloadStatusPending {
+		return uint8(node.PayloadStatus)
+	}
+
+	// Get the block to check its slot
+	block, has := f.forkGraph.GetBlock(node.Root)
+	if !has || block == nil {
+		return uint8(node.PayloadStatus)
+	}
+
+	// If block is not from the previous slot, return status as-is
+	if block.Block.Slot+1 != f.Slot() {
+		return uint8(node.PayloadStatus)
+	}
+
+	// To decide on a payload from the previous slot, choose
+	// between FULL and EMPTY based on shouldExtendPayload
+	if node.PayloadStatus == cltypes.PayloadStatusEmpty {
+		return uint8(cltypes.PayloadStatusEmpty)
+	}
+	// FULL case
+	if f.shouldExtendPayload(node.Root) {
+		return uint8(cltypes.PayloadStatusFull)
+	}
+	return uint8(cltypes.PayloadStatusPending) // Treat as PENDING (lower priority)
+}
