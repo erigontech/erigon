@@ -484,10 +484,6 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 				return 0, 0, false, err
 			}
 			if lastBn < blockNum {
-				bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("OtterSync"))
-				if err != nil {
-					return 0, 0, false, err
-				}
 				return 0, 0, false, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d, %s", ErrBehindCommitment, lastBn, blockNum, dbg.Stack())
 			}
 		}
