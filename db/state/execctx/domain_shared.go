@@ -80,6 +80,16 @@ type flushHook struct {
 	fn        func(context.Context, stateifs.DomainPutter) error
 }
 
+func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.Logger) bool {
+	doms, err := NewSharedDomains(ctx, tx, logger)
+	if err != nil {
+		logger.Debug("domain ahead of blocks", "err", err, "stack", dbg.Stack())
+		return errors.Is(err, commitmentdb.ErrBehindCommitment)
+	}
+	defer doms.Close()
+	return false
+}
+
 type SharedDomains struct {
 	sdCtx *commitmentdb.SharedDomainsCommitmentContext
 
@@ -121,7 +131,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) 
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
 
 	if err := sd.SeekCommitment(ctx, tx); err != nil {
-		return nil, err
+		return sd, err
 	}
 
 	return sd, nil

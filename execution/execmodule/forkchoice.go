@@ -76,16 +76,6 @@ func sendForkchoiceErrorWithoutWaiting(logger log.Logger, ch chan forkchoiceOutc
 	return err
 }
 
-func isDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.Logger) bool {
-	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
-	if err != nil {
-		logger.Debug("domain ahead of blocks", "err", err)
-		return errors.Is(err, commitmentdb.ErrBehindCommitment)
-	}
-	defer doms.Close()
-	return false
-}
-
 // verifyForkchoiceHashes verifies the finalized and safe hash of the forkchoice state
 func (e *EthereumExecutionModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, blockHash, finalizedHash, safeHash common.Hash) (bool, error) {
 	// Client software MUST return -38002: Invalid forkchoice state error if the payload referenced by
@@ -264,7 +254,9 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	currentContext, err := execctx.NewSharedDomains(ctx, tx, e.logger)
 
 	if err != nil {
-		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		if !errors.Is(err, commitmentdb.ErrBehindCommitment) {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		}
 	}
 
 	defer func() {
@@ -393,7 +385,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			}
 		}
 	}
-	if isDomainAheadOfBlocks(ctx, tx, e.logger) {
+	if execctx.IsDomainAheadOfBlocks(ctx, tx, e.logger) {
 		if err := currentContext.Flush(ctx, tx); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}

@@ -64,7 +64,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 	if blockLimit > 0 && min(blockNum+blockLimit, maxBlockNum) > blockNum+16 || maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] serial starting", execStage.LogPrefix()),
-			"from", blockNum, "to", maxBlockNum, "limit", blockNum+blockLimit-1, "initialTxNum", initialTxNum,
+			"from", blockNum, "to", min(maxBlockNum, blockNum+blockLimit-1), "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "lastFrozenStep", lastFrozenStep,
 			"initialCycle", initialCycle, "isForkValidation", se.isForkValidation, "isBlockProduction", se.isBlockProduction)
 	}
@@ -229,7 +229,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				"periodic commit check",
 				"block", se.doms.BlockNum(),
 				"txNum", se.doms.TxNum(),
-				"step", fmt.Sprintf("%.1f", float64(se.doms.TxNum())/float64(se.agg.StepSize())),
 				"commitment", times.ComputeCommitment,
 			)
 			if isBatchFull {

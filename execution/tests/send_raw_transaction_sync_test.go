@@ -22,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 	"github.com/stretchr/testify/require"
@@ -55,7 +54,7 @@ func TestSendRawTransactionSync(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		timeoutMillis := hexutil.Uint64(10000)
+		timeoutMillis := uint64(10000)
 		receipt, errSend = eat.RpcApiClient.SendRawTransactionSync(tx, &timeoutMillis)
 	}()
 
@@ -97,7 +96,7 @@ func TestSendRawTransactionSyncTimeout(t *testing.T) {
 	assert.NoError(err)
 
 	// Send the txn first time and just wait for timeout
-	timeoutMillis := hexutil.Uint64(100)
+	timeoutMillis := uint64(100)
 	receipt, err := eat.RpcApiClient.SendRawTransactionSync(tx, &timeoutMillis)
 	assert.Error(err)
 	assert.Equal("the transaction was added to the mempool but wasn't processed in 100ms", err.Error())
