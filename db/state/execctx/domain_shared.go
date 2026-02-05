@@ -108,7 +108,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) 
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
 
 	if err := sd.SeekCommitment(ctx, tx); err != nil {
-		return nil, err
+		return sd, err
 	}
 
 	return sd, nil
