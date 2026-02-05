@@ -12,7 +12,7 @@ on:
         required: false
         default: false
   schedule:
-  - cron: '0 3 * * *'  # Run daily at 03:00 UTC
+    - cron: '0 3 * * *'  # Run daily at 03:00 UTC
 
 concurrency:
   group: rpc-performance-historic-${{ github.ref }}
