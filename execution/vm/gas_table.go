@@ -400,6 +400,10 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas uint64, m
 		return 0, false, ErrGasUintOverflow
 	}
 
+	if availableGas < gas {
+		return 0, false, ErrOutOfGas
+	}
+
 	if !withCallGasCalc {
 		if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
 			fmt.Printf("%d (%d.%d) Call Gas: avail: %d, base: %d memory(%d): %d\n",
@@ -411,6 +415,10 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas uint64, m
 	gas, err = statefulGasCall(evm, callContext, gas, availableGas, transfersValue)
 	if err != nil {
 		return 0, false, err
+	}
+
+	if availableGas < gas {
+		return 0, false, ErrOutOfGas
 	}
 	callGas, err := calcCallGas(evm, callContext, availableGas, gas)
 	if err != nil {
@@ -499,6 +507,10 @@ func statelessGasCallCode(evm *EVM, callContext *CallContext, availableGas uint6
 		return 0, false, ErrGasUintOverflow
 	}
 
+	if availableGas < gas {
+		return 0, false, ErrOutOfGas
+	}
+
 	if !withCallGasCalc {
 		if dbg.TraceDyanmicGas && evm.intraBlockState.Trace() {
 			fmt.Printf("%d (%d.%d) CallCode Gas: base: %d memory(%d): %d\n",
@@ -535,6 +547,10 @@ func statelessGasDelegateCall(evm *EVM, callContext *CallContext, availableGas u
 	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return 0, false, err
+	}
+
+	if availableGas < gas {
+		return 0, false, ErrOutOfGas
 	}
 
 	var callGasTemp uint64
@@ -582,6 +598,10 @@ func statelessGasStaticCall(evm *EVM, callContext *CallContext, availableGas uin
 	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return 0, false, err
+	}
+
+	if availableGas < gas {
+		return 0, false, ErrOutOfGas
 	}
 
 	if !withCallGasCalc {
