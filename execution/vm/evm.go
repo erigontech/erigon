@@ -90,8 +90,14 @@ type EVM struct {
 	hasher    keccakState // Keccak256 hasher instance shared across opcodes
 	hasherBuf common.Hash // Keccak256 hasher result array shared across opcodes
 
-	readOnly   bool   // Whether to throw on stateful modifications
-	returnData []byte // Last CALL's return data for subsequent reuse
+	readOnly        bool   // Whether to throw on stateful modifications
+	noRetPool       bool   // Disable return-data pooling for current frame
+	returnData      []byte // Last CALL's return data for subsequent reuse
+	returnPooled    bool
+	returnPooledIdx int
+	pooledBuffers   [][]byte
+
+	executor *executor // active executor (iterative call frames)
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -120,6 +126,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs *state.IntraBlockState) {
 	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
+	evm.clearReturnData()
 
 	// ensure the evm is reset to be used again
 	evm.abort.Store(false)
@@ -138,7 +145,7 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.chainRules = chainRules
 
 	evm.depth = 0
-	evm.returnData = nil
+	evm.clearReturnData()
 	evm.jt = jumpTable(chainRules, vmConfig)
 
 	// ensure the evm is reset to be used again
@@ -165,6 +172,76 @@ func (evm *EVM) SetCallGasTemp(gas uint64) {
 // SetPrecompiles sets the precompiles for the EVM
 func (evm *EVM) SetPrecompiles(precompiles PrecompiledContracts) {
 	evm.precompiles = precompiles
+}
+
+func (evm *EVM) setReturnData(ret []byte, pooled bool, pooledIdx int) {
+	if evm.returnPooledIdx >= 0 {
+		evm.releasePooled(evm.returnPooledIdx)
+	}
+	evm.returnData = ret
+	evm.returnPooled = pooled
+	if pooled {
+		evm.returnPooledIdx = pooledIdx
+	} else {
+		evm.returnPooledIdx = -1
+	}
+}
+
+func (evm *EVM) clearReturnData() {
+	if evm.returnPooledIdx >= 0 {
+		evm.releasePooled(evm.returnPooledIdx)
+	}
+	evm.returnData = nil
+	evm.returnPooled = false
+	evm.returnPooledIdx = -1
+}
+
+func (evm *EVM) allocReturnData(size uint64) ([]byte, bool) {
+	if size == 0 {
+		return nil, false
+	}
+	if evm.noRetPool {
+		return make([]byte, size), false
+	}
+	if evm.depth <= 1 || evm.executor == nil {
+		return make([]byte, size), false
+	}
+	buf, pooled := getPooledBytes(size)
+	if !pooled {
+		return buf, false
+	}
+	idx := evm.trackPooled(buf)
+	evm.executor.retPooled = true
+	evm.executor.retPooledIdx = idx
+	return buf, true
+}
+
+func (evm *EVM) trackPooled(buf []byte) int {
+	evm.pooledBuffers = append(evm.pooledBuffers, buf)
+	return len(evm.pooledBuffers) - 1
+}
+
+func (evm *EVM) releasePooled(idx int) {
+	if idx < 0 || idx >= len(evm.pooledBuffers) {
+		return
+	}
+	buf := evm.pooledBuffers[idx]
+	if buf == nil {
+		return
+	}
+	evm.pooledBuffers[idx] = nil
+	putPooledBytes(buf)
+}
+
+func (evm *EVM) releaseAllPooled() {
+	for i, buf := range evm.pooledBuffers {
+		if buf == nil {
+			continue
+		}
+		putPooledBytes(buf)
+		evm.pooledBuffers[i] = nil
+	}
+	evm.pooledBuffers = evm.pooledBuffers[:0]
 }
 
 func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, input []byte, gas uint64, value uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {

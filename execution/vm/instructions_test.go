@@ -578,7 +578,7 @@ func TestOpTstore(t *testing.T) {
 		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, state, chain.TestChainConfig, Config{})
 		caller      = accounts.ZeroAddress
 		to          = accounts.InternAddress(common.Address{1})
-		callContext = &CallContext{Contract: *NewContract(caller, caller, to, uint256.Int{})}
+		callContext = &CallContext{Contract: NewContract(caller, caller, to, uint256.Int{})}
 		value       = common.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
 	)
 

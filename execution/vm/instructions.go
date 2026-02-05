@@ -969,7 +969,7 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		value  = scope.Stack.pop()
 		offset = scope.Stack.pop()
 		size   = scope.Stack.peek()
-		input  = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+		input  = scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 		gas    = scope.gas
 	)
 	if evm.ChainRules().IsTangerineWhistle {
@@ -977,10 +977,23 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	}
 	// reuse size int for stackvalue
 	stackvalue := size
+	resultSlotIndex := scope.Stack.len() - 1
 
 	scope.useGas(gas, evm.Config().Tracer, tracing.GasChangeCallContractCreation)
 
-	res, addr, returnGas, suberr := evm.Create(scope.Contract.Address(), input, gas, value, false)
+	addr := accounts.NilAddress
+	res, returnGas, suberr := []byte(nil), uint64(0), error(nil)
+	nonce, nonceErr := evm.intraBlockState.GetNonce(scope.Contract.Address())
+	if nonceErr != nil {
+		suberr = nonceErr
+	} else {
+		addr = accounts.InternAddress(types.CreateAddress(scope.Contract.Address().Value(), nonce))
+		var scheduled bool
+		scheduled, res, returnGas, suberr = evm.executor.scheduleCreate(CREATE, scope.Contract.Address(), input, accounts.CodeHash{}, gas, value, addr, true, uint256.Int{}, resultSlotIndex)
+		if scheduled {
+			return pc, nil, errCallOrCreate
+		}
+	}
 
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
@@ -998,10 +1011,10 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	scope.refundGas(returnGas, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	if suberr == ErrExecutionReverted {
-		evm.returnData = res // set REVERT data to return data buffer
+		evm.setReturnData(res, false, -1) // set REVERT data to return data buffer
 		return pc, res, nil
 	}
-	evm.returnData = nil // clear dirty return data buffer
+	evm.clearReturnData() // clear dirty return data buffer
 	return pc, nil, nil
 }
 
@@ -1011,7 +1024,7 @@ func stCreate(_ uint64, scope *CallContext) string {
 		value  = stack.data[len(stack.data)-1]
 		offset = stack.data[len(stack.data)-2]
 		size   = stack.data[len(stack.data)-3]
-		input  = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+		input  = scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 	)
 
 	return fmt.Sprintf("%s %d %x %d", CREATE.String(), &value, input, &scope.gas)
@@ -1025,7 +1038,7 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 		endowment    = scope.Stack.pop()
 		offset, size = scope.Stack.pop(), scope.Stack.pop()
 		salt         = scope.Stack.pop()
-		input        = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+		input        = scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 		gas          = scope.gas
 	)
 
@@ -1034,7 +1047,14 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 	scope.useGas(gas, evm.Config().Tracer, tracing.GasChangeCallContractCreation2)
 	// reuse size int for stackvalue
 	stackValue := size
-	res, addr, returnGas, suberr := evm.Create2(scope.Contract.Address(), input, gas, endowment, &salt, false)
+	var cah codeAndHash
+	cah.code = input
+	codeHash := cah.Hash()
+	addr := accounts.InternAddress(types.CreateAddress2(scope.Contract.Address().Value(), salt.Bytes32(), codeHash))
+	scheduled, res, returnGas, suberr := evm.executor.scheduleCreate(CREATE2, scope.Contract.Address(), input, codeHash, gas, endowment, addr, true, stackValue, -1)
+	if scheduled {
+		return pc, nil, errCallOrCreate
+	}
 
 	// Push item on the stack based on the returned error.
 	if suberr != nil {
@@ -1048,10 +1068,10 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 	scope.refundGas(returnGas, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	if suberr == ErrExecutionReverted {
-		evm.returnData = res // set REVERT data to return data buffer
+		evm.setReturnData(res, false, -1) // set REVERT data to return data buffer
 		return pc, res, nil
 	}
-	evm.returnData = nil // clear dirty return data buffer
+	evm.clearReturnData() // clear dirty return data buffer
 	return pc, nil, nil
 }
 
@@ -1061,7 +1081,7 @@ func stCreate2(_ uint64, scope *CallContext) string {
 		endowment    = stack.data[len(stack.data)-1]
 		offset, size = stack.data[len(stack.data)-2], stack.data[len(stack.data)-3]
 		salt         = stack.data[len(stack.data)-4]
-		input        = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+		input        = scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 	)
 
 	return fmt.Sprintf("%s %d %d %x %d", CREATE2.String(), &endowment, &salt, input, &scope.gas)
@@ -1086,7 +1106,10 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		gas += params.CallStipend
 	}
 
-	ret, returnGas, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, value, false /* bailout */)
+	scheduled, ret, returnGas, err := evm.executor.scheduleCall(CALL, scope.Contract.Address(), scope.Contract.Address(), toAddr, args, gas, value, retOffset.Uint64(), retSize.Uint64(), temp)
+	if scheduled {
+		return pc, nil, errCallOrCreate
+	}
 
 	if err != nil {
 		temp.Clear()
@@ -1095,13 +1118,12 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	}
 	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = common.Copy(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
 	scope.refundGas(returnGas, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
-	evm.returnData = ret
+	evm.setReturnData(ret, false, -1)
 	return pc, ret, nil
 }
 
@@ -1131,7 +1153,10 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 		gas += params.CallStipend
 	}
 
-	ret, returnGas, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, value)
+	scheduled, ret, returnGas, err := evm.executor.scheduleCall(CALLCODE, scope.Contract.Address(), scope.Contract.Address(), toAddr, args, gas, value, retOffset.Uint64(), retSize.Uint64(), temp)
+	if scheduled {
+		return pc, nil, errCallOrCreate
+	}
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -1139,13 +1164,12 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	}
 	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = common.Copy(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
 	scope.refundGas(returnGas, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
-	evm.returnData = ret
+	evm.setReturnData(ret, false, -1)
 	return pc, ret, nil
 }
 
@@ -1171,7 +1195,10 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	ret, returnGas, err := evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
+	scheduled, ret, returnGas, err := evm.executor.scheduleCall(DELEGATECALL, scope.Contract.addr, scope.Contract.caller, toAddr, args, gas, scope.Contract.value, retOffset.Uint64(), retSize.Uint64(), temp)
+	if scheduled {
+		return pc, nil, errCallOrCreate
+	}
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -1179,13 +1206,12 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	}
 	stack.push(temp)
 	if err == nil || err == ErrExecutionReverted {
-		ret = common.Copy(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
 	scope.refundGas(returnGas, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
-	evm.returnData = ret
+	evm.setReturnData(ret, false, -1)
 	return pc, ret, nil
 }
 
@@ -1211,7 +1237,10 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
-	ret, returnGas, err := evm.StaticCall(scope.Contract.Address(), toAddr, args, gas)
+	scheduled, ret, returnGas, err := evm.executor.scheduleCall(STATICCALL, scope.Contract.Address(), scope.Contract.Address(), toAddr, args, gas, uint256.Int{}, retOffset.Uint64(), retSize.Uint64(), temp)
+	if scheduled {
+		return pc, nil, errCallOrCreate
+	}
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -1224,7 +1253,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 
 	scope.refundGas(returnGas, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
-	evm.returnData = ret
+	evm.setReturnData(ret, false, -1)
 	return pc, ret, nil
 }
 
@@ -1240,14 +1269,23 @@ func stStaticCall(_ uint64, scope *CallContext) string {
 
 func opReturn(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	offset, size := scope.Stack.pop(), scope.Stack.pop()
-	ret := scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+	sizeUint := size.Uint64()
+	ret, pooled := evm.allocReturnData(sizeUint)
+	if sizeUint > 0 {
+		copy(ret, scope.Memory.GetPtr(offset.Uint64(), sizeUint))
+	}
+	_ = pooled
 	return pc, ret, errStopToken
 }
 
 func opRevert(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	offset, size := scope.Stack.pop(), scope.Stack.pop()
-	ret := scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
-	evm.returnData = ret
+	sizeUint := size.Uint64()
+	ret, pooled := evm.allocReturnData(sizeUint)
+	if sizeUint > 0 {
+		copy(ret, scope.Memory.GetPtr(offset.Uint64(), sizeUint))
+	}
+	_ = pooled
 	return pc, ret, ErrExecutionReverted
 }
 

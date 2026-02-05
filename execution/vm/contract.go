@@ -20,6 +20,8 @@
 package vm
 
 import (
+	"sync"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
@@ -57,6 +59,35 @@ type Contract struct {
 
 // around 64MB cache in the worst case.
 var jumpDestCache = cache.NewGenericCache[bitvec](64*datasize.MB, func(v bitvec) int { return len(v) })
+
+var contractPool = sync.Pool{
+	New: func() any {
+		return &Contract{}
+	},
+}
+
+func getContract() *Contract {
+	c := contractPool.Get().(*Contract)
+	c.reset()
+	return c
+}
+
+func putContract(c *Contract) {
+	if c == nil {
+		return
+	}
+	c.reset()
+	contractPool.Put(c)
+}
+
+func (c *Contract) reset() {
+	c.caller = accounts.Address{}
+	c.addr = accounts.Address{}
+	c.analysis = nil
+	c.Code = nil
+	c.CodeHash = accounts.CodeHash{}
+	c.value = uint256.Int{}
+}
 
 // NewContract returns a new contract environment for the execution of EVM.
 func NewContract(caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, value uint256.Int) *Contract {

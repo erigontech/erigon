@@ -302,7 +302,14 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	opt := applyOptions(opts)
 	tmpdir := os.TempDir()
 	if tb != nil {
-		tmpdir = tb.TempDir()
+		dir, err := os.MkdirTemp("", "erigon-test-")
+		if err != nil {
+			tb.Fatalf("TempDir: %v", err)
+		}
+		tb.Cleanup(func() {
+			_ = os.RemoveAll(dir)
+		})
+		tmpdir = dir
 	}
 	ctrl := gomock.NewController(tb)
 	dirs := datadir.New(tmpdir)

@@ -18,6 +18,7 @@ package memdb
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -38,7 +39,13 @@ func NewChainDB(tb testing.TB, tmpDir string) kv.RwDB {
 
 func NewTestDB(tb testing.TB, label kv.Label) kv.RwDB {
 	tb.Helper()
-	tmpDir := tb.TempDir()
+	tmpDir, err := os.MkdirTemp("", "erigon-memdb-")
+	if err != nil {
+		tb.Fatalf("TempDir: %v", err)
+	}
+	tb.Cleanup(func() {
+		_ = os.RemoveAll(tmpDir)
+	})
 	db := New(tb, tmpDir, label)
 	tb.Cleanup(db.Close)
 	return db
@@ -56,7 +63,13 @@ func BeginRw(tb testing.TB, db kv.RwDB) kv.RwTx {
 
 func NewTestPoolDB(tb testing.TB) kv.RwDB {
 	tb.Helper()
-	tmpDir := tb.TempDir()
+	tmpDir, err := os.MkdirTemp("", "erigon-memdb-")
+	if err != nil {
+		tb.Fatalf("TempDir: %v", err)
+	}
+	tb.Cleanup(func() {
+		_ = os.RemoveAll(tmpDir)
+	})
 	db := New(tb, tmpDir, dbcfg.TxPoolDB)
 	tb.Cleanup(db.Close)
 	return db
@@ -64,7 +77,13 @@ func NewTestPoolDB(tb testing.TB) kv.RwDB {
 
 func NewTestDownloaderDB(tb testing.TB) kv.RwDB {
 	tb.Helper()
-	tmpDir := tb.TempDir()
+	tmpDir, err := os.MkdirTemp("", "erigon-memdb-")
+	if err != nil {
+		tb.Fatalf("TempDir: %v", err)
+	}
+	tb.Cleanup(func() {
+		_ = os.RemoveAll(tmpDir)
+	})
 	db := New(tb, tmpDir, dbcfg.DownloaderDB)
 	tb.Cleanup(db.Close)
 	return db
@@ -72,7 +91,13 @@ func NewTestDownloaderDB(tb testing.TB) kv.RwDB {
 
 func NewTestTx(tb testing.TB) (kv.RwDB, kv.RwTx) {
 	tb.Helper()
-	tmpDir := tb.TempDir()
+	tmpDir, err := os.MkdirTemp("", "erigon-memdb-")
+	if err != nil {
+		tb.Fatalf("TempDir: %v", err)
+	}
+	tb.Cleanup(func() {
+		_ = os.RemoveAll(tmpDir)
+	})
 	db := New(tb, tmpDir, dbcfg.ChainDB)
 	tb.Cleanup(db.Close)
 	tx, err := db.BeginRw(context.Background()) //nolint:gocritic
