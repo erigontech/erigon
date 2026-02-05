@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	execp2p "github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -132,6 +133,11 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		return err
 	}
 	defer tx.Rollback()
+	if isDomainAheadOfBlocks(ctx, tx, logger) {
+		log.Warn("[dbg] alex4 ProcessFrozenBlocks isDomainAheadOfBlocks")
+		return nil
+	}
+
 	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
 		return err
@@ -243,6 +249,16 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 		}
 	}
 	return nil
+}
+
+func isDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.Logger) bool {
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	if err != nil {
+		logger.Debug("domain ahead of blocks", "err", err)
+		return errors.Is(err, commitmentdb.ErrBehindCommitment)
+	}
+	defer doms.Close()
+	return false
 }
 
 func stageLoopIteration(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (hasMore bool, err error) {
