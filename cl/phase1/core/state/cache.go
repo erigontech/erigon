@@ -45,7 +45,7 @@ type CachingBeaconState struct {
 	*raw.BeaconState
 
 	// Internals
-	publicKeyIndicies *maphash.Map[uint64]
+	publicKeyIndicies *maphash.NonConcurrentMap[uint64]
 	// Caches
 	activeValidatorsCache *lru.Cache[uint64, []uint64]
 	shuffledSetsCache     *lru.Cache[common.Hash, []uint64]
@@ -253,7 +253,7 @@ func (b *CachingBeaconState) initCaches() error {
 
 func (b *CachingBeaconState) InitBeaconState() error {
 
-	b.publicKeyIndicies = maphash.NewMap[uint64]()
+	b.publicKeyIndicies = maphash.NewNonConcurrentMap[uint64]()
 	b.ForEachValidator(func(validator solid.Validator, i, total int) bool {
 		pk := validator.PublicKey()
 		b.publicKeyIndicies.Set(pk[:], uint64(i))

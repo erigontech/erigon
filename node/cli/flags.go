@@ -455,6 +455,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 			RpcSubscriptionFiltersMaxTopics:    ctx.Int(RpcSubscriptionFiltersMaxTopicsFlag.Name),
 		},
 		Gascap:              ctx.Uint64(utils.RpcGasCapFlag.Name),
+		RangeLimit:          ctx.Int(utils.RpcBlockRangeLimit.Name),
 		Feecap:              ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
 		MaxTraces:           ctx.Uint64(utils.TraceMaxtracesFlag.Name),
 		TraceCompatibility:  ctx.Bool(utils.RpcTraceCompatFlag.Name),
@@ -468,6 +469,9 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 
 		StateCache:          kvcache.DefaultCoherentConfig,
 		RPCSlowLogThreshold: ctx.Duration(utils.RPCSlowFlag.Name),
+
+		RpcTxSyncDefaultTimeout: ctx.Duration(utils.RpcTxSyncDefaultTimeoutFlag.Name),
+		RpcTxSyncMaxTimeout:     ctx.Duration(utils.RpcTxSyncMaxTimeoutFlag.Name),
 	}
 
 	if ctx.IsSet(utils.WSSubscribeLogsChannelSize.Name) {

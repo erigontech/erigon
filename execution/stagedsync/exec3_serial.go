@@ -14,7 +14,6 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
@@ -31,15 +30,22 @@ type serialExecutor struct {
 	txExecutor
 	// outputs
 	txCount         uint64
-	gasUsed         uint64
+	blockGasUsed    uint64
 	blobGasUsed     uint64
 	lastBlockResult *blockResult
 	worker          *exec.Worker
 }
 
+func warmTxsHashes(block *types.Block) {
+	for _, t := range block.Transactions() {
+		_ = t.Hash()
+	}
+	_ = block.Hash()
+}
+
 func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
-	initialTxNum uint64, inputTxNum uint64, useExternalTx bool, initialCycle bool, rwTx kv.TemporalRwTx,
+	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
 	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
 	se.resetWorkers(ctx, se.rs, se.applyTx)
@@ -60,7 +66,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		log.Info(fmt.Sprintf("[%s] serial starting", execStage.LogPrefix()),
 			"from", blockNum, "to", maxBlockNum, "limit", blockNum+blockLimit-1, "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "lastFrozenStep", lastFrozenStep,
-			"initialCycle", initialCycle, "useExternalTx", useExternalTx, "isForkValidation", se.isForkValidation, "isBlockProduction", se.isBlockProduction)
+			"initialCycle", initialCycle, "isForkValidation", se.isForkValidation, "isBlockProduction", se.isBlockProduction)
 	}
 
 	for ; blockNum <= maxBlockNum; blockNum++ {
@@ -84,10 +90,24 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			// TODO: panic here and see that overall process deadlock
 			return nil, rwTx, fmt.Errorf("nil block %d", blockNum)
 		}
+		go warmTxsHashes(b)
+
+		stateCache := se.doms.GetStateCache()
+		if stateCache != nil {
+			stateCache.ValidateAndPrepare(b.ParentHash(), b.Hash())
+		}
 
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		getHashFnMutex := sync.Mutex{}
+
+		// se.cfg.chainConfig.AmsterdamTime != nil && se.cfg.chainConfig.AmsterdamTime.Uint64() > 0 is
+		// temporary to allow for inital non bals amsterdam testing before parallel exec is live by defualt
+		if se.cfg.chainConfig.AmsterdamTime != nil && se.cfg.chainConfig.AmsterdamTime.Uint64() > 0 && se.cfg.chainConfig.IsAmsterdam(header.Time) {
+			se.logger.Error(fmt.Sprintf("[%s] BLOCK PROCESSING FAILED: Amsterdam processing is not supported by serial exec", se.logPrefix), "fork-block", blockNum)
+			se.logger.Error(fmt.Sprintf("[%s] Run erigon with either '--experimental.bal' or 'export ERIGON_EXEC3_PARALLEL=true'", se.logPrefix))
+			return nil, rwTx, fmt.Errorf("amsterdam processing is not supported by serial exec from block: %d", blockNum)
+		}
 
 		blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
 			getHashFnMutex.Lock()
@@ -132,10 +152,15 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			inputTxNum++
 		}
 
+		start := time.Now()
 		continueLoop, err := se.executeBlock(ctx, txTasks, execStage.CurrentSyncCycle.IsInitialCycle, false)
 
+		log.Debug(fmt.Sprintf("[%s] executed block %d in %s", se.logPrefix, blockNum, time.Since(start)))
 		if err != nil {
 			return nil, rwTx, err
+		}
+		if stateCache != nil {
+			stateCache.PrintStatsAndReset()
 		}
 
 		if !continueLoop {
@@ -144,9 +169,10 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 		if !dbg.BatchCommitments || shouldGenerateChangesets || se.cfg.syncCfg.KeepExecutionProofs {
 			if dbg.TraceBlock(blockNum) {
+				fmt.Println(blockNum, "Commitment")
 				se.doms.SetTrace(true, false)
 			}
-			// Warmup is enabled via SetWarmupDB at executor init
+			// Warmup is enabled via EnableTrieWarmup at executor init
 			rh, err := se.doms.ComputeCommitment(ctx, se.applyTx, true, blockNum, inputTxNum-1, se.logPrefix, nil)
 			se.doms.SetTrace(false, false)
 
@@ -180,73 +206,34 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			if !se.isApplyingBlocks {
 				break
 			}
-
 			se.LogExecution()
-
-			//TODO: https://github.com/erigontech/erigon/issues/10724
-			//if executor.tx().(dbstate.HasAggTx).AggTx().(*dbstate.AggregatorRoTx).CanPrune(executor.tx(), doms.TxNum()) {
-			//	//small prune cause MDBX_TXN_FULL
-			//	if _, err := executor.tx().(dbstate.HasAggTx).AggTx().(*dbstate.AggregatorRoTx).PruneSmallBatches(ctx, 10*time.Hour, executor.tx()); err != nil {
-			//		return err
-			//	}
-			//}
-
 			isBatchFull := se.readState().SizeEstimate() >= se.cfg.batchSize.Bytes()
-			canPrune := dbstate.AggTx(se.applyTx).CanPrune(se.applyTx, se.doms.TxNum())
-			needCalcRoot := isBatchFull || havePartialBlock || canPrune
+			needCalcRoot := isBatchFull || havePartialBlock
 			// If we have a partial first block it may not be validated, then we should compute root hash ASAP for fail-fast
-
 			// this will only happen for the first executed block
 			havePartialBlock = false
-
 			if !needCalcRoot {
 				break
 			}
-
 			resetExecGauges(ctx)
-
 			ok, times, err := computeAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), rwTx, se.doms, se.cfg, execStage, false, se.logger, u, se.isBlockProduction)
 			if err != nil {
 				return nil, rwTx, err
 			} else if !ok {
 				return b.HeaderNoCopy(), rwTx, nil
 			}
-
 			resetCommitmentGauges(ctx)
-
-			se.txExecutor.lastCommittedBlockNum = b.NumberU64()
-			se.txExecutor.lastCommittedTxNum = inputTxNum
-
-			timeStart := time.Now()
-
-			pruneTimeout := 250 * time.Millisecond
-			if initialCycle {
-				pruneTimeout = 10 * time.Hour
-
-				if err = rwTx.GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
-					return nil, rwTx, err
-				}
-			}
-
-			if _, err := rwTx.PruneSmallBatches(ctx, pruneTimeout); err != nil {
-				return nil, rwTx, err
-			}
-
+			se.txExecutor.lastCommittedBlockNum.Store(b.NumberU64())
+			se.txExecutor.lastCommittedTxNum.Store(inputTxNum)
 			se.logger.Info(
 				"periodic commit check",
 				"block", se.doms.BlockNum(),
 				"txNum", se.doms.TxNum(),
 				"step", fmt.Sprintf("%.1f", float64(se.doms.TxNum())/float64(se.agg.StepSize())),
 				"commitment", times.ComputeCommitment,
-				"prune", time.Since(timeStart),
 			)
-
 			if isBatchFull {
 				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch is full"}
-			}
-
-			if canPrune {
-				return b.HeaderNoCopy(), rwTx, &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block batch can be pruned"}
 			}
 		default:
 		}
@@ -276,9 +263,9 @@ func (se *serialExecutor) LogExecution() {
 }
 
 func (se *serialExecutor) LogCommitments(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
-	se.committedGas += int64(committedGas)
-	se.txExecutor.lastCommittedBlockNum += committedBlocks
-	se.txExecutor.lastCommittedTxNum += committedTransactions
+	se.committedGas.Add(int64(committedGas))
+	se.txExecutor.lastCommittedBlockNum.Add(committedBlocks)
+	se.txExecutor.lastCommittedTxNum.Add(committedTransactions)
 	se.progress.LogCommitments(se.rs.StateV3, se, commitStart, stepsInDb, lastProgress)
 }
 
@@ -359,7 +346,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			}
 
 			se.txCount++
-			se.gasUsed += result.ExecutionResult.GasUsed
+			se.blockGasUsed += result.ExecutionResult.BlockGasUsed
 			mxExecTransactions.Add(1)
 
 			if txTask.Tx() != nil {
@@ -369,6 +356,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
 				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsGetter(se.applyTx)))
+				defer ibs.Release(true)
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 					ret, err := protocol.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, *se.cfg.vmConfig)
@@ -387,7 +375,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 						blockReceipts, txTask.Withdrawals, chainReader, syscall, nil, se.logger)
 				} else {
 					_, err = se.cfg.engine.Finalize(
-						se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles,
+						se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles,
 						blockReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
 				}
 
@@ -402,7 +390,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-					if err := se.getPostValidator().Process(se.gasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isBlockProduction, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
+					if err := se.getPostValidator().Process(se.blockGasUsed, se.blobGasUsed, checkReceipts, blockReceipts, txTask.Header, se.isBlockProduction, txTask.Txs, se.cfg.chainConfig, se.logger); err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err) //same as in stage_exec.go
 					}
 				}
@@ -426,7 +414,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					if err != nil {
 						return err
 					}
-					receipt, err = result.CreateReceipt(int(txTask.TxNum), cumGasUsed+result.ExecutionResult.GasUsed, logIndexAfterTx)
+					receipt, err = result.CreateReceipt(int(txTask.TxNum), cumGasUsed+result.ExecutionResult.ReceiptGasUsed, logIndexAfterTx)
 					if err != nil {
 						return err
 					}
@@ -517,7 +505,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 							}
 						}
 						lastReceipt, err = result.CreateReceipt(txTask.TxIndex-1,
-							cumulativeGasUsed+result.ExecutionResult.GasUsed, logIndexAfterTx)
+							cumulativeGasUsed+result.ExecutionResult.ReceiptGasUsed, logIndexAfterTx)
 						if err != nil {
 							return false, err
 						}
@@ -563,8 +551,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		se.lastExecutedBlockNum.Store(int64(txTask.BlockNumber()))
 
 		if task.IsBlockEnd() {
-			se.executedGas.Add(int64(se.gasUsed))
-			se.gasUsed = 0
+			se.executedGas.Add(int64(se.blockGasUsed))
+			se.blockGasUsed = 0
 			se.blobGasUsed = 0
 			gasPool = nil
 		}

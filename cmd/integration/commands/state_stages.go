@@ -278,7 +278,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 		stateStages.MockExecFunc(stages.Execution, execUntilFunc(execToBlock))
 		_ = stateStages.SetCurrentStage(stages.Execution)
 		for more := true; more; {
-			if more, err = stateStages.Run(db, sd, tx, false /* firstCycle */, false); err != nil {
+			if more, err = stateStages.Run(sd, tx, false /* firstCycle */, false); err != nil {
 				return err
 			}
 
@@ -393,12 +393,18 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 		default:
 		}
 
+		sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
 		_ = sync.SetCurrentStage(stages.Execution)
 		t := time.Now()
-		if _, err = sync.Run(db, nil, tx, initialCycle, false); err != nil {
+		if _, err = sync.Run(sd, tx, initialCycle, false); err != nil {
 			return err
 		}
 		logger.Info("[Integration] ", "loop time", time.Since(t))
+		sd.Close()
 		tx.Rollback()
 		tx, err = db.BeginTemporalRw(ctx)
 		if err != nil {

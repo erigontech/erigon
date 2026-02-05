@@ -178,6 +178,17 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		payload.BlobGasUsed = header.BlobGasUsed
 		payload.ExcessBlobGas = header.ExcessBlobGas
 	}
+	blockAccessList := block.BlockAccessList()
+	if header.BlockAccessListHash != nil || blockAccessList != nil {
+		payload.Version = 4
+		if header.BlockAccessListHash != nil {
+			payload.BlockAccessListHash = gointerfaces.ConvertHashToH256(*header.BlockAccessListHash)
+		}
+		payload.BlockAccessList = types.ConvertBlockAccessListToTypesProto(blockAccessList)
+		if payload.BlockAccessList == nil {
+			payload.BlockAccessList = []*typesproto.BlockAccessListAccount{}
+		}
+	}
 
 	blockValue := blockValue(blockWithReceipts, baseFee)
 

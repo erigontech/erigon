@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,11 +14,18 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package stagedsync
+package types
 
-import "github.com/erigontech/erigon/execution/stagedsync/bodydownload"
+import "sync"
 
-type DownloaderGlue interface {
-	SpawnHeaderDownloadStage([]func() error, *StageState, Unwinder) error
-	SpawnBodyDownloadStage(string, string, *StageState, Unwinder, *bodydownload.PrefetchedBlocks) (bool, error)
+type encodingBuf [33]byte
+
+var pooledBuf = sync.Pool{
+	New: func() any { return new(encodingBuf) },
+}
+
+func newEncodingBuf() *encodingBuf {
+	b := pooledBuf.Get().(*encodingBuf)
+	*b = [33]byte{} // reset, do we need to?
+	return b
 }
