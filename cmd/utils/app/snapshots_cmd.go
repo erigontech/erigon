@@ -595,6 +595,7 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 
 func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelete, dryRun bool, stepRange string, domainNames ...string) error {
 	_maxFrom := uint64(0)
+	_maxTo := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
 	commitmentFilesWithState := make([]snaptype.FileInfo, 0)
 
@@ -664,12 +665,14 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 		files = append(files, res)
 		if removeLatest {
 			_maxFrom = max(_maxFrom, res.From)
+			_maxTo = max(_maxTo, res.To)
 		}
 	}
 
 	toRemove := make(map[string]snaptype.FileInfo)
 	if len(domainNames) > 0 {
 		_maxFrom = 0
+		_maxTo = 0
 		domainFiles := make([]snaptype.FileInfo, 0, len(files))
 		for _, domainName := range domainNames {
 			_, err := kv.String2InvertedIdx(domainName)
@@ -688,6 +691,7 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 				}
 				if removeLatest {
 					_maxFrom = max(_maxFrom, res.From)
+					_maxTo = max(_maxTo, res.To)
 				}
 				domainFiles = append(domainFiles, res)
 			}
@@ -737,7 +741,8 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 		}
 
 		if removeLatest {
-			q := fmt.Sprintf("remove latest snapshot files with stepFrom=%d?\n1) RemoveFile\n4) Exit\n (pick number): ", _maxFrom)
+			// domain files have higher merge limit, so latest domain may have From < stepFrom but To == stepTo
+			q := fmt.Sprintf("remove latest snapshot files (stepFrom>=%d) and files ending at stepTo=%d?\n1) RemoveFile\n4) Exit\n (pick number): ", _maxFrom, _maxTo)
 			if promptExit(q) {
 				os.Exit(0)
 			}
@@ -773,6 +778,8 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 		for _, res := range files {
 			if res.From >= minS && res.To <= maxS {
 				toRemove[res.Path] = res
+			} else if removeLatest && res.To == _maxTo {
+				toRemove[res.Path] = res
 			}
 		}
 	} else {
@@ -793,7 +800,7 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 		removed++
 	}
 	fmt.Printf("removed %d state snapshot segments files\n", removed)
-	fmt.Printf("\n\nRun `integration stage_exec --reset` before restarting Erigon to prune execution remnants from DB to avoid gap between snapshots and DB.\n")
+	fmt.Printf("\n\nBefore restarting Erigon, run one of:\n  - `integration stage_custom_trace --reset` if deleted domains are handled by stage_custom_trace\n  - `integration stage_exec --reset` otherwise\nThis prunes DB remnants to avoid gaps between snapshots and DB.\n")
 	return nil
 }
 
@@ -2006,13 +2013,13 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 	defer clean()
 
+	if err := caplinStateSnaps.BuildMissingIndices(ctx, logger); err != nil {
+		return err
+	}
 	if err := br.BuildMissedIndicesIfNeed(ctx, "Indexing", nil); err != nil {
 		return err
 	}
 	if err := caplinSnaps.BuildMissingIndices(ctx, logger); err != nil {
-		return err
-	}
-	if err := caplinStateSnaps.BuildMissingIndices(ctx, logger); err != nil {
 		return err
 	}
 
@@ -2104,6 +2111,10 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB)
 		blkFreezeCfg := ethconfig.BlocksFreezing{ChainName: beaconConfig.ConfigName}
 		res.CaplinStateSnaps = snapshotsync.NewCaplinStateSnapshots(blkFreezeCfg, beaconConfig, dirs, snTypes, logger)
+		if err = res.CaplinStateSnaps.OpenFolder(); err != nil {
+			return res, nil, err
+		}
+		res.CaplinStateSnaps.LogStat("caplin-state")
 	}
 
 	//res.BorSnaps.LogStat("bor")

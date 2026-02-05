@@ -26,7 +26,10 @@ jobs:
             max-allowed-failures: 0
           - sim: engine
             sim-limit: cancun
-            max-allowed-failures: 0
+            # 2 failures (not due to us, but due to Hive/Geth secondary client)
+            # will remove once resolved by STEEL team (these 2 tests are failing on all clients)
+            # see https://discord.com/channels/1359927674746835211/1410592782258540565/1462699469824065560
+            max-allowed-failures: 2
           - sim: engine
             sim-limit: api
             max-allowed-failures: 0
@@ -35,14 +38,13 @@ jobs:
             max-allowed-failures: 0
           - sim: rpc
             sim-limit: compat
-            # 8 failures out of 199 tests, see https://github.com/ethereum/hive/pull/1355
-            max-allowed-failures: 8
+            max-allowed-failures: 0
     steps:
       - name: Checkout Hive
         uses: actions/checkout@v6
         with:
           repository: ethereum/hive
-          ref: 73fb4440b1fe4b362bf66e6278ec7d46b254f362
+          # ref: master
           path: hive
 
       - name: Setup go env and cache

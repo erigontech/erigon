@@ -48,34 +48,25 @@ import (
 )
 
 type SendersCfg struct {
-	db              kv.RwDB
 	batchSize       int
 	numOfGoroutines int
-	readChLen       int
 	badBlockHalt    bool
 	tmpdir          string
-	prune           prune.Mode
 	chainConfig     *chain.Config
 	hd              *headerdownload.HeaderDownload
 	blockReader     services.FullBlockReader
-	syncCfg         ethconfig.Sync
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload) SendersCfg {
+func StageSendersCfg(chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload) SendersCfg {
 	const sendersBatchSize = 1000
-
 	return SendersCfg{
-		db:              db,
 		batchSize:       sendersBatchSize,
 		numOfGoroutines: secp256k1.NumOfContexts(), // we can only be as parallels as our crypto library supports,
-		readChLen:       4,
 		badBlockHalt:    badBlockHalt,
 		tmpdir:          tmpdir,
 		chainConfig:     chainCfg,
-		prune:           prune,
 		hd:              hd,
 		blockReader:     blockReader,
-		syncCfg:         syncCfg,
 	}
 }
 
@@ -85,15 +76,6 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	}
 
 	quitCh := ctx.Done()
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
 
 	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Bodies)
 	if errStart != nil {
@@ -129,7 +111,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 			defer dbg.LogPanic()
 			defer wg.Done()
 			// each goroutine gets it's own crypto context to make sure they are really parallel
-			recoverSenders(ctx, logPrefix, secp256k1.ContextForThread(threadNo), cfg.chainConfig, jobs, out, quitCh)
+			recoverSenders(ctx, secp256k1.ContextForThread(threadNo), cfg.chainConfig, jobs, out, quitCh)
 		}(i)
 	}
 
@@ -356,12 +338,6 @@ Loop:
 		}
 		log.Debug(fmt.Sprintf("[%s] Recovery done", logPrefix), "from", startFrom, "to", to, "blocks", to-startFrom+1, "took", time.Since(recoveryStart))
 	}
-
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
@@ -382,7 +358,7 @@ type senderRecoveryJob struct {
 	err         error
 }
 
-func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp256k1.Context, config *chain.Config, in, out chan *senderRecoveryJob, quit <-chan struct{}) {
+func recoverSenders(ctx context.Context, cryptoContext *secp256k1.Context, config *chain.Config, in, out chan *senderRecoveryJob, quit <-chan struct{}) {
 	var job *senderRecoveryJob
 	var ok bool
 	for {
@@ -426,23 +402,8 @@ func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp25
 
 func UnwindSendersStage(u *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
 	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
-
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
 	if err = u.Done(tx); err != nil {
 		return err
-	}
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
 	}
 	return nil
 }

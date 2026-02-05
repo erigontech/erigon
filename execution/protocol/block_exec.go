@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"golang.org/x/crypto/sha3"
@@ -36,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
@@ -91,11 +91,11 @@ func ExecuteBlockEphemerally(
 ) (res *EphemeralExecResult, executeBlockErr error) {
 	defer blockExecutionTimer.ObserveDuration(time.Now())
 	ibs := state.New(stateReader)
+	defer ibs.Release(false)
 	ibs.SetHooks(vmConfig.Tracer)
 	header := block.Header()
 
-	gasUsed := new(uint64)
-	usedBlobGas := new(uint64)
+	gasUsed := new(GasUsed)
 	gp := new(GasPool)
 	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(block.Time()))
 
@@ -135,7 +135,7 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = tracer
 			writeTrace = true
 		}
-		receipt, err := ApplyTransaction(chainConfig, blockHashFunc, engine, accounts.NilAddress, gp, ibs, stateWriter, header, txn, gasUsed, usedBlobGas, *vmConfig)
+		receipt, err := ApplyTransaction(chainConfig, blockHashFunc, engine, accounts.NilAddress, gp, ibs, stateWriter, header, txn, gasUsed, *vmConfig)
 		if writeTrace && vmConfig.Tracer != nil && vmConfig.Tracer.Flush != nil {
 			vmConfig.Tracer.Flush(txn)
 			vmConfig.Tracer = nil
@@ -163,12 +163,12 @@ func ExecuteBlockEphemerally(
 		return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
 	}
 
-	if !vmConfig.StatelessExec && *gasUsed != header.GasUsed {
-		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *gasUsed, header.GasUsed)
+	if !vmConfig.StatelessExec && gasUsed.Block != header.GasUsed {
+		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", gasUsed.Block, header.GasUsed)
 	}
 
-	if header.BlobGasUsed != nil && *usedBlobGas != *header.BlobGasUsed {
-		return nil, fmt.Errorf("blob gas used by execution: %d, in header: %d", *usedBlobGas, *header.BlobGasUsed)
+	if header.BlobGasUsed != nil && gasUsed.Blob != *header.BlobGasUsed {
+		return nil, fmt.Errorf("blob gas used by execution: %d, in header: %d", gasUsed.Blob, *header.BlobGasUsed)
 	}
 
 	var bloom types.Bloom
@@ -197,7 +197,7 @@ func ExecuteBlockEphemerally(
 		LogsHash:    rlpHash(blockLogs),
 		Receipts:    receipts,
 		Difficulty:  (*math.HexOrDecimal256)(header.Difficulty),
-		GasUsed:     math.HexOrDecimal64(*gasUsed),
+		GasUsed:     math.HexOrDecimal64(gasUsed.Block),
 		Rejected:    rejectedTxs,
 	}
 
@@ -267,7 +267,7 @@ func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.
 	if isBor {
 		author = accounts.InternAddress(header.Coinbase)
 	} else {
-		author = state.SystemAddress
+		author = params.SystemAddress
 	}
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
 	return SysCallContractWithBlockContext(contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
@@ -276,7 +276,7 @@ func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.
 func SysCallContractWithBlockContext(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, blockContext evmtypes.BlockContext, constCall bool, vmCfg vm.Config) (result []byte, err error) {
 	isBor := chainConfig.Bor != nil
 	msg := types.NewMessage(
-		state.SystemAddress,
+		params.SystemAddress,
 		contract,
 		0, &u256.Num0,
 		SysCallGasLimit,
@@ -368,7 +368,7 @@ func FinalizeBlockExecution(
 	if isMining {
 		newBlock, retRequests, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, nil, logger)
 	} else {
-		retRequests, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, withdrawals, chainReader, syscall, false, logger)
+		retRequests, err = engine.Finalize(cc, header, ibs, uncles, receipts, withdrawals, chainReader, syscall, false, logger)
 	}
 	if err != nil {
 		return nil, nil, err
@@ -401,17 +401,11 @@ func InitializeBlockExecution(engine rules.Engine, chain rules.ChainHeaderReader
 
 var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
 
-func BlockPostValidation(gasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, h *types.Header, isMining bool, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
-	if gasUsed != h.GasUsed {
-		var txgas strings.Builder
-		sep := ""
-		for _, receipt := range receipts {
-			txgas.WriteString(fmt.Sprintf("%s%d=%d", sep, receipt.TransactionIndex, receipt.GasUsed))
-			sep = ", "
-		}
-		logger.Warn("gas used mismatch", "block", h.Number.Uint64(), "header", h.GasUsed, "execution", gasUsed, "txgas", txgas.String())
+func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts bool, receipts types.Receipts, h *types.Header, isMining bool, txns types.Transactions, chainConfig *chain.Config, logger log.Logger) error {
+	if blockGasUsed != h.GasUsed {
+		logger.Warn("gas used mismatch", "block", h.Number.Uint64(), "header", h.GasUsed, "execution", blockGasUsed)
 		return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x",
-			gasUsed, h.GasUsed, h.Number.Uint64(), h.Hash())
+			blockGasUsed, h.GasUsed, h.Number.Uint64(), h.Hash())
 	}
 
 	if h.BlobGasUsed != nil && blobGasUsed != *h.BlobGasUsed {

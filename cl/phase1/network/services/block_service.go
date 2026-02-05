@@ -137,7 +137,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		slot:          msg.Block.Slot,
 	}
 	if b.seenBlocksCache.Contains(seenCacheKey) {
-		return fmt.Errorf("%w: block already seen: %v", ErrIgnore, seenCacheKey)
+		return nil
 	}
 
 	if err := b.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {

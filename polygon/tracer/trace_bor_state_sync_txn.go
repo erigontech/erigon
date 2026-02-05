@@ -72,7 +72,7 @@ func TraceBorStateSyncTxnDebugAPI(
 		if err != nil {
 			return res, err
 		}
-		gasUsed = res.GasUsed
+		gasUsed = res.ReceiptGasUsed
 		return res, nil
 	}
 

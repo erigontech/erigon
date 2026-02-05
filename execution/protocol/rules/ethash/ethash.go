@@ -41,6 +41,7 @@ import (
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
 	"github.com/erigontech/erigon/execution/types"
@@ -580,7 +581,7 @@ func SeedHash(block uint64) []byte {
 }
 
 func (ethash *Ethash) GetTransferFunc() evmtypes.TransferFunc {
-	return rules.Transfer
+	return misc.Transfer
 }
 
 func (ethash *Ethash) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {

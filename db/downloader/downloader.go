@@ -333,11 +333,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downl
 
 	d.zeroActiveDownloadRequests.L = &d.activeDownloadRequestsLock
 
-	d.logTorrentClientParams()
-
-	if len(cfg.WebSeedUrls) == 0 {
-		d.log(log.LvlInfo, "downloader has no webseed urls configured")
-	}
+	d.logConfig()
 
 	requestHandler.downloader = d
 
@@ -435,15 +431,41 @@ func (d *Downloader) snapshotDataLooksComplete(info *metainfo.Info) bool {
 	return true
 }
 
+// Log the names of torrents missing metainfo. We can pass a level in to scale the urgency of the
+// situation.
+func (d *Downloader) logNoMetadata(lvl log.Lvl, torrents []snapshot) {
+	var noMetadata []string
+
+	for _, ps := range torrents {
+		t, ok := d.torrentClient.Torrent(ps.InfoHash)
+		if !ok {
+			// Don't report missing metainfo, because we haven't even added it yet.
+			continue
+		}
+		if t.Info() != nil {
+			continue
+		}
+		noMetadata = append(noMetadata, ps.Name)
+	}
+
+	if len(noMetadata) == 0 {
+		return
+	}
+	amount := len(noMetadata)
+	if len(noMetadata) > 5 {
+		noMetadata = append(noMetadata[:5], "...")
+	}
+	d.log(lvl, "No metadata yet", "files", amount, "list", noMetadata)
+}
+
 // We take preverifiedSnapshot because it's convenient. We want to log torrents that potentially
 // aren't initialized yet.
 func (d *Downloader) newStats(prevStats AggStats, torrents []snapshot) AggStats {
-	torrentClient := d.torrentClient
 	peers := make(map[torrent.PeerID]struct{}, 16)
 	stats := prevStats
 
 	// Call these methods outside `lock` critical section, because they have own locks with contention.
-	connStats := torrentClient.Stats()
+	connStats := d.torrentClient.Stats()
 
 	stats.BytesUpload = uint64(connStats.BytesWrittenData.Int64())
 	stats.BytesHashed = uint64(connStats.BytesHashed.Int64())
@@ -456,8 +478,6 @@ func (d *Downloader) newStats(prevStats AggStats, torrents []snapshot) AggStats 
 	stats.TorrentsCompleted = 0
 	stats.NumTorrents = len(torrents)
 
-	var noMetadata []string
-
 	for _, ps := range torrents {
 		t, ok := d.torrentClient.Torrent(ps.InfoHash)
 		if !ok {
@@ -465,7 +485,6 @@ func (d *Downloader) newStats(prevStats AggStats, torrents []snapshot) AggStats 
 			continue
 		}
 		if t.Info() == nil {
-			noMetadata = append(noMetadata, ps.Name)
 			continue
 		}
 
@@ -488,14 +507,6 @@ func (d *Downloader) newStats(prevStats AggStats, torrents []snapshot) AggStats 
 			stats.ConnectionsTotal++
 			peers[peer.PeerID] = struct{}{}
 		}
-	}
-
-	if len(noMetadata) > 0 {
-		amount := len(noMetadata)
-		if len(noMetadata) > 5 {
-			noMetadata = append(noMetadata[:5], "...")
-		}
-		d.log(log.LvlInfo, "No metadata yet", "files", amount, "list", strings.Join(noMetadata, ","))
 	}
 
 	stats.When = time.Now()
@@ -729,7 +740,23 @@ func (d *Downloader) startSnapshotsDownload(
 	batch.all.Add(1)
 	go func() {
 		defer batch.all.Done()
-		d.logDownload(batchCtx, items, target)
+		d.logDownload(
+			batchCtx,
+			items,
+			target,
+			func() log.Lvl {
+				if batch.finishedMetadataTasks.Load() {
+					// If we've finished synchronously fetching webseeds directly, then missing
+					// metainfos are a potential problem: We must now rely on fetching metainfo from
+					// peers, which usually indicates there's an issue with webseeds.
+					return log.LvlWarn
+				} else {
+					// We used to log this at info. There's a warning for each failed webseed fetch,
+					// and then only after that's all done does it become interesting.
+					return log.LvlDebug
+				}
+			},
+		)
 	}()
 
 	defer func() {
@@ -799,24 +826,34 @@ func (d *Downloader) backgroundLogging(ctx context.Context) {
 			d.activeDownloadRequestsLock.Unlock()
 			return
 		}
-		stats = d.newStats(stats, d.allActiveSnapshots())
+		allActiveSnapshots := d.allActiveSnapshots()
+		stats = d.newStats(stats, allActiveSnapshots)
 		// Flexibility to add seeding and warn on unexpected behaviour in torrent client here. We
 		// should probably change the status message if downloading but nobody is actively waiting
 		// on sync. We can also report seeding if we see upload activity and everything is synced.
 		d.logStatsInner(log.LvlDebug, stats, "Idle", nil, false)
+		// There are missing torrent infos but nobody is waiting on a download request to complete.
+		// Let me (anacrolix) know why this should happen.
+		d.logNoMetadata(log.LvlError, allActiveSnapshots)
 		d.activeDownloadRequestsLock.Unlock()
 	}
 }
 
 // We take preverifiedSnapshot because it's convenient. We want to log torrents that potentially
 // aren't initialized yet.
-func (d *Downloader) logDownload(ctx context.Context, ts []preverifiedSnapshot, target string) {
+func (d *Downloader) logDownload(
+	ctx context.Context,
+	ts []preverifiedSnapshot,
+	target string,
+	getNoMetadataLvl func() log.Lvl,
+) {
 	startTime := time.Now()
 	stats := d.newStats(AggStats{}, ts)
 	interval := time.Second
 	for {
 		stats = d.newStats(stats, ts)
 		d.logSyncStats(startTime, stats, target)
+		d.logNoMetadata(getNoMetadataLvl(), ts)
 		if ctx.Err() != nil {
 			return
 		}
@@ -972,7 +1009,7 @@ func (d *Downloader) addedFirstDownloader(
 				d.log(log.LvlError, "error loading metainfo from disk", "err", err, "name", name)
 			}
 		} else {
-			d.log(log.LvlInfo, "error fetching metainfo from webseeds", "err", err, "name", name, "infohash", infoHash)
+			d.log(log.LvlWarn, "error fetching metainfo from webseeds", "err", err, "name", name, "infohash", infoHash)
 		}
 	}
 
@@ -1060,6 +1097,7 @@ func (d *Downloader) fetchMetainfoFromWebseeds(ctx context.Context, name string,
 		}
 		return os.WriteFile(d.metainfoFilePathForName(name), buf.Bytes(), 0o666)
 	}
+	err = fmt.Errorf("all webseed urls failed. last error: %w", err)
 	return
 }
 
@@ -1076,12 +1114,22 @@ func (d *Downloader) fetchMetainfoFromWebseed(
 	mi metainfo.MetaInfo,
 	err error,
 ) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, d.webseedMetainfoUrl(webseedUrlBase, name), nil)
+	url := d.webseedMetainfoUrl(webseedUrlBase, name)
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("fetching from %q: %w", url, err)
+		}
+	}()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return
 	}
 	resp, err := d.metainfoHttpClient.Do(req)
 	if err != nil {
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		err = fmt.Errorf("unexpected http response status code: %v", resp.StatusCode)
 		return
 	}
 	defer resp.Body.Close()
@@ -1092,7 +1140,9 @@ func (d *Downloader) fetchMetainfoFromWebseed(
 		err = fmt.Errorf("decoding metainfo response body: %w", err)
 		return
 	}
-	// Do we want dec.ReadEOF here?
+	// Do we want dec.ReadEOF here? Answer: Yes. If we get a response that replies incorrectly with
+	// valid bencoding and then more stuff we're doing the wrong thing.
+	err = dec.ReadEOF()
 	return
 }
 
@@ -1291,10 +1341,10 @@ func newTorrentClient(
 
 // Moved from EthConfig to be as close to torrent client init as possible. Logs important torrent
 // parameters.
-func (d *Downloader) logTorrentClientParams() {
+func (d *Downloader) logConfig() {
 	cfg := d.cfg.ClientConfig
 	d.log(log.LvlInfo,
-		"Torrent client params",
+		"Torrent config",
 		"ipv6-enabled", !cfg.DisableIPv6,
 		"ipv4-enabled", !cfg.DisableIPv4,
 		"download.rate", rateLimitString(torrent.EffectiveDownloadRateLimit(cfg.DownloadRateLimiter)),
@@ -1306,6 +1356,7 @@ func (d *Downloader) logTorrentClientParams() {
 			return "shared with p2p"
 		}(),
 		"upload.rate", rateLimitString(cfg.UploadRateLimiter.Limit()),
+		"webseed-urls", d.cfg.WebSeedUrls,
 	)
 }
 
@@ -1329,7 +1380,7 @@ func (d *Downloader) logSyncStats(startTime time.Time, stats AggStats, target st
 
 	addCtx(
 		"time-left", calculateTime(remainingBytes, stats.CompletionRate),
-		"total-time", time.Since(startTime).Truncate(time.Second).String(),
+		"time-elapsed", time.Since(startTime).Truncate(time.Second).String(),
 	)
 
 	d.logStatsInner(log.LvlInfo, stats, fmt.Sprintf("Syncing %v", target), logCtx, true)

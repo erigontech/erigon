@@ -17,6 +17,7 @@
 package dbg
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -35,15 +36,18 @@ import (
 )
 
 var (
-	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 512)
+	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
 	noMemstat            = EnvBool("NO_MEMSTAT", false)
 	saveHeapProfile      = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath  = EnvString("HEAP_PROFILE_FILE_PATH", "")
 	heapProfileThreshold = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
 	heapProfileFrequency = EnvDuration("HEAP_PROFILE_FREQUENCY", 30*time.Second)
-	mdbxLockInRam        = EnvBool("MDBX_LOCK_IN_RAM", false)
 	StagesOnlyBlocks     = EnvBool("STAGES_ONLY_BLOCKS", false)
+
+	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
+	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
+	MdbxNoSyncUnsafe = EnvBool("MDBX_NO_FSYNC_UNSAFE", false)
 
 	stopBeforeStage = EnvString("STOP_BEFORE_STAGE", "")
 	stopAfterStage  = EnvString("STOP_AFTER_STAGE", "")
@@ -69,8 +73,6 @@ var (
 	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", true)
 	OnlyCreateDB    = EnvBool("ONLY_CREATE_DB", false)
 
-	CommitEachStage = EnvBool("COMMIT_EACH_STAGE", false)
-
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
 	Exec3Parallel = EnvBool("EXEC3_PARALLEL", false)
@@ -95,6 +97,7 @@ var (
 	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
+	UseStateCache        = EnvBool("USE_STATE_CACHE", false)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
@@ -108,8 +111,6 @@ func ReadMemStats(m *runtime.MemStats) {
 	}
 	runtime.ReadMemStats(m)
 }
-
-func MdbxLockInRam() bool { return mdbxLockInRam }
 
 func DiscardCommitment() bool    { return discardCommitment }
 func NoPrune() bool              { return noPrune }
@@ -231,34 +232,67 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 		return
 	}
 
-	// above 45%
+	// above threshold - save heap profile
 	var filePath string
 	if heapProfileFilePath == "" {
 		filePath = filepath.Join(os.TempDir(), "erigon-mem.prof")
 	} else {
 		filePath = heapProfileFilePath
 	}
+
 	if logger != nil {
-		logger.Info("[Experiment] saving heap profile as near OOM", "filePath", filePath)
+		logger.Info("[Experiment] saving heap profile as near OOM", "filePath", filePath, "alloc", common.ByteCount(memStats.Alloc))
 	}
 
-	f, err := os.Create(filePath)
-	if err != nil && logger != nil {
-		logger.Warn("[Experiment] could not create heap profile file", "err", err)
-	}
-
-	defer func() {
-		err := f.Close()
-		if err != nil && logger != nil {
-			logger.Warn("[Experiment] could not close heap profile file", "err", err)
+	// Write heap profile to buffer first
+	var buf bytes.Buffer
+	if err := pprof.WriteHeapProfile(&buf); err != nil {
+		if logger != nil {
+			logger.Warn("[Experiment] could not write heap profile to buffer", "err", err)
 		}
-	}()
-
-	runtime.GC()
-	err = pprof.WriteHeapProfile(f)
-	if err != nil && logger != nil {
-		logger.Warn("[Experiment] could not write heap profile file", "err", err)
+		return
 	}
+	logger.Info("[Experiment] wrote heap profile to buffer", "size", common.ByteCount(uint64(buf.Len())))
+
+	// create temp file-> write buffer -> fsync -> rename
+	// Writing to the temporary file first and then renaming to the output file ensures durability of data in case of an OOM
+	// If there is an OOM crash while writing to the .tmp file we still have the previous heap profile result saved
+	// in the output file. The rename() operation is atomic for POSIX systems, so there is no danger of corruption if the OOM comes
+	// when os.Rename() is being called.
+	tmpPath := filePath + ".tmp"
+	f, err := os.Create(tmpPath)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("[Experiment] could not create heap profile temp file", "err", err)
+		}
+		return
+	}
+	defer f.Close()
+	defer os.Remove(tmpPath) //nolint
+
+	if _, err := f.Write(buf.Bytes()); err != nil {
+		if logger != nil {
+			logger.Warn("[Experiment] could not write heap profile temp file", "err", err)
+		}
+		return
+	}
+
+	if err := f.Sync(); err != nil {
+		if logger != nil {
+			logger.Warn("[Experiment] could not sync heap profile temp file", "err", err)
+		}
+		return
+	}
+
+	// Atomic rename (on linux/mac; best-effort on Windows)
+	if err := os.Rename(tmpPath, filePath); err != nil {
+		if logger != nil {
+			logger.Warn("[Experiment] could not rename heap profile file", "err", err)
+		}
+		return
+	}
+
+	logger.Info("[Experiment] wrote heap profile to disk")
 }
 
 func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOption) {
