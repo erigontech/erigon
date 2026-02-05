@@ -213,8 +213,8 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		log.Debug("AddChainSegment: missing segment", "block", common.Hash(blockRoot), "slot", block.Slot, "parentRoot", block.ParentRoot)
 		return nil, MissingSegment, nil
 	}
-	finalizedBlock, hasFinalized := f.getBlock(newState.FinalizedCheckpoint().Root)
-	parentBlock, hasParentBlock := f.getBlock(block.ParentRoot)
+	finalizedBlock, hasFinalized := f.GetBlock(newState.FinalizedCheckpoint().Root)
+	parentBlock, hasParentBlock := f.GetBlock(block.ParentRoot)
 
 	// Before processing the state: update the newest lightclient update.
 	if block.Version() >= clparams.AltairVersion && hasParentBlock && fullValidation && hasFinalized && f.rcfg.Beacon && !isBlockRootTheCurrentState {
@@ -328,7 +328,7 @@ func (f *forkGraphDisk) GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHe
 	return obj.(*cltypes.BeaconBlockHeader), true
 }
 
-func (f *forkGraphDisk) getBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+func (f *forkGraphDisk) GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool) {
 	obj, has := f.blocks.Load(blockRoot)
 	if !has {
 		return nil, false
@@ -425,7 +425,7 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 
 	// try and find the point of recconnection
 	for copyReferencedState == nil {
-		block, isSegmentPresent := f.getBlock(currentIteratorRoot)
+		block, isSegmentPresent := f.GetBlock(currentIteratorRoot)
 		if !isSegmentPresent {
 			// check if it is in the header
 			bHeader, ok := f.GetHeader(currentIteratorRoot)

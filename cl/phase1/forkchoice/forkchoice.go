@@ -146,6 +146,13 @@ type ForkChoiceStore struct {
 	ethClock                eth_clock.EthereumClock
 	optimisticStore         optimistic.OptimisticStore
 	probabilisticHeadGetter bool
+
+	// [New in Gloas:EIP7732]
+	executionPayloadStates sync.Map // map[common.Hash]*state.CachingBeaconState
+	// [New in Gloas:EIP7732]
+	ptcVote sync.Map // map[common.Hash][clparams.PtcSize]bool
+	// [New in Gloas:EIP7732] block_timeliness tracks [attestation_timely, ptc_timely] per block
+	blockTimeliness sync.Map // map[common.Hash][clparams.NumBlockTimelinessDeadlines]bool
 }
 
 
@@ -292,6 +299,14 @@ func NewForkChoiceStore(
 
 	f.highestSeen.Store(anchorState.Slot())
 	f.time.Store(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot())
+
+	// [New in Gloas:EIP7732] Initialize anchor root entries
+	if anchorStateCopy, err := anchorState.Copy(); err == nil {
+		f.executionPayloadStates.Store(anchorRoot, anchorStateCopy)
+	}
+	f.ptcVote.Store(anchorRoot, [clparams.PtcSize]bool{})
+	f.blockTimeliness.Store(anchorRoot, [clparams.NumBlockTimelinessDeadlines]bool{true, true})
+
 	return f, nil
 }
 
