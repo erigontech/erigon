@@ -254,6 +254,9 @@ func ReadBlockWithSendersFromGlobalReadAheader(blockHash common.Hash) (*types.Bl
 		return nil, false
 	}
 	sendersAddresses := make([]common.Address, 0, len(senders)/length.Addr)
+	for i := 0; i < len(senders); i += length.Addr {
+		sendersAddresses = append(sendersAddresses, common.BytesToAddress(senders[i:i+length.Addr]))
+	}
 	body.SendersToTxs(sendersAddresses)
 	return types.NewBlockFromStorage(header.Hash(), header, body.Transactions, body.Uncles, body.Withdrawals, body.BlockAccessList), true
 }
