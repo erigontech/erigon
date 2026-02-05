@@ -129,7 +129,7 @@ func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas uint64, 
 	if err != nil {
 		return 0, err
 	}
-	addr := accounts.InternAddress(callContext.Stack.peek().Bytes20())
+	addr := internAddressFromWord(callContext.Stack.peek())
 	// Check slot presence in the access list
 	if evm.IntraBlockState().AddAddressToAccessList(addr) {
 		var overflow bool
@@ -150,7 +150,7 @@ func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas uint64, 
 // - extcodesize,
 // - (ext) balance
 func gasEip2929AccountCheck(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
-	addr := accounts.InternAddress(callContext.Stack.peek().Bytes20())
+	addr := internAddressFromWord(callContext.Stack.peek())
 	// If the caller cannot afford the cost, this change will be rolled back
 	if evm.IntraBlockState().AddAddressToAccessList(addr) {
 		// The warm storage read cost is already charged as constantGas
@@ -161,7 +161,7 @@ func gasEip2929AccountCheck(evm *EVM, callContext *CallContext, scopeGas uint64,
 
 func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 	return func(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
-		addr := accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
+		addr := internAddressFromWord(callContext.Stack.Back(1))
 		// The WarmStorageReadCostEIP2929 (100) is already deducted in the form of a constant cost, so
 		// the cost to charge for cold access, if any, is Cold - Warm
 		coldCost := params.ColdAccountAccessCostEIP2929 - params.WarmStorageReadCostEIP2929
@@ -226,7 +226,7 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 	gasFunc := func(evm *EVM, callContext *CallContext, scopeGas uint64, memorySize uint64) (uint64, error) {
 		var (
 			gas     uint64
-			address = accounts.InternAddress(callContext.Stack.peek().Bytes20())
+			address = internAddressFromWord(callContext.Stack.peek())
 		)
 		// If the caller cannot afford the cost, this change will be rolled back
 		if !evm.IntraBlockState().AddressInAccessList(address) {
@@ -272,7 +272,7 @@ var (
 
 func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefulCalculator statefulGasFunc) gasFunc {
 	return func(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
-		addr := accounts.InternAddress(callContext.Stack.Back(1).Bytes20())
+		addr := internAddressFromWord(callContext.Stack.Back(1))
 		// Check slot presence in the access list
 		var gas uint64
 		var accessGas uint64

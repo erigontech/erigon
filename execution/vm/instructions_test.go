@@ -613,9 +613,11 @@ func BenchmarkOpKeccak256(bench *testing.B) {
 	callContext.Memory.Resize(32)
 	pc := uint64(0)
 	start := uint256.Int{}
+	size := uint256.Int{}
+	size.SetUint64(32)
 
 	for bench.Loop() {
-		callContext.Stack.push(*uint256.NewInt(32))
+		callContext.Stack.push(size)
 		callContext.Stack.push(start)
 		opKeccak256(pc, evm, callContext)
 	}
@@ -883,8 +885,9 @@ func TestPush(t *testing.T) {
 	push32 := makePush(32, 32)
 
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
-	callContext := &CallContext{}
-	callContext.Contract.Code = code
+	callContext := &CallContext{
+		Contract: &Contract{Code: code},
+	}
 
 	for i, want := range []string{
 		"0x11223344556677889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1",
@@ -1064,8 +1067,9 @@ func TestEIP8024_Execution(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			code := common.FromHex(tc.codeHex)
 			pc := uint64(0)
-			callContext := new(CallContext)
-			callContext.Contract.Code = code
+			callContext := &CallContext{
+				Contract: &Contract{Code: code},
+			}
 			var err error
 			for pc < uint64(len(code)) && err == nil {
 				op := code[pc]

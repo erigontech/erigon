@@ -376,7 +376,7 @@ func (ex *executor) scheduleCall(typ OpCode, caller accounts.Address, callerAddr
 		ret, leftOverGas, err = ex.finalizeCall(&info, ret, leftOverGas, err)
 		return false, ret, leftOverGas, err
 	}
-	if typ == CALL || typ == CALLCODE {
+	if (typ == CALL || typ == CALLCODE) && !value.IsZero() {
 		// Fail if we're trying to transfer more than the available balance
 		canTransfer, balanceErr := evm.Context.CanTransfer(evm.intraBlockState, caller, value)
 		if balanceErr != nil {
@@ -384,7 +384,7 @@ func (ex *executor) scheduleCall(typ OpCode, caller accounts.Address, callerAddr
 			ret, leftOverGas, err = ex.finalizeCall(&info, ret, leftOverGas, err)
 			return false, ret, leftOverGas, err
 		}
-		if !value.IsZero() && !canTransfer {
+		if !canTransfer {
 			ret, leftOverGas, err = nil, gas, ErrInsufficientBalance
 			ret, leftOverGas, err = ex.finalizeCall(&info, ret, leftOverGas, err)
 			return false, ret, leftOverGas, err
@@ -523,16 +523,18 @@ func (ex *executor) scheduleCreate(typ OpCode, caller accounts.Address, code []b
 		ret, leftOverGas, err = ex.finalizeCreate(&info, ret, leftOverGas, err)
 		return false, ret, leftOverGas, err
 	}
-	canTransfer, balanceErr := evm.Context.CanTransfer(evm.intraBlockState, caller, value)
-	if balanceErr != nil {
-		ret, leftOverGas, err = nil, 0, balanceErr
-		ret, leftOverGas, err = ex.finalizeCreate(&info, ret, leftOverGas, err)
-		return false, ret, leftOverGas, err
-	}
-	if !canTransfer {
-		ret, leftOverGas, err = nil, gasRemaining, ErrInsufficientBalance
-		ret, leftOverGas, err = ex.finalizeCreate(&info, ret, leftOverGas, err)
-		return false, ret, leftOverGas, err
+	if !value.IsZero() {
+		canTransfer, balanceErr := evm.Context.CanTransfer(evm.intraBlockState, caller, value)
+		if balanceErr != nil {
+			ret, leftOverGas, err = nil, 0, balanceErr
+			ret, leftOverGas, err = ex.finalizeCreate(&info, ret, leftOverGas, err)
+			return false, ret, leftOverGas, err
+		}
+		if !canTransfer {
+			ret, leftOverGas, err = nil, gasRemaining, ErrInsufficientBalance
+			ret, leftOverGas, err = ex.finalizeCreate(&info, ret, leftOverGas, err)
+			return false, ret, leftOverGas, err
+		}
 	}
 	if incrementNonce {
 		nonce, nonceErr := evm.intraBlockState.GetNonce(caller)

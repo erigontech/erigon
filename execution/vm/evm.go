@@ -283,13 +283,13 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	if depth > int(params.CallCreateDepth) {
 		return nil, gas, ErrDepth
 	}
-	if typ == CALL || typ == CALLCODE {
+	if (typ == CALL || typ == CALLCODE) && !value.IsZero() {
 		// Fail if we're trying to transfer more than the available balance
 		canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller, value)
 		if err != nil {
 			return nil, 0, err
 		}
-		if !value.IsZero() && !canTransfer {
+		if !canTransfer {
 			if !bailout {
 				return nil, gas, ErrInsufficientBalance
 			}
@@ -469,14 +469,16 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 		err = ErrDepth
 		return nil, accounts.NilAddress, gasRemaining, err
 	}
-	canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller, value)
-	if err != nil {
-		return nil, accounts.NilAddress, 0, err
-	}
-	if !canTransfer {
-		if !bailout {
-			err = ErrInsufficientBalance
-			return nil, accounts.NilAddress, gasRemaining, err
+	if !value.IsZero() {
+		canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller, value)
+		if err != nil {
+			return nil, accounts.NilAddress, 0, err
+		}
+		if !canTransfer {
+			if !bailout {
+				err = ErrInsufficientBalance
+				return nil, accounts.NilAddress, gasRemaining, err
+			}
 		}
 	}
 	if incrementNonce {
