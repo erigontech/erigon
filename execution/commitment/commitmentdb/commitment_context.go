@@ -484,6 +484,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 				return 0, 0, false, err
 			}
 			if lastBn < blockNum {
+				log.Warn("[dbg] SeekCommitment", "err", fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d, %s", ErrBehindCommitment, lastBn, blockNum, dbg.Stack()).Error())
 				return 0, 0, false, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d, %s", ErrBehindCommitment, lastBn, blockNum, dbg.Stack())
 			}
 		}
