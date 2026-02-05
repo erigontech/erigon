@@ -247,8 +247,8 @@ jobs:
           mkdir -p $result_dir
           echo "result_dir=$result_dir" >> $GITHUB_ENV
 
-          # Initialize output log file
-          output_log=$result_dir/output.log
+          # Initialize output log file in perf dir (moved to result_dir after all tests)
+          output_log=${{runner.workspace}}/rpc-tests/perf/output.log
           > $output_log
           
           run_perf () {
@@ -263,7 +263,7 @@ jobs:
           
             # clean temporary area
             cd $workspace/rpc-tests/perf
-            rm -rf ./reports/$network
+            rm -rf ./reports/$network/*
           
             python3 ./run_perf_tests.py --blockchain "$network" \
                                       --test-type "$method" \
@@ -363,6 +363,9 @@ jobs:
           run_perf ${{runner.workspace}} $CHAIN eth_call stress_test_eth_call_002_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
           #run_perf ${{runner.workspace}} $CHAIN eth_getProof stress_test_eth_getProof_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
           
+          # Move output.log to result_dir after all tests
+          mv $output_log $result_dir/
+
           # Save the subsection reached status
           
           echo "test_executed=true" >> $GITHUB_OUTPUT
