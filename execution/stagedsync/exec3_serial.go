@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -81,10 +82,16 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		default:
 		}
 
-		var err error
-		b, err = exec.BlockWithSenders(ctx, se.cfg.db, se.applyTx, se.cfg.blockReader, blockNum)
+		canonicalHash, err := rawdb.ReadCanonicalHash(se.applyTx, blockNum)
 		if err != nil {
 			return nil, rwTx, err
+		}
+		b, ok := exec.ReadBlockWithSendersFromGlobalReadAheader(canonicalHash)
+		if b == nil || !ok {
+			b, err = exec.BlockWithSenders(ctx, se.cfg.db, se.applyTx, se.cfg.blockReader, blockNum)
+			if err != nil {
+				return nil, rwTx, err
+			}
 		}
 		if b == nil {
 			// TODO: panic here and see that overall process deadlock

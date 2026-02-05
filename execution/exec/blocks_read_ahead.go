@@ -2,15 +2,255 @@ package exec
 
 import (
 	"context"
+	"sync/atomic"
 
+	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+type blockReadAheader struct {
+	// keeps some caches for block themselves
+	headers *simplelru.LRU[common.Hash, *types.Header]
+	bodies  *simplelru.LRU[common.Hash, *types.Body]
+	senders *simplelru.LRU[common.Hash, []byte] // just do raw senders
+
+	// this is for warming state
+	warming atomic.Bool // only one warmBody can run at a time
+}
+
+func newBlockReadAheader() *blockReadAheader {
+	headers, err := simplelru.NewLRU[common.Hash, *types.Header](4, nil)
+	if err != nil {
+		panic(err)
+	}
+	bodies, err := simplelru.NewLRU[common.Hash, *types.Body](4, nil)
+	if err != nil {
+		panic(err)
+	}
+	senders, err := simplelru.NewLRU[common.Hash, []byte](4, nil)
+	if err != nil {
+		panic(err)
+	}
+	return &blockReadAheader{
+		headers: headers,
+		bodies:  bodies,
+		senders: senders,
+	}
+}
+
+var globalReadAheader = newBlockReadAheader()
+
+func (bra *blockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body) {
+	blockHash := header.Hash()
+	bra.headers.Add(blockHash, header)
+	bra.bodies.Add(blockHash, body)
+	if db != nil && ctx != nil {
+		// Only allow one warmBody to run at a time
+		if !bra.warming.CompareAndSwap(false, true) {
+			return
+		}
+		go bra.warmBody(ctx, db, body, 8) // use 8 workers for warming
+	}
+}
+
+func (bra *blockReadAheader) AddSenders(senders []byte, blockHash common.Hash) {
+	if _, ok := bra.bodies.Get(blockHash); !ok {
+		return
+	}
+	bra.senders.Add(blockHash, common.Copy(senders))
+}
+
+func AddHeaderAndBodyToGlobalReadAheader(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body) {
+	globalReadAheader.AddHeaderAndBody(ctx, db, header, body)
+}
+
+func AddSendersToGlobalReadAheader(senders []byte, blockHash common.Hash) {
+	globalReadAheader.AddSenders(senders, blockHash)
+}
+
+// warmBody warms state for all transactions in a body using multiple workers.
+// It reads: To accounts, To account code, To account storage from access lists,
+// and block-level access lists. Each worker creates its own transaction.
+// Only one warmBody can run at a time - concurrent calls are no-ops.
+func (bra *blockReadAheader) warmBody(ctx context.Context, db kv.RoDB, body *types.Body, workers int) {
+	defer bra.warming.Store(false)
+
+	if workers <= 0 {
+		workers = 1
+	}
+
+	var wg errgroup.Group
+
+	// If BAL exists, use BAL warming (more complete)
+	if len(body.BlockAccessList) > 0 {
+		balLen := len(body.BlockAccessList)
+		balWorkers := workers
+		if balWorkers > balLen {
+			balWorkers = balLen
+		}
+
+		// Pre-divide work: each worker gets a dedicated range of BAL entries
+		entriesPerWorker := (balLen + balWorkers - 1) / balWorkers
+
+		for w := 0; w < balWorkers; w++ {
+			start := w * entriesPerWorker
+			end := start + entriesPerWorker
+			if end > balLen {
+				end = balLen
+			}
+			if start >= balLen {
+				break
+			}
+
+			// Capture loop variables for closure
+			workerStart, workerEnd := start, end
+			wg.Go(func() error {
+				tx, err := db.BeginRo(ctx)
+				if err != nil {
+					return err
+				}
+				defer tx.Rollback()
+
+				ttx, ok := tx.(kv.TemporalTx)
+				if !ok {
+					return nil
+				}
+				stateReader := state.NewReaderV3(ttx)
+
+				for idx := workerStart; idx < workerEnd; idx++ {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					default:
+					}
+
+					acctChanges := body.BlockAccessList[idx]
+					acct, _ := stateReader.ReadAccountData(acctChanges.Address)
+					// Warm code if account has code or if there are code changes
+					if (acct != nil && !acct.CodeHash.IsEmpty()) || len(acctChanges.CodeChanges) > 0 {
+						stateReader.ReadAccountCode(acctChanges.Address)
+					}
+					for _, slotChanges := range acctChanges.StorageChanges {
+						stateReader.ReadAccountStorage(acctChanges.Address, slotChanges.Slot)
+					}
+					for _, slot := range acctChanges.StorageReads {
+						stateReader.ReadAccountStorage(acctChanges.Address, slot)
+					}
+				}
+				return nil
+			})
+		}
+		wg.Wait()
+		return
+	}
+	// Fallback: per-transaction warming when no BAL
+	txns := body.Transactions
+	if len(txns) == 0 {
+		return
+	}
+
+	txnLen := len(txns)
+	if workers > txnLen {
+		workers = txnLen
+	}
+
+	// Pre-divide work: each worker gets a dedicated range of transactions
+	txnsPerWorker := (txnLen + workers - 1) / workers
+
+	for w := 0; w < workers; w++ {
+		start := w * txnsPerWorker
+		end := start + txnsPerWorker
+		if end > txnLen {
+			end = txnLen
+		}
+		if start >= txnLen {
+			break
+		}
+
+		// Capture loop variables for closure
+		workerStart, workerEnd := start, end
+		wg.Go(func() error {
+			tx, err := db.BeginRo(ctx)
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+
+			ttx, ok := tx.(kv.TemporalTx)
+			if !ok {
+				return nil
+			}
+			stateReader := state.NewReaderV3(ttx)
+
+			for txIdx := workerStart; txIdx < workerEnd; txIdx++ {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
+
+				txn := txns[txIdx]
+
+				// Warm To account and its code if it has one
+				if toAddr := txn.GetTo(); toAddr != nil {
+					to := accounts.InternAddress(*toAddr)
+					if acct, _ := stateReader.ReadAccountData(to); acct != nil && !acct.CodeHash.IsEmpty() {
+						stateReader.ReadAccountCode(to)
+					}
+				}
+
+				// Warm transaction access list accounts and their code
+				for _, entry := range txn.GetAccessList() {
+					addr := accounts.InternAddress(entry.Address)
+					if acct, _ := stateReader.ReadAccountData(addr); acct != nil && !acct.CodeHash.IsEmpty() {
+						stateReader.ReadAccountCode(addr)
+					}
+					for _, slot := range entry.StorageKeys {
+						stateReader.ReadAccountStorage(addr, accounts.InternKey(slot))
+					}
+				}
+			}
+			return nil
+		})
+	}
+
+	wg.Wait()
+}
+
+func WarmBodyFromGlobalReadAheader(ctx context.Context, db kv.RoDB, body *types.Body, workers int) {
+	globalReadAheader.warmBody(ctx, db, body, workers)
+}
+
+func ReadBodyWithTransactionsFromGlobalReadAheader(blockHash common.Hash) (*types.Body, bool) {
+	return globalReadAheader.bodies.Get(blockHash)
+}
+
+func ReadBlockWithSendersFromGlobalReadAheader(blockHash common.Hash) (*types.Block, bool) {
+	header, ok := globalReadAheader.headers.Get(blockHash)
+	if !ok {
+		return nil, false
+	}
+	body, ok := globalReadAheader.bodies.Get(blockHash)
+	if !ok {
+		return nil, false
+	}
+	senders, ok := globalReadAheader.senders.Get(blockHash)
+	if !ok {
+		return nil, false
+	}
+	sendersAddresses := make([]common.Address, 0, len(senders)/length.Addr)
+	body.SendersToTxs(sendersAddresses)
+	return types.NewBlockFromStorage(header.Hash(), header, body.Transactions, body.Uncles, body.Withdrawals, body.BlockAccessList), true
+}
 
 func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.Engine, blockReader services.FullBlockReader) (chan uint64, context.CancelFunc) {
 	const readAheadBlocks = 100
