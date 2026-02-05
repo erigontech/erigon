@@ -261,17 +261,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 
-	if isDomainAheadOfBlocks(ctx, tx, e.logger) {
-		if err := tx.Commit(); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		}
-		return sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
-			LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
-			Status:          executionproto.ExecutionStatus_TooFarAway,
-			ValidationError: "domain ahead of blocks",
-		}, false)
-	}
-
 	currentContext, err := execctx.NewSharedDomains(ctx, tx, e.logger)
 
 	if err != nil {
@@ -403,6 +392,17 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			}
 		}
+	}
+
+	if isDomainAheadOfBlocks(ctx, tx, e.logger) {
+		if err := tx.Commit(); err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		}
+		return sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
+			LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
+			Status:          executionproto.ExecutionStatus_TooFarAway,
+			ValidationError: "domain ahead of blocks",
+		}, false)
 	}
 
 	// Set Progress for headers and bodies accordingly.

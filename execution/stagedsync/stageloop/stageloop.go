@@ -134,6 +134,15 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	}
 	defer tx.Rollback()
 
+	// run stages first time - it will download blocks
+	err = sync.RunSnapshots(nil, tx)
+	if err != nil {
+		return err
+	}
+	if onlySnapDownload {
+		return nil
+	}
+
 	// Must do 2 checks:
 	// - before `execctx.NewSharedDomains()`
 	// - and after StageSnapshots: it will download and fill TxNum index
@@ -146,15 +155,6 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		return err
 	}
 	defer doms.Close()
-
-	// run stages first time - it will download blocks
-	err = sync.RunSnapshots(doms, tx)
-	if err != nil {
-		return err
-	}
-	if onlySnapDownload {
-		return nil
-	}
 
 	// after StageSnapshots (files downloading): if domains are ahead of block files, then nothing to execute.
 	if isDomainAheadOfBlocks(ctx, tx, logger) {

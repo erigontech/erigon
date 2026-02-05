@@ -109,7 +109,7 @@ func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData)
 			return
 		case verification := <-incoming:
 			aggregateVerificationData = append(aggregateVerificationData, verification)
-			if len(aggregateVerificationData) >= batchSignatureVerificationThreshold {
+			if len(aggregateVerificationData) >= batchSignatureVerificatiownThreshold {
 				b.processSignatureVerification(aggregateVerificationData)
 				ticker.Reset(batchCheckInterval)
 				// clear the slice
