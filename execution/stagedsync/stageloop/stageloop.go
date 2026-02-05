@@ -134,7 +134,9 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	}
 	defer tx.Rollback()
 
-	// Checking before create `execctx.NewSharedDomains`
+	// Must do 2 checks:
+	// - before `execctx.NewSharedDomains()`: it will
+	// - and after StageSnapshots: it will download and fill TxNum index
 	if isDomainAheadOfBlocks(ctx, tx, logger) {
 		return tx.Commit()
 	}
