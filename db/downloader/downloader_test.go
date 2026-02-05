@@ -144,7 +144,9 @@ func TestAddDel(t *testing.T) {
 
 	f1Abs := filepath.Join(test.dirs.Snap, "a.seg")      // block file
 	f2Abs := filepath.Join(test.dirs.SnapDomain, "a.kv") // state file
-	_, _ = os.Create(f1Abs)
+	f, err := os.Create(f1Abs)
+	require.NoError(err)
+	assert.NoError(t, f.Close())
 	require.NoError(os.WriteFile(f2Abs, []byte("a.kv"), 0o666))
 
 	// Create a second datadir, not relative to the one the Downloader expects.
@@ -160,7 +162,7 @@ func TestAddDel(t *testing.T) {
 	var errRpcSnapName errRpcSnapName
 
 	// Add: expect relative paths
-	err := server.Seed(ctx, []string{f1BadAbs})
+	err = server.Seed(ctx, []string{f1BadAbs})
 	require.ErrorAs(err, &errRpcSnapName)
 	require.Equal(0, len(test.downloader.torrentClient.Torrents()))
 
