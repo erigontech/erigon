@@ -1,5 +1,9 @@
 ---
 description: Running Multiple Erigon Instances on a Single Machine
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/fundamentals/multiple-instances
 ---
 
 # Multiple instances / One machine
@@ -153,8 +157,6 @@ If it is failing with "can't allocate memory", try:
 sync && sudo sysctl vm.drop_caches=3
 echo 1 > /proc/sys/vm/compact_memory
 ```
-
-
 
 {% hint style="warning" %}
 ⚠️**Warning**: Running multiple instances of Erigon on the same machine will cause concurrent disk access, which can negatively impact performance. One of Erigon's main optimizations is to reduce disk random access, but the "Blocks Execution stage" still performs many random reads, making it the slowest stage. Therefore, **we do not recommend running multiple genesis syncs on the same disk**. However, if the genesis sync has already been completed, it is acceptable to run multiple Erigon instances on the same disk.
