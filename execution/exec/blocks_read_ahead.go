@@ -236,15 +236,15 @@ func ReadBodyWithTransactionsFromGlobalReadAheader(blockHash common.Hash) (*type
 
 func ReadBlockWithSendersFromGlobalReadAheader(blockHash common.Hash) (*types.Block, bool) {
 	header, ok := globalReadAheader.headers.Get(blockHash)
-	if !ok {
+	if header == nil || !ok {
 		return nil, false
 	}
 	body, ok := globalReadAheader.bodies.Get(blockHash)
-	if !ok {
+	if body == nil || !ok {
 		return nil, false
 	}
 	senders, ok := globalReadAheader.senders.Get(blockHash)
-	if !ok {
+	if len(senders) == 0 || !ok {
 		return nil, false
 	}
 	sendersAddresses := make([]common.Address, 0, len(senders)/length.Addr)
