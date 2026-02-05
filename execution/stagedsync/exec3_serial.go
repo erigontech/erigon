@@ -229,7 +229,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				"periodic commit check",
 				"block", se.doms.BlockNum(),
 				"txNum", se.doms.TxNum(),
-				"step", fmt.Sprintf("%.1f", float64(se.doms.TxNum())/float64(se.agg.StepSize())),
 				"commitment", times.ComputeCommitment,
 			)
 			if isBatchFull {
