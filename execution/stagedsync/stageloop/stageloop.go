@@ -134,7 +134,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	}
 	defer tx.Rollback()
 
-	// after StageSnapshots (files downloading): if domains are ahead of block files, then nothing to execute.
+	// Checking before create `execctx.NewSharedDomains`
 	if isDomainAheadOfBlocks(ctx, tx, logger) {
 		return tx.Commit()
 	}
