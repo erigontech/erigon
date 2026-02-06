@@ -45,6 +45,9 @@ import (
 )
 
 func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test in short mode")
+	}
 	// See https://github.com/erigontech/erigon/issues/18823
 	ctx := t.Context()
 	privKey, err := crypto.GenerateKey()
@@ -100,6 +103,9 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 }
 
 func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeight(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test in short mode")
+	}
 	// This was caught by some of the gas-benchmark tests which run a series of new payloads and FCUs
 	// for forks with different lengths, and they jump from one fork to another.
 	// The issue was that we were not calling TruncateCanonicalHash for heights after the new FCU head number.
