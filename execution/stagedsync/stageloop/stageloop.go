@@ -649,27 +649,23 @@ func StateStep(ctx context.Context, chainReader rules.ChainReader, engine rules.
 	for i := range headersChain {
 		currentHeader := headersChain[i]
 		currentBody := bodiesChain[i]
-
 		if err := addAndVerifyBlockStep(tx, engine, chainReader, currentHeader, currentBody); err != nil {
 			return err
 		}
 		// Run state sync
-		if !test {
-			hasMore, err := stateSync.RunNoInterrupt(sd, tx)
-			if err != nil {
-				// Don't lose the original error, like cancellation or common.ErrStopped.
-				return errors.Join(err, cleanupProgressIfNeeded(tx, currentHeader))
+		hasMore, err := stateSync.RunNoInterrupt(sd, tx)
+		if err != nil {
+			// Don't lose the original error, like cancellation or common.ErrStopped.
+			return errors.Join(err, cleanupProgressIfNeeded(tx, currentHeader))
+		}
+		if hasMore {
+			// should not ever happen since we exec blocks 1 by 1
+			if err := cleanupProgressIfNeeded(tx, currentHeader); err != nil {
+				return err
 			}
-			if hasMore {
-				// should not ever happen since we exec blocks 1 by 1
-				if err := cleanupProgressIfNeeded(tx, currentHeader); err != nil {
-					return err
-				}
-				return errors.New("unexpected state step has more work")
-			}
+			return errors.New("unexpected state step has more work")
 		}
 	}
-
 	return nil
 }
 
