@@ -875,6 +875,7 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 
 	if mode == "done" {
 		vals = []any{"in", interval}
+		vals = []any{"buf", fmt.Sprintf("%s/%s", common.ByteCount(uint64(rs.RawSize())), common.ByteCount(p.commitThreshold))}
 	}
 
 	vals = append(vals, []any{

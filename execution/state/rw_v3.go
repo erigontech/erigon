@@ -261,7 +261,18 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 	return nil
 }
 
+// SizeEstimate - including
 func (rs *StateV3) SizeEstimate() (r uint64) {
+	if rs.domains != nil {
+		// multiply 2: to cover data-structures overhead (and keep accounting cheap)
+		// and muliply 8 more: for Commitment calculation when batch is full
+		r += rs.domains.SizeEstimate() * 16
+	}
+	return r
+}
+
+// RawSize - not including
+func (rs *StateV3) RawSize() (r uint64) {
 	if rs.domains != nil {
 		r += rs.domains.SizeEstimate()
 	}
