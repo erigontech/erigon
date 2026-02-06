@@ -898,6 +898,13 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 					return err
 				}
 			}
+			select {
+			case <-logEvery.C:
+				took := time.Since(t)
+				log.Info("[stage_exec] progress", "block_num", s.BlockNumber, "blk/sec", float64(bn-initialExecProgress)/took.Seconds(), "batchSize", batchSize)
+			default:
+			}
+
 			if doms.SizeEstimate() < uint64(batchSize) {
 				continue
 			}
@@ -928,12 +935,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 				panic(err)
 			}
 
-			select {
-			case <-logEvery.C:
-				took := time.Since(t)
-				log.Info("[stage_exec] progress", "block_num", s.BlockNumber, "blk/sec", float64(bn-initialExecProgress)/took.Seconds(), "batchSize", batchSize)
-			default:
-			}
 		}
 		if err := doms.Flush(ctx, tx); err != nil {
 			return err
