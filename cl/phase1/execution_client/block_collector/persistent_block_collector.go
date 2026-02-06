@@ -136,6 +136,7 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	blocksBatch := []*types.Block{}
 	inserted := uint64(0)
 
+	var prevBlockNum uint64
 	if err := p.db.View(ctx, func(tx kv.Tx) error {
 		cursor, err := tx.Cursor(kv.Headers)
 		if err != nil {
@@ -157,6 +158,10 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 				continue
 			}
 
+			if prevBlockNum > 0 && block.NumberU64() != prevBlockNum+1 {
+				panic(fmt.Sprintf("assert: BlockCollector inserting gap: %d -> %d. To fix try: `rm datadir/caplin/history datadir/chaindata`", prevBlockNum, block.NumberU64()))
+			}
+			prevBlockNum = block.NumberU64()
 			blocksBatch = append(blocksBatch, block)
 
 			if len(blocksBatch) >= batchSize {

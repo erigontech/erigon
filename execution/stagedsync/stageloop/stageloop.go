@@ -459,8 +459,10 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync, finishStageAft
 	}
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
-	if (h.notifications.Accumulator != nil) && (currentHeader != nil) {
-		h.notifications.Accumulator.StartChange(currentHeader, nil, false)
+	if h.notifications.Accumulator != nil && currentHeader != nil {
+		if changes := h.notifications.Accumulator.Changes(); len(changes) == 0 || changes[len(changes)-1].BlockHeight < currentHeader.Number.Uint64() {
+			h.notifications.Accumulator.StartChange(currentHeader, nil, false)
+		}
 
 		pendingBaseFee := misc.CalcBaseFee(h.chainConfig, currentHeader)
 		pendingBlobFee := h.chainConfig.GetMinBlobGasPrice()

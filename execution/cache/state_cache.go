@@ -153,17 +153,27 @@ func (c *StateCache) PrintStatsAndReset() {
 }
 
 func (c *StateCache) RevertWithDiffset(diffset *[6][]kv.DomainEntryDiff, newBlockHash common.Hash) {
-	for domain, diffList := range diffset {
-		for _, entry := range diffList {
-			k := []byte(entry.Key[:len(entry.Key)-8])
-			// if domain == int(kv.AccountsDomain) {
-			// 	step := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-			// 	prevStep := ^binary.BigEndian.Uint64(entry.PrevStepBytes)
+	for _, entry := range diffset[kv.AccountsDomain] {
+		k := []byte(entry.Key[:len(entry.Key)-8])
+		//prevStep := ^binary.BigEndian.Uint64(entry.PrevStepBytes)
+		//currStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
 
-			// 	fmt.Println(common.Bytes2Hex(k), " step ", step, " prevStep ", prevStep)
-			// }
-			c.Delete(kv.Domain(domain), k)
-		}
+		//fmt.Println(common.Bytes2Hex(k), "prevStep", prevStep, "currStep", currStep)
+		c.Delete(kv.CodeDomain, k)
+		c.Delete(kv.AccountsDomain, k)
+	}
+	for _, entry := range diffset[kv.CodeDomain] {
+		k := []byte(entry.Key[:len(entry.Key)-8])
+		c.Delete(kv.CodeDomain, k)
+	}
+	for _, entry := range diffset[kv.StorageDomain] {
+		k := []byte(entry.Key[:len(entry.Key)-8])
+		c.Delete(kv.StorageDomain, k)
+	}
+	// still adding kv.CommitmentDomain for expandability.
+	for _, entry := range diffset[kv.CommitmentDomain] {
+		k := []byte(entry.Key[:len(entry.Key)-8])
+		c.Delete(kv.CommitmentDomain, k)
 	}
 
 	// Update block hash on all caches after unwind so ValidateAndPrepare works correctly
