@@ -906,7 +906,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 				select {
 				case <-logEvery.C:
 					took := time.Since(t)
-					log.Info("[stage_exec] progress", "block_num", s.BlockNumber, "blk/sec", float64(bn-initialExecProgress)/took.Seconds(), "batch", datasize.ByteSize(doms.SizeEstimate()).HR())
+					log.Info("[stage_exec] progress", "block_num", s.BlockNumber, "blk/sec", float64(bn-initialExecProgress)/took.Seconds(), "batch", datasize.ByteSize(doms.SizeEstimate()).String())
 				default:
 				}
 
