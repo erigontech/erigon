@@ -18,6 +18,7 @@ package backtester
 
 import (
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
@@ -31,14 +32,40 @@ type backtestStateReader struct {
 	plainStateReader commitmentdb.StateReader
 	commitmentAsOf   uint64
 	plainStateAsOf   uint64
+
+	// fields used only by NewRebuildStateReader for Clone
+	sd *execctx.SharedDomains
 }
 
+// newBacktestStateReader creates a StateReader for verifying commitment against already-persisted data.
+// Both commitment and plain state are read from history (DB/files) at the given txNum boundaries.
+// Use this when all prior commitment data already exists on disk - e.g. backtesting a known block range
+// where commitment was previously computed and flushed.
+//
+//   - commitment domain: HistoryStateReader as-of commitmentAsOf (reads persisted commitment)
+//   - acc/storage/code:  HistoryStateReader as-of plainStateAsOf (reads persisted plain state)
 func newBacktestStateReader(tx kv.TemporalTx, commitmentAsOf uint64, plainStateAsOf uint64) backtestStateReader {
 	return backtestStateReader{
 		commitmentReader: commitmentdb.NewHistoryStateReader(tx, commitmentAsOf),
 		plainStateReader: commitmentdb.NewHistoryStateReader(tx, plainStateAsOf),
 		commitmentAsOf:   commitmentAsOf,
 		plainStateAsOf:   plainStateAsOf,
+	}
+}
+
+// NewRebuildStateReader creates a StateReader for building commitment from scratch, block-by-block.
+// Commitment is read from SharedDomains' in-memory batch (LatestStateReader) because we are generating
+// it incrementally - prior commitment state lives in the MemBatch, not yet on disk.
+// Plain state (acc/storage/code) is read from history since it already exists in DB/files.
+//
+//   - commitment domain: LatestStateReader via SharedDomains (reads in-memory MemBatch being built)
+//   - acc/storage/code:  HistoryStateReader as-of plainStateAsOf (reads persisted plain state)
+func NewRebuildStateReader(tx kv.TemporalTx, sd *execctx.SharedDomains, plainStateAsOf uint64) backtestStateReader {
+	return backtestStateReader{
+		commitmentReader: commitmentdb.NewLatestStateReader(tx, sd),
+		plainStateReader: commitmentdb.NewHistoryStateReader(tx, plainStateAsOf),
+		plainStateAsOf:   plainStateAsOf,
+		sd:               sd,
 	}
 }
 
@@ -59,5 +86,8 @@ func (b backtestStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64)
 }
 
 func (b backtestStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
+	if b.sd != nil {
+		return NewRebuildStateReader(tx, b.sd, b.plainStateAsOf)
+	}
 	return newBacktestStateReader(tx, b.commitmentAsOf, b.plainStateAsOf)
 }

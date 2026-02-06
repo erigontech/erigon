@@ -30,6 +30,7 @@ import (
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment/backtester"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
@@ -396,6 +397,9 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 		domains.SetBlockNum(blockFrom)
 		domains.SetTxNum(toTxNum)
+
+		// Set state reader: commitment from MemBatch (latest), acc/storage/code from history as-of toTxNum+1
+		domains.GetCommitmentCtx().SetStateReader(backtester.NewRebuildStateReader(rwTx, domains, toTxNum+1))
 
 		// Touch all changed account keys in this block
 		accIt, err := rwTx.HistoryRange(kv.AccountsDomain, int(fromTxNum), int(toTxNum+1), order.Asc, math.MaxInt64)
