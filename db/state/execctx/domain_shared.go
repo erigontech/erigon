@@ -200,7 +200,9 @@ func (sd *SharedDomains) AddFlushHook(hook func(context.Context, stateifs.Domain
 }
 
 func (sd *SharedDomains) ResetHooks() {
-	sd.flushHooks = sd.flushHooks[:0]
+	if sd != nil {
+		sd.flushHooks = sd.flushHooks[:0]
+	}
 }
 
 // FlushHooks executes all registered flush hooks and clears them.
