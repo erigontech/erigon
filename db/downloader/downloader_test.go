@@ -21,6 +21,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -236,6 +237,13 @@ func newDownloaderTest(t *testing.T) *downloaderTest {
 		downloadercfg.NewCfgOpts{},
 	)
 	require.NoError(err)
+
+	if runtime.GOOS == "windows" {
+		// Disable UTP (UDP-based transport) to avoid Windows Server 2025 Hyper-V/WinNAT port
+		// reservation conflicts where TCP and UDP port availability is asymmetric (WSAEACCES
+		// on UDP bind).
+		cfg.ClientConfig.DisableUTP = true
+	}
 
 	d, err := New(context.Background(), cfg, log.New())
 	require.NoError(err)
