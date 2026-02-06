@@ -166,6 +166,20 @@ func (d *Domain) kvBtAccessorFilePathMask(fromStep, toStep kv.Step) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("*-%s.%d-%d.bt", d.FilenameBase, fromStep, toStep))
 }
 
+// Filename-only masks for use with pre-scanned directory listings
+func (d *Domain) kvFileNameMask(fromStep, toStep kv.Step) string {
+	return fmt.Sprintf("*-%s.%d-%d.kv", d.FilenameBase, fromStep, toStep)
+}
+func (d *Domain) kviAccessorFileNameMask(fromStep, toStep kv.Step) string {
+	return fmt.Sprintf("*-%s.%d-%d.kvi", d.FilenameBase, fromStep, toStep)
+}
+func (d *Domain) kvExistenceIdxFileNameMask(fromStep, toStep kv.Step) string {
+	return fmt.Sprintf("*-%s.%d-%d.kvei", d.FilenameBase, fromStep, toStep)
+}
+func (d *Domain) kvBtAccessorFileNameMask(fromStep, toStep kv.Step) string {
+	return fmt.Sprintf("*-%s.%d-%d.bt", d.FilenameBase, fromStep, toStep)
+}
+
 // maxStepInDB - return the latest available step in db (at-least 1 value in such step)
 func (d *Domain) maxStepInDB(tx kv.Tx) (lstInDb kv.Step) {
 	lstIdx, _ := kv.LastKey(tx, d.History.KeysTable)
@@ -214,14 +228,14 @@ func (dt *DomainRoTx) NewWriter() *DomainBufferedWriter { return dt.newWriter(dt
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (d *Domain) OpenList(idxFiles, histFiles, domainFiles []string) error {
-	if err := d.History.openList(idxFiles, histFiles); err != nil {
+func (d *Domain) OpenList(idxFiles, histFiles, domainFiles, accessorFiles []string) error {
+	if err := d.History.openList(idxFiles, histFiles, accessorFiles); err != nil {
 		return err
 	}
 
 	d.closeWhatNotInList(domainFiles)
 	d.scanDirtyFiles(domainFiles)
-	if err := d.openDirtyFiles(); err != nil {
+	if err := d.openDirtyFiles(domainFiles); err != nil {
 		return fmt.Errorf("Domain(%s).openList: %w", d.FilenameBase, err)
 	}
 	d.protectFromHistoryFilesAheadOfDomainFiles()
@@ -240,7 +254,7 @@ func (d *Domain) openFolder(r *ScanDirsResult) error {
 		return nil
 	}
 
-	if err := d.OpenList(r.iiFiles, r.historyFiles, r.domainFiles); err != nil {
+	if err := d.OpenList(r.iiFiles, r.historyFiles, r.domainFiles, r.accessorFiles); err != nil {
 		return err
 	}
 	return nil

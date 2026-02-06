@@ -176,68 +176,29 @@ func touch(path string) error {
 	return f.Close()
 }
 
-func TestDirEntryCache_LazyLoading(t *testing.T) {
-	dir := t.TempDir()
-
-	// Create test files
-	if err := touch(filepath.Join(dir, "v1.0-file.idx")); err != nil {
-		t.Fatal(err)
-	}
-	if err := touch(filepath.Join(dir, "v1.1-file.idx")); err != nil {
-		t.Fatal(err)
-	}
-
-	cache := NewDirEntryCache()
-
-	// First call should populate the cache
-	entries, err := cache.GetOrRead(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(entries))
-	}
-
-	// Add a new file - cache should NOT see it until invalidated
-	if err := touch(filepath.Join(dir, "v1.2-file.idx")); err != nil {
-		t.Fatal(err)
-	}
-
-	entries, err = cache.GetOrRead(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 2 {
-		t.Fatalf("expected 2 entries (cached), got %d", len(entries))
-	}
-
-	// Invalidate and re-read
-	cache.Invalidate(dir)
-	entries, err = cache.GetOrRead(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 3 {
-		t.Fatalf("expected 3 entries after invalidate, got %d", len(entries))
-	}
-}
-
-func TestFindFilesWithVersionsByPatternWithCache(t *testing.T) {
+func TestFindFilesWithVersionsByPatternInList(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create test files with different versions
-	if err := touch(filepath.Join(dir, "v1.0-test.idx")); err != nil {
+	if err := touch(filepath.Join(dir, "v1.0-accounts.0-1.kv")); err != nil {
 		t.Fatal(err)
 	}
-	if err := touch(filepath.Join(dir, "v1.1-test.idx")); err != nil {
+	if err := touch(filepath.Join(dir, "v1.1-accounts.0-1.kv")); err != nil {
+		t.Fatal(err)
+	}
+	if err := touch(filepath.Join(dir, "v1.0-storage.0-1.kv")); err != nil {
 		t.Fatal(err)
 	}
 
-	cache := NewDirEntryCache()
-	pattern := filepath.Join(dir, "v*-test.idx")
+	// Simulate pre-scanned directory entries (just filenames)
+	dirEntries := []string{
+		"v1.0-accounts.0-1.kv",
+		"v1.1-accounts.0-1.kv",
+		"v1.0-storage.0-1.kv",
+	}
 
-	// Should find highest version
-	path, ver, ok, err := FindFilesWithVersionsByPatternWithCache(pattern, cache)
+	// Test 1: Find highest version of accounts
+	path, ver, ok, err := FindFilesWithVersionsByPatternInList("*-accounts.0-1.kv", dirEntries, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,17 +208,76 @@ func TestFindFilesWithVersionsByPatternWithCache(t *testing.T) {
 	if ver.Major != 1 || ver.Minor != 1 {
 		t.Fatalf("expected version 1.1, got %+v", ver)
 	}
-	if filepath.Base(path) != "v1.1-test.idx" {
-		t.Fatalf("expected v1.1-test.idx, got %s", filepath.Base(path))
+	if filepath.Base(path) != "v1.1-accounts.0-1.kv" {
+		t.Fatalf("expected v1.1-accounts.0-1.kv, got %s", filepath.Base(path))
 	}
 
-	// Add a higher version file
-	if err := touch(filepath.Join(dir, "v2.0-test.idx")); err != nil {
+	// Test 2: Find storage (only one version)
+	path, ver, ok, err = FindFilesWithVersionsByPatternInList("*-storage.0-1.kv", dirEntries, dir)
+	if err != nil {
 		t.Fatal(err)
 	}
+	if !ok {
+		t.Fatal("expected ok == true")
+	}
+	if ver.Major != 1 || ver.Minor != 0 {
+		t.Fatalf("expected version 1.0, got %+v", ver)
+	}
+	if filepath.Base(path) != "v1.0-storage.0-1.kv" {
+		t.Fatalf("expected v1.0-storage.0-1.kv, got %s", filepath.Base(path))
+	}
 
-	// Cache should still return v1.1 (not invalidated yet)
-	path, ver, ok, err = FindFilesWithVersionsByPatternWithCache(pattern, cache)
+	// Test 3: No match
+	_, _, ok, err = FindFilesWithVersionsByPatternInList("*-code.0-1.kv", dirEntries, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("expected ok == false for no matches")
+	}
+}
+
+func TestFindFilesWithVersionsByPatternInList_MultipleVersions(t *testing.T) {
+	dir := t.TempDir()
+
+	// Test with many versions
+	dirEntries := []string{
+		"v1.0-test.0-1.ef",
+		"v1.1-test.0-1.ef",
+		"v1.2-test.0-1.ef",
+		"v2.0-test.0-1.ef",
+		"v2.1-test.0-1.ef",
+	}
+
+	path, ver, ok, err := FindFilesWithVersionsByPatternInList("*-test.0-1.ef", dirEntries, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected ok == true")
+	}
+	if ver.Major != 2 || ver.Minor != 1 {
+		t.Fatalf("expected version 2.1, got %+v", ver)
+	}
+	if filepath.Base(path) != "v2.1-test.0-1.ef" {
+		t.Fatalf("expected v2.1-test.0-1.ef, got %s", filepath.Base(path))
+	}
+}
+
+func TestFindFilesWithVersionsByPatternInList_AccessorFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	// Test with accessor file extensions (.vi, .efi, .kvi, etc.)
+	dirEntries := []string{
+		"v1.0-accounts.0-1.vi",
+		"v1.1-accounts.0-1.vi",
+		"v1.0-accounts.1-2.vi",
+		"v1.0-storage.0-1.efi",
+		"v2.0-storage.0-1.efi",
+	}
+
+	// Test .vi files
+	path, ver, ok, err := FindFilesWithVersionsByPatternInList("*-accounts.0-1.vi", dirEntries, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,12 +285,14 @@ func TestFindFilesWithVersionsByPatternWithCache(t *testing.T) {
 		t.Fatal("expected ok == true")
 	}
 	if ver.Major != 1 || ver.Minor != 1 {
-		t.Fatalf("expected cached version 1.1, got %+v", ver)
+		t.Fatalf("expected version 1.1, got %+v", ver)
+	}
+	if filepath.Base(path) != "v1.1-accounts.0-1.vi" {
+		t.Fatalf("expected v1.1-accounts.0-1.vi, got %s", filepath.Base(path))
 	}
 
-	// After invalidation, should find v2.0
-	cache.Invalidate(dir)
-	path, ver, ok, err = FindFilesWithVersionsByPatternWithCache(pattern, cache)
+	// Test .efi files
+	path, ver, ok, err = FindFilesWithVersionsByPatternInList("*-storage.0-1.efi", dirEntries, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,19 +302,43 @@ func TestFindFilesWithVersionsByPatternWithCache(t *testing.T) {
 	if ver.Major != 2 || ver.Minor != 0 {
 		t.Fatalf("expected version 2.0, got %+v", ver)
 	}
+	if filepath.Base(path) != "v2.0-storage.0-1.efi" {
+		t.Fatalf("expected v2.0-storage.0-1.efi, got %s", filepath.Base(path))
+	}
+
+	// Test different step range
+	path, ver, ok, err = FindFilesWithVersionsByPatternInList("*-accounts.1-2.vi", dirEntries, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected ok == true")
+	}
+	if ver.Major != 1 || ver.Minor != 0 {
+		t.Fatalf("expected version 1.0, got %+v", ver)
+	}
 }
 
-func TestFindFilesWithVersionsByPatternWithCache_NoMatch(t *testing.T) {
+func TestFindFilesWithVersionsByPatternInList_EmptyList(t *testing.T) {
 	dir := t.TempDir()
 
-	cache := NewDirEntryCache()
-	pattern := filepath.Join(dir, "v*-nonexistent.idx")
-
-	_, _, ok, err := FindFilesWithVersionsByPatternWithCache(pattern, cache)
+	// Test with empty list
+	_, _, ok, err := FindFilesWithVersionsByPatternInList("*-accounts.0-1.kv", []string{}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ok {
-		t.Fatal("expected ok == false for no matches")
+		t.Fatal("expected ok == false for empty list")
+	}
+}
+
+func TestFindFilesWithVersionsByPatternInList_InvalidPattern(t *testing.T) {
+	dir := t.TempDir()
+	dirEntries := []string{"v1.0-test.kv"}
+
+	// Invalid pattern with unmatched bracket
+	_, _, _, err := FindFilesWithVersionsByPatternInList("[invalid", dirEntries, dir)
+	if err == nil {
+		t.Fatal("expected error for invalid pattern")
 	}
 }

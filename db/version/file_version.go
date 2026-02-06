@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -220,6 +219,48 @@ func FindFilesWithVersionsByPattern(pattern string) (string, Version, bool, erro
 	return matches[0], ver, true, nil
 }
 
+// FindFilesWithVersionsByPatternInList searches for files matching a pattern within a pre-scanned list.
+// This avoids filesystem calls by searching within the provided dirEntries slice.
+// filePattern is the filename pattern (e.g., "*-accounts.0-1.kv")
+// dirEntries is a slice of filenames (not full paths)
+// dir is the directory path to join with matched filenames
+func FindFilesWithVersionsByPatternInList(filePattern string, dirEntries []string, dir string) (string, Version, bool, error) {
+	var matches []string
+	for _, name := range dirEntries {
+		matched, err := filepath.Match(filePattern, name)
+		if err != nil {
+			return "", Version{}, false, fmt.Errorf("invalid pattern: %w", err)
+		}
+		if matched {
+			matches = append(matches, filepath.Join(dir, name))
+		}
+	}
+
+	if len(matches) == 0 {
+		return "", Version{}, false, nil
+	}
+
+	if len(matches) > 1 {
+		// Sort by version (ascending) so highest version is last
+		sort.Slice(matches, func(i, j int) bool {
+			_, fName1 := filepath.Split(matches[i])
+			version1, _ := ParseVersion(fName1)
+
+			_, fName2 := filepath.Split(matches[j])
+			version2, _ := ParseVersion(fName2)
+
+			return version1.Less(version2)
+		})
+		_, fName := filepath.Split(matches[len(matches)-1])
+		ver, _ := ParseVersion(fName)
+		return matches[len(matches)-1], ver, true, nil
+	}
+
+	_, fName := filepath.Split(matches[0])
+	ver, _ := ParseVersion(fName)
+	return matches[0], ver, true, nil
+}
+
 func CheckIsThereFileWithSupportedVersion(pattern string, minSup Version) error {
 	_, fileVer, ok, err := FindFilesWithVersionsByPattern(pattern)
 	if err != nil {
@@ -278,109 +319,3 @@ func VersionTooLowPanic(filename string, version Versions) {
 	))
 }
 
-// DirEntryCache caches directory listings to avoid repeated filesystem scans.
-// This is useful when calling FindFilesWithVersionsByPattern many times for
-// files in the same directory. NOT thread-safe - intended to be owned by a
-// single struct like CaplinSnapshots or RoSnapshots.
-//
-// Call Invalidate() when files are added/removed (new indexes, merges, etc).
-type DirEntryCache struct {
-	entries map[string][]string // dir -> list of filenames (not full paths)
-}
-
-// NewDirEntryCache creates a new directory entry cache.
-func NewDirEntryCache() *DirEntryCache {
-	return &DirEntryCache{
-		entries: make(map[string][]string),
-	}
-}
-
-// GetOrRead returns cached directory entries, or reads and caches them if not present (lazy loading).
-func (c *DirEntryCache) GetOrRead(dir string) ([]string, error) {
-	if entries, ok := c.entries[dir]; ok {
-		return entries, nil
-	}
-
-	// Read directory (lazy load)
-	dirEntries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	entries := make([]string, 0, len(dirEntries))
-	for _, e := range dirEntries {
-		if !e.IsDir() {
-			entries = append(entries, e.Name())
-		}
-	}
-
-	c.entries[dir] = entries
-	return entries, nil
-}
-
-// Invalidate removes a directory from the cache. Call this when files are
-// added or removed (new indexes created, merges completed, etc).
-func (c *DirEntryCache) Invalidate(dir string) {
-	delete(c.entries, dir)
-}
-
-// Clear removes all entries from the cache.
-func (c *DirEntryCache) Clear() {
-	c.entries = make(map[string][]string)
-}
-
-// FindFilesWithVersionsByPatternWithCache is like FindFilesWithVersionsByPattern but uses
-// a directory entry cache to avoid repeated filesystem scans. The pattern must be a full
-// path with the filename pattern (e.g., "/path/to/dir/v*-file.idx").
-func FindFilesWithVersionsByPatternWithCache(pattern string, cache *DirEntryCache) (string, Version, bool, error) {
-	dir, filePattern := filepath.Split(pattern)
-	if dir == "" {
-		dir = "."
-	} else {
-		dir = strings.TrimSuffix(dir, string(filepath.Separator))
-	}
-
-	entries, err := cache.GetOrRead(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", Version{}, false, nil
-		}
-		return "", Version{}, false, fmt.Errorf("read dir %s: %w", dir, err)
-	}
-
-	// Match entries against pattern
-	var matches []string
-	for _, name := range entries {
-		matched, err := filepath.Match(filePattern, name)
-		if err != nil {
-			return "", Version{}, false, fmt.Errorf("invalid pattern: %w", err)
-		}
-		if matched {
-			matches = append(matches, filepath.Join(dir, name))
-		}
-	}
-
-	if len(matches) == 0 {
-		return "", Version{}, false, nil
-	}
-
-	if len(matches) > 1 {
-		// Sort by version (ascending) so highest version is last
-		sort.Slice(matches, func(i, j int) bool {
-			_, fName1 := filepath.Split(matches[i])
-			version1, _ := ParseVersion(fName1)
-
-			_, fName2 := filepath.Split(matches[j])
-			version2, _ := ParseVersion(fName2)
-
-			return version1.Less(version2)
-		})
-		_, fName := filepath.Split(matches[len(matches)-1])
-		ver, _ := ParseVersion(fName)
-		return matches[len(matches)-1], ver, true, nil
-	}
-
-	_, fName := filepath.Split(matches[0])
-	ver, _ := ParseVersion(fName)
-	return matches[0], ver, true, nil
-}
