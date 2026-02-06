@@ -286,10 +286,10 @@ type Config struct {
 
 type Sync struct {
 	// LoopThrottle sets a minimum time between staged loop iterations
-	LoopThrottle         time.Duration
-	ExecWorkerCount      int
-	ReconWorkerCount     int
-	CompressWorkerLimit  int // 0 = auto, >0 = limit compression workers
+	LoopThrottle        time.Duration
+	ExecWorkerCount     int
+	ReconWorkerCount    int
+	CompressWorkerLimit int // 0 = auto, >0 = limit compression workers
 
 	BodyCacheLimit             datasize.ByteSize
 	BodyDownloadTimeoutSeconds int // TODO: change to duration
