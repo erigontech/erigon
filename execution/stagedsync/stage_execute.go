@@ -265,6 +265,15 @@ func unwindExec3State(ctx context.Context,
 	defer stateChanges.Close()
 	stateChanges.SortAndFlushInBackground(true)
 
+	// Invalidate state cache entries affected by the unwind
+	if stateCache := sd.GetStateCache(); stateCache != nil {
+		unwindToHash, err := rawdb.ReadCanonicalHash(tx, blockUnwindTo)
+		if err != nil {
+			logger.Warn("failed to read canonical hash for cache update", "block", blockUnwindTo, "err", err)
+			unwindToHash = common.Hash{}
+		}
+		stateCache.RevertWithDiffset(changeset, unwindToHash)
+	}
 	if changeset != nil {
 		accountDiffs := changeset[kv.AccountsDomain]
 		for _, entry := range accountDiffs {
@@ -315,9 +324,11 @@ func unwindExec3State(ctx context.Context,
 				}
 			}
 		}
+
 		if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 			return err
 		}
+
 	}
 
 	sd.Unwind(txUnwindTo, changeset)

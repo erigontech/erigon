@@ -1,5 +1,9 @@
 ---
 description: 'Erigon RPC debug Namespace: Deep Diagnostics and State Introspection'
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/interacting-with-erigon/interacting-with-erigon/debug
 ---
 
 # debug

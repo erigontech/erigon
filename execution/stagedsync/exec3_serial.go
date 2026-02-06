@@ -36,6 +36,13 @@ type serialExecutor struct {
 	worker          *exec.Worker
 }
 
+func warmTxsHashes(block *types.Block) {
+	for _, t := range block.Transactions() {
+		_ = t.Hash()
+	}
+	_ = block.Hash()
+}
+
 func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
@@ -57,7 +64,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 
 	if blockLimit > 0 && min(blockNum+blockLimit, maxBlockNum) > blockNum+16 || maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] serial starting", execStage.LogPrefix()),
-			"from", blockNum, "to", maxBlockNum, "limit", blockNum+blockLimit-1, "initialTxNum", initialTxNum,
+			"from", blockNum, "to", min(maxBlockNum, blockNum+blockLimit-1), "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "lastFrozenStep", lastFrozenStep,
 			"initialCycle", initialCycle, "isForkValidation", se.isForkValidation, "isBlockProduction", se.isBlockProduction)
 	}
@@ -82,6 +89,12 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		if b == nil {
 			// TODO: panic here and see that overall process deadlock
 			return nil, rwTx, fmt.Errorf("nil block %d", blockNum)
+		}
+		go warmTxsHashes(b)
+
+		stateCache := se.doms.GetStateCache()
+		if stateCache != nil {
+			stateCache.ValidateAndPrepare(b.ParentHash(), b.Hash())
 		}
 
 		txs := b.Transactions()
@@ -145,6 +158,9 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		log.Debug(fmt.Sprintf("[%s] executed block %d in %s", se.logPrefix, blockNum, time.Since(start)))
 		if err != nil {
 			return nil, rwTx, err
+		}
+		if stateCache != nil {
+			stateCache.PrintStatsAndReset()
 		}
 
 		if !continueLoop {
@@ -213,7 +229,6 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				"periodic commit check",
 				"block", se.doms.BlockNum(),
 				"txNum", se.doms.TxNum(),
-				"step", fmt.Sprintf("%.1f", float64(se.doms.TxNum())/float64(se.agg.StepSize())),
 				"commitment", times.ComputeCommitment,
 			)
 			if isBatchFull {
@@ -340,6 +355,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
 				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsGetter(se.applyTx)))
+				defer ibs.Release(true)
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 					ret, err := protocol.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, *se.cfg.vmConfig)

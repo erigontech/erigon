@@ -147,7 +147,6 @@ func InitMiner(
 		Sync:            ethconfig.Defaults.Sync,
 		Downloader:      downloaderConfig,
 		WithoutHeimdall: withoutHeimdall,
-		ImportMode:      ethconfig.Defaults.ImportMode,
 		RPCGasCap:       50000000,
 		RPCTxFeeCap:     1, // 1 ether
 		Snapshot:        ethconfig.BlocksFreezing{NoDownloader: true, ChainName: genesis.Config.ChainName},

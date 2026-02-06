@@ -14,6 +14,9 @@ layout:
     visible: true
   metadata:
     visible: true
+metaLinks:
+  alternates:
+    - https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/get-started/readme
 ---
 
 # Introduction

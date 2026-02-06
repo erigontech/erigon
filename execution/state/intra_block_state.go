@@ -303,6 +303,9 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 // the underlying state trie to avoid reloading data for the next operations.
 func (sdb *IntraBlockState) Reset() {
 	sdb.nilAccounts = map[accounts.Address]struct{}{}
+	for _, so := range sdb.stateObjects {
+		so.release()
+	}
 	sdb.stateObjects = map[accounts.Address]*stateObject{}
 	sdb.stateObjectsDirty = map[accounts.Address]struct{}{}
 	for i := range sdb.logs {
@@ -327,6 +330,31 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.dep = UnknownDep
 }
 
+// Release returns pooled resources (like journal, stateObjects) back to their pools.
+// Call this when the IntraBlockState is no longer needed.
+// If parallel is true, cleanup happens in a goroutine for faster return.
+func (sdb *IntraBlockState) Release(parallel bool) {
+	stateObjects := sdb.stateObjects
+	journal := sdb.journal
+	sdb.stateObjects = nil
+	sdb.journal = nil
+
+	if parallel {
+		go releaseResources(stateObjects, journal)
+	} else {
+		releaseResources(stateObjects, journal)
+	}
+}
+
+func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *journal) {
+	for _, so := range stateObjects {
+		so.release()
+	}
+	if journal != nil {
+		journal.release()
+	}
+}
+
 func (sdb *IntraBlockState) AddLog(log *types.Log) {
 	sdb.journal.append(addLogChange{txIndex: sdb.txIndex})
 	log.TxIndex = uint(sdb.txIndex)
@@ -338,17 +366,17 @@ func (sdb *IntraBlockState) AddLog(log *types.Log) {
 		sdb.tracingHooks.OnLog(log)
 	}
 	sdb.logSize++
-	for len(sdb.logs) <= sdb.txIndex {
+	for len(sdb.logs) <= sdb.txIndex+1 {
 		sdb.logs = append(sdb.logs, nil)
 	}
-	sdb.logs[sdb.txIndex] = append(sdb.logs[sdb.txIndex], log)
+	sdb.logs[sdb.txIndex+1] = append(sdb.logs[sdb.txIndex+1], log)
 }
 
 func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) types.Logs {
-	if txIndex >= len(sdb.logs) {
+	if txIndex+1 >= len(sdb.logs) {
 		return nil
 	}
-	logs := sdb.logs[txIndex]
+	logs := sdb.logs[txIndex+1]
 	for _, l := range logs {
 		l.TxHash = txnHash
 		l.BlockNumber = blockNumber
@@ -360,10 +388,10 @@ func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumbe
 // GetRawLogs - is like GetLogs, but allow postpone calculation of `txn.Hash()`.
 // Example: if you need filter logs and only then set `txn.Hash()` for filtered logs - then no reason to calc for all transactions.
 func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
-	if txIndex >= len(sdb.logs) {
+	if txIndex+1 >= len(sdb.logs) {
 		return nil
 	}
-	return slices.Clone(sdb.logs[txIndex])
+	return slices.Clone(sdb.logs[txIndex+1])
 }
 
 func (sdb *IntraBlockState) Logs() types.Logs {
@@ -1387,12 +1415,12 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 			destructed, _, _, err := versionedRead(sdb, addr, SelfDestructPath, accounts.NilKey, false, false, nil, nil)
 
 			if destructed || err != nil {
-				sdb.setStateObject(addr, &stateObject{
-					db:             sdb,
-					address:        addr,
-					selfdestructed: destructed,
-					deleted:        destructed,
-				})
+				so := stateObjectPool.Get().(*stateObject)
+				so.db = sdb
+				so.address = addr
+				so.selfdestructed = destructed
+				so.deleted = destructed
+				sdb.setStateObject(addr, so)
 				return nil, err
 			}
 		} else {
