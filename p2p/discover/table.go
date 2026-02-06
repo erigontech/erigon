@@ -309,7 +309,7 @@ loop:
 		case <-tableMainenance.C:
 			live := tab.live()
 
-			vals := []interface{}{"protocol", tab.protocol, "version", tab.net.Version(),
+			vals := []any{"protocol", tab.protocol, "version", tab.net.Version(),
 				"len", tab.len(), "live", tab.live(), "unsol", tab.net.LenUnsolicited(), "ips", tab.ips.Len(), "db", tab.dbseeds.Load(), "reval", tab.revalidates.Load()}
 
 			func() {
@@ -386,7 +386,7 @@ func (tab *Table) loadSeedNodes() {
 	seeds = append(seeds, tab.nursery...)
 	for i := range seeds {
 		seed := seeds[i]
-		age := log.Lazy{Fn: func() interface{} { return time.Since(tab.db.LastPongReceived(seed.ID(), seed.IP())) }}
+		age := log.Lazy{Fn: func() any { return time.Since(tab.db.LastPongReceived(seed.ID(), seed.IP())) }}
 		tab.log.Trace("Found seed node in database", "id", seed.ID(), "addr", seed.addr(), "age", age)
 		tab.addSeenNode(seed)
 	}

@@ -129,7 +129,7 @@ func (bp PeersByMinBlock) Swap(i, j int) {
 }
 
 // Push (part of heap.Interface) places a new peer onto the end of queue.
-func (bp *PeersByMinBlock) Push(x interface{}) {
+func (bp *PeersByMinBlock) Push(x any) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
 	p := x.(PeerRef)
@@ -137,7 +137,7 @@ func (bp *PeersByMinBlock) Push(x interface{}) {
 }
 
 // Pop (part of heap.Interface) removes the first peer from the queue
-func (bp *PeersByMinBlock) Pop() interface{} {
+func (bp *PeersByMinBlock) Pop() any {
 	old := *bp
 	n := len(old)
 	x := old[n-1]
@@ -840,10 +840,10 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 				logger,
 			)
 		},
-		NodeInfo: func() interface{} {
+		NodeInfo: func() any {
 			return readNodeInfo()
 		},
-		PeerInfo: func(peerID [64]byte) interface{} {
+		PeerInfo: func(peerID [64]byte) any {
 			// TODO: remember handshake reply per peer ID and return eth-related Status info (see ethPeerInfo in geth)
 			return nil
 		},
@@ -879,10 +879,10 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 					logger,
 				)
 			},
-			NodeInfo: func() interface{} {
+			NodeInfo: func() any {
 				return readNodeInfo()
 			},
-			PeerInfo: func(peerID [64]byte) interface{} {
+			PeerInfo: func(peerID [64]byte) any {
 				return nil
 			},
 			FromProto: wit.FromProto[wit.ProtocolVersions[0]],
