@@ -126,10 +126,10 @@ func ExecV3(ctx context.Context,
 	logger log.Logger) (execErr error) {
 	isBlockProduction := execStage.SyncMode() == stages.ModeBlockProduction
 	isForkValidation := execStage.SyncMode() == stages.ModeForkValidation
-	var didExecution bool
+	var didExecutionUnwind bool
 	if execStage.state != nil {
-		didExecution = execStage.state.DidExecutionUnwind()
-		if didExecution {
+		didExecutionUnwind = execStage.state.DidExecutionUnwind()
+		if didExecutionUnwind {
 			logger.Warn("execution stage is executing forward after unwind. This is not expected and may lead to unexpected behavior")
 		}
 		defer execStage.state.SetDidExecutionUnwind(false)
@@ -238,7 +238,7 @@ func ExecV3(ctx context.Context,
 		postValidator = newParallelBlockPostExecutionValidator()
 		// Only defer branch updates in fork validation mode (engine API flow)
 		// where MergeExtendingFork will flush the hooks
-		if isForkValidation {
+		if isForkValidation && didExecutionUnwind {
 			doms.SetDeferredHooker(doms)
 		}
 	}
