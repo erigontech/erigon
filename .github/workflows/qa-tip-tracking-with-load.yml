@@ -18,6 +18,11 @@ on:
         description: "Stress test load sequence (qps:duration_secs) e.g. 100:300,500:300,750:300 "
         required: false
         default: "100:300,500:300,1000:300,2000:300,1:300,3000:300,1:300"
+      run_geth:
+        description: 'Run the Geth benchmark besides the Erigon one'
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -51,6 +56,7 @@ jobs:
 
     steps:
     - name: Print job parameters
+      if: matrix.client == 'erigon' || (matrix.client == 'geth' && github.event.inputs.run_geth == 'true')
       run: |
         echo "Execution name: ${{ env.EXECUTION_NAME }}"
         echo "Load pattern: ${{ env.LOAD_PATTERN }}"
@@ -61,6 +67,7 @@ jobs:
       uses: actions/checkout@v6
 
     - name: Checkout RPC Tests Repository & Install Requirements
+      if: matrix.client == 'erigon' || (matrix.client == 'geth' && github.event.inputs.run_geth == 'true')
       run: |
         rm -rf ${{runner.workspace}}/rpc-tests
         git -c advice.detachedHead=false clone --depth 1 --branch v1.78.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
@@ -99,6 +106,7 @@ jobs:
         echo "datadir_saved=true" >> $GITHUB_OUTPUT
 
     - name: Assure the client is in sync (stabilization step)
+      if: matrix.client == 'erigon' || (matrix.client == 'geth' && github.event.inputs.run_geth == 'true')
       id: pre_test_step
       run: |
         set +e # Disable exit on error
@@ -131,6 +139,7 @@ jobs:
         fi
 
     - name: Run the client, wait sync and check ability to maintain sync with load
+      if: matrix.client == 'erigon' || (matrix.client == 'geth' && github.event.inputs.run_geth == 'true')
       id: test_step
       env:
         SAFE_EXECUTION_NAME: ${{ env.EXECUTION_NAME }}
@@ -201,7 +210,7 @@ jobs:
         path: torrent-client-status.txt
 
     - name: Save test results
-      if: steps.test_step.outputs.test_executed == 'true'
+      if: always() && steps.test_step.outputs.test_executed == 'true'
       env:
         TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
       run: |
@@ -233,28 +242,28 @@ jobs:
           --result_file ${{ github.workspace }}/result-$CHAIN.json
 
     - name: Upload test results
-      if: steps.test_step.outputs.test_executed == 'true'
+      if: always() && steps.test_step.outputs.test_executed == 'true'
       uses: actions/upload-artifact@v6
       with:
         name: test-results-${{ env.CHAIN }}-${{ matrix.client }}
         path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
     - name: Upload erigon logs
-      if: steps.test_step.outputs.test_executed == 'true' && matrix.client == 'erigon'
+      if: always() && steps.test_step.outputs.test_executed == 'true' && matrix.client == 'erigon'
       uses: actions/upload-artifact@v6
       with:
         name: erigon-logs
         path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
     - name: Upload metric plots
-      if: steps.test_step.outputs.test_executed == 'true'
+      if: always() && steps.test_step.outputs.test_executed == 'true'
       uses: actions/upload-artifact@v6
       with:
         name: metric-plots-${{ env.CHAIN }}-${{ matrix.client }}
         path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
 
     - name: Upload profiling data
-      if: steps.test_step.outputs.test_executed == 'true'
+      if: always() && steps.test_step.outputs.test_executed == 'true'
       uses: actions/upload-artifact@v6
       with:
         name: profiling-data-${{ env.CHAIN }}-${{ matrix.client }}
