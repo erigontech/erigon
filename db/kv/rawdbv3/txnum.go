@@ -324,7 +324,7 @@ func (TxNumsReader) First(tx kv.Tx) (blockNum, txNum uint64, err error) {
 	return binary.BigEndian.Uint64(k), binary.BigEndian.Uint64(v), nil
 }
 
-func (t TxNumsReader) IsMaxTxNumIsPopulated(ctx context.Context, tx kv.Tx, domainProgress uint64) (bool, error) {
+func (t TxNumsReader) IsMaxTxNumPopulated(ctx context.Context, tx kv.Tx, domainProgress uint64) (bool, error) {
 	_, maxTxNum, err := t.Last(tx)
 	if err != nil {
 		return false, err
