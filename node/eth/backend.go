@@ -43,8 +43,6 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/erigontech/erigon/rpc/mcp"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -129,6 +127,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/contracts"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
+	"github.com/erigontech/erigon/rpc/mcp"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/shutter"
