@@ -136,6 +136,19 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 	return blockNumber, hash, blockNumber == plainStateBlockNumber, true, nil
 }
 
+func checkBlockExecuted(tx kv.Tx, blockNumber uint64) (bool, error) {
+	lastExecutedBlock, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return false, err
+	}
+
+	if blockNumber > lastExecutedBlock {
+		return false, fmt.Errorf("block %d is not executed (last block: %d)", blockNumber, lastExecutedBlock)
+	}
+
+	return true, nil
+}
+
 func CreateStateReader(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, blockNrOrHash rpc.BlockNumberOrHash, txnIndex int, filters *Filters, stateCache kvcache.Cache, txNumReader rawdbv3.TxNumsReader) (state.StateReader, error) {
 	blockNumber, _, latest, found, err := _GetBlockNumber(ctx, true, blockNrOrHash, tx, br, filters)
 	if err != nil {
@@ -159,6 +172,11 @@ func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.TemporalTx, blo
 }
 
 func CreateHistoryStateReader(ctx context.Context, tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
+	_, err := checkBlockExecuted(tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
 	minTxNum, err := txNumsReader.Min(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
@@ -194,8 +212,12 @@ type asOfView interface {
 }
 
 func CreateHistoryCachedStateReader(ctx context.Context, cache kvcache.CacheView, tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
-	asOfView, ok := cache.(asOfView)
+	_, err := checkBlockExecuted(tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
 
+	asOfView, ok := cache.(asOfView)
 	if !ok {
 		return nil, fmt.Errorf("%T does not implement GetAsOf at: %s", cache, dbg.Stack())
 	}
