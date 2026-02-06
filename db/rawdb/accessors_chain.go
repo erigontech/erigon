@@ -1214,6 +1214,25 @@ func WriteDBCommitmentHistoryEnabled(tx kv.RwTx, enabled bool) error {
 	return nil
 }
 
+func ReadRecentReorg(tx kv.Tx) (bool, error) {
+	v, err := tx.GetOne(kv.DatabaseInfo, kv.RecentReorgKey)
+	if err != nil {
+		return false, fmt.Errorf("reading RecentReorg flag: %w", err)
+	}
+	return len(v) == 1 && v[0] == 1, nil
+}
+
+func WriteRecentReorg(tx kv.RwTx, reorged bool) error {
+	val := []byte{0}
+	if reorged {
+		val = []byte{1}
+	}
+	if err := tx.Put(kv.DatabaseInfo, kv.RecentReorgKey, val); err != nil {
+		return fmt.Errorf("writing RecentReorg flag: %w", err)
+	}
+	return nil
+}
+
 type RCacheV2Query struct {
 	BlockNum  uint64
 	BlockHash common.Hash
