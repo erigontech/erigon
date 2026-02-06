@@ -9,7 +9,7 @@ on:
         required: false
         default: false
   schedule:
-  - cron: '0 2 * * *'  # Run daily at 02:00 UTC
+    - cron: '0 2 * * *'  # Run daily at 02:00 UTC
 
 concurrency:
   group: rpc-performance-latest-${{ github.ref }}
@@ -241,6 +241,15 @@ jobs:
           bin_past_test_dir=$RPC_PAST_TEST_DIR/${CHAIN}_bin
           rm -rf $bin_past_test_dir  # we want only the latest binary files
           mkdir -p $bin_past_test_dir
+
+          # Define result_dir (same for all run_perf calls since workspace and network are constant)
+          result_dir=${{runner.workspace}}/rpc-tests/perf/reports/$CHAIN
+          mkdir -p $result_dir
+          echo "result_dir=$result_dir" >> $GITHUB_ENV
+
+          # Initialize output log file in perf dir (moved to result_dir after all tests)
+          output_log=${{runner.workspace}}/rpc-tests/perf/output.log
+          > $output_log
           
           run_perf () {
             workspace=$1
@@ -249,13 +258,12 @@ jobs:
             pattern=$4
             sequence=$5
             client=$6
-            
-            result_dir=$workspace/rpc-tests/perf/reports/$network
+          
             result_file=$client-$method-result.json            
-                    
+          
             # clean temporary area
             cd $workspace/rpc-tests/perf
-            rm -rf ./reports/$network
+            rm -rf ./reports/$network/*
           
             python3 ./run_perf_tests.py --blockchain "$network" \
                                       --test-type "$method" \
@@ -267,11 +275,11 @@ jobs:
                                       --test-mode 2 \
                                       --test-report \
                                       --json-report $result_dir/$result_file \
-                                      --testing-daemon $client
+                                      --testing-daemon $client 2>&1 | tee -a $output_log
           
-            # Capture test runner script exit status
-            perf_exit_status=$?
-                    
+            # Capture test runner script exit status (use PIPESTATUS since we're piping to tee)
+            perf_exit_status=${PIPESTATUS[0]}
+          
             # Detect the pre-built db version
             if [ "$client" == "erigon" ]; then
               db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_REFERENCE_DIR/production.ini production erigon_repo_commit)
@@ -290,7 +298,7 @@ jobs:
               else
                 echo "::warning::vegeta binary reports directory '$workspace/rpc-tests/perf/reports/bin' not found; skipping copy."
               fi
-                    
+          
               echo "Execute Latency Percentile HDR Analysis"
               cd $result_dir
               python3 $ERIGON_QA_PATH/test_system/qa-tests/rpc-tests/perf_hdr_analysis.py \
@@ -316,7 +324,7 @@ jobs:
               branch_name="release"
               commit_hash=$commit
             fi
-            
+          
             echo branch_name=$branch_name
             echo commit_hash=$commit_hash
             echo method=$method
@@ -334,7 +342,7 @@ jobs:
               --db_version $db_version \
               --outcome $outcome \
               --result_file $result_dir/$result_file
-        
+          
             if [ $? -ne 0 ]; then
               failed_test=1
               echo "Failure saving test results on DB"
@@ -355,6 +363,9 @@ jobs:
           run_perf ${{runner.workspace}} $CHAIN eth_call stress_test_eth_call_002_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
           #run_perf ${{runner.workspace}} $CHAIN eth_getProof stress_test_eth_getProof_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
           
+          # Move output.log to result_dir after all tests
+          mv $output_log $result_dir/
+
           # Save the subsection reached status
           
           echo "test_executed=true" >> $GITHUB_OUTPUT
@@ -368,6 +379,31 @@ jobs:
             echo "::error::Error detected during tests"
             exit 1
           fi
+
+      - name: Generate Summary
+        if: always() && steps.test_step.outputs.test_executed == 'true'
+        run: |
+          SUMMARY_FILE="${{ env.result_dir }}/summary.md"
+          LOG_FILE="${{ env.result_dir }}/output.log"
+
+          cat << 'EOF' > $SUMMARY_FILE
+          # ${{ github.workflow }} Report
+
+          ## Test Configuration
+          - **Chain:** ${{ env.CHAIN }}
+          - **Client:** ${{ matrix.client }}
+          - **Result:** ${{ steps.test_step.outputs.TEST_RESULT }}
+
+          ## Test Output
+          ```
+          EOF
+
+          cat $LOG_FILE >> $SUMMARY_FILE
+
+          echo '```' >> $SUMMARY_FILE
+
+          cat $SUMMARY_FILE
+          cat $SUMMARY_FILE >> $GITHUB_STEP_SUMMARY
 
       - name: Upload test results
         if: (matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true') && steps.test_step.outputs.test_executed == 'true'

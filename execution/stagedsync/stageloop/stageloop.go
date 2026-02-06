@@ -132,19 +132,27 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		return err
 	}
 	defer tx.Rollback()
-	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
-	if err != nil {
-		return err
-	}
-	defer doms.Close()
+
 	// run stages first time - it will download blocks
-	err = sync.RunSnapshots(doms, tx)
+	err = sync.RunSnapshots(nil, tx)
 	if err != nil {
 		return err
 	}
 	if onlySnapDownload {
 		return nil
 	}
+
+	// after StageSnapshots (files downloading): if domains are ahead of block files, then nothing to execute.
+	if execctx.IsDomainAheadOfBlocks(ctx, tx, logger) {
+		return tx.Commit()
+	}
+
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	if err != nil {
+		return err
+	}
+	defer doms.Close()
+
 	var finishStageBeforeSync uint64
 	if hook != nil {
 		finishStageBeforeSync, err = stages.GetStageProgress(tx, stages.Finish)
@@ -159,11 +167,11 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 	for more := true; more; {
 		more, err = sync.Run(doms, tx, initialCycle, firstCycle)
 		if err != nil {
-			return err
+			return fmt.Errorf("ProcessFrozenBlocks: %w", err)
 		}
 
 		if err := sync.RunPrune(ctx, tx, initialCycle, 0); err != nil {
-			return err
+			return fmt.Errorf("ProcessFrozenBlocks: %w", err)
 		}
 
 		var finStageProgress uint64
@@ -185,7 +193,7 @@ func ProcessFrozenBlocks(ctx context.Context, db kv.TemporalRwDB, blockReader se
 		}
 
 		if err := doms.Flush(ctx, tx); err != nil {
-			return err
+			return fmt.Errorf("ProcessFrozenBlocks: %w", err)
 		}
 		doms.ClearRam(true)
 		if err := tx.Commit(); err != nil {
@@ -451,8 +459,10 @@ func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync, finishStageAft
 	}
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
-	if (h.notifications.Accumulator != nil) && (currentHeader != nil) {
-		h.notifications.Accumulator.StartChange(currentHeader, nil, false)
+	if h.notifications.Accumulator != nil && currentHeader != nil {
+		if changes := h.notifications.Accumulator.Changes(); len(changes) == 0 || changes[len(changes)-1].BlockHeight < currentHeader.Number.Uint64() {
+			h.notifications.Accumulator.StartChange(currentHeader, nil, false)
+		}
 
 		pendingBaseFee := misc.CalcBaseFee(h.chainConfig, currentHeader)
 		pendingBlobFee := h.chainConfig.GetMinBlobGasPrice()
