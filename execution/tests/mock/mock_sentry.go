@@ -81,7 +81,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
-	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
@@ -276,16 +275,16 @@ func applyOptions(opts []Option) options {
 	return opt
 }
 
-func MockWithGenesis(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, withPosDownloader bool, opts ...Option) *MockSentry {
-	return MockWithGenesisPruneMode(tb, gspec, key, blockBufferSize, prune.MockMode, withPosDownloader, opts...)
+func MockWithGenesis(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, opts ...Option) *MockSentry {
+	return MockWithGenesisPruneMode(tb, gspec, key, blockBufferSize, prune.MockMode, opts...)
 }
 
-func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine rules.Engine, withPosDownloader bool) *MockSentry {
+func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine rules.Engine) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	return MockWithEverything(tb, gspec, key, prune.MockMode, engine, blockBufferSize, false, withPosDownloader)
+	return MockWithEverything(tb, gspec, key, prune.MockMode, engine, blockBufferSize, false)
 }
 
-func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, blockBufferSize int, prune prune.Mode, withPosDownloader bool, opts ...Option) *MockSentry {
+func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, blockBufferSize int, prune prune.Mode, opts ...Option) *MockSentry {
 	var engine rules.Engine
 
 	switch {
@@ -295,10 +294,10 @@ func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.Pr
 		engine = ethash.NewFaker()
 	}
 
-	return MockWithEverything(tb, gspec, key, prune, engine, blockBufferSize, false, withPosDownloader, opts...)
+	return MockWithEverything(tb, gspec, key, prune, engine, blockBufferSize, false, opts...)
 }
 
-func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine rules.Engine, blockBufferSize int, withTxPool, withPosDownloader bool, opts ...Option) *MockSentry {
+func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine rules.Engine, blockBufferSize int, withTxPool bool, opts ...Option) *MockSentry {
 	opt := applyOptions(opts)
 	tmpdir := os.TempDir()
 	if tb != nil {
@@ -441,7 +440,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			dirs, notifications, mock.BlockReader, blockWriter, nil, terseLogger)
 		chainReader := consensuschain.NewReader(mock.ChainConfig, tx, mock.BlockReader, logger)
 		// We start the mining step
-		if err := stageloop.StateStep(ctx, chainReader, mock.Engine, sd, tx, stateSync, unwindPoint, headersChain, bodiesChain, false); err != nil {
+		if err := stageloop.StateStep(ctx, chainReader, mock.Engine, sd, tx, stateSync, unwindPoint, headersChain, bodiesChain); err != nil {
 			logger.Warn("Could not validate block", "err", err)
 			return err
 		}
@@ -582,7 +581,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			),
 			stagedsync.StageTxLookupCfg(prune, dirs.Tmp, mock.BlockReader),
 			stagedsync.StageFinishCfg(forkValidator),
-			!withPosDownloader,
 		),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
@@ -690,7 +688,7 @@ func Mock(tb testing.TB) *MockSentry {
 			address: {Balance: funds},
 		},
 	}
-	return MockWithGenesis(tb, gspec, key, false)
+	return MockWithGenesis(tb, gspec, key)
 }
 
 func MockWithTxPool(t *testing.T) *MockSentry {
@@ -705,7 +703,7 @@ func MockWithTxPool(t *testing.T) *MockSentry {
 		},
 	}
 
-	return MockWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true, false)
+	return MockWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true)
 }
 
 func MockWithTxPoolCancun(t *testing.T) *MockSentry {
@@ -726,7 +724,7 @@ func MockWithTxPoolCancun(t *testing.T) *MockSentry {
 		},
 	}
 
-	return MockWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true, false)
+	return MockWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true)
 }
 
 func MockWithTxPoolOsaka(t *testing.T) *MockSentry {
@@ -742,39 +740,7 @@ func MockWithTxPoolOsaka(t *testing.T) *MockSentry {
 		},
 	}
 
-	return MockWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true, false)
-}
-
-func MockWithZeroTTD(t *testing.T, withPosDownloader bool) *MockSentry {
-	funds := big.NewInt(1 * common.Ether)
-	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := chain.AllProtocolChanges
-	chainConfig.TerminalTotalDifficulty = common.Big0
-	gspec := &types.Genesis{
-		Config: chainConfig,
-		Alloc: types.GenesisAlloc{
-			address: {Balance: funds},
-		},
-	}
-	return MockWithGenesis(t, gspec, key, withPosDownloader)
-}
-
-func MockWithZeroTTDGnosis(t *testing.T, withPosDownloader bool) *MockSentry {
-	funds := big.NewInt(1 * common.Ether)
-	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := chain.TestChainAuraConfig
-	chainConfig.TerminalTotalDifficulty = common.Big0
-	chainConfig.TerminalTotalDifficultyPassed = true
-	gspec := &types.Genesis{
-		Config: chainConfig,
-		Alloc: types.GenesisAlloc{
-			address: {Balance: funds},
-		},
-	}
-	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), chainConfig, log.New())
-	return MockWithGenesisEngine(t, gspec, engine, withPosDownloader)
+	return MockWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true)
 }
 
 func (ms *MockSentry) EnableLogs() {

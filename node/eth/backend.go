@@ -36,13 +36,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/rpc/mcp"
 	"github.com/erigontech/mdbx-go/mdbx"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/erigontech/erigon/rpc/mcp"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
@@ -663,7 +664,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			dirs, notifications, blockReader, blockWriter, backend.silkworm, terseLogger)
 		chainReader := consensuschain.NewReader(chainConfig, tx, blockReader, logger)
 		// We start the mining step
-		if err := stageloop.StateStep(ctx, chainReader, backend.engine, sd, tx, stateSync, unwindPoint, headersChain, bodiesChain, config.ImportMode); err != nil {
+		if err := stageloop.StateStep(ctx, chainReader, backend.engine, sd, tx, stateSync, unwindPoint, headersChain, bodiesChain); err != nil {
 			logger.Warn("Could not validate block", "err", err)
 			return err
 		}
