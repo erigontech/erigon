@@ -141,7 +141,6 @@ func ExecV3(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	fmt.Println(didReorg)
 	if didReorg {
 		logger.Info("Recent reorg detected, resetting state")
 	}
