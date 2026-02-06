@@ -136,8 +136,8 @@ func ExecV3(ctx context.Context,
 	}
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if initialCycle && isApplyingBlocks {
-		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
-		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+		agg.SetCollateAndBuildWorkers(2)
+		agg.SetCompressWorkers(estimate.CompressSnapshot.WorkersHalf())
 	} else {
 		agg.SetCompressWorkers(1)
 		agg.SetCollateAndBuildWorkers(1)
