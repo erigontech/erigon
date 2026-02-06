@@ -947,7 +947,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return tx.Commit()
 	}
 
-	log.Info("[stage_exec] starting", "LoopBlockLimit", syncCfg.LoopBlockLimit)
+	log.Info("[stage_exec] starting", "LoopBlockLimit", syncCfg.LoopBlockLimit, "initial", s.CurrentSyncCycle.IsInitialCycle)
 
 	for {
 		if err := stagedsync.SpawnExecuteBlocksStage(s, sync, doms, tx, block, ctx, cfg, logger); err != nil {
