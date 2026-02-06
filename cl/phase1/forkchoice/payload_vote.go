@@ -8,6 +8,11 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
+func (f *ForkChoiceStore) calculateCommitteeFraction(s *state.CachingBeaconState, committeePercent uint64) uint64 {
+	committeeWeight := s.GetTotalActiveBalance() / f.beaconCfg.SlotsPerEpoch
+	return (committeeWeight * committeePercent) / 100
+}
+
 // notifyPtcMessages extracts a list of PayloadAttestationMessage from payload_attestations
 // and updates the store with them. These Payload attestations are assumed to be in the
 // beacon block hence signature verification is not needed.
