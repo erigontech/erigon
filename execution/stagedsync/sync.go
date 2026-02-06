@@ -250,7 +250,7 @@ func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, initialCycle, firstC
 	if err != nil {
 		return nil, err
 	}
-	return &StageState{s, stage, blockNum, CurrentSyncCycleInfo{initialCycle, firstCycle}}, nil
+	return &StageState{s, stage, blockNum, CurrentSyncCycleInfo{initialCycle, firstCycle}, false}, nil
 }
 
 func (s *Sync) RunSnapshots(sd *execctx.SharedDomains, tx kv.TemporalRwTx) error {
