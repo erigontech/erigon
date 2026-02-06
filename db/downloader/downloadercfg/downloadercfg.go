@@ -112,6 +112,10 @@ func defaultTorrentClientConfig() *torrent.ClientConfig {
 
 	// enable dht. TODO: We want DHT.
 	torrentConfig.NoDHT = true
+	// Disable UTP (UDP-based transport) to avoid Windows Server 2025 Hyper-V/WinNAT port
+	// reservation conflicts where TCP and UDP port availability is asymmetric (WSAEACCES on
+	// UDP bind). Since NoDHT is already true, no UDP listeners are needed.
+	torrentConfig.DisableUTP = true
 
 	torrentConfig.Seed = true
 	torrentConfig.UpnpID = torrentConfig.UpnpID + " leecher"
