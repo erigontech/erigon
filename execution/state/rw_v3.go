@@ -264,11 +264,11 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 				return err
 			}
 		}
+	}
 
-		if rs.syncCfg.PersistReceiptsCacheV2 {
-			if err := rawdb.WriteReceiptCacheV2(rs.domains.AsPutDel(tx), receipt, txNum); err != nil {
-				return err
-			}
+	if rs.syncCfg.PersistReceiptsCacheV2 {
+		if err := rawdb.WriteReceiptCacheV2(rs.domains.AsPutDel(tx), receipt, txNum); err != nil {
+			return err
 		}
 	}
 
