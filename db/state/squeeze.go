@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
@@ -352,33 +353,77 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	// backtesterReader is good for the task
 
 	var execProgress uint64
-	if err := rwDb.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		execProgress, err := stages.GetStageProgress(tx, stages.Execution)
+	rwTx, err := rwDb.BeginTemporalRw(ctx)
+	if err != nil {
+		return nil, err
+	}
+	{
+		execProgress, err = stages.GetStageProgress(rwTx, stages.Execution)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		if execProgress != 0 {
-			return nil
+			return nil, err
 		}
 
 		// else compare domain and block progress
-		domainTxNum := tx.Debug().DomainProgress(kv.AccountsDomain)
-		execProgress, ok, err := txNumsReader.FindBlockNum(ctx, tx, domainTxNum)
+		domainTxNum := rwTx.Debug().DomainProgress(kv.AccountsDomain)
+		var ok bool
+		execProgress, ok, err = txNumsReader.FindBlockNum(ctx, rwTx, domainTxNum)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if !ok {
-			return fmt.Errorf("error in finding block number for %d", domainTxNum)
+			return nil, fmt.Errorf("error in finding block number for %d", domainTxNum)
 		}
-		return nil
-	}); err != nil {
-		return nil, err
 	}
 
-	blockFrom, blockTo := 0, execProgress
+	blockFrom, blockTo := uint64(0), execProgress
 
-	for blockFrom < blockTo {
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, logger)
+	if err != nil {
+		return nil, err
+	}
+	for blockFrom <= blockTo {
+		fromTxNum, err := txNumsReader.Min(ctx, rwTx, blockFrom)
+		if err != nil {
+			return nil, err
+		}
+		toTxNum, err := txNumsReader.Max(ctx, rwTx, blockFrom)
+		if err != nil {
+			return nil, err
+		}
+
+		accRange, err := rwTx.HistoryRange(kv.AccountsDomain, int(fromTxNum), int(toTxNum+1), order.Asc, math.MaxInt64)
+		if err != nil {
+			return nil, err
+		}
+
+		storRange, err := rwTx.HistoryRange(kv.StorageDomain, int(fromTxNum), int(toTxNum+1), order.Asc, math.MaxInt64)
+		if err != nil {
+			return nil, err
+		}
+
+		// this should come at last to allow everything to be flushed
+		// TODO: this is going to change in Alex's latest PR, will become exact size of mem batch 
+		if doms.GetMemBatch().SizeEstimate() > 100 || blockFrom == blockTo {
+			if err = doms.Flush(ctx, rwTx); err != nil {
+				return nil, err
+			}
+			if err = rwTx.Commit(); err != nil {
+				return nil, err
+			}
+
+			agg := rwDb.(HasAgg).Agg().(*Aggregator)
+			stepTo := kv.Step(toTxNum / agg.StepSize())
+			agg.BuildFiles2(ctx, 0, stepTo)
+			if rwTx, err = rwDb.BeginTemporalRw(ctx); err != nil {
+				return nil, err
+			}
+
+		}
+
 	}
 
 	return nil, nil
