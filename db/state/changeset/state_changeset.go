@@ -134,7 +134,7 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 }
 
 var (
-	zstdEnc, _ = zstd.NewWriter(nil, zstd.WithEncoderCRC(false), zstd.WithZeroFrames(true), zstd.WithEncoderLevel(zstd.SpeedFastest))
+	zstdEnc, _ = zstd.NewWriter(nil, zstd.WithEncoderCRC(false), zstd.WithZeroFrames(true))
 )
 
 func serializeDiffSetBufLen(diffSet []kv.DomainEntryDiff) int {
