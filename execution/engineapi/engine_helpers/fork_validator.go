@@ -145,14 +145,14 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	start := time.Now()
+
 	if fv.sharedDom != nil {
+		fv.sharedDom.FlushHooks(ctx, fv.sharedDom.NewDomainPutter(tx))
 		err := sd.Merge(fv.sharedDom)
-		fv.sharedDom.FlushHooks(ctx, sd.NewDomainPutter(tx))
 		if err != nil {
 			return err
 		}
 	}
-	sd.FlushHooks(ctx, sd.NewDomainPutter(tx))
 	timings, _ := fv.timingsCache.Get(fv.extendingForkHeadHash)
 	timings[BlockTimingsFlushExtendingFork] = time.Since(start)
 	fv.timingsCache.Add(fv.extendingForkHeadHash, timings)
