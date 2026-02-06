@@ -333,6 +333,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	defer e.semaphore.Release(1)
 
 	e.hook.LastNewBlockSeen(req.Number) // used by eth_syncing
+	e.currentContext.ResetHooks()
 	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 	blockHash := gointerfaces.ConvertH256ToHash(req.Hash)
 	e.logger.Debug("[execmodule] validating chain", "number", req.Number, "hash", common.Hash(blockHash))

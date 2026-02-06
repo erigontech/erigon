@@ -199,6 +199,10 @@ func (sd *SharedDomains) AddFlushHook(hook func(context.Context, stateifs.Domain
 	})
 }
 
+func (sd *SharedDomains) ResetHooks() {
+	sd.flushHooks = sd.flushHooks[:0]
+}
+
 // FlushHooks executes all registered flush hooks and clears them.
 // Used during transaction commit to apply deferred commitment updates.
 // For each hook, it sets the corresponding block's changeset as the accumulator
