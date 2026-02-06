@@ -17,6 +17,7 @@
 package execmodule_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -37,11 +38,14 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execmodule"
 	eth1utils "github.com/erigontech/erigon/execution/execmodule/moduleutil"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
@@ -61,7 +65,7 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 		},
 	}
 	stepSize := uint64(5) // 2 for block 0 (0,1) and 3 for block 1 (2,3,4)
-	m := mock.MockWithGenesis(t, genesis, privKey, false, mock.WithStepSize(stepSize))
+	m := mock.MockWithGenesis(t, genesis, privKey, mock.WithStepSize(stepSize))
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(0, senderAddr, uint256.NewInt(0), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
@@ -130,7 +134,7 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 			senderAddr2: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := mock.MockWithGenesis(t, genesis, privKey, false)
+	m := mock.MockWithGenesis(t, genesis, privKey)
 	longerFork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
@@ -169,6 +173,61 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 	require.NoError(t, err)
 	err = insertValidateAndUfc1By1(t.Context(), m.Eth1ExecutionService, longerFork2)
 	require.NoError(t, err)
+}
+
+func TestAssembleBlock(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test in short mode")
+	}
+	t.Parallel()
+	ctx := t.Context()
+	m := mock.MockWithTxPoolOsaka(t)
+	exec := m.Eth1ExecutionService
+	txpool := m.TxPoolGrpcServer
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+		// In block 1, addr1 sends addr2 some ether.
+		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(t, err)
+		gen.AddTx(tx)
+	})
+	require.NoError(t, err)
+	err = m.InsertChain(chainPack)
+	require.NoError(t, err)
+	tx2, err := types.SignTx(types.NewTransaction(1, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(chainPack.TopBlock.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+	require.NoError(t, err)
+	tx3, err := types.SignTx(types.NewTransaction(2, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(chainPack.TopBlock.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+	require.NoError(t, err)
+	rlpTxs := make([][]byte, 2)
+	for i, tx := range []types.Transaction{tx2, tx3} {
+		var buf bytes.Buffer
+		err = tx.EncodeRLP(&buf)
+		require.NoError(t, err)
+		rlpTxs[i] = buf.Bytes()
+	}
+	r, err := txpool.Add(ctx, &txpoolproto.AddRequest{
+		RlpTxs: rlpTxs,
+	})
+	require.NoError(t, err)
+	require.Len(t, r.Errors, 2)
+	for _, err := range r.Errors {
+		require.Equal(t, "success", err)
+	}
+	require.Len(t, r.Imported, 2)
+	for _, res := range r.Imported {
+		require.Equal(t, txpoolproto.ImportResult_SUCCESS, res)
+	}
+	payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
+		ParentHash:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Hash()),
+		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		PrevRandao:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Header().MixDigest),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
+		Withdrawals:           make([]*typesproto.Withdrawal, 0),
+	})
+	require.NoError(t, err)
+	blockData, err := getAssembledBlock(ctx, exec, payloadId)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), blockData.ExecutionPayload.BlockNumber)
+	require.Len(t, blockData.ExecutionPayload.Transactions, 2)
 }
 
 func insertBlocks(ctx context.Context, exec *execmodule.EthereumExecutionModule, chainPack *blockgen.ChainPack) (*executionproto.InsertionResult, error) {
@@ -240,6 +299,32 @@ func insertValidateAndUfc1By1(ctx context.Context, exec *execmodule.EthereumExec
 		}
 	}
 	return nil
+}
+
+func assembleBlock(ctx context.Context, exec *execmodule.EthereumExecutionModule, req *executionproto.AssembleBlockRequest) (uint64, error) {
+	return retryBusy(ctx, func() (uint64, executionproto.ExecutionStatus, error) {
+		r, err := exec.AssembleBlock(ctx, req)
+		if err != nil {
+			return 0, 0, err
+		}
+		if r.Busy {
+			return 0, executionproto.ExecutionStatus_Busy, nil
+		}
+		return r.Id, executionproto.ExecutionStatus_Success, nil
+	})
+}
+
+func getAssembledBlock(ctx context.Context, exe *execmodule.EthereumExecutionModule, payloadId uint64) (*executionproto.AssembledBlockData, error) {
+	return retryBusy(ctx, func() (*executionproto.AssembledBlockData, executionproto.ExecutionStatus, error) {
+		br, err := exe.GetAssembledBlock(ctx, &executionproto.GetAssembledBlockRequest{Id: payloadId})
+		if err != nil {
+			return nil, 0, err
+		}
+		if br.Busy {
+			return nil, executionproto.ExecutionStatus_Busy, nil
+		}
+		return br.Data, executionproto.ExecutionStatus_Success, nil
+	})
 }
 
 func retryBusy[T any](ctx context.Context, f func() (T, executionproto.ExecutionStatus, error)) (T, error) {
