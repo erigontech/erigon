@@ -340,18 +340,8 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 	a.DisableAllDependencies()
-	// assume that commitment files are deleted at this point
-	// TODO: need to add flags to ensure this is triggered only when commitment history is enabled...
-	// TODO: option to not generate commitment history should be there in rebuild_commitment
-	// and if that option is chosen, do not use this path (it's slower), use the REbuildCommitmentFiles
 
-	// we probably need to exec from 0 to execProgress (i don't think execProgress is removed by callers of this func)
-	// it's a block by block loop - you find the range of txNum it has [startTxNum, endTxNum)
-	// you have a doms, which will be flushed every x block (maybe based on in-mem size)
-	// probably here you commit tx too
-	// configuring shared domains: backtesterReader looks good: you touch keys using the HistoryRange (of some shard -- this will work out just fine) and then commitment_context does get value of those keys using backtesterReader;
-	// backtesterReader is good for the task
-
+	// Determine block range to process
 	var execProgress uint64
 	rwTx, err := rwDb.BeginTemporalRw(ctx)
 	if err != nil {
@@ -381,10 +371,19 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 	blockFrom, blockTo := uint64(0), execProgress
 
-	doms, err := execctx.NewSharedDomains(ctx, rwTx, logger)
+	logger.Info("[rebuild_commitment_history] starting", "blockFrom", blockFrom, "blockTo", blockTo)
+
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger)
 	if err != nil {
 		return nil, err
 	}
+	domains.DiscardWrites(kv.AccountsDomain)
+	domains.DiscardWrites(kv.StorageDomain)
+	domains.DiscardWrites(kv.CodeDomain)
+
+	var totalKeysProcessed uint64
+	var rh []byte
+
 	for blockFrom <= blockTo {
 		fromTxNum, err := txNumsReader.Min(ctx, rwTx, blockFrom)
 		if err != nil {
@@ -395,38 +394,54 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			return nil, err
 		}
 
-		accRange, err := rwTx.HistoryRange(kv.AccountsDomain, int(fromTxNum), int(toTxNum+1), order.Asc, math.MaxInt64)
+		domains.SetBlockNum(blockFrom)
+		domains.SetTxNum(toTxNum)
+
+		// Touch all changed account keys in this block
+		accIt, err := rwTx.HistoryRange(kv.AccountsDomain, int(fromTxNum), int(toTxNum+1), order.Asc, math.MaxInt64)
+		if err != nil {
+			return nil, err
+		}
+		for accIt.HasNext() {
+			k, _, err := accIt.Next()
+			if err != nil {
+				accIt.Close()
+				return nil, err
+			}
+			domains.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(k), nil)
+			totalKeysProcessed++
+		}
+		accIt.Close()
+
+		// Touch all changed storage keys in this block
+		storIt, err := rwTx.HistoryRange(kv.StorageDomain, int(fromTxNum), int(toTxNum+1), order.Asc, math.MaxInt64)
+		if err != nil {
+			return nil, err
+		}
+		for storIt.HasNext() {
+			k, _, err := storIt.Next()
+			if err != nil {
+				storIt.Close()
+				return nil, err
+			}
+			domains.GetCommitmentCtx().TouchKey(kv.StorageDomain, string(k), nil)
+			totalKeysProcessed++
+		}
+		storIt.Close()
+
+		rh, err = domains.ComputeCommitment(ctx, rwTx, true, blockFrom, toTxNum, "[rebuild_commitment_history]", nil)
 		if err != nil {
 			return nil, err
 		}
 
-		storRange, err := rwTx.HistoryRange(kv.StorageDomain, int(fromTxNum), int(toTxNum+1), order.Asc, math.MaxInt64)
-		if err != nil {
-			return nil, err
-		}
-
-		// this should come at last to allow everything to be flushed
-		// TODO: this is going to change in Alex's latest PR, will become exact size of mem batch 
-		if doms.GetMemBatch().SizeEstimate() > 100 || blockFrom == blockTo {
-			if err = doms.Flush(ctx, rwTx); err != nil {
-				return nil, err
-			}
-			if err = rwTx.Commit(); err != nil {
-				return nil, err
-			}
-
-			agg := rwDb.(HasAgg).Agg().(*Aggregator)
-			stepTo := kv.Step(toTxNum / agg.StepSize())
-			agg.BuildFiles2(ctx, 0, stepTo)
-			if rwTx, err = rwDb.BeginTemporalRw(ctx); err != nil {
-				return nil, err
-			}
-
-		}
-
+		blockFrom++
 	}
 
-	return nil, nil
+	latestRoot = rh
+	_ = a
+	_ = totalKeysProcessed
+
+	return latestRoot, nil
 }
 
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
