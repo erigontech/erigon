@@ -75,9 +75,8 @@ type accHolder interface {
 
 // flushHook pairs a flush callback with the block it was created for.
 type flushHook struct {
-	blockHash common.Hash
-	blockNum  uint64
-	fn        func(context.Context, stateifs.DomainPutter) error
+	blockNum uint64
+	fn       func(context.Context, stateifs.DomainPutter) error
 }
 
 func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.Logger) bool {
@@ -99,7 +98,6 @@ type SharedDomains struct {
 
 	txNum             uint64
 	blockNum          atomic.Uint64
-	blockHash         common.Hash
 	trace             bool //nolint
 	commitmentCapture bool
 	mem               kv.TemporalMemBatch
@@ -165,7 +163,9 @@ func (sd *SharedDomains) NewDomainPutter(tx kv.TemporalTx) stateifs.DomainPutter
 
 // changesetSwitcher is implemented by TemporalMemBatch to get/set changesets for deferred writes.
 type changesetSwitcher interface {
-	GetChangesetByBlockNum(blockNumber uint64) *changeset.StateChangeSet
+	// GetChangesetByBlockNum returns the changeset for a given block number and
+	// the block hash it is keyed under.
+	GetChangesetByBlockNum(blockNumber uint64) (common.Hash, *changeset.StateChangeSet)
 	SetChangesetAccumulator(acc *changeset.StateChangeSet)
 	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet)
 }
@@ -193,9 +193,8 @@ func (sd *SharedDomains) Merge(other *SharedDomains) error {
 // Implements commitment.DeferredHooker interface.
 func (sd *SharedDomains) AddFlushHook(hook func(context.Context, stateifs.DomainPutter) error) {
 	sd.flushHooks = append(sd.flushHooks, flushHook{
-		blockHash: sd.blockHash,
-		blockNum:  sd.blockNum.Load(),
-		fn:        hook,
+		blockNum: sd.blockNum.Load(),
+		fn:       hook,
 	})
 }
 
@@ -228,7 +227,7 @@ func (sd *SharedDomains) FlushHooks(ctx context.Context, dp stateifs.DomainPutte
 
 	for _, hook := range sd.flushHooks {
 		// Set the block's changeset as accumulator so writes go there
-		cs := switcher.GetChangesetByBlockNum(hook.blockNum)
+		blockHash, cs := switcher.GetChangesetByBlockNum(hook.blockNum)
 		if cs == nil {
 			// No changeset for this block - run hook without changeset routing
 			if err := hook.fn(ctx, dp); err != nil {
@@ -244,7 +243,7 @@ func (sd *SharedDomains) FlushHooks(ctx context.Context, dp stateifs.DomainPutte
 			return err
 		}
 
-		switcher.SavePastChangesetAccumulator(hook.blockHash, hook.blockNum, cs)
+		switcher.SavePastChangesetAccumulator(blockHash, hook.blockNum, cs)
 	}
 
 	switcher.SetChangesetAccumulator(nil)
@@ -357,12 +356,6 @@ func (sd *SharedDomains) BlockNum() uint64 { return sd.blockNum.Load() }
 
 func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 	sd.blockNum.Store(blockNum)
-}
-
-func (sd *SharedDomains) BlockHash() common.Hash { return sd.blockHash }
-
-func (sd *SharedDomains) SetBlockHash(blockHash common.Hash) {
-	sd.blockHash = blockHash
 }
 
 func (sd *SharedDomains) SetTrace(b, capture bool) []string {
