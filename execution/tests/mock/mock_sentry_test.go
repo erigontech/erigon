@@ -71,6 +71,7 @@ func TestReorgsWithInsertChain(t *testing.T) {
 	short2, err := blockgen.GenerateChain(m.ChainConfig, long1.TopBlock, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
+	require.NoError(t, err)
 	// insert long2 chain
 	err = m.InsertChain(long2)
 	require.NoError(t, err)
