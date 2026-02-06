@@ -72,16 +72,7 @@ type StageState struct {
 	ID          stages.SyncStage
 	BlockNumber uint64 // BlockNumber is the current block number of the stage at the beginning of the state execution.
 
-	CurrentSyncCycle   CurrentSyncCycleInfo
-	didExecutionUnwind bool
-}
-
-func (s *StageState) DidExecutionUnwind() bool {
-	return s.didExecutionUnwind
-}
-
-func (s *StageState) SetDidExecutionUnwind(didUnwind bool) {
-	s.didExecutionUnwind = didUnwind
+	CurrentSyncCycle CurrentSyncCycleInfo
 }
 
 func (s *StageState) LogPrefix() string {

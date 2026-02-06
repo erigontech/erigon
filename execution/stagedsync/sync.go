@@ -51,6 +51,8 @@ type Sync struct {
 	stagesIdsList []string
 	mode          stages.Mode
 	metricsCache  metricsCache
+
+	didExecutionUnwind bool
 }
 
 type Timing struct {
@@ -58,6 +60,14 @@ type Timing struct {
 	isPrune  bool
 	stage    stages.SyncStage
 	took     time.Duration
+}
+
+func (s *Sync) DidExecutionUnwind() bool {
+	return s.didExecutionUnwind
+}
+
+func (s *Sync) SetDidExecutionUnwind(didUnwind bool) {
+	s.didExecutionUnwind = didUnwind
 }
 
 func (s *Sync) Len() int {
