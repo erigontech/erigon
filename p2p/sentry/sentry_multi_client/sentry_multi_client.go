@@ -388,7 +388,8 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 		if err != nil {
 			return fmt.Errorf("decode 3 BlockHeadersPacket66: %w", err)
 		}
-		hRaw := append([]byte{}, headerRaw...)
+		hRaw := make([]byte, len(headerRaw))
+		copy(hRaw, headerRaw)
 		number := header.Number.Uint64()
 		if number > highestBlock {
 			highestBlock = number
