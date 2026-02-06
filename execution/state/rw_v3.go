@@ -261,8 +261,8 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 	return nil
 }
 
-// SizeEstimate - including esitmation of future ComputeCommitment on current state changes
-func (rs *StateV3) SizeEstimate() uint64 {
+// SizeEstimateBeforeCommitment - including esitmation of future ComputeCommitment on current state changes
+func (rs *StateV3) SizeEstimateBeforeCommitment() uint64 {
 	if rs.domains == nil {
 		return 0
 	}
@@ -271,12 +271,13 @@ func (rs *StateV3) SizeEstimate() uint64 {
 	return rs.domains.SizeEstimate() * 2 * 4
 }
 
-// RawSize - not including any additional estimations
-func (rs *StateV3) RawSize() uint64 {
+// SizeEstimateAfterCommitment - not including any additional estimations. Use it after ComputeCommitment calc - to see
+func (rs *StateV3) SizeEstimateAfterCommitment() uint64 {
 	if rs.domains == nil {
 		return 0
 	}
-	return rs.domains.SizeEstimate()
+	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
+	return rs.domains.SizeEstimate() * 2
 }
 
 type storageItem struct {
