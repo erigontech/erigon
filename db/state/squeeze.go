@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
@@ -465,10 +466,14 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			return nil, err
 		}
 
-		// TODO: compare rh against canonical header's stateRoot after each ComputeCommitment
-		//   - Read header by block number, compare common.Hash(rh) == header.Root
-		//   - Consider reading headers in ranges or with read-ahead for performance
-		//   - On mismatch: return error with block number, expected root, and computed root
+		// Verify computed root matches canonical header
+		header := rawdb.ReadHeaderByNumber(rwTx, blockFrom)
+		if header == nil {
+			return nil, fmt.Errorf("[rebuild_commitment_history] canonical header not found for block %d", blockFrom)
+		}
+		if common.Hash(rh) != header.Root {
+			return nil, fmt.Errorf("[rebuild_commitment_history] root mismatch at block %d: computed %x, expected %x", blockFrom, rh, header.Root)
+		}
 
 		// Size-based flush + file building
 		if domains.SizeEstimate() > uint64(batchSize) || blockFrom == blockTo {
