@@ -18,7 +18,6 @@ package executiontests
 
 import (
 	"math/big"
-	"runtime"
 	"sync"
 	"testing"
 	"time"
