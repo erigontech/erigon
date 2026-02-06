@@ -25,6 +25,8 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/klauspost/compress/zstd"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
@@ -122,8 +124,16 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 		ret = append(ret, diffSet[i].Value...)
 		ret = append(ret, idx)
 	}
+	t := time.Now()
+	r := zstdEnc.EncodeAll(ret, nil)
+	took := time.Since(t)
+	fmt.Printf("zstdEnc.EncodeAll took %v, %d -> %d\n", took, len(ret), len(r))
 	return ret
 }
+
+var (
+	zstdEnc, _ = zstd.NewWriter(nil, zstd.WithEncoderCRC(false), zstd.WithZeroFrames(true), zstd.WithEncoderLevel(zstd.SpeedFastest))
+)
 
 func serializeDiffSetBufLen(diffSet []kv.DomainEntryDiff) int {
 	// Count unique prevStepBytes using slice instead of map
