@@ -317,6 +317,9 @@ func TestFindFilesWithVersionsByPatternInList_AccessorFiles(t *testing.T) {
 	if ver.Major != 1 || ver.Minor != 0 {
 		t.Fatalf("expected version 1.0, got %+v", ver)
 	}
+	if filepath.Base(path) != "v1.0-accounts.1-2.vi" {
+		t.Fatalf("expected v1.0-accounts.1-2.vi, got %s", filepath.Base(path))
+	}
 }
 
 func TestFindFilesWithVersionsByPatternInList_EmptyList(t *testing.T) {

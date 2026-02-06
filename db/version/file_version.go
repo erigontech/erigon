@@ -318,4 +318,3 @@ func VersionTooLowPanic(filename string, version Versions) {
 		version.Current,
 	))
 }
-
