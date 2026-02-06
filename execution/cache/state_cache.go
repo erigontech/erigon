@@ -41,7 +41,7 @@ func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes, commitmentB
 	sc.caches[kv.AccountsDomain] = NewDomainCache(accountBytes)
 	sc.caches[kv.StorageDomain] = NewDomainCache(storageBytes)
 	sc.caches[kv.CodeDomain] = NewCodeCache(codeBytes, addrBytes)
-	//sc.caches[kv.CommitmentDomain] = NewDomainCache(commitmentBytes)
+	sc.caches[kv.CommitmentDomain] = NewDomainCache(commitmentBytes)
 	return sc
 }
 
@@ -175,7 +175,6 @@ func (c *StateCache) RevertWithDiffset(diffset *[6][]kv.DomainEntryDiff, newBloc
 		k := []byte(entry.Key[:len(entry.Key)-8])
 		c.Delete(kv.CommitmentDomain, k)
 	}
-
 	// Update block hash on all caches after unwind so ValidateAndPrepare works correctly
 	for _, cache := range c.caches {
 		if cache != nil {
