@@ -221,8 +221,10 @@ func ExecV3(ctx context.Context,
 	doms.EnableParaTrieDB(cfg.db)
 	doms.EnableTrieWarmup(true)
 	isChainTip := maxBlockNum == startBlockNum
-	// Do it only for chain-tip blocks!
-	doms.EnableWarmupCache(isChainTip)
+	fmt.Printf("[dbg] alex: %s, %d\n", execStage.SyncMode().String(), startBlockNum)
+	if execStage.SyncMode() == stages.ModeApplyingBlocks {
+		doms.EnableWarmupCache(isChainTip) // Do it only for chain-tip blocks!
+	}
 	log.Debug("Warmup Cache", "enabled", isChainTip)
 	postValidator := newBlockPostExecutionValidator()
 	if isChainTip {
