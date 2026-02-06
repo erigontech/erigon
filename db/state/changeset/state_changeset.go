@@ -49,8 +49,6 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 	if len(diffSet) == 0 {
 		return append(out, 0, 0, 0, 0, 0) // dict len (1) + diffSet len (4)
 	}
-	t := time.Now()
-
 	// Build dictionary using fixed array instead of map.
 	// PrevStepBytes is always 8 bytes, so we use uint64 for fast comparison.
 	// There are typically very few unique values (< 10), so linear search beats map.
