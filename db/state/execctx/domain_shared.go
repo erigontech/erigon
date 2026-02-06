@@ -399,6 +399,7 @@ func (sd *SharedDomains) Close() {
 
 	sd.SetBlockNum(0)
 	sd.SetTxNum(0)
+	sd.ResetHooks()
 
 	//sd.walLock.Lock()
 	//defer sd.walLock.Unlock()
