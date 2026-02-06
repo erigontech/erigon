@@ -139,6 +139,11 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 	return ret
 }
 
+func init() {
+	gob.Register([]kv.DomainEntryDiff{})
+	gob.Register(kv.DomainEntryDiff{})
+}
+
 func serializeDiffSetBufLen(diffSet []kv.DomainEntryDiff) int {
 	// Count unique prevStepBytes using slice instead of map
 	var dictKeys [256]uint64
