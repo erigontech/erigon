@@ -876,7 +876,7 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 	if mode == "done" {
 		vals = []any{
 			"in", interval,
-			"buf", fmt.Sprintf("%s/%s", common.ByteCount(uint64(rs.SizeEstimateAfterCommitment())), common.ByteCount(p.commitThreshold)),
+			"buf", fmt.Sprintf("%s/%s", common.ByteCount(rs.SizeEstimateAfterCommitment()), common.ByteCount(p.commitThreshold)),
 		}
 	}
 

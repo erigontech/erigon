@@ -240,7 +240,7 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 	sd.mem.ClearRam()
 }
 
-func (sd *SharedDomains) SizeEstimate() uint64 {
+func (sd *SharedDomains) Size() uint64 {
 	return sd.mem.SizeEstimate()
 }
 
