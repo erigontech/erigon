@@ -136,7 +136,7 @@ var (
 	SyncLoopBlockLimitFlag = cli.UintFlag{
 		Name:  "sync.loop.block.limit",
 		Usage: "Sets the maximum number of blocks to process per loop iteration",
-		Value: 5_000,
+		Value: ethconfig.Defaults.Sync.LoopBlockLimit,
 	}
 
 	SyncParallelStateFlushing = cli.BoolFlag{

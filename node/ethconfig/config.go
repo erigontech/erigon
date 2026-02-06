@@ -87,11 +87,11 @@ var Defaults = Config{
 		ExecWorkerCount:            dbg.Exec3Workers, //only half of CPU, other half will spend for snapshots build/merge/prune
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
-		//LoopBlockLimit:             100_000,
-		ParallelStateFlushing:    true,
-		ChaosMonkey:              false,
-		AlwaysGenerateChangesets: !dbg.BatchCommitments,
-		MaxReorgDepth:            dbg.MaxReorgDepth,
+		LoopBlockLimit:             5_000,
+		ParallelStateFlushing:      true,
+		ChaosMonkey:                false,
+		AlwaysGenerateChangesets:   !dbg.BatchCommitments,
+		MaxReorgDepth:              dbg.MaxReorgDepth,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
