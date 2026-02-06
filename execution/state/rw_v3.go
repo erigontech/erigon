@@ -267,7 +267,7 @@ func (rs *StateV3) SizeEstimateBeforeCommitment() uint64 {
 		return 0
 	}
 	sz := rs.domains.SizeEstimate()
-	sz *= 2 // to cover data-structures overhead (and keep accounting cheap)
+	sz *= 2 // to cover data-structures overhead: map, btree, etc... and GC overhead (clean happening periodically)
 	sz *= 4 // for Commitment calculation when batch is full
 	return sz
 }
@@ -278,7 +278,7 @@ func (rs *StateV3) SizeEstimateAfterCommitment() uint64 {
 		return 0
 	}
 	sz := rs.domains.SizeEstimate()
-	sz *= 2 // to cover data-structures overhead (and keep accounting cheap)
+	sz *= 2 // to cover data-structures overhead: map, btree, etc... and GC overhead (clean happening periodically)
 	return sz
 }
 
