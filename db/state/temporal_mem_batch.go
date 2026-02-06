@@ -254,10 +254,7 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 func (sd *TemporalMemBatch) SizeEstimate() uint64 {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
-
-	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
-	// and muliply 8 more: for Commitment calculation when batch is full
-	return uint64(sd.metrics.CachePutSize) * 16
+	return uint64(sd.metrics.CachePutSize)
 }
 
 func (sd *TemporalMemBatch) ClearRam() {
