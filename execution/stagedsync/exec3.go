@@ -152,9 +152,13 @@ func ExecV3(ctx context.Context,
 
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if !inMemExec && !isMining {
-		agg.SetCollateAndBuildWorkers(2) //TODO: Need always set to 2 (on ChainTip too). But need more tests first
-	} else {
-		agg.SetCollateAndBuildWorkers(1)
+		if initialCycle {
+			agg.SetCompressWorkers(dbg.CompressWorkers)
+			agg.SetCollateAndBuildWorkers(2) //TODO: Need always set to 2 (on ChainTip too). But need more tests first
+		} else {
+			agg.SetCompressWorkers(dbg.CompressWorkers)
+			agg.SetCollateAndBuildWorkers(1)
+		}
 	}
 
 	var err error
