@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/common/dbg"
@@ -114,7 +115,13 @@ func StageHeadersCfg(
 	}
 }
 
+var headersLimiter = rate.NewLimiter(rate.Every(time.Millisecond*124), 1)
+
 func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, test bool, logger log.Logger) error {
+	if !headersLimiter.Allow() {
+		return nil // skip this time
+	}
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
