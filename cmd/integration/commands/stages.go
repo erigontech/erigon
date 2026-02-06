@@ -864,6 +864,14 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 		return err
 	}
+	if execProgress == 0 {
+		doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
+		if err != nil {
+			panic(err)
+		}
+		execProgress = doms.BlockNum()
+		doms.Close()
+	}
 	if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
 		return err
 	}
