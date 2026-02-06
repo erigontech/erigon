@@ -79,6 +79,8 @@ var (
 	numWorkers    = runtime.NumCPU() / 2
 	Exec3Workers  = EnvInt("EXEC3_WORKERS", numWorkers)
 
+	CompressWorkers = EnvInt("COMPRESS_WORKERS", 1)
+
 	TraceAccounts        = EnvStrings("TRACE_ACCOUNTS", ",", nil)
 	TraceStateKeys       = EnvStrings("TRACE_STATE_KEYS", ",", nil)
 	TraceInstructions    = EnvBool("TRACE_INSTRUCTIONS", false)

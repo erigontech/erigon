@@ -1922,10 +1922,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Snapshot.ChainName = chain
 	nodeConfig.Http.Snap = cfg.Snapshot
 
-	if ctx.Command.Name == "import" {
-		cfg.ImportMode = true
-	}
-
 	setEtherbase(ctx, cfg)
 	setGPO(ctx, &cfg.GPO)
 
