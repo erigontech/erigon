@@ -1831,6 +1831,9 @@ func (sdb *IntraBlockState) SetTxContext(bn uint64, ti int) {
 		panic(err)
 	}
 	*/
+	if ti < 0 {
+		panic("SetTxContext called with negative index")
+	}
 	sdb.txIndex = ti
 	sdb.blockNum = bn
 }
