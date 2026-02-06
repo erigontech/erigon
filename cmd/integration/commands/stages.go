@@ -902,7 +902,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 				return err
 			}
 			go func() {
-				if bn%100 != 0 {
+				if bn%10 != 0 {
 					return
 				}
 				tx, err := db.BeginTemporalRw(ctx)
