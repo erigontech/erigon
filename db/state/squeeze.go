@@ -342,6 +342,9 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 	a.DisableAllDependencies()
 
+	// Disable ReplaceKeysInValues before main loop; will be re-enabled for squeeze pass
+	a.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)
+
 	batchSize := dbg.EnvDataSize("ERIGON_COMMITMENT_REBUILD_BATCH_SIZE", 12*datasize.GB)
 
 	// Determine block range to process
@@ -536,6 +539,33 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		"blocks", blockTo+1, "totalKeys", common.PrettyCounter(totalKeysProcessed),
 		"root", hex.EncodeToString(latestRoot),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+
+	// Squeeze pass: re-compress commitment files with ReplaceKeysInValues
+	if !squeeze && !statecfg.Schema.CommitmentDomain.ReplaceKeysInValues {
+		return latestRoot, nil
+	}
+	logger.Info("[rebuild_commitment_history] squeeze starting")
+
+	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
+	a.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+
+	actx := a.BeginFilesRo()
+	defer actx.Close()
+
+	if err = SqueezeCommitmentFiles(ctx, actx, logger); err != nil {
+		logger.Warn("[rebuild_commitment_history] squeeze failed", "err", err)
+		logger.Info("[rebuild_commitment_history] rebuilt commitment files still available. Run 'erigon snapshots sqeeze' to finish squeezing")
+		return nil, err
+	}
+	actx.Close()
+	if err = a.ReloadFiles(); err != nil {
+		logger.Warn("[rebuild_commitment_history] failed to reload folder after squeeze", "err", err)
+	}
+
+	if err = a.BuildMissedAccessors(ctx, 4); err != nil {
+		logger.Warn("[rebuild_commitment_history] failed to build missed accessors", "err", err)
+		return nil, err
+	}
 
 	return latestRoot, nil
 }
