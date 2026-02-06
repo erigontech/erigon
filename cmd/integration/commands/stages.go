@@ -872,7 +872,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		block = sendersProgress
 	}
 
-	doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
 		return err
 	}
