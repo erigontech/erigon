@@ -886,6 +886,11 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	if chainTipMode {
+		const logInterval = 20 * time.Second
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
+		t := time.Now()
+
 		//if chainTip = true, forced noCommit = false
 		for bn := execProgress; bn < block; bn++ {
 			if err := stagedsync.SpawnExecuteBlocksStage(s, sync, doms, tx, bn, ctx, cfg, logger); err != nil {
@@ -915,6 +920,14 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			if err := tx.Commit(); err != nil {
 				return err
 			}
+
+			select {
+			case <-logEvery.C:
+				took := time.Since(t)
+				log.Info("[stage_exec] progress", "block_num", s.BlockNumber, "blk/sec", float64(execProgress-bn)/took.Seconds())
+			default:
+			}
+
 			if tx, err = db.BeginTemporalRw(ctx); err != nil {
 				return err
 			}
