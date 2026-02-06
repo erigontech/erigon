@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -45,13 +46,13 @@ import (
 var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", ver.DefaultSnapshotGitBranch)
 
 var (
-	Mainnet    = fromEmbeddedToml(snapshothashes.Mainnet)
-	Sepolia    = fromEmbeddedToml(snapshothashes.Sepolia)
-	Amoy       = fromEmbeddedToml(snapshothashes.Amoy)
-	BorMainnet = fromEmbeddedToml(snapshothashes.BorMainnet)
-	Gnosis     = fromEmbeddedToml(snapshothashes.Gnosis)
-	Chiado     = fromEmbeddedToml(snapshothashes.Chiado)
-	Hoodi      = fromEmbeddedToml(snapshothashes.Hoodi)
+	Mainnet    = fromEmbeddedToml(networkname.Mainnet, snapshothashes.Mainnet)
+	Sepolia    = fromEmbeddedToml(networkname.Sepolia, snapshothashes.Sepolia)
+	Amoy       = fromEmbeddedToml(networkname.Amoy, snapshothashes.Amoy)
+	BorMainnet = fromEmbeddedToml(networkname.BorMainnet, snapshothashes.BorMainnet)
+	Gnosis     = fromEmbeddedToml(networkname.Gnosis, snapshothashes.Gnosis)
+	Chiado     = fromEmbeddedToml(networkname.Chiado, snapshothashes.Chiado)
+	Hoodi      = fromEmbeddedToml(networkname.Hoodi, snapshothashes.Hoodi)
 
 	// This belongs in a generic embed.FS or something.
 	allSnapshotHashes = []*[]byte{
@@ -65,7 +66,36 @@ var (
 	}
 )
 
-func fromEmbeddedToml(in []byte) Preverified {
+func fromEmbeddedToml(network string, in []byte) Preverified {
+	cfgPath := os.Getenv("ERIGON_" + strings.ToUpper(network) + "_SNAPCFG")
+	if cfgPath != "" {
+		filePath := cfgPath
+		if strings.HasPrefix(filePath, "~/") || strings.HasPrefix(filePath, "~\\") {
+			home := os.Getenv("HOME")
+			if home == "" {
+				if usr, err := user.Current(); err == nil {
+					home = usr.HomeDir
+				}
+			}
+			if home != "" {
+				filePath = home + filePath[1:]
+			}
+		}
+		filePath = filepath.Clean(filePath)
+		cfg, err := os.ReadFile(filePath)
+		absPath, _ := filepath.Abs(filePath)
+		if absPath != "" && absPath != cfgPath {
+			cfgPath = cfgPath + " (" + absPath + ")"
+		}
+		if err != nil {
+			log.Warn("snapshot config .toml read failed, reverting to embeded", "path", cfgPath, "err", err)
+		}
+		if len(cfg) > 0 {
+			log.Info("Overriding chain snapshot config", "network", network, "path", cfgPath)
+			in = cfg
+		}
+	}
+
 	items := fromToml(in)
 	return Preverified{
 		Local: false,
@@ -537,13 +567,13 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 	}
 
 	// Re-load the preverified hashes
-	Mainnet = fromEmbeddedToml(snapshothashes.Mainnet)
-	Sepolia = fromEmbeddedToml(snapshothashes.Sepolia)
-	Amoy = fromEmbeddedToml(snapshothashes.Amoy)
-	BorMainnet = fromEmbeddedToml(snapshothashes.BorMainnet)
-	Gnosis = fromEmbeddedToml(snapshothashes.Gnosis)
-	Chiado = fromEmbeddedToml(snapshothashes.Chiado)
-	Hoodi = fromEmbeddedToml(snapshothashes.Hoodi)
+	Mainnet = fromEmbeddedToml(networkname.Mainnet, snapshothashes.Mainnet)
+	Sepolia = fromEmbeddedToml(networkname.Sepolia, snapshothashes.Sepolia)
+	Amoy = fromEmbeddedToml(networkname.Amoy, snapshothashes.Amoy)
+	BorMainnet = fromEmbeddedToml(networkname.BorMainnet, snapshothashes.BorMainnet)
+	Gnosis = fromEmbeddedToml(networkname.Gnosis, snapshothashes.Gnosis)
+	Chiado = fromEmbeddedToml(networkname.Chiado, snapshothashes.Chiado)
+	Hoodi = fromEmbeddedToml(networkname.Hoodi, snapshothashes.Hoodi)
 
 	// Update the known preverified hashes
 	KnownWebseeds = map[string][]string{
