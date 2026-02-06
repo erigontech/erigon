@@ -374,7 +374,20 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 	blockFrom, blockTo := uint64(0), execProgress
 
-	logger.Info("[rebuild_commitment_history] starting", "blockFrom", blockFrom, "blockTo", blockTo)
+	startFromTxNum, err := txNumsReader.Min(ctx, rwTx, blockFrom)
+	if err != nil {
+		return nil, err
+	}
+	endToTxNum, err := txNumsReader.Max(ctx, rwTx, blockTo)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("[rebuild_commitment_history] starting", "blockFrom", blockFrom, "blockTo", blockTo,
+		"txNumFrom", startFromTxNum, "txNumTo", endToTxNum, "batchSize", batchSize.HR())
+
+	start := time.Now()
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 
 	domains, err := execctx.NewSharedDomains(ctx, rwTx, logger)
 	if err != nil {
@@ -442,6 +455,9 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 		// Size-based flush + file building
 		if domains.SizeEstimate() > uint64(batchSize) || blockFrom == blockTo {
+			logger.Info("[rebuild_commitment_history] flushing", "block", blockFrom, "toTxNum", toTxNum,
+				"memBatchSize", datasize.ByteSize(domains.SizeEstimate()).HR(), "root", hex.EncodeToString(rh))
+
 			if err = domains.Flush(ctx, rwTx); err != nil {
 				return nil, err
 			}
@@ -496,10 +512,30 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			domains.DiscardWrites(kv.CodeDomain)
 		}
 
+		select {
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			logger.Info("[rebuild_commitment_history] progress",
+				"block", fmt.Sprintf("%d/%d", blockFrom, blockTo),
+				"keys", common.PrettyCounter(totalKeysProcessed),
+				"root", hex.EncodeToString(rh),
+				"memBatch", datasize.ByteSize(domains.SizeEstimate()).HR(),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		default:
+		}
+
 		blockFrom++
 	}
 
 	latestRoot = rh
+
+	var m runtime.MemStats
+	dbg.ReadMemStats(&m)
+	logger.Info("[rebuild_commitment_history] done", "duration", time.Since(start),
+		"blocks", blockTo+1, "totalKeys", common.PrettyCounter(totalKeysProcessed),
+		"root", hex.EncodeToString(latestRoot),
+		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 
 	return latestRoot, nil
 }
