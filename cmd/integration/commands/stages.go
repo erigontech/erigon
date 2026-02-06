@@ -902,11 +902,11 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 					return err
 				}
 			}
-			if doms.SizeEstimate() < uint64(batchSize) {
+			if doms.SizeEstimate() < uint64(batchSize/2) {
 				select {
 				case <-logEvery.C:
 					took := time.Since(t)
-					log.Info("[stage_exec] progress", "block_num", s.BlockNumber, "blk/sec", float64(bn-initialExecProgress)/took.Seconds(), "batch", doms.SizeEstimate())
+					log.Info("[stage_exec] progress", "block_num", s.BlockNumber, "blk/sec", float64(bn-initialExecProgress)/took.Seconds(), "batch", datasize.ByteSize(doms.SizeEstimate()).HR())
 				default:
 				}
 
