@@ -57,6 +57,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
+	"github.com/erigontech/erigon/execution/cache"
 	chain2 "github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -886,6 +887,9 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	if chainTipMode {
+		domainCache := cache.NewDefaultStateCache()
+		doms.SetStateCache(domainCache)
+
 		const logInterval = 20 * time.Second
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
