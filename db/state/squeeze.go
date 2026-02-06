@@ -342,6 +342,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 	a.DisableAllDependencies()
 
+	batchSize := dbg.EnvDataSize("ERIGON_COMMITMENT_REBUILD_BATCH_SIZE", 12*datasize.GB)
+
 	// Determine block range to process
 	var execProgress uint64
 	rwTx, err := rwDb.BeginTemporalRw(ctx)
@@ -438,12 +440,44 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			return nil, err
 		}
 
+		// Size-based flush + file building
+		if domains.SizeEstimate() > uint64(batchSize) || blockFrom == blockTo {
+			if err = domains.Flush(ctx, rwTx); err != nil {
+				return nil, err
+			}
+			domains.Close()
+
+			if err = rwTx.Commit(); err != nil {
+				return nil, err
+			}
+
+			// Build files in background and wait for completion
+			fin := a.BuildFilesInBackground(toTxNum)
+			<-fin
+
+			if blockFrom == blockTo {
+				break
+			}
+
+			// Reopen tx and domains for next batch
+			rwTx, err = rwDb.BeginTemporalRw(ctx)
+			if err != nil {
+				return nil, err
+			}
+
+			domains, err = execctx.NewSharedDomains(ctx, rwTx, logger)
+			if err != nil {
+				return nil, err
+			}
+			domains.DiscardWrites(kv.AccountsDomain)
+			domains.DiscardWrites(kv.StorageDomain)
+			domains.DiscardWrites(kv.CodeDomain)
+		}
+
 		blockFrom++
 	}
 
 	latestRoot = rh
-	_ = a
-	_ = totalKeysProcessed
 
 	return latestRoot, nil
 }
