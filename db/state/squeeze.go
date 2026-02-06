@@ -455,6 +455,28 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			fin := a.BuildFilesInBackground(toTxNum)
 			<-fin
 
+			// Prune commitment domain from DB after files are built
+			pruneRwTx, err := rwDb.BeginTemporalRw(ctx)
+			if err != nil {
+				return nil, err
+			}
+			{
+				aggTx := AggTx(pruneRwTx)
+				pruneLogEvery := time.NewTicker(30 * time.Second)
+				defer pruneLogEvery.Stop()
+				step := kv.Step(toTxNum / a.StepSize())
+				txFrom := uint64(0)
+				txTo := toTxNum + 1
+				_, err = aggTx.d[kv.CommitmentDomain].Prune(ctx, pruneRwTx, step, txFrom, txTo, math.MaxUint64, pruneLogEvery)
+				if err != nil {
+					pruneRwTx.Rollback()
+					return nil, fmt.Errorf("[rebuild_commitment_history] prune commitment: %w", err)
+				}
+				if err = pruneRwTx.Commit(); err != nil {
+					return nil, err
+				}
+			}
+
 			if blockFrom == blockTo {
 				break
 			}
