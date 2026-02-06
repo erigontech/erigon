@@ -24,10 +24,10 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/services"
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -339,7 +339,7 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 	return s.String(), nil
 }
 
-func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
+func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, blockReader services.FullBlockReader, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 	a.DisableAllDependencies()
 
@@ -377,18 +377,18 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	}
 
 	blockFrom, blockTo := uint64(0), execProgress
-
-	startFromTxNum, err := txNumsReader.Min(ctx, rwTx, blockFrom)
-	if err != nil {
-		return nil, err
+	{
+		startFromTxNum, err := txNumsReader.Min(ctx, rwTx, blockFrom)
+		if err != nil {
+			return nil, err
+		}
+		endToTxNum, err := txNumsReader.Max(ctx, rwTx, blockTo)
+		if err != nil {
+			return nil, err
+		}
+		logger.Info("[rebuild_commitment_history] starting", "blockFrom", blockFrom, "blockTo", blockTo,
+			"txNumFrom", startFromTxNum, "txNumTo", endToTxNum, "batchSize", batchSize.HR())
 	}
-	endToTxNum, err := txNumsReader.Max(ctx, rwTx, blockTo)
-	if err != nil {
-		return nil, err
-	}
-	logger.Info("[rebuild_commitment_history] starting", "blockFrom", blockFrom, "blockTo", blockTo,
-		"txNumFrom", startFromTxNum, "txNumTo", endToTxNum, "batchSize", batchSize.HR())
-
 	start := time.Now()
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -467,7 +467,10 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		}
 
 		// Verify computed root matches canonical header
-		header := rawdb.ReadHeaderByNumber(rwTx, blockFrom)
+		header, err := blockReader.HeaderByNumber(ctx, rwTx, blockFrom)
+		if err != nil {
+			return nil, fmt.Errorf("[rebuild_commitment_history] reading header for block %d: %w", blockFrom, err)
+		}
 		if header == nil {
 			return nil, fmt.Errorf("[rebuild_commitment_history] canonical header not found for block %d", blockFrom)
 		}

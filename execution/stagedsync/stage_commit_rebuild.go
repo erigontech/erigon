@@ -61,7 +61,7 @@ func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg, squeeze b
 
 func RebuildPatriciaTrieWithHistory(ctx context.Context, cfg TrieCfg, squeeze bool) (common.Hash, error) {
 	txNumsReader := cfg.blockReader.TxnumReader()
-	rh, err := state.RebuildCommitmentFilesWithHistory(ctx, cfg.db, &txNumsReader, log.New(), squeeze)
+	rh, err := state.RebuildCommitmentFilesWithHistory(ctx, cfg.db, &txNumsReader, cfg.blockReader, log.New(), squeeze)
 	if err != nil {
 		return trie.EmptyRoot, err
 	}
