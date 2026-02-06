@@ -134,7 +134,7 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 		took2 := time.Since(t)
 		_ = err
 
-		log.Warn("[dbg] took2", "took", took, "took", took2, "l_mb", len(ret)/1024/1024)
+		log.Warn("[dbg] took2", "took", took, "took2", took2, "l_mb", len(ret)/1024/1024)
 	}
 	return ret
 }
