@@ -30,9 +30,10 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
-//Sqeeze: ForeignKeys-aware compression of file
+// Sqeeze: ForeignKeys-aware compression of file
 
 // Sqeeze - re-compress file
 // Breaks squeezed commitment files totally
@@ -335,6 +336,54 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 	return s.String(), nil
 }
 
+func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
+	a := rwDb.(HasAgg).Agg().(*Aggregator)
+	a.DisableAllDependencies()
+	// assume that commitment files are deleted at this point
+	// TODO: need to add flags to ensure this is triggered only when commitment history is enabled...
+	// TODO: option to not generate commitment history should be there in rebuild_commitment
+	// and if that option is chosen, do not use this path (it's slower), use the REbuildCommitmentFiles
+
+	// we probably need to exec from 0 to execProgress (i don't think execProgress is removed by callers of this func)
+	// it's a block by block loop - you find the range of txNum it has [startTxNum, endTxNum)
+	// you have a doms, which will be flushed every x block (maybe based on in-mem size)
+	// probably here you commit tx too
+	// configuring shared domains: backtesterReader looks good: you touch keys using the HistoryRange (of some shard -- this will work out just fine) and then commitment_context does get value of those keys using backtesterReader;
+	// backtesterReader is good for the task
+
+	var execProgress uint64
+	if err := rwDb.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		execProgress, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return err
+		}
+
+		if execProgress != 0 {
+			return nil
+		}
+
+		// else compare domain and block progress
+		domainTxNum := tx.Debug().DomainProgress(kv.AccountsDomain)
+		execProgress, ok, err := txNumsReader.FindBlockNum(ctx, tx, domainTxNum)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("error in finding block number for %d", domainTxNum)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	blockFrom, blockTo := 0, execProgress
+
+	for blockFrom < blockTo {
+	}
+
+	return nil, nil
+}
+
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
 // If some commitment exists, they will be accepted as correct and next kv range will be processed.
 // DB expected to be empty, committed into db keys will be not processed.
@@ -409,7 +458,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		stepsInShard := uint64(shardTo - shardFrom)
 		keysPerStep := totalKeys / stepsInShard // how many keys in just one step?
 
-		//shardStepsSize := kv.Step(2)
+		// shardStepsSize := kv.Step(2)
 		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), 16))
 		if uint64(shardStepsSize) != stepsInShard { // processing shard in several smaller steps
 			shardTo = shardFrom + shardStepsSize // if shard is quite big, we will process it in several steps
@@ -439,13 +488,13 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			return nil, err
 		}
 		keyIter := stream.UnionKV(streamAcc, streamSto, -1)
-		//blockNum, ok, err := txNumsReader.FindBlockNum(ctx, roTx, rangeToTxNum-1)
+		// blockNum, ok, err := txNumsReader.FindBlockNum(ctx, roTx, rangeToTxNum-1)
 		blockNum, ok, err := txNumsReader.FindBlockNum(ctx, roTx, rangeToTxNum-1)
 		if err != nil {
 			return nil, fmt.Errorf("CommitmentRebuild: FindBlockNum(%d) %w", rangeToTxNum, err)
 		}
 		if !ok {
-			//var txnum uint64
+			// var txnum uint64
 			blockNum, _, err = txNumsReader.Last(roTx)
 			if err != nil {
 				return nil, fmt.Errorf("CommitmentRebuild: Last() %w", err)

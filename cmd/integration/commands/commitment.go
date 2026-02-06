@@ -90,7 +90,6 @@ var (
 )
 
 func init() {
-
 	// commitment branch
 	withChain(commitmentBranchCmd)
 	withDataDir(commitmentBranchCmd)
@@ -147,7 +146,6 @@ func init() {
 	commitmentCmd.AddCommand(cmdCommitmentBenchHistoryLookup)
 
 	rootCmd.AddCommand(commitmentCmd)
-
 }
 
 var commitmentCmd = &cobra.Command{
@@ -267,12 +265,23 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageTrieCfg(db, true, true, dirs.Tmp, br)
 
-	rwTx, err := db.BeginRw(ctx)
+	rwTx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer rwTx.Rollback()
 
+	{
+		domainProgress := rwTx.Debug().DomainProgress(kv.CommitmentDomain)
+		ok, err := br.TxnumReader().IsMaxTxNumIsPopulated(ctx, rwTx, domainProgress)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			// TODO: give a command to build the index
+			return errors.New("max tx num is not populated; run erigon for a while to build the index")
+		}
+    }
 	// remove all existing state commitment snapshots
 	if err := app.DeleteStateSnapshots(dirs, false, true, false, "0-999999", kv.CommitmentDomain.String()); err != nil {
 		return err
@@ -303,7 +312,10 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	agg.PeriodicalyPrintProcessSet(ctx)
 
-	if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg, squeeze); err != nil {
+	// if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg, squeeze); err != nil {
+	// 	return err
+	// }
+	if _, err := stagedsync.RebuildPatriciaTrieWithHistory(ctx, cfg, squeeze); err != nil {
 		return err
 	}
 	return nil
@@ -660,7 +672,7 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 	if err != nil {
 		logger.Warn("Failed to benchmark MDBX history lookups", "error", err)
 	}
-	var allStats = allFileStats
+	allStats := allFileStats
 	if mdbxStats != nil {
 		allStats = append(allStats, *mdbxStats)
 	}
@@ -1283,7 +1295,7 @@ func prefixLenCountChart(fname string, data *visualizeOverallStat) *charts.Pie {
 }
 
 func fileContentsMapChart(fileName string, data *visualizeOverallStat) *charts.TreeMap {
-	var TreeMap = []opts.TreeMapNode{
+	TreeMap := []opts.TreeMapNode{
 		{Name: "prefixes"},
 		{Name: "values"},
 	}
@@ -1342,14 +1354,16 @@ func fileContentsMapChart(fileName string, data *visualizeOverallStat) *charts.T
 							ItemStyle: &opts.ItemStyle{
 								BorderColor: "#777",
 								BorderWidth: 1,
-								GapWidth:    1},
+								GapWidth:    1,
+							},
 							UpperLabel: &opts.UpperLabel{Show: opts.Bool(true)},
 						},
 						{ // Level
 							ItemStyle: &opts.ItemStyle{
 								BorderColor: "#666",
 								BorderWidth: 1,
-								GapWidth:    1},
+								GapWidth:    1,
+							},
 							Emphasis: &opts.Emphasis{
 								ItemStyle: &opts.ItemStyle{BorderColor: "#555"},
 							},
@@ -1395,7 +1409,7 @@ function (info) {
     for (var i = 1; i < treePathInfo.length; i++) {
         treePath.push(treePathInfo[i].name);
     }
-    
+
     return [
         '<div class="tooltip-title" style="color: white;">' + formatUtil.encodeHTML(treePath.join('/')) + '</div>',
 				'<span style="color: white;">Disk Usage: ' + result + '</span>',
