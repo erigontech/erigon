@@ -1083,17 +1083,19 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 					log.Info("receipt queries", "total", receiptQueries.Load())
 					return fmt.Errorf("failed to get receipt for tx %s after %d attempts: %w", txData["hash"], maxRetries, err)
 				}
-				//if tx.Hash() != receipt.TransactionHash {
-				//	log.Error("fetched receipt tx hash mismatch", "expected", txData["hash"],
-				//		"got", receipt.TransactionHash, "txIndex", idx,
-				//		"receipt", fmt.Sprintf("%+v", receipt))
-				//	return fmt.Errorf("receipt tx hash mismatch for tx %s", txData["hash"])
-				//}
+				if receipt.TransactionHash != (common.Hash{}) {
+					//if tx.Hash() != receipt.TransactionHash {
+					//	log.Error("fetched receipt tx hash mismatch", "expected", txData["hash"],
+					//		"got", receipt.TransactionHash, "txIndex", idx,
+					//		"receipt", fmt.Sprintf("%+v", receipt))
+					//	return fmt.Errorf("receipt tx hash mismatch for tx %s", txData["hash"])
+					//}
 
-				if egu := receipt.GasUsed; egu != nil && egu.Uint64() > 0 {
-					if srtx, ok := tx.(*types.ArbitrumSubmitRetryableTx); ok {
-						srtx.EffectiveGasUsed = egu.Uint64()
-						tx = srtx
+					if egu := receipt.GasUsed; egu != nil && egu.Uint64() > 0 {
+						if srtx, ok := tx.(*types.ArbitrumSubmitRetryableTx); ok {
+							srtx.EffectiveGasUsed = egu.Uint64()
+							tx = srtx
+						}
 					}
 				}
 			}
