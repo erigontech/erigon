@@ -17,7 +17,9 @@
 package changeset
 
 import (
+	"bytes"
 	"encoding/binary"
+	"encoding/gob"
 	"fmt"
 	"math"
 	"strings"
@@ -28,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -49,6 +52,7 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 	if len(diffSet) == 0 {
 		return append(out, 0, 0, 0, 0, 0) // dict len (1) + diffSet len (4)
 	}
+	t := time.Now()
 
 	// Build dictionary using fixed array instead of map.
 	// PrevStepBytes is always 8 bytes, so we use uint64 for fast comparison.
@@ -121,6 +125,16 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 		ret = binary.BigEndian.AppendUint32(ret, uint32(len(diffSet[i].Value)))
 		ret = append(ret, diffSet[i].Value...)
 		ret = append(ret, idx)
+	}
+	if len(ret) > 4*1024*1024 {
+		took := time.Since(t)
+		t = time.Now()
+		b := bytes.NewBuffer(nil)
+		err := gob.NewEncoder(b).Encode(diffSet)
+		took2 := time.Since(t)
+		_ = err
+
+		log.Warn("[dbg] took2", "took", took, "took", took2, "l_mb", len(ret)/1024/1024)
 	}
 	return ret
 }
