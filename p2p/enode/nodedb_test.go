@@ -74,7 +74,7 @@ func BenchmarkNodeDBGeometry(b *testing.B) {
 		var i int
 		for b.Loop() {
 			i++
-			tx, _ := db.BeginRw(context.Background())
+			tx, _ := db.BeginRw(context.Background()) //nolint:gocritic
 
 			v := vals[i%len(vals)]
 			v[0]++ // modify value a bit on every update

@@ -74,7 +74,7 @@ func TestKvServer_renew(t *testing.T) {
 		}
 
 		if err = s.with(id, func(tx kv.TemporalTx) error {
-			c, err = tx.Cursor(kv.TblAccountVals)
+			c, err = tx.Cursor(kv.TblAccountVals) //nolint:gocritic
 			if err != nil {
 				return err
 			}
@@ -83,6 +83,8 @@ func TestKvServer_renew(t *testing.T) {
 		}); err != nil {
 			return err
 		}
+		defer c.Close()
+		defer c2.Close()
 
 		k, v, err = c.Next()
 		require.NoError(err)

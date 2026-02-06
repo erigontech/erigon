@@ -911,6 +911,7 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 
 	icc, err := rwTx.CursorDupSort(h.ValuesTable)
 	require.NoError(t, err)
+	defer icc.Close()
 
 	count := 0
 	for key, _, err := icc.Seek(from[:]); key != nil; key, _, err = icc.Next() {
@@ -945,18 +946,14 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 		t.Logf("[%d] stats: %v", i, stat)
 	}
 
-	icc, err = rwTx.CursorDupSort(h.ValuesTable)
+	icc2, err := rwTx.CursorDupSort(h.ValuesTable)
 	require.NoError(t, err)
-	defer icc.Close()
+	defer icc2.Close()
 
-	key, _, err := icc.First()
+	key, _, err := icc2.First()
 	require.NoError(t, err)
 	require.NotNil(t, key)
 	require.EqualValues(t, pruneIters*int(pruneLimit), binary.BigEndian.Uint64(key[len(key)-8:])-1)
-
-	icc, err = rwTx.CursorDupSort(h.ValuesTable)
-	require.NoError(t, err)
-	defer icc.Close()
 }
 
 func TestHistoryScanPruneCorrectness(t *testing.T) {
@@ -983,6 +980,7 @@ func TestHistoryScanPruneCorrectness(t *testing.T) {
 
 	icc, err := rwTx.CursorDupSort(h.ValuesTable)
 	require.NoError(t, err)
+	defer icc.Close()
 
 	count := 0
 	for key, _, err := icc.Seek(from[:]); key != nil; key, _, err = icc.Next() {

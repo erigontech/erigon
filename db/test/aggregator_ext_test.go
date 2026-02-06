@@ -98,7 +98,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 			Incarnation: 0,
 		}
 		buf := accounts.SerialiseV3(&acc)
-		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf[:], txNum, nil, 0)
+		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil, 0)
 		require.NoError(t, err)
 
 		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil, 0)
@@ -218,6 +218,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 		tx, err = db.BeginTemporalRw(context.Background())
 		require.NoError(t, err)
+		defer tx.Rollback()
 
 		domains, err = execctx.NewSharedDomains(context.Background(), tx, log.New())
 		require.NoError(t, err)
@@ -432,11 +433,11 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commKey1)
 	require.NoError(t, err)
-	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v[:]))
+	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v))
 
 	v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2)
 	require.NoError(t, err)
-	require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
+	require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v))
 }
 
 func TestAggregatorV3_PruneSmallBatches(t *testing.T) {

@@ -85,7 +85,8 @@ func TestUnionPairs(t *testing.T) {
 	ctx := context.Background()
 	t.Run("simple", func(t *testing.T) {
 		require := require.New(t)
-		tx, _ := db.BeginRw(ctx)
+		tx, err := db.BeginRw(ctx)
+		require.NoError(err)
 		t.Cleanup(tx.Rollback)
 		_ = tx.Put(kv.HeaderNumber, []byte{1}, []byte{1})
 		_ = tx.Put(kv.HeaderNumber, []byte{3}, []byte{1})
@@ -101,7 +102,8 @@ func TestUnionPairs(t *testing.T) {
 	})
 	t.Run("empty 1st", func(t *testing.T) {
 		require := require.New(t)
-		tx, _ := db.BeginRw(ctx)
+		tx, err := db.BeginRw(ctx)
+		require.NoError(err)
 		t.Cleanup(tx.Rollback)
 		_ = tx.Put(kv.TblAccountVals, []byte{2}, []byte{9})
 		_ = tx.Put(kv.TblAccountVals, []byte{3}, []byte{9})
@@ -113,7 +115,8 @@ func TestUnionPairs(t *testing.T) {
 	})
 	t.Run("empty 2nd", func(t *testing.T) {
 		require := require.New(t)
-		tx, _ := db.BeginRw(ctx)
+		tx, err := db.BeginRw(ctx)
+		require.NoError(err)
 		t.Cleanup(tx.Rollback)
 		_ = tx.Put(kv.HeaderNumber, []byte{1}, []byte{1})
 		_ = tx.Put(kv.HeaderNumber, []byte{3}, []byte{1})
@@ -126,7 +129,8 @@ func TestUnionPairs(t *testing.T) {
 	})
 	t.Run("empty both", func(t *testing.T) {
 		require := require.New(t)
-		tx, _ := db.BeginRw(ctx)
+		tx, err := db.BeginRw(ctx)
+		require.NoError(err)
 		defer tx.Rollback()
 		it, _ := tx.Range(kv.HeaderNumber, nil, nil, order.Asc, kv.Unlim)
 		it2, _ := tx.Range(kv.TblAccountVals, nil, nil, order.Asc, kv.Unlim)
@@ -135,7 +139,8 @@ func TestUnionPairs(t *testing.T) {
 	})
 	t.Run("error handling", func(t *testing.T) {
 		require := require.New(t)
-		tx, _ := db.BeginRw(ctx)
+		tx, err := db.BeginRw(ctx)
+		require.NoError(err)
 		defer tx.Rollback()
 		it := stream.PairsWithError(10)
 		it2 := stream.PairsWithError(12)
