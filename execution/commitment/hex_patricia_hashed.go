@@ -1667,7 +1667,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				fmt.Printf("[witness] AccountNode (+StorageTrie) (%d, %0x, depth=%d) %s [proof %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), nextAccNode)
 			}
 			// we want to jump to the account's storage trie directly in this case
-		} else if nextShortNode, ok := nextNode.(*trie.ShortNode); ok && len(hashedKey) > 64 && keyPos+1 == 64 {
+		} else if nextShortNode, ok := nextNode.(*trie.ShortNode); ok && len(hashedKey) > 64 && keyPos+1 == 64 && cellToExpand.storageAddrLen > 0 {
 			// this is because there won't be an account cell stacked in the row below the current row in this case
 			// so the account cell will be skipped in the grid in this case
 			if nextAccNode, ok := nextShortNode.Val.(*trie.AccountNode); ok {
