@@ -126,13 +126,10 @@ func ExecV3(ctx context.Context,
 	logger log.Logger) (execErr error) {
 	isBlockProduction := execStage.SyncMode() == stages.ModeBlockProduction
 	isForkValidation := execStage.SyncMode() == stages.ModeForkValidation
-	if execStage.state.unwindPoint != nil {
-		fmt.Println("unwindPoint", *execStage.state.unwindPoint)
+	if execStage.DidExecutionUnwind() {
+		logger.Warn("execution stage is executing forward after unwind. This is not expected and may lead to unexpected behavior")
 	}
-
-	if execStage.state.prevUnwindPoint != nil {
-		fmt.Println("previousUnwindPoint", *execStage.state.prevUnwindPoint)
-	}
+	defer execStage.SetDidExecutionUnwind(false)
 	isApplyingBlocks := execStage.SyncMode() == stages.ModeApplyingBlocks
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
 	hooks := cfg.vmConfig.Tracer
