@@ -124,10 +124,13 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 		ret = append(ret, diffSet[i].Value...)
 		ret = append(ret, idx)
 	}
-	t := time.Now()
-	r := zstdEnc.EncodeAll(ret, nil)
-	took := time.Since(t)
-	fmt.Printf("zstdEnc.EncodeAll took %v, %d -> %d\n", took, len(ret), len(r))
+	if len(ret) > 1024 {
+
+		t := time.Now()
+		r := zstdEnc.EncodeAll(ret, nil)
+		took := time.Since(t)
+		fmt.Printf("zstdEnc.EncodeAll took %v, %d -> %d\n", took, len(ret), len(r))
+	}
 	return ret
 }
 
