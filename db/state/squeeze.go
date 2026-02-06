@@ -339,7 +339,8 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 	return s.String(), nil
 }
 
-func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, blockReader services.FullBlockReader, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
+func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB, blockReader services.FullBlockReader, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
+	txNumsReader := blockReader.TxnumReader()
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 	a.DisableAllDependencies()
 
