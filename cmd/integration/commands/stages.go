@@ -898,7 +898,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 					return err
 				}
 			}
-			if bn%10 == 0 {
+			if bn%10 != 0 {
 				continue
 			}
 			if err := tx.Commit(); err != nil {
