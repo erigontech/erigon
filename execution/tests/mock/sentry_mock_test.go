@@ -36,48 +36,20 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
 
-func TestEmptyStageSync(t *testing.T) {
+func TestInit(t *testing.T) {
 	t.Parallel()
 	mock.Mock(t)
 }
 
-func TestHeaderStep(t *testing.T) {
+func TestInsertChain(t *testing.T) {
 	t.Parallel()
 	m := mock.Mock(t)
-
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 100, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
-	if err != nil {
-		t.Fatalf("generate blocks: %v", err)
-	}
-	// Send NewBlock message
-	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: chain.TopBlock,
-		TD:    big.NewInt(1), // This is ignored anyway
-	})
 	require.NoError(t, err)
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-	// Send all the headers
-	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-		RequestId:          1,
-		BlockHeadersPacket: chain.Headers,
-	})
+	err = m.InsertChain(chain)
 	require.NoError(t, err)
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
-
-	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-	err = stageloop.StageLoopIteration(m.Ctx, m.DB, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 }
 
 func TestMineBlockWith1Tx(t *testing.T) {
@@ -149,380 +121,42 @@ func TestMineBlockWith1Tx(t *testing.T) {
 func TestReorg(t *testing.T) {
 	t.Parallel()
 	m := mock.Mock(t)
-
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
-	if err != nil {
-		t.Fatalf("generate blocks: %v", err)
-	}
-	// Send NewBlock message
-	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: chain.TopBlock,
-		TD:    big.NewInt(1), // This is ignored anyway
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-
-	// Send all the headers
-	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-		RequestId:          1,
-		BlockHeadersPacket: chain.Headers,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
-
-	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-	err = stageloop.StageLoopIteration(m.Ctx, m.DB, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	require.NoError(t, err)
+	// insert initial chain
+	err = m.InsertChain(chain)
+	require.NoError(t, err)
 	// Now generate three competing branches, one short and two longer ones
 	short, err := blockgen.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
-	if err != nil {
-		t.Fatalf("generate short fork: %v", err)
-	}
+	require.NoError(t, err)
 	long1, err := blockgen.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 10, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{2}) // Need to make headers different from short branch
 	})
-	if err != nil {
-		t.Fatalf("generate short fork: %v", err)
-	}
+	require.NoError(t, err)
 	// Second long chain needs to be slightly shorter than the first long chain
 	long2, err := blockgen.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 9, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{3}) // Need to make headers different from short branch and another long branch
 	})
-	if err != nil {
-		t.Fatalf("generate short fork: %v", err)
-	}
-
-	// Send NewBlock message for short branch
-	b, err = rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: short.TopBlock,
-		TD:    big.NewInt(1), // This is ignored anyway
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-
-	// Send headers of the short branch
-	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-		RequestId:          2,
-		BlockHeadersPacket: short.Headers,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
-	err = stageloop.StageLoopIteration(m.Ctx, m.DB, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Send NewBlock message for long1 branch
-	b, err = rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: long1.TopBlock,
-		TD:    big.NewInt(1), // This is ignored anyway
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-
-	// Send headers of the long2 branch
-	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-		RequestId:          3,
-		BlockHeadersPacket: long2.Headers,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-
-	// Send headers of the long1 branch
-	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-		RequestId:          4,
-		BlockHeadersPacket: long1.Headers,
-	})
 	require.NoError(t, err)
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
-
-	// This is unwind step
-	err = stageloop.StageLoopIteration(m.Ctx, m.DB, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	// insert short chain
+	err = m.InsertChain(short)
+	require.NoError(t, err)
+	// insert long1 chain
+	err = m.InsertChain(long1)
+	require.NoError(t, err)
 	// another short chain
-	// Now generate three competing branches, one short and two longer ones
 	short2, err := blockgen.GenerateChain(m.ChainConfig, long1.TopBlock, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
-	if err != nil {
-		t.Fatalf("generate short fork: %v", err)
-	}
-
-	// Send NewBlock message for short branch
-	b, err = rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: short2.TopBlock,
-		TD:    big.NewInt(1), // This is ignored anyway
-	})
+	// insert long2 chain
+	err = m.InsertChain(long2)
 	require.NoError(t, err)
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-
-	// Send headers of the short branch
-	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-		RequestId:          5,
-		BlockHeadersPacket: short2.Headers,
-	})
 	require.NoError(t, err)
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
-	err = stageloop.StageLoopIteration(m.Ctx, m.DB, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestAnchorReplace(t *testing.T) {
-	t.Parallel()
-	m := mock.Mock(t)
-
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *blockgen.BlockGen) {
-		b.SetCoinbase(common.Address{1})
-	})
-	if err != nil {
-		t.Fatalf("generate blocks: %v", err)
-	}
-
-	short, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 11, func(i int, b *blockgen.BlockGen) {
-		b.SetCoinbase(common.Address{1})
-	})
-	if err != nil {
-		t.Fatalf("generate blocks: %v", err)
-	}
-
-	long, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 15, func(i int, b *blockgen.BlockGen) {
-		if i < 10 {
-			b.SetCoinbase(common.Address{1})
-		} else {
-			b.SetCoinbase(common.Address{2})
-		}
-	})
-	if err != nil {
-		t.Fatalf("generate blocks: %v", err)
-	}
-
-	// Create anchor from the long chain suffix
-	var b []byte
-	b, err = rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: long.TopBlock,
-		TD:    big.NewInt(1), // This is ignored anyway
-	})
+	// insert short2 chain
+	err = m.InsertChain(short2)
 	require.NoError(t, err)
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-
-	// Send headers of the long suffix
-	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-		RequestId:          1,
-		BlockHeadersPacket: long.Headers[10:],
-	})
-	require.NoError(t, err)
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-	require.NoError(t, err)
-
-	// Create anchor from the short chain suffix
-	b, err = rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: short.TopBlock,
-		TD:    big.NewInt(1), // This is ignored anyway
-	})
-	require.NoError(t, err)
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-	require.NoError(t, err)
-
-	// Send headers of the short suffix
-	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-		RequestId:          2,
-		BlockHeadersPacket: short.Headers[10:],
-	})
-	require.NoError(t, err)
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-
-	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
-
-	// Now send the prefix chain
-	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-		RequestId:          3,
-		BlockHeadersPacket: chain.Headers,
-	})
-	require.NoError(t, err)
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-
-	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
-
-	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-	err = stageloop.StageLoopIteration(m.Ctx, m.DB, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestAnchorReplace2(t *testing.T) {
-	t.Parallel()
-	m := mock.Mock(t)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *blockgen.BlockGen) {
-		b.SetCoinbase(common.Address{1})
-	})
-	if err != nil {
-		t.Fatalf("generate blocks: %v", err)
-	}
-
-	short, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 20, func(i int, b *blockgen.BlockGen) {
-		b.SetCoinbase(common.Address{1})
-	})
-	if err != nil {
-		t.Fatalf("generate blocks: %v", err)
-	}
-
-	long, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 30, func(i int, b *blockgen.BlockGen) {
-		if i < 10 {
-			b.SetCoinbase(common.Address{1})
-		} else {
-			b.SetCoinbase(common.Address{2})
-		}
-	})
-	if err != nil {
-		t.Fatalf("generate blocks: %v", err)
-	}
-
-	// Create anchor from the long chain suffix
-	var b []byte
-	b, err = rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: long.TopBlock,
-		TD:    big.NewInt(1), // This is ignored anyway
-	})
-	require.NoError(t, err)
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-
-	// Send headers of the long suffix
-	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-		RequestId:          1,
-		BlockHeadersPacket: long.Headers[10:],
-	})
-	require.NoError(t, err)
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-
-	// Create anchor from the short chain suffix
-	b, err = rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: short.TopBlock,
-		TD:    big.NewInt(1), // This is ignored anyway
-	})
-	require.NoError(t, err)
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-
-	// Send headers of the short suffix (far end)
-	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-		RequestId:          2,
-		BlockHeadersPacket: short.Headers[15:],
-	})
-	require.NoError(t, err)
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-
-	// Send headers of the short suffix (near end)
-	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-		RequestId:          3,
-		BlockHeadersPacket: short.Headers[10:15],
-	})
-	require.NoError(t, err)
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-
-	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
-
-	// Now send the prefix chain
-	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-		RequestId:          4,
-		BlockHeadersPacket: chain.Headers,
-	})
-	require.NoError(t, err)
-	m.ReceiveWg.Add(1)
-	for _, err = range m.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
-		require.NoError(t, err)
-	}
-
-	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
-
-	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-	hook := stageloop.NewHook(m.Ctx, m.DB, m.Notifications, m.Sync, m.BlockReader, m.ChainConfig, m.Log, nil, nil, nil)
-	err = stageloop.StageLoopIteration(m.Ctx, m.DB, m.Sync, initialCycle, firstCycle, m.Log, m.BlockReader, hook)
-	if err != nil {
-		t.Fatal(err)
-	}
 }
