@@ -898,43 +898,41 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 					return err
 				}
 			}
+			if bn%10 == 0 {
+				continue
+			}
 			if err := tx.Commit(); err != nil {
 				return err
 			}
-			go func() {
-				if bn%10 != 0 {
-					return
-				}
-				tx, err := db.BeginTemporalRw(ctx)
-				if err != nil {
-					panic(err)
-				}
-				defer tx.Rollback()
-				if err := doms.Flush(ctx, tx); err != nil {
-					panic(err)
-				}
-				doms.ClearRam(true)
+			tx, err = db.BeginTemporalRw(ctx)
+			if err != nil {
+				panic(err)
+			}
+			if err := doms.Flush(ctx, tx); err != nil {
+				panic(err)
+			}
+			doms.ClearRam(true)
 
-				pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
-				if err != nil {
-					panic(err)
-				}
-				if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
-					panic(err)
-				}
+			pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
+			if err != nil {
+				panic(err)
+			}
+			if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
+				panic(err)
+			}
+			if err := tx.Commit(); err != nil {
+				panic(err)
+			}
+			tx, err = db.BeginTemporalRw(ctx)
+			if err != nil {
+				panic(err)
+			}
 
-				if err := tx.Commit(); err != nil {
-					panic(err)
-				}
-				select {
-				case <-logEvery.C:
-					took := time.Since(t)
-					log.Info("[stage_exec] progress", "block_num", s.BlockNumber, "blk/sec", float64(bn-initialExecProgress)/took.Seconds())
-				default:
-				}
-			}()
-			if tx, err = db.BeginTemporalRw(ctx); err != nil {
-				return err
+			select {
+			case <-logEvery.C:
+				took := time.Since(t)
+				log.Info("[stage_exec] progress", "block_num", s.BlockNumber, "blk/sec", float64(bn-initialExecProgress)/took.Seconds())
+			default:
 			}
 		}
 		if err := doms.Flush(ctx, tx); err != nil {
