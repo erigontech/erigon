@@ -126,7 +126,7 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 		ret = append(ret, diffSet[i].Value...)
 		ret = append(ret, idx)
 	}
-	if len(ret) > 4*1024*1024 {
+	if len(ret) > 6*1024*1024 {
 		took := time.Since(t)
 		t = time.Now()
 		b := bytes.NewBuffer(nil)
