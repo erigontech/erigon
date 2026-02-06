@@ -266,9 +266,10 @@ func (rs *StateV3) SizeEstimateBeforeCommitment() uint64 {
 	if rs.domains == nil {
 		return 0
 	}
-	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
-	// and muliply 4 more: for Commitment calculation when batch is full
-	return rs.domains.SizeEstimate() * 2 * 4
+	sz := rs.domains.SizeEstimate()
+	sz *= 2 // to cover data-structures overhead (and keep accounting cheap)
+	sz *= 4 // for Commitment calculation when batch is full
+	return sz
 }
 
 // SizeEstimateAfterCommitment - not including any additional estimations. Use it after ComputeCommitment calc - to see
@@ -276,8 +277,9 @@ func (rs *StateV3) SizeEstimateAfterCommitment() uint64 {
 	if rs.domains == nil {
 		return 0
 	}
-	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
-	return rs.domains.SizeEstimate() * 2
+	sz := rs.domains.SizeEstimate()
+	sz *= 2 // to cover data-structures overhead (and keep accounting cheap)
+	return sz
 }
 
 type storageItem struct {
