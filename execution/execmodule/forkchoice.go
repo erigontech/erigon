@@ -251,10 +251,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 
+	var isDomainAheadOfBlocks bool
 	currentContext, err := execctx.NewSharedDomains(ctx, tx, e.logger)
-
 	if err != nil {
-		if !errors.Is(err, commitmentdb.ErrBehindCommitment) {
+		// we handle isDomainAheadOfBlocks=true after AppendCanonicalTxNums to allow the node to catch up
+		isDomainAheadOfBlocks = errors.Is(err, commitmentdb.ErrBehindCommitment)
+		if !isDomainAheadOfBlocks {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
 	}
@@ -380,12 +382,17 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			if err := rawdbv3.TxNums.Truncate(tx, newCanonicals[0].number); err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			}
+			// make sure we truncate any previous canonical hashes that go beyond the current head height
+			// so that AppendCanonicalTxNums does not mess up the txNums index
+			if err := rawdb.TruncateCanonicalHash(tx, newCanonicals[0].number+1, false); err != nil {
+				return err
+			}
 			if err := rawdb.AppendCanonicalTxNums(tx, newCanonicals[len(newCanonicals)-1].number); err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			}
 		}
 	}
-	if execctx.IsDomainAheadOfBlocks(ctx, tx, e.logger) {
+	if isDomainAheadOfBlocks {
 		if err := currentContext.Flush(ctx, tx); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
