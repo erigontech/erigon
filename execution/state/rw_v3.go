@@ -261,22 +261,22 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 	return nil
 }
 
-// SizeEstimate - including
-func (rs *StateV3) SizeEstimate() (r uint64) {
-	if rs.domains != nil {
-		// multiply 2: to cover data-structures overhead (and keep accounting cheap)
-		// and muliply 8 more: for Commitment calculation when batch is full
-		r += rs.domains.SizeEstimate() * 16
+// SizeEstimate - including esitmation of future ComputeCommitment on current state changes
+func (rs *StateV3) SizeEstimate() uint64 {
+	if rs.domains == nil {
+		return 0
 	}
-	return r
+	// multiply 2: to cover data-structures overhead (and keep accounting cheap)
+	// and muliply 4 more: for Commitment calculation when batch is full
+	return rs.domains.SizeEstimate() * 2 * 4
 }
 
-// RawSize - not including
-func (rs *StateV3) RawSize() (r uint64) {
-	if rs.domains != nil {
-		r += rs.domains.SizeEstimate()
+// RawSize - not including any additional estimations
+func (rs *StateV3) RawSize() uint64 {
+	if rs.domains == nil {
+		return 0
 	}
-	return r
+	return rs.domains.SizeEstimate()
 }
 
 type storageItem struct {
