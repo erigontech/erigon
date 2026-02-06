@@ -40,7 +40,7 @@ func (f *ForkChoiceStore) OnAttestation(
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.headHash = common.Hash{}
+	f.headHash = common.Hash{} // reset current head hash to force recomputation on next GetHead
 	data := attestation.Data
 	if err := f.ValidateOnAttestation(attestation); err != nil {
 		return err

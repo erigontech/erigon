@@ -151,10 +151,8 @@ type ForkChoiceStore struct {
 	executionPayloadStates sync.Map // map[common.Hash]*state.CachingBeaconState
 	// [New in Gloas:EIP7732]
 	ptcVote sync.Map // map[common.Hash][clparams.PtcSize]bool
-	// [New in Gloas:EIP7732] block_timeliness tracks [attestation_timely, ptc_timely] per block
-	blockTimeliness sync.Map // map[common.Hash][clparams.NumBlockTimelinessDeadlines]bool
+	//blockTimeliness sync.Map // map[common.Hash][clparams.NumBlockTimelinessDeadlines]bool
 }
-
 
 type childrens struct {
 	childrenHashes []common.Hash
@@ -305,7 +303,7 @@ func NewForkChoiceStore(
 		f.executionPayloadStates.Store(anchorRoot, anchorStateCopy)
 	}
 	f.ptcVote.Store(anchorRoot, [clparams.PtcSize]bool{})
-	f.blockTimeliness.Store(anchorRoot, [clparams.NumBlockTimelinessDeadlines]bool{true, true})
+	//f.blockTimeliness.Store(anchorRoot, [clparams.NumBlockTimelinessDeadlines]bool{true, true})
 
 	return f, nil
 }
