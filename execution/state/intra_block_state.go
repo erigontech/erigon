@@ -366,17 +366,17 @@ func (sdb *IntraBlockState) AddLog(log *types.Log) {
 		sdb.tracingHooks.OnLog(log)
 	}
 	sdb.logSize++
-	for len(sdb.logs) <= sdb.txIndex {
+	for len(sdb.logs) <= sdb.txIndex+1 {
 		sdb.logs = append(sdb.logs, nil)
 	}
-	sdb.logs[sdb.txIndex] = append(sdb.logs[sdb.txIndex], log)
+	sdb.logs[sdb.txIndex+1] = append(sdb.logs[sdb.txIndex+1], log)
 }
 
 func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) types.Logs {
-	if txIndex >= len(sdb.logs) {
+	if txIndex+1 >= len(sdb.logs) {
 		return nil
 	}
-	logs := sdb.logs[txIndex]
+	logs := sdb.logs[txIndex+1]
 	for _, l := range logs {
 		l.TxHash = txnHash
 		l.BlockNumber = blockNumber
@@ -388,10 +388,10 @@ func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumbe
 // GetRawLogs - is like GetLogs, but allow postpone calculation of `txn.Hash()`.
 // Example: if you need filter logs and only then set `txn.Hash()` for filtered logs - then no reason to calc for all transactions.
 func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
-	if txIndex >= len(sdb.logs) {
+	if txIndex+1 >= len(sdb.logs) {
 		return nil
 	}
-	return slices.Clone(sdb.logs[txIndex])
+	return slices.Clone(sdb.logs[txIndex+1])
 }
 
 func (sdb *IntraBlockState) Logs() types.Logs {
