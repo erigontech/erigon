@@ -139,9 +139,6 @@ func StageExecuteBlocksCfg(
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
 func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
-	if s.state != nil {
-		s.state.SetDidExecutionUnwind(true)
-	}
 	br := cfg.blockReader
 	txNumsReader := br.TxnumReader()
 
@@ -203,6 +200,9 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 	}
 	if err := rawdb.DeleteNewerEpochs(rwTx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("delete newer epochs: %w", err)
+	}
+	if err := rawdb.WriteRecentReorg(rwTx, true); err != nil {
+		return err
 	}
 	return nil
 }

@@ -126,14 +126,7 @@ func ExecV3(ctx context.Context,
 	logger log.Logger) (execErr error) {
 	isBlockProduction := execStage.SyncMode() == stages.ModeBlockProduction
 	isForkValidation := execStage.SyncMode() == stages.ModeForkValidation
-	var didExecutionUnwind bool
-	if execStage.state != nil {
-		didExecutionUnwind = execStage.state.DidExecutionUnwind()
-		if didExecutionUnwind {
-			logger.Warn("execution stage is executing forward after unwind. This is not expected and may lead to unexpected behavior")
-		}
-		defer execStage.state.SetDidExecutionUnwind(false)
-	}
+
 	isApplyingBlocks := execStage.SyncMode() == stages.ModeApplyingBlocks
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
 	hooks := cfg.vmConfig.Tracer
@@ -142,6 +135,19 @@ func ExecV3(ctx context.Context,
 	if err != nil {
 		return err
 	}
+
+	// Read and reset the recent reorg flag
+	didReorg, err := rawdb.ReadRecentReorg(applyTx)
+	if err != nil {
+		return err
+	}
+	if didReorg {
+		logger.Info("Recent reorg detected, resetting state")
+	}
+	if err := rawdb.WriteRecentReorg(applyTx, false); err != nil {
+		return err
+	}
+
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if initialCycle && isApplyingBlocks {
 		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
@@ -238,7 +244,7 @@ func ExecV3(ctx context.Context,
 		postValidator = newParallelBlockPostExecutionValidator()
 		// Only defer branch updates in fork validation mode (engine API flow)
 		// where MergeExtendingFork will flush the hooks
-		if isForkValidation && didExecutionUnwind {
+		if isForkValidation && !didReorg {
 			doms.SetDeferredHooker(doms)
 		}
 	}
