@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/cmp"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -136,10 +135,8 @@ func ExecV3(ctx context.Context,
 	}
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if initialCycle && isApplyingBlocks {
-		agg.SetCollateAndBuildWorkers(2)
-		agg.SetCompressWorkers(estimate.CompressSnapshot.WorkersHalf())
+		agg.SetCollateAndBuildWorkers(2) //TODO: Need always set to 2 (on ChainTip too). But need more tests first
 	} else {
-		agg.SetCompressWorkers(1)
 		agg.SetCollateAndBuildWorkers(1)
 	}
 	var (
