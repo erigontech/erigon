@@ -901,6 +901,10 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			if bn%10 != 0 {
 				continue
 			}
+			if err := doms.Flush(ctx, tx); err != nil {
+				panic(err)
+			}
+			doms.ClearRam(true)
 			if err := tx.Commit(); err != nil {
 				return err
 			}
@@ -908,10 +912,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			if err != nil {
 				panic(err)
 			}
-			if err := doms.Flush(ctx, tx); err != nil {
-				panic(err)
-			}
-			doms.ClearRam(true)
 
 			pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
 			if err != nil {
