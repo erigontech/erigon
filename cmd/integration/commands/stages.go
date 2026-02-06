@@ -859,17 +859,17 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return nil
 	}
 
-	var sendersProgress, execProgress uint64
+	var sendersProgress, initialExecProgress uint64
 
-	if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+	if initialExecProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 		return err
 	}
-	if execProgress == 0 { // then fallback to how much data we have in stat_snapshots
+	if initialExecProgress == 0 { // then fallback to how much data we have in stat_snapshots
 		doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
 		if err != nil {
 			panic(err)
 		}
-		execProgress = doms.BlockNum()
+		initialExecProgress = doms.BlockNum()
 		doms.Close()
 	}
 	if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
@@ -892,7 +892,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		t := time.Now()
 
 		//if chainTip = true, forced noCommit = false
-		for bn := execProgress; bn < block; bn++ {
+		for bn := initialExecProgress; bn < block; bn++ {
 			if err := stagedsync.SpawnExecuteBlocksStage(s, sync, doms, tx, bn, ctx, cfg, logger); err != nil {
 				if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
 					return err
@@ -924,7 +924,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			select {
 			case <-logEvery.C:
 				took := time.Since(t)
-				log.Info("[stage_exec] progress", "block_num", s.BlockNumber, "blk/sec", float64(execProgress-bn)/took.Seconds())
+				log.Info("[stage_exec] progress", "block_num", s.BlockNumber, "blk/sec", float64(bn-initialExecProgress)/took.Seconds())
 			default:
 			}
 
@@ -968,10 +968,10 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			}
 		}
 
-		if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
+		if initialExecProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 			return err
 		}
-		if execProgress >= block {
+		if initialExecProgress >= block {
 			break
 		}
 	}
