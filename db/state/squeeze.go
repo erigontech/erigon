@@ -451,10 +451,24 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		}
 		storIt.Close()
 
+		// TODO: integrate commitment trie warmuper (execution/commitment/warmuper.go)
+		//   - Start() workers before loop, WarmKey() during TouchKey phase, WaitAndClose() before ComputeCommitment
+		//   - Only beneficial after block 1+ when prior commitment state exists
+
+		// TODO: enable look-ahead for account and storage reads (check if access pattern is sequential)
+
+		// TODO: HistoryChangesIterFiles can be optimized for our case - we only need keys, not values
+		//   - Skip .vi and .v file lookups, just iterate keys from the index
+
 		rh, err = domains.ComputeCommitment(ctx, rwTx, true, blockFrom, toTxNum, "[rebuild_commitment_history]", nil)
 		if err != nil {
 			return nil, err
 		}
+
+		// TODO: compare rh against canonical header's stateRoot after each ComputeCommitment
+		//   - Read header by block number, compare common.Hash(rh) == header.Root
+		//   - Consider reading headers in ranges or with read-ahead for performance
+		//   - On mismatch: return error with block number, expected root, and computed root
 
 		// Size-based flush + file building
 		if domains.SizeEstimate() > uint64(batchSize) || blockFrom == blockTo {
