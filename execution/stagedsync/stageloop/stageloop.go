@@ -334,9 +334,7 @@ type Hook struct {
 	sync                                *stagedsync.Sync
 	chainConfig                         *chain.Config
 	logger                              log.Logger
-	blockReader                         services.FullBlockReader
 	updateHead                          func(ctx context.Context)
-	db                                  kv.RoDB
 	statusDataGetter                    sentry_multi_client.StatusGetter
 	blockRangePublisher                 *execp2p.Publisher
 	lastAnnouncedBlockRangeLatestNumber uint64
@@ -345,10 +343,8 @@ type Hook struct {
 
 func NewHook(
 	ctx context.Context,
-	db kv.RoDB,
 	notifications *shards.Notifications,
 	sync *stagedsync.Sync,
-	blockReader services.FullBlockReader,
 	chainConfig *chain.Config,
 	logger log.Logger,
 	updateHead func(ctx context.Context),
@@ -357,10 +353,8 @@ func NewHook(
 ) *Hook {
 	return &Hook{
 		ctx:                 ctx,
-		db:                  db,
 		notifications:       notifications,
 		sync:                sync,
-		blockReader:         blockReader,
 		chainConfig:         chainConfig,
 		logger:              logger,
 		updateHead:          updateHead,
@@ -368,6 +362,7 @@ func NewHook(
 		blockRangePublisher: blockRangePublisher,
 	}
 }
+
 func (h *Hook) beforeRun(tx kv.Tx, inSync bool) error {
 	notifications := h.notifications
 	if notifications != nil && notifications.Accumulator != nil && inSync {
@@ -379,27 +374,24 @@ func (h *Hook) beforeRun(tx kv.Tx, inSync bool) error {
 	}
 	return nil
 }
+
 func (h *Hook) LastNewBlockSeen(n uint64) {
 	if h == nil || h.notifications == nil {
 		return
 	}
 	h.notifications.NewLastBlockSeen(n)
 }
+
 func (h *Hook) BeforeRun(tx kv.Tx, inSync bool) error {
 	if h == nil {
 		return nil
 	}
-	if tx == nil {
-		return h.db.View(h.ctx, func(tx kv.Tx) error { return h.beforeRun(tx, inSync) })
-	}
 	return h.beforeRun(tx, inSync)
 }
+
 func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64, isSynced bool) error {
 	if h == nil {
 		return nil
-	}
-	if tx == nil {
-		return h.db.View(h.ctx, func(tx kv.Tx) error { return h.afterRun(tx, finishProgressBefore, isSynced) })
 	}
 	return h.afterRun(tx, finishProgressBefore, isSynced)
 }
@@ -416,8 +408,8 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64, isSynced bool) er
 
 	h.maybeAnnounceBlockRange(finishProgressBefore, finishStageAfterSync, isSynced)
 	return h.sendNotifications(tx, finishProgressBefore, finishStageAfterSync)
-
 }
+
 func (h *Hook) sendNotifications(tx kv.Tx, finishStageBeforeSync, finishStageAfterSync uint64) error {
 	if h.notifications == nil {
 		return nil
