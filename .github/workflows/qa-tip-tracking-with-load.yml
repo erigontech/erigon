@@ -182,7 +182,7 @@ jobs:
           echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
         else
           echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
-          if reason=$(python3 print_reason.py ${{ github.workspace }}/result-$CHAIN.json); then
+          if reason=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/print_reason.py ${{ github.workspace }}/result-$CHAIN.json); then
             echo "Error detected during tests: $reason"
             echo "::error::Tip-tracking w/ load test ${{ matrix.client }} encountered an error: $reason"
             exit 1
@@ -282,6 +282,6 @@ jobs:
         rm -rf $ERIGON_TESTBED_DATA_DIR
 
     - name: Resume the Erigon instance dedicated to db maintenance
-      if: always()
+      if: always() && matrix.client == 'erigon'
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
