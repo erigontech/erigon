@@ -136,7 +136,7 @@ func ExecV3(ctx context.Context,
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if isApplyingBlocks {
 		if initialCycle {
-			agg.SetCollateAndBuildWorkers(2) //TODO: Need always set to 2 (on ChainTip too). But need more tests first
+			agg.SetCollateAndBuildWorkers(2) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
 			agg.SetCompressWorkers(dbg.CompressWorkers)
 		} else {
 			agg.SetCollateAndBuildWorkers(1)
