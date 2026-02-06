@@ -17,9 +17,7 @@
 package changeset
 
 import (
-	"bytes"
 	"encoding/binary"
-	"encoding/gob"
 	"fmt"
 	"math"
 	"strings"
@@ -30,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -126,24 +123,8 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 		ret = append(ret, diffSet[i].Value...)
 		ret = append(ret, idx)
 	}
-	if len(ret) > 6*1024*1024 {
-		took := time.Since(t)
-		out2 := common.Copy(out)[:0]
 
-		t = time.Now()
-		b := bytes.NewBuffer(out2)
-		err := gob.NewEncoder(b).Encode(diffSet)
-		took2 := time.Since(t)
-		_ = err
-
-		log.Warn("[dbg] took2", "took", took, "took2", took2, "l_mb", len(ret)/1024/1024)
-	}
 	return ret
-}
-
-func init() {
-	gob.Register([]kv.DomainEntryDiff{})
-	gob.Register(kv.DomainEntryDiff{})
 }
 
 func serializeDiffSetBufLen(diffSet []kv.DomainEntryDiff) int {
