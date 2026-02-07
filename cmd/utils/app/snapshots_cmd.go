@@ -294,7 +294,7 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "step"},
-				&cli.BoolFlag{Name: "latestStep", Aliases: []string{"latest", "recent", "recentStep"}, Usage: "remove minimal possible recent files: and Domain and History. Keeping files consistent. Useful when have 1 corrupted recent file"},
+				&cli.BoolFlag{Name: "latestStep", Aliases: []string{"latest", "recent", "recentStep"}, Usage: "remove minimal possible recent files: and Domain and History. Useful when have 1 corrupted recent file"},
 				&cli.BoolFlag{Name: "dry-run"},
 				&cli.StringSliceFlag{Name: "domain"},
 			},
