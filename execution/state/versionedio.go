@@ -415,8 +415,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 					return defaultV, MapRead, Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, nil
 				}
 				destrcutedVersion = Version{
-					TxIndex:     res.DepIdx(),
-					Incarnation: res.Incarnation(),
+					TxIndex: res.DepIdx(),
 				}
 			}
 		}

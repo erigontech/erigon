@@ -1,5 +1,9 @@
 ---
 description: Connecting Erigon (EL) to Consensus Clients (CL)
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/interacting-with-erigon/interacting-with-erigon/engine
 ---
 
 # engine

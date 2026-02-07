@@ -1,5 +1,8 @@
 ---
 description: Erigon Installation Options
+metaLinks:
+  alternates:
+    - https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/get-started/installation
 ---
 
 # Installation
@@ -32,7 +35,7 @@ This Docker image is fully supported on **Linux**, **macOS**, and **Windows**.
 
 _(Note: The container itself is built on multi-platform Linux architectures (linux/amd64 and linux/arm64), which is handled automatically by your Docker setup.)_
 
-### **Prerequisites**
+#### **Prerequisites**
 
 [Docker Engine](https://docs.docker.com/engine/install) if you run Linux or [Docker Desktop](https://docs.docker.com/desktop/) if you run macOS/Windows.
 
@@ -49,7 +52,7 @@ _(Note: The container itself is built on multi-platform Linux architectures (lin
 **Windows**: note that Docker on Windows is affected by [WSL2 Performance and Data Storage](./#window-subsystem-for-linux-wsl).
 {% endhint %}
 
-### **Download and start Erigon in Docker**
+#### **Download and start Erigon in Docker**
 
 Here are the steps to download and start Erigon in Docker.
 

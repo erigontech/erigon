@@ -54,6 +54,9 @@ func (e BlockNotFoundErr) Error() string {
 
 func GetBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (uint64, common.Hash, bool, error) {
 	bn, bh, latest, found, err := _GetBlockNumber(ctx, blockNrOrHash.RequireCanonical, blockNrOrHash, tx, br, filters)
+	if err != nil {
+		return 0, common.Hash{}, false, err
+	}
 	if !found {
 		return bn, bh, latest, rpc.BlockNotFoundErr{BlockId: blockNrOrHash.String()}
 	}
@@ -162,7 +165,8 @@ func CreateHistoryStateReader(ctx context.Context, tx kv.TemporalTx, blockNumber
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
 	if minHistoryTxNum := state.StateHistoryStartTxNum(tx); txNum < minHistoryTxNum {
-		return nil, fmt.Errorf("%w: block tx: %d, min tx: %d", state.PrunedError, txNum, minHistoryTxNum)
+		bn, _, _ := txNumsReader.FindBlockNum(ctx, tx, minHistoryTxNum)
+		return nil, fmt.Errorf("%w: block tx: %d, min tx: %d last state history bn: %d", state.PrunedError, txNum, minHistoryTxNum, bn)
 	}
 	return state.NewHistoryReaderV3(tx, txNum), nil
 }

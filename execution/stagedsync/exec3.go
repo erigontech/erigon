@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/cmp"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -135,13 +134,16 @@ func ExecV3(ctx context.Context,
 		return err
 	}
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	if initialCycle && isApplyingBlocks {
-		agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
-		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-	} else {
-		agg.SetCompressWorkers(1)
-		agg.SetCollateAndBuildWorkers(1)
+	if isApplyingBlocks {
+		if initialCycle {
+			agg.SetCollateAndBuildWorkers(2) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
+			agg.SetCompressWorkers(dbg.CompressWorkers)
+		} else {
+			agg.SetCollateAndBuildWorkers(1)
+			agg.SetCompressWorkers(dbg.CompressWorkers)
+		}
 	}
+
 	var (
 		blockNum     = doms.BlockNum()
 		initialTxNum = doms.TxNum()
@@ -251,7 +253,9 @@ func ExecV3(ctx context.Context,
 		pe.lastCommittedBlockNum.Store(blockNum)
 
 		defer func() {
-			pe.LogComplete(stepsInDb)
+			if !isChainTip {
+				pe.LogComplete(stepsInDb)
+			}
 		}()
 
 		lastHeader, applyTx, execErr = pe.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
@@ -282,7 +286,9 @@ func ExecV3(ctx context.Context,
 		se.lastCommittedBlockNum.Store(blockNum)
 
 		defer func() {
-			se.LogComplete(stepsInDb)
+			if !isChainTip {
+				se.LogComplete(stepsInDb)
+			}
 		}()
 
 		lastHeader, applyTx, execErr = se.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
@@ -583,6 +589,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			if b == nil {
 				return fmt.Errorf("nil block %d", blockNum)
 			}
+			go warmTxsHashes(b)
 
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()

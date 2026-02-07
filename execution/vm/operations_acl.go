@@ -344,6 +344,10 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 			evm.intraBlockState.AddAddressToAccessList(dd)
 		}
 
+		if availableGas-accessGas-delegationGas < statefulBaseGas {
+			return 0, ErrOutOfGas
+		}
+
 		// Call the old calculator, which takes into account
 		// - 63/64ths rule
 		callGas, err := calcCallGas(evm, callContext, availableGas-accessGas-delegationGas, statefulBaseGas)

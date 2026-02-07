@@ -522,52 +522,11 @@ func (rs Receipts) AssertLogIndex(blockNum uint64) {
 	}
 }
 
-// DeriveFields fills the receipts with their computed fields based on consensus
-// data and contextual infos like containing block and transactions.
-func (rs Receipts) DeriveFields(hash common.Hash, number uint64, txs Transactions, senders []common.Address) error {
-	logIndex := uint(0) // logIdx is unique within the block and starts from 0
-	if len(txs) != len(rs) {
-		return fmt.Errorf("transaction and receipt count mismatch, txn count = %d, receipts count = %d", len(txs), len(rs))
+func (rs Receipts) CumulativeGasUsed() uint64 {
+	if rs.Len() == 0 {
+		return 0
 	}
-	if len(senders) != len(txs) {
-		return fmt.Errorf("transaction and senders count mismatch, txn count = %d, senders count = %d", len(txs), len(senders))
-	}
-
-	blockNumber := new(big.Int).SetUint64(number)
-	for i := 0; i < len(rs); i++ {
-		// The transaction type and hash can be retrieved from the transaction itself
-		rs[i].Type = txs[i].Type()
-		rs[i].TxHash = txs[i].Hash()
-
-		// block location fields
-		rs[i].BlockHash = hash
-		rs[i].BlockNumber = blockNumber
-		rs[i].TransactionIndex = uint(i)
-
-		// The contract address can be derived from the transaction itself
-		if txs[i].GetTo() == nil {
-			// If one wants to deploy a contract, one needs to send a transaction that does not have `To` field
-			// and then the address of the contract one is creating this way will depend on the `tx.From`
-			// and the nonce of the creating account (which is `tx.From`).
-			rs[i].ContractAddress = CreateAddress(senders[i], txs[i].GetNonce())
-		}
-		// The used gas can be calculated based on previous r
-		if i == 0 {
-			rs[i].GasUsed = rs[i].CumulativeGasUsed
-		} else {
-			rs[i].GasUsed = rs[i].CumulativeGasUsed - rs[i-1].CumulativeGasUsed
-		}
-		// The derived log fields can simply be set from the block and transaction
-		for j := 0; j < len(rs[i].Logs); j++ {
-			rs[i].Logs[j].BlockNumber = number
-			rs[i].Logs[j].BlockHash = hash
-			rs[i].Logs[j].TxHash = rs[i].TxHash
-			rs[i].Logs[j].TxIndex = uint(i)
-			rs[i].Logs[j].Index = logIndex
-			logIndex++
-		}
-	}
-	return nil
+	return rs[rs.Len()-1].CumulativeGasUsed
 }
 
 // receiptEncoder69 wraps a receipt to delegate to EncodeRLP69 during list encoding.

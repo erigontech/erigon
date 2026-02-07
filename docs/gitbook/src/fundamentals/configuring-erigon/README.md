@@ -10,13 +10,13 @@ metaLinks:
 
 The Erigon CLI has a wide range of flags that can be used to customize its behavior. There are 3 ways to configure Erigon, listed by priority:
 
-* [Command line options](configuring-erigon.md#command-line-options) (flags)
-* [Configuration file](configuring-erigon.md#configuration-file)
-* [Environment variables](configuring-erigon.md#environment-variables)
+* [Command line options](./#command-line-options) (flags)
+* [Configuration file](./#configuration-file)
+* [Environment variables](./#environment-variables)
 
 ## Command line options
 
-Here's a breakdown of the most important flags, see [options](configuring-erigon.md#options) for the full list:
+Here's a breakdown of the most important flags, see [options](./#options) for the full list:
 
 ### General Options
 
@@ -29,7 +29,7 @@ These flags cover the general behavior and configuration of the Erigon client.
 * `--config value`: Sets Erigon flags using a YAML/TOML file.
 * `--version, -v`: Prints the version information.
 * `--help, -h`: Displays help information.
-* `--chain value`: Sets the name of the [network](supported-networks.md) to join.
+* `--chain value`: Sets the name of the [network](../supported-networks.md) to join.
   * Default: `mainnet`
 * `--networkid value`: Explicitly sets the network ID.
   * Default: `1`
@@ -74,14 +74,14 @@ These flags control database performance and memory usage.
 
 Flags for managing how old chain data is handled and stored.
 
-* `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`). See also [Sync Modes](../fundamentals/sync-modes.md)
+* `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`). See also [Sync Modes](../sync-modes.md)
   * Default: `"full"`
 * `--prune.distance value`: Keeps state history for the latest `N` blocks.
   * Default: `0`
 * `--prune.distance.blocks value`: Keeps block history for the latest `N` blocks.
   * Default: `0`
 * `--prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables faster `eth_getProof` for executed blocks.
-  * Default: `false`&#x20;
+  * Default: `false`
 * `--prune.include-commitment-history` : (experimental) Enables the storage of commitment history. When enabled, it allows for blazing fast retrieval of Merkle proofs for executed blocks using the `eth_getProof` JSON-RPC method.
   * Default: `false`
 * `--snap.keepblocks`: Keeps ancient blocks in the database for debugging.
@@ -135,7 +135,7 @@ These flags manage network connectivity, peer discovery, and traffic control.
   * Default: `68`, `69`
 * `--p2p.allowed-ports value`: A comma-separated list of allowed ports for different P2P protocols.
   * Default: `30303, 30304, 30305, 30306, 30307`
-* `--nat value`: The NAT port mapping mechanism.
+* `--nat value`: The NAT port mapping mechanism (See [here](nat.md) for more details).
 * `--nodiscover`: Disables peer discovery.
   * Default: `false`
 * `--v5disc`: Enables the experimental RLPx V5 (Topic Discovery) mechanism.
@@ -476,8 +476,8 @@ Erigon supports configuration through environment variables, primarily for exper
 
 **Synchronization and Pruning:**
 
-* `NO_PRUNE` - Disables pruning when set to true [5](configuring-erigon.md#0-4)
-* `NO_MERGE` - Disables merging operations [6](configuring-erigon.md#0-5)
+* `NO_PRUNE` - Disables pruning when set to true [5](./#0-4)
+* `NO_MERGE` - Disables merging operations [6](./#0-5)
 * `PRUNE_TOTAL_DIFFICULTY` - Controls total difficulty pruning (default: `true`)
 * `MAX_REORG_DEPTH` - Sets maximum reorganization depth (default: `512`)
 

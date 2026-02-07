@@ -122,9 +122,9 @@ type TxSyncTimeoutError struct {
 	Hash common.Hash
 }
 
-func (e *TxSyncTimeoutError) Error() string          { return e.Msg }
-func (e *TxSyncTimeoutError) ErrorCode() int         { return ErrCodeTxSyncTimeout }
-func (e *TxSyncTimeoutError) ErrorData() interface{} { return e.Hash.Hex() }
+func (e *TxSyncTimeoutError) Error() string  { return e.Msg }
+func (e *TxSyncTimeoutError) ErrorCode() int { return ErrCodeTxSyncTimeout }
+func (e *TxSyncTimeoutError) ErrorData() any { return e.Hash.Hex() }
 
 type CustomError struct {
 	Code    int
