@@ -49,6 +49,7 @@ type ExecutionPayload struct {
 	Withdrawals     []*types.Withdrawal `json:"withdrawals"`
 	BlobGasUsed     *hexutil.Uint64     `json:"blobGasUsed"`
 	ExcessBlobGas   *hexutil.Uint64     `json:"excessBlobGas"`
+	SlotNumber      *hexutil.Uint64     `json:"slotNumber"`
 	BlockAccessList *hexutil.Bytes      `json:"blockAccessList"`
 }
 
@@ -203,6 +204,10 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 		excessBlobGas := *header.ExcessBlobGas
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
 	}
+	if header.SlotNumber != nil {
+		slotNumber := *header.SlotNumber
+		res.SlotNumber = (*hexutil.Uint64)(&slotNumber)
+	}
 	if body.BlockAccessList != nil {
 		res.BlockAccessList = types.ConvertBlockAccessListFromExecutionProto(body.BlockAccessList)
 	}
@@ -245,6 +250,8 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
 	}
 	if payload.Version >= 4 {
+		slotNumber := *payload.SlotNumber
+		res.SlotNumber = (*hexutil.Uint64)(&slotNumber)
 		res.BlockAccessList = types.ConvertBlockAccessListFromTypesProto(payload.BlockAccessList)
 	}
 	return res
