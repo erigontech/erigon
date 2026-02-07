@@ -76,7 +76,7 @@ type accHolder interface {
 // flushHook pairs a flush callback with the block it was created for.
 type flushHook struct {
 	blockNum uint64
-	fn       func(context.Context, stateifs.DomainPutter) error
+	fn       func(context.Context, kv.TemporalTx, stateifs.DomainPutter) error
 }
 
 func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.Logger) bool {
@@ -156,11 +156,6 @@ func (sd *SharedDomains) AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel {
 	return &temporalPutDel{sd, tx}
 }
 
-// NewDomainPutter returns a stateifs.DomainPutter for use with FlushHooks.
-func (sd *SharedDomains) NewDomainPutter(tx kv.TemporalTx) stateifs.DomainPutter {
-	return &temporalPutDel{sd, tx}
-}
-
 // changesetSwitcher is implemented by TemporalMemBatch to get/set changesets for deferred writes.
 type changesetSwitcher interface {
 	// GetChangesetByBlockNum returns the changeset for a given block number and
@@ -191,7 +186,7 @@ func (sd *SharedDomains) Merge(other *SharedDomains) error {
 // AddFlushHook adds a callback to be executed when FlushHooks is called.
 // This is used by commitment to defer branch updates until a transaction commit.
 // Implements commitment.DeferredHooker interface.
-func (sd *SharedDomains) AddFlushHook(hook func(context.Context, stateifs.DomainPutter) error) {
+func (sd *SharedDomains) AddFlushHook(hook func(context.Context, kv.TemporalTx, stateifs.DomainPutter) error) {
 	sd.flushHooks = append(sd.flushHooks, flushHook{
 		blockNum: sd.blockNum.Load(),
 		fn:       hook,
@@ -217,7 +212,7 @@ func (sd *SharedDomains) FlushHooks(ctx context.Context, tx kv.TemporalTx) error
 	if !ok {
 		// Fallback: just run hooks without changeset routing
 		for _, hook := range sd.flushHooks {
-			if err := hook.fn(ctx, sd.NewDomainPutter(tx)); err != nil {
+			if err := hook.fn(ctx, tx, sd); err != nil {
 				return err
 			}
 		}
@@ -230,7 +225,7 @@ func (sd *SharedDomains) FlushHooks(ctx context.Context, tx kv.TemporalTx) error
 		blockHash, cs := switcher.GetChangesetByBlockNum(hook.blockNum)
 		if cs == nil {
 			// No changeset for this block - run hook without changeset routing
-			if err := hook.fn(ctx, sd.NewDomainPutter(tx)); err != nil {
+			if err := hook.fn(ctx, tx, sd); err != nil {
 				return err
 			}
 			continue
@@ -238,7 +233,7 @@ func (sd *SharedDomains) FlushHooks(ctx context.Context, tx kv.TemporalTx) error
 
 		switcher.SetChangesetAccumulator(cs)
 
-		if err := hook.fn(ctx, sd.NewDomainPutter(tx)); err != nil {
+		if err := hook.fn(ctx, tx, sd); err != nil {
 			switcher.SetChangesetAccumulator(nil)
 			return err
 		}

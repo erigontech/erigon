@@ -323,10 +323,11 @@ type BranchEncoder struct {
 	metrics   *Metrics
 
 	// Deferred updates support
-	deferUpdates    bool
-	deferred        []*DeferredBranchUpdate
-	pendingPrefixes *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
-	cache           *WarmupCache
+	deferUpdates      bool
+	deferred          []*DeferredBranchUpdate
+	pendingPrefixes   *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
+	flushedMidProcess bool                                // set when a mid-process flush happens (pending prefix conflict or batch overflow)
+	cache             *WarmupCache
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -353,6 +354,18 @@ func (be *BranchEncoder) SetDeferUpdates(defer_ bool) {
 // DeferUpdatesEnabled returns whether deferred update collection is enabled.
 func (be *BranchEncoder) DeferUpdatesEnabled() bool {
 	return be.deferUpdates
+}
+
+// FlushedMidProcess returns true if a mid-process flush occurred (due to pending prefix
+// conflict or batch overflow). When true, callers should not defer remaining updates
+// to a hook since direct DB writes have already been made.
+func (be *BranchEncoder) FlushedMidProcess() bool {
+	return be.flushedMidProcess
+}
+
+// ResetFlushedMidProcess clears the mid-process flush flag.
+func (be *BranchEncoder) ResetFlushedMidProcess() {
+	be.flushedMidProcess = false
 }
 
 // HasPendingPrefix returns true if the given prefix has a pending deferred update.
@@ -579,6 +592,7 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 			return err
 		}
 		be.ClearDeferred()
+		be.flushedMidProcess = true
 	}
 
 	// try to get previous data from cache

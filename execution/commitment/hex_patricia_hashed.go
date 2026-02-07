@@ -1699,6 +1699,7 @@ func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]by
 			return nil, 0, err
 		}
 		be.ClearDeferred()
+		be.flushedMidProcess = true
 	}
 	return hph.branchFromCacheOrDB(prefix)
 }
@@ -2678,13 +2679,13 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	}
 
 	if hph.branchEncoder.DeferUpdatesEnabled() {
-		if hph.deferredHooker != nil {
+		if hph.deferredHooker != nil && !hph.branchEncoder.FlushedMidProcess() {
 			// Capture references for deferred execution
 			be := hph.branchEncoder
 			txNum := hph.ctx.TxNum()
-			hph.deferredHooker.AddFlushHook(func(_ context.Context, dp DomainPutter) error {
+			hph.deferredHooker.AddFlushHook(func(_ context.Context, tx kv.TemporalTx, dp DomainPutter) error {
 				putBranch := func(prefix, data, prevData []byte, prevStep kv.Step) error {
-					return dp.DomainPut(kv.CommitmentDomain, prefix, data, txNum, prevData, prevStep)
+					return dp.DomainPut(kv.CommitmentDomain, tx, prefix, data, txNum, prevData, prevStep)
 				}
 				if err := be.ApplyDeferredUpdates(runtime.NumCPU(), putBranch); err != nil {
 					return fmt.Errorf("apply deferred updates: %w", err)
@@ -2693,12 +2694,14 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 				return nil
 			})
 		} else {
-			// Apply deferred branch updates in parallel (EncodeBranch runs concurrently)
+			// Apply deferred branch updates inline. Also used when a mid-process flush
+			// already wrote directly to DB — remaining updates must go inline too.
 			if err = hph.branchEncoder.ApplyDeferredUpdates(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
 				return nil, fmt.Errorf("apply deferred updates: %w", err)
 			}
 			hph.branchEncoder.ClearDeferred()
 		}
+		hph.branchEncoder.ResetFlushedMidProcess()
 	}
 
 	if dbg.KVReadLevelledMetrics {
