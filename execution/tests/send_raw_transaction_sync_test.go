@@ -54,7 +54,7 @@ func TestSendRawTransactionSync(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		timeoutMillis := uint64(60000)
+		timeoutMillis := uint64(3600000) // 1hr
 		receipt, errSend = eat.RpcApiClient.SendRawTransactionSync(tx, &timeoutMillis)
 	}()
 
