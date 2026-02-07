@@ -219,46 +219,35 @@ func FindFilesWithVersionsByPattern(pattern string) (string, Version, bool, erro
 	return matches[0], ver, true, nil
 }
 
-// FindFilesWithVersionsByPatternInList searches for files matching a pattern within a pre-scanned list.
+// MatchVersionedFile searches for files matching a pattern within a pre-scanned list.
 // This avoids filesystem calls by searching within the provided dirEntries slice.
 // filePattern is the filename pattern (e.g., "*-accounts.0-1.kv")
 // dirEntries is a slice of filenames (not full paths)
 // dir is the directory path to join with matched filenames
-func FindFilesWithVersionsByPatternInList(filePattern string, dirEntries []string, dir string) (string, Version, bool, error) {
-	var matches []string
+func MatchVersionedFile(filePattern string, dirEntries []string, dir string) (string, Version, bool, error) {
+	var bestMatch string
+	var bestVersion Version
+	found := false
+
 	for _, name := range dirEntries {
 		matched, err := filepath.Match(filePattern, name)
 		if err != nil {
 			return "", Version{}, false, fmt.Errorf("invalid pattern: %w", err)
 		}
 		if matched {
-			matches = append(matches, filepath.Join(dir, name))
+			ver, _ := ParseVersion(name)
+			if !found || ver.Greater(bestVersion) {
+				bestVersion = ver
+				bestMatch = filepath.Join(dir, name)
+				found = true
+			}
 		}
 	}
 
-	if len(matches) == 0 {
+	if !found {
 		return "", Version{}, false, nil
 	}
-
-	if len(matches) > 1 {
-		// Sort by version (ascending) so highest version is last
-		sort.Slice(matches, func(i, j int) bool {
-			_, fName1 := filepath.Split(matches[i])
-			version1, _ := ParseVersion(fName1)
-
-			_, fName2 := filepath.Split(matches[j])
-			version2, _ := ParseVersion(fName2)
-
-			return version1.Less(version2)
-		})
-		_, fName := filepath.Split(matches[len(matches)-1])
-		ver, _ := ParseVersion(fName)
-		return matches[len(matches)-1], ver, true, nil
-	}
-
-	_, fName := filepath.Split(matches[0])
-	ver, _ := ParseVersion(fName)
-	return matches[0], ver, true, nil
+	return bestMatch, bestVersion, true, nil
 }
 
 func CheckIsThereFileWithSupportedVersion(pattern string, minSup Version) error {

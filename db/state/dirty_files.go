@@ -328,7 +328,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 			fromStep, toStep := item.StepRange(d.stepSize)
 			if item.decompressor == nil {
 				fNameMask := d.kvFileNameMask(fromStep, toStep)
-				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPatternInList(fNameMask, dirEntries, d.dirs.SnapDomain)
+				fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, d.dirs.SnapDomain)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					d.logger.Debug("[agg] Domain.openDirtyFiles: FileExist err", "f", fName, "err", err)
@@ -368,7 +368,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 
 			if item.index == nil && d.Accessors.Has(statecfg.AccessorHashMap) {
 				fNameMask := d.kviAccessorFileNameMask(fromStep, toStep)
-				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPatternInList(fNameMask, dirEntries, d.dirs.SnapDomain)
+				fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, d.dirs.SnapDomain)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
@@ -387,7 +387,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 			}
 			if item.bindex == nil && d.Accessors.Has(statecfg.AccessorBTree) {
 				fNameMask := d.kvBtAccessorFileNameMask(fromStep, toStep)
-				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPatternInList(fNameMask, dirEntries, d.dirs.SnapDomain)
+				fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, d.dirs.SnapDomain)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
@@ -406,7 +406,7 @@ func (d *Domain) openDirtyFiles(dirEntries []string) (err error) {
 			}
 			if item.existence == nil && d.Accessors.Has(statecfg.AccessorExistence) {
 				fNameMask := d.kvExistenceIdxFileNameMask(fromStep, toStep)
-				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPatternInList(fNameMask, dirEntries, d.dirs.SnapDomain)
+				fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, d.dirs.SnapDomain)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					d.logger.Warn("[agg] Domain.openDirtyFiles", "err", err, "f", fName)
@@ -443,7 +443,7 @@ func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {
 			fromStep, toStep := item.StepRange(h.stepSize)
 			if item.decompressor == nil {
 				fNameMask := h.vFileNameMask(fromStep, toStep)
-				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPatternInList(fNameMask, dataEntries, h.dirs.SnapHistory)
+				fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dataEntries, h.dirs.SnapHistory)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					h.logger.Debug("[agg] History.openDirtyFiles: FileExist", "f", fName, "err", err)
@@ -495,7 +495,7 @@ func (h *History) openDirtyFiles(dataEntries, accessorEntries []string) error {
 
 			if item.index == nil {
 				fNameMask := h.vAccessorFileNameMask(fromStep, toStep)
-				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPatternInList(fNameMask, accessorEntries, h.dirs.SnapAccessors)
+				fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, accessorEntries, h.dirs.SnapAccessors)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					h.logger.Warn("[agg] History.openDirtyFiles", "err", err, "f", fName)
@@ -531,10 +531,10 @@ func (ii *InvertedIndex) openDirtyFiles(dataEntries, accessorEntries []string) e
 			fromStep, toStep := item.StepRange(ii.stepSize)
 			if item.decompressor == nil {
 				fNameMask := ii.efFileNameMask(fromStep, toStep)
-				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPatternInList(fNameMask, dataEntries, ii.dirs.SnapIdx)
+				fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dataEntries, ii.dirs.SnapIdx)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
-					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: FindFilesWithVersionsByPatternInList error", "f", fName, "err", err)
+					ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: MatchVersionedFile error", "f", fName, "err", err)
 					invalidFileItemsLock.Lock()
 					invalidFileItems = append(invalidFileItems, item)
 					invalidFileItemsLock.Unlock()
@@ -572,7 +572,7 @@ func (ii *InvertedIndex) openDirtyFiles(dataEntries, accessorEntries []string) e
 
 			if item.index == nil {
 				fNameMask := ii.efAccessorFileNameMask(fromStep, toStep)
-				fPath, fileVer, ok, err := version.FindFilesWithVersionsByPatternInList(fNameMask, accessorEntries, ii.dirs.SnapAccessors)
+				fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, accessorEntries, ii.dirs.SnapAccessors)
 				if err != nil {
 					_, fName := filepath.Split(fPath)
 					ii.logger.Warn("[agg] InvertedIndex.openDirtyFiles", "err", err, "f", fName)

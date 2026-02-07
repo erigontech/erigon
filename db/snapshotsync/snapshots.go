@@ -477,7 +477,7 @@ func (s *DirtySegment) openIdx(dir string, dirEntries []string) (err error) {
 		var fPath string
 		var ok bool
 		if dirEntries != nil {
-			fPath, _, ok, err = version.FindFilesWithVersionsByPatternInList(fPathMask, dirEntries, dir)
+			fPath, _, ok, err = version.MatchVersionedFile(fPathMask, dirEntries, dir)
 		} else {
 			fPath, _, ok, err = version.FindFilesWithVersionsByPattern(filepath.Join(dir, fPathMask))
 		}

@@ -228,14 +228,14 @@ func (dt *DomainRoTx) NewWriter() *DomainBufferedWriter { return dt.newWriter(dt
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (d *Domain) OpenList(idxFiles, histFiles, domainFiles, accessorFiles []string) error {
-	if err := d.History.openList(idxFiles, histFiles, accessorFiles); err != nil {
+func (d *Domain) OpenList(scanResult ScanDirsResult) error {
+	if err := d.History.openList(scanResult.iiFiles, scanResult.historyFiles, scanResult.accessorFiles); err != nil {
 		return err
 	}
 
-	d.closeWhatNotInList(domainFiles)
-	d.scanDirtyFiles(domainFiles)
-	if err := d.openDirtyFiles(domainFiles); err != nil {
+	d.closeWhatNotInList(scanResult.domainFiles)
+	d.scanDirtyFiles(scanResult.domainFiles)
+	if err := d.openDirtyFiles(scanResult.domainFiles); err != nil {
 		return fmt.Errorf("Domain(%s).openList: %w", d.FilenameBase, err)
 	}
 	d.protectFromHistoryFilesAheadOfDomainFiles()
@@ -253,11 +253,7 @@ func (d *Domain) openFolder(r *ScanDirsResult) error {
 	if d.Disable {
 		return nil
 	}
-
-	if err := d.OpenList(r.iiFiles, r.historyFiles, r.domainFiles, r.accessorFiles); err != nil {
-		return err
-	}
-	return nil
+	return d.OpenList(*r)
 }
 
 func (d *Domain) closeFilesAfterStep(lowerBound kv.Step) {

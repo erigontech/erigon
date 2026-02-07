@@ -176,7 +176,7 @@ func touch(path string) error {
 	return f.Close()
 }
 
-func TestFindFilesWithVersionsByPatternInList(t *testing.T) {
+func TestMatchVersionedFile(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create test files with different versions
@@ -198,7 +198,7 @@ func TestFindFilesWithVersionsByPatternInList(t *testing.T) {
 	}
 
 	// Test 1: Find highest version of accounts
-	path, ver, ok, err := FindFilesWithVersionsByPatternInList("*-accounts.0-1.kv", dirEntries, dir)
+	path, ver, ok, err := MatchVersionedFile("*-accounts.0-1.kv", dirEntries, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestFindFilesWithVersionsByPatternInList(t *testing.T) {
 	}
 
 	// Test 2: Find storage (only one version)
-	path, ver, ok, err = FindFilesWithVersionsByPatternInList("*-storage.0-1.kv", dirEntries, dir)
+	path, ver, ok, err = MatchVersionedFile("*-storage.0-1.kv", dirEntries, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestFindFilesWithVersionsByPatternInList(t *testing.T) {
 	}
 
 	// Test 3: No match
-	_, _, ok, err = FindFilesWithVersionsByPatternInList("*-code.0-1.kv", dirEntries, dir)
+	_, _, ok, err = MatchVersionedFile("*-code.0-1.kv", dirEntries, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestFindFilesWithVersionsByPatternInList(t *testing.T) {
 	}
 }
 
-func TestFindFilesWithVersionsByPatternInList_MultipleVersions(t *testing.T) {
+func TestMatchVersionedFile_MultipleVersions(t *testing.T) {
 	dir := t.TempDir()
 
 	// Test with many versions
@@ -249,7 +249,7 @@ func TestFindFilesWithVersionsByPatternInList_MultipleVersions(t *testing.T) {
 		"v2.1-test.0-1.ef",
 	}
 
-	path, ver, ok, err := FindFilesWithVersionsByPatternInList("*-test.0-1.ef", dirEntries, dir)
+	path, ver, ok, err := MatchVersionedFile("*-test.0-1.ef", dirEntries, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +264,7 @@ func TestFindFilesWithVersionsByPatternInList_MultipleVersions(t *testing.T) {
 	}
 }
 
-func TestFindFilesWithVersionsByPatternInList_AccessorFiles(t *testing.T) {
+func TestMatchVersionedFile_AccessorFiles(t *testing.T) {
 	dir := t.TempDir()
 
 	// Test with accessor file extensions (.vi, .efi, .kvi, etc.)
@@ -277,7 +277,7 @@ func TestFindFilesWithVersionsByPatternInList_AccessorFiles(t *testing.T) {
 	}
 
 	// Test .vi files
-	path, ver, ok, err := FindFilesWithVersionsByPatternInList("*-accounts.0-1.vi", dirEntries, dir)
+	path, ver, ok, err := MatchVersionedFile("*-accounts.0-1.vi", dirEntries, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestFindFilesWithVersionsByPatternInList_AccessorFiles(t *testing.T) {
 	}
 
 	// Test .efi files
-	path, ver, ok, err = FindFilesWithVersionsByPatternInList("*-storage.0-1.efi", dirEntries, dir)
+	path, ver, ok, err = MatchVersionedFile("*-storage.0-1.efi", dirEntries, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +307,7 @@ func TestFindFilesWithVersionsByPatternInList_AccessorFiles(t *testing.T) {
 	}
 
 	// Test different step range
-	path, ver, ok, err = FindFilesWithVersionsByPatternInList("*-accounts.1-2.vi", dirEntries, dir)
+	path, ver, ok, err = MatchVersionedFile("*-accounts.1-2.vi", dirEntries, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,11 +322,11 @@ func TestFindFilesWithVersionsByPatternInList_AccessorFiles(t *testing.T) {
 	}
 }
 
-func TestFindFilesWithVersionsByPatternInList_EmptyList(t *testing.T) {
+func TestMatchVersionedFile_EmptyList(t *testing.T) {
 	dir := t.TempDir()
 
 	// Test with empty list
-	_, _, ok, err := FindFilesWithVersionsByPatternInList("*-accounts.0-1.kv", []string{}, dir)
+	_, _, ok, err := MatchVersionedFile("*-accounts.0-1.kv", []string{}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,12 +335,12 @@ func TestFindFilesWithVersionsByPatternInList_EmptyList(t *testing.T) {
 	}
 }
 
-func TestFindFilesWithVersionsByPatternInList_InvalidPattern(t *testing.T) {
+func TestMatchVersionedFile_InvalidPattern(t *testing.T) {
 	dir := t.TempDir()
 	dirEntries := []string{"v1.0-test.kv"}
 
 	// Invalid pattern with unmatched bracket
-	_, _, _, err := FindFilesWithVersionsByPatternInList("[invalid", dirEntries, dir)
+	_, _, _, err := MatchVersionedFile("[invalid", dirEntries, dir)
 	if err == nil {
 		t.Fatal("expected error for invalid pattern")
 	}
