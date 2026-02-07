@@ -108,6 +108,7 @@ type Header struct {
 	RequestsHash        *common.Hash `json:"requestsHash"`        // EIP-7685
 	BlockAccessListHash *common.Hash `json:"blockAccessListHash"` // EIP-7928
 
+	SlotNumber *uint64 `json:"slotNumber"` // EIP-7843
 	// by default all headers are immutable
 	// but assembling/mining may use `NewEmptyHeaderForAssembling` to create temporary mutable Header object
 	// then pass it to `block.WithSeal(header)` - to produce new block with immutable `Header`

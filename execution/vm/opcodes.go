@@ -108,6 +108,7 @@ const (
 	BASEFEE     OpCode = 0x48
 	BLOBHASH    OpCode = 0x49
 	BLOBBASEFEE OpCode = 0x4a
+	SLOTNUM     OpCode = 0x4b
 )
 
 // 0x50 range - 'storage' and execution.
@@ -294,6 +295,7 @@ var opCodeToString = map[OpCode]string{
 	BASEFEE:     "BASEFEE",
 	BLOBHASH:    "BLOBHASH",
 	BLOBBASEFEE: "BLOBBASEFEE",
+	SLOTNUM:     "SLOTNUM",
 
 	// 0x50 range - 'storage' and execution.
 	POP: "POP",
@@ -456,6 +458,7 @@ var stringToOp = map[string]OpCode{
 	"BASEFEE":        BASEFEE,
 	"BLOBHASH":       BLOBHASH,
 	"BLOBBASEFEE":    BLOBBASEFEE,
+	"SLOTNUM":        SLOTNUM,
 	"DELEGATECALL":   DELEGATECALL,
 	"STATICCALL":     STATICCALL,
 	"CODESIZE":       CODESIZE,
