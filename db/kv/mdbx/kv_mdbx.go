@@ -1032,6 +1032,9 @@ func (tx *MdbxTx) Commit() error {
 			tx.db.opts.log.Error("failed to record mdbx summaries", "err", err)
 		}
 
+		kv.MDBXGauges.GCMaxRetainedPage.WithLabelValues(string(dbLabel)).SetUint64(uint64(latency.GCDetails.MaxRetainedPage))
+		kv.MDBXGauges.GCMaxReaderLag.WithLabelValues(string(dbLabel)).SetUint64(uint64(latency.GCDetails.MaxReaderLag))
+
 		//kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
 		//kv.DbGcWorkPnlMergeVolume.Set(uint64(latency.GCDetails.WorkPnlMergeVolume))
 		//kv.DbGcWorkPnlMergeCalls.Set(uint64(latency.GCDetails.WorkPnlMergeCalls))
