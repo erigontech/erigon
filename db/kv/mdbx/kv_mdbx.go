@@ -1034,6 +1034,9 @@ func (tx *MdbxTx) Commit() error {
 
 		kv.MDBXGauges.GCMaxRetainedPages.WithLabelValues(string(dbLabel)).SetUint64(uint64(latency.GCDetails.MaxRetainedPages))
 		kv.MDBXGauges.GCMaxReaderLag.WithLabelValues(string(dbLabel)).SetUint64(uint64(latency.GCDetails.MaxReaderLag))
+		if latency.GCDetails.MaxRetainedPages > 0 || latency.GCDetails.MaxReaderLag > 0 {
+			log.Warn("[dbg] latency.GCDetails", "MaxRetainedPages", latency.GCDetails.MaxRetainedPages, "MaxRetainedPages", latency.GCDetails.MaxRetainedPages)
+		}
 
 		//kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
 		//kv.DbGcWorkPnlMergeVolume.Set(uint64(latency.GCDetails.WorkPnlMergeVolume))
