@@ -273,7 +273,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 
 	{
 		domainProgress := rwTx.Debug().DomainProgress(kv.CommitmentDomain)
-		ok, err := br.TxnumReader().IsMaxTxNumIsPopulated(ctx, rwTx, domainProgress)
+		ok, err := br.TxnumReader().IsMaxTxNumPopulated(ctx, rwTx, domainProgress)
 		if err != nil {
 			return err
 		}
