@@ -466,25 +466,19 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			return false, err
 		}
 
-		var logIndexAfterTx uint32
-		var cumGasUsed uint64
-		if !txTask.IsBlockEnd() {
-			if txTask.TxIndex >= 0 {
-				receipt := blockReceipts[txTask.TxIndex-startTxIndex]
-				if receipt != nil {
-					logIndexAfterTx = receipt.FirstLogIndexWithinBlock + uint32(len(result.Logs))
-					cumGasUsed = receipt.CumulativeGasUsed
-				}
-			}
-		} else {
+		var applyReceipt *types.Receipt
+		if txTask.TxIndex >= 0 && txTask.TxIndex-startTxIndex < len(blockReceipts) {
+			applyReceipt = blockReceipts[txTask.TxIndex-startTxIndex]
+		}
+
+		if txTask.IsBlockEnd() {
 			if se.cfg.chainConfig.Bor != nil && txTask.TxIndex >= 1 {
-				var lastReceipt *types.Receipt
 				// get last receipt and store the last log index + 1
 				if len(blockReceipts) >= txTask.TxIndex-startTxIndex {
-					lastReceipt = blockReceipts[txTask.TxIndex-startTxIndex-1]
+					applyReceipt = blockReceipts[txTask.TxIndex-startTxIndex-1]
 				}
 
-				if lastReceipt == nil {
+				if applyReceipt == nil {
 					if startTxIndex > 0 {
 						// if we're in the startup block and the last tx has been skipped we'll
 						// need to run it as a historic tx to recover its logs
@@ -503,7 +497,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 								return false, err
 							}
 						}
-						lastReceipt, err = result.CreateReceipt(txTask.TxIndex-1,
+						applyReceipt, err = result.CreateReceipt(txTask.TxIndex-1,
 							cumulativeGasUsed+result.ExecutionResult.ReceiptGasUsed, logIndexAfterTx)
 						if err != nil {
 							return false, err
@@ -512,30 +506,11 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 						return false, fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNumber())
 					}
 				}
-				if len(lastReceipt.Logs) > 0 {
-					firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
-					logIndexAfterTx = uint32(firstIndex) + uint32(len(result.Logs))
-					cumGasUsed = lastReceipt.CumulativeGasUsed
-				}
 			}
-		}
-
-		if !txTask.HistoryExecution {
-			if rawtemporaldb.ReceiptStoresFirstLogIdx(se.applyTx) {
-				logIndexAfterTx -= uint32(len(result.Logs))
-			}
-			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx), logIndexAfterTx, cumGasUsed, se.blobGasUsed, txTask.TxNum); err != nil {
-				return false, err
-			}
-		}
-
-		var applyReceipt *types.Receipt
-		if txTask.TxIndex >= 0 && txTask.TxIndex-startTxIndex < len(blockReceipts) {
-			applyReceipt = blockReceipts[txTask.TxIndex-startTxIndex]
 		}
 
 		if err := se.rs.ApplyTxState(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, state.StateUpdates{},
-			txTask.BalanceIncreaseSet, applyReceipt, result.Logs, result.TraceFroms, result.TraceTos,
+			txTask.BalanceIncreaseSet, applyReceipt, se.blobGasUsed, result.Logs, result.TraceFroms, result.TraceTos,
 			se.cfg.chainConfig, txTask.Rules(), txTask.HistoryExecution); err != nil {
 			return false, err
 		}

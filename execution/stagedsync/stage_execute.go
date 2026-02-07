@@ -280,7 +280,7 @@ func unwindExec3State(ctx context.Context,
 	if changeset != nil {
 		accountDiffs := changeset[kv.AccountsDomain]
 		for _, entry := range accountDiffs {
-			if dbg.TraceDomain(uint16(kv.AccountsDomain)) {
+			if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 				address := entry.Key[:len(entry.Key)-8]
 				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
 				prevStep := ^binary.BigEndian.Uint64(entry.PrevStepBytes)
