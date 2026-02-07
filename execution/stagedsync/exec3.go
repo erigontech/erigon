@@ -241,16 +241,16 @@ func ExecV3(ctx context.Context,
 	doms.EnableWarmupCache(isChainTip)
 	log.Debug("Warmup Cache", "enabled", isChainTip)
 	postValidator := newBlockPostExecutionValidator()
-	doms.SetDeferredHooker(nil)
+	doms.SetDeferCommitmentUpdates(false)
 	if isChainTip {
 		postValidator = newParallelBlockPostExecutionValidator()
 		// Only defer branch updates in fork validation mode (engine API flow)
-		// where MergeExtendingFork will flush the hooks
+		// where MergeExtendingFork will flush the pending updates
 		if isForkValidation && !didReorg {
-			doms.SetDeferredHooker(doms)
+			doms.SetDeferCommitmentUpdates(true)
 		}
 	}
-	defer doms.SetDeferredHooker(nil)
+	defer doms.SetDeferCommitmentUpdates(false)
 	if parallel {
 		pe := &parallelExecutor{
 			txExecutor: txExecutor{

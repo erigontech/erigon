@@ -146,7 +146,9 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 	defer fv.lock.Unlock()
 	start := time.Now()
 	if fv.sharedDom != nil {
-		fv.sharedDom.FlushHooks(ctx, tx)
+		if err := fv.sharedDom.FlushPendingUpdates(ctx, tx); err != nil {
+			return err
+		}
 		err := sd.Merge(fv.sharedDom)
 		if err != nil {
 			return err

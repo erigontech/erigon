@@ -187,7 +187,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 
 	defer UpdateForkChoiceDuration(time.Now())
 	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
-	defer e.currentContext.ResetHooks()
+	defer e.currentContext.ResetPendingUpdates()
 
 	var validationError string
 	type canonicalEntry struct {

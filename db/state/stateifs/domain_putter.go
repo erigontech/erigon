@@ -17,22 +17,14 @@
 package stateifs
 
 import (
-	"context"
-
 	"github.com/erigontech/erigon/db/kv"
 )
 
 // DomainPutter is an interface for putting data into domains.
-// Used by flush hooks to write commitment data.
+// Used by commitment to write branch data.
 // SharedDomains implements this interface directly.
 type DomainPutter interface {
 	DomainPut(domain kv.Domain, tx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error
-}
-
-// DeferredHooker is an interface for adding deferred flush hooks.
-// SharedDomains implements this interface.
-type DeferredHooker interface {
-	AddFlushHook(hook func(context.Context, kv.TemporalTx, DomainPutter) error)
 }
 
 // CommitmentWrite represents a commitment domain write that needs to be added to changesets.

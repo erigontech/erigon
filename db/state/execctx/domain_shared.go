@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -33,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/db/state/stateifs"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -73,12 +73,6 @@ type accHolder interface {
 	SetChangesetAccumulator(acc *changeset.StateChangeSet)
 }
 
-// flushHook pairs a flush callback with the block it was created for.
-type flushHook struct {
-	blockNum uint64
-	fn       func(context.Context, kv.TemporalTx, stateifs.DomainPutter) error
-}
-
 func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.Logger) bool {
 	doms, err := NewSharedDomains(ctx, tx, logger)
 	if err != nil {
@@ -103,10 +97,6 @@ type SharedDomains struct {
 	mem               kv.TemporalMemBatch
 	metrics           changeset.DomainMetrics
 
-	// flushHooks are callbacks to be executed when FlushHooks is called.
-	// Used by commitment to defer branch updates until a transaction commit.
-	// Each hook is paired with the blockNum it was created for.
-	flushHooks []flushHook
 	// stateCache is an optional cache for state data (accounts, storage, code)
 	stateCache *cache.StateCache
 }
@@ -174,75 +164,67 @@ func (sd *SharedDomains) Merge(other *SharedDomains) error {
 		return err
 	}
 
-	// Transfer flush hooks from other to sd (other's mem is invalidated after merge)
-	sd.flushHooks = append(sd.flushHooks, other.flushHooks...)
-	other.flushHooks = other.flushHooks[:0]
+	// Transfer pending commitment updates from other to sd (other's mem is invalidated after merge)
+	sd.sdCtx.AddPendingCommitmentUpdates(other.sdCtx.TakePendingCommitmentUpdates())
 
 	sd.txNum = other.txNum
 	sd.blockNum.Store(other.blockNum.Load())
 	return nil
 }
 
-// AddFlushHook adds a callback to be executed when FlushHooks is called.
-// This is used by commitment to defer branch updates until a transaction commit.
-// Implements commitment.DeferredHooker interface.
-func (sd *SharedDomains) AddFlushHook(hook func(context.Context, kv.TemporalTx, stateifs.DomainPutter) error) {
-	sd.flushHooks = append(sd.flushHooks, flushHook{
-		blockNum: sd.blockNum.Load(),
-		fn:       hook,
-	})
-}
-
-func (sd *SharedDomains) ResetHooks() {
-	if sd != nil {
-		sd.flushHooks = sd.flushHooks[:0]
+// ResetPendingUpdates clears all pending commitment updates.
+func (sd *SharedDomains) ResetPendingUpdates() {
+	if sd != nil && sd.sdCtx != nil {
+		sd.sdCtx.ResetPendingUpdates()
 	}
 }
 
-// FlushHooks executes all registered flush hooks and clears them.
-// Used during transaction commit to apply deferred commitment updates.
-// For each hook, it sets the corresponding block's changeset as the accumulator
+// FlushPendingUpdates applies all pending deferred commitment updates.
+// For each update, it sets the corresponding block's changeset as the accumulator
 // so writes go directly to the correct changeset.
-func (sd *SharedDomains) FlushHooks(ctx context.Context, tx kv.TemporalTx) error {
-	if len(sd.flushHooks) == 0 {
+func (sd *SharedDomains) FlushPendingUpdates(ctx context.Context, tx kv.TemporalTx) error {
+	updates := sd.sdCtx.TakePendingCommitmentUpdates()
+	if len(updates) == 0 {
 		return nil
 	}
 
 	switcher, ok := sd.mem.(changesetSwitcher)
-	if !ok {
-		// Fallback: just run hooks without changeset routing
-		for _, hook := range sd.flushHooks {
-			if err := hook.fn(ctx, tx, sd); err != nil {
-				return err
-			}
-		}
-		sd.flushHooks = sd.flushHooks[:0]
-		return nil
-	}
 
-	for _, hook := range sd.flushHooks {
-		// Set the block's changeset as accumulator so writes go there
-		blockHash, cs := switcher.GetChangesetByBlockNum(hook.blockNum)
-		if cs == nil {
-			// No changeset for this block - run hook without changeset routing
-			if err := hook.fn(ctx, tx, sd); err != nil {
+	for i := range updates {
+		putBranch := func(prefix, data, prevData []byte, prevStep kv.Step) error {
+			return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, updates[i].TxNum, prevData, prevStep)
+		}
+
+		if !ok {
+			// Fallback: apply without changeset routing
+			if _, err := commitment.ApplyDeferredBranchUpdates(updates[i].Deferred, runtime.NumCPU(), putBranch); err != nil {
 				return err
 			}
+			updates[i].Clear()
 			continue
 		}
 
-		switcher.SetChangesetAccumulator(cs)
+		blockHash, cs := switcher.GetChangesetByBlockNum(updates[i].BlockNum)
+		if cs != nil {
+			switcher.SetChangesetAccumulator(cs)
+		}
 
-		if err := hook.fn(ctx, tx, sd); err != nil {
-			switcher.SetChangesetAccumulator(nil)
+		if _, err := commitment.ApplyDeferredBranchUpdates(updates[i].Deferred, runtime.NumCPU(), putBranch); err != nil {
+			if cs != nil {
+				switcher.SetChangesetAccumulator(nil)
+			}
 			return err
 		}
 
-		switcher.SavePastChangesetAccumulator(blockHash, hook.blockNum, cs)
+		if cs != nil {
+			switcher.SavePastChangesetAccumulator(blockHash, updates[i].BlockNum, cs)
+		}
+		updates[i].Clear()
 	}
 
-	switcher.SetChangesetAccumulator(nil)
-	sd.flushHooks = sd.flushHooks[:0]
+	if ok {
+		switcher.SetChangesetAccumulator(nil)
+	}
 	return nil
 }
 
@@ -389,7 +371,7 @@ func (sd *SharedDomains) Close() {
 
 	sd.SetBlockNum(0)
 	sd.SetTxNum(0)
-	sd.ResetHooks()
+	sd.ResetPendingUpdates()
 
 	//sd.walLock.Lock()
 	//defer sd.walLock.Unlock()
@@ -695,11 +677,11 @@ func (sd *SharedDomains) EnableWarmupCache(enable bool) {
 	sd.sdCtx.EnableWarmupCache(enable)
 }
 
-// SetDeferredHooker sets the deferred hooker for adding flush hooks.
-// When set (typically to the SharedDomains itself), commitment branch updates
-// are deferred and added as flush hooks to be executed during transaction commit.
-func (sd *SharedDomains) SetDeferredHooker(hooker commitment.DeferredHooker) {
-	sd.sdCtx.SetDeferredHooker(hooker)
+// SetDeferCommitmentUpdates enables or disables deferred commitment updates.
+// When enabled, commitment branch updates are stored in the commitment context
+// instead of being applied inline, and must be flushed later via FlushPendingUpdates.
+func (sd *SharedDomains) SetDeferCommitmentUpdates(defer_ bool) {
+	sd.sdCtx.SetDeferCommitmentUpdates(defer_)
 }
 
 // TouchChangedKeysFromHistory touches the changed keys in the commitment trie by reading the historical updates.

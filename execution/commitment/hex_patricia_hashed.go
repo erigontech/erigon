@@ -57,12 +57,8 @@ type keccakState interface {
 }
 
 // DomainPutter is an interface for putting data into domains.
-// Used by flush hooks to write commitment data.
+// Used by commitment to write branch data.
 type DomainPutter = stateifs.DomainPutter
-
-// DeferredHooker is an interface for adding deferred flush hooks.
-// SharedDomains implements this interface.
-type DeferredHooker = stateifs.DeferredHooker
 
 // CommitmentWrite represents a commitment domain write that needs to be added to changesets.
 type CommitmentWrite = stateifs.CommitmentWrite
@@ -111,9 +107,10 @@ type HexPatriciaHashed struct {
 	cache             *WarmupCache
 	enableWarmupCache bool // if true, enables warmup cache during Process (false by default)
 
-	// When deferredHooker is set, ApplyDeferredUpdates is added as a flush hook
-	// instead of being called inline.
-	deferredHooker DeferredHooker
+	// leaveDeferredForCaller when true, Process() leaves deferred updates on the branchEncoder
+	// for the caller to handle via TakeDeferredUpdates(). When false (default), Process()
+	// applies deferred updates inline.
+	leaveDeferredForCaller bool
 
 	//processing metrics
 	metrics       *Metrics
@@ -1699,7 +1696,6 @@ func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]by
 			return nil, 0, err
 		}
 		be.ClearDeferred()
-		be.flushedMidProcess = true
 	}
 	return hph.branchFromCacheOrDB(prefix)
 }
@@ -2678,30 +2674,11 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		warmuper.DrainPending()
 	}
 
-	if hph.branchEncoder.DeferUpdatesEnabled() {
-		if hph.deferredHooker != nil && !hph.branchEncoder.FlushedMidProcess() {
-			// Capture references for deferred execution
-			be := hph.branchEncoder
-			txNum := hph.ctx.TxNum()
-			hph.deferredHooker.AddFlushHook(func(_ context.Context, tx kv.TemporalTx, dp DomainPutter) error {
-				putBranch := func(prefix, data, prevData []byte, prevStep kv.Step) error {
-					return dp.DomainPut(kv.CommitmentDomain, tx, prefix, data, txNum, prevData, prevStep)
-				}
-				if err := be.ApplyDeferredUpdates(runtime.NumCPU(), putBranch); err != nil {
-					return fmt.Errorf("apply deferred updates: %w", err)
-				}
-				be.ClearDeferred()
-				return nil
-			})
-		} else {
-			// Apply deferred branch updates inline. Also used when a mid-process flush
-			// already wrote directly to DB — remaining updates must go inline too.
-			if err = hph.branchEncoder.ApplyDeferredUpdates(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
-				return nil, fmt.Errorf("apply deferred updates: %w", err)
-			}
-			hph.branchEncoder.ClearDeferred()
+	if hph.branchEncoder.DeferUpdatesEnabled() && !hph.leaveDeferredForCaller {
+		if err = hph.branchEncoder.ApplyDeferredUpdates(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
+			return nil, fmt.Errorf("apply deferred updates: %w", err)
 		}
-		hph.branchEncoder.ResetFlushedMidProcess()
+		hph.branchEncoder.ClearDeferred()
 	}
 
 	if dbg.KVReadLevelledMetrics {
@@ -2766,10 +2743,36 @@ func (hph *HexPatriciaHashed) SetDeferBranchUpdates(defer_ bool) {
 	hph.branchEncoder.SetDeferUpdates(defer_)
 }
 
-// SetDeferredHooker sets the deferred hooker for adding flush hooks.
-// When set, ApplyDeferredUpdates is added as a flush hook instead of running inline.
-func (hph *HexPatriciaHashed) SetDeferredHooker(hooker DeferredHooker) {
-	hph.deferredHooker = hooker
+// TakeDeferredUpdates returns the current deferred updates from the branch encoder
+// and gives it a fresh empty slice. Caller takes ownership of the returned slice.
+func (hph *HexPatriciaHashed) TakeDeferredUpdates() []*DeferredBranchUpdate {
+	deferred := hph.branchEncoder.deferred
+	hph.branchEncoder.deferred = make([]*DeferredBranchUpdate, 0, 64)
+	if hph.branchEncoder.pendingPrefixes != nil {
+		hph.branchEncoder.pendingPrefixes.Clear()
+	}
+	ResetDeferredUpdateMetrics()
+	return deferred
+}
+
+// HasPendingDeferredUpdates returns true if the branch encoder has non-empty deferred updates.
+func (hph *HexPatriciaHashed) HasPendingDeferredUpdates() bool {
+	return len(hph.branchEncoder.deferred) > 0
+}
+
+// ApplyAndClearInlineDeferredUpdates applies deferred updates inline via ctx.PutBranch and clears them.
+func (hph *HexPatriciaHashed) ApplyAndClearInlineDeferredUpdates() error {
+	if err := hph.branchEncoder.ApplyDeferredUpdates(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
+		return fmt.Errorf("apply deferred updates: %w", err)
+	}
+	hph.branchEncoder.ClearDeferred()
+	return nil
+}
+
+// SetLeaveDeferredForCaller controls whether Process() leaves deferred updates on the
+// branchEncoder for the caller to handle (true) or applies them inline (false, default).
+func (hph *HexPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
+	hph.leaveDeferredForCaller = leave
 }
 
 // Reset allows HexPatriciaHashed instance to be reused for the new commitment calculation

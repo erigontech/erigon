@@ -316,6 +316,22 @@ func putDeferredUpdate(upd *DeferredBranchUpdate) {
 	}
 }
 
+// PendingCommitmentUpdate stores deferred branch updates for a specific block.
+// Used by the commitment context to defer branch update application until a later flush.
+type PendingCommitmentUpdate struct {
+	BlockNum uint64
+	TxNum    uint64
+	Deferred []*DeferredBranchUpdate
+}
+
+// Clear returns all deferred updates to the pool and nils the slice.
+func (p *PendingCommitmentUpdate) Clear() {
+	for _, upd := range p.Deferred {
+		putDeferredUpdate(upd)
+	}
+	p.Deferred = nil
+}
+
 type BranchEncoder struct {
 	buf       *bytes.Buffer
 	bitmapBuf [binary.MaxVarintLen64]byte
@@ -326,8 +342,7 @@ type BranchEncoder struct {
 	deferUpdates      bool
 	deferred          []*DeferredBranchUpdate
 	pendingPrefixes   *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
-	flushedMidProcess bool                                // set when a mid-process flush happens (pending prefix conflict or batch overflow)
-	cache             *WarmupCache
+	cache *WarmupCache
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -354,18 +369,6 @@ func (be *BranchEncoder) SetDeferUpdates(defer_ bool) {
 // DeferUpdatesEnabled returns whether deferred update collection is enabled.
 func (be *BranchEncoder) DeferUpdatesEnabled() bool {
 	return be.deferUpdates
-}
-
-// FlushedMidProcess returns true if a mid-process flush occurred (due to pending prefix
-// conflict or batch overflow). When true, callers should not defer remaining updates
-// to a hook since direct DB writes have already been made.
-func (be *BranchEncoder) FlushedMidProcess() bool {
-	return be.flushedMidProcess
-}
-
-// ResetFlushedMidProcess clears the mid-process flush flag.
-func (be *BranchEncoder) ResetFlushedMidProcess() {
-	be.flushedMidProcess = false
 }
 
 // HasPendingPrefix returns true if the given prefix has a pending deferred update.
@@ -421,12 +424,29 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error,
 ) error {
+	written, err := ApplyDeferredBranchUpdates(be.deferred, numWorkers, putBranch)
+	if err != nil {
+		return err
+	}
+	if be.metrics != nil {
+		be.metrics.updateBranch.Add(uint64(written))
+	}
+	return nil
+}
+
+// ApplyDeferredBranchUpdates encodes deferred branch updates concurrently and writes them.
+// Returns the number of updates successfully written.
+func ApplyDeferredBranchUpdates(
+	deferred []*DeferredBranchUpdate,
+	numWorkers int,
+	putBranch func(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error,
+) (int, error) {
 	start := time.Now()
 	defer func() {
-		log.Debug("ApplyDeferredUpdates completed", "updates", len(be.deferred), "took", time.Since(start))
+		log.Debug("ApplyDeferredBranchUpdates completed", "updates", len(deferred), "took", time.Since(start))
 	}()
-	if len(be.deferred) == 0 {
-		return nil
+	if len(deferred) == 0 {
+		return 0, nil
 	}
 	if numWorkers <= 1 {
 		numWorkers = 1
@@ -464,7 +484,7 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 
 	// Send work in background
 	go func() {
-		for _, upd := range be.deferred {
+		for _, upd := range deferred {
 			workCh <- upd
 		}
 		close(workCh)
@@ -494,15 +514,7 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 		written++
 	}
 
-	if firstErr != nil {
-		return firstErr
-	}
-
-	if be.metrics != nil {
-		be.metrics.updateBranch.Add(uint64(written))
-	}
-
-	return nil
+	return written, firstErr
 }
 
 func (be *BranchEncoder) setMetrics(metrics *Metrics) {
@@ -592,7 +604,6 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 			return err
 		}
 		be.ClearDeferred()
-		be.flushedMidProcess = true
 	}
 
 	// try to get previous data from cache
