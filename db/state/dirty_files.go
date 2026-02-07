@@ -703,21 +703,19 @@ func checkForVisibility(item *FilesItem, l statecfg.Accessors, trace bool) (canB
 		if trace {
 			log.Warn("[dbg] checkForVisibility: BTindex not opened", "f", item.decompressor.FileName())
 		}
-		//panic(fmt.Errorf("btindex nil: %s", item.decompressor.FileName()))
 		return false
 	}
 	if l.Has(statecfg.AccessorHashMap) && item.index == nil {
 		if trace {
 			log.Warn("[dbg] checkForVisibility: RecSplit not opened", "f", item.decompressor.FileName())
 		}
-		//panic(fmt.Errorf("index nil: %s", item.decompressor.FileName()))
+	
 		return false
 	}
 	if l.Has(statecfg.AccessorExistence) && item.existence == nil {
 		if trace {
 			log.Warn("[dbg] checkForVisibility: Existence not opened", "f", item.decompressor.FileName())
 		}
-		//panic(fmt.Errorf("existence nil: %s", item.decompressor.FileName()))
 		return false
 	}
 	return true
