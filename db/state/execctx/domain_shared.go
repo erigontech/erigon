@@ -230,7 +230,7 @@ func (sd *SharedDomains) FlushHooks(ctx context.Context, tx kv.TemporalTx) error
 		blockHash, cs := switcher.GetChangesetByBlockNum(hook.blockNum)
 		if cs == nil {
 			// No changeset for this block - run hook without changeset routing
-			if err := hook.fn(ctx, dp); err != nil {
+			if err := hook.fn(ctx, sd.NewDomainPutter(tx)); err != nil {
 				return err
 			}
 			continue
@@ -238,7 +238,7 @@ func (sd *SharedDomains) FlushHooks(ctx context.Context, tx kv.TemporalTx) error
 
 		switcher.SetChangesetAccumulator(cs)
 
-		if err := hook.fn(ctx, dp); err != nil {
+		if err := hook.fn(ctx, sd.NewDomainPutter(tx)); err != nil {
 			switcher.SetChangesetAccumulator(nil)
 			return err
 		}
