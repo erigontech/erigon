@@ -1,18 +1,24 @@
 package state
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
+	"sort"
 	"strconv"
 
 	"github.com/heimdalr/dag"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -57,6 +63,26 @@ const (
 )
 
 type ReadSet map[accounts.Address]map[AccountKey]*VersionedRead
+
+func (a ReadSet) Merge(b ReadSet) ReadSet {
+	if a == nil && b == nil {
+		return nil
+	}
+	out := make(ReadSet)
+	if a != nil {
+		a.Scan(func(vr *VersionedRead) bool {
+			out.Set(*vr)
+			return true
+		})
+	}
+	if b != nil {
+		b.Scan(func(vr *VersionedRead) bool {
+			out.Set(*vr)
+			return true
+		})
+	}
+	return out
+}
 
 func (rs ReadSet) Set(v VersionedRead) {
 	reads, ok := rs[v.Address]
@@ -144,6 +170,22 @@ func (s WriteSet) Scan(yield func(input *VersionedWrite) bool) {
 			}
 		}
 	}
+}
+
+type AccessedAddresses map[accounts.Address]struct{}
+
+func (aa AccessedAddresses) Merge(other map[accounts.Address]struct{}) map[accounts.Address]struct{} {
+	if len(other) == 0 {
+		return aa
+	}
+	dst := make(map[accounts.Address]struct{}, len(aa)+len(other))
+	for addr := range aa {
+		dst[addr] = struct{}{}
+	}
+	for addr := range other {
+		dst[addr] = struct{}{}
+	}
+	return dst
 }
 
 type VersionedRead struct {
@@ -365,6 +407,28 @@ func (vr versionedStateReader) ReadAccountIncarnation(address accounts.Address) 
 }
 
 type VersionedWrites []*VersionedWrite
+
+func (prev VersionedWrites) Merge(next VersionedWrites) VersionedWrites {
+	if len(prev) == 0 {
+		return next
+	}
+	if len(next) == 0 {
+		return prev
+	}
+	merged := WriteSet{}
+	for _, v := range prev {
+		merged.Set(*v)
+	}
+	for _, v := range next {
+		merged.Set(*v)
+	}
+	out := make(VersionedWrites, 0, merged.Len())
+	merged.Scan(func(v *VersionedWrite) bool {
+		out = append(out, v)
+		return true
+	})
+	return out
+}
 
 // hasNewWrite: returns true if the current set has a new write compared to the input
 func (writes VersionedWrites) HasNewWrite(cmpSet []*VersionedWrite) bool {
@@ -690,6 +754,277 @@ func (io *VersionedIO) HasWritten(txnIdx int, addr accounts.Address, path Accoun
 	}
 	_, ok := io.outputsSet[txnIdx+1][addr][AccountKey{path, key}]
 	return ok
+}
+
+func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
+	ac := make(map[accounts.Address]*accountState)
+	maxTxIndex := len(io.Inputs()) - 1
+
+	for txIndex := -1; txIndex <= maxTxIndex; txIndex++ {
+		io.ReadSet(txIndex).Scan(func(vr *VersionedRead) bool {
+			if vr.Address.IsNil() {
+				return true
+			}
+			account := ensureAccountState(ac, vr.Address)
+			account.updateRead(vr)
+			return true
+		})
+
+		for _, vw := range io.WriteSet(txIndex) {
+			if vw.Address.IsNil() {
+				continue
+			}
+			account := ensureAccountState(ac, vw.Address)
+			accessIndex := vw.Version.blockAccessIndex()
+			account.updateWrite(vw, accessIndex)
+		}
+
+		for addr := range io.AccessedAddresses(txIndex) {
+			if addr.IsNil() {
+				continue
+			}
+			ensureAccountState(ac, addr)
+		}
+	}
+
+	bal := make([]*types.AccountChanges, 0, len(ac))
+	for _, account := range ac {
+		// The system address shows up as a touched address due to a balance check in IBS
+		// during a system call, however this should not be included in the BAL.
+		if account.changes.Address == params.SystemAddress {
+			continue
+		}
+
+		account.finalize()
+		account.changes.Normalize()
+		bal = append(bal, account.changes)
+	}
+
+	sort.Slice(bal, func(i, j int) bool {
+		return bal[i].Address.Cmp(bal[j].Address) < 0
+	})
+
+	return bal
+}
+
+type accountState struct {
+	changes      *types.AccountChanges
+	balance      *fieldTracker[uint256.Int]
+	nonce        *fieldTracker[uint64]
+	code         *fieldTracker[[]byte]
+	balanceValue *uint256.Int // tracks latest seen balance
+}
+
+// check pre- and post-values, add to BAL if different
+func (a *accountState) finalize() {
+	applyToBalance(a.balance, a.changes)
+	applyToNonce(a.nonce, a.changes)
+	applyToCode(a.code, a.changes)
+}
+
+type fieldTracker[T any] struct {
+	changes changeTracker[T]
+}
+
+func (ft *fieldTracker[T]) recordWrite(idx uint16, value T, copyFn func(T) T, equal func(T, T) bool) {
+	ft.changes.recordWrite(idx, value, copyFn, equal)
+}
+
+func newBalanceTracker() *fieldTracker[uint256.Int] {
+	return &fieldTracker[uint256.Int]{}
+}
+
+func applyToBalance(bt *fieldTracker[uint256.Int], ac *types.AccountChanges) {
+	bt.changes.apply(func(idx uint16, value uint256.Int) {
+		ac.BalanceChanges = append(ac.BalanceChanges, &types.BalanceChange{
+			Index: idx,
+			Value: value,
+		})
+	})
+}
+
+func newNonceTracker() *fieldTracker[uint64] {
+	return &fieldTracker[uint64]{}
+}
+
+func applyToNonce(nt *fieldTracker[uint64], ac *types.AccountChanges) {
+	nt.changes.apply(func(idx uint16, value uint64) {
+		ac.NonceChanges = append(ac.NonceChanges, &types.NonceChange{
+			Index: idx,
+			Value: value,
+		})
+	})
+}
+
+func newCodeTracker() *fieldTracker[[]byte] {
+	return &fieldTracker[[]byte]{}
+}
+
+func applyToCode(ct *fieldTracker[[]byte], ac *types.AccountChanges) {
+	ct.changes.apply(func(idx uint16, value []byte) {
+		ac.CodeChanges = append(ac.CodeChanges, &types.CodeChange{
+			Index: idx,
+			Data:  bytes.Clone(value),
+		})
+	})
+}
+
+type changeTracker[T any] struct {
+	entries map[uint16]T
+	equal   func(T, T) bool
+}
+
+func (ct *changeTracker[T]) recordWrite(idx uint16, value T, copyFn func(T) T, equal func(T, T) bool) {
+	if ct.entries == nil {
+		ct.entries = make(map[uint16]T)
+		ct.equal = equal
+	}
+	ct.entries[idx] = copyFn(value)
+}
+
+func (ct *changeTracker[T]) apply(applyFn func(uint16, T)) {
+	if len(ct.entries) == 0 {
+		return
+	}
+
+	indices := make([]uint16, 0, len(ct.entries))
+	for idx := range ct.entries {
+		indices = append(indices, idx)
+	}
+	slices.Sort(indices)
+
+	for _, idx := range indices {
+		applyFn(idx, ct.entries[idx])
+	}
+}
+
+func (a *accountState) setBalanceValue(v uint256.Int) {
+	if a.balanceValue == nil {
+		a.balanceValue = &uint256.Int{}
+	}
+	*a.balanceValue = v
+}
+
+func ensureAccountState(accounts map[accounts.Address]*accountState, addr accounts.Address) *accountState {
+	if account, ok := accounts[addr]; ok {
+		return account
+	}
+	account := &accountState{
+		changes: &types.AccountChanges{Address: addr},
+		balance: newBalanceTracker(),
+		nonce:   newNonceTracker(),
+		code:    newCodeTracker(),
+	}
+	accounts[addr] = account
+	return account
+}
+
+func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint16) {
+	switch vw.Path {
+	case StoragePath:
+		addStorageUpdate(account.changes, vw, accessIndex)
+	case BalancePath:
+		val, ok := vw.Val.(uint256.Int)
+		if !ok {
+			return
+		}
+		// If we haven't seen a balance and the first write is zero, treat it as a touch only.
+		if account.balanceValue == nil && val.IsZero() {
+			account.setBalanceValue(val)
+			return
+		}
+		// Skip no-op writes.
+		if account.balanceValue != nil && val.Eq(account.balanceValue) {
+			account.setBalanceValue(val)
+			return
+		}
+		account.setBalanceValue(val)
+		account.balance.recordWrite(accessIndex, val, func(v uint256.Int) uint256.Int { return v }, func(a, b uint256.Int) bool {
+			return a.Eq(&b)
+		})
+	case NoncePath:
+		if val, ok := vw.Val.(uint64); ok {
+			account.nonce.recordWrite(accessIndex, val, func(v uint64) uint64 { return v }, func(a, b uint64) bool {
+				return a == b
+			})
+		}
+	case CodePath:
+		if val, ok := vw.Val.([]byte); ok {
+			account.code.recordWrite(accessIndex, val, bytes.Clone, bytes.Equal)
+		}
+	default:
+	}
+}
+
+func (account *accountState) updateRead(vr *VersionedRead) {
+	if vr != nil {
+		switch vr.Path {
+		case StoragePath:
+			if hasStorageWrite(account.changes, vr.Key) {
+				return
+			}
+			account.changes.StorageReads = append(account.changes.StorageReads, vr.Key)
+		case BalancePath:
+			if val, ok := vr.Val.(uint256.Int); ok {
+				account.setBalanceValue(val)
+			}
+		default:
+			// Only track storage reads for BAL. Balance/nonce/code changes are tracked via writes, others are ignored
+		}
+	}
+}
+
+func addStorageUpdate(ac *types.AccountChanges, vw *VersionedWrite, txIndex uint16) {
+	val := vw.Val.(uint256.Int)
+	value := common.Hash(val.Bytes32())
+	// If we already recorded a read for this slot, drop it because a write takes precedence.
+	removeStorageRead(ac, vw.Key)
+
+	if ac.StorageChanges == nil {
+		ac.StorageChanges = []*types.SlotChanges{{
+			Slot:    vw.Key,
+			Changes: []*types.StorageChange{{Index: txIndex, Value: value}},
+		}}
+		return
+	}
+
+	for _, slotChange := range ac.StorageChanges {
+		if slotChange.Slot == vw.Key {
+			slotChange.Changes = append(slotChange.Changes, &types.StorageChange{Index: txIndex, Value: value})
+			return
+		}
+	}
+
+	ac.StorageChanges = append(ac.StorageChanges, &types.SlotChanges{
+		Slot:    vw.Key,
+		Changes: []*types.StorageChange{{Index: txIndex, Value: value}},
+	})
+}
+
+func hasStorageWrite(ac *types.AccountChanges, slot accounts.StorageKey) bool {
+	for _, sc := range ac.StorageChanges {
+		if sc != nil && sc.Slot == slot {
+			return true
+		}
+	}
+	return false
+}
+
+func removeStorageRead(ac *types.AccountChanges, slot accounts.StorageKey) {
+	if len(ac.StorageReads) == 0 {
+		return
+	}
+	out := ac.StorageReads[:0]
+	for _, s := range ac.StorageReads {
+		if s != slot {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		ac.StorageReads = nil
+	} else {
+		ac.StorageReads = out
+	}
 }
 
 type versionedReadSet struct {

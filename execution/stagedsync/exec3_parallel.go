@@ -214,9 +214,12 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						}
 
 						if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
-							bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO, pe.cfg.dirs.DataDir)
-							log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash(), "valid", bal.Validate() == nil)
 							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) {
+								bal := applyResult.TxIO.AsBlockAccessList()
+								if dbg.TraceBlockAccessLists && dbg.TraceBlock(applyResult.BlockNum) {
+									writeBALToFile(bal, applyResult.BlockNum, pe.cfg.dirs.DataDir)
+								}
+								log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash(), "valid", bal.Validate() == nil)
 								if lastHeader.BlockAccessListHash == nil {
 									if pe.isBlockProduction {
 										hash := bal.Hash()
@@ -239,7 +242,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							}
 						}
 
-						if err := pe.getPostValidator().Process(applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
+						if err := pe.getPostValidator().Process(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
 							lastHeader, pe.isBlockProduction, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
 							dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
 							return fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
@@ -920,24 +923,24 @@ func (pe *parallelExecutor) wait(ctx context.Context) error {
 type applyResult any
 
 type blockResult struct {
-	BlockNum     uint64
-	BlockTime    uint64
-	BlockHash    common.Hash
-	ParentHash   common.Hash
-	StateRoot    common.Hash
-	Err          error
-	BlockGasUsed uint64
-	BlobGasUsed  uint64
-	lastTxNum    uint64
-	complete     bool
-	isPartial    bool
-	ApplyCount   int
-	TxIO         *state.VersionedIO
-	Receipts     types.Receipts
-	Stats        map[int]ExecutionStat
-	Deps         *state.DAG
-	AllDeps      map[int]map[int]bool
-	Exhausted    *ErrLoopExhausted
+	BlockNum    uint64
+	BlockTime   uint64
+	BlockHash   common.Hash
+	ParentHash  common.Hash
+	StateRoot   common.Hash
+	Err         error
+	GasUsed     uint64
+	BlobGasUsed uint64
+	lastTxNum   uint64
+	complete    bool
+	isPartial   bool
+	ApplyCount  int
+	TxIO        *state.VersionedIO
+	Receipts    types.Receipts
+	Stats       map[int]ExecutionStat
+	Deps        *state.DAG
+	AllDeps     map[int]map[int]bool
+	Exhausted   *ErrLoopExhausted
 }
 
 type txResult struct {
@@ -1238,10 +1241,10 @@ type blockExecutor struct {
 	// Stats for debugging purposes
 	cntExec, cntSpecExec, cntSuccess, cntAbort, cntTotalValidations, cntValidationFail, cntFinalized int
 
-	// cumulative gas for this block
-	blockGasUsed uint64
-	blobGasUsed  uint64
-	gasPool      *protocol.GasPool
+	// cummulative gas for this block
+	gasUsed     uint64
+	blobGasUsed uint64
+	gasPool     *protocol.GasPool
 
 	execFailed, execAborted []int
 
@@ -1501,7 +1504,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				// Merge any additional reads/writes produced during finalize (fee calc, post apply, etc)
 				if addReads != nil {
-					mergedReads := mergeReadSets(be.blockIO.ReadSet(txVersion.TxIndex), addReads)
+					mergedReads := be.blockIO.ReadSet(txVersion.TxIndex).Merge(addReads)
 					be.blockIO.RecordReads(txVersion, mergedReads)
 				}
 				if len(addWrites) > 0 {
@@ -1625,7 +1628,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			txTask.ParentHash(),
 			txTask.BlockRoot(),
 			nil,
-			be.blockGasUsed,
+			be.gasUsed,
 			be.blobGasUsed,
 			txTask.Version().TxNum,
 			true,
@@ -1656,7 +1659,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		txTask.ParentHash(),
 		txTask.BlockRoot(),
 		nil,
-		be.blockGasUsed,
+		be.gasUsed,
 		be.blobGasUsed,
 		lastTxNum,
 		false,
@@ -1728,59 +1731,4 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 				statsMutex: &be.Mutex})
 		}
 	}
-}
-
-func mergeReadSets(a state.ReadSet, b state.ReadSet) state.ReadSet {
-	if a == nil && b == nil {
-		return nil
-	}
-	out := make(state.ReadSet)
-	if a != nil {
-		a.Scan(func(vr *state.VersionedRead) bool {
-			out.Set(*vr)
-			return true
-		})
-	}
-	if b != nil {
-		b.Scan(func(vr *state.VersionedRead) bool {
-			out.Set(*vr)
-			return true
-		})
-	}
-	return out
-}
-
-func mergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrites {
-	if len(prev) == 0 {
-		return next
-	}
-	if len(next) == 0 {
-		return prev
-	}
-	merged := state.WriteSet{}
-	for _, v := range prev {
-		merged.Set(*v)
-	}
-	for _, v := range next {
-		merged.Set(*v)
-	}
-	out := make(state.VersionedWrites, 0, merged.Len())
-	merged.Scan(func(v *state.VersionedWrite) bool {
-		out = append(out, v)
-		return true
-	})
-	return out
-}
-
-func mergeAccessedAddresses(dst, src map[accounts.Address]struct{}) map[accounts.Address]struct{} {
-	if len(src) == 0 {
-		return dst
-	}
-	if dst == nil {
-		dst = make(map[accounts.Address]struct{}, len(src))
-	}
-	for addr := range src {
-		dst[addr] = struct{}{}
-	}
-	return dst
 }

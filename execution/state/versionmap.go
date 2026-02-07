@@ -396,6 +396,10 @@ type Version struct {
 
 var UnknownVersion = Version{TxIndex: UnknownDep, Incarnation: -1}
 
+func (v Version) blockAccessIndex() uint16 {
+	return uint16(v.TxIndex + 1)
+}
+
 const (
 	MVReadResultDone       = 0
 	MVReadResultDependency = 1
