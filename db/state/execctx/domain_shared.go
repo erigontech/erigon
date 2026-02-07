@@ -208,7 +208,7 @@ func (sd *SharedDomains) ResetHooks() {
 // Used during transaction commit to apply deferred commitment updates.
 // For each hook, it sets the corresponding block's changeset as the accumulator
 // so writes go directly to the correct changeset.
-func (sd *SharedDomains) FlushHooks(ctx context.Context, dp stateifs.DomainPutter) error {
+func (sd *SharedDomains) FlushHooks(ctx context.Context, tx kv.TemporalTx) error {
 	if len(sd.flushHooks) == 0 {
 		return nil
 	}
@@ -217,7 +217,7 @@ func (sd *SharedDomains) FlushHooks(ctx context.Context, dp stateifs.DomainPutte
 	if !ok {
 		// Fallback: just run hooks without changeset routing
 		for _, hook := range sd.flushHooks {
-			if err := hook.fn(ctx, dp); err != nil {
+			if err := hook.fn(ctx, sd.NewDomainPutter(tx)); err != nil {
 				return err
 			}
 		}
