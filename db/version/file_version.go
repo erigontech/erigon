@@ -238,7 +238,7 @@ func MatchVersionedFile(filePattern string, dirEntries []string, dir string) (st
 			ver, _ := ParseVersion(name)
 			if !found || ver.Greater(bestVersion) {
 				bestVersion = ver
-				bestMatch = filepath.Join(dir, name)
+				bestMatch = name
 				found = true
 			}
 		}
@@ -247,7 +247,7 @@ func MatchVersionedFile(filePattern string, dirEntries []string, dir string) (st
 	if !found {
 		return "", Version{}, false, nil
 	}
-	return bestMatch, bestVersion, true, nil
+	return filepath.Join(dir, bestMatch), bestVersion, true, nil
 }
 
 func CheckIsThereFileWithSupportedVersion(pattern string, minSup Version) error {

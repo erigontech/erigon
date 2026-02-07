@@ -166,7 +166,6 @@ func (d *Domain) kvBtAccessorFilePathMask(fromStep, toStep kv.Step) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("*-%s.%d-%d.bt", d.FilenameBase, fromStep, toStep))
 }
 
-// Filename-only masks for use with pre-scanned directory listings
 func (d *Domain) kvFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.kv", d.FilenameBase, fromStep, toStep)
 }

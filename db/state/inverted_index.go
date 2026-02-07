@@ -153,7 +153,6 @@ func (ii *InvertedIndex) efFilePathMask(fromStep, toStep kv.Step) string {
 	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("*-%s.%d-%d.ef", ii.FilenameBase, fromStep, toStep))
 }
 
-// Filename-only masks for use with pre-scanned directory listings
 func (ii *InvertedIndex) efFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.ef", ii.FilenameBase, fromStep, toStep)
 }

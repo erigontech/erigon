@@ -330,7 +330,6 @@ func (a *Aggregator) OpenFolder() error {
 	return nil
 }
 
-// TODO: convert this func to `map` or struct instead of 4 return params
 func scanDirs(dirs datadir.Dirs) (r *ScanDirsResult, err error) {
 	r = &ScanDirsResult{}
 	r.iiFiles, err = filesFromDir(dirs.SnapIdx)
