@@ -145,7 +145,7 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 	// start the block building process
 	fcuRes, err := retryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
 		func() (*enginetypes.ForkChoiceUpdatedResponse, enginetypes.EngineStatus, error) {
-			r, err := cl.engineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoiceState, &payloadAttributes)
+			r, err := cl.engineApiClient.ForkchoiceUpdatedV4(ctx, &forkChoiceState, &payloadAttributes)
 			if err != nil {
 				return nil, "", err
 			}
@@ -197,7 +197,7 @@ func (cl *MockCl) UpdateForkChoice(ctx context.Context, p *MockClPayload) error 
 	}
 	fcuRes, err := retryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
 		func() (*enginetypes.ForkChoiceUpdatedResponse, enginetypes.EngineStatus, error) {
-			r, err := cl.engineApiClient.ForkchoiceUpdatedV3(ctx, &forkChoiceState, nil)
+			r, err := cl.engineApiClient.ForkchoiceUpdatedV4(ctx, &forkChoiceState, nil)
 			if err != nil {
 				return nil, "", err
 			}

@@ -61,7 +61,7 @@ This is specially useful on devnets where there are network constraints (e.g. fe
 			SafeBlockHash:      hash,
 			FinalizedBlockHash: hash,
 		}
-		_, err = engineApiClient.ForkchoiceUpdatedV3(ctx, fcu, nil)
+		_, err = engineApiClient.ForkchoiceUpdatedV4(ctx, fcu, nil)
 		if err != nil {
 			logger.Error("failed while sending forkChoiceUpdate", "err", err)
 			panic(err)

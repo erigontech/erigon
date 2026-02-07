@@ -31,6 +31,7 @@ var ourCapabilities = []string{
 	"engine_forkchoiceUpdatedV1",
 	"engine_forkchoiceUpdatedV2",
 	"engine_forkchoiceUpdatedV3",
+	"engine_forkchoiceUpdatedV4",
 	"engine_newPayloadV1",
 	"engine_newPayloadV2",
 	"engine_newPayloadV3",
@@ -102,7 +103,7 @@ func (e *EngineServer) GetPayloadV5(ctx context.Context, payloadID hexutil.Bytes
 	return e.getPayload(ctx, decodedPayloadId, clparams.FuluVersion)
 }
 
-// Same as [GetPayloadV5], but returning ExecutionPayloadV4
+// Same as [GetPayloadV5], but returning ExecutionPayloadV6
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadv6
 func (e *EngineServer) GetPayloadV6(ctx context.Context, payloadID hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
@@ -127,6 +128,12 @@ func (e *EngineServer) ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState 
 // Successor of [ForkchoiceUpdatedV2] post Cancun, with stricter check on params
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3
 func (e *EngineServer) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
+	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.DenebVersion)
+}
+
+// Successor of [ForkchoiceUpdatedV3] post Amsterdam, with stricter check on params
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_forkchoiceupdatedv4
+func (e *EngineServer) ForkchoiceUpdatedV4(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
 	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.DenebVersion)
 }
 
