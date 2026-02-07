@@ -339,10 +339,10 @@ type BranchEncoder struct {
 	metrics   *Metrics
 
 	// Deferred updates support
-	deferUpdates      bool
-	deferred          []*DeferredBranchUpdate
-	pendingPrefixes   *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
-	cache *WarmupCache
+	deferUpdates    bool
+	deferred        []*DeferredBranchUpdate
+	pendingPrefixes *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
+	cache           *WarmupCache
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {

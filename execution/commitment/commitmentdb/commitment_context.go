@@ -180,11 +180,11 @@ type SharedDomainsCommitmentContext struct {
 	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
 	trieWarmup    bool            // toggle for parallel trie warmup of MDBX page cache during commitment
 
-	// deferCommitmentUpdates when true, deferred branch updates are stored in pendingCommitmentUpdates
+	// deferCommitmentUpdates when true, deferred branch updates are stored as a pending update
 	// instead of being applied inline after Process(). Used during fork validation.
 	deferCommitmentUpdates bool
-	// pendingCommitmentUpdates stores deferred branch updates per block, to be flushed later.
-	pendingCommitmentUpdates []commitment.PendingCommitmentUpdate
+	// pendingUpdate stores a single deferred branch update to be flushed at the next ComputeCommitment call.
+	pendingUpdate *commitment.PendingCommitmentUpdate
 }
 
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
@@ -210,54 +210,52 @@ func (sdc *SharedDomainsCommitmentContext) SetDeferBranchUpdates(deferBranchUpda
 }
 
 // SetDeferCommitmentUpdates enables or disables deferred commitment updates.
-// When enabled, branch updates from Process() are stored in pendingCommitmentUpdates
-// instead of being applied inline. Used during fork validation where updates are
-// flushed later via FlushPendingUpdates.
+// When enabled, branch updates from Process() are stored as a pending update
+// instead of being applied inline. Used during fork validation where the update is
+// flushed later via FlushPendingUpdate.
 func (sdc *SharedDomainsCommitmentContext) SetDeferCommitmentUpdates(defer_ bool) {
 	sdc.deferCommitmentUpdates = defer_
 }
 
-// TakePendingCommitmentUpdates returns the pending updates and clears the internal slice.
-// Caller takes ownership of the returned slice.
-func (sdc *SharedDomainsCommitmentContext) TakePendingCommitmentUpdates() []commitment.PendingCommitmentUpdate {
-	updates := sdc.pendingCommitmentUpdates
-	sdc.pendingCommitmentUpdates = nil
-	return updates
+// TakePendingUpdate returns the pending update and clears the field.
+// Caller takes ownership of the returned value.
+func (sdc *SharedDomainsCommitmentContext) TakePendingUpdate() *commitment.PendingCommitmentUpdate {
+	upd := sdc.pendingUpdate
+	sdc.pendingUpdate = nil
+	return upd
 }
 
-// AddPendingCommitmentUpdates appends externally-provided pending updates (used during Merge).
-func (sdc *SharedDomainsCommitmentContext) AddPendingCommitmentUpdates(updates []commitment.PendingCommitmentUpdate) {
-	sdc.pendingCommitmentUpdates = append(sdc.pendingCommitmentUpdates, updates...)
+// SetPendingUpdate sets the pending update (used during Merge to transfer from another context).
+func (sdc *SharedDomainsCommitmentContext) SetPendingUpdate(upd *commitment.PendingCommitmentUpdate) {
+	sdc.pendingUpdate = upd
 }
 
-// ResetPendingUpdates clears all pending updates, returning deferred updates to the pool.
+// ResetPendingUpdates clears the pending update, returning deferred updates to the pool.
 func (sdc *SharedDomainsCommitmentContext) ResetPendingUpdates() {
-	for i := range sdc.pendingCommitmentUpdates {
-		sdc.pendingCommitmentUpdates[i].Clear()
+	if sdc.pendingUpdate != nil {
+		sdc.pendingUpdate.Clear()
+		sdc.pendingUpdate = nil
 	}
-	sdc.pendingCommitmentUpdates = sdc.pendingCommitmentUpdates[:0]
 }
 
-// HasPendingCommitmentUpdates returns true if there are pending updates to flush.
-func (sdc *SharedDomainsCommitmentContext) HasPendingCommitmentUpdates() bool {
-	return len(sdc.pendingCommitmentUpdates) > 0
+// HasPendingUpdate returns true if there is a pending update to flush.
+func (sdc *SharedDomainsCommitmentContext) HasPendingUpdate() bool {
+	return sdc.pendingUpdate != nil
 }
 
-// flushPendingUpdates applies all accumulated pending commitment updates using the given putter.
-// Each update is written with its original TxNum. Called at the start of ComputeCommitment
-// to ensure previously deferred updates are applied before processing new ones.
-func (sdc *SharedDomainsCommitmentContext) flushPendingUpdates(putter kv.TemporalPutDel) error {
-	for i := range sdc.pendingCommitmentUpdates {
-		upd := &sdc.pendingCommitmentUpdates[i]
-		putBranch := func(prefix, data, prevData []byte, prevStep kv.Step) error {
-			return putter.DomainPut(kv.CommitmentDomain, prefix, data, upd.TxNum, prevData, prevStep)
-		}
-		if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
-			return err
-		}
-		upd.Clear()
+// flushPendingUpdate applies the pending commitment update using the given putter.
+// The update is written with its original TxNum. Called at the start of ComputeCommitment
+// to ensure the previously deferred update is applied before processing new ones.
+func (sdc *SharedDomainsCommitmentContext) flushPendingUpdate(putter kv.TemporalPutDel) error {
+	upd := sdc.pendingUpdate
+	putBranch := func(prefix, data, prevData []byte, prevStep kv.Step) error {
+		return putter.DomainPut(kv.CommitmentDomain, prefix, data, upd.TxNum, prevData, prevStep)
 	}
-	sdc.pendingCommitmentUpdates = sdc.pendingCommitmentUpdates[:0]
+	if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
+		return err
+	}
+	upd.Clear()
+	sdc.pendingUpdate = nil
 	return nil
 }
 
@@ -407,9 +405,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}
 	}
 
-	// Flush any accumulated pending commitment updates before processing new ones.
-	if len(sdc.pendingCommitmentUpdates) > 0 {
-		if err = sdc.flushPendingUpdates(trieContext.putter); err != nil {
+	// Flush pending commitment update before processing new ones.
+	if sdc.pendingUpdate != nil {
+		if err = sdc.flushPendingUpdate(trieContext.putter); err != nil {
 			return nil, err
 		}
 	}
@@ -431,11 +429,11 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		// Store deferred updates for later flushing (fork validation path).
 		// This path is reached only when deferCommitmentUpdates is true because
 		// Process() applies inline by default.
-		sdc.pendingCommitmentUpdates = append(sdc.pendingCommitmentUpdates, commitment.PendingCommitmentUpdate{
+		sdc.pendingUpdate = &commitment.PendingCommitmentUpdate{
 			BlockNum: blockNum,
 			TxNum:    txNum,
 			Deferred: hph.TakeDeferredUpdates(),
-		})
+		}
 	}
 
 	sdc.justRestored.Store(false)

@@ -164,8 +164,10 @@ func (sd *SharedDomains) Merge(other *SharedDomains) error {
 		return err
 	}
 
-	// Transfer pending commitment updates from other to sd (other's mem is invalidated after merge)
-	sd.sdCtx.AddPendingCommitmentUpdates(other.sdCtx.TakePendingCommitmentUpdates())
+	// Transfer pending commitment update from other to sd (other's mem is invalidated after merge)
+	if otherUpd := other.sdCtx.TakePendingUpdate(); otherUpd != nil {
+		sd.sdCtx.SetPendingUpdate(otherUpd)
+	}
 
 	sd.txNum = other.txNum
 	sd.blockNum.Store(other.blockNum.Load())
@@ -179,50 +181,40 @@ func (sd *SharedDomains) ResetPendingUpdates() {
 	}
 }
 
-// FlushPendingUpdates applies all pending deferred commitment updates.
-// For each update, it sets the corresponding block's changeset as the accumulator
+// FlushPendingUpdates applies the pending deferred commitment update.
+// It sets the corresponding block's changeset as the accumulator
 // so writes go directly to the correct changeset.
 func (sd *SharedDomains) FlushPendingUpdates(ctx context.Context, tx kv.TemporalTx) error {
-	updates := sd.sdCtx.TakePendingCommitmentUpdates()
-	if len(updates) == 0 {
+	upd := sd.sdCtx.TakePendingUpdate()
+	if upd == nil {
 		return nil
+	}
+	defer upd.Clear()
+
+	putBranch := func(prefix, data, prevData []byte, prevStep kv.Step) error {
+		return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData, prevStep)
 	}
 
 	switcher, ok := sd.mem.(changesetSwitcher)
-
-	for i := range updates {
-		putBranch := func(prefix, data, prevData []byte, prevStep kv.Step) error {
-			return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, updates[i].TxNum, prevData, prevStep)
-		}
-
-		if !ok {
-			// Fallback: apply without changeset routing
-			if _, err := commitment.ApplyDeferredBranchUpdates(updates[i].Deferred, runtime.NumCPU(), putBranch); err != nil {
-				return err
-			}
-			updates[i].Clear()
-			continue
-		}
-
-		blockHash, cs := switcher.GetChangesetByBlockNum(updates[i].BlockNum)
-		if cs != nil {
-			switcher.SetChangesetAccumulator(cs)
-		}
-
-		if _, err := commitment.ApplyDeferredBranchUpdates(updates[i].Deferred, runtime.NumCPU(), putBranch); err != nil {
-			if cs != nil {
-				switcher.SetChangesetAccumulator(nil)
-			}
-			return err
-		}
-
-		if cs != nil {
-			switcher.SavePastChangesetAccumulator(blockHash, updates[i].BlockNum, cs)
-		}
-		updates[i].Clear()
+	if !ok {
+		_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch)
+		return err
 	}
 
-	if ok {
+	blockHash, cs := switcher.GetChangesetByBlockNum(upd.BlockNum)
+	if cs != nil {
+		switcher.SetChangesetAccumulator(cs)
+	}
+
+	if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
+		if cs != nil {
+			switcher.SetChangesetAccumulator(nil)
+		}
+		return err
+	}
+
+	if cs != nil {
+		switcher.SavePastChangesetAccumulator(blockHash, upd.BlockNum, cs)
 		switcher.SetChangesetAccumulator(nil)
 	}
 	return nil
