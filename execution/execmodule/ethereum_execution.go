@@ -297,14 +297,6 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 	return canonical, nil
 }
 
-func convertIDsToStages(ids []string) []stages.SyncStage {
-	var result []stages.SyncStage
-	for _, id := range ids {
-		result = append(result, stages.SyncStage(id))
-	}
-	return result
-}
-
 func (e *EthereumExecutionModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header) error {
 	currentHeader := header
 	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
