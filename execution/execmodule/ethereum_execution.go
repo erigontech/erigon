@@ -320,9 +320,9 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(sd *execctx.SharedDoma
 	}
 	// Check if you can skip unwind by comparing the current header number with the progress of all stages.
 	// If they are equal, then we are safely already at the common canonical and can skip unwind.
-	stagesIds := e.executionPipeline.StagesIdsList()
 	unwindPoint := currentHeader.Number.Uint64()
-	commonProgress, allEqual, err := stages.GetStageProgressIfAllEqual(tx, convertIDsToStages(stagesIds)...)
+	commonProgress, allEqual, err := stages.GetStageProgressIfAllEqual(tx,
+		stages.Senders, stages.Execution, stages.Headers)
 	if err != nil {
 		return err
 	}
