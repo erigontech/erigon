@@ -1214,7 +1214,6 @@ func WriteDBCommitmentHistoryEnabled(tx kv.RwTx, enabled bool) error {
 	return nil
 }
 
-
 type RCacheV2Query struct {
 	BlockNum  uint64
 	BlockHash common.Hash
