@@ -26,6 +26,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -50,7 +51,7 @@ type BlockGen struct {
 	header      *types.Header
 	stateReader state.StateReader
 	ibs         *state.IntraBlockState
-
+	blockIO     *state.VersionedIO
 	gasPool     *protocol.GasPool
 	txs         []types.Transaction
 	receipts    types.Receipts
@@ -129,6 +130,10 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	protocol.SetGasUsed(b.header, gasUsed)
 	if err != nil {
 		panic(err)
+	}
+	if b.blockIO != nil {
+		b.blockIO = b.blockIO.Merge(b.ibs.TxIO())
+		b.ibs.ResetVersionedIO()
 	}
 	b.txs = append(b.txs, txn)
 	b.receipts = append(b.receipts, receipt)
@@ -332,7 +337,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		return nil, err
 	}
 	defer domains.Close()
-
+	domains.SetTrace(true, false)
 	stateReader := state.NewReaderV3(domains.AsGetter(tx))
 	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
 
@@ -349,7 +354,16 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		stateWriter state.StateWriter) (*types.Block, types.Receipts, error) {
 		txNumIncrement()
 
-		b := &BlockGen{i: i, chain: blocks, parent: parent, ibs: ibs, stateReader: stateReader, config: config, engine: engine, txs: make([]types.Transaction, 0, 1), receipts: make([]*types.Receipt, 0, 1), uncles: make([]*types.Header, 0, 1),
+		b := &BlockGen{i: i,
+			chain:       blocks,
+			parent:      parent,
+			ibs:         ibs,
+			stateReader: stateReader,
+			config:      config,
+			engine:      engine,
+			txs:         make([]types.Transaction, 0, 1),
+			receipts:    make([]*types.Receipt, 0, 1),
+			uncles:      make([]*types.Header, 0, 1),
 			beforeAddTx: func() {
 				txNumIncrement()
 			},
@@ -357,6 +371,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		if chainreader.Config().IsShanghai(parent.Time()) {
 			b.withdrawals = []*types.Withdrawal{}
 		}
+		if chainreader.Config().IsAmsterdam(parent.Time()) {
+			b.blockIO = &state.VersionedIO{}
+		}
+
 		b.header = makeHeader(chainreader, parent, ibs, b.engine)
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
@@ -387,8 +405,12 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
 
+			if b.blockIO != nil {
+				balHash := b.blockIO.AsBlockAccessList().Hash()
+				b.header.BlockAccessListHash = &balHash
+			}
+
 			var err error
-			//b.header.Root, err = CalcHashRootForTests(tx, b.header, histV3, true)
 			stateRoot, err := domains.ComputeCommitment(ctx, tx, true, b.header.Number.Uint64(), uint64(txNum), "", nil)
 			if err != nil {
 				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
@@ -396,7 +418,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			//don't need `domains.Flush` because we are working on RoTx
 
 			b.header.Root = common.BytesToHash(stateRoot)
-
 			// Recreating block to make sure Root makes it into the header
 			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, b.withdrawals)
 			return block, b.receipts, nil
@@ -406,6 +427,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 
 	for i := 0; i < n; i++ {
 		ibs := state.New(stateReader)
+		if dbg.Exec3Parallel {
+			ibs.SetVersionMap(&state.VersionMap{})
+		}
 		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter)
 		if err != nil {
 			return nil, fmt.Errorf("generating block %d: %w", i, err)

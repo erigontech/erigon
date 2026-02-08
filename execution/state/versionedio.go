@@ -172,22 +172,6 @@ func (s WriteSet) Scan(yield func(input *VersionedWrite) bool) {
 	}
 }
 
-type AccessedAddresses map[accounts.Address]struct{}
-
-func (aa AccessedAddresses) Merge(other map[accounts.Address]struct{}) map[accounts.Address]struct{} {
-	if len(other) == 0 {
-		return aa
-	}
-	dst := make(map[accounts.Address]struct{}, len(aa)+len(other))
-	for addr := range aa {
-		dst[addr] = struct{}{}
-	}
-	for addr := range other {
-		dst[addr] = struct{}{}
-	}
-	return dst
-}
-
 type VersionedRead struct {
 	Address accounts.Address
 	Path    AccountPath
@@ -683,10 +667,24 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 
 // note that TxIndex starts at -1 (the begin system tx)
 type VersionedIO struct {
-	inputs     []versionedReadSet
-	outputs    []VersionedWrites // write sets that should be checked during validation
-	outputsSet []map[accounts.Address]map[AccountKey]struct{}
-	accessed   []map[accounts.Address]struct{}
+	inputs   []versionedReadSet
+	outputs  []VersionedWrites // write sets that should be checked during validation
+	accessed []AccessSet
+}
+
+func NewVersionedIO(numTx int) *VersionedIO {
+	return &VersionedIO{
+		inputs:   make([]versionedReadSet, numTx+1),
+		outputs:  make([]VersionedWrites, numTx+1),
+		accessed: make([]AccessSet, numTx+1),
+	}
+}
+
+func (io *VersionedIO) Len() int {
+	if io == nil {
+		return 0
+	}
+	return max(len(io.inputs), max(len(io.outputs), len(io.accessed)))
 }
 
 func (io *VersionedIO) Inputs() []versionedReadSet {
@@ -748,17 +746,86 @@ func (io *VersionedIO) HasReads(txnIdx int) bool {
 	return len(io.inputs[txnIdx+1].readSet) > 0
 }
 
-func (io *VersionedIO) HasWritten(txnIdx int, addr accounts.Address, path AccountPath, key accounts.StorageKey) bool {
-	if len(io.outputsSet) <= txnIdx+1 {
-		return false
+func (io *VersionedIO) RecordReads(txVersion Version, input ReadSet) {
+	if len(io.inputs) <= txVersion.TxIndex+1 {
+		io.inputs = append(io.inputs, make([]versionedReadSet, txVersion.TxIndex+2-len(io.inputs))...)
 	}
-	_, ok := io.outputsSet[txnIdx+1][addr][AccountKey{path, key}]
-	return ok
+	io.inputs[txVersion.TxIndex+1] = versionedReadSet{txVersion.Incarnation, input}
+}
+
+func (io *VersionedIO) RecordWrites(txVersion Version, output VersionedWrites) {
+	txId := txVersion.TxIndex
+
+	if len(io.outputs) <= txId+1 {
+		io.outputs = append(io.outputs, make([]VersionedWrites, txId+2-len(io.outputs))...)
+	}
+	io.outputs[txId+1] = output
+}
+
+func (io *VersionedIO) RecordAccesses(txVersion Version, addresses AccessSet) {
+	if len(addresses) == 0 {
+		return
+	}
+	if len(io.accessed) <= txVersion.TxIndex+1 {
+		io.accessed = append(io.accessed, make([]AccessSet, txVersion.TxIndex+2-len(io.accessed))...)
+	}
+	dest := make(AccessSet, len(addresses))
+	for addr, opt := range addresses {
+		dest[addr] = opt
+	}
+	io.accessed[txVersion.TxIndex+1] = dest
+}
+
+func (io *VersionedIO) AccessedAddresses(txIndex int) AccessSet {
+	if len(io.accessed) <= txIndex+1 {
+		return nil
+	}
+	return io.accessed[txIndex+1]
+}
+
+func (io *VersionedIO) Merge(other *VersionedIO) *VersionedIO {
+	mergedLen := max(io.Len(), other.Len())
+	merged := NewVersionedIO(mergedLen - 1)
+
+	for i := 0; i < mergedLen; i++ {
+		if i < len(io.inputs) {
+			if i < len(other.inputs) {
+				merged.inputs[i] = io.inputs[i].Merge(other.inputs[i])
+			} else {
+				merged.inputs[i] = io.inputs[i].Merge(versionedReadSet{})
+			}
+		} else if i < len(other.inputs) {
+			merged.inputs[i] = other.inputs[i].Merge(versionedReadSet{})
+		}
+		if i < len(io.outputs) {
+			if i < len(other.outputs) {
+				merged.outputs[i] = io.outputs[i].Merge(other.outputs[i])
+			} else {
+				merged.outputs[i] = io.outputs[i].Merge(nil)
+			}
+		} else if i < len(other.inputs) {
+			merged.outputs[i] = other.outputs[i].Merge(nil)
+		}
+		if i < len(io.accessed) {
+			if i < len(other.accessed) {
+				merged.accessed[i] = io.accessed[i].Merge(other.accessed[i])
+			} else {
+				merged.accessed[i] = io.accessed[i].Merge(nil)
+			}
+		} else if i < len(other.inputs) {
+			merged.accessed[i] = other.accessed[i].Merge(nil)
+		}
+	}
+	return merged
 }
 
 func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
+	if io == nil {
+		return nil
+	}
+
 	ac := make(map[accounts.Address]*accountState)
-	maxTxIndex := len(io.Inputs()) - 1
+	maxTxIndex := io.Len() - 1
 
 	for txIndex := -1; txIndex <= maxTxIndex; txIndex++ {
 		io.ReadSet(txIndex).Scan(func(vr *VersionedRead) bool {
@@ -1038,64 +1105,17 @@ func (s versionedReadSet) Scan(yield func(input *VersionedRead) bool) {
 	}
 }
 
-func NewVersionedIO(numTx int) *VersionedIO {
-	return &VersionedIO{
-		inputs:     make([]versionedReadSet, numTx+1),
-		outputs:    make([]VersionedWrites, numTx+1),
-		outputsSet: make([]map[accounts.Address]map[AccountKey]struct{}, numTx+1),
-		accessed:   make([]map[accounts.Address]struct{}, numTx+1),
-	}
-}
-
-func (io *VersionedIO) RecordReads(txVersion Version, input ReadSet) {
-	if len(io.inputs) <= txVersion.TxIndex+1 {
-		io.inputs = append(io.inputs, make([]versionedReadSet, txVersion.TxIndex+2-len(io.inputs))...)
-	}
-	io.inputs[txVersion.TxIndex+1] = versionedReadSet{txVersion.Incarnation, input}
-}
-
-func (io *VersionedIO) RecordWrites(txVersion Version, output VersionedWrites) {
-	txId := txVersion.TxIndex
-
-	if len(io.outputs) <= txId+1 {
-		io.outputs = append(io.outputs, make([]VersionedWrites, txId+2-len(io.outputs))...)
-	}
-	io.outputs[txId+1] = output
-
-	if len(io.outputsSet) <= txId+1 {
-		io.outputsSet = append(io.outputsSet, make([]map[accounts.Address]map[AccountKey]struct{}, txId+2-len(io.outputsSet))...)
-	}
-	io.outputsSet[txId+1] = map[accounts.Address]map[AccountKey]struct{}{}
-
-	for _, v := range output {
-		keys, ok := io.outputsSet[txId+1][v.Address]
-		if !ok {
-			keys = map[AccountKey]struct{}{}
-			io.outputsSet[txId+1][v.Address] = keys
+func (s versionedReadSet) Merge(o versionedReadSet) versionedReadSet {
+	if s.incarnation > o.incarnation {
+		return versionedReadSet{
+			incarnation: s.incarnation,
+			readSet:     o.readSet.Merge(s.readSet),
 		}
-		keys[AccountKey{v.Path, v.Key}] = struct{}{}
 	}
-}
-
-func (io *VersionedIO) RecordAccesses(txVersion Version, addresses map[accounts.Address]struct{}) {
-	if len(addresses) == 0 {
-		return
+	return versionedReadSet{
+		incarnation: o.incarnation,
+		readSet:     s.readSet.Merge(o.readSet),
 	}
-	if len(io.accessed) <= txVersion.TxIndex+1 {
-		io.accessed = append(io.accessed, make([]map[accounts.Address]struct{}, txVersion.TxIndex+2-len(io.accessed))...)
-	}
-	dest := make(map[accounts.Address]struct{}, len(addresses))
-	for addr := range addresses {
-		dest[addr] = struct{}{}
-	}
-	io.accessed[txVersion.TxIndex+1] = dest
-}
-
-func (io *VersionedIO) AccessedAddresses(txIndex int) map[accounts.Address]struct{} {
-	if len(io.accessed) <= txIndex+1 {
-		return nil
-	}
-	return io.accessed[txIndex+1]
 }
 
 type DAG struct {

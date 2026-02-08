@@ -100,11 +100,8 @@ func (mb *assembledBlock) TxnsRlpSize(withAdditional ...types.Transaction) int {
 
 type BlockAssembler struct {
 	*assembledBlock
-	cfg          AssemblerCfg
-	balIO        *state.VersionedIO
-	systemReads  state.ReadSet
-	systemWrites state.VersionedWrites
-	systemAccess state.AccessedAddresses
+	cfg   AssemblerCfg
+	balIO *state.VersionedIO
 }
 
 func NewBlockAssembler(cfg AssemblerCfg, payloadId, parentTime uint64, header *types.Header, uncles []*types.Header, withdrawals []*types.Withdrawal) *BlockAssembler {
@@ -134,9 +131,10 @@ func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalT
 	protocol.InitializeBlockExecution(ba.cfg.Engine,
 		NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger), ba.Header, ba.cfg.ChainConfig, ibs, &state.NoopWriter{}, logger, nil)
 	if ba.HasBAL() {
-		ba.systemReads = ba.systemReads.Merge(ibs.VersionedReads())
-		ba.systemWrites = ba.systemWrites.Merge(ibs.VersionedWrites(false))
-		ba.systemAccess = ba.systemAccess.Merge(ibs.AccessedAddresses())
+		ba.balIO = ba.balIO.Merge(ibs.TxIO())
+		//ba.systemReads = ba.systemReads.Merge(ibs.VersionedReads())
+		//ba.systemWrites = ba.systemWrites.Merge(ibs.VersionedWrites(false))
+		//ba.systemAccess = ba.systemAccess.Merge(ibs.AccessedAddresses())
 		ibs.ResetVersionedIO()
 	}
 }
@@ -163,13 +161,9 @@ func (ba *BlockAssembler) AddTransactions(
 	var coalescedLogs types.Logs
 	noop := state.NewNoopWriter()
 	recordTxIO := func(balIO *state.VersionedIO) {
-		if balIO == nil {
-			return
+		if balIO != nil {
+			ba.balIO = ba.balIO.Merge(ibs.TxIO())
 		}
-		version := ibs.Version()
-		balIO.RecordReads(version, ibs.VersionedReads())
-		balIO.RecordWrites(version, ibs.VersionedWrites(false))
-		balIO.RecordAccesses(version, ibs.AccessedAddresses())
 		ibs.ResetVersionedIO()
 	}
 	clearTxIO := func(balIO *state.VersionedIO) {
@@ -345,18 +339,8 @@ func (ba BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *state
 		return nil, fmt.Errorf("cannot finalize block execution: %s", err)
 	}
 
-	blockHeight := block.NumberU64()
 	if ba.HasBAL() {
-		ba.systemReads = ba.systemReads.Merge(ibs.VersionedReads())
-		ba.systemWrites = ba.systemWrites.Merge(ibs.VersionedWrites(false))
-		ba.systemAccess = ba.systemAccess.Merge(ibs.AccessedAddresses())
-		ibs.ResetVersionedIO()
-
-		systemVersion := state.Version{BlockNum: blockHeight, TxIndex: -1}
-		ba.balIO.RecordReads(systemVersion, ba.systemReads)
-		ba.balIO.RecordWrites(systemVersion, ba.systemWrites)
-		ba.balIO.RecordAccesses(systemVersion, ba.systemAccess)
-		ba.BlockAccessList = ba.balIO.AsBlockAccessList()
+		block.SetBlockAccessList(ba.balIO.AsBlockAccessList())
 	}
 
 	return block, nil
