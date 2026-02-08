@@ -52,4 +52,16 @@ var (
 
 	// ErrUnexpectedRequests is returned if a pre-Prague block has EIP-7685 requests.
 	ErrUnexpectedRequests = errors.New("unexpected requests")
+
+	// ErrUnexpectedSlotNumber is returned if a pre-Amsterdam block has an EIP-7928 slotNumber.
+	ErrUnexpectedSlotNumber = errors.New("unexpected slotNumber")
+
+	// ErrMissingSlotNumber is returned if a post-Amsterdam block has a missing EIP-7928  slotNumber.
+	ErrMissingSlotNumber = errors.New("missing slotNumber")
+
+	// ErrUnexpectedBlockAccessListHash is returned if a pre-Amsterdam block has EIP-7843 a bal hash.
+	ErrUnexpectedBlockAccessListHash = errors.New("unexpected bal hash")
+
+	// ErrMissingBlockAccessListHash is missing from a prost-Amsterdam block has a missing EIP-7843 bal hash.
+	ErrMissingBlockAccessListHash = errors.New("missing bal hash")
 )
