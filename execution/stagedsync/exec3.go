@@ -42,6 +42,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -123,6 +124,11 @@ func ExecV3(ctx context.Context,
 	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger) (execErr error) {
+	commitmentdb.ResetTouchKeyDuration() // reset before execution
+	defer func() {
+		logger.Info("[TouchKey] total duration during ExecV3", "took", commitmentdb.ResetTouchKeyDuration())
+	}()
+
 	isBlockProduction := execStage.SyncMode() == stages.ModeBlockProduction
 	isForkValidation := execStage.SyncMode() == stages.ModeForkValidation
 	isApplyingBlocks := execStage.SyncMode() == stages.ModeApplyingBlocks

@@ -28,7 +28,13 @@ import (
 var (
 	mxCommitmentRunning = metrics.GetOrCreateGauge("domain_running_commitment")
 	mxCommitmentTook    = metrics.GetOrCreateSummary("domain_commitment_took")
+
+	TouchKeyDuration atomic.Int64 // nanoseconds, use atomic for concurrent access
 )
+
+func ResetTouchKeyDuration() time.Duration {
+	return time.Duration(TouchKeyDuration.Swap(0))
+}
 
 type sd interface {
 	SetBlockNum(blockNum uint64)
@@ -284,6 +290,7 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 		return
 	}
 
+	t := time.Now()
 	switch d {
 	case kv.AccountsDomain:
 		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchAccount)
@@ -295,6 +302,7 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	default:
 		//panic(fmt.Errorf("TouchKey: unknown domain %s", d))
 	}
+	TouchKeyDuration.Add(time.Since(t).Nanoseconds())
 }
 
 func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string) (proofTrie *trie.Trie, rootHash []byte, err error) {
