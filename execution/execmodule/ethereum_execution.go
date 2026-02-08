@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -297,12 +298,17 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 	return canonical, nil
 }
 
+func convertIDsToStages(ids []string) []stages.SyncStage {
+	var result []stages.SyncStage
+	for _, id := range ids {
+		result = append(result, stages.SyncStage(id))
+	}
+	return result
+}
+
 func (e *EthereumExecutionModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header) error {
 	currentHeader := header
-	shouldUnwind := true
-
 	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
-		shouldUnwind = false
 		parentBlockHash, parentBlockNum := currentHeader.ParentHash, currentHeader.Number.Uint64()-1
 		currentHeader, err = e.getHeader(e.bacgroundCtx, tx, parentBlockHash, parentBlockNum)
 		if err != nil {
@@ -312,12 +318,23 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(sd *execctx.SharedDoma
 			return makeErrMissingChainSegment(parentBlockHash)
 		}
 	}
-	_ = shouldUnwind // for now we always unwind, but in the future we may want to skip unwinding if we are already on the canonical chain.
+	// Check if you can skip unwind by comparing the current header number with the progress of all stages.
+	// If they are equal, then we are safely already at the common canonical and can skip unwind.
+	stagesIds := e.executionPipeline.StagesIdsList()
+	unwindPoint := currentHeader.Number.Uint64()
+	commonProgress, allEqual, err := stages.GetStageProgressIfAllEqual(tx, convertIDsToStages(stagesIds)...)
+	if err != nil {
+		return err
+	}
+	if allEqual && commonProgress == unwindPoint {
+		return nil
+	}
+
 	if err := e.hook.BeforeRun(tx, true); err != nil {
 		return err
 	}
 
-	if err := e.executionPipeline.UnwindTo(currentHeader.Number.Uint64(), stagedsync.ExecUnwind, tx); err != nil {
+	if err := e.executionPipeline.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
 		return err
 	}
 	if err := e.executionPipeline.RunUnwind(sd, tx); err != nil {
