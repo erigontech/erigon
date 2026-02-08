@@ -602,110 +602,11 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				pe.readCount.Add(blockExecutor.blockIO.ReadCount())
 				pe.writeCount.Add(blockExecutor.blockIO.WriteCount())
 
-				blockReceipts := make([]*types.Receipt, 0, len(blockExecutor.results))
-				for _, result := range blockExecutor.results {
-					if result.Receipt != nil {
-						blockReceipts = append(blockReceipts, result.Receipt)
-					}
-				}
-
-				if blockResult.BlockNum > 0 {
-					result := blockExecutor.results[len(blockExecutor.results)-1]
-
-					finalTask := blockExecutor.tasks[len(blockExecutor.tasks)-1].Task
-					finalVersion := finalTask.Version()
-					stateUpdates, err := func() (state.StateUpdates, error) {
-						pe.RLock()
-						defer pe.RUnlock()
-
-						var reader state.StateReader
-						if finalTask.IsHistoric() {
-							reader = state.NewHistoryReaderV3(applyTx, finalVersion.TxNum)
-						} else {
-							reader = state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
-						}
-						ibs := state.New(state.NewBufferedReader(pe.rs, reader))
-						defer ibs.Release(true)
-						ibs.SetVersion(finalVersion.Incarnation)
-						localVersionMap := state.NewVersionMap(nil)
-						ibs.SetVersionMap(localVersionMap)
-						ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
-
-						txTask, ok := result.Task.(*taskVersion).Task.(*exec.TxTask)
-
-						if !ok {
-							return state.StateUpdates{}, nil
-						}
-
-						syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-							ret, err := protocol.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
-							if err != nil {
-								return nil, err
-							}
-							result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
-							return ret, err
-						}
-
-						chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
-						if pe.isBlockProduction {
-							_, _, err =
-								pe.cfg.engine.FinalizeAndAssemble(
-									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
-									txTask.Withdrawals, chainReader, syscall, nil, pe.logger)
-						} else {
-							_, err =
-								pe.cfg.engine.Finalize(
-									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, blockReceipts,
-									txTask.Withdrawals, chainReader, syscall, false, pe.logger)
-						}
-
-						if err != nil {
-							return state.StateUpdates{}, fmt.Errorf("can't finalize block %d: %w", blockResult.BlockNum, err)
-						}
-
-						blockExecutor.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
-						blockExecutor.blockIO.RecordAccesses(finalVersion, ibs.AccessedAddresses())
-
-						finalWrites := ibs.VersionedWrites(true)
-						if len(finalWrites) > 0 {
-							blockExecutor.blockIO.RecordWrites(finalVersion, finalWrites)
-							blockExecutor.versionMap.FlushVersionedWrites(finalWrites, true, "")
-						}
-
-						stateWriter := state.NewBufferedWriter(pe.rs, nil)
-						if err = ibs.MakeWriteSet(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter); err != nil {
-							return state.StateUpdates{}, err
-						}
-
-						return stateWriter.WriteSet(), nil
-					}()
-
-					if err != nil {
-						return err
-					}
-
-					blockResult.ApplyCount += stateUpdates.UpdateCount()
-					if dbg.TraceApply && dbg.TraceBlock(blockResult.BlockNum) {
-						stateUpdates.TraceBlockUpdates(blockResult.BlockNum, true)
-						fmt.Println(blockResult.BlockNum, "apply count", blockResult.ApplyCount)
-					}
-
-					blockExecutor.applyResults <- &txResult{
-						blockNum:              blockResult.BlockNum,
-						txNum:                 blockResult.lastTxNum,
-						rules:                 result.Rules(),
-						stateUpdates:          stateUpdates,
-						logs:                  result.Logs,
-						traceFroms:            result.TraceFroms,
-						traceTos:              result.TraceTos,
-						cumulativeBlobGasUsed: blockExecutor.blobGasUsed,
-					}
-				}
-
 				if !blockExecutor.execStarted.IsZero() {
 					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
 					pe.blockExecMetrics.BlockCount.Add(1)
 				}
+
 				blockExecutor.applyResults <- blockResult
 				pe.Lock()
 				delete(pe.blockExecutors, blockResult.BlockNum)
@@ -968,7 +869,7 @@ type execResult struct {
 	stateUpdates *state.StateUpdates
 }
 
-func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, state.ReadSet, state.VersionedWrites, error) {
+func (result *execResult) finalize(blockResults []*execResult, execCfg *ExecuteBlockCfg, applyTx kv.TemporalTx, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, state.ReadSet, state.VersionedWrites, error) {
 	task, ok := result.Task.(*taskVersion)
 
 	if !ok {
@@ -1012,14 +913,38 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 
 	rules := txTask.EvmBlockContext.Rules(txTask.Config)
 
-	if task.IsBlockEnd() || txIndex < 0 {
+	if txIndex < 0 {
 		if err := ibs.FinalizeTx(rules, stateWriter); err != nil {
 			return nil, nil, nil, err
 		}
 		return nil, ibs.VersionedReads(), ibs.VersionedWrites(true), nil
 	}
 
-	if task.shouldDelayFeeCalc {
+	if task.IsBlockEnd() {
+		if blockNum > 0 {
+			syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
+				ret, err := protocol.SysCallContract(contract, data, txTask.Config, ibs, txTask.Header, execCfg.engine, false, *execCfg.vmConfig)
+				if err != nil {
+					return nil, err
+				}
+				result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
+				return ret, err
+			}
+
+			chainReader := consensuschain.NewReader(txTask.Config, applyTx, execCfg.blockReader, txTask.Logger)
+			blockReceipts := make([]*types.Receipt, 0, len(blockResults))
+			for _, result := range blockResults {
+				if result.Receipt != nil {
+					blockReceipts = append(blockReceipts, result.Receipt)
+				}
+			}
+			if _, err := execCfg.engine.Finalize(
+				txTask.Config, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, blockReceipts,
+				txTask.Withdrawals, chainReader, syscall, false, txTask.Logger); err != nil {
+				return nil, nil, nil, fmt.Errorf("can't finalize block %d: %w", blockNum, err)
+			}
+		}
+	} else if task.shouldDelayFeeCalc {
 		if !result.ExecutionResult.BurntContractAddress.IsNil() && txTask.Config.IsLondon(blockNum) {
 			if err := ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy); err != nil {
 				return nil, nil, nil, err
@@ -1030,8 +955,8 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 			return nil, nil, nil, err
 		}
 
-		if engine != nil {
-			if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
+		if execCfg.engine != nil {
+			if postApplyMessageFunc := execCfg.engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
 				execResult := result.ExecutionResult
 				coinbase, err := stateReader.ReadAccountData(result.Coinbase) // to generate logs we want the initial balance
 
@@ -1078,6 +1003,10 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	vm.SetTrace(false)
 	ibs.FinalizeTx(rules, stateWriter)
 
+	var prevReceipt *types.Receipt
+	if txIndex > 0 {
+		prevReceipt = blockResults[txIndex].Receipt
+	}
 	receipt, err := result.CreateNextReceipt(prevReceipt)
 
 	if err != nil {
@@ -1465,10 +1394,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		if valid {
 			if cntInvalid == 0 {
 				be.validateTasks.markComplete(tx)
-				var prevReceipt *types.Receipt
-				if txVersion.TxIndex > 0 && tx > 0 {
-					prevReceipt = be.results[tx-1].Receipt
-				}
 
 				txResult := be.results[tx]
 
@@ -1496,7 +1421,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				stateWriter := state.NewBufferedWriter(pe.rs, nil)
 
-				_, addReads, addWrites, err := txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, stateWriter)
+				_, addReads, addWrites, err := txResult.finalize(be.results, &pe.cfg, applyTx, be.versionMap, stateReader, stateWriter)
 
 				if err != nil {
 					return nil, err
@@ -1557,7 +1482,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			tx := toPublish[i]
 			task := be.tasks[tx].Task
 			result := be.results[tx]
-
+			fmt.Println("txResult 0", be.blockNum, task.Version().TxNum)
 			applyResult := txResult{
 				blockNum:              be.blockNum,
 				traceFroms:            map[accounts.Address]struct{}{},
