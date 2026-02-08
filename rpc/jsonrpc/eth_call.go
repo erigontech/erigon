@@ -55,7 +55,7 @@ import (
 	"github.com/erigontech/erigon/rpc/transactions"
 )
 
-var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber)
+var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 
 // estimateGasErrorRatio is the amount of overestimation eth_estimateGas is
 // allowed to produce in order to speed up calculations.
