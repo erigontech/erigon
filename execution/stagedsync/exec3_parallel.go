@@ -869,7 +869,7 @@ type execResult struct {
 	stateUpdates *state.StateUpdates
 }
 
-func (result *execResult) finalize(blockResults []*execResult, execCfg *ExecuteBlockCfg, applyTx kv.TemporalTx, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, state.ReadSet, state.VersionedWrites, error) {
+func (result *execResult) finalize(blockResults []*execResult, execCfg *ExecuteBlockCfg, applyTx kv.TemporalTx, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (types.FlatRequests, state.ReadSet, state.VersionedWrites, error) {
 	task, ok := result.Task.(*taskVersion)
 
 	if !ok {
@@ -920,6 +920,8 @@ func (result *execResult) finalize(blockResults []*execResult, execCfg *ExecuteB
 		return nil, ibs.VersionedReads(), ibs.VersionedWrites(true), nil
 	}
 
+	var requests types.FlatRequests
+
 	if task.IsBlockEnd() {
 		if blockNum > 0 {
 			syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
@@ -938,7 +940,8 @@ func (result *execResult) finalize(blockResults []*execResult, execCfg *ExecuteB
 					blockReceipts = append(blockReceipts, result.Receipt)
 				}
 			}
-			if _, err := execCfg.engine.Finalize(
+			var err error
+			if requests, err = execCfg.engine.Finalize(
 				txTask.Config, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, blockReceipts,
 				txTask.Withdrawals, chainReader, syscall, false, txTask.Logger); err != nil {
 				return nil, nil, nil, fmt.Errorf("can't finalize block %d: %w", blockNum, err)
@@ -1017,7 +1020,7 @@ func (result *execResult) finalize(blockResults []*execResult, execCfg *ExecuteB
 		hooks.OnTxEnd(receipt, result.Err)
 	}
 
-	return receipt, ibs.VersionedReads(), allWrites, nil
+	return requests, ibs.VersionedReads(), allWrites, nil
 }
 
 type taskVersion struct {
@@ -1181,11 +1184,11 @@ type blockExecutor struct {
 	stats map[int]ExecutionStat
 
 	applyResults chan applyResult
-
-	execStarted time.Time
-	result      *blockResult
-	applyCount  int
-	exhausted   *ErrLoopExhausted
+	requests     types.FlatRequests
+	execStarted  time.Time
+	result       *blockResult
+	applyCount   int
+	exhausted    *ErrLoopExhausted
 }
 
 func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
@@ -1421,12 +1424,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				stateWriter := state.NewBufferedWriter(pe.rs, nil)
 
-				_, addReads, addWrites, err := txResult.finalize(be.results, &pe.cfg, applyTx, be.versionMap, stateReader, stateWriter)
+				requests, addReads, addWrites, err := txResult.finalize(be.results, &pe.cfg, applyTx, be.versionMap, stateReader, stateWriter)
 
 				if err != nil {
 					return nil, err
 				}
 
+				if requests != nil {
+					be.requests = requests
+				}
 				// Merge any additional reads/writes produced during finalize (fee calc, post apply, etc)
 				if addReads != nil {
 					mergedReads := be.blockIO.ReadSet(txVersion.TxIndex).Merge(addReads)
