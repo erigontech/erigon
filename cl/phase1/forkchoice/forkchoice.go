@@ -151,7 +151,8 @@ type ForkChoiceStore struct {
 	executionPayloadStates sync.Map // map[common.Hash]*state.CachingBeaconState
 	// [New in Gloas:EIP7732]
 	ptcVote sync.Map // map[common.Hash][clparams.PtcSize]bool
-	//blockTimeliness sync.Map // map[common.Hash][clparams.NumBlockTimelinessDeadlines]bool
+	// [New in Gloas:EIP7732] Indexed weight store for optimized weight calculation
+	indexedWeightStore *indexedWeightStore
 }
 
 type childrens struct {
@@ -303,7 +304,9 @@ func NewForkChoiceStore(
 		f.executionPayloadStates.Store(anchorRoot, anchorStateCopy)
 	}
 	f.ptcVote.Store(anchorRoot, [clparams.PtcSize]bool{})
-	//f.blockTimeliness.Store(anchorRoot, [clparams.NumBlockTimelinessDeadlines]bool{true, true})
+
+	// [New in Gloas:EIP7732] Initialize indexed weight store
+	f.indexedWeightStore = NewIndexedWeightStore(f)
 
 	return f, nil
 }
