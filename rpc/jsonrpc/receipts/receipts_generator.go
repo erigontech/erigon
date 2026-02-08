@@ -511,7 +511,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		}
 		receipts[i] = receipt
 
-		if dbg.AssertEnabled && receiptsFromDB != nil {
+		if dbg.AssertEnabled && receiptsFromDB != nil && i < len(receiptsFromDB) {
 			g.assertEqualReceipts(receipt, receiptsFromDB[i])
 		}
 	}
@@ -531,10 +531,14 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
 
 	generated := fromExecution.Copy()
 	if generated.TransactionIndex != fromDB.TransactionIndex {
-		panic(fmt.Sprintf("assert: %d, %d", generated.TransactionIndex, fromDB.TransactionIndex))
+		panic(fmt.Sprintf("assert: txn index mismatch: %d, %d", generated.TransactionIndex, fromDB.TransactionIndex))
 	}
 	if generated.FirstLogIndexWithinBlock != fromDB.FirstLogIndexWithinBlock {
-		panic(fmt.Sprintf("assert: %d, %d", generated.FirstLogIndexWithinBlock, fromDB.FirstLogIndexWithinBlock))
+		panic(fmt.Sprintf("assert: first log index mismatch: %d, %d", generated.FirstLogIndexWithinBlock, fromDB.FirstLogIndexWithinBlock))
+	}
+	if len(generated.Logs) != len(fromDB.Logs) {
+		panic(fmt.Sprintf("assert: logs length mismatch: generated=%d, fromDB=%d, bn=%d, txnIdx=%d",
+			len(generated.Logs), len(fromDB.Logs), generated.BlockNumber.Uint64(), generated.TransactionIndex))
 	}
 
 	for i := range generated.Logs {
