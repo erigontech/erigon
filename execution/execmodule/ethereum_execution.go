@@ -326,6 +326,7 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(sd *execctx.SharedDoma
 	if err != nil {
 		return err
 	}
+	fmt.Println(allEqual, commonProgress, unwindPoint)
 	if allEqual && commonProgress == unwindPoint {
 		return nil
 	}
