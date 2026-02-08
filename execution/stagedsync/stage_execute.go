@@ -201,9 +201,6 @@ func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwT
 	if err := rawdb.DeleteNewerEpochs(rwTx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("delete newer epochs: %w", err)
 	}
-	if err := rawdb.WriteRecentReorg(rwTx, true); err != nil {
-		return err
-	}
 	return nil
 }
 

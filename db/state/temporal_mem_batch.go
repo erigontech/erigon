@@ -66,9 +66,6 @@ type TemporalMemBatch struct {
 	currentChangesAccumulator *changeset.StateChangeSet
 	pastChangesAccumulator    map[string]*changeset.StateChangeSet
 
-	// pastChangesetTxNums maps changeset keys to their ending txNum (for matching commitment writes)
-	pastChangesetTxNums map[string]uint64
-
 	unwindToTxNum   uint64
 	unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
 

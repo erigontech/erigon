@@ -135,18 +135,6 @@ func ExecV3(ctx context.Context,
 		return err
 	}
 
-	// Read and reset the recent reorg flag
-	didReorg, err := rawdb.ReadRecentReorg(applyTx)
-	if err != nil {
-		return err
-	}
-	if didReorg {
-		logger.Info("Recent reorg detected, resetting state")
-	}
-	if err := rawdb.WriteRecentReorg(applyTx, false); err != nil {
-		return err
-	}
-
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if isApplyingBlocks {
 		if initialCycle {
@@ -246,7 +234,7 @@ func ExecV3(ctx context.Context,
 		postValidator = newParallelBlockPostExecutionValidator()
 		// Only defer branch updates in fork validation mode (engine API flow)
 		// where MergeExtendingFork will flush the pending updates
-		if isForkValidation && !didReorg {
+		if isForkValidation {
 			doms.SetDeferCommitmentUpdates(true)
 		}
 	}
