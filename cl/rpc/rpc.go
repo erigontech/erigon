@@ -102,7 +102,7 @@ func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqDa
 		return nil, pid, err
 	}
 
-	responsePacket := []*cltypes.BlobSidecar{}
+	responsePacket := make([]*cltypes.BlobSidecar, 0, count)
 	for _, data := range responses {
 		responseChunk := &cltypes.BlobSidecar{}
 		if err := responseChunk.DecodeSSZ(data.raw, int(data.version)); err != nil {
