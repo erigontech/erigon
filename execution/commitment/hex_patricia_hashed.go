@@ -1549,9 +1549,6 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 						if !bytes.Equal(subTrieRoot, cellHash[1:]) {
 							return nil, fmt.Errorf("subTrieRoot(%x) != cellHash(%x)", subTrieRoot, cellHash[1:])
 						}
-						// // DEBUG patch with cell hash which we know to be correct
-						//fmt.Printf("witness cell (%d, %0x, depth=%d) %s\n", row, currentNibble, hph.depths[row], cellToExpand.FullString())
-						//nextNode = trie.NewHashNode(cellToExpand.stateHash[:])
 					}
 					if keyPos+1 == int16(len(hashedKey)) {
 						keyPos++
