@@ -273,7 +273,7 @@ func getDeferredUpdate(
 	getDeferredUpdateCount.Add(1)
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
 
-	upd.prefix = common.Copy(prefix)
+	upd.prefix = prefix
 	upd.bitmap = bitmap
 	upd.touchMap = touchMap
 	upd.afterMap = afterMap
@@ -302,7 +302,7 @@ func getDeferredUpdate(
 		bitset ^= bit
 	}
 
-	upd.prev = common.Copy(prev)
+	upd.prev = prev
 	upd.prevStep = prevStep
 	upd.encoded = nil
 
