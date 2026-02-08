@@ -19,7 +19,6 @@ package execmodule
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math/big"
 	"strings"
 	"sync"
@@ -322,11 +321,10 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(sd *execctx.SharedDoma
 	// If they are equal, then we are safely already at the common canonical and can skip unwind.
 	unwindPoint := currentHeader.Number.Uint64()
 	commonProgress, allEqual, err := stages.GetStageProgressIfAllEqual(tx,
-		stages.Senders, stages.Execution, stages.Headers)
+		stages.Headers, stages.Senders, stages.Execution)
 	if err != nil {
 		return err
 	}
-	fmt.Println(allEqual, commonProgress, unwindPoint)
 	if allEqual && commonProgress == unwindPoint {
 		return nil
 	}
@@ -409,12 +407,10 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if e.stateCache != nil && dbg.UseStateCache {
 		doms.SetStateCache(e.stateCache)
 	}
-	s := time.Now()
 	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
 		doms.Close()
 		return nil, err
 	}
-	fmt.Println("unwindToCommonCanonical", time.Since(s))
 
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
