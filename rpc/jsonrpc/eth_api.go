@@ -301,7 +301,7 @@ func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrO
 	}
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.Header(), false, nil
+			return it.Header(), isLatest, nil
 		}
 	}
 
