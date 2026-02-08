@@ -118,7 +118,7 @@ func (b *BuilderPendingPayment) DecodeSSZ(buf []byte, version int) error {
 
 func (b *BuilderPendingPayment) Clone() clonable.Clonable {
 	return &BuilderPendingPayment{
-		Weight:     b.Weight,
-		Withdrawal: b.Withdrawal.Clone().(*BuilderPendingWithdrawal),
+		Weight:     0,
+		Withdrawal: &BuilderPendingWithdrawal{},
 	}
 }
