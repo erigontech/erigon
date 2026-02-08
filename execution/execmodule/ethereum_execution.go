@@ -19,6 +19,7 @@ package execmodule
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"strings"
 	"sync"
@@ -298,8 +299,10 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 
 func (e *EthereumExecutionModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header) error {
 	currentHeader := header
+	shouldUnwind := true
 
 	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
+		shouldUnwind = false
 		parentBlockHash, parentBlockNum := currentHeader.ParentHash, currentHeader.Number.Uint64()-1
 		currentHeader, err = e.getHeader(e.bacgroundCtx, tx, parentBlockHash, parentBlockNum)
 		if err != nil {
@@ -309,6 +312,7 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(sd *execctx.SharedDoma
 			return makeErrMissingChainSegment(parentBlockHash)
 		}
 	}
+	_ = shouldUnwind // for now we always unwind, but in the future we may want to skip unwinding if we are already on the canonical chain.
 	if err := e.hook.BeforeRun(tx, true); err != nil {
 		return err
 	}
@@ -387,11 +391,12 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	if e.stateCache != nil && dbg.UseStateCache {
 		doms.SetStateCache(e.stateCache)
 	}
-
+	s := time.Now()
 	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
 		doms.Close()
 		return nil, err
 	}
+	fmt.Println("unwindToCommonCanonical", time.Since(s))
 
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
