@@ -345,3 +345,58 @@ func TestMatchVersionedFile_InvalidPattern(t *testing.T) {
 		t.Fatal("expected error for invalid pattern")
 	}
 }
+
+// TestMatchVersionedFile_DifferentSegAndIdxNames tests the case where segment files
+// have different base names than their index files (e.g., blobsidecars.seg has blocksidecars.idx)
+func TestMatchVersionedFile_DifferentSegAndIdxNames(t *testing.T) {
+	dir := t.TempDir()
+
+	// Simulate directory with blobsidecars.seg and blocksidecars.idx (different base names)
+	dirEntries := []string{
+		"v1.1-000000-000064-blobsidecars.seg",
+		"v1.1-000000-000064-blocksidecars.idx",
+		"v1.0-000000-000064-blocksidecars.idx", // older version
+		"v1.1-000064-000128-blobsidecars.seg",
+		"v1.1-000064-000128-blocksidecars.idx",
+	}
+
+	// Search for blocksidecars.idx should find it despite blobsidecars.seg being present
+	path, ver, ok, err := MatchVersionedFile("*-000000-000064-blocksidecars.idx", dirEntries, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected ok == true")
+	}
+	// Should find the highest version (v1.1)
+	if ver.Major != 1 || ver.Minor != 1 {
+		t.Fatalf("expected version 1.1, got %+v", ver)
+	}
+	if filepath.Base(path) != "v1.1-000000-000064-blocksidecars.idx" {
+		t.Fatalf("expected v1.1-000000-000064-blocksidecars.idx, got %s", filepath.Base(path))
+	}
+
+	// Search for blobsidecars.seg should find it
+	path, ver, ok, err = MatchVersionedFile("*-000000-000064-blobsidecars.seg", dirEntries, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected ok == true")
+	}
+	if ver.Major != 1 || ver.Minor != 1 {
+		t.Fatalf("expected version 1.1, got %+v", ver)
+	}
+	if filepath.Base(path) != "v1.1-000000-000064-blobsidecars.seg" {
+		t.Fatalf("expected v1.1-000000-000064-blobsidecars.seg, got %s", filepath.Base(path))
+	}
+
+	// Search for non-existent beaconblocks.idx should return not found
+	_, _, ok, err = MatchVersionedFile("*-000000-000064-beaconblocks.idx", dirEntries, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("expected ok == false for non-existent file type")
+	}
+}

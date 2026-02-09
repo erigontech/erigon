@@ -162,17 +162,14 @@ func (s *CaplinSnapshots) OpenList(fileNames []string, optimistic bool) error {
 
 	s.closeWhatNotInList(fileNames)
 
-	// Read full directory listing once for efficient index file lookups
-	var dirEntries []string
-	entries, err := os.ReadDir(s.dir)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("read dir %s: %w", s.dir, err)
+	// Get idx files for efficient index file lookups
+	idxFiles, err := snaptype.IdxFiles(s.dir)
+	if err != nil {
+		return fmt.Errorf("read idx files %s: %w", s.dir, err)
 	}
-	dirEntries = make([]string, 0, len(entries))
-	for _, e := range entries {
-		if !e.IsDir() {
-			dirEntries = append(dirEntries, e.Name())
-		}
+	dirEntries := make([]string, 0, len(idxFiles))
+	for _, f := range idxFiles {
+		dirEntries = append(dirEntries, f.Name())
 	}
 
 	var segmentsMax uint64
