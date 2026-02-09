@@ -8,6 +8,8 @@ on:
     branches:
       - main
       - 'release/**'
+      - performance
+      - performance-stable
     types:
       - opened
       - reopened
