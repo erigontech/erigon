@@ -25,6 +25,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tidwall/btree"
 
@@ -428,6 +429,12 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 	fromStep, toStep := kv.Step(r.values.from/r.aggStep), kv.Step(r.values.to/r.aggStep)
 	kvFilePath := dt.d.kvNewFilePath(fromStep, toStep)
+
+	_, fName := filepath.Split(kvFilePath)
+	t := time.Now()
+	defer func() {
+		log.Warn("[dbg] merge", "name", dt.name, "fName", fName, "took", time.Since(t))
+	}()
 
 	kvFile, err := seg.NewCompressor(ctx, "merge domain "+dt.d.FilenameBase, kvFilePath, dt.d.dirs.Tmp, dt.d.CompressCfg, log.LvlTrace, dt.d.logger)
 	if err != nil {
