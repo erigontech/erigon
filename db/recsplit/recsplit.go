@@ -511,10 +511,6 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 	salt := rs.startSeed[level]
 	m := uint16(len(bucket))
 	if m <= rs.leafSize {
-		// No need to build aggregation levels - just find bijection.
-		// Branchless approach: OR all position bits, then check popcount == m.
-		// Removes data-dependent branches from the inner loop, enabling
-		// better CPU pipelining of the independent hash computations.
 		// No need to build aggregation levels - just find bijection
 		var mask uint32
 		for {
@@ -554,14 +550,12 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 		fanout, unit := splitParams(m, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
 		count := rs.count
 		for {
-			// zero all fanout entries (needed for early overflow detection correctness)
 			for i := uint16(0); i < fanout; i++ {
 				count[i] = 0
 			}
 			var fail bool
-			// range-based iteration eliminates per-element slice bounds checks
-			for _, key := range bucket {
-				j := remap16(remix(key+salt), m) / unit
+			for i := uint16(0); i < m; i++ {
+				j := remap16(remix(bucket[i]+salt), m) / unit
 				count[j]++
 				// early overflow detection: if any bin exceeds unit, this salt fails
 				if count[j] > unit {
