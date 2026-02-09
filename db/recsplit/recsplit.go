@@ -128,6 +128,8 @@ type RecSplit struct {
 	logger             log.Logger
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
+
+	unaryBuf []uint64
 }
 
 type RecSplitArgs struct {
@@ -475,12 +477,12 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 				rs.offsetBuffer = append(rs.offsetBuffer, 0)
 			}
 		}
-		unary := make([]uint64, 0, 128) // pre-alloc
-		unary, err := rs.recsplit(0 /* level */, rs.currentBucket, rs.currentBucketOffs, unary)
+		var err error
+		rs.unaryBuf, err = rs.recsplit(0 /* level */, rs.currentBucket, rs.currentBucketOffs, rs.unaryBuf[:0])
 		if err != nil {
 			return err
 		}
-		rs.gr.appendUnaryAll(unary)
+		rs.gr.appendUnaryAll(rs.unaryBuf)
 		if rs.trace {
 			fmt.Printf("recsplitBucket(%d, %d, bitsize = %d)\n", rs.currentBucketIdx, len(rs.currentBucket), rs.gr.bitCount-bitPos)
 		}
