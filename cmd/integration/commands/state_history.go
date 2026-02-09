@@ -19,7 +19,7 @@ package commands
 import (
 	"context"
 	"fmt"
-	"os"
+	"sort"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/config3"
@@ -38,10 +38,16 @@ func init() {
 	withHistoryDomain(printCmd)
 	withHistoryKey(printCmd)
 
+	distributionCmd.Flags().Uint64Var(&fromStep, "from", 0, "step from which history to be printed")
+	distributionCmd.Flags().Uint64Var(&toStep, "to", 1e18, "step to which history to be printed")
+	withDataDir2(distributionCmd)
+	withHistoryDomain(distributionCmd)
+
 	withDataDir2(rebuildCmd)
 	withHistoryDomain(rebuildCmd)
 
 	historyCmd.AddCommand(printCmd)
+	historyCmd.AddCommand(distributionCmd)
 	historyCmd.AddCommand(rebuildCmd)
 
 	rootCmd.AddCommand(historyCmd)
@@ -112,11 +118,112 @@ var printCmd = &cobra.Command{
 			int(fromStep)*config3.DefaultStepSize,
 			int(toStep)*config3.DefaultStepSize,
 			keyToDump,
-			os.Stdout,
+			func(key []byte, txNum uint64, val []byte) {
+				fmt.Printf("key: %x, txn: %d, val: %x\n", key, txNum, val)
+			},
 		)
 		if err != nil {
 			logger.Error("Failed to print history", "error", err)
 			return
+		}
+	},
+}
+
+var distributionCmd = &cobra.Command{
+	Use: "distribution",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+
+		dirs, l, err := datadir.New(datadirCli).MustFlock()
+		if err != nil {
+			logger.Error("Opening Datadir", "error", err)
+			return
+		}
+		defer l.Unlock()
+
+		domainKV, err := kv.String2Domain(historyDomain)
+		if err != nil {
+			logger.Error("Failed to resolve domain", "error", err)
+			return
+		}
+
+		history, err := state.NewHistory(
+			statecfg.Schema.GetDomainCfg(domainKV).Hist,
+			config3.DefaultStepSize,
+			config3.DefaultStepsInFrozenFile,
+			dirs,
+			logger,
+		)
+		if err != nil {
+			logger.Error("Failed to init history", "error", err)
+			return
+		}
+		history.Scan(toStep * config3.DefaultStepSize)
+
+		roTx := history.BeginFilesRo()
+		defer roTx.Close()
+
+		keysEntries := make(map[string]int)
+		uniqueEntries := 0
+
+		err = roTx.HistoryDump(
+			int(fromStep)*config3.DefaultStepSize,
+			int(toStep)*config3.DefaultStepSize,
+			nil,
+			func(key []byte, txNum uint64, val []byte) {
+				keysEntries[string(key)] += 1
+				uniqueEntries++
+
+				//fmt.Printf("key: %x, txn: %d, val: %x\n", key, txNum, val)
+			},
+		)
+		if err != nil {
+			logger.Error("Failed to calculate history distribution", "error", err)
+			return
+		}
+
+		var distribution []int
+
+		for _, count := range keysEntries {
+			distribution = append(distribution, count)
+		}
+
+		sort.Ints(distribution)
+
+		if len(distribution) == 0 {
+			return
+		}
+
+		type DistPecentile struct {
+			P          int
+			Value      int
+			ExampleKey []byte
+		}
+
+		percentiles := []DistPecentile{
+			{P: 50, Value: distribution[len(distribution)/2]},
+			{P: 75, Value: distribution[len(distribution)/4*3]},
+			{P: 90, Value: distribution[len(distribution)/10*9]},
+			{P: 99, Value: distribution[len(distribution)/100*99]},
+			{P: 999, Value: distribution[len(distribution)/1000*999]},
+		}
+
+		fmt.Printf("Unique entries: %d\n", uniqueEntries)
+		fmt.Printf("Unique keys: %d\n\n", len(keysEntries))
+
+		fmt.Println("Entries per key: \n")
+
+		for i := range percentiles {
+			for key, count := range keysEntries {
+				if count != percentiles[i].Value {
+					continue
+				}
+
+				percentiles[i].ExampleKey = []byte(key)
+				break
+			}
+
+			fmt.Printf("%d percentile distribution: %d (example key: 0x%x)\n", percentiles[i].P, percentiles[i].Value, percentiles[i].ExampleKey)
 		}
 	},
 }
