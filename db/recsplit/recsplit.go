@@ -570,8 +570,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 			//}
 			var fail bool
 			for i := uint16(0); i < m; i++ {
-				j := remap16(remix(bucket[i]+salt), m) / unit
-				count[j]++
+				count[remap16(remix(bucket[i]+salt), m)/unit]++
 			}
 			/*
 				var fail bool
