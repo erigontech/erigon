@@ -125,6 +125,7 @@ func (d *WebSeeds) VerifyManifestedBuckets(ctx context.Context, failFast bool) e
 		fmt.Printf("%s\n", rep.ToString(false))
 	}
 	if failed {
+		// errors.Join?
 		var merr strings.Builder
 		merr.WriteString("error list:\n")
 		for _, err := range supErr {

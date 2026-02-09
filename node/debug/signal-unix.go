@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build windows
+//go:build unix
 
 package debug
 
@@ -22,10 +22,11 @@ import (
 	"os"
 
 	g "github.com/anacrolix/generics"
+	"golang.org/x/sys/unix"
 
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-func ListenSignals(stack func(), logger log.Logger) {
-	listenSignalsInner(stack, logger, []os.Signal{os.Interrupt}, g.None[os.Signal]())
+func ListenSignals(handle func(), logger log.Logger) {
+	listenSignalsInner(handle, logger, []os.Signal{unix.SIGINT, unix.SIGTERM}, g.Some[os.Signal](unix.SIGUSR1))
 }

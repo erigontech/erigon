@@ -35,10 +35,13 @@ import (
 	"strings"
 	"time"
 
+	g "github.com/anacrolix/generics"
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
+
+	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/downloader/webseeds"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
@@ -283,7 +286,7 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&dryRunFlag,
 				&removeLocalFlag,
-				&preverifiedFlag,
+				&PreverifiedFlag,
 			},
 		},
 		{
@@ -498,6 +501,33 @@ var snapshotCommand = cli.Command{
 						&cli.UintFlag{Name: "domain", Required: true},
 					}),
 				},
+			},
+		},
+		{
+			Name: "preverified",
+			Action: func(cliCtx *cli.Context) (err error) {
+				var dataDir string
+				// Don't use the default, it must be set to apply.
+				if cliCtx.IsSet(utils.DataDirFlag.Name) {
+					dataDir = cliCtx.String(utils.DataDirFlag.Name)
+				}
+				var targetChain g.Option[string]
+				// Don't use the default, it must be set to apply.
+				if cliCtx.IsSet(VerifyChainFlag.Name) {
+					targetChain.Set(VerifyChainFlag.Get(cliCtx))
+				}
+				return webseeds.Verify(
+					cliCtx.Context,
+					PreverifiedFlag.Get(cliCtx),
+					dataDir,
+					ConcurrencyFlag.Get(cliCtx),
+					targetChain,
+				)
+			},
+			Flags: []cli.Flag{
+				&PreverifiedFlag,
+				&VerifyChainFlag,
+				&ConcurrencyFlag,
 			},
 		},
 	},

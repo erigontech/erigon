@@ -201,7 +201,6 @@ func BenchmarkBuild(b *testing.B) {
 		b.StartTimer()
 	}
 }
-
 func BenchmarkAddKeyAndBuild(b *testing.B) {
 	b.ReportAllocs()
 	logger := log.New()
