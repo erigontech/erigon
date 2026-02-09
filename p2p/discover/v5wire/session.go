@@ -25,10 +25,10 @@ import (
 	"encoding/binary"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common/lru"
-	"github.com/ethereum/go-ethereum/common/mclock"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/ethereum/go-ethereum/common/lru"
+	"github.com/ethereum/go-ethereum/common/mclock"
 )
 
 const handshakeTimeout = time.Second

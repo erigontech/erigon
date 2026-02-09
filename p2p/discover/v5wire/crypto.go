@@ -28,8 +28,8 @@ import (
 	"fmt"
 	"hash"
 
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/p2p/enode"
 	"golang.org/x/crypto/hkdf"
 )

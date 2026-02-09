@@ -31,11 +31,11 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/erigontech/erigon/execution/rlp"
 )
 
 // RPC packet types

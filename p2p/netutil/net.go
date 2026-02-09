@@ -317,7 +317,7 @@ func (s *DistinctNetSet) key(ip netip.Addr) netip.Prefix {
 	if s.members == nil {
 		s.members = make(map[netip.Prefix]uint)
 	}
-	p, err := ip.Prefix(int(s.Subnet))
+	p, err := ip.Prefix(int(s.Subnet)) //nolint:gocritic
 	if err != nil {
 		panic(err)
 	}

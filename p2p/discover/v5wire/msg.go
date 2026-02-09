@@ -24,10 +24,10 @@ import (
 	"net"
 
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/ethereum/go-ethereum/common/mclock"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/ethereum/go-ethereum/common/mclock"
 )
 
 // Packet is implemented by all message types.

@@ -98,7 +98,6 @@ require (
 	github.com/quic-go/quic-go v0.49.1
 	github.com/rs/cors v1.11.1
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
-	github.com/shirou/gopsutil v3.21.11+incompatible
 	github.com/shirou/gopsutil/v4 v4.25.10
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/spf13/afero v1.10.0

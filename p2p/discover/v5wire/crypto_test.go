@@ -28,8 +28,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/p2p/enode"
 )
 

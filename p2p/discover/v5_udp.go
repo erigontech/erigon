@@ -33,12 +33,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common/mclock"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/discover/v5wire"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 	"github.com/erigontech/erigon/p2p/netutil"
+	"github.com/ethereum/go-ethereum/common/mclock"
 )
 
 const (

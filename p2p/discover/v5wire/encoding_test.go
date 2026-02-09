@@ -34,10 +34,10 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 
-	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/ethereum/go-ethereum/common/mclock"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/ethereum/go-ethereum/common/mclock"
 )
 
 // To regenerate discv5 test vectors, run

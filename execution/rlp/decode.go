@@ -42,12 +42,12 @@ import (
 var EOL = errors.New("rlp: end of list")
 
 var (
-	ErrExpectedString   = errors.New("rlp: expected String or Byte")
-	ErrExpectedList     = errors.New("rlp: expected List")
-	ErrCanonInt         = errors.New("rlp: non-canonical integer format")
-	ErrCanonSize        = errors.New("rlp: non-canonical size information")
-	ErrElemTooLarge     = errors.New("rlp: element is larger than containing list")
-	ErrValueTooLarge    = errors.New("rlp: value size exceeds available input length")
+	ErrExpectedString      = errors.New("rlp: expected String or Byte")
+	ErrExpectedList        = errors.New("rlp: expected List")
+	ErrCanonInt            = errors.New("rlp: non-canonical integer format")
+	ErrCanonSize           = errors.New("rlp: non-canonical size information")
+	ErrElemTooLarge        = errors.New("rlp: element is larger than containing list")
+	ErrValueTooLarge       = errors.New("rlp: value size exceeds available input length")
 	ErrMoreThanOneValue    = errors.New("rlp: input contains more than one value")
 	ErrWrongTxTypePrefix   = errors.New("rlp: only 1-byte tx type prefix is supported")
 	ErrUnknownTxTypePrefix = errors.New("rlp: unknown tx type prefix")
@@ -1224,7 +1224,7 @@ func (s *Stream) readUint(size byte) (uint64, error) {
 			// The error needs to be adjusted to become ErrCanonInt in this case.
 			return 0, ErrCanonSize
 		}
-		return binary.BigEndian.Uint64(buffer[:]), nil
+		return binary.BigEndian.Uint64(buffer), nil
 	}
 }
 
