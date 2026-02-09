@@ -22,8 +22,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func TestRecSplit2(t *testing.T) {
@@ -156,6 +157,38 @@ func TestIndexLookup(t *testing.T) {
 		cfg.Version = 1
 		test(t, cfg)
 	})
+}
+
+func BenchmarkBuild(b *testing.B) {
+	logger := log.New()
+	tmpDir := b.TempDir()
+	salt := uint32(1)
+	const KeysN = 10_000
+
+	for i := 0; b.Loop(); i++ {
+		indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_%d", i))
+		rs, err := NewRecSplit(RecSplitArgs{
+			KeyCount:   KeysN,
+			BucketSize: 2000,
+			Salt:       &salt,
+			TmpDir:     tmpDir,
+			IndexFile:  indexFile,
+			LeafSize:   8,
+			NoFsync:    true,
+		}, logger)
+		if err != nil {
+			b.Fatal(err)
+		}
+		for j := 0; j < KeysN; j++ {
+			if err = rs.AddKey(fmt.Appendf(nil, "key %d", j), uint64(j*17)); err != nil {
+				b.Fatal(err)
+			}
+		}
+		if err := rs.Build(context.Background()); err != nil {
+			b.Fatal(err)
+		}
+		rs.Close()
+	}
 }
 
 func TestTwoLayerIndex(t *testing.T) {
