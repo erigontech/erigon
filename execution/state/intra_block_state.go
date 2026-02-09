@@ -1137,11 +1137,6 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte) error {
 		fmt.Printf("%d (%d.%d) SetCode %x, %d: %s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, lenc, cs)
 	}
 
-	// DEBUG: Track SetCode for the EIP-7702 delegation address
-	if addr.Value() == (common.Address{0x91, 0xea, 0x02, 0x97, 0x68, 0x70, 0xd5, 0xa0, 0x37, 0xa7, 0x8c, 0x5b, 0xa3, 0xb8, 0xbc, 0x4f, 0x3d, 0x9e, 0x4d, 0xa0}) {
-		fmt.Printf("DEBUG SetCode addr=0x91ea block=%d txIndex=%d code=%x hasVersionMap=%v\n", sdb.blockNum, sdb.txIndex, code, sdb.versionMap != nil)
-	}
-
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
@@ -1150,11 +1145,6 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte) error {
 	written, err := stateObject.SetCode(codeHash, code, !sdb.hasWrite(addr, CodePath, accounts.NilKey))
 	if err != nil {
 		return err
-	}
-
-	// DEBUG: Track SetCode result for the EIP-7702 delegation address
-	if addr.Value() == (common.Address{0x91, 0xea, 0x02, 0x97, 0x68, 0x70, 0xd5, 0xa0, 0x37, 0xa7, 0x8c, 0x5b, 0xa3, 0xb8, 0xbc, 0x4f, 0x3d, 0x9e, 0x4d, 0xa0}) {
-		fmt.Printf("DEBUG SetCode result: written=%v codeHash=%x originalCodeHash=%x\n", written, codeHash, stateObject.original.CodeHash)
 	}
 
 	if written {
