@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/spaolacci/murmur3"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -157,6 +158,29 @@ func TestIndexLookup(t *testing.T) {
 		cfg.Version = 1
 		test(t, cfg)
 	})
+}
+
+func BenchmarkFindBijection(b *testing.B) {
+	// Simulate realistic leaf buckets: leafSize=8 keys with murmur3 hashes
+	const leafSize = 8
+	const numBuckets = 1000
+	buckets := make([][leafSize]uint64, numBuckets)
+	for i := range buckets {
+		for j := range buckets[i] {
+			key := fmt.Appendf(nil, "key_%d_%d", i, j)
+			hi, lo := murmur3.Sum128WithSeed(key, 1)
+			_ = hi
+			buckets[i][j] = lo
+		}
+	}
+	salt := uint64(0x106393c187cae2a) // startSeed[0]
+
+	b.ResetTimer()
+	for b.Loop() {
+		for i := range buckets {
+			findBijection(buckets[i][:], salt, leafSize)
+		}
+	}
 }
 
 func BenchmarkBuild(b *testing.B) {

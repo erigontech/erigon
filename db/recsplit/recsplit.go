@@ -516,6 +516,36 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 }
 
 // recsplit applies recSplit algorithm to the given bucket
+// findBijection finds a salt value such that all keys in bucket hash to distinct
+// positions in [0, m). Uses 4-way salt parallelism with branchless OR-accumulate
+// to exploit CPU instruction-level parallelism and avoid branch mispredictions.
+func findBijection(bucket []uint64, salt uint64, m uint16) uint64 {
+	fullMask := uint32((1 << m) - 1)
+	for {
+		var mask0, mask1, mask2, mask3 uint32
+		for i := uint16(0); i < m; i++ {
+			key := bucket[i]
+			mask0 |= uint32(1) << remap16(remix(key+salt), m)
+			mask1 |= uint32(1) << remap16(remix(key+salt+1), m)
+			mask2 |= uint32(1) << remap16(remix(key+salt+2), m)
+			mask3 |= uint32(1) << remap16(remix(key+salt+3), m)
+		}
+		if mask0 == fullMask {
+			return salt
+		}
+		if mask1 == fullMask {
+			return salt + 1
+		}
+		if mask2 == fullMask {
+			return salt + 2
+		}
+		if mask3 == fullMask {
+			return salt + 3
+		}
+		salt += 4
+	}
+}
+
 func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64) ([]uint64, error) {
 	if rs.trace {
 		fmt.Printf("recsplit(%d, %d, %x)\n", level, len(bucket), bucket)
@@ -524,38 +554,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 	salt := rs.startSeed[level]
 	m := uint16(len(bucket))
 	if m <= rs.leafSize {
-		// No need to build aggregation levels - just find bijection.
-		// Uses 4-way salt parallelism: tests 4 consecutive salts per iteration
-		// with branchless OR-accumulate. This exploits CPU instruction-level
-		// parallelism (the 4 remix calls are independent) and eliminates branch
-		// mispredictions from the early-exit collision check.
-		fullMask := uint32((1 << m) - 1)
-		for {
-			var mask0, mask1, mask2, mask3 uint32
-			for i := uint16(0); i < m; i++ {
-				key := bucket[i]
-				mask0 |= uint32(1) << remap16(remix(key+salt), m)
-				mask1 |= uint32(1) << remap16(remix(key+salt+1), m)
-				mask2 |= uint32(1) << remap16(remix(key+salt+2), m)
-				mask3 |= uint32(1) << remap16(remix(key+salt+3), m)
-			}
-			if mask0 == fullMask {
-				break
-			}
-			if mask1 == fullMask {
-				salt += 1
-				break
-			}
-			if mask2 == fullMask {
-				salt += 2
-				break
-			}
-			if mask3 == fullMask {
-				salt += 3
-				break
-			}
-			salt += 4
-		}
+		salt = findBijection(bucket[:m], salt, m)
 		for i := uint16(0); i < m; i++ {
 			j := remap16(remix(bucket[i]+salt), m)
 			rs.offsetBuffer[j] = offsets[i]
