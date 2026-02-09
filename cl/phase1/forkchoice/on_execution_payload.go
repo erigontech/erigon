@@ -66,6 +66,7 @@ func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope
 	// Store the post-execution-payload state.
 	// In GLOAS, beacon block and execution payload have separate state transitions.
 	// When the head has PayloadStatus=FULL, this state becomes the canonical state.
+	// TODO: Persistently store the execution payload states
 	f.executionPayloadStates.Store(beaconBlockRoot, blockStateCopy)
 
 	return nil
