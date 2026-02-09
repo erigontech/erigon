@@ -577,7 +577,8 @@ func findSplit(bucket []uint64, salt uint64, fanout, unit uint16, count []uint16
 }
 
 // findBijection finds a salt value such that all keys in bucket hash to distinct
-// positions in [0, m). Uses 8-way salt parallelism with branchless OR-accumulate
+// positions in [0, m).
+// Uses 8-way salt parallelism with branchless OR-accumulate
 // to exploit CPU instruction-level parallelism and avoid branch mispredictions.
 func findBijection(bucket []uint64, salt uint64) uint64 {
 	m := uint16(len(bucket))
