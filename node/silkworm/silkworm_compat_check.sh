@@ -84,6 +84,9 @@ case $(uname -s) in
 		;;
 	Darwin)
 		;;
+	MINGW*|MSYS*)
+		echo "unsupported OS"
+		;;
 	*)
 		echo "unsupported OS"
 		exit 1
