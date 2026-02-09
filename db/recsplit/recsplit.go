@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/datastruct/fusefilter"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano16"
@@ -515,6 +516,52 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 	return nil
 }
 
+// findSplit finds a salt value such that keys in bucket are evenly distributed
+// into fanout partitions of size unit each (based on remap16(remix(key+salt), m) / unit).
+func findSplit(bucket []uint64, salt uint64, fanout, unit uint16, count []uint16) uint64 {
+	m := uint16(len(bucket))
+	for {
+		for i := uint16(0); i < fanout-1; i++ {
+			count[i] = 0
+		}
+		var fail bool
+		for i := uint16(0); i < m; i++ {
+			count[remap16(remix(bucket[i]+salt), m)/unit]++
+		}
+		for i := uint16(0); i < fanout-1; i++ {
+			fail = fail || (count[i] != unit)
+		}
+		if !fail {
+			return salt
+		}
+		salt++
+	}
+}
+
+// findBijection finds a salt value such that all keys in bucket hash to distinct
+// positions in [0, m).
+func findBijection(bucket []uint64, salt uint64) uint64 {
+	m := uint16(len(bucket))
+	// No need to build aggregation levels - just find bijection
+	var mask uint32
+	for {
+		mask = 0
+		var fail bool
+		for i := uint16(0); !fail && i < m; i++ {
+			bit := uint32(1) << remap16(remix(bucket[i]+salt), m)
+			if mask&bit != 0 {
+				fail = true
+			} else {
+				mask |= bit
+			}
+		}
+		if !fail {
+			return salt
+		}
+		salt++
+	}
+}
+
 // recsplit applies recSplit algorithm to the given bucket
 func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64) ([]uint64, error) {
 	if rs.trace {
@@ -524,24 +571,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 	salt := rs.startSeed[level]
 	m := uint16(len(bucket))
 	if m <= rs.leafSize {
-		// No need to build aggregation levels - just find bijection
-		var mask uint32
-		for {
-			mask = 0
-			var fail bool
-			for i := uint16(0); !fail && i < m; i++ {
-				bit := uint32(1) << remap16(remix(bucket[i]+salt), m)
-				if mask&bit != 0 {
-					fail = true
-				} else {
-					mask |= bit
-				}
-			}
-			if !fail {
-				break
-			}
-			salt++
-		}
+		salt = findBijection(bucket, salt)
 		for i := uint16(0); i < m; i++ {
 			j := remap16(remix(bucket[i]+salt), m)
 			rs.offsetBuffer[j] = offsets[i]
@@ -562,22 +592,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 	} else {
 		fanout, unit := splitParams(m, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
 		count := rs.count
-		for {
-			for i := uint16(0); i < fanout-1; i++ {
-				count[i] = 0
-			}
-			var fail bool
-			for i := uint16(0); i < m; i++ {
-				count[remap16(remix(bucket[i]+salt), m)/unit]++
-			}
-			for i := uint16(0); i < fanout-1; i++ {
-				fail = fail || (count[i] != unit)
-			}
-			if !fail {
-				break
-			}
-			salt++
-		}
+		salt = findSplit(bucket, salt, fanout, unit, count)
 		for i, c := uint16(0), uint16(0); i < fanout; i++ {
 			count[i] = c
 			c += unit
@@ -632,6 +647,28 @@ func (rs *RecSplit) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.
 	}
 	rs.currentBucket = append(rs.currentBucket, binary.BigEndian.Uint64(k[8:]))
 	rs.currentBucketOffs = append(rs.currentBucketOffs, binary.BigEndian.Uint64(v))
+	return nil
+}
+
+// buildOffsetEf mmaps the offset temp file and builds the Elias-Fano encoding.
+func (rs *RecSplit) buildOffsetEf() error {
+	rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
+	if err := rs.offsetWriter.Flush(); err != nil {
+		return fmt.Errorf("flush offset writer: %w", err)
+	}
+
+	mmapSize := int(rs.keysAdded * 8)
+	mmapHandle1, mmapHandle2, err := mmap.Mmap(rs.offsetFile, mmapSize)
+	if err != nil {
+		return fmt.Errorf("mmap offset file: %w", err)
+	}
+	defer mmap.Munmap(mmapHandle1, mmapHandle2)
+
+	data := mmapHandle1[:mmapSize]
+	for i := uint64(0); i < rs.keysAdded; i++ {
+		rs.offsetEf.AddOffset(binary.BigEndian.Uint64(data[i*8:]))
+	}
+	rs.offsetEf.Build()
 	return nil
 }
 
@@ -699,22 +736,9 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		log.Log(rs.lvl, "[index] write", "file", rs.fileName)
 	}
 	if rs.enums && rs.keysAdded > 0 {
-		rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
-		if err := rs.offsetWriter.Flush(); err != nil {
-			return fmt.Errorf("flush offset writer: %w", err)
+		if err := rs.buildOffsetEf(); err != nil {
+			return err
 		}
-		if _, err := rs.offsetFile.Seek(0, 0); err != nil {
-			return fmt.Errorf("seek offset file: %w", err)
-		}
-		offsetReader := bufio.NewReaderSize(rs.offsetFile, 8*4096)
-		var buf [8]byte
-		for i := uint64(0); i < rs.keysAdded; i++ {
-			if _, err := io.ReadFull(offsetReader, buf[:]); err != nil {
-				return fmt.Errorf("read offset: %w", err)
-			}
-			rs.offsetEf.AddOffset(binary.BigEndian.Uint64(buf[:]))
-		}
-		rs.offsetEf.Build()
 	}
 	rs.gr.appendFixed(1, 1) // Sentinel (avoids checking for parts of size 1)
 	// Construct Elias Fano index
