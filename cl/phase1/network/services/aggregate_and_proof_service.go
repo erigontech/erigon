@@ -232,7 +232,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		if a.forkchoiceStore.Ancestor(
 			aggregateData.BeaconBlockRoot,
 			finalizedSlot,
-		) != finalizedCheckpoint.Root {
+		).Root != finalizedCheckpoint.Root {
 			return fmt.Errorf("%w: invalid finalized checkpoint: %v", ErrIgnore, finalizedCheckpoint.Root)
 		}
 
@@ -271,7 +271,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		if a.forkchoiceStore.Ancestor(
 			aggregateData.BeaconBlockRoot,
 			target.Epoch*a.beaconCfg.SlotsPerEpoch,
-		) != target.Root {
+		).Root != target.Root {
 			return errors.New("invalid target block")
 		}
 		if a.test {
