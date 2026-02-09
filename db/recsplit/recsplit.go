@@ -583,11 +583,6 @@ func findSplit(bucket []uint64, salt uint64, fanout, unit uint16, count []uint16
 func findBijection(bucket []uint64, salt uint64) uint64 {
 	m := uint16(len(bucket))
 	fullMask := uint32((1 << m) - 1)
-	// When m is a power of 2, remap16(x, m) = (x & mask48) >> (48-log2(m)),
-	// replacing a multiply (~3 cycles) with a shift (~1 cycle).
-	if m&(m-1) == 0 && m > 0 {
-		return findBijectionPow2(bucket, salt, fullMask, uint(48-bits.TrailingZeros16(m)))
-	}
 	for {
 		var mask0, mask1, mask2, mask3, mask4, mask5, mask6, mask7 uint32
 		for i := uint16(0); i < m; i++ {
@@ -600,51 +595,6 @@ func findBijection(bucket []uint64, salt uint64) uint64 {
 			mask5 |= uint32(1) << remap16(remix(key+salt+5), m)
 			mask6 |= uint32(1) << remap16(remix(key+salt+6), m)
 			mask7 |= uint32(1) << remap16(remix(key+salt+7), m)
-		}
-		if mask0 == fullMask {
-			return salt
-		}
-		if mask1 == fullMask {
-			return salt + 1
-		}
-		if mask2 == fullMask {
-			return salt + 2
-		}
-		if mask3 == fullMask {
-			return salt + 3
-		}
-		if mask4 == fullMask {
-			return salt + 4
-		}
-		if mask5 == fullMask {
-			return salt + 5
-		}
-		if mask6 == fullMask {
-			return salt + 6
-		}
-		if mask7 == fullMask {
-			return salt + 7
-		}
-		salt += 8
-	}
-}
-
-// findBijectionPow2 is the fast path for power-of-2 m values.
-// Uses a right shift instead of multiply in remap, saving ~2 cycles per hash.
-func findBijectionPow2(bucket []uint64, salt uint64, fullMask uint32, shift uint) uint64 {
-	m := uint16(len(bucket))
-	for {
-		var mask0, mask1, mask2, mask3, mask4, mask5, mask6, mask7 uint32
-		for i := uint16(0); i < m; i++ {
-			key := bucket[i]
-			mask0 |= uint32(1) << uint16((remix(key+salt)&mask48)>>shift)
-			mask1 |= uint32(1) << uint16((remix(key+salt+1)&mask48)>>shift)
-			mask2 |= uint32(1) << uint16((remix(key+salt+2)&mask48)>>shift)
-			mask3 |= uint32(1) << uint16((remix(key+salt+3)&mask48)>>shift)
-			mask4 |= uint32(1) << uint16((remix(key+salt+4)&mask48)>>shift)
-			mask5 |= uint32(1) << uint16((remix(key+salt+5)&mask48)>>shift)
-			mask6 |= uint32(1) << uint16((remix(key+salt+6)&mask48)>>shift)
-			mask7 |= uint32(1) << uint16((remix(key+salt+7)&mask48)>>shift)
 		}
 		if mask0 == fullMask {
 			return salt
