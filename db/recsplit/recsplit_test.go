@@ -158,6 +158,38 @@ func TestIndexLookup(t *testing.T) {
 	})
 }
 
+func BenchmarkBuild(b *testing.B) {
+	logger := log.New()
+	tmpDir := b.TempDir()
+	salt := uint32(1)
+	N := 1_000_000
+
+	for i := 0; i < b.N; i++ {
+		indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_%d", i))
+		rs, err := NewRecSplit(RecSplitArgs{
+			KeyCount:   N,
+			BucketSize: 2000,
+			Salt:       &salt,
+			TmpDir:     tmpDir,
+			IndexFile:  indexFile,
+			LeafSize:   8,
+			NoFsync:    true,
+		}, logger)
+		if err != nil {
+			b.Fatal(err)
+		}
+		for j := 0; j < N; j++ {
+			if err = rs.AddKey(fmt.Appendf(nil, "key %d", j), uint64(j*17)); err != nil {
+				b.Fatal(err)
+			}
+		}
+		if err := rs.Build(context.Background()); err != nil {
+			b.Fatal(err)
+		}
+		rs.Close()
+	}
+}
+
 func TestTwoLayerIndex(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()

@@ -202,7 +202,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	rs.bucketCollector.LogLvl(log.LvlDebug)
 	if args.Enums {
 		rs.offsetCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.SmallSortableBuffers, logger)
-		rs.bucketCollector.SortAndFlushInBackground(false)
+		rs.offsetCollector.SortAndFlushInBackground(false)
 		rs.offsetCollector.LogLvl(log.LvlDebug)
 	}
 	var err error
@@ -309,7 +309,7 @@ func (rs *RecSplit) ResetNextSalt() {
 		rs.offsetCollector.Close()
 		rs.offsetCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+rs.fileName, rs.tmpDir, etl.SmallSortableBuffers, rs.logger)
 		rs.offsetCollector.SortAndFlushInBackground(false)
-		rs.bucketCollector.LogLvl(log.LvlDebug)
+		rs.offsetCollector.LogLvl(log.LvlDebug)
 	}
 	rs.currentBucket = rs.currentBucket[:0]
 	rs.currentBucketOffs = rs.currentBucketOffs[:0]
@@ -511,27 +511,23 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 	salt := rs.startSeed[level]
 	m := uint16(len(bucket))
 	if m <= rs.leafSize {
-		// No need to build aggregation levels - just find bijection
+		// No need to build aggregation levels - just find bijection.
+		// Branchless approach: OR all position bits, then check popcount == m.
+		// Removes data-dependent branches from the inner loop, enabling
+		// better CPU pipelining of the independent hash computations.
 		var mask uint32
 		for {
 			mask = 0
-			var fail bool
-			for i := uint16(0); !fail && i < m; i++ {
-				bit := uint32(1) << remap16(remix(bucket[i]+salt), m)
-				if mask&bit != 0 {
-					fail = true
-				} else {
-					mask |= bit
-				}
+			for _, key := range bucket {
+				mask |= uint32(1) << remap16(remix(key+salt), m)
 			}
-			if !fail {
+			if bits.OnesCount32(mask) == int(m) {
 				break
 			}
 			salt++
 		}
-		for i := uint16(0); i < m; i++ {
-			j := remap16(remix(bucket[i]+salt), m)
-			rs.offsetBuffer[j] = offsets[i]
+		for i, key := range bucket {
+			rs.offsetBuffer[remap16(remix(key+salt), m)] = offsets[i]
 		}
 		for _, offset := range rs.offsetBuffer[:m] {
 			binary.BigEndian.PutUint64(rs.numBuf[:], offset)
@@ -550,15 +546,28 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 		fanout, unit := splitParams(m, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
 		count := rs.count
 		for {
-			for i := uint16(0); i < fanout-1; i++ {
+			// zero all fanout entries (needed for early overflow detection correctness)
+			for i := uint16(0); i < fanout; i++ {
 				count[i] = 0
 			}
 			var fail bool
-			for i := uint16(0); i < m; i++ {
-				count[remap16(remix(bucket[i]+salt), m)/unit]++
+			// range-based iteration eliminates per-element slice bounds checks
+			for _, key := range bucket {
+				j := remap16(remix(key+salt), m) / unit
+				count[j]++
+				// early overflow detection: if any bin exceeds unit, this salt fails
+				if count[j] > unit {
+					fail = true
+					break
+				}
 			}
-			for i := uint16(0); i < fanout-1; i++ {
-				fail = fail || (count[i] != unit)
+			if !fail {
+				for i := uint16(0); i < fanout-1; i++ {
+					if count[i] != unit {
+						fail = true
+						break
+					}
+				}
 			}
 			if !fail {
 				break
@@ -569,9 +578,9 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 			count[i] = c
 			c += unit
 		}
-		for i := uint16(0); i < m; i++ {
-			j := remap16(remix(bucket[i]+salt), m) / unit
-			rs.buffer[count[j]] = bucket[i]
+		for i, key := range bucket {
+			j := remap16(remix(key+salt), m) / unit
+			rs.buffer[count[j]] = key
 			rs.offsetBuffer[count[j]] = offsets[i]
 			count[j]++
 		}
