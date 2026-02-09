@@ -171,7 +171,7 @@ func BenchmarkBuild(b *testing.B) {
 	for j := 0; j < KeysN; j++ {
 		keys[j] = fmt.Appendf(nil, "key %d", j)
 	}
-
+	b.ResetTimer()
 	for i := 0; b.Loop(); i++ {
 		b.StopTimer()
 		indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_%d", i))
