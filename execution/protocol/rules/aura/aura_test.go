@@ -56,7 +56,7 @@ func TestEmptyBlock(t *testing.T) {
 	auraDB := memdb.NewTestDB(t, dbcfg.ChainDB)
 	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
 	require.NoError(err)
-	m := mock.MockWithGenesisEngine(t, genesis, engine, false)
+	m := mock.MockWithGenesisEngine(t, genesis, engine)
 
 	time := uint64(1539016985)
 	header := builder.MakeEmptyHeader(genesisBlock.Header(), chainConfig, time, nil)
@@ -94,7 +94,7 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 	auraDB := memdb.NewTestDB(t, dbcfg.ChainDB)
 	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
 	require.NoError(err)
-	m := mock.MockWithGenesisEngine(t, genesis, engine, false)
+	m := mock.MockWithGenesisEngine(t, genesis, engine)
 
 	difficlty, _ := new(big.Int).SetString("340282366920938463463374607431768211454", 10)
 	//Populate a sample valid header for a Pre-merge block

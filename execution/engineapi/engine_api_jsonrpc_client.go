@@ -103,9 +103,10 @@ func DialJsonRpcClient(url string, jwtSecret []byte, logger log.Logger, opts ...
 		return nil, err
 	}
 	res := &JsonRpcClient{
-		rpcClient:    client,
-		maxRetries:   options.maxRetries,
-		retryBackOff: options.retryBackOff,
+		rpcClient:            client,
+		maxRetries:           options.maxRetries,
+		retryBackOff:         options.retryBackOff,
+		retryableErrCheckers: options.retryableErrCheckers,
 	}
 	return res, nil
 }

@@ -106,8 +106,6 @@ var Defaults = Config{
 	RPCGasCap:   50000000,
 	GPO:         FullNodeGPO,
 	RPCTxFeeCap: 1, // 1 ether
-
-	ImportMode: false,
 	Snapshot: BlocksFreezing{
 		KeepBlocks: false,
 		ProduceE2:  true,
@@ -194,8 +192,6 @@ type Config struct {
 
 	Prune     prune.Mode
 	BatchSize datasize.ByteSize // Batch size for execution stage
-
-	ImportMode bool
 
 	BadBlockHash common.Hash // hash of the block marked as bad
 

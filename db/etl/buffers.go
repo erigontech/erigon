@@ -168,8 +168,8 @@ func (b *sortableBuffer) Get(i int, keyBuf, valBuf []byte) ([]byte, []byte) {
 }
 
 func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
-	b.lens = make([]int, 0, predictKeysAmount)
-	b.offsets = make([]int, 0, predictKeysAmount)
+	b.lens = make([]int, 0, predictKeysAmount*2)
+	b.offsets = make([]int, 0, predictKeysAmount*2)
 	b.data = make([]byte, 0, predictDataSize)
 	b.size = 0
 	return b

@@ -761,7 +761,7 @@ running:
 				inboundCount--
 			}
 		case <-logTimer.C:
-			vals := []interface{}{"protocol", srv.Config.Protocols[0].Version, "peers", len(peers), "trusted", len(trusted), "inbound", inboundCount}
+			vals := []any{"protocol", srv.Config.Protocols[0].Version, "peers", len(peers), "trusted", len(trusted), "inbound", inboundCount}
 			vals = append(vals, srv.listErrors()...)
 
 			srv.logger.Debug("[p2p] Server", vals...)
@@ -1055,8 +1055,8 @@ type NodeInfo struct {
 		Discovery int `json:"discovery"` // UDP listening port for discovery protocol
 		Listener  int `json:"listener"`  // TCP listening port for RLPx
 	} `json:"ports"`
-	ListenAddr string                 `json:"listenAddr"`
-	Protocols  map[string]interface{} `json:"protocols"`
+	ListenAddr string         `json:"listenAddr"`
+	Protocols  map[string]any `json:"protocols"`
 }
 
 // NodeInfo gathers and returns a collection of metadata known about the host.
@@ -1069,7 +1069,7 @@ func (srv *Server) NodeInfo() *NodeInfo {
 		ID:         node.ID().String(),
 		IP:         node.IP().String(),
 		ListenAddr: srv.ListenAddr,
-		Protocols:  make(map[string]interface{}),
+		Protocols:  make(map[string]any),
 	}
 	info.Ports.Discovery = node.UDP()
 	info.Ports.Listener = node.TCP()
@@ -1078,7 +1078,7 @@ func (srv *Server) NodeInfo() *NodeInfo {
 	// Gather all the running protocol infos (only once per protocol type)
 	for _, proto := range srv.Protocols {
 		if _, ok := info.Protocols[proto.Name]; !ok {
-			nodeInfo := interface{}("unknown")
+			nodeInfo := any("unknown")
 			if query := proto.NodeInfo; query != nil {
 				nodeInfo = proto.NodeInfo()
 			}
@@ -1126,11 +1126,11 @@ func (srv *Server) resetErrors() {
 	srv.errorsMu.Unlock()
 }
 
-func (srv *Server) listErrors() []interface{} {
+func (srv *Server) listErrors() []any {
 	srv.errorsMu.Lock()
 	defer srv.errorsMu.Unlock()
 
-	list := make([]interface{}, 0, len(srv.errors)*2)
+	list := make([]any, 0, len(srv.errors)*2)
 	for err, count := range srv.errors {
 		list = append(list, err, count)
 	}
