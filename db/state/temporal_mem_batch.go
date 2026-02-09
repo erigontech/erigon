@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"maps"
 	"sort"
 	"sync"
 	"unsafe"
@@ -402,9 +403,7 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 
 	for domain, otherEntries := range other.domains {
 		entries := sd.domains[domain]
-		for key, value := range otherEntries {
-			entries[key] = value
-		}
+		maps.Copy(entries, otherEntries)
 	}
 
 	other.storage.Scan(func(key string, value []dataWithTxNum) bool {
