@@ -502,8 +502,10 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 	return nil
 }
 
+// findSplit finds a salt value such that keys in bucket are evenly distributed
 // into fanout partitions of size unit each (based on remap16(remix(key+salt), m) / unit).
-func findSplit(bucket []uint64, salt uint64, m, fanout, unit uint16, count []uint16) uint64 {
+func findSplit(bucket []uint64, salt uint64, fanout, unit uint16, count []uint16) uint64 {
+	m := uint16(len(bucket))
 	for {
 		for i := uint16(0); i < fanout-1; i++ {
 			count[i] = 0
@@ -524,7 +526,8 @@ func findSplit(bucket []uint64, salt uint64, m, fanout, unit uint16, count []uin
 
 // findBijection finds a salt value such that all keys in bucket hash to distinct
 // positions in [0, m).
-func findBijection(bucket []uint64, salt uint64, m uint16) uint64 {
+func findBijection(bucket []uint64, salt uint64) uint64 {
+	m := uint16(len(bucket))
 	// No need to build aggregation levels - just find bijection
 	var mask uint32
 	for {
@@ -554,7 +557,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 	salt := rs.startSeed[level]
 	m := uint16(len(bucket))
 	if m <= rs.leafSize {
-		salt = findBijection(bucket[:m], salt, m)
+		salt = findBijection(bucket, salt)
 		for i := uint16(0); i < m; i++ {
 			j := remap16(remix(bucket[i]+salt), m)
 			rs.offsetBuffer[j] = offsets[i]
@@ -575,7 +578,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 	} else {
 		fanout, unit := splitParams(m, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
 		count := rs.count
-		salt = findSplit(bucket[:m], salt, m, fanout, unit, count)
+		salt = findSplit(bucket, salt, fanout, unit, count)
 		for i, c := uint16(0), uint16(0); i < fanout; i++ {
 			count[i] = c
 			c += unit
