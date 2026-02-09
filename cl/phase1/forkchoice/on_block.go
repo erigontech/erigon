@@ -101,6 +101,16 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	if block.Block.Slot <= finalizedSlot {
 		return nil
 	}
+
+	// [New in Gloas:EIP7732] Validate parent payload status path early (before expensive operations)
+	curEpoch := f.computeEpochAtSlot(f.Slot())
+	isGloas := f.beaconCfg.GetCurrentStateVersion(curEpoch) >= clparams.GloasVersion
+	if isGloas {
+		if err := f.validateParentPayloadPath(block.Block); err != nil {
+			return err
+		}
+	}
+
 	// Now we find the versioned hashes
 	var versionedHashes []common.Hash
 	if newPayload && f.engine != nil && block.Version() >= clparams.DenebVersion {
@@ -228,6 +238,17 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	isBeforeAttestingInterval := timeIntoSlot < f.beaconCfg.SecondsPerSlot/f.beaconCfg.IntervalsPerSlot
 	if f.Slot() == block.Block.Slot && isBeforeAttestingInterval && f.proposerBoostRoot.Load().(common.Hash) == (common.Hash{}) {
 		f.proposerBoostRoot.Store(common.Hash(blockRoot))
+	}
+
+	// [New in Gloas:EIP7732] GLOAS-specific on_block logic (post state transition)
+	if isGloas {
+		// Initialize PTC vote for this block
+		f.ptcVote.Store(blockRoot, [clparams.PtcSize]bool{})
+
+		// Notify PTC messages from payload attestations in the block
+		if block.Block.Body.PayloadAttestations != nil {
+			f.notifyPtcMessages(lastProcessedState, block.Block.Body.PayloadAttestations)
+		}
 	}
 	if lastProcessedState.Slot()%f.beaconCfg.SlotsPerEpoch == 0 {
 		// Update randao mixes

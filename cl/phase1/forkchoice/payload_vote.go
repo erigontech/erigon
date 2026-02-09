@@ -1,6 +1,8 @@
 package forkchoice
 
 import (
+	"errors"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -327,4 +329,41 @@ func (f *ForkChoiceStore) getNodeChildren(node ForkChoiceNode, blocks map[common
 		}
 	}
 	return result
+}
+
+// validateParentPayloadPath validates that the block builds on the correct parent payload path.
+// If parent is FULL, the parent must have an execution payload state.
+// If parent is EMPTY, the block's parent_block_hash must match the parent's parent_block_hash.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock) error {
+	if f.isParentNodeFull(block) {
+		// Parent is FULL - verify execution payload state exists
+		if _, ok := f.executionPayloadStates.Load(block.ParentRoot); !ok {
+			return errors.New("parent execution payload state not found for FULL parent")
+		}
+	} else {
+		// Parent is EMPTY - verify bid.parent_block_hash == parent_bid.parent_block_hash
+		parentBlock, ok := f.forkGraph.GetBlock(block.ParentRoot)
+		if !ok || parentBlock == nil {
+			return errors.New("parent block not found")
+		}
+
+		currentBid := block.Body.GetSignedExecutionPayloadBid()
+		parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid()
+
+		// Both bids must exist for GLOAS blocks
+		if currentBid == nil || currentBid.Message == nil {
+			return errors.New("current block missing execution payload bid")
+		}
+		if parentBid == nil || parentBid.Message == nil {
+			// Parent might be pre-GLOAS, skip this check
+			return nil
+		}
+
+		// Verify parent_block_hash matches
+		if currentBid.Message.ParentBlockHash != parentBid.Message.ParentBlockHash {
+			return errors.New("bid parent_block_hash mismatch with parent bid")
+		}
+	}
+	return nil
 }
