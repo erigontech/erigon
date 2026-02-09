@@ -40,7 +40,7 @@ import (
 // Make mocks with maps and simple setters and getters, panic on methods from ForkChoiceStorageWriter
 
 type ForkChoiceStorageMock struct {
-	Ancestors              map[uint64]common.Hash
+	Ancestors              map[uint64]forkchoice.ForkChoiceNode
 	AnchorSlotVal          uint64
 	FinalizedCheckpointVal solid.Checkpoint
 	FinalizedSlotVal       uint64
@@ -169,7 +169,7 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		AnyTimes()
 
 	return &ForkChoiceStorageMock{
-		Ancestors:                 make(map[uint64]common.Hash),
+		Ancestors:                 make(map[uint64]forkchoice.ForkChoiceNode),
 		AnchorSlotVal:             0,
 		FinalizedCheckpointVal:    solid.Checkpoint{},
 		FinalizedSlotVal:          0,
@@ -197,7 +197,7 @@ func (f *ForkChoiceStorageMock) GetPeerDas() das.PeerDas {
 	return f.MockPeerDas
 }
 
-func (f *ForkChoiceStorageMock) Ancestor(root common.Hash, slot uint64) common.Hash {
+func (f *ForkChoiceStorageMock) Ancestor(root common.Hash, slot uint64) forkchoice.ForkChoiceNode {
 	return f.Ancestors[slot]
 }
 
