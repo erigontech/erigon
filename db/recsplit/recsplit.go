@@ -250,12 +250,12 @@ func (rs *RecSplit) MajorVersion() version.DataStructureVersion { return rs.data
 func (rs *RecSplit) Salt() uint32                               { return rs.salt }
 func (rs *RecSplit) Close() {
 	if rs.indexF != nil {
-		rs.indexF.Close()
+		_ = rs.indexF.Close()
 		_ = dir.RemoveFile(rs.indexF.Name())
 		rs.indexF = nil
 	}
 	if rs.existenceFV0 != nil {
-		rs.existenceFV0.Close()
+		_ = rs.existenceFV0.Close()
 		_ = dir.RemoveFile(rs.existenceFV0.Name())
 		rs.existenceFV0 = nil
 	}
@@ -552,16 +552,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 				count[i] = 0
 			}
 			var fail bool
-			for i := uint16(0); i < m; i++ {
-				j := remap16(remix(bucket[i]+salt), m) / unit
-				count[j]++
-				// early overflow detection: if any bin exceeds unit, this salt fails
-				if count[j] > unit {
-					fail = true
-					break
-				}
-			}
-
+			// range-based iteration eliminates per-element slice bounds checks
 			for _, key := range bucket {
 				j := remap16(remix(key+salt), m) / unit
 				count[j]++
@@ -700,7 +691,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	}
 
 	if assert.Enable {
-		rs.indexW.Flush()
+		_ = rs.indexW.Flush()
 		rs.indexF.Seek(0, 0)
 		b, _ := io.ReadAll(rs.indexF)
 		if len(b) != 9+int(rs.keysAdded)*rs.bytesPerRec {
