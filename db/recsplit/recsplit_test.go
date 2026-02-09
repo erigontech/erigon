@@ -160,6 +160,7 @@ func TestIndexLookup(t *testing.T) {
 }
 
 func BenchmarkBuild(b *testing.B) {
+	b.ReportAllocs()
 	logger := log.New()
 	tmpDir := b.TempDir()
 	salt := uint32(1)
