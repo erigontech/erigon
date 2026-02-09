@@ -532,11 +532,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	}
 
 	log.Info("[Caplin-Archive] Historical states antiquated", "slot", s.currentState.Slot(), "root", common.Hash(stateRoot), "latency", endTime)
-	if s.stateSn != nil {
-		if err := s.stateSn.OpenFolder(); err != nil {
-			return err
-		}
-	}
 
 	if s.snapgen {
 		blocksPerStatefulFile := uint64(snaptype.CaplinMergeLimit * 5)
