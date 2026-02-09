@@ -126,7 +126,7 @@ func ExecV3(ctx context.Context,
 	logger log.Logger) (execErr error) {
 	commitmentdb.ResetTouchKeyDuration() // reset before execution
 	defer func() {
-		logger.Warn("[TouchKey] total duration during ExecV3", "took", commitmentdb.ResetTouchKeyDuration())
+		logger.Info("[perf] ExecV3 durations", "touchKey", commitmentdb.ResetTouchKeyDuration())
 	}()
 
 	isBlockProduction := execStage.SyncMode() == stages.ModeBlockProduction
