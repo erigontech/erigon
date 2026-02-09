@@ -27,6 +27,14 @@ var (
 	_ ssz2.SizedObjectSSZ = (*SignedExecutionPayloadEnvelope)(nil)
 )
 
+type PayloadStatus uint64
+
+const (
+	PayloadStatusPending PayloadStatus = 0
+	PayloadStatusEmpty   PayloadStatus = 1
+	PayloadStatusFull    PayloadStatus = 2
+)
+
 // PayloadAttestationData represents attestation data for a payload.
 type PayloadAttestationData struct {
 	BeaconBlockRoot   common.Hash `json:"beacon_block_root"`

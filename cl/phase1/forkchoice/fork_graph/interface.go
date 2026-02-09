@@ -35,8 +35,11 @@ import (
 * to analyze and manipulate the state of the blockchain.
  */
 type ForkGraph interface {
-	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
+	// AddChainSegment processes a new block and returns the post-state.
+	// parentFullState: if non-nil, use this as the starting state (for GLOAS when parent is FULL).
+	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool, parentFullState *state.CachingBeaconState) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
 	GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool)
+	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
 	GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
 	GetCurrentJustifiedCheckpoint(blockRoot common.Hash) (solid.Checkpoint, bool)
 	GetFinalizedCheckpoint(blockRoot common.Hash) (solid.Checkpoint, bool)

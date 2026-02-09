@@ -104,9 +104,19 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		return nil
 	}
 	// Check block is a descendant of the finalized block at the checkpoint finalized slot
-	if ancestorRoot := f.Ancestor(block.Block.ParentRoot, finalizedSlot); ancestorRoot != finalizedCheckpoint.Root {
+	if ancestorNode := f.Ancestor(block.Block.ParentRoot, finalizedSlot); ancestorNode.Root != finalizedCheckpoint.Root {
 		return fmt.Errorf("block is not a descendant of the finalized checkpoint")
 	}
+
+	// Validate parent payload status path early (before expensive operations)
+	curEpoch := f.computeEpochAtSlot(f.Slot())
+	isGloas := f.beaconCfg.GetCurrentStateVersion(curEpoch) >= clparams.GloasVersion
+	if isGloas {
+		if err := f.validateParentPayloadPath(block.Block); err != nil {
+			return err
+		}
+	}
+
 	// Now we find the versioned hashes
 	var versionedHashes []common.Hash
 	if newPayload && f.engine != nil && block.Version() >= clparams.DenebVersion {
@@ -219,7 +229,22 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		f.highestSeen.Store(block.Block.Slot)
 	}
 	startStateProcess := time.Now()
-	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
+
+	// [New in Gloas:EIP7732] Determine starting state based on parent payload status.
+	// In GLOAS, beacon block and execution payload have separate state transitions:
+	//   - If parent is FULL: start from execution_payload_states[parent_root]
+	//     (post-execution-payload state, includes execution layer changes)
+	//   - If parent is EMPTY: start from block_states[parent_root]
+	//     (post-beacon-block state, no execution payload was applied)
+	// This ensures the new block builds on the correct canonical state.
+	var parentFullState *state.CachingBeaconState
+	if isGloas && f.isParentNodeFull(block.Block) {
+		if s, ok := f.executionPayloadStates.Load(block.Block.ParentRoot); ok {
+			parentFullState = s.(*state.CachingBeaconState)
+		}
+	}
+
+	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation, parentFullState)
 	if err != nil {
 		return err
 	}
@@ -253,6 +278,17 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	isBeforeAttestingInterval := timeIntoSlot < f.beaconCfg.SecondsPerSlot/f.beaconCfg.IntervalsPerSlot
 	if f.Slot() == block.Block.Slot && isBeforeAttestingInterval && f.proposerBoostRoot.Load().(common.Hash) == (common.Hash{}) {
 		f.proposerBoostRoot.Store(common.Hash(blockRoot))
+	}
+
+	// [New in Gloas:EIP7732] GLOAS-specific on_block logic (post state transition)
+	if isGloas {
+		// Initialize PTC vote for this block
+		f.ptcVote.Store(blockRoot, [clparams.PtcSize]bool{})
+
+		// Notify PTC messages from payload attestations in the block
+		if block.Block.Body.PayloadAttestations != nil {
+			f.notifyPtcMessages(lastProcessedState, block.Block.Body.PayloadAttestations)
+		}
 	}
 	if lastProcessedState.Slot()%f.beaconCfg.SlotsPerEpoch == 0 {
 		// Update randao mixes
