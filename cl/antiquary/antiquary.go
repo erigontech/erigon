@@ -333,9 +333,6 @@ func (a *Antiquary) antiquate() error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	if err := a.sn.OpenFolder(); err != nil {
-		return err
-	}
 
 	paths := a.sn.SegFileNames(from, to)
 	if a.downloader != nil {
