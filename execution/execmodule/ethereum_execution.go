@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
@@ -334,7 +335,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	e.hook.LastNewBlockSeen(req.Number) // used by eth_syncing
 	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 	blockHash := gointerfaces.ConvertH256ToHash(req.Hash)
-	e.logger.Debug("[execmodule] validating chain", "number", req.Number, "hash", blockHash)
+	e.logger.Debug("[execmodule] validating chain", "number", req.Number, "hash", common.Hash(blockHash))
 	var (
 		header             *types.Header
 		body               *types.Body
@@ -351,6 +352,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		if err != nil {
 			return err
 		}
+		exec.AddHeaderAndBodyToGlobalReadAheader(ctx, e.db, header, body)
 		currentBlockNumber = rawdb.ReadCurrentBlockNumber(tx)
 		return nil
 	}); err != nil {

@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -166,6 +167,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 
 				// Check if block is complete
 				if pb.received == pb.txCount {
+					exec.AddSendersToGlobalReadAheader(pb.senders, pb.hash)
 					if err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(j.blockIndex)+1, pb.hash), pb.senders); err != nil {
 						pendingMu.Unlock()
 						errCh <- senderRecoveryError{err: err}
@@ -236,13 +238,15 @@ Loop:
 			continue
 		}
 
-		var body *types.Body
-		if body, err = cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber); err != nil {
-			return err
-		}
-		if body == nil {
-			logger.Warn(fmt.Sprintf("[%s] ReadBodyWithTransactions can't find block", logPrefix), "num", blockNumber, "hash", blockHash)
-			continue
+		body, ok := exec.ReadBodyWithTransactionsFromGlobalReadAheader(blockHash)
+		if body == nil || !ok {
+			if body, err = cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber); err != nil {
+				return err
+			}
+			if body == nil {
+				logger.Warn(fmt.Sprintf("[%s] ReadBodyWithTransactions can't find block", logPrefix), "num", blockNumber, "hash", blockHash)
+				continue
+			}
 		}
 
 		blockIndex := int(blockNumber) - int(s.BlockNumber) - 1

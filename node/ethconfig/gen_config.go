@@ -30,7 +30,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		EthDiscoveryURLs                    []string
 		Prune                               prune.Mode
 		BatchSize                           datasize.ByteSize
-		ImportMode                          bool
 		BadBlockHash                        common.Hash
 		Snapshot                            BlocksFreezing
 		Downloader                          *downloadercfg.Cfg
@@ -82,7 +81,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.EthDiscoveryURLs = c.EthDiscoveryURLs
 	enc.Prune = c.Prune
 	enc.BatchSize = c.BatchSize
-	enc.ImportMode = c.ImportMode
 	enc.BadBlockHash = c.BadBlockHash
 	enc.Snapshot = c.Snapshot
 	enc.Downloader = c.Downloader
@@ -138,7 +136,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		EthDiscoveryURLs                    []string
 		Prune                               *prune.Mode
 		BatchSize                           *datasize.ByteSize
-		ImportMode                          *bool
 		BadBlockHash                        *common.Hash
 		Snapshot                            *BlocksFreezing
 		Downloader                          *downloadercfg.Cfg
@@ -202,9 +199,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.BatchSize != nil {
 		c.BatchSize = *dec.BatchSize
-	}
-	if dec.ImportMode != nil {
-		c.ImportMode = *dec.ImportMode
 	}
 	if dec.BadBlockHash != nil {
 		c.BadBlockHash = *dec.BadBlockHash

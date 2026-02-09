@@ -123,7 +123,7 @@ func (bt *BlockTest) Run(t *testing.T) error {
 		return testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
-	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, false)
+	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine)
 
 	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root
@@ -164,7 +164,7 @@ func (bt *BlockTest) RunCLI() error {
 		return testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
-	m := mock.MockWithGenesisEngine(nil, bt.genesis(config), engine, false)
+	m := mock.MockWithGenesisEngine(nil, bt.genesis(config), engine)
 	defer m.DB.Close()
 
 	bt.br = m.BlockReader
