@@ -1455,7 +1455,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 		valid := be.skipCheck[tx] || validity == state.VersionValid
 
-
 		be.versionMap.SetTrace(trace)
 		be.versionMap.FlushVersionedWrites(be.blockIO.WriteSet(txVersion.TxIndex), cntInvalid == 0, tracePrefix)
 		be.versionMap.SetTrace(false)
@@ -1685,7 +1684,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		execTask := be.tasks[nextTx]
 		if nextTx == maxValidated+1 {
 			be.skipCheck[nextTx] = true
-			} else {
+		} else {
 			txIndex := execTask.Version().TxIndex
 			if be.txIncarnations[nextTx] > 0 &&
 				(be.execAborted[nextTx] > 0 || be.execFailed[nextTx] > 0 || !be.blockIO.HasReads(txIndex) ||
