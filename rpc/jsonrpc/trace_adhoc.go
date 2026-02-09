@@ -1091,7 +1091,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if err != nil {
 		return nil, err
 	}
-	
+
 	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err

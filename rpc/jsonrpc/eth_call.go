@@ -176,7 +176,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	if err != nil {
 		return 0, err
 	}
-	
+
 	err = rpchelper.CheckBlockExecuted(dbtx, header.Number.Uint64())
 	if err != nil {
 		return 0, err
@@ -865,7 +865,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		if err != nil {
 			return nil, err
 		}
-		
+
 		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, blockNumber+1, 0, api._txNumReader)
 		if err != nil {
 			return nil, err

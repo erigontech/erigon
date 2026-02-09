@@ -47,7 +47,7 @@ func (api *OtterscanAPIImpl) HasCode(ctx context.Context, address common.Address
 	if err != nil {
 		return false, err
 	}
-	
+
 	reader, err := rpchelper.CreateHistoryStateReader(ctx, tx, blockNumber, 0, api._txNumReader)
 	if err != nil {
 		return false, err
