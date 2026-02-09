@@ -502,25 +502,26 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 	return nil
 }
 
-// findSplit finds a salt value such that keys in bucket are evenly distributed
 // into fanout partitions of size unit each (based on remap16(remix(key+salt), m) / unit).
 // Uses 4-way salt parallelism with 4 independent count arrays carved from the
 // count slice (which must have len >= 4*fanout).
 func findSplit(bucket []uint64, salt uint64, m, fanout, unit uint16, count []uint16) uint64 {
-	for i := uint16(0); i < fanout-1; i++ {
-		count[i] = 0
+	for {
+		for i := uint16(0); i < fanout-1; i++ {
+			count[i] = 0
+		}
+		var fail bool
+		for i := uint16(0); i < m; i++ {
+			count[remap16(remix(bucket[i]+salt), m)/unit]++
+		}
+		for i := uint16(0); i < fanout-1; i++ {
+			fail = fail || (count[i] != unit)
+		}
+		if !fail {
+			return salt
+		}
+		salt++
 	}
-	var fail bool
-	for i := uint16(0); i < m; i++ {
-		count[remap16(remix(bucket[i]+salt), m)/unit]++
-	}
-	for i := uint16(0); i < fanout-1; i++ {
-		fail = fail || (count[i] != unit)
-	}
-	if !fail {
-		return salt
-	}
-	salt++
 }
 
 // findBijection finds a salt value such that all keys in bucket hash to distinct
