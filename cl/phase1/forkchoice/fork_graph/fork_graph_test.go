@@ -51,20 +51,20 @@ func TestForkGraphInDisk(t *testing.T) {
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
 	emitter := beaconevents.NewEventEmitter()
 	graph := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}, emitter)
-	_, status, err := graph.AddChainSegment(blockA, true)
+	_, status, err := graph.AddChainSegment(blockA, true, nil)
 	require.NoError(t, err)
 	require.Equal(t, Success, status)
 	// Now make blockC a bad block
 	blockC.Block.ProposerIndex = 81214459 // some invalid thing
-	_, status, err = graph.AddChainSegment(blockC, true)
+	_, status, err = graph.AddChainSegment(blockC, true, nil)
 	require.Error(t, err)
 	require.Equal(t, InvalidBlock, status)
 	// Save current state hash
-	_, status, err = graph.AddChainSegment(blockB, true)
+	_, status, err = graph.AddChainSegment(blockB, true, nil)
 	require.NoError(t, err)
 	require.Equal(t, Success, status)
 	// Try again with same should yield success
-	_, status, err = graph.AddChainSegment(blockB, true)
+	_, status, err = graph.AddChainSegment(blockB, true, nil)
 	require.NoError(t, err)
 	require.Equal(t, PreValidated, status)
 }
