@@ -609,10 +609,9 @@ func (h *Header) SanityCheck() error {
 // Body is a simple (mutable, non-safe) data container for storing and moving
 // a block's data contents (transactions and uncles) together.
 type Body struct {
-	Transactions    []Transaction
-	Uncles          []*Header
-	Withdrawals     []*Withdrawal
-	BlockAccessList BlockAccessList
+	Transactions []Transaction
+	Uncles       []*Header
+	Withdrawals  []*Withdrawal
 }
 
 func (b *Body) MatchesHeader(h *Header) error {
@@ -638,17 +637,6 @@ func (b *Body) MatchesHeader(h *Header) error {
 		}
 	}
 
-	if h.BlockAccessListHash == nil {
-		if len(b.BlockAccessList) != 0 {
-			return errors.New("body has unexpected block access list")
-		}
-	} else {
-		hash := b.BlockAccessList.Hash()
-		if hash != *h.BlockAccessListHash {
-			return fmt.Errorf("body has invalid block access list hash: have %x, exp: %x", hash, *h.BlockAccessListHash)
-		}
-	}
-
 	return nil
 }
 
@@ -656,10 +644,9 @@ func (b *Body) MatchesHeader(h *Header) error {
 // It is useful in the situations when actual transaction context is not important, for example
 // when downloading Block bodies from other peers or serving them to other peers
 type RawBody struct {
-	Transactions    [][]byte
-	Uncles          []*Header
-	Withdrawals     []*Withdrawal
-	BlockAccessList BlockAccessList
+	Transactions [][]byte
+	Uncles       []*Header
+	Withdrawals  []*Withdrawal
 }
 
 // BaseTxnID represents internal auto-incremented transaction number in block, may be different across the nodes
@@ -726,11 +713,10 @@ func (b *BodyOnlyTxn) DecodeRLP(s *rlp.Stream) error {
 }
 
 type BodyForStorage struct {
-	BaseTxnID       BaseTxnID
-	TxCount         uint32
-	Uncles          []*Header
-	Withdrawals     []*Withdrawal
-	BlockAccessList BlockAccessList
+	BaseTxnID   BaseTxnID
+	TxCount     uint32
+	Uncles      []*Header
+	Withdrawals []*Withdrawal
 }
 
 // Alternative representation of the Block.
@@ -772,7 +758,6 @@ func (r RawBlock) AsBlock() (*Block, error) {
 	b := &Block{header: r.Header}
 	b.uncles = r.Body.Uncles
 	b.withdrawals = r.Body.Withdrawals
-	b.blockAccessList = r.Body.BlockAccessList
 
 	txs := make([]Transaction, len(r.Body.Transactions))
 	for i, txn := range r.Body.Transactions {
@@ -820,11 +805,11 @@ func (b *Body) SendersFromTxs() []common.Address {
 }
 
 func (rb RawBody) EncodingSize() int {
-	payloadSize, _, _, _, _ := rb.payloadSize()
+	payloadSize, _, _, _ := rb.payloadSize()
 	return payloadSize
 }
 
-func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen, blockAccessListLen int) {
+func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen int) {
 	// size of Transactions
 	for _, txn := range rb.Transactions {
 		txsLen += len(txn)
@@ -841,16 +826,11 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen,
 		payloadSize += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
-	if len(rb.BlockAccessList) > 0 {
-		blockAccessListLen += EncodingSizeGenericList(rb.BlockAccessList)
-		payloadSize += rlp.ListPrefixLen(blockAccessListLen) + blockAccessListLen
-	}
-
-	return payloadSize, txsLen, unclesLen, withdrawalsLen, blockAccessListLen
+	return payloadSize, txsLen, unclesLen, withdrawalsLen
 }
 
 func (rb RawBody) EncodeRLP(w io.Writer) error {
-	payloadSize, txsLen, unclesLen, withdrawalsLen, blockAccessListLen := rb.payloadSize()
+	payloadSize, txsLen, unclesLen, withdrawalsLen := rb.payloadSize()
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// prefix
@@ -873,11 +853,6 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 	// encode Withdrawals
 	if rb.Withdrawals != nil {
 		if err := encodeRLPGeneric(rb.Withdrawals, withdrawalsLen, w, b[:]); err != nil {
-			return err
-		}
-	}
-	if len(rb.BlockAccessList) > 0 {
-		if err := encodeRLPGeneric(rb.BlockAccessList, blockAccessListLen, w, b[:]); err != nil {
 			return err
 		}
 	}
@@ -916,15 +891,11 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 	if err := decodeWithdrawals(&rb.Withdrawals, s); err != nil {
 		return err
 	}
-	// decode Block access list
-	if err := decodeBlockAccessList(&rb.BlockAccessList, s); err != nil {
-		return err
-	}
 
 	return s.ListEnd()
 }
 
-func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen, blockAccessListLen int) {
+func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen int) {
 	payloadSize += rlp.U64Len(bfs.BaseTxnID.U64())
 	payloadSize += rlp.U64Len(uint64(bfs.TxCount))
 
@@ -938,16 +909,11 @@ func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen,
 		payloadSize += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
-	if len(bfs.BlockAccessList) > 0 {
-		blockAccessListLen += EncodingSizeGenericList(bfs.BlockAccessList)
-		payloadSize += rlp.ListPrefixLen(blockAccessListLen) + blockAccessListLen
-	}
-
-	return payloadSize, unclesLen, withdrawalsLen, blockAccessListLen
+	return payloadSize, unclesLen, withdrawalsLen
 }
 
 func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
-	payloadSize, unclesLen, withdrawalsLen, blockAccessListLen := bfs.payloadSize()
+	payloadSize, unclesLen, withdrawalsLen := bfs.payloadSize()
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 
@@ -974,11 +940,6 @@ func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 	// nil if pre-shanghai, empty slice if shanghai and no withdrawals in block, otherwise non-empty
 	if bfs.Withdrawals != nil {
 		if err := encodeRLPGeneric(bfs.Withdrawals, withdrawalsLen, w, b[:]); err != nil {
-			return err
-		}
-	}
-	if len(bfs.BlockAccessList) > 0 {
-		if err := encodeRLPGeneric(bfs.BlockAccessList, blockAccessListLen, w, b[:]); err != nil {
 			return err
 		}
 	}
@@ -1009,19 +970,15 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 	if err := decodeWithdrawals(&bfs.Withdrawals, s); err != nil {
 		return err
 	}
-	// decode Block access list
-	if err := decodeBlockAccessList(&bfs.BlockAccessList, s); err != nil {
-		return err
-	}
 	return s.ListEnd()
 }
 
 func (bb Body) EncodingSize() int {
-	payloadSize, _, _, _, _ := bb.payloadSize()
+	payloadSize, _, _, _ := bb.payloadSize()
 	return payloadSize
 }
 
-func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen, blockAccessListLen int) {
+func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen int) {
 	// size of Transactions
 	txsLen += EncodingSizeGenericList(bb.Transactions)
 	payloadSize += rlp.ListPrefixLen(txsLen) + txsLen
@@ -1036,17 +993,11 @@ func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen
 		payloadSize += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
-	// size of BlockAccessList (optional)
-	if len(bb.BlockAccessList) > 0 {
-		blockAccessListLen += EncodingSizeGenericList(bb.BlockAccessList)
-		payloadSize += rlp.ListPrefixLen(blockAccessListLen) + blockAccessListLen
-	}
-
-	return payloadSize, txsLen, unclesLen, withdrawalsLen, blockAccessListLen
+	return payloadSize, txsLen, unclesLen, withdrawalsLen
 }
 
 func (bb Body) EncodeRLP(w io.Writer) error {
-	payloadSize, txsLen, unclesLen, withdrawalsLen, blockAccessListLen := bb.payloadSize()
+	payloadSize, txsLen, unclesLen, withdrawalsLen := bb.payloadSize()
 
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
@@ -1065,11 +1016,6 @@ func (bb Body) EncodeRLP(w io.Writer) error {
 	// encode Withdrawals
 	if bb.Withdrawals != nil {
 		if err := encodeRLPGeneric(bb.Withdrawals, withdrawalsLen, w, b[:]); err != nil {
-			return err
-		}
-	}
-	if len(bb.BlockAccessList) > 0 {
-		if err := encodeRLPGeneric(bb.BlockAccessList, blockAccessListLen, w, b[:]); err != nil {
 			return err
 		}
 	}
@@ -1092,10 +1038,6 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 	// decode Withdrawals
 	bb.Withdrawals = []*Withdrawal{}
 	if err := decodeWithdrawals(&bb.Withdrawals, s); err != nil {
-		return err
-	}
-	// decode Block Access List (optional)
-	if err := decodeBlockAccessList(&bb.BlockAccessList, s); err != nil {
 		return err
 	}
 
@@ -1167,9 +1109,9 @@ func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, r
 
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
-func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal, blockAccessList BlockAccessList) *Block {
+func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal) *Block {
 	header.hash.Store(&hash)
-	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals, blockAccessList: blockAccessList}
+	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals}
 	return b
 }
 
@@ -1189,7 +1131,6 @@ func NewBlockFromNetwork(header *Header, body *Body) *Block {
 		uncles:       body.Uncles,
 		withdrawals:  body.Withdrawals,
 	}
-	b.SetBlockAccessList(body.BlockAccessList)
 	return b
 }
 
@@ -1284,15 +1225,10 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 	if err := decodeWithdrawals(&bb.withdrawals, s); err != nil {
 		return err
 	}
-	// decode Block access list (optional)
-	if err := decodeBlockAccessList(&bb.blockAccessList, s); err != nil {
-		return err
-	}
-
 	return s.ListEnd()
 }
 
-func (bb *Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen, blockAccessListLen int) {
+func (bb *Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen int) {
 	// size of Header
 	headerLen := bb.header.EncodingSize()
 	payloadSize += rlp.ListPrefixLen(headerLen) + headerLen
@@ -1311,22 +1247,17 @@ func (bb *Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsL
 		payloadSize += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
-	if len(bb.blockAccessList) > 0 {
-		blockAccessListLen += EncodingSizeGenericList(bb.blockAccessList)
-		payloadSize += rlp.ListPrefixLen(blockAccessListLen) + blockAccessListLen
-	}
-
-	return payloadSize, txsLen, unclesLen, withdrawalsLen, blockAccessListLen
+	return payloadSize, txsLen, unclesLen, withdrawalsLen
 }
 
 func (bb *Block) EncodingSize() int {
-	payloadSize, _, _, _, _ := bb.payloadSize()
+	payloadSize, _, _, _ := bb.payloadSize()
 	return payloadSize
 }
 
 // EncodeRLP serializes b into the Ethereum RLP block format.
 func (bb *Block) EncodeRLP(w io.Writer) error {
-	payloadSize, txsLen, unclesLen, withdrawalsLen, accessListLen := bb.payloadSize()
+	payloadSize, txsLen, unclesLen, withdrawalsLen := bb.payloadSize()
 
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
@@ -1349,12 +1280,6 @@ func (bb *Block) EncodeRLP(w io.Writer) error {
 	// encode Withdrawals
 	if bb.withdrawals != nil {
 		if err := encodeRLPGeneric(bb.withdrawals, withdrawalsLen, w, b[:]); err != nil {
-			return err
-		}
-	}
-	// encode Block access list
-	if len(bb.blockAccessList) > 0 {
-		if err := encodeRLPGeneric([]*AccountChanges(bb.blockAccessList), accessListLen, w, b[:]); err != nil {
 			return err
 		}
 	}
@@ -1425,7 +1350,7 @@ func (b *Block) HeaderNoCopy() *Header { return b.header }
 
 // Body returns the non-header content of the block.
 func (b *Block) Body() *Body {
-	bd := &Body{Transactions: b.transactions, Uncles: b.uncles, Withdrawals: b.withdrawals, BlockAccessList: b.blockAccessList}
+	bd := &Body{Transactions: b.transactions, Uncles: b.uncles, Withdrawals: b.withdrawals}
 	bd.SendersFromTxs()
 	return bd
 }
@@ -1441,7 +1366,7 @@ func (b *Block) SendersToTxs(senders []common.Address) {
 // RawBody creates a RawBody based on the block. It is not very efficient, so
 // will probably be removed in favour of RawBlock. Also it panics
 func (b *Block) RawBody() *RawBody {
-	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles, Withdrawals: b.withdrawals, BlockAccessList: b.blockAccessList}
+	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles, Withdrawals: b.withdrawals}
 	for i, txn := range b.transactions {
 		var err error
 		br.Transactions[i], err = rlp.EncodeToBytes(txn)
@@ -1454,7 +1379,7 @@ func (b *Block) RawBody() *RawBody {
 
 // RawBody creates a RawBody based on the body.
 func (b *Body) RawBody() *RawBody {
-	br := &RawBody{Transactions: make([][]byte, len(b.Transactions)), Uncles: b.Uncles, Withdrawals: b.Withdrawals, BlockAccessList: b.BlockAccessList}
+	br := &RawBody{Transactions: make([][]byte, len(b.Transactions)), Uncles: b.Uncles, Withdrawals: b.Withdrawals}
 	for i, txn := range b.Transactions {
 		var err error
 		br.Transactions[i], err = rlp.EncodeToBytes(txn)
