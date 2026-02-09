@@ -24,6 +24,8 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -50,7 +52,6 @@ import (
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
-	"github.com/holiman/uint256"
 )
 
 const (

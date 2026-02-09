@@ -7,10 +7,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/google/go-cmp/cmp"
 	lru "github.com/hashicorp/golang-lru/v2"
+
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
