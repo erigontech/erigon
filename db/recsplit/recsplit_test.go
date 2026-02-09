@@ -164,7 +164,7 @@ func BenchmarkBuild(b *testing.B) {
 	logger := log.New()
 	tmpDir := b.TempDir()
 	salt := uint32(1)
-	const KeysN = 100_000
+	const KeysN = 1_000_000
 
 	// Pre-allocate all keys outside the benchmark loop
 	keys := make([][]byte, KeysN)
