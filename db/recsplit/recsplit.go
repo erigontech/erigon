@@ -129,7 +129,7 @@ type RecSplit struct {
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 
-	unaryBuf []uint64
+	unaryBuf []uint64 // `recsplit` func returning `unary` array. re-using it between buckets
 }
 
 type RecSplitArgs struct {
