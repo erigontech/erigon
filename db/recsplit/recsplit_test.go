@@ -22,8 +22,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func TestRecSplit2(t *testing.T) {
@@ -162,12 +163,12 @@ func BenchmarkBuild(b *testing.B) {
 	logger := log.New()
 	tmpDir := b.TempDir()
 	salt := uint32(1)
-	N := 1_000_000
+	const KeysN = 10_000
 
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_%d", i))
 		rs, err := NewRecSplit(RecSplitArgs{
-			KeyCount:   N,
+			KeyCount:   KeysN,
 			BucketSize: 2000,
 			Salt:       &salt,
 			TmpDir:     tmpDir,
@@ -178,7 +179,7 @@ func BenchmarkBuild(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		for j := 0; j < N; j++ {
+		for j := 0; j < KeysN; j++ {
 			if err = rs.AddKey(fmt.Appendf(nil, "key %d", j), uint64(j*17)); err != nil {
 				b.Fatal(err)
 			}
