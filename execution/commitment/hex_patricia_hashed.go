@@ -2193,6 +2193,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		start        = time.Now()
 		logEvery     = time.NewTicker(20 * time.Second)
 	)
+	//hph.memoizationOff, hph.trace = true, false
 
 	if collectCommitmentMetrics {
 		hph.metrics.Reset()
