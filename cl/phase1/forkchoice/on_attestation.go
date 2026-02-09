@@ -207,6 +207,7 @@ func (f *ForkChoiceStore) updateLatestMessagesPreGloas(
 	attestation *solid.Attestation,
 	indicies []uint64,
 ) {
+	slot := attestation.Data.Slot
 	beaconBlockRoot := attestation.Data.BeaconBlockRoot
 	target := attestation.Data.Target
 
@@ -219,6 +220,7 @@ func (f *ForkChoiceStore) updateLatestMessagesPreGloas(
 			f.setLatestMessage(index, LatestMessage{
 				Epoch: target.Epoch,
 				Root:  beaconBlockRoot,
+				Slot:  slot, // Set slot for GLOAS compatibility at fork boundary
 			})
 		}
 	}
@@ -259,10 +261,24 @@ func (f *ForkChoiceStore) ValidateOnAttestation(attestation *solid.Attestation) 
 	if _, has := f.forkGraph.GetHeader(target.Root); !has {
 		return errors.New("target root is missing")
 	}
-	if blockHeader, has := f.forkGraph.GetHeader(attestation.Data.BeaconBlockRoot); !has ||
-		blockHeader.Slot > attestation.Data.Slot {
+	blockHeader, has := f.forkGraph.GetHeader(attestation.Data.BeaconBlockRoot)
+	if !has || blockHeader.Slot > attestation.Data.Slot {
 		return errors.New("bad attestation data")
 	}
+
+	// [New in Gloas:EIP7732] Validate attestation index
+	currentEpoch := f.computeEpochAtSlot(f.Slot())
+	if f.beaconCfg.GetCurrentStateVersion(currentEpoch) >= clparams.GloasVersion {
+		// index must be 0 or 1
+		if attestation.Data.CommitteeIndex != 0 && attestation.Data.CommitteeIndex != 1 {
+			return errors.New("attestation index must be 0 or 1")
+		}
+		// if block_slot == attestation_slot, index must be 0
+		if blockHeader.Slot == attestation.Data.Slot && attestation.Data.CommitteeIndex != 0 {
+			return errors.New("attestation index must be 0 when block_slot equals attestation_slot")
+		}
+	}
+
 	// LMD vote must be consistent with FFG vote target
 	targetSlot := f.computeStartSlotAtEpoch(target.Epoch)
 	ancestorNode := f.Ancestor(attestation.Data.BeaconBlockRoot, targetSlot)
