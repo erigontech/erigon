@@ -22,6 +22,7 @@ import (
 	"runtime/pprof"
 
 	g "github.com/anacrolix/generics"
+
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 )

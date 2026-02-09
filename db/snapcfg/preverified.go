@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/anacrolix/missinggo/v2/panicif"
+
 	"github.com/erigontech/erigon/db/datadir"
 )
 
