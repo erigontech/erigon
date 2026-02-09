@@ -128,6 +128,8 @@ type RecSplit struct {
 	logger             log.Logger
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
+
+	unaryBuf []uint64 // `recsplit` func returning `unary` array. re-using it between buckets
 }
 
 type RecSplitArgs struct {
@@ -202,7 +204,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	rs.bucketCollector.LogLvl(log.LvlDebug)
 	if args.Enums {
 		rs.offsetCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.SmallSortableBuffers, logger)
-		rs.bucketCollector.SortAndFlushInBackground(false)
+		rs.offsetCollector.SortAndFlushInBackground(false)
 		rs.offsetCollector.LogLvl(log.LvlDebug)
 	}
 	var err error
@@ -250,12 +252,12 @@ func (rs *RecSplit) MajorVersion() version.DataStructureVersion { return rs.data
 func (rs *RecSplit) Salt() uint32                               { return rs.salt }
 func (rs *RecSplit) Close() {
 	if rs.indexF != nil {
-		rs.indexF.Close()
+		_ = rs.indexF.Close()
 		_ = dir.RemoveFile(rs.indexF.Name())
 		rs.indexF = nil
 	}
 	if rs.existenceFV0 != nil {
-		rs.existenceFV0.Close()
+		_ = rs.existenceFV0.Close()
 		_ = dir.RemoveFile(rs.existenceFV0.Name())
 		rs.existenceFV0 = nil
 	}
@@ -309,7 +311,7 @@ func (rs *RecSplit) ResetNextSalt() {
 		rs.offsetCollector.Close()
 		rs.offsetCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+rs.fileName, rs.tmpDir, etl.SmallSortableBuffers, rs.logger)
 		rs.offsetCollector.SortAndFlushInBackground(false)
-		rs.bucketCollector.LogLvl(log.LvlDebug)
+		rs.offsetCollector.LogLvl(log.LvlDebug)
 	}
 	rs.currentBucket = rs.currentBucket[:0]
 	rs.currentBucketOffs = rs.currentBucketOffs[:0]
@@ -475,11 +477,12 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 				rs.offsetBuffer = append(rs.offsetBuffer, 0)
 			}
 		}
-		unary, err := rs.recsplit(0 /* level */, rs.currentBucket, rs.currentBucketOffs, nil /* unary */)
+		var err error
+		rs.unaryBuf, err = rs.recsplit(0 /* level */, rs.currentBucket, rs.currentBucketOffs, rs.unaryBuf[:0])
 		if err != nil {
 			return err
 		}
-		rs.gr.appendUnaryAll(unary)
+		rs.gr.appendUnaryAll(rs.unaryBuf)
 		if rs.trace {
 			fmt.Printf("recsplitBucket(%d, %d, bitsize = %d)\n", rs.currentBucketIdx, len(rs.currentBucket), rs.gr.bitCount-bitPos)
 		}
@@ -764,7 +767,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	}
 
 	if assert.Enable {
-		rs.indexW.Flush()
+		_ = rs.indexW.Flush()
 		rs.indexF.Seek(0, 0)
 		b, _ := io.ReadAll(rs.indexF)
 		if len(b) != 9+int(rs.keysAdded)*rs.bytesPerRec {
