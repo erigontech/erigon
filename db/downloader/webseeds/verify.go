@@ -20,12 +20,13 @@ import (
 	"github.com/anacrolix/generics/result"
 	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/anacrolix/torrent/metainfo"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/preverified"
 	"github.com/erigontech/erigon/db/snapcfg"
-	"golang.org/x/sync/errgroup"
 )
 
 func Verify(
