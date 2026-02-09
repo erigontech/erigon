@@ -114,7 +114,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 		ps:                     background.NewProgressSet(),
 		logger:                 logger,
 		collateAndBuildWorkers: 1,
-		mergeWorkers:           1,
+		mergeWorkers:           dbg.MergeWorkers,
 
 		produce: true,
 	}, nil
