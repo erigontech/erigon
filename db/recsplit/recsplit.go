@@ -526,8 +526,9 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 			}
 			salt++
 		}
-		for i, key := range bucket {
-			rs.offsetBuffer[remap16(remix(key+salt), m)] = offsets[i]
+		for i := uint16(0); i < m; i++ {
+			j := remap16(remix(bucket[i]+salt), m)
+			rs.offsetBuffer[j] = offsets[i]
 		}
 		for _, offset := range rs.offsetBuffer[:m] {
 			binary.BigEndian.PutUint64(rs.numBuf[:], offset)
@@ -551,7 +552,16 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 				count[i] = 0
 			}
 			var fail bool
-			// range-based iteration eliminates per-element slice bounds checks
+			for i := uint16(0); i < m; i++ {
+				j := remap16(remix(bucket[i]+salt), m) / unit
+				count[j]++
+				// early overflow detection: if any bin exceeds unit, this salt fails
+				if count[j] > unit {
+					fail = true
+					break
+				}
+			}
+
 			for _, key := range bucket {
 				j := remap16(remix(key+salt), m) / unit
 				count[j]++
