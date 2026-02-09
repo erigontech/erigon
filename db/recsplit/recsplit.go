@@ -515,13 +515,20 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 		// Branchless approach: OR all position bits, then check popcount == m.
 		// Removes data-dependent branches from the inner loop, enabling
 		// better CPU pipelining of the independent hash computations.
+		// No need to build aggregation levels - just find bijection
 		var mask uint32
 		for {
 			mask = 0
-			for _, key := range bucket {
-				mask |= uint32(1) << remap16(remix(key+salt), m)
+			var fail bool
+			for i := uint16(0); !fail && i < m; i++ {
+				bit := uint32(1) << remap16(remix(bucket[i]+salt), m)
+				if mask&bit != 0 {
+					fail = true
+				} else {
+					mask |= bit
+				}
 			}
-			if bits.OnesCount32(mask) == int(m) {
+			if !fail {
 				break
 			}
 			salt++
