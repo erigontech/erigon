@@ -218,7 +218,6 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 		tx, err = db.BeginTemporalRw(context.Background())
 		require.NoError(t, err)
-		defer tx.Rollback()
 
 		domains, err = execctx.NewSharedDomains(context.Background(), tx, log.New())
 		require.NoError(t, err)
