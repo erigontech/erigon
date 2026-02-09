@@ -300,12 +300,12 @@ Loop:
 
 			// Block numbers are added to the bd.delivered bitmap here, only for blocks for which the body has been received, and their double hashes are present in the bd.requestedMap
 			// Also, block numbers can be added to bd.delivered for empty blocks, above
+			//deliveredNums = append(deliveredNums, blockNum)
 			blockNum, ok := bd.requestedMap[bodyHashes]
 			if !ok {
 				undelivered++
 				continue
 			}
-			//deliveredNums = append(deliveredNums, blockNum)
 			if req, ok := bd.requests[blockNum]; ok {
 				for _, blockNum := range req.BlockNums {
 					toClean[blockNum] = struct{}{}
