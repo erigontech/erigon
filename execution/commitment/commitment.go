@@ -48,6 +48,10 @@ import (
 )
 
 var (
+	HashSortLoadDuration atomic.Int64 // nanoseconds, total time in etl.Load within HashSort
+	HashSortCopyDuration atomic.Int64 // nanoseconds, hk/pk copy overhead within Load callback
+	HashSortWarmDuration atomic.Int64 // nanoseconds, WarmKey overhead within Load callback
+
 	mxTrieProcessedKeys   = metrics.GetOrCreateCounter("domain_commitment_keys")
 	mxTrieBranchesUpdated = metrics.GetOrCreateCounter("domain_commitment_updates_applied")
 
@@ -86,6 +90,16 @@ var (
 		metrics.GetOrCreateCounter(`trie_state_levelled_load_rate{level="recent",key="storage"}`),
 	}
 )
+
+func ResetHashSortLoadDuration() time.Duration {
+	return time.Duration(HashSortLoadDuration.Swap(0))
+}
+func ResetHashSortCopyDuration() time.Duration {
+	return time.Duration(HashSortCopyDuration.Swap(0))
+}
+func ResetHashSortWarmDuration() time.Duration {
+	return time.Duration(HashSortWarmDuration.Swap(0))
+}
 
 // Trie represents commitment variant.
 type Trie interface {
@@ -1668,17 +1682,21 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		batch := make([]*KeyUpdate, 0, hashSortBatchSize)
 		var prevKey []byte
 
+		loadStart := time.Now()
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 			if warmuper != nil && warmuper.Cache() != nil {
 				warmuper.Cache().EvictPlainKey(v)
 			}
 			// Make copies since ETL may reuse buffers
+			copyStart := time.Now()
 			hk := common.Copy(k)
 			pk := common.Copy(v)
 			batch = append(batch, &KeyUpdate{hashedKey: hk, plainKey: string(pk)})
+			HashSortCopyDuration.Add(time.Since(copyStart).Nanoseconds())
 
 			// Submit to warmuper with start depth based on divergence from previous key
 			if warmuper != nil {
+				warmStart := time.Now()
 				startDepth := 0
 				if prevKey != nil {
 					// Find common prefix length
@@ -1689,6 +1707,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				}
 				warmuper.WarmKey(hk, startDepth)
 				prevKey = hk
+				HashSortWarmDuration.Add(time.Since(warmStart).Nanoseconds())
 			}
 
 			// Process batch when full
@@ -1710,6 +1729,7 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			}
 			return nil
 		}, etl.TransformArgs{Quit: ctx.Done()})
+		HashSortLoadDuration.Add(time.Since(loadStart).Nanoseconds())
 		if err != nil {
 			return err
 		}
