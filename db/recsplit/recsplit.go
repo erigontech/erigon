@@ -580,9 +580,9 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 			count[i] = c
 			c += unit
 		}
-		for i, key := range bucket {
-			j := remap16(remix(key+salt), m) / unit
-			rs.buffer[count[j]] = key
+		for i := uint16(0); i < m; i++ {
+			j := remap16(remix(bucket[i]+salt), m) / unit
+			rs.buffer[count[j]] = bucket[i]
 			rs.offsetBuffer[count[j]] = offsets[i]
 			count[j]++
 		}
