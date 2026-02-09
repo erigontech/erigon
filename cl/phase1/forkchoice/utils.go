@@ -20,6 +20,7 @@ import (
 	"errors"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/transition"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -76,6 +77,24 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 		}
 		return true
 	})
+
+	// [New in Gloas:EIP7732] Clean up ptcVote and executionPayloadStates for finalized blocks
+	finalizedSlot := newFinalized.Epoch * f.beaconCfg.SlotsPerEpoch
+	f.ptcVote.Range(func(k, v any) bool {
+		root := k.(common.Hash)
+		if header, has := f.forkGraph.GetHeader(root); !has || header.Slot <= finalizedSlot {
+			f.ptcVote.Delete(k)
+		}
+		return true
+	})
+	f.executionPayloadStates.Range(func(k, v any) bool {
+		root := k.(common.Hash)
+		if header, has := f.forkGraph.GetHeader(root); !has || header.Slot <= finalizedSlot {
+			f.executionPayloadStates.Delete(k)
+		}
+		return true
+	})
+
 	slotToPrune := ((newFinalized.Epoch - 3) * f.beaconCfg.SlotsPerEpoch) - 1
 	f.forkGraph.Prune(slotToPrune)
 }
@@ -110,19 +129,38 @@ func (f *ForkChoiceStore) computeSlotsSinceEpochStart(slot uint64) uint64 {
 }
 
 // Ancestor returns the ancestor to the given root.
-func (f *ForkChoiceStore) Ancestor(root common.Hash, slot uint64) common.Hash {
-	header, has := f.forkGraph.GetHeader(root)
-	if !has {
-		return common.Hash{}
+// [Modified in Gloas:EIP7732] Returns ForkChoiceNode with payload status.
+func (f *ForkChoiceStore) Ancestor(root common.Hash, slot uint64) ForkChoiceNode {
+	block, has := f.forkGraph.GetBlock(root)
+	if !has || block == nil {
+		return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
 	}
-	for header.Slot > slot {
-		root = header.ParentRoot
-		header, has = f.forkGraph.GetHeader(header.ParentRoot)
-		if !has {
-			return common.Hash{}
+
+	// If block.slot <= slot, return with PENDING status (original: return root directly)
+	if block.Block.Slot <= slot {
+		return ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending}
+	}
+
+	// Traverse up the chain until parent.slot <= slot
+	parentBlock, has := f.forkGraph.GetBlock(block.Block.ParentRoot)
+	if !has || parentBlock == nil {
+		return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
+	}
+
+	for parentBlock.Block.Slot > slot {
+		block = parentBlock
+		parentBlock, has = f.forkGraph.GetBlock(block.Block.ParentRoot)
+		if !has || parentBlock == nil {
+			return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
 		}
 	}
-	return root
+
+	// Return parent root with payload status
+	// For pre-Gloas compatibility, the Root is the same as before
+	return ForkChoiceNode{
+		Root:          block.Block.ParentRoot,
+		PayloadStatus: f.getParentPayloadStatus(block.Block),
+	}
 }
 
 // getCheckpointState computes and caches checkpoint states.

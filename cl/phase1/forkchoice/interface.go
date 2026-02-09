@@ -34,7 +34,8 @@ type ForkChoiceStorage interface {
 }
 
 type ForkChoiceStorageReader interface {
-	Ancestor(root common.Hash, slot uint64) common.Hash
+	// [Modified in Gloas:EIP7732] Returns ForkChoiceNode with payload status.
+	Ancestor(root common.Hash, slot uint64) ForkChoiceNode
 	AnchorSlot() uint64
 	Engine() execution_client.ExecutionEngine
 	FinalizedCheckpoint() solid.Checkpoint
@@ -96,6 +97,8 @@ type ForkChoiceStorageWriter interface {
 		fullValidation bool,
 		checkDataAvaibility bool,
 	) error
+	// [New in Gloas:EIP7732] OnExecutionPayload processes an execution payload envelope from the builder.
+	OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	AddPreverifiedBlobSidecar(blobSidecar *cltypes.BlobSidecar) error
 	OnTick(time uint64)
 	SetSynced(synced bool)
