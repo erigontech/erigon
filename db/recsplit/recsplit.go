@@ -553,26 +553,15 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 		fanout, unit := splitParams(m, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
 		count := rs.count
 		for {
-			for i := uint16(0); i < fanout; i++ {
+			for i := uint16(0); i < fanout-1; i++ {
 				count[i] = 0
 			}
 			var fail bool
 			for i := uint16(0); i < m; i++ {
-				j := remap16(remix(bucket[i]+salt), m) / unit
-				count[j]++
-				// early overflow detection: if any bin exceeds unit, this salt fails
-				if count[j] > unit {
-					fail = true
-					break
-				}
+				count[remap16(remix(bucket[i]+salt), m)/unit]++
 			}
-			if !fail {
-				for i := uint16(0); i < fanout-1; i++ {
-					if count[i] != unit {
-						fail = true
-						break
-					}
-				}
+			for i := uint16(0); i < fanout-1; i++ {
+				fail = fail || (count[i] != unit)
 			}
 			if !fail {
 				break
