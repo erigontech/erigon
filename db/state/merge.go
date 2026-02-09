@@ -430,11 +430,13 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	fromStep, toStep := kv.Step(r.values.from/r.aggStep), kv.Step(r.values.to/r.aggStep)
 	kvFilePath := dt.d.kvNewFilePath(fromStep, toStep)
 
-	_, fName := filepath.Split(kvFilePath)
-	t := time.Now()
-	defer func() {
-		log.Warn("[dbg] merge", "name", dt.name, "fName", fName, "took", time.Since(t))
-	}()
+	{
+		_, fName := filepath.Split(kvFilePath)
+		t := time.Now()
+		defer func() {
+			log.Warn("[dbg] merge", "name", dt.name, "fName", fName, "took", time.Since(t))
+		}()
+	}
 
 	kvFile, err := seg.NewCompressor(ctx, "merge domain "+dt.d.FilenameBase, kvFilePath, dt.d.dirs.Tmp, dt.d.CompressCfg, log.LvlTrace, dt.d.logger)
 	if err != nil {
@@ -622,6 +624,15 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	fromStep, toStep := kv.Step(startTxNum/iit.stepSize), kv.Step(endTxNum/iit.stepSize)
 
 	datPath := iit.ii.efNewFilePath(fromStep, toStep)
+
+	{
+		_, fName := filepath.Split(datPath)
+		t := time.Now()
+		defer func() {
+			log.Warn("[dbg] merge", "name", iit.ii.Name, "fName", fName, "took", time.Since(t))
+		}()
+	}
+
 	if comp, err = seg.NewCompressor(ctx, iit.ii.FilenameBase+".ii.merge", datPath, iit.ii.dirs.Tmp, iit.ii.CompressorCfg, log.LvlTrace, iit.ii.logger); err != nil {
 		return nil, fmt.Errorf("merge %s inverted index compressor: %w", iit.ii.FilenameBase, err)
 	}
@@ -789,6 +800,15 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}()
 		fromStep, toStep := kv.Step(r.history.from/ht.stepSize), kv.Step(r.history.to/ht.stepSize)
 		datPath := ht.h.vNewFilePath(fromStep, toStep)
+
+		{
+			_, fName := filepath.Split(datPath)
+			t := time.Now()
+			defer func() {
+				log.Warn("[dbg] merge", "name", ht.h.Name, "fName", fName, "took", time.Since(t))
+			}()
+		}
+
 		idxPath := ht.h.vAccessorNewFilePath(fromStep, toStep)
 		if comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.FilenameBase, datPath, ht.h.dirs.Tmp, ht.h.CompressorCfg, log.LvlTrace, ht.h.logger); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", ht.h.FilenameBase, err)
