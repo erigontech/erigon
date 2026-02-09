@@ -77,6 +77,24 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 		}
 		return true
 	})
+
+	// [New in Gloas:EIP7732] Clean up ptcVote and executionPayloadStates for finalized blocks
+	finalizedSlot := newFinalized.Epoch * f.beaconCfg.SlotsPerEpoch
+	f.ptcVote.Range(func(k, v any) bool {
+		root := k.(common.Hash)
+		if header, has := f.forkGraph.GetHeader(root); !has || header.Slot <= finalizedSlot {
+			f.ptcVote.Delete(k)
+		}
+		return true
+	})
+	f.executionPayloadStates.Range(func(k, v any) bool {
+		root := k.(common.Hash)
+		if header, has := f.forkGraph.GetHeader(root); !has || header.Slot <= finalizedSlot {
+			f.executionPayloadStates.Delete(k)
+		}
+		return true
+	})
+
 	slotToPrune := ((newFinalized.Epoch - 3) * f.beaconCfg.SlotsPerEpoch) - 1
 	f.forkGraph.Prune(slotToPrune)
 }
