@@ -19,6 +19,7 @@ package forkchoice
 import (
 	"errors"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
@@ -39,7 +40,7 @@ func (f *ForkChoiceStore) OnAttestation(
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.headHash = common.Hash{}
+	f.headHash = common.Hash{} // reset current head hash to force recomputation on next GetHead
 	data := attestation.Data
 	if err := f.ValidateOnAttestation(attestation); err != nil {
 		return err
@@ -78,7 +79,7 @@ func (f *ForkChoiceStore) OnAttestation(
 	}
 
 	// Lastly update latest messages.
-	f.processAttestingIndicies(attestation, attestationIndicies)
+	f.updateLatestMessages(attestation, attestationIndicies)
 
 	return nil
 }
@@ -89,7 +90,7 @@ func (f *ForkChoiceStore) ProcessAttestingIndicies(
 ) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.processAttestingIndicies(attestation, attestionIndicies)
+	f.updateLatestMessages(attestation, attestionIndicies)
 }
 
 func (f *ForkChoiceStore) verifyAttestationWithCheckpointState(
@@ -150,6 +151,16 @@ func (f *ForkChoiceStore) verifyAttestationWithState(
 
 func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) {
 	f.latestMessages.set(int(index), message)
+
+	// Update indexed weight store if present
+	if f.indexedWeightStore != nil {
+		// Get old message to remove from index
+		if oldMessage, has := f.latestMessages.get(int(index)); has && oldMessage != (LatestMessage{}) {
+			f.indexedWeightStore.RemoveVote(index, oldMessage.Root)
+		}
+		// Add new vote to index (balance looked up internally)
+		f.indexedWeightStore.IndexVote(index, message)
+	}
 }
 
 func (f *ForkChoiceStore) getLatestMessage(validatorIndex uint64) (LatestMessage, bool) {
@@ -180,10 +191,23 @@ func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
 	f.equivocatingIndicies[index] |= 1 << uint(subIndex)
 }
 
-func (f *ForkChoiceStore) processAttestingIndicies(
+func (f *ForkChoiceStore) updateLatestMessages(
 	attestation *solid.Attestation,
 	indicies []uint64,
 ) {
+	currentEpoch := f.computeEpochAtSlot(f.Slot())
+	if f.beaconCfg.GetCurrentStateVersion(currentEpoch) >= clparams.GloasVersion {
+		f.updateLatestMessagesGloas(attestation, indicies)
+	} else {
+		f.updateLatestMessagesPreGloas(attestation, indicies)
+	}
+}
+
+func (f *ForkChoiceStore) updateLatestMessagesPreGloas(
+	attestation *solid.Attestation,
+	indicies []uint64,
+) {
+	slot := attestation.Data.Slot
 	beaconBlockRoot := attestation.Data.BeaconBlockRoot
 	target := attestation.Data.Target
 
@@ -196,6 +220,33 @@ func (f *ForkChoiceStore) processAttestingIndicies(
 			f.setLatestMessage(index, LatestMessage{
 				Epoch: target.Epoch,
 				Root:  beaconBlockRoot,
+				Slot:  slot, // Set slot for GLOAS compatibility at fork boundary
+			})
+		}
+	}
+}
+
+// updateLatestMessagesGloas updates latest messages using slot-based comparison
+// and tracks payload_present from the attestation index.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) updateLatestMessagesGloas(
+	attestation *solid.Attestation,
+	indicies []uint64,
+) {
+	slot := attestation.Data.Slot
+	beaconBlockRoot := attestation.Data.BeaconBlockRoot
+	payloadPresent := attestation.Data.CommitteeIndex == 1
+
+	for _, index := range indicies {
+		if f.isUnequivocating(index) {
+			continue
+		}
+		validatorMessage, has := f.getLatestMessage(index)
+		if !has || slot > validatorMessage.Slot {
+			f.setLatestMessage(index, LatestMessage{
+				Slot:           slot,
+				Root:           beaconBlockRoot,
+				PayloadPresent: payloadPresent,
 			})
 		}
 	}
@@ -210,17 +261,31 @@ func (f *ForkChoiceStore) ValidateOnAttestation(attestation *solid.Attestation) 
 	if _, has := f.forkGraph.GetHeader(target.Root); !has {
 		return errors.New("target root is missing")
 	}
-	if blockHeader, has := f.forkGraph.GetHeader(attestation.Data.BeaconBlockRoot); !has ||
-		blockHeader.Slot > attestation.Data.Slot {
+	blockHeader, has := f.forkGraph.GetHeader(attestation.Data.BeaconBlockRoot)
+	if !has || blockHeader.Slot > attestation.Data.Slot {
 		return errors.New("bad attestation data")
 	}
+
+	// [New in Gloas:EIP7732] Validate attestation index
+	currentEpoch := f.computeEpochAtSlot(f.Slot())
+	if f.beaconCfg.GetCurrentStateVersion(currentEpoch) >= clparams.GloasVersion {
+		// index must be 0 or 1
+		if attestation.Data.CommitteeIndex != 0 && attestation.Data.CommitteeIndex != 1 {
+			return errors.New("attestation index must be 0 or 1")
+		}
+		// if block_slot == attestation_slot, index must be 0
+		if blockHeader.Slot == attestation.Data.Slot && attestation.Data.CommitteeIndex != 0 {
+			return errors.New("attestation index must be 0 when block_slot equals attestation_slot")
+		}
+	}
+
 	// LMD vote must be consistent with FFG vote target
 	targetSlot := f.computeStartSlotAtEpoch(target.Epoch)
-	ancestorRoot := f.Ancestor(attestation.Data.BeaconBlockRoot, targetSlot)
-	if ancestorRoot == (common.Hash{}) {
+	ancestorNode := f.Ancestor(attestation.Data.BeaconBlockRoot, targetSlot)
+	if ancestorNode.Root == (common.Hash{}) {
 		return errors.New("could not retrieve ancestor")
 	}
-	if ancestorRoot != target.Root {
+	if ancestorNode.Root != target.Root {
 		return errors.New("ancestor root mismatches with target")
 	}
 
