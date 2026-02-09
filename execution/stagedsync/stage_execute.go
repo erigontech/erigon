@@ -265,10 +265,19 @@ func unwindExec3State(ctx context.Context,
 	defer stateChanges.Close()
 	stateChanges.SortAndFlushInBackground(true)
 
+	// Invalidate state cache entries affected by the unwind
+	if stateCache := sd.GetStateCache(); stateCache != nil {
+		unwindToHash, err := rawdb.ReadCanonicalHash(tx, blockUnwindTo)
+		if err != nil {
+			logger.Warn("failed to read canonical hash for cache update", "block", blockUnwindTo, "err", err)
+			unwindToHash = common.Hash{}
+		}
+		stateCache.RevertWithDiffset(changeset, unwindToHash)
+	}
 	if changeset != nil {
 		accountDiffs := changeset[kv.AccountsDomain]
 		for _, entry := range accountDiffs {
-			if dbg.TraceDomain(uint16(kv.AccountsDomain)) {
+			if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 				address := entry.Key[:len(entry.Key)-8]
 				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
 				prevStep := ^binary.BigEndian.Uint64(entry.PrevStepBytes)
@@ -315,9 +324,11 @@ func unwindExec3State(ctx context.Context,
 				}
 			}
 		}
+
 		if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 			return err
 		}
+
 	}
 
 	sd.Unwind(txUnwindTo, changeset)
@@ -368,7 +379,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return nil
 	}
 
-	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, dbg.Exec3Parallel, to, logger); err != nil {
+	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, dbg.Exec3Parallel || cfg.experimentalBAL, to, logger); err != nil {
 		return err
 	}
 	return nil
@@ -437,7 +448,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	//  - stop prune when `tx.SpaceDirty()` is big
 	//  - and set ~500ms timeout
 	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
-	quickPruneTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond
+	quickPruneTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond / 2
 
 	if timeout > 0 && timeout > quickPruneTimeout {
 		quickPruneTimeout = timeout

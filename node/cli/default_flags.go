@@ -239,6 +239,8 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.TrustedSetupFile,
 	&utils.RPCSlowFlag,
+	&utils.RpcTxSyncDefaultTimeoutFlag,
+	&utils.RpcTxSyncMaxTimeoutFlag,
 
 	&utils.TxPoolGossipDisableFlag,
 	&SyncLoopBlockLimitFlag,

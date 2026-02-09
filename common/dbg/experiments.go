@@ -36,7 +36,7 @@ import (
 )
 
 var (
-	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 512)
+	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
 	noMemstat            = EnvBool("NO_MEMSTAT", false)
 	saveHeapProfile      = EnvBool("SAVE_HEAP_PROFILE", false)
@@ -79,6 +79,8 @@ var (
 	numWorkers    = runtime.NumCPU() / 2
 	Exec3Workers  = EnvInt("EXEC3_WORKERS", numWorkers)
 
+	CompressWorkers = EnvInt("COMPRESS_WORKERS", 1)
+
 	TraceAccounts        = EnvStrings("TRACE_ACCOUNTS", ",", nil)
 	TraceStateKeys       = EnvStrings("TRACE_STATE_KEYS", ",", nil)
 	TraceInstructions    = EnvBool("TRACE_INSTRUCTIONS", false)
@@ -87,7 +89,7 @@ var (
 	TraceNoopIO          = EnvBool("TRACE_NOOP_IO", false)
 	TraceLogs            = EnvBool("TRACE_LOGS", false)
 	TraceGas             = EnvBool("TRACE_GAS", false)
-	TraceDyanmicGas      = EnvBool("TRACE_DYNAMIC_GAS", false)
+	TraceDynamicGas      = EnvBool("TRACE_DYNAMIC_GAS", false)
 	TraceApply           = EnvBool("TRACE_APPLY", false)
 	TraceBlocks          = EnvUints("TRACE_BLOCKS", ",", nil)
 	TraceTxIndexes       = EnvInts("TRACE_TXINDEXES", ",", nil)
@@ -97,6 +99,7 @@ var (
 	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
+	UseStateCache        = EnvBool("USE_STATE_CACHE", false)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)

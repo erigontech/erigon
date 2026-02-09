@@ -340,10 +340,10 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	// specifies a topic.  All addresses should be present still.  The state should represent the single
 	// subscription in step 3
 	f.UnsubscribeLogs(id2)
-	if lastFilterRequest.AllAddresses == false {
+	if !lastFilterRequest.AllAddresses {
 		t.Error("5: expected all addresses to be true")
 	}
-	if lastFilterRequest.AllTopics == true {
+	if lastFilterRequest.AllTopics {
 		t.Error("5: expected all topics to be false")
 	}
 	if len(lastFilterRequest.Addresses) != 0 {
@@ -356,10 +356,10 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	// unsubscribing the last filter should leave us with false for the all addresses and all topics
 	// and nothing in the address or topics lists
 	f.UnsubscribeLogs(id3)
-	if lastFilterRequest.AllAddresses == true {
+	if lastFilterRequest.AllAddresses {
 		t.Error("6: expected all addresses to be false")
 	}
-	if lastFilterRequest.AllTopics == true {
+	if lastFilterRequest.AllTopics {
 		t.Error("6: expected all topics to be false")
 	}
 	if len(lastFilterRequest.Addresses) != 0 {

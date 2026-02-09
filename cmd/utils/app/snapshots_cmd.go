@@ -35,10 +35,13 @@ import (
 	"strings"
 	"time"
 
+	g "github.com/anacrolix/generics"
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
+
+	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/downloader/webseeds"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
@@ -53,6 +56,8 @@ import (
 	"github.com/erigontech/erigon/db/compress"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/downloader/webseeds"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
@@ -95,7 +100,7 @@ func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
 func commonBeforeSnapshotCommand(cliCtx *cli.Context) error {
 	go mem.LogMemStats(cliCtx.Context, log.New())
 	go disk.UpdateDiskStats(cliCtx.Context, log.New())
-	_, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	_, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -283,7 +288,7 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&dryRunFlag,
 				&removeLocalFlag,
-				&preverifiedFlag,
+				&PreverifiedFlag,
 			},
 		},
 		{
@@ -293,7 +298,7 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "step"},
-				&cli.BoolFlag{Name: "latest"},
+				&cli.BoolFlag{Name: "recentStep", Aliases: []string{"latest", "latestStep", "recent"}, Usage: "remove minimal possible recent/latest files: and Domain and History. Useful when have 1 corrupted recent file"},
 				&cli.BoolFlag{Name: "dry-run"},
 				&cli.StringSliceFlag{Name: "domain"},
 			},
@@ -307,7 +312,7 @@ var snapshotCommand = cli.Command{
 				"It is useful for shadowforks, recovering broken nodes or chains, and/or for doing experiments that " +
 				"involve replaying certain blocks.",
 			Action: func(cliCtx *cli.Context) error {
-				logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+				logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
 				if err != nil {
 					panic(fmt.Errorf("rollback snapshots to block: could not setup logger: %w", err))
 				}
@@ -393,7 +398,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "check-commitment-hist-at-blk",
 			Action: func(cliCtx *cli.Context) error {
-				logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+				logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
 				if err != nil {
 					panic(fmt.Errorf("check commitment history at block: could not setup logger: %w", err))
 				}
@@ -414,7 +419,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "check-commitment-hist-at-blk-range",
 			Action: func(cliCtx *cli.Context) error {
-				logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+				logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
 				if err != nil {
 					panic(fmt.Errorf("check commitment history at block range: could not setup logger: %w", err))
 				}
@@ -498,6 +503,33 @@ var snapshotCommand = cli.Command{
 						&cli.UintFlag{Name: "domain", Required: true},
 					}),
 				},
+			},
+		},
+		{
+			Name: "preverified",
+			Action: func(cliCtx *cli.Context) (err error) {
+				var dataDir string
+				// Don't use the default, it must be set to apply.
+				if cliCtx.IsSet(utils.DataDirFlag.Name) {
+					dataDir = cliCtx.String(utils.DataDirFlag.Name)
+				}
+				var targetChain g.Option[string]
+				// Don't use the default, it must be set to apply.
+				if cliCtx.IsSet(VerifyChainFlag.Name) {
+					targetChain.Set(VerifyChainFlag.Get(cliCtx))
+				}
+				return webseeds.Verify(
+					cliCtx.Context,
+					PreverifiedFlag.Get(cliCtx),
+					dataDir,
+					ConcurrencyFlag.Get(cliCtx),
+					targetChain,
+				)
+			},
+			Flags: []cli.Flag{
+				&PreverifiedFlag,
+				&VerifyChainFlag,
+				&ConcurrencyFlag,
 			},
 		},
 	},
@@ -908,7 +940,7 @@ func doBtSearch(cliCtx *cli.Context) error {
 		return err
 	}
 	defer l.Unlock()
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
 	}
@@ -953,7 +985,7 @@ func doBtSearch(cliCtx *cli.Context) error {
 }
 
 func doDebugKey(cliCtx *cli.Context) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
 	}
@@ -1006,7 +1038,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 }
 
 func doIntegrity(cliCtx *cli.Context) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
 	}
@@ -1772,7 +1804,7 @@ func deleteFilesWithExtensions(dir string, extensions []string) error {
 }
 
 func doBlkTxNum(cliCtx *cli.Context) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -1944,7 +1976,7 @@ func doMeta(cliCtx *cli.Context) error {
 }
 
 func doDecompressSpeed(cliCtx *cli.Context) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -1984,7 +2016,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 }
 
 func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -2036,7 +2068,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	return nil
 }
 func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -2169,7 +2201,7 @@ func doUncompress(cliCtx *cli.Context) error {
 	}
 	defer l.Unlock()
 	var logger log.Logger
-	if logger, _, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	if logger, err = debug.SetupSimple(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 	ctx := cliCtx.Context
@@ -2233,7 +2265,7 @@ func doCompress(cliCtx *cli.Context) error {
 	}
 	defer lck.Unlock()
 
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -2339,7 +2371,7 @@ func doCompress(cliCtx *cli.Context) error {
 }
 
 func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -2362,7 +2394,7 @@ func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {
 }
 
 func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -2497,7 +2529,7 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 }
 
 func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -2636,7 +2668,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 func doCompareIdx(cliCtx *cli.Context) error {
 	// doesn't compare exact hashes offset,
 	// only sizes, counts, offsets, and ordinal lookups.
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
 	}

@@ -38,8 +38,7 @@ jobs:
             max-allowed-failures: 0
           - sim: rpc
             sim-limit: compat
-            # 8 failures out of 199 tests, see https://github.com/ethereum/hive/pull/1355
-            max-allowed-failures: 8
+            max-allowed-failures: 0
     steps:
       - name: Checkout Hive
         uses: actions/checkout@v6

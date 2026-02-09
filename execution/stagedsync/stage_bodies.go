@@ -65,7 +65,7 @@ func StageBodiesCfg(bd *bodydownload.BodyDownload,
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
-func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg BodiesCfg, test bool, logger log.Logger) error {
+func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg BodiesCfg, logger log.Logger) error {
 	var doUpdate bool
 
 	startTime := time.Now()
@@ -255,10 +255,6 @@ func BodiesForward(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, c
 		d5 += time.Since(start)
 		start = time.Now()
 		if bodyProgress == headerProgress {
-			return true, nil
-		}
-		if test {
-			stopped = true
 			return true, nil
 		}
 		firstCycle := s.CurrentSyncCycle.IsInitialCycle

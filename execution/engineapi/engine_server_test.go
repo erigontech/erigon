@@ -19,7 +19,6 @@ package engineapi
 import (
 	"bytes"
 	"context"
-	"math/big"
 	"testing"
 	"time"
 
@@ -35,56 +34,25 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 // Do 1 step to start txPool
-func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *testing.T) {
+func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions) {
 	chain, err := blockgen.GenerateChain(mockSentry.ChainConfig, mockSentry.Genesis, mockSentry.Engine, mockSentry.DB, 1 /*number of blocks:*/, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	require.NoError(err)
-
-	// Send NewBlock message
-	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: chain.TopBlock,
-		TD:    big.NewInt(1), // This is ignored anyway
-	})
+	err = mockSentry.InsertChain(chain)
 	require.NoError(err)
-
-	mockSentry.ReceiveWg.Add(1)
-	for _, err = range mockSentry.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: mockSentry.PeerId}) {
-		require.NoError(err)
-	}
-	// Send all the headers
-	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-		RequestId:          1,
-		BlockHeadersPacket: chain.Headers,
-	})
-	require.NoError(err)
-	mockSentry.ReceiveWg.Add(1)
-	for _, err = range mockSentry.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: mockSentry.PeerId}) {
-		require.NoError(err)
-	}
-	mockSentry.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
-
-	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-	err = stageloop.StageLoopIteration(mockSentry.Ctx, mockSentry.DB, mockSentry.Sync, initialCycle, firstCycle, mockSentry.Log, mockSentry.BlockReader, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 }
 
 func newBaseApiForTest(m *mock.MockSentry) *jsonrpc.BaseAPI {
@@ -109,7 +77,7 @@ func newEthApiForTest(base *jsonrpc.BaseAPI, db kv.TemporalRoDB, txPool txpoolpr
 func TestGetBlobsV1(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
 	mockSentry, require := mock.MockWithTxPoolCancun(t), require.New(t)
-	oneBlockStep(mockSentry, require, t)
+	oneBlockStep(mockSentry, require)
 
 	wrappedTxn := types.MakeWrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
 	txn, err := types.SignTx(wrappedTxn, *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
@@ -159,7 +127,7 @@ func TestGetBlobsV1(t *testing.T) {
 func TestGetBlobsV2(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
 	mockSentry, require := mock.MockWithTxPoolOsaka(t), require.New(t)
-	oneBlockStep(mockSentry, require, t)
+	oneBlockStep(mockSentry, require)
 
 	wrappedTxn := types.MakeV1WrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
 	txn, err := types.SignTx(wrappedTxn, *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
@@ -218,7 +186,7 @@ func TestGetBlobsV2(t *testing.T) {
 func TestGetBlobsV3(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
 	mockSentry, require := mock.MockWithTxPoolOsaka(t), require.New(t)
-	oneBlockStep(mockSentry, require, t)
+	oneBlockStep(mockSentry, require)
 
 	wrappedTxn := types.MakeV1WrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
 	txn, err := types.SignTx(wrappedTxn, *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
