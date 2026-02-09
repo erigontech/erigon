@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
 
@@ -51,6 +52,11 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx,
 		return receipt, nil
 	}
 
+	err := rpchelper.CheckBlockExecuted(tx, block.NumberU64())
+	if err != nil {
+		return nil, err
+	}
+	
 	txNumsReader := g.blockReader.TxnumReader()
 	ibs, blockContext, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, block.HeaderNoCopy(), chainConfig, g.blockReader, g.stateCache, txNumsReader, tx, len(block.Transactions())) // we want to get the state at the end of the block
 	if err != nil {
