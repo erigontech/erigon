@@ -45,12 +45,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-var arbTrace bool
-
-func init() {
-	arbTrace = dbg.EnvBool("ARB_TRACE", false)
-}
-
 /*
 The State Transitioning Model
 
@@ -771,7 +765,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		if burntContractAddress != nil {
 			burnAmount = *(&uint256.Int{}).Mul((&uint256.Int{}).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
 
-			if arbTrace {
+			if dbg.ArbTrace() {
 				fmt.Printf("burnAddr %x tipAddr %x\n", burntContractAddress, tipReceipient)
 			}
 			tracingTipAmount = burnAmount.Clone()
@@ -1111,7 +1105,7 @@ func (st *StateTransition) refundGas() {
 	if st.state.Trace() || st.state.TraceAccount(st.msg.From()) {
 		fmt.Printf("(%d.%d) Refund %x: remaining: %d, price: %d val: %d\n", st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining, st.gasPrice, remaining)
 	}
-	if arbTrace {
+	if dbg.ArbTrace() {
 		fmt.Printf("[ST] refund remaining gas %d to %x\n", remaining, st.msg.From())
 	}
 
