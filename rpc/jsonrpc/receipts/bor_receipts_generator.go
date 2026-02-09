@@ -56,7 +56,7 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx,
 	if err != nil {
 		return nil, err
 	}
-	
+
 	txNumsReader := g.blockReader.TxnumReader()
 	ibs, blockContext, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, block.HeaderNoCopy(), chainConfig, g.blockReader, g.stateCache, txNumsReader, tx, len(block.Transactions())) // we want to get the state at the end of the block
 	if err != nil {

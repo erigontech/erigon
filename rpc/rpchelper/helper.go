@@ -52,8 +52,7 @@ func (e BlockNotFoundErr) Error() string {
 	return fmt.Sprintf("block %x not found", e.Hash)
 }
 
-
-func CheckBlockExecuted(tx kv.Tx, blockNumber uint64) (error) {
+func CheckBlockExecuted(tx kv.Tx, blockNumber uint64) error {
 	lastExecutedBlock, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return err
