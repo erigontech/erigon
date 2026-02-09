@@ -132,6 +132,9 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 		}
 		endStep := item.endTxNum / dt.stepSize
 		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
+		if spanStep > dbg.MaxMergeSteps {
+			continue
+		}
 		span := spanStep * dt.stepSize
 		fromTxNum := item.endTxNum - span
 		if fromTxNum >= item.startTxNum {
