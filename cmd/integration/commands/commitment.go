@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/hex"
@@ -51,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/seg"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -281,9 +283,25 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 			// TODO: give a command to build the index
 			return errors.New("max tx num is not populated; run erigon for a while to build the index")
 		}
-    }
+	}
+
+	commitmentHistoryEnabled, _, err := rawdb.ReadDBCommitmentHistoryEnabled(rwTx)
+	if err != nil {
+		return err
+	}
+
+	withHistory := false
+	if commitmentHistoryEnabled {
+		fmt.Print("commitment history is enabled. Rebuild with history? (y/n): ")
+		scanner := bufio.NewScanner(os.Stdin)
+		scanner.Scan()
+		resp := strings.ToLower(strings.TrimSpace(scanner.Text()))
+		withHistory = resp == "y" || resp == "yes"
+	}
+
 	// remove all existing state commitment snapshots
-	if err := app.DeleteStateSnapshots(dirs, false, true, false, "0-999999", kv.CommitmentDomain.String()); err != nil {
+	// when not rebuilding with history, only delete domain files (preserve existing history/index)
+	if err := app.DeleteStateSnapshots(dirs, false, true, false, "0-999999", !withHistory, kv.CommitmentDomain.String()); err != nil {
 		return err
 	}
 
@@ -312,11 +330,14 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	agg.PeriodicalyPrintProcessSet(ctx)
 
-	// if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg, squeeze); err != nil {
-	// 	return err
-	// }
-	if _, err := stagedsync.RebuildPatriciaTrieWithHistory(ctx, cfg, squeeze); err != nil {
-		return err
+	if withHistory {
+		if _, err := stagedsync.RebuildPatriciaTrieWithHistory(ctx, cfg, squeeze); err != nil {
+			return err
+		}
+	} else {
+		if _, err := stagedsync.RebuildPatriciaTrieBasedOnFiles(ctx, cfg, squeeze); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -50,13 +50,13 @@ func Test_DeleteLatestStateSnaps(t *testing.T) {
 	confirmExist(t, file)
 
 	// delete 9-10
-	err := DeleteStateSnapshots(dirs, true, false, false, "", "receipt")
+	err := DeleteStateSnapshots(dirs, true, false, false, "", false, "receipt")
 	require.NoError(t, err)
 	file, _ = b.domain.DataFile(version.V1_0, 90, 100)
 	confirmDoesntExist(t, file)
 
 	// should delete 8-9
-	err = DeleteStateSnapshots(dirs, true, false, false, "", "receipt")
+	err = DeleteStateSnapshots(dirs, true, false, false, "", false, "receipt")
 	require.NoError(t, err)
 	file, _ = b.domain.DataFile(version.V1_0, 80, 90)
 	confirmDoesntExist(t, file)
@@ -76,7 +76,7 @@ func Test_DeleteLatestStateSnaps_DomainWithLargeRange(t *testing.T) {
 	domainFile, _ := b.domain.DataFile(version.V1_0, 0, 100)
 	confirmExist(t, domainFile)
 
-	err := DeleteStateSnapshots(dirs, true, false, false, "", "receipt")
+	err := DeleteStateSnapshots(dirs, true, false, false, "", false, "receipt")
 	require.NoError(t, err)
 	confirmDoesntExist(t, domainFile)
 }
@@ -97,10 +97,41 @@ func Test_DeleteLatestStateSnaps_DomainAndHistorySameEnd(t *testing.T) {
 	confirmExist(t, historyFile)
 	confirmExist(t, domainFile)
 
-	err := DeleteStateSnapshots(dirs, true, false, false, "", "receipt")
+	err := DeleteStateSnapshots(dirs, true, false, false, "", false, "receipt")
 	require.NoError(t, err)
 	confirmDoesntExist(t, historyFile)
 	confirmDoesntExist(t, domainFile)
+}
+
+func Test_DeleteStateSnaps_OnlyDomain(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	b := bundle{}
+	// Use receipt domain which has history enabled
+	dc := statecfg.Schema.ReceiptDomain
+	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 10)
+
+	// Create domain, history, and index files
+	for i := 0; i < 5; i++ {
+		createFiles(t, dirs, i*10, (i+1)*10, &b)
+	}
+
+	domainFile, _ := b.domain.DataFile(version.V1_0, 0, 10)
+	historyFile, _ := b.history.DataFile(version.V1_0, 0, 10)
+	iiFile, _ := b.ii.DataFile(version.V1_0, 0, 10)
+	confirmExist(t, domainFile)
+	confirmExist(t, historyFile)
+	confirmExist(t, iiFile)
+
+	// Delete with onlyDomain=true — should only remove domain files
+	err := DeleteStateSnapshots(dirs, false, false, false, "0-999999", true, kv.ReceiptDomain.String())
+	require.NoError(t, err)
+
+	// Domain files should be gone
+	confirmDoesntExist(t, domainFile)
+
+	// History and index files should still exist
+	confirmExist(t, historyFile)
+	confirmExist(t, iiFile)
 }
 
 func createSchemaFiles(t *testing.T, schema state.SnapNameSchema, from, to int) {
