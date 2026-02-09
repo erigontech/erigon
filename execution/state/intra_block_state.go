@@ -710,10 +710,16 @@ func (sdb *IntraBlockState) ResolveCodeHash(addr accounts.Address) (accounts.Cod
 }
 
 func (sdb *IntraBlockState) ResolveCode(addr accounts.Address) ([]byte, error) {
-	code, err := sdb.getCode(addr, true)
+	// Use commited=false so the tx's own writes (e.g. from EIP-7702 authorization list)
+	// are visible. When commited=true, the versioned write set is skipped, which causes
+	// the parallel executor to read stale delegation code from the version map instead of
+	// the code written by this tx's authorization list.
+	// CodePath reads already bypass the SelfDestruct early-return in versionedRead (line 413),
+	// so commited=false is safe here.
+	code, err := sdb.getCode(addr, false)
 	// eip-7702
 	if delegation, ok := types.ParseDelegation(code); ok {
-		return sdb.getCode(delegation, true)
+		return sdb.getCode(delegation, false)
 	}
 	if err != nil {
 		return nil, err
@@ -1001,7 +1007,7 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 		}
 	}
 
-	incarnation, isource, iversion, err := versionedRead(sdb, addr, IncarnationPath, accounts.NilKey, false, account.Nonce, nil, nil)
+	incarnation, isource, iversion, err := versionedRead(sdb, addr, IncarnationPath, accounts.NilKey, false, account.Incarnation, nil, nil)
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
 	}
@@ -1041,6 +1047,13 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 			}
 		}
 	}
+
+	// Ensure the account is marked as initialised when reconstructed from versioned fields.
+	// The version map may store accounts with Initialised=false (from storage reads of
+	// non-existent accounts), but once we've found and assembled the account from versioned
+	// fields, it IS initialised. Without this, newObject() will zero the balance when it
+	// sees Initialised=false.
+	account.Initialised = true
 
 	return account, source, version, nil
 }
@@ -1124,6 +1137,11 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte) error {
 		fmt.Printf("%d (%d.%d) SetCode %x, %d: %s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, lenc, cs)
 	}
 
+	// DEBUG: Track SetCode for the EIP-7702 delegation address
+	if addr.Value() == (common.Address{0x91, 0xea, 0x02, 0x97, 0x68, 0x70, 0xd5, 0xa0, 0x37, 0xa7, 0x8c, 0x5b, 0xa3, 0xb8, 0xbc, 0x4f, 0x3d, 0x9e, 0x4d, 0xa0}) {
+		fmt.Printf("DEBUG SetCode addr=0x91ea block=%d txIndex=%d code=%x hasVersionMap=%v\n", sdb.blockNum, sdb.txIndex, code, sdb.versionMap != nil)
+	}
+
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
@@ -1133,6 +1151,12 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte) error {
 	if err != nil {
 		return err
 	}
+
+	// DEBUG: Track SetCode result for the EIP-7702 delegation address
+	if addr.Value() == (common.Address{0x91, 0xea, 0x02, 0x97, 0x68, 0x70, 0xd5, 0xa0, 0x37, 0xa7, 0x8c, 0x5b, 0xa3, 0xb8, 0xbc, 0x4f, 0x3d, 0x9e, 0x4d, 0xa0}) {
+		fmt.Printf("DEBUG SetCode result: written=%v codeHash=%x originalCodeHash=%x\n", written, codeHash, stateObject.original.CodeHash)
+	}
+
 	if written {
 		if codeHash == stateObject.original.CodeHash {
 			sdb.versionedWrites.Delete(addr, AccountKey{Path: CodePath})
@@ -1143,6 +1167,41 @@ func (sdb *IntraBlockState) SetCode(addr accounts.Address, code []byte) error {
 			versionWritten(sdb, addr, CodeHashPath, accounts.NilKey, codeHash)
 			versionWritten(sdb, addr, CodeSizePath, accounts.NilKey, len(code))
 		}
+	}
+	return nil
+}
+
+// forceSetCode unconditionally sets the code on an account without checking
+// whether the code has changed. This is needed when replaying versioned writes
+// in the finalize path, where the state reader may return stale (post-write)
+// values from the read set, causing the normal SetCode's prevcode comparison
+// to incorrectly conclude the code is unchanged.
+func (sdb *IntraBlockState) forceSetCode(addr accounts.Address, code []byte) error {
+	stateObject, err := sdb.GetOrNewStateObject(addr)
+	if err != nil {
+		return err
+	}
+	codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	prevcode, err := stateObject.Code()
+	if err != nil {
+		return err
+	}
+	// Always add journal entry and set dirtyCode, even if prevcode matches
+	sdb.journal.append(codeChange{
+		account:     stateObject.address,
+		prevhash:    stateObject.data.CodeHash,
+		prevcode:    prevcode,
+		wasCommited: !sdb.hasWrite(addr, CodePath, accounts.NilKey),
+	})
+	stateObject.setCode(codeHash, code)
+	if codeHash == stateObject.original.CodeHash {
+		sdb.versionedWrites.Delete(addr, AccountKey{Path: CodePath})
+		sdb.versionedWrites.Delete(addr, AccountKey{Path: CodeHashPath})
+		sdb.versionedWrites.Delete(addr, AccountKey{Path: CodeSizePath})
+	} else {
+		versionWritten(sdb, addr, CodePath, accounts.NilKey, code)
+		versionWritten(sdb, addr, CodeHashPath, accounts.NilKey, codeHash)
+		versionWritten(sdb, addr, CodeSizePath, accounts.NilKey, len(code))
 	}
 	return nil
 }
@@ -1186,7 +1245,6 @@ func (sdb *IntraBlockState) setState(addr accounts.Address, key accounts.Storage
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		fmt.Printf("%d (%d.%d) SetState %x, %x=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, addr, key, value.Hex())
 	}
-
 	stateObject, err := sdb.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
@@ -1196,13 +1254,13 @@ func (sdb *IntraBlockState) setState(addr accounts.Address, key accounts.Storage
 		return err
 	}
 	if set {
-		storageKey := AccountKey{Path: StoragePath, Key: key}
-		if _, ok := sdb.versionedWrites[addr][storageKey]; ok {
-			if origin, ok := stateObject.GetOriginState(key); ok && value == origin {
-				sdb.versionedWrites.Delete(addr, storageKey)
-				return nil
-			}
-		}
+		// Note: we intentionally do NOT delete the versioned write entry when
+		// value equals origin. That optimization broke revert semantics: if a
+		// nested call sets a slot back to its committed value (deleting the
+		// write set entry) and then the call reverts, storageChange.revert
+		// cannot find the entry to restore. Subsequent reads then hit the
+		// stale read set cache (versionedReads) instead of dirtyStorage,
+		// returning the committed value rather than the pre-call value.
 		versionWritten(sdb, addr, StoragePath, key, value)
 	}
 	return nil
@@ -1585,6 +1643,7 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	if previous != nil && !previous.selfdestructed {
 		newObj.data.Balance.Set(&previous.data.Balance)
 	}
+
 	newObj.data.Initialised = true
 	newObj.data.PrevIncarnation = prevInc
 
@@ -2213,11 +2272,18 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 				}
 			case CodePath:
 				code := val.([]byte)
-				if err := sdb.SetCode(addr, code); err != nil {
+				// Use forceSetCode instead of SetCode. In the finalize path,
+				// the read set (TxIn) may contain the post-write code value
+				// (e.g., if ResolveCode was called after SetCode during execution).
+				// This causes stateObject.Code() to return the new code, making
+				// SetCode's prevcode check think nothing changed (written=false,
+				// dirtyCode not set). As a result, UpdateAccountCode is never
+				// called and the code change is lost between blocks.
+				if err := sdb.forceSetCode(addr, code); err != nil {
 					return err
 				}
 			case CodeHashPath, CodeSizePath:
-				// set by SetCode
+				// set by SetCode/forceSetCode
 			case SelfDestructPath:
 				deleted := val.(bool)
 				if deleted {

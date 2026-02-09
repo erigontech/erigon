@@ -461,17 +461,23 @@ func (w *BufferedWriter) UpdateAccountData(address accounts.Address, original, a
 		w.accumulator.ChangeAccount(address.Value(), account.Incarnation, accounts.SerialiseV3(account))
 	}
 
+	// Copy the account value to prevent pointer aliasing with pooled stateObjects.
+	// The caller passes &stateObject.data, which gets recycled by stateObjectPool
+	// after FinalizeTx. Without this copy, the stored pointer goes stale.
+	accountCopy := new(accounts.Account)
+	accountCopy.Copy(account)
+
 	if update, ok := w.writeSet.Get(&stateUpdate{address: address}); !ok {
 		update = &stateUpdate{&bufferedAccount{
 			originalIncarnation: original.Incarnation,
-			data:                account,
+			data:                accountCopy,
 		}, address, false}
 		w.writeSet.Set(update)
 	} else {
 		if original.Incarnation < update.originalIncarnation {
 			update.originalIncarnation = original.Incarnation
 		}
-		update.data = account
+		update.data = accountCopy
 	}
 
 	w.rs.accountsMutex.Lock()
@@ -480,7 +486,7 @@ func (w *BufferedWriter) UpdateAccountData(address accounts.Address, original, a
 		obj = &bufferedAccount{}
 	}
 	obj.originalIncarnation = original.Incarnation
-	obj.data = account
+	obj.data = accountCopy
 	w.rs.accounts[address] = obj
 	w.rs.accountsMutex.Unlock()
 
@@ -1028,8 +1034,7 @@ func (r *bufferedReader) HasStorage(address accounts.Address) (bool, error) {
 func (r *bufferedReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	var code []byte
 	r.bufferedState.accountsMutex.RLock()
-	so, ok := r.bufferedState.accounts[address]
-	if ok {
+	if so, ok := r.bufferedState.accounts[address]; ok {
 		if so.data == &deleted {
 			r.bufferedState.accountsMutex.RUnlock()
 			return nil, nil
@@ -1042,10 +1047,11 @@ func (r *bufferedReader) ReadAccountCode(address accounts.Address) ([]byte, erro
 	r.bufferedState.accountsMutex.RUnlock()
 
 	if len(code) != 0 {
-		return so.code, nil
+		return code, nil
 	}
 
-	return r.reader.ReadAccountCode(address)
+	fallbackCode, err := r.reader.ReadAccountCode(address)
+	return fallbackCode, err
 }
 
 func (r *bufferedReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
