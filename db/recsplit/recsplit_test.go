@@ -160,6 +160,41 @@ func TestIndexLookup(t *testing.T) {
 	})
 }
 
+func BenchmarkFindSplit(b *testing.B) {
+	// Simulate realistic aggregation-level buckets.
+	// With leafSize=8: primaryAggrBound=32, secondaryAggrBound=96.
+	// A bucket of size 2000 first splits with fanout=2, unit=1056 (secondaryAggr level),
+	// then recursively into primaryAggr and leaf levels.
+	// The most common aggregation call is primaryAggr level: m~32, fanout=4, unit=8.
+	const (
+		leafSize           = uint16(8)
+		primaryAggrBound   = uint16(32) // leafSize * max(2, ceil(0.35*8+0.5)) = 8*4
+		secondaryAggrBound = uint16(96) // primaryAggrBound * ceil(0.21*8+0.9) = 32*3
+	)
+	// Generate buckets at the primary aggregation level (most frequent)
+	const numBuckets = 1000
+	const m = primaryAggrBound // 32 keys
+	buckets := make([][m]uint64, numBuckets)
+	for i := range buckets {
+		for j := range buckets[i] {
+			key := fmt.Appendf(nil, "split_%d_%d", i, j)
+			hi, lo := murmur3.Sum128WithSeed(key, 1)
+			_ = hi
+			buckets[i][j] = lo
+		}
+	}
+	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
+	salt := uint64(0x6453cec3f7376937) // startSeed[1]
+	count := make([]uint16, secondaryAggrBound)
+
+	b.ResetTimer()
+	for b.Loop() {
+		for i := range buckets {
+			findSplit(buckets[i][:], salt, m, fanout, unit, count)
+		}
+	}
+}
+
 func BenchmarkFindBijection(b *testing.B) {
 	// Simulate realistic leaf buckets: leafSize=8 keys with murmur3 hashes
 	const leafSize = 8

@@ -516,6 +516,27 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 }
 
 // recsplit applies recSplit algorithm to the given bucket
+// findSplit finds a salt value such that keys in bucket are evenly distributed
+// into fanout partitions of size unit each (based on remap16(remix(key+salt), m) / unit).
+func findSplit(bucket []uint64, salt uint64, m, fanout, unit uint16, count []uint16) uint64 {
+	for {
+		for i := uint16(0); i < fanout-1; i++ {
+			count[i] = 0
+		}
+		var fail bool
+		for i := uint16(0); i < m; i++ {
+			count[remap16(remix(bucket[i]+salt), m)/unit]++
+		}
+		for i := uint16(0); i < fanout-1; i++ {
+			fail = fail || (count[i] != unit)
+		}
+		if !fail {
+			return salt
+		}
+		salt++
+	}
+}
+
 // findBijection finds a salt value such that all keys in bucket hash to distinct
 // positions in [0, m). Uses 4-way salt parallelism with branchless OR-accumulate
 // to exploit CPU instruction-level parallelism and avoid branch mispredictions.
@@ -575,22 +596,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 	} else {
 		fanout, unit := splitParams(m, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
 		count := rs.count
-		for {
-			for i := uint16(0); i < fanout-1; i++ {
-				count[i] = 0
-			}
-			var fail bool
-			for i := uint16(0); i < m; i++ {
-				count[remap16(remix(bucket[i]+salt), m)/unit]++
-			}
-			for i := uint16(0); i < fanout-1; i++ {
-				fail = fail || (count[i] != unit)
-			}
-			if !fail {
-				break
-			}
-			salt++
-		}
+		salt = findSplit(bucket[:m], salt, m, fanout, unit, count)
 		for i, c := uint16(0), uint16(0); i < fanout; i++ {
 			count[i] = c
 			c += unit
