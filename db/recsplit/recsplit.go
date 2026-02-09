@@ -518,22 +518,47 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 // recsplit applies recSplit algorithm to the given bucket
 // findSplit finds a salt value such that keys in bucket are evenly distributed
 // into fanout partitions of size unit each (based on remap16(remix(key+salt), m) / unit).
+// Uses 4-way salt parallelism with 4 independent count arrays carved from the
+// count slice (which must have len >= 4*fanout).
 func findSplit(bucket []uint64, salt uint64, m, fanout, unit uint16, count []uint16) uint64 {
+	c0 := count[0*fanout : 1*fanout : 1*fanout]
+	c1 := count[1*fanout : 2*fanout : 2*fanout]
+	c2 := count[2*fanout : 3*fanout : 3*fanout]
+	c3 := count[3*fanout : 4*fanout : 4*fanout]
 	for {
-		for i := uint16(0); i < fanout-1; i++ {
-			count[i] = 0
+		for i := range c0 {
+			c0[i] = 0
+			c1[i] = 0
+			c2[i] = 0
+			c3[i] = 0
 		}
-		var fail bool
 		for i := uint16(0); i < m; i++ {
-			count[remap16(remix(bucket[i]+salt), m)/unit]++
+			key := bucket[i]
+			c0[remap16(remix(key+salt), m)/unit]++
+			c1[remap16(remix(key+salt+1), m)/unit]++
+			c2[remap16(remix(key+salt+2), m)/unit]++
+			c3[remap16(remix(key+salt+3), m)/unit]++
 		}
+		ok0, ok1, ok2, ok3 := true, true, true, true
 		for i := uint16(0); i < fanout-1; i++ {
-			fail = fail || (count[i] != unit)
+			ok0 = ok0 && (c0[i] == unit)
+			ok1 = ok1 && (c1[i] == unit)
+			ok2 = ok2 && (c2[i] == unit)
+			ok3 = ok3 && (c3[i] == unit)
 		}
-		if !fail {
+		if ok0 {
 			return salt
 		}
-		salt++
+		if ok1 {
+			return salt + 1
+		}
+		if ok2 {
+			return salt + 2
+		}
+		if ok3 {
+			return salt + 3
+		}
+		salt += 4
 	}
 }
 
