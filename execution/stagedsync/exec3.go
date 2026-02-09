@@ -139,7 +139,7 @@ func ExecV3(ctx context.Context,
 			agg.SetCollateAndBuildWorkers(2) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
 			agg.SetCompressWorkers(dbg.CompressWorkers)
 		} else {
-			agg.SetCollateAndBuildWorkers(1)
+			agg.SetCollateAndBuildWorkers(dbg.MergeWorkers)
 			agg.SetCompressWorkers(dbg.CompressWorkers)
 		}
 	}
