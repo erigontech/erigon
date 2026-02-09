@@ -166,6 +166,7 @@ func BenchmarkBuild(b *testing.B) {
 	const KeysN = 10_000
 
 	for i := 0; b.Loop(); i++ {
+		b.StopTimer()
 		indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_%d", i))
 		rs, err := NewRecSplit(RecSplitArgs{
 			KeyCount:   KeysN,
@@ -184,6 +185,7 @@ func BenchmarkBuild(b *testing.B) {
 				b.Fatal(err)
 			}
 		}
+		b.StartTimer()
 		if err := rs.Build(context.Background()); err != nil {
 			b.Fatal(err)
 		}
