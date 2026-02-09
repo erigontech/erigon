@@ -160,6 +160,98 @@ func TestIndexLookup(t *testing.T) {
 	})
 }
 
+func BenchmarkBuild(b *testing.B) {
+	b.ReportAllocs()
+	logger := log.New()
+	tmpDir := b.TempDir()
+	salt := uint32(1)
+	const KeysN = 1_000_000
+
+	// Pre-allocate all keys outside the benchmark loop
+	keys := make([][]byte, KeysN)
+	for j := 0; j < KeysN; j++ {
+		keys[j] = fmt.Appendf(nil, "key %d", j)
+	}
+	b.ResetTimer()
+	for i := 0; b.Loop(); i++ {
+		b.StopTimer()
+		indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_%d", i))
+		rs, err := NewRecSplit(RecSplitArgs{
+			KeyCount:   KeysN,
+			BucketSize: 2000,
+			Salt:       &salt,
+			TmpDir:     tmpDir,
+			IndexFile:  indexFile,
+			LeafSize:   8,
+			NoFsync:    true,
+		}, logger)
+		if err != nil {
+			b.Fatal(err)
+		}
+		for j := 0; j < KeysN; j++ {
+			if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.StartTimer()
+		if err := rs.Build(context.Background()); err != nil {
+			b.Fatal(err)
+		}
+		b.StopTimer()
+		rs.Close()
+		b.StartTimer()
+	}
+}
+func BenchmarkAddKeyAndBuild(b *testing.B) {
+	b.ReportAllocs()
+	logger := log.New()
+	tmpDir := b.TempDir()
+	salt := uint32(1)
+	const KeysN = 1_000_000
+
+	keys := make([][]byte, KeysN)
+	for j := 0; j < KeysN; j++ {
+		keys[j] = fmt.Appendf(nil, "key %d", j)
+	}
+
+	for _, enums := range []bool{false, true} {
+		name := "noEnums"
+		if enums {
+			name = "enums"
+		}
+		b.Run(name, func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				b.StopTimer()
+				indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_full_%s_%d", name, i))
+				rs, err := NewRecSplit(RecSplitArgs{
+					KeyCount:   KeysN,
+					BucketSize: 2000,
+					Salt:       &salt,
+					TmpDir:     tmpDir,
+					IndexFile:  indexFile,
+					LeafSize:   8,
+					Enums:      enums,
+					NoFsync:    true,
+				}, logger)
+				if err != nil {
+					b.Fatal(err)
+				}
+				b.StartTimer()
+				for j := 0; j < KeysN; j++ {
+					if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
+						b.Fatal(err)
+					}
+				}
+				if err := rs.Build(context.Background()); err != nil {
+					b.Fatal(err)
+				}
+				b.StopTimer()
+				rs.Close()
+			}
+		})
+	}
+}
+
 func BenchmarkFindSplit(b *testing.B) {
 	// Simulate realistic aggregation-level buckets.
 	// With leafSize=8: primaryAggrBound=32, secondaryAggrBound=96.
@@ -215,99 +307,6 @@ func BenchmarkFindBijection(b *testing.B) {
 		for i := range buckets {
 			findBijection(buckets[i][:], salt)
 		}
-	}
-}
-
-func BenchmarkBuild(b *testing.B) {
-	b.ReportAllocs()
-	logger := log.New()
-	tmpDir := b.TempDir()
-	salt := uint32(1)
-	const KeysN = 1_000_000
-
-	// Pre-allocate all keys outside the benchmark loop
-	keys := make([][]byte, KeysN)
-	for j := 0; j < KeysN; j++ {
-		keys[j] = fmt.Appendf(nil, "key %d", j)
-	}
-	b.ResetTimer()
-	for i := 0; b.Loop(); i++ {
-		b.StopTimer()
-		indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_%d", i))
-		rs, err := NewRecSplit(RecSplitArgs{
-			KeyCount:   KeysN,
-			BucketSize: 2000,
-			Salt:       &salt,
-			TmpDir:     tmpDir,
-			IndexFile:  indexFile,
-			LeafSize:   8,
-			NoFsync:    true,
-		}, logger)
-		if err != nil {
-			b.Fatal(err)
-		}
-		for j := 0; j < KeysN; j++ {
-			if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
-				b.Fatal(err)
-			}
-		}
-		b.StartTimer()
-		if err := rs.Build(context.Background()); err != nil {
-			b.Fatal(err)
-		}
-		b.StopTimer()
-		rs.Close()
-		b.StartTimer()
-	}
-}
-
-func BenchmarkAddKeyAndBuild(b *testing.B) {
-	b.ReportAllocs()
-	logger := log.New()
-	tmpDir := b.TempDir()
-	salt := uint32(1)
-	const KeysN = 1_000_000
-
-	keys := make([][]byte, KeysN)
-	for j := 0; j < KeysN; j++ {
-		keys[j] = fmt.Appendf(nil, "key %d", j)
-	}
-
-	for _, enums := range []bool{false, true} {
-		name := "noEnums"
-		if enums {
-			name = "enums"
-		}
-		b.Run(name, func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
-				b.StopTimer()
-				indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_full_%s_%d", name, i))
-				rs, err := NewRecSplit(RecSplitArgs{
-					KeyCount:   KeysN,
-					BucketSize: 2000,
-					Salt:       &salt,
-					TmpDir:     tmpDir,
-					IndexFile:  indexFile,
-					LeafSize:   8,
-					Enums:      enums,
-					NoFsync:    true,
-				}, logger)
-				if err != nil {
-					b.Fatal(err)
-				}
-				b.StartTimer()
-				for j := 0; j < KeysN; j++ {
-					if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
-						b.Fatal(err)
-					}
-				}
-				if err := rs.Build(context.Background()); err != nil {
-					b.Fatal(err)
-				}
-				b.StopTimer()
-				rs.Close()
-			}
-		})
 	}
 }
 

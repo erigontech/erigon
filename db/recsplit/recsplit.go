@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/datastruct/fusefilter"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano16"
@@ -79,7 +80,8 @@ type RecSplit struct {
 	//v1 fields
 	existenceFV1 *fusefilter.WriterOffHeap
 
-	offsetCollector *etl.Collector // Collector that sorts by offsets
+	offsetFile   *os.File      // Temp file for offsets (already sorted, no need for etl.Collector)
+	offsetWriter *bufio.Writer // Buffered writer for offset file
 
 	indexW          *bufio.Writer
 	indexF          *os.File
@@ -202,12 +204,14 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.SmallSortableBuffers, logger)
 	rs.bucketCollector.SortAndFlushInBackground(false)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
-	if args.Enums {
-		rs.offsetCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.SmallSortableBuffers, logger)
-		rs.offsetCollector.SortAndFlushInBackground(false)
-		rs.offsetCollector.LogLvl(log.LvlDebug)
-	}
 	var err error
+	if args.Enums {
+		rs.offsetFile, err = os.CreateTemp(rs.tmpDir, "recsplit-offsets-")
+		if err != nil {
+			return nil, err
+		}
+		rs.offsetWriter = bufio.NewWriterSize(rs.offsetFile, 8*4096)
+	}
 	if rs.enums && args.KeyCount > 0 && rs.lessFalsePositives {
 		if rs.dataStructureVersion == 0 {
 			rs.existenceFV0, err = os.CreateTemp(rs.tmpDir, "erigon-lfp-buf-")
@@ -268,8 +272,10 @@ func (rs *RecSplit) Close() {
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()
 	}
-	if rs.offsetCollector != nil {
-		rs.offsetCollector.Close()
+	if rs.offsetFile != nil {
+		_ = rs.offsetFile.Close()
+		_ = dir.RemoveFile(rs.offsetFile.Name())
+		rs.offsetFile = nil
 	}
 }
 
@@ -307,11 +313,10 @@ func (rs *RecSplit) ResetNextSalt() {
 	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+rs.fileName, rs.tmpDir, etl.SmallSortableBuffers, rs.logger)
 	rs.bucketCollector.SortAndFlushInBackground(false)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
-	if rs.offsetCollector != nil {
-		rs.offsetCollector.Close()
-		rs.offsetCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+rs.fileName, rs.tmpDir, etl.SmallSortableBuffers, rs.logger)
-		rs.offsetCollector.SortAndFlushInBackground(false)
-		rs.offsetCollector.LogLvl(log.LvlDebug)
+	if rs.offsetFile != nil {
+		_ = rs.offsetFile.Truncate(0)
+		_, _ = rs.offsetFile.Seek(0, 0)
+		rs.offsetWriter.Reset(rs.offsetFile)
 	}
 	rs.currentBucket = rs.currentBucket[:0]
 	rs.currentBucketOffs = rs.currentBucketOffs[:0]
@@ -411,7 +416,10 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 	}
 
 	if rs.enums {
-		if err := rs.offsetCollector.Collect(rs.numBuf[:], nil); err != nil {
+		if rs.keysAdded > 0 && offset < rs.prevOffset {
+			panic(fmt.Sprintf("recsplit: AddKey offsets must be monotonically increasing: prev=%d, cur=%d", rs.prevOffset, offset))
+		}
+		if _, err := rs.offsetWriter.Write(rs.numBuf[:]); err != nil {
 			return err
 		}
 		binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
@@ -445,8 +453,11 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 
 func (rs *RecSplit) AddOffset(offset uint64) error {
 	if rs.enums {
+		if rs.keysAdded > 0 && offset < rs.prevOffset {
+			panic(fmt.Sprintf("recsplit: AddOffset offsets must be monotonically increasing: prev=%d, cur=%d", rs.prevOffset, offset))
+		}
 		binary.BigEndian.PutUint64(rs.numBuf[:], offset)
-		if err := rs.offsetCollector.Collect(rs.numBuf[:], nil); err != nil {
+		if _, err := rs.offsetWriter.Write(rs.numBuf[:]); err != nil {
 			return err
 		}
 	}
@@ -709,9 +720,25 @@ func (rs *RecSplit) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.
 	return nil
 }
 
-func (rs *RecSplit) loadFuncOffset(k, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-	offset := binary.BigEndian.Uint64(k)
-	rs.offsetEf.AddOffset(offset)
+// buildOffsetEf mmaps the offset temp file and builds the Elias-Fano encoding.
+func (rs *RecSplit) buildOffsetEf() error {
+	rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
+	if err := rs.offsetWriter.Flush(); err != nil {
+		return fmt.Errorf("flush offset writer: %w", err)
+	}
+
+	mmapSize := int(rs.keysAdded * 8)
+	mmapHandle1, mmapHandle2, err := mmap.Mmap(rs.offsetFile, mmapSize)
+	if err != nil {
+		return fmt.Errorf("mmap offset file: %w", err)
+	}
+	defer mmap.Munmap(mmapHandle1, mmapHandle2)
+
+	data := mmapHandle1[:mmapSize]
+	for i := uint64(0); i < rs.keysAdded; i++ {
+		rs.offsetEf.AddOffset(binary.BigEndian.Uint64(data[i*8:]))
+	}
+	rs.offsetEf.Build()
 	return nil
 }
 
@@ -779,12 +806,9 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		log.Log(rs.lvl, "[index] write", "file", rs.fileName)
 	}
 	if rs.enums && rs.keysAdded > 0 {
-		rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
-		defer rs.offsetCollector.Close()
-		if err := rs.offsetCollector.Load(nil, "", rs.loadFuncOffset, etl.TransformArgs{}); err != nil {
+		if err := rs.buildOffsetEf(); err != nil {
 			return err
 		}
-		rs.offsetEf.Build()
 	}
 	rs.gr.appendFixed(1, 1) // Sentinel (avoids checking for parts of size 1)
 	// Construct Elias Fano index
