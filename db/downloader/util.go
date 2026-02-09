@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/state"
 )
 
 // TODO: Update this list, or pull from common location (central manifest or canonical multi-file torrent).
@@ -91,6 +92,14 @@ func seedableSegmentFiles(dir string, chainName string, skipSeedableCheck bool) 
 		}
 		if strings.HasPrefix(name, "salt") && strings.HasSuffix(name, "txt") {
 			res = append(res, name)
+			continue
+		}
+		if name == state.ERIGONDB_SETTINGS_FILE {
+			res = append(res, name)
+			continue
+		}
+		// Skip any other .toml files
+		if strings.HasSuffix(name, ".toml") {
 			continue
 		}
 		if !skipSeedableCheck && !snaptype.IsCorrectFileName(name) {
