@@ -415,7 +415,7 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 	}
 
 	if rs.enums {
-		if assert.Enable && rs.keysAdded > 0 && offset < rs.prevOffset {
+		if rs.keysAdded > 0 && offset < rs.prevOffset {
 			panic(fmt.Sprintf("recsplit: AddKey offsets must be monotonically increasing: prev=%d, cur=%d", rs.prevOffset, offset))
 		}
 		if _, err := rs.offsetWriter.Write(rs.numBuf[:]); err != nil {
