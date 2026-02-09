@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/datastruct/fusefilter"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano16"
@@ -635,6 +636,28 @@ func (rs *RecSplit) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.
 	return nil
 }
 
+// buildOffsetEf mmaps the offset temp file and builds the Elias-Fano encoding.
+func (rs *RecSplit) buildOffsetEf() error {
+	rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
+	if err := rs.offsetWriter.Flush(); err != nil {
+		return fmt.Errorf("flush offset writer: %w", err)
+	}
+
+	mmapSize := int(rs.keysAdded * 8)
+	mmapHandle1, mmapHandle2, err := mmap.Mmap(rs.offsetFile, mmapSize)
+	if err != nil {
+		return fmt.Errorf("mmap offset file: %w", err)
+	}
+	defer mmap.Munmap(mmapHandle1, mmapHandle2)
+
+	data := mmapHandle1[:mmapSize]
+	for i := uint64(0); i < rs.keysAdded; i++ {
+		rs.offsetEf.AddOffset(binary.BigEndian.Uint64(data[i*8:]))
+	}
+	rs.offsetEf.Build()
+	return nil
+}
+
 // Build has to be called after all the keys have been added, and it initiates the process
 // of building the perfect hash function and writing index into a file
 func (rs *RecSplit) Build(ctx context.Context) error {
@@ -699,22 +722,9 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		log.Log(rs.lvl, "[index] write", "file", rs.fileName)
 	}
 	if rs.enums && rs.keysAdded > 0 {
-		rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
-		if err := rs.offsetWriter.Flush(); err != nil {
-			return fmt.Errorf("flush offset writer: %w", err)
+		if err := rs.buildOffsetEf(); err != nil {
+			return err
 		}
-		if _, err := rs.offsetFile.Seek(0, 0); err != nil {
-			return fmt.Errorf("seek offset file: %w", err)
-		}
-		offsetReader := bufio.NewReaderSize(rs.offsetFile, 8*4096)
-		var buf [8]byte
-		for i := uint64(0); i < rs.keysAdded; i++ {
-			if _, err := io.ReadFull(offsetReader, buf[:]); err != nil {
-				return fmt.Errorf("read offset: %w", err)
-			}
-			rs.offsetEf.AddOffset(binary.BigEndian.Uint64(buf[:]))
-		}
-		rs.offsetEf.Build()
 	}
 	rs.gr.appendFixed(1, 1) // Sentinel (avoids checking for parts of size 1)
 	// Construct Elias Fano index
