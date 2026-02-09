@@ -434,7 +434,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		_, fName := filepath.Split(kvFilePath)
 		t := time.Now()
 		defer func() {
-			log.Warn("[dbg] merge", "name", dt.name, "fName", fName, "took", time.Since(t))
+			took := time.Since(t)
+			if took < time.Second {
+				return
+			}
+			log.Warn("[dbg] merge", "name", dt.name, "fName", fName, "took", took)
 		}()
 	}
 
@@ -629,7 +633,11 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		_, fName := filepath.Split(datPath)
 		t := time.Now()
 		defer func() {
-			log.Warn("[dbg] merge", "name", iit.ii.Name, "fName", fName, "took", time.Since(t))
+			took := time.Since(t)
+			if took < time.Second {
+				return
+			}
+			log.Warn("[dbg] merge", "name", iit.ii.Name, "fName", fName, "took", took)
 		}()
 	}
 
@@ -805,7 +813,11 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			_, fName := filepath.Split(datPath)
 			t := time.Now()
 			defer func() {
-				log.Warn("[dbg] merge", "name", ht.h.Name, "fName", fName, "took", time.Since(t))
+				took := time.Since(t)
+				if took < time.Second {
+					return
+				}
+				log.Warn("[dbg] merge", "name", ht.h.Name, "fName", fName, "took", took)
 			}()
 		}
 
