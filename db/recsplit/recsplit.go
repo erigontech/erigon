@@ -475,7 +475,8 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 				rs.offsetBuffer = append(rs.offsetBuffer, 0)
 			}
 		}
-		unary, err := rs.recsplit(0 /* level */, rs.currentBucket, rs.currentBucketOffs, nil /* unary */)
+		unary := make([]uint64, 0, 128) // pre-alloc
+		unary, err := rs.recsplit(0 /* level */, rs.currentBucket, rs.currentBucketOffs, unary)
 		if err != nil {
 			return err
 		}
