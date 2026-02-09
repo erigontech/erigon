@@ -511,6 +511,15 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 // count slice (which must have len >= 8*fanout).
 func findSplit(bucket []uint64, salt uint64, fanout, unit uint16, count []uint16) uint64 {
 	m := uint16(len(bucket))
+	// When both m and unit are powers of 2, remap16(x, m)/unit = (x & mask48) >> combinedShift,
+	// replacing 2 multiplies with a single shift per hash.
+	if m&(m-1) == 0 && unit&(unit-1) == 0 && m > 0 && unit > 0 {
+		return findSplitPow2(bucket, salt, fanout, unit, count,
+			uint(48-bits.TrailingZeros16(m)+bits.TrailingZeros16(unit)))
+	}
+	// Precompute reciprocal for division-by-unit: x/unit = (uint64(x)*unitInv) >> 32.
+	// This replaces UDIV (~7-10 cycles) with MUL+LSR (~4 cycles) on ARM64.
+	unitInv := uint64((1<<32 + uint64(unit) - 1) / uint64(unit))
 	c0 := count[0*fanout : 1*fanout : 1*fanout]
 	c1 := count[1*fanout : 2*fanout : 2*fanout]
 	c2 := count[2*fanout : 3*fanout : 3*fanout]
@@ -523,17 +532,81 @@ func findSplit(bucket []uint64, salt uint64, fanout, unit uint16, count []uint16
 		clear(count[:8*fanout])
 		for i := uint16(0); i < m; i++ {
 			key := bucket[i]
-			c0[remap16(remix(key+salt), m)/unit]++
-			c1[remap16(remix(key+salt+1), m)/unit]++
-			c2[remap16(remix(key+salt+2), m)/unit]++
-			c3[remap16(remix(key+salt+3), m)/unit]++
-			c4[remap16(remix(key+salt+4), m)/unit]++
-			c5[remap16(remix(key+salt+5), m)/unit]++
-			c6[remap16(remix(key+salt+6), m)/unit]++
-			c7[remap16(remix(key+salt+7), m)/unit]++
+			c0[uint16(uint64(remap16(remix(key+salt), m))*unitInv>>32)]++
+			c1[uint16(uint64(remap16(remix(key+salt+1), m))*unitInv>>32)]++
+			c2[uint16(uint64(remap16(remix(key+salt+2), m))*unitInv>>32)]++
+			c3[uint16(uint64(remap16(remix(key+salt+3), m))*unitInv>>32)]++
+			c4[uint16(uint64(remap16(remix(key+salt+4), m))*unitInv>>32)]++
+			c5[uint16(uint64(remap16(remix(key+salt+5), m))*unitInv>>32)]++
+			c6[uint16(uint64(remap16(remix(key+salt+6), m))*unitInv>>32)]++
+			c7[uint16(uint64(remap16(remix(key+salt+7), m))*unitInv>>32)]++
 		}
 		// Branchless validation: XOR each count with expected value,
 		// OR-accumulate to detect any mismatch.
+		var bad0, bad1, bad2, bad3, bad4, bad5, bad6, bad7 uint16
+		for i := uint16(0); i < fanout-1; i++ {
+			bad0 |= c0[i] ^ unit
+			bad1 |= c1[i] ^ unit
+			bad2 |= c2[i] ^ unit
+			bad3 |= c3[i] ^ unit
+			bad4 |= c4[i] ^ unit
+			bad5 |= c5[i] ^ unit
+			bad6 |= c6[i] ^ unit
+			bad7 |= c7[i] ^ unit
+		}
+		if bad0 == 0 {
+			return salt
+		}
+		if bad1 == 0 {
+			return salt + 1
+		}
+		if bad2 == 0 {
+			return salt + 2
+		}
+		if bad3 == 0 {
+			return salt + 3
+		}
+		if bad4 == 0 {
+			return salt + 4
+		}
+		if bad5 == 0 {
+			return salt + 5
+		}
+		if bad6 == 0 {
+			return salt + 6
+		}
+		if bad7 == 0 {
+			return salt + 7
+		}
+		salt += 8
+	}
+}
+
+// findSplitPow2 is the fast path for findSplit when both m and unit are powers of 2.
+// Combines remap16 + division into a single right shift, eliminating 2 multiplies per hash.
+func findSplitPow2(bucket []uint64, salt uint64, fanout, unit uint16, count []uint16, shift uint) uint64 {
+	m := uint16(len(bucket))
+	c0 := count[0*fanout : 1*fanout : 1*fanout]
+	c1 := count[1*fanout : 2*fanout : 2*fanout]
+	c2 := count[2*fanout : 3*fanout : 3*fanout]
+	c3 := count[3*fanout : 4*fanout : 4*fanout]
+	c4 := count[4*fanout : 5*fanout : 5*fanout]
+	c5 := count[5*fanout : 6*fanout : 6*fanout]
+	c6 := count[6*fanout : 7*fanout : 7*fanout]
+	c7 := count[7*fanout : 8*fanout : 8*fanout]
+	for {
+		clear(count[:8*fanout])
+		for i := uint16(0); i < m; i++ {
+			key := bucket[i]
+			c0[uint16((remix(key+salt)&mask48)>>shift)]++
+			c1[uint16((remix(key+salt+1)&mask48)>>shift)]++
+			c2[uint16((remix(key+salt+2)&mask48)>>shift)]++
+			c3[uint16((remix(key+salt+3)&mask48)>>shift)]++
+			c4[uint16((remix(key+salt+4)&mask48)>>shift)]++
+			c5[uint16((remix(key+salt+5)&mask48)>>shift)]++
+			c6[uint16((remix(key+salt+6)&mask48)>>shift)]++
+			c7[uint16((remix(key+salt+7)&mask48)>>shift)]++
+		}
 		var bad0, bad1, bad2, bad3, bad4, bad5, bad6, bad7 uint16
 		for i := uint16(0); i < fanout-1; i++ {
 			bad0 |= c0[i] ^ unit
@@ -580,6 +653,11 @@ func findSplit(bucket []uint64, salt uint64, fanout, unit uint16, count []uint16
 func findBijection(bucket []uint64, salt uint64) uint64 {
 	m := uint16(len(bucket))
 	fullMask := uint32((1 << m) - 1)
+	// When m is a power of 2, remap16(x, m) = (x & mask48) >> (48-log2(m)),
+	// replacing a multiply (~3 cycles) with a shift (~1 cycle).
+	if m&(m-1) == 0 && m > 0 {
+		return findBijectionPow2(bucket, salt, fullMask, uint(48-bits.TrailingZeros16(m)))
+	}
 	for {
 		var mask0, mask1, mask2, mask3, mask4, mask5, mask6, mask7 uint32
 		for i := uint16(0); i < m; i++ {
@@ -592,6 +670,51 @@ func findBijection(bucket []uint64, salt uint64) uint64 {
 			mask5 |= uint32(1) << remap16(remix(key+salt+5), m)
 			mask6 |= uint32(1) << remap16(remix(key+salt+6), m)
 			mask7 |= uint32(1) << remap16(remix(key+salt+7), m)
+		}
+		if mask0 == fullMask {
+			return salt
+		}
+		if mask1 == fullMask {
+			return salt + 1
+		}
+		if mask2 == fullMask {
+			return salt + 2
+		}
+		if mask3 == fullMask {
+			return salt + 3
+		}
+		if mask4 == fullMask {
+			return salt + 4
+		}
+		if mask5 == fullMask {
+			return salt + 5
+		}
+		if mask6 == fullMask {
+			return salt + 6
+		}
+		if mask7 == fullMask {
+			return salt + 7
+		}
+		salt += 8
+	}
+}
+
+// findBijectionPow2 is the fast path for power-of-2 m values.
+// Uses a right shift instead of multiply in remap, saving ~2 cycles per hash.
+func findBijectionPow2(bucket []uint64, salt uint64, fullMask uint32, shift uint) uint64 {
+	m := uint16(len(bucket))
+	for {
+		var mask0, mask1, mask2, mask3, mask4, mask5, mask6, mask7 uint32
+		for i := uint16(0); i < m; i++ {
+			key := bucket[i]
+			mask0 |= uint32(1) << uint16((remix(key+salt)&mask48)>>shift)
+			mask1 |= uint32(1) << uint16((remix(key+salt+1)&mask48)>>shift)
+			mask2 |= uint32(1) << uint16((remix(key+salt+2)&mask48)>>shift)
+			mask3 |= uint32(1) << uint16((remix(key+salt+3)&mask48)>>shift)
+			mask4 |= uint32(1) << uint16((remix(key+salt+4)&mask48)>>shift)
+			mask5 |= uint32(1) << uint16((remix(key+salt+5)&mask48)>>shift)
+			mask6 |= uint32(1) << uint16((remix(key+salt+6)&mask48)>>shift)
+			mask7 |= uint32(1) << uint16((remix(key+salt+7)&mask48)>>shift)
 		}
 		if mask0 == fullMask {
 			return salt
