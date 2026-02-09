@@ -921,7 +921,7 @@ func (api *TraceAPIImpl) callTransaction(
 	if err != nil {
 		return nil, err
 	}
-	
+
 	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
