@@ -190,7 +190,7 @@ func BenchmarkFindSplit(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		for i := range buckets {
-			findSplit(buckets[i][:], salt, m, fanout, unit, count)
+			findSplit(buckets[i][:], salt, fanout, unit, count)
 		}
 	}
 }
@@ -213,7 +213,7 @@ func BenchmarkFindBijection(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		for i := range buckets {
-			findBijection(buckets[i][:], salt, leafSize)
+			findBijection(buckets[i][:], salt)
 		}
 	}
 }
