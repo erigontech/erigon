@@ -197,6 +197,7 @@ func BenchmarkBuild(b *testing.B) {
 		}
 		b.StopTimer()
 		rs.Close()
+		b.StartTimer()
 	}
 }
 
