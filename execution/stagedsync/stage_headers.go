@@ -244,7 +244,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 
 	if lastCommittedBlockNum-firstBlock > 1 {
 		log.Info("[Arbitrum] Blocks fetched", "from", firstBlock, "to", lastCommittedBlockNum,
-			"l2rpc top block", latestRemoteBlock.Uint64(), "onFeed", isChainTipMode, "wasTxCommitted", !useExternalTx)
+			"top block", latestRemoteBlock.Uint64(), "onFeed", isChainTipMode, "wasTxCommitted", !useExternalTx)
 	}
 	return nil
 }
