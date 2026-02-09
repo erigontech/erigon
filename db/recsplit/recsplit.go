@@ -512,18 +512,31 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 	m := uint16(len(bucket))
 	if m <= rs.leafSize {
 		// No need to build aggregation levels - just find bijection.
-		// Branchless approach: OR all position bits, then check popcount == m.
-		// Removes data-dependent branches from the inner loop, enabling
-		// better CPU pipelining of the independent hash computations.
 		var mask uint32
 		for {
 			mask = 0
-			for _, key := range bucket {
-				mask |= uint32(1) << remap16(remix(key+salt), m)
+			var fail bool
+			for i := uint16(0); !fail && i < m; i++ {
+				bit := uint32(1) << remap16(remix(bucket[i]+salt), m)
+				if mask&bit != 0 {
+					fail = true
+				} else {
+					mask |= bit
+				}
 			}
-			if bits.OnesCount32(mask) == int(m) {
+			if !fail {
 				break
 			}
+
+			// Branchless approach: OR all position bits, then check popcount == m.
+			// Removes data-dependent branches from the inner loop, enabling
+			// better CPU pipelining of the independent hash computations.
+			//for _, key := range bucket {
+			//	mask |= uint32(1) << remap16(remix(key+salt), m)
+			//}
+			//if bits.OnesCount32(mask) == int(m) {
+			//	break
+			//}
 			salt++
 		}
 		for i := uint16(0); i < m; i++ {
@@ -547,37 +560,51 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 		fanout, unit := splitParams(m, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
 		count := rs.count
 		for {
-			// zero all fanout entries (needed for early overflow detection correctness)
-			for i := uint16(0); i < fanout; i++ {
+			for i := uint16(0); i < fanout-1; i++ {
 				count[i] = 0
 			}
+			//var fail bool
+			//for i := uint16(0); i < m; i++ {
+			//	j := remap16(remix(bucket[i]+salt), m) / unit
+			//	count[j]++
+			//}
 			var fail bool
 			for i := uint16(0); i < m; i++ {
 				j := remap16(remix(bucket[i]+salt), m) / unit
 				count[j]++
-				// early overflow detection: if any bin exceeds unit, this salt fails
-				if count[j] > unit {
-					fail = true
-					break
-				}
 			}
-
-			for _, key := range bucket {
-				j := remap16(remix(key+salt), m) / unit
-				count[j]++
-				// early overflow detection: if any bin exceeds unit, this salt fails
-				if count[j] > unit {
-					fail = true
-					break
-				}
-			}
-			if !fail {
-				for i := uint16(0); i < fanout-1; i++ {
-					if count[i] != unit {
+			/*
+				var fail bool
+				for i := uint16(0); i < m; i++ {
+					j := remap16(remix(bucket[i]+salt), m) / unit
+					count[j]++
+					// early overflow detection: if any bin exceeds unit, this salt fails
+					if count[j] > unit {
 						fail = true
 						break
 					}
 				}
+
+				for _, key := range bucket {
+					j := remap16(remix(key+salt), m) / unit
+					count[j]++
+					// early overflow detection: if any bin exceeds unit, this salt fails
+					if count[j] > unit {
+						fail = true
+						break
+					}
+				}
+				if !fail {
+					for i := uint16(0); i < fanout-1; i++ {
+						if count[i] != unit {
+							fail = true
+							break
+						}
+					}
+				}
+			*/
+			for i := uint16(0); i < fanout-1; i++ {
+				fail = fail || (count[i] != unit)
 			}
 			if !fail {
 				break
@@ -588,9 +615,9 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 			count[i] = c
 			c += unit
 		}
-		for i, key := range bucket {
-			j := remap16(remix(key+salt), m) / unit
-			rs.buffer[count[j]] = key
+		for i := uint16(0); i < m; i++ {
+			j := remap16(remix(bucket[i]+salt), m) / unit
+			rs.buffer[count[j]] = bucket[i]
 			rs.offsetBuffer[count[j]] = offsets[i]
 			count[j]++
 		}
