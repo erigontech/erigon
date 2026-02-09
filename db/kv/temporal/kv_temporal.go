@@ -589,6 +589,23 @@ func (tx *RwTx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, lim
 	return tx.historyRange(name, tx.RwTx, fromTs, toTs, asc, limit)
 }
 
+func (tx *tx) historyKeyRange(name kv.Domain, dbTx kv.Tx, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
+	it, err := tx.aggtx.HistoryKeyRange(name, fromTs, toTs, asc, limit, dbTx)
+	if err != nil {
+		return nil, err
+	}
+	tx.resourcesToClose = append(tx.resourcesToClose, it)
+	return it, nil
+}
+
+func (tx *Tx) HistoryKeyRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
+	return tx.historyKeyRange(name, tx.Tx, fromTs, toTs, asc, limit)
+}
+
+func (tx *RwTx) HistoryKeyRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
+	return tx.historyKeyRange(name, tx.RwTx, fromTs, toTs, asc, limit)
+}
+
 // Write methods
 
 func (tx *tx) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {

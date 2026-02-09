@@ -342,6 +342,7 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB, blockReader services.FullBlockReader, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
 	txNumsReader := blockReader.TxnumReader()
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
+	defer rwDb.Debug().EnableReadAhead().DisableReadAhead()
 	a.DisableAllDependencies()
 
 	// Disable ReplaceKeysInValues before main loop; will be re-enabled for squeeze pass
@@ -355,6 +356,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	if err != nil {
 		return nil, err
 	}
+	defer rwTx.Rollback()
 	{
 		execProgress, err = stages.GetStageProgress(rwTx, stages.Execution)
 		if err != nil {
@@ -404,6 +406,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 	var totalKeysProcessed uint64
 	var rh []byte
+	lastLogTime := time.Now()
+	lastLogBlock := uint64(0)
 
 	for blockFrom <= blockTo {
 		fromTxNum, err := txNumsReader.Min(ctx, rwTx, blockFrom)
@@ -422,7 +426,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		domains.GetCommitmentCtx().SetStateReader(backtester.NewRebuildStateReader(rwTx, domains, toTxNum+1))
 
 		// Touch all changed account keys in this block
-		accIt, err := rwTx.HistoryRange(kv.AccountsDomain, int(fromTxNum), int(toTxNum+1), order.Asc, math.MaxInt64)
+		accIt, err := rwTx.Debug().HistoryKeyRange(kv.AccountsDomain, int(fromTxNum), int(toTxNum+1), order.Asc, math.MaxInt64)
 		if err != nil {
 			return nil, err
 		}
@@ -438,7 +442,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		accIt.Close()
 
 		// Touch all changed storage keys in this block
-		storIt, err := rwTx.HistoryRange(kv.StorageDomain, int(fromTxNum), int(toTxNum+1), order.Asc, math.MaxInt64)
+		storIt, err := rwTx.Debug().HistoryKeyRange(kv.StorageDomain, int(fromTxNum), int(toTxNum+1), order.Asc, math.MaxInt64)
 		if err != nil {
 			return nil, err
 		}
@@ -456,11 +460,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		// TODO: integrate commitment trie warmuper (execution/commitment/warmuper.go)
 		//   - Start() workers before loop, WarmKey() during TouchKey phase, WaitAndClose() before ComputeCommitment
 		//   - Only beneficial after block 1+ when prior commitment state exists
-
-		// TODO: enable look-ahead for account and storage reads (check if access pattern is sequential)
-
-		// TODO: HistoryChangesIterFiles can be optimized for our case - we only need keys, not values
-		//   - Skip .vi and .v file lookups, just iterate keys from the index
 
 		rh, err = domains.ComputeCommitment(ctx, rwTx, true, blockFrom, toTxNum, "[rebuild_commitment_history]", nil)
 		if err != nil {
@@ -502,6 +501,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			if err != nil {
 				return nil, err
 			}
+			defer pruneRwTx.Rollback()
 			{
 				aggTx := AggTx(pruneRwTx)
 				pruneLogEvery := time.NewTicker(30 * time.Second)
@@ -524,7 +524,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			}
 
 			// Reopen tx and domains for next batch
-			rwTx, err = rwDb.BeginTemporalRw(ctx)
+			rwTx, err = rwDb.BeginTemporalRw(ctx) //nolint:gocritic
 			if err != nil {
 				return nil, err
 			}
@@ -542,8 +542,13 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		case <-logEvery.C:
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
+			now := time.Now()
+			blkPerSec := float64(blockFrom-lastLogBlock) / now.Sub(lastLogTime).Seconds()
+			lastLogTime = now
+			lastLogBlock = blockFrom
 			logger.Info("[rebuild_commitment_history] progress",
 				"block", fmt.Sprintf("%d/%d", blockFrom, blockTo),
+				"blk/s", fmt.Sprintf("%.1f", blkPerSec),
 				"keys", common.PrettyCounter(totalKeysProcessed),
 				"root", hex.EncodeToString(rh),
 				"memBatch", datasize.ByteSize(domains.SizeEstimate()).HR(),
