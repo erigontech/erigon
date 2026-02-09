@@ -207,7 +207,22 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	}
 	log.Trace("OnBlock: engine", "elapsed", time.Since(startEngine))
 	startStateProcess := time.Now()
-	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation)
+
+	// [New in Gloas:EIP7732] Determine starting state based on parent payload status.
+	// In GLOAS, beacon block and execution payload have separate state transitions:
+	//   - If parent is FULL: start from execution_payload_states[parent_root]
+	//     (post-execution-payload state, includes execution layer changes)
+	//   - If parent is EMPTY: start from block_states[parent_root]
+	//     (post-beacon-block state, no execution payload was applied)
+	// This ensures the new block builds on the correct canonical state.
+	var parentFullState *state.CachingBeaconState
+	if isGloas && f.isParentNodeFull(block.Block) {
+		if s, ok := f.executionPayloadStates.Load(block.Block.ParentRoot); ok {
+			parentFullState = s.(*state.CachingBeaconState)
+		}
+	}
+
+	lastProcessedState, status, err := f.forkGraph.AddChainSegment(block, fullValidation, parentFullState)
 	if err != nil {
 		return err
 	}

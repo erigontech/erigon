@@ -17,6 +17,7 @@
 package forkchoice
 
 import (
+	"fmt"
 	"slices"
 	"sort"
 	"sync"
@@ -147,7 +148,9 @@ type ForkChoiceStore struct {
 	optimisticStore         optimistic.OptimisticStore
 	probabilisticHeadGetter bool
 
-	// [New in Gloas:EIP7732]
+	// [New in Gloas:EIP7732] Stores post-execution-payload states keyed by beacon block root.
+	// In GLOAS, beacon block and execution payload have separate state transitions.
+	// This stores the state after ProcessExecutionPayloadEnvelope is applied.
 	executionPayloadStates sync.Map // map[common.Hash]*state.CachingBeaconState
 	// [New in Gloas:EIP7732]
 	ptcVote sync.Map // map[common.Hash][clparams.PtcSize]bool
@@ -299,10 +302,12 @@ func NewForkChoiceStore(
 	f.highestSeen.Store(anchorState.Slot())
 	f.time.Store(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot())
 
-	// [New in Gloas:EIP7732] Initialize anchor root entries
-	if anchorStateCopy, err := anchorState.Copy(); err == nil {
-		f.executionPayloadStates.Store(anchorRoot, anchorStateCopy)
+	// [New in Gloas:EIP7732] Initialize anchor root entries with anchor state copy
+	anchorStateCopy, err := anchorState.Copy()
+	if err != nil {
+		return nil, fmt.Errorf("failed to copy anchor state for execution payload states: %w", err)
 	}
+	f.executionPayloadStates.Store(anchorRoot, anchorStateCopy)
 	f.ptcVote.Store(anchorRoot, [clparams.PtcSize]bool{})
 
 	// [New in Gloas:EIP7732] Initialize indexed weight store

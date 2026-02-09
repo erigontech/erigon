@@ -181,7 +181,9 @@ func (f *forkGraphDisk) isBlockRootTheCurrentState(blockRoot common.Hash) bool {
 }
 
 // Add a new node and edge to the graph
-func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error) {
+// parentFullState: if non-nil, use this as the starting state instead of looking up from block_states.
+// [Modified in Gloas:EIP7732] Allows passing execution_payload_states when parent is FULL.
+func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool, parentFullState *state.CachingBeaconState) (*state.CachingBeaconState, ChainSegmentInsertionResult, error) {
 	block := signedBlock.Block
 	blockRoot, err := block.HashSSZ()
 	if err != nil {
@@ -200,7 +202,10 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 
 	isBlockRootTheCurrentState := f.isBlockRootTheCurrentState(blockRoot)
 	var newState *state.CachingBeaconState
-	if isBlockRootTheCurrentState {
+	if parentFullState != nil {
+		// [New in Gloas:EIP7732] Use provided parent state (from execution_payload_states)
+		newState = parentFullState
+	} else if isBlockRootTheCurrentState {
 		newState = f.currentState
 	} else {
 		newState, err = f.getState(block.ParentRoot, false, true)
