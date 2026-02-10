@@ -22,6 +22,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -31,9 +32,10 @@ import (
 
 	snapshothashes "github.com/erigontech/erigon-snapshot"
 	"github.com/erigontech/erigon-snapshot/webseed"
-	"github.com/erigontech/erigon/db/preverified"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
+
+	"github.com/erigontech/erigon/db/preverified"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -67,6 +69,12 @@ var registry = &preverifiedRegistry{
 		networkname.Hoodi:      fromEmbeddedToml(snapshothashes.Hoodi),
 	},
 	cached: make(map[string]*Cfg),
+}
+
+func (r *preverifiedRegistry) All() map[string]Preverified {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return maps.Clone(r.data)
 }
 
 func (r *preverifiedRegistry) Get(networkName string) (*Cfg, bool) {
@@ -576,4 +584,20 @@ func GetToml(networkName string) []byte {
 	default:
 		return nil
 	}
+}
+
+// Gets the current preverified for all chains.
+func GetAllCurrentPreverified() map[string]Preverified {
+	return registry.All()
+}
+
+// Converts webseed value to URL. Mostly this is just stripping v1: for now, as nothing else is in
+// active use.
+func WebseedToUrl(s string) (_ string, err error) {
+	after, ok := strings.CutPrefix(s, "v1:")
+	if !ok {
+		err = fmt.Errorf("unhandled webseed %q", s)
+		return
+	}
+	return after, nil
 }

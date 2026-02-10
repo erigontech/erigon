@@ -4,8 +4,6 @@ go 1.24.0
 
 replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
 
-replace github.com/crate-crypto/go-eth-kzg => github.com/Giulio2002/zero-alloc-go-eth-kzg v0.0.0-20260105034637-43cb6f34f8e0
-
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20260105114333-2f59a10db72b
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
@@ -36,7 +34,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/consensys/gnark-crypto v0.19.1
 	github.com/containerd/cgroups/v3 v3.0.5
-	github.com/crate-crypto/go-eth-kzg v1.4.0
+	github.com/crate-crypto/go-eth-kzg v1.5.0
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0

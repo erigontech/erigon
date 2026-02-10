@@ -24,6 +24,8 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -50,7 +52,6 @@ import (
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
-	"github.com/holiman/uint256"
 )
 
 const (
@@ -739,7 +740,7 @@ func (s *simulator) simulateCall(
 			if errors.Is(result.Err, vm.ErrExecutionReverted) {
 				// If the result contains a revert reason, try to unpack and return it.
 				revertError := ethapi.NewRevertError(result)
-				callResult.Error = rpc.NewJsonError(rpc.ErrCodeReverted, revertError.Error(), revertError.ErrorData().(string))
+				callResult.Error = rpc.NewJsonError(revertError.ErrorCode(), revertError.Error(), revertError.ErrorData().(string))
 			} else {
 				// Otherwise, we just capture the error message.
 				callResult.Error = rpc.NewJsonError(rpc.ErrCodeVMError, result.Err.Error(), nil)
