@@ -23,7 +23,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/seg"
@@ -404,16 +403,45 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	domains.DiscardWrites(kv.StorageDomain)
 	domains.DiscardWrites(kv.CodeDomain)
 
+	prefetchWorkers := dbg.EnvInt("ERIGON_PREFETCH_WORKERS", 50)
+	prefetchLookahead := dbg.EnvInt("ERIGON_PREFETCH_LOOKAHEAD", 100)
+
 	var totalKeysProcessed uint64
 	var rh []byte
 	lastLogTime := time.Now()
 	lastLogBlock := uint64(0)
 
-	for blockFrom <= blockTo {
-		fromTxNum, err := txNumsReader.Min(ctx, rwTx, blockFrom)
+	// Start key prefetcher and seed initial work
+	prefetcher := newKeyPrefetcher(ctx, rwDb, prefetchWorkers, prefetchLookahead)
+	defer prefetcher.Stop()
+
+	nextToSubmit := blockFrom
+	for nextToSubmit <= blockTo && nextToSubmit < blockFrom+uint64(prefetchLookahead) {
+		from, err := txNumsReader.Min(ctx, rwTx, nextToSubmit)
 		if err != nil {
 			return nil, err
 		}
+		to, err := txNumsReader.Max(ctx, rwTx, nextToSubmit)
+		if err != nil {
+			return nil, err
+		}
+		prefetcher.Submit(nextToSubmit, from, to)
+		nextToSubmit++
+	}
+
+	pending := make(map[uint64]prefetchResult)
+	for blockFrom <= blockTo {
+		// Wait for current block's prefetch result
+		for _, ok := pending[blockFrom]; !ok; _, ok = pending[blockFrom] {
+			r := prefetcher.Receive()
+			if r.err != nil {
+				return nil, fmt.Errorf("[rebuild_commitment_history] prefetch block %d: %w", r.blockNum, r.err)
+			}
+			pending[r.blockNum] = r
+		}
+		result := pending[blockFrom]
+		delete(pending, blockFrom)
+
 		toTxNum, err := txNumsReader.Max(ctx, rwTx, blockFrom)
 		if err != nil {
 			return nil, err
@@ -425,41 +453,14 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		// Set state reader: commitment from MemBatch (latest), acc/storage/code from history as-of toTxNum+1
 		domains.GetCommitmentCtx().SetStateReader(backtester.NewRebuildStateReader(rwTx, domains, toTxNum+1))
 
-		// Touch all changed account keys in this block
-		accIt, err := rwTx.Debug().HistoryKeyRange(kv.AccountsDomain, int(fromTxNum), int(toTxNum+1), order.Asc, math.MaxInt64)
-		if err != nil {
-			return nil, err
+		// Apply prefetched keys
+		for _, k := range result.accountKeys {
+			domains.GetCommitmentCtx().TouchKey(kv.AccountsDomain, k, nil)
 		}
-		for accIt.HasNext() {
-			k, _, err := accIt.Next()
-			if err != nil {
-				accIt.Close()
-				return nil, err
-			}
-			domains.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(k), nil)
-			totalKeysProcessed++
+		for _, k := range result.storageKeys {
+			domains.GetCommitmentCtx().TouchKey(kv.StorageDomain, k, nil)
 		}
-		accIt.Close()
-
-		// Touch all changed storage keys in this block
-		storIt, err := rwTx.Debug().HistoryKeyRange(kv.StorageDomain, int(fromTxNum), int(toTxNum+1), order.Asc, math.MaxInt64)
-		if err != nil {
-			return nil, err
-		}
-		for storIt.HasNext() {
-			k, _, err := storIt.Next()
-			if err != nil {
-				storIt.Close()
-				return nil, err
-			}
-			domains.GetCommitmentCtx().TouchKey(kv.StorageDomain, string(k), nil)
-			totalKeysProcessed++
-		}
-		storIt.Close()
-
-		// TODO: integrate commitment trie warmuper (execution/commitment/warmuper.go)
-		//   - Start() workers before loop, WarmKey() during TouchKey phase, WaitAndClose() before ComputeCommitment
-		//   - Only beneficial after block 1+ when prior commitment state exists
+		totalKeysProcessed += uint64(len(result.accountKeys) + len(result.storageKeys))
 
 		rh, err = domains.ComputeCommitment(ctx, rwTx, true, blockFrom, toTxNum, "[rebuild_commitment_history]", nil)
 		if err != nil {
@@ -480,6 +481,9 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 		// Size-based flush + file building
 		if domains.SizeEstimate() > uint64(batchSize) || blockFrom == blockTo {
+			// Stop prefetcher before flush — workers hold RoTx snapshots that become stale after commit+prune
+			prefetcher.Stop()
+
 			logger.Info("[rebuild_commitment_history] flushing", "block", blockFrom, "toTxNum", toTxNum,
 				"memBatchSize", datasize.ByteSize(domains.SizeEstimate()).HR(), "root", hex.EncodeToString(rh))
 
@@ -536,6 +540,35 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			domains.DiscardWrites(kv.AccountsDomain)
 			domains.DiscardWrites(kv.StorageDomain)
 			domains.DiscardWrites(kv.CodeDomain)
+
+			// Restart prefetcher and re-seed lookahead from next block
+			prefetcher = newKeyPrefetcher(ctx, rwDb, prefetchWorkers, prefetchLookahead)
+			pending = make(map[uint64]prefetchResult)
+			nextToSubmit = blockFrom + 1
+			for nextToSubmit <= blockTo && nextToSubmit < blockFrom+1+uint64(prefetchLookahead) {
+				from, err := txNumsReader.Min(ctx, rwTx, nextToSubmit)
+				if err != nil {
+					return nil, err
+				}
+				to, err := txNumsReader.Max(ctx, rwTx, nextToSubmit)
+				if err != nil {
+					return nil, err
+				}
+				prefetcher.Submit(nextToSubmit, from, to)
+				nextToSubmit++
+			}
+		} else if nextToSubmit <= blockTo {
+			// Sliding window: submit next block to keep workers busy
+			from, err := txNumsReader.Min(ctx, rwTx, nextToSubmit)
+			if err != nil {
+				return nil, err
+			}
+			to, err := txNumsReader.Max(ctx, rwTx, nextToSubmit)
+			if err != nil {
+				return nil, err
+			}
+			prefetcher.Submit(nextToSubmit, from, to)
+			nextToSubmit++
 		}
 
 		select {
