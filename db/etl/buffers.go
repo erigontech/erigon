@@ -186,7 +186,7 @@ func (b *sortableBuffer) Sort() {
 	if sort.IsSorted(b) {
 		return
 	}
-	sort.Stable(b)
+	sort.Sort(b)
 }
 
 func (b *sortableBuffer) CheckFlushSize() bool {
