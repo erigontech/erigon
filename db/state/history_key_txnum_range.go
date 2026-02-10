@@ -147,7 +147,6 @@ func (hi *HistoryKeyTxNumIterFiles) Close() {
 
 func (hi *HistoryKeyTxNumIterFiles) advance() error {
 	for {
-		// If we have an active txNum iterator, try to get the next txNum
 		if hi.curTxIter != nil && hi.curTxIter.HasNext() {
 			txNum, err := hi.curTxIter.Next()
 			if err != nil {
@@ -158,13 +157,10 @@ func (hi *HistoryKeyTxNumIterFiles) advance() error {
 				hi.nextTxNum = txNum
 				return nil
 			}
-			// txNum >= endTxNum: since txNums are ascending, all remaining
-			// txNums for this key will also be >= endTxNum. Abandon the
-			// iterator and move to the next key from the heap.
+			// txNums are ascending — all remaining will also be >= endTxNum
 			hi.curTxIter = nil
 		}
 
-		// Pop the next key from the heap
 		if hi.h.Len() == 0 {
 			hi.nextKey = nil
 			return nil
@@ -182,7 +178,7 @@ func (hi *HistoryKeyTxNumIterFiles) advance() error {
 			heap.Push(&hi.h, top)
 		}
 
-		// Clone key and idxVal since segment reader reuses buffers
+		// Clone: segment reader reuses buffers
 		hi.curKey = append(hi.curKey[:0], key...)
 		hi.curIdxVal = append(hi.curIdxVal[:0], idxVal...)
 
@@ -192,16 +188,7 @@ func (hi *HistoryKeyTxNumIterFiles) advance() error {
 }
 
 func (hi *HistoryKeyTxNumIterFiles) HasNext() bool {
-	if hi.err != nil { // always true, then .Next() call will return this error
-		return true
-	}
-	if hi.limit == 0 { // limit reached
-		return false
-	}
-	if hi.nextKey == nil { // EndOfTable
-		return false
-	}
-	return true
+	return hi.err != nil || (hi.limit != 0 && hi.nextKey != nil)
 }
 
 func (hi *HistoryKeyTxNumIterFiles) Next() ([]byte, uint64, error) {
@@ -248,9 +235,7 @@ func (hi *HistoryKeyTxNumIterDB) Close() {
 	}
 }
 
-// setNext copies k from cursor memory (cursor ops invalidate previous return values)
-// and stores the txNum. Callers of Next() do not need to copy the returned key;
-// it remains valid until the next Next() call.
+// setNext copies k (cursor ops invalidate previous return values).
 func (hi *HistoryKeyTxNumIterDB) setNext(k []byte, txNum uint64) {
 	hi.nextKey = common.Copy(k)
 	hi.nextTxNum = txNum
@@ -276,17 +261,15 @@ func (hi *HistoryKeyTxNumIterDB) seekNextSmallKey(k []byte) error {
 				return nil
 			}
 		}
-		// After SeekBothRange returns nil the cursor position is
-		// indeterminate, so NextNoDup() would be unsafe. Use
-		// NextSubtree+Seek like HistoryChangesIterDB does.
+		// After SeekBothRange returns nil, cursor position is indeterminate;
+		// use NextSubtree+Seek (not NextNoDup) to safely advance.
 		next, ok := kv.NextSubtree(k)
 		if !ok {
 			break
 		}
-		var err2 error
-		k, _, err2 = hi.valsCDup.Seek(next)
-		if err2 != nil {
-			return err2
+		k, _, err = hi.valsCDup.Seek(next)
+		if err != nil {
+			return err
 		}
 	}
 	hi.nextKey = nil
@@ -306,7 +289,6 @@ func (hi *HistoryKeyTxNumIterDB) advanceSmallVals() error {
 		return hi.seekNextSmallKey(k)
 	}
 
-	// Try next dup for current key
 	k, v, err := hi.valsCDup.NextDup()
 	if err != nil {
 		return err
@@ -318,7 +300,6 @@ func (hi *HistoryKeyTxNumIterDB) advanceSmallVals() error {
 			return nil
 		}
 	}
-	// Move to next key
 	k, _, err = hi.valsCDup.NextNoDup()
 	if err != nil {
 		return err
@@ -356,7 +337,6 @@ func (hi *HistoryKeyTxNumIterDB) advanceLargeVals() error {
 		hi.nextKey = nil
 		return nil
 	}
-	// If we moved to a new key prefix, re-seek to startTxKey for that prefix
 	if hi.nextKey != nil && !bytes.Equal(k[:len(k)-8], hi.nextKey) {
 		seek := append(common.Copy(k[:len(k)-8]), hi.startTxKey[:]...)
 		k, _, err = hi.valsC.Seek(seek)
@@ -384,7 +364,6 @@ func (hi *HistoryKeyTxNumIterDB) scanLargeVals(k []byte) error {
 			}
 			continue
 		}
-		// If txNum < startTxKey, skip to startTxKey for this key prefix
 		if txNum < binary.BigEndian.Uint64(hi.startTxKey[:]) {
 			seek := append(common.Copy(k[:len(k)-8]), hi.startTxKey[:]...)
 			var err error
@@ -402,13 +381,7 @@ func (hi *HistoryKeyTxNumIterDB) scanLargeVals(k []byte) error {
 }
 
 func (hi *HistoryKeyTxNumIterDB) HasNext() bool {
-	if hi.err != nil {
-		return true
-	}
-	if hi.limit == 0 {
-		return false
-	}
-	return hi.nextKey != nil
+	return hi.err != nil || (hi.limit != 0 && hi.nextKey != nil)
 }
 
 func (hi *HistoryKeyTxNumIterDB) Next() ([]byte, uint64, error) {
