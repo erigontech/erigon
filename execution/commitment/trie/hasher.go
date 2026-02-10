@@ -24,8 +24,6 @@ import (
 	"hash"
 	"sync"
 
-	"golang.org/x/crypto/sha3"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
@@ -54,7 +52,7 @@ type keccakState interface {
 var hashersPool = sync.Pool{
 	New: func() any {
 		return &hasher{
-			sha: sha3.NewLegacyKeccak256().(crypto.KeccakState),
+			sha: newFastKeccak(),
 			bw:  &ByteArrayWriter{},
 		}
 	},

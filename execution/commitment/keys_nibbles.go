@@ -6,7 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	ecrypto "github.com/erigontech/erigon/common/crypto"
+	keccak "github.com/Giulio2002/fastkeccak"
+
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -20,12 +21,15 @@ func KeyToHexNibbleHash(key []byte) []byte {
 	if len(key) > length.Addr { // storage
 		nibblized = make([]byte, 128)
 		hashed = nibblized[64:]
-		copy(hashed[:32], ecrypto.Keccak256(key[:length.Addr]))
-		copy(hashed[32:], ecrypto.Keccak256(key[length.Addr:]))
+		h := keccak.Sum256(key[:length.Addr])
+		copy(hashed[:32], h[:])
+		h = keccak.Sum256(key[length.Addr:])
+		copy(hashed[32:], h[:])
 	} else {
 		nibblized = make([]byte, 64)
 		hashed = nibblized[32:]
-		copy(hashed, ecrypto.Keccak256(key))
+		h := keccak.Sum256(key)
+		copy(hashed, h[:])
 	}
 
 	for i, b := range hashed {
@@ -38,7 +42,8 @@ func KeyToHexNibbleHash(key []byte) []byte {
 func KeyToNibblizedHash(key []byte) []byte {
 	nibblized := make([]byte, 64) // nibblized hash
 	hashed := nibblized[32:]
-	copy(hashed, ecrypto.Keccak256(key))
+	h := keccak.Sum256(key)
+	copy(hashed, h[:])
 	for i, b := range hashed {
 		nibblized[i*2] = (b >> 4) & 0xf
 		nibblized[i*2+1] = b & 0xf

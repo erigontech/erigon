@@ -23,8 +23,6 @@ import (
 	"math/bits"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
-
 	"github.com/erigontech/erigon/common"
 	length2 "github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -62,7 +60,7 @@ type HashBuilder struct {
 // NewHashBuilder creates a new HashBuilder
 func NewHashBuilder(trace bool) *HashBuilder {
 	return &HashBuilder{
-		sha:             sha3.NewLegacyKeccak256().(keccakState),
+		sha:             newFastKeccak(),
 		byteArrayWriter: &ByteArrayWriter{},
 		trace:           trace,
 	}
