@@ -276,7 +276,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	rs.LogLvl(log.LvlTrace)
 
 	seq := &multiencseq.SequenceReader{}
-	var seqIt multiencseq.SequenceIterator
+	it := &multiencseq.SequenceIterator{}
 
 	i := 0
 	for {
@@ -292,8 +292,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 			// fmt.Printf("ef key %x\n", keyBuf)
 
 			seq.Reset(efBaseTxNum, valBuf)
-			seqIt.Reset(seq, 0)
-			it := &seqIt
+			it.Reset(seq, 0)
 			for it.HasNext() {
 				txNum, err := it.Next()
 				if err != nil {
