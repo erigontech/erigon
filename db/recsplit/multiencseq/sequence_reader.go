@@ -201,6 +201,7 @@ func (s *SequenceReader) ReverseIterator(v int) stream.U64 {
 //	}
 type SequenceIterator struct {
 	sseqIt  simpleseq.SimpleSequenceIterator
+	refIt   eliasfano32.RebasedIterWrapper
 	current stream.U64
 }
 
@@ -213,11 +214,11 @@ func (it *SequenceIterator) Reset(s *SequenceReader, from int) {
 		}
 		it.current = &it.sseqIt
 	case PlainEliasFano, RebasedEliasFano:
-		refIt := s.ref.Iterator()
+		it.refIt.Reset(&s.ref, false)
 		if from > 0 {
-			refIt.Seek(uint64(from))
+			it.refIt.Seek(uint64(from))
 		}
-		it.current = refIt
+		it.current = &it.refIt
 	default:
 		panic(fmt.Sprintf("unknown sequence encoding: %d", s.currentEnc))
 	}
