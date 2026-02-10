@@ -536,7 +536,10 @@ func (hi *HistoryKeyTxNumIterFiles) advance() error {
 				hi.nextTxNum = txNum
 				return nil
 			}
-			// txNum >= endTxNum, fall through to get next key
+			// txNum >= endTxNum: since txNums are ascending, all remaining
+			// txNums for this key will also be >= endTxNum. Abandon the
+			// iterator and move to the next key from the heap.
+			hi.curTxIter = nil
 		}
 
 		// Pop the next key from the heap
@@ -651,8 +654,15 @@ func (hi *HistoryKeyTxNumIterDB) seekNextSmallKey(k []byte) error {
 				return nil
 			}
 		}
+		// After SeekBothRange returns nil the cursor position is
+		// indeterminate, so NextNoDup() would be unsafe. Use
+		// NextSubtree+Seek like HistoryChangesIterDB does.
+		next, ok := kv.NextSubtree(k)
+		if !ok {
+			break
+		}
 		var err2 error
-		k, _, err2 = hi.valsCDup.NextNoDup()
+		k, _, err2 = hi.valsCDup.Seek(next)
 		if err2 != nil {
 			return err2
 		}
