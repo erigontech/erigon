@@ -344,7 +344,7 @@ func TableScanningPrune(
 						return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 					}
 				} else {
-					n, err = valDelCursor.DeleteDupRange(txNumBytes, txnfromb, txntob)
+					n, err = valDelCursor.DeleteDupRange(val, txnfromb, txntob)
 					if err != nil {
 						return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 					}

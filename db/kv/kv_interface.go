@@ -359,6 +359,8 @@ type Putter interface {
 	// Delete removes a single entry.
 	Delete(table string, k []byte) error
 
+	DeleteRange(table string, from []byte, to []byte) (int64, error)
+
 	/*
 		IncrementSequence - AutoIncrement generator.
 		Example reserve 1 ID:

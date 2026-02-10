@@ -323,6 +323,14 @@ func (m *memoryMutationCursor) Delete(k []byte) error {
 	return m.mutation.Delete(m.table, k)
 }
 
+func (m *memoryMutationCursor) DeleteRange(from []byte, to []byte) (int64, error) {
+	return m.mutation.DeleteRange(m.table, from, to)
+}
+
+func (m *memoryMutationCursor) DeleteDupRange(key []byte, from []byte, to []byte) (int64, error) {
+	panic("not implemented")
+}
+
 func (m *memoryMutationCursor) DeleteCurrent() error {
 	if !m.pureDupSort {
 		return m.mutation.Delete(m.table, m.currentPair.key)
