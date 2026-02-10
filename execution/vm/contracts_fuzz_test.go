@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"fmt"
 	"maps"
 	"slices"
 	"testing"

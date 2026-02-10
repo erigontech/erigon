@@ -331,12 +331,13 @@ func (api *APIImpl) Config(ctx context.Context, blockTimeOverride *hexutil.Uint6
 func fillForkConfig(chainConfig *chain.Config, forkId [4]byte, activationTime uint64) *EthHardForkConfig {
 	forkConfig := EthHardForkConfig{}
 	forkConfig.ActivationTime = activationTime
-	forkConfig.BlobSchedule = chainConfig.GetBlobConfig(activationTime)
+	forkConfig.BlobSchedule = chainConfig.GetBlobConfig(activationTime, 0 /* currentArbosVer */)
 	forkConfig.ChainId = hexutil.Uint(chainConfig.ChainID.Uint64())
 	forkConfig.ForkId = forkId[:]
 	blockContext := evmtypes.BlockContext{
 		BlockNumber: math.MaxUint64,
 		Time:        activationTime,
+		ArbOSVersion: 0,
 	}
 	precompiles := vm.Precompiles(blockContext.Rules(chainConfig))
 	forkConfig.Precompiles = make(map[string]common.Address, len(precompiles))

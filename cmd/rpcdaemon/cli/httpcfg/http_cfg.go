@@ -99,6 +99,7 @@ type HttpCfg struct {
 	LogDirVerbosity string
 	LogDirPath      string
 
+	BatchResponseMaxSize        int  // Maximum response size
 	BatchLimit                  int  // Maximum number of requests in a batch
 	ReturnDataLimit             int  // Maximum number of bytes returned from calls (like eth_call)
 	AllowUnprotectedTxs         bool // Whether to allow non EIP-155 protected transactions  txs over RPC
@@ -108,6 +109,10 @@ type HttpCfg struct {
 
 	RPCSlowLogThreshold time.Duration
 
+<<<<<<< HEAD
 	RpcTxSyncDefaultTimeout time.Duration // Default timeout for eth_sendRawTransactionSync
 	RpcTxSyncMaxTimeout     time.Duration // Maximum timeout for eth_sendRawTransactionSync
+=======
+	IsArbitrum bool // Whether the chain is Arbitrum
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 }

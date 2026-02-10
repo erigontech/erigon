@@ -106,6 +106,14 @@ var Defaults = Config{
 	RPCGasCap:   50000000,
 	GPO:         FullNodeGPO,
 	RPCTxFeeCap: 1, // 1 ether
+<<<<<<< HEAD
+=======
+
+	ArbRPCEVMTimeout: 5 * time.Second,
+	L2RPCAddr:        "", // arbitrum only field, url to connect to L2 RPC server
+
+	ImportMode: false,
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 	Snapshot: BlocksFreezing{
 		KeepBlocks: false,
 		ProduceE2:  true,
@@ -229,7 +237,8 @@ type Config struct {
 
 	// RPCTxFeeCap is the global transaction fee(price * gaslimit) cap for
 	// send-transction variants. The unit is ether.
-	RPCTxFeeCap float64 `toml:",omitempty"`
+	RPCTxFeeCap      float64       `toml:",omitempty"`
+	ArbRPCEVMTimeout time.Duration `toml:",omitempty"`
 
 	StateStream bool
 
@@ -273,11 +282,18 @@ type Config struct {
 	AllowAA bool
 
 	// fork choice update timeout
+<<<<<<< HEAD
 	FcuTimeout          time.Duration
 	FcuBackgroundPrune  bool
 	FcuBackgroundCommit bool
 
 	MCPAddress string
+=======
+	FcuTimeout time.Duration
+
+	L2RPCAddr        string
+	L2RPCReceiptAddr string
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 }
 
 type Sync struct {

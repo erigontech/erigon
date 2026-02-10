@@ -6,6 +6,8 @@ import (
 
 	"github.com/erigontech/erigon/db/snaptype"
 	"gopkg.in/yaml.v3"
+	"os"
+	"sort"
 )
 
 type TwoVers struct {

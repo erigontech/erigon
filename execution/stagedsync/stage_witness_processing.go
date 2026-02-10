@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/wrap"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/p2p/protocols/wit"
@@ -140,6 +141,21 @@ func SpawnStageWitnessProcessing(tx kv.RwTx, cfg WitnessProcessingCfg, logger lo
 
 // UnwindWitnessProcessingStage handles unwind operations for witness processing
 func UnwindWitnessProcessingStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg WitnessProcessingCfg, logger log.Logger) error {
+<<<<<<< HEAD
+=======
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		var err error
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	} else {
+		tx = txc.Tx
+	}
+
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 	if err := cleanupWitnessesForUnwind(tx, u.UnwindPoint+1); err != nil {
 		logger.Warn("failed to cleanup witnesses during witness stage unwind", "err", err, "unwind_point", u.UnwindPoint)
 		return err

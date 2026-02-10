@@ -54,8 +54,9 @@ func (al AccessList) StorageKeys() int {
 // AccessListTx is the data of EIP-2930 access list transactions.
 type AccessListTx struct {
 	LegacyTx
-	ChainID    *uint256.Int
-	AccessList AccessList // EIP-2930 access list
+	ChainID     *uint256.Int
+	AccessList  AccessList // EIP-2930 access list
+	Timeboosted *bool
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
@@ -77,6 +78,9 @@ func (tx *AccessListTx) copy() *AccessListTx {
 		AccessList: make(AccessList, len(tx.AccessList)),
 	}
 	copy(cpy.AccessList, tx.AccessList)
+	if tx.Timeboosted != nil {
+		cpy.Timeboosted = &(*tx.Timeboosted)
+	}
 	if tx.Value != nil {
 		cpy.Value.Set(tx.Value)
 	}
@@ -103,20 +107,22 @@ func (tx *AccessListTx) GetAuthorizations() []Authorization {
 func (tx *AccessListTx) Protected() bool {
 	return true
 }
-
 func (tx *AccessListTx) Unwrap() Transaction {
 	return tx
 }
 
+func (tx *AccessListTx) IsTimeBoosted() *bool     { return tx.Timeboosted }
+func (tx *AccessListTx) SetTimeboosted(val *bool) { tx.Timeboosted = val }
+
 // EncodingSize returns the RLP encoding size of the whole transaction envelope
 func (tx *AccessListTx) EncodingSize() int {
-	payloadSize, _ := tx.payloadSize()
+	payloadSize, _ := tx.payloadSize(false)
 	// Add envelope size and type size
 	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
 // payloadSize calculates the RLP encoding size of transaction, without TxType and envelope
-func (tx *AccessListTx) payloadSize() (payloadSize int, accessListLen int) {
+func (tx *AccessListTx) payloadSize(hashingOnly bool) (payloadSize int, accessListLen int) {
 	payloadSize += rlp.Uint256Len(*tx.ChainID)
 	payloadSize += rlp.U64Len(tx.Nonce)
 	payloadSize += rlp.Uint256Len(*tx.GasPrice)
@@ -138,6 +144,12 @@ func (tx *AccessListTx) payloadSize() (payloadSize int, accessListLen int) {
 	payloadSize += rlp.Uint256Len(tx.V)
 	payloadSize += rlp.Uint256Len(tx.R)
 	payloadSize += rlp.Uint256Len(tx.S)
+
+	if !hashingOnly && tx.Timeboosted != nil {
+		payloadSize++
+		payloadSize += rlp.BoolLen()
+	}
+
 	return payloadSize, accessListLen
 }
 
@@ -186,9 +198,9 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 // For legacy transactions, it returns the RLP encoding. For EIP-2718 typed
 // transactions, it returns the type and payload.
 func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
-	payloadSize, accessListLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	payloadSize, accessListLen := tx.payloadSize(false)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = AccessListTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -200,7 +212,22 @@ func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen int) error {
+func (tx *AccessListTx) MarshalBinaryForHashing(w io.Writer) error {
+	payloadSize, accessListLen := tx.payloadSize(true)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
+	// encode TxType
+	b[0] = AccessListTxType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen int, hashingOnly bool) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -225,7 +252,7 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, access
 	if tx.To == nil {
 		b[0] = 128
 	} else {
-		b[0] = 128 + 20
+		b[0] = 128 + length.Addr
 	}
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
@@ -263,17 +290,24 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, access
 	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
 		return err
 	}
+
+	if tx.Timeboosted != nil && !hashingOnly {
+		if err := rlp.EncodeBool(*tx.Timeboosted, w, b); err != nil {
+			return err
+		}
+	}
+
 	return nil
 
 }
 
 // EncodeRLP implements rlp.Encoder
 func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
-	payloadSize, accessListLen := tx.payloadSize()
+	payloadSize, accessListLen := tx.payloadSize(false)
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
@@ -283,7 +317,7 @@ func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen); err != nil {
+	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, false); err != nil {
 		return err
 	}
 	return nil
@@ -390,10 +424,15 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read S: %w", err)
 	}
 	tx.S.SetBytes(b)
-	if err := s.ListEnd(); err != nil {
-		return fmt.Errorf("close AccessListTx: %w", err)
+
+	if s.MoreDataInList() {
+		boolVal, err := s.Bool()
+		if err != nil {
+			return err
+		}
+		tx.Timeboosted = &boolVal
 	}
-	return nil
+	return s.ListEnd()
 }
 
 // AsMessage returns the transaction as a core.Message.
@@ -418,6 +457,9 @@ func (tx *AccessListTx) AsMessage(s Signer, _ *big.Int, rules *chain.Rules) (*Me
 		checkNonce:       true,
 		checkTransaction: true,
 		checkGas:         true,
+
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
+		Tx:           tx,
 	}
 
 	if !rules.IsBerlin {
@@ -447,7 +489,7 @@ func (tx *AccessListTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(AccessListTxType, []any{
+	hash := PrefixedRlpHash(AccessListTxType, []any{
 		tx.ChainID,
 		tx.Nonce,
 		tx.GasPrice,
@@ -474,7 +516,7 @@ type accessListTxSigHash struct {
 }
 
 func (tx *AccessListTx) SigningHash(chainID *big.Int) common.Hash {
-	return prefixedRlpHash(
+	return PrefixedRlpHash(
 		AccessListTxType,
 		&accessListTxSigHash{
 			ChainID:    chainID,
@@ -498,7 +540,7 @@ func (tx *AccessListTx) GetChainID() *uint256.Int {
 	return tx.ChainID
 }
 
-func (tx *AccessListTx) cachedSender() (sender accounts.Address, ok bool) {
+func (tx *AccessListTx) CachedSender() (sender accounts.Address, ok bool) {
 	s := tx.from
 	if s.IsNil() {
 		return sender, false

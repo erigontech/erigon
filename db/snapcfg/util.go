@@ -67,6 +67,7 @@ var registry = &preverifiedRegistry{
 		networkname.Gnosis:     fromEmbeddedToml(snapshothashes.Gnosis),
 		networkname.Chiado:     fromEmbeddedToml(snapshothashes.Chiado),
 		networkname.Hoodi:      fromEmbeddedToml(snapshothashes.Hoodi),
+		networkname.ArbSepolia = fromEmbeddedToml(snapshothashes.ArbSepolia)
 	},
 	cached: make(map[string]*Cfg),
 }
@@ -128,6 +129,7 @@ var (
 		&snapshothashes.Gnosis,
 		&snapshothashes.Chiado,
 		&snapshothashes.Hoodi,
+		&snapshothashes.ArbSepolia,
 	}
 )
 
@@ -494,6 +496,7 @@ var KnownWebseeds = map[string][]string{
 	networkname.Gnosis:     webseedsParse(webseed.Gnosis),
 	networkname.Chiado:     webseedsParse(webseed.Chiado),
 	networkname.Hoodi:      webseedsParse(webseed.Hoodi),
+	networkname.ArbiturmSepolia: webseedsParse(webseed.ArbSepolia),
 }
 
 func webseedsParse(in []byte) (res []string) {
@@ -544,6 +547,7 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 		networkname.Gnosis:     webseedsParse(webseed.Gnosis),
 		networkname.Chiado:     webseedsParse(webseed.Chiado),
 		networkname.Hoodi:      webseedsParse(webseed.Hoodi),
+		networkname.ArbSepolia:      webseedsParse(webseed.ArbSepolia),
 	}
 
 	// Re-load the preverified hashes
@@ -555,6 +559,7 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 		networkname.Gnosis:     fromEmbeddedToml(snapshothashes.Gnosis),
 		networkname.Chiado:     fromEmbeddedToml(snapshothashes.Chiado),
 		networkname.Hoodi:      fromEmbeddedToml(snapshothashes.Hoodi),
+		networkname.ArbSepolia = fromEmbeddedToml(snapshothashes.ArbSepolia),
 	})
 	return
 }
@@ -571,6 +576,8 @@ func GetToml(networkName string) []byte {
 		return snapshothashes.Mainnet
 	case networkname.Sepolia:
 		return snapshothashes.Sepolia
+	//case networkname.Mumbai:
+	//	return snapshothashes.Mumbai
 	case networkname.Amoy:
 		return snapshothashes.Amoy
 	case networkname.BorMainnet:

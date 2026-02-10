@@ -26,6 +26,8 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/erigontech/erigon/core/state"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -48,6 +50,8 @@ type Config struct {
 	RestoreState  bool // Revert all changes made to the state (useful for constant system calls)
 
 	ExtraEips []int // Additional EIPS that are to be enabled
+
+	ExposeMultiGas bool // Arbitrum: Expose multi-gas used in transaction receipts
 }
 
 func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
@@ -246,7 +250,13 @@ func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 // It's important to note that any errors returned by the interpreter should be
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
+<<<<<<< HEAD
 func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) (_ []byte, _ uint64, err error) {
+=======
+func (in *EVMInterpreter) Run(contract Contract, gas uint64, input []byte, readOnly bool) (_ []byte, _ uint64, err error) {
+	in.evm.ProcessingHook.PushContract(&contract)
+	defer func() { in.evm.ProcessingHook.PopContract() }()
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 	// Don't bother with the execution if there's no code.
 	if len(contract.Code) == 0 {
 		return nil, gas, nil
@@ -283,6 +293,7 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 	if restoreReadonly {
 		evm.readOnly = true
 	}
+
 	// Increment the call depth which is restricted to 1024
 	evm.depth++
 	defer func() {
@@ -302,6 +313,12 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 		}
 		evm.depth--
 	}()
+
+	// Arbitrum: handle Stylus programs
+	if in.evm.chainRules.IsStylus && state.IsStylusProgram(contract.Code) {
+		ret, err = in.evm.ProcessingHook.ExecuteWASM(callContext, input, in)
+		return
+	}
 
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
@@ -328,6 +345,19 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 			logged, pcCopy, gasCopy = false, pc, callContext.gas
 			blockNum, txIndex, txIncarnation = evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation()
 		}
+
+		// TODO ARBITRUM DO WE NEED THIS
+		//if isEIP4762 && !contract.IsDeployment && !contract.IsSystemCall {
+		//	// if the PC ends up in a new "chunk" of verkleized code, charge the
+		//	// associated costs.
+		//	contractAddr := contract.Address()
+		//	consumed, wanted := in.evm.TxContext.AccessEvents.CodeChunksRangeGas(contractAddr, pc, 1, uint64(len(contract.Code)), false, contract.Gas)
+		//	contract.UseMultiGas(multigas.StorageGrowthGas(consumed), in.evm.Config().Tracer, tracing.GasChangeWitnessCodeChunk)
+		//	if consumed < wanted {
+		//		return nil, ErrOutOfGas
+		//	}
+		//}
+
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		op = contract.GetOp(pc)
@@ -345,6 +375,7 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 		} else {
 			callContext.gas -= cost
 		}
+		addConstantMultiGas(&contract.UsedMultiGas, cost, op)
 
 		// All ops with a dynamic memory usage also has a dynamic gas cost.
 		var memorySize uint64
@@ -366,8 +397,12 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 			}
 			// Consume the gas and return an error if not enough gas is available.
 			// cost is explicitly set so that the capture state defer method can get the proper cost
+<<<<<<< HEAD
 			var dynamicCost uint64
 			dynamicCost, err = operation.dynamicGas(evm, callContext, callContext.gas, memorySize)
+=======
+			multigasDynamicCost, err := operation.dynamicGas(in.evm, callContext, callContext.gas, memorySize)
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 			if err != nil {
 				if !errors.Is(err, ErrOutOfGas) {
 					err = fmt.Errorf("%w: %v", ErrOutOfGas, err)
@@ -379,13 +414,21 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 			if dbg.TraceDynamicGas && dynamicCost > 0 {
 				fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", blockNum, txIndex, txIncarnation, traceGas(op, callGas, cost), op)
 			}
+			dynamicCost := multigasDynamicCost.SingleGas()
 
+<<<<<<< HEAD
 			// for tracing: this gas consumption event is emitted below in the debug section.
 			if callContext.gas < dynamicCost {
+=======
+			cost += dynamicCost // for tracing
+			// TODO seems it should be once UseMultiGas call
+			if !callContext.useGas(dynamicCost, in.cfg.Tracer, tracing.GasChangeIgnored) {
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 				return nil, callContext.gas, ErrOutOfGas
 			} else {
 				callContext.gas -= dynamicCost
 			}
+			contract.UsedMultiGas.SaturatingAddInto(multigasDynamicCost)
 		}
 
 		// Do gas tracing before memory expansion

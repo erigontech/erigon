@@ -19,6 +19,7 @@ package evmtypes
 import (
 	"math/big"
 
+	"github.com/erigontech/erigon/arb/osver"
 	"github.com/erigontech/erigon/execution/chain"
 )
 
@@ -40,13 +41,17 @@ func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 		IsIstanbul:         c.IsIstanbul(bc.BlockNumber),
 		IsBerlin:           c.IsBerlin(bc.BlockNumber),
 		IsLondon:           c.IsLondon(bc.BlockNumber),
-		IsShanghai:         c.IsShanghai(bc.Time) || c.IsAgra(bc.BlockNumber),
-		IsCancun:           c.IsCancun(bc.Time),
+		IsShanghai:         c.IsShanghai(bc.Time, bc.ArbOSVersion) || c.IsAgra(bc.BlockNumber),
+		IsCancun:           c.IsCancun(bc.Time, bc.ArbOSVersion),
 		IsNapoli:           c.IsNapoli(bc.BlockNumber),
 		IsBhilai:           c.IsBhilai(bc.BlockNumber),
-		IsPrague:           c.IsPrague(bc.Time) || c.IsBhilai(bc.BlockNumber),
-		IsOsaka:            c.IsOsaka(bc.Time),
+		IsPrague:           c.IsPrague(bc.Time, bc.ArbOSVersion) || c.IsBhilai(bc.BlockNumber),
+		IsOsaka:            c.IsOsaka(bc.BlockNumber, bc.Time, bc.ArbOSVersion),
 		IsAmsterdam:        c.IsAmsterdam(bc.Time),
 		IsAura:             c.Aura != nil,
+		ArbOSVersion:       bc.ArbOSVersion,
+		IsArbitrum:         c.IsArbitrum(),
+		IsStylus:           c.IsArbitrum() && bc.ArbOSVersion >= osver.ArbosVersion_Stylus,
+		IsDia:              c.IsArbitrum() && bc.ArbOSVersion >= osver.ArbosVersion_Dia,
 	}
 }

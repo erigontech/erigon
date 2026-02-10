@@ -427,6 +427,19 @@ func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.Intra
 		time = parent.Time() + 10 // block time is fixed at 10 seconds
 	}
 
+	/*
+	TODO
+	var arbosVersion uint64
+		if chainConfig.IsArbitrum() {
+			arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+		}
+
+		if chainConfig.IsCancun(header.Time, arbosVersion) {
+			excessBlobGas := misc.CalcExcessBlobGas(chainConfig, parent, header.Time)
+			header.ExcessBlobGas = &excessBlobGas
+			header.BlobGasUsed = new(uint64)
+		}
+	 */
 	header := builder.MakeEmptyHeader(parent.Header(), chain.Config(), time, nil)
 	header.Coinbase = parent.Coinbase()
 	header.Difficulty = engine.CalcDifficulty(chain, time,

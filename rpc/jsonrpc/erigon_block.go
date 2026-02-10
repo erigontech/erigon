@@ -111,9 +111,12 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	}
 
 	firstHeaderTime := firstHeader.Time
-
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	if currentHeaderTime <= uintTimestamp {
-		blockResponse, err := buildBlockResponse(ctx, api._blockReader, tx, highestNumber, fullTx)
+		blockResponse, err := buildBlockResponse(ctx, api._blockReader, tx, highestNumber, fullTx, chainConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -122,7 +125,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	}
 
 	if firstHeaderTime >= uintTimestamp {
-		blockResponse, err := buildBlockResponse(ctx, api._blockReader, tx, 0, fullTx)
+		blockResponse, err := buildBlockResponse(ctx, api._blockReader, tx, 0, fullTx, chainConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -166,11 +169,15 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 		resultingHeader = beforeHeader
 	}
 
+<<<<<<< HEAD
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, uint64(blockNum))
 	if err != nil {
 		return nil, err
 	}
 	response, err := buildBlockResponse(ctx, api._blockReader, tx, uint64(blockNum), fullTx)
+=======
+	response, err := buildBlockResponse(ctx, api._blockReader, tx, uint64(blockNum), fullTx, chainConfig)
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +185,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	return response, nil
 }
 
-func buildBlockResponse(ctx context.Context, br services.FullBlockReader, db kv.Tx, blockNum uint64, fullTx bool) (map[string]any, error) {
+func buildBlockResponse(ctx context.Context, br services.FullBlockReader, db kv.Tx, blockNum uint64, fullTx bool, chainConfig *chain.Config) (map[string]any, error) {
 	header, err := br.HeaderByNumber(ctx, db, blockNum)
 	if err != nil {
 		return nil, err
@@ -197,7 +204,7 @@ func buildBlockResponse(ctx context.Context, br services.FullBlockReader, db kv.
 
 	additionalFields := make(map[string]any)
 
-	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, nil, common.Hash{}, additionalFields)
+	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, nil, common.Hash{}, additionalFields, chainConfig.IsArbitrumNitro(block.Number()))
 
 	if err == nil && rpc.BlockNumber(block.NumberU64()) == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields

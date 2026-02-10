@@ -44,6 +44,8 @@ var (
 	chain                        string // Which chain to use (mainnet, sepolia, etc.)
 	outputCsvFile                string
 
+	l2rpc, l2rpcReceipt string // L2 RPC addresses for arbitrum block dowloading
+
 	startTxNum uint64
 
 	dbWriteMap bool
@@ -138,6 +140,10 @@ func withConcurrentCommitment(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&statecfg.ExperimentalConcurrentCommitment, utils.ExperimentalConcurrentCommitmentFlag.Name, utils.ExperimentalConcurrentCommitmentFlag.Value, utils.ExperimentalConcurrentCommitmentFlag.Usage)
 }
 
+func withConcurrentCommitment(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&statecfg.ExperimentalConcurrentCommitment, utils.ExperimentalConcurrentCommitmentFlag.Name, utils.ExperimentalConcurrentCommitmentFlag.Value, utils.ExperimentalConcurrentCommitmentFlag.Usage)
+}
+
 func withBatchSize(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&batchSizeStr, "batchSize", cli.BatchSizeFlag.Value, cli.BatchSizeFlag.Usage)
 }
@@ -178,6 +184,14 @@ func withStartTx(cmd *cobra.Command) {
 
 func withOutputCsvFile(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&outputCsvFile, "output.csv.file", "", "location to output csv data")
+}
+
+func withL2RPCaddress(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&l2rpc, cli.L2RPCAddrFlag.Name, "", cli.L2RPCAddrFlag.Usage)
+}
+
+func withL2RPCReceiptAddress(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&l2rpcReceipt, cli.L2RPCReceiptAddrFlag.Name, "", cli.L2RPCReceiptAddrFlag.Usage)
 }
 
 func withChaosMonkey(cmd *cobra.Command) {

@@ -588,6 +588,19 @@ func Uint256Len(i uint256.Int) int {
 	return 1 + common.BitLenToByteLen(bitLen)
 }
 
+func BoolLen() int {
+	return IntLenExcludingHead(1)
+}
+
+func EncodeBool(val bool, w io.Writer, buffer []byte) error {
+	// zero for false, one for true
+	intVal := 0
+	if val {
+		intVal = 1
+	}
+	return EncodeInt(uint64(intVal), w, buffer)
+}
+
 // precondition: len(buffer) >= 9
 // TODO(yperbasis): replace with EncodeU64?
 func EncodeInt(i uint64, w io.Writer, buffer []byte) error {

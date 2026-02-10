@@ -732,8 +732,15 @@ func runBlock(engine rules.Engine, ibs *state.IntraBlockState, txnWriter state.S
 	chainConfig *chain2.Config, getHeader func(hash common.Hash, number uint64) (*types.Header, error), block *types.Block, vmConfig vm.Config, trace bool, logger log.Logger) (types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
+<<<<<<< HEAD
 	gp := new(protocol.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
 	gasUsed := new(protocol.GasUsed)
+=======
+	arbOsVersion := types.GetArbOSVersion(header, chainConfig)
+	gp := new(protocol.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time, arbOsVersion))
+	gasUsed := new(uint64)
+	usedBlobGas := new(uint64)
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 	var receipts types.Receipts
 	protocol.InitializeBlockExecution(engine, nil, header, chainConfig, ibs, nil, logger, nil)
 	blockNum := block.NumberU64()

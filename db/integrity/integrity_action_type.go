@@ -38,9 +38,17 @@ const (
 )
 
 var AllChecks = []Check{
+<<<<<<< HEAD
 	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, StateProgress, Publishable, HistoryNoSystemTxs,
 	BorEvents, BorSpans, BorCheckpoints, ReceiptsNoDups, RCacheNoDups, CommitmentRoot,
 	CommitmentKvi, CommitmentKvDeref,
+=======
+	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, HistoryNoSystemTxs, ReceiptsNoDups, BorEvents,
+	BorSpans, BorCheckpoints, RCacheNoDups, CommitmentRoot,
+	CommitmentKvi, CommitmentKvDeref, StateProgress,
+	Publishable,
+	BorSpans, BorCheckpoints, RCacheNoDups, Publishable,
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 }
 
 var NonDefaultChecks = []Check{CommitmentHistVal}

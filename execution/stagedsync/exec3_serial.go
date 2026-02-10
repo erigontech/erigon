@@ -342,6 +342,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		txTask.Config = se.cfg.chainConfig
 		txTask.Engine = se.cfg.engine
 
+		se.worker.SetArbitrumWasmDB(se.cfg.arbitrumWasmDB)
 		result := se.worker.RunTxTask(txTask)
 
 		if err := func() error {
@@ -393,7 +394,15 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				if !se.isBlockProduction && startTxIndex == 0 && !isInitialCycle {
 					se.cfg.notifications.RecentReceipts.Add(blockReceipts, txTask.Txs, txTask.Header)
 				}
+<<<<<<< HEAD
 				checkReceipts := !se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts && !se.isBlockProduction
+=======
+				checkReceipts := (!se.cfg.vmConfig.StatelessExec && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber()) && !se.cfg.vmConfig.NoReceipts && !se.isMining);
+				// TODO arbitrum enable receipt checking
+				if se.cfg.chainConfig.IsArbitrum() {
+					checkReceipts = false;
+				}
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 
 				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
@@ -457,6 +466,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			if se.cfg.hd != nil && se.cfg.hd.POSSync() && errors.Is(err, rules.ErrInvalidBlock) {
 				se.cfg.hd.ReportBadHeaderPoS(txTask.Header.Hash(), txTask.Header.ParentHash)
 			}
+			os.Exit(1)
 			if se.cfg.badBlockHalt {
 				return false, err
 			}
@@ -517,6 +527,23 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			}
 		}
 
+<<<<<<< HEAD
+=======
+		if !txTask.HistoryExecution {
+			if rawtemporaldb.ReceiptStoresFirstLogIdx(se.applyTx) {
+				logIndexAfterTx -= uint32(len(result.Logs))
+			}
+			if err := rawtemporaldb.AppendReceipt(se.doms.AsPutDel(se.applyTx.(kv.TemporalTx)), logIndexAfterTx, cumGasUsed, se.blobGasUsed, txTask.TxNum); err != nil {
+				return false, err
+			}
+		}
+
+		var applyReceipt *types.Receipt
+		if txTask.TxIndex >= 0 && txTask.TxIndex < len(blockReceipts) {
+			applyReceipt = blockReceipts[txTask.TxIndex]
+		}
+
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 		if err := se.rs.ApplyTxState(ctx, se.applyTx, txTask.BlockNumber(), txTask.TxNum, state.StateUpdates{},
 			txTask.BalanceIncreaseSet, applyReceipt, se.blobGasUsed, result.Logs, result.TraceFroms, result.TraceTos,
 			se.cfg.chainConfig, txTask.Rules(), txTask.HistoryExecution); err != nil {

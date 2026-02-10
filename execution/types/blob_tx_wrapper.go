@@ -78,7 +78,7 @@ func (li BlobKzgs) payloadSize() int {
 
 func (li BlobKzgs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	// prefix
-	buf := newEncodingBuf()
+	buf := NewEncodingBuf()
 	l := rlp.EncodeListPrefix(payloadSize, buf[:])
 	w.Write(buf[:l])
 
@@ -128,7 +128,7 @@ func (li KZGProofs) payloadSize() int {
 
 func (li KZGProofs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	// prefix
-	buf := newEncodingBuf()
+	buf := NewEncodingBuf()
 	l := rlp.EncodeListPrefix(payloadSize, buf[:])
 	w.Write(buf[:l])
 
@@ -183,7 +183,7 @@ func (blobs Blobs) payloadSize() int {
 func (blobs Blobs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
 	// prefix
 
-	buf := newEncodingBuf()
+	buf := NewEncodingBuf()
 	l := rlp.EncodeListPrefix(payloadSize, buf[:])
 	w.Write(buf[:l])
 	for _, blob := range blobs {
@@ -358,7 +358,7 @@ func (txw *BlobTxWrapper) RawSignatureValues() (*uint256.Int, *uint256.Int, *uin
 	return txw.Tx.RawSignatureValues()
 }
 
-func (txw *BlobTxWrapper) cachedSender() (accounts.Address, bool) { return txw.Tx.cachedSender() }
+func (txw *BlobTxWrapper) CachedSender() (accounts.Address, bool) { return txw.Tx.cachedSender() }
 
 func (txw *BlobTxWrapper) Sender(s Signer) (accounts.Address, error) { return txw.Tx.Sender(s) }
 
@@ -369,6 +369,14 @@ func (txw *BlobTxWrapper) SetSender(address accounts.Address) { txw.Tx.SetSender
 func (txw *BlobTxWrapper) IsContractDeploy() bool { return txw.Tx.IsContractDeploy() }
 
 func (txw *BlobTxWrapper) Unwrap() Transaction { return &txw.Tx }
+
+func (txw *BlobTxWrapper) IsTimeBoosted() *bool {
+	return txw.Tx.IsTimeBoosted()
+}
+
+func (txw *BlobTxWrapper) SetTimeboosted(val *bool) {
+	txw.Tx.Timeboosted = val
+}
 
 func (txw *BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
@@ -411,7 +419,7 @@ func (txw *BlobTxWrapper) EncodingSize() int {
 	return txw.Tx.EncodingSize()
 }
 func (txw *BlobTxWrapper) payloadSize() (payloadSize int) {
-	l, _, _ := txw.Tx.payloadSize()
+	l, _, _ := txw.Tx.payloadSize(false)
 	payloadSize += l + rlp.ListPrefixLen(l)
 	if txw.WrapperVersion != 0 {
 		payloadSize += 1
@@ -425,8 +433,8 @@ func (txw *BlobTxWrapper) payloadSize() (payloadSize int) {
 	return
 }
 func (txw *BlobTxWrapper) MarshalBinaryWrapped(w io.Writer) error {
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = BlobTxType
 	if _, err := w.Write(b[:1]); err != nil {

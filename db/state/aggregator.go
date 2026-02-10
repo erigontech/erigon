@@ -328,6 +328,9 @@ func (a *Aggregator) OpenFolder() error {
 	if err := a.openFolder(); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
+	if err := a.openFolder(); err != nil {
+		return fmt.Errorf("OpenFolder: %w", err)
+	}
 	return nil
 }
 

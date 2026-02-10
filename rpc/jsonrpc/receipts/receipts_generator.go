@@ -127,8 +127,15 @@ func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *c
 		return nil, fmt.Errorf("ReceiptsGen: PrepareEnv: bn=%d, %w", header.Number.Uint64(), err)
 	}
 
+<<<<<<< HEAD
 	gasUsed := new(protocol.GasUsed)
 	gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(cfg.GetMaxBlobGasPerBlock(header.Time))
+=======
+	gasUsed := new(uint64)
+	usedBlobGas := new(uint64)
+	arbOsVersion := types.GetArbOSVersion(header, cfg)
+	gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(cfg.GetMaxBlobGasPerBlock(header.Time, arbOsVersion))
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 
 	noopWriter := state.NewNoopWriter()
 
@@ -240,6 +247,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return nil, err
 	}
 
+	var evm *vm.EVM
 	if txn.Type() == types.AccountAbstractionTxType {
 		genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, index)
 		if err != nil {
@@ -345,7 +353,26 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			evm.Cancel()
 		}()
 
+<<<<<<< HEAD
 		receipt, err = protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vm.Config{}, evm)
+=======
+
+		if cfg.IsArbitrum() {
+			var msg *types.Message
+			msg, err = txn.AsMessage(*types.MakeSigner(cfg, blockNum, header.Time), header.BaseFee, evm.ChainRules())
+			if err != nil {
+				return nil, err
+			}
+			if evm.ProcessingHookSet.CompareAndSwap(false, true) {
+				evm.ProcessingHook = arbos.NewTxProcessorIBS(evm, state.NewArbitrum(genEnv.ibs), msg)
+			} else {
+				evm.ProcessingHook.SetMessage(msg, state.NewArbitrum(genEnv.ibs))
+			}
+			receipt, _, err = core.ApplyArbTransactionVmenv(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{}, evm)
+		} else {
+			receipt, _, err = protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vm.Config{}, evm)
+		}
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipt: bn=%d, txnIdx=%d, %w", blockNum, index, err)
 		}
@@ -371,6 +398,10 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			}
 			receipt.PostState = stateRoot
 		}
+	}
+
+	if evm.Cancelled() {
+		return nil, fmt.Errorf("execution aborted (timeout = %v)", g.evmTimeout)
 	}
 
 	if evm.Cancelled() {
@@ -450,8 +481,16 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		return nil, err
 	}
 	//genEnv.ibs.SetTrace(true)
+<<<<<<< HEAD
 	vmCfg := vm.Config{}
 	hashFn := protocol.GetHashFn(genEnv.header, genEnv.getHeader)
+=======
+
+	vmCfg := vm.Config{
+		JumpDestCache: vm.NewJumpDestCache(16),
+	}
+
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 	ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
 	defer cancel()
 
@@ -498,7 +537,27 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		}()
 
 		genEnv.ibs.SetTxContext(blockNum, i)
+<<<<<<< HEAD
 		receipt, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vmCfg, evm)
+=======
+
+		var receipt *types.Receipt
+		if cfg.IsArbitrum() {
+			var msg *types.Message
+			msg, err = txn.AsMessage(*types.MakeSigner(cfg, block.NumberU64(), block.Time()), block.BaseFee(), evm.ChainRules())
+			if err != nil {
+				return nil, err
+			}
+			if evm.ProcessingHookSet.CompareAndSwap(false, true) {
+				evm.ProcessingHook = arbos.NewTxProcessorIBS(evm, state.NewArbitrum(genEnv.ibs), msg)
+			} else {
+				evm.ProcessingHook.SetMessage(msg, state.NewArbitrum(genEnv.ibs))
+			}
+			receipt, _, err = core.ApplyArbTransactionVmenv(cfg, g.engine, genEnv.gp, genEnv.ibs, genEnv.noopWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vmCfg, evm)
+		} else {
+			receipt, _, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, genEnv.usedBlobGas, vmCfg, evm)
+		}
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 		if err != nil {
 			return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", block.NumberU64(), i, err)
 		}

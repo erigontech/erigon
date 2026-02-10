@@ -30,6 +30,21 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
+<<<<<<< HEAD
+=======
+type encodingBuf [64]byte
+
+var PooledBuf = sync.Pool{
+	New: func() any { return new(encodingBuf) },
+}
+
+func NewEncodingBuf() *encodingBuf {
+	b := PooledBuf.Get().(*encodingBuf)
+	*b = encodingBuf([64]byte{}) // reset, do we need to?
+	return b
+}
+
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 //go:generate gencodec -type Withdrawal -field-override withdrawalMarshaling -out gen_withdrawal_json.go
 
 // Withdrawal represents a validator withdrawal from the consensus layer.
@@ -53,8 +68,8 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 
 	encodingSize := obj.EncodingSize()
 
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 
 	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err

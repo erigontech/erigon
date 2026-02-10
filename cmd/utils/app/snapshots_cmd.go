@@ -503,6 +503,7 @@ var snapshotCommand = cli.Command{
 			},
 		},
 		{
+<<<<<<< HEAD
 			Name: "preverified",
 			Action: func(cliCtx *cli.Context) (err error) {
 				var dataDir string
@@ -528,6 +529,16 @@ var snapshotCommand = cli.Command{
 				&VerifyChainFlag,
 				&ConcurrencyFlag,
 			},
+=======
+			Name:        "compareIdx",
+			Action:      doCompareIdx,
+			Description: "compares to accessors (recsplit) files",
+			Flags: joinFlags([]cli.Flag{
+				&cli.PathFlag{Name: "first", Required: true},
+				&cli.PathFlag{Name: "second", Required: true},
+				&cli.BoolFlag{Name: "skip-size-check", Required: false, Value: false},
+			}),
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 		},
 	},
 }
@@ -931,6 +942,22 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 	return nil
 }
 
+func doRmStateSnapshots(cliCtx *cli.Context) error {
+	dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+	if err != nil {
+		return err
+	}
+	defer l.Unlock()
+
+	removeLatest := cliCtx.Bool("latest")
+	stepRange := cliCtx.String("step")
+	domainNames := cliCtx.StringSlice("domain")
+	dryRun := cliCtx.Bool("dry-run")
+	promptUser := true // CLI should always prompt the user
+
+	return DeleteStateSnapshots(dirs, removeLatest, promptUser, dryRun, stepRange, domainNames...)
+}
+
 func doBtSearch(cliCtx *cli.Context) error {
 	_, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
 	if err != nil {
@@ -1184,6 +1211,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 			}
 		case integrity.CommitmentHistVal:
 			if err := integrity.CheckCommitmentHistVal(ctx, db, blockReader, failFast, logger); err != nil {
+				return err
+			}
+		case integrity.Publishable:
+			if err := doPublishable(cliCtx); err != nil {
 				return err
 			}
 		default:
@@ -1475,6 +1506,10 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 	if len(accFiles) == 0 {
 		return fmt.Errorf("no account snapshot files (.kv) found in %s", dirs.SnapDomain)
 	}
+	if accFiles[0].From != 0 {
+		return fmt.Errorf("gap at start: state snaps start at (%d-%d). snaptype: accounts", accFiles[0].From, accFiles[0].To)
+	}
+
 	if accFiles[0].From != 0 {
 		return fmt.Errorf("gap at start: state snaps start at (%d-%d). snaptype: accounts", accFiles[0].From, accFiles[0].To)
 	}

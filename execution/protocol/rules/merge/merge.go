@@ -192,6 +192,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 	}
 
 	var rs types.FlatRequests
+<<<<<<< HEAD
 	if config.IsPrague(header.Time) && !skipReceiptsEval {
 		rs = make(types.FlatRequests, 0, 3) // deposit, withdrawal, consolidation
 
@@ -204,6 +205,15 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			allLogs = make(types.Logs, 0, len(receipts)*4)
 		}
 
+=======
+	var arbosVersion uint64
+	if config.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+	if config.IsPrague(header.Time, arbosVersion) && !skipReceiptsEval {
+		rs = make(types.FlatRequests, 0)
+		allLogs := make(types.Logs, 0)
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 		for i, rec := range receipts {
 			if rec == nil {
 				if reuseBuffer {
@@ -261,7 +271,11 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 	if err != nil {
 		return nil, nil, err
 	}
-	if config.IsPrague(header.Time) {
+	var arbosVersion uint64
+	if config.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+	if config.IsPrague(header.Time, arbosVersion) {
 		header.RequestsHash = outRequests.Hash()
 	}
 	return types.NewBlockForAsembling(header, txs, uncles, receipts, withdrawals), outRequests, nil
@@ -328,8 +342,13 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 		return err
 	}
 
+	var arbosVersion uint64
+	if chain.Config().IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+
 	// Verify existence / non-existence of withdrawalsHash
-	shanghai := chain.Config().IsShanghai(header.Time)
+	shanghai := chain.Config().IsShanghai(header.Time, arbosVersion)
 	if shanghai && header.WithdrawalsHash == nil {
 		return errors.New("missing withdrawalsHash")
 	}
@@ -337,7 +356,7 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 		return rules.ErrUnexpectedWithdrawals
 	}
 
-	if !chain.Config().IsCancun(header.Time) {
+	if !chain.Config().IsCancun(header.Time, arbosVersion) {
 		return misc.VerifyAbsenceOfCancunHeaderFields(header)
 	}
 	if err := misc.VerifyPresenceOfCancunHeaderFields(header); err != nil {
@@ -349,7 +368,7 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 	}
 
 	// Verify existence / non-existence of requestsHash
-	prague := chain.Config().IsPrague(header.Time)
+	prague := chain.Config().IsPrague(header.Time, arbosVersion)
 	if prague && header.RequestsHash == nil {
 		return errors.New("missing requestsHash")
 	}
@@ -406,12 +425,17 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 		}
 	}
 
-	if cfg.IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
+	var arbosVersion uint64
+	if cfg.IsArbitrum() {
+		arbosVersion = types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	}
+
+	if cfg.IsCancun(header.Time, arbosVersion) && header.ParentBeaconBlockRoot != nil {
 		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr accounts.Address, data []byte) ([]byte, error) {
 			return syscall(addr, data, state, header, false /* constCall */)
 		}, tracer)
 	}
-	if cfg.IsPrague(header.Time) {
+	if cfg.IsPrague(header.Time, arbosVersion) {
 		if err := misc.StoreBlockHashesEip2935(header, state); err != nil {
 			return err
 		}

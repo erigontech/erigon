@@ -115,6 +115,10 @@ func NewHistoricalTraceWorker(
 		vmCfg:       &vm.Config{},
 	}
 	ie.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, *ie.vmCfg)
+<<<<<<< HEAD
+=======
+	ie.taskGasPool.AddBlobGas(execArgs.ChainConfig.GetMaxBlobGasPerBlock(0, ie.evm.Context.ArbOSVersion))
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 	ie.ibs = state.New(ie.stateReader)
 	return ie
 }
@@ -201,7 +205,11 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 	default:
 		tracer := calltracer.NewCallTracer(nil)
 		result.Err = func() error {
+<<<<<<< HEAD
 			rw.taskGasPool.Reset(txTask.Tx().GetGasLimit(), txTask.Tx().GetBlobGas())
+=======
+			rw.taskGasPool.Reset(txTask.Tx().GetGasLimit(), cc.GetMaxBlobGasPerBlock(header.Time, rw.evm.Context.ArbOSVersion))
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 			rw.vmCfg.Tracer = tracer.Tracer().Hooks
 			ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 			txn := txTask.Tx()

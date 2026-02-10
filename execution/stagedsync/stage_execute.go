@@ -88,6 +88,8 @@ type ExecuteBlockCfg struct {
 
 	silkworm        *silkworm.Silkworm
 	experimentalBAL bool
+
+	arbitrumWasmDB wasmdb.WasmIface
 }
 
 func StageExecuteBlocksCfg(
@@ -108,6 +110,8 @@ func StageExecuteBlocksCfg(
 	syncCfg ethconfig.Sync,
 	silkworm *silkworm.Silkworm,
 	experimentalBAL bool,
+
+	arbitrumWasmDB wasmdb.WasmIface,
 ) ExecuteBlockCfg {
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
@@ -131,6 +135,7 @@ func StageExecuteBlocksCfg(
 		syncCfg:         syncCfg,
 		silkworm:        silkworm,
 		experimentalBAL: experimentalBAL,
+		arbitrumWasmDB: arbitrumWasmDB,
 	}
 }
 

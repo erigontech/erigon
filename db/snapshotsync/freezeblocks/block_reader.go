@@ -1145,7 +1145,7 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *
 		if err != nil {
 			return nil, nil, err
 		}
-		txs[i].SetSender(accounts.InternAddress(senders[i]))
+		// txs[i].SetSender(accounts.InternAddress(senders[i])) // TODO arbitrum
 	}
 
 	return txs, senders, nil
@@ -1385,6 +1385,9 @@ func (r *BlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed HeaderNumber: %w", err)
 	}
+	if headNumber == nil {
+		return nil, fmt.Errorf("head block number not found for head hash %x", headHash)
+	}
 	block, _, err := r.blockWithSenders(context.Background(), db, headHash, *headNumber, true)
 	return block, err
 }
@@ -1564,6 +1567,15 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(ctx context.Context, tx kv.Tx,
 	}
 
 	if blockIndex == len(bodies) {
+		// total := uint64(0)
+		// for i := len(bodies) - 1; i >= 0; i-- {
+		//      total++
+		//      if total == 100 {
+		//              break
+		//      }
+		//      mtx, _ := cache.GetLastMaxTxNum(bodies[i].Range, getMaxTxNum(bodies[i]))
+		//      fmt.Printf("maxTxNum %d %s\n", mtx, bodies[i].Src().FileName())
+		// }
 		// not in snapshots
 		blockNum, ok, err = rawdbv3.DefaultTxBlockIndexInstance.BlockNumber(ctx, tx, txNum)
 		if err != nil {

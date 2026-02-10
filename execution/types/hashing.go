@@ -31,8 +31,8 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
-// encodeBufferPool holds temporary encoder buffers for DeriveSha and TX encoding.
-var encodeBufferPool = sync.Pool{
+// EncodeBufferPool holds temporary encoder buffers for DeriveSha and TX encoding.
+var EncodeBufferPool = sync.Pool{
 	New: func() any { return new(bytes.Buffer) },
 }
 

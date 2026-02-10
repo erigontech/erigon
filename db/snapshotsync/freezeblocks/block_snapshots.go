@@ -688,14 +688,17 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			sender = senders[j]
 		} else {
 			signer := types.LatestSignerForChainID(chainConfig.ChainID)
-			s, err := txn2.Sender(*signer)
+			signerEth, err := txn2.Sender(*signer)
+			signerArb := types.NewArbitrumSigner(*signerEth)
+
+			sender, err = signerArb.Sender(txn2)
 			if err != nil {
 				return nil, err
 			}
-			sender = s.Value()
 		}
 
 		valueBuf = valueBuf[:0]
+		// TODO ARB seems like first byte of txn hash and it's sender does not used anywhere
 		valueBuf = append(valueBuf, hashFirstByte...)
 		valueBuf = append(valueBuf, sender[:]...)
 		valueBuf = append(valueBuf, v...)

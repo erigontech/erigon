@@ -652,8 +652,19 @@ func opExtCodeHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 	return pc, nil, nil
 }
 
+<<<<<<< HEAD
 func opGasprice(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	scope.Stack.push(evm.GasPrice)
+=======
+func opGasprice(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
+	if true { // MERGE_ARBITRUM
+		gasPrice := interpreter.evm.ProcessingHook.GasPriceOp(interpreter.evm.GasPrice)
+		scope.Stack.push(gasPrice)
+	}
+	else {
+		scope.Stack.push(interpreter.evm.GasPrice)
+	}
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 	return pc, nil, nil
 }
 
@@ -666,14 +677,28 @@ func opBlockhash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 		return pc, nil, nil
 	}
 	var upper, lower uint64
+<<<<<<< HEAD
 	upper = evm.Context.BlockNumber
+=======
+	// Arbitrum
+	upper, err := interpreter.evm.ProcessingHook.L1BlockNumber(interpreter.evm.Context)
+	if err != nil {
+		return nil, err
+	}
+	// upper = interpreter.evm.Context.BlockNumber // must be returned by default hook
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 	if upper <= params.BlockHashOldWindow {
 		lower = 0
 	} else {
 		lower = upper - params.BlockHashOldWindow
 	}
 	if arg64 >= lower && arg64 < upper {
+<<<<<<< HEAD
 		hash, err := evm.Context.GetHash(arg64)
+=======
+		hash, err := interpreter.evm.ProcessingHook.L1BlockHash(interpreter.evm.Context, arg64)
+		//hash, err := interpreter.evm.Context.GetHash(arg64)
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 		if err != nil {
 			arg.Clear()
 			return pc, nil, err
@@ -707,9 +732,26 @@ func opTimestamp(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	return pc, nil, nil
 }
 
+<<<<<<< HEAD
 func opNumber(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	v := new(uint256.Int).SetUint64(evm.Context.BlockNumber)
 	scope.Stack.push(*v)
+=======
+func opNumber(pc uint64, interpreter *EVMInterpreter, scope *CallContext) (uint64, []byte, error) {
+	if true { // MERGE_ARBITRUM
+		bnum, err := interpreter.evm.ProcessingHook.L1BlockNumber(interpreter.evm.Context)
+		if err != nil {
+			return nil, err
+		}
+
+		v := uint256.NewInt(bnum)
+		scope.Stack.push(v)
+	} else {
+		v := new(uint256.Int).SetUint64(interpreter.evm.Context.BlockNumber)
+		scope.Stack.push(*v)
+
+	}
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 	return pc, nil, nil
 }
 
@@ -978,9 +1020,20 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	// reuse size int for stackvalue
 	stackvalue := size
 
+<<<<<<< HEAD
 	scope.useGas(gas, evm.Config().Tracer, tracing.GasChangeCallContractCreation)
 
 	res, addr, returnGas, suberr := evm.Create(scope.Contract.Address(), input, gas, value, false)
+=======
+	if true { // MERGE_ARBITRUM
+		scope.Contract.UseMultiGas(multigas.ComputationGas(gas), interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation)
+	}
+	else {
+		scope.useGas(gas, interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation)
+	}
+
+	res, addr, returnGas, usedMultiGas, suberr := interpreter.evm.Create(scope.Contract.Address(), input, gas, &value, false)
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
@@ -994,8 +1047,17 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		addrVal := addr.Value()
 		stackvalue.SetBytes(addrVal[:])
 	}
+	//scope.Stack.push(stackvalue) // TODO arbiturm does thtat but we get stack corruption if we do that here
 
+<<<<<<< HEAD
 	scope.refundGas(returnGas, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+=======
+	scope.refundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+	if true { // MERGE_ARBITRUM
+		scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
+		scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
+	}
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 
 	if suberr == ErrExecutionReverted {
 		evm.returnData = res // set REVERT data to return data buffer
@@ -1031,10 +1093,17 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 	// Apply EIP150
 	gas -= gas / 64
+<<<<<<< HEAD
 	scope.useGas(gas, evm.Config().Tracer, tracing.GasChangeCallContractCreation2)
 	// reuse size int for stackvalue
 	stackValue := size
 	res, addr, returnGas, suberr := evm.Create2(scope.Contract.Address(), input, gas, endowment, &salt, false)
+=======
+	scope.Contract.UseMultiGas(multigas.ComputationGas(gas), interpreter.evm.Config().Tracer, tracing.GasChangeCallContractCreation)
+	// reuse size int for stackvalue
+	stackValue := size
+	res, addr, returnGas, usedMultiGas, suberr := interpreter.evm.Create2(scope.Contract.Address(), input, gas, &endowment, &salt, false)
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 
 	// Push item on the stack based on the returned error.
 	if suberr != nil {
@@ -1045,7 +1114,15 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 	}
 
 	scope.Stack.push(stackValue)
+<<<<<<< HEAD
 	scope.refundGas(returnGas, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+=======
+	scope.refundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+	if true { // MERGE_ARBITRUM
+		scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
+		scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
+	}
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 
 	if suberr == ErrExecutionReverted {
 		evm.returnData = res // set REVERT data to return data buffer
@@ -1078,6 +1155,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	toAddr := accounts.InternAddress(addr.Bytes20())
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
+	ogGas := gas
 
 	if !value.IsZero() {
 		if evm.readOnly {
@@ -1086,7 +1164,11 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		gas += params.CallStipend
 	}
 
+<<<<<<< HEAD
 	ret, returnGas, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, value, false /* bailout */)
+=======
+	ret, returnGas, usedMultiGas, err := interpreter.evm.Call(scope.Contract.Address(), toAddr, args, gas, &value, false /* bailout */)
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 
 	if err != nil {
 		temp.Clear()
@@ -1099,7 +1181,16 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
+<<<<<<< HEAD
 	scope.refundGas(returnGas, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+=======
+	scope.refundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+	if true { // MERGE_ARBITRUM
+		scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
+		// Use original gas value, since evm.callGasTemp may be updated by a nested call.
+		scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, ogGas)
+	}
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1126,12 +1217,17 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	toAddr := accounts.InternAddress(addr.Bytes20())
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
+	ogGas := gas
 
 	if !value.IsZero() {
 		gas += params.CallStipend
 	}
 
+<<<<<<< HEAD
 	ret, returnGas, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, value)
+=======
+	ret, returnGas, usedMultiGas, err := interpreter.evm.CallCode(scope.Contract.Address(), toAddr, args, gas, &value)
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -1143,7 +1239,17 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
+<<<<<<< HEAD
 	scope.refundGas(returnGas, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+=======
+	scope.refundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+	if true { // MERGE_ARBITRUM
+		scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
+
+		// Use original gas value, since evm.callGasTemp may be updated by a nested call.
+		scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, ogGas)
+	}
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1171,7 +1277,11 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
+<<<<<<< HEAD
 	ret, returnGas, err := evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
+=======
+	ret, returnGas, usedMultiGas, err := interpreter.evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -1183,7 +1293,16 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
+<<<<<<< HEAD
 	scope.refundGas(returnGas, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+=======
+	scope.refundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+	if true { // MERGE_ARBITRUM
+		scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
+		// Use original gas value, since evm.callGasTemp may be updated by a nested call.
+		scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
+	}
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1211,7 +1330,11 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
+<<<<<<< HEAD
 	ret, returnGas, err := evm.StaticCall(scope.Contract.Address(), toAddr, args, gas)
+=======
+	ret, returnGas, usedMultiGas, err := interpreter.evm.StaticCall(scope.Contract.Address(), toAddr, args, gas)
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -1222,7 +1345,16 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
+<<<<<<< HEAD
 	scope.refundGas(returnGas, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+=======
+	scope.refundGas(returnGas, interpreter.evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+	if true { // MERGE_ARBITRUM
+		scope.Contract.UsedMultiGas.SaturatingAddInto(usedMultiGas)
+		// Use original gas value, since evm.callGasTemp may be updated by a nested call.
+		scope.Contract.RetainedMultiGas.SaturatingIncrementInto(multigas.ResourceKindComputation, gas)
+	}
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1271,6 +1403,10 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	if err != nil {
 		return pc, nil, err
 	}
+	if beneficiaryAddr == scope.Contract.Address() {
+		// Arbitrum: calling selfdestruct(this) burns the balance
+		interpreter.evm.IntraBlockState().ExpectBalanceBurn(&balance)
+	}
 
 	ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
 	ibs.Selfdestruct(self)
@@ -1288,6 +1424,19 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 	if evm.readOnly {
 		return pc, nil, ErrWriteProtection
 	}
+	// Arbitrum: revert if acting account is a Stylus program
+	if interpreter.evm.chainRules.IsStylus {
+		actingAddress := scope.Contract.Address()
+		code, err := interpreter.evm.intraBlockState.GetCode(actingAddress)
+		if err != nil {
+			return nil, err
+		}
+
+		if state.IsStylusProgram(code) {
+			return nil, ErrExecutionReverted
+		}
+	}
+
 	beneficiary := scope.Stack.pop()
 	self := scope.Contract.Address()
 	beneficiaryAddr := accounts.InternAddress(beneficiary.Bytes20())
@@ -1296,9 +1445,27 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 	if err != nil {
 		return pc, nil, err
 	}
+<<<<<<< HEAD
 	newContract, err := ibs.IsNewContract(self)
 	if err != nil {
 		return pc, nil, err
+=======
+	interpreter.evm.IntraBlockState().SubBalance(callerAddr, balance, tracing.BalanceDecreaseSelfdestruct)
+	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
+	interpreter.evm.IntraBlockState().Selfdestruct6780(callerAddr)
+
+	// TODO arbiturm ??? before we did not needed this one
+	if interpreter.evm.chainConfig.IsArbitrum() && beneficiary.Bytes20() == scope.Contract.Address() {
+		// SelfDestruct6780 only destructs the contract if selfdestructing in the same transaction as contract creation
+		// So we only account for the balance burn if the contract is actually destructed by checking if the balance is zero.
+		if b, err := interpreter.evm.IntraBlockState().GetBalance(scope.Contract.Address()); err == nil && b.Sign() == 0 {
+			// Arbitrum: calling selfdestruct(this) burns the balance
+			interpreter.evm.IntraBlockState().ExpectBalanceBurn(&balance)
+		}
+	}
+	if interpreter.evm.Config().Tracer != nil && interpreter.evm.Config().Tracer.OnEnter != nil {
+		interpreter.cfg.Tracer.OnEnter(interpreter.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, 0, balance, nil)
+>>>>>>> arb/372-merge-erigonarbitrum-into-erigonmain
 	}
 	if newContract { // Contract is new and will actually be deleted.
 		ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct)
@@ -1555,3 +1722,30 @@ func makeSwapStringer(n int) stringer {
 		return fmt.Sprintf("SWAP%d (%d %d)", n, &scope.Stack.data[len(scope.Stack.data)-1], &scope.Stack.data[len(scope.Stack.data)-(n+1)])
 	}
 }
+
+// Arbitrum: adaptation of opBlockHash that doesn't require an EVM interpreter
+// func BlockHashOp(evm *EVM, block *big.Int) common.Hash {
+// 	if !block.IsUint64() {
+// 		return common.Hash{}
+// 	}
+// 	num64 := block.Uint64()
+// 	upper, err := evm.ProcessingHook.L1BlockNumber(evm.Context)
+// 	if err != nil {
+// 		return common.Hash{}
+// 	}
+
+// 	var lower uint64
+// 	if upper <= params.BlockHashOldWindow {
+// 		lower = 0
+// 	} else {
+// 		lower = upper - params.BlockHashOldWindow
+// 	}
+// 	if num64 >= lower && num64 < upper {
+// 		hash, err := evm.ProcessingHook.L1BlockHash(evm.Context, num64)
+// 		if err != nil {
+// 			return common.Hash{}
+// 		}
+// 		return hash
+// 	}
+// 	return common.Hash{}
+// }
