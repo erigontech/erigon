@@ -43,6 +43,7 @@ type Dirs struct {
 	RelativeDataDir  string // like dataDir, but without filepath.Abs() resolution
 	Chaindata        string
 	Tmp              string
+	Diffsets         string
 	Snap             string
 	SnapIdx          string
 	SnapHistory      string
@@ -69,6 +70,7 @@ func New(datadir string) Dirs {
 	dir.MustExist(
 		dirs.Chaindata,
 		dirs.Tmp,
+		dirs.Diffsets,
 		dirs.SnapIdx,
 		dirs.SnapHistory,
 		dirs.SnapDomain,
@@ -112,6 +114,7 @@ func Open(datadir string) Dirs {
 		DataDir:          datadir,
 		Chaindata:        filepath.Join(datadir, "chaindata"),
 		Tmp:              filepath.Join(datadir, "temp"),
+		Diffsets:         filepath.Join(datadir, "diffsets"),
 		Snap:             filepath.Join(datadir, SnapDir),
 		SnapIdx:          filepath.Join(datadir, SnapDir, "idx"),
 		SnapHistory:      filepath.Join(datadir, SnapDir, "history"),

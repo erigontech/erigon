@@ -17,44 +17,14 @@
 package changeset_test
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/state/changeset"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
-
-func TestNoOverflowPages(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(t, dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
-	t.Cleanup(db.Close)
-
-	ctx := context.Background()
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	k, v := make([]byte, changeset.DiffChunkKeyLen), make([]byte, changeset.DiffChunkLen)
-	k[0] = 0
-	_ = tx.Put(kv.ChangeSets3, k, v)
-	k[0] = 1
-	_ = tx.Put(kv.ChangeSets3, k, v)
-	st, err := tx.(*mdbx.MdbxTx).BucketStat(kv.ChangeSets3)
-	require.NoError(t, err)
-
-	// no ofverflow pages: no problems with FreeList maintainance costs
-	require.Equal(t, 0, int(st.OverflowPages))
-	require.Equal(t, 1, int(st.LeafPages))
-	require.Equal(t, 2, int(st.Entries))
-}
 
 func TestSerializeDeserializeDiff(t *testing.T) {
 	t.Parallel()
@@ -128,106 +98,4 @@ func BenchmarkSerializeDiffSet(b *testing.B) {
 	for b.Loop() {
 		out = changeset.SerializeDiffSet(d, out[:0])
 	}
-}
-
-func BenchmarkWriteDiffSet(b *testing.B) {
-	dirs := datadir.New(b.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(b, dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
-	b.Cleanup(db.Close)
-
-	// Create a realistic StateChangeSet
-	diffSet := createTestDiffSet(b, 10, 100, 10, 100)
-
-	blockHash := common.Hash{0x01, 0x02, 0x03}
-
-	b.ResetTimer()
-	b.ReportAllocs()
-
-	for i := 0; b.Loop(); i++ {
-		ctx := context.Background()
-		tx, err := db.BeginRw(ctx)
-		if err != nil {
-			b.Fatal(err)
-		}
-		defer tx.Rollback()
-		if err := changeset.WriteDiffSet(tx, uint64(i), blockHash, diffSet); err != nil {
-			tx.Rollback()
-			b.Fatal(err)
-		}
-		tx.Rollback() // Don't commit to avoid filling up the DB
-	}
-}
-
-func BenchmarkWriteDiffSetLarge(b *testing.B) {
-	dirs := datadir.New(b.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(b, dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
-	b.Cleanup(db.Close)
-
-	// Create a large StateChangeSet (simulating a heavy block)
-	diffSet := createTestDiffSet(b, 1000, 5000, 10, 10_000)
-
-	blockHash := common.Hash{0x01, 0x02, 0x03}
-
-	b.ResetTimer()
-	b.ReportAllocs()
-
-	for i := 0; b.Loop(); i++ {
-		ctx := context.Background()
-		tx, err := db.BeginRw(ctx)
-		if err != nil {
-			b.Fatal(err)
-		}
-		defer tx.Rollback()
-		if err := changeset.WriteDiffSet(tx, uint64(i), blockHash, diffSet); err != nil {
-			tx.Rollback()
-			b.Fatal(err)
-		}
-		tx.Rollback()
-	}
-}
-
-// createTestDiffSet creates a StateChangeSet with realistic data
-func createTestDiffSet(tb testing.TB, numAccounts, numStorage, numCode, numCommitment int) *changeset.StateChangeSet {
-	tb.Helper()
-
-	diffSet := &changeset.StateChangeSet{}
-
-	// Accounts domain - 20 byte addresses with account data
-	for i := 0; i < numAccounts; i++ {
-		key := make([]byte, 20)
-		key[0] = byte(i >> 8)
-		key[1] = byte(i)
-		value := make([]byte, 70) // typical account encoding size
-		diffSet.Diffs[kv.AccountsDomain].DomainUpdate(key, kv.Step(100), value, kv.Step(99))
-	}
-
-	// Storage domain - 20 byte address + 32 byte location
-	for i := 0; i < numStorage; i++ {
-		key := make([]byte, 52)
-		key[0] = byte(i >> 16)
-		key[1] = byte(i >> 8)
-		key[2] = byte(i)
-		value := make([]byte, 32) // storage value
-		diffSet.Diffs[kv.StorageDomain].DomainUpdate(key, kv.Step(100), value, kv.Step(99))
-	}
-
-	// Code domain - 20 byte address with code hash
-	for i := 0; i < numCode; i++ {
-		key := make([]byte, 20)
-		key[0] = byte(i >> 8)
-		key[1] = byte(i)
-		value := make([]byte, 32) // code hash
-		diffSet.Diffs[kv.CodeDomain].DomainUpdate(key, kv.Step(100), value, kv.Step(99))
-	}
-
-	// Commitment domain - variable key with trie node data
-	for i := 0; i < numCommitment; i++ {
-		key := make([]byte, 8+i%32) // variable length keys
-		key[0] = byte(i >> 8)
-		key[1] = byte(i)
-		value := make([]byte, 64+i%64) // variable length values
-		diffSet.Diffs[kv.CommitmentDomain].DomainUpdate(key, kv.Step(100), value, kv.Step(99))
-	}
-
-	return diffSet
 }

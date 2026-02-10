@@ -28,6 +28,7 @@ import (
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/diffsetdb"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -71,12 +72,14 @@ type TemporalMemBatch struct {
 	unwindChangeset *[kv.DomainLen]map[string]kv.DomainEntryDiff
 
 	metrics *changeset.DomainMetrics
+	diffset *diffsetdb.DiffsetDatabase
 }
 
 func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
 		storage: btree2.NewMap[string, []dataWithTxNum](128),
 		metrics: ioMetrics.(*changeset.DomainMetrics),
+		diffset: diffsetdb.Open(tx.Debug().Dirs()),
 	}
 	aggTx := AggTx(tx)
 	sd.stepSize = aggTx.StepSize()
@@ -314,7 +317,7 @@ func (sd *TemporalMemBatch) SavePastChangesetAccumulator(blockHash common.Hash, 
 	sd.pastChangesAccumulator[toStringZeroCopy(key)] = acc
 }
 
-func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error) {
+func (sd *TemporalMemBatch) GetDiffset(_ kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error) {
 	var key [40]byte
 	binary.BigEndian.PutUint64(key[:8], blockNumber)
 	copy(key[8:], blockHash[:])
@@ -326,7 +329,7 @@ func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockN
 			changeset.Diffs[kv.CommitmentDomain].GetDiffSet(),
 		}, true, nil
 	}
-	return changeset.ReadDiffSet(tx, blockNumber, blockHash)
+	return sd.diffset.ReadDiffSet(blockNumber, blockHash)
 }
 
 func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
@@ -493,7 +496,7 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 		tx.(kv.TemporalRwTx).Unwind(ctx, sd.unwindToTxNum, &changeSet)
 	}
 
-	if err := sd.flushDiffSet(ctx, tx); err != nil {
+	if err := sd.flushDiffSet(); err != nil {
 		return err
 	}
 	if err := sd.flushWriters(ctx, tx); err != nil {
@@ -505,11 +508,11 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {
+func (sd *TemporalMemBatch) flushDiffSet() error {
 	for key, changeSet := range sd.pastChangesAccumulator {
 		blockNum := binary.BigEndian.Uint64(toBytesZeroCopy(key[:8]))
 		blockHash := common.BytesToHash(toBytesZeroCopy(key[8:]))
-		if err := changeset.WriteDiffSet(tx, blockNum, blockHash, changeSet); err != nil {
+		if err := sd.diffset.WriteDiffSet(blockNum, blockHash, changeSet); err != nil {
 			return err
 		}
 	}
