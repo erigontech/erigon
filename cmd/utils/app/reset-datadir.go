@@ -6,6 +6,8 @@ import (
 	"os"
 
 	g "github.com/anacrolix/generics"
+	"github.com/urfave/cli/v2"
+
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir/reset"
 	"github.com/erigontech/erigon/db/kv"
@@ -13,7 +15,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/urfave/cli/v2"
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"

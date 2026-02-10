@@ -21,8 +21,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/urfave/cli/v2"
+
+	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/cmd/erigon/node"
 	erigonapp "github.com/erigontech/erigon/cmd/utils/app"

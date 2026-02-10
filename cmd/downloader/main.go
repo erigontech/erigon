@@ -33,8 +33,6 @@ import (
 	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/erigontech/erigon/cmd/utils/app"
-	"github.com/erigontech/erigon/db/downloader/webseeds"
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
 	"github.com/pelletier/go-toml/v2"
@@ -46,6 +44,9 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
+
+	"github.com/erigontech/erigon/cmd/utils/app"
+	"github.com/erigontech/erigon/db/downloader/webseeds"
 
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/hack/tool"

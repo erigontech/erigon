@@ -25,8 +25,9 @@ import (
 	"syscall"
 
 	"github.com/anacrolix/envpprof"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/felixge/fgprof"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 // Runs main with envpprof and fgprof. You probably only want to do this at the main-level as the
