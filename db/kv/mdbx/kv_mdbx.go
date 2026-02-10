@@ -1481,6 +1481,14 @@ func (c *MdbxCursorPseudoDupSort) DeleteCurrentDuplicates() error {
 	return nil
 }
 
+func (c *MdbxCursorPseudoDupSort) DeleteDupRange(key []byte, from []byte, to []byte) (int64, error) {
+	err := c.Delete(key)
+	if err != nil {
+		return 0, fmt.Errorf("label: %s, bucket: %s, err: %w", c.label, c.bucketName, err)
+	}
+	return 1, nil
+}
+
 // CountDuplicates returns the number of duplicates for the current key. See mdb_cursor_count
 func (c *MdbxCursorPseudoDupSort) CountDuplicates() (uint64, error) {
 	return 1, nil

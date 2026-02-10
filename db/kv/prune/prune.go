@@ -180,8 +180,8 @@ func HashSeekingPrune(
 }
 
 type StartPos struct {
-	StartKey []byte
 	StartVal []byte
+	StartKey []byte
 }
 
 func TableScanningPrune(
@@ -220,17 +220,13 @@ func TableScanningPrune(
 		}
 	}
 	if prevStat.ValueProgress == InProgress {
-		valCursorPosition.StartVal, valCursorPosition.StartKey, err = valDelCursor.Seek(prevStat.LastPrunedValue)
+		valCursorPosition.StartVal, _, err = valDelCursor.Seek(prevStat.LastPrunedValue)
 	} else if prevStat.ValueProgress == First {
-		valCursorPosition.StartVal, valCursorPosition.StartKey, err = valDelCursor.First()
+		valCursorPosition.StartVal, _, err = valDelCursor.First()
 	}
 
 	if prevStat.KeyProgress == InProgress {
-		keyCursorPosition.StartKey, keyCursorPosition.StartVal, err = keysCursor.Seek(prevStat.LastPrunedKey) //nolint:govet
-	} else if prevStat.KeyProgress == First {
-		var txKey [8]byte
-		binary.BigEndian.PutUint64(txKey[:], txFrom)
-		keyCursorPosition.StartKey, _, err = keysCursor.Seek(txKey[:])
+		_, keyCursorPosition.StartVal, err = keysCursor.Seek(prevStat.LastPrunedKey) //nolint:govet
 	}
 
 	var pairs, valLen uint64
@@ -242,36 +238,17 @@ func TableScanningPrune(
 			"key prune status", stat.KeyProgress.String(),
 			"val prune status", stat.ValueProgress.String())
 	}()
+	var txnfromb, txntob []byte
+	binary.BigEndian.PutUint64(txnfromb, txFrom)
+	binary.BigEndian.PutUint64(txntob, txTo)
 	if prevStat.KeyProgress != Done {
-		txnb := common.Copy(keyCursorPosition.StartKey)
 		// This deletion iterator goes last to preserve invariant: if some `txNum=N` pruned - it's pruned Fully
-		for ; txnb != nil; txnb, _, err = keysCursor.NextNoDup() {
-			if err != nil {
-				return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
-			}
-			if time.Since(start) > timeOut {
-				stat.LastPrunedKey = common.Copy(txnb)
-				stat.KeyProgress = InProgress
-				return stat, nil
-			}
-			txNum := binary.BigEndian.Uint64(txnb)
-			if txNum >= txTo {
-				break
-			}
-			stat.PruneCountTx++
-			dups, err := keysCursor.CountDuplicates()
-			if err != nil {
-				return nil, err
-			}
-			pairs += dups
-			if throttling != nil {
-				time.Sleep(*throttling)
-			}
-			//println("key", hex.EncodeToString(txnb), "value", hex.EncodeToString(val))
-			if err = keysCursor.DeleteCurrentDuplicates(); err != nil {
-				return nil, err
-			}
+		n, err := keysCursor.DeleteRange(txnfromb, txntob)
+		if err != nil {
+			return nil, err
 		}
+		stat.PruneCountTx += uint64(n)
+		pairs += uint64(n)
 	}
 
 	stat.KeyProgress = Done
@@ -349,36 +326,69 @@ func TableScanningPrune(
 			}
 			stat.PruneCountValues += dups
 		} else {
-			for ; txNumBytes != nil; _, txNumBytes, err = valDelCursor.NextDup() {
-				if err != nil {
-					return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
+			if mode != KeyStorageMode && mode != StepKeyStorageMode {
+				var n int64
+				if mode == StepValueStorageMode {
+					txNumToStepVal := func(txNum, stepSize uint64) []byte {
+						step := txNum / stepSize
+						buf := make([]byte, 8)
+						binary.BigEndian.PutUint64(buf, ^step)
+						return buf
+					}
+
+					valFrom := txNumToStepVal(txTo, stepSize)
+					valTo := txNumToStepVal(txFrom, stepSize)
+
+					n, err = valDelCursor.DeleteDupRange(txNumBytes, valFrom, valTo)
+					if err != nil {
+						return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
+					}
+				} else {
+					n, err = valDelCursor.DeleteDupRange(txNumBytes, txnfromb, txntob)
+					if err != nil {
+						return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
+					}
 				}
-				txNumDup := txNumGetter(val, txNumBytes)
-				//println("txnum in loop", txNumDup)
-				if txNumDup < txFrom {
-					continue
-				}
-				if txNumDup >= txTo {
-					break
-				}
-				if throttling != nil {
-					time.Sleep(*throttling)
-				}
+				stat.PruneCountValues += uint64(n)
 				if time.Since(start) > timeOut {
 					stat.LastPrunedValue = common.Copy(val)
 					stat.ValueProgress = InProgress
 					return stat, nil
 				}
-				//println("txnum passed checks loop", txNumDup)
+			} else {
+				for ; txNumBytes != nil; _, txNumBytes, err = valDelCursor.NextDup() {
+					if err != nil {
+						return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
+					}
+					txNumDup := txNumGetter(val, txNumBytes)
+					if time.Since(start) > timeOut {
+						stat.LastPrunedValue = common.Copy(val)
+						stat.ValueProgress = InProgress
+						return stat, nil
+					}
+					//println("txnum in loop", txNumDup)
+					if txNumDup < txFrom {
+						continue
+					}
+					if txNumDup >= txTo {
+						break
+					}
+					if throttling != nil {
+						time.Sleep(*throttling)
+					}
 
-				stat.MinTxNum = min(stat.MinTxNum, txNumDup)
-				stat.MaxTxNum = max(stat.MaxTxNum, txNumDup)
-				//println("deleted loop", hex.EncodeToString(val))
-				if err = valDelCursor.DeleteCurrent(); err != nil {
-					return nil, err
+					//println("txnum passed checks loop", txNumDup)
+
+					stat.MinTxNum = min(stat.MinTxNum, txNumDup)
+					stat.MaxTxNum = max(stat.MaxTxNum, txNumDup)
+					//println("deleted loop", hex.EncodeToString(val))
+					if err = valDelCursor.DeleteCurrent(); err != nil {
+						return nil, err
+					}
+					stat.PruneCountValues++
 				}
-				stat.PruneCountValues++
 			}
+
 		}
 
 		select {
