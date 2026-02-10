@@ -1,0 +1,80 @@
+name: Native Windows build (docs verification)
+
+on:
+  push:
+    branches: [main, 'release/**']
+  pull_request:
+    branches: ['**']
+    types: [opened, reopened, synchronize, ready_for_review]
+  workflow_dispatch:
+
+jobs:
+  native-win-build:
+    runs-on: windows-2025
+    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
+    steps:
+      - name: Configure Pagefile
+        uses: al-cheb/configure-pagefile-action@v1.5
+        with:
+          minimum-size: 8GB
+          disk-root: "C:"
+
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Install build tools per docs
+        run: choco install cmake make mingw -y
+
+      - name: Restrict PATH to documented prerequisites only
+        shell: bash
+        run: |
+          # Build a minimal PATH from only the documented prerequisites:
+          # - Go (from setup-go)
+          # - Git for Windows (provides bash + MSYS2 utils)
+          # - Chocolatey-installed tools (cmake, make, mingw)
+          # - Essential Windows system directories
+          GOROOT="$(go env GOROOT)"
+          GOPATH="$(go env GOPATH)"
+          GIT_DIR="$(dirname "$(dirname "$(which git)")")"
+          NEW_PATH=""
+          NEW_PATH+="${GOROOT}/bin:"
+          NEW_PATH+="${GOPATH}/bin:"
+          NEW_PATH+="${GIT_DIR}/bin:"          # git + bash
+          NEW_PATH+="${GIT_DIR}/usr/bin:"      # MSYS2 utils (cut, uname, rm, grep, tee, etc.)
+          NEW_PATH+="/c/ProgramData/chocolatey/bin:"
+          NEW_PATH+="/c/ProgramData/chocolatey/lib/mingw/tools/install/mingw64/bin:"
+          NEW_PATH+="/c/ProgramData/chocolatey/lib/make/tools/install/bin:"
+          NEW_PATH+="/c/ProgramData/chocolatey/lib/cmake/tools/cmake-*/bin:"
+          NEW_PATH+="/c/Windows/System32:"
+          NEW_PATH+="/c/Windows:"
+          echo "PATH=${NEW_PATH}" >> "$GITHUB_ENV"
+
+      - name: Verify only documented tools are available
+        shell: bash
+        run: |
+          echo "go:    $(go version)"
+          echo "git:   $(git --version)"
+          echo "make:  $(make --version | head -1)"
+          echo "gcc:   $(gcc --version | head -1)"
+          echo "bash:  $(bash --version | head -1)"
+
+      - name: Build erigon (make erigon)
+        shell: bash
+        run: make erigon
+
+      - name: Verify erigon.exe exists
+        shell: bash
+        run: test -f ./build/bin/erigon.exe
+
+      - name: Build all targets (make all)
+        shell: bash
+        run: make all
+
+      - name: Run short tests
+        shell: bash
+        run: make test-short
