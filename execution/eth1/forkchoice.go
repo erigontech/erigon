@@ -396,6 +396,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 				sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 				return
 			}
+			// make sure we truncate any previous canonical hashes that go beyond the current head height
+			// so that AppendCanonicalTxNums does not mess up the txNums index
+			if err := rawdb.TruncateCanonicalHash(tx, newCanonicals[0].number+1, false); err != nil {
+				sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+				return
+			}
 			if err := rawdb.AppendCanonicalTxNums(tx, newCanonicals[len(newCanonicals)-1].number); err != nil {
 				sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 				return
