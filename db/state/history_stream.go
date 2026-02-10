@@ -399,6 +399,7 @@ type HistoryChangesIterFiles struct {
 	k, v, kBackup, vBackup []byte
 	err                    error
 	limit                  int
+	skipValues             bool
 }
 
 func (hi *HistoryChangesIterFiles) Close() {
@@ -429,6 +430,9 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		}
 
 		hi.nextKey = key
+		if hi.skipValues {
+			return nil
+		}
 		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
 		historyItem, ok := hi.hc.getFileDeprecated(top.startTxNum, top.endTxNum)
 		if !ok {
@@ -496,6 +500,296 @@ func (hi *HistoryChangesIterFiles) Next() ([]byte, []byte, error) {
 	return hi.kBackup, hi.vBackup, nil
 }
 
+// HistoryKeyTxNumIterFiles emits (key, txNum_be8) for every txNum at which a key changed.
+// Unlike HistoryChangesIterFiles, it does not dedup across files and emits all txNums per key.
+type HistoryKeyTxNumIterFiles struct {
+	nextVal    []byte
+	nextKey    []byte
+	h          ReconHeap
+	startTxNum uint64
+	endTxNum   int
+	txnKey     [8]byte
+
+	k, v, kBackup, vBackup []byte
+	err                    error
+	limit                  int
+
+	curKey    []byte
+	curIdxVal []byte
+	curSeq    multiencseq.SequenceReader
+	curTxIter stream.U64
+}
+
+func (hi *HistoryKeyTxNumIterFiles) Close() {
+	if hi.curTxIter != nil {
+		hi.curTxIter.Close()
+		hi.curTxIter = nil
+	}
+}
+
+func (hi *HistoryKeyTxNumIterFiles) advance() error {
+	for {
+		// If we have an active txNum iterator, try to get the next txNum
+		if hi.curTxIter != nil && hi.curTxIter.HasNext() {
+			txNum, err := hi.curTxIter.Next()
+			if err != nil {
+				return err
+			}
+			if hi.endTxNum < 0 || int(txNum) < hi.endTxNum {
+				hi.nextKey = hi.curKey
+				binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
+				hi.nextVal = hi.txnKey[:]
+				return nil
+			}
+			// txNum >= endTxNum, fall through to get next key
+		}
+
+		// Pop the next key from the heap
+		if hi.h.Len() == 0 {
+			hi.nextKey = nil
+			return nil
+		}
+
+		top := heap.Pop(&hi.h).(*ReconItem)
+		key, idxVal := top.key, top.val
+
+		if top.g.HasNext() {
+			var err error
+			top.key, top.val, err = top.g.Next()
+			if err != nil {
+				return err
+			}
+			heap.Push(&hi.h, top)
+		}
+
+		// Clone key and idxVal since segment reader reuses buffers
+		hi.curKey = append(hi.curKey[:0], key...)
+		hi.curIdxVal = append(hi.curIdxVal[:0], idxVal...)
+
+		hi.curSeq.Reset(top.startTxNum, hi.curIdxVal)
+		hi.curTxIter = hi.curSeq.Iterator(int(hi.startTxNum))
+	}
+}
+
+func (hi *HistoryKeyTxNumIterFiles) HasNext() bool {
+	if hi.err != nil { // always true, then .Next() call will return this error
+		return true
+	}
+	if hi.limit == 0 { // limit reached
+		return false
+	}
+	if hi.nextKey == nil { // EndOfTable
+		return false
+	}
+	return true
+}
+
+func (hi *HistoryKeyTxNumIterFiles) Next() ([]byte, []byte, error) {
+	if hi.err != nil {
+		return nil, nil, hi.err
+	}
+	hi.limit--
+	hi.k, hi.v = append(hi.k[:0], hi.nextKey...), append(hi.v[:0], hi.nextVal...)
+
+	// Satisfy iter.Duo Invariant 2
+	hi.k, hi.kBackup, hi.v, hi.vBackup = hi.kBackup, hi.k, hi.vBackup, hi.v
+	if err := hi.advance(); err != nil {
+		return nil, nil, err
+	}
+	return hi.kBackup, hi.vBackup, nil
+}
+
+// HistoryKeyTxNumIterDB emits (key, txNum_be8) for every txNum at which a key changed in the DB.
+// Unlike HistoryChangesIterDB, it iterates ALL dups per key (not just the first one).
+type HistoryKeyTxNumIterDB struct {
+	largeValues     bool
+	roTx            kv.Tx
+	valsC           kv.Cursor
+	valsCDup        kv.CursorDupSort
+	valsTable       string
+	limit, endTxNum int
+	startTxKey      [8]byte
+
+	nextKey, nextVal []byte
+	k, v             []byte
+	err              error
+}
+
+func (hi *HistoryKeyTxNumIterDB) Close() {
+	if hi.valsC != nil {
+		hi.valsC.Close()
+	}
+	if hi.valsCDup != nil {
+		hi.valsCDup.Close()
+	}
+}
+
+func (hi *HistoryKeyTxNumIterDB) setNextTxNum(k []byte, txNum uint64) {
+	hi.nextKey = common.Copy(k)
+	hi.nextVal = make([]byte, 8)
+	binary.BigEndian.PutUint64(hi.nextVal, txNum)
+}
+
+func (hi *HistoryKeyTxNumIterDB) advance() error {
+	if hi.largeValues {
+		return hi.advanceLargeVals()
+	}
+	return hi.advanceSmallVals()
+}
+
+func (hi *HistoryKeyTxNumIterDB) seekNextSmallKey(k []byte) error {
+	for k != nil {
+		v, err := hi.valsCDup.SeekBothRange(k, hi.startTxKey[:])
+		if err != nil {
+			return err
+		}
+		if v != nil {
+			txNum := binary.BigEndian.Uint64(v[:8])
+			if hi.endTxNum < 0 || int(txNum) < hi.endTxNum {
+				hi.setNextTxNum(k, txNum)
+				return nil
+			}
+		}
+		var err2 error
+		k, _, err2 = hi.valsCDup.NextNoDup()
+		if err2 != nil {
+			return err2
+		}
+	}
+	hi.nextKey = nil
+	return nil
+}
+
+func (hi *HistoryKeyTxNumIterDB) advanceSmallVals() error {
+	var err error
+	if hi.valsCDup == nil {
+		if hi.valsCDup, err = hi.roTx.CursorDupSort(hi.valsTable); err != nil {
+			return err
+		}
+		k, _, err := hi.valsCDup.First()
+		if err != nil {
+			return err
+		}
+		return hi.seekNextSmallKey(k)
+	}
+
+	// Try next dup for current key
+	k, v, err := hi.valsCDup.NextDup()
+	if err != nil {
+		return err
+	}
+	if v != nil {
+		txNum := binary.BigEndian.Uint64(v[:8])
+		if hi.endTxNum < 0 || int(txNum) < hi.endTxNum {
+			hi.setNextTxNum(k, txNum)
+			return nil
+		}
+	}
+	// Move to next key
+	k, _, err = hi.valsCDup.NextNoDup()
+	if err != nil {
+		return err
+	}
+	return hi.seekNextSmallKey(k)
+}
+
+func (hi *HistoryKeyTxNumIterDB) advanceLargeVals() error {
+	var err error
+	if hi.valsC == nil {
+		if hi.valsC, err = hi.roTx.Cursor(hi.valsTable); err != nil {
+			return err
+		}
+		k, _, err := hi.valsC.First()
+		if err != nil {
+			return err
+		}
+		if k == nil {
+			hi.nextKey = nil
+			return nil
+		}
+		seek := append(common.Copy(k[:len(k)-8]), hi.startTxKey[:]...)
+		k, _, err = hi.valsC.Seek(seek)
+		if err != nil {
+			return err
+		}
+		return hi.scanLargeVals(k)
+	}
+
+	k, _, err := hi.valsC.Next()
+	if err != nil {
+		return err
+	}
+	if k == nil {
+		hi.nextKey = nil
+		return nil
+	}
+	// If we moved to a new key prefix, re-seek to startTxKey for that prefix
+	if hi.nextKey != nil && !bytes.Equal(k[:len(k)-8], hi.nextKey) {
+		seek := append(common.Copy(k[:len(k)-8]), hi.startTxKey[:]...)
+		k, _, err = hi.valsC.Seek(seek)
+		if err != nil {
+			return err
+		}
+	}
+	return hi.scanLargeVals(k)
+}
+
+func (hi *HistoryKeyTxNumIterDB) scanLargeVals(k []byte) error {
+	for k != nil {
+		txNum := binary.BigEndian.Uint64(k[len(k)-8:])
+		if hi.endTxNum >= 0 && int(txNum) >= hi.endTxNum {
+			next, ok := kv.NextSubtree(k[:len(k)-8])
+			if !ok {
+				hi.nextKey = nil
+				return nil
+			}
+			seek := append(next, hi.startTxKey[:]...)
+			var err error
+			k, _, err = hi.valsC.Seek(seek)
+			if err != nil {
+				return err
+			}
+			continue
+		}
+		// If txNum < startTxKey, skip to startTxKey for this key prefix
+		if txNum < binary.BigEndian.Uint64(hi.startTxKey[:]) {
+			seek := append(common.Copy(k[:len(k)-8]), hi.startTxKey[:]...)
+			var err error
+			k, _, err = hi.valsC.Seek(seek)
+			if err != nil {
+				return err
+			}
+			continue
+		}
+		hi.setNextTxNum(k[:len(k)-8], txNum)
+		return nil
+	}
+	hi.nextKey = nil
+	return nil
+}
+
+func (hi *HistoryKeyTxNumIterDB) HasNext() bool {
+	if hi.err != nil {
+		return true
+	}
+	if hi.limit == 0 {
+		return false
+	}
+	return hi.nextKey != nil
+}
+
+func (hi *HistoryKeyTxNumIterDB) Next() ([]byte, []byte, error) {
+	if hi.err != nil {
+		return nil, nil, hi.err
+	}
+	hi.limit--
+	hi.k, hi.v = hi.nextKey, hi.nextVal
+	if err := hi.advance(); err != nil {
+		return nil, nil, err
+	}
+	return hi.k, hi.v, nil
+}
+
 type HistoryChangesIterDB struct {
 	largeValues     bool
 	roTx            kv.Tx
@@ -508,6 +802,7 @@ type HistoryChangesIterDB struct {
 	nextKey, nextVal []byte
 	k, v             []byte
 	err              error
+	skipValues       bool
 }
 
 func (hi *HistoryChangesIterDB) Close() {
@@ -595,7 +890,11 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 			continue
 		}
 		hi.nextKey = k[:len(k)-8]
-		hi.nextVal = v
+		if hi.skipValues {
+			hi.nextVal = nil
+		} else {
+			hi.nextVal = v
+		}
 		return nil
 	}
 	hi.nextKey = nil
@@ -636,7 +935,11 @@ func (hi *HistoryChangesIterDB) advanceSmallVals() (err error) {
 		foundTxNumVal := v[:8]
 		if hi.endTxNum < 0 || int(binary.BigEndian.Uint64(foundTxNumVal)) < hi.endTxNum {
 			hi.nextKey = k
-			hi.nextVal = v[8:]
+			if hi.skipValues {
+				hi.nextVal = nil
+			} else {
+				hi.nextVal = v[8:]
+			}
 			return nil
 		}
 		k, _, err = hi.valsCDup.NextNoDup()
