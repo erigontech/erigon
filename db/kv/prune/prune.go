@@ -119,7 +119,6 @@ func HashSeekingPrune(
 	err = collector.Load(nil, "", func(key, txnm []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		switch mode {
 		case KeyStorageMode:
-			//seek := make([]byte, 8, 256)
 			seek := append(bytes.Clone(key), txnm...)
 			if err := valDelCursor.Delete(seek); err != nil {
 				return err
@@ -229,21 +228,22 @@ func TableScanningPrune(
 		_, keyCursorPosition.StartVal, err = keysCursor.Seek(prevStat.LastPrunedKey) //nolint:govet
 	}
 
-	var pairs, valLen uint64
+	var pairs uint64
 
 	defer func() {
 		logger.Debug("scan pruning res", "name", name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys",
-			stat.PruneCountTx, "vals", stat.PruneCountValues, "all vals", valLen, "dups", stat.DupsDeleted,
+			stat.PruneCountTx, "vals", stat.PruneCountValues, "dups", stat.DupsDeleted,
 			"spent ms", time.Since(start).Milliseconds(),
 			"key prune status", stat.KeyProgress.String(),
 			"val prune status", stat.ValueProgress.String())
 	}()
-	var txnfromb, txntob []byte
-	binary.BigEndian.PutUint64(txnfromb, txFrom)
-	binary.BigEndian.PutUint64(txntob, txTo)
+
+	var txnfromb, txntob [8]byte
+	binary.BigEndian.PutUint64(txnfromb[:], txFrom)
+	binary.BigEndian.PutUint64(txntob[:], txTo)
 	if prevStat.KeyProgress != Done {
 		// This deletion iterator goes last to preserve invariant: if some `txNum=N` pruned - it's pruned Fully
-		n, err := keysCursor.DeleteRange(txnfromb, txntob)
+		n, err := keysCursor.DeleteRange(txnfromb[:], txntob[:])
 		if err != nil {
 			return nil, err
 		}
@@ -258,40 +258,43 @@ func TableScanningPrune(
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
 	txNumBytes, val := common.Copy(valCursorPosition.StartKey), common.Copy(valCursorPosition.StartVal)
 
-	txNumGetter := func(key, val []byte) uint64 { // key == valCursor key, val – usually txnum
-		switch mode {
-		case KeyStorageMode:
-			return binary.BigEndian.Uint64(key[len(key)-8:])
-		case PrefixValStorageMode:
-			return binary.BigEndian.Uint64(val)
-		case StepValueStorageMode:
-			return kv.Step(^binary.BigEndian.Uint64(val)).ToTxNum(stepSize)
-		case StepKeyStorageMode:
-			return kv.Step(^binary.BigEndian.Uint64(key[len(key)-8:])).ToTxNum(stepSize)
-		case DefaultStorageMode:
-			return binary.BigEndian.Uint64(val)
-
-		default:
-			return 0
-		}
+	// Pre-compute step values for StepValueStorageMode to avoid per-iteration allocations
+	var stepValFrom, stepValTo [8]byte
+	if mode == StepValueStorageMode {
+		binary.BigEndian.PutUint64(stepValFrom[:], ^(txTo / stepSize))
+		binary.BigEndian.PutUint64(stepValTo[:], ^(txFrom / stepSize))
 	}
+
+	// Use iteration counter to amortize time.Since syscall cost
+	const timeCheckInterval = 128
+	var iterCount uint64
+
 	for ; val != nil; val, txNumBytes, err = valDelCursor.NextNoDup() {
 		if err != nil {
 			return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 		}
-		dups, err := valDelCursor.CountDuplicates() //TODO: delete when analytics would be ready
-		if err != nil {
-			return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
-		}
-		valLen += dups
-		if time.Since(start) > timeOut {
+
+		iterCount++
+		if iterCount&(timeCheckInterval-1) == 0 && time.Since(start) > timeOut {
 			stat.LastPrunedValue = common.Copy(val)
 			stat.ValueProgress = InProgress
 			return stat, nil
 		}
 
-		txNum := txNumGetter(val, txNumBytes)
-		//println("txnum first", txNum, txFrom, txTo)
+		var txNum uint64
+		switch mode {
+		case KeyStorageMode:
+			txNum = binary.BigEndian.Uint64(val[len(val)-8:])
+		case PrefixValStorageMode:
+			txNum = binary.BigEndian.Uint64(txNumBytes)
+		case StepValueStorageMode:
+			txNum = kv.Step(^binary.BigEndian.Uint64(txNumBytes)).ToTxNum(stepSize)
+		case StepKeyStorageMode:
+			txNum = kv.Step(^binary.BigEndian.Uint64(val[len(val)-8:])).ToTxNum(stepSize)
+		default: // DefaultStorageMode
+			txNum = binary.BigEndian.Uint64(txNumBytes)
+		}
+
 		lastDupTxNumB, err := valDelCursor.LastDup()
 		if err != nil {
 			return nil, fmt.Errorf("LastDup iterate over %s index keys: %w", filenameBase, err)
@@ -300,8 +303,21 @@ func TableScanningPrune(
 		if err != nil {
 			return nil, fmt.Errorf("FirstDup iterate over %s index keys: %w", filenameBase, err)
 		}
-		lastDupTxNum := txNumGetter(val, lastDupTxNumB)
-		//println("txnum last", lastDupTxNum)
+
+		var lastDupTxNum uint64
+		switch mode {
+		case KeyStorageMode:
+			lastDupTxNum = binary.BigEndian.Uint64(val[len(val)-8:])
+		case PrefixValStorageMode:
+			lastDupTxNum = binary.BigEndian.Uint64(lastDupTxNumB)
+		case StepValueStorageMode:
+			lastDupTxNum = kv.Step(^binary.BigEndian.Uint64(lastDupTxNumB)).ToTxNum(stepSize)
+		case StepKeyStorageMode:
+			lastDupTxNum = kv.Step(^binary.BigEndian.Uint64(val[len(val)-8:])).ToTxNum(stepSize)
+		default:
+			lastDupTxNum = binary.BigEndian.Uint64(lastDupTxNumB)
+		}
+
 		if txNum >= txTo {
 			continue
 		}
@@ -316,7 +332,10 @@ func TableScanningPrune(
 			if throttling != nil {
 				time.Sleep(*throttling)
 			}
-			//println("deleted", hex.EncodeToString(val), txNumGetter(val, txNumBytes), dups)
+			dups, err := valDelCursor.CountDuplicates()
+			if err != nil {
+				return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
+			}
 			err = valDelCursor.DeleteCurrentDuplicates()
 			if err != nil {
 				return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
@@ -329,28 +348,19 @@ func TableScanningPrune(
 			if mode != KeyStorageMode && mode != StepKeyStorageMode {
 				var n int64
 				if mode == StepValueStorageMode {
-					txNumToStepVal := func(txNum, stepSize uint64) []byte {
-						step := txNum / stepSize
-						buf := make([]byte, 8)
-						binary.BigEndian.PutUint64(buf, ^step)
-						return buf
-					}
-
-					valFrom := txNumToStepVal(txTo, stepSize)
-					valTo := txNumToStepVal(txFrom, stepSize)
-
-					n, err = valDelCursor.DeleteDupRange(txNumBytes, valFrom, valTo)
+					n, err = valDelCursor.DeleteDupRange(txNumBytes, stepValFrom[:], stepValTo[:])
 					if err != nil {
 						return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 					}
 				} else {
-					n, err = valDelCursor.DeleteDupRange(val, txnfromb, txntob)
+					n, err = valDelCursor.DeleteDupRange(val, txnfromb[:], txntob[:])
 					if err != nil {
 						return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 					}
 				}
 				stat.PruneCountValues += uint64(n)
-				if time.Since(start) > timeOut {
+				iterCount++
+				if iterCount&(timeCheckInterval-1) == 0 && time.Since(start) > timeOut {
 					stat.LastPrunedValue = common.Copy(val)
 					stat.ValueProgress = InProgress
 					return stat, nil
@@ -360,13 +370,21 @@ func TableScanningPrune(
 					if err != nil {
 						return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 					}
-					txNumDup := txNumGetter(val, txNumBytes)
-					if time.Since(start) > timeOut {
+
+					var txNumDup uint64
+					switch mode {
+					case KeyStorageMode:
+						txNumDup = binary.BigEndian.Uint64(val[len(val)-8:])
+					default: // StepKeyStorageMode
+						txNumDup = kv.Step(^binary.BigEndian.Uint64(val[len(val)-8:])).ToTxNum(stepSize)
+					}
+
+					iterCount++
+					if iterCount&(timeCheckInterval-1) == 0 && time.Since(start) > timeOut {
 						stat.LastPrunedValue = common.Copy(val)
 						stat.ValueProgress = InProgress
 						return stat, nil
 					}
-					//println("txnum in loop", txNumDup)
 					if txNumDup < txFrom {
 						continue
 					}
@@ -377,11 +395,8 @@ func TableScanningPrune(
 						time.Sleep(*throttling)
 					}
 
-					//println("txnum passed checks loop", txNumDup)
-
 					stat.MinTxNum = min(stat.MinTxNum, txNumDup)
 					stat.MaxTxNum = max(stat.MaxTxNum, txNumDup)
-					//println("deleted loop", hex.EncodeToString(val))
 					if err = valDelCursor.DeleteCurrent(); err != nil {
 						return nil, err
 					}
