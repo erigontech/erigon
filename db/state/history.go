@@ -28,10 +28,11 @@ import (
 	"strings"
 	"time"
 
-	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/prune"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
+
+	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/prune"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -275,6 +276,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	rs.LogLvl(log.LvlTrace)
 
 	seq := &multiencseq.SequenceReader{}
+	var seqIt multiencseq.SequenceIterator
 
 	i := 0
 	for {
@@ -290,7 +292,8 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 			// fmt.Printf("ef key %x\n", keyBuf)
 
 			seq.Reset(efBaseTxNum, valBuf)
-			it := seq.Iterator(0)
+			seqIt.Reset(seq, 0)
+			it := &seqIt
 			for it.HasNext() {
 				txNum, err := it.Next()
 				if err != nil {

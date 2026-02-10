@@ -188,3 +188,41 @@ func (s *SequenceReader) ReverseIterator(v int) stream.U64 {
 
 	panic(fmt.Sprintf("unknown sequence encoding: %d", s.currentEnc))
 }
+
+// SequenceIterator is a reusable iterator for SequenceReader.
+// Create as a value and call Reset() to (re)initialize — avoids heap allocation
+// for SimpleEncoding (the common case).
+//
+//	var it multiencseq.SequenceIterator
+//	for ... {
+//	    seq.Reset(baseNum, data)
+//	    it.Reset(seq, 0)
+//	    for it.HasNext() { v, _ := it.Next() }
+//	}
+type SequenceIterator struct {
+	sseqIt  simpleseq.SimpleSequenceIterator
+	current stream.U64
+}
+
+func (it *SequenceIterator) Reset(s *SequenceReader, from int) {
+	switch s.currentEnc {
+	case SimpleEncoding:
+		it.sseqIt.Reset(&s.sseq)
+		if from > 0 {
+			it.sseqIt.Seek(uint64(from))
+		}
+		it.current = &it.sseqIt
+	case PlainEliasFano, RebasedEliasFano:
+		refIt := s.ref.Iterator()
+		if from > 0 {
+			refIt.Seek(uint64(from))
+		}
+		it.current = refIt
+	default:
+		panic(fmt.Sprintf("unknown sequence encoding: %d", s.currentEnc))
+	}
+}
+
+func (it *SequenceIterator) HasNext() bool         { return it.current.HasNext() }
+func (it *SequenceIterator) Next() (uint64, error) { return it.current.Next() }
+func (it *SequenceIterator) Close()                {}
