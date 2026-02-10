@@ -160,47 +160,119 @@ func TestIndexLookup(t *testing.T) {
 	})
 }
 
-func BenchmarkBuild(b *testing.B) {
-	b.ReportAllocs()
-	logger := log.New()
-	tmpDir := b.TempDir()
-	salt := uint32(1)
-	const KeysN = 1_000_000
+func TestFindBijection(t *testing.T) {
+	// Build a small bucket of murmur3-hashed keys
+	bucket := make([]uint64, 8)
+	for i := range bucket {
+		key := fmt.Appendf(nil, "bij_key_%d", i)
+		_, lo := murmur3.Sum128WithSeed(key, 1)
+		bucket[i] = lo
+	}
 
-	// Pre-allocate all keys outside the benchmark loop
-	keys := make([][]byte, KeysN)
-	for j := 0; j < KeysN; j++ {
-		keys[j] = fmt.Appendf(nil, "key %d", j)
+	salt := findBijection(bucket, 0)
+
+	// Verify: every key maps to a distinct position in [0, m)
+	m := uint16(len(bucket))
+	seen := make(map[uint16]bool)
+	for _, key := range bucket {
+		pos := remap16(remix(key+salt), m)
+		assert.Less(t, pos, m)
+		assert.False(t, seen[pos], "duplicate position %d", pos)
+		seen[pos] = true
 	}
-	b.ResetTimer()
-	for i := 0; b.Loop(); i++ {
-		b.StopTimer()
-		indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_%d", i))
-		rs, err := NewRecSplit(RecSplitArgs{
-			KeyCount:   KeysN,
-			BucketSize: 2000,
-			Salt:       &salt,
-			TmpDir:     tmpDir,
-			IndexFile:  indexFile,
-			LeafSize:   8,
-			NoFsync:    true,
-		}, logger)
-		if err != nil {
-			b.Fatal(err)
-		}
-		for j := 0; j < KeysN; j++ {
-			if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
-				b.Fatal(err)
+	assert.Equal(t, int(m), len(seen))
+}
+
+func TestFindBijectionSmallBuckets(t *testing.T) {
+	for size := 1; size <= 8; size++ {
+		t.Run(fmt.Sprintf("size_%d", size), func(t *testing.T) {
+			bucket := make([]uint64, size)
+			for i := range bucket {
+				key := fmt.Appendf(nil, "small_%d_%d", size, i)
+				_, lo := murmur3.Sum128WithSeed(key, 1)
+				bucket[i] = lo
 			}
-		}
-		b.StartTimer()
-		if err := rs.Build(context.Background()); err != nil {
-			b.Fatal(err)
-		}
-		b.StopTimer()
-		rs.Close()
-		b.StartTimer()
+
+			salt := findBijection(bucket, 0)
+
+			m := uint16(size)
+			seen := make(map[uint16]bool)
+			for _, key := range bucket {
+				pos := remap16(remix(key+salt), m)
+				assert.False(t, seen[pos], "duplicate position %d for size %d", pos, size)
+				seen[pos] = true
+			}
+			assert.Equal(t, size, len(seen))
+		})
 	}
+}
+
+func TestFindSplit(t *testing.T) {
+	const (
+		leafSize           = uint16(8)
+		primaryAggrBound   = uint16(32)
+		secondaryAggrBound = uint16(96)
+	)
+
+	// Build a bucket at the primary aggregation level (32 keys)
+	const m = primaryAggrBound
+	bucket := make([]uint64, m)
+	for i := range bucket {
+		key := fmt.Appendf(nil, "split_key_%d", i)
+		_, lo := murmur3.Sum128WithSeed(key, 1)
+		bucket[i] = lo
+	}
+
+	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
+	count := make([]uint16, secondaryAggrBound)
+
+	salt := findSplit(bucket, 0, fanout, unit, count)
+
+	// Verify: each partition gets exactly 'unit' keys (except possibly the last)
+	partitionCounts := make([]uint16, fanout)
+	for _, key := range bucket {
+		j := remap16(remix(key+salt), m) / unit
+		partitionCounts[j]++
+	}
+	for i := uint16(0); i < fanout-1; i++ {
+		assert.Equal(t, unit, partitionCounts[i], "partition %d should have %d keys", i, unit)
+	}
+	// Last partition gets the remainder
+	remainder := m - unit*(fanout-1)
+	assert.Equal(t, remainder, partitionCounts[fanout-1], "last partition should have %d keys", remainder)
+}
+
+func TestFindSplitSecondaryAggr(t *testing.T) {
+	const (
+		leafSize           = uint16(8)
+		primaryAggrBound   = uint16(32)
+		secondaryAggrBound = uint16(96)
+	)
+
+	// Bucket at secondary aggregation level (64 keys, between 32 and 96)
+	const m = uint16(64)
+	bucket := make([]uint64, m)
+	for i := range bucket {
+		key := fmt.Appendf(nil, "sec_split_%d", i)
+		_, lo := murmur3.Sum128WithSeed(key, 1)
+		bucket[i] = lo
+	}
+
+	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
+	count := make([]uint16, secondaryAggrBound)
+
+	salt := findSplit(bucket, 0, fanout, unit, count)
+
+	partitionCounts := make([]uint16, fanout)
+	for _, key := range bucket {
+		j := remap16(remix(key+salt), m) / unit
+		partitionCounts[j]++
+	}
+	for i := uint16(0); i < fanout-1; i++ {
+		assert.Equal(t, unit, partitionCounts[i], "partition %d should have %d keys", i, unit)
+	}
+	remainder := m - unit*(fanout-1)
+	assert.Equal(t, remainder, partitionCounts[fanout-1])
 }
 
 func BenchmarkFindSplit(b *testing.B) {
@@ -261,6 +333,48 @@ func BenchmarkFindBijection(b *testing.B) {
 	}
 }
 
+func BenchmarkBuild(b *testing.B) {
+	b.ReportAllocs()
+	logger := log.New()
+	tmpDir := b.TempDir()
+	salt := uint32(1)
+	const KeysN = 1_000_000
+
+	// Pre-allocate all keys outside the benchmark loop
+	keys := make([][]byte, KeysN)
+	for j := 0; j < KeysN; j++ {
+		keys[j] = fmt.Appendf(nil, "key %d", j)
+	}
+	b.ResetTimer()
+	for i := 0; b.Loop(); i++ {
+		b.StopTimer()
+		indexFile := filepath.Join(tmpDir, fmt.Sprintf("index_%d", i))
+		rs, err := NewRecSplit(RecSplitArgs{
+			KeyCount:   KeysN,
+			BucketSize: 2000,
+			Salt:       &salt,
+			TmpDir:     tmpDir,
+			IndexFile:  indexFile,
+			LeafSize:   8,
+			NoFsync:    true,
+		}, logger)
+		if err != nil {
+			b.Fatal(err)
+		}
+		for j := 0; j < KeysN; j++ {
+			if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.StartTimer()
+		if err := rs.Build(context.Background()); err != nil {
+			b.Fatal(err)
+		}
+		b.StopTimer()
+		rs.Close()
+		b.StartTimer()
+	}
+}
 func BenchmarkAddKeyAndBuild(b *testing.B) {
 	b.ReportAllocs()
 	logger := log.New()
