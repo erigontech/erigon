@@ -4,6 +4,11 @@ on:
     branches:
       - main
       - 'release/**'
+    paths-ignore:
+      - 'dashboards/**'
+      - '**/*.md'
+      - 'docs/**'
+      - '.github/workflows/backups-dashboards.yml'
   pull_request:
     branches:
       - '**'
@@ -12,6 +17,11 @@ on:
       - reopened
       - synchronize
       - ready_for_review
+    paths-ignore:
+      - 'dashboards/**'
+      - '**/*.md'
+      - 'docs/**'
+      - '.github/workflows/backups-dashboards.yml'
     
   workflow_dispatch:
 
