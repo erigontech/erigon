@@ -187,7 +187,7 @@ func (b *sortableBuffer) Sort() {
 	if sort.IsSorted(b) {
 		return
 	}
-	sort.Stable(b)
+	sort.Stable(b) // Can't use `sort.Sort` because this buffer type can produce duplicated values (of same key). And we must preserve their original order
 }
 
 func (b *sortableBuffer) CheckFlushSize() bool {
@@ -250,7 +250,7 @@ func (b *appendSortableBuffer) Sort() {
 	for key, val := range b.entries {
 		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(key), value: val})
 	}
-	sort.Stable(b)
+	sort.Sort(b) // Doesn't need `sort.Stable` because this buffer type can't produce duplicated values
 }
 
 func (b *appendSortableBuffer) Less(i, j int) bool {
@@ -352,7 +352,7 @@ func (b *oldestEntrySortableBuffer) Sort() {
 	for k, v := range b.entries {
 		b.sortedBuf = append(b.sortedBuf, sortableBufferEntry{key: []byte(k), value: v})
 	}
-	sort.Stable(b)
+	sort.Sort(b) // Doesn't need `sort.Stable` because this buffer type can't produce duplicated values
 }
 
 func (b *oldestEntrySortableBuffer) Less(i, j int) bool {
