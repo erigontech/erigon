@@ -52,6 +52,19 @@ func (e BlockNotFoundErr) Error() string {
 	return fmt.Sprintf("block %x not found", e.Hash)
 }
 
+func CheckBlockExecuted(tx kv.Tx, blockNumber uint64) error {
+	lastExecutedBlock, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+
+	if blockNumber > lastExecutedBlock {
+		return fmt.Errorf("block %d is not executed (last block: %d)", blockNumber, lastExecutedBlock)
+	}
+
+	return nil
+}
+
 func GetBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (uint64, common.Hash, bool, error) {
 	bn, bh, latest, found, err := _GetBlockNumber(ctx, blockNrOrHash.RequireCanonical, blockNrOrHash, tx, br, filters)
 	if err != nil {
@@ -195,7 +208,6 @@ type asOfView interface {
 
 func CreateHistoryCachedStateReader(ctx context.Context, cache kvcache.CacheView, tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
 	asOfView, ok := cache.(asOfView)
-
 	if !ok {
 		return nil, fmt.Errorf("%T does not implement GetAsOf at: %s", cache, dbg.Stack())
 	}

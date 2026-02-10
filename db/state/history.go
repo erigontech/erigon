@@ -1480,7 +1480,7 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 	return stream.UnionKV(itOnFiles, itOnDB, limit), nil
 }
 
-func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, dumpTo io.Writer) error {
+func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, dumpTo io.Writer) error {
 	if len(ht.iit.files) == 0 {
 		return nil
 	}
@@ -1505,6 +1505,10 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, dumpTo io.Writer) err
 		for efGetter.HasNext() {
 			key, _ := efGetter.Next(nil)
 			val, _ := efGetter.Next(nil) // encoded EF sequence
+
+			if keyToDump != nil && !bytes.Equal(key, *keyToDump) {
+				continue
+			}
 
 			seq := multiencseq.ReadMultiEncSeq(item.startTxNum, val)
 			ss := seq.Iterator(0)

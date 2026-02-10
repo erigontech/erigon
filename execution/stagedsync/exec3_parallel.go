@@ -257,7 +257,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						lastBlockResult = *applyResult
 					}
 
-					flushPending = pe.rs.SizeEstimate() > pe.cfg.batchSize.Bytes()
+					flushPending = pe.rs.SizeEstimateBeforeCommitment() > pe.cfg.batchSize.Bytes()
 
 					if !dbg.DiscardCommitment() {
 						if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||

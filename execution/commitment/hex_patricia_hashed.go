@@ -1529,7 +1529,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 
 				// Val will be set to HashNode with hash of branch node it points to when the current node is processed.
 				// Currently necessary, because the commented out code above which reads branch data and converts it
-				nextNode = &trie.ShortNode{Key: hashedExtKey}
+				nextNode = &trie.ShortNode{Key: common.Copy(hashedExtKey)}
 			} else {
 				keyPos += extKeyLength // jump ahead
 
@@ -1617,7 +1617,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				if err != nil {
 					return nil, err
 				}
-				fullNode.Children[col] = trie.NewHashNode(cellHash[1:]) // because cellHash has 33 bytes and we want 32
+				fullNode.Children[col] = trie.NewHashNode(common.Copy(cellHash[1:])) // because cellHash has 33 bytes and we want 32
 
 				if hph.trace {
 					fmt.Printf("[witness, pos %d] FullNodeChild Hash (%d, %0x, depth=%d) %s proof %+v\n", keyPos, row, col, hph.depths[row], currentCell.FullString(), fullNode.Children[col])
@@ -1628,7 +1628,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 			// and points to a branch node. In this case we just need to provide the hash of this branch node
 			if pathDivergenceFound {
 				terminalCell := &hph.grid[row][currentNibble]
-				nextNode.(*trie.ShortNode).Val = trie.NewHashNode(terminalCell.hash[:])
+				nextNode.(*trie.ShortNode).Val = trie.NewHashNode(common.Copy(terminalCell.hash[:]))
 			}
 			fullNode.Children[currentNibble] = nextNode // ready to expand next nibble in the path
 		} else if accNode, ok := currentNode.(*trie.AccountNode); ok {
@@ -1660,8 +1660,17 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 		// we need to check if we are dealing with the next node being an account node and we have a storage key,
 		// in that case start a new tree for the storage
 		if nextAccNode, ok := nextNode.(*trie.AccountNode); ok && len(hashedKey) > 64 {
+			// If the account has an empty storage root, stop traversal here.
+			// There's no storage trie to expand into, and continuing would incorporate
+			// garbage data from rows below the account into the proof.
+			if nextAccNode.Root == trie.EmptyRoot {
+				if hph.trace {
+					fmt.Printf("[witness] AccountNode (empty storage root, break) (%d, %0x, depth=%d) %s proof %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), nextAccNode)
+				}
+				break
+			}
 			if cellToExpand.hashedExtLen > 0 {
-				extKey := cellToExpand.hashedExtension[:cellToExpand.hashedExtLen]
+				extKey := common.Copy(cellToExpand.hashedExtension[:cellToExpand.hashedExtLen])
 				nextNode = &trie.ShortNode{Key: extKey}
 			} else {
 				nextNode = &trie.FullNode{}
@@ -1671,7 +1680,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				fmt.Printf("[witness] AccountNode (+StorageTrie) (%d, %0x, depth=%d) %s [proof %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), nextAccNode)
 			}
 			// we want to jump to the account's storage trie directly in this case
-		} else if nextShortNode, ok := nextNode.(*trie.ShortNode); ok && len(hashedKey) > 64 && keyPos+1 == 64 && cellToExpand.storageAddrLen > 0 {
+		} else if nextShortNode, ok := nextNode.(*trie.ShortNode); ok && len(hashedKey) > 64 && keyPos+1 == 64 {
 			// this is because there won't be an account cell stacked in the row below the current row in this case
 			// so the account cell will be skipped in the grid in this case
 			if nextAccNode, ok := nextShortNode.Val.(*trie.AccountNode); ok {
@@ -2464,7 +2473,9 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 
 		var tr *trie.Trie
 		if hph.trace {
-			fmt.Printf("\n%d/%d) witnessing [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
+			// de-nibblize for better printing
+			printableHashedKey, _ := CompactKey(hashedKey)
+			fmt.Printf("\n%d/%d) witnessing [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, printableHashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
 
 		var update *Update
