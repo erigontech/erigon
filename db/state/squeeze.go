@@ -412,6 +412,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 	var totalKeysProcessed uint64
 	var rh []byte
+	var lastToTxNum uint64
 	lastLogTime := time.Now()
 	lastLogBlock := uint64(0)
 
@@ -419,7 +420,65 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	defer fetcher.Stop()
 
 	for blockFrom <= blockTo {
-		batch := fetcher.Receive()
+		batch, ok := fetcher.Receive()
+		if !ok {
+			fetcher.Stop()
+
+			logger.Info("[rebuild_commitment_history] flushing", "block", blockFrom-1, "toTxNum", lastToTxNum,
+				"memBatchSize", datasize.ByteSize(domains.Size()).HR(), "root", hex.EncodeToString(rh))
+
+			if err = domains.Flush(ctx, rwTx); err != nil {
+				return nil, err
+			}
+			domains.Close()
+
+			if err = rwTx.Commit(); err != nil {
+				return nil, err
+			}
+
+			fin := a.BuildFilesInBackground(lastToTxNum)
+			<-fin
+
+			pruneRwTx, err := rwDb.BeginTemporalRw(ctx)
+			if err != nil {
+				return nil, err
+			}
+			defer pruneRwTx.Rollback()
+			{
+				aggTx := AggTx(pruneRwTx)
+				pruneLogEvery := time.NewTicker(30 * time.Second)
+				defer pruneLogEvery.Stop()
+				step := kv.Step(lastToTxNum / a.StepSize())
+				_, err = aggTx.d[kv.CommitmentDomain].Prune(ctx, pruneRwTx, step, 0, lastToTxNum+1, math.MaxUint64, pruneLogEvery)
+				if err != nil {
+					pruneRwTx.Rollback()
+					return nil, fmt.Errorf("[rebuild_commitment_history] prune commitment: %w", err)
+				}
+				if err = pruneRwTx.Commit(); err != nil {
+					return nil, err
+				}
+			}
+
+			if blockFrom > blockTo {
+				break
+			}
+
+			rwTx, err = rwDb.BeginTemporalRw(ctx) //nolint:gocritic
+			if err != nil {
+				return nil, err
+			}
+			domains, err = execctx.NewSharedDomains(ctx, rwTx, logger)
+			if err != nil {
+				return nil, err
+			}
+			domains.DiscardWrites(kv.AccountsDomain)
+			domains.DiscardWrites(kv.StorageDomain)
+			domains.DiscardWrites(kv.CodeDomain)
+
+			fetcher = newBatchFetcher(ctx, rwDb, txNumsReader, batchBlockCount, blockFrom, blockTo)
+			continue
+		}
+
 		if batch.err != nil {
 			return nil, fmt.Errorf("[rebuild_commitment_history] fetch batch from block %d: %w", batch.fromBlock, batch.err)
 		}
@@ -428,20 +487,18 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			"blocks", fmt.Sprintf("%d-%d", batch.fromBlock, batch.toBlock),
 			"sizeBytes", datasize.ByteSize(batch.sizeBytes).HR())
 
-		needRestart := false
 		for _, bk := range batch.blocks {
 			toTxNum, err := txNumsReader.Max(ctx, rwTx, bk.blockNum)
 			if err != nil {
 				return nil, err
 			}
+			lastToTxNum = toTxNum
 
 			domains.SetBlockNum(bk.blockNum)
 			domains.SetTxNum(toTxNum)
 
-			// Set state reader: commitment from MemBatch (latest), acc/storage/code from history as-of toTxNum+1
 			domains.GetCommitmentCtx().SetStateReader(backtester.NewRebuildStateReader(rwTx, domains, toTxNum+1))
 
-			// Apply fetched keys
 			for _, k := range bk.accountKeys {
 				domains.GetCommitmentCtx().TouchKey(kv.AccountsDomain, k, nil)
 			}
@@ -455,7 +512,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				return nil, err
 			}
 
-			// Verify computed root matches canonical header
 			header, err := blockReader.HeaderByNumber(ctx, rwTx, bk.blockNum)
 			if err != nil {
 				return nil, fmt.Errorf("[rebuild_commitment_history] reading header for block %d: %w", bk.blockNum, err)
@@ -467,74 +523,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				return nil, fmt.Errorf("[rebuild_commitment_history] root mismatch at block %d: computed %x, expected %x", bk.blockNum, rh, header.Root)
 			}
 
-			// Size-based flush + file building
-			if domains.Size() > uint64(batchSize) || bk.blockNum == blockTo {
-				// Stop fetcher before flush — it holds RoTx snapshots that become stale after commit+prune
-				fetcher.Stop()
-
-				logger.Info("[rebuild_commitment_history] flushing", "block", bk.blockNum, "toTxNum", toTxNum,
-					"memBatchSize", datasize.ByteSize(domains.Size()).HR(), "root", hex.EncodeToString(rh))
-
-				if err = domains.Flush(ctx, rwTx); err != nil {
-					return nil, err
-				}
-				domains.Close()
-
-				if err = rwTx.Commit(); err != nil {
-					return nil, err
-				}
-
-				// Build files in background and wait for completion
-				fin := a.BuildFilesInBackground(toTxNum)
-				<-fin
-
-				// Prune commitment domain from DB after files are built
-				pruneRwTx, err := rwDb.BeginTemporalRw(ctx)
-				if err != nil {
-					return nil, err
-				}
-				defer pruneRwTx.Rollback()
-				{
-					aggTx := AggTx(pruneRwTx)
-					pruneLogEvery := time.NewTicker(30 * time.Second)
-					defer pruneLogEvery.Stop()
-					step := kv.Step(toTxNum / a.StepSize())
-					txFrom := uint64(0)
-					txTo := toTxNum + 1
-					_, err = aggTx.d[kv.CommitmentDomain].Prune(ctx, pruneRwTx, step, txFrom, txTo, math.MaxUint64, pruneLogEvery)
-					if err != nil {
-						pruneRwTx.Rollback()
-						return nil, fmt.Errorf("[rebuild_commitment_history] prune commitment: %w", err)
-					}
-					if err = pruneRwTx.Commit(); err != nil {
-						return nil, err
-					}
-				}
-
-				blockFrom = bk.blockNum + 1
-				if blockFrom > blockTo {
-					break
-				}
-
-				// Reopen tx and domains for next batch
-				rwTx, err = rwDb.BeginTemporalRw(ctx) //nolint:gocritic
-				if err != nil {
-					return nil, err
-				}
-
-				domains, err = execctx.NewSharedDomains(ctx, rwTx, logger)
-				if err != nil {
-					return nil, err
-				}
-				domains.DiscardWrites(kv.AccountsDomain)
-				domains.DiscardWrites(kv.StorageDomain)
-				domains.DiscardWrites(kv.CodeDomain)
-
-				// Restart fetcher from next block (remaining blocks in batch are discarded)
-				fetcher = newBatchFetcher(ctx, rwDb, txNumsReader, batchBlockCount, blockFrom, blockTo)
-				needRestart = true
-				break // back to outer loop to receive from new fetcher
-			}
+			blockFrom = bk.blockNum + 1
 
 			select {
 			case <-logEvery.C:
@@ -553,11 +542,10 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			default:
 			}
-
-			blockFrom = bk.blockNum + 1
 		}
-		if needRestart {
-			continue
+
+		if domains.Size() > uint64(batchSize) || blockFrom > blockTo {
+			fetcher.Exhaust()
 		}
 	}
 

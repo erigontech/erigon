@@ -2,6 +2,7 @@ package state
 
 import (
 	"context"
+	"fmt"
 	"sort"
 
 	"github.com/erigontech/erigon/db/kv"
@@ -31,6 +32,7 @@ type batchFetcher struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	done         chan struct{}
+	exhaust      chan struct{} // closed by Exhaust()
 }
 
 func newBatchFetcher(ctx context.Context, db kv.TemporalRwDB, txNumsReader rawdbv3.TxNumsReader, batchBlocks int, startBlock, endBlock uint64) *batchFetcher {
@@ -43,6 +45,7 @@ func newBatchFetcher(ctx context.Context, db kv.TemporalRwDB, txNumsReader rawdb
 		ctx:          ctx,
 		cancel:       cancel,
 		done:         make(chan struct{}),
+		exhaust:      make(chan struct{}),
 	}
 	go f.run(startBlock, endBlock)
 	return f
@@ -55,6 +58,14 @@ func (f *batchFetcher) run(startBlock, endBlock uint64) {
 		batchEnd := currentBlock + uint64(f.batchBlocks) - 1
 		if batchEnd > endBlock {
 			batchEnd = endBlock
+		}
+
+		select {
+		case <-f.exhaust:
+			return
+		case <-f.ctx.Done():
+			return
+		default:
 		}
 
 		batch := f.fetchBatch(currentBlock, batchEnd)
@@ -97,9 +108,13 @@ func (f *batchFetcher) fetchBatch(fromBlock, toBlock uint64) keyBatch {
 		blocks[i].blockNum = fromBlock + uint64(i)
 	}
 
-	var sizeBytes uint64
+	type fetchedKey struct {
+		txNum     uint64
+		key       string
+		isStorage bool
+	}
+	var entries []fetchedKey
 
-	// Account keys
 	accIt, err := roTx.Debug().HistoryKeyTxNumRange(kv.AccountsDomain, int(batchFromTxNum), int(batchToTxNum), order.Asc, -1)
 	if err != nil {
 		return keyBatch{fromBlock: fromBlock, toBlock: toBlock, err: err}
@@ -110,15 +125,10 @@ func (f *batchFetcher) fetchBatch(fromBlock, toBlock uint64) keyBatch {
 			accIt.Close()
 			return keyBatch{fromBlock: fromBlock, toBlock: toBlock, err: err}
 		}
-		idx := sort.Search(numBlocks, func(i int) bool { return maxTxNums[i] >= txNum })
-		if idx < numBlocks {
-			blocks[idx].accountKeys = append(blocks[idx].accountKeys, string(k))
-			sizeBytes += uint64(len(k)) + 8
-		}
+		entries = append(entries, fetchedKey{txNum: txNum, key: string(k)})
 	}
 	accIt.Close()
 
-	// Storage keys
 	storIt, err := roTx.Debug().HistoryKeyTxNumRange(kv.StorageDomain, int(batchFromTxNum), int(batchToTxNum), order.Asc, -1)
 	if err != nil {
 		return keyBatch{fromBlock: fromBlock, toBlock: toBlock, err: err}
@@ -129,13 +139,29 @@ func (f *batchFetcher) fetchBatch(fromBlock, toBlock uint64) keyBatch {
 			storIt.Close()
 			return keyBatch{fromBlock: fromBlock, toBlock: toBlock, err: err}
 		}
-		idx := sort.Search(numBlocks, func(i int) bool { return maxTxNums[i] >= txNum })
-		if idx < numBlocks {
-			blocks[idx].storageKeys = append(blocks[idx].storageKeys, string(k))
-			sizeBytes += uint64(len(k)) + 8
-		}
+		entries = append(entries, fetchedKey{txNum: txNum, key: string(k), isStorage: true})
 	}
 	storIt.Close()
+
+	sort.Slice(entries, func(i, j int) bool { return entries[i].txNum < entries[j].txNum })
+
+	var sizeBytes uint64
+	blockIdx := 0
+	for _, e := range entries {
+		for blockIdx < numBlocks && maxTxNums[blockIdx] < e.txNum {
+			blockIdx++
+		}
+		if blockIdx >= numBlocks {
+			return keyBatch{fromBlock: fromBlock, toBlock: toBlock,
+				err: fmt.Errorf("fetchBatch: txNum %d beyond block range [%d, %d] (maxTxNum %d)", e.txNum, fromBlock, toBlock, maxTxNums[numBlocks-1])}
+		}
+		if e.isStorage {
+			blocks[blockIdx].storageKeys = append(blocks[blockIdx].storageKeys, e.key)
+		} else {
+			blocks[blockIdx].accountKeys = append(blocks[blockIdx].accountKeys, e.key)
+		}
+		sizeBytes += uint64(len(e.key)) + 8
+	}
 
 	return keyBatch{
 		blocks:    blocks,
@@ -145,19 +171,33 @@ func (f *batchFetcher) fetchBatch(fromBlock, toBlock uint64) keyBatch {
 	}
 }
 
-func (f *batchFetcher) Receive() keyBatch {
+func (f *batchFetcher) Receive() (keyBatch, bool) {
 	select {
 	case batch := <-f.batches:
-		return batch
+		return batch, true
+	case <-f.done:
+		select {
+		case batch := <-f.batches:
+			return batch, true
+		default:
+			return keyBatch{}, false
+		}
 	case <-f.ctx.Done():
-		return keyBatch{err: f.ctx.Err()}
+		return keyBatch{err: f.ctx.Err()}, false
+	}
+}
+
+func (f *batchFetcher) Exhaust() {
+	select {
+	case <-f.exhaust:
+	default:
+		close(f.exhaust)
 	}
 }
 
 func (f *batchFetcher) Stop() {
 	f.cancel()
 	<-f.done
-	// drain any remaining batch
 	for {
 		select {
 		case <-f.batches:
