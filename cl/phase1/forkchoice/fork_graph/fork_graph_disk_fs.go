@@ -25,6 +25,8 @@ import (
 	"github.com/golang/snappy"
 	"github.com/spf13/afero"
 
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -32,6 +34,12 @@ import (
 
 func getBeaconStateFilename(blockRoot common.Hash) string {
 	return fmt.Sprintf("%x.snappy_ssz", blockRoot)
+}
+
+// getEnvelopeFilename returns the filename for execution payload envelopes.
+// [New in Gloas:EIP7732]
+func getEnvelopeFilename(blockRoot common.Hash) string {
+	return fmt.Sprintf("%x.envelope.snappy_ssz", blockRoot)
 }
 
 func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot common.Hash) (bs *state.CachingBeaconState, err error) {
@@ -120,6 +128,107 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 		return err
 	}
 	// Lastly dump the state
+	if _, err := f.sszSnappyWriter.Write(f.sszBuffer); err != nil {
+		log.Error("failed to write ssz buffer", "err", err)
+		return err
+	}
+	if err = f.sszSnappyWriter.Flush(); err != nil {
+		log.Error("failed to flush snappy writer", "err", err)
+		return err
+	}
+
+	if err = dumpedFile.Sync(); err != nil {
+		log.Error("failed to sync dumped file", "err", err)
+		return
+	}
+
+	return
+}
+
+// HasEnvelope checks if an envelope exists on disk for the given block root.
+// [New in Gloas:EIP7732]
+func (f *forkGraphDisk) HasEnvelope(blockRoot common.Hash) bool {
+	exists, err := afero.Exists(f.fs, getEnvelopeFilename(blockRoot))
+	return err == nil && exists
+}
+
+// ReadEnvelopeFromDisk reads an execution payload envelope from disk.
+// [New in Gloas:EIP7732]
+func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *cltypes.SignedExecutionPayloadEnvelope, err error) {
+	var file afero.File
+	f.stateDumpLock.Lock()
+	defer f.stateDumpLock.Unlock()
+
+	file, err = f.fs.Open(getEnvelopeFilename(blockRoot))
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	if f.sszSnappyReader == nil {
+		f.sszSnappyReader = snappy.NewReader(file)
+	} else {
+		f.sszSnappyReader.Reset(file)
+	}
+
+	// Read the length
+	lengthBytes := make([]byte, 8)
+	var n int
+	n, err = io.ReadFull(f.sszSnappyReader, lengthBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read length: %w, root: %x", err, blockRoot)
+	}
+	if n != 8 {
+		return nil, fmt.Errorf("failed to read length: %d, want 8, root: %x", n, blockRoot)
+	}
+
+	f.sszBuffer = f.sszBuffer[:binary.BigEndian.Uint64(lengthBytes)]
+	n, err = io.ReadFull(f.sszSnappyReader, f.sszBuffer)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
+	}
+	f.sszBuffer = f.sszBuffer[:n]
+
+	envelope = &cltypes.SignedExecutionPayloadEnvelope{}
+	if err = envelope.DecodeSSZ(f.sszBuffer, int(clparams.GloasVersion)); err != nil {
+		return nil, fmt.Errorf("failed to decode envelope: %w, root: %x, len: %d", err, blockRoot, n)
+	}
+
+	return
+}
+
+// DumpEnvelopeOnDisk dumps an execution payload envelope to disk.
+// [New in Gloas:EIP7732]
+func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) (err error) {
+	f.stateDumpLock.Lock()
+	defer f.stateDumpLock.Unlock()
+
+	// Encode the envelope
+	f.sszBuffer, err = envelope.EncodeSSZ(f.sszBuffer[:0])
+	if err != nil {
+		return
+	}
+
+	dumpedFile, err := f.fs.OpenFile(getEnvelopeFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
+	if err != nil {
+		return err
+	}
+	defer dumpedFile.Close()
+
+	if f.sszSnappyWriter == nil {
+		f.sszSnappyWriter = snappy.NewBufferedWriter(dumpedFile)
+	} else {
+		f.sszSnappyWriter.Reset(dumpedFile)
+	}
+
+	// Write the length
+	length := make([]byte, 8)
+	binary.BigEndian.PutUint64(length, uint64(len(f.sszBuffer)))
+	if _, err := f.sszSnappyWriter.Write(length); err != nil {
+		log.Error("failed to write length", "err", err)
+		return err
+	}
+	// Write the envelope
 	if _, err := f.sszSnappyWriter.Write(f.sszBuffer); err != nil {
 		log.Error("failed to write ssz buffer", "err", err)
 		return err

@@ -62,12 +62,12 @@ func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope
 	if err := transition.DefaultMachine.ProcessExecutionPayloadEnvelope(blockStateCopy, signedEnvelope); err != nil {
 		return fmt.Errorf("OnExecutionPayload: failed to process execution payload: %w", err)
 	}
-
-	// Store the post-execution-payload state.
-	// In GLOAS, beacon block and execution payload have separate state transitions.
-	// When the head has PayloadStatus=FULL, this state becomes the canonical state.
-	// TODO: Persistently store the execution payload states
-	f.executionPayloadStates.Store(beaconBlockRoot, blockStateCopy)
+	// Persist envelope to disk for recovery after restart.
+	// The full state can be reconstructed via GetExecutionPayloadState() which replays the envelope.
+	// HasEnvelope() checks disk for existence, replacing in-memory tracking.
+	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
+		return fmt.Errorf("OnExecutionPayload: failed to dump envelope: %w", err)
+	}
 
 	return nil
 }
