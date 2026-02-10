@@ -33,23 +33,23 @@ jobs:
       - name: Restrict PATH to documented prerequisites only
         shell: bash
         run: |
-          # Build a minimal PATH from only the documented prerequisites:
-          # - Go (from setup-go)
-          # - Git for Windows (provides bash + MSYS2 utils)
-          # - Chocolatey-installed tools (cmake, make, mingw)
-          # - Essential Windows system directories
+          # Build a minimal PATH from only the documented prerequisites.
+          # Dynamically discover tool locations (choco may install to
+          # non-obvious paths) before we restrict PATH.
           GOROOT="$(go env GOROOT)"
           GOPATH="$(go env GOPATH)"
-          GIT_DIR="$(dirname "$(dirname "$(which git)")")"
+          GCC_DIR="$(dirname "$(which gcc)")"
+          MAKE_DIR="$(dirname "$(which make)")"
+          CMAKE_DIR="$(dirname "$(which cmake)")"
           NEW_PATH=""
           NEW_PATH+="${GOROOT}/bin:"
           NEW_PATH+="${GOPATH}/bin:"
-          NEW_PATH+="${GIT_DIR}/bin:"          # git + bash
-          NEW_PATH+="${GIT_DIR}/usr/bin:"      # MSYS2 utils (cut, uname, rm, grep, tee, etc.)
+          NEW_PATH+="/usr/bin:"                # MSYS2 utils (grep, cut, tee, uname, rm, etc.)
+          NEW_PATH+="/mingw64/bin:"            # git, bash (Git for Windows)
           NEW_PATH+="/c/ProgramData/chocolatey/bin:"
-          NEW_PATH+="/c/ProgramData/chocolatey/lib/mingw/tools/install/mingw64/bin:"
-          NEW_PATH+="/c/ProgramData/chocolatey/lib/make/tools/install/bin:"
-          NEW_PATH+="/c/ProgramData/chocolatey/lib/cmake/tools/cmake-*/bin:"
+          NEW_PATH+="${GCC_DIR}:"              # gcc/g++ from choco mingw
+          NEW_PATH+="${MAKE_DIR}:"             # make from choco
+          NEW_PATH+="${CMAKE_DIR}:"            # cmake from choco
           NEW_PATH+="/c/Windows/System32:"
           NEW_PATH+="/c/Windows:"
           echo "PATH=${NEW_PATH}" >> "$GITHUB_ENV"
@@ -57,10 +57,13 @@ jobs:
       - name: Verify only documented tools are available
         shell: bash
         run: |
+          echo "PATH=${PATH}"
+          echo "---"
           echo "go:    $(go version)"
           echo "git:   $(git --version)"
           echo "make:  $(make --version | head -1)"
           echo "gcc:   $(gcc --version | head -1)"
+          echo "cmake: $(cmake --version | head -1)"
           echo "bash:  $(bash --version | head -1)"
 
       - name: Build erigon (make erigon)
