@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
@@ -141,7 +142,7 @@ func TestAggregateAndProofServiceNoHeader(t *testing.T) {
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	sd.OnHeadState(s)
 	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
-	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = s.FinalizedCheckpoint().Root
+	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
 	require.Error(t, aggService.ProcessMessage(context.Background(), nil, agg))
 }
 
@@ -154,7 +155,7 @@ func TestAggregateAndProofInvalidEpoch(t *testing.T) {
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	sd.OnHeadState(s)
 	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
-	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = s.FinalizedCheckpoint().Root
+	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
 	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
 	agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Epoch = 999999
 	require.Error(t, aggService.ProcessMessage(context.Background(), nil, agg))
@@ -169,7 +170,7 @@ func TestAggregateAndProofInvalidCommittee(t *testing.T) {
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	sd.OnHeadState(s)
 	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
-	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = s.FinalizedCheckpoint().Root
+	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
 	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
 	agg.SignedAggregateAndProof.Message.AggregatorIndex = 12453224
 	require.Error(t, aggService.ProcessMessage(context.Background(), nil, agg))
@@ -184,7 +185,7 @@ func TestAggregateAndProofAncestorMissing(t *testing.T) {
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	sd.OnHeadState(s)
 	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
-	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = s.FinalizedCheckpoint().Root
+	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
 	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
 	require.Error(t, aggService.ProcessMessage(context.Background(), nil, agg))
 }
@@ -198,8 +199,8 @@ func TestAggregateAndProofSuccess(t *testing.T) {
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	sd.OnHeadState(s)
 	fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
-	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = s.FinalizedCheckpoint().Root
-	fcu.Ancestors[agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot] = agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Root
+	fcu.Ancestors[s.FinalizedCheckpoint().Epoch*32] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
+	fcu.Ancestors[agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot] = forkchoice.ForkChoiceNode{Root: agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Root}
 	fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
 	require.NoError(t, aggService.ProcessMessage(context.Background(), nil, agg))
 }
