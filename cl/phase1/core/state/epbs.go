@@ -9,7 +9,9 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -174,4 +176,134 @@ func GetPendingBalanceToWithdrawForBuilder(s abstract.BeaconState, builderIndex 
 	}
 
 	return total
+}
+
+// IsBuilderPubkey returns true if the given pubkey belongs to any builder in the state.
+// [New in Gloas:EIP7732]
+func IsBuilderPubkey(s abstract.BeaconState, pubkey common.Bytes48) bool {
+	builders := s.GetBuilders()
+	if builders == nil {
+		return false
+	}
+	for i := 0; i < builders.Len(); i++ {
+		if builders.Get(i).Pubkey == pubkey {
+			return true
+		}
+	}
+	return false
+}
+
+// IsValidDepositSignature validates a builder deposit signature.
+// [New in Gloas:EIP7732]
+func IsValidDepositSignature(cfg *clparams.BeaconChainConfig, pubkey common.Bytes48, withdrawalCredentials common.Hash, amount uint64, signature common.Bytes96) (bool, error) {
+	// Compute domain for deposit (agnostic domain using genesis fork version)
+	domain, err := fork.ComputeDomain(
+		cfg.DomainDeposit[:],
+		utils.Uint32ToBytes4(uint32(cfg.GenesisForkVersion)),
+		[32]byte{},
+	)
+	if err != nil {
+		return false, err
+	}
+
+	// Create deposit data for hashing
+	depositData := &cltypes.DepositData{
+		PubKey:                pubkey,
+		WithdrawalCredentials: withdrawalCredentials,
+		Amount:                amount,
+		Signature:             signature,
+	}
+
+	depositMessageRoot, err := depositData.MessageHash()
+	if err != nil {
+		return false, err
+	}
+
+	signedRoot := utils.Sha256(depositMessageRoot[:], domain)
+
+	// Verify BLS signature
+	valid, err := bls.Verify(signature[:], signedRoot[:], pubkey[:])
+	if err != nil {
+		return false, nil
+	}
+	return valid, nil
+}
+
+// GetIndexForNewBuilder returns the first builder index that is reusable
+// (withdrawable_epoch <= current_epoch and balance == 0), or len(state.builders)
+// if no such slot exists.
+// [New in Gloas:EIP7732]
+func GetIndexForNewBuilder(s abstract.BeaconState) cltypes.BuilderIndex {
+	builders := s.GetBuilders()
+	if builders == nil {
+		return 0
+	}
+	epoch := GetEpochAtSlot(s.BeaconConfig(), s.Slot())
+	for i := 0; i < builders.Len(); i++ {
+		builder := builders.Get(i)
+		if builder.WithdrawableEpoch <= epoch && builder.Balance == 0 {
+			return cltypes.BuilderIndex(i)
+		}
+	}
+	return cltypes.BuilderIndex(builders.Len())
+}
+
+// AddBuilderToRegistry adds a new builder to the registry.
+// [New in Gloas:EIP7732]
+func AddBuilderToRegistry(s abstract.BeaconState, pubkey common.Bytes48, withdrawalCredentials common.Hash, amount uint64, slot uint64) {
+	cfg := s.BeaconConfig()
+	index := GetIndexForNewBuilder(s)
+
+	builder := &cltypes.Builder{
+		Pubkey:            pubkey,
+		Version:           withdrawalCredentials[0],
+		ExecutionAddress:  common.BytesToAddress(withdrawalCredentials[12:]),
+		Balance:           amount,
+		DepositEpoch:      GetEpochAtSlot(cfg, slot),
+		WithdrawableEpoch: cfg.FarFutureEpoch,
+	}
+
+	builders := s.GetBuilders()
+	if int(index) < builders.Len() {
+		builders.Set(int(index), builder)
+	} else {
+		builders.Append(builder)
+	}
+	s.SetBuilders(builders)
+}
+
+// ApplyDepositForBuilder processes a builder deposit.
+// If the pubkey is new and signature is valid, registers a new builder.
+// If the pubkey already exists, increases the builder's balance.
+// [New in Gloas:EIP7732]
+func ApplyDepositForBuilder(s abstract.BeaconState, pubkey common.Bytes48, withdrawalCredentials common.Hash, amount uint64, signature common.Bytes96, slot uint64) {
+	builders := s.GetBuilders()
+
+	// Check if pubkey already exists in builders
+	builderIndex := -1
+	if builders != nil {
+		for i := 0; i < builders.Len(); i++ {
+			if builders.Get(i).Pubkey == pubkey {
+				builderIndex = i
+				break
+			}
+		}
+	}
+
+	if builderIndex == -1 {
+		// New builder: verify deposit signature (proof of possession)
+		valid, err := IsValidDepositSignature(s.BeaconConfig(), pubkey, withdrawalCredentials, amount, signature)
+		if err != nil {
+			return
+		}
+		if valid {
+			AddBuilderToRegistry(s, pubkey, withdrawalCredentials, amount, slot)
+		}
+	} else {
+		// Existing builder: increase balance
+		builder := builders.Get(builderIndex)
+		builder.Balance += amount
+		builders.Set(builderIndex, builder)
+		s.SetBuilders(builders)
+	}
 }
