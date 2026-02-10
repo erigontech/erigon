@@ -297,7 +297,7 @@ func NewForkChoiceStore(
 	f.highestSeen.Store(anchorState.Slot())
 	f.time.Store(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot())
 
-	f.ptcVote.Store(anchorRoot, [clparams.PtcSize]bool{})
+	f.ptcVote.Store(common.Hash(anchorRoot), [clparams.PtcSize]bool{})
 
 	// [New in Gloas:EIP7732] Initialize indexed weight store
 	f.indexedWeightStore = NewIndexedWeightStore(f)
