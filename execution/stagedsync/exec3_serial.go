@@ -215,7 +215,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 				break
 			}
 			se.LogExecution()
-			isBatchFull := se.readState().SizeEstimate() >= se.cfg.batchSize.Bytes()
+			isBatchFull := se.readState().SizeEstimateBeforeCommitment() >= se.cfg.batchSize.Bytes()
 			needCalcRoot := isBatchFull || havePartialBlock
 			// If we have a partial first block it may not be validated, then we should compute root hash ASAP for fail-fast
 			// this will only happen for the first executed block
