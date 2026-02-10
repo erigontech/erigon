@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -197,7 +198,14 @@ func (f *batchFetcher) Exhaust() {
 
 func (f *batchFetcher) Stop() {
 	f.cancel()
-	<-f.done
+	// fetchBatch may be in long file I/O that doesn't check context;
+	// bound the wait so shutdown isn't blocked indefinitely
+	t := time.NewTimer(5 * time.Second)
+	select {
+	case <-f.done:
+		t.Stop()
+	case <-t.C:
+	}
 	for {
 		select {
 		case <-f.batches:

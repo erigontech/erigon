@@ -422,6 +422,9 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	for blockFrom <= blockTo {
 		batch, ok := fetcher.Receive()
 		if !ok {
+			if batch.err != nil {
+				return nil, batch.err
+			}
 			fetcher.Stop()
 
 			logger.Info("[rebuild_commitment_history] flushing", "block", blockFrom-1, "toTxNum", lastToTxNum,
