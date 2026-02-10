@@ -1480,6 +1480,12 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 				return err
 			}
 		}
+
+		if state.Epoch(s) == beaconConfig.GloasForkEpoch {
+			if err := s.UpgradeToGloas(); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -1491,12 +1497,12 @@ func (I *impl) ProcessDepositRequest(s abstract.BeaconState, depositRequest *sol
 
 	// [New in Gloas:EIP7732] Route builder deposits immediately
 	if s.Version() >= clparams.GloasVersion {
-		isBuilder := isBuilderPubkey(s, depositRequest.PubKey)
+		isBuilder := state.IsBuilderPubkey(s, depositRequest.PubKey)
 		_, isValidator := s.ValidatorIndexByPubkey(depositRequest.PubKey)
 		isBuilderPrefix := state.IsBuilderWithdrawalCredential(depositRequest.WithdrawalCredentials, s.BeaconConfig())
 
 		if isBuilder || (isBuilderPrefix && !isValidator) {
-			applyDepositForBuilder(s, depositRequest.PubKey, depositRequest.WithdrawalCredentials, depositRequest.Amount, depositRequest.Signature, s.Slot())
+			state.ApplyDepositForBuilder(s, depositRequest.PubKey, depositRequest.WithdrawalCredentials, depositRequest.Amount, depositRequest.Signature, s.Slot())
 			return nil
 		}
 	}
