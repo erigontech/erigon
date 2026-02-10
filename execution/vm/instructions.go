@@ -25,8 +25,6 @@ import (
 	"math"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -362,7 +360,7 @@ func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	data := scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 
 	if evm.hasher == nil {
-		evm.hasher = sha3.NewLegacyKeccak256().(keccakState)
+		evm.hasher = newFastKeccak()
 	} else {
 		evm.hasher.Reset()
 	}
