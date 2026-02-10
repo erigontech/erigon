@@ -119,7 +119,7 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 	if f.beaconCfg.GetCurrentStateVersion(currentEpoch) >= clparams.GloasVersion {
 		return f.getHeadGloas()
 	}
-	return f.getHeadPreGloas(auxilliaryState)
+	return f.getHead(auxilliaryState)
 }
 
 // getHeadGloas returns the head using GLOAS fork choice rules.
@@ -192,8 +192,8 @@ func (f *ForkChoiceStore) getHeadGloas() (common.Hash, uint64, error) {
 	}
 }
 
-// getHeadPreGloas returns the head using pre-GLOAS fork choice rules.
-func (f *ForkChoiceStore) getHeadPreGloas(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error) {
+// getHead returns the head using pre-GLOAS fork choice rules.
+func (f *ForkChoiceStore) getHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error) {
 	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 	var justificationState *checkpointState
 	var err error

@@ -217,8 +217,15 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// This ensures the new block builds on the correct canonical state.
 	var parentFullState *state.CachingBeaconState
 	if isGloas && f.isParentNodeFull(block.Block) {
-		if s, ok := f.executionPayloadStates.Load(block.Block.ParentRoot); ok {
-			parentFullState = s.(*state.CachingBeaconState)
+		// Check disk for envelope existence (handles both normal operation and restart recovery)
+		if f.forkGraph.HasEnvelope(block.Block.ParentRoot) {
+			// Reconstruct the execution payload state from disk
+			parentFullState, err = f.forkGraph.GetExecutionPayloadState(block.Block.ParentRoot)
+			if err != nil {
+				log.Warn("Failed to get execution payload state for parent", "parentRoot", block.Block.ParentRoot, "err", err)
+				// Fall back to block_state via AddChainSegment's normal path
+				parentFullState = nil
+			}
 		}
 	}
 
