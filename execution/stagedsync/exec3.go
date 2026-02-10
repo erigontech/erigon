@@ -682,9 +682,9 @@ Loop:
 		if ERIGON_COMMIT_EACH_BLOCK || shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs {
 			start := time.Now()
 			if blockNum == 0 {
-				executor.domains().GetCommitmentContext().Trie().SetTrace(true)
+				executor.domains().SetTrace(true)
 			} else {
-				executor.domains().GetCommitmentContext().Trie().SetTrace(false)
+				executor.domains().SetTrace(false)
 			}
 			rh, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix())
 			if err != nil {

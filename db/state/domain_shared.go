@@ -187,6 +187,7 @@ func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 
 func (sd *SharedDomains) SetTrace(b bool) {
 	sd.trace = b
+	sd.sdCtx.SetTrace(b)
 }
 
 func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
