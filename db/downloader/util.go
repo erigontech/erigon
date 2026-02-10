@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha1"
-
 	//nolint:gosec
 	"errors"
 	"fmt"
