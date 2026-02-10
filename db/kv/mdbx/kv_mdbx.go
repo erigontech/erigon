@@ -1108,6 +1108,14 @@ func (tx *MdbxTx) Delete(table string, k []byte) error {
 	return err
 }
 
+func (tx *MdbxTx) DeleteRange(table string, from []byte, to []byte) (int64, error) {
+	res, err := tx.tx.DeleteRange(gdbx.DBI(tx.db.buckets[table].DBI), from, to)
+	if gdbx.IsNotFound(err) {
+		return 0, nil
+	}
+	return res, err
+}
+
 func (tx *MdbxTx) GetOne(bucket string, k []byte) ([]byte, error) {
 	v, err := tx.tx.Get(gdbx.DBI(tx.db.buckets[bucket].DBI), k)
 	if gdbx.IsNotFound(err) {
@@ -1368,6 +1376,10 @@ func (c *MdbxCursor) Delete(k []byte) error {
 	return c.c.Del(gdbx.Current)
 }
 
+func (c *MdbxCursor) DeleteRange(from []byte, to []byte) (int64, error) {
+	return c.c.DeleteRange(from, to)
+}
+
 // DeleteCurrent This function deletes the key/data pair to which the cursor refers.
 // This does not invalidate the cursor, so operations such as MDB_NEXT
 // can still be used on it.
@@ -1499,6 +1511,10 @@ func (c *MdbxDupSortCursor) SeekBothExact(key, value []byte) ([]byte, []byte, er
 		return []byte{}, nil, fmt.Errorf("in SeekBothExact: %w", err)
 	}
 	return key, v, nil
+}
+
+func (c *MdbxDupSortCursor) DeleteDupRange(key []byte, from []byte, to []byte) (int64, error) {
+	return c.c.DeleteDupRange(key, from, to)
 }
 
 func (c *MdbxDupSortCursor) SeekBothRange(key, value []byte) ([]byte, error) {
