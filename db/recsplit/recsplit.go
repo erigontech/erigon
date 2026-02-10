@@ -28,6 +28,7 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/erigontech/erigon/db/version"
 
@@ -39,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/datastruct/fusefilter"
-	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano16"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 )
@@ -83,10 +83,12 @@ type RecSplit struct {
 	offsetFile   *os.File      // Temp file for offsets (already sorted, no need for etl.Collector)
 	offsetWriter *bufio.Writer // Buffered writer for offset file
 
-	indexW          *bufio.Writer
-	indexF          *os.File
-	offsetEf        *eliasfano32.EliasFano // Elias Fano instance for encoding the offsets
-	bucketCollector *etl.Collector         // Collector that sorts by buckets
+	indexW   *bufio.Writer
+	indexF   *os.File
+	offsetEf *eliasfano32.EliasFano // Elias Fano instance for encoding the offsets
+
+	bucketHashes [][]uint64 // Per-bucket hash values (lo from murmur3)
+	bucketValues [][]uint64 // Per-bucket offset/enum values
 
 	fileName string
 	filePath string
@@ -120,7 +122,6 @@ type RecSplit struct {
 	leafSize           uint16 // Leaf size for recursive split algorithm
 	secondaryAggrBound uint16 // The lower bound for secondary key aggregation (computed from leadSize)
 	primaryAggrBound   uint16 // The lower bound for primary key aggregation (computed from leafSize)
-	bucketKeyBuf       [16]byte
 	numBuf             [8]byte
 	collision          bool
 	enums              bool // Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
@@ -201,9 +202,16 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	} else {
 		rs.salt = *args.Salt
 	}
-	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.SmallSortableBuffers, logger)
-	rs.bucketCollector.SortAndFlushInBackground(false)
-	rs.bucketCollector.LogLvl(log.LvlDebug)
+	rs.bucketHashes = make([][]uint64, bucketCount)
+	rs.bucketValues = make([][]uint64, bucketCount)
+	if bucketCount > 0 {
+		estBucketCap := args.KeyCount / bucketCount
+		estBucketCap += estBucketCap/10 + 1 // 10% margin for hash distribution variance
+		for i := range rs.bucketHashes {
+			rs.bucketHashes[i] = make([]uint64, 0, estBucketCap)
+			rs.bucketValues[i] = make([]uint64, 0, estBucketCap)
+		}
+	}
 	var err error
 	if args.Enums {
 		rs.offsetFile, err = os.CreateTemp(rs.tmpDir, "recsplit-offsets-")
@@ -269,9 +277,8 @@ func (rs *RecSplit) Close() {
 		rs.existenceFV1.Close()
 		rs.existenceFV1 = nil
 	}
-	if rs.bucketCollector != nil {
-		rs.bucketCollector.Close()
-	}
+	rs.bucketHashes = nil
+	rs.bucketValues = nil
 	if rs.offsetFile != nil {
 		_ = rs.offsetFile.Close()
 		_ = dir.RemoveFile(rs.offsetFile.Name())
@@ -307,12 +314,10 @@ func (rs *RecSplit) ResetNextSalt() {
 	rs.collision = false
 	rs.keysAdded = 0
 	rs.salt++
-	if rs.bucketCollector != nil {
-		rs.bucketCollector.Close()
+	for i := range rs.bucketHashes {
+		rs.bucketHashes[i] = rs.bucketHashes[i][:0]
+		rs.bucketValues[i] = rs.bucketValues[i][:0]
 	}
-	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+rs.fileName, rs.tmpDir, etl.SmallSortableBuffers, rs.logger)
-	rs.bucketCollector.SortAndFlushInBackground(false)
-	rs.bucketCollector.LogLvl(log.LvlDebug)
 	if rs.offsetFile != nil {
 		_ = rs.offsetFile.Truncate(0)
 		_, _ = rs.offsetFile.Seek(0, 0)
@@ -402,9 +407,6 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 		return errors.New("cannot add keys after perfect hash function had been built")
 	}
 	hi, lo := murmur3.Sum128WithSeed(key, rs.salt)
-	binary.BigEndian.PutUint64(rs.bucketKeyBuf[:], remap(hi, rs.bucketCount))
-	binary.BigEndian.PutUint64(rs.bucketKeyBuf[8:], lo)
-	binary.BigEndian.PutUint64(rs.numBuf[:], offset)
 	if offset > rs.maxOffset {
 		rs.maxOffset = offset
 	}
@@ -415,17 +417,17 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 		}
 	}
 
+	bucketIdx := remap(hi, rs.bucketCount)
 	if rs.enums {
 		if rs.keysAdded > 0 && offset < rs.prevOffset {
 			panic(fmt.Sprintf("recsplit: AddKey offsets must be monotonically increasing: prev=%d, cur=%d", rs.prevOffset, offset))
 		}
+		binary.BigEndian.PutUint64(rs.numBuf[:], offset)
 		if _, err := rs.offsetWriter.Write(rs.numBuf[:]); err != nil {
 			return err
 		}
-		binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
-		if err := rs.bucketCollector.Collect(rs.bucketKeyBuf[:], rs.numBuf[:]); err != nil {
-			return err
-		}
+		rs.bucketHashes[bucketIdx] = append(rs.bucketHashes[bucketIdx], lo)
+		rs.bucketValues[bucketIdx] = append(rs.bucketValues[bucketIdx], rs.keysAdded)
 		if rs.lessFalsePositives {
 			if rs.dataStructureVersion == 0 {
 				//1 byte from each hashed key
@@ -435,9 +437,8 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 			}
 		}
 	} else {
-		if err := rs.bucketCollector.Collect(rs.bucketKeyBuf[:], rs.numBuf[:]); err != nil {
-			return err
-		}
+		rs.bucketHashes[bucketIdx] = append(rs.bucketHashes[bucketIdx], lo)
+		rs.bucketValues[bucketIdx] = append(rs.bucketValues[bucketIdx], offset)
 	}
 
 	if rs.lessFalsePositives && rs.dataStructureVersion >= 1 {
@@ -703,21 +704,17 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 	return unary, nil
 }
 
-// loadFuncBucket is required to satisfy the type etl.LoadFunc type, to use with collector.Load
-func (rs *RecSplit) loadFuncBucket(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-	// k is the BigEndian encoding of the bucket number, and the v is the key that is assigned into that bucket
-	bucketIdx := binary.BigEndian.Uint64(k)
-	if rs.currentBucketIdx != bucketIdx {
-		if rs.currentBucketIdx != math.MaxUint64 {
-			if err := rs.recsplitCurrentBucket(); err != nil {
-				return err
-			}
-		}
-		rs.currentBucketIdx = bucketIdx
-	}
-	rs.currentBucket = append(rs.currentBucket, binary.BigEndian.Uint64(k[8:]))
-	rs.currentBucketOffs = append(rs.currentBucketOffs, binary.BigEndian.Uint64(v))
-	return nil
+// bucketSorter sorts two parallel slices (hashes and offsets) by hash value.
+type bucketSorter struct {
+	hashes  []uint64
+	offsets []uint64
+}
+
+func (s bucketSorter) Len() int           { return len(s.hashes) }
+func (s bucketSorter) Less(i, j int) bool { return s.hashes[i] < s.hashes[j] }
+func (s bucketSorter) Swap(i, j int) {
+	s.hashes[i], s.hashes[j] = s.hashes[j], s.hashes[i]
+	s.offsets[i], s.offsets[j] = s.offsets[j], s.offsets[i]
 }
 
 // buildOffsetEf mmaps the offset temp file and builds the Elias-Fano encoding.
@@ -757,7 +754,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	}
 
 	defer rs.indexF.Close()
-	rs.indexW = bufio.NewWriterSize(rs.indexF, etl.BufIOSize)
+	rs.indexW = bufio.NewWriterSize(rs.indexF, 128*4096)
 	// 1 byte: dataStructureVersion, 7 bytes: app-specific minimal dataID (of current shard)
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)
 	rs.numBuf[0] = uint8(rs.dataStructureVersion)
@@ -780,19 +777,28 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return fmt.Errorf("write bytes per record: %w", err)
 	}
 
-	rs.currentBucketIdx = math.MaxUint64 // To make sure 0 bucket is detected
-	defer rs.bucketCollector.Close()
 	if rs.lvl < log.LvlTrace {
 		log.Log(rs.lvl, "[index] calculating", "file", rs.fileName)
 	}
-	if err := rs.bucketCollector.Load(nil, "", rs.loadFuncBucket, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
-	if len(rs.currentBucket) > 0 {
+	for b := uint64(0); b < rs.bucketCount; b++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		hashes := rs.bucketHashes[b]
+		if len(hashes) == 0 {
+			continue
+		}
+		values := rs.bucketValues[b]
+		sort.Sort(bucketSorter{hashes: hashes, offsets: values})
+		rs.currentBucketIdx = b
+		rs.currentBucket = hashes
+		rs.currentBucketOffs = values
 		if err := rs.recsplitCurrentBucket(); err != nil {
 			return err
 		}
 	}
+	rs.bucketHashes = nil
+	rs.bucketValues = nil
 
 	if assert.Enable {
 		_ = rs.indexW.Flush()
