@@ -225,39 +225,40 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		blockTo = cfg.blockReader.CanPruneTo(s.ForwardProgress)
 	}
 
-	pruneTimeout := time.Hour // aggressive pruning at non-chain-tip
-	if !s.CurrentSyncCycle.IsInitialCycle {
-		pruneTimeout = 250 * time.Millisecond
-		// can't prune much on non-chain-tip: because tx_lookup has crypto-hashed-keys. 1 block producing hundreds of random deletes: ~2pages updated per delete
-		blockTo = min(blockTo, blockFrom+10)
-	}
-
-	if blockFrom < blockTo {
-		logEvery := time.NewTicker(logInterval)
-		defer logEvery.Stop()
-
-		t := time.Now()
-		var pruneBlockNum = blockFrom
-		for ; pruneBlockNum < blockTo; pruneBlockNum++ {
-			select {
-			case <-logEvery.C:
-				logger.Info(fmt.Sprintf("[%s] progress", logPrefix), "blockNum", pruneBlockNum)
-			default:
-			}
-
-			err = deleteTxLookupRange(tx, logPrefix, pruneBlockNum, pruneBlockNum+1, ctx, cfg, logger)
-			if err != nil {
-				return fmt.Errorf("prune TxLookUp: %w", err)
-			}
-
-			if time.Since(t) > pruneTimeout {
-				break
-			}
-		}
-		if err = s.DoneAt(tx, pruneBlockNum); err != nil {
-			return err
-		}
-	}
+	//pruneTimeout := time.Hour // aggressive pruning at non-chain-tip
+	//if !s.CurrentSyncCycle.IsInitialCycle {
+	//	pruneTimeout = 250 * time.Millisecond
+	//	// can't prune much on non-chain-tip: because tx_lookup has crypto-hashed-keys. 1 block producing hundreds of random deletes: ~2pages updated per delete
+	//	blockTo = min(blockTo, blockFrom+10)
+	//}
+	//
+	//if blockFrom < blockTo {
+	//	logEvery := time.NewTicker(logInterval)
+	//	defer logEvery.Stop()
+	//
+	//	t := time.Now()
+	//	var pruneBlockNum = blockFrom
+	//	for ; pruneBlockNum < blockTo; pruneBlockNum++ {
+	//		select {
+	//		case <-logEvery.C:
+	//			logger.Info(fmt.Sprintf("[%s] progress", logPrefix), "blockNum", pruneBlockNum)
+	//		default:
+	//		}
+	//
+	//		err = deleteTxLookupRange(tx, logPrefix, pruneBlockNum, pruneBlockNum+1, ctx, cfg, logger)
+	//		if err != nil {
+	//			return fmt.Errorf("prune TxLookUp: %w", err)
+	//		}
+	//
+	//		if time.Since(t) > pruneTimeout {
+	//			break
+	//		}
+	//	}
+	//	if err = s.DoneAt(tx, pruneBlockNum); err != nil {
+	//		return err
+	//	}
+	//}
+	s.DoneAt(tx, pruneBlockNum)
 	return nil
 }
 
