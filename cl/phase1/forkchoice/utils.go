@@ -80,8 +80,6 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 	})
 
 	// Clean up per-block unrealized justifications/finalizations for finalized blocks.
-	// Also delete entries whose headers have already been pruned from the fork graph
-	// to prevent orphaned entries from accumulating.
 	f.unrealizedJustifications.Range(func(k, v any) bool {
 		blockRoot := k.(common.Hash)
 		header, has := f.forkGraph.GetHeader(blockRoot)
@@ -98,18 +96,12 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 		}
 		return true
 	})
-	// Clean up GLOAS-specific ptcVote and executionPayloadStates for finalized blocks.
+	// Clean up GLOAS-specific ptcVote for finalized blocks.
+	// Note: envelope files are cleaned up in forkGraph.Prune().
 	f.ptcVote.Range(func(k, v any) bool {
 		root := k.(common.Hash)
 		if header, has := f.forkGraph.GetHeader(root); !has || header.Slot <= finalizedSlot {
 			f.ptcVote.Delete(k)
-		}
-		return true
-	})
-	f.executionPayloadStates.Range(func(k, v any) bool {
-		root := k.(common.Hash)
-		if header, has := f.forkGraph.GetHeader(root); !has || header.Slot <= finalizedSlot {
-			f.executionPayloadStates.Delete(k)
 		}
 		return true
 	})
