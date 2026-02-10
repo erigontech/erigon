@@ -744,6 +744,7 @@ func configForkSchedule(b *BeaconChainConfig) map[common.Bytes4]VersionScheduleE
 	fvs[utils.Uint32ToBytes4(uint32(b.DenebForkVersion))] = VersionScheduleEntry{b.DenebForkEpoch, DenebVersion}
 	fvs[utils.Uint32ToBytes4(uint32(b.ElectraForkVersion))] = VersionScheduleEntry{b.ElectraForkEpoch, ElectraVersion}
 	fvs[utils.Uint32ToBytes4(uint32(b.FuluForkVersion))] = VersionScheduleEntry{b.FuluForkEpoch, FuluVersion}
+	fvs[utils.Uint32ToBytes4(uint32(b.GloasForkVersion))] = VersionScheduleEntry{b.GloasForkEpoch, GloasVersion}
 	return fvs
 }
 
@@ -903,6 +904,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	ElectraForkEpoch:     364032,
 	FuluForkVersion:      0x06000000,
 	FuluForkEpoch:        411392,
+	GloasForkVersion:     0x70000000,
+	GloasForkEpoch:       math.MaxUint64,
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
@@ -1416,6 +1419,8 @@ func (b *BeaconChainConfig) GetForkVersionByVersion(v StateVersion) uint32 {
 		return uint32(b.ElectraForkVersion)
 	case FuluVersion:
 		return uint32(b.FuluForkVersion)
+	case GloasVersion:
+		return uint32(b.GloasForkVersion)
 	}
 	panic("invalid version")
 }
