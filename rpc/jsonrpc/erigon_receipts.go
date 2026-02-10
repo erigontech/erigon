@@ -70,7 +70,7 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 		}
 		receipts, err = api.getReceipts(ctx, tx, block)
 		if err != nil {
-			return nil, fmt.Errorf("getReceipts error: %w", err)
+			return nil, err
 		}
 	}
 	logs := make([][]*types.Log, len(receipts))
@@ -422,7 +422,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	}
 	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
-		return nil, fmt.Errorf("getReceipts error: %w", err)
+		return nil, err
 	}
 
 	result := make([]map[string]any, 0, len(receipts))
