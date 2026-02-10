@@ -211,7 +211,7 @@ var distributionCmd = &cobra.Command{
 		fmt.Printf("Unique entries: %d\n", uniqueEntries)
 		fmt.Printf("Unique keys: %d\n\n", len(keysEntries))
 
-		fmt.Println("Entries per key: \n")
+		fmt.Println("Entries per key:")
 
 		for i := range percentiles {
 			for key, count := range keysEntries {
