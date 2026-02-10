@@ -589,8 +589,8 @@ func (tx *RwTx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, lim
 	return tx.historyRange(name, tx.RwTx, fromTs, toTs, asc, limit)
 }
 
-func (tx *tx) historyKeyRange(name kv.Domain, dbTx kv.Tx, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
-	it, err := tx.aggtx.HistoryKeyRange(name, fromTs, toTs, asc, limit, dbTx)
+func (tx *tx) historyKeyTxNumRange(name kv.Domain, dbTx kv.Tx, fromTs, toTs int, asc order.By, limit int) (stream.KU64, error) {
+	it, err := tx.aggtx.HistoryKeyTxNumRange(name, fromTs, toTs, asc, limit, dbTx)
 	if err != nil {
 		return nil, err
 	}
@@ -598,12 +598,12 @@ func (tx *tx) historyKeyRange(name kv.Domain, dbTx kv.Tx, fromTs, toTs int, asc 
 	return it, nil
 }
 
-func (tx *Tx) HistoryKeyRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
-	return tx.historyKeyRange(name, tx.Tx, fromTs, toTs, asc, limit)
+func (tx *Tx) HistoryKeyTxNumRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KU64, error) {
+	return tx.historyKeyTxNumRange(name, tx.Tx, fromTs, toTs, asc, limit)
 }
 
-func (tx *RwTx) HistoryKeyRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KV, error) {
-	return tx.historyKeyRange(name, tx.RwTx, fromTs, toTs, asc, limit)
+func (tx *RwTx) HistoryKeyTxNumRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (stream.KU64, error) {
+	return tx.historyKeyTxNumRange(name, tx.RwTx, fromTs, toTs, asc, limit)
 }
 
 // Write methods

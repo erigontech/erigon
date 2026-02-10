@@ -1392,7 +1392,7 @@ func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, t
 	return stream.UnionKV(hi, dbit, limit), nil
 }
 
-func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By, limit int, skipValues bool) (stream.KV, error) {
+func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By, limit int) (stream.KV, error) {
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
@@ -1409,7 +1409,6 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 		startTxNum: max(0, uint64(fromTxNum)),
 		endTxNum:   toTxNum,
 		limit:      limit,
-		skipValues: skipValues,
 	}
 	if fromTxNum >= 0 {
 		binary.BigEndian.PutUint64(s.startTxKey[:], uint64(fromTxNum))
@@ -1440,7 +1439,7 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 	return s, nil
 }
 
-func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx, skipValues bool) (stream.KV, error) {
+func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
@@ -1454,7 +1453,6 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 		largeValues: ht.h.HistoryLargeValues,
 		valsTable:   ht.h.ValuesTable,
 		limit:       limit,
-		skipValues:  skipValues,
 	}
 	if fromTxNum >= 0 {
 		binary.BigEndian.PutUint64(s.startTxKey[:], uint64(fromTxNum))
@@ -1471,27 +1469,11 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
-	itOnFiles, err := ht.iterateChangedFrozen(fromTxNum, toTxNum, asc, limit, false)
+	itOnFiles, err := ht.iterateChangedFrozen(fromTxNum, toTxNum, asc, limit)
 	if err != nil {
 		return nil, err
 	}
-	itOnDB, err := ht.iterateChangedRecent(fromTxNum, toTxNum, asc, limit, roTx, false)
-	if err != nil {
-		return nil, err
-	}
-	return stream.UnionKV(itOnFiles, itOnDB, limit), nil
-}
-
-// HistoryKeyRange is like HistoryRange but returns only keys (nil values), skipping expensive value lookups.
-func (ht *HistoryRoTx) HistoryKeyRange(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KV, error) {
-	if asc == order.Desc {
-		panic("not supported yet")
-	}
-	itOnFiles, err := ht.iterateChangedFrozen(fromTxNum, toTxNum, asc, limit, true)
-	if err != nil {
-		return nil, err
-	}
-	itOnDB, err := ht.iterateChangedRecent(fromTxNum, toTxNum, asc, limit, roTx, true)
+	itOnDB, err := ht.iterateChangedRecent(fromTxNum, toTxNum, asc, limit, roTx)
 	if err != nil {
 		return nil, err
 	}
