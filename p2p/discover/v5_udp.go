@@ -269,9 +269,9 @@ func (t *UDPv5) ResolveNodeId(id enode.ID) *enode.Node {
 func (t *UDPv5) AllNodes() []*enode.Node {
 	t.tab.mutex.Lock()
 	defer t.tab.mutex.Unlock()
-	nodes := make([]*enode.Node, 0)
-
+	var nodes []*enode.Node
 	for _, b := range &t.tab.buckets {
+		nodes = slices.Grow(nodes, len(b.entries))
 		for _, n := range b.entries {
 			nodes = append(nodes, n.Node)
 		}
