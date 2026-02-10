@@ -19,6 +19,7 @@ package datadir
 import (
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/db/version"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -346,7 +347,36 @@ func (d *Dirs) RenameOldVersions(cmdCommand bool) error {
 	return nil
 }
 
-func (d *Dirs) RenameNewVersions() error {
+func (d *Dirs) ResetToPreviousVersion() error {
+	if version.Major == 3 && version.Minor == 0 {
+		return errors.New("cannot reset to previous version")
+	}
+	if version.Major == 3 && version.Minor == 1 {
+		return d.RenameNewVersionsToOldFormat()
+	}
+
+	//eliminate polygon-bridge && heimdall && chaindata just in case
+	if d.DataDir != "" {
+		if err := dir.RemoveAll(filepath.Join(d.DataDir, dbcfg.PolygonBridgeDB)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		log.Info(fmt.Sprintf("Removed polygon-bridge directory: %s", filepath.Join(d.DataDir, dbcfg.PolygonBridgeDB)))
+		if err := dir.RemoveAll(filepath.Join(d.DataDir, dbcfg.HeimdallDB)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		log.Info(fmt.Sprintf("Removed heimdall directory: %s", filepath.Join(d.DataDir, dbcfg.HeimdallDB)))
+		if d.Chaindata != "" {
+			if err := dir.RemoveAll(d.Chaindata); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			log.Info(fmt.Sprintf("Removed chaindata directory: %s", d.Chaindata))
+		}
+	}
+
+	return nil
+}
+
+func (d *Dirs) RenameNewVersionsToOldFormat() error {
 	directories := []string{
 		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
 		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
@@ -434,6 +464,7 @@ func (d *Dirs) RenameNewVersions() error {
 
 	return nil
 }
+
 func (d *Dirs) PreverifiedPath() string {
 	return filepath.Join(d.Snap, PreverifiedFileName)
 }

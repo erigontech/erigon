@@ -219,7 +219,7 @@ func FindFilesWithVersionsByPattern(pattern string) (string, Version, bool, erro
 	return matches[0], ver, true, nil
 }
 
-func CheckIsThereFileWithSupportedVersion(pattern string, minSup Version) error {
+func CheckIsThereFileWithSupportedVersion(pattern string, version Versions) error {
 	_, fileVer, ok, err := FindFilesWithVersionsByPattern(pattern)
 	if err != nil {
 		return err
@@ -227,9 +227,14 @@ func CheckIsThereFileWithSupportedVersion(pattern string, minSup Version) error 
 	if !ok {
 		return errors.New("file with this pattern not found")
 	}
-	if fileVer.Less(minSup) {
-		return fmt.Errorf("file version %s is less than supported version %s", fileVer.String(), minSup.String())
+	if fileVer.Less(version.MinSupported) {
+		return fmt.Errorf("file version %s is less than supported version %s", fileVer.String(), version.MinSupported.String())
 	}
+
+	if fileVer.Major > version.Current.Major {
+		return fmt.Errorf("file version %s is greater than current version %s", fileVer.String(), version.Current.String())
+	}
+
 	return nil
 }
 

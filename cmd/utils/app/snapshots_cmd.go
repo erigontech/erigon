@@ -257,7 +257,20 @@ var snapshotCommand = cli.Command{
 					return err
 				}
 				defer l.Unlock()
-				return dirs.RenameNewVersions()
+				return dirs.RenameNewVersionsToOldFormat()
+			},
+			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
+		},
+		{
+			Name:  "reset-to-prev-version",
+			Usage: "change all the snapshots to previous version",
+			Action: func(cliCtx *cli.Context) error {
+				dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
+				if err != nil {
+					return err
+				}
+				defer l.Unlock()
+				return dirs.ResetToPreviousVersion()
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
 		},
@@ -1501,33 +1514,33 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 			return fmt.Errorf("failed to replace version file %s: %w", res.Name(), err)
 		}
 		for snapType := kv.Domain(0); snapType < kv.DomainLen; snapType++ {
-			schemaVersionMinSup := statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV.MinSupported
+			schemaVersion := statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV
 			expectedFileName := strings.Replace(accName, "accounts", snapType.String(), 1)
-			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, expectedFileName), schemaVersionMinSup); err != nil {
+			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, expectedFileName), schemaVersion); err != nil {
 				return fmt.Errorf("missing file %s at path %s with err %w", expectedFileName, filepath.Join(dirs.SnapDomain, expectedFileName), err)
 			}
 
 			// check that the index file exist
 			if statecfg.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorBTree) {
-				schemaVersionMinSup = statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorBT.MinSupported
+				schemaVersion = statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorBT
 				fileName := strings.Replace(expectedFileName, ".kv", ".bt", 1)
-				err := version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, fileName), schemaVersionMinSup)
+				err := version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, fileName), schemaVersion)
 				if err != nil {
 					return fmt.Errorf("missing file %s at path %s with err %w", expectedFileName, filepath.Join(dirs.SnapDomain, fileName), err)
 				}
 			}
 			if statecfg.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorExistence) {
-				schemaVersionMinSup = statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVEI.MinSupported
+				schemaVersion = statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVEI
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvei", 1)
-				err := version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, fileName), schemaVersionMinSup)
+				err := version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, fileName), schemaVersion)
 				if err != nil {
 					return fmt.Errorf("missing file %s at path %s with err %w", expectedFileName, filepath.Join(dirs.SnapDomain, fileName), err)
 				}
 			}
 			if statecfg.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorHashMap) {
-				schemaVersionMinSup = statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVI.MinSupported
+				schemaVersion = statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.AccessorKVI
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvi", 1)
-				err := version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, fileName), schemaVersionMinSup)
+				err := version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, fileName), schemaVersion)
 				if err != nil {
 					return fmt.Errorf("missing file %s at path %s with err %w", expectedFileName, filepath.Join(dirs.SnapDomain, fileName), err)
 				}
@@ -1619,29 +1632,29 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 				return err
 			}
 
-			schemaVersionMinSup := versioned.GetVersions().II.DataEF.MinSupported
+			schemaVersion := versioned.GetVersions().II.DataEF
 			expectedFileName := strings.Replace(accName, "accounts", snapType, 1)
-			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapIdx, expectedFileName), schemaVersionMinSup); err != nil {
+			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapIdx, expectedFileName), schemaVersion); err != nil {
 				return fmt.Errorf("missing file %s at path %s with err %w", expectedFileName, filepath.Join(dirs.SnapIdx, expectedFileName), err)
 			}
 			// Check accessors
-			schemaVersionMinSup = versioned.GetVersions().II.AccessorEFI.MinSupported
+			schemaVersion = versioned.GetVersions().II.AccessorEFI
 			fileName := strings.Replace(expectedFileName, ".ef", ".efi", 1)
-			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapAccessors, fileName), schemaVersionMinSup); err != nil {
+			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapAccessors, fileName), schemaVersion); err != nil {
 				return fmt.Errorf("missing file %s at path %s with err %w", fileName, filepath.Join(dirs.SnapAccessors, fileName), err)
 			}
 			if !slices.Contains(viTypes, snapType) {
 				continue
 			}
-			schemaVersionMinSup = versioned.GetVersions().Hist.AccessorVI.MinSupported
+			schemaVersion = versioned.GetVersions().Hist.AccessorVI
 			fileName = strings.Replace(expectedFileName, ".ef", ".vi", 1)
-			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapAccessors, fileName), schemaVersionMinSup); err != nil {
+			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapAccessors, fileName), schemaVersion); err != nil {
 				return fmt.Errorf("missing file %s at path %s with err %w", fileName, filepath.Join(dirs.SnapAccessors, fileName), err)
 			}
-			schemaVersionMinSup = versioned.GetVersions().Hist.DataV.MinSupported
+			schemaVersion = versioned.GetVersions().Hist.DataV
 			// check that .v
 			fileName = strings.Replace(expectedFileName, ".ef", ".v", 1)
-			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapHistory, fileName), schemaVersionMinSup); err != nil {
+			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapHistory, fileName), schemaVersion); err != nil {
 				return fmt.Errorf("missing file %s at path %s with err %w", fileName, filepath.Join(dirs.SnapHistory, fileName), err)
 			}
 		}
