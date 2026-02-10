@@ -62,7 +62,7 @@ func (f *ForkChoiceStore) isPayloadTimely(root common.Hash) bool {
 
 	// If the payload is not locally available, the payload
 	// is not considered available regardless of the PTC vote
-	if _, ok := f.executionPayloadStates.Load(root); !ok {
+	if !f.forkGraph.HasEnvelope(root) {
 		return false
 	}
 
@@ -224,7 +224,8 @@ func (f *ForkChoiceStore) getNodeChildren(node ForkChoiceNode, blocks map[common
 		children := []ForkChoiceNode{
 			{Root: node.Root, PayloadStatus: cltypes.PayloadStatusEmpty},
 		}
-		if _, ok := f.executionPayloadStates.Load(node.Root); ok {
+		// Check disk for envelope existence to determine if FULL status is available
+		if f.forkGraph.HasEnvelope(node.Root) {
 			children = append(children, ForkChoiceNode{
 				Root: node.Root, PayloadStatus: cltypes.PayloadStatusFull,
 			})
@@ -259,8 +260,8 @@ func (f *ForkChoiceStore) getNodeChildren(node ForkChoiceNode, blocks map[common
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock) error {
 	if f.isParentNodeFull(block) {
-		// Parent is FULL - verify execution payload state exists
-		if _, ok := f.executionPayloadStates.Load(block.ParentRoot); !ok {
+		// Parent is FULL - verify execution payload envelope exists on disk
+		if !f.forkGraph.HasEnvelope(block.ParentRoot) {
 			return errors.New("parent execution payload state not found for FULL parent")
 		}
 	} else {
