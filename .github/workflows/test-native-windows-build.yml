@@ -36,22 +36,16 @@ jobs:
           # Build a minimal PATH from only the documented prerequisites.
           # Dynamically discover tool locations (choco may install to
           # non-obvious paths) before we restrict PATH.
-          GOROOT="$(go env GOROOT)"
-          GOPATH="$(go env GOPATH)"
-          GCC_DIR="$(dirname "$(which gcc)")"
-          MAKE_DIR="$(dirname "$(which make)")"
-          CMAKE_DIR="$(dirname "$(which cmake)")"
-          NEW_PATH=""
-          NEW_PATH+="${GOROOT}/bin:"
-          NEW_PATH+="${GOPATH}/bin:"
-          NEW_PATH+="/usr/bin:"                # MSYS2 utils (grep, cut, tee, uname, rm, etc.)
-          NEW_PATH+="/mingw64/bin:"            # git, bash (Git for Windows)
-          NEW_PATH+="/c/ProgramData/chocolatey/bin:"
-          NEW_PATH+="${GCC_DIR}:"              # gcc/g++ from choco mingw
-          NEW_PATH+="${MAKE_DIR}:"             # make from choco
-          NEW_PATH+="${CMAKE_DIR}:"            # cmake from choco
-          NEW_PATH+="/c/Windows/System32:"
-          NEW_PATH+="/c/Windows:"
+          # Use Windows-native paths (cygpath -w) so both bash and PowerShell
+          # steps work. MSYS2 bash auto-translates Windows PATH entries.
+          GOROOT_WIN="$(cygpath -w "$(go env GOROOT)")"
+          GOPATH_WIN="$(cygpath -w "$(go env GOPATH)")"
+          GCC_DIR_WIN="$(cygpath -w "$(dirname "$(which gcc)")")"
+          MAKE_DIR_WIN="$(cygpath -w "$(dirname "$(which make)")")"
+          CMAKE_DIR_WIN="$(cygpath -w "$(dirname "$(which cmake)")")"
+          GIT_USR_BIN_WIN="$(cygpath -w /usr/bin)"
+          GIT_MINGW_BIN_WIN="$(cygpath -w /mingw64/bin)"
+          NEW_PATH="${GOROOT_WIN}\\bin;${GOPATH_WIN}\\bin;${GIT_USR_BIN_WIN};${GIT_MINGW_BIN_WIN};C:\\ProgramData\\chocolatey\\bin;${GCC_DIR_WIN};${MAKE_DIR_WIN};${CMAKE_DIR_WIN};C:\\Windows\\System32;C:\\Windows"
           echo "PATH=${NEW_PATH}" >> "$GITHUB_ENV"
 
       - name: Verify only documented tools are available
@@ -73,6 +67,10 @@ jobs:
       - name: Verify erigon.exe exists
         shell: bash
         run: test -f ./build/bin/erigon.exe
+
+      - name: Build erigon from PowerShell (make erigon)
+        shell: pwsh
+        run: make erigon
 
       - name: Build all targets (make all)
         shell: bash
