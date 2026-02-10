@@ -31,8 +31,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/db/kv/prune"
 	rand2 "golang.org/x/exp/rand"
+
+	"github.com/erigontech/erigon/db/kv/prune"
 
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/tidwall/btree"
@@ -755,7 +756,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	}
 	mxStepTook.ObserveDuration(stepStartedAt)
 	a.IntegrateDirtyFiles(static, txFrom, txTo)
-	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt))
+	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt), "workers", a.collateAndBuildWorkers)
 
 	return nil
 }

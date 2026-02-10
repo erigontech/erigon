@@ -78,7 +78,7 @@ func TestEth66EmptyMessages(t *testing.T) {
 	// All empty messages encodes to the same format
 	want := common.FromHex("c4820457c0")
 
-	for i, msg := range []interface{}{
+	for i, msg := range []any{
 		// Headers
 		GetBlockHeadersPacket66{1111, nil},
 		BlockHeadersPacket66{1111, nil},
@@ -185,7 +185,7 @@ func TestEth66Messages(t *testing.T) {
 	}
 
 	for i, tc := range []struct {
-		message interface{}
+		message any
 		want    []byte
 	}{
 		{

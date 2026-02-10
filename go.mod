@@ -4,8 +4,6 @@ go 1.24.0
 
 replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
 
-replace github.com/crate-crypto/go-eth-kzg => github.com/Giulio2002/zero-alloc-go-eth-kzg v0.0.0-20260105034637-43cb6f34f8e0
-
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20260105114333-2f59a10db72b
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
@@ -27,7 +25,7 @@ require (
 	github.com/anacrolix/log v0.17.1-0.20251118025802-918f1157b7bb
 	github.com/anacrolix/missinggo/v2 v2.10.0
 	github.com/anacrolix/sync v0.5.5-0.20251119100342-d78dd1f686f1
-	github.com/anacrolix/torrent v1.60.1-0.20251217073903-486bcbe758e0
+	github.com/anacrolix/torrent v1.61.1-0.20260205044246-b4fcea2871e5
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/c2h5oh/datasize v0.0.0-20231215233829-aa82cc1e6500
 	github.com/cenkalti/backoff/v4 v4.3.0
@@ -36,7 +34,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/consensys/gnark-crypto v0.19.1
 	github.com/containerd/cgroups/v3 v3.0.5
-	github.com/crate-crypto/go-eth-kzg v1.4.0
+	github.com/crate-crypto/go-eth-kzg v1.5.0
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
@@ -137,10 +135,9 @@ require (
 	github.com/Masterminds/semver/v3 v3.2.0 // indirect
 	github.com/RoaringBitmap/roaring v1.9.4 // indirect
 	github.com/agnivade/levenshtein v1.2.1 // indirect
-	github.com/alecthomas/assert/v2 v2.8.1 // indirect
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
 	github.com/alecthomas/repr v0.4.0 // indirect
-	github.com/anacrolix/btree v0.0.0-20251201064447-d86c3fa41bd8 // indirect
+	github.com/anacrolix/btree v0.1.1 // indirect
 	github.com/anacrolix/chansync v0.7.0 // indirect
 	github.com/anacrolix/dht/v2 v2.23.0 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
@@ -182,7 +179,6 @@ require (
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
-	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/garslo/gogen v0.0.0-20170307003452-d6ebae628c7c // indirect
 	github.com/go-llsqlite/adapter v0.0.0-20230927005056-7f5ce7f0c916 // indirect
 	github.com/go-llsqlite/crawshaw v0.6.0 // indirect
