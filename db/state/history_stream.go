@@ -399,7 +399,6 @@ type HistoryChangesIterFiles struct {
 	k, v, kBackup, vBackup []byte
 	err                    error
 	limit                  int
-	skipValues             bool
 }
 
 func (hi *HistoryChangesIterFiles) Close() {
@@ -430,9 +429,6 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		}
 
 		hi.nextKey = key
-		if hi.skipValues {
-			return nil
-		}
 		binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
 		historyItem, ok := hi.hc.getFileDeprecated(top.startTxNum, top.endTxNum)
 		if !ok {
@@ -807,7 +803,6 @@ type HistoryChangesIterDB struct {
 	nextKey, nextVal []byte
 	k, v             []byte
 	err              error
-	skipValues       bool
 }
 
 func (hi *HistoryChangesIterDB) Close() {
@@ -895,11 +890,7 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 			continue
 		}
 		hi.nextKey = k[:len(k)-8]
-		if hi.skipValues {
-			hi.nextVal = nil
-		} else {
-			hi.nextVal = v
-		}
+		hi.nextVal = v
 		return nil
 	}
 	hi.nextKey = nil
@@ -940,11 +931,7 @@ func (hi *HistoryChangesIterDB) advanceSmallVals() (err error) {
 		foundTxNumVal := v[:8]
 		if hi.endTxNum < 0 || int(binary.BigEndian.Uint64(foundTxNumVal)) < hi.endTxNum {
 			hi.nextKey = k
-			if hi.skipValues {
-				hi.nextVal = nil
-			} else {
-				hi.nextVal = v[8:]
-			}
+			hi.nextVal = v[8:]
 			return nil
 		}
 		k, _, err = hi.valsCDup.NextNoDup()
