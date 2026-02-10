@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	mockCommittee "github.com/erigontech/erigon/cl/validator/committee_subscription/mock_services"
@@ -294,8 +295,8 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 					att.Data.BeaconBlockRoot: {},
 				}
 				mockFinalizedCheckPoint := &solid.Checkpoint{Root: [32]byte{1, 0}, Epoch: 1}
-				t.mockForkChoice.Ancestors = map[uint64]common.Hash{
-					mockEpoch * mockSlotsPerEpoch:                     att.Data.Target.Root,
+				t.mockForkChoice.Ancestors = map[uint64]forkchoice.ForkChoiceNode{
+					mockEpoch * mockSlotsPerEpoch:                     {Root: att.Data.Target.Root},
 					mockFinalizedCheckPoint.Epoch * mockSlotsPerEpoch: {}, // wrong block root
 				}
 				t.mockForkChoice.FinalizedCheckpointVal = *mockFinalizedCheckPoint
@@ -329,9 +330,9 @@ func (t *attestationTestSuite) TestAttestationProcessMessage() {
 				}
 
 				mockFinalizedCheckPoint := &solid.Checkpoint{Root: [32]byte{1, 0}, Epoch: 1}
-				t.mockForkChoice.Ancestors = map[uint64]common.Hash{
-					mockEpoch * mockSlotsPerEpoch:                     att.Data.Target.Root,
-					mockFinalizedCheckPoint.Epoch * mockSlotsPerEpoch: mockFinalizedCheckPoint.Root,
+				t.mockForkChoice.Ancestors = map[uint64]forkchoice.ForkChoiceNode{
+					mockEpoch * mockSlotsPerEpoch:                     {Root: att.Data.Target.Root},
+					mockFinalizedCheckPoint.Epoch * mockSlotsPerEpoch: {Root: mockFinalizedCheckPoint.Root},
 				}
 				t.mockForkChoice.FinalizedCheckpointVal = *mockFinalizedCheckPoint
 				//t.committeeSubscibe.EXPECT().NeedToAggregate(att).Return(true).Times(1)
