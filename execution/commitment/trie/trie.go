@@ -520,7 +520,7 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 	if value.Root == EmptyRoot || value.Root == (common.Hash{}) {
 		newnode = &AccountNode{*value, nil, true, nil, codeSizeUncached}
 	} else {
-		newnode = &AccountNode{*value, HashNode{hash: value.Root[:]}, true, nil, codeSizeUncached}
+		newnode = &AccountNode{*value, &HashNode{hash: value.Root[:]}, true, nil, codeSizeUncached}
 	}
 
 	if t.RootNode == nil {
@@ -1671,7 +1671,7 @@ func decodeTrieRef(buf []byte) (Node, []byte, error) {
 	case kind == rlp.String && len(val) == 0:
 		return nil, rest, nil
 	case kind == rlp.String && len(val) == 32:
-		return HashNode{hash: val}, rest, nil
+		return &HashNode{hash: val}, rest, nil
 	default:
 		return nil, nil, fmt.Errorf("invalid RLP string size %d (want 0 through 32)", len(val))
 	}
@@ -1702,7 +1702,7 @@ func tryDecodeAccountNode(val ValueNode, nodeMap map[common.Hash]Node) *AccountN
 			an.Storage = storageNode
 		} else {
 			// Storage root exists but we don't have the nodes - use HashNode
-			an.Storage = HashNode{hash: acc.Root[:]}
+			an.Storage = &HashNode{hash: acc.Root[:]}
 		}
 	}
 
