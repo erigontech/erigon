@@ -45,8 +45,8 @@ jobs:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-main/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      TRACKING_TIME_SECONDS: 1800 # 0.5 hours
-      TOTAL_TIME_SECONDS: 7200 # 2 hours
+      TRACKING_TIME_SECONDS: 7200 # 2 hours
+      TOTAL_TIME_SECONDS: 10800 # 3 hours
       CHAIN: mainnet
       GETH_INSTALL_DIR: /opt/go-ethereum
       CLIENT: ${{ matrix.client }}
