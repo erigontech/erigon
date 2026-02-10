@@ -1049,6 +1049,9 @@ func (sdb *IntraBlockState) refreshVersionedAccount(addr accounts.Address, readA
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
 	if amount.IsZero() && addr != params.SystemAddress {
+		// We skip this early exit if the sender is the system address
+		// because Gnosis has a special logic to create an empty system account
+		// even after Spurious Dragon (see PR 5645 and Issue 18276).
 		return nil
 	}
 
