@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -90,116 +89,25 @@ func TestHistoryKeyTxNumRange(t *testing.T) {
 		ic := h.BeginFilesRo()
 		defer ic.Close()
 
-		// Case 1: small range [2, 20) — verify all (key, txNum) pairs
+		// Small range [2, 20)
 		it, err := ic.HistoryKeyTxNumRange(2, 20, order.Asc, -1, tx)
 		require.NoError(err)
-		var results []string
-		for it.HasNext() {
-			k, txNum, err := it.Next()
-			require.NoError(err)
-			results = append(results, fmt.Sprintf("%x:%d", k, txNum))
-		}
-		it.Close()
+		require.Equal(expectedKeyTxNums(2, 20, txs), collectKeyTxNumRange(t, it))
 
-		// Build expected: for each key N (1..31), txNums in [2,20) that are multiples of N
-		var expected []string
-		for keyNum := uint64(1); keyNum <= 31; keyNum++ {
-			var k [8]byte
-			binary.BigEndian.PutUint64(k[:], keyNum)
-			k[0] = 1
-			for txNum := uint64(2); txNum < 20; txNum++ {
-				if txNum%keyNum == 0 {
-					expected = append(expected, fmt.Sprintf("%x:%d", k[:], txNum))
-				}
-			}
-		}
-		require.Equal(expected, results)
-
-		// Case 2: key 1 should appear 18 times (txNums 2..19)
-		count := 0
-		for _, s := range results {
-			if strings.HasPrefix(s, "0100000000000001:") {
-				count++
-			}
-		}
-		require.Equal(18, count, "key 1 should have 18 entries in [2,20)")
-
-		// Case 3: limit
+		// Limit
 		it, err = ic.HistoryKeyTxNumRange(2, 20, order.Asc, 5, tx)
 		require.NoError(err)
-		results = results[:0]
-		for it.HasNext() {
-			k, txNum, err := it.Next()
-			require.NoError(err)
-			results = append(results, fmt.Sprintf("%x:%d", k, txNum))
-		}
-		it.Close()
-		require.Len(results, 5, "limit should be respected")
+		require.Len(collectKeyTxNumRange(t, it), 5)
 
-		// Case 4: larger range entirely within files [100, 200)
+		// Larger range within files [100, 200)
 		it, err = ic.HistoryKeyTxNumRange(100, 200, order.Asc, -1, tx)
 		require.NoError(err)
-		results = results[:0]
-		for it.HasNext() {
-			k, txNum, err := it.Next()
-			require.NoError(err)
-			results = append(results, fmt.Sprintf("%x:%d", k, txNum))
-		}
-		it.Close()
-		// Build expected for [100, 200)
-		expected = expected[:0]
-		for keyNum := uint64(1); keyNum <= 31; keyNum++ {
-			var k [8]byte
-			binary.BigEndian.PutUint64(k[:], keyNum)
-			k[0] = 1
-			for txNum := uint64(100); txNum < 200; txNum++ {
-				if txNum%keyNum == 0 {
-					expected = append(expected, fmt.Sprintf("%x:%d", k[:], txNum))
-				}
-			}
-		}
-		require.Equal(expected, results)
+		require.Equal(expectedKeyTxNums(100, 200, txs), collectKeyTxNumRange(t, it))
 
-		// Case 5: range [980, 1001) spanning frozen files + DB
-		// filledHistory writes 1000 txs with stepSize=16.
-		// collateAndMergeHistory freezes steps 0..61 (txNums 0..991), leaves step 62 (992..1000) in DB.
-		// So [980, 1001) covers both file data (980..991) and DB data (992..1000).
+		// Range [980, 1001) spanning frozen files + DB
 		it, err = ic.HistoryKeyTxNumRange(980, 1001, order.Asc, -1, tx)
 		require.NoError(err)
-		results = results[:0]
-		for it.HasNext() {
-			k, txNum, err := it.Next()
-			require.NoError(err)
-			results = append(results, fmt.Sprintf("%x:%d", k, txNum))
-		}
-		it.Close()
-		// Build expected for [980, 1001)
-		expected = expected[:0]
-		for keyNum := uint64(1); keyNum <= 31; keyNum++ {
-			var k [8]byte
-			binary.BigEndian.PutUint64(k[:], keyNum)
-			k[0] = 1
-			for txNum := uint64(980); txNum < 1001; txNum++ {
-				if txNum <= txs && txNum%keyNum == 0 {
-					expected = append(expected, fmt.Sprintf("%x:%d", k[:], txNum))
-				}
-			}
-		}
-		require.Equal(expected, results)
-
-		// Verify DB-side has multiple entries per key (key 1 should have entries 992..1000)
-		dbEntries := 0
-		for _, s := range results {
-			if strings.HasPrefix(s, "0100000000000001:") {
-				parts := strings.Split(s, ":")
-				var txNum uint64
-				fmt.Sscanf(parts[1], "%d", &txNum)
-				if txNum >= 992 {
-					dbEntries++
-				}
-			}
-		}
-		require.Equal(9, dbEntries, "key 1 should have 9 DB-side entries (992..1000)")
+		require.Equal(expectedKeyTxNums(980, 1001, txs), collectKeyTxNumRange(t, it))
 	}
 	t.Run("large_values", func(t *testing.T) {
 		db, h, txs := filledHistory(t, true, logger)
@@ -233,90 +141,55 @@ func TestHistoryKeyTxNumRange_EdgeCases(t *testing.T) {
 		ic := h.BeginFilesRo()
 		defer ic.Close()
 
-		// Empty range: fromTxNum == toTxNum
 		t.Run("empty_range", func(t *testing.T) {
 			it, err := ic.HistoryKeyTxNumRange(5, 5, order.Asc, -1, tx)
 			require.NoError(err)
-			results := collectKeyTxNumRange(t, it)
-			require.Empty(results)
+			require.Empty(collectKeyTxNumRange(t, it))
 		})
-
-		// Empty range: fromTxNum > toTxNum (edge case)
 		t.Run("inverted_range", func(t *testing.T) {
 			it, err := ic.HistoryKeyTxNumRange(20, 5, order.Asc, -1, tx)
 			require.NoError(err)
-			results := collectKeyTxNumRange(t, it)
-			require.Empty(results)
+			require.Empty(collectKeyTxNumRange(t, it))
 		})
-
-		// Range beyond all data
 		t.Run("range_beyond_data", func(t *testing.T) {
 			it, err := ic.HistoryKeyTxNumRange(2000, 3000, order.Asc, -1, tx)
 			require.NoError(err)
-			results := collectKeyTxNumRange(t, it)
-			require.Empty(results)
+			require.Empty(collectKeyTxNumRange(t, it))
 		})
-
-		// Limit = 0
 		t.Run("limit_zero", func(t *testing.T) {
 			it, err := ic.HistoryKeyTxNumRange(2, 20, order.Asc, 0, tx)
 			require.NoError(err)
-			results := collectKeyTxNumRange(t, it)
-			require.Empty(results)
+			require.Empty(collectKeyTxNumRange(t, it))
 		})
-
-		// Range from 0 (includes first changes)
 		t.Run("from_zero", func(t *testing.T) {
 			it, err := ic.HistoryKeyTxNumRange(0, 5, order.Asc, -1, tx)
 			require.NoError(err)
-			results := collectKeyTxNumRange(t, it)
-			expected := expectedKeyTxNums(0, 5, txs)
-			require.Equal(expected, results)
+			require.Equal(expectedKeyTxNums(0, 5, txs), collectKeyTxNumRange(t, it))
 		})
-
-		// Unbounded end (toTxNum = -1)
 		t.Run("unbounded_end", func(t *testing.T) {
 			it, err := ic.HistoryKeyTxNumRange(995, -1, order.Asc, -1, tx)
 			require.NoError(err)
-			results := collectKeyTxNumRange(t, it)
-			expected := expectedKeyTxNums(995, -1, txs)
-			require.Equal(expected, results)
+			require.Equal(expectedKeyTxNums(995, -1, txs), collectKeyTxNumRange(t, it))
 		})
-
-		// Unbounded start (fromTxNum = -1)
 		t.Run("unbounded_start", func(t *testing.T) {
 			it, err := ic.HistoryKeyTxNumRange(-1, 5, order.Asc, -1, tx)
 			require.NoError(err)
-			results := collectKeyTxNumRange(t, it)
-			expected := expectedKeyTxNums(-1, 5, txs)
-			require.Equal(expected, results)
+			require.Equal(expectedKeyTxNums(-1, 5, txs), collectKeyTxNumRange(t, it))
 		})
-
-		// Fully unbounded (fromTxNum = -1, toTxNum = -1)
 		t.Run("fully_unbounded", func(t *testing.T) {
 			it, err := ic.HistoryKeyTxNumRange(-1, -1, order.Asc, -1, tx)
 			require.NoError(err)
-			results := collectKeyTxNumRange(t, it)
-			expected := expectedKeyTxNums(-1, -1, txs)
-			require.Equal(expected, results)
+			require.Equal(expectedKeyTxNums(-1, -1, txs), collectKeyTxNumRange(t, it))
 		})
-
-		// Limit = 1
 		t.Run("limit_one", func(t *testing.T) {
 			it, err := ic.HistoryKeyTxNumRange(1, 100, order.Asc, 1, tx)
 			require.NoError(err)
-			results := collectKeyTxNumRange(t, it)
-			require.Len(results, 1)
+			require.Len(collectKeyTxNumRange(t, it), 1)
 		})
-
-		// Single-step range (from, from+1)
 		t.Run("single_txnum_range", func(t *testing.T) {
-			// txNum=6 is a multiple of 1,2,3,6 → 4 keys change at txNum=6
 			it, err := ic.HistoryKeyTxNumRange(6, 7, order.Asc, -1, tx)
 			require.NoError(err)
-			results := collectKeyTxNumRange(t, it)
-			expected := expectedKeyTxNums(6, 7, txs)
-			require.Equal(expected, results)
+			require.Equal(expectedKeyTxNums(6, 7, txs), collectKeyTxNumRange(t, it))
 		})
 	}
 	t.Run("large_values", func(t *testing.T) {
@@ -343,35 +216,25 @@ func TestHistoryKeyTxNumRange_DBOnly(t *testing.T) {
 		t.Helper()
 		require := require.New(t)
 
-		// NO collation/merge — all data stays in the DB
+		// No collation/merge — all data stays in the DB
 		tx, err := db.BeginRo(ctx)
 		require.NoError(err)
 		defer tx.Rollback()
 		ic := h.BeginFilesRo()
 		defer ic.Close()
+		require.Empty(ic.iit.files)
 
-		// Verify no frozen files
-		require.Empty(ic.iit.files, "expected no frozen files")
-
-		// Full range
 		it, err := ic.HistoryKeyTxNumRange(-1, -1, order.Asc, -1, tx)
 		require.NoError(err)
-		results := collectKeyTxNumRange(t, it)
-		expected := expectedKeyTxNums(-1, -1, txs)
-		require.Equal(expected, results)
+		require.Equal(expectedKeyTxNums(-1, -1, txs), collectKeyTxNumRange(t, it))
 
-		// Bounded sub-range
 		it, err = ic.HistoryKeyTxNumRange(10, 30, order.Asc, -1, tx)
 		require.NoError(err)
-		results = collectKeyTxNumRange(t, it)
-		expected = expectedKeyTxNums(10, 30, txs)
-		require.Equal(expected, results)
+		require.Equal(expectedKeyTxNums(10, 30, txs), collectKeyTxNumRange(t, it))
 
-		// With limit
 		it, err = ic.HistoryKeyTxNumRange(1, 100, order.Asc, 3, tx)
 		require.NoError(err)
-		results = collectKeyTxNumRange(t, it)
-		require.Len(results, 3)
+		require.Len(collectKeyTxNumRange(t, it), 3)
 	}
 	t.Run("large_values", func(t *testing.T) {
 		db, h, txs := filledHistory(t, true, logger)
