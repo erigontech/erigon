@@ -9,19 +9,25 @@ on:
     branches:
         - main
         - 'release/**'
-    paths-ignore:
-      - 'dashboards/**'
-      - '**/*.md'
-      - 'docs/**'
-      - '.github/workflows/backups-dashboards.yml'
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - 'Dockerfile'
+      - '.github/workflows/kurtosis/**'
+      - '.github/workflows/test-kurtosis-assertoor.yml'
   pull_request:
     branches:
       - main
-    paths-ignore:
-      - 'dashboards/**'
-      - '**/*.md'
-      - 'docs/**'
-      - '.github/workflows/backups-dashboards.yml'
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - 'Dockerfile'
+      - '.github/workflows/kurtosis/**'
+      - '.github/workflows/test-kurtosis-assertoor.yml'
   workflow_call:
   workflow_dispatch:
 
