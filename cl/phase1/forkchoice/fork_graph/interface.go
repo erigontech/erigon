@@ -58,4 +58,10 @@ type ForkGraph interface {
 	GetCurrentParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error)
 	GetPreviousParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error)
 	DumpBeaconStateOnDisk(blockRoot common.Hash, state *state.CachingBeaconState, forced bool) error
+	// [New in Gloas:EIP7732] Execution payload envelope persistence and state reconstruction
+	DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) error
+	ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
+	HasEnvelope(blockRoot common.Hash) bool
+	// GetExecutionPayloadState reconstructs the post-execution-payload state by replaying the envelope.
+	GetExecutionPayloadState(blockRoot common.Hash) (*state.CachingBeaconState, error)
 }
