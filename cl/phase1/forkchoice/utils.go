@@ -125,35 +125,32 @@ func (f *ForkChoiceStore) computeSlotsSinceEpochStart(slot uint64) uint64 {
 // Ancestor returns the ancestor to the given root.
 // [Modified in Gloas:EIP7732] Returns ForkChoiceNode with payload status.
 func (f *ForkChoiceStore) Ancestor(root common.Hash, slot uint64) ForkChoiceNode {
-	block, has := f.forkGraph.GetBlock(root)
-	if !has || block == nil {
+	// Use GetHeader for traversal (same as original implementation)
+	// This ensures we can traverse even when blocks are pruned
+	header, has := f.forkGraph.GetHeader(root)
+	if !has {
 		return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
 	}
 
-	// If block.slot <= slot, return with PENDING status (original: return root directly)
-	if block.Block.Slot <= slot {
-		return ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending}
-	}
-
-	// Traverse up the chain until parent.slot <= slot
-	parentBlock, has := f.forkGraph.GetBlock(block.Block.ParentRoot)
-	if !has || parentBlock == nil {
-		return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
-	}
-
-	for parentBlock.Block.Slot > slot {
-		block = parentBlock
-		parentBlock, has = f.forkGraph.GetBlock(block.Block.ParentRoot)
-		if !has || parentBlock == nil {
+	// Traverse up the chain using headers (same logic as original)
+	for header.Slot > slot {
+		root = header.ParentRoot
+		header, has = f.forkGraph.GetHeader(header.ParentRoot)
+		if !has {
 			return ForkChoiceNode{Root: common.Hash{}, PayloadStatus: cltypes.PayloadStatusPending}
 		}
 	}
 
-	// Return parent root with payload status
-	// For pre-Gloas compatibility, the Root is the same as before
+	// For Gloas, determine payload status from the block if available
+	// For pre-Gloas, PayloadStatus is not used by callers (they only check Root)
+	payloadStatus := cltypes.PayloadStatusPending
+	if block, hasBlock := f.forkGraph.GetBlock(root); hasBlock && block != nil {
+		payloadStatus = f.getParentPayloadStatus(block.Block)
+	}
+
 	return ForkChoiceNode{
-		Root:          block.Block.ParentRoot,
-		PayloadStatus: f.getParentPayloadStatus(block.Block),
+		Root:          root,
+		PayloadStatus: payloadStatus,
 	}
 }
 

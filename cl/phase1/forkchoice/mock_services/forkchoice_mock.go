@@ -302,6 +302,10 @@ func (f *ForkChoiceStorageMock) OnBlock(
 	return nil
 }
 
+func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	return nil
+}
+
 func (f *ForkChoiceStorageMock) OnTick(time uint64) {
 	panic("implement me")
 }
