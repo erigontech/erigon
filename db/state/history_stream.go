@@ -500,19 +500,19 @@ func (hi *HistoryChangesIterFiles) Next() ([]byte, []byte, error) {
 	return hi.kBackup, hi.vBackup, nil
 }
 
-// HistoryKeyTxNumIterFiles emits (key, txNum_be8) for every txNum at which a key changed.
+// HistoryKeyTxNumIterFiles emits (key, txNum) for every txNum at which a key changed.
 // Unlike HistoryChangesIterFiles, it does not dedup across files and emits all txNums per key.
 type HistoryKeyTxNumIterFiles struct {
-	nextVal    []byte
 	nextKey    []byte
+	nextTxNum  uint64
 	h          ReconHeap
 	startTxNum uint64
 	endTxNum   int
-	txnKey     [8]byte
 
-	k, v, kBackup, vBackup []byte
-	err                    error
-	limit                  int
+	k, kBackup []byte
+	txNum      uint64
+	err        error
+	limit      int
 
 	curKey    []byte
 	curIdxVal []byte
@@ -537,8 +537,7 @@ func (hi *HistoryKeyTxNumIterFiles) advance() error {
 			}
 			if hi.endTxNum < 0 || int(txNum) < hi.endTxNum {
 				hi.nextKey = hi.curKey
-				binary.BigEndian.PutUint64(hi.txnKey[:], txNum)
-				hi.nextVal = hi.txnKey[:]
+				hi.nextTxNum = txNum
 				return nil
 			}
 			// txNum >= endTxNum, fall through to get next key
@@ -584,22 +583,23 @@ func (hi *HistoryKeyTxNumIterFiles) HasNext() bool {
 	return true
 }
 
-func (hi *HistoryKeyTxNumIterFiles) Next() ([]byte, []byte, error) {
+func (hi *HistoryKeyTxNumIterFiles) Next() ([]byte, uint64, error) {
 	if hi.err != nil {
-		return nil, nil, hi.err
+		return nil, 0, hi.err
 	}
 	hi.limit--
-	hi.k, hi.v = append(hi.k[:0], hi.nextKey...), append(hi.v[:0], hi.nextVal...)
+	hi.k = append(hi.k[:0], hi.nextKey...)
+	hi.txNum = hi.nextTxNum
 
-	// Satisfy iter.Duo Invariant 2
-	hi.k, hi.kBackup, hi.v, hi.vBackup = hi.kBackup, hi.k, hi.vBackup, hi.v
+	// Satisfy iter.Duo Invariant 2 for key buffer
+	hi.k, hi.kBackup = hi.kBackup, hi.k
 	if err := hi.advance(); err != nil {
-		return nil, nil, err
+		return nil, 0, err
 	}
-	return hi.kBackup, hi.vBackup, nil
+	return hi.kBackup, hi.txNum, nil
 }
 
-// HistoryKeyTxNumIterDB emits (key, txNum_be8) for every txNum at which a key changed in the DB.
+// HistoryKeyTxNumIterDB emits (key, txNum) for every txNum at which a key changed in the DB.
 // Unlike HistoryChangesIterDB, it iterates ALL dups per key (not just the first one).
 type HistoryKeyTxNumIterDB struct {
 	largeValues     bool
@@ -608,11 +608,14 @@ type HistoryKeyTxNumIterDB struct {
 	valsCDup        kv.CursorDupSort
 	valsTable       string
 	limit, endTxNum int
-	startTxKey      [8]byte
+	startTxNum      uint64
+	startTxKey      [8]byte // startTxNum encoded as big-endian for cursor seeks
 
-	nextKey, nextVal []byte
-	k, v             []byte
-	err              error
+	nextKey   []byte
+	nextTxNum uint64
+	k         []byte
+	txNum     uint64
+	err       error
 }
 
 func (hi *HistoryKeyTxNumIterDB) Close() {
@@ -624,10 +627,12 @@ func (hi *HistoryKeyTxNumIterDB) Close() {
 	}
 }
 
-func (hi *HistoryKeyTxNumIterDB) setNextTxNum(k []byte, txNum uint64) {
+// setNext copies k from cursor memory (cursor ops invalidate previous return values)
+// and stores the txNum. Callers of Next() do not need to copy the returned key;
+// it remains valid until the next Next() call.
+func (hi *HistoryKeyTxNumIterDB) setNext(k []byte, txNum uint64) {
 	hi.nextKey = common.Copy(k)
-	hi.nextVal = make([]byte, 8)
-	binary.BigEndian.PutUint64(hi.nextVal, txNum)
+	hi.nextTxNum = txNum
 }
 
 func (hi *HistoryKeyTxNumIterDB) advance() error {
@@ -646,7 +651,7 @@ func (hi *HistoryKeyTxNumIterDB) seekNextSmallKey(k []byte) error {
 		if v != nil {
 			txNum := binary.BigEndian.Uint64(v[:8])
 			if hi.endTxNum < 0 || int(txNum) < hi.endTxNum {
-				hi.setNextTxNum(k, txNum)
+				hi.setNext(k, txNum)
 				return nil
 			}
 		}
@@ -681,7 +686,7 @@ func (hi *HistoryKeyTxNumIterDB) advanceSmallVals() error {
 	if v != nil {
 		txNum := binary.BigEndian.Uint64(v[:8])
 		if hi.endTxNum < 0 || int(txNum) < hi.endTxNum {
-			hi.setNextTxNum(k, txNum)
+			hi.setNext(k, txNum)
 			return nil
 		}
 	}
@@ -761,7 +766,7 @@ func (hi *HistoryKeyTxNumIterDB) scanLargeVals(k []byte) error {
 			}
 			continue
 		}
-		hi.setNextTxNum(k[:len(k)-8], txNum)
+		hi.setNext(k[:len(k)-8], txNum)
 		return nil
 	}
 	hi.nextKey = nil
@@ -778,16 +783,16 @@ func (hi *HistoryKeyTxNumIterDB) HasNext() bool {
 	return hi.nextKey != nil
 }
 
-func (hi *HistoryKeyTxNumIterDB) Next() ([]byte, []byte, error) {
+func (hi *HistoryKeyTxNumIterDB) Next() ([]byte, uint64, error) {
 	if hi.err != nil {
-		return nil, nil, hi.err
+		return nil, 0, hi.err
 	}
 	hi.limit--
-	hi.k, hi.v = hi.nextKey, hi.nextVal
+	hi.k, hi.txNum = hi.nextKey, hi.nextTxNum
 	if err := hi.advance(); err != nil {
-		return nil, nil, err
+		return nil, 0, err
 	}
-	return hi.k, hi.v, nil
+	return hi.k, hi.txNum, nil
 }
 
 type HistoryChangesIterDB struct {

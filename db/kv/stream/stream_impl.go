@@ -24,12 +24,14 @@ import (
 type (
 	U64  Uno[uint64]
 	KV   Duo[[]byte, []byte] // key,  value
+	KU64 Duo[[]byte, uint64] // key,  txnum
 	U64V Duo[uint64, []byte] // txnum,  value
 )
 
 var (
-	EmptyU64 = &Empty[uint64]{}
-	EmptyKV  = &EmptyDuo[[]byte, []byte]{}
+	EmptyU64  = &Empty[uint64]{}
+	EmptyKV   = &EmptyDuo[[]byte, []byte]{}
+	EmptyKU64 = &EmptyDuo[[]byte, uint64]{}
 )
 
 var (
@@ -278,6 +280,95 @@ func (m *MultisetKVIter) Next() ([]byte, []byte, error) {
 }
 
 func (m *MultisetKVIter) Close() {
+	if x, ok := m.x.(Closer); ok {
+		x.Close()
+	}
+	if y, ok := m.y.(Closer); ok {
+		y.Close()
+	}
+}
+
+// MultisetKU64Iter - sorted merge of two KU64 streams that preserves duplicates.
+// When keys are equal, x is emitted first; y is kept for the next call.
+type MultisetKU64Iter struct {
+	x, y               KU64
+	xHasNext, yHasNext bool
+	xNextK             []byte
+	xNextV             uint64
+	yNextK             []byte
+	yNextV             uint64
+	limit              int
+	err                error
+}
+
+// MultisetKU64 - sorted merge of two KU64 streams that preserves duplicates.
+// When keys are equal, x is emitted first; y is kept for the next call.
+func MultisetKU64(x, y KU64, limit int) KU64 {
+	if x == nil && y == nil {
+		return EmptyKU64
+	}
+	if x == nil {
+		return y
+	}
+	if y == nil {
+		return x
+	}
+	m := &MultisetKU64Iter{x: x, y: y, limit: limit}
+	m.advanceX()
+	m.advanceY()
+	return m
+}
+func (m *MultisetKU64Iter) HasNext() bool {
+	if m.err != nil {
+		return true
+	}
+	return (m.limit != 0 && m.xHasNext) || (m.limit != 0 && m.yHasNext)
+}
+func (m *MultisetKU64Iter) advanceX() {
+	if m.err != nil {
+		return
+	}
+	m.xHasNext = m.x.HasNext()
+	if m.xHasNext {
+		m.xNextK, m.xNextV, m.err = m.x.Next()
+	}
+}
+func (m *MultisetKU64Iter) advanceY() {
+	if m.err != nil {
+		return
+	}
+	m.yHasNext = m.y.HasNext()
+	if m.yHasNext {
+		m.yNextK, m.yNextV, m.err = m.y.Next()
+	}
+}
+func (m *MultisetKU64Iter) Next() ([]byte, uint64, error) {
+	if m.err != nil {
+		return nil, 0, m.err
+	}
+	m.limit--
+	if m.xHasNext && m.yHasNext {
+		cmp := bytes.Compare(m.xNextK, m.yNextK)
+		if cmp <= 0 {
+			k, v, err := m.xNextK, m.xNextV, m.err
+			m.advanceX()
+			return k, v, err
+		}
+		k, v, err := m.yNextK, m.yNextV, m.err
+		m.advanceY()
+		return k, v, err
+	}
+	if m.xHasNext {
+		k, v, err := m.xNextK, m.xNextV, m.err
+		m.advanceX()
+		return k, v, err
+	}
+	k, v, err := m.yNextK, m.yNextV, m.err
+	m.advanceY()
+	return k, v, err
+}
+
+func (m *MultisetKU64Iter) Close() {
 	if x, ok := m.x.(Closer); ok {
 		x.Close()
 	}

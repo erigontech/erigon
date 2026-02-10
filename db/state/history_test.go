@@ -1514,10 +1514,8 @@ func TestHistoryKeyTxNumRange(t *testing.T) {
 		require.NoError(err)
 		var results []string
 		for it.HasNext() {
-			k, v, err := it.Next()
+			k, txNum, err := it.Next()
 			require.NoError(err)
-			require.Len(v, 8, "value should be 8-byte txNum")
-			txNum := binary.BigEndian.Uint64(v)
 			results = append(results, fmt.Sprintf("%x:%d", k, txNum))
 		}
 		it.Close()
@@ -1550,9 +1548,8 @@ func TestHistoryKeyTxNumRange(t *testing.T) {
 		require.NoError(err)
 		results = results[:0]
 		for it.HasNext() {
-			k, v, err := it.Next()
+			k, txNum, err := it.Next()
 			require.NoError(err)
-			txNum := binary.BigEndian.Uint64(v)
 			results = append(results, fmt.Sprintf("%x:%d", k, txNum))
 		}
 		it.Close()
@@ -1563,10 +1560,8 @@ func TestHistoryKeyTxNumRange(t *testing.T) {
 		require.NoError(err)
 		results = results[:0]
 		for it.HasNext() {
-			k, v, err := it.Next()
+			k, txNum, err := it.Next()
 			require.NoError(err)
-			require.Len(v, 8, "value should be 8-byte txNum")
-			txNum := binary.BigEndian.Uint64(v)
 			results = append(results, fmt.Sprintf("%x:%d", k, txNum))
 		}
 		it.Close()
@@ -1592,10 +1587,8 @@ func TestHistoryKeyTxNumRange(t *testing.T) {
 		require.NoError(err)
 		results = results[:0]
 		for it.HasNext() {
-			k, v, err := it.Next()
+			k, txNum, err := it.Next()
 			require.NoError(err)
-			require.Len(v, 8, "value should be 8-byte txNum")
-			txNum := binary.BigEndian.Uint64(v)
 			results = append(results, fmt.Sprintf("%x:%d", k, txNum))
 		}
 		it.Close()
@@ -1617,7 +1610,6 @@ func TestHistoryKeyTxNumRange(t *testing.T) {
 		dbEntries := 0
 		for _, s := range results {
 			if strings.HasPrefix(s, "0100000000000001:") {
-				// Parse txNum
 				parts := strings.Split(s, ":")
 				var txNum uint64
 				fmt.Sscanf(parts[1], "%d", &txNum)
