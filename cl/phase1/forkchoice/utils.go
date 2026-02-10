@@ -80,14 +80,17 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 
 	// [New in Gloas:EIP7732] Clean up ptcVote for finalized blocks
 	// Note: envelope files are cleaned up in forkGraph.Prune()
-	finalizedSlot := newFinalized.Epoch * f.beaconCfg.SlotsPerEpoch
-	f.ptcVote.Range(func(k, v any) bool {
-		root := k.(common.Hash)
-		if header, has := f.forkGraph.GetHeader(root); !has || header.Slot <= finalizedSlot {
-			f.ptcVote.Delete(k)
-		}
-		return true
-	})
+	if newFinalized.Epoch >= f.beaconCfg.GloasForkEpoch {
+		finalizedSlot := newFinalized.Epoch * f.beaconCfg.SlotsPerEpoch
+		f.ptcVote.Range(func(k, v any) bool {
+			// Key is stored as common.Hash
+			root := k.(common.Hash)
+			if header, has := f.forkGraph.GetHeader(root); !has || header.Slot <= finalizedSlot {
+				f.ptcVote.Delete(k)
+			}
+			return true
+		})
+	}
 
 	slotToPrune := ((newFinalized.Epoch - 3) * f.beaconCfg.SlotsPerEpoch) - 1
 	f.forkGraph.Prune(slotToPrune)

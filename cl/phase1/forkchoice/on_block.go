@@ -265,7 +265,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// [New in Gloas:EIP7732] GLOAS-specific on_block logic (post state transition)
 	if isGloas {
 		// Initialize PTC vote for this block
-		f.ptcVote.Store(blockRoot, [clparams.PtcSize]bool{})
+		f.ptcVote.Store(common.Hash(blockRoot), [clparams.PtcSize]bool{})
 
 		// Notify PTC messages from payload attestations in the block
 		if block.Block.Body.PayloadAttestations != nil {
