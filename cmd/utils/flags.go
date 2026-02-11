@@ -1909,7 +1909,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			Fatalf("chain name is not recognized: %s", chain)
 			return
 		}
-		cfg.NetworkID = spec.Config.ChainID.Uint64()
+		// Use custom NetworkID from spec if set, otherwise use ChainID
+		if spec.NetworkID != 0 {
+			cfg.NetworkID = spec.NetworkID
+		} else {
+			cfg.NetworkID = spec.Config.ChainID.Uint64()
+		}
 	}
 
 	cfg.Dirs = nodeConfig.Dirs

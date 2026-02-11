@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -178,6 +179,12 @@ type SharedDomainsCommitmentContext struct {
 	stateReader   StateReader
 	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
 	trieWarmup    bool            // toggle for parallel trie warmup of MDBX page cache during commitment
+
+	// deferCommitmentUpdates when true, deferred branch updates are stored as a pending update
+	// instead of being applied inline after Process(). Used during fork validation.
+	deferCommitmentUpdates bool
+	// pendingUpdate stores a single deferred branch update to be flushed at the next ComputeCommitment call.
+	pendingUpdate *commitment.PendingCommitmentUpdate
 }
 
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
@@ -200,6 +207,56 @@ func (sdc *SharedDomainsCommitmentContext) SetDeferBranchUpdates(deferBranchUpda
 	if sdc.patriciaTrie.Variant() == commitment.VariantHexPatriciaTrie {
 		sdc.patriciaTrie.(*commitment.HexPatriciaHashed).SetDeferBranchUpdates(deferBranchUpdates)
 	}
+}
+
+// SetDeferCommitmentUpdates enables or disables deferred commitment updates.
+// When enabled, branch updates from Process() are stored as a pending update
+// instead of being applied inline. Used during fork validation where the update is
+// flushed later via FlushPendingUpdate.
+func (sdc *SharedDomainsCommitmentContext) SetDeferCommitmentUpdates(defer_ bool) {
+	sdc.deferCommitmentUpdates = defer_
+}
+
+// TakePendingUpdate returns the pending update and clears the field.
+// Caller takes ownership of the returned value.
+func (sdc *SharedDomainsCommitmentContext) TakePendingUpdate() *commitment.PendingCommitmentUpdate {
+	upd := sdc.pendingUpdate
+	sdc.pendingUpdate = nil
+	return upd
+}
+
+// SetPendingUpdate sets the pending update (used during Merge to transfer from another context).
+func (sdc *SharedDomainsCommitmentContext) SetPendingUpdate(upd *commitment.PendingCommitmentUpdate) {
+	sdc.pendingUpdate = upd
+}
+
+// ResetPendingUpdates clears the pending update, returning deferred updates to the pool.
+func (sdc *SharedDomainsCommitmentContext) ResetPendingUpdates() {
+	if sdc.pendingUpdate != nil {
+		sdc.pendingUpdate.Clear()
+		sdc.pendingUpdate = nil
+	}
+}
+
+// HasPendingUpdate returns true if there is a pending update to flush.
+func (sdc *SharedDomainsCommitmentContext) HasPendingUpdate() bool {
+	return sdc.pendingUpdate != nil
+}
+
+// flushPendingUpdate applies the pending commitment update using the given putter.
+// The update is written with its original TxNum. Called at the start of ComputeCommitment
+// to ensure the previously deferred update is applied before processing new ones.
+func (sdc *SharedDomainsCommitmentContext) flushPendingUpdate(putter kv.TemporalPutDel) error {
+	upd := sdc.pendingUpdate
+	putBranch := func(prefix, data, prevData []byte, prevStep kv.Step) error {
+		return putter.DomainPut(kv.CommitmentDomain, prefix, data, upd.TxNum, prevData, prevStep)
+	}
+	if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
+		return err
+	}
+	upd.Clear()
+	sdc.pendingUpdate = nil
+	return nil
 }
 
 // SetHistoryStateReader sets the state reader to read *full* historical state at specified txNum.
@@ -348,10 +405,37 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}
 	}
 
+	// Flush pending commitment update before processing new ones.
+	if sdc.pendingUpdate != nil {
+		if err = sdc.flushPendingUpdate(trieContext.putter); err != nil {
+			return nil, err
+		}
+	}
+
+	// When deferring commitment updates, tell Process() to leave deferred updates
+	// on the branch encoder instead of applying inline — we'll take them after.
+	if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok && sdc.deferCommitmentUpdates {
+		hph.SetLeaveDeferredForCaller(true)
+		defer hph.SetLeaveDeferredForCaller(false)
+	}
+
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, commitProgress, warmupConfig)
 	if err != nil {
 		return nil, err
 	}
+
+	// Handle deferred branch updates left by Process() on the branch encoder.
+	if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok && hph.HasPendingDeferredUpdates() {
+		// Store deferred updates for later flushing (fork validation path).
+		// This path is reached only when deferCommitmentUpdates is true because
+		// Process() applies inline by default.
+		sdc.pendingUpdate = &commitment.PendingCommitmentUpdate{
+			BlockNum: blockNum,
+			TxNum:    txNum,
+			Deferred: hph.TakeDeferredUpdates(),
+		}
+	}
+
 	sdc.justRestored.Store(false)
 
 	if saveState {
