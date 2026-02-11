@@ -664,6 +664,9 @@ func findSplitPow2(bucket []uint64, salt uint64, fanout, unit uint16, count []ui
 // Uses 8-way salt parallelism with branchless OR-accumulate
 // to exploit CPU instruction-level parallelism and avoid branch mispredictions.
 func findBijection(bucket []uint64, salt uint64) uint64 {
+	if len(bucket) == 8 {
+		return findBijection8(bucket, salt)
+	}
 
 	m := uint16(len(bucket))
 	fullMask := uint32((1 << m) - 1)
@@ -770,11 +773,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 	salt := rs.startSeed[level]
 	m := uint16(len(bucket))
 	if m <= rs.leafSize {
-		if m == 8 {
-			salt = findBijection8(bucket, salt)
-		} else {
-			salt = findBijection(bucket, salt)
-		}
+		salt = findBijection(bucket, salt)
 		for i := uint16(0); i < m; i++ {
 			j := remap16(remix(bucket[i]+salt), m)
 			rs.offsetBuffer[j] = offsets[i]
