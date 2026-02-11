@@ -522,6 +522,9 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 // count slice (which must have len >= 8*fanout).
 func findSplit(bucket []uint64, salt uint64, fanout, unit uint16, count []uint16) uint64 {
 	m := uint16(len(bucket))
+	// Magic number division: replace UDIVW (7-12 cycles on ARM64) with MUL+LSR (4 cycles).
+	// For uint16 x in [0, m): x/unit = uint16(uint64(x) * invUnit >> 48).
+	invUnit := ((1 << 48) + uint64(unit) - 1) / uint64(unit) // ceil(2^48 / unit)
 	c0 := count[0*fanout : 1*fanout : 1*fanout]
 	c1 := count[1*fanout : 2*fanout : 2*fanout]
 	c2 := count[2*fanout : 3*fanout : 3*fanout]
@@ -534,14 +537,14 @@ func findSplit(bucket []uint64, salt uint64, fanout, unit uint16, count []uint16
 		clear(count[:8*fanout])
 		for i := uint16(0); i < m; i++ {
 			key := bucket[i]
-			c0[remap16(remix(key+salt), m)/unit]++
-			c1[remap16(remix(key+salt+1), m)/unit]++
-			c2[remap16(remix(key+salt+2), m)/unit]++
-			c3[remap16(remix(key+salt+3), m)/unit]++
-			c4[remap16(remix(key+salt+4), m)/unit]++
-			c5[remap16(remix(key+salt+5), m)/unit]++
-			c6[remap16(remix(key+salt+6), m)/unit]++
-			c7[remap16(remix(key+salt+7), m)/unit]++
+			c0[uint16(uint64(remap16(remix(key+salt), m))*invUnit>>48)]++
+			c1[uint16(uint64(remap16(remix(key+salt+1), m))*invUnit>>48)]++
+			c2[uint16(uint64(remap16(remix(key+salt+2), m))*invUnit>>48)]++
+			c3[uint16(uint64(remap16(remix(key+salt+3), m))*invUnit>>48)]++
+			c4[uint16(uint64(remap16(remix(key+salt+4), m))*invUnit>>48)]++
+			c5[uint16(uint64(remap16(remix(key+salt+5), m))*invUnit>>48)]++
+			c6[uint16(uint64(remap16(remix(key+salt+6), m))*invUnit>>48)]++
+			c7[uint16(uint64(remap16(remix(key+salt+7), m))*invUnit>>48)]++
 		}
 		// Branchless validation: XOR each count with expected value,
 		// OR-accumulate to detect any mismatch.
