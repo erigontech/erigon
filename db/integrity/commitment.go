@@ -812,6 +812,9 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 	wg.SetLimit(estimate.AlmostAllCPUs())
 	for blockNum := from; blockNum < to; blockNum++ {
 		wg.Go(func() error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			return CheckCommitmentHistAtBlk(ctx, db, br, blockNum, logger)
 		})
 	}
@@ -835,7 +838,7 @@ func touchHistoricalKeysCode(sd *execctx.SharedDomains, tx kv.TemporalTx, fromTx
 	return touchHistoricalKeys(sd, tx, kv.CodeDomain, fromTxNum, toTxNum, visitor)
 }
 
-func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64, visitor func(k []byte)) (uint64, error) {
+func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, ckCommitmentHistAtBlk d kv.Domain, fromTxNum uint64, toTxNum uint64, visitor func(k []byte)) (uint64, error) {
 	// toTxNum is exclusive per kv.TemporalTx.HistoryRange contract [from,to)
 	stream, err := tx.HistoryRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
 	if err != nil {
