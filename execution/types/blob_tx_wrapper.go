@@ -77,11 +77,9 @@ func (li BlobKzgs) payloadSize() int {
 }
 
 func (li BlobKzgs) encodePayload(w io.Writer, payloadSize int) error {
-	// prefix
-	buf := newEncodingBuf()
-	l := rlp.EncodeListPrefix(payloadSize, buf[:])
-	w.Write(buf[:l])
-
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
+		return err
+	}
 	for _, cmtmt := range li {
 		if err := rlp.EncodeString(cmtmt[:], w); err != nil {
 			return err
@@ -127,11 +125,9 @@ func (li KZGProofs) payloadSize() int {
 }
 
 func (li KZGProofs) encodePayload(w io.Writer, payloadSize int) error {
-	// prefix
-	buf := newEncodingBuf()
-	l := rlp.EncodeListPrefix(payloadSize, buf[:])
-	w.Write(buf[:l])
-
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
+		return err
+	}
 	for _, proof := range li {
 		if err := rlp.EncodeString(proof[:], w); err != nil {
 			return err
@@ -181,17 +177,14 @@ func (blobs Blobs) payloadSize() int {
 }
 
 func (blobs Blobs) encodePayload(w io.Writer, payloadSize int) error {
-	// prefix
-
-	buf := newEncodingBuf()
-	l := rlp.EncodeListPrefix(payloadSize, buf[:])
-	w.Write(buf[:l])
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
+		return err
+	}
 	for _, blob := range blobs {
 		if err := rlp.EncodeString(blob[:], w); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
@@ -425,16 +418,14 @@ func (txw *BlobTxWrapper) payloadSize() (payloadSize int) {
 	return
 }
 func (txw *BlobTxWrapper) MarshalBinaryWrapped(w io.Writer) error {
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	var b [1]byte
 	// encode TxType
 	b[0] = BlobTxType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
 	payloadSize := txw.payloadSize()
-	l := rlp.EncodeListPrefix(payloadSize, b[1:])
-	if _, err := w.Write(b[1 : 1+l]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
 		return err
 	}
 	bw := bytes.Buffer{}
