@@ -3,7 +3,6 @@ package simpleseq
 import (
 	"encoding/binary"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/stream"
 )
 
