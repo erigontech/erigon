@@ -3,7 +3,6 @@ package simpleseq
 import (
 	"encoding/binary"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/stream"
 )
 
@@ -77,14 +76,14 @@ func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
 	if len(raw) == 0 || seek > s.Max() {
 		return 0, 0, false
 	}
-	if distFound[1]%100 == 0 && distFound[0]%100 == 0 {
-		log.Warn("[dbg] SimpleSequence.search", "distFound", distFound, "distLen", distLen)
-	}
-	distLen[s.Count()]++
+	//if distFound[1]%100 == 0 && distFound[0]%100 == 0 {
+	//	log.Warn("[dbg] SimpleSequence.search", "distFound", distFound, "distLen", distLen)
+	//}
+	//distLen[s.Count()]++
 	for i := 0; i < len(raw); i += 4 {
 		v = s.baseNum + uint64(binary.BigEndian.Uint32(raw[i:]))
 		if v >= seek {
-			distFound[i/4]++
+			//distFound[i/4]++
 			return i / 4, v, true
 		}
 	}
