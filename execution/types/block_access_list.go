@@ -501,6 +501,23 @@ func DecodeBlockAccessListBytes(data []byte) (BlockAccessList, error) {
 	return bal, nil
 }
 
+// EncodeBlockAccessListBytes encodes a block access list into RLP bytes.
+func EncodeBlockAccessListBytes(bal BlockAccessList) ([]byte, error) {
+	if len(bal) == 0 {
+		return []byte{0xc0}, nil
+	}
+	if err := bal.Validate(); err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	encBuf := newEncodingBuf()
+	defer releaseEncodingBuf(encBuf)
+	if err := encodeBlockAccessList(bal, &buf, encBuf[:]); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 func decodeSlotChangesList(s *rlp.Stream) ([]*SlotChanges, error) {
 	var err error
 	var size uint64

@@ -773,11 +773,10 @@ func (r RawBlock) AsBlock() (*Block, error) {
 
 // Block represents an entire block in the Ethereum blockchain.
 type Block struct {
-	header          *Header
-	uncles          []*Header
-	transactions    Transactions
-	withdrawals     []*Withdrawal
-	blockAccessList BlockAccessList
+	header       *Header
+	uncles       []*Header
+	transactions Transactions
+	withdrawals  []*Withdrawal
 
 	// caches
 	size atomic.Uint64
@@ -1328,21 +1327,6 @@ func (b *Block) Withdrawals() Withdrawals            { return b.withdrawals }
 func (b *Block) ParentBeaconBlockRoot() *common.Hash { return b.header.ParentBeaconBlockRoot }
 func (b *Block) RequestsHash() *common.Hash          { return b.header.RequestsHash }
 func (b *Block) BlockAccessListHash() *common.Hash   { return b.header.BlockAccessListHash }
-func (b *Block) BlockAccessList() BlockAccessList    { return b.blockAccessList }
-
-func (b *Block) SetBlockAccessList(list BlockAccessList) {
-	b.blockAccessList = list
-	if b.header == nil {
-		return
-	}
-	if len(list) == 0 {
-		// Leave existing hash untouched (already persisted) or nil if unset.
-		return
-	}
-	if hash := list.Hash(); hash != (common.Hash{}) {
-		b.header.BlockAccessListHash = &hash
-	}
-}
 
 // Header returns a deep-copy of the entire block header using CopyHeader()
 func (b *Block) Header() *Header       { return CopyHeader(b.header) }
@@ -1502,11 +1486,10 @@ func (b *Block) WithSeal(header *Header) *Block {
 	headerCopy.mutable = false
 	headerCopy.hash.Store(nil) // invalidate cached hash
 	return &Block{
-		header:          headerCopy,
-		transactions:    b.transactions,
-		uncles:          b.uncles,
-		withdrawals:     b.withdrawals,
-		blockAccessList: b.blockAccessList,
+		header:       headerCopy,
+		transactions: b.transactions,
+		uncles:       b.uncles,
+		withdrawals:  b.withdrawals,
 	}
 }
 
@@ -1536,9 +1519,10 @@ func DecodeOnlyTxMetadataFromBody(payload []byte) (baseTxnID BaseTxnID, txCount 
 }
 
 type BlockWithReceipts struct {
-	Block    *Block
-	Receipts Receipts
-	Requests FlatRequests
+	Block           *Block
+	Receipts        Receipts
+	Requests        FlatRequests
+	BlockAccessList BlockAccessList
 }
 
 type rlpEncodable interface {

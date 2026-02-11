@@ -613,6 +613,23 @@ func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint6
 	return body, bodyForStorage.BaseTxnID.First(), bodyForStorage.TxCount - 2 // 1 system txn in the beginning of block, and 1 at the end
 }
 
+// ReadBlockAccessListBytes reads the RLP-encoded block access list sidecar for a block.
+func ReadBlockAccessListBytes(db kv.Getter, hash common.Hash, number uint64) ([]byte, error) {
+	data, err := db.GetOne(kv.BlockAccessList, dbutils.BlockBodyKey(number, hash))
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+// WriteBlockAccessListBytes stores the RLP-encoded block access list sidecar for a block.
+func WriteBlockAccessListBytes(db kv.Putter, hash common.Hash, number uint64, data []byte) error {
+	if err := db.Put(kv.BlockAccessList, dbutils.BlockBodyKey(number, hash), data); err != nil {
+		return fmt.Errorf("failed to store block access list: %w", err)
+	}
+	return nil
+}
+
 func HasSenders(db kv.Getter, hash common.Hash, number uint64) (bool, error) {
 	return db.Has(kv.Senders, dbutils.BlockBodyKey(number, hash))
 }
@@ -698,6 +715,9 @@ func WriteSenders(db kv.Putter, hash common.Hash, number uint64, senders []commo
 func DeleteBody(db kv.Putter, hash common.Hash, number uint64) {
 	if err := db.Delete(kv.BlockBody, dbutils.BlockBodyKey(number, hash)); err != nil {
 		log.Crit("Failed to delete block body", "err", err)
+	}
+	if err := db.Delete(kv.BlockAccessList, dbutils.BlockBodyKey(number, hash)); err != nil {
+		log.Crit("Failed to delete block access list", "err", err)
 	}
 }
 
@@ -896,6 +916,9 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 		if err = tx.Delete(kv.BlockBody, kCopy); err != nil {
 			return deleted, err
 		}
+		if err = tx.Delete(kv.BlockAccessList, kCopy); err != nil {
+			return deleted, err
+		}
 		if err = tx.Delete(kv.Headers, kCopy); err != nil {
 			return deleted, err
 		}
@@ -942,6 +965,9 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 			return err
 		}
 		if err := tx.Delete(kv.BlockBody, kCopy); err != nil {
+			return err
+		}
+		if err := tx.Delete(kv.BlockAccessList, kCopy); err != nil {
 			return err
 		}
 		if err := tx.Delete(kv.Headers, kCopy); err != nil {

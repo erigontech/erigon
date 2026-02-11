@@ -19,7 +19,6 @@ package stagedsync
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
@@ -68,13 +67,10 @@ func SpawnMiningFinishStage(s *StageState, sd *execctx.SharedDomains, tx kv.Temp
 
 	block := types.NewBlockForAsembling(current.Header, current.Txns, current.Uncles, current.Receipts, current.Withdrawals)
 	if current.BlockAccessList != nil {
-		block.SetBlockAccessList(current.BlockAccessList)
-		if block.BlockAccessListHash() == nil {
-			hash := empty.BlockAccessListHash
-			block.HeaderNoCopy().BlockAccessListHash = &hash
-		}
+		hash := current.BlockAccessList.Hash()
+		block.HeaderNoCopy().BlockAccessListHash = &hash
 	}
-	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: current.Receipts, Requests: current.Requests}
+	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: current.Receipts, Requests: current.Requests, BlockAccessList: current.BlockAccessList}
 	*current = MiningBlock{} // hack to clean global data
 
 	//sealHash := engine.SealHash(block.Header())
