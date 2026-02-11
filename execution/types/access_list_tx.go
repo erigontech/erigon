@@ -195,13 +195,13 @@ func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen); err != nil {
+	if err := tx.encodePayload(w, payloadSize, accessListLen); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen int) error {
+func (tx *AccessListTx) encodePayload(w io.Writer, payloadSize, accessListLen int) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
 		return err
@@ -223,18 +223,8 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, access
 		return err
 	}
 	// encode To
-	if tx.To == nil {
-		b[0] = 128
-	} else {
-		b[0] = 128 + 20
-	}
-	if _, err := w.Write(b[:1]); err != nil {
+	if err := rlp.EncodeOptionalAddress(tx.To, w); err != nil {
 		return err
-	}
-	if tx.To != nil {
-		if _, err := w.Write(tx.To[:]); err != nil {
-			return err
-		}
 	}
 	// encode Value
 	if err := rlp.EncodeUint256(*tx.Value, w); err != nil {
@@ -284,7 +274,7 @@ func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen); err != nil {
+	if err := tx.encodePayload(w, payloadSize, accessListLen); err != nil {
 		return err
 	}
 	return nil

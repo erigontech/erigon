@@ -211,15 +211,13 @@ func (tx *LegacyTx) payloadSize() (payloadSize int) {
 
 func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
 	payloadSize := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
-	if err := tx.encodePayload(w, b[:], payloadSize); err != nil {
+	if err := tx.encodePayload(w, payloadSize); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error {
+func (tx *LegacyTx) encodePayload(w io.Writer, payloadSize int) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
 		return err
@@ -233,18 +231,8 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 	if err := rlp.EncodeInt(tx.GasLimit, w); err != nil {
 		return err
 	}
-	if tx.To == nil {
-		b[0] = 128
-	} else {
-		b[0] = 128 + 20
-	}
-	if _, err := w.Write(b[:1]); err != nil {
+	if err := rlp.EncodeOptionalAddress(tx.To, w); err != nil {
 		return err
-	}
-	if tx.To != nil {
-		if _, err := w.Write(tx.To[:]); err != nil {
-			return err
-		}
 	}
 	if err := rlp.EncodeUint256(*tx.Value, w); err != nil {
 		return err
@@ -267,9 +255,7 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 
 func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
 	payloadSize := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
-	if err := tx.encodePayload(w, b[:], payloadSize); err != nil {
+	if err := tx.encodePayload(w, payloadSize); err != nil {
 		return err
 	}
 	return nil

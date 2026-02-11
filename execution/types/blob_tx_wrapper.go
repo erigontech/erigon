@@ -76,7 +76,7 @@ func (li BlobKzgs) payloadSize() int {
 	return 49 * len(li)
 }
 
-func (li BlobKzgs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
+func (li BlobKzgs) encodePayload(w io.Writer, payloadSize int) error {
 	// prefix
 	buf := newEncodingBuf()
 	l := rlp.EncodeListPrefix(payloadSize, buf[:])
@@ -126,7 +126,7 @@ func (li KZGProofs) payloadSize() int {
 	return 49 * len(li)
 }
 
-func (li KZGProofs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
+func (li KZGProofs) encodePayload(w io.Writer, payloadSize int) error {
 	// prefix
 	buf := newEncodingBuf()
 	l := rlp.EncodeListPrefix(payloadSize, buf[:])
@@ -180,7 +180,7 @@ func (blobs Blobs) payloadSize() int {
 	return 0
 }
 
-func (blobs Blobs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
+func (blobs Blobs) encodePayload(w io.Writer, payloadSize int) error {
 	// prefix
 
 	buf := newEncodingBuf()
@@ -450,13 +450,13 @@ func (txw *BlobTxWrapper) MarshalBinaryWrapped(w io.Writer) error {
 			return err
 		}
 	}
-	if err := txw.Blobs.encodePayload(w, b[:], txw.Blobs.payloadSize()); err != nil {
+	if err := txw.Blobs.encodePayload(w, txw.Blobs.payloadSize()); err != nil {
 		return err
 	}
-	if err := txw.Commitments.encodePayload(w, b[:], txw.Commitments.payloadSize()); err != nil {
+	if err := txw.Commitments.encodePayload(w, txw.Commitments.payloadSize()); err != nil {
 		return err
 	}
-	if err := txw.Proofs.encodePayload(w, b[:], txw.Proofs.payloadSize()); err != nil {
+	if err := txw.Proofs.encodePayload(w, txw.Proofs.payloadSize()); err != nil {
 		return err
 	}
 	return nil
