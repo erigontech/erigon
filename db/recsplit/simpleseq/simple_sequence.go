@@ -36,7 +36,8 @@ func ReadSimpleSequence(baseNum uint64, raw []byte) *SimpleSequence {
 }
 
 func (s *SimpleSequence) Get(i uint64) uint64 {
-	return s.baseNum + uint64(binary.BigEndian.Uint32(s.raw[i*4:]))
+	delta := binary.BigEndian.Uint32(s.raw[i*4:])
+	return s.baseNum + uint64(delta)
 }
 
 func (s *SimpleSequence) Min() uint64 {
@@ -44,7 +45,8 @@ func (s *SimpleSequence) Min() uint64 {
 }
 
 func (s *SimpleSequence) Max() uint64 {
-	return s.Get(s.Count() - 1)
+	delta := binary.BigEndian.Uint32(s.raw[len(s.raw)-4:])
+	return s.baseNum + uint64(delta)
 }
 
 func (s *SimpleSequence) Count() uint64 {
@@ -68,7 +70,7 @@ func (s *SimpleSequence) AppendBytes(buf []byte) []byte {
 
 func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
 	n := s.Count()
-	if n == 0 || seek > s.Get(n-1) { // over the max
+	if n == 0 || seek > s.Max() { // over the max
 		return 0, 0, false
 	}
 	for i := uint64(0); i < n; i++ {
@@ -80,7 +82,11 @@ func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
 }
 
 func (s *SimpleSequence) reverseSearch(seek uint64) (idx int, v uint64, ok bool) {
-	for i := s.Count(); i > 0; i-- {
+	c := s.Count()
+	if c == 0 || seek < s.Min() {
+		return 0, 0, false
+	}
+	for i := c; i > 0; i-- {
 		if v = s.Get(i - 1); v <= seek {
 			return int(i - 1), v, true
 		}
