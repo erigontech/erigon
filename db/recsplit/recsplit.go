@@ -528,9 +528,6 @@ func findSplit(bucket []uint64, salt uint64, fanout, unit uint16, count []uint16
 		return findSplitPow2(bucket, salt, fanout, unit, count)
 	}
 	m := uint16(len(bucket))
-	// Magic number division: replace UDIVW (7-12 cycles on ARM64) with MUL+LSR (4 cycles).
-	// For uint16 x in [0, m): x/unit = uint16(uint64(x) * invUnit >> 48).
-	invUnit := ((1 << 48) + uint64(unit) - 1) / uint64(unit) // ceil(2^48 / unit)
 	c0 := count[0*fanout : 1*fanout : 1*fanout]
 	c1 := count[1*fanout : 2*fanout : 2*fanout]
 	c2 := count[2*fanout : 3*fanout : 3*fanout]
@@ -543,14 +540,14 @@ func findSplit(bucket []uint64, salt uint64, fanout, unit uint16, count []uint16
 		clear(count[:8*fanout])
 		for i := uint16(0); i < m; i++ {
 			key := bucket[i]
-			c0[uint16(uint64(remap16(remix(key+salt), m))*invUnit>>48)]++
-			c1[uint16(uint64(remap16(remix(key+salt+1), m))*invUnit>>48)]++
-			c2[uint16(uint64(remap16(remix(key+salt+2), m))*invUnit>>48)]++
-			c3[uint16(uint64(remap16(remix(key+salt+3), m))*invUnit>>48)]++
-			c4[uint16(uint64(remap16(remix(key+salt+4), m))*invUnit>>48)]++
-			c5[uint16(uint64(remap16(remix(key+salt+5), m))*invUnit>>48)]++
-			c6[uint16(uint64(remap16(remix(key+salt+6), m))*invUnit>>48)]++
-			c7[uint16(uint64(remap16(remix(key+salt+7), m))*invUnit>>48)]++
+			c0[remap16(remix(key+salt), m)/unit]++
+			c1[remap16(remix(key+salt+1), m)/unit]++
+			c2[remap16(remix(key+salt+2), m)/unit]++
+			c3[remap16(remix(key+salt+3), m)/unit]++
+			c4[remap16(remix(key+salt+4), m)/unit]++
+			c5[remap16(remix(key+salt+5), m)/unit]++
+			c6[remap16(remix(key+salt+6), m)/unit]++
+			c7[remap16(remix(key+salt+7), m)/unit]++
 		}
 		// Branchless validation: XOR each count with expected value,
 		// OR-accumulate to detect any mismatch.
@@ -614,14 +611,14 @@ func findSplitPow2(bucket []uint64, salt uint64, fanout, unit uint16, count []ui
 		clear(count[:8*fanout])
 		for i := uint16(0); i < m; i++ {
 			key := bucket[i]
-			c0[uint16((remix(key+salt)&mask48)*um>>(totalShift&63))]++
-			c1[uint16((remix(key+salt+1)&mask48)*um>>(totalShift&63))]++
-			c2[uint16((remix(key+salt+2)&mask48)*um>>(totalShift&63))]++
-			c3[uint16((remix(key+salt+3)&mask48)*um>>(totalShift&63))]++
-			c4[uint16((remix(key+salt+4)&mask48)*um>>(totalShift&63))]++
-			c5[uint16((remix(key+salt+5)&mask48)*um>>(totalShift&63))]++
-			c6[uint16((remix(key+salt+6)&mask48)*um>>(totalShift&63))]++
-			c7[uint16((remix(key+salt+7)&mask48)*um>>(totalShift&63))]++
+			c0[uint16((remix(key+salt)&mask48)*um>>totalShift)]++
+			c1[uint16((remix(key+salt+1)&mask48)*um>>totalShift)]++
+			c2[uint16((remix(key+salt+2)&mask48)*um>>totalShift)]++
+			c3[uint16((remix(key+salt+3)&mask48)*um>>totalShift)]++
+			c4[uint16((remix(key+salt+4)&mask48)*um>>totalShift)]++
+			c5[uint16((remix(key+salt+5)&mask48)*um>>totalShift)]++
+			c6[uint16((remix(key+salt+6)&mask48)*um>>totalShift)]++
+			c7[uint16((remix(key+salt+7)&mask48)*um>>totalShift)]++
 		}
 		var bad0, bad1, bad2, bad3, bad4, bad5, bad6, bad7 uint16
 		for i := uint16(0); i < fanout-1; i++ {
@@ -678,18 +675,14 @@ func findBijection(bucket []uint64, salt uint64) uint64 {
 		for i := uint16(0); i < m; i++ {
 			key := bucket[i]
 
-			//- Added & 31 to each remap16() result used as a shift amount in uint32(1) << ...
-			//- This is a no-op at runtime (remap16 always returns [0, m) where m ≤ leafSize ≤ 24 < 32) but tells the Go compiler the shift is always valid
-			//- The compiler responds by replacing 3 instructions per lane (MOVHU + CMP + CSEL) with 1 instruction (UBFX — Unsigned Bit Field eXtract), saving 24 instructions per key per outer-loop iteration in the hottest loop of the algorithm
-			// BenchmarkFindBijection: -7.31 %
-			mask0 |= uint32(1) << (remap16(remix(key+salt), m) & 31)
-			mask1 |= uint32(1) << (remap16(remix(key+salt+1), m) & 31)
-			mask2 |= uint32(1) << (remap16(remix(key+salt+2), m) & 31)
-			mask3 |= uint32(1) << (remap16(remix(key+salt+3), m) & 31)
-			mask4 |= uint32(1) << (remap16(remix(key+salt+4), m) & 31)
-			mask5 |= uint32(1) << (remap16(remix(key+salt+5), m) & 31)
-			mask6 |= uint32(1) << (remap16(remix(key+salt+6), m) & 31)
-			mask7 |= uint32(1) << (remap16(remix(key+salt+7), m) & 31)
+			mask0 |= uint32(1) << remap16(remix(key+salt), m)
+			mask1 |= uint32(1) << remap16(remix(key+salt+1), m)
+			mask2 |= uint32(1) << remap16(remix(key+salt+2), m)
+			mask3 |= uint32(1) << remap16(remix(key+salt+3), m)
+			mask4 |= uint32(1) << remap16(remix(key+salt+4), m)
+			mask5 |= uint32(1) << remap16(remix(key+salt+5), m)
+			mask6 |= uint32(1) << remap16(remix(key+salt+6), m)
+			mask7 |= uint32(1) << remap16(remix(key+salt+7), m)
 		}
 		if mask0 == fullMask {
 			return salt
@@ -720,9 +713,7 @@ func findBijection(bucket []uint64, salt uint64) uint64 {
 }
 
 // findBijection8 is a specialization of findBijection for m=8 (the common leaf size).
-// For m=8 (power of 2), remap16(x, 8) = ((x & mask48) * 8) >> 48 = (x >> 45) & 7,
-// which the compiler emits as a single UBFX instruction instead of AND + MUL + UBFX.
-// This eliminates 8 multiplies per key per outer-loop iteration.
+// Uses fixed loop count and const fullMask to help the compiler optimize.
 func findBijection8(bucket []uint64, salt uint64) uint64 {
 	_ = bucket[7] // bounds check hint
 	const fullMask = uint32(0xFF)
@@ -730,14 +721,14 @@ func findBijection8(bucket []uint64, salt uint64) uint64 {
 		var mask0, mask1, mask2, mask3, mask4, mask5, mask6, mask7 uint32
 		for i := 0; i < 8; i++ {
 			key := bucket[i]
-			mask0 |= uint32(1) << ((remix(key+salt) >> 45) & 7)
-			mask1 |= uint32(1) << ((remix(key+salt+1) >> 45) & 7)
-			mask2 |= uint32(1) << ((remix(key+salt+2) >> 45) & 7)
-			mask3 |= uint32(1) << ((remix(key+salt+3) >> 45) & 7)
-			mask4 |= uint32(1) << ((remix(key+salt+4) >> 45) & 7)
-			mask5 |= uint32(1) << ((remix(key+salt+5) >> 45) & 7)
-			mask6 |= uint32(1) << ((remix(key+salt+6) >> 45) & 7)
-			mask7 |= uint32(1) << ((remix(key+salt+7) >> 45) & 7)
+			mask0 |= uint32(1) << remap16(remix(key+salt), 8)
+			mask1 |= uint32(1) << remap16(remix(key+salt+1), 8)
+			mask2 |= uint32(1) << remap16(remix(key+salt+2), 8)
+			mask3 |= uint32(1) << remap16(remix(key+salt+3), 8)
+			mask4 |= uint32(1) << remap16(remix(key+salt+4), 8)
+			mask5 |= uint32(1) << remap16(remix(key+salt+5), 8)
+			mask6 |= uint32(1) << remap16(remix(key+salt+6), 8)
+			mask7 |= uint32(1) << remap16(remix(key+salt+7), 8)
 		}
 		if mask0 == fullMask {
 			return salt
