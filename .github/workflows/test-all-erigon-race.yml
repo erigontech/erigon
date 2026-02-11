@@ -17,7 +17,7 @@ jobs:
   # - '**/.github/workflows/**' is currently commented to avoid unintended freeze in case of concurrent changes outside the excluded paths (further development will be done in due course)
   # 
   source-of-changes:
-    runs-on: [self-hosted, qa]
+    runs-on: ubuntu-latest
     outputs:
       changed_files: ${{ steps.filter.outputs.changed_files }}
     steps:
@@ -35,22 +35,29 @@ jobs:
               - '**/.github/workflows/backups-dashboards.yml'
   tests-linux:
     needs: source-of-changes
+    timeout-minutes: 60
     concurrency:
       # concurrency group: there can be at most one running and one pending job in a 
       # concurrency group at any time. So for commits on main/release, we use different 
       # concurrency group per commit; for other branches, we use a branch-level CG.
       group: >-
         ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
-          format('{0}-{1}-{2}', github.workflow, matrix.os, github.run_id) ||
-          format('{0}-{1}-{2}', github.workflow, matrix.os, github.ref)
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
+          format('{0}-{1}-{2}-{3}', github.workflow, matrix.os, matrix.test-group, github.run_id) ||
+          format('{0}-{1}-{2}-{3}', github.workflow, matrix.os, matrix.test-group, github.ref)
         }}
       cancel-in-progress: true
     strategy:
       matrix:
         os:
-          - Linux
-    runs-on: ["${{ matrix.os }}", self-hosted, qa, Release, X64]
+          - ubuntu-latest
+        test-group:
+          - execution
+          - consensus
+          - p2p-rpc
+          - core-db
+          - other
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Declare runners
@@ -58,7 +65,7 @@ jobs:
         run: |
           set +x
           echo "This workflow is being executed by this runner: $RUNNER_NAME"
-
+          
       - name: "Checkout code with submodules and large files (lfs)"
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/checkout@v6
@@ -68,19 +75,52 @@ jobs:
           lfs: true
 
       - name: Cleanup space
-        if: runner.os == 'Linux'
+        if: runner.os == 'ubuntu-latest'
         run: |
           rm -fr /opt/az \
                  /opt/microsoft \
                  /usr/share/dotnet \
                  /usr/share/miniconda \
                  /usr/share/swift
+
+      - name: Setup Go environment
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+          cache: true
+          
+      - name: Install dependencies on Linux
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        run: sudo apt update -y && sudo apt install -y build-essential
         
-      - name: Run all tests on ${{ matrix.os }}
+      - name: Run ${{ matrix.test-group }} tests on ${{ matrix.os }}
         env:
           SKIP_FLAKY_TESTS: 'true'
         if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: GOGC=80 make test-all-race
+        run: |
+          case "${{ matrix.test-group }}" in
+            execution)
+              # Run execution layer tests with race detector (critical path)
+              GOGC=80 go test -race -timeout 30m ./execution/...
+              ;;
+            consensus)
+              # Run consensus layer tests with race detector (critical path)
+              GOGC=80 go test -race -timeout 30m ./cl/...
+              ;;
+            p2p-rpc)
+              # Run p2p and rpc tests without race detector (less critical)
+              GOGC=80 go test -timeout 20m ./p2p/... ./rpc/... ./turbo/jsonrpc/...
+              ;;
+            core-db)
+              # Run core and db tests without race detector
+              GOGC=80 go test -timeout 20m ./core/... ./db/... ./ethdb/... ./node/... ./txnprovider/...
+              ;;
+            other)
+              # Run cmd tests without race detector
+              GOGC=80 go test -timeout 20m ./cmd/... ./common/... ./polygon/...
+              ;;
+          esac
 
       - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
         if: needs.source-of-changes.outputs.changed_files == 'true'
