@@ -9,7 +9,7 @@ import (
 // [Modified in Gloas:EIP7732] Added Slot and PayloadPresent.
 type LatestMessage struct {
 	Epoch          uint64
-	Slot           uint64      // [New in Gloas:EIP7732]
+	Slot           uint64 // [New in Gloas:EIP7732]
 	Root           common.Hash
 	PayloadPresent bool // [New in Gloas:EIP7732]
 }
