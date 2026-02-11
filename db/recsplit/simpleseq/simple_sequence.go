@@ -3,7 +3,6 @@ package simpleseq
 import (
 	"encoding/binary"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/stream"
 )
 
@@ -69,28 +68,25 @@ func (s *SimpleSequence) AppendBytes(buf []byte) []byte {
 	return append(buf, s.raw...)
 }
 
-var distFound [17]int
-var distLen [17]int
-
 func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
-	// Real data returns:
-	//   - 98% return idx=0 (first element)
-	//   - 1% return "not found"
+	// Real data lengths:
+	//   - 70% len=1
+	//   - 15% len=2
+	//   - ...
 	//
-	// Real data:
-	//   - 98% of sequences have len=1
+	// Real data return `idx`:
+	//   - 85% return idx=0 (first element)
+	//   - 10% return "not found"
+	//   - 5% other lengths
+	//
+	// As a result: early-check for `max` + full-scan search
+
 	if len(s.raw) == 0 || seek > s.Max() {
-		distFound[16]++
 		return 0, 0, false
 	}
-	if distFound[1]%100 == 0 && distFound[0]%1_000 == 0 {
-		log.Warn("[dbg] SimpleSequence.search", "distFound", distFound, "distLen", distLen)
-	}
-	distLen[s.Count()]++
 	for i := 0; i < len(s.raw); i += 4 {
 		v = s.baseNum + uint64(binary.BigEndian.Uint32(s.raw[i:]))
 		if v >= seek {
-			distFound[i/4]++
 			return i / 4, v, true
 		}
 	}
