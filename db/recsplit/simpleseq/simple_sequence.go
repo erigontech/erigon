@@ -2,7 +2,6 @@ package simpleseq
 
 import (
 	"encoding/binary"
-	"sort"
 
 	"github.com/erigontech/erigon/db/kv/stream"
 )
@@ -37,8 +36,7 @@ func ReadSimpleSequence(baseNum uint64, raw []byte) *SimpleSequence {
 }
 
 func (s *SimpleSequence) Get(i uint64) uint64 {
-	idx := i * 4
-	delta := binary.BigEndian.Uint32(s.raw[idx : idx+4])
+	delta := binary.BigEndian.Uint32(s.raw[i*4:])
 	return s.baseNum + uint64(delta)
 }
 
@@ -47,7 +45,8 @@ func (s *SimpleSequence) Min() uint64 {
 }
 
 func (s *SimpleSequence) Max() uint64 {
-	return s.Get(s.Count() - 1)
+	delta := binary.BigEndian.Uint32(s.raw[len(s.raw)-4:])
+	return s.baseNum + uint64(delta)
 }
 
 func (s *SimpleSequence) Count() uint64 {
@@ -55,7 +54,7 @@ func (s *SimpleSequence) Count() uint64 {
 }
 
 func (s *SimpleSequence) AddOffset(offset uint64) {
-	binary.BigEndian.PutUint32(s.raw[s.pos*4:(s.pos+1)*4], uint32(offset-s.baseNum))
+	binary.BigEndian.PutUint32(s.raw[s.pos*4:], uint32(offset-s.baseNum))
 	s.pos++
 }
 
@@ -69,36 +68,47 @@ func (s *SimpleSequence) AppendBytes(buf []byte) []byte {
 	return append(buf, s.raw...)
 }
 
-func (s *SimpleSequence) search(v uint64) (int, bool) {
-	c := s.Count()
-	idx := sort.Search(int(c), func(i int) bool {
-		return s.Get(uint64(i)) >= v
-	})
+func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
+	// Real data lengths:
+	//   - 70% len=1
+	//   - 15% len=2
+	//   - ...
+	//
+	// Real data return `idx`:
+	//   - 85% return idx=0 (first element)
+	//   - 10% return "not found"
+	//   - 5% other lengths
+	//
+	// As a result: early-check for `max` + full-scan search instead of `sort.Search`
 
-	if idx >= int(c) {
-		return 0, false
+	if len(s.raw) == 0 || seek > s.Max() {
+		return 0, 0, false
 	}
-	return idx, true
+	for i := 0; i < len(s.raw); i += 4 {
+		v = s.baseNum + uint64(binary.BigEndian.Uint32(s.raw[i:]))
+		if v >= seek {
+			return i / 4, v, true
+		}
+	}
+	return 0, 0, false
 }
 
-func (s *SimpleSequence) reverseSearch(v uint64) (int, bool) {
-	c := s.Count()
-	idx := sort.Search(int(c), func(i int) bool {
-		return s.Get(c-uint64(i)-1) <= v
-	})
-
-	if idx >= int(c) {
-		return 0, false
+func (s *SimpleSequence) reverseSearch(seek uint64) (idx int, v uint64, ok bool) {
+	if len(s.raw) == 0 || seek < s.Min() {
+		return 0, 0, false
 	}
-	return int(c) - idx - 1, true
+	for i := len(s.raw) - 4; i >= 0; i -= 4 {
+		v = s.baseNum + uint64(binary.BigEndian.Uint32(s.raw[i:]))
+		if v <= seek {
+			return i / 4, v, true
+		}
+	}
+	return 0, 0, false
 }
 
 func (s *SimpleSequence) Seek(v uint64) (uint64, bool) {
-	idx, found := s.search(v)
-	if !found {
-		return 0, false
-	}
-	return s.Get(uint64(idx)), true
+	_, val, found := s.search(v)
+	return val, found
 }
 
 func (s *SimpleSequence) Iterator() *SimpleSequenceIterator {
@@ -139,7 +149,7 @@ func (it *SimpleSequenceIterator) Close() {
 }
 
 func (it *SimpleSequenceIterator) Seek(v uint64) {
-	idx, found := it.seq.search(v)
+	idx, _, found := it.seq.search(v)
 	if !found {
 		it.pos = int(it.seq.Count())
 		return
@@ -172,7 +182,7 @@ func (it *ReverseSimpleSequenceIterator) Close() {
 }
 
 func (it *ReverseSimpleSequenceIterator) Seek(v uint64) {
-	idx, found := it.seq.reverseSearch(v)
+	idx, _, found := it.seq.reverseSearch(v)
 	if !found {
 		it.pos = -1
 		return
