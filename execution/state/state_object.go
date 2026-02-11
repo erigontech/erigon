@@ -119,10 +119,8 @@ func newObject(db *IntraBlockState, address accounts.Address, data, original *ac
 		dirtyStorage:       make(Storage),
 	}
 	so.data.Copy(data)
-	if !so.data.Initialised {
-		so.data.Balance.SetUint64(0)
-		so.data.Initialised = true
-	}
+	so.data.Balance.SetUint64(0)
+
 	if so.data.CodeHash.IsEmpty() {
 		so.data.CodeHash = accounts.EmptyCodeHash
 	}
@@ -344,7 +342,6 @@ func (so *stateObject) SetBalance(amount uint256.Int, wasCommited bool, reason t
 
 func (so *stateObject) setBalance(amount uint256.Int) {
 	so.data.Balance = amount
-	so.data.Initialised = true
 }
 
 // Return the gas back to the origin. Used by the Virtual machine or Closures
