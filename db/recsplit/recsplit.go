@@ -589,6 +589,7 @@ func findSplit(bucket []uint64, salt uint64, fanout, unit uint16, count []uint16
 // Uses 8-way salt parallelism with branchless OR-accumulate
 // to exploit CPU instruction-level parallelism and avoid branch mispredictions.
 func findBijection(bucket []uint64, salt uint64) uint64 {
+
 	m := uint16(len(bucket))
 	fullMask := uint32((1 << m) - 1)
 	for {
@@ -599,6 +600,7 @@ func findBijection(bucket []uint64, salt uint64) uint64 {
 			//- Added & 31 to each remap16() result used as a shift amount in uint32(1) << ...
 			//- This is a no-op at runtime (remap16 always returns [0, m) where m ≤ leafSize ≤ 24 < 32) but tells the Go compiler the shift is always valid
 			//- The compiler responds by replacing 3 instructions per lane (MOVHU + CMP + CSEL) with 1 instruction (UBFX — Unsigned Bit Field eXtract), saving 24 instructions per key per outer-loop iteration in the hottest loop of the algorithm
+			// BenchmarkFindBijection: -7.31 %
 			mask0 |= uint32(1) << (remap16(remix(key+salt), m) & 31)
 			mask1 |= uint32(1) << (remap16(remix(key+salt+1), m) & 31)
 			mask2 |= uint32(1) << (remap16(remix(key+salt+2), m) & 31)
