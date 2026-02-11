@@ -446,7 +446,6 @@ func randomAccount(t *testing.T) (*accounts.Account, accounts.Address) {
 		t.Fatal(err)
 	}
 	acc := accounts.NewAccount()
-	acc.Initialised = true
 	acc.Balance = u256.U64(uint64(rand.Int63()))
 	addr := accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
 	return &acc, addr
