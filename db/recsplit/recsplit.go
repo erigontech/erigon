@@ -611,14 +611,14 @@ func findSplitPow2(bucket []uint64, salt uint64, fanout, unit uint16, count []ui
 		clear(count[:8*fanout])
 		for i := uint16(0); i < m; i++ {
 			key := bucket[i]
-			c0[uint16((remix(key+salt)&mask48)*um>>totalShift)]++
-			c1[uint16((remix(key+salt+1)&mask48)*um>>totalShift)]++
-			c2[uint16((remix(key+salt+2)&mask48)*um>>totalShift)]++
-			c3[uint16((remix(key+salt+3)&mask48)*um>>totalShift)]++
-			c4[uint16((remix(key+salt+4)&mask48)*um>>totalShift)]++
-			c5[uint16((remix(key+salt+5)&mask48)*um>>totalShift)]++
-			c6[uint16((remix(key+salt+6)&mask48)*um>>totalShift)]++
-			c7[uint16((remix(key+salt+7)&mask48)*um>>totalShift)]++
+			c0[uint16((remix(key+salt)&mask48)*um>>(totalShift&63))]++
+			c1[uint16((remix(key+salt+1)&mask48)*um>>(totalShift&63))]++
+			c2[uint16((remix(key+salt+2)&mask48)*um>>(totalShift&63))]++
+			c3[uint16((remix(key+salt+3)&mask48)*um>>(totalShift&63))]++
+			c4[uint16((remix(key+salt+4)&mask48)*um>>(totalShift&63))]++
+			c5[uint16((remix(key+salt+5)&mask48)*um>>(totalShift&63))]++
+			c6[uint16((remix(key+salt+6)&mask48)*um>>(totalShift&63))]++
+			c7[uint16((remix(key+salt+7)&mask48)*um>>(totalShift&63))]++
 		}
 		var bad0, bad1, bad2, bad3, bad4, bad5, bad6, bad7 uint16
 		for i := uint16(0); i < fanout-1; i++ {
