@@ -140,9 +140,6 @@ func (s *SequenceReader) Reset(baseNum uint64, raw []byte) {
 	panic(fmt.Sprintf("unknown sequence encoding: %d", raw[0]))
 }
 
-func (s *SequenceReader) Seek2(v uint64) (uint64, bool) {
-	return s.seek(v)
-}
 func (s *SequenceReader) seek(v uint64) (uint64, bool) {
 	switch s.currentEnc {
 	case SimpleEncoding:
