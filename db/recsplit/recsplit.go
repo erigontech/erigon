@@ -521,12 +521,6 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 // Uses 8-way salt parallelism with 8 independent count arrays carved from the
 // count slice (which must have len >= 8*fanout).
 func findSplit(bucket []uint64, salt uint64, fanout, unit uint16, count []uint16) uint64 {
-	// For power-of-2 unit sizes (80%+ of calls), combine remap16's >>48 shift with
-	// division-by-unit into a single right shift, eliminating 8 UDIVW instructions
-	// (7-12 cycles each on ARM64) per key per outer-loop iteration.
-	if unit&(unit-1) == 0 {
-		return findSplitPow2(bucket, salt, fanout, unit, count)
-	}
 	m := uint16(len(bucket))
 	c0 := count[0*fanout : 1*fanout : 1*fanout]
 	c1 := count[1*fanout : 2*fanout : 2*fanout]
@@ -551,75 +545,6 @@ func findSplit(bucket []uint64, salt uint64, fanout, unit uint16, count []uint16
 		}
 		// Branchless validation: XOR each count with expected value,
 		// OR-accumulate to detect any mismatch.
-		var bad0, bad1, bad2, bad3, bad4, bad5, bad6, bad7 uint16
-		for i := uint16(0); i < fanout-1; i++ {
-			bad0 |= c0[i] ^ unit
-			bad1 |= c1[i] ^ unit
-			bad2 |= c2[i] ^ unit
-			bad3 |= c3[i] ^ unit
-			bad4 |= c4[i] ^ unit
-			bad5 |= c5[i] ^ unit
-			bad6 |= c6[i] ^ unit
-			bad7 |= c7[i] ^ unit
-		}
-		if bad0 == 0 {
-			return salt
-		}
-		if bad1 == 0 {
-			return salt + 1
-		}
-		if bad2 == 0 {
-			return salt + 2
-		}
-		if bad3 == 0 {
-			return salt + 3
-		}
-		if bad4 == 0 {
-			return salt + 4
-		}
-		if bad5 == 0 {
-			return salt + 5
-		}
-		if bad6 == 0 {
-			return salt + 6
-		}
-		if bad7 == 0 {
-			return salt + 7
-		}
-		salt += 8
-	}
-}
-
-// findSplitPow2 is the fast path for findSplit when unit is a power of 2.
-// Replaces remap16(remix(key+salt), m) / unit with
-// uint16(((remix(key+salt) & mask48) * um) >> totalShift)
-// where totalShift = 48 + log2(unit), combining the remap16 right-shift
-// and the division into a single shift operation.
-func findSplitPow2(bucket []uint64, salt uint64, fanout, unit uint16, count []uint16) uint64 {
-	m := uint16(len(bucket))
-	um := uint64(m)
-	totalShift := uint64(48 + bits.TrailingZeros16(unit))
-	c0 := count[0*fanout : 1*fanout : 1*fanout]
-	c1 := count[1*fanout : 2*fanout : 2*fanout]
-	c2 := count[2*fanout : 3*fanout : 3*fanout]
-	c3 := count[3*fanout : 4*fanout : 4*fanout]
-	c4 := count[4*fanout : 5*fanout : 5*fanout]
-	c5 := count[5*fanout : 6*fanout : 6*fanout]
-	c6 := count[6*fanout : 7*fanout : 7*fanout]
-	c7 := count[7*fanout : 8*fanout : 8*fanout]
-	for {
-		clear(count[:8*fanout])
-		for i := uint16(0); i < m; i++ {
-			key := bucket[i]
-			c0[uint16((remix(key+salt)&mask48)*um>>(totalShift&63))]++
-			c1[uint16((remix(key+salt+1)&mask48)*um>>(totalShift&63))]++
-			c2[uint16((remix(key+salt+2)&mask48)*um>>(totalShift&63))]++
-			c3[uint16((remix(key+salt+3)&mask48)*um>>(totalShift&63))]++
-			c4[uint16((remix(key+salt+4)&mask48)*um>>(totalShift&63))]++
-			c5[uint16((remix(key+salt+5)&mask48)*um>>(totalShift&63))]++
-			c6[uint16((remix(key+salt+6)&mask48)*um>>(totalShift&63))]++
-			c7[uint16((remix(key+salt+7)&mask48)*um>>(totalShift&63))]++
-		}
 		var bad0, bad1, bad2, bad3, bad4, bad5, bad6, bad7 uint16
 		for i := uint16(0); i < fanout-1; i++ {
 			bad0 |= c0[i] ^ unit
@@ -713,54 +638,6 @@ func findBijection(bucket []uint64, salt uint64) uint64 {
 	}
 }
 
-// findBijection8 is a specialization of findBijection for m=8 (the common leaf size).
-// For m=8 (power of 2), remap16(x, 8) = ((x & mask48) * 8) >> 48 = (x >> 45) & 7,
-// which the compiler emits as a single UBFX instruction instead of AND + MUL + UBFX.
-// This eliminates 8 multiplies per key per outer-loop iteration.
-func findBijection8(bucket []uint64, salt uint64) uint64 {
-	_ = bucket[7] // bounds check hint
-	const fullMask = uint32(0xFF)
-	for {
-		var mask0, mask1, mask2, mask3, mask4, mask5, mask6, mask7 uint32
-		for i := 0; i < 8; i++ {
-			key := bucket[i]
-			mask0 |= uint32(1) << ((remix(key+salt) >> 45) & 7)
-			mask1 |= uint32(1) << ((remix(key+salt+1) >> 45) & 7)
-			mask2 |= uint32(1) << ((remix(key+salt+2) >> 45) & 7)
-			mask3 |= uint32(1) << ((remix(key+salt+3) >> 45) & 7)
-			mask4 |= uint32(1) << ((remix(key+salt+4) >> 45) & 7)
-			mask5 |= uint32(1) << ((remix(key+salt+5) >> 45) & 7)
-			mask6 |= uint32(1) << ((remix(key+salt+6) >> 45) & 7)
-			mask7 |= uint32(1) << ((remix(key+salt+7) >> 45) & 7)
-		}
-		if mask0 == fullMask {
-			return salt
-		}
-		if mask1 == fullMask {
-			return salt + 1
-		}
-		if mask2 == fullMask {
-			return salt + 2
-		}
-		if mask3 == fullMask {
-			return salt + 3
-		}
-		if mask4 == fullMask {
-			return salt + 4
-		}
-		if mask5 == fullMask {
-			return salt + 5
-		}
-		if mask6 == fullMask {
-			return salt + 6
-		}
-		if mask7 == fullMask {
-			return salt + 7
-		}
-		salt += 8
-	}
-}
-
 // recsplit applies recSplit algorithm to the given bucket
 func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary []uint64) ([]uint64, error) {
 	if rs.trace {
@@ -770,11 +647,7 @@ func (rs *RecSplit) recsplit(level int, bucket []uint64, offsets []uint64, unary
 	salt := rs.startSeed[level]
 	m := uint16(len(bucket))
 	if m <= rs.leafSize {
-		if m == 8 {
-			salt = findBijection8(bucket, salt)
-		} else {
-			salt = findBijection(bucket, salt)
-		}
+		salt = findBijection(bucket, salt)
 		for i := uint16(0); i < m; i++ {
 			j := remap16(remix(bucket[i]+salt), m)
 			rs.offsetBuffer[j] = offsets[i]
