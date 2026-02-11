@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/stateifs"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -54,6 +55,13 @@ type keccakState interface {
 	hash.Hash
 	Read([]byte) (int, error)
 }
+
+// DomainPutter is an interface for putting data into domains.
+// Used by commitment to write branch data.
+type DomainPutter = stateifs.DomainPutter
+
+// CommitmentWrite represents a commitment domain write that needs to be added to changesets.
+type CommitmentWrite = stateifs.CommitmentWrite
 
 // HexPatriciaHashed implements commitment based on patricia merkle tree with radix 16,
 // with keys pre-hashed by keccak256
@@ -98,6 +106,11 @@ type HexPatriciaHashed struct {
 	// Warmup cache for serving reads from pre-warmed data
 	cache             *WarmupCache
 	enableWarmupCache bool // if true, enables warmup cache during Process (false by default)
+
+	// leaveDeferredForCaller when true, Process() leaves deferred updates on the branchEncoder
+	// for the caller to handle via TakeDeferredUpdates(). When false (default), Process()
+	// applies deferred updates inline.
+	leaveDeferredForCaller bool
 
 	//processing metrics
 	metrics       *Metrics
@@ -1516,7 +1529,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 
 				// Val will be set to HashNode with hash of branch node it points to when the current node is processed.
 				// Currently necessary, because the commented out code above which reads branch data and converts it
-				nextNode = &trie.ShortNode{Key: hashedExtKey}
+				nextNode = &trie.ShortNode{Key: common.Copy(hashedExtKey)}
 			} else {
 				keyPos += extKeyLength // jump ahead
 
@@ -1604,7 +1617,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				if err != nil {
 					return nil, err
 				}
-				fullNode.Children[col] = trie.NewHashNode(cellHash[1:]) // because cellHash has 33 bytes and we want 32
+				fullNode.Children[col] = trie.NewHashNode(common.Copy(cellHash[1:])) // because cellHash has 33 bytes and we want 32
 
 				if hph.trace {
 					fmt.Printf("[witness, pos %d] FullNodeChild Hash (%d, %0x, depth=%d) %s proof %+v\n", keyPos, row, col, hph.depths[row], currentCell.FullString(), fullNode.Children[col])
@@ -1615,7 +1628,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 			// and points to a branch node. In this case we just need to provide the hash of this branch node
 			if pathDivergenceFound {
 				terminalCell := &hph.grid[row][currentNibble]
-				nextNode.(*trie.ShortNode).Val = trie.NewHashNode(terminalCell.hash[:])
+				nextNode.(*trie.ShortNode).Val = trie.NewHashNode(common.Copy(terminalCell.hash[:]))
 			}
 			fullNode.Children[currentNibble] = nextNode // ready to expand next nibble in the path
 		} else if accNode, ok := currentNode.(*trie.AccountNode); ok {
@@ -1647,8 +1660,17 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 		// we need to check if we are dealing with the next node being an account node and we have a storage key,
 		// in that case start a new tree for the storage
 		if nextAccNode, ok := nextNode.(*trie.AccountNode); ok && len(hashedKey) > 64 {
+			// If the account has an empty storage root, stop traversal here.
+			// There's no storage trie to expand into, and continuing would incorporate
+			// garbage data from rows below the account into the proof.
+			if nextAccNode.Root == trie.EmptyRoot {
+				if hph.trace {
+					fmt.Printf("[witness] AccountNode (empty storage root, break) (%d, %0x, depth=%d) %s proof %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), nextAccNode)
+				}
+				break
+			}
 			if cellToExpand.hashedExtLen > 0 {
-				extKey := cellToExpand.hashedExtension[:cellToExpand.hashedExtLen]
+				extKey := common.Copy(cellToExpand.hashedExtension[:cellToExpand.hashedExtLen])
 				nextNode = &trie.ShortNode{Key: extKey}
 			} else {
 				nextNode = &trie.FullNode{}
@@ -1658,7 +1680,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 				fmt.Printf("[witness] AccountNode (+StorageTrie) (%d, %0x, depth=%d) %s [proof %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), nextAccNode)
 			}
 			// we want to jump to the account's storage trie directly in this case
-		} else if nextShortNode, ok := nextNode.(*trie.ShortNode); ok && len(hashedKey) > 64 && keyPos+1 == 64 && cellToExpand.storageAddrLen > 0 {
+		} else if nextShortNode, ok := nextNode.(*trie.ShortNode); ok && len(hashedKey) > 64 && keyPos+1 == 64 {
 			// this is because there won't be an account cell stacked in the row below the current row in this case
 			// so the account cell will be skipped in the grid in this case
 			if nextAccNode, ok := nextShortNode.Val.(*trie.AccountNode); ok {
@@ -2451,7 +2473,9 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 
 		var tr *trie.Trie
 		if hph.trace {
-			fmt.Printf("\n%d/%d) witnessing [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, hashedKey, hph.currentKey[:hph.currentKeyLen])
+			// de-nibblize for better printing
+			printableHashedKey, _ := CompactKey(hashedKey)
+			fmt.Printf("\n%d/%d) witnessing [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, printableHashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
 
 		var update *Update
@@ -2661,8 +2685,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		warmuper.DrainPending()
 	}
 
-	if hph.branchEncoder.DeferUpdatesEnabled() {
-		// Apply deferred branch updates in parallel (EncodeBranch runs concurrently)
+	if hph.branchEncoder.DeferUpdatesEnabled() && !hph.leaveDeferredForCaller {
 		if err = hph.branchEncoder.ApplyDeferredUpdates(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
 			return nil, fmt.Errorf("apply deferred updates: %w", err)
 		}
@@ -2729,6 +2752,38 @@ func (hph *HexPatriciaHashed) Variant() TrieVariant { return VariantHexPatriciaT
 // When enabled, branch updates are collected during fold() and applied at the end of Process().
 func (hph *HexPatriciaHashed) SetDeferBranchUpdates(defer_ bool) {
 	hph.branchEncoder.SetDeferUpdates(defer_)
+}
+
+// TakeDeferredUpdates returns the current deferred updates from the branch encoder
+// and gives it a fresh empty slice. Caller takes ownership of the returned slice.
+func (hph *HexPatriciaHashed) TakeDeferredUpdates() []*DeferredBranchUpdate {
+	deferred := hph.branchEncoder.deferred
+	hph.branchEncoder.deferred = make([]*DeferredBranchUpdate, 0, 64)
+	if hph.branchEncoder.pendingPrefixes != nil {
+		hph.branchEncoder.pendingPrefixes.Clear()
+	}
+	ResetDeferredUpdateMetrics()
+	return deferred
+}
+
+// HasPendingDeferredUpdates returns true if the branch encoder has non-empty deferred updates.
+func (hph *HexPatriciaHashed) HasPendingDeferredUpdates() bool {
+	return len(hph.branchEncoder.deferred) > 0
+}
+
+// ApplyAndClearInlineDeferredUpdates applies deferred updates inline via ctx.PutBranch and clears them.
+func (hph *HexPatriciaHashed) ApplyAndClearInlineDeferredUpdates() error {
+	if err := hph.branchEncoder.ApplyDeferredUpdates(runtime.NumCPU(), hph.ctx.PutBranch); err != nil {
+		return fmt.Errorf("apply deferred updates: %w", err)
+	}
+	hph.branchEncoder.ClearDeferred()
+	return nil
+}
+
+// SetLeaveDeferredForCaller controls whether Process() leaves deferred updates on the
+// branchEncoder for the caller to handle (true) or applies them inline (false, default).
+func (hph *HexPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
+	hph.leaveDeferredForCaller = leave
 }
 
 // Reset allows HexPatriciaHashed instance to be reused for the new commitment calculation
