@@ -215,17 +215,18 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) m
 	return receipt
 }
 
-func LogReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Config, header *types.Header, logger log.Logger) string {
+func LogReceipts(msg string, receipts types.Receipts, txns types.Transactions, cc *chain.Config, header *types.Header, logger log.Logger) {
 	if len(receipts) == 0 {
 		// no-op, can happen if vmConfig.NoReceipts=true or vmConfig.StatelessExec=true
-		return ""
+		logger.Info(msg, "block", header.Number.Uint64(), "receipts", "")
+		return
 	}
 
 	// note we do not return errors from this func since this is a debug-only
 	// informative feature that is best-effort and should not interfere with execution
 	if len(receipts) != len(txns) {
 		logger.Error("receipts and txns sizes differ", "receiptsLen", receipts.Len(), "txnsLen", txns.Len())
-		return ""
+		return
 	}
 
 	marshalled := make([]map[string]any, 0, len(receipts))
@@ -237,8 +238,7 @@ func LogReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Con
 	result, err := json.Marshal(marshalled)
 	if err != nil {
 		logger.Error("marshalling error when logging receipts", "err", err)
-		return ""
+		return
 	}
-
-	return string(result)
+	logger.Info(msg, "block", header.Number.Uint64(), "receipts", string(result))
 }
