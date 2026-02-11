@@ -1592,7 +1592,6 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	if previous != nil && !previous.selfdestructed {
 		newObj.data.Balance.Set(&previous.data.Balance)
 	}
-	newObj.data.Initialised = true
 	newObj.data.PrevIncarnation = prevInc
 
 	if contractCreation {

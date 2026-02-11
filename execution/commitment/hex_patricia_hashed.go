@@ -1325,7 +1325,6 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, depth int16, has
 	var account accounts.Account
 	account.Nonce = accountUpdate.Nonce
 	account.Balance = accountUpdate.Balance
-	account.Initialised = true
 	account.Root = accountUpdate.Storage
 	account.CodeHash = accounts.InternCodeHash(accountUpdate.CodeHash)
 
