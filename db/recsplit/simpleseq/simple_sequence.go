@@ -68,22 +68,14 @@ func (s *SimpleSequence) AppendBytes(buf []byte) []byte {
 	return append(buf, s.raw...)
 }
 
-var distFound [17]int
-var distLen [17]int
-
 func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
 	raw := s.raw
 	if len(raw) == 0 || seek > s.Max() {
 		return 0, 0, false
 	}
-	//if distFound[1]%100 == 0 && distFound[0]%100 == 0 {
-	//	log.Warn("[dbg] SimpleSequence.search", "distFound", distFound, "distLen", distLen)
-	//}
-	//distLen[s.Count()]++
 	for i := 0; i < len(raw); i += 4 {
 		v = s.baseNum + uint64(binary.BigEndian.Uint32(raw[i:]))
 		if v >= seek {
-			//distFound[i/4]++
 			return i / 4, v, true
 		}
 	}
