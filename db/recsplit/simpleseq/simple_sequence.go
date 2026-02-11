@@ -75,6 +75,7 @@ var distLen [17]int
 func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
 	raw := s.raw
 	if len(raw) == 0 || seek > s.Max() {
+		distFound[16]++
 		return 0, 0, false
 	}
 	if distFound[1]%100 == 0 && distFound[0]%100 == 0 {
