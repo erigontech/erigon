@@ -66,30 +66,27 @@ func (s *SimpleSequence) AppendBytes(buf []byte) []byte {
 	return append(buf, s.raw...)
 }
 
-func (s *SimpleSequence) search(v uint64) (int, bool) {
+func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
 	for i := uint64(0); i < s.Count(); i++ {
-		if s.Get(i) >= v {
-			return int(i), true
+		if v = s.Get(i); v >= seek {
+			return int(i), v, true
 		}
 	}
-	return 0, false
+	return 0, 0, false
 }
 
-func (s *SimpleSequence) reverseSearch(v uint64) (int, bool) {
+func (s *SimpleSequence) reverseSearch(seek uint64) (idx int, v uint64, ok bool) {
 	for i := s.Count(); i > 0; i-- {
-		if s.Get(i-1) <= v {
-			return int(i - 1), true
+		if v = s.Get(i - 1); v <= seek {
+			return int(i - 1), v, true
 		}
 	}
-	return 0, false
+	return 0, 0, false
 }
 
 func (s *SimpleSequence) Seek(v uint64) (uint64, bool) {
-	idx, found := s.search(v)
-	if !found {
-		return 0, false
-	}
-	return s.Get(uint64(idx)), true
+	_, v, found := s.search(v)
+	return v, found
 }
 
 func (s *SimpleSequence) Iterator() *SimpleSequenceIterator {
@@ -130,7 +127,7 @@ func (it *SimpleSequenceIterator) Close() {
 }
 
 func (it *SimpleSequenceIterator) Seek(v uint64) {
-	idx, found := it.seq.search(v)
+	idx, _, found := it.seq.search(v)
 	if !found {
 		it.pos = int(it.seq.Count())
 		return
@@ -163,7 +160,7 @@ func (it *ReverseSimpleSequenceIterator) Close() {
 }
 
 func (it *ReverseSimpleSequenceIterator) Seek(v uint64) {
-	idx, found := it.seq.reverseSearch(v)
+	idx, _, found := it.seq.reverseSearch(v)
 	if !found {
 		it.pos = -1
 		return
