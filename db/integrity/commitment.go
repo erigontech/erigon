@@ -808,7 +808,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 		return fmt.Errorf("invalid blk range: %d >= %d", from, to)
 	}
 	start := time.Now()
-	wg := errgroup.Group{}
+	wg, ctx := errgroup.WithContext(ctx)
 	wg.SetLimit(estimate.AlmostAllCPUs())
 	for blockNum := from; blockNum < to; blockNum++ {
 		wg.Go(func() error {
