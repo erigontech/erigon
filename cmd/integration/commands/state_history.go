@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -35,6 +36,7 @@ func init() {
 	printCmd.Flags().Uint64Var(&toStep, "to", 1e18, "step to which history to be printed")
 	withDataDir2(printCmd)
 	withHistoryDomain(printCmd)
+	withHistoryKey(printCmd)
 
 	withDataDir2(rebuildCmd)
 	withHistoryDomain(rebuildCmd)
@@ -50,9 +52,14 @@ func withHistoryDomain(cmd *cobra.Command) {
 	must(cmd.MarkFlagRequired("domain"))
 }
 
+func withHistoryKey(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&historyKey, "key", "", "Dump values of a specific key in hex format")
+}
+
 var (
 	fromStep      uint64
 	toStep        uint64
+	historyKey    string
 	historyDomain string
 )
 
@@ -94,9 +101,17 @@ var printCmd = &cobra.Command{
 		roTx := history.BeginFilesRo()
 		defer roTx.Close()
 
+		var keyToDump *[]byte
+
+		if historyKey != "" {
+			key := common.Hex2Bytes(historyKey)
+			keyToDump = &key
+		}
+
 		err = roTx.HistoryDump(
 			int(fromStep)*config3.DefaultStepSize,
 			int(toStep)*config3.DefaultStepSize,
+			keyToDump,
 			os.Stdout,
 		)
 		if err != nil {

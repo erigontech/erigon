@@ -28,9 +28,8 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
-	"github.com/erigontech/erigon/common/dbg"
-
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 )
 
 const (
