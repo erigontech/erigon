@@ -138,8 +138,12 @@ These flags manage network connectivity, peer discovery, and traffic control.
 * `--nat value`: The NAT port mapping mechanism (See [here](nat.md) for more details).
 * `--nodiscover`: Disables peer discovery.
   * Default: `false`
-* `--v5disc`: Enables the experimental RLPx V5 (Topic Discovery) mechanism.
-  * Default: `false`
+* `--v5disc`: Enables the Node Discovery Protocol v5 (Discv5) for managed ENRs and topic discovery.
+  * Default: `true`
+* `--discovery.parallelism value`: The number of concurrent lookup requests allowed per discovery query.
+  * Default: `3`
+* `**`--discovery.ban-threshold value`: The number of failed handshake attempts before an IP is temporarily blacklisted.
+  * Default: `5`
 * `--netrestrict value`: Restricts network communication to specific IP networks.
 * `--nodekey value`: The P2P node key file.
 * `--nodekeyhex value`: The P2P node key as a hexadecimal string.
