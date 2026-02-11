@@ -2,7 +2,6 @@ package simpleseq
 
 import (
 	"encoding/binary"
-	"sort"
 
 	"github.com/erigontech/erigon/db/kv/stream"
 )
@@ -70,27 +69,23 @@ func (s *SimpleSequence) AppendBytes(buf []byte) []byte {
 }
 
 func (s *SimpleSequence) search(v uint64) (int, bool) {
-	c := s.Count()
-	idx := sort.Search(int(c), func(i int) bool {
-		return s.Get(uint64(i)) >= v
-	})
-
-	if idx >= int(c) {
-		return 0, false
+	c := int(s.Count())
+	for i := 0; i < c; i++ {
+		if s.Get(uint64(i)) >= v {
+			return i, true
+		}
 	}
-	return idx, true
+	return 0, false
 }
 
 func (s *SimpleSequence) reverseSearch(v uint64) (int, bool) {
-	c := s.Count()
-	idx := sort.Search(int(c), func(i int) bool {
-		return s.Get(c-uint64(i)-1) <= v
-	})
-
-	if idx >= int(c) {
-		return 0, false
+	c := int(s.Count())
+	for i := c - 1; i >= 0; i-- {
+		if s.Get(uint64(i)) <= v {
+			return i, true
+		}
 	}
-	return int(c) - idx - 1, true
+	return 0, false
 }
 
 func (s *SimpleSequence) Seek(v uint64) (uint64, bool) {
