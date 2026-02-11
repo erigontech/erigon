@@ -179,32 +179,28 @@ func TestRLPEncodeDecodeWithAccountsAndStorage(t *testing.T) {
 	// Create accounts
 	testAccounts := []*accounts.Account{
 		{
-			Nonce:       1,
-			Balance:     *uint256.NewInt(1000000000000000000), // 1 ETH
-			Root:        EmptyRoot,
-			CodeHash:    accounts.EmptyCodeHash,
-			Incarnation: 0,
+			Nonce:    1,
+			Balance:  *uint256.NewInt(1000000000000000000), // 1 ETH
+			Root:     EmptyRoot,
+			CodeHash: accounts.EmptyCodeHash,
 		},
 		{
-			Nonce:       42,
-			Balance:     *uint256.NewInt(10000000000000000000), // 10 ETH
-			Root:        EmptyRoot,                             // Will be updated when storage is added
-			CodeHash:    accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0x60, 0x80, 0x60, 0x40})),
-			Incarnation: 1,
+			Nonce:    42,
+			Balance:  *uint256.NewInt(10000000000000000000), // 10 ETH
+			Root:     EmptyRoot,                             // Will be updated when storage is added
+			CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0x60, 0x80, 0x60, 0x40})),
 		},
 		{
-			Nonce:       0,
-			Balance:     *uint256.NewInt(0),
-			Root:        EmptyRoot,
-			CodeHash:    accounts.EmptyCodeHash,
-			Incarnation: 0,
+			Nonce:    0,
+			Balance:  *uint256.NewInt(0),
+			Root:     EmptyRoot,
+			CodeHash: accounts.EmptyCodeHash,
 		},
 		{
-			Nonce:       999,
-			Balance:     *uint256.NewInt(0xffffffffffffffff),
-			Root:        EmptyRoot,
-			CodeHash:    accounts.InternCodeHash(crypto.Keccak256Hash([]byte("contract code"))),
-			Incarnation: 2,
+			Nonce:    999,
+			Balance:  *uint256.NewInt(0xffffffffffffffff),
+			Root:     EmptyRoot,
+			CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte("contract code"))),
 		},
 	}
 
