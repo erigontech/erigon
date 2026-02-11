@@ -377,4 +377,3 @@ func processBlsToExecutionChanges(impl BlockOperationProcessor, s abstract.Beaco
 
 	return
 }
-

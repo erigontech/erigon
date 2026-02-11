@@ -69,8 +69,8 @@ func (f *ForkChoiceStore) isPayloadTimely(root common.Hash) bool {
 	// Count PTC votes for payload present
 	ptcVotes := ptcVoteRaw.([clparams.PtcSize]bool)
 	presentCount := uint64(0)
-	for _, present := range ptcVotes {
-		if present {
+	for i := range ptcVotes {
+		if ptcVotes[i] {
 			presentCount++
 		}
 	}
