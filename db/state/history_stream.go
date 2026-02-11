@@ -399,6 +399,8 @@ type HistoryChangesIterFiles struct {
 	k, v, kBackup, vBackup []byte
 	err                    error
 	limit                  int
+
+	seq multiencseq.SequenceReader
 }
 
 func (hi *HistoryChangesIterFiles) Close() {
@@ -420,7 +422,9 @@ func (hi *HistoryChangesIterFiles) advance() error {
 		if bytes.Equal(key, hi.nextKey) { // deduplication
 			continue
 		}
-		txNum, ok := multiencseq.Seek(top.startTxNum, idxVal, hi.startTxNum)
+
+		hi.seq.Reset(top.startTxNum, idxVal)
+		txNum, ok := hi.seq.Seek2(hi.startTxNum)
 		if !ok {
 			continue
 		}
