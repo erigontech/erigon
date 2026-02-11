@@ -20,12 +20,9 @@
 package executiontests
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"fmt"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"testing"
 
@@ -33,26 +30,31 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/tests/testutil"
-	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/vm"
 )
 
 func TestStateCornerCases(t *testing.T) {
 	t.Parallel()
 
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+	//defer log.Root().SetHandler(log.Root().GetHandler())
+	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
 	}
 
 	st := new(testMatcher)
 
+	// TODO remove
+	st.whitelist(".*feedback-storage-46.json")
+
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs)
-	st.walk(t, cornersDir, func(t *testing.T, name string, test *testutil.StateTest) {
+	testDir := filepath.Join(cornersDir, "state")
+	st.walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
+		fmt.Printf("--- debug --- st.walk test=%s, subtests=%d\n", name, len(test.Subtests()))
 		for _, subtest := range test.Subtests() {
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
+			fmt.Printf("--- debug --- subtest %s\n", key)
 			t.Run(key, func(t *testing.T) {
 				withTrace(t, func(vmconfig vm.Config) error {
 					tx, err := db.BeginTemporalRw(context.Background())
@@ -60,6 +62,7 @@ func TestStateCornerCases(t *testing.T) {
 						t.Fatal(err)
 					}
 					defer tx.Rollback()
+					fmt.Printf("--- debug --- test key %s\n", key)
 					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
 					tx.Rollback()
 					if err != nil && len(test.Json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
@@ -131,21 +134,21 @@ func withTrace(t *testing.T, test func(vm.Config) error) {
 
 	// Test failed, re-run with tracing enabled.
 	t.Error(err)
-	buf := new(bytes.Buffer)
-	w := bufio.NewWriter(buf)
-	tracer := logger.NewJSONLogger(&logger.LogConfig{DisableMemory: true}, w)
-	config.Tracer = tracer.Tracer().Hooks
-	err2 := test(config)
-	if !reflect.DeepEqual(err, err2) {
-		t.Errorf("different error for second run: %v", err2)
-	}
-	w.Flush()
-	if buf.Len() == 0 {
-		t.Log("no EVM operation logs generated")
-		//} else {
-		//enable it if need extensive logging
-		//t.Log("EVM operation log:\n" + buf.String())
-	}
+	//buf := new(bytes.Buffer)
+	//w := bufio.NewWriter(buf)
+	//tracer := logger.NewJSONLogger(&logger.LogConfig{DisableMemory: true}, w)
+	//config.Tracer = tracer.Tracer().Hooks
+	//err2 := test(config)
+	//if !reflect.DeepEqual(err, err2) {
+	//	t.Errorf("different error for second run: %v", err2)
+	//}
+	//w.Flush()
+	//if buf.Len() == 0 {
+	//	t.Log("no EVM operation logs generated")
+	//	//} else {
+	//	//enable it if need extensive logging
+	//	//t.Log("EVM operation log:\n" + buf.String())
+	//}
 	//t.Logf("EVM output: 0x%x", tracer.Output())
 	//t.Logf("EVM error: %v", tracer.Error())
 }

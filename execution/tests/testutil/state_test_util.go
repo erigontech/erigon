@@ -213,11 +213,21 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 
+	//logger := testlog.Logger(tb.(*testing.T), log.LvlDebug)
+	//domains, err := execctx.NewSharedDomains(context.Background(), tx, logger)
 	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	if err != nil {
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 	defer domains.Close()
+	rh, err := domains.GetCommitmentCtx().Trie().RootHash()
+	if err != nil {
+		return nil, common.Hash{}, 0, err
+	}
+	fmt.Printf("--- debug --- Prestate root: %x\n", rh)
+	fmt.Printf("--- debug ---\n")
+	fmt.Printf("--- debug ---\n")
+	fmt.Printf("--- debug ---\n")
 	blockNum, txNum := readBlockNr, uint64(1)
 
 	r := rpchelper.NewLatestStateReader(tx)
