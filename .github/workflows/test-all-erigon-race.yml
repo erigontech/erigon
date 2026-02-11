@@ -50,23 +50,15 @@ jobs:
       matrix:
         os:
           - Linux
-    runs-on: ["${{ matrix.os }}", self-hosted, qa]
+    runs-on: ["${{ matrix.os }}", self-hosted, qa, Release, X64]
 
     steps:
-      - name: Cleanup space
-        run: |
-          rm -fr /opt/az \
-                 /opt/microsoft \
-                 /usr/share/dotnet \
-                 /usr/share/miniconda \
-                 /usr/share/swift
-
       - name: Declare runners
         if: needs.source-of-changes.outputs.changed_files != 'true'
         run: |
           set +x
           echo "This workflow is being executed by this runner: $RUNNER_NAME"
-          
+
       - name: "Checkout code with submodules and large files (lfs)"
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/checkout@v6
@@ -83,17 +75,6 @@ jobs:
                  /usr/share/dotnet \
                  /usr/share/miniconda \
                  /usr/share/swift
-
-      - name: Setup Go environment
-        if: needs.source-of-changes.outputs.changed_files != 'true'
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.25'
-          cache: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
-          
-      - name: Install dependencies on Linux
-        if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: sudo apt update -y && sudo apt install -y build-essential
         
       - name: Run all tests on ${{ matrix.os }}
         env:
