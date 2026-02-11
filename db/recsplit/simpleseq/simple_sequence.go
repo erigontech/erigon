@@ -78,7 +78,7 @@ func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
 		distFound[16]++
 		return 0, 0, false
 	}
-	if distFound[1]%1000 == 0 && distFound[0]%100 == 0 {
+	if distFound[1]%100 == 0 && distFound[0]%1_000 == 0 {
 		log.Warn("[dbg] SimpleSequence.search", "distFound", distFound, "distLen", distLen)
 	}
 	distLen[s.Count()]++
