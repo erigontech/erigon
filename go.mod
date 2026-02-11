@@ -133,7 +133,7 @@ require (
 
 require (
 	cel.dev/expr v0.24.0 // indirect
-	github.com/Giulio2002/fastkeccak v0.0.0-20260210212727-76724edd642e // indirect
+	github.com/Giulio2002/fastkeccak v0.0.0-20260211162430-e46f5da3471e // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver/v3 v3.2.0 // indirect
 	github.com/RoaringBitmap/roaring v1.9.4 // indirect

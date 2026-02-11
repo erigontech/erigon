@@ -31,8 +31,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/google/btree"
-	"github.com/holiman/uint256"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
@@ -43,6 +41,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/google/btree"
+	"github.com/holiman/uint256"
 )
 
 var (

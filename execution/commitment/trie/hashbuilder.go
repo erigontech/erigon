@@ -22,11 +22,11 @@ import (
 	"io"
 	"math/bits"
 
-	"github.com/holiman/uint256"
 	"github.com/erigontech/erigon/common"
 	length2 "github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/holiman/uint256"
 )
 
 const hashStackStride = length2.Hash + 1 // + 1 byte for RLP encoding

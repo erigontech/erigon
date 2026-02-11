@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/holiman/uint256"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -32,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/holiman/uint256"
 )
 
 func opAdd(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {

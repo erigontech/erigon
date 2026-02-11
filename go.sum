@@ -63,6 +63,10 @@ github.com/Giulio2002/fastkeccak v0.0.0-20260210192437-571a88a5310c h1:allCVVL4k
 github.com/Giulio2002/fastkeccak v0.0.0-20260210192437-571a88a5310c/go.mod h1:Pd9D7XqT39GFZxg3l6WvDAWqWEvJL4q8wGo+lV3jOiY=
 github.com/Giulio2002/fastkeccak v0.0.0-20260210212727-76724edd642e h1:qed3dhNgrlwr7gNfNHRuaoBpFPCj9K3FcHGZTv0yMTc=
 github.com/Giulio2002/fastkeccak v0.0.0-20260210212727-76724edd642e/go.mod h1:hV8opQ3ZsVD6S/N0htzaYUcD7l17Q/81vXvyfZacr8A=
+github.com/Giulio2002/fastkeccak v0.0.0-20260210224444-475111897d79 h1:bdlpC9lyz+r/QRX+p057HQYgcVi12AhqGyrP95forqI=
+github.com/Giulio2002/fastkeccak v0.0.0-20260210224444-475111897d79/go.mod h1:c8xKFYwwaqZu58HExXsizNY59YXkX8jWnpG8Llk9wZU=
+github.com/Giulio2002/fastkeccak v0.0.0-20260211162430-e46f5da3471e h1:RrlPQT2lAmlGWldQ7PIhmxnusr7V5cFXynPWhktgP30=
+github.com/Giulio2002/fastkeccak v0.0.0-20260211162430-e46f5da3471e/go.mod h1:c8xKFYwwaqZu58HExXsizNY59YXkX8jWnpG8Llk9wZU=
 github.com/Masterminds/goutils v1.1.1 h1:5nUrii3FMTL5diU80unEVvNevw1nH4+ZV4DSLVJLSYI=
 github.com/Masterminds/goutils v1.1.1/go.mod h1:8cTjp+g8YejhMuvIA5y2vz3BpJxksy863GQaJW2MFNU=
 github.com/Masterminds/semver/v3 v3.2.0 h1:3MEsd0SM6jqZojhjLWWeBY+Kcjy9i6MQAeY7YgDP83g=
