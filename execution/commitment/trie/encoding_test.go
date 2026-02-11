@@ -252,6 +252,11 @@ func TestRLPEncodeDecodeWithAccountsAndStorage(t *testing.T) {
 	_, storageRoot1 := stateTrie.DeepHash(contract1AddrHash[:])
 	_, storageRoot2 := stateTrie.DeepHash(contract2AddrHash[:])
 
+	// Update expected accounts with computed storage roots
+	// (storage was added via Update, so the trie's AccountNode.Root is updated)
+	testAccounts[1].Root = storageRoot1
+	testAccounts[3].Root = storageRoot2
+
 	// Compute original state root BEFORE encoding
 	originalStateRoot := stateTrie.Hash()
 
