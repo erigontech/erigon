@@ -209,7 +209,7 @@ func blobVersionedHashesSize(hashes []common.Hash) int {
 	return 33 * len(hashes)
 }
 
-func encodeBlobVersionedHashes(hashes []common.Hash, w io.Writer, b []byte) error {
+func encodeBlobVersionedHashes(hashes []common.Hash, w io.Writer) error {
 	for i := 0; i < len(hashes); i++ {
 		if err := rlp.EncodeString(hashes[i][:], w); err != nil {
 			return err
@@ -218,7 +218,7 @@ func encodeBlobVersionedHashes(hashes []common.Hash, w io.Writer, b []byte) erro
 	return nil
 }
 
-func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, blobHashesLen int) error {
+func (stx *BlobTx) encodePayload(w io.Writer, payloadSize, accessListLen, blobHashesLen int) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
 		return err
@@ -244,11 +244,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListL
 		return err
 	}
 	// encode To
-	b[0] = 128 + 20
-	if _, err := w.Write(b[:1]); err != nil {
-		return err
-	}
-	if _, err := w.Write(stx.To[:]); err != nil {
+	if err := rlp.EncodeString(stx.To[:], w); err != nil {
 		return err
 	}
 	// encode Value
@@ -264,7 +260,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListL
 		return err
 	}
 	// encode AccessList
-	if err := encodeAccessList(stx.AccessList, w, b); err != nil {
+	if err := encodeAccessList(stx.AccessList, w); err != nil {
 		return err
 	}
 	// encode MaxFeePerBlobGas
@@ -276,7 +272,7 @@ func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListL
 		return err
 	}
 	// encode BlobVersionedHashes
-	if err := encodeBlobVersionedHashes(stx.BlobVersionedHashes, w, b); err != nil {
+	if err := encodeBlobVersionedHashes(stx.BlobVersionedHashes, w); err != nil {
 		return err
 	}
 	// encode V
@@ -312,7 +308,7 @@ func (stx *BlobTx) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := stx.encodePayload(w, b[:], payloadSize, accessListLen, blobHashesLen); err != nil {
+	if err := stx.encodePayload(w, payloadSize, accessListLen, blobHashesLen); err != nil {
 		return err
 	}
 	return nil
@@ -330,7 +326,7 @@ func (stx *BlobTx) MarshalBinary(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := stx.encodePayload(w, b[:], payloadSize, accessListLen, blobHashesLen); err != nil {
+	if err := stx.encodePayload(w, payloadSize, accessListLen, blobHashesLen); err != nil {
 		return err
 	}
 	return nil

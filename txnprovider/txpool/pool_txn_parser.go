@@ -547,7 +547,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 			}
 			auth.R, auth.S = sig.R, sig.S
 
-			authority, err := auth.RecoverSigner(bytes.NewBuffer(nil), make([]byte, 32))
+			authority, err := auth.RecoverSigner(bytes.NewBuffer(nil))
 			if err != nil {
 				return 0, fmt.Errorf("%w: recover authorization signer: %s stack: %s", ErrParseTxn, err, dbg.Stack()) //nolint
 			}

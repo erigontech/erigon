@@ -36,7 +36,7 @@ func (ath *Authorization) copy() *Authorization {
 	}
 }
 
-func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common.Address, error) {
+func (ath *Authorization) RecoverSigner(data *bytes.Buffer) (*common.Address, error) {
 	if ath.Nonce == math.MaxUint64 {
 		return nil, errors.New("failed assertion: auth.nonce < 2**64 - 1")
 	}
@@ -54,7 +54,7 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common
 		return nil, err
 	}
 
-	if err := rlp.EncodeOptionalAddress(&ath.Address, data, buf); err != nil {
+	if err := rlp.EncodeOptionalAddress(&ath.Address, data); err != nil {
 		return nil, err
 	}
 
@@ -185,7 +185,7 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 	return nil
 }
 
-func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte) error {
+func encodeAuthorizations(authorizations []Authorization, w io.Writer) error {
 	for i := 0; i < len(authorizations); i++ {
 		authLen := authorizationSize(authorizations[i])
 		if err := rlp.EncodeStructSizePrefix(authLen, w); err != nil {
@@ -197,7 +197,7 @@ func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte)
 			return err
 		}
 		// 2. encode Address
-		if err := rlp.EncodeOptionalAddress(&authorizations[i].Address, w, b); err != nil {
+		if err := rlp.EncodeOptionalAddress(&authorizations[i].Address, w); err != nil {
 			return err
 		}
 		// 3. encode Nonce

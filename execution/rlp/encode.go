@@ -702,7 +702,8 @@ func EncodeStringSizePrefix(size int, w io.Writer) error {
 	return nil
 }
 
-func EncodeOptionalAddress(addr *common.Address, w io.Writer, buffer []byte) error {
+func EncodeOptionalAddress(addr *common.Address, w io.Writer) error {
+	var buffer [1]byte
 	if addr == nil {
 		buffer[0] = 128
 	} else {

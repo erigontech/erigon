@@ -166,13 +166,13 @@ func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen); err != nil {
+	if err := tx.encodePayload(w, payloadSize, accessListLen); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen int) error {
+func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, payloadSize, accessListLen int) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
 		return err
@@ -198,7 +198,7 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 		return err
 	}
 	// encode To
-	if err := rlp.EncodeOptionalAddress(tx.To, w, b); err != nil {
+	if err := rlp.EncodeOptionalAddress(tx.To, w); err != nil {
 		return err
 	}
 	// encode Value
@@ -214,7 +214,7 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 		return err
 	}
 	// encode AccessList
-	if err := encodeAccessList(tx.AccessList, w, b); err != nil {
+	if err := encodeAccessList(tx.AccessList, w); err != nil {
 		return err
 	}
 	// encode V
@@ -247,7 +247,7 @@ func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen); err != nil {
+	if err := tx.encodePayload(w, payloadSize, accessListLen); err != nil {
 		return err
 	}
 	return nil

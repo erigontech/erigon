@@ -154,7 +154,8 @@ func accessListSize(al AccessList) int {
 	return accessListLen
 }
 
-func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
+func encodeAccessList(al AccessList, w io.Writer) error {
+	var b [1]byte
 	for i := 0; i < len(al); i++ {
 		tupleLen := 21
 		// Each storage key takes 33 bytes
@@ -163,7 +164,7 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 		if err := rlp.EncodeStructSizePrefix(tupleLen, w); err != nil {
 			return err
 		}
-		if err := rlp.EncodeOptionalAddress(&al[i].Address, w, b); err != nil { // TODO(racytech): change addr to []byte?
+		if err := rlp.EncodeOptionalAddress(&al[i].Address, w); err != nil {
 			return err
 		}
 		if err := rlp.EncodeStructSizePrefix(storageLen, w); err != nil {
@@ -248,7 +249,7 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, access
 		return err
 	}
 	// encode AccessList
-	if err := encodeAccessList(tx.AccessList, w, b); err != nil {
+	if err := encodeAccessList(tx.AccessList, w); err != nil {
 		return err
 	}
 	// encode V

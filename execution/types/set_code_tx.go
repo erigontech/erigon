@@ -109,7 +109,7 @@ func (tx *SetCodeTransaction) MarshalBinary(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen); err != nil {
+	if err := tx.encodePayload(w, payloadSize, accessListLen, authorizationsLen); err != nil {
 		return err
 	}
 	return nil
@@ -244,7 +244,7 @@ func (tx *SetCodeTransaction) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	return tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen)
+	return tx.encodePayload(w, payloadSize, accessListLen, authorizationsLen)
 }
 
 func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
@@ -314,7 +314,7 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
-func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, authorizationsLen int) error {
+func (tx *SetCodeTransaction) encodePayload(w io.Writer, payloadSize, accessListLen, authorizationsLen int) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
 		return err
@@ -340,7 +340,7 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode To
-	if err := rlp.EncodeOptionalAddress(tx.To, w, b); err != nil {
+	if err := rlp.EncodeOptionalAddress(tx.To, w); err != nil {
 		return err
 	}
 	// encode Value
@@ -356,7 +356,7 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode AccessList
-	if err := encodeAccessList(tx.AccessList, w, b); err != nil {
+	if err := encodeAccessList(tx.AccessList, w); err != nil {
 		return err
 	}
 	// prefix
@@ -364,7 +364,7 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode Authorizations
-	if err := encodeAuthorizations(tx.Authorizations, w, b); err != nil {
+	if err := encodeAuthorizations(tx.Authorizations, w); err != nil {
 		return err
 	}
 	// encode V

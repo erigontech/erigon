@@ -285,14 +285,14 @@ func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen); err != nil {
+	if err := tx.encodePayload(w, payloadSize, accessListLen, authorizationsLen); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, authorizationsLen int) error {
+func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, payloadSize, accessListLen, authorizationsLen int) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
 		return err
@@ -316,7 +316,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		senderAddress = &senderValue
 
 	}
-	if err := rlp.EncodeOptionalAddress(senderAddress, w, b); err != nil {
+	if err := rlp.EncodeOptionalAddress(senderAddress, w); err != nil {
 		return err
 	}
 
@@ -324,7 +324,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeOptionalAddress(tx.Deployer, w, b); err != nil {
+	if err := rlp.EncodeOptionalAddress(tx.Deployer, w); err != nil {
 		return err
 	}
 
@@ -332,7 +332,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeOptionalAddress(tx.Paymaster, w, b); err != nil {
+	if err := rlp.EncodeOptionalAddress(tx.Paymaster, w); err != nil {
 		return err
 	}
 
@@ -377,7 +377,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 	// encode AccessList
-	if err := encodeAccessList(tx.AccessList, w, b); err != nil {
+	if err := encodeAccessList(tx.AccessList, w); err != nil {
 		return err
 	}
 
@@ -386,7 +386,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 	// encode Authorizations
-	if err := encodeAuthorizations(tx.Authorizations, w, b); err != nil {
+	if err := encodeAuthorizations(tx.Authorizations, w); err != nil {
 		return err
 	}
 
@@ -516,7 +516,7 @@ func (tx *AccountAbstractionTransaction) MarshalBinary(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w, b[:], payloadSize, accessListLen, authorizationsLen); err != nil {
+	if err := tx.encodePayload(w, payloadSize, accessListLen, authorizationsLen); err != nil {
 		return err
 	}
 	return nil
