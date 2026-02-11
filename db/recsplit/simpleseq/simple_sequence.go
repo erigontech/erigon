@@ -79,7 +79,7 @@ func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
 	//   - 10% return "not found"
 	//   - 5% other lengths
 	//
-	// As a result: early-check for `max` + full-scan search
+	// As a result: early-check for `max` + full-scan search instead of `sort.Search`
 
 	if len(s.raw) == 0 || seek > s.Max() {
 		return 0, 0, false
