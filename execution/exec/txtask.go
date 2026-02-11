@@ -111,7 +111,7 @@ type TxResult struct {
 
 	TraceFroms        map[accounts.Address]struct{}
 	TraceTos          map[accounts.Address]struct{}
-	AccessedAddresses map[accounts.Address]struct{}
+	AccessedAddresses state.AccessSet
 }
 
 func (r *TxResult) compare(other *TxResult) int {

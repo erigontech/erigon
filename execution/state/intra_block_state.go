@@ -130,6 +130,22 @@ type accessOptions struct {
 	revertable bool
 }
 
+type AccessSet map[accounts.Address]*accessOptions
+
+func (aa AccessSet) Merge(other AccessSet) AccessSet {
+	if len(other) == 0 {
+		return aa
+	}
+	dst := make(AccessSet, len(aa)+len(other))
+	for addr, opt := range aa {
+		dst[addr] = opt
+	}
+	for addr, opt := range other {
+		dst[addr] = opt
+	}
+	return dst
+}
+
 // IntraBlockState is responsible for caching and managing state changes
 // that occur during block's execution.
 // NOT THREAD SAFE!
@@ -163,7 +179,7 @@ type IntraBlockState struct {
 	trace         bool
 	tracingHooks  *tracing.Hooks
 	balanceInc    map[accounts.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
-	addressAccess map[accounts.Address]*accessOptions
+	addressAccess AccessSet
 	recordAccess  bool
 
 	// Versioned storage used for parallel tx processing, versions
@@ -1858,6 +1874,15 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 	return nil
 }
 
+func (sdb *IntraBlockState) TxIO() *VersionedIO {
+	var io VersionedIO
+	version := Version{BlockNum: sdb.blockNum, TxIndex: sdb.txIndex, Incarnation: sdb.version}
+	io.RecordReads(version, sdb.versionedReads)
+	io.RecordWrites(version, sdb.VersionedWrites(false))
+	io.RecordAccesses(version, sdb.addressAccess)
+	return &io
+}
+
 func (sdb *IntraBlockState) Print(chainRules chain.Rules, all bool) {
 	for addr, stateObject := range sdb.stateObjects {
 		_, isDirty := sdb.stateObjectsDirty[addr]
@@ -2004,15 +2029,15 @@ func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 }
 
 // AccessedAddresses returns and resets the set of addresses touched during the current transaction.
-func (sdb *IntraBlockState) AccessedAddresses() map[accounts.Address]struct{} {
+func (sdb *IntraBlockState) AccessedAddresses() AccessSet {
 	if len(sdb.addressAccess) == 0 {
 		sdb.recordAccess = false
 		sdb.addressAccess = nil
 		return nil
 	}
-	out := make(map[accounts.Address]struct{}, len(sdb.addressAccess))
+	out := make(AccessSet, len(sdb.addressAccess))
 	for addr := range sdb.addressAccess {
-		out[addr] = struct{}{}
+		out[addr] = nil
 	}
 	sdb.recordAccess = false
 	sdb.addressAccess = nil
