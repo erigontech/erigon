@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"io"
 	"math"
 	"path/filepath"
 	"strings"
@@ -1480,7 +1479,7 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 	return stream.UnionKV(itOnFiles, itOnDB, limit), nil
 }
 
-func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, dumpTo io.Writer) error {
+func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, dumpTo func(key []byte, txNum uint64, val []byte)) error {
 	if len(ht.iit.files) == 0 {
 		return nil
 	}
@@ -1505,6 +1504,10 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, dumpTo io.Writer) err
 		for efGetter.HasNext() {
 			key, _ := efGetter.Next(nil)
 			val, _ := efGetter.Next(nil) // encoded EF sequence
+
+			if keyToDump != nil && !bytes.Equal(key, *keyToDump) {
+				continue
+			}
 
 			seq := multiencseq.ReadMultiEncSeq(item.startTxNum, val)
 			ss := seq.Iterator(0)
@@ -1542,7 +1545,7 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, dumpTo io.Writer) err
 					val, _ = seg.GetFromPage(histKeyBuf, val, nil, true)
 				}
 
-				fmt.Fprintf(dumpTo, "key: %x, txn: %d, val: %x\n", key, txNum, val)
+				dumpTo(key, txNum, val)
 			}
 		}
 	}

@@ -125,6 +125,7 @@ func ExecV3(ctx context.Context,
 	logger log.Logger) (execErr error) {
 	isBlockProduction := execStage.SyncMode() == stages.ModeBlockProduction
 	isForkValidation := execStage.SyncMode() == stages.ModeForkValidation
+
 	isApplyingBlocks := execStage.SyncMode() == stages.ModeApplyingBlocks
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
 	hooks := cfg.vmConfig.Tracer
@@ -133,6 +134,7 @@ func ExecV3(ctx context.Context,
 	if err != nil {
 		return err
 	}
+
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if isApplyingBlocks {
 		if initialCycle {
@@ -204,15 +206,6 @@ func ExecV3(ctx context.Context,
 	var lastHeader *types.Header
 
 	var readAhead chan uint64
-	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
-	// can't use OS-level ReadAhead - because Data >> RAM
-	// it also warmsup state a bit - by touching senders/coninbase accounts and code
-	if !execStage.CurrentSyncCycle.IsInitialCycle {
-		var clean func()
-
-		readAhead, clean = exec.BlocksReadAhead(ctx, 2, cfg.db, cfg.engine, cfg.blockReader)
-		defer clean()
-	}
 
 	startBlockNum := blockNum
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
@@ -227,8 +220,24 @@ func ExecV3(ctx context.Context,
 	doms.EnableWarmupCache(isChainTip)
 	log.Debug("Warmup Cache", "enabled", isChainTip)
 	postValidator := newBlockPostExecutionValidator()
+	doms.SetDeferCommitmentUpdates(false)
 	if isChainTip {
 		postValidator = newParallelBlockPostExecutionValidator()
+		// Only defer branch updates in fork validation mode (engine API flow)
+		// where MergeExtendingFork will flush the pending updates
+		if isForkValidation {
+			doms.SetDeferCommitmentUpdates(true)
+		}
+	}
+	defer doms.SetDeferCommitmentUpdates(false)
+	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
+	// can't use OS-level ReadAhead - because Data >> RAM
+	// it also warmsup state a bit - by touching senders/coninbase accounts and code
+	if !execStage.CurrentSyncCycle.IsInitialCycle && !isChainTip {
+		var clean func()
+
+		readAhead, clean = exec.BlocksReadAhead(ctx, 2, cfg.db, cfg.engine, cfg.blockReader)
+		defer clean()
 	}
 	if parallel {
 		pe := &parallelExecutor{
@@ -578,11 +587,17 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			default:
 			}
 
-			var b *types.Block
-			err := tx.Apply(ctx, func(tx kv.Tx) error {
-				b, err = exec.BlockWithSenders(ctx, te.cfg.db, tx, te.cfg.blockReader, blockNum)
+			canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+			if err != nil {
 				return err
-			})
+			}
+			b, ok := exec.ReadBlockWithSendersFromGlobalReadAheader(canonicalHash)
+			if b == nil || !ok {
+				err = tx.Apply(ctx, func(tx kv.Tx) error {
+					b, err = exec.BlockWithSenders(ctx, te.cfg.db, tx, te.cfg.blockReader, blockNum)
+					return err
+				})
+			}
 			if err != nil {
 				return err
 			}

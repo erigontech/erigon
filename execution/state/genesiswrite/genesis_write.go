@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"math/big"
 	"slices"
-	"sort"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -522,8 +521,8 @@ func sortedAllocAddresses(m types.GenesisAlloc) []common.Address {
 		addrs = append(addrs, addr)
 	}
 
-	sort.Slice(addrs, func(i, j int) bool {
-		return bytes.Compare(addrs[i][:], addrs[j][:]) < 0
+	slices.SortFunc(addrs, func(a, b common.Address) int {
+		return bytes.Compare(a[:], b[:])
 	})
 	return addrs
 }
