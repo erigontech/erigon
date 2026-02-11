@@ -18,6 +18,11 @@ on:
         description: "Stress test load sequence (qps:duration_secs) e.g. 100:300,500:300,750:300 "
         required: false
         default: "100:300,500:300,1000:300,2000:300,1:300,3000:300,1:300"
+      skip_pprof:
+        description: "Skip downloading pprof data"
+        type: boolean
+        required: false
+        default: false
       run_geth:
         description: 'Run the Geth benchmark besides the Erigon one'
         type: boolean
@@ -53,6 +58,7 @@ jobs:
       EXECUTION_NAME: ${{ github.event.inputs.execution_name || 'eth_getBlockByNumber' }}
       LOAD_PATTERN: ${{ github.event.inputs.load_pattern || 'stress_test_eth_getBlockByNumber_13M.tar' }}
       LOAD_SEQUENCE: ${{ github.event.inputs.load_sequence || '100:300,500:300,1000:300,2000:300,1:300,3000:300,1:300' }}
+      LOAD_MODE: ${{ github.event.inputs.skip_pprof == 'true' && 'measure' || 'load' }}
 
     steps:
     - name: Print job parameters
@@ -159,7 +165,7 @@ jobs:
             "Erigon3" \
             "$CHAIN" \
             "archive_node" \
-            "load@${SAFE_EXECUTION_NAME}@${SAFE_LOAD_PATTERN}@${SAFE_LOAD_SEQUENCE}@${RPC_TESTS_DIR}"
+            "${{ env.LOAD_MODE }}@${SAFE_EXECUTION_NAME}@${SAFE_LOAD_PATTERN}@${SAFE_LOAD_SEQUENCE}@${RPC_TESTS_DIR}"
         else
           python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/check_tip_tracking.py \
             "${{ matrix.client }}" \
@@ -167,7 +173,7 @@ jobs:
             "$TRACKING_TIME_SECONDS" \
             "$TOTAL_TIME_SECONDS" \
             "$CHAIN" \
-            "load@${SAFE_EXECUTION_NAME}@${SAFE_LOAD_PATTERN}@${SAFE_LOAD_SEQUENCE}@${RPC_TESTS_DIR}"
+            "${{ env.LOAD_MODE }}@${SAFE_EXECUTION_NAME}@${SAFE_LOAD_PATTERN}@${SAFE_LOAD_SEQUENCE}@${RPC_TESTS_DIR}"
         fi
         # Capture monitoring script exit status
         test_exit_status=$?
