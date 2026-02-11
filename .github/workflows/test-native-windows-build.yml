@@ -11,7 +11,6 @@ on:
 jobs:
   native-win-build:
     runs-on: windows-2025
-    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     steps:
       - name: Configure Pagefile
         uses: al-cheb/configure-pagefile-action@v1.5
