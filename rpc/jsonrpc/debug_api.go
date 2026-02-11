@@ -1508,14 +1508,14 @@ func compareComputedVsExpectedState(stateless *witnessStateless, expectedState m
 // witnessStateless is a StateReader/StateWriter implementation that operates on a witness trie.
 // It's used for stateless block verification.
 type witnessStateless struct {
-	t              *trie.Trie                                  // Witness trie decoded from ExecutionWitnessResult.State
-	codeMap        map[common.Hash][]byte                      // Code hash -> bytecode
-	codeUpdates    map[common.Hash][]byte                      // Code updates during execution
-	storageWrites  map[common.Hash]map[common.Hash]uint256.Int // addrHash -> keyHash -> value
-	storageDeletes map[common.Hash]map[common.Hash]struct{}    // addrHash -> keyHash
-	accountUpdates map[common.Hash]*accounts.Account           // addrHash -> account
-	deleted        map[common.Hash]struct{}                    // deleted accounts
-	created        map[common.Hash]struct{}                    // created contracts
+	t              *trie.Trie                                     // Witness trie decoded from ExecutionWitnessResult.State
+	codeMap        map[common.Hash][]byte                         // Code hash -> bytecode
+	codeUpdates    map[common.Hash][]byte                         // Code updates during execution
+	storageWrites  map[common.Address]map[common.Hash]uint256.Int // addr -> key -> value
+	storageDeletes map[common.Address]map[common.Hash]struct{}    // addr -> key
+	accountUpdates map[common.Address]*accounts.Account           // addr -> account
+	deleted        map[common.Address]struct{}                    // deleted accounts
+	created        map[common.Address]struct{}                    // created contracts
 	trace          bool
 }
 
@@ -1547,11 +1547,11 @@ func newWitnessStateless(result *ExecutionWitnessResult) (*witnessStateless, err
 		t:              witnessTrie,
 		codeMap:        codeMap,
 		codeUpdates:    make(map[common.Hash][]byte),
-		storageWrites:  make(map[common.Hash]map[common.Hash]uint256.Int),
-		storageDeletes: make(map[common.Hash]map[common.Hash]struct{}),
-		accountUpdates: make(map[common.Hash]*accounts.Account),
-		deleted:        make(map[common.Hash]struct{}),
-		created:        make(map[common.Hash]struct{}),
+		storageWrites:  make(map[common.Address]map[common.Hash]uint256.Int),
+		storageDeletes: make(map[common.Address]map[common.Hash]struct{}),
+		accountUpdates: make(map[common.Address]*accounts.Account),
+		deleted:        make(map[common.Address]struct{}),
+		created:        make(map[common.Address]struct{}),
 		trace:          false,
 	}, nil
 }
@@ -1575,19 +1575,19 @@ func (s *witnessStateless) ReadAccountDataForDebug(address accounts.Address) (*a
 }
 
 func (s *witnessStateless) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	addrValue := address.Value()
-	addrHash, err := common.HashData(addrValue[:])
+	addr := address.Value()
+	addrHash, err := common.HashData(addr[:])
 	if err != nil {
 		return nil, err
 	}
 
 	// Check if account has been updated in memory
-	if acc, ok := s.accountUpdates[addrHash]; ok {
+	if acc, ok := s.accountUpdates[addr]; ok {
 		return acc, nil
 	}
 
 	// Check if account has been deleted
-	if _, ok := s.deleted[addrHash]; ok {
+	if _, ok := s.deleted[addr]; ok {
 		return nil, nil
 	}
 
@@ -1600,10 +1600,10 @@ func (s *witnessStateless) ReadAccountData(address accounts.Address) (*accounts.
 }
 
 func (s *witnessStateless) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
-	addrValue := address.Value()
+	addr := address.Value()
 	keyValue := key.Value()
 
-	addrHash, err := common.HashData(addrValue[:])
+	addrHash, err := common.HashData(addr[:])
 	if err != nil {
 		return uint256.Int{}, false, err
 	}
@@ -1614,15 +1614,15 @@ func (s *witnessStateless) ReadAccountStorage(address accounts.Address, key acco
 	}
 
 	// Check if storage has been updated in memory
-	if m, ok := s.storageWrites[addrHash]; ok {
-		if v, ok := m[seckey]; ok {
+	if m, ok := s.storageWrites[addr]; ok {
+		if v, ok := m[keyValue]; ok {
 			return v, true, nil
 		}
 	}
 
 	// Check if storage has been deleted
-	if d, ok := s.storageDeletes[addrHash]; ok {
-		if _, ok := d[seckey]; ok {
+	if d, ok := s.storageDeletes[addr]; ok {
+		if _, ok := d[keyValue]; ok {
 			return uint256.Int{}, false, nil
 		}
 	}
@@ -1639,8 +1639,8 @@ func (s *witnessStateless) ReadAccountStorage(address accounts.Address, key acco
 }
 
 func (s *witnessStateless) ReadAccountCode(address accounts.Address) ([]byte, error) {
-	addrValue := address.Value()
-	addrHash, err := common.HashData(addrValue[:])
+	addr := address.Value()
+	addrHash, err := common.HashData(addr[:])
 	if err != nil {
 		return nil, err
 	}
@@ -1683,19 +1683,19 @@ func (s *witnessStateless) ReadAccountIncarnation(address accounts.Address) (uin
 }
 
 func (s *witnessStateless) HasStorage(address accounts.Address) (bool, error) {
-	addrValue := address.Value()
-	addrHash, err := common.HashData(addrValue[:])
+	addr := address.Value()
+	addrHash, err := common.HashData(addr[:])
 	if err != nil {
 		return false, err
 	}
 
 	// Check if account has been deleted
-	if _, ok := s.deleted[addrHash]; ok {
+	if _, ok := s.deleted[addr]; ok {
 		return false, nil
 	}
 
 	// Check if we know about any storage updates with non-empty values
-	for _, v := range s.storageWrites[addrHash] {
+	for _, v := range s.storageWrites[addr] {
 		if !v.IsZero() {
 			return true, nil
 		}
@@ -1713,38 +1713,34 @@ func (s *witnessStateless) HasStorage(address accounts.Address) (bool, error) {
 // StateWriter interface implementation
 
 func (s *witnessStateless) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
-	addrValue := address.Value()
-	addrHash, err := common.HashData(addrValue[:])
-	if err != nil {
-		return err
-	}
+	addr := address.Value()
 	// Make a copy to avoid the account being modified later
 	if account != nil {
 		accCopy := new(accounts.Account)
 		accCopy.Copy(account)
-		s.accountUpdates[addrHash] = accCopy
+		s.accountUpdates[addr] = accCopy
 	} else {
-		s.accountUpdates[addrHash] = nil
+		s.accountUpdates[addr] = nil
 	}
 	return nil
 }
 
 func (s *witnessStateless) DeleteAccount(address accounts.Address, original *accounts.Account) error {
-	addrValue := address.Value()
-	addrHash, err := common.HashData(addrValue[:])
+	addr := address.Value()
+	addrHash, err := common.HashData(addr[:])
 	if err != nil {
 		return err
 	}
 	// Only delete if the account exists in the original state (trie or was previously updated)
 	// Skip deletes for accounts that weren't in the witness - they don't affect the state root
 	existingInTrie, wasInTrie := s.t.GetAccount(addrHash[:])
-	_, wasUpdated := s.accountUpdates[addrHash]
+	_, wasUpdated := s.accountUpdates[addr]
 	if (!wasInTrie || existingInTrie == nil) && !wasUpdated {
 		// Account wasn't in the original state, skip deletion
 		return nil
 	}
-	s.accountUpdates[addrHash] = nil
-	s.deleted[addrHash] = struct{}{}
+	s.accountUpdates[addr] = nil
+	s.deleted[addr] = struct{}{}
 	return nil
 }
 
@@ -1754,41 +1750,27 @@ func (s *witnessStateless) UpdateAccountCode(address accounts.Address, incarnati
 }
 
 func (s *witnessStateless) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
-	addrValue := address.Value()
+	addr := address.Value()
 	keyValue := key.Value()
 
-	addrHash, err := common.HashData(addrValue[:])
-	if err != nil {
-		return err
-	}
-
-	seckey, err := common.HashData(keyValue[:])
-	if err != nil {
-		return err
-	}
-
-	m, ok := s.storageWrites[addrHash]
+	m, ok := s.storageWrites[addr]
 	if !ok {
 		m = make(map[common.Hash]uint256.Int)
-		s.storageWrites[addrHash] = m
+		s.storageWrites[addr] = m
 	}
-	m[seckey] = value
+	m[keyValue] = value
 
 	// Remove from deletes if present
-	if d, ok := s.storageDeletes[addrHash]; ok {
-		delete(d, seckey)
+	if d, ok := s.storageDeletes[addr]; ok {
+		delete(d, keyValue)
 	}
 	return nil
 }
 
 func (s *witnessStateless) CreateContract(address accounts.Address) error {
-	addrValue := address.Value()
-	addrHash, err := common.HashData(addrValue[:])
-	if err != nil {
-		return err
-	}
-	s.created[addrHash] = struct{}{}
-	delete(s.deleted, addrHash)
+	addr := address.Value()
+	s.created[addr] = struct{}{}
+	delete(s.deleted, addr)
 	return nil
 }
 
@@ -1799,45 +1781,46 @@ func (s *witnessStateless) debugPrintPendingUpdates(blockNum uint64) {
 	fmt.Printf("Trie root node type: %T\n", s.t.RootNode)
 
 	fmt.Printf("\n--- Account Updates (%d) ---\n", len(s.accountUpdates))
-	for addrHash, acc := range s.accountUpdates {
+	for addr, acc := range s.accountUpdates {
 		// Check if account exists in trie
+		addrHash, _ := common.HashData(addr[:])
 		existingAcc, existsInTrie := s.t.GetAccount(addrHash[:])
 		if acc != nil {
 			if existsInTrie && existingAcc != nil {
 				fmt.Printf("  UPDATE %x: Nonce=%d, Balance=%s, CodeHash=%x, Root=%x (exists in trie)\n",
-					addrHash[:], acc.Nonce, acc.Balance.String(), acc.CodeHash, acc.Root)
+					addr[:], acc.Nonce, acc.Balance.String(), acc.CodeHash, acc.Root)
 			} else {
 				fmt.Printf("  INSERT %x: Nonce=%d, Balance=%s, CodeHash=%x, Root=%x (NEW - not in trie)\n",
-					addrHash[:], acc.Nonce, acc.Balance.String(), acc.CodeHash, acc.Root)
+					addr[:], acc.Nonce, acc.Balance.String(), acc.CodeHash, acc.Root)
 			}
 		} else {
-			fmt.Printf("  DELETE %x\n", addrHash[:])
+			fmt.Printf("  DELETE %x\n", addr[:])
 		}
 	}
 
 	fmt.Printf("\n--- Created Contracts (%d) ---\n", len(s.created))
-	for addrHash := range s.created {
-		fmt.Printf("  CREATED %x\n", addrHash[:])
+	for addr := range s.created {
+		fmt.Printf("  CREATED %x\n", addr[:])
 	}
 
 	fmt.Printf("\n--- Deleted Accounts (%d) ---\n", len(s.deleted))
-	for addrHash := range s.deleted {
-		fmt.Printf("  DELETED %x\n", addrHash[:])
+	for addr := range s.deleted {
+		fmt.Printf("  DELETED %x\n", addr[:])
 	}
 
 	fmt.Printf("\n--- Storage Writes ---\n")
-	for addrHash, storageMap := range s.storageWrites {
-		fmt.Printf("  Account %x (%d slots):\n", addrHash[:8], len(storageMap))
-		for keyHash, value := range storageMap {
-			fmt.Printf("    %x = %s\n", keyHash[:], value.String())
+	for addr, storageMap := range s.storageWrites {
+		fmt.Printf("  Account %x (%d slots):\n", addr[:8], len(storageMap))
+		for key, value := range storageMap {
+			fmt.Printf("    %x = %s\n", key[:], value.String())
 		}
 	}
 
 	fmt.Printf("\n--- Storage Deletes ---\n")
-	for addrHash, storageMap := range s.storageDeletes {
-		fmt.Printf("  Account %x (%d slots):\n", addrHash[:8], len(storageMap))
-		for keyHash := range storageMap {
-			fmt.Printf("    %x\n", keyHash[:])
+	for addr, storageMap := range s.storageDeletes {
+		fmt.Printf("  Account %x (%d slots):\n", addr[:8], len(storageMap))
+		for key := range storageMap {
+			fmt.Printf("    %x\n", key[:])
 		}
 	}
 
@@ -1853,62 +1836,69 @@ func (s *witnessStateless) Finalize() common.Hash {
 	fmt.Printf("\n=== Finalize: Applying updates ===\n")
 
 	// Handle created contracts - clear their storage subtries
-	for addrHash := range s.created {
-		if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
+	for addr := range s.created {
+		if account, ok := s.accountUpdates[addr]; ok && account != nil {
 			account.Root = trie.EmptyRoot
 		}
+		addrHash, _ := common.HashData(addr[:])
 		s.t.DeleteSubtree(addrHash[:])
-		fmt.Printf("  Created contract %x: cleared subtrie\n", addrHash[:8])
+		fmt.Printf("  Created contract %x: cleared subtrie\n", addr[:8])
 	}
 
 	// Apply account updates
-	for addrHash, account := range s.accountUpdates {
+	for addr, account := range s.accountUpdates {
+		addrHash, _ := common.HashData(addr[:])
 		if account != nil {
-			fmt.Printf("  UpdateAccount %x: Nonce=%d, Balance=%s\n", addrHash[:8], account.Nonce, account.Balance.String())
+			fmt.Printf("  UpdateAccount %x: Nonce=%d, Balance=%s\n", addr[:8], account.Nonce, account.Balance.String())
 			s.t.UpdateAccount(addrHash[:], account)
 		} else {
-			fmt.Printf("  Delete %x\n", addrHash[:8])
+			fmt.Printf("  Delete %x\n", addr[:8])
 			s.t.Delete(addrHash[:])
 		}
 	}
 
 	// Apply code updates - must be done after account updates so accounts exist in trie
-	for addrHash, account := range s.accountUpdates {
+	for addr, account := range s.accountUpdates {
 		if account == nil {
 			continue
 		}
+		addrHash, _ := common.HashData(addr[:])
 		codeHashValue := account.CodeHash.Value()
 		if code, ok := s.codeUpdates[codeHashValue]; ok {
-			fmt.Printf("  UpdateAccountCode %x: codeHash=%x, len=%d\n", addrHash[:8], codeHashValue[:8], len(code))
+			fmt.Printf("  UpdateAccountCode %x: codeHash=%x, len=%d\n", addr[:8], codeHashValue[:8], len(code))
 			if err := s.t.UpdateAccountCode(addrHash[:], code); err != nil {
-				fmt.Printf("  Warning: failed to update account code for %x: %v\n", addrHash[:8], err)
+				fmt.Printf("  Warning: failed to update account code for %x: %v\n", addr[:8], err)
 			}
 		}
 	}
 
-	updatedAccounts := map[common.Hash]struct{}{}
+	updatedAccounts := map[common.Address]struct{}{}
 
 	// Apply storage writes
-	for addrHash, m := range s.storageWrites {
-		if _, ok := s.deleted[addrHash]; ok {
+	for addr, m := range s.storageWrites {
+		if _, ok := s.deleted[addr]; ok {
 			continue
 		}
-		updatedAccounts[addrHash] = struct{}{}
-		for keyHash, v := range m {
+		updatedAccounts[addr] = struct{}{}
+		addrHash, _ := common.HashData(addr[:])
+		for key, v := range m {
+			keyHash, _ := common.HashData(key[:])
 			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
-			fmt.Printf("  Storage write: account=%x, key=%x, value=%x\n", addrHash[:8], keyHash[:8], v.Bytes())
+			fmt.Printf("  Storage write: account=%x, key=%x, value=%x\n", addr[:8], key[:8], v.Bytes())
 			s.t.Update(cKey, v.Bytes())
 			// Don't call Hash() here - it would cache node refs and interfere with later updates
 		}
 	}
 
 	// Apply storage deletes
-	for addrHash, m := range s.storageDeletes {
-		if _, ok := s.deleted[addrHash]; ok {
+	for addr, m := range s.storageDeletes {
+		if _, ok := s.deleted[addr]; ok {
 			continue
 		}
-		updatedAccounts[addrHash] = struct{}{}
-		for keyHash := range m {
+		updatedAccounts[addr] = struct{}{}
+		addrHash, _ := common.HashData(addr[:])
+		for key := range m {
+			keyHash, _ := common.HashData(key[:])
 			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
 			s.t.Delete(cKey)
 		}
@@ -1916,29 +1906,31 @@ func (s *witnessStateless) Finalize() common.Hash {
 
 	// Update storage roots for modified accounts
 	// DeepHash computes the storage root, then we update the account with it
-	for addrHash := range updatedAccounts {
-		if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
+	for addr := range updatedAccounts {
+		if account, ok := s.accountUpdates[addr]; ok && account != nil {
+			addrHash, _ := common.HashData(addr[:])
 			gotRoot, root := s.t.DeepHash(addrHash[:])
-			fmt.Printf("  Storage root for %x: gotRoot=%v, root=%x\n", addrHash[:8], gotRoot, root)
+			fmt.Printf("  Storage root for %x: gotRoot=%v, root=%x\n", addr[:8], gotRoot, root)
 			if gotRoot {
 				// Update the account's storage root and re-apply to trie
 				account.Root = root
 				s.t.UpdateAccount(addrHash[:], account)
-				fmt.Printf("  Updated account %x with storage root %x\n", addrHash[:8], root)
+				fmt.Printf("  Updated account %x with storage root %x\n", addr[:8], root)
 			}
 		}
 	}
 
 	// Handle deleted accounts
-	for addrHash := range s.deleted {
-		if _, ok := s.created[addrHash]; ok {
+	for addr := range s.deleted {
+		if _, ok := s.created[addr]; ok {
 			continue
 		}
-		if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
+		if account, ok := s.accountUpdates[addr]; ok && account != nil {
 			account.Root = trie.EmptyRoot
 		}
+		addrHash, _ := common.HashData(addr[:])
 		s.t.DeleteSubtree(addrHash[:])
-		fmt.Printf("  Deleted account subtrie %x, hash=%x\n", addrHash[:8], s.t.Hash())
+		fmt.Printf("  Deleted account subtrie %x, hash=%x\n", addr[:8], s.t.Hash())
 	}
 
 	// Compute and return the final hash
