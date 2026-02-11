@@ -55,7 +55,7 @@ type HistoryRangeAsOfFiles struct {
 	logger log.Logger
 	ctx    context.Context
 
-	seq multiencseq.SequenceReader
+	seq multiencseq.SequenceReader // re-usable instance, to reduce allocations
 }
 
 func (hi *HistoryRangeAsOfFiles) Close() {
@@ -402,7 +402,7 @@ type HistoryChangesIterFiles struct {
 	err                    error
 	limit                  int
 
-	seq multiencseq.SequenceReader
+	seq multiencseq.SequenceReader // re-usable instance, to reduce allocations
 }
 
 func (hi *HistoryChangesIterFiles) Close() {
