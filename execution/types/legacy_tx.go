@@ -224,13 +224,13 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(tx.Nonce, w, b); err != nil {
+	if err := rlp.EncodeInt(tx.Nonce, w); err != nil {
 		return err
 	}
 	if err := rlp.EncodeUint256(*tx.GasPrice, w); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
+	if err := rlp.EncodeInt(tx.GasLimit, w); err != nil {
 		return err
 	}
 	if tx.To == nil {

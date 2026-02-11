@@ -241,14 +241,11 @@ func (sc *StorageChange) EncodingSize() int {
 }
 
 func (sc *StorageChange) EncodeRLP(w io.Writer) error {
-	b := newEncodingBuf()
-	defer releaseEncodingBuf(b)
-
 	encodingSize := sc.EncodingSize()
 	if err := rlp.EncodeStructSizePrefix(encodingSize, w); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(uint64(sc.Index), w, b[:]); err != nil {
+	if err := rlp.EncodeInt(uint64(sc.Index), w); err != nil {
 		return err
 	}
 	valInt := uint256FromHash(sc.Value)
@@ -282,14 +279,11 @@ func (bc *BalanceChange) EncodingSize() int {
 }
 
 func (bc *BalanceChange) EncodeRLP(w io.Writer) error {
-	b := newEncodingBuf()
-	defer releaseEncodingBuf(b)
-
 	encodingSize := bc.EncodingSize()
 	if err := rlp.EncodeStructSizePrefix(encodingSize, w); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(uint64(bc.Index), w, b[:]); err != nil {
+	if err := rlp.EncodeInt(uint64(bc.Index), w); err != nil {
 		return err
 	}
 	return rlp.EncodeUint256(bc.Value, w)
@@ -325,17 +319,14 @@ func (nc *NonceChange) EncodingSize() int {
 }
 
 func (nc *NonceChange) EncodeRLP(w io.Writer) error {
-	b := newEncodingBuf()
-	defer releaseEncodingBuf(b)
-
 	encodingSize := nc.EncodingSize()
 	if err := rlp.EncodeStructSizePrefix(encodingSize, w); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(uint64(nc.Index), w, b[:]); err != nil {
+	if err := rlp.EncodeInt(uint64(nc.Index), w); err != nil {
 		return err
 	}
-	return rlp.EncodeInt(nc.Value, w, b[:])
+	return rlp.EncodeInt(nc.Value, w)
 }
 
 func (nc *NonceChange) DecodeRLP(s *rlp.Stream) error {
@@ -365,14 +356,11 @@ func (cc *CodeChange) EncodingSize() int {
 }
 
 func (cc *CodeChange) EncodeRLP(w io.Writer) error {
-	b := newEncodingBuf()
-	defer releaseEncodingBuf(b)
-
 	encodingSize := cc.EncodingSize()
 	if err := rlp.EncodeStructSizePrefix(encodingSize, w); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(uint64(cc.Index), w, b[:]); err != nil {
+	if err := rlp.EncodeInt(uint64(cc.Index), w); err != nil {
 		return err
 	}
 	return rlp.EncodeString(cc.Data, w)

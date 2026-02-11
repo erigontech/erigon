@@ -210,7 +210,7 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, access
 		return err
 	}
 	// encode Nonce
-	if err := rlp.EncodeInt(tx.Nonce, w, b); err != nil {
+	if err := rlp.EncodeInt(tx.Nonce, w); err != nil {
 		return err
 	}
 	// encode GasPrice
@@ -218,7 +218,7 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, access
 		return err
 	}
 	// encode GasLimit
-	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
+	if err := rlp.EncodeInt(tx.GasLimit, w); err != nil {
 		return err
 	}
 	// encode To

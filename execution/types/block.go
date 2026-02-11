@@ -233,13 +233,13 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeBigInt(h.Number, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(h.GasLimit, w, b[:]); err != nil {
+	if err := rlp.EncodeInt(h.GasLimit, w); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(h.GasUsed, w, b[:]); err != nil {
+	if err := rlp.EncodeInt(h.GasUsed, w); err != nil {
 		return err
 	}
-	if err := rlp.EncodeInt(h.Time, w, b[:]); err != nil {
+	if err := rlp.EncodeInt(h.Time, w); err != nil {
 		return err
 	}
 	if err := rlp.EncodeString(h.Extra, w); err != nil {
@@ -247,7 +247,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	}
 
 	if len(h.AuRaSeal) > 0 {
-		if err := rlp.EncodeInt(h.AuRaStep, w, b[:]); err != nil {
+		if err := rlp.EncodeInt(h.AuRaStep, w); err != nil {
 			return err
 		}
 		if err := rlp.EncodeString(h.AuRaSeal, w); err != nil {
@@ -287,12 +287,12 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	}
 
 	if h.BlobGasUsed != nil {
-		if err := rlp.EncodeInt(*h.BlobGasUsed, w, b[:]); err != nil {
+		if err := rlp.EncodeInt(*h.BlobGasUsed, w); err != nil {
 			return err
 		}
 	}
 	if h.ExcessBlobGas != nil {
-		if err := rlp.EncodeInt(*h.ExcessBlobGas, w, b[:]); err != nil {
+		if err := rlp.EncodeInt(*h.ExcessBlobGas, w); err != nil {
 			return err
 		}
 	}

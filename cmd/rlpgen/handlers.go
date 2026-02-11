@@ -126,7 +126,7 @@ func uintHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName string
 	fmt.Fprintf(b1, "    size += rlp.U64Len(uint64(obj.%s))\n", fieldName)
 
 	// encode
-	fmt.Fprintf(b2, "    if err := rlp.EncodeInt(uint64(obj.%s), w, b[:]); err != nil {\n", fieldName)
+	fmt.Fprintf(b2, "    if err := rlp.EncodeInt(uint64(obj.%s), w); err != nil {\n", fieldName)
 	fmt.Fprintf(b2, "        return err\n")
 	fmt.Fprintf(b2, "    }\n")
 
@@ -165,7 +165,7 @@ func uintPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName str
 
 	// encode
 	fmt.Fprintf(b2, "    if obj.%s != nil {\n", fieldName)
-	fmt.Fprintf(b2, "        if err := rlp.EncodeInt(uint64(*obj.%s), w, b[:]); err != nil {\n", fieldName)
+	fmt.Fprintf(b2, "        if err := rlp.EncodeInt(uint64(*obj.%s), w); err != nil {\n", fieldName)
 	fmt.Fprintf(b2, "            return err\n")
 	fmt.Fprintf(b2, "        }\n")
 	fmt.Fprintf(b2, "    }\n")
@@ -240,7 +240,7 @@ func uint256Handle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName str
 	fmt.Fprintf(b1, "    size += rlp.Uint256Len(&obj.%s)\n", fieldName)
 
 	// encode
-	fmt.Fprintf(b2, "    if err := rlp.EncodeUint256(obj.%s, w, b[:]); err != nil {\n", fieldName)
+	fmt.Fprintf(b2, "    if err := rlp.EncodeUint256(obj.%s, w); err != nil {\n", fieldName)
 	fmt.Fprintf(b2, "        return err\n")
 	fmt.Fprintf(b2, "    }\n")
 
@@ -267,7 +267,7 @@ func uint256PtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName 
 	fmt.Fprintf(b1, "    size += rlp.Uint256Len(*obj.%s)\n", fieldName)
 
 	// encode
-	fmt.Fprintf(b2, "    if err := rlp.EncodeUint256(*obj.%s, w, b[:]); err != nil {\n", fieldName)
+	fmt.Fprintf(b2, "    if err := rlp.EncodeUint256(*obj.%s, w); err != nil {\n", fieldName)
 	fmt.Fprintf(b2, "        return err\n")
 	fmt.Fprintf(b2, "    }\n")
 
@@ -459,7 +459,7 @@ func byteSliceHandle(b1, b2, b3 *bytes.Buffer, _ types.Type, fieldName string) {
 	fmt.Fprintf(b1, "    size += rlp.StringLen(obj.%s)\n", fieldName)
 
 	// encode
-	fmt.Fprintf(b2, "    if err := rlp.EncodeString(obj.%s, w, b[:]); err != nil {\n", fieldName)
+	fmt.Fprintf(b2, "    if err := rlp.EncodeString(obj.%s, w); err != nil {\n", fieldName)
 	fmt.Fprintf(b2, "        return err\n")
 	fmt.Fprintf(b2, "    }\n")
 
@@ -480,11 +480,11 @@ func byteSlicePtrHandle(b1, b2, b3 *bytes.Buffer, _ types.Type, fieldName string
 
 	// encode
 	fmt.Fprintf(b2, "    if obj.%s != nil {\n", fieldName)
-	fmt.Fprintf(b2, "        if err := rlp.EncodeString(*obj.%s, w, b[:]); err != nil {\n", fieldName)
+	fmt.Fprintf(b2, "        if err := rlp.EncodeString(*obj.%s, w); err != nil {\n", fieldName)
 	fmt.Fprintf(b2, "            return err\n")
 	fmt.Fprintf(b2, "        }\n")
 	fmt.Fprintf(b2, "    } else {\n")
-	fmt.Fprintf(b2, "        if err := rlp.EncodeString([]byte{}, w, b[:]); err != nil {\n")
+	fmt.Fprintf(b2, "        if err := rlp.EncodeString([]byte{}, w); err != nil {\n")
 	fmt.Fprintf(b2, "            return err\n")
 	fmt.Fprintf(b2, "        }\n")
 	fmt.Fprintf(b2, "    }\n")
@@ -540,11 +540,11 @@ func _shortArraySliceHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fiel
 	// encode
 	addIntEncode(b2)
 	fmt.Fprintf(b2, "    gidx = (%d + 1) * len(obj.%s)\n", size, fieldName)
-	fmt.Fprintf(b2, "    if err := rlp.EncodeStructSizePrefix(gidx, w, b[:]); err != nil {\n")
+	fmt.Fprintf(b2, "    if err := rlp.EncodeStructSizePrefix(gidx, w); err != nil {\n")
 	fmt.Fprintf(b2, "        return err\n")
 	fmt.Fprintf(b2, "    }\n")
 	fmt.Fprintf(b2, "    for i := 0; i < len(obj.%s); i++ {\n", fieldName)
-	fmt.Fprintf(b2, "        if err := rlp.EncodeString(obj.%s[i][:], w, b[:]); err != nil {\n", fieldName)
+	fmt.Fprintf(b2, "        if err := rlp.EncodeString(obj.%s[i][:], w); err != nil {\n", fieldName)
 	fmt.Fprintf(b2, "            return err\n")
 	fmt.Fprintf(b2, "        }\n")
 	fmt.Fprintf(b2, "    }\n")
@@ -604,16 +604,16 @@ func _shortArrayPtrSliceHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, f
 	fmt.Fprintf(b2, "            gidx += 1\n")
 	fmt.Fprintf(b2, "        }\n")
 	fmt.Fprintf(b2, "    }\n")
-	fmt.Fprintf(b2, "    if err := rlp.EncodeStructSizePrefix(gidx, w, b[:]); err != nil {\n")
+	fmt.Fprintf(b2, "    if err := rlp.EncodeStructSizePrefix(gidx, w); err != nil {\n")
 	fmt.Fprintf(b2, "        return err\n")
 	fmt.Fprintf(b2, "    }\n")
 	fmt.Fprintf(b2, "    for i := 0; i < len(obj.%s); i++ {\n", fieldName)
 	fmt.Fprintf(b2, "        if obj.%s[i] != nil {\n", fieldName)
-	fmt.Fprintf(b2, "            if err := rlp.EncodeString(obj.%s[i][:], w, b[:]); err != nil {\n", fieldName)
+	fmt.Fprintf(b2, "            if err := rlp.EncodeString(obj.%s[i][:], w); err != nil {\n", fieldName)
 	fmt.Fprintf(b2, "                return err\n")
 	fmt.Fprintf(b2, "            }\n")
 	fmt.Fprintf(b2, "        } else {\n")
-	fmt.Fprintf(b2, "            if err := rlp.EncodeString([]byte{}, w, b[:]); err != nil {\n")
+	fmt.Fprintf(b2, "            if err := rlp.EncodeString([]byte{}, w); err != nil {\n")
 	fmt.Fprintf(b2, "                return err\n")
 	fmt.Fprintf(b2, "            }\n")
 	fmt.Fprintf(b2, "        }\n")
@@ -677,7 +677,7 @@ func byteArrayHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldName s
 	fmt.Fprintf(b1, "    size += %d + rlp.ListPrefixLen(%d)\n", size, size)
 
 	// encode
-	fmt.Fprintf(b2, "    if err := rlp.EncodeString(obj.%s[:], w, b[:]); err != nil {\n", fieldName)
+	fmt.Fprintf(b2, "    if err := rlp.EncodeString(obj.%s[:], w); err != nil {\n", fieldName)
 	fmt.Fprintf(b2, "        return err\n")
 	fmt.Fprintf(b2, "    }\n")
 
@@ -710,11 +710,11 @@ func byteArrayPtrHandle(b1, b2, b3 *bytes.Buffer, fieldType types.Type, fieldNam
 
 	// encode
 	fmt.Fprintf(b2, "    if obj.%s != nil {\n", fieldName)
-	fmt.Fprintf(b2, "        if err := rlp.EncodeString(obj.%s[:], w, b[:]); err != nil {\n", fieldName)
+	fmt.Fprintf(b2, "        if err := rlp.EncodeString(obj.%s[:], w); err != nil {\n", fieldName)
 	fmt.Fprintf(b2, "            return err\n")
 	fmt.Fprintf(b2, "        }\n")
 	fmt.Fprintf(b2, "    } else {\n")
-	fmt.Fprintf(b2, "        if err := rlp.EncodeString([]byte{}, w, b[:]); err != nil {\n")
+	fmt.Fprintf(b2, "        if err := rlp.EncodeString([]byte{}, w); err != nil {\n")
 	fmt.Fprintf(b2, "            return err\n")
 	fmt.Fprintf(b2, "        }\n")
 	fmt.Fprintf(b2, "    }\n")

@@ -58,7 +58,7 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common
 		return nil, err
 	}
 
-	if err := rlp.EncodeInt(ath.Nonce, data, buf); err != nil {
+	if err := rlp.EncodeInt(ath.Nonce, data); err != nil {
 		return nil, err
 	}
 
@@ -201,11 +201,11 @@ func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte)
 			return err
 		}
 		// 3. encode Nonce
-		if err := rlp.EncodeInt(authorizations[i].Nonce, w, b); err != nil {
+		if err := rlp.EncodeInt(authorizations[i].Nonce, w); err != nil {
 			return err
 		}
 		// 4. encode YParity, R, S
-		if err := rlp.EncodeInt(uint64(authorizations[i].YParity), w, b); err != nil {
+		if err := rlp.EncodeInt(uint64(authorizations[i].YParity), w); err != nil {
 			return err
 		}
 		if err := rlp.EncodeUint256(authorizations[i].R, w); err != nil {
