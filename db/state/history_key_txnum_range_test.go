@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math/rand"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -68,10 +69,6 @@ func collectKeyTxNumRange(t *testing.T, it stream.KU64) []string {
 }
 
 func TestHistoryKeyTxNumRange(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	t.Parallel()
 
 	logger := log.New()
@@ -120,10 +117,6 @@ func TestHistoryKeyTxNumRange(t *testing.T) {
 }
 
 func TestHistoryKeyTxNumRange_EdgeCases(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	t.Parallel()
 
 	logger := log.New()
@@ -203,10 +196,6 @@ func TestHistoryKeyTxNumRange_EdgeCases(t *testing.T) {
 }
 
 func TestHistoryKeyTxNumRange_DBOnly(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	t.Parallel()
 
 	logger := log.New()
@@ -235,6 +224,61 @@ func TestHistoryKeyTxNumRange_DBOnly(t *testing.T) {
 		it, err = ic.HistoryKeyTxNumRange(1, 100, order.Asc, 3, tx)
 		require.NoError(err)
 		require.Len(collectKeyTxNumRange(t, it), 3)
+	}
+	t.Run("large_values", func(t *testing.T) {
+		db, h, txs := filledHistory(t, true, logger)
+		test(t, h, db, txs)
+	})
+	t.Run("small_values", func(t *testing.T) {
+		db, h, txs := filledHistory(t, false, logger)
+		test(t, h, db, txs)
+	})
+}
+
+func TestHistoryKeyTxNumRange_RandomRanges(t *testing.T) {
+	t.Parallel()
+
+	logger := log.New()
+	ctx := context.Background()
+
+	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
+		t.Helper()
+		require := require.New(t)
+
+		collateAndMergeHistory(t, db, h, txs, true)
+
+		tx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+		ic := h.BeginFilesRo()
+		defer ic.Close()
+
+		rng := rand.New(rand.NewSource(0))
+		for i := 0; i < 50; i++ {
+			from := rng.Intn(int(txs) + 100)
+			to := rng.Intn(int(txs) + 100)
+			if from > to {
+				from, to = to, from
+			}
+			limit := -1
+			if rng.Intn(3) == 0 {
+				limit = rng.Intn(20)
+			}
+			t.Logf("iter %d: from=%d to=%d limit=%d", i, from, to, limit)
+
+			it, err := ic.HistoryKeyTxNumRange(from, to, order.Asc, limit, tx)
+			require.NoError(err)
+			got := collectKeyTxNumRange(t, it)
+
+			expected := expectedKeyTxNums(from, to, txs)
+			if limit >= 0 && len(expected) > limit {
+				expected = expected[:limit]
+			}
+			if len(expected) == 0 {
+				expected = nil
+			}
+			require.Equal(expected, got, "iter %d: from=%d to=%d limit=%d", i, from, to, limit)
+		}
 	}
 	t.Run("large_values", func(t *testing.T) {
 		db, h, txs := filledHistory(t, true, logger)
