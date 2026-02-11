@@ -820,6 +820,16 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 	return nil
 }
 
+func touchHistoricalKeysAccount(sd *execctx.SharedDomains, tx kv.TemporalTx, fromTxNum uint64, toTxNum uint64, visitor func(k []byte)) (uint64, error) {
+	return touchHistoricalKeys(sd, tx, kv.AccountsDomain, fromTxNum, toTxNum, visitor)
+}
+func touchHistoricalKeysStorage(sd *execctx.SharedDomains, tx kv.TemporalTx, fromTxNum uint64, toTxNum uint64, visitor func(k []byte)) (uint64, error) {
+	return touchHistoricalKeys(sd, tx, kv.StorageDomain, fromTxNum, toTxNum, visitor)
+}
+func touchHistoricalKeysCode(sd *execctx.SharedDomains, tx kv.TemporalTx, fromTxNum uint64, toTxNum uint64, visitor func(k []byte)) (uint64, error) {
+	return touchHistoricalKeys(sd, tx, kv.CodeDomain, fromTxNum, toTxNum, visitor)
+}
+
 func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64, visitor func(k []byte)) (uint64, error) {
 	// toTxNum is exclusive per kv.TemporalTx.HistoryRange contract [from,to)
 	stream, err := tx.HistoryRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
