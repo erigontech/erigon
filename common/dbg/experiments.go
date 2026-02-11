@@ -126,7 +126,7 @@ var (
 
 func DirtySpace() uint64 {
 	dirtySaceOnce.Do(func() {
-		v, _ := os.LookupEnv("MDBX_DIRTY_SPACE_MB")
+		v, _ := envLookup("MDBX_DIRTY_SPACE_MB")
 		if v != "" {
 			i := MustParseInt(v)
 			log.Info("[Experiment]", "MDBX_DIRTY_SPACE_MB", i)
@@ -145,7 +145,7 @@ var (
 
 func SlowTx() time.Duration {
 	slowTxOnce.Do(func() {
-		v, _ := os.LookupEnv("SLOW_TX")
+		v, _ := envLookup("SLOW_TX")
 		if v != "" {
 			var err error
 			slowTx, err = time.ParseDuration(v)
@@ -172,8 +172,8 @@ var (
 
 func LogHashMismatchReason() bool {
 	logHashMismatchReasonOnce.Do(func() {
-		v, _ := os.LookupEnv("LOG_HASH_MISMATCH_REASON")
-		if v == "true" {
+		v, _ := envLookup("LOG_HASH_MISMATCH_REASON")
+		if strings.EqualFold(v, "true") {
 			logHashMismatchReason = true
 			log.Info("[Experiment]", "LOG_HASH_MISMATCH_REASON", logHashMismatchReason)
 		}
