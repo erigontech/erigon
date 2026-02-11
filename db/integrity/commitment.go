@@ -33,6 +33,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -807,11 +808,15 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 		return fmt.Errorf("invalid blk range: %d >= %d", from, to)
 	}
 	start := time.Now()
+	wg := errgroup.Group{}
+	wg.SetLimit(estimate.AlmostAllCPUs())
 	for blockNum := from; blockNum < to; blockNum++ {
-		err := CheckCommitmentHistAtBlk(ctx, db, br, blockNum, logger)
-		if err != nil {
-			return err
-		}
+		wg.Go(func() error {
+			return CheckCommitmentHistAtBlk(ctx, db, br, blockNum, logger)
+		})
+	}
+	if err := wg.Wait(); err != nil {
+		return wg.Wait()
 	}
 	dur := time.Since(start)
 	blks := to - from
