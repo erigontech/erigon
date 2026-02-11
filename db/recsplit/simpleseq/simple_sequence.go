@@ -76,7 +76,7 @@ func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
 	if len(raw) == 0 || seek > s.Max() {
 		return 0, 0, false
 	}
-	if dist[1]%100 == 0 {
+	if dist[1]%100 == 0 && dist[0]%100 == 0 {
 		log.Warn("[dbg] SimpleSequence.search", "count", dist)
 	}
 	for i := 0; i < len(raw); i += 4 {
