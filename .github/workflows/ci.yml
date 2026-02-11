@@ -25,7 +25,6 @@ jobs:
           format('{0}-{1}-{2}', github.workflow, matrix.os, github.ref)
         }}
       cancel-in-progress: true
-    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
         # list of os: https://github.com/actions/virtual-environments
@@ -92,7 +91,6 @@ jobs:
           format('{0}-{1}-{2}', github.workflow, matrix.os, github.ref)
         }}
       cancel-in-progress: true
-    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
         os: [ windows-2025 ]
