@@ -595,14 +595,14 @@ func findBijection(bucket []uint64, salt uint64) uint64 {
 		var mask0, mask1, mask2, mask3, mask4, mask5, mask6, mask7 uint32
 		for i := uint16(0); i < m; i++ {
 			key := bucket[i]
-			mask0 |= uint32(1) << remap16(remix(key+salt), m)
-			mask1 |= uint32(1) << remap16(remix(key+salt+1), m)
-			mask2 |= uint32(1) << remap16(remix(key+salt+2), m)
-			mask3 |= uint32(1) << remap16(remix(key+salt+3), m)
-			mask4 |= uint32(1) << remap16(remix(key+salt+4), m)
-			mask5 |= uint32(1) << remap16(remix(key+salt+5), m)
-			mask6 |= uint32(1) << remap16(remix(key+salt+6), m)
-			mask7 |= uint32(1) << remap16(remix(key+salt+7), m)
+			mask0 |= uint32(1) << (remap16(remix(key+salt), m) & 31)
+			mask1 |= uint32(1) << (remap16(remix(key+salt+1), m) & 31)
+			mask2 |= uint32(1) << (remap16(remix(key+salt+2), m) & 31)
+			mask3 |= uint32(1) << (remap16(remix(key+salt+3), m) & 31)
+			mask4 |= uint32(1) << (remap16(remix(key+salt+4), m) & 31)
+			mask5 |= uint32(1) << (remap16(remix(key+salt+5), m) & 31)
+			mask6 |= uint32(1) << (remap16(remix(key+salt+6), m) & 31)
+			mask7 |= uint32(1) << (remap16(remix(key+salt+7), m) & 31)
 		}
 		if mask0 == fullMask {
 			return salt
