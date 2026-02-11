@@ -36,7 +36,8 @@ func ReadSimpleSequence(baseNum uint64, raw []byte) *SimpleSequence {
 }
 
 func (s *SimpleSequence) Get(i uint64) uint64 {
-	return s.baseNum + uint64(binary.BigEndian.Uint32(s.raw[i*4:]))
+	delta := binary.BigEndian.Uint32(s.raw[i*4:])
+	return s.baseNum + uint64(delta)
 }
 
 func (s *SimpleSequence) Min() uint64 {
@@ -44,7 +45,8 @@ func (s *SimpleSequence) Min() uint64 {
 }
 
 func (s *SimpleSequence) Max() uint64 {
-	return s.Get(s.Count() - 1)
+	delta := binary.BigEndian.Uint32(s.raw[len(s.raw)-4:])
+	return s.baseNum + uint64(delta)
 }
 
 func (s *SimpleSequence) Count() uint64 {
@@ -67,26 +69,46 @@ func (s *SimpleSequence) AppendBytes(buf []byte) []byte {
 }
 
 func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
-	for i := uint64(0); i < s.Count(); i++ {
-		if v = s.Get(i); v >= seek {
-			return int(i), v, true
+	// Real data lengths:
+	//   - 70% len=1
+	//   - 15% len=2
+	//   - ...
+	//
+	// Real data return `idx`:
+	//   - 85% return idx=0 (first element)
+	//   - 10% return "not found"
+	//   - 5% other lengths
+	//
+	// As a result: early-check for `max` + full-scan search instead of `sort.Search`
+
+	if len(s.raw) == 0 || seek > s.Max() {
+		return 0, 0, false
+	}
+	for i := 0; i < len(s.raw); i += 4 {
+		v = s.baseNum + uint64(binary.BigEndian.Uint32(s.raw[i:]))
+		if v >= seek {
+			return i / 4, v, true
 		}
 	}
 	return 0, 0, false
 }
 
 func (s *SimpleSequence) reverseSearch(seek uint64) (idx int, v uint64, ok bool) {
-	for i := s.Count(); i > 0; i-- {
-		if v = s.Get(i - 1); v <= seek {
-			return int(i - 1), v, true
+	if len(s.raw) == 0 || seek < s.Min() {
+		return 0, 0, false
+	}
+	for i := len(s.raw) - 4; i >= 0; i -= 4 {
+		v = s.baseNum + uint64(binary.BigEndian.Uint32(s.raw[i:]))
+		if v <= seek {
+			return i / 4, v, true
 		}
 	}
 	return 0, 0, false
 }
 
 func (s *SimpleSequence) Seek(v uint64) (uint64, bool) {
-	_, v, found := s.search(v)
-	return v, found
+	_, val, found := s.search(v)
+	return val, found
 }
 
 func (s *SimpleSequence) Iterator() *SimpleSequenceIterator {
