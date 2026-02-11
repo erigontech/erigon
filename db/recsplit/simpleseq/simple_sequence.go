@@ -73,7 +73,12 @@ var distFound [17]int
 var distLen [17]int
 
 func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
-	// real data:
+	// Real data returns:
+	//   - 98% return idx=0 (first element)
+	//   - 1% return "not found"
+	//
+	// Real data:
+	//   - 98% of sequences have len=1
 	if len(s.raw) == 0 || seek > s.Max() {
 		distFound[16]++
 		return 0, 0, false
