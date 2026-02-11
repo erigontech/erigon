@@ -666,14 +666,11 @@ func BenchmarkSortableBufferSort(b *testing.B) {
 		{"sorted_500k", 500_000, true},
 	} {
 		b.Run(tc.name, func(b *testing.B) {
-			ref := makeBuffer(tc.count, tc.sorted)
-			origEntries := make([]entryLoc, len(ref.entries))
-			copy(origEntries, ref.entries)
-
-			b.ResetTimer()
 			b.ReportAllocs()
-			for range b.N {
-				copy(ref.entries, origEntries)
+			for b.Loop() {
+				b.StopTimer()
+				ref := makeBuffer(tc.count, tc.sorted)
+				b.StartTimer()
 				ref.Sort()
 			}
 		})
