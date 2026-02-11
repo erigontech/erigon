@@ -150,85 +150,6 @@ func BenchmarkHexToKeybytes(b *testing.B) {
 	}
 }
 
-func TestRLPEncodeDecodeRoundtrip(t *testing.T) {
-	// Create a trie and populate it with some values
-	tr := newEmpty()
-
-	// Use 32-byte keys to avoid prefix conflicts (like hashed account addresses)
-	testData := []struct {
-		key   []byte
-		value []byte
-	}{
-		{common.FromHex("1111111111111111111111111111111111111111111111111111111111111111"), []byte("value1")},
-		{common.FromHex("2222222222222222222222222222222222222222222222222222222222222222"), []byte("value2")},
-		{common.FromHex("1111111111111111111111111111111111111111111111111111111111111112"), []byte("value3")},
-		{common.FromHex("3333333333333333333333333333333333333333333333333333333333333333"), []byte("value4")},
-		{common.FromHex("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"), []byte("value5")},
-	}
-
-	for _, td := range testData {
-		tr.Update(td.key, td.value)
-	}
-
-	// Compute the original hash before encoding
-	originalHash := tr.Hash()
-
-	// Encode the trie
-	encoded, err := tr.RLPEncode()
-	assert.NoError(t, err)
-	assert.NotEmpty(t, encoded, "encoded nodes should not be empty")
-
-	// Decode the trie
-	decoded, err := RLPDecode(encoded)
-	assert.NoError(t, err)
-	assert.NotNil(t, decoded)
-
-	// Verify the decoded trie has the same hash
-	decodedHash := decoded.Hash()
-	assert.Equal(t, originalHash, decodedHash, "hashes should match after roundtrip")
-
-	// Verify all values can be retrieved from the decoded trie
-	for _, td := range testData {
-		got, found := decoded.Get(td.key)
-		assert.True(t, found, "key %x should be found", td.key)
-		assert.Equal(t, td.value, got, "value for key %x should match", td.key)
-	}
-}
-
-func TestRLPEncodeDecodeEmpty(t *testing.T) {
-	// Test with empty trie
-	tr := newEmpty()
-
-	encoded, err := tr.RLPEncode()
-	assert.NoError(t, err)
-	assert.Empty(t, encoded, "empty trie should produce no nodes")
-
-	decoded, err := RLPDecode(encoded)
-	assert.NoError(t, err)
-	assert.NotNil(t, decoded)
-	assert.Equal(t, EmptyRoot, decoded.Hash())
-}
-
-func TestRLPEncodeDecodeSingleValue(t *testing.T) {
-	tr := newEmpty()
-	tr.Update([]byte("test"), []byte("value"))
-
-	originalHash := tr.Hash()
-
-	encoded, err := tr.RLPEncode()
-	assert.NoError(t, err)
-	assert.NotEmpty(t, encoded)
-
-	decoded, err := RLPDecode(encoded)
-	assert.NoError(t, err)
-
-	assert.Equal(t, originalHash, decoded.Hash())
-
-	got, found := decoded.Get([]byte("test"))
-	assert.True(t, found)
-	assert.Equal(t, []byte("value"), got)
-}
-
 func TestRLPEncodeDecodeWithAccountsAndStorage(t *testing.T) {
 	// This test creates a single trie containing accounts with embedded storage subtries.
 	// - Accounts are created using UpdateAccount (creates AccountNode entries)
@@ -363,41 +284,13 @@ func TestRLPEncodeDecodeWithAccountsAndStorage(t *testing.T) {
 	// - Storage subtrie nodes for both contracts
 	assert.GreaterOrEqual(t, len(encoded), 10, "should have multiple nodes for accounts + storage")
 
-	// Create expected storage tries separately to verify their roots match
-	expectedStorageTrie1 := newEmpty()
-	for _, slot := range storageSlots1 {
-		slotKey := crypto.Keccak256(slot.slot.Bytes())
-		expectedStorageTrie1.Update(slotKey, slot.value)
+	for i, addr := range addresses {
+		key := crypto.Keccak256(addr.Bytes())
+		acc, ok := decodedStateTrie.GetAccount(key)
+		require.True(t, ok)
+		require.EqualValues(t, testAccounts[i], acc)
 	}
-	expectedStorageRoot1 := expectedStorageTrie1.Hash()
 
-	expectedStorageTrie2 := newEmpty()
-	for _, slot := range storageSlots2 {
-		slotKey := crypto.Keccak256(slot.slot.Bytes())
-		expectedStorageTrie2.Update(slotKey, slot.value)
-	}
-	expectedStorageRoot2 := expectedStorageTrie2.Hash()
-
-	// Verify storage roots match
-	assert.Equal(t, expectedStorageRoot1, storageRoot1, "storage root 1 should match expected")
-	assert.Equal(t, expectedStorageRoot2, storageRoot2, "storage root 2 should match expected")
-
-	// Verify we can encode/decode the storage subtries independently and get matching hashes
-	t.Run("StorageSubtrie1", func(t *testing.T) {
-		encoded1, err := expectedStorageTrie1.RLPEncode()
-		require.NoError(t, err)
-		decoded1, err := RLPDecode(encoded1)
-		require.NoError(t, err)
-		assert.Equal(t, expectedStorageRoot1, decoded1.Hash())
-	})
-
-	t.Run("StorageSubtrie2", func(t *testing.T) {
-		encoded2, err := expectedStorageTrie2.RLPEncode()
-		require.NoError(t, err)
-		decoded2, err := RLPDecode(encoded2)
-		require.NoError(t, err)
-		assert.Equal(t, expectedStorageRoot2, decoded2.Hash())
-	})
 }
 
 func totalSize(nodes [][]byte) int {

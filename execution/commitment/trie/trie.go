@@ -1559,7 +1559,7 @@ func RLPDecode(encodedNodes [][]byte) (*Trie, error) {
 	}
 
 	// Resolve all HashNodes by looking them up in the map
-	resolved, err := resolveHashNodes(rootNode, nodeMap)
+	resolved, err := resolveHashNodes(rootNode, nodeMap /* insideStorageTree */, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1677,17 +1677,17 @@ func decodeTrieRef(buf []byte) (Node, []byte, error) {
 	}
 }
 
-// tryDecodeAccountNode attempts to decode a ValueNode as an AccountNode.
-// Returns the AccountNode if successful, or nil if the value is not valid account data.
-func tryDecodeAccountNode(val ValueNode, nodeMap map[common.Hash]Node) *AccountNode {
+// decodeAccountNode attempts to decode a ValueNode as an AccountNode.
+// Returns the AccountNode if successful
+func decodeAccountNode(val ValueNode, nodeMap map[common.Hash]Node) (*AccountNode, error) {
 	if len(val) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Try to decode as account RLP: [nonce, balance, storageRoot, codeHash]
 	acc := new(accounts.Account)
 	if err := acc.DecodeForHashing(val); err != nil {
-		return nil
+		return nil, err
 	}
 
 	// Successfully decoded as account
@@ -1706,41 +1706,47 @@ func tryDecodeAccountNode(val ValueNode, nodeMap map[common.Hash]Node) *AccountN
 		}
 	}
 
-	return an
+	return an, nil
 }
 
 // resolveHashNodes recursively replaces HashNodes with their actual nodes from the map
 // and converts ValueNodes containing account data back into AccountNodes.
-func resolveHashNodes(node Node, nodeMap map[common.Hash]Node) (Node, error) {
+func resolveHashNodes(node Node, nodeMap map[common.Hash]Node, insideStorageTree bool) (Node, error) {
 	if node == nil {
 		return nil, nil
 	}
 
 	switch n := node.(type) {
 	case *ShortNode:
-		resolved, err := resolveHashNodes(n.Val, nodeMap)
+		resolved, err := resolveHashNodes(n.Val, nodeMap, insideStorageTree)
 		if err != nil {
 			return nil, err
 		}
 
 		// Check if this is a leaf node (terminating key) with a ValueNode
 		// that might be account data
-		if vn, ok := resolved.(ValueNode); ok && len(n.Key) > 0 && n.Key[len(n.Key)-1] == 16 {
+		// resolve value node only if we're not inside the storage tree
+		if vn, ok := resolved.(ValueNode); ok && len(n.Key) > 0 && n.Key[len(n.Key)-1] == 16 && !insideStorageTree {
 			// Key ends with terminator (16), this is a leaf
-			if an := tryDecodeAccountNode(vn, nodeMap); an != nil {
-				// Resolve storage if present
-				if an.Storage != nil {
-					resolvedStorage, err := resolveHashNodes(an.Storage, nodeMap)
-					if err != nil {
-						return nil, err
-					}
-					an.Storage = resolvedStorage
-				}
-				return &ShortNode{
-					Key: n.Key,
-					Val: an,
-				}, nil
+			an, err := decodeAccountNode(vn, nodeMap)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decode AccountNode : %w", err)
 			}
+			if an == nil {
+				return nil, fmt.Errorf("AccountNode decoded into nil")
+			}
+			// Resolve storage if present
+			if an.Storage != nil {
+				resolvedStorage, err := resolveHashNodes(an.Storage, nodeMap /* insideStorageTree */, true)
+				if err != nil {
+					return nil, err
+				}
+				an.Storage = resolvedStorage
+			}
+			return &ShortNode{
+				Key: n.Key,
+				Val: an,
+			}, nil
 		}
 
 		return &ShortNode{
@@ -1752,7 +1758,7 @@ func resolveHashNodes(node Node, nodeMap map[common.Hash]Node) (Node, error) {
 		newNode := &FullNode{}
 		for i := 0; i < 17; i++ {
 			if n.Children[i] != nil {
-				resolved, err := resolveHashNodes(n.Children[i], nodeMap)
+				resolved, err := resolveHashNodes(n.Children[i], nodeMap, insideStorageTree)
 				if err != nil {
 					return nil, err
 				}
@@ -1765,7 +1771,7 @@ func resolveHashNodes(node Node, nodeMap map[common.Hash]Node) (Node, error) {
 		hash := common.BytesToHash(n.hash)
 		if resolved, ok := nodeMap[hash]; ok {
 			// Recursively resolve the looked-up node
-			return resolveHashNodes(resolved, nodeMap)
+			return resolveHashNodes(resolved, nodeMap, insideStorageTree)
 		}
 		// HashNode not in map, keep as is (partial trie)
 		return n, nil
@@ -1773,7 +1779,7 @@ func resolveHashNodes(node Node, nodeMap map[common.Hash]Node) (Node, error) {
 	case *HashNode:
 		hash := common.BytesToHash(n.hash)
 		if resolved, ok := nodeMap[hash]; ok {
-			return resolveHashNodes(resolved, nodeMap)
+			return resolveHashNodes(resolved, nodeMap, insideStorageTree)
 		}
 		return n, nil
 
@@ -1782,7 +1788,7 @@ func resolveHashNodes(node Node, nodeMap map[common.Hash]Node) (Node, error) {
 
 	case *AccountNode:
 		if n.Storage != nil {
-			resolved, err := resolveHashNodes(n.Storage, nodeMap)
+			resolved, err := resolveHashNodes(n.Storage, nodeMap /* inside storage tree */, true)
 			if err != nil {
 				return nil, err
 			}
