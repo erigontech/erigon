@@ -1464,10 +1464,10 @@ func printPreStateCheck(witnessTrie *trie.Trie, readAddresses, writeAddresses []
 					var valInt uint256.Int
 					valInt.SetBytes(val)
 					fmt.Printf("    [%s] Key %x (hash %x): value=%s\n",
-						accessType, key[:8], keyHash[:8], valInt.String())
+						accessType, key, keyHash[:8], valInt.String())
 				} else {
 					fmt.Printf("    [%s] Key %x (hash %x): not in pre-state (may be created)\n",
-						accessType, key[:8], keyHash[:8])
+						accessType, key, keyHash[:8])
 				}
 			}
 		}
@@ -1531,7 +1531,7 @@ func compareComputedVsExpectedState(stateless *witnessStateless, expectedState m
 			if found && len(computedBytes) > 0 {
 				computedVal.SetBytes(computedBytes)
 			}
-			fmt.Printf("  Key %x (hash %x):\n", key[:8], keyHash[:8])
+			fmt.Printf("  Key %x (hash %x):\n", key, keyHash[:8])
 			fmt.Printf("    EXPECTED: %s (hex: %x)\n", expectedVal.String(), expectedVal.Bytes())
 			fmt.Printf("    COMPUTED: %s (hex: %x)\n", computedVal.String(), computedVal.Bytes())
 			if !expectedVal.Eq(&computedVal) {
