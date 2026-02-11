@@ -93,7 +93,7 @@ func startLocalhostV5(t *testing.T, cfg Config) *UDPv5 {
 	}
 	realaddr := socket.LocalAddr().(*net.UDPAddr)
 	ln.SetStaticIP(realaddr.IP)
-	ln.Set(enr.UDP(realaddr.Port))
+	ln.SetFallbackUDP(realaddr.Port)
 	udp, err := ListenV5(socket, ln, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -934,11 +934,12 @@ func newUDPV5Test(t *testing.T) *udpV5Test {
 	test.db, _ = enode.OpenDB("")
 	ln := enode.NewLocalNode(test.db, test.localkey)
 	ln.SetStaticIP(net.IP{10, 0, 0, 1})
-	ln.Set(enr.UDP(30303))
+	ln.SetFallbackUDP(30303)
 	test.udp, _ = ListenV5(test.pipe, ln, Config{
 		PrivateKey:   test.localkey,
 		Log:          testlog.Logger(t, log.LvlTrace),
 		ValidSchemes: enode.ValidSchemesForTesting,
+		PingInterval: 1000 * time.Hour,
 	})
 	test.udp.codec = &testCodec{test: test, id: ln.ID()}
 	test.table = test.udp.tab
@@ -977,7 +978,7 @@ func (test *udpV5Test) getNode(key *ecdsa.PrivateKey, addr netip.AddrPort) *enod
 		db, _ := enode.OpenDB("")
 		ln = enode.NewLocalNode(db, key)
 		ln.SetStaticIP(addr.Addr().AsSlice())
-		ln.Set(enr.UDP(addr.Port()))
+		ln.SetFallbackUDP(int(addr.Port()))
 		test.nodesByID[id] = ln
 	}
 	test.nodesByIP[addr.Addr()] = ln
