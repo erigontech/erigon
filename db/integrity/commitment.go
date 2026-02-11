@@ -238,7 +238,7 @@ func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *
 	touchLoggingVisitor := func(k []byte) {
 		logger.Debug("account touch for root block", "key", common.Address(k), "blockNum", sd.BlockNum(), "file", filepath.Base(f.Fullpath()))
 	}
-	touches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, info.blockMinTxNum, info.txNum+1, touchLoggingVisitor)
+	touches, err := touchHistoricalKeysAccount(sd, tx, info.blockMinTxNum, info.txNum+1, touchLoggingVisitor)
 	if err != nil {
 		return err
 	}
@@ -767,15 +767,15 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		logger.Debug("commitment touched key", args...)
 	}
 	touchStart := time.Now()
-	accTouches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, minTxNum, toTxNum, touchLoggingVisitor)
+	accTouches, err := touchHistoricalKeysAccount(sd, tx, minTxNum, toTxNum, touchLoggingVisitor)
 	if err != nil {
 		return err
 	}
-	storageTouches, err := touchHistoricalKeys(sd, tx, kv.StorageDomain, minTxNum, toTxNum, touchLoggingVisitor)
+	storageTouches, err := touchHistoricalKeysStorage(sd, tx, minTxNum, toTxNum, touchLoggingVisitor)
 	if err != nil {
 		return err
 	}
-	codeTouches, err := touchHistoricalKeys(sd, tx, kv.CodeDomain, minTxNum, toTxNum, touchLoggingVisitor)
+	codeTouches, err := touchHistoricalKeysCode(sd, tx, minTxNum, toTxNum, touchLoggingVisitor)
 	if err != nil {
 		return err
 	}
