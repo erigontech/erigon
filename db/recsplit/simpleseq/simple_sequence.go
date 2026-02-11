@@ -70,7 +70,7 @@ func (s *SimpleSequence) AppendBytes(buf []byte) []byte {
 }
 
 var distFound [16]int
-var distLen [16]int
+var distLen [32]int
 
 func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
 	raw := s.raw
