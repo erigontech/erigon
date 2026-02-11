@@ -69,26 +69,38 @@ func (s *SimpleSequence) AppendBytes(buf []byte) []byte {
 }
 
 func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
-	n := s.Count()
-	if n == 0 || seek > s.Max() { // over the max
+	// Real data lengths:
+	//   - 70% len=1
+	//   - 15% len=2
+	//   - ...
+	//
+	// Real data return `idx`:
+	//   - 85% return idx=0 (first element)
+	//   - 10% return "not found"
+	//   - 5% other lengths
+	//
+	// As a result: early-check for `max` + full-scan search instead of `sort.Search`
+
+	if len(s.raw) == 0 || seek > s.Max() {
 		return 0, 0, false
 	}
-	for i := uint64(0); i < n; i++ {
-		if v = s.Get(i); v >= seek {
-			return int(i), v, true
+	for i := 0; i < len(s.raw); i += 4 {
+		v = s.baseNum + uint64(binary.BigEndian.Uint32(s.raw[i:]))
+		if v >= seek {
+			return i / 4, v, true
 		}
 	}
 	return 0, 0, false
 }
 
 func (s *SimpleSequence) reverseSearch(seek uint64) (idx int, v uint64, ok bool) {
-	c := s.Count()
-	if c == 0 || seek < s.Min() {
+	if len(s.raw) == 0 || seek < s.Min() {
 		return 0, 0, false
 	}
-	for i := c; i > 0; i-- {
-		if v = s.Get(i - 1); v <= seek {
-			return int(i - 1), v, true
+	for i := len(s.raw) - 4; i >= 0; i -= 4 {
+		v = s.baseNum + uint64(binary.BigEndian.Uint32(s.raw[i:]))
+		if v <= seek {
+			return i / 4, v, true
 		}
 	}
 	return 0, 0, false
