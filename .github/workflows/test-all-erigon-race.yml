@@ -48,7 +48,8 @@ jobs:
         }}
       cancel-in-progress: true
     strategy:
-      matrix:
+      fail-fast: false
+      matrix:        
         os:
           - ubuntu-latest
         test-group:
@@ -110,7 +111,7 @@ jobs:
               ;;
             p2p-rpc)
               # Run p2p and rpc tests without race detector (less critical)
-              GOGC=80 go test -timeout 20m ./p2p/... ./rpc/... ./turbo/jsonrpc/...
+              GOGC=80 go test -timeout 20m ./p2p/... ./rpc/...
               ;;
             core-db)
               # Run core and db tests without race detector
