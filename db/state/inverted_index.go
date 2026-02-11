@@ -32,11 +32,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
@@ -494,6 +495,8 @@ type InvertedIndexRoTx struct {
 	salt              *uint32
 	stepSize          uint64
 	stepsInFrozenFile uint64
+
+	statelessSeq multiencseq.SequenceReader
 }
 
 // hashKey - change of salt will require re-gen of indices
@@ -575,12 +578,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 		}
 		encodedSeq, _ := g.Next(nil)
 
-		// TODO: implement merge Reset+Seek
-		// if iit.ef == nil {
-		// 	iit.ef = eliasfano32.NewEliasFano(1, 1)
-		// }
-		// equalOrHigherTxNum, found = iit.ef.Reset(encodedSeq).Seek(txNum)
-		equalOrHigherTxNum, found = multiencseq.Seek(iit.files[i].startTxNum, encodedSeq, txNum)
+		equalOrHigherTxNum, found = iit.statelessSeq.Reset(iit.files[i].startTxNum, encodedSeq).Seek(txNum)
 		if !found {
 			continue
 		}
