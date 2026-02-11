@@ -67,9 +67,11 @@ func (s *SimpleSequence) AppendBytes(buf []byte) []byte {
 }
 
 func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
-	for i := uint64(0); i < s.Count(); i++ {
-		if v = s.Get(i); v >= seek {
-			return int(i), v, true
+	for i := 0; i < len(s.raw); i += 4 {
+		v := s.baseNum + uint64(binary.BigEndian.Uint32(s.raw[i:]))
+
+		if v >= seek {
+			return i / 4, v, true
 		}
 	}
 	return 0, 0, false
