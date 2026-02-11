@@ -49,7 +49,7 @@ jobs:
       cancel-in-progress: true
     strategy:
       fail-fast: false
-      matrix:        
+      matrix:
         os:
           - ubuntu-latest
         test-group:
@@ -115,11 +115,11 @@ jobs:
               ;;
             core-db)
               # Run core and db tests without race detector
-              GOGC=80 go test -timeout 20m ./core/... ./db/... ./ethdb/... ./node/... ./txnprovider/...
+              GOGC=80 go test -timeout 20m ./db/... ./node/... ./txnprovider/...
               ;;
             other)
               # Run cmd tests without race detector
-              GOGC=80 go test -timeout 20m ./cmd/... ./common/... ./polygon/...
+              GOGC=80 go test -timeout 20m ./cmd/... ./common/... ./polygon/... ./diagnostics/... ./internal/...
               ;;
           esac
 
