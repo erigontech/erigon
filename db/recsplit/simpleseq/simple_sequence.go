@@ -67,7 +67,11 @@ func (s *SimpleSequence) AppendBytes(buf []byte) []byte {
 }
 
 func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
-	for i := uint64(0); i < s.Count(); i++ {
+	n := s.Count()
+	if n == 0 || seek > s.Get(n-1) { // over the max
+		return 0, 0, false
+	}
+	for i := uint64(0); i < n; i++ {
 		if v = s.Get(i); v >= seek {
 			return int(i), v, true
 		}
@@ -85,11 +89,8 @@ func (s *SimpleSequence) reverseSearch(seek uint64) (idx int, v uint64, ok bool)
 }
 
 func (s *SimpleSequence) Seek(v uint64) (uint64, bool) {
-	if s.Count() == 0 || v > s.Max() {
-		return 0, false
-	}
-	_, val, _ := s.search(v)
-	return val, true
+	_, val, found := s.search(v)
+	return val, found
 }
 
 func (s *SimpleSequence) Iterator() *SimpleSequenceIterator {
