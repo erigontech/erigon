@@ -367,19 +367,17 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			return nil, err
 		}
 
-		if execProgress != 0 {
-			return nil, err
-		}
-
-		// else compare domain and block progress
-		domainTxNum := rwTx.Debug().DomainProgress(kv.AccountsDomain)
-		var ok bool
-		execProgress, ok, err = txNumsReader.FindBlockNum(ctx, rwTx, domainTxNum)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, fmt.Errorf("error in finding block number for %d", domainTxNum)
+		if execProgress == 0 {
+			// else compare domain and block progress
+			domainTxNum := rwTx.Debug().DomainProgress(kv.AccountsDomain)
+			var ok bool
+			execProgress, ok, err = txNumsReader.FindBlockNum(ctx, rwTx, domainTxNum)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				return nil, fmt.Errorf("error in finding block number for %d", domainTxNum)
+			}
 		}
 	}
 
