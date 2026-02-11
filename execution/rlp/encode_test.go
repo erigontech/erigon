@@ -34,7 +34,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
 )
@@ -530,27 +529,6 @@ func TestStringLen56(t *testing.T) {
 	assert.Equal(t, 56, dataLen)
 }
 
-// Any buffer of 32 bytes or more should be fine for EncodeUint256.
-// See https://github.com/erigontech/erigon/pull/13574
-func TestEncodeUint256Buffer(t *testing.T) {
-	i := *uint256.NewInt(128)
-	output := "8180"
-
-	var writer1 bytes.Buffer
-	var buf32 [32]byte
-	require.NoError(t, EncodeUint256(i, &writer1, buf32[:]))
-	assert.Equal(t, output, common.Bytes2Hex(writer1.Bytes()))
-
-	var writer2 bytes.Buffer
-	var buf33 [33]byte
-	require.NoError(t, EncodeUint256(i, &writer2, buf33[:]))
-	assert.Equal(t, output, common.Bytes2Hex(writer2.Bytes()))
-
-	var writer3 bytes.Buffer
-	var buf31 [31]byte
-	require.Panics(t, func() { EncodeUint256(i, &writer3, buf31[:]) })
-}
-
 func TestEncodeUint256Random(t *testing.T) {
 	for size := 1; size <= 32; size++ {
 		t.Run(fmt.Sprintf("size=%d", size), func(t *testing.T) {
@@ -560,8 +538,7 @@ func TestEncodeUint256Random(t *testing.T) {
 
 			i := *new(uint256.Int).SetBytes(randomBytes)
 			var writer bytes.Buffer
-			var buf [32]byte
-			require.NoError(t, EncodeUint256(i, &writer, buf[:]))
+			require.NoError(t, EncodeUint256(i, &writer))
 			encoded := bytes.NewReader(writer.Bytes())
 
 			s := NewStream(encoded, 0)

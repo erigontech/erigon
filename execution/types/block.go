@@ -176,7 +176,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// Prefix
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(encodingSize, w); err != nil {
 		return err
 	}
 	b[0] = 128 + 32
@@ -242,7 +242,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeInt(h.Time, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeString(h.Extra, w, b[:]); err != nil {
+	if err := rlp.EncodeString(h.Extra, w); err != nil {
 		return err
 	}
 
@@ -250,7 +250,7 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 		if err := rlp.EncodeInt(h.AuRaStep, w, b[:]); err != nil {
 			return err
 		}
-		if err := rlp.EncodeString(h.AuRaSeal, w, b[:]); err != nil {
+		if err := rlp.EncodeString(h.AuRaSeal, w); err != nil {
 			return err
 		}
 	} else {
@@ -854,11 +854,11 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
 		return err
 	}
 	// encode Transactions
-	if err := rlp.EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(txsLen, w); err != nil {
 		return err
 	}
 	for _, txn := range rb.Transactions {
@@ -952,7 +952,7 @@ func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 	defer pooledBuf.Put(b)
 
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
 		return err
 	}
 
@@ -1051,7 +1051,7 @@ func (bb Body) EncodeRLP(w io.Writer) error {
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
 		return err
 	}
 	// encode Transactions
@@ -1331,7 +1331,7 @@ func (bb *Block) EncodeRLP(w io.Writer) error {
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
 		return err
 	}
 	// encode Header
@@ -1630,7 +1630,7 @@ func EncodingSizeGenericList[T rlpEncodable](arr []T) (_len int) {
 }
 
 func encodeRLPGeneric[T rlpEncodable](arr []T, _len int, w io.Writer, b []byte) error {
-	if err := rlp.EncodeStructSizePrefix(_len, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(_len, w); err != nil {
 		return err
 	}
 	for _, item := range arr {

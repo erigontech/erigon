@@ -45,12 +45,12 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common
 	authLen += 1 + length.Addr
 	authLen += rlp.U64Len(ath.Nonce)
 
-	if err := rlp.EncodeStructSizePrefix(authLen, data, buf); err != nil {
+	if err := rlp.EncodeStructSizePrefix(authLen, data); err != nil {
 		return nil, err
 	}
 
 	// chainId, address, nonce
-	if err := rlp.EncodeUint256(ath.ChainID, data, buf); err != nil {
+	if err := rlp.EncodeUint256(ath.ChainID, data); err != nil {
 		return nil, err
 	}
 
@@ -188,12 +188,12 @@ func decodeAuthorizations(auths *[]Authorization, s *rlp.Stream) error {
 func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte) error {
 	for i := 0; i < len(authorizations); i++ {
 		authLen := authorizationSize(authorizations[i])
-		if err := rlp.EncodeStructSizePrefix(authLen, w, b); err != nil {
+		if err := rlp.EncodeStructSizePrefix(authLen, w); err != nil {
 			return err
 		}
 
 		// 1. encode ChainId
-		if err := rlp.EncodeUint256(authorizations[i].ChainID, w, b); err != nil {
+		if err := rlp.EncodeUint256(authorizations[i].ChainID, w); err != nil {
 			return err
 		}
 		// 2. encode Address
@@ -208,10 +208,10 @@ func encodeAuthorizations(authorizations []Authorization, w io.Writer, b []byte)
 		if err := rlp.EncodeInt(uint64(authorizations[i].YParity), w, b); err != nil {
 			return err
 		}
-		if err := rlp.EncodeUint256(authorizations[i].R, w, b); err != nil {
+		if err := rlp.EncodeUint256(authorizations[i].R, w); err != nil {
 			return err
 		}
-		if err := rlp.EncodeUint256(authorizations[i].S, w, b); err != nil {
+		if err := rlp.EncodeUint256(authorizations[i].S, w); err != nil {
 			return err
 		}
 	}

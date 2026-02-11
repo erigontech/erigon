@@ -160,13 +160,13 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 		// Each storage key takes 33 bytes
 		storageLen := 33 * len(al[i].StorageKeys)
 		tupleLen += rlp.ListPrefixLen(storageLen) + storageLen
-		if err := rlp.EncodeStructSizePrefix(tupleLen, w, b); err != nil {
+		if err := rlp.EncodeStructSizePrefix(tupleLen, w); err != nil {
 			return err
 		}
 		if err := rlp.EncodeOptionalAddress(&al[i].Address, w, b); err != nil { // TODO(racytech): change addr to []byte?
 			return err
 		}
-		if err := rlp.EncodeStructSizePrefix(storageLen, w, b); err != nil {
+		if err := rlp.EncodeStructSizePrefix(storageLen, w); err != nil {
 			return err
 		}
 		b[0] = 128 + 32
@@ -202,11 +202,11 @@ func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
 
 func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen int) error {
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
 		return err
 	}
 	// encode ChainID
-	if err := rlp.EncodeUint256(*tx.ChainID, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.ChainID, w); err != nil {
 		return err
 	}
 	// encode Nonce
@@ -214,7 +214,7 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, access
 		return err
 	}
 	// encode GasPrice
-	if err := rlp.EncodeUint256(*tx.GasPrice, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.GasPrice, w); err != nil {
 		return err
 	}
 	// encode GasLimit
@@ -236,15 +236,15 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, access
 		}
 	}
 	// encode Value
-	if err := rlp.EncodeUint256(*tx.Value, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.Value, w); err != nil {
 		return err
 	}
 	// encode Data
-	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
+	if err := rlp.EncodeString(tx.Data, w); err != nil {
 		return err
 	}
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(accessListLen, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(accessListLen, w); err != nil {
 		return err
 	}
 	// encode AccessList
@@ -252,15 +252,15 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, access
 		return err
 	}
 	// encode V
-	if err := rlp.EncodeUint256(tx.V, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.V, w); err != nil {
 		return err
 	}
 	// encode R
-	if err := rlp.EncodeUint256(tx.R, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.R, w); err != nil {
 		return err
 	}
 	// encode S
-	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.S, w); err != nil {
 		return err
 	}
 	return nil
@@ -275,7 +275,7 @@ func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// envelope
-	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStringSizePrefix(envelopeSize, w); err != nil {
 		return err
 	}
 	// encode TxType

@@ -235,7 +235,7 @@ func (tx *SetCodeTransaction) EncodeRLP(w io.Writer) error {
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// encode envelope size
-	if err := rlp.EncodeStringSizePrefix(envelopSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStringSizePrefix(envelopSize, w); err != nil {
 		return err
 	}
 	// encode TxType
@@ -316,11 +316,11 @@ func (tx *SetCodeTransaction) DecodeRLP(s *rlp.Stream) error {
 
 func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, authorizationsLen int) error {
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
 		return err
 	}
 	// encode ChainID
-	if err := rlp.EncodeUint256(*tx.ChainID, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.ChainID, w); err != nil {
 		return err
 	}
 	// encode Nonce
@@ -328,11 +328,11 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode MaxPriorityFeePerGas
-	if err := rlp.EncodeUint256(*tx.TipCap, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.TipCap, w); err != nil {
 		return err
 	}
 	// encode MaxFeePerGas
-	if err := rlp.EncodeUint256(*tx.FeeCap, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.FeeCap, w); err != nil {
 		return err
 	}
 	// encode GasLimit
@@ -344,15 +344,15 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode Value
-	if err := rlp.EncodeUint256(*tx.Value, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.Value, w); err != nil {
 		return err
 	}
 	// encode Data
-	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
+	if err := rlp.EncodeString(tx.Data, w); err != nil {
 		return err
 	}
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(accessListLen, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(accessListLen, w); err != nil {
 		return err
 	}
 	// encode AccessList
@@ -360,7 +360,7 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(authorizationsLen, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(authorizationsLen, w); err != nil {
 		return err
 	}
 	// encode Authorizations
@@ -368,15 +368,15 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	// encode V
-	if err := rlp.EncodeUint256(tx.V, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.V, w); err != nil {
 		return err
 	}
 	// encode R
-	if err := rlp.EncodeUint256(tx.R, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.R, w); err != nil {
 		return err
 	}
 	// encode S
-	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.S, w); err != nil {
 		return err
 	}
 	return nil

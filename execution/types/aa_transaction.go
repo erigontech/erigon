@@ -276,7 +276,7 @@ func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// encode envelope size
-	if err := rlp.EncodeStringSizePrefix(envelopSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStringSizePrefix(envelopSize, w); err != nil {
 		return err
 	}
 	// encode TxType
@@ -294,15 +294,15 @@ func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
 
 func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, authorizationsLen int) error {
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
 		return err
 	}
 
-	if err := rlp.EncodeUint256(*tx.ChainID, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.ChainID, w); err != nil {
 		return err
 	}
 
-	if err := rlp.EncodeUint256(*tx.NonceKey, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.NonceKey, w); err != nil {
 		return err
 	}
 
@@ -320,7 +320,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeString(tx.SenderValidationData, w, b); err != nil {
+	if err := rlp.EncodeString(tx.SenderValidationData, w); err != nil {
 		return err
 	}
 
@@ -328,7 +328,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeString(tx.DeployerData, w, b); err != nil {
+	if err := rlp.EncodeString(tx.DeployerData, w); err != nil {
 		return err
 	}
 
@@ -336,23 +336,23 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 		return err
 	}
 
-	if err := rlp.EncodeString(tx.PaymasterData, w, b); err != nil {
+	if err := rlp.EncodeString(tx.PaymasterData, w); err != nil {
 		return err
 	}
 
-	if err := rlp.EncodeString(tx.ExecutionData, w, b); err != nil {
+	if err := rlp.EncodeString(tx.ExecutionData, w); err != nil {
 		return err
 	}
 
-	if err := rlp.EncodeUint256(*tx.BuilderFee, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.BuilderFee, w); err != nil {
 		return err
 	}
 
-	if err := rlp.EncodeUint256(*tx.Tip, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.Tip, w); err != nil {
 		return err
 	}
 
-	if err := rlp.EncodeUint256(*tx.FeeCap, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.FeeCap, w); err != nil {
 		return err
 	}
 
@@ -373,7 +373,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 	}
 
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(accessListLen, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(accessListLen, w); err != nil {
 		return err
 	}
 	// encode AccessList
@@ -382,7 +382,7 @@ func (tx *AccountAbstractionTransaction) encodePayload(w io.Writer, b []byte, pa
 	}
 
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(authorizationsLen, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(authorizationsLen, w); err != nil {
 		return err
 	}
 	// encode Authorizations

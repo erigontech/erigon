@@ -101,7 +101,7 @@ func (ac *AccountChanges) EncodeRLP(w io.Writer) error {
 	b := newEncodingBuf()
 	defer releaseEncodingBuf(b)
 
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(encodingSize, w); err != nil {
 		return err
 	}
 
@@ -196,12 +196,12 @@ func (sc *SlotChanges) EncodeRLP(w io.Writer) error {
 	defer releaseEncodingBuf(b)
 
 	encodingSize := sc.EncodingSize()
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(encodingSize, w); err != nil {
 		return err
 	}
 	slot := sc.Slot.Value()
 	slotInt := uint256FromHash(slot)
-	if err := rlp.EncodeUint256(slotInt, w, b[:]); err != nil {
+	if err := rlp.EncodeUint256(slotInt, w); err != nil {
 		return err
 	}
 
@@ -245,14 +245,14 @@ func (sc *StorageChange) EncodeRLP(w io.Writer) error {
 	defer releaseEncodingBuf(b)
 
 	encodingSize := sc.EncodingSize()
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(encodingSize, w); err != nil {
 		return err
 	}
 	if err := rlp.EncodeInt(uint64(sc.Index), w, b[:]); err != nil {
 		return err
 	}
 	valInt := uint256FromHash(sc.Value)
-	return rlp.EncodeUint256(valInt, w, b[:])
+	return rlp.EncodeUint256(valInt, w)
 }
 
 func (sc *StorageChange) DecodeRLP(s *rlp.Stream) error {
@@ -286,13 +286,13 @@ func (bc *BalanceChange) EncodeRLP(w io.Writer) error {
 	defer releaseEncodingBuf(b)
 
 	encodingSize := bc.EncodingSize()
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(encodingSize, w); err != nil {
 		return err
 	}
 	if err := rlp.EncodeInt(uint64(bc.Index), w, b[:]); err != nil {
 		return err
 	}
-	return rlp.EncodeUint256(bc.Value, w, b[:])
+	return rlp.EncodeUint256(bc.Value, w)
 }
 
 func (bc *BalanceChange) DecodeRLP(s *rlp.Stream) error {
@@ -329,7 +329,7 @@ func (nc *NonceChange) EncodeRLP(w io.Writer) error {
 	defer releaseEncodingBuf(b)
 
 	encodingSize := nc.EncodingSize()
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(encodingSize, w); err != nil {
 		return err
 	}
 	if err := rlp.EncodeInt(uint64(nc.Index), w, b[:]); err != nil {
@@ -369,13 +369,13 @@ func (cc *CodeChange) EncodeRLP(w io.Writer) error {
 	defer releaseEncodingBuf(b)
 
 	encodingSize := cc.EncodingSize()
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(encodingSize, w); err != nil {
 		return err
 	}
 	if err := rlp.EncodeInt(uint64(cc.Index), w, b[:]); err != nil {
 		return err
 	}
-	return rlp.EncodeString(cc.Data, w, b[:])
+	return rlp.EncodeString(cc.Data, w)
 }
 
 func (cc *CodeChange) DecodeRLP(s *rlp.Stream) error {
@@ -400,7 +400,7 @@ func (cc *CodeChange) DecodeRLP(s *rlp.Stream) error {
 
 func encodeBlockAccessList[T rlpEncodable](items []T, w io.Writer, buf []byte) error {
 	total := EncodingSizeGenericList(items)
-	if err := rlp.EncodeStructSizePrefix(total, w, buf); err != nil {
+	if err := rlp.EncodeStructSizePrefix(total, w); err != nil {
 		return err
 	}
 	for _, item := range items {
@@ -421,13 +421,13 @@ func encodeHashList(hashes []accounts.StorageKey, w io.Writer, buf []byte) error
 		hashInt := uint256FromHash(hash)
 		total += rlp.Uint256Len(hashInt)
 	}
-	if err := rlp.EncodeStructSizePrefix(total, w, buf); err != nil {
+	if err := rlp.EncodeStructSizePrefix(total, w); err != nil {
 		return err
 	}
 	for i := range hashes {
 		hash := hashes[i].Value()
 		hashInt := uint256FromHash(hash)
-		if err := rlp.EncodeUint256(hashInt, w, buf); err != nil {
+		if err := rlp.EncodeUint256(hashInt, w); err != nil {
 			return err
 		}
 	}

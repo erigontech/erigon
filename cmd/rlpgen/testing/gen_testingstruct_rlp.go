@@ -96,7 +96,7 @@ func (obj *TestingStruct) EncodingSize() (size int) {
 
 func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 	var b [32]byte
-	if err := rlp.EncodeStructSizePrefix(obj.EncodingSize(), w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(obj.EncodingSize(), w); err != nil {
 		return err
 	}
 	if err := rlp.EncodeInt(uint64(obj.a), w, b[:]); err != nil {
@@ -113,10 +113,10 @@ func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeBigInt(obj.bb, w, b[:]); err != nil {
 		return err
 	}
-	if err := rlp.EncodeUint256(obj.c, w, b[:]); err != nil {
+	if err := rlp.EncodeUint256(obj.c, w); err != nil {
 		return err
 	}
-	if err := rlp.EncodeUint256(*obj.cc, w, b[:]); err != nil {
+	if err := rlp.EncodeUint256(*obj.cc, w); err != nil {
 		return err
 	}
 	b[0] = 128 + 8
@@ -207,28 +207,28 @@ func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	}
-	if err := rlp.EncodeString(obj.h, w, b[:]); err != nil {
+	if err := rlp.EncodeString(obj.h, w); err != nil {
 		return err
 	}
 	if obj.hh != nil {
-		if err := rlp.EncodeString(*obj.hh, w, b[:]); err != nil {
+		if err := rlp.EncodeString(*obj.hh, w); err != nil {
 			return err
 		}
 	} else {
-		if err := rlp.EncodeString([]byte{}, w, b[:]); err != nil {
+		if err := rlp.EncodeString([]byte{}, w); err != nil {
 			return err
 		}
 	}
-	if err := rlp.EncodeByteSliceSlice(obj.i, w, b[:]); err != nil {
+	if err := rlp.EncodeByteSliceSlice(obj.i, w); err != nil {
 		return err
 	}
 	gidx := 0
 	gidx = (8 + 1) * len(obj.j)
-	if err := rlp.EncodeStructSizePrefix(gidx, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(gidx, w); err != nil {
 		return err
 	}
 	for i := 0; i < len(obj.j); i++ {
-		if err := rlp.EncodeString(obj.j[i][:], w, b[:]); err != nil {
+		if err := rlp.EncodeString(obj.j[i][:], w); err != nil {
 			return err
 		}
 	}
@@ -240,27 +240,27 @@ func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 			gidx += 1
 		}
 	}
-	if err := rlp.EncodeStructSizePrefix(gidx, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(gidx, w); err != nil {
 		return err
 	}
 	for i := 0; i < len(obj.jj); i++ {
 		if obj.jj[i] != nil {
-			if err := rlp.EncodeString(obj.jj[i][:], w, b[:]); err != nil {
+			if err := rlp.EncodeString(obj.jj[i][:], w); err != nil {
 				return err
 			}
 		} else {
-			if err := rlp.EncodeString([]byte{}, w, b[:]); err != nil {
+			if err := rlp.EncodeString([]byte{}, w); err != nil {
 				return err
 			}
 		}
 	}
 	gidx = 0
 	gidx = (20 + 1) * len(obj.k)
-	if err := rlp.EncodeStructSizePrefix(gidx, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(gidx, w); err != nil {
 		return err
 	}
 	for i := 0; i < len(obj.k); i++ {
-		if err := rlp.EncodeString(obj.k[i][:], w, b[:]); err != nil {
+		if err := rlp.EncodeString(obj.k[i][:], w); err != nil {
 			return err
 		}
 	}
@@ -272,27 +272,27 @@ func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 			gidx += 1
 		}
 	}
-	if err := rlp.EncodeStructSizePrefix(gidx, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(gidx, w); err != nil {
 		return err
 	}
 	for i := 0; i < len(obj.kk); i++ {
 		if obj.kk[i] != nil {
-			if err := rlp.EncodeString(obj.kk[i][:], w, b[:]); err != nil {
+			if err := rlp.EncodeString(obj.kk[i][:], w); err != nil {
 				return err
 			}
 		} else {
-			if err := rlp.EncodeString([]byte{}, w, b[:]); err != nil {
+			if err := rlp.EncodeString([]byte{}, w); err != nil {
 				return err
 			}
 		}
 	}
 	gidx = 0
 	gidx = (32 + 1) * len(obj.l)
-	if err := rlp.EncodeStructSizePrefix(gidx, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(gidx, w); err != nil {
 		return err
 	}
 	for i := 0; i < len(obj.l); i++ {
-		if err := rlp.EncodeString(obj.l[i][:], w, b[:]); err != nil {
+		if err := rlp.EncodeString(obj.l[i][:], w); err != nil {
 			return err
 		}
 	}
@@ -304,29 +304,29 @@ func (obj *TestingStruct) EncodeRLP(w io.Writer) error {
 			gidx += 1
 		}
 	}
-	if err := rlp.EncodeStructSizePrefix(gidx, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(gidx, w); err != nil {
 		return err
 	}
 	for i := 0; i < len(obj.ll); i++ {
 		if obj.ll[i] != nil {
-			if err := rlp.EncodeString(obj.ll[i][:], w, b[:]); err != nil {
+			if err := rlp.EncodeString(obj.ll[i][:], w); err != nil {
 				return err
 			}
 		} else {
-			if err := rlp.EncodeString([]byte{}, w, b[:]); err != nil {
+			if err := rlp.EncodeString([]byte{}, w); err != nil {
 				return err
 			}
 		}
 	}
-	if err := rlp.EncodeString(obj.m[:], w, b[:]); err != nil {
+	if err := rlp.EncodeString(obj.m[:], w); err != nil {
 		return err
 	}
 	if obj.mm != nil {
-		if err := rlp.EncodeString(obj.mm[:], w, b[:]); err != nil {
+		if err := rlp.EncodeString(obj.mm[:], w); err != nil {
 			return err
 		}
 	} else {
-		if err := rlp.EncodeString([]byte{}, w, b[:]); err != nil {
+		if err := rlp.EncodeString([]byte{}, w); err != nil {
 			return err
 		}
 	}

@@ -174,11 +174,11 @@ func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 
 func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen int) error {
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
 		return err
 	}
 	// encode ChainID
-	if err := rlp.EncodeUint256(*tx.ChainID, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.ChainID, w); err != nil {
 		return err
 	}
 	// encode Nonce
@@ -186,11 +186,11 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 		return err
 	}
 	// encode MaxPriorityFeePerGas
-	if err := rlp.EncodeUint256(*tx.TipCap, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.TipCap, w); err != nil {
 		return err
 	}
 	// encode MaxFeePerGas
-	if err := rlp.EncodeUint256(*tx.FeeCap, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.FeeCap, w); err != nil {
 		return err
 	}
 	// encode GasLimit
@@ -202,15 +202,15 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 		return err
 	}
 	// encode Value
-	if err := rlp.EncodeUint256(*tx.Value, w, b); err != nil {
+	if err := rlp.EncodeUint256(*tx.Value, w); err != nil {
 		return err
 	}
 	// encode Data
-	if err := rlp.EncodeString(tx.Data, w, b); err != nil {
+	if err := rlp.EncodeString(tx.Data, w); err != nil {
 		return err
 	}
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(accessListLen, w, b); err != nil {
+	if err := rlp.EncodeStructSizePrefix(accessListLen, w); err != nil {
 		return err
 	}
 	// encode AccessList
@@ -218,15 +218,15 @@ func (tx *DynamicFeeTransaction) encodePayload(w io.Writer, b []byte, payloadSiz
 		return err
 	}
 	// encode V
-	if err := rlp.EncodeUint256(tx.V, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.V, w); err != nil {
 		return err
 	}
 	// encode R
-	if err := rlp.EncodeUint256(tx.R, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.R, w); err != nil {
 		return err
 	}
 	// encode S
-	if err := rlp.EncodeUint256(tx.S, w, b); err != nil {
+	if err := rlp.EncodeUint256(tx.S, w); err != nil {
 		return err
 	}
 	return nil
@@ -239,7 +239,7 @@ func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// envelope
-	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStringSizePrefix(envelopeSize, w); err != nil {
 		return err
 	}
 	// encode TxType

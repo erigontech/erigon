@@ -246,7 +246,7 @@ func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
 	encodingSize += tdLen
 	var b [33]byte
 	// prefix
-	if err := rlp.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(encodingSize, w); err != nil {
 		return err
 	}
 	// encode Block
