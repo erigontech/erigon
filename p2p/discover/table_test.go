@@ -32,11 +32,11 @@ import (
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mclock"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 	"github.com/erigontech/erigon/p2p/netutil"
-	"github.com/ethereum/go-ethereum/common/mclock"
 )
 
 func TestTable_pingReplace(t *testing.T) {

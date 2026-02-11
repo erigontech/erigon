@@ -32,10 +32,10 @@ import (
 	"hash"
 	"slices"
 
+	"github.com/erigontech/erigon/common/mclock"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
-	"github.com/ethereum/go-ethereum/common/mclock"
 )
 
 // TODO concurrent WHOAREYOU tie-breaker

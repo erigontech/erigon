@@ -42,7 +42,6 @@ require (
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/elastic/go-freelru v0.16.0
 	github.com/ethereum/go-bigmodexpfix v0.0.0-20250911101455-f9e208c548ab
-	github.com/ethereum/go-ethereum v1.16.8
 	github.com/felixge/fgprof v0.9.5
 	github.com/go-chi/chi/v5 v5.2.3
 	github.com/go-chi/cors v1.2.2
@@ -180,6 +179,7 @@ require (
 	github.com/fjl/gencodec v0.1.0 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/francoispqt/gojay v1.2.13 // indirect
+	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/garslo/gogen v0.0.0-20170307003452-d6ebae628c7c // indirect
 	github.com/go-llsqlite/adapter v0.0.0-20230927005056-7f5ce7f0c916 // indirect
 	github.com/go-llsqlite/crawshaw v0.6.0 // indirect

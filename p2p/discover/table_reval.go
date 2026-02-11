@@ -22,8 +22,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/erigontech/erigon/common/mclock"
 	"github.com/erigontech/erigon/p2p/enode"
-	"github.com/ethereum/go-ethereum/common/mclock"
 )
 
 const never = mclock.AbsTime(math.MaxInt64)
