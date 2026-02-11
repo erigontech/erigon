@@ -54,6 +54,10 @@ var (
 
 	mergeTr = EnvInt("MERGE_THRESHOLD", -1)
 
+	// used to identify tests to skip while running race tests
+	// in general becuase they have performance issues
+	RaceTesting = EnvBool("RACE_TESTING", false)
+
 	//state v3
 	noPrune              = EnvBool("NO_PRUNE", false)
 	noMerge              = EnvBool("NO_MERGE", false)

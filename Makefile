@@ -216,13 +216,14 @@ test-filtered:
 	(set -o pipefail && $(GOTEST) | tee run.log | (grep -v -e '^=== CONT ' -e '^=== RUN ' -e '^=== PAUSE ' -e '^PASS' -e '--- PASS:' || true))
 
 # Rather than add more special cases here, I'd suggest using GO_FLAGS and calling `make test-filtered GO_FLAGS='-cool flag' or `make test GO_FLAGS='-cool flag'`.
-test-short: override GO_FLAGS += -short -failfast
+test-short: override GO_FLAGS += -short -failfast, overide 
 test-short: test-filtered
 
 test-all: override GO_FLAGS += --timeout 60m -coverprofile=coverage-test-all.out
 test-all: test-filtered
 
 test-all-race: override GO_FLAGS += --timeout 60m -race
+test-all-race: override GOTEST := ERIGON_RACE_TESTING=true $(GOTEST)
 test-all-race: test-filtered
 
 ## test-hive						run the hive tests locally off nektos/act workflows simulator
