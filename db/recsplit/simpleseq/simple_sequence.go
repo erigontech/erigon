@@ -82,13 +82,13 @@ func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
 }
 
 func (s *SimpleSequence) reverseSearch(seek uint64) (idx int, v uint64, ok bool) {
-	c := s.Count()
 	if len(s.raw) == 0 || seek < s.Min() {
 		return 0, 0, false
 	}
-	for i := c; i > 0; i-- {
-		if v = s.Get(i - 1); v <= seek {
-			return int(i - 1), v, true
+	for i := len(s.raw) - 4; i >= 0; i -= 4 {
+		v := s.baseNum + uint64(binary.BigEndian.Uint32(s.raw[i:]))
+		if v <= seek {
+			return i / 4, v, true
 		}
 	}
 	return 0, 0, false
