@@ -37,7 +37,8 @@ func ReadSimpleSequence(baseNum uint64, raw []byte) *SimpleSequence {
 }
 
 func (s *SimpleSequence) Get(i uint64) uint64 {
-	return s.baseNum + uint64(binary.BigEndian.Uint32(s.raw[i*4:]))
+	delta := binary.BigEndian.Uint32(s.raw[i*4:])
+	return s.baseNum + uint64(delta)
 }
 
 func (s *SimpleSequence) Min() uint64 {
@@ -45,7 +46,8 @@ func (s *SimpleSequence) Min() uint64 {
 }
 
 func (s *SimpleSequence) Max() uint64 {
-	return s.baseNum + uint64(binary.BigEndian.Uint32(s.raw[len(s.raw)-4:]))
+	delta := binary.BigEndian.Uint32(s.raw[len(s.raw)-4:])
+	return s.baseNum + uint64(delta)
 }
 
 func (s *SimpleSequence) Count() uint64 {
