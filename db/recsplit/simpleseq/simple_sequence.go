@@ -69,8 +69,7 @@ func (s *SimpleSequence) AppendBytes(buf []byte) []byte {
 }
 
 func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
-	n := s.Count()
-	if n == 0 || seek > s.Max() { // over the max
+	if len(s.raw) == 0 || seek > s.Max() { // over the max
 		return 0, 0, false
 	}
 	for i := 0; i < len(s.raw); i += 4 {
