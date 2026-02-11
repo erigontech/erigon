@@ -21,12 +21,22 @@ package state
 
 import (
 	"fmt"
+	"sync"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/holiman/uint256"
 )
+
+var journalPool = sync.Pool{
+	New: func() any {
+		return &journal{
+			dirties: make(map[accounts.Address]int),
+		}
+	},
+}
 
 // journalEntry is a modification entry in the state change journal that can be
 // reverted on demand.
@@ -46,11 +56,15 @@ type journal struct {
 	dirties map[accounts.Address]int // Dirty accounts and the number of changes
 }
 
-// newJournal create a new initialized journal.
+// newJournal gets a journal from the pool.
 func newJournal() *journal {
-	return &journal{
-		dirties: make(map[accounts.Address]int),
-	}
+	return journalPool.Get().(*journal)
+}
+
+// release returns the journal to the pool after resetting it.
+func (j *journal) release() {
+	j.Reset()
+	journalPool.Put(j)
 }
 func (j *journal) Reset() {
 	j.entries = j.entries[:0]
@@ -153,7 +167,7 @@ type (
 	addLogChange struct {
 		txIndex int
 	}
-	touchChange struct {
+	touchAccount struct {
 		account accounts.Address
 	}
 
@@ -176,10 +190,13 @@ type (
 //type journalEntry2 interface {
 //	createObjectChange | resetObjectChange | selfdestructChange | balanceChange | balanceIncrease | balanceIncreaseTransfer |
 //		nonceChange | storageChange | fakeStorageChange | codeChange |
-//		refundChange | addLogChange | touchChange | accessListAddAccountChange | accessListAddSlotChange | transientStorageChange
+//		refundChange | addLogChange | touchAccount | accessListAddAccountChange | accessListAddSlotChange | transientStorageChange
 //}
 
 func (ch createObjectChange) revert(s *IntraBlockState) error {
+	if so, ok := s.stateObjects[ch.account]; ok {
+		so.release()
+	}
 	delete(s.stateObjects, ch.account)
 	delete(s.stateObjectsDirty, ch.account)
 	return nil
@@ -190,6 +207,9 @@ func (ch createObjectChange) dirtied() (accounts.Address, bool) {
 }
 
 func (ch resetObjectChange) revert(s *IntraBlockState) error {
+	if current, ok := s.stateObjects[ch.account]; ok && current != ch.prev {
+		current.release()
+	}
 	s.setStateObject(ch.account, ch.prev)
 	return nil
 }
@@ -199,7 +219,7 @@ func (ch resetObjectChange) dirtied() (accounts.Address, bool) {
 }
 
 func (ch selfdestructChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(ch.account, false)
 	if err != nil {
 		return err
 	}
@@ -249,14 +269,24 @@ func (ch selfdestructChange) dirtied() (accounts.Address, bool) {
 
 var ripemd = accounts.InternAddress(common.HexToAddress("0000000000000000000000000000000000000003"))
 
-func (ch touchChange) revert(s *IntraBlockState) error {
+func (ch touchAccount) revert(s *IntraBlockState) error {
+	if reads, ok := s.versionedReads[ch.account]; ok {
+		if len(reads) == 1 {
+			if _, ok := reads[AccountKey{Path: AddressPath}]; ok {
+				if opts, ok := s.addressAccess[ch.account]; !ok || opts.revertable {
+					delete(s.versionedReads, ch.account)
+					delete(s.addressAccess, ch.account)
+				}
+			}
+		}
+	}
 	return nil
 }
 
-func (ch touchChange) dirtied() (accounts.Address, bool) { return ch.account, true }
+func (ch touchAccount) dirtied() (accounts.Address, bool) { return ch.account, true }
 
 func (ch balanceChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(ch.account, false)
 	if err != nil {
 		return err
 	}
@@ -319,7 +349,7 @@ func (ch balanceIncreaseTransfer) revert(s *IntraBlockState) error {
 	return nil
 }
 func (ch nonceChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(ch.account, false)
 	if err != nil {
 		return err
 	}
@@ -357,7 +387,7 @@ func (ch nonceChange) dirtied() (accounts.Address, bool) {
 }
 
 func (ch codeChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(ch.account, false)
 	if err != nil {
 		return err
 	}
@@ -376,7 +406,7 @@ func (ch codeChange) revert(s *IntraBlockState) error {
 		if ch.wasCommited {
 			if trace {
 				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodeHashPath}]; ok {
-					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, v.Val.(common.Hash), ch.prevhash)
+					fmt.Printf("%s WRT Revert %x: %x -> %x\n", tracePrefix, ch.account, v.Val.(accounts.CodeHash), ch.prevhash)
 				}
 				if v, ok := s.versionedWrites[ch.account][AccountKey{Path: CodePath}]; ok {
 					_, cs := printCode(v.Val.([]byte))
@@ -411,7 +441,7 @@ func (ch codeChange) dirtied() (accounts.Address, bool) {
 }
 
 func (ch storageChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(ch.account, false)
 	if err != nil {
 		return err
 	}
@@ -453,7 +483,7 @@ func (ch storageChange) dirtied() (accounts.Address, bool) {
 }
 
 func (ch fakeStorageChange) revert(s *IntraBlockState) error {
-	obj, err := s.getStateObject(ch.account)
+	obj, err := s.getStateObject(ch.account, false)
 	if err != nil {
 		return err
 	}
@@ -484,12 +514,12 @@ func (ch refundChange) dirtied() (accounts.Address, bool) {
 }
 
 func (ch addLogChange) revert(s *IntraBlockState) error {
-	if ch.txIndex >= len(s.logs) {
+	if ch.txIndex+1 >= len(s.logs) {
 		panic(fmt.Sprintf("can't revert log index %v, max: %v", ch.txIndex, len(s.logs)-1))
 	}
-	txnLogs := s.logs[ch.txIndex]
-	s.logs[ch.txIndex] = txnLogs[:len(txnLogs)-1] // revert 1 log
-	if len(s.logs[ch.txIndex]) == 0 {
+	txnLogs := s.logs[ch.txIndex+1]
+	s.logs[ch.txIndex+1] = txnLogs[:len(txnLogs)-1] // revert 1 log
+	if len(s.logs[ch.txIndex+1]) == 0 {
 		s.logs = s.logs[:len(s.logs)-1] // revert txn
 	}
 	s.logSize--

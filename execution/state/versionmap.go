@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/holiman/uint256"
+	"github.com/tidwall/btree"
+
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/tidwall/btree"
 )
 
 type statusFlag uint
@@ -26,6 +28,8 @@ func (p AccountPath) String() string {
 		return "Balance"
 	case NoncePath:
 		return "Nonce"
+	case IncarnationPath:
+		return "Incarnation"
 	case CodePath:
 		return "Code"
 	case CodeHashPath:
@@ -45,6 +49,7 @@ const (
 	AddressPath AccountPath = iota
 	BalancePath
 	NoncePath
+	IncarnationPath
 	CodePath
 	CodeHashPath
 	CodeSizePath
@@ -101,7 +106,9 @@ func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
 	for _, accountChanges := range changes {
 		for _, storageChanges := range accountChanges.StorageChanges {
 			for _, change := range storageChanges.Changes {
-				vm.Write(accountChanges.Address, StoragePath, storageChanges.Slot, Version{TxIndex: int(change.Index) - 1}, change.Value, true)
+				var value uint256.Int
+				value.SetBytes32(change.Value[:])
+				vm.Write(accountChanges.Address, StoragePath, storageChanges.Slot, Version{TxIndex: int(change.Index) - 1}, value, true)
 			}
 		}
 		for _, balanceChange := range accountChanges.BalanceChanges {
@@ -166,15 +173,15 @@ func (vm *VersionMap) Write(addr accounts.Address, path AccountPath, key account
 }
 
 func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) (res ReadResult) {
+	res.depIdx = UnknownDep
+	res.incarnation = -1
+
 	if vm == nil {
 		return res
 	}
 
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
-
-	res.depIdx = UnknownDep
-	res.incarnation = -1
 
 	cells := vm.getKeyCells(addr, path, key, nil)
 
@@ -320,7 +327,7 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 			valid = VersionInvalid
 		} else {
 			if valid = checkVersion(version, version); valid == VersionValid {
-				if path == BalancePath || path == NoncePath || path == CodeHashPath {
+				if path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath {
 					if valid = vm.validateRead(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
 						version, checkVersion, traceInvalid, tracePrefix); valid == VersionValid {
 						valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,

@@ -36,15 +36,18 @@ import (
 )
 
 var (
-	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 512)
+	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
 	noMemstat            = EnvBool("NO_MEMSTAT", false)
 	saveHeapProfile      = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath  = EnvString("HEAP_PROFILE_FILE_PATH", "")
 	heapProfileThreshold = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
 	heapProfileFrequency = EnvDuration("HEAP_PROFILE_FREQUENCY", 30*time.Second)
-	mdbxLockInRam        = EnvBool("MDBX_LOCK_IN_RAM", false)
 	StagesOnlyBlocks     = EnvBool("STAGES_ONLY_BLOCKS", false)
+
+	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
+	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
+	MdbxNoSyncUnsafe = EnvBool("MDBX_NO_FSYNC_UNSAFE", false)
 
 	stopBeforeStage = EnvString("STOP_BEFORE_STAGE", "")
 	stopAfterStage  = EnvString("STOP_AFTER_STAGE", "")
@@ -76,6 +79,8 @@ var (
 	numWorkers    = runtime.NumCPU() / 2
 	Exec3Workers  = EnvInt("EXEC3_WORKERS", numWorkers)
 
+	CompressWorkers = EnvInt("COMPRESS_WORKERS", 1)
+
 	TraceAccounts        = EnvStrings("TRACE_ACCOUNTS", ",", nil)
 	TraceStateKeys       = EnvStrings("TRACE_STATE_KEYS", ",", nil)
 	TraceInstructions    = EnvBool("TRACE_INSTRUCTIONS", false)
@@ -84,7 +89,7 @@ var (
 	TraceNoopIO          = EnvBool("TRACE_NOOP_IO", false)
 	TraceLogs            = EnvBool("TRACE_LOGS", false)
 	TraceGas             = EnvBool("TRACE_GAS", false)
-	TraceDyanmicGas      = EnvBool("TRACE_DYNAMIC_GAS", false)
+	TraceDynamicGas      = EnvBool("TRACE_DYNAMIC_GAS", false)
 	TraceApply           = EnvBool("TRACE_APPLY", false)
 	TraceBlocks          = EnvUints("TRACE_BLOCKS", ",", nil)
 	TraceTxIndexes       = EnvInts("TRACE_TXINDEXES", ",", nil)
@@ -94,6 +99,7 @@ var (
 	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
+	UseStateCache        = EnvBool("USE_STATE_CACHE", false)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
@@ -107,8 +113,6 @@ func ReadMemStats(m *runtime.MemStats) {
 	}
 	runtime.ReadMemStats(m)
 }
-
-func MdbxLockInRam() bool { return mdbxLockInRam }
 
 func DiscardCommitment() bool    { return discardCommitment }
 func NoPrune() bool              { return noPrune }

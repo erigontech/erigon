@@ -464,7 +464,7 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block,
 		BlockHash:     blockHash,
 		BaseFeePerGas: gointerfaces.ConvertH256ToHash(payloadRpc.BaseFeePerGas),
 	}
-	copy(block.BaseFeePerGas[:], utils.ReverseOfByteSlice(block.BaseFeePerGas[:])) // reverse the byte slice
+	utils.ReverseBytes(&block.BaseFeePerGas)
 	if payloadRpc.ExcessBlobGas != nil {
 		block.ExcessBlobGas = *payloadRpc.ExcessBlobGas
 	}

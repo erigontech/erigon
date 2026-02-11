@@ -102,7 +102,7 @@ func (m *MockMsgReadWriter) WriteMsg(msg p2p.Msg) error {
 	}
 
 	buf := new(bytes.Buffer)
-	err := rlp.Encode(buf, []interface{}{msg.Code, payloadBytes}) // Encode as a list [code, payload]
+	err := rlp.Encode(buf, []any{msg.Code, payloadBytes}) // Encode as a list [code, payload]
 	if err != nil {
 		return fmt.Errorf("failed to RLP encode message: %w", err)
 	}
@@ -381,7 +381,7 @@ func (rw *RLPReadWriter) WriteMsg(msg p2p.Msg) error {
 		defer rw.writtenMessagesMu.Unlock()
 		// RLP encode the message code and payload for storage
 		buf := new(bytes.Buffer)
-		err := rlp.Encode(buf, []interface{}{msg.Code, msg.Payload})
+		err := rlp.Encode(buf, []any{msg.Code, msg.Payload})
 		if err != nil {
 			return fmt.Errorf("failed to RLP encode message for storage: %w", err)
 		}

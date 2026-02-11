@@ -1,5 +1,9 @@
 ---
 description: Seeding/downloading historical data
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/fundamentals/modules/downloader
 ---
 
 # Downloader

@@ -50,7 +50,7 @@ type Genesis struct {
 	Difficulty *big.Int       `json:"difficulty" gencodec:"required"`
 	Mixhash    common.Hash    `json:"mixHash"`
 	Coinbase   common.Address `json:"coinbase"`
-	Alloc      GenesisAlloc   `json:"alloc"      gencodec:"required"`
+	Alloc      GenesisAlloc   `json:"alloc"`
 
 	AuRaSeal *AuRaSeal `json:"seal"`
 

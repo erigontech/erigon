@@ -86,6 +86,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcAccessListFlag,
 	&utils.RpcTraceCompatFlag,
 	&utils.RpcGasCapFlag,
+	&utils.RpcBlockRangeLimit,
 	&utils.RpcBatchLimit,
 	&utils.RpcReturnDataLimit,
 	&utils.AllowUnprotectedTxs,
@@ -238,6 +239,8 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.TrustedSetupFile,
 	&utils.RPCSlowFlag,
+	&utils.RpcTxSyncDefaultTimeoutFlag,
+	&utils.RpcTxSyncMaxTimeoutFlag,
 
 	&utils.TxPoolGossipDisableFlag,
 	&SyncLoopBlockLimitFlag,

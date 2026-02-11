@@ -1,0 +1,3 @@
+check-windows-cross-builds:
+	# utp requires ws2tcpip.h which isn't in my cross compiler setup
+	CC=x86_64-w64-mingw32-gcc CGO_ENABLED=1 GOARCH=amd64 GOOS=windows go build -v -tags disable_libutp ./...

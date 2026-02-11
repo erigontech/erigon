@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 
 	"github.com/erigontech/erigon/common"
@@ -90,7 +89,7 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 
 	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
-		return nil, fmt.Errorf("getReceipts error: %w", err)
+		return nil, err
 	}
 
 	result := make([]map[string]any, 0, len(receipts))

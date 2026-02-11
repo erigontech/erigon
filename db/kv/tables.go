@@ -290,8 +290,6 @@ var (
 
 	StatesProcessingKey          = []byte("StatesProcessing")
 	MinimumPrunableStepDomainKey = []byte("MinimumPrunableStepDomainKey")
-
-	RecentReorgKey = []byte("RecentReorg") // just signals if there was a recent reorg recently.
 )
 
 // Vals
