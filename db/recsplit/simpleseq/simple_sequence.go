@@ -80,7 +80,7 @@ func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
 	if distFound[1]%100 == 0 && distFound[0]%100 == 0 {
 		log.Warn("[dbg] SimpleSequence.search", "distFound", distFound, "distLen", distLen)
 	}
-	distFound[s.Count()]++
+	distLen[s.Count()]++
 	for i := 0; i < len(raw); i += 4 {
 		v = s.baseNum + uint64(binary.BigEndian.Uint32(raw[i:]))
 		if v >= seek {
