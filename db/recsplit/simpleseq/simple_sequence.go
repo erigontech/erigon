@@ -45,7 +45,7 @@ func (s *SimpleSequence) Min() uint64 {
 }
 
 func (s *SimpleSequence) Max() uint64 {
-	return s.Get(s.Count() - 1)
+	return s.baseNum + uint64(binary.BigEndian.Uint32(s.raw[len(s.raw)-4:]))
 }
 
 func (s *SimpleSequence) Count() uint64 {
@@ -69,7 +69,7 @@ func (s *SimpleSequence) AppendBytes(buf []byte) []byte {
 
 func (s *SimpleSequence) search(seek uint64) (int, bool) {
 	c := s.Count()
-	if c == 0 || seek > s.Get(c-1) { // over the max
+	if c == 0 || seek > s.Max() { // over the max
 		return 0, false
 	}
 	idx := sort.Search(int(c), func(i int) bool {
