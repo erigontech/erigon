@@ -78,9 +78,10 @@ func (s *SimpleSequence) search(v uint64) (int, bool) {
 }
 
 func (s *SimpleSequence) reverseSearch(v uint64) (int, bool) {
-	for i := s.Count() - 1; i >= 0; i-- {
-		if s.Get(i) <= v {
-			return int(i), true
+	c := s.Count()
+	for i := c; i > 0; i-- {
+		if s.Get(i-1) <= v {
+			return int(i - 1), true
 		}
 	}
 	return 0, false
