@@ -1747,7 +1747,7 @@ func (s *Ethereum) DataDir() string {
 
 func setDefaultMinerGasLimit(chainConfig *chain.Config, config *ethconfig.Config, logger log.Logger) {
 	if config.Miner.GasLimit == nil {
-		gasLimit := ethconfig.DefaultBlockGasLimitByChain(config)
+		gasLimit := ethconfig.DefaultBlockGasLimitByChain(chainConfig)
 		config.Miner.GasLimit = &gasLimit
 	}
 }
