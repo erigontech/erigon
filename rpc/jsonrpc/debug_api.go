@@ -1173,15 +1173,37 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	// Query the expected state for all modified accounts from the actual state DB
-	// This lets us compare what we compute vs what's actually in the state after this block
-	// We use the commitment context to get correct storage roots (not stored in DB to save space)
+	expectedState, expectedStorage, err := api.buildExpectedPostState(ctx, tx, blockNum, block,
+		readAddresses, writeAddresses, readStorageKeys, writeStorageKeys)
+	if err != nil {
+		return nil, err
+	}
+
+	// Print expected post-state in human-readable format
+	if err = verifyExecutionWitnessResult(result, block, chainCfg, fullEngine, expectedState, expectedStorage); err != nil {
+		return nil, fmt.Errorf("witness verification failed: %w", err)
+	}
+	fmt.Printf("Witness for block %d successfully verified 🚀\n", blockNum)
+	return result, nil
+}
+
+// buildExpectedPostState queries the actual state DB to build expected post-state for verification.
+// It uses the commitment context to get correct storage roots (not stored in DB to save space).
+func (api *DebugAPIImpl) buildExpectedPostState(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	blockNum uint64,
+	block *types.Block,
+	readAddresses, writeAddresses []common.Address,
+	readStorageKeys, writeStorageKeys map[common.Address][]common.Hash,
+) (map[common.Address]*accounts.Account, map[common.Address]map[common.Hash]uint256.Int, error) {
 	expectedState := make(map[common.Address]*accounts.Account)
 	expectedStorage := make(map[common.Address]map[common.Hash]uint256.Int)
 
 	// Create commitment context for accurate storage roots
 	postDomains, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	if err != nil {
-		return nil, fmt.Errorf("failed to create post-state domains: %w", err)
+		return nil, nil, fmt.Errorf("failed to create post-state domains: %w", err)
 	}
 	defer postDomains.Close()
 	postSdCtx := postDomains.GetCommitmentContext()
@@ -1190,17 +1212,17 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	// Set up to read state at current block (after execution)
 	latestBlock, err := rpchelper.GetLatestBlockNumber(tx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get latest block: %w", err)
+		return nil, nil, fmt.Errorf("failed to get latest block: %w", err)
 	}
 	if blockNum < latestBlock {
 		// Get first txnum of blockNum+1 to ensure correct state root
 		lastTxnInBlock, err := api._txNumReader.Min(ctx, tx, blockNum+1)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get last txn in block: %w", err)
+			return nil, nil, fmt.Errorf("failed to get last txn in block: %w", err)
 		}
 		postSdCtx.SetHistoryStateReader(tx, lastTxnInBlock)
 		if err := postDomains.SeekCommitment(context.Background(), tx); err != nil {
-			return nil, fmt.Errorf("failed to seek commitment: %w", err)
+			return nil, nil, fmt.Errorf("failed to seek commitment: %w", err)
 		}
 	}
 
@@ -1218,7 +1240,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	// Generate the trie with correct storage roots
 	postTrie, postRoot, err := postSdCtx.Witness(ctx, nil, "debug_executionWitness_postState")
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate post-state trie: %w", err)
+		return nil, nil, fmt.Errorf("failed to generate post-state trie: %w", err)
 	}
 
 	// Verify the post-state root matches the block's state root
@@ -1227,6 +1249,12 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	// Read account data from the post-state trie (with correct storage roots)
+	// Include both read and write addresses
+	for _, addr := range readAddresses {
+		addrHash := crypto.Keccak256(addr.Bytes())
+		acc, _ := postTrie.GetAccount(addrHash)
+		expectedState[addr] = acc
+	}
 	for _, addr := range writeAddresses {
 		addrHash := crypto.Keccak256(addr.Bytes())
 		acc, _ := postTrie.GetAccount(addrHash)
@@ -1238,27 +1266,37 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	currentNrOrHash := rpc.BlockNumberOrHash{BlockNumber: &currentBlockNum}
 	postStateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, currentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create postStateReader: %w", err)
+		return nil, nil, fmt.Errorf("failed to create postStateReader: %w", err)
 	}
-	for addr, keys := range writeStorageKeys {
-		expectedStorage[addr] = make(map[common.Hash]uint256.Int)
+	// Include both read and write storage keys
+	for addr, keys := range readStorageKeys {
+		if expectedStorage[addr] == nil {
+			expectedStorage[addr] = make(map[common.Hash]uint256.Int)
+		}
 		for _, key := range keys {
 			storageKey := accounts.InternKey(key)
 			val, _, err := postStateReader.ReadAccountStorage(accounts.InternAddress(addr), storageKey)
 			if err != nil {
-				return nil, fmt.Errorf("failed to read expected account in post state: %x %w", addr, err)
+				return nil, nil, fmt.Errorf("failed to read expected storage in post state: %x key %x: %w", addr, key, err)
 			}
 			expectedStorage[addr][key] = val
-
+		}
+	}
+	for addr, keys := range writeStorageKeys {
+		if expectedStorage[addr] == nil {
+			expectedStorage[addr] = make(map[common.Hash]uint256.Int)
+		}
+		for _, key := range keys {
+			storageKey := accounts.InternKey(key)
+			val, _, err := postStateReader.ReadAccountStorage(accounts.InternAddress(addr), storageKey)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to read expected storage in post state: %x key %x: %w", addr, key, err)
+			}
+			expectedStorage[addr][key] = val
 		}
 	}
 
-	// Print expected post-state in human-readable format
-	if err = verifyExecutionWitnessResult(result, block, chainCfg, fullEngine, expectedState, expectedStorage); err != nil {
-		return nil, fmt.Errorf("witness verification failed: %w", err)
-	}
-	fmt.Printf("Witness for block %d successfully verified 🚀\n", blockNum)
-	return result, nil
+	return expectedState, expectedStorage, nil
 }
 
 // printExpectedPostState prints the expected post-state in a human-readable format
