@@ -50,11 +50,7 @@ func (obj *Withdrawal) EncodingSize() int {
 }
 
 func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
-
 	encodingSize := obj.EncodingSize()
-
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
 
 	if err := rlp.EncodeStructSizePrefix(encodingSize, w); err != nil {
 		return err
@@ -66,15 +62,9 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeInt(obj.Validator, w); err != nil {
 		return err
 	}
-
-	b[0] = 128 + 20
-	if _, err := w.Write(b[:1]); err != nil {
+	if err := rlp.EncodeString(obj.Address[:], w); err != nil {
 		return err
 	}
-	if _, err := w.Write(obj.Address[:]); err != nil {
-		return err
-	}
-
 	return rlp.EncodeInt(obj.Amount, w)
 }
 

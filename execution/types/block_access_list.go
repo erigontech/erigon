@@ -98,8 +98,7 @@ func (ac *AccountChanges) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	encodingSize := ac.EncodingSize()
-	b := newEncodingBuf()
-	defer releaseEncodingBuf(b)
+	var b [1]byte
 
 	if err := rlp.EncodeStructSizePrefix(encodingSize, w); err != nil {
 		return err
@@ -114,19 +113,19 @@ func (ac *AccountChanges) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	if err := encodeBlockAccessList(ac.StorageChanges, w, b[:]); err != nil {
+	if err := encodeBlockAccessList(ac.StorageChanges, w); err != nil {
 		return err
 	}
-	if err := encodeHashList(ac.StorageReads, w, b[:]); err != nil {
+	if err := encodeHashList(ac.StorageReads, w); err != nil {
 		return err
 	}
-	if err := encodeBlockAccessList(ac.BalanceChanges, w, b[:]); err != nil {
+	if err := encodeBlockAccessList(ac.BalanceChanges, w); err != nil {
 		return err
 	}
-	if err := encodeBlockAccessList(ac.NonceChanges, w, b[:]); err != nil {
+	if err := encodeBlockAccessList(ac.NonceChanges, w); err != nil {
 		return err
 	}
-	return encodeBlockAccessList(ac.CodeChanges, w, b[:])
+	return encodeBlockAccessList(ac.CodeChanges, w)
 }
 
 func (ac *AccountChanges) DecodeRLP(s *rlp.Stream) error {
@@ -192,9 +191,6 @@ func (sc *SlotChanges) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	b := newEncodingBuf()
-	defer releaseEncodingBuf(b)
-
 	encodingSize := sc.EncodingSize()
 	if err := rlp.EncodeStructSizePrefix(encodingSize, w); err != nil {
 		return err
@@ -205,7 +201,7 @@ func (sc *SlotChanges) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	return encodeBlockAccessList(sc.Changes, w, b[:])
+	return encodeBlockAccessList(sc.Changes, w)
 }
 
 func (sc *SlotChanges) DecodeRLP(s *rlp.Stream) error {
@@ -386,7 +382,7 @@ func (cc *CodeChange) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
-func encodeBlockAccessList[T rlpEncodable](items []T, w io.Writer, buf []byte) error {
+func encodeBlockAccessList[T rlpEncodable](items []T, w io.Writer) error {
 	total := EncodingSizeGenericList(items)
 	if err := rlp.EncodeStructSizePrefix(total, w); err != nil {
 		return err
@@ -399,7 +395,7 @@ func encodeBlockAccessList[T rlpEncodable](items []T, w io.Writer, buf []byte) e
 	return nil
 }
 
-func encodeHashList(hashes []accounts.StorageKey, w io.Writer, buf []byte) error {
+func encodeHashList(hashes []accounts.StorageKey, w io.Writer) error {
 	if err := validateStorageReads(hashes); err != nil {
 		return err
 	}

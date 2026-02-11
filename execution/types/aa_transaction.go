@@ -273,8 +273,7 @@ func (tx *AccountAbstractionTransaction) EncodingSize() int {
 func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
 	envelopSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	var b [1]byte
 	// encode envelope size
 	if err := rlp.EncodeStringSizePrefix(envelopSize, w); err != nil {
 		return err
@@ -509,8 +508,7 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 
 func (tx *AccountAbstractionTransaction) MarshalBinary(w io.Writer) error {
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	var b [1]byte
 	// encode TxType
 	b[0] = AccountAbstractionTxType
 	if _, err := w.Write(b[:1]); err != nil {

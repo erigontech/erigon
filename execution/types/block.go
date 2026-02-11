@@ -851,8 +851,6 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen,
 
 func (rb RawBody) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen, blockAccessListLen := rb.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
 		return err
@@ -867,17 +865,17 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 		}
 	}
 	// encode Uncles
-	if err := encodeRLPGeneric(rb.Uncles, unclesLen, w, b[:]); err != nil {
+	if err := encodeRLPGeneric(rb.Uncles, unclesLen, w); err != nil {
 		return err
 	}
 	// encode Withdrawals
 	if rb.Withdrawals != nil {
-		if err := encodeRLPGeneric(rb.Withdrawals, withdrawalsLen, w, b[:]); err != nil {
+		if err := encodeRLPGeneric(rb.Withdrawals, withdrawalsLen, w); err != nil {
 			return err
 		}
 	}
 	if len(rb.BlockAccessList) > 0 {
-		if err := encodeRLPGeneric(rb.BlockAccessList, blockAccessListLen, w, b[:]); err != nil {
+		if err := encodeRLPGeneric(rb.BlockAccessList, blockAccessListLen, w); err != nil {
 			return err
 		}
 	}
@@ -948,8 +946,6 @@ func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen,
 
 func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 	payloadSize, unclesLen, withdrawalsLen, blockAccessListLen := bfs.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
 
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
@@ -967,18 +963,18 @@ func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 	}
 
 	// encode Uncles
-	if err := encodeRLPGeneric(bfs.Uncles, unclesLen, w, b[:]); err != nil {
+	if err := encodeRLPGeneric(bfs.Uncles, unclesLen, w); err != nil {
 		return err
 	}
 	// encode Withdrawals
 	// nil if pre-shanghai, empty slice if shanghai and no withdrawals in block, otherwise non-empty
 	if bfs.Withdrawals != nil {
-		if err := encodeRLPGeneric(bfs.Withdrawals, withdrawalsLen, w, b[:]); err != nil {
+		if err := encodeRLPGeneric(bfs.Withdrawals, withdrawalsLen, w); err != nil {
 			return err
 		}
 	}
 	if len(bfs.BlockAccessList) > 0 {
-		if err := encodeRLPGeneric(bfs.BlockAccessList, blockAccessListLen, w, b[:]); err != nil {
+		if err := encodeRLPGeneric(bfs.BlockAccessList, blockAccessListLen, w); err != nil {
 			return err
 		}
 	}
@@ -1048,28 +1044,26 @@ func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen
 func (bb Body) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen, blockAccessListLen := bb.payloadSize()
 
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
 		return err
 	}
 	// encode Transactions
-	if err := encodeRLPGeneric(bb.Transactions, txsLen, w, b[:]); err != nil {
+	if err := encodeRLPGeneric(bb.Transactions, txsLen, w); err != nil {
 		return err
 	}
 	// encode Uncles
-	if err := encodeRLPGeneric(bb.Uncles, unclesLen, w, b[:]); err != nil {
+	if err := encodeRLPGeneric(bb.Uncles, unclesLen, w); err != nil {
 		return err
 	}
 	// encode Withdrawals
 	if bb.Withdrawals != nil {
-		if err := encodeRLPGeneric(bb.Withdrawals, withdrawalsLen, w, b[:]); err != nil {
+		if err := encodeRLPGeneric(bb.Withdrawals, withdrawalsLen, w); err != nil {
 			return err
 		}
 	}
 	if len(bb.BlockAccessList) > 0 {
-		if err := encodeRLPGeneric(bb.BlockAccessList, blockAccessListLen, w, b[:]); err != nil {
+		if err := encodeRLPGeneric(bb.BlockAccessList, blockAccessListLen, w); err != nil {
 			return err
 		}
 	}
@@ -1328,8 +1322,6 @@ func (bb *Block) EncodingSize() int {
 func (bb *Block) EncodeRLP(w io.Writer) error {
 	payloadSize, txsLen, unclesLen, withdrawalsLen, accessListLen := bb.payloadSize()
 
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w); err != nil {
 		return err
@@ -1339,22 +1331,22 @@ func (bb *Block) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	// encode Transactions
-	if err := encodeRLPGeneric(bb.transactions, txsLen, w, b[:]); err != nil {
+	if err := encodeRLPGeneric(bb.transactions, txsLen, w); err != nil {
 		return err
 	}
 	// encode Uncles
-	if err := encodeRLPGeneric(bb.uncles, unclesLen, w, b[:]); err != nil {
+	if err := encodeRLPGeneric(bb.uncles, unclesLen, w); err != nil {
 		return err
 	}
 	// encode Withdrawals
 	if bb.withdrawals != nil {
-		if err := encodeRLPGeneric(bb.withdrawals, withdrawalsLen, w, b[:]); err != nil {
+		if err := encodeRLPGeneric(bb.withdrawals, withdrawalsLen, w); err != nil {
 			return err
 		}
 	}
 	// encode Block access list
 	if len(bb.blockAccessList) > 0 {
-		if err := encodeRLPGeneric([]*AccountChanges(bb.blockAccessList), accessListLen, w, b[:]); err != nil {
+		if err := encodeRLPGeneric([]*AccountChanges(bb.blockAccessList), accessListLen, w); err != nil {
 			return err
 		}
 	}
@@ -1629,7 +1621,7 @@ func EncodingSizeGenericList[T rlpEncodable](arr []T) (_len int) {
 	return
 }
 
-func encodeRLPGeneric[T rlpEncodable](arr []T, _len int, w io.Writer, b []byte) error {
+func encodeRLPGeneric[T rlpEncodable](arr []T, _len int, w io.Writer) error {
 	if err := rlp.EncodeStructSizePrefix(_len, w); err != nil {
 		return err
 	}

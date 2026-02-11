@@ -159,8 +159,7 @@ func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Trans
 // transactions, it returns the type and payload.
 func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 	payloadSize, accessListLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	var b [1]byte
 	// encode TxType
 	b[0] = DynamicFeeTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -236,8 +235,7 @@ func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, accessListLen := tx.payloadSize()
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	var b [1]byte
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w); err != nil {
 		return err
