@@ -17,7 +17,7 @@ jobs:
   # - '**/.github/workflows/**' is currently commented to avoid unintended freeze in case of concurrent changes outside the excluded paths (further development will be done in due course)
   # 
   source-of-changes:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, qa]
     outputs:
       changed_files: ${{ steps.filter.outputs.changed_files }}
     steps:
