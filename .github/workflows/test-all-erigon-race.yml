@@ -49,8 +49,8 @@ jobs:
     strategy:
       matrix:
         os:
-          - ubuntu-latest
-    runs-on: ${{ matrix.os }}
+          - Linux
+    runs-on: ["${{ matrix.os }}", self-hosted, qa]
 
     steps:
       - name: Cleanup space
