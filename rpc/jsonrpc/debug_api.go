@@ -1753,16 +1753,32 @@ func (s *witnessStateless) WriteAccountStorage(address accounts.Address, incarna
 	addr := address.Value()
 	keyValue := key.Value()
 
-	m, ok := s.storageWrites[addr]
-	if !ok {
-		m = make(map[common.Hash]uint256.Int)
-		s.storageWrites[addr] = m
-	}
-	m[keyValue] = value
+	if value.IsZero() {
+		// Delete: add to storageDeletes, remove from storageWrites
+		d, ok := s.storageDeletes[addr]
+		if !ok {
+			d = make(map[common.Hash]struct{})
+			s.storageDeletes[addr] = d
+		}
+		d[keyValue] = struct{}{}
 
-	// Remove from deletes if present
-	if d, ok := s.storageDeletes[addr]; ok {
-		delete(d, keyValue)
+		// Remove from writes if present
+		if m, ok := s.storageWrites[addr]; ok {
+			delete(m, keyValue)
+		}
+	} else {
+		// Write: add to storageWrites, remove from storageDeletes
+		m, ok := s.storageWrites[addr]
+		if !ok {
+			m = make(map[common.Hash]uint256.Int)
+			s.storageWrites[addr] = m
+		}
+		m[keyValue] = value
+
+		// Remove from deletes if present
+		if d, ok := s.storageDeletes[addr]; ok {
+			delete(d, keyValue)
+		}
 	}
 	return nil
 }
