@@ -119,7 +119,6 @@ func newObject(db *IntraBlockState, address accounts.Address, data, original *ac
 		dirtyStorage:       make(Storage),
 	}
 	so.data.Copy(data)
-	so.data.Balance.SetUint64(0)
 
 	if so.data.CodeHash.IsEmpty() {
 		so.data.CodeHash = accounts.EmptyCodeHash
