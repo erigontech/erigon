@@ -19,10 +19,8 @@ network: defaults
 tools:
   github:
 
-safe-outputs:
-  create-issue:
-    title-prefix: "[repo-status] "
-    labels: [report, daily-status]
+
+
 source: githubnext/agentics/workflows/daily-repo-status.md@d3ff5177d6a49a123cceed203dc271e132a585e4
 ---
 
