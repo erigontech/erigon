@@ -65,6 +65,8 @@ github.com/JkLondon/gdbx v0.0.0-20260210074410-8df1ed965583 h1:8fEHMSRY/Svj8leYa
 github.com/JkLondon/gdbx v0.0.0-20260210074410-8df1ed965583/go.mod h1:HWH9EeHkUcuMgVXMTUojmcWO+jA6511QSIWvInUxlf8=
 github.com/JkLondon/gdbx v0.0.0-20260210123803-499b25a0aa4e h1:ev0rLDNa1/9rEt4V6p2/mcRsxRP3RBaDRMMmKyMc5Co=
 github.com/JkLondon/gdbx v0.0.0-20260210123803-499b25a0aa4e/go.mod h1:HWH9EeHkUcuMgVXMTUojmcWO+jA6511QSIWvInUxlf8=
+github.com/JkLondon/gdbx v0.0.0-20260212142211-fa6f7835e156 h1:XgAoUQ1TIxtRE/LRUQO3r4trqvEn4wh6a/I6P+ybIdo=
+github.com/JkLondon/gdbx v0.0.0-20260212142211-fa6f7835e156/go.mod h1:HWH9EeHkUcuMgVXMTUojmcWO+jA6511QSIWvInUxlf8=
 github.com/Masterminds/goutils v1.1.1 h1:5nUrii3FMTL5diU80unEVvNevw1nH4+ZV4DSLVJLSYI=
 github.com/Masterminds/goutils v1.1.1/go.mod h1:8cTjp+g8YejhMuvIA5y2vz3BpJxksy863GQaJW2MFNU=
 github.com/Masterminds/semver/v3 v3.2.0 h1:3MEsd0SM6jqZojhjLWWeBY+Kcjy9i6MQAeY7YgDP83g=

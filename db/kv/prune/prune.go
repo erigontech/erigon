@@ -258,11 +258,27 @@ func TableScanningPrune(
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
 	txNumBytes, val := common.Copy(valCursorPosition.StartKey), common.Copy(valCursorPosition.StartVal)
 
-	// Pre-compute step values for StepValueStorageMode to avoid per-iteration allocations
+	// Pre-compute DeleteDupRange boundaries for StepValueStorageMode.
+	// Domain DupSort values are stored as ^step(8 bytes) || actual_data, sorted bytewise ascending.
+	// ^step inverts the ordering: step 0 → ^0 = 0xFFFFFFFFFFFFFFFF (sorts last),
+	// step N → ^N (sorts earlier). So newer steps sort first.
+	//
+	// To delete steps in [firstStep, lastStep] inclusive, we need the byte range
+	// [^lastStep, ^firstStep+1) because DeleteDupRange uses [from, to) semantics.
+	// Special case: when firstStep=0, ^0+1 overflows uint64, so we use to=nil
+	// which means "delete to end of values for this key".
 	var stepValFrom, stepValTo [8]byte
+	var stepValFromSlice, stepValToSlice []byte
 	if mode == StepValueStorageMode {
-		binary.BigEndian.PutUint64(stepValFrom[:], ^(txTo / stepSize))
-		binary.BigEndian.PutUint64(stepValTo[:], ^(txFrom / stepSize))
+		lastStep := txTo/stepSize - 1  // last step to delete (inclusive)
+		firstStep := txFrom / stepSize // first step to delete (inclusive)
+		binary.BigEndian.PutUint64(stepValFrom[:], ^lastStep)
+		stepValFromSlice = stepValFrom[:]
+		if firstStep > 0 {
+			binary.BigEndian.PutUint64(stepValTo[:], ^firstStep+1)
+			stepValToSlice = stepValTo[:]
+		}
+		// else: stepValToSlice stays nil → DeleteDupRange deletes to end of values
 	}
 
 	// Use iteration counter to amortize time.Since syscall cost
@@ -314,14 +330,37 @@ func TableScanningPrune(
 			lastDupTxNum = binary.BigEndian.Uint64(lastDupTxNumB)
 		}
 
-		if txNum >= txTo {
+		// For StepValueStorageMode, txNum is the NEWEST step (highest txNum) and
+		// lastDupTxNum is the OLDEST step. We must check that ALL dups are outside
+		// the prune range before skipping. For other modes, txNum is the first dup
+		// (smallest txNum), so txNum >= txTo means all dups are out of range.
+		var skipKey bool
+		switch mode {
+		case StepValueStorageMode:
+			// newest step (first dup) has highest txNum; oldest (last dup) has lowest
+			// skip only if even the oldest step is beyond the prune range
+			skipKey = lastDupTxNum >= txTo
+		default:
+			skipKey = txNum >= txTo
+		}
+		if skipKey {
 			val, txNumBytes, err = valDelCursor.NextNoDup()
 			if err != nil {
 				return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 			}
 			continue
 		}
-		dupsDelete := lastDupTxNum < txTo && txNum >= txFrom
+		// dupsDelete is true when ALL dups of this key are within [txFrom, txTo).
+		// For StepValueStorageMode: txNum=newest(highest), lastDupTxNum=oldest(lowest).
+		// For other modes: txNum=first dup(smallest), lastDupTxNum=last dup(largest).
+		var dupsDelete bool
+		if mode == StepValueStorageMode {
+			// ALL in range when: newest < txTo AND oldest >= txFrom
+			dupsDelete = txNum < txTo && lastDupTxNum >= txFrom
+		} else {
+			// ALL in range when: largest < txTo AND smallest >= txFrom
+			dupsDelete = lastDupTxNum < txTo && txNum >= txFrom
+		}
 		if asserts && txNum < txFrom {
 			panic(fmt.Errorf("assert: index pruning txn=%d [%d-%d)", txNum, txFrom, txTo))
 		}
@@ -345,21 +384,17 @@ func TableScanningPrune(
 			}
 			stat.PruneCountValues += dups
 		} else if mode != KeyStorageMode && mode != StepKeyStorageMode {
-			// DeleteDupRange invalidates cursor position, so we save the key
-			// and re-seek after. If all dups were deleted, Seek returns the next key
-			// which we process directly without calling NextNoDup.
+			// Use DeleteDupRange for bulk deletion. It invalidates cursor position,
+			// so we save the key and re-seek after.
 			savedKey := common.Copy(val)
 			var n int64
 			if mode == StepValueStorageMode {
-				n, err = valDelCursor.DeleteDupRange(val, stepValFrom[:], stepValTo[:])
-				if err != nil {
-					return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
-				}
+				n, err = valDelCursor.DeleteDupRange(val, stepValFromSlice, stepValToSlice)
 			} else {
 				n, err = valDelCursor.DeleteDupRange(val, txnfromb[:], txntob[:])
-				if err != nil {
-					return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
-				}
+			}
+			if err != nil {
+				return nil, fmt.Errorf("DeleteDupRange over %s: %w", filenameBase, err)
 			}
 			stat.PruneCountValues += uint64(n)
 			// Re-seek to restore cursor position after DeleteDupRange
@@ -368,10 +403,10 @@ func TableScanningPrune(
 				return nil, fmt.Errorf("re-seek after DeleteDupRange %s: %w", filenameBase, err)
 			}
 			if val == nil {
-				break // no more keys
+				break
 			}
 			// If same key still exists (has remaining dups outside prune range),
-			// advance to next key. If Seek returned a different key, process it
+			// advance to next key. If Seek landed on a different key, process it
 			// directly on next iteration.
 			if bytes.Equal(val, savedKey) {
 				val, txNumBytes, err = valDelCursor.NextNoDup()
@@ -379,7 +414,6 @@ func TableScanningPrune(
 					return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 				}
 			}
-			// skip the normal NextNoDup at bottom — we already advanced
 			continue
 		} else {
 			for ; txNumBytes != nil; _, txNumBytes, err = valDelCursor.NextDup() {
