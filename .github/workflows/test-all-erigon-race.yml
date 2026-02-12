@@ -118,7 +118,7 @@ jobs:
               go test -timeout 20m ./db/... ./node/... ./txnprovider/...
               ;;
             other)
-              DIRS=$(ls -d -- */ | grep -vE '^(execution|cl|p2p|rpc|db|node|txnprovider)/$' | sed 's/\/$//')
+              DIRS=$(ls -d -- */ | grep -vE '^(execution|cl|p2p|rpc|db|node|txnprovider|dashboards)/$' | sed 's/\/$//')
               for d in $DIRS; do
                 if [ -d "$d" ]; then
                   go test -timeout 20m "./$d/..."
