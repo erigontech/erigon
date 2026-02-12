@@ -223,7 +223,12 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 		balIO.RecordWrites(systemVersion, systemWrites)
 		balIO.RecordAccesses(systemVersion, systemAccess)
 		current.BlockAccessList = CreateBAL(blockHeight, balIO, execCfg.dirs.DataDir)
+		// Note: This gets reset in MiningFinish - but we need it here to
+		// process execv3 - when we remove that this becomes redundant
+		hash := current.BlockAccessList.Hash()
+		block.HeaderNoCopy().BlockAccessListHash = &hash
 	}
+
 	writeBlockForExecution := func(rwTx kv.TemporalRwTx) error {
 		if err = rawdb.WriteHeader(rwTx, block.Header()); err != nil {
 			return fmt.Errorf("cannot write header: %s", err)

@@ -168,6 +168,10 @@ func (h *Header) EncodingSize() int {
 		encodingSize += 33
 	}
 
+	if h.SlotNumber != nil {
+		encodingSize += rlp.U64Len(*h.SlotNumber)
+	}
+
 	return encodingSize
 }
 
@@ -328,6 +332,11 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 		}
 	}
 
+	if h.SlotNumber != nil {
+		if err := rlp.EncodeInt(*h.SlotNumber, w, b[:]); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -506,6 +515,19 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	}
 	h.BlockAccessListHash = new(common.Hash)
 	h.BlockAccessListHash.SetBytes(b)
+
+	var slotNumber uint64
+	if slotNumber, err = s.Uint(); err != nil {
+		if errors.Is(err, rlp.EOL) {
+			h.SlotNumber = nil
+			if err := s.ListEnd(); err != nil {
+				return fmt.Errorf("close header struct (no ExcessBlobGas): %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("read SlotNumber: %w", err)
+	}
+	h.SlotNumber = &slotNumber
 
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close header struct: %w", err)

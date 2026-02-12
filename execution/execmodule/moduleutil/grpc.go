@@ -82,6 +82,10 @@ func HeaderToHeaderRPC(header *types.Header) *executionproto.Header {
 		h.BlockAccessListHash = gointerfaces.ConvertHashToH256(*header.BlockAccessListHash)
 	}
 
+	if header.SlotNumber != nil {
+		h.SlotNumber = header.SlotNumber
+	}
+
 	if len(header.AuRaSeal) > 0 {
 		h.AuraSeal = header.AuRaSeal
 		h.AuraStep = &header.AuRaStep
@@ -140,6 +144,7 @@ func HeaderRpcToHeader(header *executionproto.Header) (*types.Header, error) {
 		Nonce:         blockNonce,
 		BlobGasUsed:   header.BlobGasUsed,
 		ExcessBlobGas: header.ExcessBlobGas,
+		SlotNumber:    header.SlotNumber,
 	}
 	if header.AuraStep != nil {
 		h.AuRaSeal = header.AuraSeal

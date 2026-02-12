@@ -298,6 +298,11 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			hash := crypto.Keccak256Hash(*req.BlockAccessList)
 			header.BlockAccessListHash = &hash
 		}
+		if req.SlotNumber == nil {
+			return nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
+		}
+		slotNumber := uint64(*req.SlotNumber)
+		header.SlotNumber = &slotNumber
 	} else if req.BlockAccessList != nil {
 		return nil, &rpc.InvalidParamsError{Message: "unexpected blockAccessList before Amsterdam"}
 	}
