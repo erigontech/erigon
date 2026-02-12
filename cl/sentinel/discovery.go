@@ -45,24 +45,32 @@ func (s *Sentinel) getSubnetCoverage() [attestationSubnetCount]int {
 	var coverage [attestationSubnetCount]int
 	peers := s.p2p.Host().Network().Peers()
 
+	metaSuccess, metaFail, enrFallback, skipped := 0, 0, 0, 0
 	for _, pid := range peers {
 		// Get attnets from cache or query on-demand
 		attnets, ok := s.GetPeerAttnets(pid)
 		if !ok {
+			metaFail++
 			// Fallback to ENR data if metadata query fails
 			nodeVal, ok := s.pidToEnr.Load(pid)
 			if !ok {
+				skipped++
 				continue
 			}
 			node, ok := nodeVal.(*enode.Node)
 			if !ok {
+				skipped++
 				continue
 			}
 			var peerSubnets bitfield.Bitvector64
 			if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err != nil {
+				skipped++
 				continue
 			}
 			attnets = [8]byte(peerSubnets)
+			enrFallback++
+		} else {
+			metaSuccess++
 		}
 
 		// Count which subnets this peer covers
@@ -72,6 +80,7 @@ func (s *Sentinel) getSubnetCoverage() [attestationSubnetCount]int {
 			}
 		}
 	}
+	log.Debug("[Sentinel] Subnet coverage check", "totalPeers", len(peers), "metaSuccess", metaSuccess, "metaFail", metaFail, "enrFallback", enrFallback, "skipped", skipped)
 	return coverage
 }
 

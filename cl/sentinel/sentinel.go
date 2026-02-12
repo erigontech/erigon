@@ -195,6 +195,7 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 		DisconnectedF: func(n network.Network, c network.Conn) {
 			peerId := c.RemotePeer()
 			s.peers.RemovePeer(peerId)
+			log.Debug("[Sentinel] Peer disconnected", "peer", peerId)
 			// peerAttnetsCache uses TTL, no manual cleanup needed
 		},
 	})
