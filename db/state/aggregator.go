@@ -1793,6 +1793,14 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 	return ac
 }
 
+func (at *AggregatorRoTx) UseRpcCache() {
+	for _, d := range at.d {
+		if d != nil {
+			d.UseRpcCache()
+		}
+	}
+}
+
 func (at *AggregatorRoTx) Dirs() datadir.Dirs { return at.a.dirs }
 
 func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
