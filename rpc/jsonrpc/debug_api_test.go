@@ -293,7 +293,7 @@ func TestStorageRangeAt(t *testing.T) {
 		// limited
 		result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, nil, 2)
 		require.NoError(t, err)
-		expect = StorageRangeResult{storageMap{keys[0]: storage[keys[0]], keys[2]: storage[keys[2]]}, &keys[5]}
+		expect = StorageRangeResult{storageMap{keys[0]: storage[keys[0]], keys[2]: storage[keys[2]]}, &keys[4]}
 		if !reflect.DeepEqual(result, expect) {
 			t.Fatalf("wrong result:\ngot %s\nwant %s", dumper.Sdump(result), dumper.Sdump(&expect))
 		}

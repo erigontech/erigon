@@ -17,6 +17,10 @@
 package jsonrpc
 
 import (
+	"bytes"
+	"container/heap"
+	"slices"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -39,36 +43,59 @@ type StorageEntry struct {
 	Value common.Hash  `json:"value"`
 }
 
+// hashedStorageEntry is an intermediate type used for sorting storage entries by their hashed key.
+type hashedStorageEntry struct {
+	seckey common.Hash // keccak256 of the raw storage key
+	key    common.Hash // raw storage key (preimage)
+	value  common.Hash
+}
+
+// storageEntryMaxHeap is a max-heap of hashedStorageEntry ordered by seckey.
+// Used to efficiently find the smallest maxResult+1 entries from a full storage scan.
+type storageEntryMaxHeap []hashedStorageEntry
+
+func (h storageEntryMaxHeap) Len() int { return len(h) }
+func (h storageEntryMaxHeap) Less(i, j int) bool {
+	return bytes.Compare(h[i].seckey[:], h[j].seckey[:]) > 0 // max-heap: largest first
+}
+func (h storageEntryMaxHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+
+func (h *storageEntryMaxHeap) Push(x any) {
+	*h = append(*h, x.(hashedStorageEntry))
+}
+
+func (h *storageEntryMaxHeap) Pop() any {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[:n-1]
+	return x
+}
+
 func storageRangeAt(ttx kv.TemporalTx, contractAddress common.Address, start []byte, txNum uint64, maxResult int) (StorageRangeResult, error) {
 	result := StorageRangeResult{Storage: storageMap{}}
 
-	fromKey := append(common.Copy(contractAddress.Bytes()), start...)
-	toKey, _ := kv.NextSubtree(contractAddress.Bytes())
+	// Always scan all storage for this contract — we need to sort by hashed key
+	// to match Geth's trie-based iteration order.
+	fromKey := common.Copy(contractAddress.Bytes())
+	toKey, _ := kv.NextSubtree(fromKey)
 
-	r, err := ttx.RangeAsOf(kv.StorageDomain, fromKey, toKey, txNum, order.Asc, kv.Unlim) //no limit because need skip empty records
+	r, err := ttx.RangeAsOf(kv.StorageDomain, fromKey, toKey, txNum, order.Asc, kv.Unlim)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
 	defer r.Close()
-	for len(result.Storage) < maxResult && r.HasNext() {
-		k, v, err := r.Next()
-		if err != nil {
-			return StorageRangeResult{}, err
-		}
-		if len(v) == 0 {
-			continue // Skip deleted entries
-		}
-		key := common.BytesToHash(k[20:])
-		seckey, err := common.HashData(k[20:])
-		if err != nil {
-			return StorageRangeResult{}, err
-		}
-		var value uint256.Int
-		value.SetBytes(v)
-		result.Storage[seckey] = StorageEntry{Key: &key, Value: value.Bytes32()}
-	}
 
-	for r.HasNext() { // not `if` because need skip empty vals
+	// We need the smallest maxResult+1 entries (by hashed key) that are >= start.
+	// Use a bounded max-heap of size maxResult+1: we keep pushing eligible entries
+	// and evict the largest whenever the heap exceeds the limit. This gives O(n log k)
+	// time and O(k) memory, where k = maxResult+1 and n = total storage entries.
+	startHash := common.BytesToHash(start)
+	hasStart := len(start) > 0
+	limit := maxResult + 1 // +1 to determine nextKey
+	h := make(storageEntryMaxHeap, 0, limit+1)
+
+	for r.HasNext() {
 		k, v, err := r.Next()
 		if err != nil {
 			return StorageRangeResult{}, err
@@ -76,9 +103,49 @@ func storageRangeAt(ttx kv.TemporalTx, contractAddress common.Address, start []b
 		if len(v) == 0 {
 			continue
 		}
-		key := common.BytesToHash(k[20:])
-		result.NextKey = &key
-		break
+		rawKey := k[20:]
+		seckey, err := common.HashData(rawKey)
+		if err != nil {
+			return StorageRangeResult{}, err
+		}
+
+		// Skip entries with hashed key < start.
+		if hasStart && bytes.Compare(seckey[:], startHash[:]) < 0 {
+			continue
+		}
+
+		// If the heap is full and this entry is larger than the current max, skip it.
+		if h.Len() == limit && bytes.Compare(seckey[:], h[0].seckey[:]) >= 0 {
+			continue
+		}
+
+		var value uint256.Int
+		value.SetBytes(v)
+		heap.Push(&h, hashedStorageEntry{
+			seckey: seckey,
+			key:    common.BytesToHash(rawKey),
+			value:  value.Bytes32(),
+		})
+		if h.Len() > limit {
+			heap.Pop(&h)
+		}
 	}
+
+	// Sort the collected entries by hashed key (ascending).
+	entries := []hashedStorageEntry(h)
+	slices.SortFunc(entries, func(a, b hashedStorageEntry) int {
+		return bytes.Compare(a.seckey[:], b.seckey[:])
+	})
+
+	// Fill result with up to maxResult entries; the extra one (if present) becomes nextKey.
+	for i := range entries {
+		if i >= maxResult {
+			result.NextKey = &entries[i].seckey
+			break
+		}
+		key := entries[i].key
+		result.Storage[entries[i].seckey] = StorageEntry{Key: &key, Value: entries[i].value}
+	}
+
 	return result, nil
 }
