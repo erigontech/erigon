@@ -25,6 +25,15 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
+const (
+	// DefaultAccountCacheBytes is the byte limit for account cache (1 GB)
+	DefaultAccountCacheBytes = 1 * datasize.GB
+	// DefaultStorageCacheBytes is the byte limit for storage cache (2 GB)
+	DefaultStorageCacheBytes = 2 * datasize.GB
+	// DefaultCommitmentCacheBytes is the byte limit for commitment cache (128 MB)
+	DefaultCommitmentCacheBytes = 128 * datasize.MB
+)
+
 // StateCache is a unified cache for domain data (Account, Storage, Code).
 // Uses an array indexed by kv.Domain. Only Account, Storage, and Code domains
 // are supported; other indices are nil.
@@ -41,7 +50,7 @@ func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes, commitmentB
 	sc.caches[kv.AccountsDomain] = NewDomainCache(accountBytes)
 	sc.caches[kv.StorageDomain] = NewDomainCache(storageBytes)
 	sc.caches[kv.CodeDomain] = NewCodeCache(codeBytes, addrBytes)
-	sc.caches[kv.CommitmentDomain] = NewDomainCache(commitmentBytes)
+	//sc.caches[kv.CommitmentDomain] = NewDomainCache(commitmentBytes)
 	return sc
 }
 
