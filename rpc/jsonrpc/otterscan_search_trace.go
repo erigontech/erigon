@@ -79,6 +79,11 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 		return false, nil, nil
 	}
 
+	err = rpchelper.CheckBlockExecuted(dbtx, blockNum)
+	if err != nil {
+		return false, nil, err
+	}
+
 	reader, err := rpchelper.CreateHistoryStateReader(ctx, dbtx, blockNum, 0, api._txNumReader)
 	if err != nil {
 		return false, nil, err
@@ -148,7 +153,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 				}
 				return false, nil, fmt.Errorf("requested receipt idx %d, but have only %d", idx, len(blockReceipts)) // otherwise return some error for debugging
 			}
-			rpcTx := ethapi.NewRPCTransaction(txn, block.Hash(), blockNum, uint64(idx), block.BaseFee())
+			rpcTx := ethapi.NewRPCTransaction(txn, block.Hash(), block.Time(), blockNum, uint64(idx), block.BaseFee())
 			mReceipt := ethutils.MarshalReceipt(blockReceipts[idx], txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, false)
 			mReceipt["timestamp"] = block.Time()
 			rpcTxs = append(rpcTxs, rpcTx)

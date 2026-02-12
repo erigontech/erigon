@@ -14,15 +14,24 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package chainspec
+package stateifs
 
-const (
-	MainnetChainID    = 1
-	SepoliaChainID    = 11155111
-	HoodiChainID      = 560048
-	GnosisChainID     = 100
-	ChiadoChainID     = 10200
-	BloatnetNetworkID = 12159 // Bloatnet NetworkID (ChainID is 1/mainnet)
+import (
+	"github.com/erigontech/erigon/db/kv"
 )
 
-var NetworkNameByID = make(map[uint64]string)
+// DomainPutter is an interface for putting data into domains.
+// Used by commitment to write branch data.
+// SharedDomains implements this interface directly.
+type DomainPutter interface {
+	DomainPut(domain kv.Domain, tx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error
+}
+
+// CommitmentWrite represents a commitment domain write that needs to be added to changesets.
+type CommitmentWrite struct {
+	Key      []byte
+	Value    []byte
+	TxNum    uint64
+	PrevVal  []byte
+	PrevStep kv.Step
+}
