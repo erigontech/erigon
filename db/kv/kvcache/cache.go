@@ -302,8 +302,7 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 				c.add(addr[:], v, r, id)
 				c.hasher.Reset()
 				c.hasher.Write(sc.Changes[i].Code)
-				k := make([]byte, 32)
-				c.hasher.Sum(k)
+				k := c.hasher.Sum(nil)
 				c.addCode(k, sc.Changes[i].Code, r, id)
 			case remoteproto.Action_REMOVE:
 				addr := gointerfaces.ConvertH160toAddress(sc.Changes[i].Address)
@@ -313,8 +312,7 @@ func (c *Coherent) OnNewBlock(stateChanges *remoteproto.StateChangeBatch) {
 			case remoteproto.Action_CODE:
 				c.hasher.Reset()
 				c.hasher.Write(sc.Changes[i].Code)
-				k := make([]byte, 32)
-				c.hasher.Sum(k)
+				k := c.hasher.Sum(nil)
 				c.addCode(k, sc.Changes[i].Code, r, id)
 			default:
 				panic("not implemented yet")

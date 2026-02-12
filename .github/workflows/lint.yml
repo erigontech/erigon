@@ -9,6 +9,7 @@ on:
       - main
       - 'release/**'
       - performance
+      - performance-stable
     types:
       - opened
       - reopened

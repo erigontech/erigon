@@ -2472,4 +2472,70 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		// Generate witness for both the address and its storage slot
 		buildTrieAndWitness(t, builder, [][]byte{plainKeys5[0], fullStorageKey}, []bool{true, true})
 	})
+
+	t.Run("Multiproof_NonExistentStorageProof", func(t *testing.T) {
+		t.Logf("Multiproof_NonExistentStorageProof")
+		// Create multiple accounts with different hash prefixes
+		// All accounts EXCEPT ONE will have storage
+		plainKeys1, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x1}, length.Addr, 1, 3)
+		plainKeys5, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5}, length.Addr, 1, 50)
+		plainKeysA, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0xa}, length.Addr, 1, 2)
+		plainKeysF, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0xf}, length.Addr, 1, 1)
+
+		// Collect all accounts
+		allAccounts := append([][]byte(nil), plainKeys1...)
+		allAccounts = append(allAccounts, plainKeys5...)
+		allAccounts = append(allAccounts, plainKeysA...)
+		allAccounts = append(allAccounts, plainKeysF...)
+
+		// The  account WITHOUT storage - we'll prove non-existent storage for this
+		addrWithoutStorage := common.Copy(plainKeys5[len(plainKeys5)-1])
+
+		// Account WITH storage - we'll prove both the account and one of its storage slots
+		addrWithStorage := common.Copy(plainKeys5[0])
+		var existingStorageSlot []byte // Will be set when we add storage to this account
+
+		// Generate a non-existent storage key for the account without storage
+		storageSlotToProve, _ := generateKeyWithHashedPrefix([]byte{0x7, 0x8}, length.Hash)
+		fullNonExistentStorageKey := common.Copy(addrWithoutStorage)
+		fullNonExistentStorageKey = append(fullNonExistentStorageKey, storageSlotToProve...)
+		require.Equal(t, len(fullNonExistentStorageKey), length.Addr+length.Hash)
+
+		builder := NewUpdateBuilder()
+
+		// Add balance to all accounts and storage to every account EXCEPT addrWithoutStorage
+		for i, addr := range allAccounts {
+			builder.Balance(common.Bytes2Hex(addr), uint64(i+1))
+			fmt.Printf("addr %x\n", addr)
+
+			// Skip storage for the one account we want to prove non-existent storage for
+			if bytes.Equal(addr, addrWithoutStorage) {
+				continue
+			}
+
+			// Generate unique storage slots for this account
+			storageSlots, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x7}, length.Hash, 2, 50)
+			for _, slot := range storageSlots {
+				builder.Storage(common.Bytes2Hex(addr), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
+			}
+
+			// Save one existing storage slot for the account we'll prove
+			if bytes.Equal(addr, addrWithStorage) {
+				existingStorageSlot = common.Copy(storageSlots[0])
+			}
+		}
+
+		// Build full key for the existing storage slot
+		fullExistingStorageKey := common.Copy(addrWithStorage)
+		fullExistingStorageKey = append(fullExistingStorageKey, existingStorageSlot...)
+		require.Equal(t, len(fullExistingStorageKey), length.Addr+length.Hash)
+
+		// Request proofs for:
+		// 1. plainKeys5[0] account (exists)
+		// 2. One of plainKeys5[0]'s existing storage slots (exists)
+		// 3. Non-existent storage key on addrWithoutStorage (doesn't exist)
+		keysToProve := [][]byte{addrWithStorage, fullExistingStorageKey, fullNonExistentStorageKey}
+		keyExists := []bool{true, true, false}
+		buildTrieAndWitness(t, builder, keysToProve, keyExists)
+	})
 }

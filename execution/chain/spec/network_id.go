@@ -17,11 +17,12 @@
 package chainspec
 
 const (
-	MainnetChainID = 1
-	SepoliaChainID = 11155111
-	HoodiChainID   = 560048
-	GnosisChainID  = 100
-	ChiadoChainID  = 10200
+	MainnetChainID    = 1
+	SepoliaChainID    = 11155111
+	HoodiChainID      = 560048
+	GnosisChainID     = 100
+	ChiadoChainID     = 10200
+	BloatnetNetworkID = 12159 // Bloatnet NetworkID (ChainID is 1/mainnet)
 )
 
 var NetworkNameByID = make(map[uint64]string)
