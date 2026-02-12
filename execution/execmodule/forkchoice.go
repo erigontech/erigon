@@ -451,6 +451,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 
 	for hasMore := true; hasMore; {
+		currentContext.SetStateCache(e.stateCache)
 		hasMore, err = e.executionPipeline.Run(currentContext, tx, initialCycle, firstCycle)
 		if err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
