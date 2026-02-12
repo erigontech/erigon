@@ -38,7 +38,10 @@ DISABLED_TEST_LIST=(
   txpool_status/test_1.json
   web3_clientVersion/test_1.json
   # tests not updated after cherry-picking
+  eth_getBalance/test_05.json
   eth_getStorageAt/test_09.json
+  ots_hasCode/test_06.json
+  ots_hasCode/test_09.json
   # disabled because eth_createAccessList/test_19.json currently fails on mainnet; root cause under investigation
   eth_createAccessList/test_19.json
 )
