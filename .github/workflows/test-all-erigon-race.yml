@@ -118,7 +118,12 @@ jobs:
               go test -timeout 20m ./db/... ./node/... ./txnprovider/...
               ;;
             other)
-              go test -timeout 20m ./cmd/... ./common/... ./polygon/... ./diagnostics/... ./internal/...
+              DIRS=$(ls -d -- */ | grep -vE '^(execution|cl|p2p|rpc|db|node|txnprovider)/$' | sed 's/\/$//')
+              for d in $DIRS; do
+                if [ -d "$d" ]; then
+                  go test -timeout 20m "./$d/..."
+                fi
+              done
               ;;
           esac
 
