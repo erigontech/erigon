@@ -236,7 +236,6 @@ func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
 	encodingSize += rlp.ListPrefixLen(blockLen) + blockLen
 	// size of TD
 	encodingSize += rlp.BigIntLen(nbp.TD)
-	var b [32]byte
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(encodingSize, w); err != nil {
 		return err
@@ -246,6 +245,7 @@ func (nbp NewBlockPacket) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	// encode TD
+	var b [32]byte
 	if err := rlp.EncodeBigInt(nbp.TD, w, b[:]); err != nil {
 		return err
 	}
