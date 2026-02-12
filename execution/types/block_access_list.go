@@ -48,7 +48,7 @@ type SlotChanges struct {
 
 type StorageChange struct {
 	Index uint16
-	Value common.Hash
+	Value uint256.Int
 }
 
 type BalanceChange struct {
@@ -62,8 +62,8 @@ type NonceChange struct {
 }
 
 type CodeChange struct {
-	Index uint16
-	Data  []byte
+	Index    uint16
+	Bytecode []byte
 }
 
 // indexedChange interface for generic validation of change types with indices
@@ -234,8 +234,7 @@ func (sc *SlotChanges) DecodeRLP(s *rlp.Stream) error {
 
 func (sc *StorageChange) EncodingSize() int {
 	size := rlp.U64Len(uint64(sc.Index))
-	valInt := uint256FromHash(sc.Value)
-	size += rlp.Uint256Len(valInt)
+	size += rlp.Uint256Len(sc.Value)
 
 	return size
 }
@@ -251,8 +250,7 @@ func (sc *StorageChange) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeInt(uint64(sc.Index), w, b[:]); err != nil {
 		return err
 	}
-	valInt := uint256FromHash(sc.Value)
-	return rlp.EncodeUint256(valInt, w, b[:])
+	return rlp.EncodeUint256(sc.Value, w, b[:])
 }
 
 func (sc *StorageChange) DecodeRLP(s *rlp.Stream) error {
@@ -267,11 +265,14 @@ func (sc *StorageChange) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("block access index overflow: %d", idx)
 	}
 	sc.Index = uint16(idx)
-	value, err := decodeUint256Hash(s)
+	valBytes, err := s.Bytes()
 	if err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
-	sc.Value = value
+	if len(valBytes) > 32 {
+		return fmt.Errorf("read Value: integer too large")
+	}
+	sc.Value.SetBytes(valBytes)
 	return s.ListEnd()
 }
 
@@ -360,7 +361,7 @@ func (nc *NonceChange) DecodeRLP(s *rlp.Stream) error {
 
 func (cc *CodeChange) EncodingSize() int {
 	size := rlp.U64Len(uint64(cc.Index))
-	size += rlp.StringLen(cc.Data)
+	size += rlp.StringLen(cc.Bytecode)
 	return size
 }
 
@@ -375,7 +376,7 @@ func (cc *CodeChange) EncodeRLP(w io.Writer) error {
 	if err := rlp.EncodeInt(uint64(cc.Index), w, b[:]); err != nil {
 		return err
 	}
-	return rlp.EncodeString(cc.Data, w, b[:])
+	return rlp.EncodeString(cc.Bytecode, w, b[:])
 }
 
 func (cc *CodeChange) DecodeRLP(s *rlp.Stream) error {
@@ -392,9 +393,9 @@ func (cc *CodeChange) DecodeRLP(s *rlp.Stream) error {
 	cc.Index = uint16(idx)
 	data, err := s.Bytes()
 	if err != nil {
-		return fmt.Errorf("read Data: %w", err)
+		return fmt.Errorf("read Bytecode: %w", err)
 	}
-	cc.Data = data
+	cc.Bytecode = data
 	return s.ListEnd()
 }
 
@@ -974,7 +975,7 @@ func (bal BlockAccessList) DebugString() string {
 					sb.WriteString("<nil>")
 					continue
 				}
-				fmt.Fprintf(&sb, "%d:len(%d)", change.Index, len(change.Data))
+				fmt.Fprintf(&sb, "%d:len(%d)", change.Index, len(change.Bytecode))
 			}
 			sb.WriteString("]")
 		}
@@ -1000,10 +1001,10 @@ func ConvertBlockAccessListFromTypesProto(protoList []*typesproto.BlockAccessLis
 				if sc.Changes != nil {
 					bal[i].StorageChanges[j].Changes = make([]*StorageChange, len(sc.Changes))
 					for k, c := range sc.Changes {
-						val := gointerfaces.ConvertH256ToHash(c.Value)
+						val := gointerfaces.ConvertH256ToUint256Int(c.Value)
 						bal[i].StorageChanges[j].Changes[k] = &StorageChange{
 							Index: uint16(c.Index),
-							Value: val,
+							Value: *val,
 						}
 					}
 				}
@@ -1038,8 +1039,8 @@ func ConvertBlockAccessListFromTypesProto(protoList []*typesproto.BlockAccessLis
 			bal[i].CodeChanges = make([]*CodeChange, len(acc.CodeChanges))
 			for j, cc := range acc.CodeChanges {
 				bal[i].CodeChanges[j] = &CodeChange{
-					Index: uint16(cc.Index),
-					Data:  cc.Data,
+					Index:    uint16(cc.Index),
+					Bytecode: cc.Data,
 				}
 			}
 		}
@@ -1075,9 +1076,10 @@ func ConvertBlockAccessListToTypesProto(bal BlockAccessList) []*typesproto.Block
 				if change == nil {
 					continue
 				}
+				val := change.Value
 				slotChanges.Changes = append(slotChanges.Changes, &typesproto.BlockAccessListStorageChange{
 					Index: uint32(change.Index),
-					Value: gointerfaces.ConvertHashToH256(change.Value),
+					Value: gointerfaces.ConvertUint256IntToH256(&val),
 				})
 			}
 			balAccount.StorageChanges = append(balAccount.StorageChanges, slotChanges)
@@ -1108,8 +1110,8 @@ func ConvertBlockAccessListToTypesProto(bal BlockAccessList) []*typesproto.Block
 			if codeChange == nil {
 				continue
 			}
-			data := make([]byte, len(codeChange.Data))
-			copy(data, codeChange.Data)
+			data := make([]byte, len(codeChange.Bytecode))
+			copy(data, codeChange.Bytecode)
 			balAccount.CodeChanges = append(balAccount.CodeChanges, &typesproto.BlockAccessListCodeChange{
 				Index: uint32(codeChange.Index),
 				Data:  data,
@@ -1159,9 +1161,10 @@ func ConvertBlockAccessListToExecutionProto(bal BlockAccessList) []*executionpro
 				if change == nil {
 					continue
 				}
+				val := change.Value
 				slotChanges.Changes = append(slotChanges.Changes, &executionproto.BlockAccessListStorageChange{
 					Index: uint32(change.Index),
-					Value: gointerfaces.ConvertHashToH256(change.Value),
+					Value: gointerfaces.ConvertUint256IntToH256(&val),
 				})
 			}
 			rpcAccount.StorageChanges = append(rpcAccount.StorageChanges, slotChanges)
@@ -1192,8 +1195,8 @@ func ConvertBlockAccessListToExecutionProto(bal BlockAccessList) []*executionpro
 			if codeChange == nil {
 				continue
 			}
-			data := make([]byte, len(codeChange.Data))
-			copy(data, codeChange.Data)
+			data := make([]byte, len(codeChange.Bytecode))
+			copy(data, codeChange.Bytecode)
 			rpcAccount.CodeChanges = append(rpcAccount.CodeChanges, &executionproto.BlockAccessListCodeChange{
 				Index: uint32(codeChange.Index),
 				Data:  data,
@@ -1237,9 +1240,10 @@ func ConvertExecutionProtoToBlockAccessList(protoList []*executionproto.BlockAcc
 				if change.Value == nil {
 					return nil, fmt.Errorf("blockAccessList account %d storageChanges[%d].changes[%d] missing value", accountIdx, slotIdx, changeIdx)
 				}
+				val := gointerfaces.ConvertH256ToUint256Int(change.Value)
 				slotChanges.Changes = append(slotChanges.Changes, &StorageChange{
 					Index: uint16(change.Index),
-					Value: gointerfaces.ConvertH256ToHash(change.Value),
+					Value: *val,
 				})
 			}
 			accountChanges.StorageChanges = append(accountChanges.StorageChanges, slotChanges)
@@ -1288,8 +1292,8 @@ func ConvertExecutionProtoToBlockAccessList(protoList []*executionproto.BlockAcc
 			data := make([]byte, len(codeChange.Data))
 			copy(data, codeChange.Data)
 			accountChanges.CodeChanges = append(accountChanges.CodeChanges, &CodeChange{
-				Index: uint16(codeChange.Index),
-				Data:  data,
+				Index:    uint16(codeChange.Index),
+				Bytecode: data,
 			})
 		}
 		out = append(out, accountChanges)
