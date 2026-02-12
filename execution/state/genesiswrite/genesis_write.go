@@ -502,6 +502,11 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		} else {
 			head.BlockAccessListHash = &empty.BlockAccessListHash
 		}
+		if g.SlotNumber != nil {
+			head.SlotNumber = g.SlotNumber
+		} else {
+			head.SlotNumber = new(uint64)
+		}
 	}
 
 	// these fields need to be overriden for Bor running in a kurtosis devnet
