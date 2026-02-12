@@ -5,6 +5,17 @@ on:
     branches:
       - main
       - 'release/**'
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+      - performance
+      - performance-stable
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
   schedule:
     - cron: "0 05 * * *" # daily at 5 am UTC
   workflow_dispatch:
@@ -12,6 +23,7 @@ on:
 
 jobs:
   test-hive:
+    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     runs-on:
       group: hive
     strategy:
