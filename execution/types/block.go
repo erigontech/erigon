@@ -1253,6 +1253,10 @@ func CopyHeader(h *Header) *Header {
 		cpy.BlockAccessListHash = new(common.Hash)
 		cpy.BlockAccessListHash.SetBytes(h.BlockAccessListHash.Bytes())
 	}
+	if h.SlotNumber != nil {
+		slotNumber := *h.SlotNumber
+		cpy.SlotNumber = &slotNumber
+	}
 	cpy.mutable = h.mutable
 	return &cpy
 }

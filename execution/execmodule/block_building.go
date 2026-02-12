@@ -167,6 +167,7 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
 		BlockHash:     gointerfaces.ConvertHashToH256(block.Hash()),
 		Transactions:  encodedTransactions,
+		SlotNumber:    header.SlotNumber,
 	}
 	if block.Withdrawals() != nil {
 		payload.Version = 2
