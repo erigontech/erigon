@@ -5175,3 +5175,4 @@ TEXT ·keccakF1600(SB), NOSPLIT, $0-8
 	MOVD	R22, 192(R0)
 
 	RET
+	
