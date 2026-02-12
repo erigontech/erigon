@@ -63,7 +63,7 @@ func TestGenerateChain(t *testing.T) {
 		Difficulty: big.NewInt(0),
 		Alloc:      types.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
 	}
-	m := mock.MockWithGenesis(t, gspec, key1, false)
+	m := mock.MockWithGenesis(t, gspec, key1)
 
 	// This call generates a chain of 5 blocks. The function runs for
 	// each block and adds different features to gen based on the

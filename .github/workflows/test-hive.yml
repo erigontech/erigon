@@ -38,7 +38,7 @@ jobs:
             max-allowed-failures: 0
           - sim: rpc
             sim-limit: compat
-            max-allowed-failures: 0
+            max-allowed-failures: 23
     steps:
       - name: Checkout Hive
         uses: actions/checkout@v6

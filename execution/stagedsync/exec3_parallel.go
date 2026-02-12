@@ -184,7 +184,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					}
 					blockUpdateCount += applyResult.stateUpdates.UpdateCount()
 					err := pe.rs.ApplyTxState(ctx, rwTx, applyResult.blockNum, applyResult.txNum, applyResult.stateUpdates,
-						nil, applyResult.receipt, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
+						nil, applyResult.receipt, applyResult.blobGasUsed, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
 						pe.cfg.chainConfig, applyResult.rules, false)
 					blockApplyCount += applyResult.stateUpdates.UpdateCount()
 					pe.rs.SetTrace(false)
@@ -257,7 +257,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						lastBlockResult = *applyResult
 					}
 
-					flushPending = pe.rs.SizeEstimate() > pe.cfg.batchSize.Bytes()
+					flushPending = pe.rs.SizeEstimateBeforeCommitment() > pe.cfg.batchSize.Bytes()
 
 					if !dbg.DiscardCommitment() {
 						if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||
@@ -688,13 +688,14 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					}
 
 					blockExecutor.applyResults <- &txResult{
-						blockNum:     blockResult.BlockNum,
-						txNum:        blockResult.lastTxNum,
-						rules:        result.Rules(),
-						stateUpdates: stateUpdates,
-						logs:         result.Logs,
-						traceFroms:   result.TraceFroms,
-						traceTos:     result.TraceTos,
+						blockNum:              blockResult.BlockNum,
+						txNum:                 blockResult.lastTxNum,
+						rules:                 result.Rules(),
+						stateUpdates:          stateUpdates,
+						logs:                  result.Logs,
+						traceFroms:            result.TraceFroms,
+						traceTos:              result.TraceTos,
+						cumulativeBlobGasUsed: blockExecutor.blobGasUsed,
 					}
 				}
 
@@ -940,15 +941,17 @@ type blockResult struct {
 }
 
 type txResult struct {
-	blockNum     uint64
-	txNum        uint64
-	blockGasUsed int64
-	receipt      *types.Receipt
-	logs         []*types.Log
-	traceFroms   map[accounts.Address]struct{}
-	traceTos     map[accounts.Address]struct{}
-	stateUpdates state.StateUpdates
-	rules        *chain.Rules
+	blockNum              uint64
+	txNum                 uint64
+	blockGasUsed          int64
+	blobGasUsed           uint64
+	cumulativeBlobGasUsed uint64
+	receipt               *types.Receipt
+	logs                  []*types.Log
+	traceFroms            map[accounts.Address]struct{}
+	traceTos              map[accounts.Address]struct{}
+	stateUpdates          state.StateUpdates
+	rules                 *chain.Rules
 }
 
 type execTask struct {
@@ -1007,10 +1010,8 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	rules := txTask.EvmBlockContext.Rules(txTask.Config)
 
 	if task.IsBlockEnd() || txIndex < 0 {
-		if blockNum == 0 || txTask.Config.IsByzantium(blockNum) {
-			if err := ibs.FinalizeTx(rules, stateWriter); err != nil {
-				return nil, nil, nil, err
-			}
+		if err := ibs.FinalizeTx(rules, stateWriter); err != nil {
+			return nil, nil, nil, err
 		}
 		return nil, ibs.VersionedReads(), ibs.VersionedWrites(true), nil
 	}
@@ -1072,10 +1073,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 
 	vm.FlushVersionedWrites(allWrites, true, tracePrefix)
 	vm.SetTrace(false)
-
-	if txTask.Config.IsByzantium(blockNum) {
-		ibs.FinalizeTx(rules, stateWriter)
-	}
+	ibs.FinalizeTx(rules, stateWriter)
 
 	receipt, err := result.CreateNextReceipt(prevReceipt)
 
@@ -1558,26 +1556,31 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			result := be.results[tx]
 
 			applyResult := txResult{
-				blockNum:   be.blockNum,
-				traceFroms: map[accounts.Address]struct{}{},
-				traceTos:   map[accounts.Address]struct{}{},
-				txNum:      task.Version().TxNum,
-				rules:      task.Rules(),
+				blockNum:              be.blockNum,
+				traceFroms:            map[accounts.Address]struct{}{},
+				traceTos:              map[accounts.Address]struct{}{},
+				txNum:                 task.Version().TxNum,
+				rules:                 task.Rules(),
+				cumulativeBlobGasUsed: be.blobGasUsed,
+			}
+
+			if tx := result.Tx(); tx != nil {
+				applyResult.blobGasUsed = tx.GetBlobGas()
 			}
 
 			if result.Receipt != nil {
-				applyResult.blockGasUsed += int64(result.ExecutionResult.BlockGasUsed)
+				applyResult.blockGasUsed = int64(result.ExecutionResult.BlockGasUsed)
 				be.blockGasUsed += result.ExecutionResult.BlockGasUsed
 				applyResult.receipt = result.Receipt
+				applyResult.logs = append(applyResult.logs, result.Receipt.Logs...)
+				pe.executedGas.Add(int64(applyResult.blockGasUsed))
 			}
 
-			applyResult.logs = append(applyResult.logs, result.Logs...)
 			maps.Copy(applyResult.traceFroms, result.TraceFroms)
 			maps.Copy(applyResult.traceTos, result.TraceTos)
 			be.cntFinalized++
 			be.publishTasks.markComplete(tx)
 
-			pe.executedGas.Add(int64(applyResult.blockGasUsed))
 			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
 			if result.stateUpdates != nil {
 				applyResult.stateUpdates = *result.stateUpdates

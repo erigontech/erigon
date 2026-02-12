@@ -1,0 +1,92 @@
+{
+    "tests/static/state_tests/stZeroCallsTest/ZeroValue_TransactionCALLwithData_ToEmpty_ParisFiller.json::ZeroValue_TransactionCALLwithData_ToEmpty_Paris[fork_Osaka-state_test-]": {
+        "_info": {
+            "hash": "0xe76c3b061f9134505efba9e1ac4a1ba1c9faf4326b056d5b19f17a4f76867413",
+            "comment": "`execution-specs` generated test",
+            "filling-transition-tool": "2.18.0rc6",
+            "description": "Issue caught is that we returned error instead of producing a state root hash when there is a singleton storage cell that gets propagated all the way up to the root.",
+            "url": "",
+            "fixture-format": "state_test"
+        },
+        "config": {
+            "blobSchedule": {
+                "Osaka": {
+                    "baseFeeUpdateFraction": "0x4c6964",
+                    "max": "0x9",
+                    "target": "0x6"
+                }
+            }
+        },
+        "env": {
+            "currentBaseFee": "0x0a",
+            "currentBeaconRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "currentCoinbase": "0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba",
+            "currentDifficulty": "0x00",
+            "currentExcessBlobGas": "0x00",
+            "currentGasLimit": "0x989680",
+            "currentNumber": "0x01",
+            "currentRandom": "0x0000000000000000000000000000000000000000000000000000000000020000",
+            "currentTimestamp": "0x03e8",
+            "currentWithdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
+        },
+        "post": {
+            "Osaka": [
+                {
+                    "hash": "0x55a777fbd6131a6e793b310a12e403868f740e0744ce16e87397d4bd5f95c4ec",
+                    "indexes": {
+                        "data": 0,
+                        "gas": 0,
+                        "value": 0
+                    },
+                    "logs": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                    "state": {
+                        "0x5f795c8c073d13ad07184ab82ff2d99b8ae141da": {
+                            "nonce": "0x00",
+                            "balance": "0x0a",
+                            "code": "0x",
+                            "storage": {}
+                        },
+                        "0x79165c698234a3a637439c2ec027c4413ffc85d3": {
+                            "nonce": "0x01",
+                            "balance": "0xe8d4a1bc70",
+                            "code": "0x",
+                            "storage": {}
+                        }
+                    }
+                }
+            ]
+        },
+        "pre": {
+            "0x5f795c8c073d13ad07184ab82ff2d99b8ae141da": {
+                "balance": "0x0",
+                "code": "0x",
+                "nonce": "0x00",
+                "storage": {}
+            },
+            "0x79165c698234a3a637439c2ec027c4413ffc85d3": {
+                "balance": "0x7fffffffffffffff",
+                "code": "0x",
+                "nonce": "0x00",
+                "storage": {
+                    "0x96a0b7d2cbcdffcf22b33d31b61db840bd40506cde05ac0b37431fd6e81aa6b5": "0xdededededededededededededededededededededededededededededededede"
+                }
+            }
+        },
+        "transaction": {
+            "data": [
+                "0x1122334455667788991011121314151617181920"
+            ],
+            "gasLimit": [
+                "0x0927c0"
+            ],
+            "gasPrice": "0x0a",
+            "nonce": "0x00",
+            "secretKey": "0xb03a0eed8ce1aaf6ef1a9ae63bbbd963b7f2a73f42585ff353369aad49390461",
+            "sender": "0x79165c698234a3a637439c2ec027c4413ffc85d3",
+            "to": "0x5f795c8c073d13ad07184ab82ff2d99b8ae141da",
+            "value": [
+                "0x0"
+            ]
+        }
+    }
+}

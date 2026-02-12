@@ -50,7 +50,7 @@ var backtestCommitmentCommand = cli.Command{
 	}),
 	Action: func(cliCtx *cli.Context) error {
 		ctx := cliCtx.Context
-		logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+		logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
 		if err != nil {
 			panic(fmt.Errorf("backtest-commitment: could not setup logger: %w", err))
 		}
@@ -92,7 +92,7 @@ var backtestCommitmentCommand = cli.Command{
 				&cli.StringFlag{Name: "output-dir", Required: true, Usage: "directory to store comparison.html file"},
 			}),
 			Action: func(cliCtx *cli.Context) error {
-				logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+				logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
 				if err != nil {
 					panic(fmt.Errorf("backtest-commitment: compare-runs: could not setup logger: %w", err))
 				}

@@ -134,7 +134,6 @@ jobs:
             echo "RPC tests completed successfully"
             echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
           else
-            echo "Error detected during RPC tests"
             echo "::error::Error detected during RPC tests: some tests failed, check the logs or the artifacts for more details"
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
             exit 1
@@ -180,7 +179,7 @@ jobs:
           fi
 
       - name: Upload test results
-        if: steps.test_step.outputs.test_executed == 'true'
+        if: always() && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v6
         with:
           name: test-results
@@ -189,7 +188,7 @@ jobs:
             ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
       - name: Save test results
-        if: steps.test_step.outputs.test_executed == 'true'
+        if: always() && steps.test_step.outputs.test_executed == 'true'
         working-directory: ${{ github.workspace }}
         env:
           TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
@@ -224,5 +223,3 @@ jobs:
       - name: Action for Success
         if: steps.test_step.outputs.TEST_RESULT == 'success'
         run: echo "::notice::Tests completed successfully"
-
-
