@@ -89,21 +89,27 @@ func (s *Sentinel) getEmptySubnets() []int {
 
 // isPeerUsefulForEmptySubnets checks if a peer covers any subnet that currently has no peers
 func (s *Sentinel) isPeerUsefulForEmptySubnets(node *enode.Node, emptySubnets []int) bool {
+	return len(s.getFilledSubnets(node, emptySubnets)) > 0
+}
+
+// getFilledSubnets returns which empty subnets a peer would fill (based on ENR)
+func (s *Sentinel) getFilledSubnets(node *enode.Node, emptySubnets []int) []int {
 	if len(emptySubnets) == 0 {
-		return false
+		return nil
 	}
 
 	var peerSubnets bitfield.Bitvector64
 	if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err != nil {
-		return false
+		return nil
 	}
 
+	var filled []int
 	for _, subnetIdx := range emptySubnets {
 		if peerSubnets[subnetIdx/8]&(1<<(subnetIdx%8)) != 0 {
-			return true
+			filled = append(filled, subnetIdx)
 		}
 	}
-	return false
+	return filled
 }
 
 // isPeerUsefulForAnySubnet checks if a peer's ENR advertises any attestation subnets
@@ -250,8 +256,9 @@ func (s *Sentinel) listenForPeers() {
 
 		// Check if peer is useful for any of our subscribed subnets
 		peerUsefulForSubnets := s.isPeerUsefulForAnySubnet(node)
-		// Check if peer can fill an empty subnet
-		peerFillsEmptySubnet := s.isPeerUsefulForEmptySubnets(node, emptySubnets)
+		// Check which empty subnets this peer can fill (based on ENR)
+		filledSubnets := s.getFilledSubnets(node, emptySubnets)
+		peerFillsEmptySubnet := len(filledSubnets) > 0
 
 		// If we have too many peers, only connect if peer is useful
 		if s.HasTooManyPeers() {
@@ -262,7 +269,7 @@ func (s *Sentinel) listenForPeers() {
 			}
 			// Peer is useful for subnets or fills an empty subnet, allow connection
 			if peerFillsEmptySubnet {
-				log.Debug("[Sentinel] Connecting to peer that fills empty subnet despite peer limit")
+				log.Debug("[Sentinel] Connecting to peer that fills empty subnet despite peer limit", "subnets", filledSubnets)
 			} else {
 				log.Debug("[Sentinel] Connecting to subnet-useful peer despite peer limit")
 			}
@@ -288,15 +295,15 @@ func (s *Sentinel) listenForPeers() {
 			continue
 		}
 
-		go func(usefulForSubnets, fillsEmpty bool) {
+		go func(usefulForSubnets bool, filled []int) {
 			if err := s.ConnectWithPeer(s.ctx, *peerInfo, sem); err != nil {
 				log.Trace("[Sentinel] Could not connect with peer", "err", err)
-			} else if fillsEmpty {
-				log.Debug("[Sentinel] Connected with peer that fills empty subnet", "peer", peerInfo.ID)
+			} else if len(filled) > 0 {
+				log.Debug("[Sentinel] Connected with peer that fills empty subnet (ENR)", "peer", peerInfo.ID, "subnets", filled)
 			} else if usefulForSubnets {
 				log.Debug("[Sentinel] Connected with subnet-useful peer", "peer", peerInfo.ID)
 			}
-		}(peerUsefulForSubnets, peerFillsEmptySubnet)
+		}(peerUsefulForSubnets, filledSubnets)
 
 	}
 }
@@ -314,11 +321,11 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 
 		valid, err := s.handshaker.ValidatePeer(peerId)
 		if err != nil {
-			log.Trace("[sentinel] failed to validate peer:", "err", err)
+			log.Debug("[Sentinel] Failed to validate peer", "peer", peerId, "err", err)
 		}
 
 		if !valid {
-			log.Trace("Handshake was unsuccessful")
+			log.Debug("[Sentinel] Handshake failed, disconnecting peer", "peer", peerId)
 			// on handshake fail, we disconnect with said peer, and remove them from our pool
 			s.p2p.Host().Peerstore().RemovePeer(peerId)
 			s.p2p.Host().Network().ClosePeer(peerId)
@@ -326,6 +333,7 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 		} else {
 			// we were able to succesfully connect, so add this peer to our pool
 			s.peers.AddPeer(peerId)
+			log.Debug("[Sentinel] Peer validated and added", "peer", peerId)
 		}
 	}()
 }
