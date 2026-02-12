@@ -503,6 +503,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		require.Len(t, idxFiles, 3)
 	})
 }
+
 // TestFindMergeRange_Optimal documents the desired merge range selection.
 // When multiple single-step files accumulate before the merge loop runs,
 // the algorithm should pick the largest power-of-2-aligned range so that
