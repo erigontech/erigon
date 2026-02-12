@@ -24,17 +24,54 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
+	"github.com/prysmaticlabs/go-bitfield"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/enode"
+	"github.com/erigontech/erigon/p2p/enr"
 )
 
 const (
 	peerSubnetTarget                 = 4
 	goRoutinesOpeningPeerConnections = 4
 )
+
+// isPeerUsefulForAnySubnet checks if a peer's ENR advertises any attestation subnets
+// that overlap with our currently subscribed subnets
+func (s *Sentinel) isPeerUsefulForAnySubnet(node *enode.Node) bool {
+	// Get our subscribed subnets from ENR
+	ourSubnets := s.p2p.GetSubscribedAttSubnets()
+
+	// Check if we have any subnets subscribed
+	hasAnySubscription := false
+	for _, b := range ourSubnets {
+		if b != 0 {
+			hasAnySubscription = true
+			break
+		}
+	}
+	// If we don't have any subnet subscriptions, all peers are equally useful
+	if !hasAnySubscription {
+		return false
+	}
+
+	// Get peer's attnets from their ENR
+	var peerSubnets bitfield.Bitvector64
+	if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err != nil {
+		// Peer doesn't advertise attnets, not specifically useful for subnets
+		return false
+	}
+
+	// Check for overlap between our subnets and peer's subnets
+	for i := 0; i < len(ourSubnets) && i < len(peerSubnets); i++ {
+		if ourSubnets[i]&peerSubnets[i] != 0 {
+			return true
+		}
+	}
+	return false
+}
 
 // ConnectWithPeer is used to attempt to connect and add the peer to our pool
 // it errors when if fail to connect with the peer, for instance, if it fails the handshake
@@ -128,12 +165,20 @@ func (s *Sentinel) listenForPeers() {
 		}
 		node := iterator.Node()
 
-		// needsPeersForSubnets := s.isPeerUsefulForAnySubnet(node)
+		// Check if peer is useful for any of our subscribed subnets
+		peerUsefulForSubnets := s.isPeerUsefulForAnySubnet(node)
+
+		// If we have too many peers, only connect if peer is useful for subnets
 		if s.HasTooManyPeers() {
-			log.Trace("[Sentinel] Not looking for peers, at peer limit")
-			time.Sleep(100 * time.Millisecond)
-			continue
+			if !peerUsefulForSubnets {
+				log.Trace("[Sentinel] Not looking for peers, at peer limit")
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+			// Peer is useful for subnets, allow connection even at peer limit
+			log.Debug("[Sentinel] Connecting to subnet-useful peer despite peer limit")
 		}
+
 		peerInfo, _, err := convertToAddrInfo(node)
 		if err != nil {
 			log.Error("[Sentinel] Could not convert to peer info", "err", err)
@@ -154,11 +199,13 @@ func (s *Sentinel) listenForPeers() {
 			continue
 		}
 
-		go func() {
+		go func(usefulForSubnets bool) {
 			if err := s.ConnectWithPeer(s.ctx, *peerInfo, sem); err != nil {
 				log.Trace("[Sentinel] Could not connect with peer", "err", err)
+			} else if usefulForSubnets {
+				log.Debug("[Sentinel] Connected with subnet-useful peer", "peer", peerInfo.ID)
 			}
-		}()
+		}(peerUsefulForSubnets)
 
 	}
 }

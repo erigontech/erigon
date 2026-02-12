@@ -449,3 +449,19 @@ func (g *GossipManager) observeBandwidth(ctx context.Context, maxInboundTrafficP
 func composeTopic(forkDigest common.Bytes4, name string) string {
 	return fmt.Sprintf("/eth2/%x/%s/%s", forkDigest, name, gossip.SSZSnappyCodec)
 }
+
+// GetSubscribedAttSubnets returns a bitfield of currently subscribed attestation subnets
+func (g *GossipManager) GetSubscribedAttSubnets() []byte {
+	subnets := make([]byte, 8) // 64 bits for 64 subnets
+	allTopics := g.subscriptions.AllTopics()
+	for _, topic := range allTopics {
+		name := extractTopicName(topic)
+		if gossip.IsTopicBeaconAttestation(name) {
+			subnetIdx := extractSubnetIndexByGossipTopic(name)
+			if subnetIdx >= 0 && subnetIdx < 64 {
+				subnets[subnetIdx/8] |= 1 << (subnetIdx % 8)
+			}
+		}
+	}
+	return subnets
+}
