@@ -1232,12 +1232,15 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int16 {
 		}
 	}
 	if int16(len(hashedKey)) <= depth {
+		fmt.Printf("--- debug --- needUnfolding terminating with 0 due to hashedKey <= depth: %d <= %d\n", len(hashedKey), depth)
 		return 0
 	}
 	if cell.hashedExtLen == 0 {
 		if cell.hashLen == 0 { // cell is empty, no need to unfold further
+			fmt.Printf("--- debug --- needUnfolding terminating with 0 due to hashedExtLen and hashLen == 0\n")
 			return 0
 		}
+		fmt.Printf("--- debug --- needUnfolding terminating with 1 due to hashedExtLen == 0\n")
 		return 1 // unfold branch node
 	}
 
@@ -1805,6 +1808,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 
 	if upCell.hashedExtLen == 0 {
 		depth = upDepth + 1
+		fmt.Printf("--- debug ---- unfolding branch node: row=%d, depth=%d, touched=%v, present=%v\n", row, depth, touched, present)
 		return hph.unfoldBranchNode(row, depth, touched && !present)
 	}
 
@@ -1850,7 +1854,9 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int16) error {
 }
 
 func (hph *HexPatriciaHashed) needFolding(hashedKey []byte) bool {
-	return !bytes.HasPrefix(hashedKey, hph.currentKey[:hph.currentKeyLen])
+	r := !bytes.HasPrefix(hashedKey, hph.currentKey[:hph.currentKeyLen])
+	fmt.Printf("--- debug --- needFolding r=%v, currentKeyLen=%d, currentKey=%x, hashedKey=%x\n", r, hph.currentKeyLen, hph.currentKey, hashedKey)
+	return r
 }
 
 var (
@@ -2418,7 +2424,6 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 	//}
 	// Keep folding until the currentKey is the prefix of the key we modify
 	for hph.needFolding(hashedKey) {
-		fmt.Printf("--- debug --- needFolding hashedKey=%x\n", hashedKey)
 		var foldDone func()
 		if dbg.KVReadLevelledMetrics {
 			foldDone = hph.metrics.StartFolding(plainKey)

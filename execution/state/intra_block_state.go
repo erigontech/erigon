@@ -812,6 +812,7 @@ func (sdb *IntraBlockState) ReadVersion(addr accounts.Address, path AccountPath,
 // AddBalance adds amount to the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
+	fmt.Printf("--- debug --- AddBalance addr=%x,amount=%d\n", addr.Value(), amount.Uint64())
 	if sdb.versionMap == nil {
 		// If this account has not been read, add to the balance increment map
 		if _, needAccount := sdb.stateObjects[addr]; !needAccount && addr == ripemd && amount.IsZero() {
