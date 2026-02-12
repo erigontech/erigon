@@ -125,6 +125,7 @@ func ExecV3(ctx context.Context,
 	logger log.Logger) (execErr error) {
 	isBlockProduction := execStage.SyncMode() == stages.ModeBlockProduction
 	isForkValidation := execStage.SyncMode() == stages.ModeForkValidation
+
 	isApplyingBlocks := execStage.SyncMode() == stages.ModeApplyingBlocks
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
 	hooks := cfg.vmConfig.Tracer
@@ -133,6 +134,7 @@ func ExecV3(ctx context.Context,
 	if err != nil {
 		return err
 	}
+
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if isApplyingBlocks {
 		if initialCycle {
@@ -218,9 +220,16 @@ func ExecV3(ctx context.Context,
 	doms.EnableWarmupCache(isChainTip)
 	log.Debug("Warmup Cache", "enabled", isChainTip)
 	postValidator := newBlockPostExecutionValidator()
+	doms.SetDeferCommitmentUpdates(false)
 	if isChainTip {
 		postValidator = newParallelBlockPostExecutionValidator()
+		// Only defer branch updates in fork validation mode (engine API flow)
+		// where MergeExtendingFork will flush the pending updates
+		if isForkValidation {
+			doms.SetDeferCommitmentUpdates(true)
+		}
 	}
+	defer doms.SetDeferCommitmentUpdates(false)
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
 	// it also warmsup state a bit - by touching senders/coninbase accounts and code
