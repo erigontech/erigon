@@ -560,6 +560,7 @@ func BenchmarkEncodeConcurrentInterface(b *testing.B) {
 		&struct1{A: "hello", B: big.NewInt(0xFFFFFFFF)},
 		[10]byte{1, 2, 3, 4, 5, 6},
 		[]string{"yeah", "yeah", "yeah"},
+		uint256.NewInt(0xFFFFFFFF),
 	}
 
 	var wg sync.WaitGroup
