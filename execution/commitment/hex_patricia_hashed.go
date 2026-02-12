@@ -2053,6 +2053,17 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		cell := &hph.grid[row][nibble]
 		upCell.extLen = 0
 		upCell.stateHashLen = 0
+		var counters skipStat
+		if dbg.KVReadLevelledMetrics {
+			counters = hph.hadToLoadL[hph.depthsToTxNum[depth]]
+		}
+		counters, err = hph.loadStateIfNeeded(cell, counters)
+		if err != nil {
+			return err
+		}
+		if dbg.KVReadLevelledMetrics {
+			hph.hadToLoadL[hph.depthsToTxNum[depth]] = counters
+		}
 		// propagate cell into parent row
 		upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], nibble)
 
@@ -2114,31 +2125,9 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 					counters.storReset++
 				}
 			}
-
-			if cell.stateHashLen == 0 { // load state if needed
-				if !cell.loaded.account() && cell.accountAddrLen > 0 {
-					hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
-					upd, err := hph.accountFromCacheOrDB(cell.accountAddr[:cell.accountAddrLen])
-					if err != nil {
-						return err
-					}
-					cell.setFromUpdate(upd)
-					// if update is empty, loaded flag was not updated so do it manually
-					cell.loaded = cell.loaded.addFlag(cellLoadAccount)
-					counters.accLoaded++
-				}
-				if !cell.loaded.storage() && cell.storageAddrLen > 0 {
-					hph.metrics.StorageLoad(cell.storageAddr[:cell.storageAddrLen])
-					upd, err := hph.storageFromCacheOrDB(cell.storageAddr[:cell.storageAddrLen])
-					if err != nil {
-						return err
-					}
-					cell.setFromUpdate(upd)
-					// if update is empty, loaded flag was not updated so do it manually
-					cell.loaded = cell.loaded.addFlag(cellLoadStorage)
-					counters.storLoaded++
-				}
-				// computeCellHash can reset hash as well so have to check if node has been skipped  right after computeCellHash.
+			counters, err = hph.loadStateIfNeeded(cell, counters)
+			if err != nil {
+				return err
 			}
 			if dbg.KVReadLevelledMetrics {
 				hph.hadToLoadL[hph.depthsToTxNum[depth]] = counters
@@ -2234,6 +2223,34 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		}
 	}
 	return nil
+}
+
+func (hph *HexPatriciaHashed) loadStateIfNeeded(cell *cell, counters skipStat) (skipStat, error) {
+	if cell.stateHashLen == 0 {
+		if !cell.loaded.account() && cell.accountAddrLen > 0 {
+			hph.metrics.AccountLoad(cell.accountAddr[:cell.accountAddrLen])
+			upd, err := hph.accountFromCacheOrDB(cell.accountAddr[:cell.accountAddrLen])
+			if err != nil {
+				return skipStat{}, err
+			}
+			cell.setFromUpdate(upd)
+			// if the update is empty, the loaded flag was not updated so do it manually
+			cell.loaded = cell.loaded.addFlag(cellLoadAccount)
+			counters.accLoaded++
+		}
+		if !cell.loaded.storage() && cell.storageAddrLen > 0 {
+			hph.metrics.StorageLoad(cell.storageAddr[:cell.storageAddrLen])
+			upd, err := hph.storageFromCacheOrDB(cell.storageAddr[:cell.storageAddrLen])
+			if err != nil {
+				return skipStat{}, err
+			}
+			cell.setFromUpdate(upd)
+			// if the update is empty, the loaded flag was not updated so do it manually
+			cell.loaded = cell.loaded.addFlag(cellLoadStorage)
+			counters.storLoaded++
+		}
+	}
+	return skipStat{}, nil
 }
 
 func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
