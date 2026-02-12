@@ -91,7 +91,7 @@ func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
 				{
 					Slot: accounts.InternKey(common.HexToHash("0x01")),
 					Changes: []*types.StorageChange{
-						{Index: 0, Value: common.HexToHash("0x02")},
+						{Index: 0, Value: *uint256.NewInt(2)},
 					},
 				},
 			},
@@ -103,7 +103,7 @@ func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
 				{Index: 1, Value: 7},
 			},
 			CodeChanges: []*types.CodeChange{
-				{Index: 0, Data: []byte{0xaa, 0xbb}},
+				{Index: 0, Bytecode: []byte{0xaa, 0xbb}},
 			},
 		},
 	}
