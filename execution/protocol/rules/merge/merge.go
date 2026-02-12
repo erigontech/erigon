@@ -370,7 +370,7 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 		if header.SlotNumber != nil {
 			return rules.ErrUnexpectedSlotNumber
 		}
-		if header.BlockAccessListHash Q= nil {
+		if header.BlockAccessListHash != nil {
 			return rules.ErrUnexpectedBlockAccessListHash
 		}
 	}

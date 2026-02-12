@@ -266,7 +266,7 @@ func VerifyHeaderBasics(chain rules.ChainHeaderReader, header, parent *types.Hea
 		return rules.ErrUnexpectedSlotNumber
 	}
 	
-	if header.BlockAccessListHash Q= nil {
+	if header.BlockAccessListHash != nil {
 		return rules.ErrUnexpectedBlockAccessListHash
 	}
 	
@@ -300,7 +300,7 @@ func (ethash *Ethash) verifyHeader(chain rules.ChainHeaderReader, header, parent
 		return rules.ErrUnexpectedSlotNumber
 	}
 	
-	if header.BlockAccessListHash Q= nil {
+	if header.BlockAccessListHash != nil {
 		return rules.ErrUnexpectedBlockAccessListHash
 	}
 

@@ -105,7 +105,7 @@ func (c *Clique) verifyHeader(chain rules.ChainHeaderReader, header *types.Heade
 		return rules.ErrUnexpectedSlotNumber
 	}
 	
-	if header.BlockAccessListHash Q= nil {
+	if header.BlockAccessListHash != nil {
 		return rules.ErrUnexpectedBlockAccessListHash
 	}
 	
