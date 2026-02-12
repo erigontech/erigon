@@ -1,193 +1,313 @@
-name: QA - RPC Integration Tests (Polygon)
+name: QA - Agentic Tip-Tracking
 
 on:
-  workflow_dispatch:     # Run manually
-  push:
-    branches:
-      - main
-      - 'release/3.*'
-  pull_request:
-    branches:
-      - main
-      - 'release/3.*'
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
+  workflow_dispatch:
+    inputs:
+      chain:
+        description: 'Ethereum chain to sync'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - mainnet
+          - sepolia
+          - hoodi
+          - gnosis
+          - chiado
+      analysis_goal:
+        description: 'What should the LLM look for in the logs?'
+        required: true
+        default: 'Look for errors, warnings, sync stalls, performance anomalies, and any unusual patterns'
+        type: string
+      erigon_flags:
+        description: 'Additional Erigon CLI flags (e.g., --log.console.verbosity=4)'
+        required: false
+        default: ''
+        type: string
+      duration_minutes:
+        description: 'How long to run Erigon (minutes)'
+        required: true
+        default: '30'
+        type: string
+      analysis_interval_seconds:
+        description: 'Seconds between LLM analysis calls'
+        required: true
+        default: '120'
+        type: string
+      model:
+        description: 'LLM model from GitHub Models catalog'
+        required: true
+        default: 'openai/gpt-4o'
+        type: string
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  models: read
+  contents: read
 
 jobs:
-  bor-mainnet-rpc-integ-tests:
-    concurrency:
-      group: >-
-        ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
-          format('{0}-{1}', github.workflow, github.run_id) ||
-          format('{0}-{1}', github.workflow, github.ref)
-        }}
-      cancel-in-progress: true
-    runs-on: [ self-hosted, qa, Polygon, rpc-integration ]
+  log-analysis:
+    runs-on: [self-hosted, qa, long-running]
+    timeout-minutes: 600
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
-      ERIGON_TESTBED_AREA: /opt/erigon-testbed
-      ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      ERIGON_ASSERT: true
-      RPC_PAST_TEST_DIR: /opt/rpc-past-tests
-      CHAIN: bor-mainnet
+      ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
+      ERIGON_LOG_FILE: ${{ github.workspace }}/erigon_output.log
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
+    - name: Check out repository
+      uses: actions/checkout@v6
 
-      - name: Clean Erigon Build Directory
-        run: |
-          make clean
+    - name: Clean Erigon Build & Data Directories
+      run: |
+        make clean
+        rm -rf $ERIGON_DATA_DIR
 
-      - name: Build Erigon RPCDaemon and integration
-        run: |
-          make rpcdaemon integration
-        working-directory: ${{ github.workspace }}
+    - name: Build Erigon
+      run: |
+        make erigon
+      working-directory: ${{ github.workspace }}
 
-      - name: Pause the Erigon instance dedicated to db maintenance
-        run: |
-          python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
+    - name: Run Erigon with continuous LLM log analysis
+      id: analysis
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        ANALYSIS_GOAL: ${{ inputs.analysis_goal }}
+        CHAIN: ${{ inputs.chain }}
+        DURATION_MINUTES: ${{ inputs.duration_minutes }}
+        INTERVAL_SECONDS: ${{ inputs.analysis_interval_seconds }}
+        MODEL: ${{ inputs.model }}
+        ERIGON_FLAGS: ${{ inputs.erigon_flags }}
+      run: |
+        set +e
 
-      - name: Save Erigon Chaindata Directory
-        id: save_chaindata_step
-        run: |
-          rm -rf $ERIGON_TESTBED_AREA/chaindata-prev || true
-          echo "Backup chaindata"
-          cp -r $ERIGON_REFERENCE_DATA_DIR/chaindata $ERIGON_TESTBED_AREA/chaindata-prev
+        ERIGON_BIN="${{ github.workspace }}/build/bin/erigon"
+        LOG_FILE="$ERIGON_LOG_FILE"
+        DURATION_SECONDS=$((DURATION_MINUTES * 60))
 
-      - name: Run Migrations
-        working-directory: ${{ github.workspace }}/build/bin
-        run: |
-          echo "Running migrations on datadir..."
-          ./integration run_migrations --datadir $ERIGON_REFERENCE_DATA_DIR --chain $CHAIN
+        # Start Erigon in the background
+        echo "::group::Starting Erigon (chain=$CHAIN, duration=${DURATION_MINUTES}m)"
+        ERIGON_CMD="$ERIGON_BIN --datadir=$ERIGON_DATA_DIR --chain=$CHAIN $ERIGON_FLAGS"
+        echo "Command: $ERIGON_CMD"
+        $ERIGON_CMD > "$LOG_FILE" 2>&1 &
+        ERIGON_PID=$!
+        echo "Erigon started with PID $ERIGON_PID"
+        echo "::endgroup::"
 
-      - name: Run RpcDaemon
-        working-directory: ${{ github.workspace }}/build/bin
-        run: |
-          echo "Starting RpcDaemon..."
-          
-          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api bor,admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net --ws > erigon.log 2>&1 &
+        # Wait a few seconds for Erigon to start producing logs
+        sleep 10
 
-          RPC_DAEMON_PID=$!          
-          RPC_DAEMON_EXIT_STATUS=$?
-          echo "RPC_DAEMON_PID=$RPC_DAEMON_PID" >> $GITHUB_ENV
-          echo "rpc_daemon_started=true" >> $GITHUB_OUTPUT
-          
-          sleep 5
-          tail erigon.log
-          
-          if [ $RPC_DAEMON_EXIT_STATUS -ne 0 ]; then            
-            echo "RpcDaemon failed to start"
-            echo "::error::Error detected during tests: RpcDaemon failed to start"
-            exit 1
-          fi
-          echo "RpcDaemon started"
-
-      - name: Wait for port 8545 to be opened
-        run: |
-          for i in {1..30}; do
-            if nc -z localhost 8545; then
-              echo "Port 8545 is open"
-              break
-            fi
-            echo "Waiting for port 8545 to open..."
-            sleep 10
-          done
-          if ! nc -z localhost 8545; then
-            echo "Port 8545 did not open in time"
-            echo "::error::Error detected during tests: Port 8545 did not open in time"
-            exit 1
-          fi
-
-      - name: Run RPC Integration Tests
-        id: test_step
-        run: |
-          commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD)
-          TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/polygon_$(date +%Y%m%d_%H%M%S)_integration_${commit}_http/"
-          echo "TEST_RESULT_DIR=$TEST_RESULT_DIR" >> $GITHUB_ENV
-
-          chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_polygon.sh
-          
-          set +e # Disable exit on error for test run
-          ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_polygon.sh ${{ runner.workspace }} $TEST_RESULT_DIR
-          test_exit_status=$? # Capture test runner script exit status
-          set -e # Re-enable exit on error after test run
-
-          echo "test_executed=true" >> $GITHUB_OUTPUT
-
-          echo
-          if [ $test_exit_status -eq 0 ]; then
-            echo "RPC tests completed successfully"
-            echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::Error detected during RPC tests: some tests failed, check the logs or the artifacts for more details"
-            echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
-            exit 1
-          fi
-
-      - name: Stop Erigon RpcDaemon
-        if: always()
-        working-directory: ${{ github.workspace }}/build/bin
-        run: |
-          # Clean up rpcdaemon process if it's still running
-          if [ -n "$RPC_DAEMON_PID" ] && kill -0 $RPC_DAEMON_PID 2> /dev/null; then
-            echo "RpcDaemon stopping..."
-            kill $RPC_DAEMON_PID
-            echo "RpcDaemon stopped"
-          else
-            echo "RpcDaemon has already terminated"
-          fi
-
-      - name: Restore Erigon Chaindata Directory
-        if: ${{ always() }}
-        run: |
-          if [ -d "$ERIGON_TESTBED_AREA/chaindata-prev" ] && [ "${{ steps.save_chaindata_step.outcome }}" == "success" ]; then
-          rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
-          echo "Restore chaindata"
-          mv $ERIGON_TESTBED_AREA/chaindata-prev $ERIGON_REFERENCE_DATA_DIR/chaindata
-          fi
-
-      - name: Resume the Erigon instance dedicated to db maintenance
-        if: ${{ always() }}
-        run: |
-          python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
-
-      - name: Upload test results
-        if: steps.test_step.outputs.test_executed == 'true'
-        uses: actions/upload-artifact@v6
-        with:
-          name: test-results
-          path: |
-            ${{ env.TEST_RESULT_DIR }}
-            ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
-
-      - name: Save test results
-        if: steps.test_step.outputs.test_executed == 'true'
-        working-directory: ${{ github.workspace }}
-        env:
-          TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
-        run: |
-          db_version=$(python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/prod_info.py $ERIGON_REFERENCE_DATA_DIR/../production.ini production erigon_repo_commit)
-          if [ -z "$db_version" ]; then
-            db_version="no-version"
-          fi
-          
-          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --branch ${{ github.ref_name }} --test_name rpc-integration-tests --chain $CHAIN --runner ${{ runner.name }} --db_version $db_version --outcome $TEST_RESULT #--result_file ${{ github.workspace }}/result-$CHAIN.json
-
-      - name: Action to check failure condition
-        if: failure()
-        run: |
-          if [ "${{ steps.test_step.outputs.test_executed }}" != "true" ]; then
-            echo "::error::Test not executed, workflow failed for infrastructure reasons"
-          fi
+        if ! kill -0 $ERIGON_PID 2>/dev/null; then
+          echo "::error::Erigon failed to start"
+          cat "$LOG_FILE"
           exit 1
+        fi
 
-      - name: Action for Success
-        if: steps.test_step.outputs.TEST_RESULT == 'success'
-        run: echo "::notice::Tests completed successfully"
+        # Analysis loop state
+        LINES_READ=0
+        ITERATION=0
+        PREVIOUS_SUMMARY=""
+        START_TIME=$(date +%s)
+        MAX_LINES_PER_CALL=500
 
+        SYSTEM_PROMPT="You are an expert Ethereum node operator analyzing Erigon execution client logs in real-time.
+
+        ANALYSIS GOAL: ${ANALYSIS_GOAL}
+
+        Context:
+        - Erigon is an Ethereum execution client written in Go
+        - Chain: ${CHAIN}
+        - You are receiving log chunks periodically as Erigon runs
+        - Focus your analysis on the stated goal above
+        - Be concise but highlight anything important, especially errors, warnings, or anomalies
+        - If you see progress indicators (block numbers, sync stages), note the progression
+        - Flag any patterns that might indicate problems even if not explicit errors"
+
+        echo "=== Continuous Log Analysis Started ==="
+        echo "Goal: $ANALYSIS_GOAL"
+        echo "Interval: ${INTERVAL_SECONDS}s | Duration: ${DURATION_MINUTES}m | Model: $MODEL"
+        echo "======================================="
+
+        while true; do
+          # Check if duration exceeded
+          CURRENT_TIME=$(date +%s)
+          ELAPSED=$((CURRENT_TIME - START_TIME))
+          if [ $ELAPSED -ge $DURATION_SECONDS ]; then
+            echo ""
+            echo "=== Duration limit reached (${DURATION_MINUTES}m) ==="
+            break
+          fi
+
+          # Check if Erigon is still running
+          if ! kill -0 $ERIGON_PID 2>/dev/null; then
+            echo ""
+            echo "=== Erigon process exited ==="
+            break
+          fi
+
+          # Sleep for the configured interval
+          REMAINING=$((DURATION_SECONDS - ELAPSED))
+          SLEEP_TIME=$INTERVAL_SECONDS
+          if [ $REMAINING -lt $SLEEP_TIME ]; then
+            SLEEP_TIME=$REMAINING
+          fi
+          sleep $SLEEP_TIME
+
+          # Count current total lines in the log
+          TOTAL_LINES=$(wc -l < "$LOG_FILE" 2>/dev/null || echo "0")
+          TOTAL_LINES=$(echo "$TOTAL_LINES" | tr -d ' ')
+          NEW_LINES=$((TOTAL_LINES - LINES_READ))
+
+          if [ "$NEW_LINES" -le 0 ]; then
+            echo "[$(date '+%H:%M:%S')] No new log lines, skipping analysis..."
+            continue
+          fi
+
+          ITERATION=$((ITERATION + 1))
+
+          # Extract new lines (skip already-read lines, cap at MAX_LINES_PER_CALL)
+          SKIPPED=0
+          if [ "$NEW_LINES" -gt "$MAX_LINES_PER_CALL" ]; then
+            SKIPPED=$((NEW_LINES - MAX_LINES_PER_CALL))
+            SKIP_OFFSET=$((LINES_READ + SKIPPED + 1))
+            LOG_CHUNK=$(tail -n +"$SKIP_OFFSET" "$LOG_FILE" | head -n "$MAX_LINES_PER_CALL")
+          else
+            SKIP_OFFSET=$((LINES_READ + 1))
+            LOG_CHUNK=$(tail -n +"$SKIP_OFFSET" "$LOG_FILE" | head -n "$NEW_LINES")
+          fi
+
+          LINES_READ=$TOTAL_LINES
+
+          # Build the user message
+          USER_MSG="--- Iteration $ITERATION | $(date '+%Y-%m-%d %H:%M:%S') | Lines: $NEW_LINES new ($TOTAL_LINES total) ---"
+          if [ "$SKIPPED" -gt 0 ]; then
+            USER_MSG="$USER_MSG
+        [Note: $SKIPPED lines skipped, showing last $MAX_LINES_PER_CALL lines]"
+          fi
+          if [ -n "$PREVIOUS_SUMMARY" ]; then
+            USER_MSG="$USER_MSG
+
+        PREVIOUS ANALYSIS SUMMARY:
+        $PREVIOUS_SUMMARY
+
+        NEW LOG LINES:"
+          else
+            USER_MSG="$USER_MSG
+
+        LOG LINES:"
+          fi
+          USER_MSG="$USER_MSG
+        $LOG_CHUNK"
+
+          echo ""
+          echo "::group::[$(date '+%H:%M:%S')] LLM Analysis #$ITERATION ($NEW_LINES new lines, $TOTAL_LINES total)"
+
+          # Call GitHub Models API
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            "https://models.github.ai/inference/chat/completions" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+              --arg model "$MODEL" \
+              --arg system "$SYSTEM_PROMPT" \
+              --arg user "$USER_MSG" \
+              '{
+                model: $model,
+                messages: [
+                  {role: "system", content: $system},
+                  {role: "user", content: $user}
+                ],
+                max_tokens: 2000
+              }')")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            LLM_RESPONSE=$(echo "$BODY" | jq -r '.choices[0].message.content // "No response"')
+            echo "$LLM_RESPONSE"
+            # Keep a truncated version as context for next iteration
+            PREVIOUS_SUMMARY=$(echo "$LLM_RESPONSE" | head -20)
+          else
+            echo "::warning::LLM API returned HTTP $HTTP_CODE"
+            echo "$BODY" | jq . 2>/dev/null || echo "$BODY"
+            LLM_RESPONSE=""
+          fi
+
+          echo "::endgroup::"
+        done
+
+        # Stop Erigon if still running
+        if kill -0 $ERIGON_PID 2>/dev/null; then
+          echo "Stopping Erigon (PID $ERIGON_PID)..."
+          kill $ERIGON_PID
+          wait $ERIGON_PID 2>/dev/null || true
+        fi
+
+        FINAL_LINES=$(wc -l < "$LOG_FILE" 2>/dev/null | tr -d ' ')
+        echo ""
+        echo "=== Analysis Complete ==="
+        echo "Total iterations: $ITERATION"
+        echo "Total log lines: $FINAL_LINES"
+        echo "test_executed=true" >> "$GITHUB_OUTPUT"
+
+    - name: Final comprehensive LLM analysis
+      if: ${{ always() && steps.analysis.outputs.test_executed == 'true' }}
+      id: final_analysis
+      uses: actions/ai-inference@v2
+      with:
+        model: ${{ inputs.model }}
+        max-tokens: 4000
+        system-prompt: |
+          You are an expert Ethereum node operator providing a comprehensive analysis
+          of an Erigon execution client log.
+
+          ANALYSIS GOAL: ${{ inputs.analysis_goal }}
+
+          Provide a structured report with:
+          1. Executive Summary (2-3 sentences)
+          2. Key Findings (bullet points of important observations)
+          3. Errors & Warnings (list any errors or warnings found)
+          4. Sync Progress (if applicable, describe the sync progression)
+          5. Recommendations (if any issues were found, suggest next steps)
+
+          Be thorough but concise. Focus on the stated analysis goal.
+        file_input: |
+          erigon_log: ${{ github.workspace }}/erigon_output.log
+        prompt: |
+          Analyze this complete Erigon log (chain: ${{ inputs.chain }}, ran for ${{ inputs.duration_minutes }} minutes).
+          The log content is:
+
+          {{erigon_log}}
+
+    - name: Write final analysis to summary
+      if: ${{ always() && steps.final_analysis.outcome == 'success' }}
+      run: |
+        cat >> "$GITHUB_STEP_SUMMARY" <<'HEADER'
+        ## Erigon Log Analysis Report
+
+        **Chain:** ${{ inputs.chain }} | **Duration:** ${{ inputs.duration_minutes }}m | **Model:** ${{ inputs.model }}
+
+        **Analysis Goal:** ${{ inputs.analysis_goal }}
+
+        ---
+
+        HEADER
+        cat "${{ steps.final_analysis.outputs.response-file }}" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload Erigon logs
+      if: always()
+      uses: actions/upload-artifact@v6
+      with:
+        name: erigon-logs
+        path: |
+          ${{ github.workspace }}/erigon_output.log
+          ${{ github.workspace }}/erigon_data/logs/
+
+    - name: Clean up Erigon data directory
+      if: always()
+      run: |
+        rm -rf $ERIGON_DATA_DIR
