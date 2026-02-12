@@ -18,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
 
@@ -46,6 +47,11 @@ func (g *BorGenerator) GenerateBorReceipt(ctx context.Context, tx kv.TemporalTx,
 	msgs []*types.Message, chainConfig *chain.Config) (*types.Receipt, error) {
 	if receipt, ok := g.receiptCache.Get(block.Hash()); ok {
 		return receipt, nil
+	}
+
+	err := rpchelper.CheckBlockExecuted(tx, block.NumberU64())
+	if err != nil {
+		return nil, err
 	}
 
 	txNumsReader := g.blockReader.TxnumReader(ctx)

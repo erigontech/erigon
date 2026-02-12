@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
 
@@ -218,6 +219,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	}
 
 	var err error
+	err = rpchelper.CheckBlockExecuted(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
 	var evm *vm.EVM
 	var genEnv *ReceiptEnv
 
@@ -400,6 +406,11 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	defer g.blockExecMutex.unlock(mu, blockHash)
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok {
 		return receipts, nil
+	}
+
+	err := rpchelper.CheckBlockExecuted(tx, block.NumberU64())
+	if err != nil {
+		return nil, err
 	}
 
 	// Check if we have commitment history: this is required to know if state root will be computed or left zero for historical state.
