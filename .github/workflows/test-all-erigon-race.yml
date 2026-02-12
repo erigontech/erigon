@@ -121,7 +121,10 @@ jobs:
               DIRS=$(ls -d -- */ | grep -vE '^(execution|cl|p2p|rpc|db|node|txnprovider|dashboards)/$' | sed 's/\/$//')
               for d in $DIRS; do
                 if [ -d "$d" ]; then
-                  go test -timeout 20m "./$d/..."
+                  TEST_PACKAGES=$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' "./$d/...")
+                  if [ -n "$TEST_PACKAGES" ]; then
+                    go test -timeout 20m "./$d/..."
+                  fi
                 fi
               done
               ;;
