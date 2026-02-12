@@ -12,9 +12,6 @@ on:
       - performance
       - performance-stable
     types:
-      - opened
-      - reopened
-      - synchronize
       - ready_for_review
   schedule:
     - cron: "0 05 * * *" # daily at 5 am UTC
