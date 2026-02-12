@@ -37,6 +37,9 @@ const (
 	peerSubnetTarget                 = 4
 	goRoutinesOpeningPeerConnections = 4
 	attestationSubnetCount           = 64
+	minimumPeersPerSubnet            = 4 // Minimum peers needed per subnet before proactive search stops
+	subnetSearchTimeout              = 30 * time.Second
+	subnetSearchInterval             = 12 * time.Second // Check every slot
 )
 
 // getSubnetCoverage returns a count of peers for each attestation subnet (64 subnets)
@@ -94,6 +97,140 @@ func (s *Sentinel) getEmptySubnets() []int {
 		}
 	}
 	return empty
+}
+
+// getUnderservedSubnets returns subnets that have fewer than minimumPeersPerSubnet peers
+func (s *Sentinel) getUnderservedSubnets() []int {
+	coverage := s.getSubnetCoverage()
+	var underserved []int
+	for i, count := range coverage {
+		if count < minimumPeersPerSubnet {
+			underserved = append(underserved, i)
+		}
+	}
+	return underserved
+}
+
+// nodeAdvertisesSubnet checks if a node's ENR advertises a specific subnet
+func (s *Sentinel) nodeAdvertisesSubnet(node *enode.Node, subnetIdx int) bool {
+	var peerSubnets bitfield.Bitvector64
+	if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err != nil {
+		return false
+	}
+	return peerSubnets[subnetIdx/8]&(1<<(subnetIdx%8)) != 0
+}
+
+// findPeersForSubnet proactively searches for peers that advertise a specific subnet
+// This is similar to Prysm's FindPeersWithSubnet approach
+func (s *Sentinel) findPeersForSubnet(subnetIdx int, wantedCount int) {
+	// Create a filtered iterator that only returns nodes advertising this subnet
+	baseIterator := s.listener.RandomNodes()
+	filteredIterator := enode.Filter(baseIterator, func(node *enode.Node) bool {
+		return s.nodeAdvertisesSubnet(node, subnetIdx)
+	})
+	defer filteredIterator.Close()
+
+	ctx, cancel := context.WithTimeout(s.ctx, subnetSearchTimeout)
+	defer cancel()
+
+	found := 0
+	checked := 0
+	maxChecks := 1000 // Limit iterations to avoid infinite loop
+
+	for found < wantedCount && checked < maxChecks {
+		select {
+		case <-ctx.Done():
+			log.Debug("[Sentinel] Subnet peer search timeout", "subnet", subnetIdx, "found", found, "wanted", wantedCount)
+			return
+		default:
+		}
+
+		if !filteredIterator.Next() {
+			// Iterator exhausted
+			break
+		}
+		checked++
+		node := filteredIterator.Node()
+
+		// Skip private IPs
+		if node.IP().IsPrivate() {
+			continue
+		}
+
+		peerInfo, _, err := convertToAddrInfo(node)
+		if err != nil {
+			continue
+		}
+
+		// Skip if already connected
+		if s.p2p.Host().Network().Connectedness(peerInfo.ID) == network.Connected {
+			continue
+		}
+
+		// Skip banned peers
+		if s.peers.BanStatus(peerInfo.ID) {
+			continue
+		}
+
+		// Store ENR mapping
+		s.pidToEnr.Store(peerInfo.ID, node)
+		s.pidToEnodeId.Store(peerInfo.ID, node.ID())
+
+		// Try to connect
+		if err := s.ConnectWithPeer(ctx, *peerInfo, nil); err != nil {
+			log.Trace("[Sentinel] Subnet search: failed to connect", "subnet", subnetIdx, "peer", peerInfo.ID, "err", err)
+			continue
+		}
+
+		found++
+		log.Debug("[Sentinel] Subnet search: connected to peer", "subnet", subnetIdx, "peer", peerInfo.ID, "found", found, "wanted", wantedCount)
+	}
+
+	log.Debug("[Sentinel] Subnet peer search completed", "subnet", subnetIdx, "found", found, "wanted", wantedCount, "checked", checked)
+}
+
+// proactiveSubnetPeerSearch is a goroutine that monitors subnet coverage
+// and proactively searches for peers when coverage is below threshold
+func (s *Sentinel) proactiveSubnetPeerSearch() {
+	ticker := time.NewTicker(subnetSearchInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			underserved := s.getUnderservedSubnets()
+			if len(underserved) == 0 {
+				log.Debug("[Sentinel] All subnets have sufficient peers")
+				continue
+			}
+
+			coverage := s.getSubnetCoverage()
+			log.Info("[Sentinel] Proactive subnet search starting",
+				"underservedCount", len(underserved),
+				"threshold", minimumPeersPerSubnet,
+				"subnets", underserved)
+
+			// Search for peers for each underserved subnet
+			// Process up to 8 subnets per cycle to avoid overwhelming the network
+			maxSubnetsPerCycle := 8
+			if len(underserved) > maxSubnetsPerCycle {
+				underserved = underserved[:maxSubnetsPerCycle]
+			}
+
+			for _, subnetIdx := range underserved {
+				if s.ctx.Err() != nil {
+					return
+				}
+				currentCount := coverage[subnetIdx]
+				wantedCount := minimumPeersPerSubnet - currentCount
+				if wantedCount > 0 {
+					s.findPeersForSubnet(subnetIdx, wantedCount)
+				}
+			}
+		}
+	}
 }
 
 // isPeerUsefulForEmptySubnets checks if a peer covers any subnet that currently has no peers

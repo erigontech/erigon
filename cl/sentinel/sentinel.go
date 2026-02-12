@@ -203,6 +203,7 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 	//s.subManager.Start(s.ctx)
 
 	go s.listenForPeers()
+	go s.proactiveSubnetPeerSearch() // Proactively search for peers when subnet coverage is low
 	//go s.forkWatcher()
 	//go s.observeBandwidth(s.ctx)
 
