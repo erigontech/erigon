@@ -138,9 +138,9 @@ These flags manage network connectivity, peer discovery, and traffic control.
 * `--nat value`: The NAT port mapping mechanism (See [here](nat.md) for more details).
 * `--nodiscover`: Disables peer discovery.
   * Default: `false`
-* `--discovery.v4`, `--v4disc`: Enables the Node Discovery Protocol v5 (Discv4) for managed ENRs and topic discovery.
+* `--discovery.v4`, `--discv4`: Enables the Node Discovery Protocol v4 (Discv4) for managed ENRs and topic discovery.
   * Default: `true`
-* `--discovery.v5`, `--v5disc`, `--discv5`: Enables the Node Discovery Protocol v5 (Discv5) for managed ENRs and topic discovery.
+* `--discovery.v5`, `--discv5`, `--v5disc`: Enables the Node Discovery Protocol v5 (Discv5) for managed ENRs and topic discovery.
   * Default: `true`
 * `--discovery.parallelism value`: The number of concurrent lookup requests allowed per discovery query.
   * Default: `3`
