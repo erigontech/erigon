@@ -1325,7 +1325,6 @@ func (hph *HexPatriciaHashed) witnessCreateAccountNode(c *cell, depth int16, has
 	var account accounts.Account
 	account.Nonce = accountUpdate.Nonce
 	account.Balance = accountUpdate.Balance
-	account.Initialised = true
 	account.Root = accountUpdate.Storage
 	account.CodeHash = accounts.InternCodeHash(accountUpdate.CodeHash)
 
@@ -1562,6 +1561,7 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 						if !bytes.Equal(subTrieRoot, cellHash[1:]) {
 							return nil, fmt.Errorf("subTrieRoot(%x) != cellHash(%x)", subTrieRoot, cellHash[1:])
 						}
+						extNodeSubTrie.Reset() // clear cached hash refs
 						// // DEBUG patch with cell hash which we know to be correct
 						//fmt.Printf("witness cell (%d, %0x, depth=%d) %s\n", row, currentNibble, hph.depths[row], cellToExpand.FullString())
 						//nextNode = trie.NewHashNode(cellToExpand.stateHash[:])
@@ -1584,7 +1584,17 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 			if err != nil {
 				return nil, err
 			}
-			nextNode = accNode
+			// check if account node was already constructed, then we need to switch to storage
+			if _, ok := currentNode.(*trie.AccountNode); ok && len(hashedKey) > 64 {
+				if cellToExpand.hashedExtLen > 0 {
+					extKey := common.Copy(cellToExpand.hashedExtension[:cellToExpand.hashedExtLen])
+					nextNode = &trie.ShortNode{Key: extKey}
+				} else {
+					nextNode = &trie.FullNode{}
+				}
+			} else {
+				nextNode = accNode
+			}
 			keyPos++ // only move one nibble
 		} else if cellToExpand.hashLen > 0 { // hash cell means we will expand using a full node
 			nextNode = &trie.FullNode{}
@@ -1657,34 +1667,15 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 			}
 			break // break if currentNode is nil
 		}
-		// we need to check if we are dealing with the next node being an account node and we have a storage key,
-		// in that case start a new tree for the storage
-		if nextAccNode, ok := nextNode.(*trie.AccountNode); ok && len(hashedKey) > 64 {
-			// If the account has an empty storage root, stop traversal here.
-			// There's no storage trie to expand into, and continuing would incorporate
-			// garbage data from rows below the account into the proof.
-			if nextAccNode.Root == trie.EmptyRoot {
-				if hph.trace {
-					fmt.Printf("[witness] AccountNode (empty storage root, break) (%d, %0x, depth=%d) %s proof %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), nextAccNode)
-				}
-				break
-			}
-			if cellToExpand.hashedExtLen > 0 {
-				extKey := common.Copy(cellToExpand.hashedExtension[:cellToExpand.hashedExtLen])
-				nextNode = &trie.ShortNode{Key: extKey}
-			} else {
-				nextNode = &trie.FullNode{}
-			}
-			nextAccNode.Storage = nextNode
-			if hph.trace {
-				fmt.Printf("[witness] AccountNode (+StorageTrie) (%d, %0x, depth=%d) %s [proof %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), nextAccNode)
-			}
-			// we want to jump to the account's storage trie directly in this case
-		} else if nextShortNode, ok := nextNode.(*trie.ShortNode); ok && len(hashedKey) > 64 && keyPos+1 == 64 {
+		if nextShortNode, ok := nextNode.(*trie.ShortNode); ok && len(hashedKey) > 64 && keyPos+1 == 64 {
 			// this is because there won't be an account cell stacked in the row below the current row in this case
 			// so the account cell will be skipped in the grid in this case
 			if nextAccNode, ok := nextShortNode.Val.(*trie.AccountNode); ok {
-				nextNode = nextAccNode
+				if nextAccNode.Root != trie.EmptyRoot {
+					nextNode = nextAccNode // only continue traversal if the account has storage
+				} else {
+					break
+				}
 				if hph.trace {
 					fmt.Printf("[witness] AccountNode (+StorageTrie) (%d, %0x, depth=%d) %s [proof %+v\n", row, currentNibble, hph.depths[row], cellToExpand.FullString(), nextAccNode)
 				}
@@ -2518,6 +2509,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		if err != nil {
 			return err
 		}
+		tr.Reset()
 		tries = append(tries, tr)
 		ki++
 		return nil
@@ -3246,16 +3238,4 @@ func HexTrieStateToString(enc []byte) (string, error) {
 
 func (hph *HexPatriciaHashed) Grid() [128][16]cell {
 	return hph.grid
-}
-
-func (hph *HexPatriciaHashed) PrintAccountsInGrid() {
-	fmt.Printf("SEARCHING FOR ACCOUNTS IN GRID\n")
-	for row := 0; row < 128; row++ {
-		for col := 0; col < 16; col++ {
-			c := hph.grid[row][col]
-			if c.accountAddr[19] != 0 && c.accountAddr[0] != 0 {
-				fmt.Printf("FOUND account %x in position (%d,%d)\n", c.accountAddr, row, col)
-			}
-		}
-	}
 }

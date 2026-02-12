@@ -14,18 +14,19 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package types
+package misc
 
-import "sync"
+import (
+	"testing"
 
-type encodingBuf [32]byte
+	"github.com/stretchr/testify/assert"
+)
 
-var pooledBuf = sync.Pool{
-	New: func() any { return new(encodingBuf) },
-}
-
-func newEncodingBuf() *encodingBuf {
-	b := pooledBuf.Get().(*encodingBuf)
-	*b = [32]byte{} // reset, do we need to?
-	return b
+// A test for https://github.com/erigontech/erigon/issues/18424
+func TestCalcGasLimit(t *testing.T) {
+	// https://gnosisscan.io//block/43788389
+	parentGasLimit := uint64(16_999_984)
+	desiredLimit := uint64(17_000_000)
+	gasLimit := CalcGasLimit(parentGasLimit, desiredLimit)
+	assert.Equal(t, desiredLimit, gasLimit)
 }

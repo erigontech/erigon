@@ -19,6 +19,7 @@ package stagedsync
 import (
 	"fmt"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
@@ -27,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 )
 
 type MiningFinishCfg struct {
@@ -71,6 +73,9 @@ func SpawnMiningFinishStage(s *StageState, sd *execctx.SharedDomains, tx kv.Temp
 		block.HeaderNoCopy().BlockAccessListHash = &hash
 	}
 	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: current.Receipts, Requests: current.Requests, BlockAccessList: current.BlockAccessList}
+	if dbg.LogHashMismatchReason() {
+		ethutils.LogReceipts("Block built", current.Receipts, current.Txns, cfg.chainConfig, current.Header, logger)
+	}
 	*current = MiningBlock{} // hack to clean global data
 
 	//sealHash := engine.SealHash(block.Header())
