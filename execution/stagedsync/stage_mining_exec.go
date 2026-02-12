@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/metrics"
 	"github.com/erigontech/erigon/db/kv"
@@ -211,6 +212,14 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 		return fmt.Errorf("cannot finalize block execution: %s", err)
 	}
 
+	// Note: This gets reset in MiningFinish - but we need it here to
+	// process execv3 - when we remove that this becomes redundant
+	hash := common.Hash{}
+	if len(current.Requests) > 0 {
+		hash = *current.Requests.Hash()
+	}
+	block.HeaderNoCopy().RequestsHash = &hash
+
 	blockHeight := block.NumberU64()
 	if needBAL {
 		systemReads = mergeReadSets(systemReads, ibs.VersionedReads())
@@ -227,6 +236,10 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 		// process execv3 - when we remove that this becomes redundant
 		hash := current.BlockAccessList.Hash()
 		block.HeaderNoCopy().BlockAccessListHash = &hash
+	} else {
+		// Note: This gets reset in MiningFinish - but we need it here to
+		// process execv3 - when we remove that this becomes redundant
+		block.HeaderNoCopy().BlockAccessListHash = &empty.BlockAccessListHash
 	}
 
 	writeBlockForExecution := func(rwTx kv.TemporalRwTx) error {
