@@ -51,3 +51,5 @@ Erigon is a high-performance Ethereum execution client with embedded consensus l
 ## Conventions
 
 Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace configs optional`
+
+**Important**: Always run `make lint` after making code changes and before committing. Fix any linter errors before proceeding.

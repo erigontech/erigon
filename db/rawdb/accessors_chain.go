@@ -1273,17 +1273,17 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
 
-	_min, err := txNumReader.Min(context.Background(), tx, blockNum)
+	minTxNum, err := txNumReader.Min(context.Background(), tx, blockNum)
 	if err != nil {
 		return
 	}
-	_max, err := txNumReader.Max(context.Background(), tx, blockNum)
+	maxTxNum, err := txNumReader.Max(context.Background(), tx, blockNum)
 	if err != nil {
 		return
 	}
 
-	for txnID := _min; txnID < _max+1; txnID++ {
-		v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txnID+1)
+	for txNum := minTxNum; txNum < maxTxNum+1; txNum++ {
+		v, ok, err := tx.HistorySeek(kv.RCacheDomain, receiptCacheKey, txNum+1)
 		if err != nil {
 			return nil, err
 		}
@@ -1297,13 +1297,16 @@ func ReadReceiptsCacheV2(tx kv.TemporalTx, block *types.Block, txNumReader rawdb
 		// Convert the receipts from their storage form to their internal representation
 		receipt := &types.ReceiptForStorage{}
 		if err := rlp.DecodeBytes(v, receipt); err != nil {
-			return nil, fmt.Errorf("ReadReceipts: deserialize %d, len(v)=%d, %w", blockNum, len(v), err)
+			return nil, fmt.Errorf("ReadReceiptsCacheV2: deserialize %d, len(v)=%d, %w", blockNum, len(v), err)
 		}
 		x := (*types.Receipt)(receipt)
-		if int(receipt.TransactionIndex) < len(block.Transactions()) {
-			txn := block.Transactions()[receipt.TransactionIndex]
-			x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, txn.Hash(), true)
+		transactions := block.Transactions()
+		txnIdx := int(receipt.TransactionIndex)
+		if txnIdx < 0 || txnIdx >= len(transactions) {
+			return nil, fmt.Errorf("ReadReceiptsCacheV2: out of range txnIdx=%d, len(transactions)=%d", txnIdx, len(transactions))
 		}
+		txn := transactions[txnIdx]
+		x.DeriveFieldsV4ForCachedReceipt(blockHash, blockNum, txn.Hash(), true)
 		res = append(res, x)
 	}
 	return res, nil
