@@ -295,15 +295,30 @@ func (s *Sentinel) listenForPeers() {
 			continue
 		}
 
-		go func(usefulForSubnets bool, filled []int) {
+		go func(usefulForSubnets bool, filled []int, enrNode *enode.Node) {
 			if err := s.ConnectWithPeer(s.ctx, *peerInfo, sem); err != nil {
 				log.Trace("[Sentinel] Could not connect with peer", "err", err)
 			} else if len(filled) > 0 {
-				log.Debug("[Sentinel] Connected with peer that fills empty subnet (ENR)", "peer", peerInfo.ID, "subnets", filled)
+				// Check if metadata actually covers the subnets ENR claimed
+				if metaAttnets, ok := s.GetPeerAttnets(peerInfo.ID); ok {
+					actualFilled := []int{}
+					for _, subnetIdx := range filled {
+						if metaAttnets[subnetIdx/8]&(1<<(subnetIdx%8)) != 0 {
+							actualFilled = append(actualFilled, subnetIdx)
+						}
+					}
+					if len(actualFilled) != len(filled) {
+						log.Debug("[Sentinel] ENR claimed subnets not in metadata", "peer", peerInfo.ID, "enrClaimed", filled, "metadataActual", actualFilled)
+					} else {
+						log.Debug("[Sentinel] Connected with peer that fills empty subnet", "peer", peerInfo.ID, "subnets", filled)
+					}
+				} else {
+					log.Debug("[Sentinel] Connected with peer (ENR), metadata query failed", "peer", peerInfo.ID, "enrSubnets", filled)
+				}
 			} else if usefulForSubnets {
 				log.Debug("[Sentinel] Connected with subnet-useful peer", "peer", peerInfo.ID)
 			}
-		}(peerUsefulForSubnets, filledSubnets)
+		}(peerUsefulForSubnets, filledSubnets, node)
 
 	}
 }
@@ -333,6 +348,30 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 		} else {
 			// we were able to succesfully connect, so add this peer to our pool
 			s.peers.AddPeer(peerId)
+
+			// Debug: compare ENR attnets vs metadata attnets
+			if nodeVal, ok := s.pidToEnr.Load(peerId); ok {
+				if node, ok := nodeVal.(*enode.Node); ok {
+					var enrSubnets bitfield.Bitvector64
+					if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &enrSubnets)); err == nil {
+						if metaAttnets, ok := s.GetPeerAttnets(peerId); ok {
+							// Count how many subnets each advertises
+							enrCount, metaCount := 0, 0
+							for i := 0; i < 64; i++ {
+								if enrSubnets[i/8]&(1<<(i%8)) != 0 {
+									enrCount++
+								}
+								if metaAttnets[i/8]&(1<<(i%8)) != 0 {
+									metaCount++
+								}
+							}
+							if enrCount != metaCount {
+								log.Debug("[Sentinel] ENR vs Metadata mismatch", "peer", peerId, "enrSubnets", enrCount, "metaSubnets", metaCount)
+							}
+						}
+					}
+				}
+			}
 			log.Debug("[Sentinel] Peer validated and added", "peer", peerId)
 		}
 	}()
