@@ -51,7 +51,6 @@ func (obj *Withdrawal) EncodingSize() int {
 
 func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 	encodingSize := obj.EncodingSize()
-
 	if err := rlp.EncodeStructSizePrefix(encodingSize, w); err != nil {
 		return err
 	}
