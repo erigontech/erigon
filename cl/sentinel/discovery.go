@@ -40,27 +40,34 @@ const (
 )
 
 // getSubnetCoverage returns a count of peers for each attestation subnet (64 subnets)
+// Uses on-demand metadata queries with LRU cache (TTL = 1 epoch)
 func (s *Sentinel) getSubnetCoverage() [attestationSubnetCount]int {
 	var coverage [attestationSubnetCount]int
 	peers := s.p2p.Host().Network().Peers()
 
 	for _, pid := range peers {
-		// Try to get the peer's enode from our store
-		nodeVal, ok := s.pidToEnr.Load(pid)
+		// Get attnets from cache or query on-demand
+		attnets, ok := s.GetPeerAttnets(pid)
 		if !ok {
-			continue
+			// Fallback to ENR data if metadata query fails
+			nodeVal, ok := s.pidToEnr.Load(pid)
+			if !ok {
+				continue
+			}
+			node, ok := nodeVal.(*enode.Node)
+			if !ok {
+				continue
+			}
+			var peerSubnets bitfield.Bitvector64
+			if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err != nil {
+				continue
+			}
+			attnets = [8]byte(peerSubnets)
 		}
-		node, ok := nodeVal.(*enode.Node)
-		if !ok {
-			continue
-		}
-		var peerSubnets bitfield.Bitvector64
-		if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err != nil {
-			continue
-		}
+
 		// Count which subnets this peer covers
 		for i := 0; i < attestationSubnetCount; i++ {
-			if peerSubnets[i/8]&(1<<(i%8)) != 0 {
+			if attnets[i/8]&(1<<(i%8)) != 0 {
 				coverage[i]++
 			}
 		}
