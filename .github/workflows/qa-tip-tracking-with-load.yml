@@ -72,6 +72,7 @@ jobs:
       run: |
         # Remove all contents under the runner workspace directory
         rm -rf ${{ runner.workspace }}/* || true
+        mkdir -p ${{ runner.workspace }}/erigon
 
     - name: Check out Erigon repository
       if: matrix.client == 'erigon'
