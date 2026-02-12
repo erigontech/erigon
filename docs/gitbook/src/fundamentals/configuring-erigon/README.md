@@ -138,7 +138,9 @@ These flags manage network connectivity, peer discovery, and traffic control.
 * `--nat value`: The NAT port mapping mechanism (See [here](nat.md) for more details).
 * `--nodiscover`: Disables peer discovery.
   * Default: `false`
-* `--v5disc`: Enables the Node Discovery Protocol v5 (Discv5) for managed ENRs and topic discovery.
+* `--discovery.v4`, `--v4disc`: Enables the Node Discovery Protocol v5 (Discv4) for managed ENRs and topic discovery.
+  * Default: `true`
+* `--discovery.v5`, `--v5disc`, `--discv5`: Enables the Node Discovery Protocol v5 (Discv5) for managed ENRs and topic discovery.
   * Default: `true`
 * `--discovery.parallelism value`: The number of concurrent lookup requests allowed per discovery query.
   * Default: `3`
@@ -573,8 +575,8 @@ COMMANDS:
    help, h                                      Shows a list of commands or help for one command
 
 GLOBAL OPTIONS:
-   --datadir value                                                                                                         Data directory for the databases (default: /home/bloxster/.local/share/erigon)
-   --ethash.dagdir value                                                                                                   Directory to store the ethash mining DAGs (default: /home/bloxster/.local/share/erigon-ethash)
+   --datadir value                                                                                                         Data directory for the databases (default: /home/user/.local/share/erigon)
+   --ethash.dagdir value                                                                                                   Directory to store the ethash mining DAGs (default: /home/user/.local/share/erigon-ethash)
    --externalcl                                                                                                            Enables the external consensus layer (default: false)
    --txpool.disable                                                                                                        External pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer. (default: false)
    --txpool.pricelimit value                                                                                               Minimum gas price (fee cap) limit to enforce for acceptance into the pool (default: 1)
