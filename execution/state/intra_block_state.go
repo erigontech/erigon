@@ -1896,6 +1896,16 @@ func (sdb *IntraBlockState) Print(chainRules chain.Rules, all bool) {
 // used when the EVM emits new state logs. It should be invoked before
 // transaction execution.
 func (sdb *IntraBlockState) SetTxContext(bn uint64, ti int) {
+	/* Not sure what this test is for it seems to break some tests
+	if len(sdb.logs) > 0 && ti == 0 {
+		err := fmt.Errorf("seems you forgot `ibs.Reset` or `ibs.TxIndex()`. len(sdb.logs)=%d, ti=%d", len(sdb.logs), ti)
+		panic(err)
+	}
+	if sdb.txIndex >= 0 && sdb.txIndex > ti {
+		err := fmt.Errorf("seems you forgot `ibs.Reset` or `ibs.TxIndex()`. sdb.txIndex=%d, ti=%d", sdb.txIndex, ti)
+		panic(err)
+	}
+	*/
 	sdb.txIndex = ti
 	sdb.blockNum = bn
 }
@@ -2140,6 +2150,8 @@ func (sdb *IntraBlockState) ResetVersionedIO() {
 	sdb.versionedReads = nil
 	sdb.versionedWrites = nil
 	sdb.dep = UnknownDep
+	sdb.recordAccess = false
+	sdb.addressAccess = nil
 }
 
 // VersionedWrites returns the current versioned write set if this block

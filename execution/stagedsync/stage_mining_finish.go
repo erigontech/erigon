@@ -34,7 +34,7 @@ type MiningFinishCfg struct {
 	chainConfig           *chain.Config
 	engine                rules.Engine
 	sealCancel            chan struct{}
-	miningState           MiningState
+	miningState           *MiningState
 	blockReader           services.FullBlockReader
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore
 }
@@ -42,7 +42,7 @@ type MiningFinishCfg struct {
 func StageMiningFinishCfg(
 	chainConfig *chain.Config,
 	engine rules.Engine,
-	miningState MiningState,
+	miningState *MiningState,
 	sealCancel chan struct{},
 	blockReader services.FullBlockReader,
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore,

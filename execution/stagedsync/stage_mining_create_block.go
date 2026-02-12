@@ -50,8 +50,8 @@ type MiningState struct {
 	BlockAssembler  *exec.BlockAssembler
 }
 
-func NewMiningState(cfg *buildercfg.MiningConfig) MiningState {
-	return MiningState{
+func NewMiningState(cfg *buildercfg.MiningConfig) *MiningState {
+	return &MiningState{
 		MiningConfig:    cfg,
 		PendingResultCh: make(chan *types.Block, 1),
 		MiningResultCh:  make(chan *types.BlockWithReceipts, 1),
@@ -59,7 +59,7 @@ func NewMiningState(cfg *buildercfg.MiningConfig) MiningState {
 }
 
 type MiningCreateBlockCfg struct {
-	miner                  MiningState
+	miner                  *MiningState
 	chainConfig            *chain.Config
 	engine                 rules.Engine
 	blockBuilderParameters *builder.Parameters
@@ -68,7 +68,7 @@ type MiningCreateBlockCfg struct {
 }
 
 func StageMiningCreateBlockCfg(
-	miner MiningState,
+	miner *MiningState,
 	chainConfig *chain.Config,
 	engine rules.Engine,
 	blockBuilderParameters *builder.Parameters,
@@ -194,6 +194,9 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv
 	}
 
 	if cfg.blockBuilderParameters != nil {
+		if cfg.blockBuilderParameters.ParentBeaconBlockRoot == nil {
+			return fmt.Errorf("ParentBeaconBlockRoot missing from builder parameters")
+		}
 		header.MixDigest = cfg.blockBuilderParameters.PrevRandao
 		header.ParentBeaconBlockRoot = cfg.blockBuilderParameters.ParentBeaconBlockRoot
 		cfg.miner.BlockAssembler = exec.NewBlockAssembler(

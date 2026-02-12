@@ -19,9 +19,11 @@ package execmodule_test
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"testing"
 	"time"
@@ -32,6 +34,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
@@ -52,6 +55,11 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping test in short mode")
 	}
+
+	dbg.TraceBlocks = []uint64{math.MaxUint64}
+	dbg.TraceDomainIO = true
+	dbg.TraceTransactionIO = true
+
 	// See https://github.com/erigontech/erigon/issues/18823
 	ctx := t.Context()
 	privKey, err := crypto.GenerateKey()
@@ -216,12 +224,16 @@ func TestAssembleBlock(t *testing.T) {
 	for _, res := range r.Imported {
 		require.Equal(t, txpoolproto.ImportResult_SUCCESS, res)
 	}
+	var beaconBlockRoot common.Hash
+	_, err = rand.Read(beaconBlockRoot[:])
+	require.NoError(t, err)
 	payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
 		ParentHash:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Hash()),
 		Timestamp:             chainPack.TopBlock.Header().Time + 1,
 		PrevRandao:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Header().MixDigest),
 		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
 		Withdrawals:           make([]*typesproto.Withdrawal, 0),
+		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(beaconBlockRoot),
 	})
 	require.NoError(t, err)
 	blockData, err := getAssembledBlock(ctx, exec, payloadId)

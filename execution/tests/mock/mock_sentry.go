@@ -60,6 +60,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/bodydownload"
 	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
@@ -298,7 +299,7 @@ func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.Pr
 	case gspec.Config.Bor != nil:
 		engine = bor.NewFaker()
 	default:
-		engine = ethash.NewFaker()
+		engine = merge.NewFaker(ethash.NewFaker())
 	}
 
 	return MockWithEverything(tb, gspec, key, prune, engine, blockBufferSize, false, opts...)
@@ -387,6 +388,10 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			// Wait for all the background snapshot retirements launched by any stages2.StageLoopIteration to finish
 			mock.retirementWg.Wait()
 		})
+	}
+
+	if err := blockgen.InitPraguePreDeploys(db, logger); err != nil {
+		panic(err)
 	}
 
 	// Committed genesis will be shared between download and mock sentry
@@ -751,7 +756,7 @@ func MockWithTxPoolOsaka(t *testing.T) *MockSentry {
 		},
 	}
 
-	return MockWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true)
+	return MockWithEverything(t, gspec, key, prune.MockMode, merge.NewFaker(ethash.NewFaker()), blockBufferSize, true)
 }
 
 func (ms *MockSentry) EnableLogs() {

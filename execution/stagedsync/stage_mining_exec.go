@@ -48,7 +48,7 @@ import (
 )
 
 type MiningExecCfg struct {
-	miningState MiningState
+	miningState *MiningState
 	notifier    ChainEventNotifier
 	chainConfig *chain.Config
 	engine      rules.Engine
@@ -61,7 +61,7 @@ type MiningExecCfg struct {
 }
 
 func StageMiningExecCfg(
-	miningState MiningState,
+	miningState *MiningState,
 	notifier ChainEventNotifier,
 	chainConfig *chain.Config,
 	engine rules.Engine,

@@ -812,7 +812,7 @@ func (io *VersionedIO) Merge(other *VersionedIO) *VersionedIO {
 			} else {
 				merged.accessed[i] = io.accessed[i].Merge(nil)
 			}
-		} else if i < len(other.inputs) {
+		} else if i < len(other.accessed) {
 			merged.accessed[i] = other.accessed[i].Merge(nil)
 		}
 	}
@@ -829,7 +829,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 
 	for txIndex := -1; txIndex <= maxTxIndex; txIndex++ {
 		io.ReadSet(txIndex).Scan(func(vr *VersionedRead) bool {
-			if vr.Address.IsNil() {
+			if vr.Address.IsNil() || params.IsSystemAddress(vr.Address) {
 				return true
 			}
 			account := ensureAccountState(ac, vr.Address)
@@ -838,7 +838,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 		})
 
 		for _, vw := range io.WriteSet(txIndex) {
-			if vw.Address.IsNil() {
+			if vw.Address.IsNil() || params.IsSystemAddress(vw.Address) {
 				continue
 			}
 			account := ensureAccountState(ac, vw.Address)
@@ -847,21 +847,16 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 		}
 
 		for addr := range io.AccessedAddresses(txIndex) {
-			if addr.IsNil() {
+			if addr.IsNil() || params.IsSystemAddress(addr) {
 				continue
 			}
+
 			ensureAccountState(ac, addr)
 		}
 	}
 
 	bal := make([]*types.AccountChanges, 0, len(ac))
 	for _, account := range ac {
-		// The system address shows up as a touched address due to a balance check in IBS
-		// during a system call, however this should not be included in the BAL.
-		if account.changes.Address == params.SystemAddress {
-			continue
-		}
-
 		account.finalize()
 		account.changes.Normalize()
 		bal = append(bal, account.changes)

@@ -262,7 +262,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 					flushPending = pe.rs.SizeEstimate() > pe.cfg.batchSize.Bytes()
 
-					if !dbg.DiscardCommitment() {
+					if !dbg.DiscardCommitment() && !pe.isBlockProduction {
 						if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||
 							applyResult.Exhausted != nil ||
 							pe.cfg.syncCfg.KeepExecutionProofs ||
@@ -921,8 +921,11 @@ func (result *execResult) finalize(blockResults []*execResult, execCfg *ExecuteB
 	}
 
 	var requests types.FlatRequests
+	var txReads state.ReadSet
 
 	if task.IsBlockEnd() {
+		txReads = ibs.VersionedReads()
+
 		if blockNum > 0 {
 			syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 				ret, err := protocol.SysCallContract(contract, data, txTask.Config, ibs, txTask.Header, execCfg.engine, false, *execCfg.vmConfig)
@@ -991,6 +994,8 @@ func (result *execResult) finalize(blockResults []*execResult, execCfg *ExecuteB
 				result.Logs = append(result.Logs, ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), blockNum, txTask.BlockHash())...)
 			}
 		}
+
+		txReads = ibs.VersionedReads()
 	}
 
 	if txTrace {
@@ -1000,9 +1005,9 @@ func (result *execResult) finalize(blockResults []*execResult, execCfg *ExecuteB
 
 	// we need to flush the finalized writes to the version map so
 	// they are taken into account by subsequent transactions
-	allWrites := ibs.VersionedWrites(true)
+	txWrites := ibs.VersionedWrites(true)
 
-	vm.FlushVersionedWrites(allWrites, true, tracePrefix)
+	vm.FlushVersionedWrites(txWrites, true, tracePrefix)
 	vm.SetTrace(false)
 	ibs.FinalizeTx(rules, stateWriter)
 
@@ -1020,7 +1025,7 @@ func (result *execResult) finalize(blockResults []*execResult, execCfg *ExecuteB
 		hooks.OnTxEnd(receipt, result.Err)
 	}
 
-	return requests, ibs.VersionedReads(), allWrites, nil
+	return requests, txReads, txWrites, nil
 }
 
 type taskVersion struct {
@@ -1488,7 +1493,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			tx := toPublish[i]
 			task := be.tasks[tx].Task
 			result := be.results[tx]
-			fmt.Println("txResult 0", be.blockNum, task.Version().TxNum)
+
 			applyResult := txResult{
 				blockNum:              be.blockNum,
 				traceFroms:            map[accounts.Address]struct{}{},

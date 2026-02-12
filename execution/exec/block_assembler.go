@@ -208,13 +208,15 @@ func (ba *BlockAssembler) AddTransactions(
 			return receipt.Logs, nil
 		}
 
+		gasUsed := protocol.NewGasUsed(header, current.Receipts.CumulativeGasUsed())
 		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader),
-			ba.cfg.Engine, coinbase, gasPool, ibs, noop, header, txn, protocol.NewGasUsed(header, ba.Receipts.CumulativeGasUsed()), *vmConfig)
+			ba.cfg.Engine, coinbase, gasPool, ibs, noop, header, txn, gasUsed, *vmConfig)
 		if err != nil {
 			ibs.RevertToSnapshot(snap, err)
 			gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap) // restore gasPool as well as ibs
 			return nil, err
 		}
+		protocol.SetGasUsed(header, gasUsed)
 
 		current.AddTxn(txn)
 		current.Receipts = append(current.Receipts, receipt)

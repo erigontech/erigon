@@ -36,8 +36,7 @@ func TestMiningBlock_AvailableRlpSpace_BugReproduction(t *testing.T) {
 		Time:   1764800001,           // Timestamp (greater than Osaka activation time)
 	}
 
-	mb := exec.NewBlockAssembler(exec.AssemblerCfg{}, 0, 0, header, []*types.Header{}, nil)
-
+	mb := exec.NewBlockAssembler(exec.AssemblerCfg{ChainConfig: chain.AllProtocolChanges}, 0, 0, header, []*types.Header{}, nil)
 	config := &chain.Config{
 		OsakaTime: big.NewInt(1764800000),
 	}
