@@ -98,28 +98,27 @@ jobs:
       - name: Run ${{ matrix.test-group }} tests on ${{ matrix.os }}
         env:
           SKIP_FLAKY_TESTS: 'true'
+          GODEBUG: cgocheck=0
+          GOTRACEBACK: 1
+          GOEXPERIMENT: synctest
+          GOGC: 80
         if: needs.source-of-changes.outputs.changed_files != 'true'
         run: |
           case "${{ matrix.test-group }}" in
             execution)
-              # Run execution layer tests with race detector (critical path)
-              GOGC=80 go test -race -timeout 30m ./execution/...
+              go test -race -timeout 30m ./execution/...
               ;;
             consensus)
-              # Run consensus layer tests with race detector (critical path)
-              GOGC=80 go test -race -timeout 30m ./cl/...
+              go test -race -timeout 30m ./cl/...
               ;;
             p2p-rpc)
-              # Run p2p and rpc tests without race detector (less critical)
-              GOGC=80 go test -timeout 20m ./p2p/... ./rpc/...
+              go test -timeout 20m ./p2p/... ./rpc/...
               ;;
             core-db)
-              # Run core and db tests without race detector
-              GOGC=80 go test -timeout 20m ./db/... ./node/... ./txnprovider/...
+              go test -timeout 20m ./db/... ./node/... ./txnprovider/...
               ;;
             other)
-              # Run cmd tests without race detector
-              GOGC=80 go test -timeout 20m ./cmd/... ./common/... ./polygon/... ./diagnostics/... ./internal/...
+              go test -timeout 20m ./cmd/... ./common/... ./polygon/... ./diagnostics/... ./internal/...
               ;;
           esac
 
