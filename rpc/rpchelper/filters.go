@@ -52,15 +52,16 @@ type Filters struct {
 
 	pendingBlock *types.Block
 
-	headsSubs         *concurrent.SyncMap[HeadsSubID, Sub[*types.Header]]
-	pendingLogsSubs   *concurrent.SyncMap[PendingLogsSubID, Sub[types.Logs]]
-	pendingBlockSubs  *concurrent.SyncMap[PendingBlockSubID, Sub[*types.Block]]
-	pendingTxsSubs    *concurrent.SyncMap[PendingTxsSubID, Sub[[]types.Transaction]]
-	logsSubs          *LogsFilterAggregator
-	logsRequestor     atomic.Value
-	receiptsSubs      *ReceiptsFilterAggregator
-	receiptsRequestor atomic.Value
-	onNewSnapshot     func()
+	headsSubs             *concurrent.SyncMap[HeadsSubID, Sub[*types.Header]]
+	pendingLogsSubs       *concurrent.SyncMap[PendingLogsSubID, Sub[types.Logs]]
+	pendingBlockSubs      *concurrent.SyncMap[PendingBlockSubID, Sub[*types.Block]]
+	pendingTxsSubs        *concurrent.SyncMap[PendingTxsSubID, Sub[[]types.Transaction]]
+	logsSubs              *LogsFilterAggregator
+	logsRequestor         atomic.Value
+	receiptsSubs          *ReceiptsFilterAggregator
+	receiptsRequestor     atomic.Value
+	pendingReceiptsUpdate atomic.Bool
+	onNewSnapshot         func()
 
 	logsStores         *concurrent.SyncMap[LogsSubID, []*types.Log]
 	pendingHeadsStores *concurrent.SyncMap[HeadsSubID, []*types.Header]
@@ -160,7 +161,12 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 				return
 			default:
 			}
-			if err := ethBackend.SubscribeReceipts(ctx, ff.OnReceipts, &ff.receiptsRequestor); err != nil {
+			if err := ethBackend.SubscribeReceipts(ctx, ff.OnReceipts, &ff.receiptsRequestor, func() error {
+				if ff.pendingReceiptsUpdate.CompareAndSwap(true, false) {
+					return ff.sendReceiptsFilterUpdate()
+				}
+				return nil
+			}); err != nil {
 				select {
 				case <-ctx.Done():
 					activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Receipts"}).Dec()
@@ -468,30 +474,10 @@ func (ff *Filters) UnsubscribePendingTxs(id PendingTxsSubID) bool {
 // and a subscription ID to manage the subscription.
 func (ff *Filters) SubscribeReceipts(size int, criteria filters.ReceiptsFilterCriteria) (<-chan *remoteproto.SubscribeReceiptsReply, ReceiptsSubID) {
 	sub := newChanSub[*remoteproto.SubscribeReceiptsReply](size)
-	id, f := ff.receiptsSubs.insertReceiptsFilter(sub)
-	f.transactionHashes = concurrent.NewSyncMap[common.Hash, int]()
-	if len(criteria.TransactionHashes) == 0 {
-		f.allTxHashes = 1
-	} else {
-		txHashCount := 0
-		maxTxHashes := ff.config.RpcSubscriptionFiltersMaxLogs // Reuse the same limit as logs
-		for _, txHash := range criteria.TransactionHashes {
-			if maxTxHashes == 0 || txHashCount < maxTxHashes {
-				f.transactionHashes.Put(txHash, 1)
-				txHashCount++
-			} else {
-				break
-			}
-		}
-	}
-	ff.receiptsSubs.addReceiptsFilters(f)
-	rfr := ff.receiptsSubs.createFilterRequest()
-	loaded := ff.loadReceiptsRequester()
-	if loaded != nil {
-		if err := loaded.(func(*remoteproto.ReceiptsFilterRequest) error)(rfr); err != nil {
-			ff.logger.Warn("Could not update remote receipts filter", "err", err)
-			ff.receiptsSubs.removeReceiptsFilter(id)
-		}
+	id := ff.receiptsSubs.insertReceiptsFilter(sub, criteria.TransactionHashes, ff.config.RpcSubscriptionFiltersMaxLogs)
+	if err := ff.sendReceiptsFilterUpdate(); err != nil {
+		ff.logger.Warn("Could not update remote receipts filter", "err", err)
+		ff.receiptsSubs.removeReceiptsFilter(id)
 	}
 	return sub.ch, id
 }
@@ -503,14 +489,23 @@ func (ff *Filters) UnsubscribeReceipts(id ReceiptsSubID) bool {
 	if !removed {
 		return false
 	}
-	rfr := ff.receiptsSubs.createFilterRequest()
-	loaded := ff.loadReceiptsRequester()
-	if loaded != nil {
-		if err := loaded.(func(*remoteproto.ReceiptsFilterRequest) error)(rfr); err != nil {
-			ff.logger.Warn("Could not update remote receipts filter after unsubscribe", "err", err)
-		}
+	if err := ff.sendReceiptsFilterUpdate(); err != nil {
+		ff.logger.Warn("Could not update remote receipts filter after unsubscribe", "err", err)
 	}
 	return true
+}
+
+// sendReceiptsFilterUpdate sends the current receipts filter state to the server.
+// If the requestor is not yet available, it sets a flag so the readiness goroutine
+// in New will send the update once the receipts subscription goroutine connects.
+func (ff *Filters) sendReceiptsFilterUpdate() error {
+	rfr := ff.receiptsSubs.createFilterRequest()
+	loaded := ff.loadReceiptsRequester()
+	if loaded == nil {
+		ff.pendingReceiptsUpdate.Store(true)
+		return nil
+	}
+	return loaded.(func(*remoteproto.ReceiptsFilterRequest) error)(rfr)
 }
 
 // SubscribeLogs subscribes to logs using the specified filter criteria and returns a channel to receive the logs
