@@ -94,12 +94,13 @@ type Domain struct {
 }
 
 type domainVisible struct {
-	files []visibleFile
-	name  kv.Domain
-	cache *DomainGetFromFileCache
+	files    []visibleFile
+	name     kv.Domain
+	cache    *DomainGetFromFileCache
+	rpcCache *DomainGetFromFileCache
 }
 
-func newDomainCache(name kv.Domain) *DomainGetFromFileCache {
+func newDomainCache(name kv.Domain, label string) *DomainGetFromFileCache {
 	limit := domainGetFromFileCacheLimit
 	if flag.Lookup("test.v") != nil {
 		limit = 10_000
@@ -114,7 +115,9 @@ func newDomainCache(name kv.Domain) *DomainGetFromFileCache {
 		domainGetFromFileCacheEnabled = false
 		return nil
 	}
-	return NewDomainGetFromFileCache(limit)
+	c := NewDomainGetFromFileCache(limit)
+	c.label = label
+	return c
 }
 
 func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*Domain, error) {
@@ -595,7 +598,10 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 	}
 
 	if d._visible.cache == nil {
-		d._visible.cache = newDomainCache(d.Name)
+		d._visible.cache = newDomainCache(d.Name, "chaintip")
+	}
+	if d._visible.rpcCache == nil {
+		d._visible.rpcCache = newDomainCache(d.Name, "rpc")
 	}
 
 	return &DomainRoTx{
@@ -608,6 +614,12 @@ func (d *Domain) BeginFilesRo() *DomainRoTx {
 		files:             d._visible.files,
 		salt:              d.salt.Load(),
 		getFromFileCache:  d._visible.cache,
+	}
+}
+
+func (dt *DomainRoTx) UseRpcCache() {
+	if dt.visible.rpcCache != nil {
+		dt.getFromFileCache = dt.visible.rpcCache
 	}
 }
 

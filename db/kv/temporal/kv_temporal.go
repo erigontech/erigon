@@ -271,6 +271,8 @@ type RwTx struct {
 	tx
 }
 
+func (tx *tx) UseRpcCache() { tx.aggtx.UseRpcCache() }
+
 func (tx *tx) ForceReopenAggCtx() {
 	tx.aggtx.Close()
 	tx.aggtx = tx.Agg().BeginFilesRo()
@@ -776,4 +778,46 @@ func (tx *RwTx) AllForkableIds() (ids []kv.ForkableId) {
 		ids = append(ids, forkagg.Ids()...)
 	}
 	return
+}
+
+// RpcDB is a thin wrapper around kv.TemporalRoDB that makes all read
+// transactions use a separate RPC-specific domain file cache, so that
+// RPC access patterns don't interfere with chain-tip caches.
+type RpcDB struct {
+	kv.TemporalRoDB
+}
+
+func NewRpcDB(db kv.TemporalRoDB) *RpcDB { return &RpcDB{TemporalRoDB: db} }
+
+func (db *RpcDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	tx, err := db.TemporalRoDB.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if s, ok := tx.(interface{ UseRpcCache() }); ok {
+		s.UseRpcCache()
+	}
+	return tx, nil
+}
+
+func (db *RpcDB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	return f(tx)
+}
+
+func (db *RpcDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	return db.BeginTemporalRo(ctx)
+}
+
+func (db *RpcDB) View(ctx context.Context, f func(tx kv.Tx) error) error {
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	return f(tx)
 }
