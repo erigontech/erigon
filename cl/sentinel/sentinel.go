@@ -242,8 +242,8 @@ func (s *Sentinel) GetPeersInfos() *sentinelproto.PeersInfoResponse {
 		} else {
 			entry.Direction = "inbound"
 		}
-		if enr, ok := s.pidToEnr.Load(p); ok {
-			entry.Enr = enr.(string)
+		if node, ok := s.pidToEnr.Load(p); ok {
+			entry.Enr = node.(*enode.Node).String()
 		} else {
 			entry.Enr = ""
 		}

@@ -36,7 +36,68 @@ import (
 const (
 	peerSubnetTarget                 = 4
 	goRoutinesOpeningPeerConnections = 4
+	attestationSubnetCount           = 64
 )
+
+// getSubnetCoverage returns a count of peers for each attestation subnet (64 subnets)
+func (s *Sentinel) getSubnetCoverage() [attestationSubnetCount]int {
+	var coverage [attestationSubnetCount]int
+	peers := s.p2p.Host().Network().Peers()
+
+	for _, pid := range peers {
+		// Try to get the peer's enode from our store
+		nodeVal, ok := s.pidToEnr.Load(pid)
+		if !ok {
+			continue
+		}
+		node, ok := nodeVal.(*enode.Node)
+		if !ok {
+			continue
+		}
+		var peerSubnets bitfield.Bitvector64
+		if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err != nil {
+			continue
+		}
+		// Count which subnets this peer covers
+		for i := 0; i < attestationSubnetCount; i++ {
+			if peerSubnets[i/8]&(1<<(i%8)) != 0 {
+				coverage[i]++
+			}
+		}
+	}
+	return coverage
+}
+
+// getEmptySubnets returns a list of subnet indices that have no peers
+func (s *Sentinel) getEmptySubnets() []int {
+	coverage := s.getSubnetCoverage()
+	var empty []int
+	for i, count := range coverage {
+		if count == 0 {
+			empty = append(empty, i)
+		}
+	}
+	return empty
+}
+
+// isPeerUsefulForEmptySubnets checks if a peer covers any subnet that currently has no peers
+func (s *Sentinel) isPeerUsefulForEmptySubnets(node *enode.Node, emptySubnets []int) bool {
+	if len(emptySubnets) == 0 {
+		return false
+	}
+
+	var peerSubnets bitfield.Bitvector64
+	if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err != nil {
+		return false
+	}
+
+	for _, subnetIdx := range emptySubnets {
+		if peerSubnets[subnetIdx/8]&(1<<(subnetIdx%8)) != 0 {
+			return true
+		}
+	}
+	return false
+}
 
 // isPeerUsefulForAnySubnet checks if a peer's ENR advertises any attestation subnets
 // that overlap with our currently subscribed subnets
@@ -153,6 +214,12 @@ func (s *Sentinel) listenForPeers() {
 
 	iterator := s.listener.RandomNodes()
 	defer iterator.Close()
+
+	// Track empty subnets, refresh every 6 seconds (half slot) to ensure quick coverage
+	var emptySubnets []int
+	lastEmptySubnetCheck := time.Time{}
+	const emptySubnetCheckInterval = 6 * time.Second // Check every half slot
+
 	for {
 		if err := s.ctx.Err(); err != nil {
 			log.Debug("Stopping Ethereum 2.0 peer discovery", "err", err)
@@ -165,18 +232,33 @@ func (s *Sentinel) listenForPeers() {
 		}
 		node := iterator.Node()
 
+		// Refresh empty subnets list every slot (12 seconds)
+		if time.Since(lastEmptySubnetCheck) > emptySubnetCheckInterval {
+			emptySubnets = s.getEmptySubnets()
+			lastEmptySubnetCheck = time.Now()
+			if len(emptySubnets) > 0 {
+				log.Info("[Sentinel] Subnets without peers", "count", len(emptySubnets), "subnets", emptySubnets)
+			}
+		}
+
 		// Check if peer is useful for any of our subscribed subnets
 		peerUsefulForSubnets := s.isPeerUsefulForAnySubnet(node)
+		// Check if peer can fill an empty subnet
+		peerFillsEmptySubnet := s.isPeerUsefulForEmptySubnets(node, emptySubnets)
 
-		// If we have too many peers, only connect if peer is useful for subnets
+		// If we have too many peers, only connect if peer is useful
 		if s.HasTooManyPeers() {
-			if !peerUsefulForSubnets {
+			if !peerUsefulForSubnets && !peerFillsEmptySubnet {
 				log.Trace("[Sentinel] Not looking for peers, at peer limit")
 				time.Sleep(100 * time.Millisecond)
 				continue
 			}
-			// Peer is useful for subnets, allow connection even at peer limit
-			log.Debug("[Sentinel] Connecting to subnet-useful peer despite peer limit")
+			// Peer is useful for subnets or fills an empty subnet, allow connection
+			if peerFillsEmptySubnet {
+				log.Debug("[Sentinel] Connecting to peer that fills empty subnet despite peer limit")
+			} else {
+				log.Debug("[Sentinel] Connecting to subnet-useful peer despite peer limit")
+			}
 		}
 
 		peerInfo, _, err := convertToAddrInfo(node)
@@ -184,7 +266,7 @@ func (s *Sentinel) listenForPeers() {
 			log.Error("[Sentinel] Could not convert to peer info", "err", err)
 			continue
 		}
-		s.pidToEnr.Store(peerInfo.ID, node.String())
+		s.pidToEnr.Store(peerInfo.ID, node)
 		s.pidToEnodeId.Store(peerInfo.ID, node.ID())
 		// Skip Peer if IP was private.
 		if node.IP().IsPrivate() {
@@ -199,13 +281,15 @@ func (s *Sentinel) listenForPeers() {
 			continue
 		}
 
-		go func(usefulForSubnets bool) {
+		go func(usefulForSubnets, fillsEmpty bool) {
 			if err := s.ConnectWithPeer(s.ctx, *peerInfo, sem); err != nil {
 				log.Trace("[Sentinel] Could not connect with peer", "err", err)
+			} else if fillsEmpty {
+				log.Debug("[Sentinel] Connected with peer that fills empty subnet", "peer", peerInfo.ID)
 			} else if usefulForSubnets {
 				log.Debug("[Sentinel] Connected with subnet-useful peer", "peer", peerInfo.ID)
 			}
-		}(peerUsefulForSubnets)
+		}(peerUsefulForSubnets, peerFillsEmptySubnet)
 
 	}
 }
