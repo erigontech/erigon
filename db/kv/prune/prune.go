@@ -219,9 +219,9 @@ func TableScanningPrune(
 		}
 	}
 	if prevStat.ValueProgress == InProgress {
-		valCursorPosition.StartVal, _, err = valDelCursor.Seek(prevStat.LastPrunedValue)
+		valCursorPosition.StartVal, valCursorPosition.StartKey, err = valDelCursor.Seek(prevStat.LastPrunedValue)
 	} else if prevStat.ValueProgress == First {
-		valCursorPosition.StartVal, _, err = valDelCursor.First()
+		valCursorPosition.StartVal, valCursorPosition.StartKey, err = valDelCursor.First()
 	}
 
 	if prevStat.KeyProgress == InProgress {
@@ -269,11 +269,7 @@ func TableScanningPrune(
 	const timeCheckInterval = 128
 	var iterCount uint64
 
-	for ; val != nil; val, txNumBytes, err = valDelCursor.NextNoDup() {
-		if err != nil {
-			return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
-		}
-
+	for val != nil {
 		iterCount++
 		if iterCount&(timeCheckInterval-1) == 0 && time.Since(start) > timeOut {
 			stat.LastPrunedValue = common.Copy(val)
@@ -319,6 +315,10 @@ func TableScanningPrune(
 		}
 
 		if txNum >= txTo {
+			val, txNumBytes, err = valDelCursor.NextNoDup()
+			if err != nil {
+				return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
+			}
 			continue
 		}
 		dupsDelete := lastDupTxNum < txTo && txNum >= txFrom
@@ -344,66 +344,80 @@ func TableScanningPrune(
 				stat.DupsDeleted += dups
 			}
 			stat.PruneCountValues += dups
-		} else {
-			if mode != KeyStorageMode && mode != StepKeyStorageMode {
-				var n int64
-				if mode == StepValueStorageMode {
-					n, err = valDelCursor.DeleteDupRange(txNumBytes, stepValFrom[:], stepValTo[:])
-					if err != nil {
-						return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
-					}
-				} else {
-					n, err = valDelCursor.DeleteDupRange(val, txnfromb[:], txntob[:])
-					if err != nil {
-						return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
-					}
+		} else if mode != KeyStorageMode && mode != StepKeyStorageMode {
+			// DeleteDupRange invalidates cursor position, so we save the key
+			// and re-seek after. If all dups were deleted, Seek returns the next key
+			// which we process directly without calling NextNoDup.
+			savedKey := common.Copy(val)
+			var n int64
+			if mode == StepValueStorageMode {
+				n, err = valDelCursor.DeleteDupRange(val, stepValFrom[:], stepValTo[:])
+				if err != nil {
+					return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 				}
-				stat.PruneCountValues += uint64(n)
+			} else {
+				n, err = valDelCursor.DeleteDupRange(val, txnfromb[:], txntob[:])
+				if err != nil {
+					return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
+				}
+			}
+			stat.PruneCountValues += uint64(n)
+			// Re-seek to restore cursor position after DeleteDupRange
+			val, txNumBytes, err = valDelCursor.Seek(savedKey)
+			if err != nil {
+				return nil, fmt.Errorf("re-seek after DeleteDupRange %s: %w", filenameBase, err)
+			}
+			if val == nil {
+				break // no more keys
+			}
+			// If same key still exists (has remaining dups outside prune range),
+			// advance to next key. If Seek returned a different key, process it
+			// directly on next iteration.
+			if bytes.Equal(val, savedKey) {
+				val, txNumBytes, err = valDelCursor.NextNoDup()
+				if err != nil {
+					return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
+				}
+			}
+			// skip the normal NextNoDup at bottom — we already advanced
+			continue
+		} else {
+			for ; txNumBytes != nil; _, txNumBytes, err = valDelCursor.NextDup() {
+				if err != nil {
+					return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
+				}
+
+				var txNumDup uint64
+				switch mode {
+				case KeyStorageMode:
+					txNumDup = binary.BigEndian.Uint64(val[len(val)-8:])
+				default: // StepKeyStorageMode
+					txNumDup = kv.Step(^binary.BigEndian.Uint64(val[len(val)-8:])).ToTxNum(stepSize)
+				}
+
 				iterCount++
 				if iterCount&(timeCheckInterval-1) == 0 && time.Since(start) > timeOut {
 					stat.LastPrunedValue = common.Copy(val)
 					stat.ValueProgress = InProgress
 					return stat, nil
 				}
-			} else {
-				for ; txNumBytes != nil; _, txNumBytes, err = valDelCursor.NextDup() {
-					if err != nil {
-						return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
-					}
-
-					var txNumDup uint64
-					switch mode {
-					case KeyStorageMode:
-						txNumDup = binary.BigEndian.Uint64(val[len(val)-8:])
-					default: // StepKeyStorageMode
-						txNumDup = kv.Step(^binary.BigEndian.Uint64(val[len(val)-8:])).ToTxNum(stepSize)
-					}
-
-					iterCount++
-					if iterCount&(timeCheckInterval-1) == 0 && time.Since(start) > timeOut {
-						stat.LastPrunedValue = common.Copy(val)
-						stat.ValueProgress = InProgress
-						return stat, nil
-					}
-					if txNumDup < txFrom {
-						continue
-					}
-					if txNumDup >= txTo {
-						break
-					}
-					if throttling != nil {
-						time.Sleep(*throttling)
-					}
-
-					stat.MinTxNum = min(stat.MinTxNum, txNumDup)
-					stat.MaxTxNum = max(stat.MaxTxNum, txNumDup)
-					if err = valDelCursor.DeleteCurrent(); err != nil {
-						return nil, err
-					}
-					stat.PruneCountValues++
+				if txNumDup < txFrom {
+					continue
 				}
-			}
+				if txNumDup >= txTo {
+					break
+				}
+				if throttling != nil {
+					time.Sleep(*throttling)
+				}
 
+				stat.MinTxNum = min(stat.MinTxNum, txNumDup)
+				stat.MaxTxNum = max(stat.MaxTxNum, txNumDup)
+				if err = valDelCursor.DeleteCurrent(); err != nil {
+					return nil, err
+				}
+				stat.PruneCountValues++
+			}
 		}
 
 		select {
@@ -419,6 +433,11 @@ func TableScanningPrune(
 
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+
+		val, txNumBytes, err = valDelCursor.NextNoDup()
+		if err != nil {
+			return nil, fmt.Errorf("iterate over %s index keys: %w", filenameBase, err)
 		}
 	}
 
