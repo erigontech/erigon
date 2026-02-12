@@ -477,5 +477,4 @@ func writeBALToFile(bal types.BlockAccessList, blockNum uint64, dataDir string) 
 		fmt.Fprintf(file, "\n")
 	}
 
-	//log.Info("BAL written to file", "blockNum", blockNum, "filename", filename, "accounts", len(bal))
 }
