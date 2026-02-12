@@ -68,6 +68,11 @@ jobs:
         echo "Load pattern: ${{ env.LOAD_PATTERN }}"
         echo "Load sequence: ${{ env.LOAD_SEQUENCE }}"
 
+    - name: Clean runner workspace
+      run: |
+        # Remove all contents under the runner workspace directory
+        rm -rf ${{ runner.workspace }}/* || true
+
     - name: Check out Erigon repository
       if: matrix.client == 'erigon'
       uses: actions/checkout@v6
