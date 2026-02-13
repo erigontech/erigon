@@ -36,55 +36,53 @@ type TxnBatch struct {
 }
 
 type DecryptedTxnsPool struct {
-	decryptedTxns  map[DecryptionMark]TxnBatch
-	decryptionCond *sync.Cond
+	mu            sync.Mutex
+	decryptedTxns map[DecryptionMark]TxnBatch
+	// decryptionChange is closed and replaced each time txns are added.
+	// Using a channel instead of sync.Cond for compatibility with testing/synctest.
+	decryptionChange chan struct{}
 }
 
 func NewDecryptedTxnsPool() *DecryptedTxnsPool {
-	var mu sync.Mutex
 	return &DecryptedTxnsPool{
-		decryptedTxns:  make(map[DecryptionMark]TxnBatch),
-		decryptionCond: sync.NewCond(&mu),
+		decryptedTxns:    make(map[DecryptionMark]TxnBatch),
+		decryptionChange: make(chan struct{}),
 	}
 }
 
 func (p *DecryptedTxnsPool) Wait(ctx context.Context, mark DecryptionMark) error {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
+	for {
+		p.mu.Lock()
+		_, ok := p.decryptedTxns[mark]
+		ch := p.decryptionChange
+		p.mu.Unlock()
 
-		p.decryptionCond.L.Lock()
-		defer p.decryptionCond.L.Unlock()
-
-		for _, ok := p.decryptedTxns[mark]; !ok && ctx.Err() == nil; _, ok = p.decryptedTxns[mark] {
-			p.decryptionCond.Wait()
+		if ok {
+			return nil
 		}
-	}()
 
-	select {
-	case <-ctx.Done():
-		// note the below will wake up all waiters prematurely, but thanks to the for loop condition
-		// in the waiting goroutine the ones that still need to wait will go back to sleep
-		p.decryptionCond.Broadcast()
-	case <-done:
-		// no-op
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ch:
+		}
 	}
-
-	return ctx.Err()
 }
 
 func (p *DecryptedTxnsPool) DecryptedTxns(mark DecryptionMark) (TxnBatch, bool) {
-	p.decryptionCond.L.Lock()
-	defer p.decryptionCond.L.Unlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	txnBatch, ok := p.decryptedTxns[mark]
 	return txnBatch, ok
 }
 
 func (p *DecryptedTxnsPool) AddDecryptedTxns(mark DecryptionMark, txnBatch TxnBatch) {
-	p.decryptionCond.L.Lock()
-	defer p.decryptionCond.L.Unlock()
+	p.mu.Lock()
 	p.decryptedTxns[mark] = txnBatch
-	p.decryptionCond.Broadcast()
+	close(p.decryptionChange)
+	p.decryptionChange = make(chan struct{})
+	p.mu.Unlock()
+
 	txnsLen := float64(len(txnBatch.Transactions))
 	decryptedTxnsPoolAdded.Add(txnsLen)
 	decryptedTxnsPoolTotalCount.Add(txnsLen)
@@ -92,8 +90,8 @@ func (p *DecryptedTxnsPool) AddDecryptedTxns(mark DecryptionMark, txnBatch TxnBa
 }
 
 func (p *DecryptedTxnsPool) DeleteDecryptedTxnsUpToSlot(slot uint64) (markDeletions, txnDeletions uint64) {
-	p.decryptionCond.L.Lock()
-	defer p.decryptionCond.L.Unlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
 	var totalBytes int64
 	for mark, txnBatch := range p.decryptedTxns {
@@ -112,8 +110,8 @@ func (p *DecryptedTxnsPool) DeleteDecryptedTxnsUpToSlot(slot uint64) (markDeleti
 }
 
 func (p *DecryptedTxnsPool) AllDecryptedTxns() []types.Transaction {
-	p.decryptionCond.L.Lock()
-	defer p.decryptionCond.L.Unlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	var totalTxns int
 	marks := make([]DecryptionMark, 0, len(p.decryptedTxns))
 	for mark, txnBatch := range p.decryptedTxns {

@@ -29,20 +29,29 @@ type currentBlockNumReader func(ctx context.Context) (*uint64, error)
 type BlockTracker struct {
 	logger                log.Logger
 	blockListener         *BlockListener
-	blockChangeCond       *sync.Cond
+	mu                    sync.Mutex
 	currentBlockNum       uint64
 	stopped               bool
 	currentBlockNumReader currentBlockNumReader
+	// blockChange is closed and replaced each time the block number changes or the tracker stops.
+	// Using a channel instead of sync.Cond for compatibility with testing/synctest.
+	blockChange chan struct{}
 }
 
 func NewBlockTracker(logger log.Logger, blockListener *BlockListener, bnReader currentBlockNumReader) *BlockTracker {
-	var blockChangeMu sync.Mutex
 	return &BlockTracker{
 		logger:                logger,
 		blockListener:         blockListener,
-		blockChangeCond:       sync.NewCond(&blockChangeMu),
 		currentBlockNumReader: bnReader,
+		blockChange:           make(chan struct{}),
 	}
+}
+
+// broadcast closes the current blockChange channel and replaces it with a new one,
+// waking up all goroutines waiting on it.
+func (bt *BlockTracker) broadcast() {
+	close(bt.blockChange)
+	bt.blockChange = make(chan struct{})
 }
 
 func (bt *BlockTracker) Run(ctx context.Context) error {
@@ -51,10 +60,10 @@ func (bt *BlockTracker) Run(ctx context.Context) error {
 
 	defer func() {
 		// make sure we wake up all waiters upon getting stopped
-		bt.blockChangeCond.L.Lock()
+		bt.mu.Lock()
 		bt.stopped = true
-		bt.blockChangeCond.Broadcast()
-		bt.blockChangeCond.L.Unlock()
+		bt.broadcast()
+		bt.mu.Unlock()
 	}()
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -74,10 +83,10 @@ func (bt *BlockTracker) Run(ctx context.Context) error {
 	}
 	if bn != nil {
 		bt.logger.Debug("block tracker setting initial block num", "blockNum", *bn)
-		bt.blockChangeCond.L.Lock()
+		bt.mu.Lock()
 		bt.currentBlockNum = *bn
-		bt.blockChangeCond.Broadcast()
-		bt.blockChangeCond.L.Unlock()
+		bt.broadcast()
+		bt.mu.Unlock()
 	}
 
 	for {
@@ -86,41 +95,33 @@ func (bt *BlockTracker) Run(ctx context.Context) error {
 			return ctx.Err()
 		case blockEvent := <-blockEventC:
 			bt.logger.Debug("block tracker got block event", "blockNum", blockEvent.LatestBlockNum)
-			bt.blockChangeCond.L.Lock()
+			bt.mu.Lock()
 			bt.currentBlockNum = blockEvent.LatestBlockNum
-			bt.blockChangeCond.Broadcast()
-			bt.blockChangeCond.L.Unlock()
+			bt.broadcast()
+			bt.mu.Unlock()
 		}
 	}
 }
 
 func (bt *BlockTracker) Wait(ctx context.Context, blockNum uint64) error {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
+	for {
+		bt.mu.Lock()
+		curBlock := bt.currentBlockNum
+		stopped := bt.stopped
+		ch := bt.blockChange
+		bt.mu.Unlock()
 
-		bt.blockChangeCond.L.Lock()
-		defer bt.blockChangeCond.L.Unlock()
-
-		for bt.currentBlockNum < blockNum && !bt.stopped && ctx.Err() == nil {
-			bt.blockChangeCond.Wait()
+		if curBlock >= blockNum {
+			return nil
 		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		// note the below will wake up all waiters prematurely, but thanks to the for loop condition
-		// in the waiting goroutine the ones that still need to wait will go back to sleep
-		bt.blockChangeCond.Broadcast()
-		return ctx.Err()
-	case <-done:
-		bt.blockChangeCond.L.Lock()
-		defer bt.blockChangeCond.L.Unlock()
-
-		if bt.currentBlockNum < blockNum && bt.stopped {
+		if stopped {
 			return errors.New("block tracker stopped")
 		}
 
-		return nil
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ch:
+		}
 	}
 }

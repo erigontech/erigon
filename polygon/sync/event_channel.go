@@ -32,7 +32,7 @@ type EventChannel[TEvent any] struct {
 	queue      *list.List
 	queueCap   uint
 	queueMutex sync.Mutex
-	queueCond  *sync.Cond
+	notify     chan struct{} // signal channel replacing sync.Cond for synctest compatibility
 }
 
 func NewEventChannel[TEvent any](capacity uint, opts ...EventChannelOption) *EventChannel[TEvent] {
@@ -45,16 +45,13 @@ func NewEventChannel[TEvent any](capacity uint, opts ...EventChannelOption) *Eve
 		opt(&defaultOpts)
 	}
 
-	ec := &EventChannel[TEvent]{
+	return &EventChannel[TEvent]{
 		opts:     defaultOpts,
 		events:   make(chan TEvent),
 		queue:    list.New(),
 		queueCap: capacity,
+		notify:   make(chan struct{}, 1),
 	}
-
-	ec.queueCond = sync.NewCond(&ec.queueMutex)
-
-	return ec
 }
 
 // Events returns a channel for reading events.
@@ -65,7 +62,6 @@ func (ec *EventChannel[TEvent]) Events() <-chan TEvent {
 // PushEvent queues an event. If the queue is full, it drops the oldest event to make space.
 func (ec *EventChannel[TEvent]) PushEvent(e TEvent) {
 	ec.queueMutex.Lock()
-	defer ec.queueMutex.Unlock()
 
 	var dropped bool
 	if uint(ec.queue.Len()) == ec.queueCap {
@@ -77,64 +73,44 @@ func (ec *EventChannel[TEvent]) PushEvent(e TEvent) {
 	}
 
 	ec.queue.PushBack(e)
-	ec.queueCond.Signal()
+	ec.queueMutex.Unlock()
+
+	// Non-blocking signal to notify the Run loop that an event is available.
+	// Using a channel instead of sync.Cond for compatibility with testing/synctest.
+	select {
+	case ec.notify <- struct{}{}:
+	default:
+	}
 }
 
 // takeEvent dequeues an event. If the queue was empty, it returns false.
 func (ec *EventChannel[TEvent]) takeEvent() (TEvent, bool) {
+	ec.queueMutex.Lock()
+	defer ec.queueMutex.Unlock()
 	if elem := ec.queue.Front(); elem != nil {
 		e := ec.queue.Remove(elem).(TEvent)
 		return e, true
-	} else {
-		var emptyEvent TEvent
-		return emptyEvent, false
 	}
-}
-
-// takeEvent dequeues an event. If the queue was empty, it blocks.
-func (ec *EventChannel[TEvent]) waitForEvent(ctx context.Context) (TEvent, error) {
-	waitCtx, waitCancel := context.WithCancel(ctx)
-	defer waitCancel()
-
-	var e TEvent
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
-		ec.queueMutex.Lock()
-		defer ec.queueMutex.Unlock()
-
-		var ok bool
-		for e, ok = ec.takeEvent(); !ok && (waitCtx.Err() == nil); e, ok = ec.takeEvent() {
-			ec.queueCond.Wait()
-		}
-
-		waitCancel()
-	}()
-
-	// wait for the waiting goroutine or the parent context to finish, whichever happens first
-	<-waitCtx.Done()
-
-	// if the parent context is done, force the waiting goroutine to exit
-	ec.queueCond.Signal()
-	wg.Wait()
-
-	return e, ctx.Err()
+	var emptyEvent TEvent
+	return emptyEvent, false
 }
 
 // Run pumps events from the queue to the events channel.
 func (ec *EventChannel[TEvent]) Run(ctx context.Context) error {
 	for {
-		e, err := ec.waitForEvent(ctx)
-		if err != nil {
-			return err
+		// Try to dequeue first without waiting
+		if e, ok := ec.takeEvent(); ok {
+			select {
+			case ec.events <- e:
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
 
+		// Queue is empty - wait for a signal or context cancellation
 		select {
-		case ec.events <- e:
+		case <-ec.notify:
 		case <-ctx.Done():
 			return ctx.Err()
 		}
