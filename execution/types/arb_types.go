@@ -1300,7 +1300,9 @@ func (t *ArbitrumRetryTx) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for RefundTo: %d", len(b))
 	}
-	copy(t.RefundTo.Value().Bytes(), b)
+	addr := common.Address{}
+	copy(addr[:], b)
+	t.RefundTo = accounts.InternAddress(addr)
 
 	// Decode MaxRefund (*big.Int)
 	if b, err = s.Bytes(); err != nil {
