@@ -396,7 +396,7 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, result, 3)
 
-		// latest block is 11, should work both ways: [11,12) and [11,nil)
+		// latest block is 13, should work both ways: [11,12) and [11,nil)
 		n2 = rpc.BlockNumber(12)
 		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), &n2)
 		require.NoError(t, err)
@@ -473,14 +473,14 @@ func TestAccountAt(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0)
 
-	var blockHash0, blockHash1, blockHash3, blockHash10, blockHash12 common.Hash
+	var blockHash0, blockHash1, blockHash3, blockHash10, blockHashNonExistent common.Hash
 	_ = m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		blockHash0, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 0)
 		blockHash1, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 1)
 		blockHash3, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 3)
 		blockHash10, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 10)
-		blockHash12, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 12)
-		_, _, _, _, _ = blockHash0, blockHash1, blockHash3, blockHash10, blockHash12
+		blockHashNonExistent, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 20)
+		_, _, _, _, _ = blockHash0, blockHash1, blockHash3, blockHash10, blockHashNonExistent
 		return nil
 	})
 
@@ -500,8 +500,8 @@ func TestAccountAt(t *testing.T) {
 		require.NoError(err)
 		require.Equal(1, int(results.Nonce))
 
-		//only 11 blocks in chain
-		results, err = api.AccountAt(m.Ctx, blockHash12, 0, addr)
+		// block 20 doesn't exist in the chain
+		results, err = api.AccountAt(m.Ctx, blockHashNonExistent, 0, addr)
 		require.NoError(err)
 		require.Nil(results)
 	})
@@ -522,7 +522,7 @@ func TestAccountAt(t *testing.T) {
 		// and too big txIndex
 		results, err = api.AccountAt(m.Ctx, blockHash10, 1024, contract)
 		require.NoError(err)
-		require.Equal(39, int(results.Nonce))
+		require.Equal(40, int(results.Nonce))
 	})
 	t.Run("not existing addr", func(t *testing.T) {
 		require := require.New(t)

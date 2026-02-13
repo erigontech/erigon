@@ -170,9 +170,10 @@ func generateChain(
 	transactOpts2, _ := bind.NewKeyedTransactorWithChainID(key2, chainId)
 	var poly *contracts.Poly
 	var tokenContract *contracts.Token
+	var tokenContract2 *contracts.Token
 
 	// We generate the blocks without plain state because it's not supported in blockgen.GenerateChain
-	return blockgen.GenerateChain(config, parent, engine, db, 11, func(i int, block *blockgen.BlockGen) {
+	return blockgen.GenerateChain(config, parent, engine, db, 13, func(i int, block *blockgen.BlockGen) {
 		var (
 			txn types.Transaction
 			txs []types.Transaction
@@ -276,8 +277,50 @@ func generateChain(
 				panic(err)
 			}
 			txs = append(txs, txn)
+
 		case 10:
-			// Empty block
+			break
+		case 11:
+			// // Mint tokens to many addresses to populate the token contract's storage trie
+			// // with many entries. This creates balanceOf[addr] writes for each address.
+			// // The dense trie is needed so that subsequent deletes in case 11 can trigger
+			// // trie node collapses (branch nodes losing children).
+			// var mintAddr common.Address
+			// for j := uint64(100); j <= 130; j++ {
+			// 	binary.BigEndian.PutUint64(mintAddr[:], j)
+			// 	txn, err = tokenContract.Mint(transactOpts1, mintAddr, big.NewInt(10))
+			// 	if err != nil {
+			// 		panic(err)
+			// 	}
+			// 	txs = append(txs, txn)
+			// }
+			// Mint to address so it has a known balance to drain in the next block
+			_, txn, tokenContract2, err = contracts.DeployToken(transactOpts2, contractBackend, address2)
+			if err != nil {
+				panic(err)
+			}
+			txs = append(txs, txn)
+			// txn, err = tokenContract2.Mint(transactOpts2, address2, big.NewInt(2000))
+			// if err != nil {
+			// 	panic(err)
+			// }
+			// txs = append(txs, txn)
+			txn, err = tokenContract2.Mint(transactOpts2, address1, big.NewInt(1000))
+			if err != nil {
+				panic(err)
+			}
+			txs = append(txs, txn)
+
+		case 12:
+			// transfer everything to address to to drain address1
+			txn, err = tokenContract2.Transfer(transactOpts1, address2, big.NewInt(1000))
+			if err != nil {
+				panic(err)
+			}
+			txs = append(txs, txn)
+
+		case 13:
+			// Empty block after storage deletes
 			break
 		}
 
