@@ -208,9 +208,6 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 		slotNumber := *header.SlotNumber
 		res.SlotNumber = (*hexutil.Uint64)(&slotNumber)
 	}
-	if body.BlockAccessList != nil {
-		res.BlockAccessList = types.ConvertBlockAccessListFromExecutionProto(body.BlockAccessList)
-	}
 	return res
 }
 
