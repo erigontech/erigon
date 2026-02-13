@@ -25,11 +25,8 @@ import (
 	"io"
 
 	"github.com/erigontech/erigon/common/crypto"
-<<<<<<< crypto-keccak-vedoring
 	"github.com/erigontech/erigon/common/crypto/keccak"
-=======
 	"github.com/erigontech/erigon/common/math"
->>>>>>> main
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/p2p/enr"
 )
