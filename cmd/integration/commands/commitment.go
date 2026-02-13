@@ -280,8 +280,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 			return err
 		}
 		if !ok {
-			// TODO: give a command to build the index
-			return errors.New("max tx num is not populated; run erigon for a while to build the index")
+			return errors.New("max tx num is not populated; run: integration stage_headers --reset --datadir=<dir> --chain=<chain>")
 		}
 	}
 
