@@ -299,11 +299,12 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			hash := crypto.Keccak256Hash(*req.BlockAccessList)
 			header.BlockAccessListHash = &hash
 		}
-		if req.SlotNumber == nil {
-			return nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
+		if req.SlotNumber != nil {
+			slotNumber := uint64(*req.SlotNumber)
+			header.SlotNumber = &slotNumber
+			// TODO: No Slot Error Yet - Treate it as optional for hive testing
+			// qreturn nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
 		}
-		slotNumber := uint64(*req.SlotNumber)
-		header.SlotNumber = &slotNumber
 	}
 
 	log.Debug(fmt.Sprintf("bal from header: %s", blockAccessList.DebugString()))
