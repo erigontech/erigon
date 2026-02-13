@@ -650,6 +650,11 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 		return lastKeyValue, fmt.Errorf("compress: %w", err)
 	}
 
+	f, err = snaptype.ApplyContentHash(f)
+	if err != nil {
+		return lastKeyValue, err
+	}
+
 	p := &background.Progress{}
 
 	if err := f.Type.BuildIndexes(ctx, f, nil, chainConfig, tmpDir, p, lvl, logger); err != nil {
