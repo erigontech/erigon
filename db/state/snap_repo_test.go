@@ -488,7 +488,9 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 
 		merged := newFilesItemWithSnapConfig(mr.from, mr.to, repo.cfg)
 		repo.IntegrateDirtyFile(merged)
-		require.NoError(t, repo.openDirtyFiles())
+		dirEntries, err := filesFromDir(repo.schema.DataDirectory())
+		require.NoError(t, err)
+		require.NoError(t, repo.openDirtyFiles(dirEntries))
 		repo.RecalcVisibleFiles(RootNum(MaxUint64))
 
 		vf = repo.visibleFiles()
