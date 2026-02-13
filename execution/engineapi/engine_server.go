@@ -278,7 +278,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	var blockAccessList types.BlockAccessList
-	var blockAccessListBytes []byte
 	var err error
 	if version >= clparams.GloasVersion {
 		if req.BlockAccessList == nil {
@@ -299,7 +298,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			hash := crypto.Keccak256Hash(*req.BlockAccessList)
 			header.BlockAccessListHash = &hash
 		}
-		blockAccessListBytes = *req.BlockAccessList
 	} else if req.BlockAccessList != nil {
 		return nil, &rpc.InvalidParamsError{Message: "unexpected blockAccessList before Amsterdam"}
 	}
@@ -385,8 +383,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	defer s.lock.Unlock()
 
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
-	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
-	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes, blockAccessListBytes)
+	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals, blockAccessList)
+
+	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			return &engine_types.PayloadStatus{
@@ -808,7 +807,6 @@ func (e *EngineServer) HandleNewPayload(
 	logPrefix string,
 	block *types.Block,
 	versionedHashes []common.Hash,
-	blockAccessListBytes []byte,
 ) (*engine_types.PayloadStatus, error) {
 	e.engineLogSpamer.RecordRequest()
 
@@ -880,17 +878,7 @@ func (e *EngineServer) HandleNewPayload(
 		}
 	}
 
-	var accessLists []*executionproto.BlockAccessListEntry
-	if len(blockAccessListBytes) > 0 || block.BlockAccessListHash() != nil {
-		accessLists = []*executionproto.BlockAccessListEntry{
-			{
-				BlockHash:       gointerfaces.ConvertHashToH256(block.Hash()),
-				BlockNumber:     block.NumberU64(),
-				BlockAccessList: blockAccessListBytes,
-			},
-		}
-	}
-	if err := e.chainRW.InsertBlocksAndWaitWithAccessLists(ctx, []*types.Block{block}, accessLists); err != nil {
+	if err := e.chainRW.InsertBlockAndWait(ctx, block); err != nil {
 		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,

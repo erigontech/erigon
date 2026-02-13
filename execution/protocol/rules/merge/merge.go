@@ -364,7 +364,6 @@ func (s *Merge) Seal(chain rules.ChainHeaderReader, blockWithReceipts *types.Blo
 	block := blockWithReceipts.Block
 	receipts := blockWithReceipts.Receipts
 	requests := blockWithReceipts.Requests
-	blockAccessList := blockWithReceipts.BlockAccessList
 	if !misc.IsPoSHeader(block.HeaderNoCopy()) {
 		return s.eth1Engine.Seal(chain, blockWithReceipts, results, stop)
 	}
@@ -373,7 +372,7 @@ func (s *Merge) Seal(chain rules.ChainHeaderReader, blockWithReceipts *types.Blo
 	header.Nonce = ProofOfStakeNonce
 
 	select {
-	case results <- &types.BlockWithReceipts{Block: block.WithSeal(header), Receipts: receipts, Requests: requests, BlockAccessList: blockAccessList}:
+	case results <- &types.BlockWithReceipts{Block: block.WithSeal(header), Receipts: receipts, Requests: requests}:
 	default:
 		log.Warn("Sealing result is not read", "sealhash", block.Hash())
 	}

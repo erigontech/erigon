@@ -1,6 +1,6 @@
 // Copyright 2018 The go-ethereum Authors
 // (original work)
-// Copyright 2026 The Erigon Authors
+// Copyright 2024 The Erigon Authors
 // (modifications)
 // This file is part of Erigon.
 //
@@ -27,17 +27,16 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/p2p/discover/v4wire"
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
-// ValidSchemes is a List of known secure identity schemes.
+// List of known secure identity schemes.
 var ValidSchemes = enr.SchemeMap{
 	"v4": V4ID{},
 }
 
-// ValidSchemesForTesting is a List of identity schemes for testing.
 var ValidSchemesForTesting = enr.SchemeMap{
 	"v4":   V4ID{},
 	"null": NullID{},
@@ -88,10 +87,20 @@ func (V4ID) NodeAddr(r *enr.Record) []byte {
 	if err != nil {
 		return nil
 	}
-	buf := make([]byte, 64)
-	math.ReadBits(pubkey.X, buf[:32])
-	math.ReadBits(pubkey.Y, buf[32:])
-	return crypto.Keccak256(buf)
+	id := PubkeyToIDV4((*ecdsa.PublicKey)(&pubkey))
+	return id[:]
+}
+
+// PubkeyToIDV4 derives the v4 node address from the given public key.
+func PubkeyToIDV4(key *ecdsa.PublicKey) ID {
+	return PubkeyEncoded(v4wire.EncodePubkey(key)).ID()
+}
+
+type PubkeyEncoded v4wire.Pubkey
+
+// ID returns the node ID corresponding to the public key.
+func (e PubkeyEncoded) ID() ID {
+	return ID(crypto.Keccak256Hash(e[:]))
 }
 
 // Secp256k1 is the "secp256k1" key, which holds a public key.
@@ -161,5 +170,5 @@ func SignNull(r *enr.Record, id ID) *Node {
 	if err := r.SetSig(NullID{}, []byte{}); err != nil {
 		panic(err)
 	}
-	return newNodeWithID(r, id)
+	return &Node{r: *r, id: id}
 }

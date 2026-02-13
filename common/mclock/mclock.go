@@ -22,7 +22,6 @@ package mclock
 
 import (
 	"time"
-
 	_ "unsafe" // for go:linkname
 )
 

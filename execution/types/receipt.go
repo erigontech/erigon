@@ -310,24 +310,26 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 		}
 		r.Type = LegacyTxType
 	case rlp.String:
-		// EIP-2718 typed txn receipt. Read the envelope as raw bytes,
-		// then decode from them using a fresh stream.
-		if size == 0 {
-			return rlp.EOL
+		// It's an EIP-2718 typed txn receipt.
+		s.NewList(size) // Hack - convert String (envelope) into List
+		var b []byte
+		if b, err = s.Bytes(); err != nil {
+			return fmt.Errorf("read TxType: %w", err)
 		}
-		b := make([]byte, size)
-		if err = s.ReadBytes(b); err != nil {
-			return fmt.Errorf("read typed receipt: %w", err)
+		if len(b) != 1 {
+			return fmt.Errorf("%w, got %d bytes", rlp.ErrWrongTxTypePrefix, len(b))
 		}
 		r.Type = b[0]
 		switch r.Type {
 		case AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType:
-			inner := rlp.NewStream(bytes.NewReader(b[1:]), uint64(len(b)-1))
-			if err := r.decodePayload(inner); err != nil {
+			if err := r.decodePayload(s); err != nil {
 				return err
 			}
 		default:
 			return ErrTxTypeNotSupported
+		}
+		if err = s.ListEnd(); err != nil {
+			return err
 		}
 	default:
 		return rlp.ErrExpectedList

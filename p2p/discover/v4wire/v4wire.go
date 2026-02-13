@@ -1,4 +1,4 @@
-// Copyright 2020 The go-ethereum Authors
+// Copyright 2019 The go-ethereum Authors
 // (original work)
 // Copyright 2024 The Erigon Authors
 // (modifications)
@@ -28,13 +28,11 @@ import (
 	"fmt"
 	"math/big"
 	"net"
-	"net/netip"
 	"time"
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 )
 
@@ -64,7 +62,7 @@ type (
 	Pong struct {
 		// This field should mirror the UDP envelope address
 		// of the ping packet, which provides a way to discover the
-		// external address (after NAT).
+		// the external address (after NAT).
 		To         Endpoint
 		ReplyTok   []byte // This contains the hash of the ping packet.
 		Expiration uint64 // Absolute timestamp at which the packet becomes invalid.
@@ -90,23 +88,23 @@ type (
 		Rest []rlp.RawValue `rlp:"tail"`
 	}
 
-	// ENRRequest queries for the remote node's record.
+	// enrRequest queries for the remote node's record.
 	ENRRequest struct {
 		Expiration uint64
 		// Ignore additional fields (for forward compatibility).
 		Rest []rlp.RawValue `rlp:"tail"`
 	}
 
-	// ENRResponse is the reply to ENRRequest.
+	// enrResponse is the reply to enrRequest.
 	ENRResponse struct {
-		ReplyTok []byte // Hash of the ENRRequest packet.
+		ReplyTok []byte // Hash of the enrRequest packet.
 		Record   enr.Record
 		// Ignore additional fields (for forward compatibility).
 		Rest []rlp.RawValue `rlp:"tail"`
 	}
 )
 
-// MaxNeighbors is the maximum number of neighbor nodes in a Neighbors packet.
+// This number is the maximum number of neighbor nodes in a Neigbors packet.
 const MaxNeighbors = 12
 
 // This code computes the MaxNeighbors constant value.
@@ -133,11 +131,6 @@ const MaxNeighbors = 12
 // Pubkey represents an encoded 64-byte secp256k1 public key.
 type Pubkey [64]byte
 
-// ID returns the node ID corresponding to the public key.
-func (e Pubkey) ID() enode.ID {
-	return enode.ID(crypto.Keccak256Hash(e[:]))
-}
-
 // Node represents information about a node.
 type Node struct {
 	IP  net.IP // len 4 for IPv4 or 16 for IPv6
@@ -154,21 +147,19 @@ type Endpoint struct {
 }
 
 // NewEndpoint creates an endpoint.
-func NewEndpoint(addr netip.AddrPort, tcpPort uint16) Endpoint {
-	var ip net.IP
-	if addr.Addr().Is4() || addr.Addr().Is4In6() {
-		ip4 := addr.Addr().As4()
-		ip = ip4[:]
-	} else {
-		ip = addr.Addr().AsSlice()
+func NewEndpoint(addr *net.UDPAddr, tcpPort uint16) Endpoint {
+	ip := net.IP{}
+	if ip4 := addr.IP.To4(); ip4 != nil {
+		ip = ip4
+	} else if ip6 := addr.IP.To16(); ip6 != nil {
+		ip = ip6
 	}
-	return Endpoint{IP: ip, UDP: addr.Port(), TCP: tcpPort}
+	return Endpoint{IP: ip, UDP: uint16(addr.Port), TCP: tcpPort}
 }
 
 type Packet interface {
-	// Name is the name of the package, for logging purposes.
+	// packet name and type for logging purposes.
 	Name() string
-	// Kind is the packet type, for logging purposes.
 	Kind() byte
 }
 
@@ -243,8 +234,6 @@ func Decode(input []byte) (Packet, Pubkey, []byte, error) {
 	default:
 		return nil, fromKey, hash, fmt.Errorf("unknown type: %d", ptype)
 	}
-	// Here we use NewStream to allow for additional data after the first
-	// RLP object (forward-compatibility).
 	s := rlp.NewStream(bytes.NewReader(sigdata[1:]), 0)
 	err = s.Decode(req)
 	return req, fromKey, hash, err
@@ -255,7 +244,7 @@ func Encode(priv *ecdsa.PrivateKey, req Packet) (packet, hash []byte, err error)
 	b := new(bytes.Buffer)
 	b.Write(headSpace)
 	b.WriteByte(req.Kind())
-	if err := rlp.Encode(b, req); err != nil {
+	if err = rlp.Encode(b, req); err != nil {
 		return nil, nil, err
 	}
 	packet = b.Bytes()
@@ -280,7 +269,8 @@ func recoverNodeKey(hash, sig []byte) (key Pubkey, err error) {
 	return key, nil
 }
 
-// EncodePubkey encodes a secp256k1 public key.
+// EncodePubkey converts a public key into a binary format.
+// The logic matches DecodePubkey.
 func EncodePubkey(key *ecdsa.PublicKey) Pubkey {
 	var e Pubkey
 	math.ReadBits(key.X, e[:len(e)/2])

@@ -386,8 +386,8 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 		onChangeCalls++
 		if onChangeCalls == 1 {
-			mustSeeFile(newFiles, "domain", "accounts.0-64.kv")
-			require.False(t, filepath.IsAbs(newFiles[0])) // expecting non-absolute paths (relative as of snapshots dir)
+			mustSeeFile(newFiles, "domain", "accounts.0-2.kv") //TODO: when we build `accounts.0-1.kv` - we sending empty notifcation
+			require.False(t, filepath.IsAbs(newFiles[0]))      // expecting non-absolute paths (relative as of snapshots dir)
 		}
 	}, func(deletedFiles []string) {
 		if len(deletedFiles) == 0 {
@@ -396,16 +396,20 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 		onDelCalls++
 		if onDelCalls == 1 {
+			mustSeeFile(deletedFiles, "domain", "accounts.0-1.kv")
+			mustSeeFile(deletedFiles, "domain", "commitment.0-1.kv")
 			mustSeeFile(deletedFiles, "history", "accounts.0-1.v")
 			mustSeeFile(deletedFiles, "accessor", "accounts.0-1.vi")
+
+			mustSeeFile(deletedFiles, "domain", "accounts.1-2.kv")
 			require.False(t, filepath.IsAbs(deletedFiles[0])) // expecting non-absolute paths (relative as of snapshots dir)
 		}
 	})
 
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
-	require.Equal(t, 3, onChangeCalls)
-	require.Equal(t, 4, onDelCalls)
+	require.Equal(t, 13, onChangeCalls)
+	require.Equal(t, 14, onDelCalls)
 
 	{ //prune
 		rwTx, err = db.BeginTemporalRw(context.Background())

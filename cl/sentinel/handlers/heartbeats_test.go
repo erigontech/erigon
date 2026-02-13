@@ -59,11 +59,11 @@ func newkey() *ecdsa.PrivateKey {
 }
 
 func testLocalNode() *enode.LocalNode {
-	db, err := enode.OpenDBEx(context.TODO(), "", "", log.Root())
+	db, err := enode.OpenDB(context.TODO(), "", "", log.Root())
 	if err != nil {
 		panic(err)
 	}
-	ln := enode.NewLocalNode(db, newkey())
+	ln := enode.NewLocalNode(db, newkey(), log.Root())
 	ln.Set(enr.WithEntry("attnets", attnetsTestVal))
 	ln.Set(enr.WithEntry("syncnets", syncnetsTestVal))
 	return ln

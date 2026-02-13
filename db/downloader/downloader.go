@@ -427,7 +427,7 @@ func (d *Downloader) snapshotDataLooksComplete(info *metainfo.Info) bool {
 // Log the names of torrents missing metainfo. We can pass a level in to scale the urgency of the
 // situation.
 func (d *Downloader) logNoMetadata(lvl log.Lvl, torrents []snapshot) {
-	noMetadata := make([]string, 0, len(torrents))
+	var noMetadata []string
 
 	for _, ps := range torrents {
 		t, ok := d.torrentClient.Torrent(ps.InfoHash)
