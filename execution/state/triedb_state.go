@@ -318,7 +318,7 @@ func (tds *TrieDbState) BuildStorageReads() common.StorageKeys {
 	for storageKey := range tds.aggregateBuffer.storageReads {
 		storageTouches = append(storageTouches, storageKey)
 	}
-	sort.Sort(storageTouches)
+	storageTouches.Sort()
 	return storageTouches
 }
 
@@ -339,7 +339,7 @@ func (tds *TrieDbState) buildStorageWrites() (common.StorageKeys, [][]byte) {
 			storageTouches = append(storageTouches, storageKey)
 		}
 	}
-	sort.Sort(storageTouches)
+	storageTouches.Sort()
 	var addrHash common.Hash
 	var keyHash common.Hash
 	var values = make([][]byte, len(storageTouches))
@@ -377,7 +377,7 @@ func (tds *TrieDbState) BuildAccountReads() common.Hashes {
 	for addrHash := range tds.aggregateBuffer.accountReads {
 		accountTouches = append(accountTouches, addrHash)
 	}
-	sort.Sort(accountTouches)
+	accountTouches.Sort()
 	return accountTouches
 }
 
@@ -440,7 +440,7 @@ func (tds *TrieDbState) buildAccountWrites() (common.Hashes, []*accounts.Account
 		}
 		accountTouches = append(accountTouches, addrHash)
 	}
-	sort.Sort(accountTouches)
+	accountTouches.Sort()
 	aValues := make([]*accounts.Account, len(accountTouches))
 	aCodes := make([][]byte, len(accountTouches))
 	for i, addrHash := range accountTouches {
