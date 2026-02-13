@@ -21,6 +21,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -97,6 +98,14 @@ func TestEthSubscribeReceipts(t *testing.T) {
 		TransactionHashes: []common.Hash{},
 	})
 	defer ff.UnsubscribeReceipts(id)
+	// Wait for the server-side receipt filter to be fully activated before inserting
+	// blocks. SubscribeReceipts sends a filter update request through a channel which
+	// is processed asynchronously by the server goroutine. Without this wait,
+	// InsertChain may execute and call NotifyReceipts before HasReceiptSubscriptions
+	// returns true, causing all receipt notifications to be silently dropped.
+	require.Eventually(t, func() bool {
+		return m.Notifications.Events.HasReceiptSubscriptions()
+	}, 5*time.Second, time.Millisecond)
 	err = m.InsertChain(chain)
 	require.NoError(t, err)
 	highestSeenHeader := chain.TopBlock.NumberU64()
