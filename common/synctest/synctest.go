@@ -23,4 +23,4 @@ import "testing/synctest"
 //
 
 var Wait = synctest.Wait // nolint:govet
-var Test  = synctest.Test // nolint:govet
+var Test = synctest.Test // nolint:govet
