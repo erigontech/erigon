@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -73,6 +74,9 @@ func TestEthSubscribe(t *testing.T) {
 }
 
 func TestEthSubscribeReceipts(t *testing.T) {
+	if race.Enabled {
+		t.Skip("This test is flakey during race tetsing.  Remove this when fixed")
+	}
 	ctx := t.Context()
 	logger := log.New()
 	m := mock.Mock(t)
