@@ -31,5 +31,5 @@ type Parameters struct {
 	SuggestedFeeRecipient common.Address
 	Withdrawals           []*types.Withdrawal // added in Shapella (EIP-4895)
 	ParentBeaconBlockRoot *common.Hash        // added in Dencun (EIP-4788)
-	SlotNumber            uint64              // added in Amsterdam (EIP-7843)
+	SlotNumber            *uint64             // added in Amsterdam (EIP-7843)
 }

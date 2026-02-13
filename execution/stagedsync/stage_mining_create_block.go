@@ -260,8 +260,7 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv
 	if cfg.blockBuilderParameters != nil {
 		header.MixDigest = cfg.blockBuilderParameters.PrevRandao
 		header.ParentBeaconBlockRoot = cfg.blockBuilderParameters.ParentBeaconBlockRoot
-		slotNumber := cfg.blockBuilderParameters.SlotNumber
-		header.SlotNumber = &slotNumber
+		header.SlotNumber = cfg.blockBuilderParameters.SlotNumber
 
 		current.ParentHeaderTime = parent.Time
 		current.Header = header
