@@ -88,15 +88,25 @@ func (f *ForkChoiceStore) onPayloadAttestationMessage(
 		}
 	}
 
-	// Get or initialize the PTC vote array for this block root
-	var ptcVotes [clparams.PtcSize]bool
-	if existing, ok := f.ptcVote.Load(blockRoot); ok {
-		ptcVotes = existing.([clparams.PtcSize]bool)
+	// Get or initialize the payload timeliness vote array for this block root
+	var timelinessVotes [clparams.PtcSize]bool
+	if existing, ok := f.payloadTimelinessVote.Load(blockRoot); ok {
+		timelinessVotes = existing.([clparams.PtcSize]bool)
 	}
 
-	// Update the ptc vote for the block
-	ptcVotes[ptcIndex] = data.PayloadPresent
-	f.ptcVote.Store(blockRoot, ptcVotes)
+	// Update the payload timeliness vote for the block
+	timelinessVotes[ptcIndex] = data.PayloadPresent
+	f.payloadTimelinessVote.Store(blockRoot, timelinessVotes)
+
+	// Get or initialize the data availability vote array for this block root
+	var dataAvailabilityVotes [clparams.PtcSize]bool
+	if existing, ok := f.payloadDataAvailabilityVote.Load(blockRoot); ok {
+		dataAvailabilityVotes = existing.([clparams.PtcSize]bool)
+	}
+
+	// Update the data availability vote for the block
+	dataAvailabilityVotes[ptcIndex] = data.BlobDataAvailable
+	f.payloadDataAvailabilityVote.Store(blockRoot, dataAvailabilityVotes)
 
 	return nil
 }
