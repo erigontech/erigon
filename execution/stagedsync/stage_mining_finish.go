@@ -78,7 +78,7 @@ func SpawnMiningFinishStage(s *StageState, sd *execctx.SharedDomains, tx kv.Temp
 	}
 	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: current.Receipts, Requests: current.Requests}
 	if dbg.LogHashMismatchReason() {
-		ethutils.LogReceipts("Block built", current.Receipts, current.Txns, cfg.chainConfig, current.Header, logger)
+		ethutils.LogReceipts(log.LvlInfo, "Block built", current.Receipts, current.Txns, cfg.chainConfig, current.Header, logger)
 	}
 
 	*current = MiningBlock{} // hack to clean global data
