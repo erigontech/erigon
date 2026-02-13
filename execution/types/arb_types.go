@@ -1882,7 +1882,10 @@ func (tx *ArbitrumSubmitRetryableTx) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for Beneficiary: %d", len(b))
 	}
-	copy(tx.Beneficiary.Value().Bytes(), b)
+
+	addr := common.Address{}
+	copy(addr[:], b)
+	tx.Beneficiary = accounts.InternAddress(addr)
 
 	// Decode MaxSubmissionFee (*big.Int)
 	if b, err = s.Bytes(); err != nil {
@@ -1897,7 +1900,8 @@ func (tx *ArbitrumSubmitRetryableTx) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for FeeRefundAddr: %d", len(b))
 	}
-	copy(tx.FeeRefundAddr.Value().Bytes(), b)
+	copy(addr[:], b)
+	tx.FeeRefundAddr = accounts.InternAddress(addr)
 
 	// Decode RetryData ([]byte)
 	if tx.RetryData, err = s.Bytes(); err != nil {
