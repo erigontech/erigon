@@ -215,10 +215,10 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) m
 	return receipt
 }
 
-func LogReceipts(msg string, receipts types.Receipts, txns types.Transactions, cc *chain.Config, header *types.Header, logger log.Logger) {
+func LogReceipts(level log.Lvl, msg string, receipts types.Receipts, txns types.Transactions, cc *chain.Config, header *types.Header, logger log.Logger) {
 	if len(receipts) == 0 {
 		// no-op, can happen if vmConfig.NoReceipts=true or vmConfig.StatelessExec=true
-		logger.Info(msg, "block", header.Number.Uint64(), "receipts", "")
+		logger.Log(level, msg, "block", header.Number.Uint64(), "receipts", "")
 		return
 	}
 
@@ -240,5 +240,5 @@ func LogReceipts(msg string, receipts types.Receipts, txns types.Transactions, c
 		logger.Error("marshalling error when logging receipts", "err", err)
 		return
 	}
-	logger.Info(msg, "block", header.Number.Uint64(), "receipts", string(result))
+	logger.Log(level, msg, "block", header.Number.Uint64(), "receipts", string(result))
 }

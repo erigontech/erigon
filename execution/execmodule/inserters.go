@@ -22,9 +22,9 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/metrics"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/execmodule/moduleutil"
+	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
