@@ -56,7 +56,8 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: ethereum/hive
-          # ref: master
+          # version hive and update periodically/on-demand to prevent upstream changes in Hive affecting us with red CI
+          ref: 0ee187ce394720a5902c135324ac7de4240cbb37
           path: hive
 
       - name: Setup go env and cache
