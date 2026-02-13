@@ -218,8 +218,8 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 	if len(current.Requests) > 0 {
 		hash = *current.Requests.Hash()
 	}
-	block.HeaderNoCopy().RequestsHash = &hash
-
+	header := block.HeaderNoCopy()	
+	header.RequestsHash = &hash
 	blockHeight := block.NumberU64()
 	if needBAL {
 		systemReads = mergeReadSets(systemReads, ibs.VersionedReads())
@@ -235,11 +235,11 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 		// Note: This gets reset in MiningFinish - but we need it here to
 		// process execv3 - when we remove that this becomes redundant
 		hash := current.BlockAccessList.Hash()
-		block.HeaderNoCopy().BlockAccessListHash = &hash
+		header.BlockAccessListHash = &hash
 	} else {
 		// Note: This gets reset in MiningFinish - but we need it here to
 		// process execv3 - when we remove that this becomes redundant
-		block.HeaderNoCopy().BlockAccessListHash = &empty.BlockAccessListHash
+		header.BlockAccessListHash = &empty.BlockAccessListHash
 	}
 
 	writeBlockForExecution := func(rwTx kv.TemporalRwTx) error {

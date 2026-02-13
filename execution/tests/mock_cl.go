@@ -134,12 +134,14 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 		}
 	}
 	parentBeaconBlockRoot := common.BigToHash(cl.state.ParentClBlockRoot)
+	slotNumber := cl.state.NextSlotNumber()
 	payloadAttributes := enginetypes.PayloadAttributes{
 		Timestamp:             hexutil.Uint64(timestamp),
 		PrevRandao:            common.BigToHash(cl.state.ParentRandao),
 		SuggestedFeeRecipient: cl.suggestedFeeRecipient,
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		SlotNumber:            (*hexutil.Uint64)(&slotNumber),
 	}
 	cl.logger.Debug("[mock-cl] building block", "timestamp", timestamp)
 	// start the block building process
@@ -288,6 +290,13 @@ type MockClState struct {
 	ParentElTimestamp uint64
 	ParentClBlockRoot *big.Int
 	ParentRandao      *big.Int
+	SlotNumber        uint64
+}
+
+func (cl *MockClState) NextSlotNumber() uint64 {
+	slotNumber := cl.SlotNumber
+	cl.SlotNumber++
+	return slotNumber
 }
 
 func TamperMockClPayloadStateRoot(p *MockClPayload, stateRoot common.Hash) *MockClPayload {
@@ -330,6 +339,7 @@ func MockClPayloadToHeader(p *MockClPayload) *types.Header {
 		BlobGasUsed:           (*uint64)(elPayload.BlobGasUsed),
 		ExcessBlobGas:         (*uint64)(elPayload.ExcessBlobGas),
 		ParentBeaconBlockRoot: p.ParentBeaconBlockRoot,
+		SlotNumber:            (*uint64)(elPayload.SlotNumber),
 	}
 	if elPayload.Withdrawals != nil {
 		wh := types.DeriveSha(types.Withdrawals(elPayload.Withdrawals))
