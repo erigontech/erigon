@@ -219,10 +219,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							if err := bal.Validate(); err != nil {
 								return fmt.Errorf("block %d: invalid computed block access list: %w", applyResult.BlockNum, err)
 							}
-							dbBALBytes, err := rawdb.ReadBlockAccessListBytes(rwTx, applyResult.BlockHash, applyResult.BlockNum)
-							if err != nil {
-								return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
-							}
 							log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash())
 							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) {
 								if lastHeader.BlockAccessListHash == nil {
@@ -235,13 +231,18 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								}
 								headerBALHash := *lastHeader.BlockAccessListHash
 								if !pe.isBlockProduction {
+									dbBALBytes, err := rawdb.ReadBlockAccessListBytes(rwTx, applyResult.BlockHash, applyResult.BlockNum)
+									if err != nil {
+										return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
+									}
 									dbBAL, err := types.DecodeBlockAccessListBytes(dbBALBytes)
 									if err != nil {
 										return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
 									}
-									if dbBAL == nil {
-										return fmt.Errorf("block %d: block access list is nil in post-Amsterdam block", applyResult.BlockNum)
+									if err = dbBAL.Validate(); err != nil {
+										return fmt.Errorf("block %d: db block access list is invalid: %w", applyResult.BlockNum, err)
 									}
+
 									if headerBALHash != dbBAL.Hash() {
 										log.Info(fmt.Sprintf("bal from block: %s", dbBAL.DebugString()))
 										return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, dbBAL.Hash(), headerBALHash)
