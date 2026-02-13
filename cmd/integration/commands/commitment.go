@@ -280,7 +280,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 			return err
 		}
 		if !ok {
-			return errors.New("max tx num is not populated; run: integration maxtxnum_populate --datadir=<dir> --chain=<chain>")
+			return errors.New("max tx num is not populated; run: integration stage_headers --reset --datadir=<dir> --chain=<chain>")
 		}
 	}
 
