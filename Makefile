@@ -68,7 +68,7 @@ endif
 
 BUILD_TAGS =
 
-ifneq ($(shell "$(CURDIR)/node/silkworm/silkworm_compat_check.sh"),)
+ifneq ($(shell $(CURDIR)/node/silkworm/silkworm_compat_check.sh),)
 	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
 endif
 
