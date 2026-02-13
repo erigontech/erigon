@@ -155,7 +155,7 @@ func ExecuteBlockEphemerally(
 	receiptSha := types.DeriveSha(receipts)
 	if !vmConfig.StatelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
 		if dbg.LogHashMismatchReason() {
-			ethutils.LogReceipts("receipt hash mismatch in ExecuteBlockEphemerally", receipts, includedTxs, chainConfig, header, logger)
+			ethutils.LogReceipts(log.LvlWarn, "receipt hash mismatch in ExecuteBlockEphemerally", receipts, includedTxs, chainConfig, header, logger)
 		}
 
 		return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
@@ -394,7 +394,7 @@ func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts bool, r
 				return nil
 			}
 			if dbg.LogHashMismatchReason() {
-				ethutils.LogReceipts("receipt hash mismatch in BlockPostValidation", receipts, txns, chainConfig, h, logger)
+				ethutils.LogReceipts(log.LvlWarn, "receipt hash mismatch in BlockPostValidation", receipts, txns, chainConfig, h, logger)
 			}
 			return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
 				receiptHash, h.ReceiptHash, h.Number.Uint64(), h.Hash())
@@ -407,7 +407,7 @@ func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts bool, r
 	}
 
 	if dbg.TraceLogs && dbg.TraceBlock(h.Number.Uint64()) {
-		ethutils.LogReceipts("trace logs", receipts, txns, chainConfig, h, logger)
+		ethutils.LogReceipts(log.LvlInfo, "trace logs", receipts, txns, chainConfig, h, logger)
 	}
 
 	return nil

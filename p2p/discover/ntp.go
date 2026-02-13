@@ -28,7 +28,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -40,7 +39,6 @@ const (
 // checkClockDrift queries an NTP server for clock drifts and warns the user if
 // one large enough is detected.
 func checkClockDrift() {
-	defer dbg.LogPanic()
 	drift, err := sntpDrift(ntpChecks)
 	if err != nil {
 		return
@@ -49,7 +47,7 @@ func checkClockDrift() {
 		log.Warn(fmt.Sprintf("System clock seems off by %v, which can prevent network connectivity", drift))
 		log.Warn("Please enable network time synchronisation in system settings.")
 	} else {
-		log.Trace("NTP sanity check done", "drift", drift)
+		log.Debug("NTP sanity check done", "drift", drift)
 	}
 }
 
@@ -100,12 +98,12 @@ func sntpDrift(measurements int) (time.Duration, error) {
 
 		nanosec := sec*1e9 + (frac*1e9)>>32
 
-		t := time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(nanosec)).Local() //nolint:gosmopolitan
+		t := time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(nanosec))
 
 		// Calculate the drift based on an assumed answer time of RRT/2
 		drifts = append(drifts, sent.Sub(t)+elapsed/2)
 	}
-	// Calculate average drif (drop two extremities to avoid outliers)
+	// Calculate average drift (drop two extremities to avoid outliers)
 	slices.Sort(drifts)
 
 	drift := time.Duration(0)
