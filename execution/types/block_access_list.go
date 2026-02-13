@@ -1072,10 +1072,9 @@ func ConvertBlockAccessListToTypesProto(bal BlockAccessList) []*typesproto.Block
 				if change == nil {
 					continue
 				}
-				val := change.Value
 				slotChanges.Changes = append(slotChanges.Changes, &typesproto.BlockAccessListStorageChange{
 					Index: uint32(change.Index),
-					Value: gointerfaces.ConvertUint256IntToH256(&val),
+					Value: gointerfaces.ConvertUint256IntToH256(&change.Value),
 				})
 			}
 			balAccount.StorageChanges = append(balAccount.StorageChanges, slotChanges)
@@ -1157,10 +1156,9 @@ func ConvertBlockAccessListToExecutionProto(bal BlockAccessList) []*executionpro
 				if change == nil {
 					continue
 				}
-				val := change.Value
 				slotChanges.Changes = append(slotChanges.Changes, &executionproto.BlockAccessListStorageChange{
 					Index: uint32(change.Index),
-					Value: gointerfaces.ConvertUint256IntToH256(&val),
+					Value: gointerfaces.ConvertUint256IntToH256(&change.Value),
 				})
 			}
 			rpcAccount.StorageChanges = append(rpcAccount.StorageChanges, slotChanges)
