@@ -39,6 +39,14 @@ func FileName(version Version, from, to uint64, fileType string) string {
 	return fmt.Sprintf("%s-%06d-%06d-%s", version.String(), from/1_000, to/1_000, fileType)
 }
 
+func FileNameWithHash(version Version, from, to uint64, fileType string, hash string) string {
+	name := FileName(version, from, to, fileType)
+	if hash != "" {
+		return name + "." + hash
+	}
+	return name
+}
+
 func FileMask(from, to uint64, fileType string) string {
 	return fmt.Sprintf("*-%06d-%06d-%s", from/1_000, to/1_000, fileType)
 }
@@ -46,15 +54,24 @@ func FileMask(from, to uint64, fileType string) string {
 func SegmentFileName(version Version, from, to uint64, t Enum) string {
 	return FileName(version, from, to, t.String()) + ".seg"
 }
+
+func SegmentFileNameWithHash(version Version, from, to uint64, t Enum, hash string) string {
+	return FileNameWithHash(version, from, to, t.String(), hash) + ".seg"
+}
+
 func IdxFileName(version Version, from, to uint64, fType string) string {
 	return FileName(version, from, to, fType) + ".idx"
 }
 
+func IdxFileNameWithHash(version Version, from, to uint64, fType string, hash string) string {
+	return FileNameWithHash(version, from, to, fType, hash) + ".idx"
+}
+
 func SegmentFileMask(from, to uint64, t Enum) string {
-	return FileMask(from, to, t.String()) + ".seg"
+	return FileMask(from, to, t.String()) + "*.seg"
 }
 func IdxFileMask(from, to uint64, fType string) string {
-	return FileMask(from, to, fType) + ".idx"
+	return FileMask(from, to, fType) + "*.idx"
 }
 
 func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
@@ -154,6 +171,9 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 
 	for ext := filepath.Ext(croppedFileName); ext != "" && !strings.Contains(ext, "-"); ext = filepath.Ext(croppedFileName) {
 		croppedFileName = strings.TrimSuffix(croppedFileName, ext)
+		if res.Hash == "" {
+			res.Hash = ext[1:] // strip leading dot
+		}
 	}
 
 	isStateFile := IsStateFileV2(croppedFileName)
@@ -401,6 +421,7 @@ type FileInfo struct {
 	From, To        uint64
 	name, Path, Ext string
 	Type            Type
+	Hash            string // optional cache-busting hash particle
 
 	CaplinTypeString string // part of file-name - without version, range, ext
 	TypeString       string
@@ -433,15 +454,49 @@ func (f FileInfo) CompareTo(o FileInfo) int {
 }
 
 func (f FileInfo) As(t Type) FileInfo {
-	name := fmt.Sprintf("%s-%06d-%06d-%s%s", f.Version.String(), f.From/1_000, f.To/1_000, t, f.Ext)
+	hashPart := ""
+	if f.Hash != "" {
+		hashPart = "." + f.Hash
+	}
+	name := fmt.Sprintf("%s-%06d-%06d-%s%s%s", f.Version.String(), f.From/1_000, f.To/1_000, t, hashPart, f.Ext)
 	return FileInfo{
 		Version: f.Version,
 		From:    f.From,
 		To:      f.To,
 		Ext:     f.Ext,
 		Type:    t,
+		Hash:    f.Hash,
 		name:    name,
 		Path:    filepath.Join(f.Dir(), name),
+	}
+}
+
+// WithHash returns a copy of the FileInfo with the given hash particle set.
+// Pass an empty string to remove the hash.
+func (f FileInfo) WithHash(hash string) FileInfo {
+	// Remove old hash and extension from name to get base
+	base := strings.TrimSuffix(f.name, f.Ext)
+	if f.Hash != "" {
+		base = strings.TrimSuffix(base, "."+f.Hash)
+	}
+
+	hashPart := ""
+	if hash != "" {
+		hashPart = "." + hash
+	}
+	name := base + hashPart + f.Ext
+
+	return FileInfo{
+		Version:          f.Version,
+		From:             f.From,
+		To:               f.To,
+		Ext:              f.Ext,
+		Type:             f.Type,
+		Hash:             hash,
+		name:             name,
+		Path:             filepath.Join(f.Dir(), name),
+		CaplinTypeString: f.CaplinTypeString,
+		TypeString:       f.TypeString,
 	}
 }
 
