@@ -144,9 +144,9 @@ func (ln *LocalNode) ID() ID {
 // Use Set*IP and SetFallbackUDP to set IP addresses and UDP port, otherwise they'll
 // be overwritten by the endpoint predictor.
 //
-// Since node record updates are throttled to one per second, Set is asynchronous.
-// Any update will be queued up and published when at least one second passes from
-// the last change.
+// Record updates are throttled by recordUpdateThrottle (currently 1ms), and changes
+// are applied to the node record when a new ENR is generated via Node(). Multiple
+// Set calls within the throttle window may be coalesced into a single update.
 func (ln *LocalNode) Set(e enr.Entry) {
 	ln.mu.Lock()
 	defer ln.mu.Unlock()
@@ -301,7 +301,7 @@ func (ln *LocalNode) sign() {
 		panic(fmt.Errorf("enode: can't verify local record: %v", err))
 	}
 	ln.cur.Store(n)
-	log.Info("New local node record", "seq", ln.seq, "id", n.ID(), "ip", n.IPAddr(), "udp", n.UDP(), "tcp", n.TCP())
+	log.Trace("New local node record", "seq", ln.seq, "id", n.ID(), "ip", n.IPAddr(), "udp", n.UDP(), "tcp", n.TCP())
 }
 
 func (ln *LocalNode) bumpSeq() {
