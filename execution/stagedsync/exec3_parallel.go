@@ -638,7 +638,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							reader = state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
 						}
 						ibs := state.New(state.NewBufferedReader(pe.rs, reader))
-						defer ibs.Release(true)
+						defer ibs.Release(false)
 						ibs.SetVersion(finalVersion.Incarnation)
 						localVersionMap := state.NewVersionMap(nil)
 						ibs.SetVersionMap(localVersionMap)

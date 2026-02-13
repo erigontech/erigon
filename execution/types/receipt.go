@@ -391,8 +391,9 @@ type ReceiptForStorage Receipt
 // EncodeRLP implements rlp.Encoder, and flattens all content fields of a receipt
 // into an RLP stream.
 func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
-	if r.FirstLogIndexWithinBlock == 0 && len(r.Logs) > 0 {
-		r.FirstLogIndexWithinBlock = uint32(r.Logs[0].Index)
+	firstLogIndex := r.FirstLogIndexWithinBlock
+	if firstLogIndex == 0 && len(r.Logs) > 0 {
+		firstLogIndex = uint32(r.Logs[0].Index)
 	}
 
 	logsForStorage := make([]*LogForStorage, len(r.Logs))
@@ -403,7 +404,7 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 		Type:              r.Type,
 		PostStateOrStatus: (*Receipt)(r).statusEncoding(),
 		CumulativeGasUsed: r.CumulativeGasUsed,
-		FirstLogIndex:     r.FirstLogIndexWithinBlock,
+		FirstLogIndex:     firstLogIndex,
 
 		Logs:             logsForStorage,
 		GasUsed:          r.GasUsed,

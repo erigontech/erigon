@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/hashicorp/golang-lru/v2/simplelru"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -22,24 +22,24 @@ import (
 
 type blockReadAheader struct {
 	// keeps some caches for block themselves
-	headers *simplelru.LRU[common.Hash, *types.Header]
-	bodies  *simplelru.LRU[common.Hash, *types.Body]
-	senders *simplelru.LRU[common.Hash, []byte] // just do raw senders
+	headers *lru.Cache[common.Hash, *types.Header]
+	bodies  *lru.Cache[common.Hash, *types.Body]
+	senders *lru.Cache[common.Hash, []byte] // just do raw senders
 
 	// this is for warming state
 	warming atomic.Bool // only one warmBody can run at a time
 }
 
 func newBlockReadAheader() *blockReadAheader {
-	headers, err := simplelru.NewLRU[common.Hash, *types.Header](4, nil)
+	headers, err := lru.New[common.Hash, *types.Header](4)
 	if err != nil {
 		panic(err)
 	}
-	bodies, err := simplelru.NewLRU[common.Hash, *types.Body](4, nil)
+	bodies, err := lru.New[common.Hash, *types.Body](4)
 	if err != nil {
 		panic(err)
 	}
-	senders, err := simplelru.NewLRU[common.Hash, []byte](4, nil)
+	senders, err := lru.New[common.Hash, []byte](4)
 	if err != nil {
 		panic(err)
 	}
