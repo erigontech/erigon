@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"runtime"
 	"runtime/debug"
 
@@ -1995,57 +1994,6 @@ func (s *witnessStateless) Finalize() common.Hash {
 	fmt.Printf("=== Finalize complete: final hash=%x ===\n\n", finalHash)
 	return finalHash
 }
-
-// statelessChainReader is a minimal ChainReader implementation for stateless execution
-type statelessChainReader struct {
-	config        *chain.Config
-	headerByNum   map[uint64]*types.Header
-	headerByHash  map[common.Hash]*types.Header
-	currentHeader *types.Header
-}
-
-func newStatelessChainReader(config *chain.Config, headers map[uint64]*types.Header, currentHeader *types.Header) *statelessChainReader {
-	headerByHash := make(map[common.Hash]*types.Header)
-	for _, h := range headers {
-		headerByHash[h.Hash()] = h
-	}
-	return &statelessChainReader{
-		config:        config,
-		headerByNum:   headers,
-		headerByHash:  headerByHash,
-		currentHeader: currentHeader,
-	}
-}
-
-func (c *statelessChainReader) Config() *chain.Config        { return c.config }
-func (c *statelessChainReader) CurrentHeader() *types.Header { return c.currentHeader }
-func (c *statelessChainReader) CurrentFinalizedHeader() *types.Header {
-	return nil
-}
-func (c *statelessChainReader) CurrentSafeHeader() *types.Header { return nil }
-func (c *statelessChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
-	return c.headerByHash[hash]
-}
-func (c *statelessChainReader) GetHeaderByNumber(number uint64) *types.Header {
-	return c.headerByNum[number]
-}
-func (c *statelessChainReader) GetHeaderByHash(hash common.Hash) *types.Header {
-	return c.headerByHash[hash]
-}
-func (c *statelessChainReader) GetTd(hash common.Hash, number uint64) *big.Int {
-	return big.NewInt(0)
-}
-func (c *statelessChainReader) FrozenBlocks() uint64              { return 0 }
-func (c *statelessChainReader) FrozenBorBlocks(align bool) uint64 { return 0 }
-func (c *statelessChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
-	return nil
-}
-func (c *statelessChainReader) HasBlock(hash common.Hash, number uint64) bool {
-	return false
-}
-
-// Ensure statelessChainReader implements ChainReader
-var _ rules.ChainReader = (*statelessChainReader)(nil)
 
 // verifyExecutionWitnessResult verifies the execution witness by re-executing the block statelessly.
 // It decodes the witness trie, executes all transactions, and verifies the resulting state root
