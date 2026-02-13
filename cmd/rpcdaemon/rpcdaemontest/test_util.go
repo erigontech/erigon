@@ -17,12 +17,15 @@
 package rpcdaemontest
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"math/rand"
 	"net"
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -39,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -60,6 +64,11 @@ type testAddresses struct {
 	address1 common.Address
 	address2 common.Address
 }
+
+var randSrc = rand.New(rand.NewSource(42)) // fixed seed
+var randMu sync.Mutex
+
+var sameStoragePrefixAddresses []common.Address // plain keys with same balanceOf mapping storage mapping as address1
 
 func makeTestAddresses() testAddresses {
 	var (
@@ -281,39 +290,33 @@ func generateChain(
 		case 10:
 			break
 		case 11:
-			// // Mint tokens to many addresses to populate the token contract's storage trie
-			// // with many entries. This creates balanceOf[addr] writes for each address.
-			// // The dense trie is needed so that subsequent deletes in case 11 can trigger
-			// // trie node collapses (branch nodes losing children).
-			// var mintAddr common.Address
-			// for j := uint64(100); j <= 130; j++ {
-			// 	binary.BigEndian.PutUint64(mintAddr[:], j)
-			// 	txn, err = tokenContract.Mint(transactOpts1, mintAddr, big.NewInt(10))
-			// 	if err != nil {
-			// 		panic(err)
-			// 	}
-			// 	txs = append(txs, txn)
-			// }
 			// Mint to address so it has a known balance to drain in the next block
-			_, txn, tokenContract2, err = contracts.DeployToken(transactOpts2, contractBackend, address2)
+			_, txn, tokenContract2, err = contracts.DeployToken(transactOpts, contractBackend, address)
 			if err != nil {
 				panic(err)
 			}
 			txs = append(txs, txn)
-			// txn, err = tokenContract2.Mint(transactOpts2, address2, big.NewInt(2000))
-			// if err != nil {
-			// 	panic(err)
-			// }
-			// txs = append(txs, txn)
-			txn, err = tokenContract2.Mint(transactOpts2, address1, big.NewInt(1000))
+			txn, err = tokenContract2.Mint(transactOpts, address1, big.NewInt(1000))
+			if err != nil {
+				panic(err)
+			}
+			txs = append(txs, txn)
+			balanceStorageKeyPath := computeMappingStorageKey(address1, 1) // balance in slot 1
+			sameStoragePrefixAddresses = findAddressesWithMatchingStorageKeyPrefix(balanceStorageKeyPath, 1, 1, 1)
+			sameStorageKeyPath := computeMappingStorageKey(sameStoragePrefixAddresses[0], 1)
+			// Assert first nibble is the same
+			if (sameStorageKeyPath[0] >> 4) != (balanceStorageKeyPath[0] >> 4) {
+				panic("storage key prefix mismatch")
+			}
+			txn, err = tokenContract2.Mint(transactOpts, common.Address(sameStoragePrefixAddresses[0]), big.NewInt(500))
 			if err != nil {
 				panic(err)
 			}
 			txs = append(txs, txn)
 
 		case 12:
-			// transfer everything to address to to drain address1
-			txn, err = tokenContract2.Transfer(transactOpts1, address2, big.NewInt(1000))
+			// transfer everything out of address1
+			txn, err = tokenContract2.Transfer(transactOpts1, common.Address(address), big.NewInt(1000))
 			if err != nil {
 				panic(err)
 			}
@@ -336,6 +339,115 @@ func generateChain(
 		}
 		contractBackend.Commit()
 	})
+}
+
+func computeMappingStorageKey(addr common.Address, slot uint64) common.Hash {
+	// Create 64-byte buffer: address (32 bytes, left-padded) || slot (32 bytes)
+	var buf [64]byte
+
+	// Copy address to bytes 12-31 (left-padded with zeros)
+	copy(buf[12:32], addr[:])
+
+	// Write slot number to bytes 56-63 (big-endian, left-padded)
+	binary.BigEndian.PutUint64(buf[56:64], slot)
+
+	return crypto.Keccak256Hash(buf[:])
+}
+
+// findAddressWithMatchingStorageKeyPrefix finds an address whose computeMappingStorageKey
+// result shares the first nNibbles with the target storage key.
+// This is useful for creating storage entries that share trie paths to test node collapses.
+func findAddressWithMatchingStorageKeyPrefix(targetKey common.Hash, slot uint64, nNibbles int) common.Address {
+	// Convert target key to nibbles for prefix comparison
+	targetNibbles := make([]byte, nNibbles)
+	for i := 0; i < nNibbles; i++ {
+		if i%2 == 0 {
+			targetNibbles[i] = targetKey[i/2] >> 4
+		} else {
+			targetNibbles[i] = targetKey[i/2] & 0x0f
+		}
+	}
+
+	var addr common.Address
+	for {
+		randMu.Lock()
+		randSrc.Read(addr[:])
+		randMu.Unlock()
+
+		storageKey := computeMappingStorageKey(addr, slot)
+
+		// Compare nibbles
+		match := true
+		for i := 0; i < nNibbles; i++ {
+			var nibble byte
+			if i%2 == 0 {
+				nibble = storageKey[i/2] >> 4
+			} else {
+				nibble = storageKey[i/2] & 0x0f
+			}
+			if nibble != targetNibbles[i] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return addr
+		}
+	}
+}
+
+// findAddressesWithMatchingStorageKeyPrefix finds multiple addresses whose storage keys
+// share the first nNibbles with the target, useful for populating a trie subtree.
+func findAddressesWithMatchingStorageKeyPrefix(targetKey common.Hash, slot uint64, nNibbles int, count int) []common.Address {
+	addresses := make([]common.Address, 0, count)
+	seen := make(map[common.Address]bool)
+
+	for len(addresses) < count {
+		addr := findAddressWithMatchingStorageKeyPrefix(targetKey, slot, nNibbles)
+		if !seen[addr] {
+			seen[addr] = true
+			addresses = append(addresses, addr)
+		}
+	}
+	return addresses
+}
+func generateKeyWithHashedPrefix(constHashedPrefixNibbles []byte, keyLen int) (plainKey []byte, hashedKey []byte) {
+	plainKey = make([]byte, keyLen)
+	for {
+		randMu.Lock()
+		randSrc.Read(plainKey[:keyLen]) // read random key
+		randMu.Unlock()
+		hashedKey := commitment.KeyToNibblizedHash(plainKey)
+		if bytes.HasPrefix(hashedKey, constHashedPrefixNibbles) {
+			// found key with desired hashed prefix, return result
+			return plainKey, hashedKey
+		}
+	}
+}
+
+// longer prefixLen - harder to find required keys
+func generatePlainKeysWithSameHashPrefix(constPrefixNibbles []byte, keyLen int, prefixLen int, keyCount int) (plainKeys [][]byte, hashedKeys [][]byte) {
+	plainKeys = make([][]byte, 0, keyCount)
+	hashedKeys = make([][]byte, 0, keyCount)
+	for {
+		key, hashed := generateKeyWithHashedPrefix(constPrefixNibbles, keyLen)
+		if len(plainKeys) == 0 {
+			plainKeys = append(plainKeys, key)
+			hashedKeys = append(hashedKeys, hashed)
+			if keyCount == 1 {
+				break
+			}
+			continue
+		}
+		if bytes.Equal(hashed[:prefixLen], hashedKeys[0][:prefixLen]) {
+			plainKeys = append(plainKeys, key)
+			hashedKeys = append(hashedKeys, hashed)
+		}
+		if len(plainKeys) == keyCount {
+			break
+		}
+	}
+	return plainKeys, hashedKeys
 }
 
 type IsMiningMock struct{}
