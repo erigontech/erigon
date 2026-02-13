@@ -95,7 +95,6 @@ func (bra *blockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 
 	// If BAL exists in DB, use BAL warming (more complete)
 	var bal types.BlockAccessList
-	var balFound bool
 	if header != nil && db != nil {
 		tx, err := db.BeginRo(ctx)
 		if err != nil {
@@ -105,22 +104,17 @@ func (bra *blockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 			if err != nil {
 				log.Warn("[warmBody] failed to read BAL", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
 			} else if len(data) > 0 {
-				balFound = true
 				bal, err = types.DecodeBlockAccessListBytes(data)
 				if err != nil {
 					log.Warn("[warmBody] failed to decode BAL", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
-					balFound = false
 				}
 			}
 			tx.Rollback()
 		}
 	}
 
-	if balFound {
-		balLen := len(bal)
-		if balLen == 0 {
-			return
-		}
+	balLen := len(bal)
+	if balLen > 0 {
 		balWorkers := workers
 		if balWorkers > balLen {
 			balWorkers = balLen
