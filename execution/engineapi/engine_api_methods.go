@@ -134,7 +134,7 @@ func (e *EngineServer) ForkchoiceUpdatedV3(ctx context.Context, forkChoiceState 
 // Successor of [ForkchoiceUpdatedV3] post Amsterdam, with stricter check on params
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_forkchoiceupdatedv4
 func (e *EngineServer) ForkchoiceUpdatedV4(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
-	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.DenebVersion)
+	return e.forkchoiceUpdated(ctx, forkChoiceState, payloadAttributes, clparams.GloasVersion)
 }
 
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain without withdrawals.
