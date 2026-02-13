@@ -434,7 +434,7 @@ func (t *UDPv5) verifyResponseNode(c *callV5, r *enr.Record, distances []uint, s
 	if err := netutil.CheckRelayIP(c.node.IP(), node.IP()); err != nil {
 		return nil, err
 	}
-	if c.node.UDP() <= 1024 {
+	if node.UDP() <= 1024 {
 		return nil, errLowPort
 	}
 	if distances != nil {
