@@ -218,7 +218,7 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 	if len(current.Requests) > 0 {
 		hash = *current.Requests.Hash()
 	}
-	header := block.HeaderNoCopy()	
+	header := block.HeaderNoCopy()
 	header.RequestsHash = &hash
 	blockHeight := block.NumberU64()
 	if needBAL {
