@@ -841,7 +841,7 @@ type BlockAccessListEntry struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	BlockHash       *typesproto.H256       `protobuf:"bytes,1,opt,name=block_hash,json=blockHash,proto3" json:"block_hash,omitempty"`
 	BlockNumber     uint64                 `protobuf:"varint,2,opt,name=block_number,json=blockNumber,proto3" json:"block_number,omitempty"`
-	BlockAccessList []byte                 `protobuf:"bytes,3,opt,name=block_access_list,json=blockAccessList,proto3" json:"block_access_list,omitempty"` // RLP bytes, empty list encoded as 0xc0
+	BlockAccessList []byte                 `protobuf:"bytes,3,opt,name=block_access_list,json=blockAccessList,proto3" json:"block_access_list,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1480,6 +1480,7 @@ type AssembleBlockRequest struct {
 	SuggestedFeeRecipient *typesproto.H160         `protobuf:"bytes,4,opt,name=suggested_fee_recipient,json=suggestedFeeRecipient,proto3" json:"suggested_fee_recipient,omitempty"`
 	Withdrawals           []*typesproto.Withdrawal `protobuf:"bytes,5,rep,name=withdrawals,proto3" json:"withdrawals,omitempty"`                                                            // added in Shapella (EIP-4895)
 	ParentBeaconBlockRoot *typesproto.H256         `protobuf:"bytes,6,opt,name=parent_beacon_block_root,json=parentBeaconBlockRoot,proto3,oneof" json:"parent_beacon_block_root,omitempty"` // added in Dencun (EIP-4788)
+	SlotNumber            *uint64                  `protobuf:"varint,7,opt,name=slot_number,json=slotNumber,proto3,oneof" json:"slot_number,omitempty"`                                     // added in Amsterdam (EIP-7843)
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -1554,6 +1555,13 @@ func (x *AssembleBlockRequest) GetParentBeaconBlockRoot() *typesproto.H256 {
 		return x.ParentBeaconBlockRoot
 	}
 	return nil
+}
+
+func (x *AssembleBlockRequest) GetSlotNumber() uint64 {
+	if x != nil && x.SlotNumber != nil {
+		return *x.SlotNumber
+	}
+	return 0
 }
 
 type AssembleBlockResponse struct {
@@ -2188,7 +2196,7 @@ const file_execution_execution_proto_rawDesc = "" +
 	"\x06result\x18\x01 \x01(\x0e2\x1a.execution.ExecutionStatusR\x06result\"L\n" +
 	"\x11ValidationRequest\x12\x1f\n" +
 	"\x04hash\x18\x01 \x01(\v2\v.types.H256R\x04hash\x12\x16\n" +
-	"\x06number\x18\x02 \x01(\x04R\x06number\"\xf2\x02\n" +
+	"\x06number\x18\x02 \x01(\x04R\x06number\"\xa8\x03\n" +
 	"\x14AssembleBlockRequest\x12,\n" +
 	"\vparent_hash\x18\x01 \x01(\v2\v.types.H256R\n" +
 	"parentHash\x12\x1c\n" +
@@ -2197,8 +2205,11 @@ const file_execution_execution_proto_rawDesc = "" +
 	"prevRandao\x12C\n" +
 	"\x17suggested_fee_recipient\x18\x04 \x01(\v2\v.types.H160R\x15suggestedFeeRecipient\x123\n" +
 	"\vwithdrawals\x18\x05 \x03(\v2\x11.types.WithdrawalR\vwithdrawals\x12I\n" +
-	"\x18parent_beacon_block_root\x18\x06 \x01(\v2\v.types.H256H\x00R\x15parentBeaconBlockRoot\x88\x01\x01B\x1b\n" +
-	"\x19_parent_beacon_block_root\";\n" +
+	"\x18parent_beacon_block_root\x18\x06 \x01(\v2\v.types.H256H\x00R\x15parentBeaconBlockRoot\x88\x01\x01\x12$\n" +
+	"\vslot_number\x18\a \x01(\x04H\x01R\n" +
+	"slotNumber\x88\x01\x01B\x1b\n" +
+	"\x19_parent_beacon_block_rootB\x0e\n" +
+	"\f_slot_number\";\n" +
 	"\x15AssembleBlockResponse\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x12\n" +
 	"\x04busy\x18\x02 \x01(\bR\x04busy\"*\n" +

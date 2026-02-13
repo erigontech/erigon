@@ -67,6 +67,7 @@ type PayloadAttributes struct {
 	SuggestedFeeRecipient common.Address      `json:"suggestedFeeRecipient" gencodec:"required"`
 	Withdrawals           []*types.Withdrawal `json:"withdrawals"`
 	ParentBeaconBlockRoot *common.Hash        `json:"parentBeaconBlockRoot"`
+	SlotNumber            *hexutil.Uint64     `json:"slotNumber"`
 }
 
 // TransitionConfiguration represents the correct configurations of the CL and the EL
