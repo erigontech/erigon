@@ -1475,7 +1475,7 @@ func printPreStateCheck(witnessTrie *trie.Trie, readAddresses, writeAddresses []
 }
 
 // compareComputedVsExpectedState compares the state computed by witnessStateless against the expected state.
-func compareComputedVsExpectedState(stateless *witnessStateless, expectedState map[common.Address]*accounts.Account, expectedStorage map[common.Address]map[common.Hash]uint256.Int) {
+func compareComputedVsExpectedState(stateless *witnessStateless, expectedState map[common.Address]*accounts.Account, expectedStorage map[common.Address]map[common.Hash]uint256.Int, storageDeletes map[common.Address]map[common.Hash]struct{}) {
 	fmt.Printf("\n=== Comparing computed vs expected state ===\n")
 	for addr, expectedAcc := range expectedState {
 		addrHash, _ := common.HashData(addr[:])
@@ -1494,6 +1494,9 @@ func compareComputedVsExpectedState(stateless *witnessStateless, expectedState m
 			// Check for differences - only print mismatches or a single tick if all match
 			if expectedAcc != nil {
 				allMatch := true
+				if _, ok := storageDeletes[addr]; ok {
+					fmt.Printf("   ⛔️ STORAGE deletes on this account!\n")
+				}
 				if expectedAcc.Nonce != computedAcc.Nonce {
 					fmt.Printf("    ❌ NONCE MISMATCH!\n")
 					allMatch = false
@@ -2144,7 +2147,7 @@ func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.B
 	newStateRoot := stateless.Finalize()
 
 	// Compare computed state vs expected state
-	compareComputedVsExpectedState(stateless, expectedState, expectedStorage)
+	compareComputedVsExpectedState(stateless, expectedState, expectedStorage, stateless.storageDeletes)
 
 	// Verify the root matches the block's state root
 	expectedRoot := block.Root()
