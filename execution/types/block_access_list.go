@@ -265,7 +265,7 @@ func (sc *StorageChange) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("block access index overflow: %d", idx)
 	}
 	sc.Index = uint16(idx)
-	sc.Value, err = s.Uint256()
+	err = s.ReadUint256(&sc.Value)
 	if err != nil {
 		return fmt.Errorf("read Value: %w", err)
 	}
