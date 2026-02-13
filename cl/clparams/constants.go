@@ -11,6 +11,7 @@ const (
 	BuilderPaymentThresholdDenominator = uint64(10)
 	PtcSize                            = uint64(512)
 	PayloadTimelyThreshold             = PtcSize / 2 // 256
+	DataAvailabilityTimelyThreshold    = PtcSize / 2 // 256
 
 	AttestationTimelinessIndex  = 0
 	PtcTimelinessIndex          = 1

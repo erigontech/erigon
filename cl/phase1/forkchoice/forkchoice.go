@@ -148,7 +148,8 @@ type ForkChoiceStore struct {
 	probabilisticHeadGetter bool
 
 	// [New in Gloas:EIP7732]
-	ptcVote sync.Map // map[common.Hash][clparams.PtcSize]bool
+	payloadTimelinessVote       sync.Map // map[common.Hash][clparams.PtcSize]bool
+	payloadDataAvailabilityVote sync.Map // map[common.Hash][clparams.PtcSize]bool
 	// [New in Gloas:EIP7732] Indexed weight store for optimized weight calculation
 	indexedWeightStore *indexedWeightStore
 }
@@ -297,7 +298,16 @@ func NewForkChoiceStore(
 	f.highestSeen.Store(anchorState.Slot())
 	f.time.Store(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot())
 
-	f.ptcVote.Store(common.Hash(anchorRoot), [clparams.PtcSize]bool{})
+	// [New in Gloas:EIP7732] Initialize payload timeliness and data availability votes
+	// Anchor block votes are initialized to all true (prior payloads/blobs were available)
+	var anchorTimelinessVotes [clparams.PtcSize]bool
+	var anchorDataAvailabilityVotes [clparams.PtcSize]bool
+	for i := range anchorTimelinessVotes {
+		anchorTimelinessVotes[i] = true
+		anchorDataAvailabilityVotes[i] = true
+	}
+	f.payloadTimelinessVote.Store(common.Hash(anchorRoot), anchorTimelinessVotes)
+	f.payloadDataAvailabilityVote.Store(common.Hash(anchorRoot), anchorDataAvailabilityVotes)
 
 	// [New in Gloas:EIP7732] Initialize indexed weight store
 	f.indexedWeightStore = NewIndexedWeightStore(f)
