@@ -20,6 +20,9 @@ on:
     - cron: "0 05 * * *" # daily at 5 am UTC
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('push-{0}-{1}', github.run_id, github.run_attempt) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test-hive:
