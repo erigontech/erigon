@@ -12,6 +12,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  models: read
+
 jobs:
   minimal-node-sync-from-scratch-test:
     runs-on: [self-hosted, qa, long-running]
@@ -94,6 +97,38 @@ jobs:
             --runner ${{ runner.name }} \
             --outcome $TEST_RESULT \
             --result_file ${{ github.workspace }}/result-$CHAIN.json
+
+      - name: Prepare AI failure analysis context
+        if: ${{ always() && steps.test_step.outputs.TEST_RESULT == 'failure' }}
+        run: |
+          echo "=== TEST RESULT JSON ===" > ${{ github.workspace }}/ai-prompt.txt
+          cat ${{ github.workspace }}/result-$CHAIN.json >> ${{ github.workspace }}/ai-prompt.txt 2>/dev/null || echo "(result file not available)" >> ${{ github.workspace }}/ai-prompt.txt
+          echo "" >> ${{ github.workspace }}/ai-prompt.txt
+          echo "=== LAST 1000 WARNINGS AND ERRORS FROM ERIGON LOG ===" >> ${{ github.workspace }}/ai-prompt.txt
+          grep -iE '\b(WARN|ERR|CRIT|FATAL|panic|FAIL)\b' $ERIGON_DATA_DIR/logs/erigon.log | tail -n 1000 >> ${{ github.workspace }}/ai-prompt.txt 2>/dev/null || echo "(log file not available)" >> ${{ github.workspace }}/ai-prompt.txt
+          echo "" >> ${{ github.workspace }}/ai-prompt.txt
+          echo "Analyze the above Erigon node sync test failure for chain=$CHAIN. Identify the root cause, highlight the most relevant error messages, and suggest what to investigate." >> ${{ github.workspace }}/ai-prompt.txt
+
+      - name: AI failure analysis
+        if: ${{ always() && steps.test_step.outputs.TEST_RESULT == 'failure' }}
+        id: ai_analysis
+        uses: actions/ai-inference@v1
+        with:
+          model: openai/gpt-5
+          max-tokens: 1024
+          system-prompt: >
+            You are an expert in Ethereum execution clients, specifically Erigon.
+            You are analyzing a failed sync-from-scratch QA test.
+            Be concise: summarize the root cause in a few sentences, list the key error
+            lines, and suggest next steps for debugging.
+          prompt-file: ${{ github.workspace }}/ai-prompt.txt
+
+      - name: Print AI failure analysis
+        if: ${{ always() && steps.ai_analysis.outcome == 'success' }}
+        run: |
+          echo "## AI Failure Analysis for $CHAIN" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.ai_analysis.outputs.response }}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload test results
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
