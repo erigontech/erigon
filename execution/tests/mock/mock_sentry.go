@@ -457,7 +457,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		}
 		return nil
 	}
-	forkValidator := enginehelpers.NewForkValidator(ctx, 1, inMemoryExecution, dirs.Tmp, mock.BlockReader)
+	forkValidator := enginehelpers.NewForkValidator(ctx, 1, inMemoryExecution, dirs.Tmp, mock.BlockReader, cfg.MaxReorgDepth)
 	mock.ForkValidator = forkValidator
 
 	statusDataProvider := sentry.NewStatusDataProvider(

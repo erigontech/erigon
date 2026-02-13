@@ -36,6 +36,7 @@ import (
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func NewEngineXTestRunner(t *testing.T, logger log.Logger, preAllocsDir string) (*EngineXTestRunner, error) {
@@ -141,6 +142,9 @@ func (extr *EngineXTestRunner) getOrCreateTester(fork Fork, preAllocHash PreAllo
 		Genesis:                &genesis,
 		NoEmptyBlock1:          true,
 		EngineApiClientTimeout: &engineApiClientTimeout,
+		EthConfigTweaker: func(config *ethconfig.Config) {
+			config.MaxReorgDepth = 512
+		},
 	})
 	testersPerAlloc[preAllocHash] = tester
 	return testersPerAlloc[preAllocHash], nil
