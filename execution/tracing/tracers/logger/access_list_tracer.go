@@ -20,7 +20,7 @@
 package logger
 
 import (
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -131,8 +131,8 @@ func (al accessList) accessListSorted() types.AccessList {
 		for slot, pos := range storage.slots {
 			storageKeys[pos] = slot
 		}
-		sort.Slice(storageKeys, func(i, j int) bool {
-			return storageKeys[i].Cmp(storageKeys[j]) < 0
+		slices.SortFunc(storageKeys, func(a, b common.Hash) int {
+			return a.Cmp(b)
 		})
 		acl = append(acl, types.AccessTuple{
 			Address:     addr,
