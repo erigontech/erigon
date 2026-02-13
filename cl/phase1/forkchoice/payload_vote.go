@@ -54,8 +54,8 @@ func (f *ForkChoiceStore) notifyPtcMessages(
 // was voted as present by the PTC, and was locally determined to be available.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) isPayloadTimely(root common.Hash) bool {
-	// The beacon block root must be known in ptc_vote
-	ptcVoteRaw, ok := f.ptcVote.Load(root)
+	// The beacon block root must be known in payload_timeliness_vote
+	voteRaw, ok := f.payloadTimelinessVote.Load(root)
 	if !ok {
 		return false
 	}
@@ -67,15 +67,43 @@ func (f *ForkChoiceStore) isPayloadTimely(root common.Hash) bool {
 	}
 
 	// Count PTC votes for payload present
-	ptcVotes := ptcVoteRaw.([clparams.PtcSize]bool)
+	votes := voteRaw.([clparams.PtcSize]bool)
 	presentCount := uint64(0)
-	for i := range ptcVotes {
-		if ptcVotes[i] {
+	for i := range votes {
+		if votes[i] {
 			presentCount++
 		}
 	}
 
 	return presentCount > clparams.PayloadTimelyThreshold
+}
+
+// isPayloadDataAvailable returns whether the blob data for the beacon block with root
+// was voted as present by the PTC, and was locally determined to be available.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) isPayloadDataAvailable(root common.Hash) bool {
+	// The beacon block root must be known in payload_data_availability_vote
+	voteRaw, ok := f.payloadDataAvailabilityVote.Load(root)
+	if !ok {
+		return false
+	}
+
+	// If the payload is not locally available, the blob data
+	// is not considered available regardless of the PTC vote
+	if !f.forkGraph.HasEnvelope(root) {
+		return false
+	}
+
+	// Count PTC votes for data available
+	votes := voteRaw.([clparams.PtcSize]bool)
+	availableCount := uint64(0)
+	for i := range votes {
+		if votes[i] {
+			availableCount++
+		}
+	}
+
+	return availableCount > clparams.DataAvailabilityTimelyThreshold
 }
 
 // getParentPayloadStatus returns the payload status of the parent block.
@@ -148,14 +176,14 @@ func (f *ForkChoiceStore) isSupportingVote(node ForkChoiceNode, message LatestMe
 
 // shouldExtendPayload returns whether the payload for the given root should be extended.
 // Returns true if:
-// - The payload is timely (received enough PTC votes), OR
+// - The payload is timely AND blob data is available (received enough PTC votes for both), OR
 // - There's no proposer boost root, OR
 // - The proposer boost root's parent is not this root, OR
 // - The proposer boost root's parent node has FULL payload status
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) shouldExtendPayload(root common.Hash) bool {
-	// Check if payload is timely
-	if f.isPayloadTimely(root) {
+	// Check if payload is timely AND blob data is available
+	if f.isPayloadTimely(root) && f.isPayloadDataAvailable(root) {
 		return true
 	}
 

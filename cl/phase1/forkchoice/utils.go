@@ -96,13 +96,21 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 		}
 		return true
 	})
-	// Clean up GLOAS-specific ptcVote for finalized blocks.
+	// Clean up GLOAS-specific payload votes for finalized blocks.
 	// Note: envelope files are cleaned up in forkGraph.Prune().
 	if newFinalized.Epoch >= f.beaconCfg.GloasForkEpoch {
-		f.ptcVote.Range(func(k, v any) bool {
+		f.payloadTimelinessVote.Range(func(k, v any) bool {
 			root := k.(common.Hash)
 			if header, has := f.forkGraph.GetHeader(root); !has || header.Slot <= finalizedSlot {
-				f.ptcVote.Delete(k)
+				f.payloadTimelinessVote.Delete(k)
+			}
+			return true
+		})
+		f.payloadDataAvailabilityVote.Range(func(k, v any) bool {
+			// Key is stored as common.Hash
+			root := k.(common.Hash)
+			if header, has := f.forkGraph.GetHeader(root); !has || header.Slot <= finalizedSlot {
+				f.payloadDataAvailabilityVote.Delete(k)
 			}
 			return true
 		})
