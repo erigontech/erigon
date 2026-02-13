@@ -161,11 +161,15 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 				return
 			default:
 			}
-			if err := ethBackend.SubscribeReceipts(ctx, ff.OnReceipts, &ff.receiptsRequestor, func() error {
+			if err := ethBackend.SubscribeReceipts(ctx, ff.OnReceipts, func(send func(*remoteproto.ReceiptsFilterRequest) error) {
+				ff.mu.Lock()
+				ff.receiptsRequestor.Store(send)
+				ff.mu.Unlock()
 				if ff.pendingReceiptsUpdate.CompareAndSwap(true, false) {
-					return ff.sendReceiptsFilterUpdate()
+					if err := ff.sendReceiptsFilterUpdate(); err != nil {
+						logger.Warn("rpc filters: error sending pending receipts filter update", "err", err)
+					}
 				}
-				return nil
 			}); err != nil {
 				select {
 				case <-ctx.Done():
@@ -496,15 +500,20 @@ func (ff *Filters) UnsubscribeReceipts(id ReceiptsSubID) bool {
 }
 
 // sendReceiptsFilterUpdate sends the current receipts filter state to the server.
-// If the requestor is not yet available, it sets a flag so the readiness goroutine
-// in New will send the update once the receipts subscription goroutine connects.
+// If the requestor is not yet available, it sets a flag so the onReady callback
+// will send the update once the receipts subscription goroutine connects.
+// The load-or-flag operation is atomic under ff.mu to prevent a race with onReady
+// storing the requestor concurrently.
 func (ff *Filters) sendReceiptsFilterUpdate() error {
 	rfr := ff.receiptsSubs.createFilterRequest()
-	loaded := ff.loadReceiptsRequester()
+	ff.mu.Lock()
+	loaded := ff.receiptsRequestor.Load()
 	if loaded == nil {
 		ff.pendingReceiptsUpdate.Store(true)
+		ff.mu.Unlock()
 		return nil
 	}
+	ff.mu.Unlock()
 	return loaded.(func(*remoteproto.ReceiptsFilterRequest) error)(rfr)
 }
 
@@ -590,13 +599,6 @@ func (ff *Filters) loadLogsRequester() any {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
 	return ff.logsRequestor.Load()
-}
-
-// loadReceiptsRequester loads the current receipts requester and returns it.
-func (ff *Filters) loadReceiptsRequester() any {
-	ff.mu.Lock()
-	defer ff.mu.Unlock()
-	return ff.receiptsRequestor.Load()
 }
 
 func (ff *Filters) HasSubscription(id LogsSubID) bool {
