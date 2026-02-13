@@ -247,6 +247,7 @@ type DirtySegment struct {
 	indexes []*recsplit.Index
 	segType snaptype.Type
 	version snaptype.Version
+	hash    string // optional content hash for cache-busting filenames
 
 	frozen   bool
 	refcount atomic.Int32
@@ -346,6 +347,9 @@ func (s *DirtySegment) IsIndexed() bool {
 }
 
 func (s *DirtySegment) FileName() string {
+	if s.hash != "" {
+		return snaptype.SegmentFileNameWithHash(s.version, s.from, s.to, s.segType.Enum(), s.hash)
+	}
 	return s.Type().FileName(s.version, s.from, s.to)
 }
 
@@ -370,7 +374,11 @@ func (s *DirtySegment) FilePaths(basePath string) (relativePaths []string) {
 }
 
 func (s *DirtySegment) FileInfo(dir string) snaptype.FileInfo {
-	return s.Type().FileInfoByMask(dir, s.from, s.to)
+	fi := s.Type().FileInfoByMask(dir, s.from, s.to)
+	if s.hash != "" {
+		fi = fi.WithHash(s.hash)
+	}
+	return fi
 }
 
 func (s *DirtySegment) GetRange() (from, to uint64) { return s.from, s.to }
@@ -1138,7 +1146,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 		})
 
 		if !exists {
-			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: s.snCfg.IsFrozen(f)}
+			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: s.snCfg.IsFrozen(f), hash: f.Hash}
 		}
 
 		if open {

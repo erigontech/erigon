@@ -493,6 +493,12 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 	if err := sn.Compress(); err != nil {
 		return fmt.Errorf("compress: %w", err)
 	}
+
+	f, err = snaptype.ApplyContentHash(f)
+	if err != nil {
+		return err
+	}
+
 	// Generate .idx file, which is the slot => offset mapping.
 	p := &background.Progress{}
 
@@ -583,6 +589,12 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 	if err := sn.Compress(); err != nil {
 		return fmt.Errorf("compress: %w", err)
 	}
+
+	f, err = snaptype.ApplyContentHash(f)
+	if err != nil {
+		return err
+	}
+
 	// Generate .idx file, which is the slot => offset mapping.
 	p := &background.Progress{}
 
