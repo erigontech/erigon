@@ -566,8 +566,11 @@ func EncodeBigInt(i *big.Int, w io.Writer, buffer []byte) error {
 
 	size := common.BitLenToByteLen(bitLen)
 	buffer[0] = 0x80 + byte(size)
-	i.FillBytes(buffer[1 : 1+size])
-	_, err := w.Write(buffer[:1+size])
+	if _, err := w.Write(buffer[:1]); err != nil {
+		return err
+	}
+	i.FillBytes(buffer[:size])
+	_, err := w.Write(buffer[:size])
 	return err
 }
 

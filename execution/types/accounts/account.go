@@ -33,7 +33,6 @@ import (
 // These objects are stored in the main account trie.
 // DESCRIBED: docs/programmers_guide/guide.md#ethereum-state
 type Account struct {
-	Initialised     bool
 	Nonce           uint64
 	Balance         uint256.Int
 	Root            common.Hash // merkle root of the storage trie
@@ -258,7 +257,6 @@ func (a *Account) EncodeForHashing(buffer []byte) {
 
 // Copy makes `a` a full, independent (meaning that if the `image` changes in any way, it does not affect `a`) copy of the account `image`.
 func (a *Account) Copy(image *Account) {
-	a.Initialised = image.Initialised
 	a.Nonce = image.Nonce
 	a.Balance.Set(&image.Balance)
 	copy(a.Root[:], image.Root[:])
@@ -284,7 +282,6 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 		)
 	}
 
-	a.Initialised = true
 	a.Nonce = 0
 	a.Balance.Clear()
 	a.Root = empty.RootHash
@@ -440,7 +437,6 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 }
 
 func (a *Account) Reset() {
-	a.Initialised = true
 	a.Nonce = 0
 	a.Incarnation = 0
 	a.Balance.Clear()
