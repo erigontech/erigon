@@ -168,7 +168,7 @@ jobs:
           fi
 
       - name: Restore Erigon Chaindata Directory
-        if: ${{ always() }}
+        if: always()
         run: |
           if [ -d "$ERIGON_TESTBED_AREA/chaindata-prev" ] && [ "${{ steps.save_chaindata_step.outcome }}" == "success" ]; then
           rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
@@ -177,12 +177,12 @@ jobs:
           fi
 
       - name: Resume the Erigon instance dedicated to db maintenance
-        if: ${{ always() }}
+        if: always()
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
       - name: Upload test results
-        if: steps.test_step.outputs.test_executed == 'true'
+        if: always() && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v6
         with:
           name: test-results
@@ -191,7 +191,7 @@ jobs:
             ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
 
       - name: Save test results
-        if: steps.test_step.outputs.test_executed == 'true'
+        if: always() && steps.test_step.outputs.test_executed == 'true'
         working-directory: ${{ github.workspace }}
         env:
           TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
