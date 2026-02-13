@@ -116,6 +116,10 @@ type replyMatcher struct {
 	// reply contains the most recent reply. This field is safe for reading after errc has
 	// received a value.
 	reply v4wire.Packet
+
+	// added is closed by the loop goroutine after the matcher has been inserted into plist.
+	// pending() waits on this before returning to ensure the matcher is findable by handleReply.
+	added chan struct{}
 }
 
 type replyMatchFunc func(v4wire.Packet) (matched bool, requestDone bool)
@@ -405,10 +409,13 @@ func (t *UDPv4) TableBuckets() [][]BucketNode {
 // see the documentation of type replyMatcher for a detailed explanation.
 func (t *UDPv4) pending(id enode.ID, ip netip.Addr, ptype byte, callback replyMatchFunc) *replyMatcher {
 	ch := make(chan error, 1)
-	p := &replyMatcher{from: id, ip: ip, ptype: ptype, callback: callback, errc: ch}
+	p := &replyMatcher{from: id, ip: ip, ptype: ptype, callback: callback, errc: ch, added: make(chan struct{})}
 	select {
 	case t.addReplyMatcher <- p:
-		// loop will handle it
+		// Wait for loop to actually insert the matcher into plist before returning.
+		// This prevents a race where sendPing writes the packet before the matcher
+		// is findable by handleReply.
+		<-p.added
 	case <-t.closeCtx.Done():
 		ch <- errClosed
 	}
@@ -478,6 +485,9 @@ func (t *UDPv4) loop() {
 		case p := <-t.addReplyMatcher:
 			p.deadline = time.Now().Add(respTimeout)
 			plist.PushBack(p)
+			if p.added != nil {
+				close(p.added)
+			}
 
 		case r := <-t.gotreply:
 			var matched bool // whether any replyMatcher considered the reply acceptable.

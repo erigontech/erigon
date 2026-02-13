@@ -52,16 +52,16 @@ type Filters struct {
 
 	pendingBlock *types.Block
 
-	headsSubs             *concurrent.SyncMap[HeadsSubID, Sub[*types.Header]]
-	pendingLogsSubs       *concurrent.SyncMap[PendingLogsSubID, Sub[types.Logs]]
-	pendingBlockSubs      *concurrent.SyncMap[PendingBlockSubID, Sub[*types.Block]]
-	pendingTxsSubs        *concurrent.SyncMap[PendingTxsSubID, Sub[[]types.Transaction]]
-	logsSubs              *LogsFilterAggregator
-	logsRequestor         atomic.Value
-	receiptsSubs          *ReceiptsFilterAggregator
-	receiptsRequestor     atomic.Value
-	pendingReceiptsUpdate atomic.Bool
-	onNewSnapshot         func()
+	headsSubs         *concurrent.SyncMap[HeadsSubID, Sub[*types.Header]]
+	pendingLogsSubs   *concurrent.SyncMap[PendingLogsSubID, Sub[types.Logs]]
+	pendingBlockSubs  *concurrent.SyncMap[PendingBlockSubID, Sub[*types.Block]]
+	pendingTxsSubs    *concurrent.SyncMap[PendingTxsSubID, Sub[[]types.Transaction]]
+	logsSubs          *LogsFilterAggregator
+	logsRequestor     atomic.Value
+	receiptsSubs      *ReceiptsFilterAggregator
+	receiptsRequestor atomic.Value
+	receiptsReady     chan struct{} // closed when receiptsRequestor is first stored
+	onNewSnapshot     func()
 
 	logsStores         *concurrent.SyncMap[LogsSubID, []*types.Log]
 	pendingHeadsStores *concurrent.SyncMap[HeadsSubID, []*types.Header]
@@ -85,6 +85,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 		receiptsSubs:       NewReceiptsFilterAggregator(),
 		logsSubs:           NewLogsFilterAggregator(),
 		onNewSnapshot:      onNewSnapshot,
+		receiptsReady:      make(chan struct{}),
 		logsStores:         concurrent.NewSyncMap[LogsSubID, []*types.Log](),
 		pendingHeadsStores: concurrent.NewSyncMap[HeadsSubID, []*types.Header](),
 		pendingTxsStores:   concurrent.NewSyncMap[PendingTxsSubID, [][]types.Transaction](),
@@ -151,6 +152,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 
 	go func() {
 		if ethBackend == nil {
+			close(ff.receiptsReady)
 			return
 		}
 		activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Receipts"}).Inc()
@@ -162,13 +164,12 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 			default:
 			}
 			if err := ethBackend.SubscribeReceipts(ctx, ff.OnReceipts, func(send func(*remoteproto.ReceiptsFilterRequest) error) {
-				ff.mu.Lock()
 				ff.receiptsRequestor.Store(send)
-				ff.mu.Unlock()
-				if ff.pendingReceiptsUpdate.CompareAndSwap(true, false) {
-					if err := ff.sendReceiptsFilterUpdate(); err != nil {
-						logger.Warn("rpc filters: error sending pending receipts filter update", "err", err)
-					}
+				select {
+				case <-ff.receiptsReady:
+					// already closed from a previous connection attempt
+				default:
+					close(ff.receiptsReady)
 				}
 			}); err != nil {
 				select {
@@ -500,20 +501,15 @@ func (ff *Filters) UnsubscribeReceipts(id ReceiptsSubID) bool {
 }
 
 // sendReceiptsFilterUpdate sends the current receipts filter state to the server.
-// If the requestor is not yet available, it sets a flag so the onReady callback
-// will send the update once the receipts subscription goroutine connects.
-// The load-or-flag operation is atomic under ff.mu to prevent a race with onReady
-// storing the requestor concurrently.
+// It waits for the receipts subscription goroutine to connect and store the
+// requestor function before sending the update.
 func (ff *Filters) sendReceiptsFilterUpdate() error {
 	rfr := ff.receiptsSubs.createFilterRequest()
-	ff.mu.Lock()
+	<-ff.receiptsReady
 	loaded := ff.receiptsRequestor.Load()
 	if loaded == nil {
-		ff.pendingReceiptsUpdate.Store(true)
-		ff.mu.Unlock()
 		return nil
 	}
-	ff.mu.Unlock()
 	return loaded.(func(*remoteproto.ReceiptsFilterRequest) error)(rfr)
 }
 
