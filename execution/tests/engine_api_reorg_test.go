@@ -228,7 +228,7 @@ func TestEthGetLogsDoNotGetAffectedAfterNewPayloadOnSideChain(t *testing.T) {
 	})
 }
 
-func TestNewPayloadShouldReturnValidWhenChainIsLtMaxReorgDepth(t *testing.T) {
+func TestNewPayloadShouldReturnValidWhenSideChainGoingBackIsLtMaxReorgDepth(t *testing.T) {
 	// we had an issue where some benchmark tests were doing more than a 32-block reorg backwards
 	// while our MAX_REORG_DEPTH was 96 blocks, however, NewPayload returned ACCEPTED instead of VALID
 	// and caused issues with benchmarkoor
