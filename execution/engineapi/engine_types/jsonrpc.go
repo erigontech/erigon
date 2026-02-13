@@ -250,8 +250,10 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
 	}
 	if payload.Version >= 4 {
-		slotNumber := *payload.SlotNumber
-		res.SlotNumber = (*hexutil.Uint64)(&slotNumber)
+		if payload.SlotNumber != nil {
+			slotNumber := *payload.SlotNumber
+			res.SlotNumber = (*hexutil.Uint64)(&slotNumber)
+		}
 		res.BlockAccessList = types.ConvertBlockAccessListFromTypesProto(payload.BlockAccessList)
 	}
 	return res
