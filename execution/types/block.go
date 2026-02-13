@@ -521,7 +521,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		if errors.Is(err, rlp.EOL) {
 			h.SlotNumber = nil
 			if err := s.ListEnd(); err != nil {
-				return fmt.Errorf("close header struct (no ExcessBlobGas): %w", err)
+				return fmt.Errorf("close header struct (no SlotNumber): %w", err)
 			}
 			return nil
 		}
