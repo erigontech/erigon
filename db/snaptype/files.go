@@ -18,9 +18,11 @@ package snaptype
 
 import (
 	"cmp"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -454,18 +456,14 @@ func (f FileInfo) CompareTo(o FileInfo) int {
 }
 
 func (f FileInfo) As(t Type) FileInfo {
-	hashPart := ""
-	if f.Hash != "" {
-		hashPart = "." + f.Hash
-	}
-	name := fmt.Sprintf("%s-%06d-%06d-%s%s%s", f.Version.String(), f.From/1_000, f.To/1_000, t, hashPart, f.Ext)
+	// Hash is NOT preserved: it is content-specific and differs between types.
+	name := fmt.Sprintf("%s-%06d-%06d-%s%s", f.Version.String(), f.From/1_000, f.To/1_000, t, f.Ext)
 	return FileInfo{
 		Version: f.Version,
 		From:    f.From,
 		To:      f.To,
 		Ext:     f.Ext,
 		Type:    t,
-		Hash:    f.Hash,
 		name:    name,
 		Path:    filepath.Join(f.Dir(), name),
 	}
@@ -584,4 +582,35 @@ func Hex2InfoHash(in string) (infoHash metainfo.Hash) {
 	}
 	copy(infoHash[:], inHex)
 	return infoHash
+}
+
+// computeFileHash returns a truncated SHA256 hex digest (8 hex chars = 4 bytes) of the file at path.
+func computeFileHash(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)[:4]), nil
+}
+
+// ApplyContentHash computes a content hash of the file at f.Path and renames it
+// to include the hash particle. Returns the updated FileInfo.
+func ApplyContentHash(f FileInfo) (FileInfo, error) {
+	h, err := computeFileHash(f.Path)
+	if err != nil {
+		return f, err
+	}
+	newF := f.WithHash(h)
+	if newF.Path == f.Path {
+		return newF, nil
+	}
+	if err := os.Rename(f.Path, newF.Path); err != nil {
+		return f, err
+	}
+	return newF, nil
 }

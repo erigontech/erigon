@@ -1,6 +1,9 @@
 package snaptype
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -231,7 +234,7 @@ func TestFileInfoWithHashV3(t *testing.T) {
 	}
 }
 
-func TestFileInfoAsPreservesHash(t *testing.T) {
+func TestFileInfoAsStripsHash(t *testing.T) {
 	fi, _, ok := ParseFileName("/snap", "v1.0-000000-001000-headers.abc123def0.seg")
 	if !ok {
 		t.Fatal("failed to parse")
@@ -243,10 +246,10 @@ func TestFileInfoAsPreservesHash(t *testing.T) {
 	}
 
 	converted := fi.As(bodiesType)
-	if converted.Hash != "abc123def0" {
-		t.Errorf("As() should preserve hash, got %q", converted.Hash)
+	if converted.Hash != "" {
+		t.Errorf("As() should strip hash (content-specific), got %q", converted.Hash)
 	}
-	if want := "v1.0-000000-001000-bodies.abc123def0.seg"; converted.Name() != want {
+	if want := "v1.0-000000-001000-bodies.seg"; converted.Name() != want {
 		t.Errorf("As() name = %q, want %q", converted.Name(), want)
 	}
 }
@@ -270,6 +273,60 @@ func TestMaskMatchesHashedFiles(t *testing.T) {
 	}
 	if !matched {
 		t.Errorf("mask %q should match hashed file", mask)
+	}
+}
+
+func TestApplyContentHash(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a fake .seg file with known content
+	content := []byte("hello snapshot world")
+	origName := "v1.0-000000-001000-headers.seg"
+	origPath := filepath.Join(dir, origName)
+	if err := os.WriteFile(origPath, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	fi, _, ok := ParseFileName(dir, origName)
+	if !ok {
+		t.Fatalf("failed to parse %q", origName)
+	}
+
+	result, err := ApplyContentHash(fi)
+	if err != nil {
+		t.Fatalf("ApplyContentHash: %v", err)
+	}
+
+	// Verify hash matches SHA256 of content
+	h := sha256.Sum256(content)
+	wantHash := hex.EncodeToString(h[:4])
+	if result.Hash != wantHash {
+		t.Errorf("Hash = %q, want %q", result.Hash, wantHash)
+	}
+
+	// Verify original file no longer exists
+	if _, err := os.Stat(origPath); !os.IsNotExist(err) {
+		t.Error("original file should have been renamed")
+	}
+
+	// Verify new file exists at result.Path
+	if _, err := os.Stat(result.Path); err != nil {
+		t.Errorf("new file should exist at %q: %v", result.Path, err)
+	}
+
+	// Verify the new filename contains the hash
+	wantName := "v1.0-000000-001000-headers." + wantHash + ".seg"
+	if result.Name() != wantName {
+		t.Errorf("Name = %q, want %q", result.Name(), wantName)
+	}
+
+	// Verify round-trip parse
+	fi2, _, ok := ParseFileName(dir, result.Name())
+	if !ok {
+		t.Fatalf("failed to parse hashed name %q", result.Name())
+	}
+	if fi2.Hash != wantHash {
+		t.Errorf("round-trip Hash = %q, want %q", fi2.Hash, wantHash)
 	}
 }
 
