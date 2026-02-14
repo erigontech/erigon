@@ -26,6 +26,7 @@ import (
 	"maps"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -38,6 +39,16 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+var stateObjectPool = sync.Pool{
+	New: func() any {
+		return &stateObject{
+			originStorage:      make(Storage),
+			blockOriginStorage: make(Storage),
+			dirtyStorage:       make(Storage),
+		}
+	},
+}
 
 type Code []byte
 
@@ -94,35 +105,37 @@ type stateObject struct {
 }
 
 func (so *stateObject) deepCopy(db *IntraBlockState) *stateObject {
-	stateObject := &stateObject{db: db, address: so.address}
-	stateObject.data.Copy(&so.data)
-	stateObject.original.Copy(&so.original)
-	stateObject.code = so.code
-	stateObject.dirtyStorage = so.dirtyStorage.Copy()
-	stateObject.originStorage = so.originStorage.Copy()
-	stateObject.blockOriginStorage = so.blockOriginStorage.Copy()
-	stateObject.selfdestructed = so.selfdestructed
-	stateObject.dirtyCode = so.dirtyCode
-	stateObject.deleted = so.deleted
-	stateObject.newlyCreated = so.newlyCreated
-	stateObject.createdContract = so.createdContract
-	return stateObject
+	obj := stateObjectPool.Get().(*stateObject)
+	obj.db = db
+	obj.address = so.address
+	obj.data.Copy(&so.data)
+	obj.original.Copy(&so.original)
+	obj.code = so.code
+	// Clear and copy storage maps
+	clear(obj.dirtyStorage)
+	maps.Copy(obj.dirtyStorage, so.dirtyStorage)
+	clear(obj.originStorage)
+	maps.Copy(obj.originStorage, so.originStorage)
+	clear(obj.blockOriginStorage)
+	maps.Copy(obj.blockOriginStorage, so.blockOriginStorage)
+	if so.fakeStorage != nil {
+		obj.fakeStorage = so.fakeStorage.Copy()
+	}
+	obj.selfdestructed = so.selfdestructed
+	obj.dirtyCode = so.dirtyCode
+	obj.deleted = so.deleted
+	obj.newlyCreated = so.newlyCreated
+	obj.createdContract = so.createdContract
+	return obj
 }
 
-// newObject creates a state object.
+// newObject creates a state object from the pool.
 func newObject(db *IntraBlockState, address accounts.Address, data, original *accounts.Account) *stateObject {
-	var so = stateObject{
-		db:                 db,
-		address:            address,
-		originStorage:      make(Storage),
-		blockOriginStorage: make(Storage),
-		dirtyStorage:       make(Storage),
-	}
+	so := stateObjectPool.Get().(*stateObject)
+	so.db = db
+	so.address = address
 	so.data.Copy(data)
-	if !so.data.Initialised {
-		so.data.Balance.SetUint64(0)
-		so.data.Initialised = true
-	}
+
 	if so.data.CodeHash.IsEmpty() {
 		so.data.CodeHash = accounts.EmptyCodeHash
 	}
@@ -130,7 +143,26 @@ func newObject(db *IntraBlockState, address accounts.Address, data, original *ac
 		so.data.Root = empty.RootHash
 	}
 	so.original.Copy(original)
-	return &so
+	return so
+}
+
+// release returns the stateObject to the pool after resetting it.
+func (so *stateObject) release() {
+	so.db = nil
+	so.address = accounts.NilAddress
+	so.data = accounts.Account{}
+	so.original = accounts.Account{}
+	so.code = nil
+	clear(so.originStorage)
+	clear(so.blockOriginStorage)
+	clear(so.dirtyStorage)
+	so.fakeStorage = nil
+	so.dirtyCode = false
+	so.selfdestructed = false
+	so.deleted = false
+	so.newlyCreated = false
+	so.createdContract = false
+	stateObjectPool.Put(so)
 }
 
 // EncodeRLP implements rlp.Encoder.
@@ -183,9 +215,14 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle()))) {
 		so.db.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", so.db.blockNum, so.db.txIndex, so.db.version))
 	}
-	readStart := time.Now()
+	var readStart time.Time
+	if dbg.KVReadLevelledMetrics {
+		readStart = time.Now()
+	}
 	res, ok, err := so.db.stateReader.ReadAccountStorage(so.address, key)
-	so.db.storageReadDuration += time.Since(readStart)
+	if dbg.KVReadLevelledMetrics {
+		so.db.storageReadDuration += time.Since(readStart)
+	}
 	so.db.storageReadCount++
 	so.db.stateReader.SetTrace(false, "")
 
@@ -339,7 +376,6 @@ func (so *stateObject) SetBalance(amount uint256.Int, wasCommited bool, reason t
 
 func (so *stateObject) setBalance(amount uint256.Int) {
 	so.data.Balance = amount
-	so.data.Initialised = true
 }
 
 // Return the gas back to the origin. Used by the Virtual machine or Closures
@@ -370,10 +406,15 @@ func (so *stateObject) Code() ([]byte, error) {
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle()))) {
 		so.db.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", so.db.blockNum, so.db.txIndex, so.db.version))
 	}
-	readStart := time.Now()
+	var readStart time.Time
+	if dbg.KVReadLevelledMetrics {
+		readStart = time.Now()
+	}
 	code, err := so.db.stateReader.ReadAccountCode(so.Address())
-	so.db.codeReadDuration += time.Since(readStart)
-	so.db.codeReadCount++
+	if dbg.KVReadLevelledMetrics {
+		so.db.codeReadDuration += time.Since(readStart)
+		so.db.codeReadCount++
+	}
 	so.db.stateReader.SetTrace(false, "")
 
 	if err != nil {

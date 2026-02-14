@@ -18,7 +18,7 @@ import (
 )
 
 func domainStat(cliCtx *cli.Context) error {
-	_, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+	_, err := debug.SetupSimple(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
 	}

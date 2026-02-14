@@ -132,7 +132,17 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 
 				v, _ := ci1.hist.Next(valBuf[:0])
 
-				if dedupVal != nil && bytes.Equal(*dedupVal, v) {
+				// if dedupVal == nil -> we can not insert to the page because next val can be duplicate --> remember the value and decide next iter
+				if dedupVal == nil {
+					dd := bytes.Clone(v) // i am not sure if there is a way to avoid extra copy here
+					dedupVal = &dd
+					prevTxNum = txNum
+
+					continue
+				}
+
+				// if dedupVal is the same as current --> can not insert to the page bacause next val can be duplicate as well --> mark prev tx as duplicate
+				if bytes.Equal(*dedupVal, v) {
 					if dedupKeyEFs[string(ci1.key)] == nil {
 						dedupKeyEFs[string(ci1.key)] = make(map[uint64]struct{})
 					}
@@ -143,13 +153,21 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 					continue
 				}
 
+				histKeyBuf = historyKey(prevTxNum, ci1.key, histKeyBuf)
+
+				if err = pagedWr.Add(histKeyBuf, *dedupVal); err != nil {
+					return err
+				}
+
 				dd := bytes.Clone(v) // i am not sure if there is a way to avoid extra copy here
 				dedupVal = &dd
 				prevTxNum = txNum
+			}
 
-				histKeyBuf = historyKey(txNum, ci1.key, histKeyBuf)
+			if dedupVal != nil {
+				histKeyBuf = historyKey(prevTxNum, ci1.key, histKeyBuf)
 
-				if err = pagedWr.Add(histKeyBuf, v); err != nil {
+				if err = pagedWr.Add(histKeyBuf, *dedupVal); err != nil {
 					return err
 				}
 			}

@@ -125,8 +125,9 @@ jobs:
             echo "RPC tests completed successfully"
             echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
           else
-            echo "Error detected during RPC tests"
+            echo "::error::Error detected during RPC tests: some tests failed, check the logs or the artifacts for more details"
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+            exit 1
           fi
 
       - name: Generate Summary
@@ -167,7 +168,7 @@ jobs:
           fi
 
       - name: Restore Erigon Chaindata Directory
-        if: ${{ always() }}
+        if: always()
         run: |
           if [ -d "$ERIGON_TESTBED_AREA/chaindata-prev" ] && [ "${{ steps.save_chaindata_step.outcome }}" == "success" ]; then
           rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
@@ -176,12 +177,12 @@ jobs:
           fi
 
       - name: Resume the Erigon instance dedicated to db maintenance
-        if: ${{ always() }}
+        if: always()
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
       - name: Upload test results
-        if: steps.test_step.outputs.test_executed == 'true'
+        if: always() && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v6
         with:
           name: test-results
@@ -190,7 +191,7 @@ jobs:
             ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
 
       - name: Save test results
-        if: steps.test_step.outputs.test_executed == 'true'
+        if: always() && steps.test_step.outputs.test_executed == 'true'
         working-directory: ${{ github.workspace }}
         env:
           TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
@@ -213,10 +214,4 @@ jobs:
       - name: Action for Success
         if: steps.test_step.outputs.TEST_RESULT == 'success'
         run: echo "::notice::Tests completed successfully"
-
-      - name: Action for Failure
-        if: steps.test_step.outputs.TEST_RESULT != 'success'
-        run: |
-          echo "::error::Error detected during tests: some tests failed, check the logs or the artifacts for more details"
-          exit 1
 

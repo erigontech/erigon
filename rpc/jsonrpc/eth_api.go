@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -107,7 +108,7 @@ type EthAPI interface {
 	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides, blockOverrides *ethapi.BlockOverrides) (hexutil.Bytes, error)
 	EstimateGas(ctx context.Context, argsOrNil *ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides, blockOverrides *ethapi.BlockOverrides) (hexutil.Uint64, error)
 	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
-	SendRawTransactionSync(ctx context.Context, encodedTx hexutil.Bytes, timeoutMs *hexutil.Uint64) (map[string]any, error)
+	SendRawTransactionSync(ctx context.Context, encodedTx hexutil.Bytes, timeoutMs *uint64) (map[string]any, error)
 	SendTransaction(_ context.Context, txObject any) (common.Hash, error)
 	Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error)
 	SignTransaction(_ context.Context, txObject any) (common.Hash, error)
@@ -169,7 +170,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		_txNumReader:        blockReader.TxnumReader(),
 		evmCallTimeout:      evmCallTimeout,
 		_engine:             engine,
-		receiptsGenerator:   receipts.NewGenerator(blockReader, engine, stateCache, evmCallTimeout),
+		receiptsGenerator:   receipts.NewGenerator(dirs, blockReader, engine, stateCache, evmCallTimeout),
 		borReceiptGenerator: receipts.NewBorGenerator(blockReader, engine, stateCache),
 		dirs:                dirs,
 		bridgeReader:        bridgeReader,
@@ -182,6 +183,33 @@ func (api *BaseAPI) chainConfig(ctx context.Context, tx kv.Tx) (*chain.Config, e
 	return cfg, err
 }
 
+func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chain.Config, *types.Block, error) {
+	cc, genesisBlock := api._chainConfig.Load(), api._genesis.Load()
+	if cc != nil && genesisBlock != nil {
+		return cc, genesisBlock, nil
+	}
+
+	genesisBlock, err := api.blockByNumberWithSenders(ctx, tx, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	if genesisBlock == nil {
+		return nil, nil, errors.New("genesis block not found in database")
+	}
+	cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+	if err != nil {
+		return nil, nil, err
+	}
+	if cc != nil {
+		api._genesis.Store(genesisBlock)
+		api._chainConfig.Store(cc)
+	}
+	return cc, genesisBlock, nil
+}
+
+func (api *BaseAPI) pendingBlock() *types.Block {
+	return api.filters.LastPendingBlock()
+}
 func (api *BaseAPI) engine() rules.EngineReader {
 	return api._engine
 }
@@ -191,14 +219,14 @@ func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash
 }
 
 func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
-	hash, ok, hashErr := api._blockReader.CanonicalHash(ctx, tx, number)
-	if hashErr != nil {
-		return nil, hashErr
+	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(number)), tx, api._blockReader, api.filters)
+	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return nil, nil
+		}
+		return nil, err
 	}
-	if !ok {
-		return nil, nil
-	}
-	return api.blockWithSenders(ctx, tx, hash, number)
+	return api.blockWithSenders(ctx, tx, hash, blockNumber)
 }
 
 func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash) (*types.Block, error) {
@@ -216,24 +244,6 @@ func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash c
 	}
 
 	return api.blockWithSenders(ctx, tx, hash, *number)
-}
-
-func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
-	if api.blocksLRU != nil {
-		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.Header().Number.Uint64(), nil
-		}
-	}
-	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
-	if err != nil {
-		return 0, err
-	}
-
-	if number == nil {
-		return 0, errors.New("header number not found")
-	}
-	return *number, nil
-
 }
 
 func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
@@ -265,46 +275,45 @@ func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.
 	return block, nil
 }
 
-func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chain.Config, *types.Block, error) {
-	cc, genesisBlock := api._chainConfig.Load(), api._genesis.Load()
-	if cc != nil && genesisBlock != nil {
-		return cc, genesisBlock, nil
+func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
+	if api.blocksLRU != nil {
+		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
+			return it.Header().Number.Uint64(), nil
+		}
+	}
+	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
+	if err != nil {
+		return 0, err
 	}
 
-	genesisBlock, err := api.blockByRPCNumber(ctx, 0, tx)
-	if err != nil {
-		return nil, nil, err
+	if number == nil {
+		return 0, errors.New("header number not found")
 	}
-	if genesisBlock == nil {
-		return nil, nil, errors.New("genesis block not found in database")
-	}
-	cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
-	if err != nil {
-		return nil, nil, err
-	}
-	if cc != nil {
-		api._genesis.Store(genesisBlock)
-		api._chainConfig.Store(cc)
-	}
-	return cc, genesisBlock, nil
+	return *number, nil
+
 }
 
-func (api *BaseAPI) pendingBlock() *types.Block {
-	return api.filters.LastPendingBlock()
-}
-
-func (api *BaseAPI) blockByRPCNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
-	n, h, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+// headerByNumberOrHash - intent to read recent headers only, tries from the lru cache before reading from the db
+func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, bool, error) {
+	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
-		return nil, err
+		return nil, false, err
+	}
+	if api.blocksLRU != nil {
+		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
+			return it.Header(), isLatest, nil
+		}
 	}
 
-	// it's ok to use context.Background(), because in "Remote RPCDaemon" `tx` already contains internal ctx
-	block, err := api.blockWithSenders(ctx, tx, h, n)
-	return block, err
+	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
+	if err != nil {
+		return nil, false, err
+	}
+	// header can be nil
+	return header, isLatest, nil
 }
 
-func (api *BaseAPI) headerByRPCNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Header, error) {
+func (api *BaseAPI) headerByNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Header, error) {
 	n, h, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
@@ -359,7 +368,7 @@ func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint6
 		}
 		prunedTo := p.History.PruneTo(latest)
 		if block < prunedTo {
-			return errors.New("history has been pruned for this block")
+			return state.PrunedError
 		}
 	}
 
@@ -446,11 +455,15 @@ func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPo
 
 // newRPCPendingTransaction returns a pending transaction that will serialize to the RPC representation
 func newRPCPendingTransaction(txn types.Transaction, current *types.Header, config *chain.Config) *ethapi.RPCTransaction {
-	var baseFee *big.Int
+	var (
+		baseFee   *big.Int
+		blockTime = uint64(0)
+	)
 	if current != nil {
 		baseFee = misc.CalcBaseFee(config, current)
+		blockTime = current.Time
 	}
-	return ethapi.NewRPCTransaction(txn, common.Hash{}, 0, 0, baseFee)
+	return ethapi.NewRPCTransaction(txn, common.Hash{}, blockTime, 0, 0, baseFee)
 }
 
 // newRPCRawTransactionFromBlockIndex returns the bytes of a transaction given a block and a transaction index.

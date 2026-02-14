@@ -29,7 +29,6 @@ import (
 func TestEmptyAccount(t *testing.T) {
 	t.Parallel()
 	a := Account{
-		Initialised: true,
 		Nonce:       100,
 		Balance:     *new(uint256.Int),
 		Root:        empty.RootHash, // extAccount doesn't have Root value
@@ -80,7 +79,6 @@ func TestEmptyAccount_BufferStrangeBehaviour(t *testing.T) {
 func TestAccountEncodeWithCode(t *testing.T) {
 	t.Parallel()
 	a := Account{
-		Initialised: true,
 		Nonce:       2,
 		Balance:     *new(uint256.Int).SetUint64(1000),
 		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
@@ -101,7 +99,6 @@ func TestAccountEncodeWithCode(t *testing.T) {
 func TestAccountEncodeWithCodeWithStorageSizeHack(t *testing.T) {
 	t.Parallel()
 	a := Account{
-		Initialised: true,
 		Nonce:       2,
 		Balance:     *new(uint256.Int).SetUint64(1000),
 		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
@@ -122,7 +119,6 @@ func TestAccountEncodeWithCodeWithStorageSizeHack(t *testing.T) {
 func TestAccountEncodeWithoutCode(t *testing.T) {
 	t.Parallel()
 	a := Account{
-		Initialised: true,
 		Nonce:       2,
 		Balance:     *new(uint256.Int).SetUint64(1000),
 		Root:        empty.RootHash, // extAccount doesn't have Root value
@@ -143,7 +139,6 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *testing.T) {
 	t.Parallel()
 	a := Account{
-		Initialised: true,
 		Nonce:       0,
 		Balance:     uint256.Int{},
 		Root:        common.HexToHash("123"),
@@ -162,7 +157,6 @@ func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *tes
 func TestEncodeAccountWithEmptyBalanceAndNotZeroIncarnation(t *testing.T) {
 	t.Parallel()
 	a := Account{
-		Initialised: true,
 		Nonce:       0,
 		Balance:     uint256.Int{},
 		Incarnation: 1,
@@ -187,9 +181,6 @@ func TestEncodeAccountWithEmptyBalanceAndNotZeroIncarnation(t *testing.T) {
 
 func isAccountsEqual(t *testing.T, src, dst Account) {
 	t.Helper()
-	if dst.Initialised != src.Initialised {
-		t.Fatal("cant decode the account Initialised", src.Initialised, dst.Initialised)
-	}
 
 	if dst.CodeHash != src.CodeHash {
 		t.Fatal("cant decode the account CodeHash", src.CodeHash, dst.CodeHash)
@@ -210,7 +201,6 @@ func isAccountsEqual(t *testing.T, src, dst Account) {
 func TestIncarnationForEmptyAccount(t *testing.T) {
 	t.Parallel()
 	a := Account{
-		Initialised: true,
 		Nonce:       100,
 		Balance:     *new(uint256.Int),
 		Root:        empty.RootHash,
@@ -246,7 +236,6 @@ func TestEmptyIncarnationForEmptyAccount2(t *testing.T) {
 func TestIncarnationWithNonEmptyAccount(t *testing.T) {
 	t.Parallel()
 	a := Account{
-		Initialised: true,
 		Nonce:       2,
 		Balance:     *new(uint256.Int).SetUint64(1000),
 		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
@@ -267,7 +256,6 @@ func TestIncarnationWithNonEmptyAccount(t *testing.T) {
 func TestIncarnationWithNoIncarnation(t *testing.T) {
 	t.Parallel()
 	a := Account{
-		Initialised: true,
 		Nonce:       2,
 		Balance:     *new(uint256.Int).SetUint64(1000),
 		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
