@@ -19,11 +19,11 @@ package utils_test
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/utils"
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon/common"
 )
 
 func TestSSZSnappy(t *testing.T) {
@@ -51,4 +51,11 @@ func TestLiteralConverters(t *testing.T) {
 	require.Equal(t, [4]byte{0x0, 0x0, 0x2, 0x58}, utils.Uint32ToBytes4(600))
 	require.Equal(t, [4]byte{10, 23, 56, 7}, utils.BytesToBytes4([]byte{10, 23, 56, 7, 8, 5}))
 	require.Equal(t, []byte{0x58, 0x2, 0x0, 0x0, 0x0, 0x0, 0x00, 0x00}, utils.Uint64ToLE(600))
+}
+
+func TestReverseBytes(t *testing.T) {
+	input := common.HexToHash("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+	reversed := common.HexToHash("1f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100")
+	utils.ReverseBytes(&input)
+	require.Equal(t, reversed, input)
 }
