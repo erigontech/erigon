@@ -72,6 +72,7 @@ type HttpCfg struct {
 	RpcFiltersConfig                  rpchelper.FiltersConfig
 	DBReadConcurrency                 int
 	TraceCompatibility                bool // Bug for bug compatibility for trace_ routines with OpenEthereum
+	GethCompatibility                 bool // Geth-compatible storage iteration order for debug_storageRangeAt
 	TxPoolApiAddr                     string
 	StateCache                        kvcache.CoherentConfig
 	Snap                              ethconfig.BlocksFreezing

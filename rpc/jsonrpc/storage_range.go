@@ -72,7 +72,63 @@ func (h *storageEntryMaxHeap) Pop() any {
 	return x
 }
 
-func storageRangeAt(ttx kv.TemporalTx, contractAddress common.Address, start []byte, txNum uint64, maxResult int) (StorageRangeResult, error) {
+func storageRangeAt(ttx kv.TemporalTx, contractAddress common.Address, start []byte, txNum uint64, maxResult int, gethCompatibility bool) (StorageRangeResult, error) {
+	if gethCompatibility {
+		return storageRangeAtGethCompat(ttx, contractAddress, start, txNum, maxResult)
+	}
+	return storageRangeAtErigon(ttx, contractAddress, start, txNum, maxResult)
+}
+
+// storageRangeAtErigon iterates storage in raw key order (Erigon's flat KV order).
+// This is the default behavior — fast, but produces different iteration order than Geth.
+func storageRangeAtErigon(ttx kv.TemporalTx, contractAddress common.Address, start []byte, txNum uint64, maxResult int) (StorageRangeResult, error) {
+	result := StorageRangeResult{Storage: storageMap{}}
+
+	fromKey := append(common.Copy(contractAddress.Bytes()), start...)
+	toKey, _ := kv.NextSubtree(contractAddress.Bytes())
+
+	r, err := ttx.RangeAsOf(kv.StorageDomain, fromKey, toKey, txNum, order.Asc, kv.Unlim) //no limit because need skip empty records
+	if err != nil {
+		return StorageRangeResult{}, err
+	}
+	defer r.Close()
+	for len(result.Storage) < maxResult && r.HasNext() {
+		k, v, err := r.Next()
+		if err != nil {
+			return StorageRangeResult{}, err
+		}
+		if len(v) == 0 {
+			continue // Skip deleted entries
+		}
+		key := common.BytesToHash(k[20:])
+		seckey, err := common.HashData(k[20:])
+		if err != nil {
+			return StorageRangeResult{}, err
+		}
+		var value uint256.Int
+		value.SetBytes(v)
+		result.Storage[seckey] = StorageEntry{Key: &key, Value: value.Bytes32()}
+	}
+
+	for r.HasNext() { // not `if` because need skip empty vals
+		k, v, err := r.Next()
+		if err != nil {
+			return StorageRangeResult{}, err
+		}
+		if len(v) == 0 {
+			continue
+		}
+		key := common.BytesToHash(k[20:])
+		result.NextKey = &key
+		break
+	}
+	return result, nil
+}
+
+// storageRangeAtGethCompat iterates storage in keccak256 hash order to match Geth's
+// trie-based iteration. This requires scanning all storage entries and sorting by hash,
+// which is significantly slower than the default Erigon approach.
+func storageRangeAtGethCompat(ttx kv.TemporalTx, contractAddress common.Address, start []byte, txNum uint64, maxResult int) (StorageRangeResult, error) {
 	result := StorageRangeResult{Storage: storageMap{}}
 
 	// Always scan all storage for this contract — we need to sort by hashed key

@@ -408,6 +408,10 @@ var (
 		Name:  "trace.compat",
 		Usage: "Bug for bug compatibility with OE for trace_ routines",
 	}
+	RpcGethCompatFlag = cli.BoolFlag{
+		Name:  "rpc.gethcompat",
+		Usage: "Enables Geth-compatible storage iteration order for debug_storageRangeAt (sorted by keccak256 hash). Disabled by default for performance.",
+	}
 	RpcTxSyncDefaultTimeoutFlag = cli.DurationFlag{
 		Name:  "rpc.txsync.defaulttimeout",
 		Usage: "Default timeout for eth_sendRawTransactionSync (default: 25 secs).",
