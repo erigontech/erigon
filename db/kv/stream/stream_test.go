@@ -155,7 +155,8 @@ func TestMultisetKV(t *testing.T) {
 	ctx := context.Background()
 	t.Run("preserves duplicates", func(t *testing.T) {
 		require := require.New(t)
-		tx, _ := db.BeginRw(ctx)
+		tx, err := db.BeginRw(ctx)
+		require.NoError(err)
 		defer tx.Rollback()
 		_ = tx.Put(kv.HeaderNumber, []byte{1}, []byte{1})
 		_ = tx.Put(kv.HeaderNumber, []byte{3}, []byte{1})
@@ -171,7 +172,8 @@ func TestMultisetKV(t *testing.T) {
 	})
 	t.Run("sorted merge", func(t *testing.T) {
 		require := require.New(t)
-		tx, _ := db.BeginRw(ctx)
+		tx, err := db.BeginRw(ctx)
+		require.NoError(err)
 		defer tx.Rollback()
 		_ = tx.Put(kv.HeaderNumber, []byte{1}, []byte{1})
 		_ = tx.Put(kv.HeaderNumber, []byte{4}, []byte{1})
@@ -185,7 +187,8 @@ func TestMultisetKV(t *testing.T) {
 	})
 	t.Run("empty left", func(t *testing.T) {
 		require := require.New(t)
-		tx, _ := db.BeginRw(ctx)
+		tx, err := db.BeginRw(ctx)
+		require.NoError(err)
 		defer tx.Rollback()
 		_ = tx.Put(kv.TblAccountVals, []byte{2}, []byte{9})
 		_ = tx.Put(kv.TblAccountVals, []byte{3}, []byte{9})
@@ -197,7 +200,8 @@ func TestMultisetKV(t *testing.T) {
 	})
 	t.Run("empty right", func(t *testing.T) {
 		require := require.New(t)
-		tx, _ := db.BeginRw(ctx)
+		tx, err := db.BeginRw(ctx)
+		require.NoError(err)
 		defer tx.Rollback()
 		_ = tx.Put(kv.HeaderNumber, []byte{1}, []byte{1})
 		_ = tx.Put(kv.HeaderNumber, []byte{3}, []byte{1})
@@ -209,7 +213,8 @@ func TestMultisetKV(t *testing.T) {
 	})
 	t.Run("both empty", func(t *testing.T) {
 		require := require.New(t)
-		tx, _ := db.BeginRw(ctx)
+		tx, err := db.BeginRw(ctx)
+		require.NoError(err)
 		defer tx.Rollback()
 		it, _ := tx.Range(kv.HeaderNumber, nil, nil, order.Asc, kv.Unlim)
 		it2, _ := tx.Range(kv.TblAccountVals, nil, nil, order.Asc, kv.Unlim)
@@ -218,7 +223,8 @@ func TestMultisetKV(t *testing.T) {
 	})
 	t.Run("limit", func(t *testing.T) {
 		require := require.New(t)
-		tx, _ := db.BeginRw(ctx)
+		tx, err := db.BeginRw(ctx)
+		require.NoError(err)
 		defer tx.Rollback()
 		_ = tx.Put(kv.HeaderNumber, []byte{1}, []byte{1})
 		_ = tx.Put(kv.HeaderNumber, []byte{3}, []byte{1})
