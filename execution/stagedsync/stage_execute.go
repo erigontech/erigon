@@ -485,6 +485,27 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 		}
 	}
 
+	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth {
+		pruneBalLimit := 10_000
+		pruneTimeout := quickPruneTimeout
+		if s.CurrentSyncCycle.IsInitialCycle {
+			pruneBalLimit = math.MaxInt
+			pruneTimeout = time.Hour
+		}
+		if err := rawdb.PruneTable(
+			tx,
+			kv.BlockAccessList,
+			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
+			ctx,
+			pruneBalLimit,
+			pruneTimeout,
+			logger,
+			s.LogPrefix(),
+		); err != nil {
+			return err
+		}
+	}
+
 	agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
 	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize()) * 100)
 
