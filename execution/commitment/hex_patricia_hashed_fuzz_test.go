@@ -131,7 +131,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 			}
 
 			plainKeys[k] = make([]byte, kl)
-			keysSeed.Read(plainKeys[k][:])
+			keysSeed.Read(plainKeys[k])
 		}
 
 		ms := NewMockState(t)

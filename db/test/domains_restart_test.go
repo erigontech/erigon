@@ -196,6 +196,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	tx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
+	defer tx.Rollback()
 	domains, err = execctx.NewSharedDomains(ctx, tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()

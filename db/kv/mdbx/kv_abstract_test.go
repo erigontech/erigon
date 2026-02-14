@@ -106,8 +106,10 @@ func TestManagedTx(t *testing.T) {
 
 		c, err := tx.RwCursor(bucket1)
 		require.NoError(t, err)
+		defer c.Close()
 		c1, err := tx.RwCursor(bucket2)
 		require.NoError(t, err)
+		defer c1.Close()
 		require.NoError(t, c.Append([]byte{0}, []byte{1}))
 		require.NoError(t, c1.Append([]byte{0}, []byte{1}))
 		require.NoError(t, c.Append([]byte{0, 0, 0, 0, 0, 1}, []byte{1})) // prefixes of len=FromLen for DupSort test (other keys must be <ToLen)
@@ -214,6 +216,7 @@ func TestRemoteKvRange(t *testing.T) {
 	require.NoError(writeDB.Update(ctx, func(tx kv.RwTx) error {
 		wc, err := tx.RwCursorDupSort(kv.TblAccountVals)
 		require.NoError(err)
+		defer wc.Close()
 		require.NoError(wc.Append([]byte{1}, []byte{1}))
 		require.NoError(wc.Append([]byte{1}, []byte{2}))
 		require.NoError(wc.Append([]byte{2}, []byte{1}))
@@ -224,6 +227,7 @@ func TestRemoteKvRange(t *testing.T) {
 	require.NoError(db.View(ctx, func(tx kv.Tx) error {
 		c, err := tx.Cursor(kv.TblAccountVals)
 		require.NoError(err)
+		defer c.Close()
 
 		k, v, err := c.First()
 		require.NoError(err)
@@ -381,10 +385,12 @@ func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
 		if err != nil {
 			return err
 		}
+		defer c1.Close()
 		c2, err := tx.Cursor(bucket2)
 		if err != nil {
 			return err
 		}
+		defer c2.Close()
 
 		k1, v1, err := c1.First()
 		require.NoError(err)

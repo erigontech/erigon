@@ -441,7 +441,7 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 	if rawBody.Uncles[1].GasLimit != 100 {
 		t.Fatal("expected gas limit of 2nd uncle to be 100")
 	}
-	if string(resultJson) != string(expectedJson) {
+	if !bytes.Equal(resultJson, expectedJson) {
 		t.Fatalf("encoded and decoded json do not match, got\n%s\nwant\n%s", resultJson, expectedJson)
 	}
 }
