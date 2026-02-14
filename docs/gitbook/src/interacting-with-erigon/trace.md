@@ -1,5 +1,9 @@
 ---
 description: Inspecting Transaction Execution with Trace, VMTrace, and StateDiff
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/interacting-with-erigon/interacting-with-erigon/trace
 ---
 
 # trace

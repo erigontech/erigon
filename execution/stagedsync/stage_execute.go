@@ -139,8 +139,6 @@ func StageExecuteBlocksCfg(
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
 func unwindExec3(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator, logger log.Logger) (err error) {
-	rawdb.WriteRecentReorg(rwTx, true)
-
 	br := cfg.blockReader
 	txNumsReader := br.TxnumReader()
 
@@ -267,10 +265,19 @@ func unwindExec3State(ctx context.Context,
 	defer stateChanges.Close()
 	stateChanges.SortAndFlushInBackground(true)
 
+	// Invalidate state cache entries affected by the unwind
+	if stateCache := sd.GetStateCache(); stateCache != nil {
+		unwindToHash, err := rawdb.ReadCanonicalHash(tx, blockUnwindTo)
+		if err != nil {
+			logger.Warn("failed to read canonical hash for cache update", "block", blockUnwindTo, "err", err)
+			unwindToHash = common.Hash{}
+		}
+		stateCache.RevertWithDiffset(changeset, unwindToHash)
+	}
 	if changeset != nil {
 		accountDiffs := changeset[kv.AccountsDomain]
 		for _, entry := range accountDiffs {
-			if dbg.TraceDomain(uint16(kv.AccountsDomain)) {
+			if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 				address := entry.Key[:len(entry.Key)-8]
 				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
 				prevStep := ^binary.BigEndian.Uint64(entry.PrevStepBytes)
@@ -317,9 +324,11 @@ func unwindExec3State(ctx context.Context,
 				}
 			}
 		}
+
 		if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 			return err
 		}
+
 	}
 
 	sd.Unwind(txUnwindTo, changeset)
@@ -370,7 +379,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		return nil
 	}
 
-	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, dbg.Exec3Parallel, to, logger); err != nil {
+	if err := ExecV3(ctx, s, u, cfg, doms, rwTx, dbg.Exec3Parallel || cfg.experimentalBAL, to, logger); err != nil {
 		return err
 	}
 	return nil
@@ -439,7 +448,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 	//  - stop prune when `tx.SpaceDirty()` is big
 	//  - and set ~500ms timeout
 	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
-	quickPruneTimeout := 1 * time.Second
+	quickPruneTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond / 2
 
 	if timeout > 0 && timeout > quickPruneTimeout {
 		quickPruneTimeout = timeout
@@ -476,25 +485,33 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 		}
 	}
 
+	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth {
+		pruneBalLimit := 10_000
+		pruneTimeout := quickPruneTimeout
+		if s.CurrentSyncCycle.IsInitialCycle {
+			pruneBalLimit = math.MaxInt
+			pruneTimeout = time.Hour
+		}
+		if err := rawdb.PruneTable(
+			tx,
+			kv.BlockAccessList,
+			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
+			ctx,
+			pruneBalLimit,
+			pruneTimeout,
+			logger,
+			s.LogPrefix(),
+		); err != nil {
+			return err
+		}
+	}
+
 	agg := cfg.db.(state.HasAgg).Agg().(*state.Aggregator)
 	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, agg.StepSize()) * 100)
 
 	pruneTimeout := quickPruneTimeout
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneTimeout = 12 * time.Hour
-
-		// allow greedy prune on non-chain-tip
-		greedyPruneCommitmentHistoryStartTime := time.Now()
-		if err = tx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
-			return err
-		}
-		if duration := time.Since(greedyPruneCommitmentHistoryStartTime); duration > quickPruneTimeout {
-			logger.Debug(
-				fmt.Sprintf("[%s] greedy prune commitment history timing", s.LogPrefix()),
-				"duration", duration,
-				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
-			)
-		}
 	}
 
 	pruneSmallBatchesStartTime := time.Now()
