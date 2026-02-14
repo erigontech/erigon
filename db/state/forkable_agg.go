@@ -26,7 +26,7 @@ type ForkableAgg struct {
 
 	marked          []*Forkable[MarkedTxI]
 	unmarked        []*Forkable[UnmarkedTxI]
-	alignedEntities []ForkableId
+	alignedEntities []kv.ForkableId
 
 	dirtyFilesLock             sync.Mutex
 	visibleFilesLock           sync.RWMutex
@@ -344,7 +344,7 @@ func (r *ForkableAgg) mergeLoopStep(ctx context.Context) (somethingMerged bool, 
 func (r *ForkableAgg) buildFile(ctx context.Context, to RootNum) (built bool, err error) {
 	type wrappedFilesItem struct {
 		*FilesItem
-		id ForkableId
+		id kv.ForkableId
 	}
 	var (
 		g, ctx2     = errgroup.WithContext(ctx)
@@ -493,7 +493,6 @@ func (r *ForkableAgg) BuildMissedAccessors(ctx context.Context, workers int) err
 			case <-logEvery.C:
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
-				sendDiagnostics(startIndexingTime, ps.DiagnosticsData(), m.Alloc, m.Sys)
 				r.logger.Info("[fork_agg] Indexing", "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			}
 		}
@@ -619,7 +618,7 @@ func (r *ForkableAgg) loop(fn func(p *ProtoForkable) error) error {
 	return nil
 }
 
-func (r *ForkableAgg) IsForkablePresent(id ForkableId) bool {
+func (r *ForkableAgg) IsForkablePresent(id kv.ForkableId) bool {
 	for i := range r.marked {
 		if r.marked[i].id == id {
 			return true
@@ -643,7 +642,7 @@ type ForkableAggTemporalTx struct {
 	unmarked []UnmarkedTxI
 	// TODO _leakId logic
 
-	mp     map[ForkableId]uint32
+	mp     map[kv.ForkableId]uint32
 	logger log.Logger
 	// map from forkableId -> stragety+index in array; strategy encoded in lowest 2-bits.
 }
@@ -651,7 +650,7 @@ type ForkableAggTemporalTx struct {
 func NewForkableAggTemporalTx(r *ForkableAgg) *ForkableAggTemporalTx {
 	marked := make([]MarkedTxI, 0, len(r.marked))
 	unmarked := make([]UnmarkedTxI, 0, len(r.unmarked))
-	mp := make(map[ForkableId]uint32)
+	mp := make(map[kv.ForkableId]uint32)
 
 	for i, ap := range r.marked {
 		marked = append(marked, ap.BeginTemporalTx())
@@ -672,12 +671,12 @@ func NewForkableAggTemporalTx(r *ForkableAgg) *ForkableAggTemporalTx {
 	}
 }
 
-func (r *ForkableAggTemporalTx) IsForkablePresent(id ForkableId) bool {
+func (r *ForkableAggTemporalTx) IsForkablePresent(id kv.ForkableId) bool {
 	_, ok := r.mp[id]
 	return ok
 }
 
-func (r *ForkableAggTemporalTx) Marked(id ForkableId) MarkedTxI {
+func (r *ForkableAggTemporalTx) Marked(id kv.ForkableId) MarkedTxI {
 	index, ok := r.mp[id]
 	if !ok {
 		panic(fmt.Errorf("forkable %s not found", Registry.Name(id)))
@@ -686,7 +685,7 @@ func (r *ForkableAggTemporalTx) Marked(id ForkableId) MarkedTxI {
 	return r.marked[index>>2]
 }
 
-func (r *ForkableAggTemporalTx) Unmarked(id ForkableId) UnmarkedTxI {
+func (r *ForkableAggTemporalTx) Unmarked(id kv.ForkableId) UnmarkedTxI {
 	index, ok := r.mp[id]
 	if !ok {
 		panic(fmt.Errorf("forkable %s not found", Registry.Name(id)))
@@ -706,14 +705,14 @@ func (r *ForkableAggTemporalTx) AlignedMaxRootNum() RootNum {
 	})
 }
 
-func (r *ForkableAggTemporalTx) MaxRootNum(forId ForkableId) RootNum {
+func (r *ForkableAggTemporalTx) MaxRootNum(forId kv.ForkableId) RootNum {
 	// return max root num of the a given forkableId
 	return loopOverDebugFiles(r, forId, false, func(db ForkableFilesTxI) RootNum {
 		return db.VisibleFilesMaxRootNum()
 	})
 }
 
-func (r *ForkableAggTemporalTx) HasRootNumUpto(ctx context.Context, forId ForkableId, to RootNum, tx kv.Tx) (bool, error) {
+func (r *ForkableAggTemporalTx) HasRootNumUpto(ctx context.Context, forId kv.ForkableId, to RootNum, tx kv.Tx) (bool, error) {
 	return loopOverDebugDbs(r, forId, func(db ForkableDbCommonTxI) (bool, error) {
 		return db.HasRootNumUpto(ctx, to, tx)
 	})
@@ -819,7 +818,7 @@ func (r ForkableAggTemporalTx) Ids() (ids []kv.ForkableId) {
 
 // loop over all forkables (with some variations)
 // assume AllForkableId when needed to exec for all forkables
-func loopOverDebugDbsExec(r *ForkableAggTemporalTx, forId ForkableId, fn func(ForkableDbCommonTxI) error) error {
+func loopOverDebugDbsExec(r *ForkableAggTemporalTx, forId kv.ForkableId, fn func(ForkableDbCommonTxI) error) error {
 	for i, mt := range r.marked {
 		if forId.MatchAll() || r.f.marked[i].id == forId {
 			dbg := mt.(ForkableDebugAPI[MarkedDbTxI])
@@ -841,7 +840,7 @@ func loopOverDebugDbsExec(r *ForkableAggTemporalTx, forId ForkableId, fn func(Fo
 	return nil
 }
 
-func loopOverDebugDbs[R any](r *ForkableAggTemporalTx, forId ForkableId, fn func(ForkableDbCommonTxI) (R, error)) (R, error) {
+func loopOverDebugDbs[R any](r *ForkableAggTemporalTx, forId kv.ForkableId, fn func(ForkableDbCommonTxI) (R, error)) (R, error) {
 	// since only single call can return, doesn't support AllForkableId
 	for i, mt := range r.marked {
 		if r.f.marked[i].id == forId {
@@ -860,7 +859,7 @@ func loopOverDebugDbs[R any](r *ForkableAggTemporalTx, forId ForkableId, fn func
 	panic("no forkable with id " + Registry.String(forId))
 }
 
-func loopOverDebugFiles[R any](r *ForkableAggTemporalTx, forId ForkableId, skipUnaligned bool, fn func(ForkableFilesTxI) R) R {
+func loopOverDebugFiles[R any](r *ForkableAggTemporalTx, forId kv.ForkableId, skipUnaligned bool, fn func(ForkableFilesTxI) R) R {
 	for i, mt := range r.marked {
 		if skipUnaligned && r.f.marked[i].unaligned {
 			continue
@@ -882,4 +881,12 @@ func loopOverDebugFiles[R any](r *ForkableAggTemporalTx, forId ForkableId, skipU
 	}
 
 	panic("no forkable with id " + Registry.Name(forId))
+}
+
+func ForkAggTx(tx kv.Tx, id kv.ForkableId) *ForkableAggTemporalTx {
+	if withAggTx, ok := tx.(interface{ AggForkablesTx(kv.ForkableId) any }); ok {
+		return withAggTx.AggForkablesTx(id).(*ForkableAggTemporalTx)
+	}
+
+	return nil
 }

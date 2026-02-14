@@ -45,11 +45,13 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	downloadertype "github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	erigoncli "github.com/erigontech/erigon/node/cli"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -209,7 +211,7 @@ var compactDomains = &cobra.Command{
 			logger.Error("No domains specified")
 			return
 		}
-		supportedDomain := []kv.Domain{kv.CommitmentDomain, kv.AccountsDomain, kv.StorageDomain, kv.CommitmentDomain}
+		supportedDomain := []kv.Domain{kv.CommitmentDomain, kv.AccountsDomain, kv.StorageDomain}
 		var compactionDomains []kv.Domain
 
 		for _, domain := range domainsStr {
@@ -532,7 +534,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	if !ok {
 		return errors.New("stateDb transaction is not a temporal transaction")
 	}
-	domains, err := dbstate.NewSharedDomains(temporalTx, logger)
+	domains, err := execctx.NewSharedDomains(ctx, temporalTx, logger)
 	if err != nil {
 		return err
 	}
@@ -551,7 +553,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	case kv.AccountsDomain.String():
 		for _, addr := range addrs {
 
-			acc, err := r.ReadAccountData(common.BytesToAddress(addr))
+			acc, err := r.ReadAccountData(accounts.InternAddress(common.BytesToAddress(addr)))
 			if err != nil {
 				logger.Error("failed to read account", "addr", addr, "err", err)
 				continue
@@ -560,7 +562,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 		}
 	case kv.StorageDomain.String():
 		for _, addr := range addrs {
-			a, s := common.BytesToAddress(addr[:length.Addr]), common.BytesToHash(addr[length.Addr:])
+			a, s := accounts.InternAddress(common.BytesToAddress(addr[:length.Addr])), accounts.InternKey(common.BytesToHash(addr[length.Addr:]))
 			st, _, err := r.ReadAccountStorage(a, s)
 			if err != nil {
 				logger.Error("failed to read storage", "addr", a.String(), "key", s.String(), "err", err)
@@ -570,7 +572,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 		}
 	case kv.CodeDomain.String():
 		for _, addr := range addrs {
-			code, err := r.ReadAccountCode(common.BytesToAddress(addr))
+			code, err := r.ReadAccountCode(accounts.InternAddress(common.BytesToAddress(addr)))
 			if err != nil {
 				logger.Error("failed to read code", "addr", addr, "err", err)
 				continue

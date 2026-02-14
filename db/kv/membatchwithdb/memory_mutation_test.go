@@ -204,7 +204,7 @@ func TestForEach(t *testing.T) {
 	require.Equal(t, []string{"value", "value1", "value2", "value3", "value5"}, values1)
 }
 
-func newTestTx(tb testing.TB) (kv.RwDB, kv.RwTx) {
+func newTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
 	tb.Helper()
 	dirs := datadir.New(tb.TempDir())
 	stepSize := uint64(16)

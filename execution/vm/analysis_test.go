@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestJumpDestAnalysis(t *testing.T) {
@@ -91,19 +92,15 @@ func BenchmarkJumpDest(b *testing.B) {
 	pc := new(uint256.Int)
 	hash := common.Hash{1, 2, 3, 4, 5}
 
-	contractRef := dummyContractRef{}
+	//c := NewJumpDestCache(16)
+	contract := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	contract.Code = code
+	contract.CodeHash = accounts.InternCodeHash(hash)
 
-	c := NewJumpDestCache(16)
-
+	b.ResetTimer()
 	for b.Loop() {
-		contract := NewContract(contractRef, common.Address{}, nil, 0, c)
-		contract.Code = code
-		contract.CodeHash = hash
-
-		b.StartTimer()
 		for i := range contract.Code {
-			contract.validJumpdest(pc.SetUint64(uint64(i)))
+			contract.validJumpdest(*pc.SetUint64(uint64(i)))
 		}
-		b.StopTimer()
 	}
 }

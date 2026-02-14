@@ -3,6 +3,7 @@ package commitment
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	ecrypto "github.com/erigontech/erigon/common/crypto"
@@ -45,11 +46,11 @@ func KeyToNibblizedHash(key []byte) []byte {
 	return nibblized
 }
 
-// hexNibblesToCompactBytes Converts slice of hex nibbles into regular bytes form, combining two nibbles into one byte.
-func hexNibblesToCompactBytes(key []byte) []byte {
+// HexNibblesToCompactBytes Converts slice of hex nibbles into regular bytes form, combining two nibbles into one byte.
+func HexNibblesToCompactBytes(key []byte) []byte {
 	var compactZeroByte byte
 	keyLen := len(key)
-	if hasTerm(key) { // trim terminator if needed
+	if HasTerm(key) { // trim terminator if needed
 		keyLen--
 		compactZeroByte = 0x20
 	}
@@ -81,8 +82,29 @@ func hexNibblesToCompactBytes(key []byte) []byte {
 	return buf
 }
 
-// hasTerm returns whether a hex nibble key has the terminator flag.
-func hasTerm(s []byte) bool {
+// uncompactNibbles converts a slice of bytes representing nibbles in regular form into 1-nibble-per-byte form.
+func uncompactNibbles(key []byte) []byte {
+	if len(key) == 0 {
+		return nil
+	}
+	terminating := key[0]&0x20 == 0x20
+	odd := key[0]&0x10 == 0x10
+	buf := make([]byte, 0, len(key)*2)
+	if odd {
+		buf = append(buf, key[0]&0x0f)
+	}
+	key = key[1:]
+	for _, b := range key {
+		buf = append(buf, b>>4, b&0x0f)
+	}
+	if terminating {
+		buf = append(buf, terminatorHexByte)
+	}
+	return buf
+}
+
+// HasTerm returns whether a hex nibble key has the terminator flag.
+func HasTerm(s []byte) bool {
 	return len(s) > 0 && s[len(s)-1] == terminatorHexByte
 }
 
@@ -97,14 +119,9 @@ func commonPrefixLen(b1, b2 []byte) int {
 	return i
 }
 
-// splits each byte in key slice onto 2 nibbles in the resulting slice
-func splitOntoHexNibbles(key, nibblized []byte) []byte { // nolint:unused
-	return nibblized
-}
-
-// compactKey takes a slice of nibbles and compacts them into the original byte slice.
+// CompactKey takes a slice of nibbles and compacts them into the original byte slice.
 // It returns an error if the input contains invalid nibbles (values > 0xF).
-func compactKey(nibbles []byte) ([]byte, error) {
+func CompactKey(nibbles []byte) ([]byte, error) {
 	// If the number of nibbles is odd, you might decide to handle it differently.
 	// For this example, we'll return an error.
 	if len(nibbles)%2 != 0 {
@@ -163,4 +180,18 @@ func hashKey(keccak keccakState, plainKey []byte, dest []byte, hashedKeyOffset i
 		k++
 	}
 	return nil
+}
+
+func PrefixStringToNibbles(hexStr string) ([]byte, error) {
+	nibbles := make([]byte, len(hexStr))
+
+	for i, char := range hexStr {
+		nibble, err := strconv.ParseUint(string(char), 16, 8)
+		if err != nil {
+			return nil, err
+		}
+		nibbles[i] = byte(nibble)
+	}
+
+	return nibbles, nil
 }

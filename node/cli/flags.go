@@ -115,6 +115,10 @@ var (
 		Name:  "state.stream.disable",
 		Usage: "Disable streaming of state changes from core to RPC daemon",
 	}
+	ExperimentalBALFlag = cli.BoolFlag{
+		Name:  "experimental.bal",
+		Usage: "generate block access list",
+	}
 
 	// Throttling Flags
 	SyncLoopThrottleFlag = cli.StringFlag{
@@ -273,6 +277,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	}
 
 	cfg.StateStream = !ctx.Bool(StateStreamDisableFlag.Name)
+	cfg.ExperimentalBAL = ctx.Bool(ExperimentalBALFlag.Name)
 	if bodyCacheLim := ctx.String(BodyCacheLimitFlag.Name); bodyCacheLim != "" {
 		if err := cfg.Sync.BodyCacheLimit.UnmarshalText([]byte(bodyCacheLim)); err != nil {
 			utils.Fatalf("Invalid bodyCacheLimit provided: %v", err)
@@ -363,8 +368,11 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	if v := f.Bool(StateStreamDisableFlag.Name, false, StateStreamDisableFlag.Usage); v != nil {
 		cfg.StateStream = false
 	}
+	if v := f.Bool(ExperimentalBALFlag.Name, false, ExperimentalBALFlag.Usage); v != nil {
+		cfg.ExperimentalBAL = *v
+	}
 
-	if v := f.Bool(utils.ChaosMonkeyFlag.Name, true, utils.ChaosMonkeyFlag.Usage); v != nil {
+	if v, _ := f.GetBool(utils.ChaosMonkeyFlag.Name); v {
 		cfg.ChaosMonkey = true
 	}
 }
@@ -373,6 +381,16 @@ func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *nodecfg.Config, logger log.L
 	setPrivateApi(ctx, cfg)
 	setEmbeddedRpcDaemon(ctx, cfg, logger)
 	cfg.DatabaseVerbosity = kv.DBVerbosityLvl(ctx.Int(DatabaseVerbosityFlag.Name))
+
+	// Warn if deprecated flag was explicitly set by user
+	if ctx.IsSet(utils.TorrentDownloadSlotsFlag.Name) {
+		logger.Warn(
+			"[DEPRECATED] --torrent.download.slots flag is deprecated and has no effect",
+			"flag", "torrent.download.slots",
+			"provided_value", ctx.Int(utils.TorrentDownloadSlotsFlag.Name),
+			"action", "This flag will be removed in a future release. The downloader now manages concurrent downloads automatically.",
+		)
+	}
 }
 
 func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logger) {
@@ -418,7 +436,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		AuthRpcTimeouts: rpccfg.HTTPTimeouts{
 			ReadTimeout:  ctx.Duration(AuthRpcReadTimeoutFlag.Name),
 			WriteTimeout: ctx.Duration(AuthRpcWriteTimeoutFlag.Name),
-			IdleTimeout:  ctx.Duration(HTTPIdleTimeoutFlag.Name),
+			IdleTimeout:  ctx.Duration(AuthRpcIdleTimeoutFlag.Name),
 		},
 		EvmCallTimeout:            ctx.Duration(EvmCallTimeoutFlag.Name),
 		OverlayGetLogsTimeout:     ctx.Duration(OverlayGetLogsFlag.Name),
@@ -437,6 +455,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 			RpcSubscriptionFiltersMaxTopics:    ctx.Int(RpcSubscriptionFiltersMaxTopicsFlag.Name),
 		},
 		Gascap:              ctx.Uint64(utils.RpcGasCapFlag.Name),
+		RangeLimit:          ctx.Int(utils.RpcBlockRangeLimit.Name),
 		Feecap:              ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
 		MaxTraces:           ctx.Uint64(utils.TraceMaxtracesFlag.Name),
 		TraceCompatibility:  ctx.Bool(utils.RpcTraceCompatFlag.Name),
@@ -450,6 +469,9 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 
 		StateCache:          kvcache.DefaultCoherentConfig,
 		RPCSlowLogThreshold: ctx.Duration(utils.RPCSlowFlag.Name),
+
+		RpcTxSyncDefaultTimeout: ctx.Duration(utils.RpcTxSyncDefaultTimeoutFlag.Name),
+		RpcTxSyncMaxTimeout:     ctx.Duration(utils.RpcTxSyncMaxTimeoutFlag.Name),
 	}
 
 	if ctx.IsSet(utils.WSSubscribeLogsChannelSize.Name) {

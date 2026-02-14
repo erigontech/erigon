@@ -36,9 +36,10 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
-	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -55,7 +56,7 @@ func TestMemoryGasCost(t *testing.T) {
 		{0x1fffffffe1, 0, true},
 	}
 	for i, tt := range tests {
-		v, err := vm.MemoryGasCost(&vm.Memory{}, tt.size)
+		v, err := vm.MemoryGasCost(&vm.CallContext{}, tt.size)
 		if (err == vm.ErrGasUintOverflow) != tt.overflow {
 			t.Errorf("test %d: overflow mismatch: have %v, want %v", i, err == vm.ErrGasUintOverflow, tt.overflow)
 		}
@@ -94,7 +95,7 @@ var eip2200Tests = []struct {
 	{1, 2307, "0x6001600055", 806, 0, nil},                                     // 1 -> 1 (2301 sentry + 2xPUSH)
 }
 
-func testTemporalTxSD(t *testing.T) (kv.TemporalRwTx, *dbstate.SharedDomains) {
+func testTemporalTxSD(t *testing.T) (kv.TemporalRwTx, *execctx.SharedDomains) {
 	dirs := datadir.New(t.TempDir())
 
 	db := temporaltest.NewTestDB(t, dirs)
@@ -102,7 +103,7 @@ func testTemporalTxSD(t *testing.T) (kv.TemporalRwTx, *dbstate.SharedDomains) {
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 
-	sd, err := dbstate.NewSharedDomains(tx, log.New())
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -111,8 +112,6 @@ func testTemporalTxSD(t *testing.T) (kv.TemporalRwTx, *dbstate.SharedDomains) {
 
 func TestEIP2200(t *testing.T) {
 	for i, tt := range eip2200Tests {
-		tt := tt
-		i := i
 
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			t.Parallel()
@@ -122,21 +121,21 @@ func TestEIP2200(t *testing.T) {
 			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, sd.TxNum())
 			s := state.New(r)
 
-			address := common.BytesToAddress([]byte("contract"))
+			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 			s.CreateAccount(address, true)
 			s.SetCode(address, hexutil.MustDecode(tt.input))
-			s.SetState(address, common.Hash{}, *uint256.NewInt(uint64(tt.original)))
+			s.SetState(address, accounts.ZeroKey, *uint256.NewInt(uint64(tt.original)))
 
 			vmctx := evmtypes.BlockContext{
-				CanTransfer: func(evmtypes.IntraBlockState, common.Address, *uint256.Int) (bool, error) { return true, nil },
-				Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, uint256.Int, bool) error {
+				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
+				Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
 					return nil
 				},
 			}
 			_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
 			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{ExtraEips: []int{2200}})
 
-			_, gas, err := vmenv.Call(vm.AccountRef(common.Address{}), address, nil, tt.gaspool, new(uint256.Int), false /* bailout */)
+			_, gas, err := vmenv.Call(accounts.ZeroAddress, address, nil, tt.gaspool, uint256.Int{}, false /* bailout */)
 			if !errors.Is(err, tt.failure) {
 				t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 			}
@@ -173,9 +172,9 @@ func TestCreateGas(t *testing.T) {
 	defer tx.Rollback()
 
 	for i, tt := range createGasTests {
-		address := common.BytesToAddress([]byte("contract"))
+		address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 
-		domains, err := dbstate.NewSharedDomains(tx, log.New())
+		domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
 
@@ -187,8 +186,8 @@ func TestCreateGas(t *testing.T) {
 		s.SetCode(address, hexutil.MustDecode(tt.code))
 
 		vmctx := evmtypes.BlockContext{
-			CanTransfer: func(evmtypes.IntraBlockState, common.Address, *uint256.Int) (bool, error) { return true, nil },
-			Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, uint256.Int, bool) error {
+			CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
+			Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
 				return nil
 			},
 		}
@@ -201,7 +200,7 @@ func TestCreateGas(t *testing.T) {
 		vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainConfig, config)
 
 		var startGas uint64 = math.MaxUint64
-		_, gas, err := vmenv.Call(vm.AccountRef(common.Address{}), address, nil, startGas, new(uint256.Int), false /* bailout */)
+		_, gas, err := vmenv.Call(accounts.ZeroAddress, address, nil, startGas, uint256.Int{}, false /* bailout */)
 		if err != nil {
 			t.Errorf("test %d execution failed: %v", i, err)
 		}

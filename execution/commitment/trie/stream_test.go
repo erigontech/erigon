@@ -21,7 +21,7 @@ package trie
 import (
 	"encoding/binary"
 	"fmt"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
@@ -62,7 +62,7 @@ func TestHashWithModificationsNoChanges(t *testing.T) {
 		key := crypto.Keccak256(preimage[:])
 		keys = append(keys, string(key))
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	for i, key := range keys {
 		if i > 0 && keys[i-1] == key {
 			fmt.Printf("Duplicate!\n")
@@ -71,12 +71,10 @@ func TestHashWithModificationsNoChanges(t *testing.T) {
 	var a0, a1 accounts.Account
 	a0.Balance.SetUint64(100000)
 	a0.Root = EmptyRoot
-	a0.CodeHash = emptyState
-	a0.Initialised = true
+	a0.CodeHash = accounts.InternCodeHash(emptyState)
 	a1.Balance.SetUint64(200000)
 	a1.Root = EmptyRoot
-	a1.CodeHash = emptyState
-	a1.Initialised = true
+	a1.CodeHash = accounts.InternCodeHash(emptyState)
 	v := []byte("VALUE")
 	for i, key := range keys {
 		if i%2 == 0 {
@@ -120,7 +118,7 @@ func TestHashWithModificationsChanges(t *testing.T) {
 		key := crypto.Keccak256(preimage[:])
 		keys = append(keys, string(key))
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	for i, key := range keys {
 		if i > 0 && keys[i-1] == key {
 			fmt.Printf("Duplicate!\n")
@@ -129,12 +127,10 @@ func TestHashWithModificationsChanges(t *testing.T) {
 	var a0, a1 accounts.Account
 	a0.Balance.SetUint64(100000)
 	a0.Root = EmptyRoot
-	a0.CodeHash = emptyState
-	a0.Initialised = true
+	a0.CodeHash = accounts.InternCodeHash(emptyState)
 	a1.Balance.SetUint64(200000)
 	a1.Root = EmptyRoot
-	a1.CodeHash = emptyState
-	a1.Initialised = true
+	a1.CodeHash = accounts.InternCodeHash(emptyState)
 	v := []byte("VALUE")
 	for i, key := range keys {
 		if i%2 == 0 {
@@ -155,8 +151,7 @@ func TestHashWithModificationsChanges(t *testing.T) {
 	var insertA accounts.Account
 	insertA.Balance.SetUint64(300000)
 	insertA.Root = EmptyRoot
-	insertA.CodeHash = emptyState
-	insertA.Initialised = true
+	insertA.CodeHash = accounts.InternCodeHash(emptyState)
 
 	// Build the root
 	var stream Stream

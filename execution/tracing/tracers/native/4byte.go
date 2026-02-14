@@ -21,6 +21,7 @@ package native
 
 import (
 	"encoding/json"
+	"slices"
 	"strconv"
 	"sync/atomic"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -53,10 +55,10 @@ func init() {
 //	  0xc281d19e-0: 1
 //	}
 type fourByteTracer struct {
-	ids               map[string]int   // ids aggregates the 4byte ids found
-	interrupt         uint32           // Atomic flag to signal execution interruption
-	reason            error            // Textual reason for the interruption
-	activePrecompiles []common.Address // Updated on tx start based on given rules
+	ids               map[string]int     // ids aggregates the 4byte ids found
+	interrupt         atomic.Bool        // Atomic flag to signal execution interruption
+	reason            error              // Textual reason for the interruption
+	activePrecompiles []accounts.Address // Updated on tx start based on given rules
 }
 
 // newFourByteTracer returns a native go tracer which collects
@@ -76,13 +78,8 @@ func newFourByteTracer(ctx *tracers.Context, _ json.RawMessage) (*tracers.Tracer
 }
 
 // isPrecompiled returns whether the addr is a precompile. Logic borrowed from newJsTracer in execution/tracing/tracers/js/tracer.go
-func (t *fourByteTracer) isPrecompiled(addr common.Address) bool {
-	for _, p := range t.activePrecompiles {
-		if p == addr {
-			return true
-		}
-	}
-	return false
+func (t *fourByteTracer) isPrecompiled(addr accounts.Address) bool {
+	return slices.Contains(t.activePrecompiles, addr)
 }
 
 // store saves the given identifier and datasize.
@@ -91,7 +88,7 @@ func (t *fourByteTracer) store(id []byte, size int) {
 	t.ids[key] += 1
 }
 
-func (t *fourByteTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
+func (t *fourByteTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	blockContext := evmtypes.BlockContext{
 		BlockNumber: env.BlockNumber,
 		Time:        env.Time,
@@ -100,9 +97,9 @@ func (t *fourByteTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 }
 
-func (t *fourByteTracer) OnEnter(depth int, opcode byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) { // Skip if tracing was interrupted
+func (t *fourByteTracer) OnEnter(depth int, opcode byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) { // Skip if tracing was interrupted
 	// Skip if tracing was interrupted
-	if atomic.LoadUint32(&t.interrupt) > 0 {
+	if t.interrupt.Load() {
 		return
 	}
 	if len(input) < 4 {
@@ -134,7 +131,7 @@ func (t *fourByteTracer) GetResult() (json.RawMessage, error) {
 // Stop terminates execution of the tracer at the first opportune moment.
 func (t *fourByteTracer) Stop(err error) {
 	t.reason = err
-	atomic.StoreUint32(&t.interrupt, 1)
+	t.interrupt.Store(true)
 }
 
 func bytesToHex(s []byte) string {

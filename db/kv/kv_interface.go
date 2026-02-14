@@ -19,14 +19,13 @@ package kv
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/mdbx-go/mdbx"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -299,6 +298,18 @@ type RwCursorDupSort interface {
 	AppendDup(key, value []byte) error    // AppendDup - same as Append, but for sorted dup data
 }
 
+type PseudoDupSortRwCursor interface { // For both DupSort and usual cursors (usual imitates functionality of ds)
+	RwCursor
+	DeleteCurrentDuplicates() error     // DeleteCurrentDuplicates - deletes all values of the current key
+	DeleteExact(k1, k2 []byte) error    // DeleteExact - delete 1 value from given key
+	FirstDup() ([]byte, error)          // FirstDup - position at first data item of current key
+	NextDup() ([]byte, []byte, error)   // NextDup - position at next data item of current key
+	NextNoDup() ([]byte, []byte, error) // NextNoDup - position at first data item of next key
+	LastDup() ([]byte, error)           // LastDup - position at last data item of current key
+
+	CountDuplicates() (uint64, error) // CountDuplicates - number of duplicates for the current key
+}
+
 const Unlim int = -1 // const Unbounded/EOF/EndOfTable []byte = nil
 
 type StatelessRwTx interface {
@@ -435,6 +446,9 @@ type TemporalDebugTx interface {
 	GetLatestFromDB(domain Domain, k []byte) (v []byte, step Step, found bool, err error)
 	GetLatestFromFiles(domain Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error)
 
+	// TraceKey returns stream of <txNum->value_after_txnum_change> for a given key
+	TraceKey(domain Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error)
+
 	DomainFiles(domain ...Domain) VisibleFiles
 	CurrentDomainVersion(domain Domain) version.Version
 	TxNumsInFiles(domains ...Domain) (minTxNum uint64)
@@ -447,6 +461,8 @@ type TemporalDebugTx interface {
 	StepSize() uint64
 	Dirs() datadir.Dirs
 	AllForkableIds() []ForkableId
+
+	NewMemBatch(ioMetrics any) TemporalMemBatch
 }
 
 type TemporalDebugDB interface {
@@ -460,6 +476,24 @@ type TemporalDebugDB interface {
 
 	Files() []string
 	MergeLoop(ctx context.Context) error
+}
+
+type TemporalMemBatch interface {
+	DomainPut(domain Domain, k string, v []byte, txNum uint64, preval []byte, prevStep Step) error
+	DomainDel(domain Domain, k string, txNum uint64, preval []byte, prevStep Step) error
+	GetLatest(domain Domain, key []byte) (v []byte, step Step, ok bool)
+	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
+	Merge(other TemporalMemBatch) error
+	ClearRam()
+	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
+	IteratePrefix(domain Domain, prefix []byte, roTx Tx, it func(k []byte, v []byte, step Step) (cont bool, err error)) error
+	SizeEstimate() uint64
+	Flush(ctx context.Context, tx RwTx) error
+	Close()
+	PutForkable(id ForkableId, num Num, v []byte) error
+	DiscardWrites(domain Domain)
+	Unwind(txNumUnwindTo uint64, changeset *[DomainLen][]DomainEntryDiff)
+	GetAsOf(domain Domain, key []byte, ts uint64) (v []byte, ok bool, err error)
 }
 
 type WithFreezeInfo interface {
@@ -616,26 +650,6 @@ func InitSummaries(dbLabel Label) {
 			DbCommitTotal:       metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "total"}),
 		})
 	}
-}
-
-func RecordSummaries(dbLabel Label, latency mdbx.CommitLatency) error {
-	_summaries, ok := MDBXSummaries.Load(string(dbLabel))
-	if !ok {
-		return fmt.Errorf("MDBX summaries not initialized yet for db=%s", string(dbLabel))
-	}
-	// cast to *DBSummaries
-	summaries, ok := _summaries.(*DBSummaries)
-	if !ok {
-		return fmt.Errorf("type casting to *DBSummaries failed")
-	}
-
-	summaries.DbCommitPreparation.Observe(latency.Preparation.Seconds())
-	summaries.DbCommitWrite.Observe(latency.Write.Seconds())
-	summaries.DbCommitSync.Observe(latency.Sync.Seconds())
-	summaries.DbCommitEnding.Observe(latency.Ending.Seconds())
-	summaries.DbCommitTotal.Observe(latency.Whole.Seconds())
-	return nil
-
 }
 
 var MDBXGauges = InitMDBXMGauges() // global mdbx gauges. each gauge can be filtered by db name

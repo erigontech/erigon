@@ -50,7 +50,7 @@ func ExpectEqualU64(tb testing.TB, s1, s2 Uno[uint64]) {
 	tb.Helper()
 	ExpectEqual[uint64](tb, s1, s2)
 }
-func ExpectEqual[V comparable](tb testing.TB, s1, s2 Uno[V]) {
+func ExpectEqual[V any](tb testing.TB, s1, s2 Uno[V]) {
 	tb.Helper()
 	for s1.HasNext() && s2.HasNext() {
 		k1, e1 := s1.Next()
@@ -89,7 +89,7 @@ func (m *PairsWithErrorIter) Next() ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("expected error at iteration: %d", m.errorAt)
 	}
 	m.i++
-	return []byte(fmt.Sprintf("%x", m.i)), []byte(fmt.Sprintf("%x", m.i)), nil
+	return fmt.Appendf(nil, "%x", m.i), fmt.Appendf(nil, "%x", m.i), nil
 }
 
 func Count[T any](s Uno[T]) (cnt int, err error) {

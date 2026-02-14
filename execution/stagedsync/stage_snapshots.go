@@ -20,10 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"io/fs"
-	"os"
-	"path/filepath"
-	"reflect"
 	"strings"
 	"time"
 
@@ -49,27 +45,32 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
-	"github.com/erigontech/erigon/turbo/shards"
-	"github.com/erigontech/erigon/turbo/silkworm"
+	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/node/silkworm"
 )
 
 type SnapshotsCfg struct {
-	db          kv.TemporalRwDB
-	chainConfig *chain.Config
-	dirs        datadir.Dirs
-
+	db                 kv.TemporalRwDB
+	chainConfig        *chain.Config
+	dirs               datadir.Dirs
 	blockRetire        services.BlockRetire
-	snapshotDownloader downloaderproto.DownloaderClient
+	snapshotDownloader downloader.Client
 	blockReader        services.FullBlockReader
 	notifier           *shards.Notifications
+	caplin             bool
+	blobs              bool
+	caplinState        bool
+	silkworm           *silkworm.Silkworm
+	syncConfig         ethconfig.Sync
+	prune              prune.Mode
+}
 
-	caplin      bool
-	blobs       bool
-	caplinState bool
-	silkworm    *silkworm.Silkworm
-	syncConfig  ethconfig.Sync
-	prune       prune.Mode
+// Returns a seeder client for block management, a noop implementation if no downloader is attached.
+func (me *SnapshotsCfg) getSeederClient() downloader.SeederClient {
+	if me.snapshotDownloader == nil {
+		return downloader.NoopSeederClient{}
+	}
+	return me.snapshotDownloader
 }
 
 func StageSnapshotsCfg(db kv.TemporalRwDB,
@@ -77,7 +78,7 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	syncConfig ethconfig.Sync,
 	dirs datadir.Dirs,
 	blockRetire services.BlockRetire,
-	snapshotDownloader downloaderproto.DownloaderClient,
+	snapshotDownloader downloader.Client,
 	blockReader services.FullBlockReader,
 	notifier *shards.Notifications,
 	caplin bool,
@@ -105,21 +106,7 @@ func StageSnapshotsCfg(db kv.TemporalRwDB,
 	return cfg
 }
 
-func SpawnStageSnapshots(
-	s *StageState,
-	ctx context.Context,
-	tx kv.RwTx,
-	cfg SnapshotsCfg,
-	logger log.Logger,
-) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
+func SpawnStageSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, logger log.Logger) (err error) {
 	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, logger); err != nil {
 		return err
 	}
@@ -140,11 +127,6 @@ func SpawnStageSnapshots(
 
 	if minProgress > s.BlockNumber {
 		if err = s.Update(tx, minProgress); err != nil {
-			return err
-		}
-	}
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
@@ -185,6 +167,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "Download header-chain"})
 	agg := cfg.db.(*temporal.DB).Agg().(*state.Aggregator)
 	// Download only the snapshots that are for the header chain.
+
+	// How do we get to the real Downloader if we need? Get the stack trace.
+	//panic("here")
 
 	if err := snapshotsync.SyncSnapshots(
 		ctx,
@@ -232,6 +217,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	); err != nil {
 		return err
 	}
+
+	// want to add remaining snapshots here?
 
 	{ // Now can open all files
 		if err := cfg.blockReader.Snapshots().OpenFolder(); err != nil {
@@ -315,10 +302,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	{
 		cfg.blockReader.Snapshots().LogStat("download")
-		txNumsReader := cfg.blockReader.TxnumReader(ctx)
+		txNumsReader := cfg.blockReader.TxnumReader()
 		aggtx := state.AggTx(tx)
 		stats.LogStats(aggtx, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-			histBlockNumProgress, _, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
+			histBlockNumProgress, _, err := txNumsReader.FindBlockNum(ctx, tx, endTxNumMinimax)
 			return histBlockNumProgress, err
 		})
 	}
@@ -326,7 +313,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	return nil
 }
 
-func firstNonGenesisCheck(tx kv.RwTx, snapshots snapshotsync.BlockSnapshots, logPrefix string, dirs datadir.Dirs) error {
+func firstNonGenesisCheck(tx kv.RwTx, snapshots services.BlockSnapshots, logPrefix string, dirs datadir.Dirs) error {
 	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
 	if err != nil {
 		return err
@@ -380,15 +367,6 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader services
 
 // SnapshotsPrune moving block data from db into snapshots, removing old snapshots (if --prune.* enabled)
 func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
 	freezingCfg := cfg.blockReader.FreezingCfg()
 	if freezingCfg.ProduceE2 {
 		//TODO: initialSync maybe save files progress here
@@ -401,32 +379,20 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			cfg.blockRetire.SetWorkers(1)
 		}
 
-		noDl := cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()
 		started := cfg.blockRetire.RetireBlocksInBackground(
 			ctx,
 			minBlockNumber,
 			s.ForwardProgress,
 			log.LvlDebug,
-			func(downloadRequest []snapshotsync.DownloadRequest) error {
-				if noDl {
-					return nil
-				}
-				return snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader, "")
-			}, func(l []string) error {
-				if noDl {
-					return nil
-				}
-				if _, err := cfg.snapshotDownloader.Delete(ctx, &downloaderproto.DeleteRequest{Paths: l}); err != nil {
-					return err
-				}
-				return nil
-			}, func() error {
+			cfg.getSeederClient(),
+			func() error {
 				filesDeleted, err := pruneBlockSnapshots(ctx, cfg, logger)
 				if filesDeleted && cfg.notifier != nil {
 					cfg.notifier.Events.OnNewSnapshot()
 				}
 				return err
-			}, func() {
+			},
+			func() {
 				if cfg.notifier != nil {
 					cfg.notifier.Events.OnRetirementDone()
 				}
@@ -434,8 +400,6 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 		if cfg.notifier != nil {
 			cfg.notifier.Events.OnRetirementStart(started)
 		}
-
-		//	cfg.agg.BuildFilesInBackground()
 	}
 
 	pruneLimit := 10
@@ -450,13 +414,6 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	if err := pruneCanonicalMarkers(ctx, tx, cfg.blockReader); err != nil {
 		return err
 	}
-
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -504,14 +461,9 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		if info.To-info.From != snaptype.Erigon2MergeLimit {
 			continue
 		}
-		if cfg.snapshotDownloader != nil {
-			relativePathToFile := file
-			if filepath.IsAbs(file) {
-				relativePathToFile, _ = filepath.Rel(cfg.dirs.Snap, file)
-			}
-			if _, err := cfg.snapshotDownloader.Delete(ctx, &downloaderproto.DeleteRequest{Paths: []string{relativePathToFile}}); err != nil {
-				return filesDeleted, err
-			}
+		err = cfg.getSeederClient().Delete(ctx, []string{file})
+		if err != nil {
+			return filesDeleted, err
 		}
 		if err := cfg.blockReader.Snapshots().Delete(file); err != nil {
 			return filesDeleted, err
@@ -519,97 +471,4 @@ func pruneBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logge
 		filesDeleted = true
 	}
 	return filesDeleted, nil
-}
-
-type dirEntry struct {
-	name string
-}
-
-type snapInfo struct {
-	snaptype.FileInfo
-}
-
-func (i *snapInfo) Version() snaptype.Version {
-	return i.FileInfo.Version
-}
-
-func (i *snapInfo) From() uint64 {
-	return i.FileInfo.From
-}
-
-func (i *snapInfo) To() uint64 {
-	return i.FileInfo.To
-}
-
-func (i *snapInfo) Type() snaptype.Type {
-	return i.FileInfo.Type
-}
-
-func (e dirEntry) Name() string {
-	return e.name
-}
-
-func (e dirEntry) IsDir() bool {
-	return false
-}
-
-func (e dirEntry) Type() fs.FileMode {
-	return e.Mode()
-}
-
-func (e dirEntry) Size() int64 {
-	return -1
-}
-
-func (e dirEntry) Mode() fs.FileMode {
-	return fs.ModeIrregular
-}
-
-func (e dirEntry) ModTime() time.Time {
-	return time.Time{}
-}
-
-func (e dirEntry) Sys() any {
-	if info, _, ok := snaptype.ParseFileName("", e.name); ok {
-		return &snapInfo{info}
-	}
-
-	return nil
-}
-
-func (e dirEntry) Info() (fs.FileInfo, error) {
-	return e, nil
-}
-
-var checkKnownSizes = false
-
-func expandHomeDir(dirpath string) string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return dirpath
-	}
-	prefix := fmt.Sprintf("~%c", os.PathSeparator)
-	if strings.HasPrefix(dirpath, prefix) {
-		return filepath.Join(home, dirpath[len(prefix):])
-	} else if dirpath == "~" {
-		return home
-	}
-	return dirpath
-}
-
-func isLocalFs(ctx context.Context, rclient *downloader.RCloneClient, fs string) bool {
-
-	remotes, _ := rclient.ListRemotes(ctx)
-
-	if remote, _, ok := strings.Cut(fs, ":"); ok {
-		for _, r := range remotes {
-			if remote == r {
-				return false
-			}
-		}
-
-		return filepath.VolumeName(fs) == remote
-	}
-
-	return true
 }

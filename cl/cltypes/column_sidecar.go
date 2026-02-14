@@ -32,7 +32,9 @@ var (
 )
 
 type DataColumnSidecar struct {
-	Index                        uint64                         `json:"index"` // index of the column
+	BlockRoot                    common.Hash                    `json:"-"`
+	Index                        uint64                         `json:"index,string"` // index of the column
+	Slot                         uint64                         `json:"-"`
 	Column                       *solid.ListSSZ[*Cell]          `json:"column"`
 	KzgCommitments               *solid.ListSSZ[*KZGCommitment] `json:"kzg_commitments"`
 	KzgProofs                    *solid.ListSSZ[*KZGProof]      `json:"kzg_proofs"`
@@ -47,7 +49,10 @@ func NewDataColumnSidecar() *DataColumnSidecar {
 }
 
 func (d *DataColumnSidecar) Clone() clonable.Clonable {
-	newSidecar := &DataColumnSidecar{}
+	newSidecar := &DataColumnSidecar{
+		BlockRoot: d.BlockRoot,
+		Slot:      d.Slot,
+	}
 	newSidecar.tryInit()
 	return newSidecar
 }
@@ -80,9 +85,9 @@ func (d *DataColumnSidecar) EncodeSSZ(buf []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(buf, d.getSchema()...)
 }
 
-func (d *DataColumnSidecar) getSchema() []interface{} {
+func (d *DataColumnSidecar) getSchema() []any {
 	d.tryInit()
-	return []interface{}{&d.Index, d.Column, d.KzgCommitments, d.KzgProofs, d.SignedBlockHeader, d.KzgCommitmentsInclusionProof}
+	return []any{&d.Index, d.Column, d.KzgCommitments, d.KzgProofs, d.SignedBlockHeader, d.KzgCommitmentsInclusionProof}
 }
 
 func (d *DataColumnSidecar) EncodingSizeSSZ() int {
@@ -129,7 +134,7 @@ func (c *Cell) MarshalJSON() ([]byte, error) {
 	return json.Marshal(hexutil.Bytes(c[:]))
 }
 
-var cellType = reflect.TypeOf(Cell{})
+var cellType = reflect.TypeFor[Cell]()
 
 func (c *Cell) UnmarshalJSON(in []byte) error {
 	return hexutil.UnmarshalFixedJSON(cellType, in, c[:])

@@ -31,16 +31,16 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
-	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/misc"
-	"github.com/erigontech/erigon/execution/core"
-	"github.com/erigontech/erigon/execution/ethutils"
+	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type MiningBlock struct {
@@ -50,8 +50,8 @@ type MiningBlock struct {
 	Txns             types.Transactions
 	Receipts         types.Receipts
 	Withdrawals      []*types.Withdrawal
-	PreparedTxns     types.Transactions
 	Requests         types.FlatRequests
+	BlockAccessList  types.BlockAccessList
 
 	headerRlpSize         *int
 	withdrawalsRlpSize    *int
@@ -98,11 +98,6 @@ func (mb *MiningBlock) AvailableRlpSpace(chainConfig *chain.Config, withAddition
 }
 
 func (mb *MiningBlock) TxnsRlpSize(withAdditional ...types.Transaction) int {
-	if len(mb.PreparedTxns) > 0 {
-		s := types.EncodingSizeGenericList(mb.PreparedTxns)
-		s += rlp.ListPrefixLen(s)
-		return s
-	}
 	if len(mb.Txns) != mb.txnsRlpSizeCalculated {
 		panic("mismatch between mb.Txns and mb.txnsRlpSizeCalculated - did you forget to use mb.AddTxn()?")
 	}
@@ -129,30 +124,24 @@ func NewMiningState(cfg *buildercfg.MiningConfig) MiningState {
 }
 
 type MiningCreateBlockCfg struct {
-	db                     kv.RwDB
 	miner                  MiningState
 	chainConfig            *chain.Config
-	engine                 consensus.Engine
-	tmpdir                 string
-	blockBuilderParameters *core.BlockBuilderParameters
+	engine                 rules.Engine
+	blockBuilderParameters *builder.Parameters
 	blockReader            services.FullBlockReader
 }
 
 func StageMiningCreateBlockCfg(
-	db kv.RwDB,
 	miner MiningState,
 	chainConfig *chain.Config,
-	engine consensus.Engine,
-	blockBuilderParameters *core.BlockBuilderParameters,
-	tmpdir string,
+	engine rules.Engine,
+	blockBuilderParameters *builder.Parameters,
 	blockReader services.FullBlockReader,
 ) MiningCreateBlockCfg {
 	return MiningCreateBlockCfg{
-		db:                     db,
 		miner:                  miner,
 		chainConfig:            chainConfig,
 		engine:                 engine,
-		tmpdir:                 tmpdir,
 		blockBuilderParameters: blockBuilderParameters,
 		blockReader:            blockReader,
 	}
@@ -161,11 +150,11 @@ func StageMiningCreateBlockCfg(
 // SpawnMiningCreateBlockStage
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, sd *dbstate.SharedDomains, tx kv.TemporalRwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}, logger log.Logger) (err error) {
+func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}, logger log.Logger) (err error) {
 	current := cfg.miner.MiningBlock
-	*current = MiningBlock{}          // always start with a clean state
-	var txPoolLocals []common.Address //txPoolV2 has no concept of local addresses (yet?)
-	coinbase := cfg.miner.MiningConfig.Etherbase
+	*current = MiningBlock{}            // always start with a clean state
+	var txPoolLocals []accounts.Address //txPoolV2 has no concept of local addresses (yet?)
+	coinbase := accounts.InternAddress(cfg.miner.MiningConfig.Etherbase)
 
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.
@@ -191,7 +180,7 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *dbstate.SharedDomains, tx kv
 			return errors.New("refusing to mine without etherbase")
 		}
 		// If we do not have an etherbase, let's use the suggested one
-		coinbase = cfg.blockBuilderParameters.SuggestedFeeRecipient
+		coinbase = accounts.InternAddress(cfg.blockBuilderParameters.SuggestedFeeRecipient)
 	}
 
 	blockNum := executionAt + 1
@@ -243,17 +232,18 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *dbstate.SharedDomains, tx kv
 		uncles:    mapset.NewSet[common.Hash](),
 	}
 
-	header := core.MakeEmptyHeader(parent, cfg.chainConfig, timestamp, cfg.miner.MiningConfig.GasLimit)
+	header := builder.MakeEmptyHeader(parent, cfg.chainConfig, timestamp, cfg.miner.MiningConfig.GasLimit)
 	if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
 		logger.Warn("Failed to verify gas limit given by the validator, defaulting to parent gas limit", "err", err)
 		header.GasLimit = parent.GasLimit
 	}
 
-	header.Coinbase = coinbase
+	header.Coinbase = coinbase.Value()
 	header.Extra = cfg.miner.MiningConfig.ExtraData
 
 	logger.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
 	ibs := state.New(state.NewReaderV3(sd.AsGetter(tx)))
+	defer ibs.Release(false)
 
 	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
 		logger.Error("Failed to prepare header for mining",
@@ -358,14 +348,14 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *dbstate.SharedDomains, tx kv
 	return nil
 }
 
-func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine consensus.Engine, coinbase common.Address, txPoolLocals []common.Address) (localUncles, remoteUncles map[common.Hash]*types.Header, err error) {
+func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine rules.Engine, coinbase accounts.Address, txPoolLocals []accounts.Address) (localUncles, remoteUncles map[common.Hash]*types.Header, err error) {
 	localUncles, remoteUncles = map[common.Hash]*types.Header{}, map[common.Hash]*types.Header{}
 	nonCanonicalBlocks, err := rawdb.ReadHeadersByNumber(tx, blockNum)
 	if err != nil {
 		return
 	}
 	for _, u := range nonCanonicalBlocks {
-		if ethutils.IsLocalBlock(engine, coinbase, txPoolLocals, u) {
+		if builder.IsLocalBlock(engine, coinbase, txPoolLocals, u) {
 			localUncles[u.Hash()] = u
 		} else {
 			remoteUncles[u.Hash()] = u

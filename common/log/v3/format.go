@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -62,10 +63,19 @@ func TerminalFormat() Format {
 
 		b := &bytes.Buffer{}
 		lvl := strings.ToUpper(r.Lvl.String())
-		if color > 0 {
-			fmt.Fprintf(b, "\x1b[%dm%s\x1b[0m[%s] %s ", color, lvl, r.Time.Format(termTimeFormat), r.Msg)
+		logNoTimestamps := logEnvBool("ERIGON_LOG_NO_TIMESTAMPS", false)
+		if logNoTimestamps {
+			if color > 0 {
+				fmt.Fprintf(b, "\x1b[%dm%s\x1b[0m %s ", color, lvl, r.Msg)
+			} else {
+				fmt.Fprintf(b, "[%s] %s ", lvl, r.Msg)
+			}
 		} else {
-			fmt.Fprintf(b, "[%s] [%s] %s ", lvl, r.Time.Format(termTimeFormat), r.Msg)
+			if color > 0 {
+				fmt.Fprintf(b, "\x1b[%dm%s\x1b[0m[%s] %s ", color, lvl, r.Time.Format(termTimeFormat), r.Msg)
+			} else {
+				fmt.Fprintf(b, "[%s] [%s] %s ", lvl, r.Time.Format(termTimeFormat), r.Msg)
+			}
 		}
 
 		// try to justify the log output for short messages
@@ -102,14 +112,14 @@ func TerminalFormatNoColor() Format {
 // For more details see: http://godoc.org/github.com/kr/logfmt
 func LogfmtFormat() Format {
 	return FormatFunc(func(r *Record) []byte {
-		common := []interface{}{r.KeyNames.Time, r.Time, r.KeyNames.Lvl, r.Lvl, r.KeyNames.Msg, r.Msg}
+		common := []any{r.KeyNames.Time, r.Time, r.KeyNames.Lvl, r.Lvl, r.KeyNames.Msg, r.Msg}
 		buf := &bytes.Buffer{}
 		logfmt(buf, append(common, r.Ctx...), 0)
 		return buf.Bytes()
 	})
 }
 
-func logfmt(buf *bytes.Buffer, ctx []interface{}, color int) {
+func logfmt(buf *bytes.Buffer, ctx []any, color int) {
 	for i := 0; i < len(ctx); i += 2 {
 		if i != 0 {
 			buf.WriteByte(' ')
@@ -146,13 +156,13 @@ func JsonFormat() Format {
 func JsonFormatEx(pretty, lineSeparated bool) Format {
 	jsonMarshal := json.Marshal
 	if pretty {
-		jsonMarshal = func(v interface{}) ([]byte, error) {
+		jsonMarshal = func(v any) ([]byte, error) {
 			return json.MarshalIndent(v, "", "    ")
 		}
 	}
 
 	return FormatFunc(func(r *Record) []byte {
-		props := make(map[string]interface{})
+		props := make(map[string]any)
 
 		props[r.KeyNames.Time] = r.Time
 		props[r.KeyNames.Lvl] = r.Lvl.String()
@@ -182,7 +192,7 @@ func JsonFormatEx(pretty, lineSeparated bool) Format {
 	})
 }
 
-func formatShared(value interface{}) (result interface{}) {
+func formatShared(value any) (result any) {
 	defer func() {
 		if err := recover(); err != nil {
 			if v := reflect.ValueOf(value); v.Kind() == reflect.Ptr && v.IsNil() {
@@ -208,13 +218,13 @@ func formatShared(value interface{}) (result interface{}) {
 	}
 }
 
-func formatJSONValue(value interface{}) interface{} {
+func formatJSONValue(value any) any {
 	value = formatShared(value)
 
 	switch value.(type) {
 	case int, int8, int16, int32, int64, float32, float64, uint, uint8, uint16, uint32, uint64, string:
 		return value
-	case map[string]interface{}, []interface{}, interface{}:
+	case map[string]any, []any, any:
 		return value
 	default:
 		return fmt.Sprintf("%+v", value)
@@ -222,7 +232,7 @@ func formatJSONValue(value interface{}) interface{} {
 }
 
 // formatValue formats a value for serialization
-func formatLogfmtValue(value interface{}) string {
+func formatLogfmtValue(value any) string {
 	if value == nil {
 		return "nil"
 	}
@@ -251,7 +261,7 @@ func formatLogfmtValue(value interface{}) string {
 }
 
 var stringBufPool = sync.Pool{
-	New: func() interface{} { return new(bytes.Buffer) },
+	New: func() any { return new(bytes.Buffer) },
 }
 
 func escapeString(s string) string {
@@ -295,4 +305,16 @@ func escapeString(s string) string {
 	e.Reset()
 	stringBufPool.Put(e)
 	return ret
+}
+
+// EnvBool from dbg uses log many times so don't want to make a cycle.
+func logEnvBool(envVarName string, defaultVal bool) bool {
+	v, _ := os.LookupEnv(envVarName)
+	if strings.EqualFold(v, "true") {
+		return true
+	}
+	if strings.EqualFold(v, "false") {
+		return false
+	}
+	return defaultVal
 }

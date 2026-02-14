@@ -50,8 +50,6 @@ var (
 
 	chainTipMode bool
 	syncCfg      = ethconfig.Defaults.Sync
-
-	integStepSize uint64 // name prefixed to avoid conflict with another existing stepSize flag
 )
 
 func must(err error) {
@@ -68,11 +66,8 @@ func withMining(cmd *cobra.Command) {
 	cmd.Flags().Bool("mine", false, "Enable mining")
 	cmd.Flags().StringArray("miner.notify", nil, "Comma separated HTTP URL list to notify of new work packages")
 	cmd.Flags().Uint64("miner.gaslimit", ethconfig.DefaultBlockGasLimit, "Target gas limit for mined blocks")
-	cmd.Flags().Int64("miner.gasprice", ethconfig.Defaults.Miner.GasPrice.Int64(), "Target gas price for mined blocks")
 	cmd.Flags().String("miner.etherbase", "0", "Public address for block mining rewards (default = first account")
 	cmd.Flags().String("miner.extradata", "", "Block extra data set by the miner (default = client version)")
-	cmd.Flags().Duration("miner.recommit", ethconfig.Defaults.Miner.Recommit, "Time interval to recreate the block being mined")
-	cmd.Flags().Bool("miner.noverify", false, "Disable remote sealing verification")
 }
 
 func withFile(cmd *cobra.Command) {
@@ -130,7 +125,6 @@ func withDataDir2(cmd *cobra.Command) {
 
 	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enable internal database logs. Very high verbosity levels may require recompiling the database. The default value is 2, which means warnings are shown.")
 	cmd.Flags().BoolVar(&dbWriteMap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
-	cmd.Flags().Uint64Var(&integStepSize, utils.ErigonDBStepSizeFlag.Name, utils.ErigonDBStepSizeFlag.Value, utils.ErigonDBStepSizeFlag.Usage)
 }
 
 func withDataDir(cmd *cobra.Command) {

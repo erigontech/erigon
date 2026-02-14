@@ -22,10 +22,16 @@ import (
 
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 )
 
 func TestBlackListForPruning(t *testing.T) {
-	preverified := snapcfg.Mainnet
+	c, ok := snapcfg.KnownCfg(networkname.Mainnet)
+	if !ok {
+		t.Fatal("no known cfg")
+	}
+
+	preverified := c.Preverified
 
 	maxStep, err := getMaxStepRangeInSnapshots(preverified)
 	if err != nil {

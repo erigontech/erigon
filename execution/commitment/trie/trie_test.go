@@ -237,7 +237,7 @@ func BenchmarkHash(b *testing.B) {
 			root    = EmptyRoot
 			code    = crypto.Keccak256(nil)
 		)
-		accounts[i], _ = rlp.EncodeToBytes([]interface{}{nonce, balance, root, code})
+		accounts[i], _ = rlp.EncodeToBytes([]any{nonce, balance, root, code})
 	}
 	// Insert the accounts into the trie and hash it
 	trie := newEmpty()
@@ -314,7 +314,7 @@ func TestCodeNodeValid(t *testing.T) {
 	codeValues := make([][]byte, len(addresses))
 	for i := 0; i < len(addresses); i++ {
 		codeValues[i] = genRandomByteArrayOfLen(128)
-		codeHash := common.BytesToHash(crypto.Keccak256(codeValues[i]))
+		codeHash := accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(codeValues[i])))
 		balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 		acc := accounts.NewAccount()
 		acc.Nonce = uint64(random.Int63())
@@ -342,7 +342,7 @@ func TestCodeNodeUpdateNotExisting(t *testing.T) {
 	address := getAddressForIndex(0)
 	codeValue := genRandomByteArrayOfLen(128)
 
-	codeHash := common.BytesToHash(crypto.Keccak256(codeValue))
+	codeHash := accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(codeValue)))
 	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 
 	acc := accounts.NewAccount()
@@ -370,7 +370,7 @@ func TestCodeNodeGetNotExistingAccount(t *testing.T) {
 	address := getAddressForIndex(0)
 	codeValue := genRandomByteArrayOfLen(128)
 
-	codeHash := common.BytesToHash(crypto.Keccak256(codeValue))
+	codeHash := accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(codeValue)))
 	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 
 	acc := accounts.NewAccount()
@@ -415,7 +415,7 @@ func TestCodeNodeGetExistingAccountNoCodeNotEmpty(t *testing.T) {
 	address := getAddressForIndex(0)
 	codeValue := genRandomByteArrayOfLen(128)
 
-	codeHash := common.BytesToHash(crypto.Keccak256(codeValue))
+	codeHash := accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(codeValue)))
 	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 
 	acc := accounts.NewAccount()
@@ -438,7 +438,7 @@ func TestCodeNodeGetExistingAccountEmptyCode(t *testing.T) {
 
 	address := getAddressForIndex(0)
 
-	codeHash := emptyCodeHash
+	codeHash := accounts.EmptyCodeHash
 	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 
 	acc := accounts.NewAccount()
@@ -462,7 +462,7 @@ func TestCodeNodeWrongHash(t *testing.T) {
 	address := getAddressForIndex(0)
 
 	codeValue1 := genRandomByteArrayOfLen(128)
-	codeHash1 := common.BytesToHash(crypto.Keccak256(codeValue1))
+	codeHash1 := accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(codeValue1)))
 
 	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 
@@ -487,7 +487,7 @@ func TestCodeNodeUpdateAccountAndCodeValidHash(t *testing.T) {
 	address := getAddressForIndex(0)
 
 	codeValue1 := genRandomByteArrayOfLen(128)
-	codeHash1 := common.BytesToHash(crypto.Keccak256(codeValue1))
+	codeHash1 := accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(codeValue1)))
 
 	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 
@@ -502,7 +502,7 @@ func TestCodeNodeUpdateAccountAndCodeValidHash(t *testing.T) {
 	require.NoError(t, err, "should successfully insert code")
 
 	codeValue2 := genRandomByteArrayOfLen(128)
-	codeHash2 := common.BytesToHash(crypto.Keccak256(codeValue2))
+	codeHash2 := accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(codeValue2)))
 
 	acc.CodeHash = codeHash2
 
@@ -519,7 +519,7 @@ func TestCodeNodeUpdateAccountAndCodeInvalidHash(t *testing.T) {
 	address := getAddressForIndex(0)
 
 	codeValue1 := genRandomByteArrayOfLen(128)
-	codeHash1 := common.BytesToHash(crypto.Keccak256(codeValue1))
+	codeHash1 := accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(codeValue1)))
 
 	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 
@@ -534,7 +534,7 @@ func TestCodeNodeUpdateAccountAndCodeInvalidHash(t *testing.T) {
 	require.NoError(t, err, "should successfully insert code")
 
 	codeValue2 := genRandomByteArrayOfLen(128)
-	codeHash2 := common.BytesToHash(crypto.Keccak256(codeValue2))
+	codeHash2 := accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(codeValue2)))
 
 	codeValue3 := genRandomByteArrayOfLen(128)
 
@@ -553,7 +553,7 @@ func TestCodeNodeUpdateAccountChangeCodeHash(t *testing.T) {
 	address := getAddressForIndex(0)
 
 	codeValue1 := genRandomByteArrayOfLen(128)
-	codeHash1 := common.BytesToHash(crypto.Keccak256(codeValue1))
+	codeHash1 := accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(codeValue1)))
 
 	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 
@@ -568,7 +568,7 @@ func TestCodeNodeUpdateAccountChangeCodeHash(t *testing.T) {
 	require.NoError(t, err, "should successfully insert code")
 
 	codeValue2 := genRandomByteArrayOfLen(128)
-	codeHash2 := common.BytesToHash(crypto.Keccak256(codeValue2))
+	codeHash2 := accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(codeValue2)))
 
 	acc.CodeHash = codeHash2
 
@@ -586,7 +586,7 @@ func TestCodeNodeUpdateAccountNoChangeCodeHash(t *testing.T) {
 	address := getAddressForIndex(0)
 
 	codeValue1 := genRandomByteArrayOfLen(128)
-	codeHash1 := common.BytesToHash(crypto.Keccak256(codeValue1))
+	codeHash1 := accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(codeValue1)))
 
 	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
 

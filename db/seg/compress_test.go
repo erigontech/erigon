@@ -81,11 +81,11 @@ func checksum(file string) uint32 {
 	return hasher.Sum32()
 }
 
-func prepareDict(t *testing.T, multiplier int) *Decompressor {
-	return prepareDictMetadata(t, multiplier, false, nil)
+func prepareDict(t *testing.T, multiplier int, keys int) *Decompressor {
+	return prepareDictMetadata(t, multiplier, false, nil, keys)
 }
 
-func prepareDictMetadata(t *testing.T, multiplier int, hasMetadata bool, metadata []byte) *Decompressor {
+func prepareDictMetadata(t *testing.T, multiplier int, hasMetadata bool, metadata []byte, keys int) *Decompressor {
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
@@ -101,7 +101,7 @@ func prepareDictMetadata(t *testing.T, multiplier int, hasMetadata bool, metadat
 	defer c.Close()
 	k := bytes.Repeat([]byte("long"), multiplier)
 	v := bytes.Repeat([]byte("word"), multiplier)
-	for i := 0; i < 100; i++ {
+	for i := 0; i < keys; i++ {
 		if err = c.AddWord(nil); err != nil {
 			panic(err)
 		}
@@ -111,7 +111,7 @@ func prepareDictMetadata(t *testing.T, multiplier int, hasMetadata bool, metadat
 		if err = c.AddWord(v); err != nil {
 			t.Fatal(err)
 		}
-		if err = c.AddWord(bytes.Repeat([]byte(fmt.Sprintf("%d longlongword %d", i, i)), multiplier)); err != nil {
+		if err = c.AddWord(bytes.Repeat(fmt.Appendf(nil, "%d longlongword %d", i, i), multiplier)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -129,7 +129,7 @@ func prepareDictMetadata(t *testing.T, multiplier int, hasMetadata bool, metadat
 }
 
 func TestCompressDict1(t *testing.T) {
-	d := prepareDict(t, 1)
+	d := prepareDict(t, 1, 100)
 	defer d.Close()
 	g := d.MakeGetter()
 	i := 0
@@ -167,7 +167,7 @@ func TestCompressDict1(t *testing.T) {
 		// next word is `longlongword %d`
 		expectPrefix := fmt.Sprintf("%d long", i)
 
-		require.True(t, g.MatchPrefix([]byte(fmt.Sprintf("%d", i))))
+		require.True(t, g.MatchPrefix(fmt.Appendf(nil, "%d", i)))
 		require.True(t, g.MatchPrefix([]byte(expectPrefix)))
 		require.True(t, g.MatchPrefix([]byte(expectPrefix+"long")))
 		require.True(t, g.MatchPrefix([]byte(expectPrefix+"longword ")))
@@ -187,7 +187,7 @@ func TestCompressDict1(t *testing.T) {
 		i++
 	}
 
-	if cs := checksum(d.filePath); cs != 3153486123 {
+	if cs := checksum(d.filePath); cs != 3613725886 {
 		// it's ok if hash changed, but need re-generate all existing snapshot hashes
 		// in https://github.com/erigontech/erigon-snapshot
 		t.Errorf("result file hash changed, %d", cs)
@@ -195,7 +195,7 @@ func TestCompressDict1(t *testing.T) {
 }
 
 func TestCompressDictCmp(t *testing.T) {
-	d := prepareDict(t, 1)
+	d := prepareDict(t, 1, 100)
 	defer d.Close()
 	g := d.MakeGetter()
 	i := 0
@@ -238,7 +238,7 @@ func TestCompressDictCmp(t *testing.T) {
 		// next word is `longlongword %d`
 		expectPrefix := fmt.Sprintf("%d long", i)
 
-		require.Equal(t, -1, g.MatchCmp([]byte(fmt.Sprintf("%d", i))))
+		require.Equal(t, -1, g.MatchCmp(fmt.Appendf(nil, "%d", i)))
 		require.Equal(t, -1, g.MatchCmp([]byte(expectPrefix)))
 		require.Equal(t, -1, g.MatchCmp([]byte(expectPrefix+"long")))
 		require.Equal(t, -1, g.MatchCmp([]byte(expectPrefix+"longword ")))
@@ -257,7 +257,7 @@ func TestCompressDictCmp(t *testing.T) {
 		i++
 	}
 
-	if cs := checksum(d.filePath); cs != 3153486123 {
+	if cs := checksum(d.filePath); cs != 3613725886 {
 		// it's ok if hash changed, but need re-generate all existing snapshot hashes
 		// in https://github.com/erigontech/erigon-snapshot
 		t.Errorf("result file hash changed, %d", cs)
@@ -266,7 +266,7 @@ func TestCompressDictCmp(t *testing.T) {
 
 func Test_CompressWithMetadata(t *testing.T) {
 	metadata := []byte("lorem metadata ipsum")
-	d := prepareDictMetadata(t, 1, true, metadata)
+	d := prepareDictMetadata(t, 1, true, metadata, 100)
 	defer d.Close()
 	require.Equal(t, metadata, d.GetMetadata())
 	g := d.MakeGetter()
@@ -305,7 +305,7 @@ func Test_CompressWithMetadata(t *testing.T) {
 		// next word is `longlongword %d`
 		expectPrefix := fmt.Sprintf("%d long", i)
 
-		require.True(t, g.MatchPrefix([]byte(fmt.Sprintf("%d", i))))
+		require.True(t, g.MatchPrefix(fmt.Appendf(nil, "%d", i)))
 		require.True(t, g.MatchPrefix([]byte(expectPrefix)))
 		require.True(t, g.MatchPrefix([]byte(expectPrefix+"long")))
 		require.True(t, g.MatchPrefix([]byte(expectPrefix+"longword ")))

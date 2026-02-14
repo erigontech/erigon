@@ -252,7 +252,7 @@ func TestLightClientBootstrap(t *testing.T) {
 	}
 	require.NoError(t, err)
 
-	reqData := common.CopyBytes(reqBuf.Bytes())
+	reqData := common.Copy(reqBuf.Bytes())
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
 
@@ -335,7 +335,7 @@ func TestLightClientUpdates(t *testing.T) {
 	}
 	require.NoError(t, err)
 
-	reqData := common.CopyBytes(reqBuf.Bytes())
+	reqData := common.Copy(reqBuf.Bytes())
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
 
@@ -399,4 +399,29 @@ func TestLightClientUpdates(t *testing.T) {
 		t.Fatal("Stream is not empty")
 	}
 
+}
+
+// BenchmarkLightClientPrefixConstruction benchmarks the prefix construction
+// for light client responses, comparing the optimized version (stack allocation)
+// against the old version (heap allocation with append).
+func BenchmarkLightClientPrefixConstruction(b *testing.B) {
+	forkDigest := common.Bytes4{0xAA, 0xBB, 0xCC, 0xDD}
+
+	b.Run("Optimized", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			var prefix [5]byte
+			prefix[0] = SuccessfulResponsePrefix
+			copy(prefix[1:], forkDigest[:])
+			_ = prefix
+		}
+	})
+
+	b.Run("Old", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			prefix := append([]byte{SuccessfulResponsePrefix}, forkDigest[:]...)
+			_ = prefix
+		}
+	})
 }

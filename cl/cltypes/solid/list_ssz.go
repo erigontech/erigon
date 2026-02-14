@@ -182,7 +182,7 @@ func (l *ListSSZ[T]) Cut(length int) {
 }
 
 func (l *ListSSZ[T]) ElementProof(i int) [][32]byte {
-	leaves := make([]interface{}, l.limit)
+	leaves := make([]any, l.limit)
 	for i := range leaves {
 		leaves[i] = make([]byte, 32)
 	}
@@ -207,7 +207,7 @@ func (l *ListSSZ[T]) ShallowCopy() *ListSSZ[T] {
 		limit:           l.limit,
 		static:          l.static,
 		bytesPerElement: l.bytesPerElement,
-		root:            common.Hash(common.CopyBytes(l.root[:])),
+		root:            common.Hash(common.Copy(l.root[:])),
 	}
 	copy(cpy.list, l.list)
 	return cpy

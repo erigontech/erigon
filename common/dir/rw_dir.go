@@ -17,6 +17,7 @@
 package dir
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -55,18 +56,19 @@ func trackRemovedFiles() {
 		case <-ticker.C:
 			for _, path := range removedFiles {
 				if exists, _ := FileExist(path); exists {
-					panic("Removed file unexpectedly exists: " + path)
+					log.Warn("Removed file unexpectedly exists", "path", path)
 				}
 			}
 		}
 	}
 }
 
+// user rwx, group rwx, other rx
+// x is required to navigate through directories. umask 0o022 is the default and will mask final
+// permissions to 0o755 for newly created files (and directories).
+const DirPerm = 0o775
+
 func MustExist(path ...string) {
-	// user rwx, group rwx, other rx
-	// x is required to navigate through directories. umask 0o022 is the default and will mask final
-	// permissions to 0o755 for newly created files (and directories).
-	const perm = 0o775
 	for _, p := range path {
 		exist, err := Exist(p)
 		if err != nil {
@@ -75,7 +77,7 @@ func MustExist(path ...string) {
 		if exist {
 			continue
 		}
-		if err := os.MkdirAll(p, perm); err != nil {
+		if err := os.MkdirAll(p, DirPerm); err != nil {
 			panic(err)
 		}
 	}
@@ -157,6 +159,10 @@ func DeleteFiles(dirs ...string) error {
 	g := errgroup.Group{}
 	for _, dir := range dirs {
 		files, err := ListFiles(dir)
+		if errors.Is(err, os.ErrNotExist) {
+			log.Debug("directory does not exist, skipping deletion", "dir", dir)
+			continue
+		}
 		if err != nil {
 			return err
 		}
@@ -196,6 +202,19 @@ func ListFiles(dir string, extensions ...string) (paths []string, err error) {
 		paths = append(paths, filepath.Join(dir, f.Name()))
 	}
 	return paths, nil
+}
+
+func RemoveFilesByMask(path string) error {
+	matches, err := filepath.Glob(path)
+	if err != nil {
+		return fmt.Errorf("invalid pattern: %w", err)
+	}
+	for _, match := range matches {
+		if err := RemoveFile(match); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func RemoveFile(path string) error {

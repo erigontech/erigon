@@ -25,10 +25,12 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/gossip"
 	st "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 type proposerSlashingService struct {
@@ -61,17 +63,33 @@ func NewProposerSlashingService(
 	}
 }
 
+func (s *proposerSlashingService) Names() []string {
+	return []string{gossip.TopicNameProposerSlashing}
+}
+
+func (s *proposerSlashingService) IsMyGossipMessage(name string) bool {
+	return name == gossip.TopicNameProposerSlashing
+}
+
+func (s *proposerSlashingService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.ProposerSlashing, error) {
+	obj := &cltypes.ProposerSlashing{}
+	if err := obj.DecodeSSZ(data, int(version)); err != nil {
+		return nil, err
+	}
+	return obj, nil
+}
+
 func (s *proposerSlashingService) ProcessMessage(ctx context.Context, subnet *uint64, msg *cltypes.ProposerSlashing) error {
 	// https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#proposer_slashing
 
 	// [IGNORE] The proposer slashing is the first valid proposer slashing received for the proposer with index proposer_slashing.signed_header_1.message.proposer_index
 	pIndex := msg.Header1.Header.ProposerIndex
 	if _, ok := s.cache.Get(pIndex); ok {
-		return ErrIgnore
+		return nil
 	}
 
 	if s.operationsPool.ProposerSlashingsPool.Has(pool.ComputeKeyForProposerSlashing(msg)) {
-		return ErrIgnore
+		return nil
 	}
 	h1 := msg.Header1.Header
 	h2 := msg.Header2.Header

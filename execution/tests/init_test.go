@@ -43,7 +43,7 @@ var (
 	cornersDir = filepath.Join(".", "test-corners")
 )
 
-func readJSONFile(fn string, value interface{}) error {
+func readJSONFile(fn string, value any) error {
 	data, err := os.ReadFile(fn)
 	if err != nil {
 		return fmt.Errorf("error reading JSON file: %w", err)
@@ -80,6 +80,7 @@ type testMatcher struct {
 	skiploadpat  []*regexp.Regexp
 	slowpat      []*regexp.Regexp
 	whitelistpat *regexp.Regexp
+	noparallel   bool
 }
 
 type testConfig struct {
@@ -168,7 +169,7 @@ func (tm *testMatcher) checkFailureWithName(t *testing.T, name string, err error
 //
 // runTest should be a function of type func(t *testing.T, name string, x <TestType>),
 // where TestType is the type of the test contained in test files.
-func (tm *testMatcher) walk(t *testing.T, dir string, runTest interface{}) {
+func (tm *testMatcher) walk(t *testing.T, dir string, runTest any) {
 	// Walk the directory.
 	dirinfo, err := os.Stat(dir)
 	if os.IsNotExist(err) || !dirinfo.IsDir() {
@@ -203,8 +204,10 @@ func (tm *testMatcher) walk(t *testing.T, dir string, runTest interface{}) {
 	//panic(fmt.Sprintf("[dbg] mem info: alloc=%s, sys=%s", common.ByteCount(m.Alloc), common.ByteCount(m.Sys)))
 }
 
-func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest interface{}) {
-	t.Parallel()
+func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest any) {
+	if !tm.noparallel {
+		t.Parallel()
+	}
 	if r, _ := tm.findSkip(name); r != "" {
 		t.Skip(r)
 	}
@@ -229,11 +232,7 @@ func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest inte
 		for _, key := range keys {
 			i++
 			name := name + "/" + key
-			subTestName := key
-			if len(subTestName) > 32 {
-				subTestName = fmt.Sprintf("%s_%s_%d", key[:20], key[len(key)-20:], i)
-			}
-			t.Run(subTestName, func(t *testing.T) {
+			t.Run(key, func(t *testing.T) {
 				if r, _ := tm.findSkip(name); r != "" {
 					t.Skip(r)
 				}
@@ -243,9 +242,9 @@ func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest inte
 	}
 }
 
-func makeMapFromTestFunc(f interface{}) reflect.Value {
-	stringT := reflect.TypeOf("")
-	testingT := reflect.TypeOf((*testing.T)(nil))
+func makeMapFromTestFunc(f any) reflect.Value {
+	stringT := reflect.TypeFor[string]()
+	testingT := reflect.TypeFor[*testing.T]()
 	ftyp := reflect.TypeOf(f)
 	if ftyp.Kind() != reflect.Func || ftyp.NumIn() != 3 || ftyp.NumOut() != 0 || ftyp.In(0) != testingT || ftyp.In(1) != stringT {
 		panic(fmt.Sprintf("bad test function type: want func(*testing.T, string, <TestType>), have %s", ftyp))
@@ -264,7 +263,7 @@ func sortedMapKeys(m reflect.Value) []string {
 	return keys
 }
 
-func runTestFunc(runTest interface{}, t *testing.T, name string, m reflect.Value, key string) {
+func runTestFunc(runTest any, t *testing.T, name string, m reflect.Value, key string) {
 	reflect.ValueOf(runTest).Call([]reflect.Value{
 		reflect.ValueOf(t),
 		reflect.ValueOf(name),

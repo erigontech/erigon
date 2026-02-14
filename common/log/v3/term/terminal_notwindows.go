@@ -4,7 +4,6 @@
 // license that can be found in the LICENSE file.
 
 //go:build (linux && !appengine) || darwin || freebsd || openbsd || netbsd
-// +build linux,!appengine darwin freebsd openbsd netbsd
 
 package term
 

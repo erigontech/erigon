@@ -20,9 +20,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"math/big"
+	"math/rand"
 	"testing"
 	"time"
+
+	"crypto/ecdsa"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -40,15 +44,15 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
-	"github.com/erigontech/erigon/execution/core"
-	"github.com/erigontech/erigon/execution/stages/mock"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
-	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -58,7 +62,7 @@ func TestEstimateGas(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mock.Mock(t))
 	mining := txpoolproto.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log)
-	api := NewEthAPI(NewBaseApi(ff, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	if _, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
@@ -72,7 +76,7 @@ func TestEstimateGas(t *testing.T) {
 func TestEthCallNonCanonical(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(nil, stateCache, m), m.DB, nil, nil)
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(common.HexToHash("0x3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b"), true)
@@ -94,7 +98,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 
 	m, bankAddress, contractAddress, _ := chainWithDeployedContract(t)
 	doPrune(t, m.DB, pruneTo)
-	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
 	callData := hexutil.MustDecode("0x2e64cec1")
 	callDataBytes := hexutil.Bytes(callData)
@@ -115,7 +119,17 @@ func TestGetProof(t *testing.T) {
 	var maxGetProofRewindBlockCount = 1   // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
 	statecfg.EnableHistoricalCommitment() // enable commitment history to test historical proofs
 	m, bankAddr, contractAddr, receiverAddress := chainWithDeployedContract(t)
-	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, maxGetProofRewindBlockCount, 128, log.New())
+	cfg := &EthApiConfig{
+		GasCap:                      5000000,
+		FeeCap:                      ethconfig.Defaults.RPCTxFeeCap,
+		ReturnDataLimit:             100_000,
+		AllowUnprotectedTxs:         false,
+		MaxGetProofRewindBlockCount: maxGetProofRewindBlockCount,
+		SubscribeLogsChannelSize:    128,
+		RpcTxSyncDefaultTimeout:     20 * time.Second,
+		RpcTxSyncMaxTimeout:         1 * time.Minute,
+	}
+	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, cfg, log.New())
 
 	key := func(b byte) hexutil.Bytes {
 		result := common.Hash{}
@@ -135,29 +149,29 @@ func TestGetProof(t *testing.T) {
 		{
 			name:     "currentBlockNoState",
 			addr:     contractAddr,
-			blockNum: 4,
+			blockNum: 6,
 		},
 		{
 			name:     "currentBlockEOA",
 			addr:     bankAddr,
-			blockNum: 4,
+			blockNum: 6,
 		},
 		{
 			name:     "currentBlockNoAccount",
 			addr:     common.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead0"),
-			blockNum: 4,
+			blockNum: 6,
 		},
 		{
 			name:        "currentBlockWithState",
 			addr:        contractAddr,
-			blockNum:    4,
+			blockNum:    6,
 			storageKeys: []hexutil.Bytes{key(0), key(4), key(8), key(10)},
 			stateVal:    2,
 		},
 		{
 			name:        "currentBlockWithStateAndShortKeys",
 			addr:        contractAddr,
-			blockNum:    4,
+			blockNum:    6,
 			storageKeys: []hexutil.Bytes{{0x0}, {0x4}, {0x8}, {0x0a}},
 			stateVal:    2,
 		},
@@ -165,21 +179,21 @@ func TestGetProof(t *testing.T) {
 			name:        "currentBlockWithMissingState",
 			addr:        contractAddr,
 			storageKeys: []hexutil.Bytes{hexutil.FromHex("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
-			blockNum:    4,
+			blockNum:    6,
 			stateVal:    0,
 		},
 		{
 			name:        "currentBlockEOAMissingState",
 			addr:        bankAddr,
 			storageKeys: []hexutil.Bytes{hexutil.FromHex("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
-			blockNum:    4,
+			blockNum:    6,
 			stateVal:    0,
 		},
 		{
 			name:        "currentBlockNoAccountMissingState",
 			addr:        common.HexToAddress("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddead0"),
 			storageKeys: []hexutil.Bytes{hexutil.FromHex("0xdeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddeaddead")},
-			blockNum:    4,
+			blockNum:    6,
 			stateVal:    0,
 		},
 		{
@@ -192,14 +206,18 @@ func TestGetProof(t *testing.T) {
 		{
 			name:     "notCreatedYetAccount",
 			addr:     receiverAddress, // receiver address only starts existing at block 4
-			blockNum: 2,
+			blockNum: 3,
 		},
-		// {
-		// 	name:        "tooOldBlock",
-		// 	addr:        contractAddr,
-		// 	blockNum:    1,
-		// 	expectedErr: "requested block is too old, block must be within 1 blocks of the head block number (currently 3)",
-		// },
+		{
+			name:     "createdAccountAtBlock", // account created at block 4, proof requested at block 4, latest=6
+			addr:     receiverAddress,         // receiver address only starts existing at block 4
+			blockNum: 4,
+		},
+		{
+			name:     "createdAccountBlockAfter", // account created at block 4, proof requested at block 5, latest=6
+			addr:     receiverAddress,            // receiver address only starts existing at block 4
+			blockNum: 5,
+		},
 	}
 
 	for _, tt := range tests {
@@ -221,7 +239,7 @@ func TestGetProof(t *testing.T) {
 			tx, err := m.DB.BeginTemporalRo(context.Background())
 			require.NoError(t, err)
 			defer tx.Rollback()
-			header, err := api.headerByRPCNumber(context.Background(), rpc.BlockNumber(tt.blockNum), tx)
+			header, err := api.headerByNumber(context.Background(), rpc.BlockNumber(tt.blockNum), tx)
 			require.NoError(t, err)
 
 			require.Equal(t, tt.addr, proof.Address)
@@ -519,8 +537,29 @@ func contractInvocationData(val byte) []byte {
 	return hexutil.MustDecode(fmt.Sprintf("0x%x00000000000000000000000000000000000000000000000000000000000000%02x", contractFuncSelector, val))
 }
 
+func generatePseudoRandomECDSAKey(rand io.Reader) (*ecdsa.PrivateKey, error) {
+	return ecdsa.GenerateKey(crypto.S256(), rand)
+}
+
+func generatePseudoRandomECDSAKeyPairs(rand io.Reader, n int) ([]*ecdsa.PrivateKey, []*ecdsa.PublicKey, error) {
+	privateKeys := make([]*ecdsa.PrivateKey, n)
+	publicKeys := make([]*ecdsa.PublicKey, n)
+	var err error
+	for i := 0; i < n; i++ {
+		privateKeys[i], err = generatePseudoRandomECDSAKey(rand)
+		if err != nil {
+			return nil, nil, err
+		}
+		publicKeys[i] = &privateKeys[i].PublicKey
+	}
+	return privateKeys, publicKeys, nil
+}
+
 func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, common.Address, common.Address) {
 	var (
+		seed            = int64(12345)
+		rng             = rand.New(rand.NewSource(seed)) // rng for filler accounts
+		nFillerAccounts = 400                            // nr. of accounts to fill up MPT
 		signer          = types.LatestSignerForChainID(nil)
 		bankKey, _      = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		bankAddress     = crypto.PubkeyToAddress(bankKey.PublicKey)
@@ -534,12 +573,16 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, 
 			//Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds, Storage: map[common.Hash]common.Hash{crypto.Keccak256Hash([]byte{0x1}): crypto.Keccak256Hash([]byte{0xf})}}}, // TODO (antonis19)
 		}
 	)
-	m := mock.MockWithGenesis(t, gspec, bankKey, false)
+	// accounts to fill up MPT
+	_, fillerPublicKeys, err := generatePseudoRandomECDSAKeyPairs(rng, nFillerAccounts)
+	require.NoError(t, err)
+
+	m := mock.MockWithGenesis(t, gspec, bankKey)
 	db := m.DB
 
 	var contractAddr common.Address
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 6, func(i int, block *blockgen.BlockGen) {
 		nonce := block.TxNonce(bankAddress)
 		switch i {
 		case 0:
@@ -551,15 +594,41 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, 
 			txn, err := types.SignTx(types.NewTransaction(nonce, contractAddr, new(uint256.Int), 900000, new(uint256.Int), contractInvocationData(1)), *signer, bankKey)
 			require.NoError(t, err)
 			block.AddTx(txn)
+			// send txs to filler addresses, so that MPT may be populated ( populate only half in this block, to not exceed gas limit)
+			nonce++
+			for idx := 0; idx < nFillerAccounts/2; idx++ {
+				transferAmount := big.NewInt(1e1)
+				fillerAddress := crypto.PubkeyToAddress(*fillerPublicKeys[idx])
+				txn, err := types.SignTx(types.NewTransaction(nonce, fillerAddress, uint256.MustFromBig(transferAmount), 21000, new(uint256.Int), nil), *signer, bankKey)
+				require.NoError(t, err)
+				block.AddTx(txn)
+				nonce++
+			}
 		case 2:
 			txn, err := types.SignTx(types.NewTransaction(nonce, contractAddr, new(uint256.Int), 900000, new(uint256.Int), contractInvocationData(2)), *signer, bankKey)
 			require.NoError(t, err)
 			block.AddTx(txn)
+			// send txs to filler addresses, so that MPT may be populated
+			// ( populate the second half in this block)
+			nonce++
+			for idx := nFillerAccounts / 2; idx < nFillerAccounts; idx++ {
+				transferAmount := big.NewInt(1e1)
+				fillerAddress := crypto.PubkeyToAddress(*fillerPublicKeys[idx])
+				txn, err := types.SignTx(types.NewTransaction(nonce, fillerAddress, uint256.MustFromBig(transferAmount), 21000, new(uint256.Int), nil), *signer, bankKey)
+				require.NoError(t, err)
+				block.AddTx(txn)
+				nonce++
+			}
+
 		case 3:
 			transferAmount := big.NewInt(1e2)
 			txn, err := types.SignTx(types.NewTransaction(nonce, receiverAddress, uint256.MustFromBig(transferAmount), 21000, new(uint256.Int), nil), *signer, bankKey)
 			require.NoError(t, err)
 			block.AddTx(txn)
+		case 4:
+			// empty block
+		case 5:
+			// empty block
 		}
 	})
 	if err != nil {
@@ -569,25 +638,26 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, 
 	err = m.InsertChain(chain)
 	require.NoError(t, err)
 
-	tx, err := db.BeginTemporalRo(context.Background())
+	ctx := context.Background()
+	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		t.Fatalf("read only db tx to read state: %v", err)
 	}
 	defer tx.Rollback()
 
-	stateReader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, rawdbv3.TxNums)
+	stateReader, err := rpchelper.CreateHistoryStateReader(ctx, tx, 1, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st := state.New(stateReader)
 	require.NoError(t, err)
-	exist, err := st.Exist(contractAddr)
+	exist, err := st.Exist(accounts.InternAddress(contractAddr))
 	require.NoError(t, err)
 	assert.False(t, exist, "Contract should not exist at block #1")
 
-	stateReader, err = rpchelper.CreateHistoryStateReader(tx, 2, 0, rawdbv3.TxNums)
+	stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, 2, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st = state.New(stateReader)
 	require.NoError(t, err)
-	exist, err = st.Exist(contractAddr)
+	exist, err = st.Exist(accounts.InternAddress(contractAddr))
 	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #2")
 

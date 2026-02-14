@@ -3,6 +3,7 @@
 [![Docs](https://img.shields.io/badge/docs-up-green)](https://docs.erigon.tech/)
 [![Blog](https://img.shields.io/badge/blog-up-green)](https://erigon.tech/blog/)
 [![Twitter](https://img.shields.io/twitter/follow/ErigonEth?style=social)](https://x.com/ErigonEth)
+[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?style=flat&logo=discord&logoColor=white)](https://dsc.gg/erigon)
 [![Build status](https://github.com/erigontech/erigon/actions/workflows/ci.yml/badge.svg)](https://github.com/erigontech/erigon/actions/workflows/ci.yml)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=erigontech_erigon&metric=coverage)](https://sonarcloud.io/summary/new_code?id=erigontech_erigon)
 
@@ -57,15 +58,7 @@ frontier.
     - [Erigon3 perf tricks](#erigon3-perf-tricks)
     - [Windows](#windows)
 - [Getting in touch](#getting-in-touch)
-    - [Erigon Discord Server](#erigon-discord-server)
     - [Reporting security issues/concerns](#reporting-security-issuesconcerns)
-- [Known issues](#known-issues)
-    - [`htop` shows incorrect memory usage](#htop-shows-incorrect-memory-usage)
-    - [Cloud network drives](#cloud-network-drives)
-    - [Filesystem's background features are expensive](#filesystems-background-features-are-expensive)
-    - [Gnome Tracker can kill Erigon](#gnome-tracker-can-kill-erigon)
-    - [the --mount option requires BuildKit error](#the---mount-option-requires-buildkit-error)
-    - [`cannot allocate memory` Erigon crashes due to kernel allocation limits](#erigon-crashes-due-to-kernel-allocation-limits)
 
 <!--te-->
 
@@ -282,19 +275,19 @@ Each service has own `./cmd/*/README.md` file.
 
 ### Embedded Consensus Layer
 
-Built-in consensus for Ethereum Mainnet, Sepolia, Holesky, Hoodi, Gnosis, Chiado.
+Built-in consensus for Ethereum Mainnet, Sepolia, Hoodi, Gnosis, Chiado.
 To use external Consensus Layer: `--externalcl`.
 
 ### Testnets
 
-If you would like to give Erigon a try: a good option is to start syncing one of the public testnets, Holesky (or Amoy).
+If you would like to give Erigon a try: a good option is to start syncing one of the public testnets, Hoodi (or Chiado).
 It syncs much quicker, and does not take so much disk space:
 
 ```sh
 git clone https://github.com/erigontech/erigon.git
 cd erigon
 make erigon
-./build/bin/erigon --datadir=<your_datadir> --chain=holesky --prune.mode=full
+./build/bin/erigon --datadir=<your_datadir> --chain=hoodi --prune.mode=full
 ```
 
 Please note the `--datadir` option that allows you to store Erigon files in a non-default location. Name of the
@@ -693,18 +686,14 @@ echo 1 > /proc/sys/vm/compact_memory
 
 Windows users may run erigon in 3 possible ways:
 
-* Build executable binaries natively for Windows using provided `wmake.ps1` PowerShell script. Usage syntax is the same
-  as `make` command so you have to run `.\wmake.ps1 [-target] <targetname>`. Example: `.\wmake.ps1 erigon` builds erigon
+* Build executable binaries natively for Windows using `make`. Example: `make erigon` builds the erigon
   executable. All binaries are placed in `.\build\bin\` subfolder. There are some requirements for a successful native
   build on windows :
-    * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
-      likely you already have it
+    * [Git](https://git-scm.com/downloads) for Windows must be installed (provides bash and MSYS2 environment). If
+      you're cloning this repository is very likely you already have it
     * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.24
-    * GNU CC Compiler at least version 13 (is highly suggested that you install `chocolatey` package manager - see
-      following point)
-    * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
-      then [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. By Chocolatey you need
-      to install the following components : `cmake`, `make`, `mingw` by `choco install cmake make mingw`. Make sure
+    * [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. Then install the required
+      build tools: `choco install cmake make mingw` (provides GNU CC Compiler >= 13, GNU Make, and CMake). Make sure
       Windows System "Path" variable has:
       C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin
 
@@ -734,90 +723,6 @@ Windows users may run erigon in 3 possible ways:
 Getting in touch
 ================
 
-### Erigon Discord Server
-
-The main discussions are happening on our Discord server. To get an invite, send an email to `bloxster [at] proton.me`
-with your name, occupation, a brief explanation of why you want to join the Discord, and how you heard about Erigon.
-
 ### Reporting security issues/concerns
 
 Send an email to `security [at] torquem.ch`.
-
-Known issues
-============
-
-### `htop` shows incorrect memory usage
-
-Erigon's internal DB (MDBX) using `MemoryMap` - when OS does manage all `read, write, cache` operations instead of
-Application
-([linux](https://linux-kernel-labs.github.io/refs/heads/master/labs/memory_mapping.html)
-, [windows](https://docs.microsoft.com/en-us/windows/win32/memory/file-mapping))
-
-`htop` on column `res` shows memory of "App + OS used to hold page cache for given App", but it's not informative,
-because if `htop` says that app using 90% of memory you still can run 3 more instances of app on the same machine -
-because most of that `90%` is "OS pages cache".
-OS automatically frees this cache any time it needs memory. Smaller "page cache size" may not impact performance of
-Erigon at all.
-
-Next tools show correct memory usage of Erigon:
-
-- `vmmap -summary PID | grep -i "Physical footprint"`. Without `grep` you can see details
-    - `section MALLOC ZONE column Resident Size` shows App memory usage, `section REGION TYPE column Resident Size`
-      shows OS pages cache size.
-- `Prometheus` dashboard shows memory of Go app without OS pages cache (`make prometheus`, open in
-  browser `localhost:3000`, credentials `admin/admin`)
-- `cat /proc/<PID>/smaps`
-
-Erigon uses ~4Gb of RAM during genesis sync and ~1Gb during normal work. OS pages cache can utilize unlimited amount of
-memory.
-
-**Warning:** Multiple instances of Erigon on same machine will touch Disk concurrently, it impacts performance - one of
-main Erigon optimizations: "reduce Disk random access".
-"Blocks Execution stage" still does many random reads - this is reason why it's slowest stage. We do not recommend
-running multiple genesis syncs on same Disk. If genesis sync passed, then it's fine to run multiple Erigon instances on
-same Disk.
-
-### Cloud network drives
-
-(Like gp3)
-You may read: https://github.com/erigontech/erigon/issues/1516#issuecomment-811958891
-In short: network-disks are bad for blocks execution - because they are designed for parallel/batch workloads (databases
-with many parallel requests). But blocks execution in Erigon is non-parallel and using blocking-io.
-
-What can do:
-
-- reduce disk latency (not throughput, not iops)
-    - use latency-critical cloud-drives
-    - or attached-NVMe (at least for initial sync)
-- increase RAM
-- if you throw enough RAM, then can set env variable `ERIGON_SNAPSHOT_MADV_RND=false`
-- Use `--db.pagesize=64kb` (less fragmentation, more IO)
-- Or use Erigon3 (it also sensitive for disk-latency - but it will download 99% of history)
-
-### Filesystem's background features are expensive
-
-For example: btrfs's autodefrag option - may increase write IO 100x times
-
-### Gnome Tracker can kill Erigon
-
-[Gnome Tracker](https://wiki.gnome.org/Attic/Tracker) - detecting miners and kill them.
-
-### the --mount option requires BuildKit error
-
-For anyone else that was getting the BuildKit error when trying to start Erigon the old way you can use the below...
-
-```sh
-XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
-```
-
-### Erigon crashes due to kernel allocation limits
-
-Error message: `cannot allocate memory`.
-
-Add to `/etc/sysctl.conf` (or add .conf file in `/etc/sysctl.d/`)
-
-```
-vm.overcommit_memory = 1 
-vm.max_map_count = 16777216 
-```
----------

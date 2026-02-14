@@ -24,9 +24,8 @@ func KzgCommitmentToVersionedHash(kzgCommitment common.Bytes48) (common.Hash, er
 	versionedHash := [32]byte{}
 	kzgCommitmentHash := Sha256(kzgCommitment[:])
 
-	buf := append([]byte{}, VERSIONED_HASH_VERSION_KZG)
-	buf = append(buf, kzgCommitmentHash[1:]...)
-	copy(versionedHash[:], buf)
+	versionedHash[0] = VERSIONED_HASH_VERSION_KZG
+	copy(versionedHash[1:], kzgCommitmentHash[1:])
 
 	return versionedHash, nil
 }

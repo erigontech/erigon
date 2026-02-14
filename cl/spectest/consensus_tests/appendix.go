@@ -21,7 +21,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	"github.com/erigontech/erigon/spectest"
+	"github.com/erigontech/erigon/cl/spectest/spectest"
 )
 
 var TestFormats = spectest.Appendix{}

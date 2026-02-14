@@ -50,7 +50,7 @@ type Genesis struct {
 	Difficulty *big.Int       `json:"difficulty" gencodec:"required"`
 	Mixhash    common.Hash    `json:"mixHash"`
 	Coinbase   common.Address `json:"coinbase"`
-	Alloc      GenesisAlloc   `json:"alloc"      gencodec:"required"`
+	Alloc      GenesisAlloc   `json:"alloc"`
 
 	AuRaSeal *AuRaSeal `json:"seal"`
 
@@ -66,6 +66,7 @@ type Genesis struct {
 	ExcessBlobGas         *uint64      `json:"excessBlobGas"`         // EIP-4844
 	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
 	RequestsHash          *common.Hash `json:"requestsHash"`          // EIP-7685
+	BlockAccessListHash   *common.Hash `json:"blockAccessListHash"`   // EIP-7928
 }
 
 type AuRaSeal struct {
@@ -97,7 +98,7 @@ func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func DecodeGenesisAlloc(i interface{}) (GenesisAlloc, error) {
+func DecodeGenesisAlloc(i any) (GenesisAlloc, error) {
 	var alloc GenesisAlloc
 
 	b, err := json.Marshal(i)

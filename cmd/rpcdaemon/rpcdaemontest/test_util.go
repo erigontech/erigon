@@ -39,11 +39,12 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/consensus"
-	"github.com/erigontech/erigon/execution/consensus/ethash"
-	"github.com/erigontech/erigon/execution/core"
-	"github.com/erigontech/erigon/execution/stages/mock"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -80,7 +81,7 @@ func makeTestAddresses() testAddresses {
 	}
 }
 
-func CreateTestSentry(t *testing.T) (*mock.MockSentry, *core.ChainPack, []*core.ChainPack) {
+func CreateTestSentry(t *testing.T) (*mock.MockSentry, *blockgen.ChainPack, []*blockgen.ChainPack) {
 	addresses := makeTestAddresses()
 	var (
 		key      = addresses.key
@@ -100,12 +101,12 @@ func CreateTestSentry(t *testing.T) (*mock.MockSentry, *core.ChainPack, []*core.
 			GasLimit: 10000000,
 		}
 	)
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 
 	// Generate empty chain to have some orphaned blocks for tests
-	orphanedChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *core.BlockGen) {
+	orphanedChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *blockgen.BlockGen) {
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -123,19 +124,19 @@ func CreateTestSentry(t *testing.T) (*mock.MockSentry, *core.ChainPack, []*core.
 		t.Fatal(err)
 	}
 
-	return m, chain, []*core.ChainPack{orphanedChain}
+	return m, chain, []*blockgen.ChainPack{orphanedChain}
 }
 
-var chainInstance *core.ChainPack
+var chainInstance *blockgen.ChainPack
 
 func getChainInstance(
 	addresses *testAddresses,
 	config *chain.Config,
 	parent *types.Block,
-	engine consensus.Engine,
+	engine rules.Engine,
 	db kv.TemporalRwDB,
 	contractBackend *backends.SimulatedBackend,
-) (*core.ChainPack, error) {
+) (*blockgen.ChainPack, error) {
 	var err error
 	if chainInstance == nil {
 		chainInstance, err = generateChain(addresses, config, parent, engine, db, contractBackend)
@@ -147,10 +148,10 @@ func generateChain(
 	addresses *testAddresses,
 	config *chain.Config,
 	parent *types.Block,
-	engine consensus.Engine,
+	engine rules.Engine,
 	db kv.TemporalRwDB,
 	contractBackend *backends.SimulatedBackend,
-) (*core.ChainPack, error) {
+) (*blockgen.ChainPack, error) {
 	var (
 		key      = addresses.key
 		key1     = addresses.key1
@@ -170,8 +171,8 @@ func generateChain(
 	var poly *contracts.Poly
 	var tokenContract *contracts.Token
 
-	// We generate the blocks without plain state because it's not supported in core.GenerateChain
-	return core.GenerateChain(config, parent, engine, db, 11, func(i int, block *core.BlockGen) {
+	// We generate the blocks without plain state because it's not supported in blockgen.GenerateChain
+	return blockgen.GenerateChain(config, parent, engine, db, 11, func(i int, block *blockgen.BlockGen) {
 		var (
 			txn types.Transaction
 			txs []types.Transaction
@@ -430,12 +431,12 @@ func CreateTestSentryForTraces(t *testing.T) *mock.MockSentry {
 			},
 		}
 	)
-	m := mock.MockWithGenesis(t, gspec, key, false)
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
+	m := mock.MockWithGenesis(t, gspec, key)
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AAAA
 		tx, _ := types.SignTx(types.NewTransaction(0, a2,
-			u256.Num0, 50000, u256.Num1, []byte{0x01, 0x00, 0x01, 0x00}), *types.LatestSignerForChainID(nil), key)
+			&u256.Num0, 50000, &u256.Num1, []byte{0x01, 0x00, 0x01, 0x00}), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 	})
 	if err != nil {
@@ -488,9 +489,10 @@ func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 	if l := len(initCode); l > 32 {
 		t.Fatalf("init code is too long for a pushx, need a more elaborate deployer")
 	}
-	bbCode := []byte{
+	bbCode := make([]byte, 0, 1+len(initCode)+12)
+	bbCode = append(bbCode,
 		// Push initcode onto stack
-		byte(vm.PUSH1) + byte(len(initCode)-1)}
+		byte(vm.PUSH1)+byte(len(initCode)-1))
 	bbCode = append(bbCode, initCode...)
 	bbCode = append(bbCode, []byte{
 		byte(vm.PUSH1), 0x0, // memory start on stack
@@ -502,8 +504,8 @@ func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 		byte(vm.CREATE2),
 	}...)
 
-	initHash := crypto.Keccak256Hash(initCode)
-	aa := types.CreateAddress2(bb, [32]byte{}, initHash[:])
+	initHash := accounts.InternCodeHash(crypto.Keccak256Hash(initCode))
+	aa := types.CreateAddress2(bb, [32]byte{}, initHash)
 	t.Logf("Destination address: %x\n", aa)
 
 	gspec := &types.Genesis{
@@ -529,19 +531,19 @@ func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 			},
 		},
 	}
-	m := mock.MockWithGenesis(t, gspec, key, false)
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
+	m := mock.MockWithGenesis(t, gspec, key)
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, aa,
-			u256.Num0, 50000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+			&u256.Num0, 50000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 		// One transaction to BB, to recreate AA
 		tx, _ = types.SignTx(types.NewTransaction(1, bb,
-			u256.Num0, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+			&u256.Num0, 100000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 		tx, _ = types.SignTx(types.NewTransaction(2, bb,
-			u256.Num0, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
+			&u256.Num0, 100000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 	})
 	if err != nil {

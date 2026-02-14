@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"sort"
+	"slices"
 	"strconv"
 
 	"github.com/erigontech/erigon/cmd/pics/visual"
@@ -85,7 +85,7 @@ func prefixGroups2() {
 	}
 
 	keys := generatePrefixGroups()
-	sort.Strings(keys)
+	slices.Sort(keys)
 	visual.StartGraph(f, false)
 	for i, key := range keys {
 		visual.QuadVertical(f, []byte(key), len(key), fmt.Sprintf("q_%x", key))
@@ -121,7 +121,7 @@ func prefixGroups3() {
 		panic(err)
 	}
 	keys := generatePrefixGroups()
-	sort.Strings(keys)
+	slices.Sort(keys)
 	// Set of all possible common prefixes
 	prefixSet := make(map[string]struct{})
 	for i, key := range keys {

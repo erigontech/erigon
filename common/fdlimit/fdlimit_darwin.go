@@ -34,10 +34,7 @@ func Raise(_max uint64) (uint64, error) {
 		return 0, err
 	}
 	// Try to update the limit to the max allowance
-	limit.Cur = limit.Max
-	if limit.Cur > _max {
-		limit.Cur = _max
-	}
+	limit.Cur = min(limit.Max, _max)
 	if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &limit); err != nil {
 		return 0, err
 	}

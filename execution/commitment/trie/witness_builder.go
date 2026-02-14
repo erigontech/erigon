@@ -160,7 +160,8 @@ func (b *WitnessBuilder) processAccountCode(n *AccountNode, retainDec RetainDeci
 		if n.Code != nil {
 			codeSize = len(n.Code)
 		}
-		return codeSize, b.addHashOp(&HashNode{hash: n.CodeHash[:]})
+		codeHashValue := n.CodeHash.Value()
+		return codeSize, b.addHashOp(&HashNode{hash: codeHashValue[:]})
 	}
 
 	return len(n.Code), b.addCodeOp(n.Code)

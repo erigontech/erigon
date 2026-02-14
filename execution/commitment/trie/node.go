@@ -38,6 +38,7 @@ type Node interface {
 
 	// if not empty, returns node's RLP or hash thereof
 	reference() []byte
+	String() string
 }
 
 type (
@@ -160,6 +161,10 @@ func resetRefs(nd Node) {
 			if child != nil {
 				resetRefs(child)
 			}
+		}
+	case *AccountNode:
+		if n.Storage != nil {
+			resetRefs(n.Storage)
 		}
 	}
 }

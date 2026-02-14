@@ -21,8 +21,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/genesiswrite"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -102,7 +102,7 @@ func (m *MockMsgReadWriter) WriteMsg(msg p2p.Msg) error {
 	}
 
 	buf := new(bytes.Buffer)
-	err := rlp.Encode(buf, []interface{}{msg.Code, payloadBytes}) // Encode as a list [code, payload]
+	err := rlp.Encode(buf, []any{msg.Code, payloadBytes}) // Encode as a list [code, payload]
 	if err != nil {
 		return fmt.Errorf("failed to RLP encode message: %w", err)
 	}
@@ -187,8 +187,7 @@ func TestHandShake69_ETH69ToETH69(t *testing.T) {
 	assert := assert.New(t)
 	require := require.New(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Sentry 1 (initiator)
 	sentry1RW := NewMockMsgReadWriter()
@@ -278,8 +277,7 @@ func TestHandShake69_ETH69ToETH68(t *testing.T) {
 	assert := assert.New(t)
 	require := require.New(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Sentry 1 (ETH69 initiator)
 	sentry1RW := NewMockMsgReadWriter()
@@ -383,7 +381,7 @@ func (rw *RLPReadWriter) WriteMsg(msg p2p.Msg) error {
 		defer rw.writtenMessagesMu.Unlock()
 		// RLP encode the message code and payload for storage
 		buf := new(bytes.Buffer)
-		err := rlp.Encode(buf, []interface{}{msg.Code, msg.Payload})
+		err := rlp.Encode(buf, []any{msg.Code, msg.Payload})
 		if err != nil {
 			return fmt.Errorf("failed to RLP encode message for storage: %w", err)
 		}
@@ -411,8 +409,7 @@ func TestHandShake69_ETH69ToETH69_WithRLP(t *testing.T) {
 	t.Parallel()
 	assert := assert.New(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Sentry 1 (initiator)
 	sentry1RW := NewRLPReadWriter()
@@ -483,8 +480,7 @@ func TestHandShake_ETH69ToETH68_WithRLP(t *testing.T) {
 	t.Parallel()
 	assert := assert.New(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// Sentry 1 (ETH69 initiator)
 	sentry1RW := NewRLPReadWriter()

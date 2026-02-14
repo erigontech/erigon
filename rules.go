@@ -21,12 +21,7 @@ package gorules
 // to apply changes in this file, please do: ./build/bin/golangci-lint cache clean
 import (
 	"github.com/quasilyte/go-ruleguard/dsl"
-	//quasilyterules "github.com/quasilyte/ruleguard-rules-test"
 )
-
-func init() {
-	//dsl.ImportRules("qrules", quasilyterules.Bundle)
-}
 
 func txDeferRollback(m dsl.Matcher) {
 	// Common pattern for long-living transactions:
@@ -78,7 +73,7 @@ func cursorDeferClose(m dsl.Matcher) {
 		`$c, $err := $db.RwCursorDupSort($table); $chk; $close`,
 	).
 		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
-		//At(m["rollback"]).
+		//At(m["close"]).
 		Report(`Add "defer $c.Close()" right after cursor creation error check`)
 }
 
@@ -92,15 +87,15 @@ func streamDeferClose(m dsl.Matcher) {
 		`$c, $err := $db.Prefix($params); $chk; $close`,
 	).
 		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
-		//At(m["rollback"]).
+		//At(m["close"]).
 		Report(`Add "defer $c.Close()" right after cursor creation error check`)
 }
 
 func closeCollector(m dsl.Matcher) {
-	m.Match(`$c := etl.NewCollector($*_); $close`).
-		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
-		Report(`Add "defer $c.Close()" right after collector creation`)
-	m.Match(`$c := etl.NewCollectorWithAllocator($*_); $close`).
+	m.Match(
+		`$c := etl.NewCollector($*_); $close`,
+		`$c := etl.NewCollectorWithAllocator($*_); $close`,
+	).
 		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
 		Report(`Add "defer $c.Close()" right after collector creation`)
 }

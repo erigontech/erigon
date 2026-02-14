@@ -116,7 +116,8 @@ func DialHTTPWithClient(endpoint string, client *http.Client, logger log.Logger)
 
 // DialHTTP creates a new RPC client that connects to an RPC server over HTTP.
 func DialHTTP(endpoint string, logger log.Logger) (*Client, error) {
-	return DialHTTPWithClient(endpoint, new(http.Client), logger)
+	client := &http.Client{Timeout: 30 * time.Second}
+	return DialHTTPWithClient(endpoint, client, logger)
 }
 
 func (c *Client) sendHTTP(ctx context.Context, op *requestOp, msg any) error {
@@ -125,11 +126,11 @@ func (c *Client) sendHTTP(ctx context.Context, op *requestOp, msg any) error {
 	if err != nil {
 		return err
 	}
-	var respmsg jsonrpcMessage
-	if err := json.Unmarshal(respBody, &respmsg); err != nil {
+	var respMsg jsonrpcMessage
+	if err := json.Unmarshal(respBody, &respMsg); err != nil {
 		return err
 	}
-	op.resp <- &respmsg
+	op.resp <- []*jsonrpcMessage{&respMsg}
 	return nil
 }
 
@@ -139,13 +140,11 @@ func (c *Client) sendBatchHTTP(ctx context.Context, op *requestOp, msgs []*jsonr
 	if err != nil {
 		return err
 	}
-	var respmsgs []jsonrpcMessage
-	if err := json.Unmarshal(respBody, &respmsgs); err != nil {
+	var respMsgs []*jsonrpcMessage
+	if err := json.Unmarshal(respBody, &respMsgs); err != nil {
 		return err
 	}
-	for i := 0; i < len(respmsgs); i++ {
-		op.resp <- &respmsgs[i]
-	}
+	op.resp <- respMsgs
 	return nil
 }
 
@@ -270,8 +269,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if s.debugSingleRequest {
 		if v := r.Header.Get(dbg.HTTPHeader); v == "true" {
-			ctx = dbg.ContextWithDebug(ctx, true)
-
+			ctx = dbg.WithDebug(ctx, true)
 		}
 	}
 

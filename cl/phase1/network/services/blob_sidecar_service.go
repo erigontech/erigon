@@ -24,7 +24,9 @@ import (
 	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
+	"github.com/libp2p/go-libp2p/core/peer"
 
+	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/utils/bls"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -78,6 +80,26 @@ func NewBlobSidecarService(
 	}
 	// go b.loop(ctx)
 	return b
+}
+
+func (b *blobSidecarService) Names() []string {
+	names := make([]string, 0, b.beaconCfg.BlobSidecarSubnetCountElectra)
+	for i := 0; i < int(b.beaconCfg.BlobSidecarSubnetCountElectra); i++ {
+		names = append(names, gossip.TopicNameBlobSidecar(uint64(i)))
+	}
+	return names
+}
+
+func (b *blobSidecarService) IsMyGossipMessage(name string) bool {
+	return gossip.IsTopicBlobSidecar(name)
+}
+
+func (b *blobSidecarService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.BlobSidecar, error) {
+	obj := &cltypes.BlobSidecar{}
+	if err := obj.DecodeSSZ(data, int(version)); err != nil {
+		return nil, err
+	}
+	return obj, nil
 }
 
 // ProcessMessage processes a blob sidecar message

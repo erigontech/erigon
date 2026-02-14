@@ -235,8 +235,7 @@ func NewTestDB(tb testing.TB, label kv.Label) kv.TemporalRwDB {
 	tb.Helper()
 	db := memdb.NewTestDB(tb, label)
 	dirs := datadir.New(tb.TempDir())
-	stepSize := uint64(1000)
-	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(context.Background(), db)
+	agg := state.NewTest(dirs).DisableHistory().MustOpen(context.Background(), db)
 	tb.Cleanup(agg.Close)
 	tdb, _ := New(db, agg)
 	return tdb
@@ -371,6 +370,13 @@ func (tx *RwTx) LockDBInRam() error {
 
 func (tx *RwTx) Debug() kv.TemporalDebugTx { return tx }
 func (tx *Tx) Debug() kv.TemporalDebugTx   { return tx }
+
+func (tx *RwTx) NewMemBatch(ioMetrics any) kv.TemporalMemBatch {
+	return state.NewTemporalMemBatch(tx, ioMetrics)
+}
+func (tx *Tx) NewMemBatch(ioMetrics any) kv.TemporalMemBatch {
+	return state.NewTemporalMemBatch(tx, ioMetrics)
+}
 
 func (tx *RwTx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 	tx.tx.mu.RLock()
@@ -617,12 +623,20 @@ func (tx *RwTx) GetLatestFromDB(domain kv.Domain, k []byte) (v []byte, step kv.S
 	return tx.getLatestFromDB(domain, tx.RwTx, k)
 }
 
+func (tx *RwTx) TraceKey(domain kv.Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error) {
+	return tx.aggtx.DebugTraceKey(tx.ctx, domain, k, fromTxNum, toTxNum, tx.RwTx)
+}
+
 func (tx *tx) getLatestFromDB(domain kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step kv.Step, found bool, err error) {
 	return tx.aggtx.DebugGetLatestFromDB(domain, k, dbTx)
 }
 
 func (tx *tx) GetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	return tx.aggtx.DebugGetLatestFromFiles(domain, k, maxTxNum)
+}
+
+func (tx *Tx) TraceKey(domain kv.Domain, k []byte, fromTxNum, toTxNum uint64) (stream.U64V, error) {
+	return tx.aggtx.DebugTraceKey(tx.ctx, domain, k, fromTxNum, toTxNum, tx.Tx)
 }
 
 func (db *DB) DomainTables(domain ...kv.Domain) []string {

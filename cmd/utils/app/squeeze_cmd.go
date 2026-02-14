@@ -56,7 +56,7 @@ func doSqueeze(cliCtx *cli.Context) error {
 		return err
 	}
 	defer l.Unlock()
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -90,7 +90,8 @@ func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 	defer db.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(db).ChainName)
 
-	_, _, _, _, agg, _, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	agg := res.Aggregator
 	if err != nil {
 		return err
 	}
@@ -108,6 +109,9 @@ func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 		return err
 	}
 	ac.Close()
+	if err := agg.ReloadFiles(); err != nil {
+		return err
+	}
 	if err := agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
@@ -118,7 +122,8 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(db).ChainName)
-	_, _, _, _, agg, _, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	agg := res.Aggregator
 	if err != nil {
 		return err
 	}
@@ -167,6 +172,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	if err := agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
+	// TODO: aggOld.reload files?
 	if err := aggOld.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
@@ -227,7 +233,8 @@ func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) er
 	chainConfig := fromdb.ChainConfig(db)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
-	_, _, _, br, _, _, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
+	br := res.BlockRetire
 	if err != nil {
 		return err
 	}

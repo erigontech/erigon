@@ -30,7 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/execution/chain/params"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/testdata"
@@ -38,13 +38,11 @@ import (
 
 func TestParseTransactionRLP(t *testing.T) {
 	for _, testSet := range allNetsTestCases {
-		testSet := testSet
 		t.Run(strconv.Itoa(int(testSet.chainID.Uint64())), func(t *testing.T) {
 			require := require.New(t)
 			ctx := NewTxnParseContext(testSet.chainID)
 			txn, txnSender := &TxnSlot{}, [20]byte{}
 			for i, tt := range testSet.tests {
-				tt := tt
 				t.Run(strconv.Itoa(i), func(t *testing.T) {
 					payload := hexutil.MustDecodeHex(tt.PayloadStr)
 					parseEnd, err := ctx.ParseTransaction(payload, 0, txn, txnSender[:], false /* hasEnvelope */, true /* wrappedWithBlobs */, nil)
@@ -586,7 +584,7 @@ func TestSetCodeAuthSignatureRecover(t *testing.T) {
 	rlpStream := rlp.NewStream(bytes.NewBuffer(txnRlpBytes[1:]), uint64(len(txnRlpBytes)))
 	setCodeTx.DecodeRLP(rlpStream)
 	require.Len(t, txn.AuthAndNonces, 1)
-	require.Equal(t, expectedSigner.String(), txn.AuthAndNonces[0].authority)
+	require.Equal(t, expectedSigner, txn.AuthAndNonces[0].authority)
 }
 
 func TestSetCodeTxnParsing(t *testing.T) {

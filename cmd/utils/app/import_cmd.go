@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/urfave/cli/v2"
+	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cmd/erigon/node"
 	"github.com/erigontech/erigon/cmd/utils"
@@ -36,14 +37,15 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/execution/core"
-	"github.com/erigontech/erigon/execution/eth1/eth1_chain_reader"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/eth"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
 const (
@@ -185,7 +187,7 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.
 		}
 
 		// RLP decoding worked, try to insert into chain:
-		missingChain := &core.ChainPack{
+		missingChain := &blockgen.ChainPack{
 			Blocks:   missing,
 			TopBlock: missing[len(missing)-1],
 		}
@@ -232,14 +234,28 @@ func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader services.
 	return nil
 }
 
-func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack, setHead bool) error {
+type stateChangesClient interface {
+	StateChanges(ctx context.Context, in *remoteproto.StateChangeRequest, opts ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error)
+}
+
+func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool) error {
+	streamCtx, cancel := context.WithCancel(ethereum.SentryCtx())
+	defer cancel()
+	stream, err := ethereum.StateDiffClient().StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: false, WithTransactions: false}, grpc.WaitForReady(true))
+	if err != nil {
+		return err
+	}
+
+	insertedBlocks := map[uint64]struct{}{}
+
 	for _, block := range chain.Blocks {
 		if err := block.HashCheck(true); err != nil {
 			return err
 		}
+		insertedBlocks[block.NumberU64()] = struct{}{}
 	}
 
-	chainRW := eth1_chain_reader.NewChainReaderEth1(ethereum.ChainConfig(), direct.NewExecutionClientDirect(ethereum.ExecutionModule()), uint64(time.Hour))
+	chainRW := chainreader.NewChainReaderEth1(ethereum.ChainConfig(), direct.NewExecutionClientDirect(ethereum.ExecutionModule()), uint64(time.Hour))
 
 	ctx := context.Background()
 	if err := chainRW.InsertBlocksAndWait(ctx, chain.Blocks); err != nil {
@@ -254,6 +270,35 @@ func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack, setHead bool) er
 	status, _, lvh, err := chainRW.UpdateForkChoice(ctx, tipHash, tipHash, tipHash)
 	if err != nil {
 		return err
+	}
+
+	// UpdateForkChoice has an async commit so we need to wait to make sure
+	// it is completed before assuming all state changes etc are inserted
+	var lastSeenBlock uint64
+	for len(insertedBlocks) > 0 {
+		req, err := stream.Recv()
+		if err != nil {
+			if ethereum.SentryCtx().Err() != nil {
+				return nil
+			}
+			if streamCtx.Err() != nil {
+				return fmt.Errorf("block insert recv timed out: %d remaining", len(insertedBlocks))
+			}
+			return fmt.Errorf("block insert recv failed: %w, %d remaining", err, len(insertedBlocks))
+		}
+
+		for _, change := range req.ChangeBatch {
+			if change.Direction == remoteproto.Direction_UNWIND {
+				insertedBlocks = nil
+			}
+			for lastSeenBlock <= change.BlockHeight {
+				delete(insertedBlocks, lastSeenBlock)
+				lastSeenBlock++
+			}
+			if len(insertedBlocks) == 0 {
+				break
+			}
+		}
 	}
 
 	err = ethereum.ChainDB().Update(ethereum.SentryCtx(), func(tx kv.RwTx) error {

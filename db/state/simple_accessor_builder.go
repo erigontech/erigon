@@ -10,6 +10,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
@@ -69,7 +70,7 @@ func NewAccessorArgs(enums, lessFalsePositives bool, valuesOnCompressedPage int,
 type SimpleAccessorBuilder struct {
 	args     *AccessorArgs
 	indexPos uint64
-	id       ForkableId
+	id       kv.ForkableId
 	parser   SnapNameSchema
 	kf       IndexKeyFactory
 	fetcher  FirstEntityNumFetcher
@@ -82,7 +83,7 @@ type FirstEntityNumFetcher = func(from, to RootNum, seg *seg.Decompressor) Num
 
 var _ AccessorIndexBuilder = (*SimpleAccessorBuilder)(nil)
 
-func NewSimpleAccessorBuilder(args *AccessorArgs, id ForkableId, tmpDir string, logger log.Logger, options ...AccessorBuilderOptions) *SimpleAccessorBuilder {
+func NewSimpleAccessorBuilder(args *AccessorArgs, id kv.ForkableId, tmpDir string, logger log.Logger, options ...AccessorBuilderOptions) *SimpleAccessorBuilder {
 	b := &SimpleAccessorBuilder{
 		args:   args,
 		id:     id,
@@ -160,7 +161,7 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, decomp *seg.Decompres
 	}
 	defer iidq.Close()
 	meta := iidq.Metadata()
-	idxFile := s.parser.AccessorIdxFile(version.V1_0, from, to, s.indexPos)
+	idxFile, _ := s.parser.AccessorIdxFile(version.V1_0, from, to, uint16(s.indexPos))
 
 	keyCount := iidq.Count()
 	if p != nil {

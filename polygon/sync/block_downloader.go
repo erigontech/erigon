@@ -181,7 +181,7 @@ func (d *BlockDownloader) downloadBlocksUsingWaypoints(
 	waypoints = d.limitWaypoints(waypoints)
 	waypoints = limitWaypointsEndBlock(waypoints, end)
 
-	initialInfoLogArgs := []interface{}{
+	initialInfoLogArgs := []any{
 		"start", start,
 		"waypointsLen", len(waypoints),
 		"waypointsStart", waypoints[0].StartBlock().Uint64(),
@@ -312,7 +312,7 @@ func (d *BlockDownloader) downloadBlocksUsingWaypoints(
 				break
 			}
 
-			if blockBatch[0].Number().Uint64() == 0 {
+			if blockBatch[0].Number().Sign() == 0 {
 				// we do not want to insert block 0 (genesis)
 				blockBatch = blockBatch[1:]
 			}

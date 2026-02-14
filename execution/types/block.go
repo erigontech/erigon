@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const (
@@ -104,7 +105,8 @@ type Header struct {
 
 	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
 
-	RequestsHash *common.Hash `json:"requestsHash"` // EIP-7685
+	RequestsHash        *common.Hash `json:"requestsHash"`        // EIP-7685
+	BlockAccessListHash *common.Hash `json:"blockAccessListHash"` // EIP-7928
 
 	// by default all headers are immutable
 	// but assembling/mining may use `NewEmptyHeaderForAssembling` to create temporary mutable Header object
@@ -124,33 +126,22 @@ func (h *Header) EncodingSize() int {
 	encodingSize := 33 /* ParentHash */ + 33 /* UncleHash */ + 21 /* Coinbase */ + 33 /* Root */ + 33 /* TxHash */ +
 		33 /* ReceiptHash */ + 259 /* Bloom */
 
-	encodingSize++
-	if h.Difficulty != nil {
-		encodingSize += rlp.BigIntLenExcludingHead(h.Difficulty)
-	}
-	encodingSize++
-	if h.Number != nil {
-		encodingSize += rlp.BigIntLenExcludingHead(h.Number)
-	}
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(h.GasLimit)
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(h.GasUsed)
-	encodingSize++
-	encodingSize += rlp.IntLenExcludingHead(h.Time)
-	// size of Extra
+	encodingSize += rlp.BigIntLen(h.Difficulty)
+	encodingSize += rlp.BigIntLen(h.Number)
+	encodingSize += rlp.U64Len(h.GasLimit)
+	encodingSize += rlp.U64Len(h.GasUsed)
+	encodingSize += rlp.U64Len(h.Time)
 	encodingSize += rlp.StringLen(h.Extra)
 
 	if len(h.AuRaSeal) != 0 {
-		encodingSize += 1 + rlp.IntLenExcludingHead(h.AuRaStep)
+		encodingSize += rlp.U64Len(h.AuRaStep)
 		encodingSize += rlp.ListPrefixLen(len(h.AuRaSeal)) + len(h.AuRaSeal)
 	} else {
 		encodingSize += 33 /* MixDigest */ + 9 /* BlockNonce */
 	}
 
 	if h.BaseFee != nil {
-		encodingSize++
-		encodingSize += rlp.BigIntLenExcludingHead(h.BaseFee)
+		encodingSize += rlp.BigIntLen(h.BaseFee)
 	}
 
 	if h.WithdrawalsHash != nil {
@@ -158,12 +149,10 @@ func (h *Header) EncodingSize() int {
 	}
 
 	if h.BlobGasUsed != nil {
-		encodingSize++
-		encodingSize += rlp.IntLenExcludingHead(*h.BlobGasUsed)
+		encodingSize += rlp.U64Len(*h.BlobGasUsed)
 	}
 	if h.ExcessBlobGas != nil {
-		encodingSize++
-		encodingSize += rlp.IntLenExcludingHead(*h.ExcessBlobGas)
+		encodingSize += rlp.U64Len(*h.ExcessBlobGas)
 	}
 
 	if h.ParentBeaconBlockRoot != nil {
@@ -171,6 +160,10 @@ func (h *Header) EncodingSize() int {
 	}
 
 	if h.RequestsHash != nil {
+		encodingSize += 33
+	}
+
+	if h.BlockAccessListHash != nil {
 		encodingSize += 33
 	}
 
@@ -320,6 +313,16 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 			return err
 		}
 		if _, err := w.Write(h.RequestsHash[:]); err != nil {
+			return err
+		}
+	}
+
+	if h.BlockAccessListHash != nil {
+		b[0] = 128 + 32
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
+		if _, err := w.Write(h.BlockAccessListHash[:]); err != nil {
 			return err
 		}
 	}
@@ -486,6 +489,23 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	h.RequestsHash = new(common.Hash)
 	h.RequestsHash.SetBytes(b)
 
+	// BlockAccessListHash
+	if b, err = s.Bytes(); err != nil {
+		if errors.Is(err, rlp.EOL) {
+			h.BlockAccessListHash = nil
+			if err := s.ListEnd(); err != nil {
+				return fmt.Errorf("close header struct (no BlockAccessListHash): %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("read BlockAccessListHash: %w", err)
+	}
+	if len(b) != 32 {
+		return fmt.Errorf("wrong size for BlockAccessListHash: %d", len(b))
+	}
+	h.BlockAccessListHash = new(common.Hash)
+	h.BlockAccessListHash.SetBytes(b)
+
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close header struct: %w", err)
 	}
@@ -533,7 +553,7 @@ func (h *Header) CalcHash() (hash common.Hash) {
 	return hash
 }
 
-var headerSize = common.StorageSize(reflect.TypeOf(Header{}).Size())
+var headerSize = common.StorageSize(reflect.TypeFor[Header]().Size())
 
 // Size returns the approximate memory used by all internal contents. It is used
 // to approximate and limit the memory consumption of various caches.
@@ -768,7 +788,7 @@ func (b *Body) SendersToTxs(senders []common.Address) {
 		return
 	}
 	for i, txn := range b.Transactions {
-		txn.SetSender(senders[i])
+		txn.SetSender(accounts.InternAddress(senders[i]))
 	}
 }
 
@@ -777,7 +797,7 @@ func (b *Body) SendersFromTxs() []common.Address {
 	senders := make([]common.Address, len(b.Transactions))
 	for i, txn := range b.Transactions {
 		if sender, ok := txn.GetSender(); ok {
-			senders[i] = sender
+			senders[i] = sender.Value()
 		}
 	}
 	return senders
@@ -875,11 +895,8 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 }
 
 func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen int) {
-	baseTxnIDLen := 1 + rlp.IntLenExcludingHead(bfs.BaseTxnID.U64())
-	txCountLen := 1 + rlp.IntLenExcludingHead(uint64(bfs.TxCount))
-
-	payloadSize += baseTxnIDLen
-	payloadSize += txCountLen
+	payloadSize += rlp.U64Len(bfs.BaseTxnID.U64())
+	payloadSize += rlp.U64Len(uint64(bfs.TxCount))
 
 	// size of Uncles
 	unclesLen += EncodingSizeGenericList(bfs.Uncles)
@@ -1107,12 +1124,13 @@ func NewBlockWithHeader(header *Header) *Block {
 // NewBlockFromNetwork like NewBlock but used to create Block object when assembled from devp2p network messages
 // when there is no reason to copy parts, or re-calculate headers fields.
 func NewBlockFromNetwork(header *Header, body *Body) *Block {
-	return &Block{
+	b := &Block{
 		header:       header,
 		transactions: body.Transactions,
 		uncles:       body.Uncles,
 		withdrawals:  body.Withdrawals,
 	}
+	return b
 }
 
 // CopyHeader creates a deep copy of a block header to prevent side effects from
@@ -1170,6 +1188,10 @@ func CopyHeader(h *Header) *Header {
 		cpy.RequestsHash = new(common.Hash)
 		cpy.RequestsHash.SetBytes(h.RequestsHash.Bytes())
 	}
+	if h.BlockAccessListHash != nil {
+		cpy.BlockAccessListHash = new(common.Hash)
+		cpy.BlockAccessListHash.SetBytes(h.BlockAccessListHash.Bytes())
+	}
 	cpy.mutable = h.mutable
 	return &cpy
 }
@@ -1202,7 +1224,6 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 	if err := decodeWithdrawals(&bb.withdrawals, s); err != nil {
 		return err
 	}
-
 	return s.ListEnd()
 }
 
@@ -1294,7 +1315,7 @@ func (b *Block) ParentHash() common.Hash  { return b.header.ParentHash }
 func (b *Block) TxHash() common.Hash      { return b.header.TxHash }
 func (b *Block) ReceiptHash() common.Hash { return b.header.ReceiptHash }
 func (b *Block) UncleHash() common.Hash   { return b.header.UncleHash }
-func (b *Block) Extra() []byte            { return common.CopyBytes(b.header.Extra) }
+func (b *Block) Extra() []byte            { return common.Copy(b.header.Extra) }
 func (b *Block) BaseFee() *big.Int {
 	if b.header.BaseFee == nil {
 		return nil
@@ -1305,6 +1326,7 @@ func (b *Block) WithdrawalsHash() *common.Hash       { return b.header.Withdrawa
 func (b *Block) Withdrawals() Withdrawals            { return b.withdrawals }
 func (b *Block) ParentBeaconBlockRoot() *common.Hash { return b.header.ParentBeaconBlockRoot }
 func (b *Block) RequestsHash() *common.Hash          { return b.header.RequestsHash }
+func (b *Block) BlockAccessListHash() *common.Hash   { return b.header.BlockAccessListHash }
 
 // Header returns a deep-copy of the entire block header using CopyHeader()
 func (b *Block) Header() *Header       { return CopyHeader(b.header) }
@@ -1321,7 +1343,7 @@ func (b *Block) SendersToTxs(senders []common.Address) {
 		return
 	}
 	for i, txn := range b.transactions {
-		txn.SetSender(senders[i])
+		txn.SetSender(accounts.InternAddress(senders[i]))
 	}
 }
 
@@ -1497,9 +1519,10 @@ func DecodeOnlyTxMetadataFromBody(payload []byte) (baseTxnID BaseTxnID, txCount 
 }
 
 type BlockWithReceipts struct {
-	Block    *Block
-	Receipts Receipts
-	Requests FlatRequests
+	Block           *Block
+	Receipts        Receipts
+	Requests        FlatRequests
+	BlockAccessList BlockAccessList
 }
 
 type rlpEncodable interface {

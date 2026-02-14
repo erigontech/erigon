@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
@@ -27,6 +28,7 @@ func setupBorSpans(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) 
 	id := kv.ForkableId(2)
 	stepSize := uint64(10)
 	name := "borspans"
+	ver := version.V1_0_standart
 	snapCfg := state.NewSnapshotConfig(
 		&state.SnapshotCreationConfig{
 			RootNumPerStep: stepSize,
@@ -34,7 +36,7 @@ func setupBorSpans(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) 
 			MinimumSize:    10,
 			SafetyMargin:   5,
 		},
-		state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize),
+		state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize, state.NewE2SnapSchemaVersion(ver, ver)),
 	)
 	registerEntityWithSnapshotConfig(dirs, name, id, snapCfg)
 
@@ -106,7 +108,7 @@ func TestUnmarkedPrune(t *testing.T) {
 			require.NoError(t, err)
 
 			getData := func(i int) (Num, state.Bytes) {
-				return Num(i), state.Bytes(fmt.Sprintf("data%d", i))
+				return Num(i), fmt.Appendf(nil, "data%d", i)
 			}
 
 			for i := range int(entries_count) {
@@ -189,7 +191,7 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 	entries_count := num_files*cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
 
 	getData := func(i int) (Num, state.Bytes) {
-		return Num(i), state.Bytes(fmt.Sprintf("data%d", i))
+		return Num(i), fmt.Appendf(nil, "data%d", i)
 	}
 
 	for i := range int(entries_count) {
@@ -286,7 +288,7 @@ func TestBuildFiles_PagedUnmarked(t *testing.T) {
 	entries_count := num_files*cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
 
 	getData := func(i int) (Num, state.Bytes) {
-		return Num(i), state.Bytes(fmt.Sprintf("data%d", i))
+		return Num(i), fmt.Appendf(nil, "data%d", i)
 	}
 
 	for i := range int(entries_count) {
@@ -374,6 +376,7 @@ func setupPagedEntity(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RwD
 	id := kv.ForkableId(3)
 	stepSize := uint64(50)
 	name := "random_paged_data"
+	ver := version.V1_0_standart
 	snapCfg := state.NewSnapshotConfig(
 		&state.SnapshotCreationConfig{
 			RootNumPerStep: stepSize,
@@ -381,7 +384,7 @@ func setupPagedEntity(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RwD
 			MinimumSize:    50,
 			SafetyMargin:   5,
 		},
-		state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize),
+		state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize, state.NewE2SnapSchemaVersion(ver, ver)),
 	)
 	registerEntityWithSnapshotConfig(dirs, name, id, snapCfg)
 

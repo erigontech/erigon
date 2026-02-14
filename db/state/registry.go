@@ -13,8 +13,6 @@ import (
 	"github.com/erigontech/erigon/db/snapcfg"
 )
 
-type ForkableId = kv.ForkableId
-
 type holder struct {
 	// tag - "type" of snapshot file. e.g. tag is "bodies" for "v1.0-007300-007400-bodies.seg" file
 	name                string
@@ -90,23 +88,23 @@ func WithSaltFile(saltFile string) EntityIdOption {
 	}
 }
 
-func (r *registry) Exists(a ForkableId) bool {
+func (r *registry) Exists(a kv.ForkableId) bool {
 	return r.entityRegistry[a].name != ""
 }
 
-func (r *registry) Name(a ForkableId) string {
+func (r *registry) Name(a kv.ForkableId) string {
 	return r.entityRegistry[a].name
 }
 
-func (r *registry) String(a ForkableId) string {
+func (r *registry) String(a kv.ForkableId) string {
 	return r.entityRegistry[a].name
 }
 
-func (r *registry) SnapshotConfig(a ForkableId) *SnapshotConfig {
+func (r *registry) SnapshotConfig(a kv.ForkableId) *SnapshotConfig {
 	return r.entityRegistry[a].snapshotConfig
 }
 
-func (r *registry) Salt(a ForkableId) (uint32, error) {
+func (r *registry) Salt(a kv.ForkableId) (uint32, error) {
 	// not computing salt at EntityId inception
 	// since salt file might not be downloaded yet.
 	saltFile := r.entityRegistry[a].saltFile
