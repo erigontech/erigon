@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
@@ -32,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/rpc"
 )
 
 func TestEngineApiInvalidPayloadThenValidCanonicalFcuWithPayloadShouldSucceed(t *testing.T) {
@@ -59,7 +61,8 @@ func TestEngineApiInvalidPayloadThenValidCanonicalFcuWithPayloadShouldSucceed(t 
 		status, err := eat.MockCl.InsertNewPayload(ctx, b3Faulty)
 		require.NoError(t, err)
 		require.Equal(t, enginetypes.InvalidStatus, status.Status)
-		require.True(t, strings.Contains(status.ValidationError.Error().Error(), "wrong trie root"))
+		t.Log(status.ValidationError.Error().Error())
+		require.True(t, strings.Contains(status.ValidationError.Error().Error(), "invalid block hash"))
 		// build b4 on the canonical chain
 		txn, err = changer.Change(transactOpts)
 		require.NoError(t, err)
@@ -161,5 +164,66 @@ func TestEngineApiExecBlockBatchWithLenLtMaxReorgDepthAtTipThenUnwindShouldSucce
 		require.NoError(t, err)
 		_, err = eatSync.MockCl.InsertNewPayload(ctx, sideChain[len(sideChain)-1])
 		require.NoError(t, err)
+	})
+}
+
+func TestEthGetLogsDoNotGetAffectedAfterNewPayloadOnSideChain(t *testing.T) {
+	logLvl := log.LvlDebug
+	sharedGenesis, coinbaseKey := DefaultEngineApiTesterGenesis(t)
+	var b2Side *MockClPayload
+	eatSide := InitialiseEngineApiTester(t, EngineApiTesterInitArgs{
+		Logger:      testlog.Logger(t, logLvl),
+		DataDir:     t.TempDir(),
+		Genesis:     sharedGenesis,
+		CoinbaseKey: coinbaseKey,
+	})
+	eatSide.Run(t, func(ctx context.Context, t *testing.T, eat EngineApiTester) {
+		// do a simple eth transfer at bn2
+		txn, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, common.HexToAddress("0x333"), big.NewInt(1))
+		require.NoError(t, err)
+		b2Side, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b2Side.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+	})
+	eatCanonical := InitialiseEngineApiTester(t, EngineApiTesterInitArgs{
+		Logger:      testlog.Logger(t, logLvl),
+		DataDir:     t.TempDir(),
+		Genesis:     sharedGenesis,
+		CoinbaseKey: coinbaseKey,
+	})
+	eatCanonical.Run(t, func(ctx context.Context, t *testing.T, eat EngineApiTester) {
+		// deploy a smart contract at bn2
+		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
+		require.NoError(t, err)
+		transactOpts.GasLimit = params.MaxTxnGasLimit
+		_, txn, poly, err := contracts.DeployPoly(transactOpts, eat.ContractBackend)
+		require.NoError(t, err)
+		b2Canon, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b2Canon.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+		// interact with the smart contract at bn3 to produce a log
+		txn, err = poly.Deploy(transactOpts, big.NewInt(1))
+		require.NoError(t, err)
+		b3Canon, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b3Canon.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+		// check the log is present by querying rpc
+		latestBlock, err := eat.RpcApiClient.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
+		require.NoError(t, err)
+		require.Equal(t, uint64(3), latestBlock.Number.Uint64())
+		logs, err := eat.RpcApiClient.FilterLogs(ctx, ethereum.FilterQuery{BlockHash: &latestBlock.Hash})
+		require.NoError(t, err)
+		require.Len(t, logs, 1)
+		require.Equal(t, uint64(3), logs[0].BlockNumber)
+		// now insert a new payload on the side chain and check the log is still present
+		_, err = eat.MockCl.InsertNewPayload(ctx, b2Side)
+		require.NoError(t, err)
+		logs, err = eat.RpcApiClient.FilterLogs(ctx, ethereum.FilterQuery{BlockHash: &latestBlock.Hash})
+		require.NoError(t, err)
+		require.Len(t, logs, 1)
+		require.Equal(t, uint64(3), logs[0].BlockNumber)
 	})
 }

@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -99,8 +100,8 @@ type opcode struct {
 type RetStackTop []uint32
 
 type txn struct {
-	From        common.Address
-	To          common.Address
+	From        accounts.Address
+	To          accounts.Address
 	TxHash      *common.Hash
 	CodeHash    *common.Hash
 	Opcodes     sliceOpcodes
@@ -195,7 +196,7 @@ func (ot *opcodeTracer) Tracer() *tracers.Tracer {
 	}
 }
 
-func (ot *opcodeTracer) captureStartOrEnter(from, to common.Address, create bool, input []byte) {
+func (ot *opcodeTracer) captureStartOrEnter(from, to accounts.Address, create bool, input []byte) {
 	//fmt.Fprint(ot.summary, ot.lastLine)
 
 	// When a OnEnter is called, a txn is starting. Create its entry in our list and initialize it with the partial data available
@@ -223,14 +224,14 @@ func (ot *opcodeTracer) captureStartOrEnter(from, to common.Address, create bool
 	ot.stack = append(ot.stack, &newTx)
 }
 
-func (ot *opcodeTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
+func (ot *opcodeTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	ot.env = env
 	ot.depth = 0
 }
 
-func (ot *opcodeTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (ot *opcodeTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	ot.depth = depth
-	ot.captureStartOrEnter(from, to, to == common.Address{}, input)
+	ot.captureStartOrEnter(from, to, to == accounts.Address{}, input)
 }
 
 func (ot *opcodeTracer) captureEndOrExit(err error) {
@@ -302,8 +303,8 @@ func (ot *opcodeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tra
 		// fill in the missing data in the entry
 		currentEntry.TxHash = new(common.Hash)
 		currentEntry.TxHash.SetBytes(currentTxHash.Bytes())
-		currentEntry.CodeHash = new(common.Hash)
-		currentEntry.CodeHash.SetBytes(scope.CodeHash().Bytes())
+		codeHashValue := scope.CodeHash().Value()
+		currentEntry.CodeHash = &codeHashValue
 		currentEntry.CodeSize = len(scope.Code())
 		if ot.saveOpcodes {
 			currentEntry.Opcodes = make([]opcode, 0, 200)
@@ -584,7 +585,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 
 	timeLastBlock := startTime
 	blockNumLastReport := blockNum
-	txNumReader := blockReader.TxnumReader(context.Background())
+	txNumReader := blockReader.TxnumReader()
 
 	for !interrupt {
 		var block *types.Block
@@ -608,7 +609,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 			ot.fsumWriter = bufio.NewWriter(fsum)
 		}
 
-		dbstate, err := rpchelper.CreateHistoryStateReader(historyTx, block.NumberU64(), 0, txNumReader)
+		dbstate, err := rpchelper.CreateHistoryStateReader(context.Background(), historyTx, block.NumberU64(), 0, txNumReader)
 		if err != nil {
 			return err
 		}
@@ -732,16 +733,15 @@ func runBlock(engine rules.Engine, ibs *state.IntraBlockState, txnWriter state.S
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
 	gp := new(protocol.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
-	gasUsed := new(uint64)
-	usedBlobGas := new(uint64)
+	gasUsed := new(protocol.GasUsed)
 	var receipts types.Receipts
 	protocol.InitializeBlockExecution(engine, nil, header, chainConfig, ibs, nil, logger, nil)
 	blockNum := block.NumberU64()
-	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), engine, nil, chainConfig)
+	blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), engine, accounts.NilAddress, chainConfig)
 	rules := blockContext.Rules(chainConfig)
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(blockNum, i)
-		receipt, _, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader), engine, nil, gp, ibs, txnWriter, header, txn, gasUsed, usedBlobGas, vmConfig)
+		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader), engine, accounts.NilAddress, gp, ibs, txnWriter, header, txn, gasUsed, vmConfig)
 		if err != nil {
 			return nil, fmt.Errorf("could not apply txn %d [%x] failed: %w", i, txn.Hash(), err)
 		}

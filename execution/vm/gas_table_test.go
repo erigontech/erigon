@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -102,7 +103,7 @@ func testTemporalTxSD(t *testing.T) (kv.TemporalRwTx, *execctx.SharedDomains) {
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 
-	sd, err := execctx.NewSharedDomains(tx, log.New())
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -120,21 +121,21 @@ func TestEIP2200(t *testing.T) {
 			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, sd.TxNum())
 			s := state.New(r)
 
-			address := common.BytesToAddress([]byte("contract"))
+			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 			s.CreateAccount(address, true)
 			s.SetCode(address, hexutil.MustDecode(tt.input))
-			s.SetState(address, common.Hash{}, *uint256.NewInt(uint64(tt.original)))
+			s.SetState(address, accounts.ZeroKey, *uint256.NewInt(uint64(tt.original)))
 
 			vmctx := evmtypes.BlockContext{
-				CanTransfer: func(evmtypes.IntraBlockState, common.Address, uint256.Int) (bool, error) { return true, nil },
-				Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, uint256.Int, bool) error {
+				CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
+				Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
 					return nil
 				},
 			}
 			_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
 			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{ExtraEips: []int{2200}})
 
-			_, gas, err := vmenv.Call(common.Address{}, address, nil, tt.gaspool, uint256.Int{}, false /* bailout */)
+			_, gas, err := vmenv.Call(accounts.ZeroAddress, address, nil, tt.gaspool, uint256.Int{}, false /* bailout */)
 			if !errors.Is(err, tt.failure) {
 				t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 			}
@@ -171,9 +172,9 @@ func TestCreateGas(t *testing.T) {
 	defer tx.Rollback()
 
 	for i, tt := range createGasTests {
-		address := common.BytesToAddress([]byte("contract"))
+		address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 
-		domains, err := execctx.NewSharedDomains(tx, log.New())
+		domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 		require.NoError(t, err)
 		defer domains.Close()
 
@@ -185,8 +186,8 @@ func TestCreateGas(t *testing.T) {
 		s.SetCode(address, hexutil.MustDecode(tt.code))
 
 		vmctx := evmtypes.BlockContext{
-			CanTransfer: func(evmtypes.IntraBlockState, common.Address, uint256.Int) (bool, error) { return true, nil },
-			Transfer: func(evmtypes.IntraBlockState, common.Address, common.Address, uint256.Int, bool) error {
+			CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
+			Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {
 				return nil
 			},
 		}
@@ -199,7 +200,7 @@ func TestCreateGas(t *testing.T) {
 		vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainConfig, config)
 
 		var startGas uint64 = math.MaxUint64
-		_, gas, err := vmenv.Call(common.Address{}, address, nil, startGas, uint256.Int{}, false /* bailout */)
+		_, gas, err := vmenv.Call(accounts.ZeroAddress, address, nil, startGas, uint256.Int{}, false /* bailout */)
 		if err != nil {
 			t.Errorf("test %d execution failed: %v", i, err)
 		}

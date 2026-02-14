@@ -17,7 +17,6 @@
 package trie
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -27,15 +26,12 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/empty"
 	length2 "github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const hashStackStride = length2.Hash + 1 // + 1 byte for RLP encoding
-
-var emptyCodeHash = empty.CodeHash
 
 // HashBuilder implements the interface `structInfoReceiver` and opcodes that the structural information of the trie
 // is comprised of
@@ -49,7 +45,7 @@ type HashBuilder struct {
 	sha       keccakState           // Keccak primitive that can absorb data (Write), and get squeezed to the hash out (Read)
 	hashBuf   [hashStackStride]byte // RLP representation of hash (or un-hashes value)
 	keyPrefix [1]byte
-	lenPrefix [4]byte
+	lenPrefix [9]byte
 	valBuf    [128]byte // Enough to accommodate hash encoding of any account
 	b         [1]byte   // Buffer for single byte
 	prefixBuf [8]byte
@@ -236,10 +232,9 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	fullKey := keyHex[:len(keyHex)-1]
 	key := keyHex[len(keyHex)-length:]
 	copy(hb.acc.Root[:], EmptyRoot[:])
-	copy(hb.acc.CodeHash[:], emptyCodeHash[:])
+	hb.acc.CodeHash = accounts.EmptyCodeHash
 	hb.acc.Nonce = nonce
 	hb.acc.Balance.Set(balance)
-	hb.acc.Initialised = true
 	hb.acc.Incarnation = incarnation
 
 	popped := 0
@@ -256,10 +251,13 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 		popped++
 	}
 	var accountCode CodeNode
+	var codeHash = accounts.EmptyCodeHash
+
 	if fieldSet&uint32(8) != 0 {
-		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
+		var codeHashValue common.Hash
+		copy(codeHashValue[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
 		var ok bool
-		if !bytes.Equal(hb.acc.CodeHash[:], emptyCodeHash[:]) {
+		if codeHashValue != accounts.EmptyCodeHash.Value() {
 			stackTop := hb.nodeStack[len(hb.nodeStack)-popped-1]
 			if stackTop != nil { // if we don't have any stack top it might be okay because we didn't resolve the code yet (stateful resolver)
 				// but if we have something on top of the stack that isn't `nil`, it has to be a codeNode
@@ -268,6 +266,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 					return fmt.Errorf("unexpected node type on the node stack, wanted codeNode, got %T:%s", stackTop, stackTop)
 				}
 			}
+			codeHash = accounts.InternCodeHash(codeHashValue)
 		}
 		popped++
 	}
@@ -281,9 +280,10 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 		hb.proofElement.storageRoot = hb.acc.Root
 	}
 	var accCopy accounts.Account
+	hb.acc.CodeHash = codeHash
 	accCopy.Copy(&hb.acc)
 
-	if !bytes.Equal(accCopy.CodeHash[:], emptyCodeHash[:]) && accountCode != nil {
+	if accCopy.CodeHash != accounts.EmptyCodeHash && accountCode != nil {
 		accountCodeSize = len(accountCode)
 	}
 
@@ -311,7 +311,6 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *uint2
 	key := keyHex[len(keyHex)-length:]
 	hb.acc.Nonce = nonce
 	hb.acc.Balance.Set(balance)
-	hb.acc.Initialised = true
 	hb.acc.Incarnation = incarnation
 
 	popped := 0
@@ -323,10 +322,12 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *uint2
 	}
 
 	if fieldSet&AccountFieldCodeOnly != 0 {
-		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
+		var codeHashValue common.Hash
+		copy(codeHashValue[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
+		hb.acc.CodeHash = accounts.InternCodeHash(codeHashValue)
 		popped++
 	} else {
-		copy(hb.acc.CodeHash[:], emptyCodeHash[:])
+		hb.acc.CodeHash = accounts.EmptyCodeHash
 	}
 
 	return hb.accountLeafHashWithKey(key, popped)

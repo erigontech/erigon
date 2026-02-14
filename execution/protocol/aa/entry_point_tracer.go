@@ -5,20 +5,20 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type EntryPointTracer struct {
 	OnEnterSuper tracing.EnterHook
 
 	Input []byte
-	From  common.Address
+	From  accounts.Address
 	Error error
 }
 
-func (epc *EntryPointTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (epc *EntryPointTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	if epc.OnEnterSuper != nil {
 		epc.OnEnterSuper(depth, typ, from, to, precompile, input, gas, value, code)
 	}
@@ -46,6 +46,6 @@ func (epc *EntryPointTracer) Hooks() *tracing.Hooks {
 
 func (epc *EntryPointTracer) Reset() {
 	epc.Input = nil
-	epc.From = common.Address{}
+	epc.From = accounts.Address{}
 	epc.Error = nil
 }

@@ -207,28 +207,38 @@ func (m *FairMix) Close() {
 // Next returns a node from a random source.
 func (m *FairMix) Next() bool {
 	m.cur = nil
-
-	var timeout <-chan time.Time
-	if m.timeout >= 0 {
-		timer := time.NewTimer(m.timeout)
-		timeout = timer.C
-		defer timer.Stop()
-	}
+	var timer *time.Timer
+	// Since Go 1.23, GC will clean up timers and this is likely faster than Stopping them ourselves.
 	for {
 		source := m.pickSource()
 		if source == nil {
 			return m.nextFromAny()
 		}
+		var timeout <-chan time.Time
+		if source.timeout >= 0 {
+			if timer == nil {
+				timer = time.NewTimer(source.timeout)
+			} else {
+				// Since Go 1.23, this will guarantee not to let us receive an old value.
+				timer.Reset(source.timeout)
+			}
+			timeout = timer.C
+		}
 		select {
 		case n, ok := <-source.next:
 			if ok {
-				m.cur = n
+				// Here, the timeout is reset to the configured value
+				// because the source delivered a node.
 				source.timeout = m.timeout
+				m.cur = n
 				return true
 			}
 			// This source has ended.
 			m.deleteSource(source)
 		case <-timeout:
+			// The selected source did not deliver a node within the timeout, so the
+			// timeout duration is halved for next time. This is supposed to improve
+			// latency with stuck sources.
 			source.timeout /= 2
 			return m.nextFromAny()
 		}

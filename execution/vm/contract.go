@@ -20,14 +20,12 @@
 package vm
 
 import (
-	"fmt"
-
-	"github.com/hashicorp/golang-lru/v2/simplelru"
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // AccountRef is a reference to an account address.
@@ -36,10 +34,10 @@ import (
 // it's primary use is to fetch addresses. Removing this object
 // proves difficult because of the cached jump destinations which
 // are fetched from the parent contract (i.e. the caller).
-type AccountRef common.Address
+type AccountRef accounts.Address
 
 // Address casts AccountRef to a Address
-func (ar AccountRef) Address() common.Address { return (common.Address)(ar) }
+func (ar AccountRef) Address() accounts.Address { return (accounts.Address)(ar) }
 
 // Contract represents an ethereum contract in the state database. It contains
 // the contract code, calling arguments. Contract implements ContractRef
@@ -47,50 +45,25 @@ type Contract struct {
 	// caller is the result of the caller which initialised this
 	// contract. However when the "call method" is delegated this value
 	// needs to be initialised to that of the caller's caller.
-	caller    common.Address
-	addr      common.Address
-	jumpdests *JumpDestCache // Aggregated result of JUMPDEST analysis.
-	analysis  bitvec         // Locally cached result of JUMPDEST analysis
+	caller   accounts.Address
+	addr     accounts.Address
+	analysis bitvec // Locally cached result of JUMPDEST analysis
 
 	Code     []byte
-	CodeHash common.Hash
+	CodeHash accounts.CodeHash
 
 	value uint256.Int
 }
 
-type JumpDestCache struct {
-	*simplelru.LRU[common.Hash, bitvec]
-	hit, total int
-	trace      bool
-}
-
-var (
-	JumpDestCacheLimit = dbg.EnvInt("JD_LRU", 128)
-	jumpDestCacheTrace = dbg.EnvBool("JD_LRU_TRACE", false)
-)
-
-func NewJumpDestCache(limit int) *JumpDestCache {
-	c, err := simplelru.NewLRU[common.Hash, bitvec](limit, nil)
-	if err != nil {
-		panic(err)
-	}
-	return &JumpDestCache{LRU: c, trace: jumpDestCacheTrace}
-}
-
-func (c *JumpDestCache) LogStats() {
-	if c == nil || !c.trace {
-		return
-	}
-	log.Warn("[dbg] JumpDestCache", "hit", c.hit, "total", c.total, "limit", JumpDestCacheLimit, "ratio", fmt.Sprintf("%.2f", float64(c.hit)/float64(c.total)))
-}
+// around 64MB cache in the worst case.
+var jumpDestCache = cache.NewGenericCache[bitvec](64*datasize.MB, func(v bitvec) int { return len(v) })
 
 // NewContract returns a new contract environment for the execution of EVM.
-func NewContract(caller common.Address, callerAddress common.Address, addr common.Address, value uint256.Int, jumpDest *JumpDestCache) *Contract {
+func NewContract(caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, value uint256.Int) *Contract {
 	return &Contract{
-		caller:    callerAddress,
-		addr:      addr,
-		value:     value,
-		jumpdests: jumpDest,
+		caller: callerAddress,
+		addr:   addr,
+		value:  value,
 	}
 }
 
@@ -113,32 +86,26 @@ func (c *Contract) validJumpdest(dest uint256.Int) (bool, bool) {
 // isCode returns true if the provided PC location is an actual opcode, as
 // opposed to a data-segment following a PUSHN operation.
 func (c *Contract) isCode(udest uint64) bool {
-	// Do we have a contract hash already?
-	// If we do have a hash, that means it's a 'regular' contract. For regular
-	// contracts ( not temporary initcode), we store the analysis in a map
-	if c.CodeHash != (common.Hash{}) {
-		// Does parent context have the analysis?
-		c.jumpdests.total++
-		analysis, exist := c.jumpdests.Get(c.CodeHash)
-		if !exist {
-			// Do the analysis and save in parent context
-			// We do not need to store it in c.analysis
-			analysis = codeBitmap(c.Code)
-			c.jumpdests.Add(c.CodeHash, analysis)
-		} else {
-			c.jumpdests.hit++
-		}
-		// Also stash it in current contract for faster access
-		c.analysis = analysis
+	if c.analysis != nil {
 		return c.analysis.codeSegment(udest)
 	}
+	var codeHash common.Hash
+	isCodeHashZero := c.CodeHash.IsZero()
+	if !isCodeHashZero {
+		codeHash = c.CodeHash.Value()
+	}
 
-	// We don't have the code hash, most likely a piece of initcode not already
-	// in state trie. In that case, we do an analysis, and save it locally, so
-	// we don't have to recalculate it for every JUMP instruction in the execution
-	// However, we don't save it within the parent context
-	if c.analysis == nil {
-		c.analysis = codeBitmap(c.Code)
+	if !isCodeHashZero {
+		if analysis, ok := jumpDestCache.Get(codeHash[:]); ok {
+			c.analysis = analysis
+			return c.analysis.codeSegment(udest)
+		}
+	}
+
+	c.analysis = codeBitmap(c.Code)
+
+	if !isCodeHashZero {
+		jumpDestCache.Put(codeHash[:], c.analysis)
 	}
 
 	return c.analysis.codeSegment(udest)
@@ -157,12 +124,12 @@ func (c *Contract) GetOp(n uint64) OpCode {
 //
 // Caller will recursively set to the caller's caller when
 // the contract is a delegate call, including that of caller's caller.
-func (c *Contract) Caller() common.Address {
+func (c *Contract) Caller() accounts.Address {
 	return c.caller
 }
 
 // Address returns the contracts address
-func (c *Contract) Address() common.Address {
+func (c *Contract) Address() accounts.Address {
 	return c.addr
 }
 

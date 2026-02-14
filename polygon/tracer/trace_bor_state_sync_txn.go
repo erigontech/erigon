@@ -18,6 +18,7 @@ package tracer
 
 import (
 	"context"
+	"math/big"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -29,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
@@ -52,7 +54,7 @@ func TraceBorStateSyncTxnDebugAPI(
 	txIndex int,
 ) (gasUsed uint64, err error) {
 	txCtx := initStateSyncTxContext(blockNum, blockHash)
-	tracer, streaming, cancel, err := transactions.AssembleTracer(ctx, traceConfig, txCtx.TxHash, blockHash, txIndex, stream, callTimeout)
+	tracer, streaming, cancel, err := transactions.AssembleTracer(ctx, traceConfig, txCtx.TxHash, new(big.Int).SetUint64(blockNum), blockHash, txIndex, stream, callTimeout)
 	if err != nil {
 		stream.WriteNil()
 		return gasUsed, err
@@ -64,17 +66,17 @@ func TraceBorStateSyncTxnDebugAPI(
 	rules := blockCtx.Rules(chainConfig)
 	stateWriter := state.NewNoopWriter()
 	execCb := func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error) {
-		tracer.OnTxStart(evm.GetVMContext(), bortypes.NewBorTransaction(), common.Address{})
+		tracer.OnTxStart(evm.GetVMContext(), bortypes.NewBorTransaction(), accounts.ZeroAddress)
 		res, err := traceBorStateSyncTxn(ctx, ibs, stateWriter, msgs, evm, rules, txCtx, refunds)
 		tracer.OnTxEnd(&types.Receipt{}, err)
 		if err != nil {
 			return res, err
 		}
-		gasUsed = res.GasUsed
+		gasUsed = res.ReceiptGasUsed
 		return res, nil
 	}
 
-	err = transactions.ExecuteTraceTx(blockCtx, txCtx, ibs, traceConfig, chainConfig, stream, tracer, streaming, execCb)
+	err = transactions.ExecuteTraceTx(blockCtx, txCtx, ibs, traceConfig, chainConfig, stream, tracer, streaming, nil, execCb)
 	return gasUsed, err
 }
 
@@ -141,7 +143,7 @@ func traceBorStateSyncTxn(
 func initStateSyncTxContext(blockNum uint64, blockHash common.Hash) evmtypes.TxContext {
 	return evmtypes.TxContext{
 		TxHash:   bortypes.ComputeBorTxHash(blockNum, blockHash),
-		Origin:   common.Address{},
+		Origin:   accounts.ZeroAddress,
 		GasPrice: uint256.Int{},
 	}
 }

@@ -38,9 +38,11 @@ import (
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // SignedAggregateAndProofData is passed to SignedAggregateAndProof service. The service does the signature verification
@@ -74,6 +76,10 @@ type aggregateAndProofServiceImpl struct {
 	test                   bool
 	batchSignatureVerifier *BatchSignatureVerifier
 	seenAggreatorIndexes   *lru.Cache[seenAggregateIndex, struct{}]
+	validatorParams        *validator_params.ValidatorParams
+
+	// Cached proposer indices per epoch (for current epoch check)
+	proposerIndicesCache *lru.Cache[uint64, []uint64]
 
 	// set of aggregates that are scheduled for later processing
 	aggregatesScheduledForLaterExecution sync.Map
@@ -87,8 +93,13 @@ func NewAggregateAndProofService(
 	opPool pool.OperationsPool,
 	test bool,
 	batchSignatureVerifier *BatchSignatureVerifier,
+	validatorParams *validator_params.ValidatorParams,
 ) AggregateAndProofService {
 	seenAggCache, err := lru.New[seenAggregateIndex, struct{}]("seenAggregate", seenAggregateCacheSize)
+	if err != nil {
+		panic(err)
+	}
+	proposerIndicesCache, err := lru.New[uint64, []uint64]("proposerIndices", 3)
 	if err != nil {
 		panic(err)
 	}
@@ -100,21 +111,62 @@ func NewAggregateAndProofService(
 		test:                   test,
 		batchSignatureVerifier: batchSignatureVerifier,
 		seenAggreatorIndexes:   seenAggCache,
+		validatorParams:        validatorParams,
+		proposerIndicesCache:   proposerIndicesCache,
 	}
 	go a.loop(ctx)
 	return a
+}
+
+func (a *aggregateAndProofServiceImpl) Names() []string {
+	return []string{gossip.TopicNameBeaconAggregateAndProof}
 }
 
 func (a *aggregateAndProofServiceImpl) IsMyGossipMessage(name string) bool {
 	return name == gossip.TopicNameBeaconAggregateAndProof
 }
 
-func (a *aggregateAndProofServiceImpl) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*SignedAggregateAndProofForGossip, error) {
+// isLocalValidatorProposer checks if any local validator is a proposer in the current or next epoch.
+// For current epoch: uses cached GetBeaconProposerIndices.
+// For next epoch: uses GetProposerLookahead() (Fulu+) or always returns true (pre-Fulu).
+func (a *aggregateAndProofServiceImpl) isLocalValidatorProposer(headState *state.CachingBeaconState, currentEpoch uint64, localValidators []uint64) bool {
+	if headState.Version() < clparams.FuluVersion {
+		return true
+	}
+	// Check current epoch using cached proposer indices
+	currentProposers, ok := a.proposerIndicesCache.Get(currentEpoch)
+	if !ok {
+		var err error
+		currentProposers, err = headState.GetBeaconProposerIndices(currentEpoch)
+		if err == nil {
+			a.proposerIndicesCache.Add(currentEpoch, currentProposers)
+		}
+	}
+	for _, validatorIndex := range localValidators {
+		if slices.Contains(currentProposers, validatorIndex) {
+			return true
+		}
+	}
+
+	// For Fulu+, use the efficient proposer lookahead for next epoch
+	lookahead := headState.GetProposerLookahead()
+	// The lookahead contains proposers for current and next epoch, skip current epoch slots
+	slotsPerEpoch := int(a.beaconCfg.SlotsPerEpoch)
+	for i := slotsPerEpoch; i < lookahead.Length(); i++ {
+		proposerIndex := lookahead.Get(i)
+		if slices.Contains(localValidators, proposerIndex) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *aggregateAndProofServiceImpl) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*SignedAggregateAndProofForGossip, error) {
 	obj := &SignedAggregateAndProofForGossip{
-		Receiver:                copyOfPeerData(data),
+		Receiver:                &sentinelproto.Peer{Pid: pid.String()},
 		SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{},
 	}
-	if err := obj.SignedAggregateAndProof.DecodeSSZ(data.Data, int(version)); err != nil {
+	if err := obj.SignedAggregateAndProof.DecodeSSZ(data, int(version)); err != nil {
 		return nil, err
 	}
 	return obj, nil
@@ -134,7 +186,8 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	if aggregateData.Slot > a.syncedDataManager.HeadSlot() {
 		//a.scheduleAggregateForLaterProcessing(aggregateAndProof)
-		return ErrIgnore
+		return fmt.Errorf("%w: aggregate is for a future slot: %d > %d", ErrIgnore, aggregateData.Slot, a.syncedDataManager.HeadSlot())
+
 	}
 
 	epoch := slot / a.beaconCfg.SlotsPerEpoch
@@ -156,11 +209,12 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		aggregateVerificationData *AggregateVerificationData
 		attestingIndices          []uint64
 		seenIndex                 seenAggregateIndex
+		localValidatorIsProposer  bool
 	)
 	if err := a.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. compute_epoch_at_slot(aggregate.data.slot) in (get_previous_epoch(state), get_current_epoch(state))
 		if state.PreviousEpoch(headState) != epoch && state.Epoch(headState) != epoch {
-			return ErrIgnore
+			return fmt.Errorf("%w: epoch is not in previous or current epoch: %d", ErrIgnore, epoch)
 		}
 
 		// [REJECT] The committee index is within the expected range -- i.e. index < get_committee_count_per_slot(state, aggregate.data.target.epoch).
@@ -179,12 +233,12 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			aggregateData.BeaconBlockRoot,
 			finalizedSlot,
 		) != finalizedCheckpoint.Root {
-			return ErrIgnore
+			return fmt.Errorf("%w: invalid finalized checkpoint: %v", ErrIgnore, finalizedCheckpoint.Root)
 		}
 
 		// [IGNORE] The block being voted for (aggregate.data.beacon_block_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue aggregates for processing once block is retrieved).
 		if _, ok := a.forkchoiceStore.GetHeader(aggregateData.BeaconBlockRoot); !ok {
-			return ErrIgnore
+			return fmt.Errorf("%w: block not seen: %v", ErrIgnore, aggregateData.BeaconBlockRoot)
 		}
 
 		// [IGNORE] The aggregate is the first valid aggregate received for the aggregator with index aggregate_and_proof.aggregator_index for the epoch aggregate.data.target.epoch
@@ -193,7 +247,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			index: aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex,
 		}
 		if a.seenAggreatorIndexes.Contains(seenIndex) {
-			return ErrIgnore
+			return nil
 		}
 
 		committee, err := headState.GetBeaconCommitee(slot, committeeIndex)
@@ -230,21 +284,34 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			return errors.New("invalid aggregate and proof")
 		}
 
-		// aggregate signatures for later verification
-		aggregateVerificationData, err = GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
-		if err != nil {
-			return err
-		}
-
 		monitor.ObserveNumberOfAggregateSignatures(len(attestingIndices))
 		monitor.ObserveAggregateQuality(len(attestingIndices), len(committee))
 		monitor.ObserveCommitteeSize(float64(len(committee)))
+
+		// Check if any local validator is a proposer in this or the next epoch
+		localValidators := a.validatorParams.GetValidators()
+		if len(localValidators) > 0 {
+			currentEpoch := state.Epoch(headState)
+			localValidatorIsProposer = a.isLocalValidatorProposer(headState, currentEpoch, localValidators)
+		}
+
+		if localValidatorIsProposer || aggregateAndProof.ImmediateProcess {
+			// aggregate signatures for later verification
+			aggregateVerificationData, err = GetSignaturesOnAggregate(headState, aggregateAndProof.SignedAggregateAndProof, attestingIndices)
+			if err != nil {
+				return err
+			}
+		}
+
 		return nil
 	}); err != nil {
 		return err
 	}
 	if a.test {
 		return nil
+	}
+	if aggregateVerificationData == nil {
+		return ErrIgnore
 	}
 	// further processing will be done after async signature verification
 	aggregateVerificationData.F = func() {
@@ -265,10 +332,8 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		return a.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 	}
 
-	// push the signatures to verify asynchronously and run final functions after that.
 	a.batchSignatureVerifier.AsyncVerifyAggregateProof(aggregateVerificationData)
-
-	return ErrIgnore
+	return nil
 
 }
 

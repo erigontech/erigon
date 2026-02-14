@@ -23,6 +23,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const (
@@ -213,17 +214,20 @@ const (
 var DelegatedDesignationPrefix = []byte{0xef, 0x01, 0x00}
 var DelegatedCodeHash = common.HexToHash("0xeadcdba66a79ab5dce91622d1d75c8cff5cff0b96944c3bf1072cd08ce018329")
 
+// SystemAddress is where the system-transaction is sent from as per EIP-4788
+var SystemAddress = accounts.InternAddress(common.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe"))
+
 // EIP-4788: Beacon block root in the EVM
-var BeaconRootsAddress = common.HexToAddress("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02")
+var BeaconRootsAddress = accounts.InternAddress(common.HexToAddress("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02"))
 
 // EIP-2935: Historical block hashes in state
-var HistoryStorageAddress = common.HexToAddress("0x0000F90827F1C53a10cb7A02335B175320002935")
+var HistoryStorageAddress = accounts.InternAddress(common.HexToAddress("0x0000F90827F1C53a10cb7A02335B175320002935"))
 
 // EIP-7002: Execution layer triggerable withdrawals
-var WithdrawalRequestAddress = common.HexToAddress("0x00000961Ef480Eb55e80D19ad83579A64c007002")
+var WithdrawalRequestAddress = accounts.InternAddress(common.HexToAddress("0x00000961Ef480Eb55e80D19ad83579A64c007002"))
 
-// EIP-7251
-var ConsolidationRequestAddress = common.HexToAddress("0x0000BBdDc7CE488642fb579F8B00f3a590007251")
+// EIP-7251: Increase the MAX_EFFECTIVE_BALANCE
+var ConsolidationRequestAddress = accounts.InternAddress(common.HexToAddress("0x0000BBdDc7CE488642fb579F8B00f3a590007251"))
 
 // Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations
 var Bls12381MSMDiscountTableG1 = [128]uint64{1000, 949, 848, 797, 764, 750, 738, 728, 719, 712, 705, 698, 692, 687, 682, 677, 673, 669, 665, 661, 658, 654, 651, 648, 645, 642, 640, 637, 635, 632, 630, 627, 625, 623, 621, 619, 617, 615, 613, 611, 609, 608, 606, 604, 603, 601, 599, 598, 596, 595, 593, 592, 591, 589, 588, 586, 585, 584, 582, 581, 580, 579, 577, 576, 575, 574, 573, 572, 570, 569, 568, 567, 566, 565, 564, 563, 562, 561, 560, 559, 558, 557, 556, 555, 554, 553, 552, 551, 550, 549, 548, 547, 547, 546, 545, 544, 543, 542, 541, 540, 540, 539, 538, 537, 536, 536, 535, 534, 533, 532, 532, 531, 530, 529, 528, 528, 527, 526, 525, 525, 524, 523, 522, 522, 521, 520, 520, 519}

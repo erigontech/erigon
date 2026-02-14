@@ -29,9 +29,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
@@ -39,13 +40,13 @@ import (
 type Reader struct {
 	store              Store
 	logger             log.Logger
-	stateClientAddress common.Address
+	stateClientAddress accounts.Address
 }
 
 type ReaderConfig struct {
 	Store                        Store
 	Logger                       log.Logger
-	StateReceiverContractAddress common.Address
+	StateReceiverContractAddress accounts.Address
 	RoTxLimit                    int64
 }
 
@@ -60,7 +61,7 @@ func AssembleReader(ctx context.Context, config ReaderConfig) (*Reader, error) {
 	return reader, nil
 }
 
-func NewReader(store Store, logger log.Logger, stateReceiverContractAddress common.Address) *Reader {
+func NewReader(store Store, logger log.Logger, stateReceiverContractAddress accounts.Address) *Reader {
 	return &Reader{
 		store:              store,
 		logger:             logger,
@@ -94,11 +95,11 @@ func (r *Reader) EventsWithinTime(ctx context.Context, timeFrom, timeTo time.Tim
 	// convert to message
 	for _, event := range events {
 		msg := types.NewMessage(
-			state.SystemAddress,
-			&r.stateClientAddress,
-			0, u256.Num0,
+			params.SystemAddress,
+			r.stateClientAddress,
+			0, &u256.Num0,
 			protocol.SysCallGasLimit,
-			u256.Num0,
+			&u256.Num0,
 			nil, nil,
 			event, nil,
 			false, // checkNonce
@@ -130,11 +131,11 @@ func (r *Reader) Events(ctx context.Context, blockHash common.Hash, blockNum uin
 	// convert to message
 	for _, event := range events {
 		msg := types.NewMessage(
-			state.SystemAddress,
-			&r.stateClientAddress,
-			0, u256.Num0,
+			params.SystemAddress,
+			r.stateClientAddress,
+			0, &u256.Num0,
 			protocol.SysCallGasLimit,
-			u256.Num0,
+			&u256.Num0,
 			nil, nil,
 			event, nil,
 			false, // checkNonce
@@ -183,7 +184,7 @@ func (r *RemoteReader) Events(ctx context.Context, blockHash common.Hash, blockN
 		return nil, nil
 	}
 
-	stateReceiverContractAddress := common.HexToAddress(reply.StateReceiverContractAddress)
+	stateReceiverContractAddress := accounts.InternAddress(common.HexToAddress(reply.StateReceiverContractAddress))
 	result := make([]*types.Message, len(reply.EventRlps))
 	for i, event := range reply.EventRlps {
 		result[i] = messageFromData(stateReceiverContractAddress, event)
@@ -224,13 +225,13 @@ func (r *RemoteReader) EnsureVersionCompatibility() bool {
 	return true
 }
 
-func messageFromData(to common.Address, data []byte) *types.Message {
+func messageFromData(to accounts.Address, data []byte) *types.Message {
 	msg := types.NewMessage(
-		state.SystemAddress,
-		&to,
-		0, u256.Num0,
+		params.SystemAddress,
+		to,
+		0, &u256.Num0,
 		protocol.SysCallGasLimit,
-		u256.Num0,
+		&u256.Num0,
 		nil, nil,
 		data, nil,
 		false, // checkNonce
@@ -244,18 +245,18 @@ func messageFromData(to common.Address, data []byte) *types.Message {
 }
 
 // NewStateSyncEventMessages creates a corresponding message that can be passed to EVM for multiple state sync events
-func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverContract *common.Address, gasLimit uint64) []*types.Message {
+func NewStateSyncEventMessages(stateSyncEvents []rlp.RawValue, stateReceiverContract accounts.Address, gasLimit uint64) []*types.Message {
 	msgs := make([]*types.Message, len(stateSyncEvents))
 	for i, event := range stateSyncEvents {
 		msg := types.NewMessage(
-			state.SystemAddress, // from
+			params.SystemAddress, // from
 			stateReceiverContract,
-			0,         // nonce
-			u256.Num0, // amount
+			0,          // nonce
+			&u256.Num0, // amount
 			gasLimit,
-			u256.Num0, // gasPrice
-			nil,       // feeCap
-			nil,       // tip
+			&u256.Num0, // gasPrice
+			nil,        // feeCap
+			nil,        // tip
 			event,
 			nil,   // accessList
 			false, // checkNonce

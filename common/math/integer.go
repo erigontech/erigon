@@ -44,6 +44,8 @@ const (
 	MaxUint64 = 1<<64 - 1
 )
 
+var maxInt64 = big.NewInt(math.MaxInt64)
+
 // HexOrDecimal64 marshals uint64 as hex or decimal.
 type HexOrDecimal64 uint64
 
@@ -69,7 +71,7 @@ func (i *HexOrDecimal64) UnmarshalText(input []byte) error {
 }
 
 func (i HexOrDecimal64) MarshalText() ([]byte, error) {
-	return []byte(fmt.Sprintf("%#x", uint64(i))), nil
+	return fmt.Appendf(nil, "%#x", uint64(i)), nil
 }
 
 // ParseUint64 parses s as an integer in decimal or hexadecimal syntax.
@@ -104,7 +106,7 @@ func AbsoluteDifference(x, y uint64) uint64 {
 }
 
 func RandInt64() (int64, error) {
-	n, err := rand.Int(rand.Reader, big.NewInt(math.MaxInt64))
+	n, err := rand.Int(rand.Reader, maxInt64)
 	if err != nil {
 		return 0, err
 	}

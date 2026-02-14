@@ -1,5 +1,9 @@
 ---
 description: Connecting Erigon (EL) to Consensus Clients (CL)
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/interacting-with-erigon/interacting-with-erigon/engine
 ---
 
 # engine
@@ -12,13 +16,13 @@ For API usage refer to the below official resources:
 
 {% embed url="https://ethereum.org/en/developers/docs/apis/json-rpc/" %}
 
-{% embed url="https://ethereum.github.io/execution-apis/api-documentation/" %}
+{% embed url="https://ethereum.github.io/execution-apis/" %}
 
 #### Default Erigon Behavior (Caplin)
 
 By default, Erigon runs its own embedded consensus layer client, Caplin. For optimized performance, Caplin bypasses the Engine API and uses direct internal calls to communicate with Erigon's execution layer.
 
-You can optionally force Caplin to use the Engine API interface by setting the `--caplin.use-engine-api` flag. When this flag is active, Caplin connects via the same [JWT](../../../get-started/fundamentals/jwt.md)-authenticated HTTP endpoint used by external CL clients.
+You can optionally force Caplin to use the Engine API interface by setting the `--caplin.use-engine-api` flag. When this flag is active, Caplin connects via the same [JWT](../fundamentals/jwt.md)-authenticated HTTP endpoint used by external CL clients.
 
 #### Engine API Functionality
 

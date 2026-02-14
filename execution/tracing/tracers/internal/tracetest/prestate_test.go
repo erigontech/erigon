@@ -33,18 +33,19 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	debugtracer "github.com/erigontech/erigon/execution/tracing/tracers/debug"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 // prestateTrace is the result of a prestateTrace run.
-type prestateTrace = map[common.Address]*account
+type prestateTrace = map[accounts.Address]*account
 
 type account struct {
 	Balance string                      `json:"balance"`
@@ -59,7 +60,7 @@ type testcase struct {
 	Context      *callContext    `json:"context"`
 	Input        string          `json:"input"`
 	TracerConfig json.RawMessage `json:"tracerConfig"`
-	Result       interface{}     `json:"result"`
+	Result       any             `json:"result"`
 }
 
 func TestPrestateTracerLegacy(t *testing.T) {
@@ -104,8 +105,8 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
 			context := evmtypes.BlockContext{
 				CanTransfer: protocol.CanTransfer,
-				Transfer:    rules.Transfer,
-				Coinbase:    test.Context.Miner,
+				Transfer:    misc.Transfer,
+				Coinbase:    accounts.InternAddress(test.Context.Miner),
 				BlockNumber: uint64(test.Context.Number),
 				Time:        uint64(test.Context.Time),
 				Difficulty:  (*big.Int)(test.Context.Difficulty),
@@ -161,7 +162,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
 			}
-			tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.GasUsed}, nil)
+			tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, nil)
 			// Retrieve the trace result and compare against the expected
 			res, err := tracer.GetResult()
 			if err != nil {

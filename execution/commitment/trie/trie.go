@@ -335,7 +335,7 @@ func (t *Trie) GetAccountCode(key []byte) (value []byte, gotValue bool) {
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode != nil {
-		if bytes.Equal(accNode.Account.CodeHash[:], emptyCodeHash[:]) {
+		if accNode.Account.CodeHash == accounts.EmptyCodeHash {
 			return nil, gotValue
 		}
 
@@ -357,7 +357,7 @@ func (t *Trie) GetAccountCodeSize(key []byte) (value int, gotValue bool) {
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode != nil {
-		if bytes.Equal(accNode.Account.CodeHash[:], emptyCodeHash[:]) {
+		if accNode.Account.CodeHash == accounts.EmptyCodeHash {
 			return 0, gotValue
 		}
 
@@ -519,7 +519,7 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 	if value.Root == EmptyRoot || value.Root == (common.Hash{}) {
 		newnode = &AccountNode{*value, nil, true, nil, codeSizeUncached}
 	} else {
-		newnode = &AccountNode{*value, HashNode{hash: value.Root[:]}, true, nil, codeSizeUncached}
+		newnode = &AccountNode{*value, &HashNode{hash: value.Root[:]}, true, nil, codeSizeUncached}
 	}
 
 	if t.RootNode == nil {
@@ -543,8 +543,9 @@ func (t *Trie) UpdateAccountCode(key []byte, code CodeNode) error {
 	}
 
 	actualCodeHash := crypto.Keccak256(code)
-	if !bytes.Equal(accNode.CodeHash[:], actualCodeHash) {
-		return fmt.Errorf("inserted code mismatch account hash (acc.CodeHash=%x codeHash=%x)", accNode.CodeHash[:], actualCodeHash)
+	codeHashValue := accNode.CodeHash.Value()
+	if !bytes.Equal(codeHashValue[:], actualCodeHash) {
+		return fmt.Errorf("inserted code mismatch account hash (acc.CodeHash=%x codeHash=%x)", accNode.CodeHash, actualCodeHash)
 	}
 
 	accNode.Code = code
@@ -580,7 +581,7 @@ func (t *Trie) UpdateAccountCodeSize(key []byte, codeSize int) error {
 type LoadRequestForCode struct {
 	t        *Trie
 	addrHash common.Hash // contract address hash
-	codeHash common.Hash
+	codeHash accounts.CodeHash
 	bytecode bool // include the bytecode too
 }
 
@@ -588,12 +589,12 @@ func (lrc *LoadRequestForCode) String() string {
 	return fmt.Sprintf("rr_code{addrHash:%x,codeHash:%x,bytecode:%v}", lrc.addrHash, lrc.codeHash, lrc.bytecode)
 }
 
-func (t *Trie) NewLoadRequestForCode(addrHash common.Hash, codeHash common.Hash, bytecode bool) *LoadRequestForCode {
+func (t *Trie) NewLoadRequestForCode(addrHash common.Hash, codeHash accounts.CodeHash, bytecode bool) *LoadRequestForCode {
 	return &LoadRequestForCode{t, addrHash, codeHash, bytecode}
 }
 
-func (t *Trie) NeedLoadCode(addrHash common.Hash, codeHash common.Hash, bytecode bool) (bool, *LoadRequestForCode) {
-	if bytes.Equal(codeHash[:], emptyCodeHash[:]) {
+func (t *Trie) NeedLoadCode(addrHash common.Hash, codeHash accounts.CodeHash, bytecode bool) (bool, *LoadRequestForCode) {
+	if codeHash.IsEmpty() {
 		return false, nil
 	}
 
@@ -752,7 +753,7 @@ func (t *Trie) insertRecursive(origNode Node, key []byte, pos int, value Node) (
 		if origNok && vnok {
 			updated = !origAccN.Equals(&vAccN.Account)
 			if updated {
-				if !bytes.Equal(origAccN.CodeHash[:], vAccN.CodeHash[:]) {
+				if origAccN.CodeHash != vAccN.CodeHash {
 					origAccN.Code = nil
 				} else if vAccN.Code != nil {
 					origAccN.Code = vAccN.Code

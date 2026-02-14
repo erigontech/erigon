@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestSimulatedBackend(t *testing.T) {
@@ -70,7 +71,7 @@ func TestSimulatedBackend(t *testing.T) {
 	code := `6060604052600a8060106000396000f360606040526008565b00`
 	var gas uint64 = 3000000
 	signer := types.MakeSigner(chain.TestChainConfig, 1, 0)
-	var txn types.Transaction = types.NewContractCreation(0, u256.Num0, gas, u256.Num1, common.FromHex(code))
+	var txn types.Transaction = types.NewContractCreation(0, &u256.Num0, gas, &u256.Num1, common.FromHex(code))
 	txn, _ = types.SignTx(txn, *signer, key)
 
 	err = sim.SendTransaction(context.Background(), txn)
@@ -127,16 +128,12 @@ func simTestBackend(t *testing.T, testAddr common.Address) *SimulatedBackend {
 }
 
 func TestNewSimulatedBackend(t *testing.T) {
-	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
+	testAddr := accounts.InternAddress(crypto.PubkeyToAddress(testKey.PublicKey))
 	expectedBal := uint256.NewInt(10000000000)
-	sim := simTestBackend(t, testAddr)
+	sim := simTestBackend(t, testAddr.Value())
 
 	if sim.m.ChainConfig != chain.TestChainConfig {
 		t.Errorf("expected sim config to equal chain.TestChainConfig, got %v", sim.m.ChainConfig)
-	}
-
-	if sim.m.ChainConfig != chain.TestChainConfig {
-		t.Errorf("expected sim blockchain config to equal chain.TestChainConfig, got %v", sim.m.ChainConfig)
 	}
 	tx, err1 := sim.DB().BeginTemporalRo(context.Background())
 	if err1 != nil {
@@ -450,14 +447,14 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 		message     ethereum.CallMsg
 		expect      uint64
 		expectError error
-		expectData  interface{}
+		expectData  any
 	}{
 		{"plain transfer(valid)", ethereum.CallMsg{
 			From:     addr,
 			To:       &addr,
 			Gas:      0,
-			GasPrice: u256.Num0,
-			Value:    u256.Num1,
+			GasPrice: &u256.Num0,
+			Value:    &u256.Num1,
 			Data:     nil,
 		}, params.TxGas, nil, nil},
 
@@ -465,8 +462,8 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			From:     addr,
 			To:       &contractAddr,
 			Gas:      0,
-			GasPrice: u256.Num0,
-			Value:    u256.Num1,
+			GasPrice: &u256.Num0,
+			Value:    &u256.Num1,
 			Data:     nil,
 		}, 0, errors.New("execution reverted"), nil},
 
@@ -474,7 +471,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			From:     addr,
 			To:       &contractAddr,
 			Gas:      0,
-			GasPrice: u256.Num0,
+			GasPrice: &u256.Num0,
 			Value:    nil,
 			Data:     common.Hex2Bytes("d8b98391"),
 		}, 0, errors.New("execution reverted: revert reason"), "0x08c379a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000d72657665727420726561736f6e00000000000000000000000000000000000000"},
@@ -483,7 +480,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			From:     addr,
 			To:       &contractAddr,
 			Gas:      0,
-			GasPrice: u256.Num0,
+			GasPrice: &u256.Num0,
 			Value:    nil,
 			Data:     common.Hex2Bytes("aa8b1d30"),
 		}, 0, errors.New("execution reverted"), nil},
@@ -492,7 +489,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			From:     addr,
 			To:       &contractAddr,
 			Gas:      100000,
-			GasPrice: u256.Num0,
+			GasPrice: &u256.Num0,
 			Value:    nil,
 			Data:     common.Hex2Bytes("50f6fe34"),
 		}, 0, errors.New("gas required exceeds allowance (100000)"), nil},
@@ -501,7 +498,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			From:     addr,
 			To:       &contractAddr,
 			Gas:      100000,
-			GasPrice: u256.Num0,
+			GasPrice: &u256.Num0,
 			Value:    nil,
 			Data:     common.Hex2Bytes("b9b046f9"),
 		}, 0, errors.New("invalid opcode: INVALID"), nil},
@@ -510,7 +507,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			From:     addr,
 			To:       &contractAddr,
 			Gas:      100000,
-			GasPrice: u256.Num0,
+			GasPrice: &u256.Num0,
 			Value:    nil,
 			Data:     common.Hex2Bytes("e09fface"),
 		}, 21275, nil, nil},
@@ -1066,7 +1063,7 @@ func TestSimulatedBackend_CallContractRevert(t *testing.T) {
 		t.Errorf("could not deploy contract: %v", err)
 	}
 
-	inputs := make(map[string]interface{}, 3)
+	inputs := make(map[string]any, 3)
 	inputs["revertASM"] = nil
 	inputs["revertNoString"] = ""
 	inputs["revertString"] = "some error"

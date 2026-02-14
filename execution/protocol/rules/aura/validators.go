@@ -17,10 +17,11 @@
 package aura
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"math"
-	"sort"
+	"slices"
 	"strings"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules/aura/auraabi"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // nolint
@@ -218,9 +220,9 @@ type Multi struct {
 	parent func(common.Hash) *types.Header
 }
 
-func (s *Multi) Less(i, j int) bool { return s.sorted[i].num < s.sorted[j].num }
-func (s *Multi) Len() int           { return len(s.sorted) }
-func (s *Multi) Swap(i, j int)      { s.sorted[i], s.sorted[j] = s.sorted[j], s.sorted[i] }
+func (s *Multi) Sort() {
+	slices.SortFunc(s.sorted, func(a, b MultiItem) int { return cmp.Compare(a.num, b.num) })
+}
 
 func NewMulti(m map[uint64]ValidatorSet) *Multi {
 	if _, ok := m[0]; !ok {
@@ -233,7 +235,7 @@ func NewMulti(m map[uint64]ValidatorSet) *Multi {
 		i++
 	}
 	multi := &Multi{sorted: list}
-	sort.Sort(multi)
+	multi.Sort()
 	return multi
 }
 
@@ -558,7 +560,7 @@ func (s *ValidatorSafeContract) getList(caller rules.Call) (*SimpleList, bool) {
 	if err != nil {
 		panic(err)
 	}
-	out, err := caller(s.contractAddress, packed)
+	out, err := caller(accounts.InternAddress(s.contractAddress), packed)
 	if err != nil {
 		panic(err)
 	}
@@ -575,7 +577,7 @@ func (s *ValidatorSafeContract) getListSyscall(caller rules.SystemCall) (*Simple
 	if err != nil {
 		panic(err)
 	}
-	out, err := caller(s.contractAddress, packed)
+	out, err := caller(accounts.InternAddress(s.contractAddress), packed)
 	if err != nil {
 		panic(err)
 	}
@@ -593,7 +595,7 @@ func (s *ValidatorSafeContract) genesisEpochData(header *types.Header, call rule
 
 func (s *ValidatorSafeContract) onEpochBegin(firstInEpoch bool, header *types.Header, caller rules.SystemCall) error {
 	data := common.FromHex("75286211") // s.abi.Pack("finalizeChange")
-	_, err := caller(s.contractAddress, data)
+	_, err := caller(accounts.InternAddress(s.contractAddress), data)
 	if err != nil {
 		return err
 	}

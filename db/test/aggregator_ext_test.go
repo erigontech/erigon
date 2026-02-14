@@ -69,7 +69,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -94,7 +94,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		acc := accounts.Account{
 			Nonce:       txNum,
 			Balance:     *uint256.NewInt(1000000000000),
-			CodeHash:    common.Hash{},
+			CodeHash:    accounts.EmptyCodeHash,
 			Incarnation: 0,
 		}
 		buf := accounts.SerialiseV3(&acc)
@@ -149,7 +149,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	newDoms, err := execctx.NewSharedDomains(tx, log.New())
+	newDoms, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	require.NoError(t, err)
 	defer newDoms.Close()
 
@@ -204,7 +204,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -219,7 +219,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		tx, err = db.BeginTemporalRw(context.Background())
 		require.NoError(t, err)
 
-		domains, err = execctx.NewSharedDomains(tx, log.New())
+		domains, err = execctx.NewSharedDomains(context.Background(), tx, log.New())
 		require.NoError(t, err)
 		atomic.StoreUint64(&latestCommitTxNum, txn)
 		return nil
@@ -247,7 +247,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		acc := accounts.Account{
 			Nonce:       1,
 			Balance:     uint256.Int{},
-			CodeHash:    common.Hash{},
+			CodeHash:    accounts.EmptyCodeHash,
 			Incarnation: 0,
 		}
 		buf := accounts.SerialiseV3(&acc)
@@ -302,7 +302,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -331,7 +331,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		acc := accounts.Account{
 			Nonce:       1,
 			Balance:     uint256.Int{},
-			CodeHash:    common.Hash{},
+			CodeHash:    accounts.EmptyCodeHash,
 			Incarnation: 0,
 		}
 		buf := accounts.SerialiseV3(&acc)
@@ -386,8 +386,8 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 		onChangeCalls++
 		if onChangeCalls == 1 {
-			mustSeeFile(newFiles, "domain", "accounts.0-2.kv") //TODO: when we build `accounts.0-1.kv` - we sending empty notifcation
-			require.False(t, filepath.IsAbs(newFiles[0]))      // expecting non-absolute paths (relative as of snapshots dir)
+			mustSeeFile(newFiles, "domain", "accounts.0-64.kv")
+			require.False(t, filepath.IsAbs(newFiles[0])) // expecting non-absolute paths (relative as of snapshots dir)
 		}
 	}, func(deletedFiles []string) {
 		if len(deletedFiles) == 0 {
@@ -396,20 +396,16 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 		onDelCalls++
 		if onDelCalls == 1 {
-			mustSeeFile(deletedFiles, "domain", "accounts.0-1.kv")
-			mustSeeFile(deletedFiles, "domain", "commitment.0-1.kv")
 			mustSeeFile(deletedFiles, "history", "accounts.0-1.v")
 			mustSeeFile(deletedFiles, "accessor", "accounts.0-1.vi")
-
-			mustSeeFile(deletedFiles, "domain", "accounts.1-2.kv")
 			require.False(t, filepath.IsAbs(deletedFiles[0])) // expecting non-absolute paths (relative as of snapshots dir)
 		}
 	})
 
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
-	require.Equal(t, 13, onChangeCalls)
-	require.Equal(t, 14, onDelCalls)
+	require.Equal(t, 3, onChangeCalls)
+	require.Equal(t, 4, onDelCalls)
 
 	{ //prune
 		rwTx, err = db.BeginTemporalRw(context.Background())
@@ -456,7 +452,7 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -583,7 +579,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -628,7 +624,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	defer rwTx.Rollback()
 
 	// 4. restart on same (replaced keys) files
-	domains, err = execctx.NewSharedDomains(rwTx, log.New())
+	domains, err = execctx.NewSharedDomains(context.Background(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -657,7 +653,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 
 	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
 
-	domains, err := execctx.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -683,7 +679,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 		acc := accounts.Account{
 			Nonce:       1,
 			Balance:     *uint256.NewInt(txNum * 1e6),
-			CodeHash:    common.Hash{},
+			CodeHash:    accounts.EmptyCodeHash,
 			Incarnation: 0,
 		}
 		buf := accounts.SerialiseV3(&acc)
@@ -741,7 +737,7 @@ func TestAggregatorV3_BuildFiles_WithReorgDepth(t *testing.T) {
 	tx, err := tdb.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
-	doms, err := execctx.NewSharedDomains(tx, logger)
+	doms, err := execctx.NewSharedDomains(context.Background(), tx, logger)
 	require.NoError(t, err)
 	t.Cleanup(doms.Close)
 	txnNums := uint64(18)
@@ -849,7 +845,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 			acc := accounts.Account{
 				Nonce:       txNum,
 				Balance:     *uint256.NewInt(txNum * 100_000),
-				CodeHash:    common.Hash{},
+				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
@@ -900,7 +896,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 				acc := accounts.Account{
 					Nonce:       txNum,
 					Balance:     *uint256.NewInt(txNum * 100_000),
-					CodeHash:    common.Hash{},
+					CodeHash:    accounts.EmptyCodeHash,
 					Incarnation: 0,
 				}
 				buf := accounts.SerialiseV3(&acc)

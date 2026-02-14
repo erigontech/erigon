@@ -23,7 +23,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-
+	"fmt"
 	"reflect"
 	"slices"
 	"strconv"
@@ -68,6 +68,7 @@ type handler struct {
 	conn           jsonWriter                     // where responses will be sent
 	logger         log.Logger
 	allowSubscribe bool
+	batchLimit     int
 
 	allowList     AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
 	forbiddenList ForbiddenList
@@ -96,7 +97,7 @@ func HandleError(err error, stream jsonstream.Stream) {
 		if ok {
 			stream.WriteInt(ec.ErrorCode())
 		} else {
-			stream.WriteInt(defaultErrorCode)
+			stream.WriteInt(ErrCodeDefault)
 		}
 		stream.WriteMore()
 		stream.WriteObjectField("message")
@@ -118,7 +119,18 @@ func HandleError(err error, stream jsonstream.Stream) {
 	}
 }
 
-func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint, traceRequests bool, logger log.Logger, rpcSlowLogThreshold time.Duration) *handler {
+func newHandler(
+	connCtx context.Context,
+	conn jsonWriter,
+	idgen func() ID,
+	reg *serviceRegistry,
+	batchLimit int,
+	allowList AllowList,
+	maxBatchConcurrency uint,
+	traceRequests bool,
+	logger log.Logger,
+	rpcSlowLogThreshold time.Duration,
+) *handler {
 	rootCtx, cancelRoot := context.WithCancel(connCtx)
 	forbiddenList := newForbiddenList()
 
@@ -131,6 +143,7 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 		rootCtx:        rootCtx,
 		cancelRoot:     cancelRoot,
 		allowSubscribe: true,
+		batchLimit:     batchLimit,
 		serverSubs:     make(map[ID]*Subscription),
 		logger:         logger,
 		allowList:      allowList,
@@ -164,17 +177,23 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		})
 		return
 	}
+	// Apply limit on total number of requests.
+	if h.batchLimit != 0 && len(msgs) > h.batchLimit {
+		h.startCallProc(func(cp *callProc) {
+			h.respondWithBatchTooLarge(cp, msgs)
+		})
+		return
+	}
 
 	// Handle non-call messages first:
 	calls := make([]*jsonrpcMessage, 0, len(msgs))
-	for _, msg := range msgs {
-		if handled := h.handleImmediate(msg); !handled {
-			calls = append(calls, msg)
-		}
-	}
+	h.handleResponses(msgs, func(msg *jsonrpcMessage) {
+		calls = append(calls, msg)
+	})
 	if len(calls) == 0 {
 		return
 	}
+
 	// Process calls on a goroutine because they may block indefinitely:
 	h.startCallProc(func(cp *callProc) {
 		// All goroutines will place results right to this array. Because requests order must match reply orders.
@@ -226,6 +245,21 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 	})
 }
 
+func (h *handler) respondWithBatchTooLarge(cp *callProc, batch []*jsonrpcMessage) {
+	reason := fmt.Sprintf("batch limit %d exceeded (can increase by --rpc.batch.limit). Requested batch of size: %d", h.batchLimit, len(batch))
+	resp := errorMessage(&invalidRequestError{reason})
+	// Find the first call and add its "id" field to the error.
+	// This is the best we can do, given that the protocol doesn't have a way
+	// of reporting an error for the entire batch.
+	for _, msg := range batch {
+		if msg.isCall() {
+			resp.ID = msg.ID
+			break
+		}
+	}
+	h.conn.WriteJSON(cp.ctx, []*jsonrpcMessage{resp})
+}
+
 // handleMsg handles a single message.
 func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 	if ok := h.handleImmediate(msg); ok {
@@ -252,6 +286,63 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 			n.activate()
 		}
 	})
+}
+
+// handleResponses processes method call responses.
+func (h *handler) handleResponses(batch []*jsonrpcMessage, handleCall func(*jsonrpcMessage)) {
+	var resolvedOps []*requestOp
+	handleResp := func(msg *jsonrpcMessage) {
+		op := h.respWait[string(msg.ID)]
+		if op == nil {
+			h.logger.Debug("Unsolicited RPC response", "reqid", idForLog(msg.ID))
+			return
+		}
+		resolvedOps = append(resolvedOps, op)
+		delete(h.respWait, string(msg.ID))
+
+		// For subscription responses, start the subscription if the server
+		// indicates success. EthSubscribe gets unblocked in either case through
+		// the op.resp channel.
+		if op.sub != nil {
+			if msg.Error != nil {
+				op.err = msg.Error
+			} else {
+				op.err = json.Unmarshal(msg.Result, &op.sub.subid)
+				if op.err == nil {
+					go op.sub.start()
+					h.clientSubs[op.sub.subid] = op.sub
+				}
+			}
+		}
+
+		if !op.hadResponse {
+			op.hadResponse = true
+			op.resp <- batch
+		}
+	}
+
+	for _, msg := range batch {
+		start := time.Now()
+		switch {
+		case msg.isResponse():
+			handleResp(msg)
+			h.logger.Trace("Handled RPC response", "reqid", idForLog(msg.ID), "duration", time.Since(start))
+
+		case msg.isNotification():
+			if strings.HasSuffix(msg.Method, notificationMethodSuffix) {
+				h.handleSubscriptionResult(msg)
+				continue
+			}
+			handleCall(msg)
+
+		default:
+			handleCall(msg)
+		}
+	}
+
+	for _, op := range resolvedOps {
+		h.removeRequestOp(op)
+	}
 }
 
 // close cancels all requests except for inflightReq and waits for
@@ -374,7 +465,7 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 	delete(h.respWait, string(msg.ID))
 	// For normal responses, just forward the reply to Call/BatchCall.
 	if op.sub == nil {
-		op.resp <- msg
+		op.resp <- []*jsonrpcMessage{msg}
 		return
 	}
 	// For subscription responses, start the subscription if the server

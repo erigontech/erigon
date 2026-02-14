@@ -168,7 +168,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 	}
 	defer tx.Rollback()
 
-	sd, err := execctx.NewSharedDomains(tx, logger1)
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger1)
 	if err != nil {
 		return err
 	}
@@ -277,20 +277,26 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 
 		stateStages.MockExecFunc(stages.Execution, execUntilFunc(execToBlock))
 		_ = stateStages.SetCurrentStage(stages.Execution)
-		if _, err := stateStages.Run(db, sd, tx, false /* firstCycle */, false); err != nil {
-			return err
+		for more := true; more; {
+			if more, err = stateStages.Run(sd, tx, false /* firstCycle */, false); err != nil {
+				return err
+			}
+
+			if err = sd.Flush(ctx, tx); err != nil {
+				return err
+			}
+			sd.ClearRam(true)
+			if err = tx.Commit(); err != nil {
+				return err
+			}
+
+			if tx, err = db.BeginTemporalRw(ctx); err != nil {
+				return err
+			}
+			defer tx.Rollback()
 		}
 
 		//receiptsInDB := rawdb.ReadReceiptsByNumber(tx, progress(tx, stages.Execution)+1)
-
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-		tx, err = db.BeginTemporalRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
 
 		execAtBlock = progress(tx, stages.Execution)
 
@@ -387,12 +393,18 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 		default:
 		}
 
+		sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
 		_ = sync.SetCurrentStage(stages.Execution)
 		t := time.Now()
-		if _, err = sync.Run(db, nil, tx, initialCycle, false); err != nil {
+		if _, err = sync.Run(sd, tx, initialCycle, false); err != nil {
 			return err
 		}
 		logger.Info("[Integration] ", "loop time", time.Since(t))
+		sd.Close()
 		tx.Rollback()
 		tx, err = db.BeginTemporalRw(ctx)
 		if err != nil {

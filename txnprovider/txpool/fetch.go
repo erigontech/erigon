@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
@@ -176,6 +177,72 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		}
 		return err
 	}
+
+	var (
+		batch     = make([]*sentryproto.InboundMessage, 0, 256)
+		batchLock sync.Mutex
+	)
+
+	// LRU cache for deduplication - filters duplicates before they enter the batch
+	// Uses maphash to avoid string allocations
+	seenLRU, _ := maphash.NewLRU[struct{}](1024)
+
+	flushBatch := func() {
+		batchLock.Lock()
+		if len(batch) == 0 {
+			batchLock.Unlock()
+			return
+		}
+		toProcess := batch
+		batch = make([]*sentryproto.InboundMessage, 0, 256)
+		batchLock.Unlock()
+
+		if !f.pool.Started() {
+			return
+		}
+
+		if f.db == nil {
+			for range toProcess {
+				if f.wg != nil {
+					f.wg.Done()
+				}
+			}
+			return
+		}
+
+		tx, txErr := f.db.BeginRo(streamCtx)
+		if txErr != nil {
+			f.logger.Warn("[txpool.fetch] failed to begin batch transaction", "err", txErr)
+			return
+		}
+		defer tx.Rollback()
+
+		for _, req := range toProcess {
+			if handleErr := f.handleInboundMessageWithTx(streamCtx, tx, req, sentryClient); handleErr != nil {
+				if !grpcutil.IsRetryLater(handleErr) && !grpcutil.IsEndOfStream(handleErr) {
+					f.logger.Trace("[txpool.fetch] Handling batched message", "reqID", req.Id.String(), "err", handleErr)
+				}
+			}
+			if f.wg != nil {
+				f.wg.Done()
+			}
+		}
+	}
+
+	// Start ticker goroutine to flush batch every second
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	go func() {
+		for {
+			select {
+			case <-streamCtx.Done():
+				return
+			case <-ticker.C:
+				flushBatch()
+			}
+		}
+	}()
+
 	var req *sentryproto.InboundMessage
 	for req, err = stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
@@ -187,22 +254,26 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 			return fmt.Errorf("txpool.receiveMessage: %w", err)
 		}
 		if req == nil {
+			flushBatch()
 			return nil
 		}
-		if err = f.handleInboundMessage(streamCtx, req, sentryClient); err != nil {
-			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
-				continue
+
+		// Skip duplicates using LRU cache with maphash to avoid string allocs
+		if _, seen := seenLRU.Get(req.Data); seen {
+			if f.wg != nil {
+				f.wg.Done()
 			}
-			f.logger.Trace("[txpool.fetch] Handling incoming message", "reqID", req.Id.String(), "err", err)
+			continue
 		}
-		if f.wg != nil {
-			f.wg.Done()
-		}
+		seenLRU.Set(req.Data, struct{}{})
+
+		batchLock.Lock()
+		batch = append(batch, req)
+		batchLock.Unlock()
 	}
 }
 
-func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) (err error) {
+func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *sentryproto.InboundMessage, sentryClient sentryproto.SentryClient) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s, rlp: %x", rec, dbg.Stack(), req.Data)
@@ -212,11 +283,6 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentryproto.Inbou
 	if !f.pool.Started() {
 		return nil
 	}
-	tx, err := f.db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 
 	switch req.Id {
 	case sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_66:
@@ -332,12 +398,6 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentryproto.Inbou
 		}
 	case sentryproto.MessageId_POOLED_TRANSACTIONS_66, sentryproto.MessageId_TRANSACTIONS_66:
 		txns := TxnSlots{}
-		if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
-			return nil
-		}); err != nil {
-			return err
-		}
-
 		switch req.Id {
 		case sentryproto.MessageId_TRANSACTIONS_66:
 			if err := f.threadSafeParsePooledTxn(func(parseContext *TxnParseContext) error {
@@ -489,16 +549,21 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 	var unwindTxns, unwindBlobTxns, minedTxns TxnSlots
 	for _, change := range req.ChangeBatch {
 		if change.Direction == remoteproto.Direction_FORWARD {
-			minedTxns.Resize(uint(len(change.Txs)))
 			for i := range change.Txs {
-				minedTxns.Txns[i] = &TxnSlot{}
 				if err := f.threadSafeParseStateChangeTxn(func(parseContext *TxnParseContext) error {
-					_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxns.Txns[i], minedTxns.Senders.At(i), false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
-					return err
+					utx := &TxnSlot{}
+					sender := make([]byte, 20)
+					_, err := parseContext.ParseTransaction(change.Txs[i], 0, utx, sender, false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
+					if err != nil {
+						return err
+					}
+					minedTxns.Append(utx, sender, false)
+					return nil
 				}); err != nil && !errors.Is(err, context.Canceled) {
-					f.logger.Debug("[txpool.fetch] stream.Recv", "err", err)
+					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "index", i, "err", err)
 					continue // 1 txn handling error must not stop batch processing
 				}
+
 			}
 		} else if change.Direction == remoteproto.Direction_UNWIND {
 			for i := range change.Txs {
@@ -516,7 +581,7 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 					}
 					return nil
 				}); err != nil && !errors.Is(err, context.Canceled) {
-					f.logger.Debug("[txpool.fetch] stream.Recv", "err", err)
+					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "index", i, "err", err)
 					continue // 1 txn handling error must not stop batch processing
 				}
 			}

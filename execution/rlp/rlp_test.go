@@ -53,7 +53,7 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}},
 		}
 	)
-	m := mock.MockWithGenesis(tb, gspec, key, false)
+	m := mock.MockWithGenesis(tb, gspec, key)
 	genesis := m.Genesis
 	db := m.DB
 
@@ -63,7 +63,7 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 			// Add transactions and stuff on the last block
 			for i := 0; i < transactions; i++ {
 				tx, _ := types.SignTx(types.NewTransaction(uint64(i), aa,
-					u256.Num0, 50000, u256.Num1, make([]byte, dataSize)), *types.LatestSignerForChainID(nil), key)
+					&u256.Num0, 50000, &u256.Num1, make([]byte, dataSize)), *types.LatestSignerForChainID(nil), key)
 				b.AddTx(tx)
 			}
 			for i := 0; i < uncles; i++ {
@@ -163,7 +163,7 @@ func BenchmarkHashing(b *testing.B) {
 	var hasher = sha3.NewLegacyKeccak256()
 	b.Run("iteratorhashing", func(b *testing.B) {
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			var hash common.Hash
 			it, err := rlp.NewListIterator(bodyRlp)
 			if err != nil {
@@ -186,7 +186,7 @@ func BenchmarkHashing(b *testing.B) {
 	var exp common.Hash
 	b.Run("fullbodyhashing", func(b *testing.B) {
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			var body types.Body
 			rlp.DecodeBytes(bodyRlp, &body)
 			for _, txn := range body.Transactions {
@@ -196,7 +196,7 @@ func BenchmarkHashing(b *testing.B) {
 	})
 	b.Run("fullblockhashing", func(b *testing.B) {
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			var block types.Block
 			rlp.DecodeBytes(blockRlp, &block)
 			for _, txn := range block.Transactions() {

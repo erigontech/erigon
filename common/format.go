@@ -21,6 +21,7 @@ package common
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -61,11 +62,12 @@ func (t PrettyAge) String() string {
 		return "0"
 	}
 	// Accumulate a precision of 3 components before returning
-	result, prec := "", 0
+	var result strings.Builder
+	prec := 0
 
 	for _, unit := range ageUnits {
 		if diff >= unit.Size {
-			result = fmt.Sprintf("%s%d%s", result, diff/unit.Size, unit.Symbol)
+			result.WriteString(fmt.Sprintf("%d%s", diff/unit.Size, unit.Symbol))
 			diff %= unit.Size
 
 			if prec += 1; prec >= 3 {
@@ -73,5 +75,5 @@ func (t PrettyAge) String() string {
 			}
 		}
 	}
-	return result
+	return result.String()
 }
