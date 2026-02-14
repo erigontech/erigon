@@ -162,7 +162,11 @@ func GetChainConfig(forkString string) (baseConfig *chain.Config, eips []int, er
 
 // Subtests returns all valid subtests of the test.
 func (t *StateTest) Subtests() []StateSubtest {
-	var sub []StateSubtest
+	totalCount := 0
+	for _, pss := range t.Json.Post {
+		totalCount += len(pss)
+	}
+	sub := make([]StateSubtest, 0, totalCount)
 	for fork, pss := range t.Json.Post {
 		for i := range pss {
 			sub = append(sub, StateSubtest{fork, i})
@@ -272,7 +276,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	res, err := protocol.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */)
 	gasUsed := uint64(0)
 	if res != nil {
-		gasUsed = res.GasUsed
+		gasUsed = res.ReceiptGasUsed
 	}
 	if err != nil {
 		statedb.RevertToSnapshot(snapshot, err)
@@ -292,7 +296,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	var root common.Hash
 	rootBytes, err := domains.ComputeCommitment(context2.Background(), tx, true, blockNum, txNum, "", nil)
 	if err != nil {
-		return statedb, root, res.GasUsed, fmt.Errorf("ComputeCommitment: %w", err)
+		return statedb, root, res.ReceiptGasUsed, fmt.Errorf("ComputeCommitment: %w", err)
 	}
 	return statedb, common.BytesToHash(rootBytes), gasUsed, nil
 }

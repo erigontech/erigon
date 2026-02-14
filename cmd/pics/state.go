@@ -289,7 +289,7 @@ func initialState1() error {
 		// this code generates a log
 		signer = types.MakeSigner(chain.AllProtocolChanges, 1, 0)
 	)
-	m := mock.MockWithGenesis(nil, gspec, key, false)
+	m := mock.MockWithGenesis(nil, gspec, key)
 	defer m.DB.Close()
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(nil, gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -418,7 +418,7 @@ func initialState1() error {
 	if err != nil {
 		return err
 	}
-	m2 := mock.MockWithGenesis(nil, gspec, key, false)
+	m2 := mock.MockWithGenesis(nil, gspec, key)
 	defer m2.DB.Close()
 
 	if err = hexPalette(); err != nil {

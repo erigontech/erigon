@@ -53,11 +53,11 @@ var BorDefaultMinerGasPrice = big.NewInt(25 * common.GWei)
 // Fail-back block gas limit. Better specify one in the chain config.
 const DefaultBlockGasLimit uint64 = 60_000_000
 
-func DefaultBlockGasLimitByChain(config *Config) uint64 {
-	if config.Genesis == nil || config.Genesis.Config == nil || config.Genesis.Config.DefaultBlockGasLimit == nil {
+func DefaultBlockGasLimitByChain(chainConfig *chain.Config) uint64 {
+	if chainConfig.DefaultBlockGasLimit == nil {
 		return DefaultBlockGasLimit
 	}
-	return *config.Genesis.Config.DefaultBlockGasLimit
+	return *chainConfig.DefaultBlockGasLimit
 }
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
@@ -106,13 +106,14 @@ var Defaults = Config{
 	RPCGasCap:   50000000,
 	GPO:         FullNodeGPO,
 	RPCTxFeeCap: 1, // 1 ether
-
-	ImportMode: false,
 	Snapshot: BlocksFreezing{
 		KeepBlocks: false,
 		ProduceE2:  true,
 		ProduceE3:  true,
 	},
+	FcuTimeout:          1 * time.Second,
+	FcuBackgroundPrune:  true,
+	FcuBackgroundCommit: false, // to enable, we need to 1) have rawdb API go via execctx and 2) revive Coherent cache for rpcdaemon
 }
 
 const DefaultChainDBPageSize = 16 * datasize.KB
@@ -191,8 +192,6 @@ type Config struct {
 
 	Prune     prune.Mode
 	BatchSize datasize.ByteSize // Batch size for execution stage
-
-	ImportMode bool
 
 	BadBlockHash common.Hash // hash of the block marked as bad
 
@@ -274,7 +273,11 @@ type Config struct {
 	AllowAA bool
 
 	// fork choice update timeout
-	FcuTimeout time.Duration
+	FcuTimeout          time.Duration
+	FcuBackgroundPrune  bool
+	FcuBackgroundCommit bool
+
+	MCPAddress string
 }
 
 type Sync struct {

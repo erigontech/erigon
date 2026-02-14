@@ -160,7 +160,7 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 	// get the newly built block
 	newPayload, err := retryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, []error{&engine_helpers.UnknownPayloadErr},
 		func() (*enginetypes.GetPayloadResponse, enginetypes.EngineStatus, error) {
-			r, err := cl.engineApiClient.GetPayloadV5(ctx, *fcuRes.PayloadId)
+			r, err := cl.engineApiClient.GetPayloadV6(ctx, *fcuRes.PayloadId)
 			if err != nil {
 				return nil, "", err
 			}
@@ -177,9 +177,9 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 func (cl *MockCl) InsertNewPayload(ctx context.Context, p *MockClPayload) (*enginetypes.PayloadStatus, error) {
 	elPayload := p.ExecutionPayload
 	clParentBlockRoot := p.ParentBeaconBlockRoot
-	return retryEngine(ctx, []enginetypes.EngineStatus{}, nil,
+	return retryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
 		func() (*enginetypes.PayloadStatus, enginetypes.EngineStatus, error) {
-			r, err := cl.engineApiClient.NewPayloadV4(ctx, elPayload, []common.Hash{}, clParentBlockRoot, []hexutil.Bytes{})
+			r, err := cl.engineApiClient.NewPayloadV5(ctx, elPayload, []common.Hash{}, clParentBlockRoot, []hexutil.Bytes{})
 			if err != nil {
 				return nil, "", err
 			}
@@ -270,7 +270,7 @@ func retryEngine[T any](ctx context.Context, retryStatuses []enginetypes.EngineS
 		return res, nil
 	}
 	// don't retry for too long
-	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	var backOff backoff.BackOff
 	backOff = backoff.NewConstantBackOff(50 * time.Millisecond)
@@ -335,7 +335,7 @@ func MockClPayloadToHeader(p *MockClPayload) *types.Header {
 		wh := types.DeriveSha(types.Withdrawals(elPayload.Withdrawals))
 		header.WithdrawalsHash = &wh
 	}
-	requests := make(types.FlatRequests, 0)
+	requests := make(types.FlatRequests, 0, len(p.ExecutionRequests))
 	for _, r := range p.ExecutionRequests {
 		requests = append(requests, types.FlatRequest{Type: r[0], RequestData: r[1:]})
 	}

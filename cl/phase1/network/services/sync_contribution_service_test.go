@@ -145,5 +145,5 @@ func TestSyncContributionServiceSuccess(t *testing.T) {
 	err := s.ProcessMessage(context.TODO(), nil, msg)
 	require.NoError(t, err)
 	err = s.ProcessMessage(context.TODO(), nil, msg)
-	require.Error(t, err)
+	require.NoError(t, err) // Silent ignore: returns nil when seen before
 }

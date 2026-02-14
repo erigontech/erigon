@@ -453,7 +453,7 @@ func (UnimplementedETHBACKENDServer) SubscribeLogs(grpc.BidiStreamingServer[Logs
 	return status.Error(codes.Unimplemented, "method SubscribeLogs not implemented")
 }
 func (UnimplementedETHBACKENDServer) SubscribeReceipts(grpc.BidiStreamingServer[ReceiptsFilterRequest, SubscribeReceiptsReply]) error {
-	return status.Errorf(codes.Unimplemented, "method SubscribeReceipts not implemented")
+	return status.Error(codes.Unimplemented, "method SubscribeReceipts not implemented")
 }
 func (UnimplementedETHBACKENDServer) Block(context.Context, *BlockRequest) (*BlockReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method Block not implemented")

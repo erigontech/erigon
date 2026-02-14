@@ -140,15 +140,16 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 	fv.extendingForkHeadHash = common.Hash{}
 }
 
-// FlushExtendingFork flush the current extending fork if fcu chooses its head hash as the its forkchoice.
-func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts) error {
+// MergeExtendingFork merges the shared domains of the current extending fork into the current shared domains if fcu chooses its head hash as the fork choice.
+func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts) error {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	start := time.Now()
-	// Flush changes to db.
 	if fv.sharedDom != nil {
-		sd.Merge(fv.sharedDom)
-		_, err := sd.ComputeCommitment(ctx, tx, true, sd.BlockNum(), sd.TxNum(), "flush-commitment", nil)
+		if err := fv.sharedDom.FlushPendingUpdates(ctx, tx); err != nil {
+			return err
+		}
+		err := sd.Merge(fv.sharedDom)
 		if err != nil {
 			return err
 		}
@@ -160,7 +161,6 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, sd *execctx.Sha
 	fv.extendingForkNotifications.RecentReceipts.CopyAndReset(recentReceipts)
 	// Clean extending fork data
 	fv.sharedDom = nil
-
 	fv.extendingForkHeadHash = common.Hash{}
 	fv.extendingForkNumber = 0
 	fv.extendingForkNotifications = nil
@@ -354,4 +354,10 @@ func (fv *ForkValidator) GetTimings(hash common.Hash) BlockTimings {
 		return timings
 	}
 	return BlockTimings{}
+}
+
+func (fv *ForkValidator) ExtendingFork() (common.Hash, uint64, *execctx.SharedDomains) {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	return fv.extendingForkHeadHash, fv.extendingForkNumber, fv.sharedDom
 }

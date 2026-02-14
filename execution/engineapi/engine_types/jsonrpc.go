@@ -203,9 +203,6 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 		excessBlobGas := *header.ExcessBlobGas
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
 	}
-	if body.BlockAccessList != nil {
-		res.BlockAccessList = types.ConvertBlockAccessListFromExecutionProto(body.BlockAccessList)
-	}
 	return res
 }
 
