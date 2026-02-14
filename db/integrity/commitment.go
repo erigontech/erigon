@@ -811,6 +811,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(estimate.AlmostAllCPUs())
 	for blockNum := from; blockNum < to; blockNum++ {
+		blockNum := blockNum
 		g.Go(func() error {
 			return CheckCommitmentHistAtBlk(ctx, db, br, blockNum, logger)
 		})
