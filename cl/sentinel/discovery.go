@@ -542,8 +542,25 @@ func (s *Sentinel) listenForPeers() {
 func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 	go func() {
 		peerId := conn.RemotePeer()
-		if s.HasTooManyPeers() {
-			log.Trace("[Sentinel] Not looking for peers, at peer limit")
+
+		// Check if this peer fills any subnets with zero peers
+		peerFillsEmptySubnet := false
+		if nodeVal, ok := s.pidToEnr.Load(peerId); ok {
+			if node, ok := nodeVal.(*enode.Node); ok {
+				emptySubnets := s.getEmptySubnets()
+				if len(emptySubnets) > 0 {
+					filledSubnets := s.getFilledSubnets(node, emptySubnets)
+					peerFillsEmptySubnet = len(filledSubnets) > 0
+					if peerFillsEmptySubnet {
+						log.Debug("[Sentinel] Peer fills empty subnets, bypassing limit", "peer", peerId, "subnets", filledSubnets)
+					}
+				}
+			}
+		}
+
+		// If peer fills empty subnets, skip the limit check entirely
+		if s.HasTooManyPeers() && !peerFillsEmptySubnet {
+			log.Trace("[Sentinel] Rejecting peer, at peer limit")
 			s.p2p.Host().Peerstore().RemovePeer(peerId)
 			s.p2p.Host().Network().ClosePeer(peerId)
 			s.peers.RemovePeer(peerId)
