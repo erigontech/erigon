@@ -68,8 +68,8 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 				{
 					Slot: accounts.InternKey(common.HexToHash("0x01")),
 					Changes: []*StorageChange{
-						{Index: 1, Value: common.Hash(uint256.NewInt(2).Bytes32())},
-						{Index: 5, Value: common.Hash(uint256.NewInt(3).Bytes32())},
+						{Index: 1, Value: *uint256.NewInt(2)},
+						{Index: 5, Value: *uint256.NewInt(3)},
 					},
 				},
 			},
@@ -83,7 +83,7 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 				{Index: 9, Value: 7},
 			},
 			CodeChanges: []*CodeChange{
-				{Index: 2, Data: []byte{0xbe, 0xef}},
+				{Index: 2, Bytecode: []byte{0xbe, 0xef}},
 			},
 		},
 	}
@@ -93,7 +93,7 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 		t.Fatalf("encode failed: %v", err)
 	}
 
-	expected := common.FromHex("0xf8b4f8b29400000000000000000000000000000000000000aaf86bf869a00000000000000000000000000000000000000000000000000000000000000001f846e201a00000000000000000000000000000000000000000000000000000000000000002e205a00000000000000000000000000000000000000000000000000000000000000003e1a00000000000000000000000000000000000000000000000000000000000000002c3c20104c3c20907c5c40282beef")
+	expected := common.FromHex("0xf0ef9400000000000000000000000000000000000000aac9c801c6c20102c20503c102c3c20104c3c20907c5c40282beef")
 	if !bytes.Equal(encoded, expected) {
 		t.Fatalf("unexpected encoding\nhave: %x\nwant: %x", encoded, expected)
 	}

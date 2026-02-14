@@ -31,7 +31,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/erigontech/secp256k1"
-	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -68,7 +67,6 @@ import (
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/eth"
@@ -81,7 +79,6 @@ import (
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -564,7 +561,7 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 		}
 	}
 	logger.Info("Progress", "snapshots", progress)
-	return nil
+	return tx.Commit()
 }
 
 func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
@@ -657,7 +654,7 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 	br, bw := blocksIO(db, logger)
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		s := stage(sync, tx, nil, stages.Bodies)
+		s := stage(sync, tx, stages.Bodies)
 
 		if unwind > 0 {
 			if unwind > s.BlockNumber {
@@ -665,8 +662,8 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 			}
 
 			u := sync.NewUnwindState(stages.Bodies, s.BlockNumber-unwind, s.BlockNumber, true, false)
-			cfg := stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, chainConfig, br, bw)
-			if err := stagedsync.UnwindBodiesStage(u, tx, cfg, ctx); err != nil {
+			cfg := stagedsync.StageBodiesCfg(nil, nil, nil, nil, 0, chainConfig, br, bw)
+			if err := stagedsync.UnwindBodiesStage(u, tx, cfg); err != nil {
 				return err
 			}
 
@@ -744,7 +741,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 		return nil
 	}
 
-	s := stage(sync, tx, nil, stages.Senders)
+	s := stage(sync, tx, stages.Senders)
 	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
 	pm, err := prune.Get(tx)
@@ -752,7 +749,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 		return err
 	}
 
-	cfg := stagedsync.StageSendersCfg(db, chainConfig, sync.Cfg(), false, tmpdir, pm, br, nil)
+	cfg := stagedsync.StageSendersCfg(chainConfig, sync.Cfg(), false /* badBlockHalt */, tmpdir, pm, br, nil /* hd */)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber, true, false)
 		if err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
@@ -795,7 +792,11 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
-	s := stage(sync, nil, db, stages.Execution)
+	var s *stagedsync.StageState
+	_ = db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		s = stage(sync, tx, stages.Execution)
+		return nil
+	})
 	if chainTipMode {
 		s.CurrentSyncCycle.IsFirstCycle = false
 		s.CurrentSyncCycle.IsInitialCycle = false
@@ -847,7 +848,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}()
 
 	if pruneTo > 0 {
-		p, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, db, true)
+		p, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, true)
 		if err != nil {
 			return err
 		}
@@ -863,7 +864,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 		return err
 	}
-	if execProgress == 0 {
+	if execProgress == 0 { // then fallback to how much data we have in stat_snapshots
 		doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
 		if err != nil {
 			panic(err)
@@ -871,7 +872,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		execProgress = doms.BlockNum()
 		doms.Close()
 	}
-
 	if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
 		return err
 	}
@@ -880,7 +880,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		block = sendersProgress
 	}
 
-	doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
 		return err
 	}
@@ -892,16 +892,31 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 				if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
 					return err
 				}
-				if err := doms.Flush(ctx, tx); err != nil {
-					return err
-				}
-				doms.ClearRam(true)
-				if err := tx.Commit(); err != nil {
-					return err
-				}
-				if tx, err = db.BeginTemporalRw(ctx); err != nil {
-					return err
-				}
+			}
+			if err := doms.Flush(ctx, tx); err != nil {
+				return err
+			}
+			doms.ClearRam(true)
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			if tx, err = db.BeginTemporalRw(ctx); err != nil {
+				return err
+			}
+
+			pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
+			if err != nil {
+				return err
+			}
+			if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
+				return err
+			}
+
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			if tx, err = db.BeginTemporalRw(ctx); err != nil {
+				return err
 			}
 		}
 		if err := doms.Flush(ctx, tx); err != nil {
@@ -922,6 +937,15 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			return err
 		}
 		doms.ClearRam(true)
+
+		pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
+		if err != nil {
+			return err
+		}
+		if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
+			return err
+		}
+
 		if !noCommit {
 			if err := tx.Commit(); err != nil {
 				return err
@@ -996,7 +1020,6 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
 	_, _, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
-	chainConfig := fromdb.ChainConfig(db)
 	must(sync.SetCurrentStage(stages.TxLookup))
 	if reset {
 		return db.Update(ctx, rawdbreset.ResetTxLookup)
@@ -1007,14 +1030,14 @@ func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) e
 	}
 	defer tx.Rollback()
 
-	s := stage(sync, tx, nil, stages.TxLookup)
+	s := stage(sync, tx, stages.TxLookup)
 	if pruneTo > 0 {
 		pm.History = prune.Distance(s.BlockNumber - pruneTo)
 	}
 	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
 	br, _ := blocksIO(db, logger)
-	cfg := stagedsync.StageTxLookupCfg(db, pm, dirs.Tmp, chainConfig.Bor, br)
+	cfg := stagedsync.StageTxLookupCfg(pm, dirs.Tmp, br)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.TxLookup, s.BlockNumber-unwind, s.BlockNumber, true, false)
 		err = stagedsync.UnwindTxLookup(u, s, tx, cfg, ctx, logger)
@@ -1022,7 +1045,7 @@ func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) e
 			return err
 		}
 	} else if pruneTo > 0 {
-		p, err := sync.PruneStageState(stages.TxLookup, s.BlockNumber, tx, nil, true)
+		p, err := sync.PruneStageState(stages.TxLookup, s.BlockNumber, tx, true)
 		if err != nil {
 			return err
 		}
@@ -1096,7 +1119,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		_bridgeStoreSingleton = bridge.NewSnapshotStore(bridge.NewDbStore(db), _allBorSnapshotsSingleton, chainConfig.Bor)
 		_heimdallStoreSingleton = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), _allBorSnapshotsSingleton)
 		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton)
-		txNums := blockReader.TxnumReader(ctx)
+		txNums := blockReader.TxnumReader()
 
 		_aggSingleton = dbstate.New(dirs).Logger(logger).MustOpen(ctx, db)
 
@@ -1142,7 +1165,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 			ac := _aggSingleton.BeginFilesRo()
 			defer ac.Close()
 			stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-				histBlockNumProgress, _, err := txNums.FindBlockNum(tx, endTxNumMinimax)
+				histBlockNumProgress, _, err := txNums.FindBlockNum(ctx, tx, endTxNumMinimax)
 				if err != nil {
 					return histBlockNumProgress, fmt.Errorf("findBlockNum(%d) fails: %w", endTxNumMinimax, err)
 				}
@@ -1239,6 +1262,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
 
 	sentryControlServer, err := sentry_multi_client.NewMultiClient(
+		dirs,
 		db,
 		chainConfig,
 		engine,
@@ -1256,20 +1280,10 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 	if err != nil {
 		panic(err)
 	}
-
 	notifications := shards.NewNotifications(nil)
-
-	var signatures *lru.ARCCache[common.Hash, accounts.Address]
-
-	if bor, ok := engine.(*bor.Bor); ok {
-		signatures = bor.Signatures
-	}
 	blockRetire := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, heimdallStore, bridgeStore, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
-
-	stageList := stageloop.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil,
-		signatures, logger, nil)
+	stageList := stageloop.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil, nil)
 	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
-
 	return blockRetire, engine, vmConfig, sync
 }
 
@@ -1281,8 +1295,8 @@ func progress(tx kv.Getter, stage stages.SyncStage) uint64 {
 	return res
 }
 
-func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *stagedsync.StageState {
-	res, err := st.StageState(stage, tx, db, true, false)
+func stage(st *stagedsync.Sync, tx kv.Tx, stage stages.SyncStage) *stagedsync.StageState {
+	res, err := st.StageState(stage, tx, true, false)
 	if err != nil {
 		panic(err)
 	}

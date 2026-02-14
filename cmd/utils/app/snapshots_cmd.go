@@ -35,8 +35,8 @@ import (
 	"strings"
 	"time"
 
+	g "github.com/anacrolix/generics"
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
@@ -53,12 +53,16 @@ import (
 	"github.com/erigontech/erigon/db/compress"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/downloader/webseeds"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
@@ -93,7 +97,7 @@ func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
 func commonBeforeSnapshotCommand(cliCtx *cli.Context) error {
 	go mem.LogMemStats(cliCtx.Context, log.New())
 	go disk.UpdateDiskStats(cliCtx.Context, log.New())
-	_, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	_, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -281,7 +285,7 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&dryRunFlag,
 				&removeLocalFlag,
-				&preverifiedFlag,
+				&PreverifiedFlag,
 			},
 		},
 		{
@@ -291,7 +295,7 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "step"},
-				&cli.BoolFlag{Name: "latest"},
+				&cli.BoolFlag{Name: "recentStep", Aliases: []string{"latest", "latestStep", "recent"}, Usage: "remove minimal possible recent/latest files: and Domain and History. Useful when have 1 corrupted recent file"},
 				&cli.BoolFlag{Name: "dry-run"},
 				&cli.StringSliceFlag{Name: "domain"},
 			},
@@ -305,7 +309,7 @@ var snapshotCommand = cli.Command{
 				"It is useful for shadowforks, recovering broken nodes or chains, and/or for doing experiments that " +
 				"involve replaying certain blocks.",
 			Action: func(cliCtx *cli.Context) error {
-				logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+				logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
 				if err != nil {
 					panic(fmt.Errorf("rollback snapshots to block: could not setup logger: %w", err))
 				}
@@ -391,7 +395,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "check-commitment-hist-at-blk",
 			Action: func(cliCtx *cli.Context) error {
-				logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+				logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
 				if err != nil {
 					panic(fmt.Errorf("check commitment history at block: could not setup logger: %w", err))
 				}
@@ -412,7 +416,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "check-commitment-hist-at-blk-range",
 			Action: func(cliCtx *cli.Context) error {
-				logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+				logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
 				if err != nil {
 					panic(fmt.Errorf("check commitment history at block range: could not setup logger: %w", err))
 				}
@@ -434,7 +438,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "publishable",
 			Action: func(cliCtx *cli.Context) error {
-				if err := doPublishable(cliCtx); err != nil {
+				if err := doPublishable(cliCtx, nil); err != nil {
 					log.Error("[publishable]", "err", err)
 					return err
 				}
@@ -496,6 +500,33 @@ var snapshotCommand = cli.Command{
 						&cli.UintFlag{Name: "domain", Required: true},
 					}),
 				},
+			},
+		},
+		{
+			Name: "preverified",
+			Action: func(cliCtx *cli.Context) (err error) {
+				var dataDir string
+				// Don't use the default, it must be set to apply.
+				if cliCtx.IsSet(utils.DataDirFlag.Name) {
+					dataDir = cliCtx.String(utils.DataDirFlag.Name)
+				}
+				var targetChain g.Option[string]
+				// Don't use the default, it must be set to apply.
+				if cliCtx.IsSet(VerifyChainFlag.Name) {
+					targetChain.Set(VerifyChainFlag.Get(cliCtx))
+				}
+				return webseeds.Verify(
+					cliCtx.Context,
+					PreverifiedFlag.Get(cliCtx),
+					dataDir,
+					ConcurrencyFlag.Get(cliCtx),
+					targetChain,
+				)
+			},
+			Flags: []cli.Flag{
+				&PreverifiedFlag,
+				&VerifyChainFlag,
+				&ConcurrencyFlag,
 			},
 		},
 	},
@@ -593,6 +624,7 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, err err
 
 func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelete, dryRun bool, stepRange string, domainNames ...string) error {
 	_maxFrom := uint64(0)
+	_maxTo := uint64(0)
 	files := make([]snaptype.FileInfo, 0)
 	commitmentFilesWithState := make([]snaptype.FileInfo, 0)
 
@@ -662,12 +694,14 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 		files = append(files, res)
 		if removeLatest {
 			_maxFrom = max(_maxFrom, res.From)
+			_maxTo = max(_maxTo, res.To)
 		}
 	}
 
 	toRemove := make(map[string]snaptype.FileInfo)
 	if len(domainNames) > 0 {
 		_maxFrom = 0
+		_maxTo = 0
 		domainFiles := make([]snaptype.FileInfo, 0, len(files))
 		for _, domainName := range domainNames {
 			_, err := kv.String2InvertedIdx(domainName)
@@ -686,6 +720,7 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 				}
 				if removeLatest {
 					_maxFrom = max(_maxFrom, res.From)
+					_maxTo = max(_maxTo, res.To)
 				}
 				domainFiles = append(domainFiles, res)
 			}
@@ -735,7 +770,8 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 		}
 
 		if removeLatest {
-			q := fmt.Sprintf("remove latest snapshot files with stepFrom=%d?\n1) RemoveFile\n4) Exit\n (pick number): ", _maxFrom)
+			// domain files have higher merge limit, so latest domain may have From < stepFrom but To == stepTo
+			q := fmt.Sprintf("remove latest snapshot files (stepFrom>=%d) and files ending at stepTo=%d?\n1) RemoveFile\n4) Exit\n (pick number): ", _maxFrom, _maxTo)
 			if promptExit(q) {
 				os.Exit(0)
 			}
@@ -771,6 +807,8 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 		for _, res := range files {
 			if res.From >= minS && res.To <= maxS {
 				toRemove[res.Path] = res
+			} else if removeLatest && res.To == _maxTo {
+				toRemove[res.Path] = res
 			}
 		}
 	} else {
@@ -791,7 +829,7 @@ func DeleteStateSnapshots(dirs datadir.Dirs, removeLatest, promptUserBeforeDelet
 		removed++
 	}
 	fmt.Printf("removed %d state snapshot segments files\n", removed)
-	fmt.Printf("\n\nRun `integration stage_exec --reset` before restarting Erigon to prune execution remnants from DB to avoid gap between snapshots and DB.\n")
+	fmt.Printf("\n\nBefore restarting Erigon, run one of:\n  - `integration stage_custom_trace --reset` if deleted domains are handled by stage_custom_trace\n  - `integration stage_exec --reset` otherwise\nThis prunes DB remnants to avoid gaps between snapshots and DB.\n")
 	return nil
 }
 
@@ -842,8 +880,8 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 	}
 	defer tx.Rollback()
 	reader, _ := br.IO()
-	txNumReader := reader.TxnumReader(ctx)
-	toTxNum, err := txNumReader.Min(tx, blockNum)
+	txNumReader := reader.TxnumReader()
+	toTxNum, err := txNumReader.Min(ctx, tx, blockNum)
 	if err != nil {
 		return err
 	}
@@ -899,7 +937,7 @@ func doBtSearch(cliCtx *cli.Context) error {
 		return err
 	}
 	defer l.Unlock()
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
 	}
@@ -944,7 +982,7 @@ func doBtSearch(cliCtx *cli.Context) error {
 }
 
 func doDebugKey(cliCtx *cli.Context) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
 	}
@@ -997,7 +1035,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 }
 
 func doIntegrity(cliCtx *cli.Context) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
 	}
@@ -1129,7 +1167,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return err
 			}
 		case integrity.Publishable:
-			if err := doPublishable(cliCtx); err != nil {
+			if err := doPublishable(cliCtx, chainDB); err != nil {
 				return err
 			}
 		case integrity.CommitmentRoot:
@@ -1378,7 +1416,29 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	return nil
 }
 
-func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
+func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error {
+	// Read feature flags from DB
+	if chainDB == nil {
+		chainDB = dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+		defer chainDB.Close()
+	}
+
+	var persistReceiptCache, commitmentHistory bool
+	if err := chainDB.View(context.Background(), func(tx kv.Tx) error {
+		var err error
+		persistReceiptCache, err = kvcfg.PersistReceipts.Enabled(tx)
+		if err != nil {
+			return fmt.Errorf("failed to read PersistReceipts config: %w", err)
+		}
+		commitmentHistory, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
+		if err != nil {
+			return fmt.Errorf("failed to read CommitmentHistory config: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
 	var maxStepDomain uint64 // across all files in SnapDomain
 	var accFiles []snaptype.FileInfo
 
@@ -1537,14 +1597,23 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs) error {
 		prevFrom, prevTo = res.From, res.To
 	}
 
-	viTypes := []string{"accounts", "storage", "code", "rcache", "receipt"}
+	viTypes := []string{"accounts", "storage", "code", "receipt"}
+	iiTypes := []string{"accounts", "storage", "code", "receipt", "logtopics", "logaddrs", "tracesfrom", "tracesto"}
+	if persistReceiptCache {
+		viTypes = append(viTypes, "rcache")
+		iiTypes = append(iiTypes, "rcache")
+	}
+	if commitmentHistory {
+		viTypes = append(viTypes, "commitment")
+		iiTypes = append(iiTypes, "commitment")
+	}
 	for _, res := range accFiles {
 		accName, err := version.ReplaceVersionWithMask(res.Name())
 		if err != nil {
 			return fmt.Errorf("failed to replace version file %s: %w", res.Name(), err)
 		}
 		// do a range check over all snapshots types (sanitizes domain and history folder)
-		for _, snapType := range []string{"accounts", "storage", "code", "rcache", "receipt", "logtopics", "logaddrs", "tracesfrom", "tracesto"} {
+		for _, snapType := range iiTypes {
 			versioned, err := statecfg.Schema.GetVersioned(snapType)
 			if err != nil {
 				return err
@@ -1622,16 +1691,16 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 	if intervals[0].from != 0 {
 		return fmt.Errorf("gap at start: snapshots start at (%d-%d). snaptype: %s", intervals[0].from, intervals[0].to, snapType)
 	}
-	// Check that there are no gaps
-	for i := 1; i < len(intervals); i++ {
-		if intervals[i].from != intervals[i-1].to {
-			return fmt.Errorf("gap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
-		}
-	}
 	// Check that there are no overlaps
 	for i := 1; i < len(intervals); i++ {
 		if intervals[i].from < intervals[i-1].to {
 			return fmt.Errorf("overlap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
+		}
+	}
+	// Check that there are no gaps
+	for i := 1; i < len(intervals); i++ {
+		if intervals[i].from != intervals[i-1].to {
+			return fmt.Errorf("gap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
 		}
 	}
 
@@ -1639,14 +1708,14 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 
 }
 
-func doPublishable(cliCtx *cli.Context) error {
+func doPublishable(cliCtx *cli.Context, chainDB kv.RoDB) error {
 	dat := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	// Check block snapshots sanity
 	if err := checkIfBlockSnapshotsPublishable(dat.Snap); err != nil {
 		return err
 	}
 	// Iterate over all fies in dat.Snap
-	if err := checkIfStateSnapshotsPublishable(dat); err != nil {
+	if err := checkIfStateSnapshotsPublishable(dat, chainDB); err != nil {
 		return err
 	}
 	if err := checkIfCaplinSnapshotsPublishable(dat, true); err != nil {
@@ -1732,7 +1801,7 @@ func deleteFilesWithExtensions(dir string, extensions []string) error {
 }
 
 func doBlkTxNum(cliCtx *cli.Context) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -1775,14 +1844,14 @@ func doBlkTxNum(cliCtx *cli.Context) error {
 	defer tx.Rollback()
 
 	reader, _ := br.IO()
-	txNumReader := reader.TxnumReader(ctx)
+	txNumReader := reader.TxnumReader()
 
 	if blkNumber >= 0 {
-		min, err := txNumReader.Min(tx, uint64(blkNumber))
+		min, err := txNumReader.Min(ctx, tx, uint64(blkNumber))
 		if err != nil {
 			return err
 		}
-		max, err := txNumReader.Max(tx, uint64(blkNumber))
+		max, err := txNumReader.Max(ctx, tx, uint64(blkNumber))
 		if err != nil {
 			return err
 		}
@@ -1791,7 +1860,7 @@ func doBlkTxNum(cliCtx *cli.Context) error {
 		maxStep := max / stepSize
 		logger.Info("out", "block", blkNumber, "min_txnum", min, "max_txnum", max, "min_step", minStep, "max_step", maxStep)
 	} else {
-		blk, ok, err := txNumReader.FindBlockNum(tx, uint64(txNum))
+		blk, ok, err := txNumReader.FindBlockNum(ctx, tx, uint64(txNum))
 		if err != nil {
 			return err
 		}
@@ -1904,7 +1973,7 @@ func doMeta(cliCtx *cli.Context) error {
 }
 
 func doDecompressSpeed(cliCtx *cli.Context) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -1944,7 +2013,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 }
 
 func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -1973,13 +2042,13 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 	defer clean()
 
+	if err := caplinStateSnaps.BuildMissingIndices(ctx, logger); err != nil {
+		return err
+	}
 	if err := br.BuildMissedIndicesIfNeed(ctx, "Indexing", nil); err != nil {
 		return err
 	}
 	if err := caplinSnaps.BuildMissingIndices(ctx, logger); err != nil {
-		return err
-	}
-	if err := caplinStateSnaps.BuildMissingIndices(ctx, logger); err != nil {
 		return err
 	}
 
@@ -1996,7 +2065,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	return nil
 }
 func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -2071,6 +2140,10 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB)
 		blkFreezeCfg := ethconfig.BlocksFreezing{ChainName: beaconConfig.ConfigName}
 		res.CaplinStateSnaps = snapshotsync.NewCaplinStateSnapshots(blkFreezeCfg, beaconConfig, dirs, snTypes, logger)
+		if err = res.CaplinStateSnaps.OpenFolder(); err != nil {
+			return res, nil, err
+		}
+		res.CaplinStateSnaps.LogStat("caplin-state")
 	}
 
 	//res.BorSnaps.LogStat("bor")
@@ -2106,7 +2179,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		ac := res.Aggregator.BeginFilesRo()
 		defer ac.Close()
 		stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-			histBlockNumProgress, _, err := blockReader.TxnumReader(ctx).FindBlockNum(tx, endTxNumMinimax)
+			histBlockNumProgress, _, err := blockReader.TxnumReader().FindBlockNum(ctx, tx, endTxNumMinimax)
 			return histBlockNumProgress, err
 		})
 		return nil
@@ -2125,7 +2198,7 @@ func doUncompress(cliCtx *cli.Context) error {
 	}
 	defer l.Unlock()
 	var logger log.Logger
-	if logger, _, _, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	if logger, err = debug.SetupSimple(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
 	ctx := cliCtx.Context
@@ -2189,7 +2262,7 @@ func doCompress(cliCtx *cli.Context) error {
 	}
 	defer lck.Unlock()
 
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -2295,7 +2368,7 @@ func doCompress(cliCtx *cli.Context) error {
 }
 
 func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -2318,7 +2391,7 @@ func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {
 }
 
 func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -2453,7 +2526,7 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 }
 
 func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -2546,11 +2619,11 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 		return err
 	}
 
-	txNumsReader := blockReader.TxnumReader(ctx)
+	txNumsReader := blockReader.TxnumReader()
 	var lastTxNum uint64
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)
-		lastTxNum, err = txNumsReader.Max(tx, execProgress)
+		lastTxNum, err = txNumsReader.Max(ctx, tx, execProgress)
 		if err != nil {
 			return err
 		}
@@ -2592,7 +2665,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 func doCompareIdx(cliCtx *cli.Context) error {
 	// doesn't compare exact hashes offset,
 	// only sizes, counts, offsets, and ordinal lookups.
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
 	}

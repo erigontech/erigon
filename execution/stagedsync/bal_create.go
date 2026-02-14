@@ -10,8 +10,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -22,20 +22,28 @@ func CreateBAL(blockNum uint64, txIO *state.VersionedIO, dataDir string) types.B
 	maxTxIndex := len(txIO.Inputs()) - 1
 
 	for txIndex := -1; txIndex <= maxTxIndex; txIndex++ {
-		accessIndex := blockAccessIndex(txIndex)
-
 		txIO.ReadSet(txIndex).Scan(func(vr *state.VersionedRead) bool {
+			if vr.Address.IsNil() {
+				return true
+			}
 			account := ensureAccountState(ac, vr.Address)
 			updateAccountRead(account, vr)
 			return true
 		})
 
 		for _, vw := range txIO.WriteSet(txIndex) {
+			if vw.Address.IsNil() {
+				continue
+			}
 			account := ensureAccountState(ac, vw.Address)
+			accessIndex := blockAccessIndex(vw.Version.TxIndex)
 			updateAccountWrite(account, vw, accessIndex)
 		}
 
 		for addr := range txIO.AccessedAddresses(txIndex) {
+			if addr.IsNil() {
+				continue
+			}
 			ensureAccountState(ac, addr)
 		}
 	}
@@ -84,25 +92,27 @@ func updateAccountRead(account *accountState, vr *state.VersionedRead) {
 
 func addStorageUpdate(ac *types.AccountChanges, vw *state.VersionedWrite, txIndex uint16) {
 	val := vw.Val.(uint256.Int)
-	value := common.Hash(val.Bytes32())
+	// If we already recorded a read for this slot, drop it because a write takes precedence.
+	removeStorageRead(ac, vw.Key)
+
 	if ac.StorageChanges == nil {
 		ac.StorageChanges = []*types.SlotChanges{{
 			Slot:    vw.Key,
-			Changes: []*types.StorageChange{{Index: txIndex, Value: value}},
+			Changes: []*types.StorageChange{{Index: txIndex, Value: val}},
 		}}
 		return
 	}
 
 	for _, slotChange := range ac.StorageChanges {
 		if slotChange.Slot == vw.Key {
-			slotChange.Changes = append(slotChange.Changes, &types.StorageChange{Index: txIndex, Value: value})
+			slotChange.Changes = append(slotChange.Changes, &types.StorageChange{Index: txIndex, Value: val})
 			return
 		}
 	}
 
 	ac.StorageChanges = append(ac.StorageChanges, &types.SlotChanges{
 		Slot:    vw.Key,
-		Changes: []*types.StorageChange{{Index: txIndex, Value: value}},
+		Changes: []*types.StorageChange{{Index: txIndex, Value: val}},
 	})
 }
 
@@ -158,7 +168,7 @@ func updateAccountWrite(account *accountState, vw *state.VersionedWrite, accessI
 }
 
 func isSystemBALAddress(addr accounts.Address) bool {
-	return addr == state.SystemAddress
+	return addr == params.SystemAddress
 }
 
 func hasStorageWrite(ac *types.AccountChanges, slot accounts.StorageKey) bool {
@@ -168,6 +178,23 @@ func hasStorageWrite(ac *types.AccountChanges, slot accounts.StorageKey) bool {
 		}
 	}
 	return false
+}
+
+func removeStorageRead(ac *types.AccountChanges, slot accounts.StorageKey) {
+	if len(ac.StorageReads) == 0 {
+		return
+	}
+	out := ac.StorageReads[:0]
+	for _, s := range ac.StorageReads {
+		if s != slot {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		ac.StorageReads = nil
+	} else {
+		ac.StorageReads = out
+	}
 }
 
 func blockAccessIndex(txIndex int) uint16 {
@@ -230,8 +257,8 @@ func newCodeTracker() *fieldTracker[[]byte] {
 func applyToCode(ct *fieldTracker[[]byte], ac *types.AccountChanges) {
 	ct.changes.apply(func(idx uint16, value []byte) {
 		ac.CodeChanges = append(ac.CodeChanges, &types.CodeChange{
-			Index: idx,
-			Data:  cloneBytes(value),
+			Index:    idx,
+			Bytecode: cloneBytes(value),
 		})
 	})
 }
@@ -429,11 +456,11 @@ func writeBALToFile(bal types.BlockAccessList, blockNum uint64, dataDir string) 
 		if len(account.CodeChanges) > 0 {
 			fmt.Fprintf(file, "  Code Changes (%d):\n", len(account.CodeChanges))
 			for _, change := range account.CodeChanges {
-				fmt.Fprintf(file, "    [%d] -> %d bytes\n", change.Index, len(change.Data))
-				if len(change.Data) <= 64 {
-					fmt.Fprintf(file, "      Data: %x\n", change.Data)
+				fmt.Fprintf(file, "    [%d] -> %d bytes\n", change.Index, len(change.Bytecode))
+				if len(change.Bytecode) <= 64 {
+					fmt.Fprintf(file, "      Bytecode: %x\n", change.Bytecode)
 				} else {
-					fmt.Fprintf(file, "      Data: %x... (truncated)\n", change.Data[:64])
+					fmt.Fprintf(file, "      Bytecode: %x... (truncated)\n", change.Bytecode[:64])
 				}
 			}
 		}

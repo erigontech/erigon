@@ -150,14 +150,15 @@ func TestAllocConstructor(t *testing.T) {
 	}
 
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	m := mock.MockWithGenesis(t, genSpec, key, false)
+	m := mock.MockWithGenesis(t, genSpec, key)
 
-	tx, err := m.DB.BeginTemporalRo(context.Background())
+	ctx := context.Background()
+	tx, err := m.DB.BeginTemporalRo(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
 
 	//TODO: support historyV3
-	reader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, rawdbv3.TxNums)
+	reader, err := rpchelper.CreateHistoryStateReader(ctx, tx, 1, 0, rawdbv3.TxNums)
 	require.NoError(err)
 	state := state.New(reader)
 	balance, err := state.GetBalance(address)
@@ -270,7 +271,7 @@ func TestSetupGenesis(t *testing.T) {
 				// Commit the 'old' genesis block with Homestead transition at #2.
 				// Advance to block #4, past the homestead transition block of customg.
 				key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-				m := mock.MockWithGenesis(t, &oldcustomg, key, false)
+				m := mock.MockWithGenesis(t, &oldcustomg, key)
 
 				chainBlocks, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, nil)
 				if err != nil {

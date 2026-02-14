@@ -19,9 +19,9 @@ func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader se
 		log.Info("[integrity] ReceiptsNoDups: done", "err", err)
 	}()
 
-	txNumsReader := blockReader.TxnumReader(ctx)
+	txNumsReader := blockReader.TxnumReader()
 
-	if err := ValidateDomainProgress(db, kv.ReceiptDomain, txNumsReader); err != nil {
+	if err := ValidateDomainProgress(ctx, db, kv.ReceiptDomain, txNumsReader); err != nil {
 		return err
 	}
 
@@ -33,7 +33,7 @@ func CheckReceiptsNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader se
 
 	receiptProgress := tx.Debug().DomainProgress(kv.ReceiptDomain)
 	fromBlock := uint64(1)
-	toBlock, _, _ := txNumsReader.FindBlockNum(tx, receiptProgress)
+	toBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, receiptProgress)
 
 	log.Info("[integrity] ReceiptsNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
 	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, ReceiptsNoDupsRange)
@@ -45,8 +45,8 @@ func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 		return err
 	}
 	defer tx.Rollback()
-	txNumsReader := blockReader.TxnumReader(ctx)
-	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
+	txNumsReader := blockReader.TxnumReader()
+	fromTxNum, err := txNumsReader.Min(ctx, tx, fromBlock)
 	if err != nil {
 		return err
 	}
@@ -55,7 +55,7 @@ func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 		toBlock-- // [fromBlock,toBlock)
 	}
 
-	toTxNum, err := txNumsReader.Max(tx, toBlock)
+	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
 	if err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 	blockNum := fromBlock
 	var _min, _max uint64
 	_min = fromTxNum
-	_max, _ = txNumsReader.Max(tx, fromBlock)
+	_max, _ = txNumsReader.Max(ctx, tx, fromBlock)
 
 	cumGasTx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -88,7 +88,7 @@ func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 		for txNum >= _max {
 			blockNum++
 			_min = _max + 1
-			_max, _ = txNumsReader.Max(tx, blockNum)
+			_max, _ = txNumsReader.Max(ctx, tx, blockNum)
 			blockChanged = true
 		}
 		//fmt.Println("txNum:", txNum, "cumGasUsed:", cumGasUsed)
@@ -126,8 +126,8 @@ func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 		return err
 	}
 	defer tx.Rollback()
-	txNumsReader := blockReader.TxnumReader(ctx)
-	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
+	txNumsReader := blockReader.TxnumReader()
+	fromTxNum, err := txNumsReader.Min(ctx, tx, fromBlock)
 	if err != nil {
 		return err
 	}
@@ -136,7 +136,7 @@ func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 		toBlock-- // [fromBlock,toBlock)
 	}
 
-	toTxNum, err := txNumsReader.Max(tx, toBlock)
+	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
 	if err != nil {
 		return err
 	}
@@ -145,15 +145,15 @@ func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 	blockNum := fromBlock
 	var _min, _max uint64
 	_min = fromTxNum
-	_max, _ = txNumsReader.Max(tx, fromBlock)
+	_max, _ = txNumsReader.Max(ctx, tx, fromBlock)
 
-	logIdxAfterTxTx, err := db.BeginTemporalRo(ctx)
+	logIdxTx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
-	defer logIdxAfterTxTx.Rollback()
+	defer logIdxTx.Rollback()
 
-	logIdxAfterTxIt, err := logIdxAfterTxTx.Debug().TraceKey(kv.ReceiptDomain, rawtemporaldb.LogIndexAfterTxKey, fromTxNum, toTxNum+1)
+	logIdxAfterTxIt, err := logIdxTx.Debug().TraceKey(kv.ReceiptDomain, rawtemporaldb.LogIndexAfterTxKey, fromTxNum, toTxNum+1)
 	if err != nil {
 		return err
 	}
@@ -168,8 +168,8 @@ func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 
 		for txNum >= _max {
 			blockNum++
-			_min, _ = txNumsReader.Min(tx, blockNum)
-			_max, _ = txNumsReader.Max(tx, blockNum)
+			_min, _ = txNumsReader.Min(ctx, tx, blockNum)
+			_max, _ = txNumsReader.Max(ctx, tx, blockNum)
 			blockChanged = true
 		}
 
@@ -211,8 +211,8 @@ func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.T
 	return nil
 }
 
-func ValidateDomainProgress(db kv.TemporalRoDB, domain kv.Domain, txNumsReader rawdbv3.TxNumsReader) (err error) {
-	tx, err := db.BeginTemporalRo(context.Background())
+func ValidateDomainProgress(ctx context.Context, db kv.TemporalRoDB, domain kv.Domain, txNumsReader rawdbv3.TxNumsReader) (err error) {
+	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
@@ -221,8 +221,8 @@ func ValidateDomainProgress(db kv.TemporalRoDB, domain kv.Domain, txNumsReader r
 	receiptProgress := tx.Debug().DomainProgress(domain)
 	accProgress := tx.Debug().DomainProgress(kv.AccountsDomain)
 	if accProgress > receiptProgress {
-		e1, _, _ := txNumsReader.FindBlockNum(tx, receiptProgress)
-		e2, _, _ := txNumsReader.FindBlockNum(tx, accProgress)
+		e1, _, _ := txNumsReader.FindBlockNum(ctx, tx, receiptProgress)
+		e2, _, _ := txNumsReader.FindBlockNum(ctx, tx, accProgress)
 
 		// accProgress can be greater than domainProgress in some scenarios..
 		// e.g. account vs receipt

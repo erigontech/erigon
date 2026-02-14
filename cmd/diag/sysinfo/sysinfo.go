@@ -132,7 +132,7 @@ func writeProcessesToStringBuilder(prcInfo []*sysutils.ProcessInfo, cpuUsage flo
 	builder.WriteString("\n\nProcesses info:\n")
 
 	prcInfo = sortProcessesByCPU(prcInfo)
-	rows := make([]table.Row, 0)
+	rows := make([]table.Row, 0, len(prcInfo))
 	header := table.Row{"PID", "Name", "% CPU", "% Memory"}
 
 	for _, process := range prcInfo {

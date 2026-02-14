@@ -326,7 +326,23 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remoteproto.BlockRequ
 	}
 	defer tx.Rollback()
 
-	block, senders, err := s.blockReader.BlockWithSenders(ctx, tx, gointerfaces.ConvertH256ToHash(req.BlockHash), req.BlockHeight)
+	var blockHash common.Hash
+	var blockHeight = req.BlockHeight
+	if req.BlockHash != nil {
+		blockHash = gointerfaces.ConvertH256ToHash(req.BlockHash)
+	} else if req.BlockHeight > 0 {
+		// If height is provided but hash is not, get the canonical hash
+		var ok bool
+		blockHash, ok, err = s.blockReader.CanonicalHash(ctx, tx, blockHeight)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return &remoteproto.BlockReply{}, nil
+		}
+	}
+
+	block, senders, err := s.blockReader.BlockWithSenders(ctx, tx, blockHash, blockHeight)
 	if err != nil {
 		return nil, err
 	}
@@ -490,8 +506,8 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AA
 	header := currentBlock.HeaderNoCopy()
 
 	aaTxn := types.FromProto(req.Tx)
-	txNumsReader := s.blockReader.TxnumReader(ctx)
-	maxTxNum, err := txNumsReader.Max(tx, header.Number.Uint64())
+	txNumsReader := s.blockReader.TxnumReader()
+	maxTxNum, err := txNumsReader.Max(ctx, tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}

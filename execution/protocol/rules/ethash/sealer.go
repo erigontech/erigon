@@ -260,7 +260,12 @@ func (s *remoteSealer) submitWork(nonce types.BlockNonce, mixDigest common.Hash,
 	// The submitted solution is within the scope of acceptance.
 	if solution.NumberU64()+staleThreshold > s.currentBlock.NumberU64() {
 		select {
-		case s.results <- &types.BlockWithReceipts{Block: solution, Receipts: block.Receipts}:
+		case s.results <- &types.BlockWithReceipts{
+			Block:           solution,
+			Receipts:        block.Receipts,
+			Requests:        block.Requests,
+			BlockAccessList: block.BlockAccessList,
+		}:
 			s.ethash.config.Log.Trace("Work submitted is acceptable", "number", solution.NumberU64(), "sealhash", sealhash, "hash", solution.Hash())
 			return true
 		default:

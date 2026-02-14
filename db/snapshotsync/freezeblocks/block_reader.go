@@ -50,7 +50,7 @@ import (
 
 type RemoteBlockReader struct {
 	client       remoteproto.ETHBACKENDClient
-	txBlockIndex *txBlockIndexWithBlockReader
+	txNumsReader rawdbv3.TxNumsReader
 }
 
 func (r *RemoteBlockReader) CanPruneTo(uint64) uint64 {
@@ -189,8 +189,7 @@ func NewRemoteBlockReader(client remoteproto.ETHBACKENDClient) *RemoteBlockReade
 	br := &RemoteBlockReader{
 		client: client,
 	}
-	txnumReader := TxBlockIndexFromBlockReader(context.Background(), br).(*txBlockIndexWithBlockReader)
-	br.txBlockIndex = txnumReader
+	br.txNumsReader = rawdbv3.TxNums.WithCustomReadTxNumFunc(TxBlockIndexFromBlockReader(br))
 	return br
 }
 
@@ -354,20 +353,19 @@ func (r *RemoteBlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.G
 	return body, nil
 }
 
-func (r *RemoteBlockReader) TxnumReader(ctx context.Context) rawdbv3.TxNumsReader {
+func (r *RemoteBlockReader) TxnumReader() rawdbv3.TxNumsReader {
 	if r == nil {
 		// tests
-		txnumReader := TxBlockIndexFromBlockReader(ctx, nil).(*txBlockIndexWithBlockReader)
-		return rawdbv3.TxNums.WithCustomReadTxNumFunc(txnumReader)
+		return rawdbv3.TxNums.WithCustomReadTxNumFunc(TxBlockIndexFromBlockReader(nil))
 	}
-	return rawdbv3.TxNums.WithCustomReadTxNumFunc(r.txBlockIndex.CopyWithContext(ctx))
+	return r.txNumsReader
 }
 
 // BlockReader can read blocks from db and snapshots
 type BlockReader struct {
 	sn           *RoSnapshots
 	borSn        *heimdall.RoSnapshots
-	txBlockIndex *txBlockIndexWithBlockReader
+	txNumsReader rawdbv3.TxNumsReader
 
 	//files are immutable: no reorgs, on updates - means no invalidation needed
 	headerByNumCache *lru.Cache[uint64, *types.Header]
@@ -380,8 +378,7 @@ func NewBlockReader(snapshots services.BlockSnapshots, borSnapshots services.Blo
 	sn, _ := snapshots.(*RoSnapshots)
 	br := &BlockReader{sn: sn, borSn: borSn}
 	br.headerByNumCache, _ = lru.New[uint64, *types.Header](headerByNumCacheSize)
-	txnumReader := TxBlockIndexFromBlockReader(context.Background(), br).(*txBlockIndexWithBlockReader)
-	br.txBlockIndex = txnumReader
+	br.txNumsReader = rawdbv3.TxNums.WithCustomReadTxNumFunc(TxBlockIndexFromBlockReader(br))
 	return br
 }
 
@@ -941,7 +938,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		// Apparently some snapshots have pre-Shapella blocks with empty rather than nil withdrawals
 		b.Withdrawals = nil
 	}
-	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals, b.BlockAccessList)
+	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals)
 	if len(senders) != block.Transactions().Len() {
 		if dbgLogs {
 			log.Info(dbgPrefix + fmt.Sprintf("found block with %d transactions, but %d senders", block.Transactions().Len(), len(senders)))
@@ -1478,43 +1475,32 @@ func (r *BlockReader) Integrity(ctx context.Context) error {
 	return nil
 }
 
-func (r *BlockReader) TxnumReader(ctx context.Context) rawdbv3.TxNumsReader {
+func (r *BlockReader) TxnumReader() rawdbv3.TxNumsReader {
 	if r == nil {
 		// tests
-		txnumReader := TxBlockIndexFromBlockReader(ctx, nil).(*txBlockIndexWithBlockReader)
-		return rawdbv3.TxNums.WithCustomReadTxNumFunc(txnumReader)
+		return rawdbv3.TxNums.WithCustomReadTxNumFunc(TxBlockIndexFromBlockReader(nil))
 	}
-	return rawdbv3.TxNums.WithCustomReadTxNumFunc(r.txBlockIndex.CopyWithContext(ctx))
+	return r.txNumsReader
 }
 
 func (r *BlockReader) BlockForTxNum(ctx context.Context, tx kv.Tx, txnNum uint64) (blockNum uint64, ok bool, err error) {
-	return r.TxnumReader(ctx).FindBlockNum(tx, txnNum)
+	return r.TxnumReader().FindBlockNum(ctx, tx, txnNum)
 }
 
-func TxBlockIndexFromBlockReader(ctx context.Context, r services.FullBlockReader) rawdbv3.TxBlockIndex {
+func TxBlockIndexFromBlockReader(r services.FullBlockReader) rawdbv3.TxBlockIndex {
 	return &txBlockIndexWithBlockReader{
 		r:     r,
-		ctx:   ctx,
 		cache: NewBlockTxNumLookupCache(20),
 	}
 }
 
 type txBlockIndexWithBlockReader struct {
 	r     services.FullBlockReader
-	ctx   context.Context
 	cache *BlockTxNumLookupCache
 }
 
-func (t *txBlockIndexWithBlockReader) CopyWithContext(ctx context.Context) *txBlockIndexWithBlockReader {
-	return &txBlockIndexWithBlockReader{
-		r:     t.r,
-		ctx:   ctx,
-		cache: t.cache,
-	}
-}
-
-func (t *txBlockIndexWithBlockReader) MaxTxNum(tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
-	maxTxNum, ok, err = rawdbv3.DefaultTxBlockIndexInstance.MaxTxNum(tx, c, blockNum)
+func (t *txBlockIndexWithBlockReader) MaxTxNum(ctx context.Context, tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
+	maxTxNum, ok, err = rawdbv3.DefaultTxBlockIndexInstance.MaxTxNum(ctx, tx, c, blockNum)
 	if err != nil {
 		return
 	}
@@ -1522,7 +1508,7 @@ func (t *txBlockIndexWithBlockReader) MaxTxNum(tx kv.Tx, c kv.Cursor, blockNum u
 	if ok || r == nil {
 		return
 	}
-	b, err := r.CanonicalBodyForStorage(t.ctx, tx, blockNum)
+	b, err := r.CanonicalBodyForStorage(ctx, tx, blockNum)
 	if err != nil {
 		return 0, false, err
 	}
@@ -1533,9 +1519,9 @@ func (t *txBlockIndexWithBlockReader) MaxTxNum(tx kv.Tx, c kv.Cursor, blockNum u
 	return ret, true, nil
 }
 
-func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (blockNum uint64, ok bool, err error) {
+func (t *txBlockIndexWithBlockReader) BlockNumber(ctx context.Context, tx kv.Tx, txNum uint64) (blockNum uint64, ok bool, err error) {
 	if _, ok := t.r.(*BlockReader); !ok {
-		return t.r.BlockForTxNum(t.ctx, tx, txNum)
+		return t.r.BlockForTxNum(ctx, tx, txNum)
 	}
 	var buf []byte
 	var b *types.BodyOnlyTxn
@@ -1579,7 +1565,7 @@ func (t *txBlockIndexWithBlockReader) BlockNumber(tx kv.Tx, txNum uint64) (block
 
 	if blockIndex == len(bodies) {
 		// not in snapshots
-		blockNum, ok, err = rawdbv3.DefaultTxBlockIndexInstance.BlockNumber(tx, txNum)
+		blockNum, ok, err = rawdbv3.DefaultTxBlockIndexInstance.BlockNumber(ctx, tx, txNum)
 		if err != nil {
 			return
 		}

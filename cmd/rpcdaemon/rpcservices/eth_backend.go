@@ -283,7 +283,7 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 	return nil
 }
 
-func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts func(reply *remoteproto.SubscribeReceiptsReply), requestor *atomic.Value) error {
+func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts func(reply *remoteproto.SubscribeReceiptsReply), onReady func(func(*remoteproto.ReceiptsFilterRequest) error)) error {
 	subscription, err := back.remoteEthBackend.SubscribeReceipts(ctx, grpc.WaitForReady(true))
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
@@ -291,7 +291,9 @@ func (back *RemoteBackend) SubscribeReceipts(ctx context.Context, onNewReceipts 
 		}
 		return err
 	}
-	requestor.Store(subscription.Send)
+	if onReady != nil {
+		onReady(subscription.Send)
+	}
 	for {
 		receipts, err := subscription.Recv()
 		if errors.Is(err, io.EOF) {
@@ -450,8 +452,8 @@ func (back *RemoteBackend) Peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
 	return peers, nil
 }
 
-func (back *RemoteBackend) TxnumReader(ctx context.Context) rawdbv3.TxNumsReader {
-	return back.blockReader.TxnumReader(ctx)
+func (back *RemoteBackend) TxnumReader() rawdbv3.TxNumsReader {
+	return back.blockReader.TxnumReader()
 }
 
 func (back *RemoteBackend) BlockForTxNum(ctx context.Context, tx kv.Tx, txNum uint64) (uint64, bool, error) {
