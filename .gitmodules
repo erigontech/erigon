@@ -4,6 +4,6 @@
 [submodule "eest-fixtures"]
 	path = execution/tests/execution-spec-tests
 	url = https://github.com/erigontech/eest-fixtures
-[submodule "interfaces"]
+[submodule "node/interfaces"]
 	path = node/interfaces
 	url = https://github.com/erigontech/interfaces

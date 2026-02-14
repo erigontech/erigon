@@ -17,6 +17,7 @@
 package ethutils
 
 import (
+	"encoding/json"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -40,7 +41,7 @@ func MarshalReceipt(
 	txnHash common.Hash,
 	signed bool,
 	withBlockTimestamp bool,
-) map[string]interface{} {
+) map[string]any {
 	var chainId *big.Int
 	switch t := txn.(type) {
 	case *types.LegacyTx:
@@ -57,11 +58,11 @@ func MarshalReceipt(
 		from, _ = txn.Sender(*signer)
 	}
 
-	var logsToMarshal interface{}
+	var logsToMarshal any
 
 	if withBlockTimestamp {
 		if receipt.Logs != nil {
-			rpcLogs := []*types.RPCLog{}
+			rpcLogs := make([]*types.RPCLog, 0, len(receipt.Logs))
 			for _, l := range receipt.Logs {
 				rpcLogs = append(rpcLogs, types.ToRPCTransactionLog(l, header, txnHash, uint64(receipt.TransactionIndex)))
 			}
@@ -77,7 +78,7 @@ func MarshalReceipt(
 		}
 	}
 
-	fields := map[string]interface{}{
+	fields := map[string]any{
 		"blockHash":         receipt.BlockHash,
 		"blockNumber":       hexutil.Uint64(receipt.BlockNumber.Uint64()),
 		"transactionHash":   txnHash,
@@ -131,8 +132,8 @@ func MarshalReceipt(
 	return fields
 }
 
-func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) map[string]interface{} {
-	receipt := make(map[string]interface{})
+func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) map[string]any {
+	receipt := make(map[string]any)
 
 	// Basic metadata - convert to proper hex strings
 	blockHash := common.Hash(gointerfaces.ConvertH256ToHash(protoReceipt.BlockHash))
@@ -178,9 +179,9 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) m
 		receipt["logsBloom"] = hexutil.Bytes(protoReceipt.LogsBloom)
 	}
 
-	logs := make([]map[string]interface{}, 0, len(protoReceipt.Logs))
+	logs := make([]map[string]any, 0, len(protoReceipt.Logs))
 	for _, protoLog := range protoReceipt.Logs {
-		logEntry := make(map[string]interface{})
+		logEntry := make(map[string]any)
 
 		if protoLog.Address != nil {
 			logEntry["address"] = common.Address(gointerfaces.ConvertH160toAddress(protoLog.Address))
@@ -192,6 +193,7 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) m
 		}
 		logEntry["topics"] = topics
 		logEntry["data"] = hexutil.Bytes(protoLog.Data)
+		logEntry["transactionHash"] = txHash
 
 		logs = append(logs, logEntry)
 	}
@@ -211,4 +213,32 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) m
 	}
 
 	return receipt
+}
+
+func LogReceipts(level log.Lvl, msg string, receipts types.Receipts, txns types.Transactions, cc *chain.Config, header *types.Header, logger log.Logger) {
+	if len(receipts) == 0 {
+		// no-op, can happen if vmConfig.NoReceipts=true or vmConfig.StatelessExec=true
+		logger.Log(level, msg, "block", header.Number.Uint64(), "receipts", "")
+		return
+	}
+
+	// note we do not return errors from this func since this is a debug-only
+	// informative feature that is best-effort and should not interfere with execution
+	if len(receipts) != len(txns) {
+		logger.Error("receipts and txns sizes differ", "receiptsLen", receipts.Len(), "txnsLen", txns.Len())
+		return
+	}
+
+	marshalled := make([]map[string]any, 0, len(receipts))
+	for i, receipt := range receipts {
+		txn := txns[i]
+		marshalled = append(marshalled, MarshalReceipt(receipt, txn, cc, header, txn.Hash(), true, false))
+	}
+
+	result, err := json.Marshal(marshalled)
+	if err != nil {
+		logger.Error("marshalling error when logging receipts", "err", err)
+		return
+	}
+	logger.Log(level, msg, "block", header.Number.Uint64(), "receipts", string(result))
 }

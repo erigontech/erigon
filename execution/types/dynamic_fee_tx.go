@@ -363,7 +363,7 @@ func (tx *DynamicFeeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(DynamicFeeTxType, []interface{}{
+	hash := prefixedRlpHash(DynamicFeeTxType, []any{
 		tx.ChainID,
 		tx.Nonce,
 		tx.TipCap,
@@ -379,19 +379,31 @@ func (tx *DynamicFeeTransaction) Hash() common.Hash {
 	return hash
 }
 
+type dynamicFeeTxSigHash struct {
+	ChainID    *big.Int
+	Nonce      uint64
+	GasTipCap  *uint256.Int
+	GasFeeCap  *uint256.Int
+	Gas        uint64
+	To         *common.Address `rlp:"nil"`
+	Value      *uint256.Int
+	Data       []byte
+	AccessList AccessList
+}
+
 func (tx *DynamicFeeTransaction) SigningHash(chainID *big.Int) common.Hash {
 	return prefixedRlpHash(
 		DynamicFeeTxType,
-		[]interface{}{
-			chainID,
-			tx.Nonce,
-			tx.TipCap,
-			tx.FeeCap,
-			tx.GasLimit,
-			tx.To,
-			tx.Value,
-			tx.Data,
-			tx.AccessList,
+		&dynamicFeeTxSigHash{
+			ChainID:    chainID,
+			Nonce:      tx.Nonce,
+			GasTipCap:  tx.TipCap,
+			GasFeeCap:  tx.FeeCap,
+			Gas:        tx.GasLimit,
+			To:         tx.To,
+			Value:      tx.Value,
+			Data:       tx.Data,
+			AccessList: tx.AccessList,
 		})
 }
 

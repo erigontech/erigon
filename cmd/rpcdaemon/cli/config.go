@@ -176,12 +176,15 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().IntVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersMaxTxs, "rpc.subscription.filters.maxtxs", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTxs, "Maximum number of transactions to store per subscription.")
 	rootCmd.PersistentFlags().IntVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersMaxAddresses, "rpc.subscription.filters.maxaddresses", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxAddresses, "Maximum number of addresses per subscription to filter logs by.")
 	rootCmd.PersistentFlags().IntVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersMaxTopics, "rpc.subscription.filters.maxtopics", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTopics, "Maximum number of topics per subscription to filter logs by.")
+	rootCmd.PersistentFlags().IntVar(&cfg.RangeLimit, utils.RpcBlockRangeLimit.Name, utils.RpcBlockRangeLimit.Value, utils.RpcBlockRangeLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.BatchLimit, utils.RpcBatchLimit.Name, utils.RpcBatchLimit.Value, utils.RpcBatchLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.ReturnDataLimit, utils.RpcReturnDataLimit.Name, utils.RpcReturnDataLimit.Value, utils.RpcReturnDataLimit.Usage)
 	rootCmd.PersistentFlags().BoolVar(&cfg.AllowUnprotectedTxs, utils.AllowUnprotectedTxs.Name, utils.AllowUnprotectedTxs.Value, utils.AllowUnprotectedTxs.Usage)
 	rootCmd.PersistentFlags().Uint64Var(&cfg.OtsMaxPageSize, utils.OtsSearchMaxCapFlag.Name, utils.OtsSearchMaxCapFlag.Value, utils.OtsSearchMaxCapFlag.Usage)
 	rootCmd.PersistentFlags().DurationVar(&cfg.RPCSlowLogThreshold, utils.RPCSlowFlag.Name, utils.RPCSlowFlag.Value, utils.RPCSlowFlag.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.WebsocketSubscribeLogsChannelSize, utils.WSSubscribeLogsChannelSize.Name, utils.WSSubscribeLogsChannelSize.Value, utils.WSSubscribeLogsChannelSize.Usage)
+	rootCmd.PersistentFlags().DurationVar(&cfg.RpcTxSyncDefaultTimeout, utils.RpcTxSyncDefaultTimeoutFlag.Name, utils.RpcTxSyncDefaultTimeoutFlag.Value, utils.RpcTxSyncDefaultTimeoutFlag.Usage)
+	rootCmd.PersistentFlags().DurationVar(&cfg.RpcTxSyncMaxTimeout, utils.RpcTxSyncMaxTimeoutFlag.Name, utils.RpcTxSyncMaxTimeoutFlag.Value, utils.RpcTxSyncMaxTimeoutFlag.Usage)
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
@@ -316,7 +319,13 @@ func EmbeddedServices(ctx context.Context,
 		// ... adding back in place to see about the above statement
 		stateCache = kvcache.New(stateCacheCfg)
 	} else {
-		stateCache = kvcache.NewDummy()
+		if stateCacheCfg.LocalCache != nil {
+			// this attaches the rpc layer to the local
+			// execution caches if they are availible
+			stateCache = stateCacheCfg.LocalCache
+		} else {
+			stateCache = kvcache.NewDummy()
+		}
 	}
 
 	subscribeToStateChangesLoop(ctx, stateDiffClient, stateCache)
@@ -423,7 +432,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, cfg.Dirs.DataDir, true, roTxLimit), allBorSnapshots)
 		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(cfg.Dirs.DataDir, logger, true, roTxLimit), allBorSnapshots, cc.Bor)
 		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
-		txNumsReader := blockReader.TxnumReader(ctx)
+		txNumsReader := blockReader.TxnumReader()
 
 		if err := dbstate.CheckSnapshotsCompatibility(cfg.Dirs); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
@@ -455,7 +464,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				aggTx := agg.BeginFilesRo()
 				defer aggTx.Close()
 				stats.LogStats(aggTx, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-					histBlockNumProgress, _, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
+					histBlockNumProgress, _, err := txNumsReader.FindBlockNum(ctx, tx, endTxNumMinimax)
 					return histBlockNumProgress, err
 				})
 				return nil
@@ -489,7 +498,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 						ac := agg.BeginFilesRo()
 						defer ac.Close()
 						stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-							histBlockNumProgress, _, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
+							histBlockNumProgress, _, err := txNumsReader.FindBlockNum(ctx, tx, endTxNumMinimax)
 							return histBlockNumProgress, err
 						})
 						return nil
@@ -701,7 +710,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		return fmt.Errorf("could not start register RPC apis: %w", err)
 	}
 
-	info := []interface{}{
+	info := []any{
 		"grpc", cfg.GRPCServerEnabled,
 		"http", cfg.HttpServerEnabled,
 		"ws", cfg.WebsocketEnabled,
@@ -956,7 +965,7 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 		return nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
 	}
 
-	engineInfo := []interface{}{"url", engineAddr}
+	engineInfo := []any{"url", engineAddr}
 	logger.Info("HTTP endpoint opened for Engine API", engineInfo...)
 
 	return engineListener, engineSrv, engineAddr.String(), nil
@@ -1102,7 +1111,7 @@ func (e *remoteRulesEngine) Prepare(_ rules.ChainHeaderReader, _ *types.Header, 
 	panic("remoteRulesEngine.Prepare not supported")
 }
 
-func (e *remoteRulesEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ rules.ChainReader, _ rules.SystemCall, skipReceiptsEval bool, _ log.Logger) (types.FlatRequests, error) {
+func (e *remoteRulesEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ rules.ChainReader, _ rules.SystemCall, skipReceiptsEval bool, _ log.Logger) (types.FlatRequests, error) {
 	panic("remoteRulesEngine.Finalize not supported")
 }
 

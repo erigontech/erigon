@@ -51,7 +51,7 @@ func StageTrieCfg(db kv.TemporalRwDB, checkRoot, saveNewHashesToDB bool, tmpDir 
 var ErrInvalidStateRootHash = errors.New("invalid state root hash")
 
 func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg, squeeze bool) (common.Hash, error) {
-	txNumsReader := cfg.blockReader.TxnumReader(ctx)
+	txNumsReader := cfg.blockReader.TxnumReader()
 	rh, err := state.RebuildCommitmentFiles(ctx, cfg.db, &txNumsReader, log.New(), squeeze)
 	if err != nil {
 		return trie.EmptyRoot, err

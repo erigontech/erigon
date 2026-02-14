@@ -19,6 +19,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -37,7 +38,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 var (
@@ -79,7 +80,7 @@ func NewBlockService(
 	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
 	emitter *beaconevents.EventEmitter,
-) Service[*cltypes.SignedBeaconBlock] {
+) BlockService {
 	seenBlocksCache, err := lru.New[proposerIndexAndSlot, struct{}]("seenblocks", seenBlockCacheSize)
 	if err != nil {
 		panic(err)
@@ -97,13 +98,17 @@ func NewBlockService(
 	return b
 }
 
+func (b *blockService) Names() []string {
+	return []string{gossip.TopicNameBeaconBlock}
+}
+
 func (b *blockService) IsMyGossipMessage(name string) bool {
 	return name == gossip.TopicNameBeaconBlock
 }
 
-func (b *blockService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*cltypes.SignedBeaconBlock, error) {
+func (b *blockService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.SignedBeaconBlock, error) {
 	obj := cltypes.NewSignedBeaconBlock(b.beaconCfg, version)
-	if err := obj.DecodeSSZ(data.Data, int(version)); err != nil {
+	if err := obj.DecodeSSZ(data, int(version)); err != nil {
 		return nil, err
 	}
 	return obj, nil
@@ -115,7 +120,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	blockEpoch := msg.Block.Slot / b.beaconCfg.SlotsPerEpoch
 
 	if b.syncedData.Syncing() {
-		return ErrIgnore
+		return fmt.Errorf("%w: syncing", ErrIgnore)
 	}
 
 	currentSlot := b.syncedData.HeadSlot()
@@ -123,7 +128,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	// [IGNORE] The block is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. validate that
 	//signed_beacon_block.message.slot <= current_slot (a client MAY queue future blocks for processing at the appropriate slot).
 	if currentSlot < msg.Block.Slot && !b.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Block.Slot) {
-		return ErrIgnore
+		return fmt.Errorf("%w: block is not from a future slot: %d > %d", ErrIgnore, currentSlot, msg.Block.Slot)
 	}
 
 	// [IGNORE] The block is the first block with valid signature received for the proposer for the slot, signed_beacon_block.message.slot.
@@ -132,14 +137,14 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		slot:          msg.Block.Slot,
 	}
 	if b.seenBlocksCache.Contains(seenCacheKey) {
-		return ErrIgnore
+		return nil
 	}
 
 	if err := b.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [IGNORE] The block is from a slot greater than the latest finalized slot -- i.e. validate that signed_beacon_block.message.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
 		// (a client MAY choose to validate and store such blocks for additional purposes -- e.g. slashing detection, archive nodes, etc).
 		if blockEpoch <= headState.FinalizedCheckpoint().Epoch {
-			return ErrIgnore
+			return fmt.Errorf("%w: block is not from a slot greater than the latest finalized slot: %d > %d", ErrIgnore, blockEpoch, headState.FinalizedCheckpoint().Epoch)
 		}
 
 		if ok, err := eth2.VerifyBlockSignature(headState, msg); err != nil {
@@ -159,7 +164,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	parentHeader, ok := b.forkchoiceStore.GetHeader(msg.Block.ParentRoot)
 	if !ok {
 		b.scheduleBlockForLaterProcessing(msg)
-		return ErrIgnore
+		return fmt.Errorf("%w: parent header not found: %v", ErrIgnore, msg.Block.ParentRoot)
 	}
 	if parentHeader.Slot >= msg.Block.Slot {
 		return ErrBlockYoungerThanParent
@@ -182,7 +187,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
 		if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			b.scheduleBlockForLaterProcessing(msg)
-			return ErrIgnore
+			return nil
 		}
 		return err
 	}

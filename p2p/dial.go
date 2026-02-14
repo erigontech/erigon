@@ -346,7 +346,7 @@ func (d *dialScheduler) readNodes(it enode.Iterator) {
 // or comes back online.
 // nolint
 func (d *dialScheduler) logStats() {
-	vals := []interface{}{"protocol", d.subProtocolVersion,
+	vals := []any{"protocol", d.subProtocolVersion,
 		"peers", fmt.Sprintf("%d/%d", len(d.peers), d.maxDialPeers), "tried", d.dialed, "static", len(d.static)}
 
 	d.mutex.Lock()

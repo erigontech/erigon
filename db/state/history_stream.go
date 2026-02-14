@@ -727,6 +727,7 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 		ht.histReader = nil
 	}
 	for ht.fileIdx < len(ht.hc.iit.files) {
+		historyItem := ht.hc.files[ht.fileIdx]
 		item := ht.hc.iit.files[ht.fileIdx]
 		if ht.fromTxNum > item.endTxNum {
 			moveToNextFileFn()
@@ -749,7 +750,12 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 				continue
 			}
 			getter.Reset(offset)
-			getter.Next(ht.efbuf[:0]) // skip key
+			gkey, _ := getter.Next(ht.efbuf[:0]) // skip key
+			if !bytes.Equal(gkey, ht.key) {
+				ht.logger.Debug("weird thing - key mismatch for %s in file %s", hexutil.Encode(ht.key), item.src.decompressor.FileName())
+				moveToNextFileFn()
+				continue
+			}
 			ht.efbuf, _ = getter.Next(ht.efbuf[:0])
 			currSeq := multiencseq.ReadMultiEncSeq(item.startTxNum, ht.efbuf)
 			ht.seqItr = currSeq.Iterator(int(ht.fromTxNum))
@@ -772,13 +778,19 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 		ht.histKey = ht.hc.encodeTs(txNum, ht.key)
 		ht.txNum = txNum
 
+		compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
+
+		if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+			compressedPageValuesCount = ht.hc.h.HistoryValuesOnCompressedPage
+		}
+
 		if ht.histReader == nil {
 			idxReader := ht.hc.statelessIdxReader(ht.fileIdx)
 			getter := ht.hc.statelessGetter(ht.fileIdx)
 			getter.Reset(0)
 			ht.histReader = seg.NewPagedReader(
 				getter,
-				ht.hc.h.HistoryValuesOnCompressedPage,
+				compressedPageValuesCount,
 				true,
 			)
 			offset, ok := idxReader.Lookup(ht.histKey)
@@ -790,7 +802,7 @@ func (ht *HistoryTraceKeyFiles) advance() error {
 			ht.histReader.Reset(offset)
 		}
 
-		if ht.hc.h.HistoryValuesOnCompressedPage <= 1 {
+		if compressedPageValuesCount <= 1 {
 			for ht.histReader.HasNext() {
 				v, _ := ht.histReader.Next(nil)
 				ht.v = bytes.Clone(v)

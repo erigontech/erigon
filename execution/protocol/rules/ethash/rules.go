@@ -571,7 +571,7 @@ func (ethash *Ethash) Initialize(config *chain.Config, chain rules.ChainHeaderRe
 // Finalize implements rules.Engine, accumulating the block and uncle rewards,
 // setting the final state on the header
 func (ethash *Ethash) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
+	uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.FlatRequests, error) {
 	// Accumulate any block and uncle rewards and commit the final state root
@@ -587,7 +587,7 @@ func (ethash *Ethash) FinalizeAndAssemble(chainConfig *chain.Config, header *typ
 ) (*types.Block, types.FlatRequests, error) {
 
 	// Finalize block
-	_, err := ethash.Finalize(chainConfig, header, state, txs, uncles, r, withdrawals, chain, syscall, false, logger)
+	_, err := ethash.Finalize(chainConfig, header, state, uncles, r, withdrawals, chain, syscall, false, logger)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -599,7 +599,7 @@ func (ethash *Ethash) FinalizeAndAssemble(chainConfig *chain.Config, header *typ
 func (ethash *Ethash) SealHash(header *types.Header) (hash common.Hash) {
 	hasher := sha3.NewLegacyKeccak256()
 
-	enc := []interface{}{
+	enc := []any{
 		header.ParentHash,
 		header.UncleHash,
 		header.Coinbase,
@@ -654,7 +654,7 @@ func AccumulateRewards(config *chain.Config, header *types.Header, uncles []*typ
 		blockReward = ConstantinopleBlockReward
 	}
 	// Accumulate the rewards for the miner and any included uncles
-	uncleRewards := []uint256.Int{}
+	uncleRewards := make([]uint256.Int, 0, len(uncles))
 	reward := new(uint256.Int).Set(blockReward)
 	r := new(uint256.Int)
 	headerNum, _ := uint256.FromBig(header.Number)

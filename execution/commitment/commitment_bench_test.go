@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/stretchr/testify/require"
 )
 
@@ -114,5 +115,91 @@ func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
 		})
 		require.NoError(b, err)
 		require.EqualValues(b, original, replacedBack)
+	}
+}
+
+func BenchmarkGetDeferredUpdate(b *testing.B) {
+	// Create a cell grid similar to what fold() would produce
+	var cells [16]cell
+	var bitmap uint16
+
+	// Fill cells with realistic data
+	for i := 0; i < 16; i++ {
+		c := &cells[i]
+		c.hashLen = 32
+		for j := 0; j < 32; j++ {
+			c.hash[j] = byte(i*32 + j)
+		}
+
+		// Vary the cell types like real trie data
+		switch i % 4 {
+		case 0: // account cell
+			c.accountAddrLen = 20
+			for j := 0; j < 20; j++ {
+				c.accountAddr[j] = byte(i + j)
+			}
+		case 1: // storage cell
+			c.storageAddrLen = 52
+			for j := 0; j < 52; j++ {
+				c.storageAddr[j] = byte(i + j)
+			}
+		case 2: // extension cell
+			c.extLen = 10
+			for j := 0; j < 10; j++ {
+				c.extension[j] = byte(i + j)
+			}
+		case 3: // hash-only cell
+			// just hash, already set
+		}
+
+		bitmap |= uint16(1 << i)
+	}
+
+	touchMap := bitmap
+	afterMap := bitmap
+	prefix := []byte{0x01, 0x02, 0x03}
+	prev := []byte{0x04, 0x05, 0x06}
+	var prevStep kv.Step = 100
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, &cells, 5, prev, prevStep)
+		putDeferredUpdate(upd)
+	}
+}
+
+func BenchmarkGetDeferredUpdate_FewCells(b *testing.B) {
+	// Benchmark with only 2 cells set (more realistic for sparse updates)
+	var cells [16]cell
+	var bitmap uint16
+
+	// Only set cells 0 and 5
+	for _, i := range []int{0, 5} {
+		c := &cells[i]
+		c.hashLen = 32
+		for j := 0; j < 32; j++ {
+			c.hash[j] = byte(i*32 + j)
+		}
+		c.accountAddrLen = 20
+		for j := 0; j < 20; j++ {
+			c.accountAddr[j] = byte(i + j)
+		}
+		bitmap |= uint16(1 << i)
+	}
+
+	touchMap := bitmap
+	afterMap := bitmap
+	prefix := []byte{0x01, 0x02, 0x03}
+	prev := []byte{0x04, 0x05, 0x06}
+	var prevStep kv.Step = 100
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		upd := getDeferredUpdate(prefix, bitmap, touchMap, afterMap, &cells, 5, prev, prevStep)
+		putDeferredUpdate(upd)
 	}
 }

@@ -56,7 +56,7 @@ func doSqueeze(cliCtx *cli.Context) error {
 		return err
 	}
 	defer l.Unlock()
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
@@ -109,6 +109,9 @@ func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 		return err
 	}
 	ac.Close()
+	if err := agg.ReloadFiles(); err != nil {
+		return err
+	}
 	if err := agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
@@ -169,6 +172,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	if err := agg.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}
+	// TODO: aggOld.reload files?
 	if err := aggOld.BuildMissedAccessors(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 		return err
 	}

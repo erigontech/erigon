@@ -42,6 +42,9 @@ func (a Address) IsZero() bool {
 }
 
 func (a Address) Value() common.Address {
+	if a == NilAddress {
+		return common.Address{}
+	}
 	return unique.Handle[common.Address](a).Value()
 }
 
@@ -59,6 +62,7 @@ func (a Address) String() string {
 func (a Address) Format(s fmt.State, c rune) {
 	if a == NilAddress {
 		s.Write([]byte("<nil>"))
+		return
 	}
 	a.Value().Format(s, c)
 }
@@ -121,6 +125,9 @@ func (k StorageKey) IsNil() bool {
 }
 
 func (k StorageKey) Value() common.Hash {
+	if k == NilKey {
+		return common.Hash{}
+	}
 	return unique.Handle[common.Hash](k).Value()
 }
 
@@ -134,6 +141,7 @@ func (k StorageKey) String() string {
 func (k StorageKey) Format(s fmt.State, c rune) {
 	if k == NilKey {
 		s.Write([]byte("<nil>"))
+		return
 	}
 	k.Value().Format(s, c)
 }
@@ -177,6 +185,9 @@ func (h CodeHash) IsZero() bool {
 }
 
 func (h CodeHash) Value() common.Hash {
+	if h == NilCodeHash {
+		return common.Hash{}
+	}
 	return unique.Handle[common.Hash](h).Value()
 }
 
@@ -190,6 +201,7 @@ func (h CodeHash) String() string {
 func (h CodeHash) Format(s fmt.State, c rune) {
 	if h == NilCodeHash {
 		s.Write([]byte("<nil>"))
+		return
 	}
 	h.Value().Format(s, c)
 }

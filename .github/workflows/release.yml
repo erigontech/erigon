@@ -23,8 +23,8 @@ on:
       checkout_ref:
         required: true
         type: string
-        default: 'main'
-        description: 'The branch to checkout and build artifacts from. By default "main".'
+        default: 'release/x.x'
+        description: '[MANUAL EDIT REQUIRED] Specify the branch to checkout and build artifacts from. Default value is "release/x.x".'
       release_version:
         required: true
         type: string

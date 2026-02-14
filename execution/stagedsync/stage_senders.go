@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -48,34 +49,25 @@ import (
 )
 
 type SendersCfg struct {
-	db              kv.RwDB
 	batchSize       int
 	numOfGoroutines int
-	readChLen       int
 	badBlockHalt    bool
 	tmpdir          string
-	prune           prune.Mode
 	chainConfig     *chain.Config
 	hd              *headerdownload.HeaderDownload
 	blockReader     services.FullBlockReader
-	syncCfg         ethconfig.Sync
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload) SendersCfg {
+func StageSendersCfg(chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload) SendersCfg {
 	const sendersBatchSize = 1000
-
 	return SendersCfg{
-		db:              db,
 		batchSize:       sendersBatchSize,
 		numOfGoroutines: secp256k1.NumOfContexts(), // we can only be as parallels as our crypto library supports,
-		readChLen:       4,
 		badBlockHalt:    badBlockHalt,
 		tmpdir:          tmpdir,
 		chainConfig:     chainCfg,
-		prune:           prune,
 		hd:              hd,
 		blockReader:     blockReader,
-		syncCfg:         syncCfg,
 	}
 }
 
@@ -85,15 +77,6 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	}
 
 	quitCh := ctx.Done()
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(context.Background())
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
 
 	prevStageProgress, errStart := stages.GetStageProgress(tx, stages.Bodies)
 	if errStart != nil {
@@ -129,13 +112,13 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 			defer dbg.LogPanic()
 			defer wg.Done()
 			// each goroutine gets it's own crypto context to make sure they are really parallel
-			recoverSenders(ctx, logPrefix, secp256k1.ContextForThread(threadNo), cfg.chainConfig, jobs, out, quitCh)
+			recoverSenders(ctx, secp256k1.ContextForThread(threadNo), cfg.chainConfig, jobs, out, quitCh)
 		}(i)
 	}
 
 	collectorSenders := etl.NewCollectorWithAllocator(logPrefix, cfg.tmpdir, etl.SmallSortableBuffers, logger)
 	defer collectorSenders.Close()
-	collectorSenders.SortAndFlushInBackground(true)
+	collectorSenders.SortAndFlushInBackground(false)
 	collectorSenders.LogLvl(log.LvlDebug)
 
 	// pendingBlocks tracks blocks that are being processed
@@ -184,6 +167,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 
 				// Check if block is complete
 				if pb.received == pb.txCount {
+					exec.AddSendersToGlobalReadAheader(pb.senders, pb.hash)
 					if err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(j.blockIndex)+1, pb.hash), pb.senders); err != nil {
 						pendingMu.Unlock()
 						errCh <- senderRecoveryError{err: err}
@@ -254,13 +238,15 @@ Loop:
 			continue
 		}
 
-		var body *types.Body
-		if body, err = cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber); err != nil {
-			return err
-		}
-		if body == nil {
-			logger.Warn(fmt.Sprintf("[%s] ReadBodyWithTransactions can't find block", logPrefix), "num", blockNumber, "hash", blockHash)
-			continue
+		body, ok := exec.ReadBodyWithTransactionsFromGlobalReadAheader(blockHash)
+		if body == nil || !ok {
+			if body, err = cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber); err != nil {
+				return err
+			}
+			if body == nil {
+				logger.Warn(fmt.Sprintf("[%s] ReadBodyWithTransactions can't find block", logPrefix), "num", blockNumber, "hash", blockHash)
+				continue
+			}
 		}
 
 		blockIndex := int(blockNumber) - int(s.BlockNumber) - 1
@@ -268,17 +254,17 @@ Loop:
 			panic(blockIndex) //uint-underflow
 		}
 
+		// Register pending block
+		pendingMu.Lock()
 		// Skip blocks with no transactions
 		if len(body.Transactions) == 0 {
 			// Write empty senders for blocks with no transactions
 			if err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(blockIndex)+1, blockHash), nil); err != nil {
 				return err
 			}
+			pendingMu.Unlock()
 			continue
 		}
-
-		// Register pending block
-		pendingMu.Lock()
 		pendingBlocks[blockIndex] = &pendingBlock{
 			senders: make([]byte, len(body.Transactions)*length.Addr),
 			txCount: len(body.Transactions),
@@ -345,8 +331,8 @@ Loop:
 	} else {
 		if err := collectorSenders.Load(tx, kv.Senders, etl.IdentityLoadFunc, etl.TransformArgs{
 			Quit: quitCh,
-			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
-				return []interface{}{"block", binary.BigEndian.Uint64(k)}
+			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []any) {
+				return []any{"block", binary.BigEndian.Uint64(k)}
 			},
 		}); err != nil {
 			return err
@@ -355,12 +341,6 @@ Loop:
 			return err
 		}
 		log.Debug(fmt.Sprintf("[%s] Recovery done", logPrefix), "from", startFrom, "to", to, "blocks", to-startFrom+1, "took", time.Since(recoveryStart))
-	}
-
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -382,7 +362,7 @@ type senderRecoveryJob struct {
 	err         error
 }
 
-func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp256k1.Context, config *chain.Config, in, out chan *senderRecoveryJob, quit <-chan struct{}) {
+func recoverSenders(ctx context.Context, cryptoContext *secp256k1.Context, config *chain.Config, in, out chan *senderRecoveryJob, quit <-chan struct{}) {
 	var job *senderRecoveryJob
 	var ok bool
 	for {
@@ -426,23 +406,8 @@ func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp25
 
 func UnwindSendersStage(u *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
 	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
-
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
 	if err = u.Done(tx); err != nil {
 		return err
-	}
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
 	}
 	return nil
 }

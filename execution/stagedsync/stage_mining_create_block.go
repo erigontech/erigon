@@ -50,8 +50,8 @@ type MiningBlock struct {
 	Txns             types.Transactions
 	Receipts         types.Receipts
 	Withdrawals      []*types.Withdrawal
-	PreparedTxns     types.Transactions
 	Requests         types.FlatRequests
+	BlockAccessList  types.BlockAccessList
 
 	headerRlpSize         *int
 	withdrawalsRlpSize    *int
@@ -98,11 +98,6 @@ func (mb *MiningBlock) AvailableRlpSpace(chainConfig *chain.Config, withAddition
 }
 
 func (mb *MiningBlock) TxnsRlpSize(withAdditional ...types.Transaction) int {
-	if len(mb.PreparedTxns) > 0 {
-		s := types.EncodingSizeGenericList(mb.PreparedTxns)
-		s += rlp.ListPrefixLen(s)
-		return s
-	}
 	if len(mb.Txns) != mb.txnsRlpSizeCalculated {
 		panic("mismatch between mb.Txns and mb.txnsRlpSizeCalculated - did you forget to use mb.AddTxn()?")
 	}
@@ -129,30 +124,24 @@ func NewMiningState(cfg *buildercfg.MiningConfig) MiningState {
 }
 
 type MiningCreateBlockCfg struct {
-	db                     kv.RwDB
 	miner                  MiningState
 	chainConfig            *chain.Config
 	engine                 rules.Engine
-	tmpdir                 string
 	blockBuilderParameters *builder.Parameters
 	blockReader            services.FullBlockReader
 }
 
 func StageMiningCreateBlockCfg(
-	db kv.RwDB,
 	miner MiningState,
 	chainConfig *chain.Config,
 	engine rules.Engine,
 	blockBuilderParameters *builder.Parameters,
-	tmpdir string,
 	blockReader services.FullBlockReader,
 ) MiningCreateBlockCfg {
 	return MiningCreateBlockCfg{
-		db:                     db,
 		miner:                  miner,
 		chainConfig:            chainConfig,
 		engine:                 engine,
-		tmpdir:                 tmpdir,
 		blockBuilderParameters: blockBuilderParameters,
 		blockReader:            blockReader,
 	}
@@ -254,6 +243,7 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv
 
 	logger.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
 	ibs := state.New(state.NewReaderV3(sd.AsGetter(tx)))
+	defer ibs.Release(false)
 
 	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
 		logger.Error("Failed to prepare header for mining",

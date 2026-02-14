@@ -2,6 +2,9 @@
 description: >-
   Securing Your Erigon Node: Best Practices for RPC, Network, and Operational
   Safety
+metaLinks:
+  alternates:
+    - https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/fundamentals/security
 ---
 
 # Security
@@ -10,7 +13,7 @@ The security practices focus heavily on the RPC daemon since it's the primary ex
 
 ## Network Security
 
-Securing your network ports is essential for protecting your Erigon node. Proper firewall configuration is the first line of defense.&#x20;
+Securing your network ports is essential for protecting your Erigon node. Proper firewall configuration is the first line of defense.
 
 Based on best practices for execution clients, your local machine's firewall settings should be configured as follows:
 
@@ -31,12 +34,12 @@ When exposing public RPC endpoints (like those on port 8545), use the following 
 
 The RPC daemon is the primary external interface, making API security critical. To protect against abuse, denial-of-service (DoS) attacks, OOM issues and unauthorized access, implement the following controls:
 
-| **Security Measure** | **Description**                                                                                                                                                                                                   | **Erigon Configuration**                                                                                                                                                             |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Method Allowlisting  | <p>Restrict the available RPC methods to only those strictly necessary. This significantly reduces the attack surface. </p><p></p><p>Can be applied to <code>erigon</code> or <code>rpcdaemon</code> process.</p> | Use the `--rpc.accessList=rules.json` flag, pointing to a JSON file (e.g., `rules.json`) that specifies the allowed methods: `{"allow": ["net_version", "eth_getBlockByHash"]}`      |
-| Remove Admin APIs    | Never include sensitive namespaces like `admin` or `debug` in the `--http.api` list for public-facing nodes. These APIs are intended for node operators only.                                                     | Omit the `admin` and `debug` namespaces from `--http.api`.                                                                                                                           |
-| Rate Limiting        | Protect against DoS attacks by limiting the processing capacity for batch requests.                                                                                                                               | Configure `--rpc.batch.concurrency` and `--rpc.batch.limit` flags.                                                                                                                   |
-| Subscription Filters | Control WebSocket subscriptions to prevent Out-of-Memory (OOM) errors caused by a large number of filter requests.                                                                                                | <p>Utilize the various <code>--rpc.subscription.filters.*</code> flags.</p><p><strong>Note</strong>: These are disabled by default because they increase the risk of OOM issues.</p> |
+| **Security Measure** | **Description**                                                                                                                                                                                           | **Erigon Configuration**                                                                                                                                                             |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Method Allowlisting  | <p>Restrict the available RPC methods to only those strictly necessary. This significantly reduces the attack surface.</p><p>Can be applied to <code>erigon</code> or <code>rpcdaemon</code> process.</p> | Use the `--rpc.accessList=rules.json` flag, pointing to a JSON file (e.g., `rules.json`) that specifies the allowed methods: `{"allow": ["net_version", "eth_getBlockByHash"]}`      |
+| Remove Admin APIs    | Never include sensitive namespaces like `admin` or `debug` in the `--http.api` list for public-facing nodes. These APIs are intended for node operators only.                                             | Omit the `admin` and `debug` namespaces from `--http.api`.                                                                                                                           |
+| Rate Limiting        | Protect against DoS attacks by limiting the processing capacity for batch requests.                                                                                                                       | Configure `--rpc.batch.concurrency` and `--rpc.batch.limit` flags.                                                                                                                   |
+| Subscription Filters | Control WebSocket subscriptions to prevent Out-of-Memory (OOM) errors caused by a large number of filter requests.                                                                                        | <p>Utilize the various <code>--rpc.subscription.filters.*</code> flags.</p><p><strong>Note</strong>: These are disabled by default because they increase the risk of OOM issues.</p> |
 
 ### External Protection Layer (Recommended for Production)
 
@@ -47,8 +50,6 @@ For production environments where RPC endpoints are exposed publicly, it is stro
 * **TLS Termination**: Handling SSL/TLS encryption/decryption.
 * **Monitoring and Logging**: Tracking requests for security auditing.
 * **Web Application Firewalls (WAFs)**: Protecting against common web exploits.
-
-{% include "../../.gitbook/includes/warning-admin_-and-debug_-....md" %}
 
 ## TLS and Authentication
 

@@ -20,6 +20,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -30,7 +31,7 @@ import (
 
 // HelpData is a one shot struct to pass to the usage template
 type HelpData struct {
-	App        interface{}
+	App        any
 	FlagGroups []FlagGroup
 }
 
@@ -63,10 +64,42 @@ func (a ByCategory) Less(i, j int) bool {
 }
 
 // NewApp creates an app with sane defaults.
-func NewApp(gitCommit, usage string) *cli.App {
+func NewApp(desc string) *cli.App {
 	app := cli.NewApp()
 	app.Name = filepath.Base(os.Args[0])
-	app.Version = version.VersionWithCommit(gitCommit)
-	app.Usage = usage
+	app.Version = version.VersionWithCommit(version.GitCommit)
+	app.Usage = desc
+	app.EnableBashCompletion = true
+
+	app.Suggest = true
+
+	// Only show usage if explicitly requested via --help
+	app.OnUsageError = func(ctx *cli.Context, err error, isSubcommand bool) error {
+		// Print the error but not the usage
+		if ctx != nil && ctx.App != nil {
+			fmt.Fprintf(ctx.App.ErrWriter, "Error: %v\n", err)
+			fmt.Fprintf(ctx.App.ErrWriter, "Run '%s --help' for usage.\n", ctx.App.Name)
+		}
+		// Return cli.Exit to signal we've handled the error
+		return cli.Exit("", 1)
+	}
+
+	// Configure exit error handler to prevent additional output
+	app.ExitErrHandler = func(ctx *cli.Context, err error) {
+		if err == nil {
+			return
+		}
+		// For cli.Exit errors, just exit with the code
+		if exitErr, ok := err.(cli.ExitCoder); ok {
+			cli.OsExiter(exitErr.ExitCode())
+		} else {
+			// For other errors, print them and exit
+			if err.Error() != "" {
+				fmt.Fprintf(ctx.App.ErrWriter, "Error: %v\n", err)
+			}
+			cli.OsExiter(1)
+		}
+	}
+
 	return app
 }

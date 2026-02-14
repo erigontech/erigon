@@ -64,7 +64,7 @@ func TestSelfDestructReceive(t *testing.T) {
 		signer = types.LatestSignerForChainID(nil)
 	)
 
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)

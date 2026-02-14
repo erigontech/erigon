@@ -155,7 +155,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 	suffixCollectors := make([]*etl.Collector, workers)
 	for i := 0; i < workers; i++ {
 		collector := etl.NewCollectorWithAllocator(logPrefix+"_dict", tmpDir, etl.SmallSortableBuffers, logger) //nolint:gocritic
-		collector.SortAndFlushInBackground(true)
+		collector.SortAndFlushInBackground(false)
 		collector.LogLvl(lvl)
 
 		suffixCollectors[i] = collector
@@ -400,11 +400,11 @@ func (db *DictionaryBuilder) Swap(i, j int) {
 }
 func (db *DictionaryBuilder) Sort() { slices.SortFunc(db.items, dictionaryBuilderCmp) }
 
-func (db *DictionaryBuilder) Push(x interface{}) {
+func (db *DictionaryBuilder) Push(x any) {
 	db.items = append(db.items, x.(*Pattern))
 }
 
-func (db *DictionaryBuilder) Pop() interface{} {
+func (db *DictionaryBuilder) Pop() any {
 	old := db.items
 	n := len(old)
 	x := old[n-1]
@@ -574,11 +574,11 @@ func (ph *PatternHeap) Swap(i, j int) {
 	(*ph)[i], (*ph)[j] = (*ph)[j], (*ph)[i]
 }
 
-func (ph *PatternHeap) Push(x interface{}) {
+func (ph *PatternHeap) Push(x any) {
 	*ph = append(*ph, x.(*PatternHuff))
 }
 
-func (ph *PatternHeap) Pop() interface{} {
+func (ph *PatternHeap) Pop() any {
 	old := *ph
 	n := len(old)
 	x := old[n-1]
@@ -685,11 +685,11 @@ func (ph *PositionHeap) Swap(i, j int) {
 	(*ph)[i], (*ph)[j] = (*ph)[j], (*ph)[i]
 }
 
-func (ph *PositionHeap) Push(x interface{}) {
+func (ph *PositionHeap) Push(x any) {
 	*ph = append(*ph, x.(*PositionHuff))
 }
 
-func (ph *PositionHeap) Pop() interface{} {
+func (ph *PositionHeap) Pop() any {
 	old := *ph
 	n := len(old)
 	x := old[n-1]
@@ -887,6 +887,8 @@ func Ratio(f1, f2 string) (CompressionRatio, error) {
 }
 
 // RawWordsFile - .idt file format - simple format for temporary data store
+// PerfCritical: Used to speedup foreground processes by moving heavy compression to background
+// or outside of critical sections (e.g., outside of database.RoTx)
 type RawWordsFile struct {
 	f        *os.File
 	w        *bufio.Writer
@@ -915,8 +917,12 @@ func (f *RawWordsFile) Flush() error {
 	return f.w.Flush()
 }
 func (f *RawWordsFile) Close() {
-	f.w.Flush()
-	f.f.Close()
+	if f.w != nil {
+		f.w.Flush()
+		f.f.Close()
+		f.w = nil
+		f.f = nil
+	}
 }
 func (f *RawWordsFile) CloseAndRemove() {
 	f.Close()

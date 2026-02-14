@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/tidwall/btree"
+
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/tidwall/btree"
 )
 
 type statusFlag uint
@@ -26,6 +27,8 @@ func (p AccountPath) String() string {
 		return "Balance"
 	case NoncePath:
 		return "Nonce"
+	case IncarnationPath:
+		return "Incarnation"
 	case CodePath:
 		return "Code"
 	case CodeHashPath:
@@ -42,9 +45,10 @@ func (p AccountPath) String() string {
 }
 
 const (
-	AddressPath = iota
+	AddressPath AccountPath = iota
 	BalancePath
 	NoncePath
+	IncarnationPath
 	CodePath
 	CodeHashPath
 	CodeSizePath
@@ -101,7 +105,8 @@ func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
 	for _, accountChanges := range changes {
 		for _, storageChanges := range accountChanges.StorageChanges {
 			for _, change := range storageChanges.Changes {
-				vm.Write(accountChanges.Address, StoragePath, storageChanges.Slot, Version{TxIndex: int(change.Index) - 1}, change.Value, true)
+				value := change.Value
+				vm.Write(accountChanges.Address, StoragePath, storageChanges.Slot, Version{TxIndex: int(change.Index) - 1}, value, true)
 			}
 		}
 		for _, balanceChange := range accountChanges.BalanceChanges {
@@ -111,13 +116,13 @@ func (vm *VersionMap) WriteChanges(changes []*types.AccountChanges) {
 			vm.Write(accountChanges.Address, NoncePath, accounts.NilKey, Version{TxIndex: int(nonceChange.Index) - 1}, nonceChange.Value, true)
 		}
 		for _, codeChange := range accountChanges.CodeChanges {
-			vm.Write(accountChanges.Address, CodePath, accounts.NilKey, Version{TxIndex: int(codeChange.Index) - 1}, codeChange.Data, true)
+			vm.Write(accountChanges.Address, CodePath, accounts.NilKey, Version{TxIndex: int(codeChange.Index) - 1}, codeChange.Bytecode, true)
 		}
 	}
 
 }
 
-func (vm *VersionMap) Write(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version, data interface{}, complete bool) {
+func (vm *VersionMap) Write(addr accounts.Address, path AccountPath, key accounts.StorageKey, v Version, data any, complete bool) {
 	vm.mu.Lock()
 	defer vm.mu.Unlock()
 
@@ -166,15 +171,15 @@ func (vm *VersionMap) Write(addr accounts.Address, path AccountPath, key account
 }
 
 func (vm *VersionMap) Read(addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) (res ReadResult) {
+	res.depIdx = UnknownDep
+	res.incarnation = -1
+
 	if vm == nil {
 		return res
 	}
 
 	vm.mu.RLock()
 	defer vm.mu.RUnlock()
-
-	res.depIdx = UnknownDep
-	res.incarnation = -1
 
 	cells := vm.getKeyCells(addr, path, key, nil)
 
@@ -320,9 +325,15 @@ func (vm *VersionMap) validateRead(txIndex int, addr accounts.Address, path Acco
 			valid = VersionInvalid
 		} else {
 			if valid = checkVersion(version, version); valid == VersionValid {
-				if path == BalancePath || path == NoncePath || path == CodeHashPath {
-					valid = vm.validateRead(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
-						version, checkVersion, traceInvalid, tracePrefix)
+				if path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath {
+					if valid = vm.validateRead(txIndex, addr, AddressPath, accounts.StorageKey{}, source,
+						version, checkVersion, traceInvalid, tracePrefix); valid == VersionValid {
+						valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
+							version, checkVersion, traceInvalid, tracePrefix)
+					} else {
+						valid = vm.validateRead(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, source,
+							version, checkVersion, traceInvalid, tracePrefix)
+					}
 				}
 			}
 		}
@@ -371,7 +382,7 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 type WriteCell struct {
 	flag        statusFlag
 	incarnation int
-	data        interface{}
+	data        any
 }
 
 type Version struct {
@@ -392,7 +403,14 @@ const (
 type ReadResult struct {
 	depIdx      int
 	incarnation int
-	value       interface{}
+	value       any
+}
+
+func (res *ReadResult) DepString() string {
+	if res.depIdx == UnknownDep {
+		return "unknown"
+	}
+	return fmt.Sprintf("%d.%d", res.depIdx, res.incarnation)
 }
 
 func (res *ReadResult) DepIdx() int {
@@ -403,7 +421,7 @@ func (res *ReadResult) Incarnation() int {
 	return res.incarnation
 }
 
-func (res *ReadResult) Value() interface{} {
+func (res *ReadResult) Value() any {
 	return res.value
 }
 

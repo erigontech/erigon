@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 var (
@@ -101,17 +102,25 @@ func NewAttestationService(
 	return a
 }
 
+func (s *attestationService) Names() []string {
+	names := make([]string, 0, s.netCfg.AttestationSubnetCount)
+	for i := 0; i < int(s.netCfg.AttestationSubnetCount); i++ {
+		names = append(names, gossip.TopicNameBeaconAttestation(uint64(i)))
+	}
+	return names
+}
+
 func (s *attestationService) IsMyGossipMessage(name string) bool {
 	return gossip.IsTopicBeaconAttestation(name)
 }
 
-func (s *attestationService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*AttestationForGossip, error) {
+func (s *attestationService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*AttestationForGossip, error) {
 	obj := &AttestationForGossip{
-		Receiver:         copyOfPeerData(data),
+		Receiver:         &sentinelproto.Peer{Pid: pid.String()},
 		ImmediateProcess: false,
 	}
 	obj.SingleAttestation = &solid.SingleAttestation{}
-	if err := obj.SingleAttestation.DecodeSSZ(data.Data, int(version)); err != nil {
+	if err := obj.SingleAttestation.DecodeSSZ(data, int(version)); err != nil {
 		return nil, err
 	}
 	return obj, nil
@@ -254,7 +263,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		// mark the validator as seen
 		epochLastTime, ok := s.validatorAttestationSeen.Get(vIndex)
 		if ok && epochLastTime == targetEpoch {
-			return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
+			return nil
 		}
 		s.validatorAttestationSeen.Add(vIndex, targetEpoch)
 
@@ -321,7 +330,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 
 	if att.ImmediateProcess {
 		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
-
 	}
 
 	// push the signatures to verify asynchronously and run final functions after that.
@@ -331,7 +339,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
 	// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
 	// gossip ourselves or ban the peer which sent that particular invalid signature.
-	return ErrIgnore
+	return nil
 }
 
 // type attestationJob struct {
