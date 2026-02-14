@@ -816,7 +816,10 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			return CheckCommitmentHistAtBlk(ctx, db, br, blockNum, logger)
+			if err := CheckCommitmentHistAtBlk(ctx, db, br, blockNum, logger); err != nil {
+				return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
+			}
+			return nil
 		})
 	}
 	if err := g.Wait(); err != nil {
