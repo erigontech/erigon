@@ -15,7 +15,7 @@ require github.com/erigontech/nitro-erigon v0.0.0-00010101000000-000000000000
 replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
 
 require (
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20251227031956-35482e673b0c
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20260209193225-9b1ea4e3e893
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
 	github.com/erigontech/mdbx-go v0.39.9
 	github.com/erigontech/secp256k1 v1.2.0

@@ -112,7 +112,7 @@ var Defaults = Config{
 	RPCTxFeeCap: 1, // 1 ether
 
 	ArbRPCEVMTimeout: 5 * time.Second,
-	L2RPCAddr:        "", // arbitrum only field, url to connect to L2 RPC server
+	L2RPC:            L2RPCConfig{},
 
 	ImportMode: false,
 	Snapshot: BlocksFreezing{
@@ -280,8 +280,16 @@ type Config struct {
 
 	ElBlockDownloaderV2 bool
 
-	L2RPCAddr        string
-	L2RPCReceiptAddr string
+	L2RPC L2RPCConfig
+}
+
+type L2RPCConfig struct {
+	Addr         string // L2 RPC server address to fetch blocks and transactions
+	ReceiptAddr  string // L2 RPC server address for fetching receipts (defaults to Addr if empty)
+	BlockRPS     int    // requests per second limit for block fetching
+	BlockBurst   int    // burst limit (max concurrent requests) for block fetching
+	ReceiptRPS   int    // requests per second limit for receipt fetching
+	ReceiptBurst int    // burst limit (max concurrent requests) for receipt fetching
 }
 
 type Sync struct {
