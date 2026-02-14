@@ -24,6 +24,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"path"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -50,7 +51,8 @@ func TestStateCornerCases(t *testing.T) {
 
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs)
-	st.walk(t, cornersDir, func(t *testing.T, name string, test *testutil.StateTest) {
+	testDir := path.Join(cornersDir, "state")
+	st.walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
 		for _, subtest := range test.Subtests() {
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
