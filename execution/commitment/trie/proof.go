@@ -199,10 +199,13 @@ func decodeNode(encoded []byte) (Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	switch c, _ := rlp.CountValues(elems); c {
-	case 2:
+	c, err := rlp.CountValues(elems)
+	switch {
+	case err != nil:
+		return nil, fmt.Errorf("invalid node list: %v", err)
+	case c == 2:
 		return decodeShort(elems)
-	case 17:
+	case c == 17:
 		return decodeFull(elems)
 	default:
 		return nil, fmt.Errorf("invalid number of list elements: %v", c)
