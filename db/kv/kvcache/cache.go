@@ -398,7 +398,6 @@ func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err err
 	}
 
 	if it != nil {
-		//fmt.Printf("from cache:  %#x,%x\n", k, it.(*Element).V)
 		c.hits.Inc()
 		return it.V, nil
 	}
@@ -416,7 +415,6 @@ func (c *Coherent) Get(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err err
 	if len(v) == 0 {
 		return v, nil
 	}
-	//fmt.Printf("from db: %#x,%x\n", k, v)
 	c.lock.Lock()
 
 	defer c.lock.Unlock()
@@ -432,7 +430,6 @@ func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err
 	}
 
 	if it != nil {
-		//fmt.Printf("from cache:  %#x,%x\n", k, it.(*Element).V)
 		c.codeHits.Inc()
 		return it.V, nil
 	}
@@ -442,8 +439,6 @@ func (c *Coherent) GetCode(k []byte, tx kv.TemporalTx, id uint64) (v []byte, err
 	if err != nil {
 		return nil, err
 	}
-	//fmt.Printf("from db: %#x,%x\n", k, v)
-
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	v = c.addCode(common.Copy(k), common.Copy(v), r, id).V
@@ -468,7 +463,6 @@ func (c *Coherent) add(k, v []byte, r *CoherentRoot, id uint64) *Element {
 
 	replaced, _ := r.cache.Set(it)
 	if c.latestStateVersionID != id {
-		//fmt.Printf("add to non-last viewID: %d<%d\n", c.latestViewID, id)
 		return it
 	}
 	if replaced != nil {
@@ -487,7 +481,6 @@ func (c *Coherent) addCode(k, v []byte, r *CoherentRoot, id uint64) *Element {
 	it := &Element{K: k, V: v}
 	replaced, _ := r.codeCache.Set(it)
 	if c.latestStateVersionID != id {
-		//fmt.Printf("add to non-last viewID: %d<%d\n", c.latestViewID, id)
 		return it
 	}
 	if replaced != nil {
