@@ -183,18 +183,17 @@ func TestCanonicalHashCache_DBHit(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	// First call: should read from DB and populate cache
+	// First call: should read from DB (DB results are not cached, only snapshot results are)
 	hash, ok, err := blockReader.CanonicalHash(context.Background(), tx, 0)
 	require.NoError(t, err)
 	assert.True(t, ok)
 	assert.Equal(t, expectedHash, hash)
 
-	// Verify the cache is populated
-	cached, found := blockReader.canonicalHashCache.Get(uint64(0))
-	assert.True(t, found)
-	assert.Equal(t, expectedHash, cached)
+	// DB results should NOT be cached (only snapshot data is immutable and cacheable)
+	_, found := blockReader.canonicalHashCache.Get(uint64(0))
+	assert.False(t, found)
 
-	// Second call: should return from cache (same result)
+	// Second call: should still return correct result from DB
 	hash2, ok2, err := blockReader.CanonicalHash(context.Background(), tx, 0)
 	require.NoError(t, err)
 	assert.True(t, ok2)
@@ -260,10 +259,9 @@ func TestCanonicalHashCache_MultipleBlocks(t *testing.T) {
 		assert.Equal(t, hashes[i], hash)
 	}
 
-	// All should be cached
+	// DB results should NOT be cached (only snapshot data is immutable and cacheable)
 	for i := uint64(0); i < 5; i++ {
-		cached, found := blockReader.canonicalHashCache.Get(i)
-		assert.True(t, found, "block %d should be cached", i)
-		assert.Equal(t, hashes[i], cached)
+		_, found := blockReader.canonicalHashCache.Get(i)
+		assert.False(t, found, "block %d should not be cached (DB data)", i)
 	}
 }

@@ -627,17 +627,16 @@ func (r *BlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash commo
 var emptyHash = common.Hash{}
 
 func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (h common.Hash, ok bool, err error) {
-	if cached, ok := r.canonicalHashCache.Get(blockHeight); ok {
-		return cached, true, nil
-	}
-
 	h, err = rawdb.ReadCanonicalHash(tx, blockHeight)
 	if err != nil {
 		return emptyHash, false, err
 	}
 	if h != emptyHash {
-		r.canonicalHashCache.Add(blockHeight, h)
 		return h, true, nil
+	}
+
+	if cached, ok := r.canonicalHashCache.Get(blockHeight); ok {
+		return cached, true, nil
 	}
 
 	seg, ok, release := r.sn.ViewSingleFile(snaptype2.Headers, blockHeight)
