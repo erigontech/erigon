@@ -118,8 +118,8 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 	)
 
 	for i, test := range tests {
-		x := *new(uint256.Int).SetBytes(common.Hex2Bytes(test.X))
-		y := *new(uint256.Int).SetBytes(common.Hex2Bytes(test.Y))
+		x := *uint256.NewInt(0).SetBytes(common.Hex2Bytes(test.X))
+		y := *uint256.NewInt(0).SetBytes(common.Hex2Bytes(test.Y))
 		expected := new(uint256.Int).SetBytes(common.Hex2Bytes(test.Expected))
 		callContext.Stack.push(x)
 		callContext.Stack.push(y)
@@ -541,13 +541,13 @@ func TestOpMstore(t *testing.T) {
 	pc := uint64(0)
 	v := "abcdef00000000000000abba000000000deaf000000c0de00100000000133700"
 	callContext.Stack.push(*new(uint256.Int).SetBytes(common.Hex2Bytes(v)))
-	callContext.Stack.push(*new(uint256.Int))
+	callContext.Stack.push(uint256.Int{})
 	opMstore(pc, evm, callContext)
 	if got := common.Bytes2Hex(callContext.Memory.GetCopy(0, 32)); got != v {
 		t.Fatalf("Mstore fail, got %v, expected %v", got, v)
 	}
 	callContext.Stack.push(*new(uint256.Int).SetOne())
-	callContext.Stack.push(*new(uint256.Int))
+	callContext.Stack.push(uint256.Int{})
 	opMstore(pc, evm, callContext)
 	if common.Bytes2Hex(callContext.Memory.GetCopy(0, 32)) != "0000000000000000000000000000000000000000000000000000000000000001" {
 		t.Fatalf("Mstore failed to overwrite previous value")
@@ -562,7 +562,7 @@ func BenchmarkOpMstore(bench *testing.B) {
 
 	callContext.Memory.Resize(64)
 	pc := uint64(0)
-	memStart := *new(uint256.Int)
+	memStart := uint256.Int{}
 	value := *new(uint256.Int).SetUint64(0x1337)
 
 	for bench.Loop() {
@@ -587,14 +587,14 @@ func TestOpTstore(t *testing.T) {
 	// push the value to the stack
 	callContext.Stack.push(*new(uint256.Int).SetBytes(value))
 	// push the location to the stack
-	callContext.Stack.push(*new(uint256.Int))
+	callContext.Stack.push(uint256.Int{})
 	opTstore(pc, evm, callContext)
 	// there should be no elements on the stack after TSTORE
 	if callContext.Stack.len() != 0 {
 		t.Fatal("stack wrong size")
 	}
 	// push the location to the stack
-	callContext.Stack.push(*new(uint256.Int))
+	callContext.Stack.push(uint256.Int{})
 	opTload(pc, evm, callContext)
 	// there should be one element on the stack after TLOAD
 	if callContext.Stack.len() != 1 {

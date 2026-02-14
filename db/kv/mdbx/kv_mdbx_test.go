@@ -1118,6 +1118,7 @@ func BenchmarkDB_ResetSequence(b *testing.B) {
 
 	tx, err := _db.BeginRw(ctx)
 	require.NoError(b, err)
+	defer tx.Rollback()
 
 	for i := 0; b.Loop(); i++ {
 		err = tx.ResetSequence(table, uint64(i))
@@ -1125,7 +1126,6 @@ func BenchmarkDB_ResetSequence(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
-	tx.Rollback()
 }
 
 func TestMdbxWithSyncBytes(t *testing.T) {
