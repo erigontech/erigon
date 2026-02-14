@@ -21,10 +21,12 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/execmodule/moduleutil"
 	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 )
 
@@ -44,6 +46,19 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not begin transaction: %s", err)
 	}
 	defer tx.Rollback()
+
+	type balKey struct {
+		hash   common.Hash
+		number uint64
+	}
+	balEntries := make(map[balKey]*executionproto.BlockAccessListEntry, len(req.BlockAccessLists))
+	for _, entry := range req.BlockAccessLists {
+		if entry == nil || entry.BlockHash == nil {
+			continue
+		}
+		hash := gointerfaces.ConvertH256ToHash(entry.BlockHash)
+		balEntries[balKey{hash: hash, number: entry.BlockNumber}] = entry
+	}
 
 	for _, block := range req.Blocks {
 		// Skip frozen blocks.
@@ -88,6 +103,22 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		}
 		if _, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), height, body); err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
+		}
+		key := balKey{hash: header.Hash(), number: height}
+		if entry, ok := balEntries[key]; ok && entry != nil {
+			if header.BlockAccessListHash == nil {
+				return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: block access list provided without hash for block %d", height)
+			}
+			balBytes := entry.BlockAccessList
+			if len(balBytes) == 0 {
+				balBytes, err = types.EncodeBlockAccessListBytes(nil)
+				if err != nil {
+					return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: encode empty block access list, block %d: %s", height, err)
+				}
+			}
+			if err := rawdb.WriteBlockAccessListBytes(tx, header.Hash(), height, balBytes); err != nil {
+				return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBlockAccessList, block %d: %s", height, err)
+			}
 		}
 		e.logger.Trace("Inserted block", "hash", header.Hash(), "number", header.Number)
 	}
