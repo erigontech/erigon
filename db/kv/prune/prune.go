@@ -57,6 +57,7 @@ const (
 	PrefixValStorageMode //TODO: change name
 	StepValueStorageMode
 	StepKeyStorageMode
+	ValueOffset8StorageMode // txNum at val[8:16], used by TxLookup
 )
 
 func HashSeekingPrune(
@@ -242,7 +243,7 @@ func TableScanningPrune(
 			"key prune status", stat.KeyProgress.String(),
 			"val prune status", stat.ValueProgress.String())
 	}()
-	if prevStat.KeyProgress != Done {
+	if prevStat.KeyProgress != Done && keysCursor != nil {
 		txnb := common.Copy(keyCursorPosition.StartKey)
 		// This deletion iterator goes last to preserve invariant: if some `txNum=N` pruned - it's pruned Fully
 		for ; txnb != nil; txnb, _, err = keysCursor.NextNoDup() {
@@ -293,7 +294,8 @@ func TableScanningPrune(
 			return kv.Step(^binary.BigEndian.Uint64(key[len(key)-8:])).ToTxNum(stepSize)
 		case DefaultStorageMode:
 			return binary.BigEndian.Uint64(val)
-
+		case ValueOffset8StorageMode:
+			return binary.BigEndian.Uint64(val[8:])
 		default:
 			return 0
 		}
