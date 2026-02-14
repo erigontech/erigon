@@ -161,7 +161,12 @@ func serveTestnet(test *udpTest, testnet *preminedTestnet) {
 			n, key := testnet.nodeByAddr(to)
 			switch p.(type) {
 			case *v4wire.Ping:
-				test.packetInFrom(nil, key, to, &v4wire.Pong{Expiration: futureExp, ReplyTok: hash})
+				// Tolerate errUnsolicitedReply for Pong: under CI load, the
+				// reply matcher's 500ms timeout can fire before serveTestnet
+				// gets scheduled to send the Pong back. A late Pong is
+				// harmless for the lookup test — the node will simply be
+				// re-pinged on the next round.
+				test.packetInFromTolerate(key, to, &v4wire.Pong{Expiration: futureExp, ReplyTok: hash}, errUnsolicitedReply)
 			case *v4wire.Findnode:
 				dist := enode.LogDist(n.ID(), testnet.target.ID())
 				nodes := testnet.nodesAtDistance(dist - 1)
@@ -258,7 +263,7 @@ type preminedTestnet struct {
 
 func (tn *preminedTestnet) len() int {
 	n := 0
-	for _, keys := range tn.dists {
+	for _, keys := range &tn.dists {
 		n += len(keys)
 	}
 	return n
@@ -266,7 +271,7 @@ func (tn *preminedTestnet) len() int {
 
 func (tn *preminedTestnet) nodes() []*enode.Node {
 	result := make([]*enode.Node, 0, tn.len())
-	for dist, keys := range tn.dists {
+	for dist, keys := range &tn.dists {
 		for index := range keys {
 			result = append(result, tn.node(dist, index))
 		}
@@ -354,7 +359,7 @@ func (tn *preminedTestnet) mine() {
 	fmt.Printf("&preminedTestnet{\n")
 	fmt.Printf("	target: hexEncPubkey(\"%x\"),\n", tn.target[:])
 	fmt.Printf("	dists: [%d][]*ecdsa.PrivateKey{\n", len(tn.dists))
-	for ld, ns := range tn.dists {
+	for ld, ns := range &tn.dists {
 		if len(ns) == 0 {
 			continue
 		}

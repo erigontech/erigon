@@ -24,6 +24,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/rpc"
@@ -80,7 +82,8 @@ func TestFeeHistory(t *testing.T) {
 			defer m.Close()
 
 			baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0)
-			tx, _ := m.DB.BeginTemporalRo(m.Ctx)
+			tx, err := m.DB.BeginTemporalRo(m.Ctx)
+			require.NoError(t, err)
 			defer tx.Rollback()
 
 			cache := jsonrpc.NewGasPriceCache()
