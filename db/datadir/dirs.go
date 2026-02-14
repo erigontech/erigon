@@ -59,6 +59,8 @@ type Dirs struct {
 	CaplinLatest     string
 	CaplinGenesis    string
 	CaplinHistory    string
+
+	Log string
 }
 
 func New(datadir string) Dirs {

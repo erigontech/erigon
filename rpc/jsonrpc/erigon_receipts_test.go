@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
@@ -37,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
 )
@@ -46,7 +44,7 @@ func TestGetLogs(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	{
-		ethApi := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+		ethApi := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
 		logs, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(10)})
 		require.NoError(err)
@@ -242,7 +240,7 @@ func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.B
 	m := mock.MockWithGenesis(t, &types.Genesis{
 		Config: chain.TestChainConfig,
 		Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
-	}, testKey, false)
+	}, testKey)
 	if blocks > 0 {
 		chain, _ := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator)
 		err := m.InsertChain(chain)

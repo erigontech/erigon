@@ -1,5 +1,9 @@
 ---
 description: Connecting Erigon (EL) to Consensus Clients (CL)
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/interacting-with-erigon/interacting-with-erigon/engine
 ---
 
 # engine
@@ -12,7 +16,7 @@ For API usage refer to the below official resources:
 
 {% embed url="https://ethereum.org/en/developers/docs/apis/json-rpc/" %}
 
-{% embed url="https://ethereum.github.io/execution-apis/api-documentation/" %}
+{% embed url="https://ethereum.github.io/execution-apis/" %}
 
 #### Default Erigon Behavior (Caplin)
 

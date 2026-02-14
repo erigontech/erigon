@@ -17,6 +17,7 @@
 package ethutils
 
 import (
+	"encoding/json"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -61,7 +62,7 @@ func MarshalReceipt(
 
 	if withBlockTimestamp {
 		if receipt.Logs != nil {
-			rpcLogs := []*types.RPCLog{}
+			rpcLogs := make([]*types.RPCLog, 0, len(receipt.Logs))
 			for _, l := range receipt.Logs {
 				rpcLogs = append(rpcLogs, types.ToRPCTransactionLog(l, header, txnHash, uint64(receipt.TransactionIndex)))
 			}
@@ -192,6 +193,7 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) m
 		}
 		logEntry["topics"] = topics
 		logEntry["data"] = hexutil.Bytes(protoLog.Data)
+		logEntry["transactionHash"] = txHash
 
 		logs = append(logs, logEntry)
 	}
@@ -211,4 +213,32 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) m
 	}
 
 	return receipt
+}
+
+func LogReceipts(level log.Lvl, msg string, receipts types.Receipts, txns types.Transactions, cc *chain.Config, header *types.Header, logger log.Logger) {
+	if len(receipts) == 0 {
+		// no-op, can happen if vmConfig.NoReceipts=true or vmConfig.StatelessExec=true
+		logger.Log(level, msg, "block", header.Number.Uint64(), "receipts", "")
+		return
+	}
+
+	// note we do not return errors from this func since this is a debug-only
+	// informative feature that is best-effort and should not interfere with execution
+	if len(receipts) != len(txns) {
+		logger.Error("receipts and txns sizes differ", "receiptsLen", receipts.Len(), "txnsLen", txns.Len())
+		return
+	}
+
+	marshalled := make([]map[string]any, 0, len(receipts))
+	for i, receipt := range receipts {
+		txn := txns[i]
+		marshalled = append(marshalled, MarshalReceipt(receipt, txn, cc, header, txn.Hash(), true, false))
+	}
+
+	result, err := json.Marshal(marshalled)
+	if err != nil {
+		logger.Error("marshalling error when logging receipts", "err", err)
+		return
+	}
+	logger.Log(level, msg, "block", header.Number.Uint64(), "receipts", string(result))
 }

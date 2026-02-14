@@ -291,7 +291,7 @@ func newValidator(t *testing.T, testHeimdall *testHeimdall, blocks map[uint64]*t
 	})
 
 	return validator{
-		mock.MockWithEverything(t, &types.Genesis{Config: testHeimdall.chainConfig}, validatorKey, prune.DefaultMode, bor, 1024, false, false),
+		mock.MockWithEverything(t, &types.Genesis{Config: testHeimdall.chainConfig}, validatorKey, prune.DefaultMode, bor, 1024, false),
 		testHeimdall,
 		blocks,
 	}

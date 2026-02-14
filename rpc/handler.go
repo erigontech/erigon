@@ -97,7 +97,7 @@ func HandleError(err error, stream jsonstream.Stream) {
 		if ok {
 			stream.WriteInt(ec.ErrorCode())
 		} else {
-			stream.WriteInt(defaultErrorCode)
+			stream.WriteInt(ErrCodeDefault)
 		}
 		stream.WriteMore()
 		stream.WriteObjectField("message")

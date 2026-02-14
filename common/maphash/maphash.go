@@ -2,10 +2,10 @@ package maphash
 
 import (
 	"hash/maphash"
-	"sync"
 	"unsafe"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/puzpuzpuz/xsync/v4"
 )
 
 var seed maphash.Seed
@@ -23,59 +23,81 @@ func Hash(key []byte) uint64 {
 	return maphash.Bytes(seed, key)
 }
 
-// Map is a non-thread-safe map that uses maphash to hash []byte keys.
+// Map is a concurrent map that uses maphash to hash []byte keys.
 type Map[V any] struct {
-	m  map[uint64]V
-	mu sync.RWMutex
+	m *xsync.MapOf[uint64, V]
 }
 
 // NewMap creates a new Map.
 func NewMap[V any]() *Map[V] {
-	return &Map[V]{
-		m: make(map[uint64]V),
-	}
+	return &Map[V]{m: xsync.NewMapOf[uint64, V]()}
 }
 
 // Get retrieves a value by key.
 func (m *Map[V]) Get(key []byte) (V, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
 	h := Hash(key)
-	e, ok := m.m[h]
-	if !ok {
-		var zero V
-		return zero, false
-	}
-	return e, true
+	return m.m.Load(h)
 }
 
 // Set stores a value with the given key.
 func (m *Map[V]) Set(key []byte, value V) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	h := Hash(key)
+	m.m.Store(h, value)
+}
+
+// Delete removes a key from the map.
+func (m *Map[V]) Delete(key []byte) {
+	h := Hash(key)
+	m.m.Delete(h)
+}
+
+// Len returns the number of entries in the map.
+func (m *Map[V]) Len() int {
+	return m.m.Size()
+}
+
+// Clear removes all entries from the map.
+func (m *Map[V]) Clear() {
+	m.m.Clear()
+}
+
+// NonConcurrentMap is a non-thread-safe map that uses maphash to hash []byte keys.
+// Use this when you don't need concurrent access for better performance.
+type NonConcurrentMap[V any] struct {
+	m map[uint64]V
+}
+
+// NewNonConcurrentMap creates a new NonConcurrentMap.
+func NewNonConcurrentMap[V any]() *NonConcurrentMap[V] {
+	return &NonConcurrentMap[V]{m: make(map[uint64]V)}
+}
+
+// Get retrieves a value by key.
+func (m *NonConcurrentMap[V]) Get(key []byte) (V, bool) {
+	h := Hash(key)
+	v, ok := m.m[h]
+	return v, ok
+}
+
+// Set stores a value with the given key.
+func (m *NonConcurrentMap[V]) Set(key []byte, value V) {
 	h := Hash(key)
 	m.m[h] = value
 }
 
 // Delete removes a key from the map.
-func (m *Map[V]) Delete(key []byte) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (m *NonConcurrentMap[V]) Delete(key []byte) {
 	h := Hash(key)
 	delete(m.m, h)
 }
 
 // Len returns the number of entries in the map.
-func (m *Map[V]) Len() int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+func (m *NonConcurrentMap[V]) Len() int {
 	return len(m.m)
 }
 
 // Clear removes all entries from the map.
-func (m *Map[V]) Clear() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (m *NonConcurrentMap[V]) Clear() {
 	clear(m.m)
 }
 
@@ -125,4 +147,19 @@ func (l *LRU[V]) Contains(key []byte) bool {
 // Purge clears all entries from the cache.
 func (l *LRU[V]) Purge() {
 	l.cache.Purge()
+}
+
+// GetByHash retrieves a value by a pre-computed hash.
+func (l *LRU[V]) GetByHash(hash uint64) (V, bool) {
+	return l.cache.Get(hash)
+}
+
+// SetByHash stores a value with a pre-computed hash.
+func (l *LRU[V]) SetByHash(hash uint64, value V) {
+	l.cache.Add(hash, value)
+}
+
+// ContainsByHash checks if a hash exists in the cache.
+func (l *LRU[V]) ContainsByHash(hash uint64) bool {
+	return l.cache.Contains(hash)
 }

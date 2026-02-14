@@ -18,13 +18,25 @@ package common
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
+	"github.com/anacrolix/envpprof"
+	"github.com/felixge/fgprof"
+
 	"github.com/erigontech/erigon/common/log/v3"
 )
+
+// Runs main with envpprof and fgprof. You probably only want to do this at the main-level as the
+// profilers are global.
+func WithProfilersMain(main func()) {
+	defer envpprof.Stop()
+	http.DefaultServeMux.Handle("/debug/fgprof", fgprof.Handler())
+	main()
+}
 
 func RootContext() (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())

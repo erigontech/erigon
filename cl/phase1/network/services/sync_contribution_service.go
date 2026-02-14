@@ -202,7 +202,7 @@ func (s *syncContributionService) ProcessMessage(ctx context.Context, subnet *ui
 
 		// [IGNORE] The sync committee contribution is the first valid contribution received for the aggregator with index contribution_and_proof.aggregator_index for the slot contribution.slot and subcommittee index contribution.subcommittee_index (this requires maintaining a cache of size SYNC_COMMITTEE_SIZE for this topic that can be flushed after each slot).
 		if s.wasContributionSeen(contributionAndProof) {
-			return ErrIgnore
+			return nil
 		}
 
 		// Check if any local validator is a proposer in this or the next epoch

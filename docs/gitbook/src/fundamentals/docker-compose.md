@@ -1,5 +1,8 @@
 ---
 description: 'Optional: Setup dedicated user'
+metaLinks:
+  alternates:
+    - https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/fundamentals/docker-compose
 ---
 
 # Docker Compose

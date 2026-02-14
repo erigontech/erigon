@@ -1,6 +1,6 @@
 #!/bin/bash
 
-version="v2.6.2"
+version="v2.8.0"
 
 if [[ "$1" == "--install-deps" ]]
 then

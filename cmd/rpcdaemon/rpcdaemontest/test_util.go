@@ -101,7 +101,7 @@ func CreateTestSentry(t *testing.T) (*mock.MockSentry, *blockgen.ChainPack, []*b
 			GasLimit: 10000000,
 		}
 	)
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 
@@ -431,7 +431,7 @@ func CreateTestSentryForTraces(t *testing.T) *mock.MockSentry {
 			},
 		}
 	)
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AAAA
@@ -489,9 +489,10 @@ func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 	if l := len(initCode); l > 32 {
 		t.Fatalf("init code is too long for a pushx, need a more elaborate deployer")
 	}
-	bbCode := []byte{
+	bbCode := make([]byte, 0, 1+len(initCode)+12)
+	bbCode = append(bbCode,
 		// Push initcode onto stack
-		byte(vm.PUSH1) + byte(len(initCode)-1)}
+		byte(vm.PUSH1)+byte(len(initCode)-1))
 	bbCode = append(bbCode, initCode...)
 	bbCode = append(bbCode, []byte{
 		byte(vm.PUSH1), 0x0, // memory start on stack
@@ -530,7 +531,7 @@ func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 			},
 		},
 	}
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
