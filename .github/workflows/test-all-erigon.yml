@@ -90,7 +90,7 @@ jobs:
         with:
           go-version: '1.25'
           cache: true
-          
+
       - name: Install dependencies on Linux
         if: runner.os == 'Linux' && needs.source-of-changes.outputs.changed_files != 'true'
         run: sudo apt update -y && sudo apt install -y build-essential

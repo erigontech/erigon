@@ -61,6 +61,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
+          cache: true
 
       - name: Install dependencies on Linux runner
         if: runner.os == 'Linux'
@@ -111,6 +112,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
+          cache: true
 
       - name: Install make
         run: choco install make -y
