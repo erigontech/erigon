@@ -38,58 +38,30 @@ const (
 	peerSubnetTarget                 = 4
 	goRoutinesOpeningPeerConnections = 4
 	attestationSubnetCount           = 64
-	minimumPeersPerSubnet            = 3 // Minimum peers needed per subnet before proactive search stops
+	minimumPeersPerSubnet            = 3  // Minimum peers needed per subnet before proactive search stops
 	subnetSearchTimeout              = 30 * time.Second
 	subnetSearchInterval             = 12 * time.Second // Check every slot
+	peerPruneInterval                = 60 * time.Second // How often to check for excess peers
 )
 
 // getSubnetCoverage returns a count of peers for each attestation subnet (64 subnets)
-// Uses on-demand metadata queries with LRU cache (TTL = 1 epoch)
 func (s *Sentinel) getSubnetCoverage() [attestationSubnetCount]int {
-	var coverage [attestationSubnetCount]int
-	peers := s.p2p.Host().Network().Peers()
-
-	metaSuccess, metaFail, enrFallback, skipped := 0, 0, 0, 0
-	for _, pid := range peers {
-		// Get attnets from cache or query on-demand
-		attnets, ok := s.GetPeerAttnets(pid)
-		if !ok {
-			metaFail++
-			// Fallback to ENR data if metadata query fails
-			nodeVal, ok := s.pidToEnr.Load(pid)
-			if !ok {
-				skipped++
-				continue
-			}
-			node, ok := nodeVal.(*enode.Node)
-			if !ok {
-				skipped++
-				continue
-			}
-			var peerSubnets bitfield.Bitvector64
-			if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err != nil {
-				skipped++
-				continue
-			}
-			attnets = [8]byte(peerSubnets)
-			enrFallback++
-		} else {
-			metaSuccess++
-		}
-
-		// Count which subnets this peer covers
-		for i := 0; i < attestationSubnetCount; i++ {
-			if attnets[i/8]&(1<<(i%8)) != 0 {
-				coverage[i]++
-			}
-		}
-	}
-	log.Debug("[Sentinel] Subnet coverage check", "totalPeers", len(peers), "metaSuccess", metaSuccess, "metaFail", metaFail, "enrFallback", enrFallback, "skipped", skipped)
+	coverage, _ := s.getSubnetCoverageWithPeers()
 	return coverage
 }
 
-// getEmptySubnets returns a list of subnet indices that have no peers
+const emptySubnetsCacheTTL = 2 * time.Second // Cache empty subnets for 2 seconds
+
+// getEmptySubnets returns a list of subnet indices that have no peers (cached)
 func (s *Sentinel) getEmptySubnets() []int {
+	// Check cache first
+	if cached := s.emptySubnetsCache.Load(); cached != nil {
+		if time.Since(cached.time) < emptySubnetsCacheTTL {
+			return cached.subnets
+		}
+	}
+
+	// Recalculate
 	coverage := s.getSubnetCoverage()
 	var empty []int
 	for i, count := range coverage {
@@ -97,6 +69,13 @@ func (s *Sentinel) getEmptySubnets() []int {
 			empty = append(empty, i)
 		}
 	}
+
+	// Update cache
+	s.emptySubnetsCache.Store(&emptySubnetsCacheEntry{
+		subnets: empty,
+		time:    time.Now(),
+	})
+
 	return empty
 }
 
@@ -248,14 +227,19 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 // proactiveSubnetPeerSearch is a goroutine that monitors subnet coverage
 // and proactively searches for peers when coverage is below threshold
 func (s *Sentinel) proactiveSubnetPeerSearch() {
-	ticker := time.NewTicker(subnetSearchInterval)
-	defer ticker.Stop()
+	searchTicker := time.NewTicker(subnetSearchInterval)
+	pruneTicker := time.NewTicker(peerPruneInterval)
+	defer searchTicker.Stop()
+	defer pruneTicker.Stop()
 
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
-		case <-ticker.C:
+		case <-pruneTicker.C:
+			// Prune excess peers periodically
+			s.pruneExcessPeers()
+		case <-searchTicker.C:
 			coverage := s.getSubnetCoverage()
 
 			// Collect underserved subnets with their peer counts
@@ -301,6 +285,201 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 			s.findPeersForSubnets(underserved)
 		}
 	}
+}
+
+// peerSubnetInfo holds information about a peer's subnet coverage for pruning decisions
+type peerSubnetInfo struct {
+	pid              peer.ID
+	attnets          [8]byte
+	subnetsCount     int   // Total subnets this peer covers
+	criticalSubnets  []int // Subnets where this peer is the only provider
+	redundantSubnets []int // Subnets where this peer is one of many
+}
+
+// getSubnetCoverageWithPeers returns subnet coverage and which peers cover each subnet
+// Uses on-demand metadata queries with LRU cache (TTL = 1 epoch)
+func (s *Sentinel) getSubnetCoverageWithPeers() (coverage [attestationSubnetCount]int, subnetToPeers [attestationSubnetCount][]peer.ID) {
+	peers := s.p2p.Host().Network().Peers()
+
+	metaSuccess, enrFallback, skipped := 0, 0, 0
+	for _, pid := range peers {
+		attnets, ok := s.GetPeerAttnets(pid)
+		if !ok {
+			// Fallback to ENR
+			nodeVal, ok := s.pidToEnr.Load(pid)
+			if !ok {
+				skipped++
+				continue
+			}
+			node, ok := nodeVal.(*enode.Node)
+			if !ok {
+				skipped++
+				continue
+			}
+			var peerSubnets bitfield.Bitvector64
+			if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err != nil {
+				skipped++
+				continue
+			}
+			attnets = [8]byte(peerSubnets)
+			enrFallback++
+		} else {
+			metaSuccess++
+		}
+
+		for i := 0; i < attestationSubnetCount; i++ {
+			if attnets[i/8]&(1<<(i%8)) != 0 {
+				coverage[i]++
+				subnetToPeers[i] = append(subnetToPeers[i], pid)
+			}
+		}
+	}
+	log.Trace("[Sentinel] Subnet coverage check", "totalPeers", len(peers), "metaSuccess", metaSuccess, "enrFallback", enrFallback, "skipped", skipped)
+	return coverage, subnetToPeers
+}
+
+// pruneExcessPeers disconnects excess peers while ensuring no subnet becomes empty
+func (s *Sentinel) pruneExcessPeers() {
+	peerCount := len(s.p2p.Host().Network().Peers())
+	targetPeerCount := int(s.cfg.MaxPeerCount)
+
+	// Only prune if we're significantly over the limit (10% buffer)
+	pruneThreshold := targetPeerCount + targetPeerCount/10
+	if peerCount <= pruneThreshold {
+		return
+	}
+
+	peersToRemove := peerCount - targetPeerCount
+	log.Info("[Sentinel] Pruning excess peers", "current", peerCount, "target", targetPeerCount, "toRemove", peersToRemove)
+
+	// Get detailed subnet coverage
+	coverage, subnetToPeers := s.getSubnetCoverageWithPeers()
+
+	// Build peer info for all peers
+	peers := s.p2p.Host().Network().Peers()
+	peerInfos := make([]peerSubnetInfo, 0, len(peers))
+
+	for _, pid := range peers {
+		attnets, ok := s.GetPeerAttnets(pid)
+		if !ok {
+			// Fallback to ENR
+			nodeVal, ok := s.pidToEnr.Load(pid)
+			if !ok {
+				// No subnet info, mark as lowest priority (can be removed)
+				peerInfos = append(peerInfos, peerSubnetInfo{
+					pid:          pid,
+					subnetsCount: 0,
+				})
+				continue
+			}
+			node, ok := nodeVal.(*enode.Node)
+			if !ok {
+				peerInfos = append(peerInfos, peerSubnetInfo{
+					pid:          pid,
+					subnetsCount: 0,
+				})
+				continue
+			}
+			var peerSubnets bitfield.Bitvector64
+			if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err != nil {
+				peerInfos = append(peerInfos, peerSubnetInfo{
+					pid:          pid,
+					subnetsCount: 0,
+				})
+				continue
+			}
+			attnets = [8]byte(peerSubnets)
+		}
+
+		info := peerSubnetInfo{
+			pid:     pid,
+			attnets: attnets,
+		}
+
+		// Check each subnet this peer covers
+		for i := 0; i < attestationSubnetCount; i++ {
+			if attnets[i/8]&(1<<(i%8)) != 0 {
+				info.subnetsCount++
+				if coverage[i] == 1 {
+					// This peer is the ONLY one covering this subnet - critical!
+					info.criticalSubnets = append(info.criticalSubnets, i)
+				} else {
+					info.redundantSubnets = append(info.redundantSubnets, i)
+				}
+			}
+		}
+
+		peerInfos = append(peerInfos, info)
+	}
+
+	// Sort peers by "removability" (most removable first)
+	// Priority: peers with no critical subnets, then by fewest covered subnets
+	sort.Slice(peerInfos, func(i, j int) bool {
+		// Critical peers (covering unique subnets) should never be removed
+		iCritical := len(peerInfos[i].criticalSubnets) > 0
+		jCritical := len(peerInfos[j].criticalSubnets) > 0
+
+		if iCritical != jCritical {
+			return !iCritical // Non-critical peers first (more removable)
+		}
+
+		// Among non-critical peers, prefer removing those covering fewer subnets
+		// (they provide less value)
+		return peerInfos[i].subnetsCount < peerInfos[j].subnetsCount
+	})
+
+	// Remove peers, but re-check coverage after each removal
+	removed := 0
+	for _, info := range peerInfos {
+		if removed >= peersToRemove {
+			break
+		}
+
+		// Skip critical peers
+		if len(info.criticalSubnets) > 0 {
+			log.Trace("[Sentinel] Skipping critical peer", "peer", info.pid, "criticalSubnets", info.criticalSubnets)
+			continue
+		}
+
+		// Before removing, verify this won't cause any subnet to become empty
+		safeToRemove := true
+		for _, subnetIdx := range info.redundantSubnets {
+			// Check current coverage (may have changed from previous removals)
+			currentPeers := subnetToPeers[subnetIdx]
+			if len(currentPeers) <= 1 {
+				safeToRemove = false
+				break
+			}
+		}
+
+		if !safeToRemove {
+			log.Trace("[Sentinel] Skipping peer to prevent empty subnet", "peer", info.pid)
+			continue
+		}
+
+		// Safe to remove - update coverage tracking
+		for _, subnetIdx := range info.redundantSubnets {
+			// Remove this peer from the subnet's peer list
+			newPeers := make([]peer.ID, 0, len(subnetToPeers[subnetIdx])-1)
+			for _, pid := range subnetToPeers[subnetIdx] {
+				if pid != info.pid {
+					newPeers = append(newPeers, pid)
+				}
+			}
+			subnetToPeers[subnetIdx] = newPeers
+			coverage[subnetIdx]--
+		}
+
+		// Disconnect the peer
+		s.p2p.Host().Network().ClosePeer(info.pid)
+		s.p2p.Host().Peerstore().RemovePeer(info.pid)
+		s.peers.RemovePeer(info.pid)
+		removed++
+
+		log.Debug("[Sentinel] Pruned excess peer", "peer", info.pid, "subnetsCount", info.subnetsCount)
+	}
+
+	log.Info("[Sentinel] Peer pruning complete", "removed", removed, "remaining", peerCount-removed)
 }
 
 // isPeerUsefulForEmptySubnets checks if a peer covers any subnet that currently has no peers
@@ -569,7 +748,7 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 
 		valid, err := s.handshaker.ValidatePeer(peerId)
 		if err != nil {
-			log.Debug("[Sentinel] Failed to validate peer", "peer", peerId, "err", err)
+			log.Trace("[Sentinel] Failed to validate peer", "peer", peerId, "err", err)
 		}
 
 		if !valid {

@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -62,6 +63,12 @@ type peerAttnetsKey struct {
 	epoch uint64
 }
 
+// emptySubnetsCacheEntry holds cached empty subnets with timestamp
+type emptySubnetsCacheEntry struct {
+	subnets []int
+	time    time.Time
+}
+
 type Sentinel struct {
 	started  bool
 	listener *discover.UDPv5 // this is us in the network.
@@ -88,6 +95,7 @@ type Sentinel struct {
 	pidToEnr           sync.Map
 	pidToEnodeId       sync.Map
 	peerAttnetsCache   *lru.CacheWithTTL[peerAttnetsKey, [8]byte] // (peer.ID, epoch) -> attnets
+	emptySubnetsCache  atomic.Pointer[emptySubnetsCacheEntry]     // cached empty subnets (TTL ~2s)
 	ethClock           eth_clock.EthereumClock
 	peerDasStateReader peerdasstate.PeerDasStateReader
 
@@ -195,7 +203,7 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 		DisconnectedF: func(n network.Network, c network.Conn) {
 			peerId := c.RemotePeer()
 			s.peers.RemovePeer(peerId)
-			log.Debug("[Sentinel] Peer disconnected", "peer", peerId)
+			//log.Debug("[Sentinel] Peer disconnected", "peer", peerId)
 			// peerAttnetsCache uses TTL, no manual cleanup needed
 		},
 	})
