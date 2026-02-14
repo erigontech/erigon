@@ -40,8 +40,9 @@ func (h *Header) MarshalJSON() ([]byte, error) {
 		ParentBeaconBlockRoot *common.Hash    `json:"parentBeaconBlockRoot"`
 		RequestsHash          *common.Hash    `json:"requestsHash"`
 		BlockAccessListHash   *common.Hash    `json:"blockAccessListHash"`
-		SlotNumber            *hexutil.Uint64 `json:"slotNumber"`
-		Hash                  common.Hash     `json:"hash"`
+		// TODO omitempty is temporary until ci is updated to support slotnumber: null
+		SlotNumber *hexutil.Uint64 `json:"slotNumber,omitempty"`
+		Hash       common.Hash     `json:"hash"`
 	}
 	var enc Header
 	enc.ParentHash = h.ParentHash
