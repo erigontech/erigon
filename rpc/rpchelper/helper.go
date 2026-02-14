@@ -36,11 +36,11 @@ import (
 )
 
 // unable to decode supplied params, or an invalid number of parameters
-type nonCanonocalHashError struct{ hash common.Hash }
+type nonCanonicalHashError struct{ hash common.Hash }
 
-func (e nonCanonocalHashError) ErrorCode() int { return -32603 }
+func (e nonCanonicalHashError) ErrorCode() int { return -32603 }
 
-func (e nonCanonocalHashError) Error() string {
+func (e nonCanonicalHashError) Error() string {
 	return fmt.Sprintf("hash %x is not currently canonical", e.hash)
 }
 
@@ -59,7 +59,7 @@ func CheckBlockExecuted(tx kv.Tx, blockNumber uint64) error {
 	}
 
 	if blockNumber > lastExecutedBlock {
-		return fmt.Errorf("block %d is not executed (last block: %d)", blockNumber, lastExecutedBlock)
+		return fmt.Errorf("block %d is not executed (last executed: %d)", blockNumber, lastExecutedBlock)
 	}
 
 	return nil
@@ -143,7 +143,7 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 			return 0, common.Hash{}, false, false, err
 		}
 		if requireCanonical && (!ok || ch != hash) {
-			return 0, common.Hash{}, false, false, nonCanonocalHashError{hash}
+			return 0, common.Hash{}, false, false, nonCanonicalHashError{hash}
 		}
 	}
 	return blockNumber, hash, blockNumber == plainStateBlockNumber, true, nil

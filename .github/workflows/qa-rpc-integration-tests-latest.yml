@@ -179,7 +179,7 @@ jobs:
           fi
 
       - name: Upload test results
-        if: steps.test_step.outputs.test_executed == 'true'
+        if: always() && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v6
         with:
           name: test-results
@@ -188,7 +188,7 @@ jobs:
             ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
       - name: Save test results
-        if: steps.test_step.outputs.test_executed == 'true'
+        if: always() && steps.test_step.outputs.test_executed == 'true'
         working-directory: ${{ github.workspace }}
         env:
           TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
