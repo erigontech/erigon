@@ -10,7 +10,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
@@ -93,28 +92,27 @@ func updateAccountRead(account *accountState, vr *state.VersionedRead) {
 
 func addStorageUpdate(ac *types.AccountChanges, vw *state.VersionedWrite, txIndex uint16) {
 	val := vw.Val.(uint256.Int)
-	value := common.Hash(val.Bytes32())
 	// If we already recorded a read for this slot, drop it because a write takes precedence.
 	removeStorageRead(ac, vw.Key)
 
 	if ac.StorageChanges == nil {
 		ac.StorageChanges = []*types.SlotChanges{{
 			Slot:    vw.Key,
-			Changes: []*types.StorageChange{{Index: txIndex, Value: value}},
+			Changes: []*types.StorageChange{{Index: txIndex, Value: val}},
 		}}
 		return
 	}
 
 	for _, slotChange := range ac.StorageChanges {
 		if slotChange.Slot == vw.Key {
-			slotChange.Changes = append(slotChange.Changes, &types.StorageChange{Index: txIndex, Value: value})
+			slotChange.Changes = append(slotChange.Changes, &types.StorageChange{Index: txIndex, Value: val})
 			return
 		}
 	}
 
 	ac.StorageChanges = append(ac.StorageChanges, &types.SlotChanges{
 		Slot:    vw.Key,
-		Changes: []*types.StorageChange{{Index: txIndex, Value: value}},
+		Changes: []*types.StorageChange{{Index: txIndex, Value: val}},
 	})
 }
 
@@ -259,8 +257,8 @@ func newCodeTracker() *fieldTracker[[]byte] {
 func applyToCode(ct *fieldTracker[[]byte], ac *types.AccountChanges) {
 	ct.changes.apply(func(idx uint16, value []byte) {
 		ac.CodeChanges = append(ac.CodeChanges, &types.CodeChange{
-			Index: idx,
-			Data:  cloneBytes(value),
+			Index:    idx,
+			Bytecode: cloneBytes(value),
 		})
 	})
 }
@@ -458,11 +456,11 @@ func writeBALToFile(bal types.BlockAccessList, blockNum uint64, dataDir string) 
 		if len(account.CodeChanges) > 0 {
 			fmt.Fprintf(file, "  Code Changes (%d):\n", len(account.CodeChanges))
 			for _, change := range account.CodeChanges {
-				fmt.Fprintf(file, "    [%d] -> %d bytes\n", change.Index, len(change.Data))
-				if len(change.Data) <= 64 {
-					fmt.Fprintf(file, "      Data: %x\n", change.Data)
+				fmt.Fprintf(file, "    [%d] -> %d bytes\n", change.Index, len(change.Bytecode))
+				if len(change.Bytecode) <= 64 {
+					fmt.Fprintf(file, "      Bytecode: %x\n", change.Bytecode)
 				} else {
-					fmt.Fprintf(file, "      Data: %x... (truncated)\n", change.Data[:64])
+					fmt.Fprintf(file, "      Bytecode: %x... (truncated)\n", change.Bytecode[:64])
 				}
 			}
 		}

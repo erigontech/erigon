@@ -99,7 +99,7 @@ func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.Temp
 	}
 	receipts, err := api.getReceipts(ctx, tx, b)
 	if err != nil {
-		return nil, fmt.Errorf("getReceipts error: %v", err)
+		return nil, err
 	}
 	feesRes, err := delegateBlockFees(ctx, tx, b, senders, chainConfig, receipts)
 	if err != nil {

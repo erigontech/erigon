@@ -233,7 +233,6 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	hb.acc.CodeHash = accounts.EmptyCodeHash
 	hb.acc.Nonce = nonce
 	hb.acc.Balance.Set(balance)
-	hb.acc.Initialised = true
 	hb.acc.Incarnation = incarnation
 
 	popped := 0
@@ -310,7 +309,6 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *uint2
 	key := keyHex[len(keyHex)-length:]
 	hb.acc.Nonce = nonce
 	hb.acc.Balance.Set(balance)
-	hb.acc.Initialised = true
 	hb.acc.Incarnation = incarnation
 
 	popped := 0
