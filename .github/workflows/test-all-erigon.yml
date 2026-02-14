@@ -89,8 +89,8 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: '1.25'
-          cache: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
-          
+          cache: true
+
       - name: Install dependencies on Linux
         if: runner.os == 'Linux' && needs.source-of-changes.outputs.changed_files != 'true'
         run: sudo apt update -y && sudo apt install -y build-essential
@@ -103,7 +103,7 @@ jobs:
 
       - name: SonarCloud scan in case OS Linux and changed_files is not true
         if: runner.os == 'Linux' && needs.source-of-changes.outputs.changed_files != 'true'
-        uses: SonarSource/sonarqube-scan-action@v6
+        uses: SonarSource/sonarqube-scan-action@v7
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -149,11 +149,15 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: '1.25'
-          cache: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
+          cache: true
+
+      - name: Install make
+        run: choco install make -y
 
       - name: Run all tests on ${{ matrix.os }}
         if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: .\wmake.ps1 test-all
+        shell: bash
+        run: make test-all
 
       - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
         if: needs.source-of-changes.outputs.changed_files == 'true'

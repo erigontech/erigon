@@ -490,7 +490,7 @@ func (c *SentryStreamC[T]) Recv() (T, error) {
 
 func (c *SentryStreamC[T]) Context() context.Context { return c.Ctx }
 
-func (c *SentryStreamC[T]) RecvMsg(anyMessage interface{}) error {
+func (c *SentryStreamC[T]) RecvMsg(anyMessage any) error {
 	m, err := c.Recv()
 	if err != nil {
 		return err

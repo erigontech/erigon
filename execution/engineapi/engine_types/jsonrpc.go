@@ -90,7 +90,7 @@ type BlobAndProofV1 struct {
 	Proof hexutil.Bytes `json:"proof" gencodec:"required"`
 }
 
-// BlobAndProofV2 holds one item for engine_getBlobsV2
+// BlobAndProofV2 holds one item for engine_getBlobsV2/engine_getBlobsV3
 type BlobAndProofV2 struct {
 	Blob       hexutil.Bytes   `json:"blob" gencodec:"required"`
 	CellProofs []hexutil.Bytes `json:"proofs" gencodec:"required"`
@@ -202,9 +202,6 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 		res.BlobGasUsed = (*hexutil.Uint64)(&blobGasUsed)
 		excessBlobGas := *header.ExcessBlobGas
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
-	}
-	if body.BlockAccessList != nil {
-		res.BlockAccessList = types.ConvertBlockAccessListFromExecutionProto(body.BlockAccessList)
 	}
 	return res
 }

@@ -83,11 +83,13 @@ func (n *FullNode) print(w io.Writer) {
 }
 
 func (n *DuoNode) fstring(ind string) string {
-	resp := fmt.Sprintf("duo[\n%s  ", ind)
+	var resp strings.Builder
+	resp.WriteString(fmt.Sprintf("duo[\n%s  ", ind))
 	i1, i2 := n.childrenIdx()
-	resp += fmt.Sprintf("%s: %v", indices[i1], n.child1.fstring(ind+"  "))
-	resp += fmt.Sprintf("%s: %v", indices[i2], n.child2.fstring(ind+"  "))
-	return resp + fmt.Sprintf("\n%s] ", ind)
+	resp.WriteString(fmt.Sprintf("%s: %v", indices[i1], n.child1.fstring(ind+"  ")))
+	resp.WriteString(fmt.Sprintf("%s: %v", indices[i2], n.child2.fstring(ind+"  ")))
+	resp.WriteString(fmt.Sprintf("\n%s] ", ind))
+	return resp.String()
 }
 func (n *DuoNode) print(w io.Writer) {
 	fmt.Fprintf(w, "d(")

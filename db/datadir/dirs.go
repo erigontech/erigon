@@ -58,6 +58,9 @@ type Dirs struct {
 	CaplinIndexing   string
 	CaplinLatest     string
 	CaplinGenesis    string
+	CaplinHistory    string
+
+	Log string
 }
 
 func New(datadir string) Dirs {
@@ -80,10 +83,17 @@ func New(datadir string) Dirs {
 		dirs.CaplinLatest,
 		dirs.CaplinGenesis,
 		dirs.CaplinColumnData,
+		dirs.CaplinHistory,
+		filepath.Join(datadir, "logs"),
 	)
 
 	return dirs
 }
+
+// The subdirectory in the datadir for snapshots. This isn't encoded anywhere else because it's not
+// an MDBX name, but also a bunch of other datadir subdirs aren't encoded in Dirs, and Dirs does
+// absolute path stuff I don't want.
+const SnapDir = "snapshots"
 
 // Open new Dirs instance without forcing all the directories to exist.
 func Open(datadir string) Dirs {
@@ -102,13 +112,13 @@ func Open(datadir string) Dirs {
 		DataDir:          datadir,
 		Chaindata:        filepath.Join(datadir, "chaindata"),
 		Tmp:              filepath.Join(datadir, "temp"),
-		Snap:             filepath.Join(datadir, "snapshots"),
-		SnapIdx:          filepath.Join(datadir, "snapshots", "idx"),
-		SnapHistory:      filepath.Join(datadir, "snapshots", "history"),
-		SnapDomain:       filepath.Join(datadir, "snapshots", "domain"),
-		SnapAccessors:    filepath.Join(datadir, "snapshots", "accessor"),
-		SnapCaplin:       filepath.Join(datadir, "snapshots", "caplin"),
-		SnapForkable:     filepath.Join(datadir, "snapshots", "forkable"),
+		Snap:             filepath.Join(datadir, SnapDir),
+		SnapIdx:          filepath.Join(datadir, SnapDir, "idx"),
+		SnapHistory:      filepath.Join(datadir, SnapDir, "history"),
+		SnapDomain:       filepath.Join(datadir, SnapDir, "domain"),
+		SnapAccessors:    filepath.Join(datadir, SnapDir, "accessor"),
+		SnapCaplin:       filepath.Join(datadir, SnapDir, "caplin"),
+		SnapForkable:     filepath.Join(datadir, SnapDir, "forkable"),
 		Downloader:       filepath.Join(datadir, "downloader"),
 		TxPool:           filepath.Join(datadir, "txpool"),
 		Nodes:            filepath.Join(datadir, "nodes"),
@@ -117,6 +127,7 @@ func Open(datadir string) Dirs {
 		CaplinIndexing:   filepath.Join(datadir, "caplin", "indexing"),
 		CaplinLatest:     filepath.Join(datadir, "caplin", "latest"),
 		CaplinGenesis:    filepath.Join(datadir, "caplin", "genesis-state"),
+		CaplinHistory:    filepath.Join(datadir, "caplin", "history"),
 	}
 	return dirs
 }

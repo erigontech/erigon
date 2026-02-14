@@ -447,7 +447,7 @@ func (tx *AccessListTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(AccessListTxType, []interface{}{
+	hash := prefixedRlpHash(AccessListTxType, []any{
 		tx.ChainID,
 		tx.Nonce,
 		tx.GasPrice,
@@ -462,18 +462,29 @@ func (tx *AccessListTx) Hash() common.Hash {
 	return hash
 }
 
+type accessListTxSigHash struct {
+	ChainID    *big.Int
+	Nonce      uint64
+	GasPrice   *uint256.Int
+	Gas        uint64
+	To         *common.Address `rlp:"nil"`
+	Value      *uint256.Int
+	Data       []byte
+	AccessList AccessList
+}
+
 func (tx *AccessListTx) SigningHash(chainID *big.Int) common.Hash {
 	return prefixedRlpHash(
 		AccessListTxType,
-		[]interface{}{
-			chainID,
-			tx.Nonce,
-			tx.GasPrice,
-			tx.GasLimit,
-			tx.To,
-			tx.Value,
-			tx.Data,
-			tx.AccessList,
+		&accessListTxSigHash{
+			ChainID:    chainID,
+			Nonce:      tx.Nonce,
+			GasPrice:   tx.GasPrice,
+			Gas:        tx.GasLimit,
+			To:         tx.To,
+			Value:      tx.Value,
+			Data:       tx.Data,
+			AccessList: tx.AccessList,
 		})
 }
 

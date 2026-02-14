@@ -26,4 +26,4 @@ DISABLED_TEST_LIST=(
 DISABLED_TESTS=$(IFS=,; echo "${DISABLED_TEST_LIST[*]}")
 
 # Call the main test runner script with the required and optional parameters
-"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.109.1 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"
+"$(dirname "$0")/run_rpc_tests.sh" mainnet v1.117.1 "$DISABLED_TESTS" "$WORKSPACE" "$RESULT_DIR"

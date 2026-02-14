@@ -19,8 +19,9 @@ package commands
 import (
 	"context"
 	"fmt"
-	"os"
+	"sort"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -35,12 +36,18 @@ func init() {
 	printCmd.Flags().Uint64Var(&toStep, "to", 1e18, "step to which history to be printed")
 	withDataDir2(printCmd)
 	withHistoryDomain(printCmd)
+	withHistoryKey(printCmd)
+
+	distributionCmd.Flags().Uint64Var(&fromStep, "from", 0, "step from which history to be printed")
+	distributionCmd.Flags().Uint64Var(&toStep, "to", 1e18, "step to which history to be printed")
+	withDataDir2(distributionCmd)
+	withHistoryDomain(distributionCmd)
 
 	withDataDir2(rebuildCmd)
 	withHistoryDomain(rebuildCmd)
-	withOverrideValuesOnCompressedPage(rebuildCmd)
 
 	historyCmd.AddCommand(printCmd)
+	historyCmd.AddCommand(distributionCmd)
 	historyCmd.AddCommand(rebuildCmd)
 
 	rootCmd.AddCommand(historyCmd)
@@ -51,15 +58,15 @@ func withHistoryDomain(cmd *cobra.Command) {
 	must(cmd.MarkFlagRequired("domain"))
 }
 
-func withOverrideValuesOnCompressedPage(cmd *cobra.Command) {
-	cmd.Flags().IntVar(&overrideValuesOnCompressedPage, "overrideValuesOnCompressedPage", 0, "Override default history domain ValuesOnCompressed page. The option will be applied for rebuilding snapshots")
+func withHistoryKey(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&historyKey, "key", "", "Dump values of a specific key in hex format")
 }
 
 var (
-	fromStep                       uint64
-	toStep                         uint64
-	historyDomain                  string
-	overrideValuesOnCompressedPage int
+	fromStep      uint64
+	toStep        uint64
+	historyKey    string
+	historyDomain string
 )
 
 var historyCmd = &cobra.Command{
@@ -100,14 +107,123 @@ var printCmd = &cobra.Command{
 		roTx := history.BeginFilesRo()
 		defer roTx.Close()
 
+		var keyToDump *[]byte
+
+		if historyKey != "" {
+			key := common.Hex2Bytes(historyKey)
+			keyToDump = &key
+		}
+
 		err = roTx.HistoryDump(
 			int(fromStep)*config3.DefaultStepSize,
 			int(toStep)*config3.DefaultStepSize,
-			os.Stdout,
+			keyToDump,
+			func(key []byte, txNum uint64, val []byte) {
+				fmt.Printf("key: %x, txn: %d, val: %x\n", key, txNum, val)
+			},
 		)
 		if err != nil {
 			logger.Error("Failed to print history", "error", err)
 			return
+		}
+	},
+}
+
+var distributionCmd = &cobra.Command{
+	Use: "distribution",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+
+		dirs, l, err := datadir.New(datadirCli).MustFlock()
+		if err != nil {
+			logger.Error("Opening Datadir", "error", err)
+			return
+		}
+		defer l.Unlock()
+
+		domainKV, err := kv.String2Domain(historyDomain)
+		if err != nil {
+			logger.Error("Failed to resolve domain", "error", err)
+			return
+		}
+
+		history, err := state.NewHistory(
+			statecfg.Schema.GetDomainCfg(domainKV).Hist,
+			config3.DefaultStepSize,
+			config3.DefaultStepsInFrozenFile,
+			dirs,
+			logger,
+		)
+		if err != nil {
+			logger.Error("Failed to init history", "error", err)
+			return
+		}
+		history.Scan(toStep * config3.DefaultStepSize)
+
+		roTx := history.BeginFilesRo()
+		defer roTx.Close()
+
+		keysEntries := make(map[string]int)
+		uniqueEntries := 0
+
+		err = roTx.HistoryDump(
+			int(fromStep)*config3.DefaultStepSize,
+			int(toStep)*config3.DefaultStepSize,
+			nil,
+			func(key []byte, txNum uint64, val []byte) {
+				keysEntries[string(key)] += 1
+				uniqueEntries++
+
+				//fmt.Printf("key: %x, txn: %d, val: %x\n", key, txNum, val)
+			},
+		)
+		if err != nil {
+			logger.Error("Failed to calculate history distribution", "error", err)
+			return
+		}
+
+		var distribution []int
+
+		for _, count := range keysEntries {
+			distribution = append(distribution, count)
+		}
+
+		sort.Ints(distribution)
+
+		if len(distribution) == 0 {
+			return
+		}
+
+		type DistPecentile struct {
+			P          int
+			Value      int
+			ExampleKey []byte
+		}
+
+		percentiles := []DistPecentile{
+			{P: 50, Value: distribution[len(distribution)/2]},
+			{P: 75, Value: distribution[len(distribution)/4*3]},
+			{P: 90, Value: distribution[len(distribution)/10*9]},
+			{P: 99, Value: distribution[len(distribution)/100*99]},
+			{P: 999, Value: distribution[len(distribution)/1000*999]},
+		}
+
+		fmt.Printf("Unique entries: %d\n", uniqueEntries)
+		fmt.Printf("Unique keys: %d\n\n", len(keysEntries))
+
+		fmt.Println("Entries per key:")
+
+		for i := range percentiles {
+			for key, count := range keysEntries {
+				if count != percentiles[i].Value {
+					continue
+				}
+
+				percentiles[i].ExampleKey = []byte(key)
+				break
+			}
+
+			fmt.Printf("%d percentile distribution: %d (example key: 0x%x)\n", percentiles[i].P, percentiles[i].Value, percentiles[i].ExampleKey)
 		}
 	},
 }
@@ -157,13 +273,7 @@ var rebuildCmd = &cobra.Command{
 
 			fmt.Printf("Compacting files %d-%d step\n", fromTxNum/config3.DefaultStepSize, i/config3.DefaultStepSize)
 
-			var opts state.OverrideCompactOpts
-
-			if overrideValuesOnCompressedPage > 0 {
-				opts.HistoryValuesOnCompressedPage = &overrideValuesOnCompressedPage
-			}
-
-			err = roTx.CompactRange(context.TODO(), fromTxNum, i, opts)
+			err = roTx.CompactRange(context.TODO(), fromTxNum, i)
 			if err != nil {
 				logger.Error("Failed to rebuild history", "error", err)
 				return

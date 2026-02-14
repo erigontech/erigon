@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -77,7 +77,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	}
 	context := evmtypes.BlockContext{
 		CanTransfer: protocol.CanTransfer,
-		Transfer:    rules.Transfer,
+		Transfer:    misc.Transfer,
 		Coinbase:    accounts.ZeroAddress,
 		BlockNumber: 8000000,
 		Time:        5,
@@ -126,13 +126,13 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
-	tracer.OnTxEnd(&types.Receipt{GasUsed: exeRes.GasUsed}, nil)
+	tracer.OnTxEnd(&types.Receipt{GasUsed: exeRes.ReceiptGasUsed}, nil)
 	// Retrieve the trace result and compare against the etalon
 	res, err := tracer.GetResult()
 	if err != nil {
 		t.Fatalf("failed to retrieve trace result: %v", err)
 	}
-	ret := make(map[string]interface{})
+	ret := make(map[string]any)
 	if err := json.Unmarshal(res, &ret); err != nil {
 		t.Fatalf("failed to unmarshal trace result: %v", err)
 	}

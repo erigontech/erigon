@@ -30,6 +30,7 @@ const (
 	ETHBACKEND_ClientVersion_FullMethodName           = "/remote.ETHBACKEND/ClientVersion"
 	ETHBACKEND_Subscribe_FullMethodName               = "/remote.ETHBACKEND/Subscribe"
 	ETHBACKEND_SubscribeLogs_FullMethodName           = "/remote.ETHBACKEND/SubscribeLogs"
+	ETHBACKEND_SubscribeReceipts_FullMethodName       = "/remote.ETHBACKEND/SubscribeReceipts"
 	ETHBACKEND_Block_FullMethodName                   = "/remote.ETHBACKEND/Block"
 	ETHBACKEND_CanonicalBodyForStorage_FullMethodName = "/remote.ETHBACKEND/CanonicalBodyForStorage"
 	ETHBACKEND_CanonicalHash_FullMethodName           = "/remote.ETHBACKEND/CanonicalHash"
@@ -65,6 +66,8 @@ type ETHBACKENDClient interface {
 	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SubscribeReply], error)
 	// Only one subscription is needed to serve all the users, LogsFilterRequest allows to dynamically modifying the subscription
 	SubscribeLogs(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[LogsFilterRequest, SubscribeLogsReply], error)
+	// Only one subscription is needed to serve all the users, ReceiptsFilterRequest allows to dynamically modifying the subscription
+	SubscribeReceipts(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ReceiptsFilterRequest, SubscribeReceiptsReply], error)
 	// High-level method - can read block from db, snapshots or apply any other logic
 	// it doesn't provide consistency
 	// Request fields are optional - it's ok to request block only by hash or only by number
@@ -202,6 +205,19 @@ func (c *eTHBACKENDClient) SubscribeLogs(ctx context.Context, opts ...grpc.CallO
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ETHBACKEND_SubscribeLogsClient = grpc.BidiStreamingClient[LogsFilterRequest, SubscribeLogsReply]
+
+func (c *eTHBACKENDClient) SubscribeReceipts(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ReceiptsFilterRequest, SubscribeReceiptsReply], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ETHBACKEND_ServiceDesc.Streams[2], ETHBACKEND_SubscribeReceipts_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ReceiptsFilterRequest, SubscribeReceiptsReply]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ETHBACKEND_SubscribeReceiptsClient = grpc.BidiStreamingClient[ReceiptsFilterRequest, SubscribeReceiptsReply]
 
 func (c *eTHBACKENDClient) Block(ctx context.Context, in *BlockRequest, opts ...grpc.CallOption) (*BlockReply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -371,6 +387,8 @@ type ETHBACKENDServer interface {
 	Subscribe(*SubscribeRequest, grpc.ServerStreamingServer[SubscribeReply]) error
 	// Only one subscription is needed to serve all the users, LogsFilterRequest allows to dynamically modifying the subscription
 	SubscribeLogs(grpc.BidiStreamingServer[LogsFilterRequest, SubscribeLogsReply]) error
+	// Only one subscription is needed to serve all the users, ReceiptsFilterRequest allows to dynamically modifying the subscription
+	SubscribeReceipts(grpc.BidiStreamingServer[ReceiptsFilterRequest, SubscribeReceiptsReply]) error
 	// High-level method - can read block from db, snapshots or apply any other logic
 	// it doesn't provide consistency
 	// Request fields are optional - it's ok to request block only by hash or only by number
@@ -433,6 +451,9 @@ func (UnimplementedETHBACKENDServer) Subscribe(*SubscribeRequest, grpc.ServerStr
 }
 func (UnimplementedETHBACKENDServer) SubscribeLogs(grpc.BidiStreamingServer[LogsFilterRequest, SubscribeLogsReply]) error {
 	return status.Error(codes.Unimplemented, "method SubscribeLogs not implemented")
+}
+func (UnimplementedETHBACKENDServer) SubscribeReceipts(grpc.BidiStreamingServer[ReceiptsFilterRequest, SubscribeReceiptsReply]) error {
+	return status.Error(codes.Unimplemented, "method SubscribeReceipts not implemented")
 }
 func (UnimplementedETHBACKENDServer) Block(context.Context, *BlockRequest) (*BlockReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method Block not implemented")
@@ -643,6 +664,13 @@ func _ETHBACKEND_SubscribeLogs_Handler(srv interface{}, stream grpc.ServerStream
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ETHBACKEND_SubscribeLogsServer = grpc.BidiStreamingServer[LogsFilterRequest, SubscribeLogsReply]
+
+func _ETHBACKEND_SubscribeReceipts_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(ETHBACKENDServer).SubscribeReceipts(&grpc.GenericServerStream[ReceiptsFilterRequest, SubscribeReceiptsReply]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ETHBACKEND_SubscribeReceiptsServer = grpc.BidiStreamingServer[ReceiptsFilterRequest, SubscribeReceiptsReply]
 
 func _ETHBACKEND_Block_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(BlockRequest)
@@ -1019,6 +1047,12 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "SubscribeLogs",
 			Handler:       _ETHBACKEND_SubscribeLogs_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "SubscribeReceipts",
+			Handler:       _ETHBACKEND_SubscribeReceipts_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

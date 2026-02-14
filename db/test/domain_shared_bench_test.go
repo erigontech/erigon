@@ -179,7 +179,7 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 	}
 
 	b.Run("ComputeCommitment", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum, "", nil)
 			require.NoError(b, err)
 		}

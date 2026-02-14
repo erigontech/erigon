@@ -61,6 +61,8 @@ const (
 	HeaderTD        = "HeadersTotalDifficulty" // block_num_u64 + hash -> td (RLP)
 
 	BlockBody = "BlockBody" // block_num_u64 + hash -> block body
+	// BlockAccessList stores RLP-encoded block access lists, keyed by block_num_u64 + hash.
+	BlockAccessList = "BlockAccessList"
 
 	// Naming:
 	//  TxNum - Ethereum canonical transaction number - same across all nodes.
@@ -187,6 +189,8 @@ const (
 	// corresponding history tables `Tbl{Account,Storage,Code,Commitment}HistoryKeys` for history
 	// and `Tbl{Account,Storage,Code,Commitment}Idx` for inverted indices
 	TblPruningProgress = "PruningProgress"
+	// tableName -> txTo;last pruned val
+	TblPruningValsProg = "PruningValsProgress"
 
 	// Erigon-CL Objects
 
@@ -303,6 +307,7 @@ var ChaindataTables = []string{
 	HeaderNumber,
 	BadHeaderNumber,
 	BlockBody,
+	BlockAccessList,
 	TxLookup,
 	ConfigTable,
 	DatabaseInfo,
@@ -377,6 +382,7 @@ var ChaindataTables = []string{
 	TblTracesToIdx,
 
 	TblPruningProgress,
+	TblPruningValsProg,
 
 	MaxTxNum,
 

@@ -50,7 +50,7 @@ type Genesis struct {
 	Difficulty *big.Int       `json:"difficulty" gencodec:"required"`
 	Mixhash    common.Hash    `json:"mixHash"`
 	Coinbase   common.Address `json:"coinbase"`
-	Alloc      GenesisAlloc   `json:"alloc"      gencodec:"required"`
+	Alloc      GenesisAlloc   `json:"alloc"`
 
 	AuRaSeal *AuRaSeal `json:"seal"`
 
@@ -98,7 +98,7 @@ func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func DecodeGenesisAlloc(i interface{}) (GenesisAlloc, error) {
+func DecodeGenesisAlloc(i any) (GenesisAlloc, error) {
 	var alloc GenesisAlloc
 
 	b, err := json.Marshal(i)

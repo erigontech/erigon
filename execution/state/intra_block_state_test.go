@@ -279,7 +279,7 @@ func (test *snapshotTest) run(t *testing.T) bool {
 func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 	for _, addr := range test.addrs {
 		var err error
-		checkeq := func(op string, a, b interface{}) bool {
+		checkeq := func(op string, a, b any) bool {
 			if err == nil && !reflect.DeepEqual(a, b) {
 				err = fmt.Errorf("got %s(%s) == %v, want %v", op, addr, a, b)
 				return false
@@ -360,7 +360,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 		}
 		checkeq("GetCodeSize", scs, ccs)
 		// Check storage.
-		obj, err := state.getStateObject(addr)
+		obj, err := state.getStateObject(addr, true)
 		if err != nil {
 			return err
 		}
@@ -372,7 +372,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 				}
 			}
 		}
-		obj, err = checkstate.getStateObject(addr)
+		obj, err = checkstate.getStateObject(addr, true)
 		if err != nil {
 			return err
 		}

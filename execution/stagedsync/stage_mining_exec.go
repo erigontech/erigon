@@ -29,13 +29,14 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/metrics"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -50,7 +51,6 @@ import (
 )
 
 type MiningExecCfg struct {
-	db          kv.RwDB
 	miningState MiningState
 	notifier    ChainEventNotifier
 	chainConfig *chain.Config
@@ -64,7 +64,6 @@ type MiningExecCfg struct {
 }
 
 func StageMiningExecCfg(
-	db kv.RwDB,
 	miningState MiningState,
 	notifier ChainEventNotifier,
 	chainConfig *chain.Config,
@@ -77,7 +76,6 @@ func StageMiningExecCfg(
 	blockReader services.FullBlockReader,
 ) MiningExecCfg {
 	return MiningExecCfg{
-		db:          db,
 		miningState: miningState,
 		notifier:    notifier,
 		chainConfig: chainConfig,
@@ -99,13 +97,19 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 	logPrefix := s.LogPrefix()
 	current := cfg.miningState.MiningBlock
-	preparedTxns := current.PreparedTxns
+	needBAL := execCfg.chainConfig.IsAmsterdam(current.Header.Time) || execCfg.experimentalBAL
 
-	var (
-		stateReader state.StateReader
-	)
-	stateReader = state.NewReaderV3(sd.AsGetter(tx))
+	stateReader := state.NewReaderV3(sd.AsGetter(tx))
 	ibs := state.New(stateReader)
+	defer ibs.Release(false)
+	var balIO *state.VersionedIO
+	var systemReads state.ReadSet
+	var systemWrites state.VersionedWrites
+	var systemAccess map[accounts.Address]struct{}
+	if needBAL {
+		ibs.SetVersionMap(state.NewVersionMap(nil))
+		balIO = &state.VersionedIO{}
+	}
 	// Clique consensus needs forced author in the evm context
 	//if cfg.chainConfig.Consensus == chain.CliqueConsensus {
 	//	execCfg.author = &cfg.miningState.MiningConfig.Etherbase
@@ -132,64 +136,56 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 	txNum := sd.TxNum()
 
 	protocol.InitializeBlockExecution(cfg.engine, chainReader, current.Header, cfg.chainConfig, ibs, &state.NoopWriter{}, logger, nil)
+	if needBAL {
+		systemReads = mergeReadSets(systemReads, ibs.VersionedReads())
+		systemWrites = mergeVersionedWrites(systemWrites, ibs.VersionedWrites(false))
+		systemAccess = mergeAccessedAddresses(systemAccess, ibs.AccessedAddresses())
+		ibs.ResetVersionedIO()
+	}
 
 	coinbase := accounts.InternAddress(cfg.miningState.MiningConfig.Etherbase)
 
-	if len(preparedTxns) > 0 {
-		logs, _, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, preparedTxns, coinbase, ibs, cfg.interrupt, cfg.payloadId, logger)
+	yielded := mapset.NewSet[[32]byte]()
+	simStateWriter := state.NewWriter(simSd.AsPutDel(tx), nil, txNum)
+	simStateReader := state.NewReaderV3(simSd.AsGetter(tx))
+
+	executionAt, err := s.ExecutionAt(tx)
+	if err != nil {
+		return err
+	}
+
+	interrupt := cfg.interrupt
+	const amount = 50
+	for {
+		txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, amount, executionAt, yielded, simStateReader, simStateWriter, logger)
 		if err != nil {
 			return err
 		}
-		NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
-	} else {
 
-		yielded := mapset.NewSet[[32]byte]()
-		var simStateReader state.StateReader
-		var simStateWriter state.StateWriter
-
-		simStateWriter = state.NewWriter(simSd.AsPutDel(tx), nil, txNum)
-		simStateReader = state.NewReaderV3(simSd.AsGetter(tx))
-
-		executionAt, err := s.ExecutionAt(tx)
-		if err != nil {
-			return err
-		}
-
-		interrupt := cfg.interrupt
-		const amount = 50
-		for {
-			txns, err := getNextTransactions(ctx, cfg, chainID, current.Header, amount, executionAt, yielded, simStateReader, simStateWriter, logger)
+		if len(txns) > 0 {
+			logs, stop, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, coinbase, ibs, balIO, interrupt, cfg.payloadId, logger)
 			if err != nil {
 				return err
 			}
-
-			if len(txns) > 0 {
-				logs, stop, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, coinbase, ibs, interrupt, cfg.payloadId, logger)
-				if err != nil {
-					return err
-				}
-				NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
-				if stop {
-					break
-				}
-			} else {
+			NotifyPendingLogs(logPrefix, cfg.notifier, logs, logger)
+			if stop {
 				break
-			}
-
-			// if we yielded less than the count we wanted, assume the txpool has run dry now and stop to save another loop
-			if len(txns) < amount {
-				if interrupt != nil && !interrupt.Load() {
-					// if we are in interrupt mode, then keep on poking the txpool until we get interrupted
-					// since there may be new txns that can arrive
-					time.Sleep(50 * time.Millisecond)
-				} else {
-					break
-				}
 			}
 		}
 
-		metrics.UpdateBlockProducerProductionDelay(current.ParentHeaderTime, current.Header.Number.Uint64(), logger)
+		// if we yielded less than the count we wanted, assume the txpool has run dry now
+		if len(txns) < amount {
+			if interrupt != nil && !interrupt.Load() {
+				// if we are in interrupt mode, then keep on poking the txpool until we get interrupted
+				// since there may be new txns that can arrive
+				time.Sleep(50 * time.Millisecond)
+			} else {
+				break
+			}
+		}
 	}
+
+	metrics.UpdateBlockProducerProductionDelay(current.ParentHeaderTime, current.Header.Number.Uint64(), logger)
 
 	logger.Debug("SpawnMiningExecStage", "block", current.Header.Number, "txn", current.Txns.Len(), "payload", cfg.payloadId)
 	if current.Uncles == nil {
@@ -207,50 +203,106 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 	}
 
 	var block *types.Block
+	if needBAL {
+		ibs.ResetVersionedIO()
+	}
 	block, current.Requests, err = protocol.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txns, current.Uncles, &state.NoopWriter{}, cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, chainReader, true, logger, nil)
 	if err != nil {
 		return fmt.Errorf("cannot finalize block execution: %s", err)
 	}
 
-	// Simulate the block execution to get the final state root
-	if err = rawdb.WriteHeader(tx, block.Header()); err != nil {
-		return fmt.Errorf("cannot write header: %s", err)
-	}
 	blockHeight := block.NumberU64()
+	if needBAL {
+		systemReads = mergeReadSets(systemReads, ibs.VersionedReads())
+		systemWrites = mergeVersionedWrites(systemWrites, ibs.VersionedWrites(false))
+		systemAccess = mergeAccessedAddresses(systemAccess, ibs.AccessedAddresses())
+		ibs.ResetVersionedIO()
 
-	if err = rawdb.WriteCanonicalHash(tx, block.Hash(), blockHeight); err != nil {
-		return fmt.Errorf("cannot write canonical hash: %s", err)
+		systemVersion := state.Version{BlockNum: blockHeight, TxIndex: -1}
+		balIO.RecordReads(systemVersion, systemReads)
+		balIO.RecordWrites(systemVersion, systemWrites)
+		balIO.RecordAccesses(systemVersion, systemAccess)
+		current.BlockAccessList = CreateBAL(blockHeight, balIO, execCfg.dirs.DataDir)
 	}
-	if err = rawdb.WriteHeadHeaderHash(tx, block.Hash()); err != nil {
-		return err
+	writeBlockForExecution := func(rwTx kv.TemporalRwTx) error {
+		if err = rawdb.WriteHeader(rwTx, block.Header()); err != nil {
+			return fmt.Errorf("cannot write header: %s", err)
+		}
+		if err = rawdb.WriteCanonicalHash(rwTx, block.Hash(), blockHeight); err != nil {
+			return fmt.Errorf("cannot write canonical hash: %s", err)
+		}
+		if err = rawdb.WriteHeadHeaderHash(rwTx, block.Hash()); err != nil {
+			return err
+		}
+		if _, err = rawdb.WriteRawBodyIfNotExists(rwTx, block.Hash(), blockHeight, block.RawBody()); err != nil {
+			return fmt.Errorf("cannot write body: %s", err)
+		}
+		if err = rawdb.AppendCanonicalTxNums(rwTx, blockHeight); err != nil {
+			return err
+		}
+		if err = stages.SaveStageProgress(rwTx, kv.Headers, blockHeight); err != nil {
+			return err
+		}
+		if err = stages.SaveStageProgress(rwTx, stages.Bodies, blockHeight); err != nil {
+			return err
+		}
+		senderS := &StageState{state: s.state, ID: stages.Senders, BlockNumber: blockHeight - 1}
+		if err = SpawnRecoverSendersStage(sendersCfg, senderS, nil, rwTx, blockHeight, ctx, logger); err != nil {
+			return err
+		}
+		return nil
 	}
-	if _, err = rawdb.WriteRawBodyIfNotExists(tx, block.Hash(), blockHeight, block.RawBody()); err != nil {
-		return fmt.Errorf("cannot write body: %s", err)
-	}
-	if err = rawdb.AppendCanonicalTxNums(tx, blockHeight); err != nil {
-		return err
-	}
-	if err = stages.SaveStageProgress(tx, kv.Headers, blockHeight); err != nil {
-		return err
-	}
-	if err = stages.SaveStageProgress(tx, stages.Bodies, blockHeight); err != nil {
-		return err
-	}
-	senderS := &StageState{state: s.state, ID: stages.Senders, BlockNumber: blockHeight - 1}
-	if err = SpawnRecoverSendersStage(sendersCfg, senderS, nil, tx, blockHeight, ctx, logger); err != nil {
+
+	// Simulate the block execution to get the final state root
+	if err = writeBlockForExecution(tx); err != nil {
 		return err
 	}
 
 	// This flag will skip checking the state root
-	execCfg.blockProduction = true
 	execS := &StageState{state: s.state, ID: stages.Execution, BlockNumber: blockHeight - 1}
+	forceParallel := dbg.Exec3Parallel /*|| cfg.chainConfig.IsAmsterdam(current.Header.Time)*/ // TODO Re-enable after bals testing
+	execTx := tx
+	execSd := sd
+	var execCleanup func()
+	if forceParallel {
+		// get the underlying TemporalTx from MemoryMutation and create temporary SharedDomain
+		if _, ok := tx.(*temporal.RwTx); !ok {
+			type txUnwrapper interface {
+				UnderlyingTx() kv.TemporalTx
+			}
+			if unwrap, ok := tx.(txUnwrapper); ok {
+				if rwTx, ok := unwrap.UnderlyingTx().(kv.TemporalRwTx); ok {
+					tempSd, err := execctx.NewSharedDomains(ctx, rwTx, logger)
+					if err != nil {
+						return err
+					}
+					execTx = rwTx
+					execSd = tempSd
+					execCleanup = func() {
+						tempSd.Close()
+					}
+					if err = writeBlockForExecution(execTx); err != nil {
+						execCleanup()
+						return err
+					}
+				}
+			}
+		}
+		if _, ok := execTx.(*temporal.RwTx); !ok {
+			return fmt.Errorf("parallel execution requires *temporal.RwTx, got %T", execTx)
+		}
+	}
+	if execCleanup != nil {
+		defer execCleanup()
+	}
 
-	if err = ExecV3(ctx, execS, u, execCfg, sd, tx, dbg.Exec3Parallel, blockHeight, logger); err != nil {
+	if err = ExecV3(ctx, execS, u, execCfg, execSd, execTx, forceParallel, blockHeight, logger); err != nil {
 		logger.Error("cannot execute block execution", "err", err)
 		return err
 	}
 
-	rh, err := sd.ComputeCommitment(ctx, tx, true, blockHeight, txNum, s.LogPrefix(), nil)
+	commitmentTxNum := execSd.TxNum()
+	rh, err := execSd.ComputeCommitment(ctx, execTx, true, blockHeight, commitmentTxNum, s.LogPrefix(), nil)
 	if err != nil {
 		return fmt.Errorf("compute commitment failed: %w", err)
 	}
@@ -277,7 +329,11 @@ func getNextTransactions(
 	remainingGas := header.GasLimit - header.GasUsed
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
-		remainingBlobGas = cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed
+		maxBlobs := cfg.chainConfig.GetMaxBlobsPerBlock(header.Time)
+		if cfg.miningState.MiningConfig.MaxBlobsPerBlock != nil {
+			maxBlobs = min(maxBlobs, *cfg.miningState.MiningConfig.MaxBlobsPerBlock)
+		}
+		remainingBlobGas = maxBlobs*params.GasPerBlob - *header.BlobGasUsed
 	}
 
 	provideOpts := []txnprovider.ProvideOption{
@@ -441,12 +497,13 @@ func addTransactionsToMiningBlock(
 	txns types.Transactions,
 	coinbase accounts.Address,
 	ibs *state.IntraBlockState,
+	balIO *state.VersionedIO,
 	interrupt *atomic.Bool,
 	payloadId uint64,
 	logger log.Logger,
 ) (types.Logs, bool, error) {
 	header := current.Header
-	txnIdx := ibs.TxnIndex() + 1
+	txnIdx := ibs.TxnIndex()
 	gasPool := new(protocol.GasPool).AddGas(header.GasLimit - header.GasUsed)
 	if header.BlobGasUsed != nil {
 		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed)
@@ -455,6 +512,23 @@ func addTransactionsToMiningBlock(
 
 	var coalescedLogs types.Logs
 	noop := state.NewNoopWriter()
+	recordTxIO := func() {
+		if balIO == nil {
+			return
+		}
+		version := ibs.Version()
+		balIO.RecordReads(version, ibs.VersionedReads())
+		balIO.RecordWrites(version, ibs.VersionedWrites(false))
+		balIO.RecordAccesses(version, ibs.AccessedAddresses())
+		ibs.ResetVersionedIO()
+	}
+	clearTxIO := func() {
+		if balIO == nil {
+			return
+		}
+		ibs.AccessedAddresses()
+		ibs.ResetVersionedIO()
+	}
 
 	var miningCommitTx = func(txn types.Transaction, coinbase accounts.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
 		ibs.SetTxContext(current.Header.Number.Uint64(), txnIdx)
@@ -490,13 +564,14 @@ func addTransactionsToMiningBlock(
 			return receipt.Logs, nil
 		}
 
-		receipt, _, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader), engine, coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, header.BlobGasUsed, *vmConfig)
+		gasUsed := protocol.NewGasUsed(header, current.Receipts.CumulativeGasUsed())
+		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader), engine, coinbase, gasPool, ibs, noop, header, txn, gasUsed, *vmConfig)
 		if err != nil {
 			ibs.RevertToSnapshot(snap, err)
 			gasPool = new(protocol.GasPool).AddGas(gasSnap).AddBlobGas(blobGasSnap) // restore gasPool as well as ibs
 			return nil, err
 		}
-
+		protocol.SetGasUsed(header, gasUsed)
 		current.AddTxn(txn)
 		current.Receipts = append(current.Receipts, receipt)
 		return receipt.Logs, nil
@@ -567,6 +642,11 @@ LOOP:
 
 		// Start executing the transaction
 		logs, err := miningCommitTx(txn, coinbase, vmConfig, chainConfig, ibs, current)
+		if err == nil {
+			recordTxIO()
+		} else {
+			clearTxIO()
+		}
 		if errors.Is(err, protocol.ErrGasLimitReached) {
 			// Skip the env out-of-gas transaction
 			logger.Debug(fmt.Sprintf("[%s] Gas limit exceeded for env block", logPrefix), "hash", txn.Hash(), "sender", from)

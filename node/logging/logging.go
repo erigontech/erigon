@@ -27,7 +27,7 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/metrics"
+	"github.com/erigontech/erigon/execution/metrics"
 )
 
 // Determine the log dir path based on the given urfave context
@@ -250,6 +250,7 @@ func initSeparatedLogging(
 		MaxSize:    100, // megabytes
 		MaxBackups: 3,
 		MaxAge:     28, //days
+		Compress:   true,
 	}
 	userLog := log.StreamHandler(lumberjack, dirFormat)
 
