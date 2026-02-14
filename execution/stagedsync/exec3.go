@@ -606,6 +606,21 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			}
 			go warmTxsHashes(b)
 
+			var dbBAL types.BlockAccessList
+			data, err := rawdb.ReadBlockAccessListBytes(tx, b.Hash(), blockNum)
+			if err != nil {
+				return err
+			}
+			if len(data) > 0 {
+				dbBAL, err = types.DecodeBlockAccessListBytes(data)
+				if err != nil {
+					return fmt.Errorf("decode block access list: %w", err)
+				}
+				if err := dbBAL.Validate(); err != nil {
+					return fmt.Errorf("invalid block access list: %w", err)
+				}
+			}
+
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()
 			getHashFnMutex := sync.Mutex{}
@@ -669,8 +684,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			te.execRequests <- &execRequest{
 				b.Number().Uint64(), b.Hash(),
 				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				b.BlockAccessList(),
-				txTasks, applyResults, false, exhausted,
+				dbBAL, txTasks, applyResults, false, exhausted,
 			}
 
 			mxExecBlocks.Add(1)

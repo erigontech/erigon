@@ -1,8 +1,10 @@
-*            @AskAlexSharov @Giulio2002
-/cl/          @domiwei @Giulio2002
-/db/          @AskAlexSharov @sudeepdino008
-/docs/        @bloxster @AskAlexSharov @yperbasis
-/execution/   @yperbasis @mh0lt
-/p2p/         @taratorio @yperbasis
-/rpc/         @canepat @yperbasis
-/txnprovider/ @taratorio @yperbasis
+*                      @AskAlexSharov @Giulio2002
+/.github/workflows     @mriccobene @AskAlexSharov
+/cl/                   @domiwei @Giulio2002
+/db/                   @AskAlexSharov @sudeepdino008
+/docs/                 @bloxster @AskAlexSharov @yperbasis
+/execution/            @yperbasis @mh0lt
+/execution/commitment/ @taratorio @antonis19 @awskii
+/p2p/                  @anacrolix @taratorio
+/rpc/                  @canepat @lupin012
+/txnprovider/          @taratorio @yperbasis

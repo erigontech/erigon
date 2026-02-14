@@ -63,9 +63,13 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		lastFrozenTxNum = uint64((lastFrozenStep+1)*kv.Step(se.doms.StepSize())) - 1
 	}
 
-	if blockLimit > 0 && min(blockNum+blockLimit, maxBlockNum) > blockNum+16 || maxBlockNum > blockNum+16 {
+	toBlockNum := maxBlockNum
+	if blockLimit > 0 {
+		toBlockNum = min(maxBlockNum, blockNum+blockLimit-1)
+	}
+	if maxBlockNum > blockNum+16 {
 		log.Info(fmt.Sprintf("[%s] serial starting", execStage.LogPrefix()),
-			"from", blockNum, "to", min(maxBlockNum, blockNum+blockLimit-1), "initialTxNum", initialTxNum,
+			"from", blockNum, "to", toBlockNum, "initialTxNum", initialTxNum,
 			"initialBlockTxOffset", offsetFromBlockBeginning, "lastFrozenStep", lastFrozenStep,
 			"initialCycle", initialCycle, "isForkValidation", se.isForkValidation, "isBlockProduction", se.isBlockProduction)
 	}
