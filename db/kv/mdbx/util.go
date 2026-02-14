@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/JkLondon/gdbx"
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -31,7 +32,7 @@ func MustOpen(path string) kv.RwDB {
 	return New(dbcfg.ChainDB, log.New()).Path(path).MustOpen()
 }
 
-func RecordSummaries(dbLabel kv.Label, latency mdbx.CommitLatency) error {
+func RecordSummaries(dbLabel kv.Label, latency gdbx.CommitLatency) error {
 	_summaries, ok := kv.MDBXSummaries.Load(string(dbLabel))
 	if !ok {
 		return fmt.Errorf("MDBX summaries not initialized yet for db=%s", string(dbLabel))

@@ -9,7 +9,7 @@ replace github.com/holiman/uint256 => github.com/erigontech/uint256 v0.0.0-20260
 require (
 	github.com/erigontech/erigon-snapshot v1.3.1-0.20260210221902-e495954c7e78
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
-	github.com/erigontech/mdbx-go v0.39.12
+	github.com/erigontech/mdbx-go v0.40.0
 	github.com/erigontech/secp256k1 v1.2.0
 	github.com/erigontech/silkworm-go v0.24.0
 )
@@ -18,6 +18,7 @@ require (
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
 	github.com/99designs/gqlgen v0.17.83
 	github.com/FastFilter/xorfilter v0.2.1
+	github.com/JkLondon/gdbx v0.0.0-20260212142211-fa6f7835e156
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring/v2 v2.14.4
 	github.com/alecthomas/kong v0.8.1
@@ -299,7 +300,7 @@ require (
 	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	go.etcd.io/bbolt v1.3.6 // indirect
+	go.etcd.io/bbolt v1.4.3 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel v1.38.0 // indirect
 	go.opentelemetry.io/otel/metric v1.38.0 // indirect

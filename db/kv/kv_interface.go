@@ -252,6 +252,8 @@ type RwCursor interface {
 	// Both MDB_NEXT and MDB_GET_CURRENT will return the same record after
 	// this operation.
 	DeleteCurrent() error
+
+	DeleteRange(from []byte, to []byte) (int64, error)
 }
 
 /*
@@ -292,6 +294,7 @@ type RwCursorDupSort interface {
 	CursorDupSort
 	RwCursor
 
+	DeleteDupRange(key []byte, from []byte, to []byte) (int64, error)
 	PutNoDupData(key, value []byte) error // PutNoDupData - inserts key without dupsort
 	DeleteCurrentDuplicates() error       // DeleteCurrentDuplicates - deletes all values of the current key
 	DeleteExact(k1, k2 []byte) error      // DeleteExact - delete 1 value from given key
@@ -307,6 +310,7 @@ type PseudoDupSortRwCursor interface { // For both DupSort and usual cursors (us
 	NextNoDup() ([]byte, []byte, error) // NextNoDup - position at first data item of next key
 	LastDup() ([]byte, error)           // LastDup - position at last data item of current key
 
+	DeleteDupRange(key []byte, from []byte, to []byte) (int64, error)
 	CountDuplicates() (uint64, error) // CountDuplicates - number of duplicates for the current key
 }
 
@@ -354,6 +358,8 @@ type Putter interface {
 
 	// Delete removes a single entry.
 	Delete(table string, k []byte) error
+
+	DeleteRange(table string, from []byte, to []byte) (int64, error)
 
 	/*
 		IncrementSequence - AutoIncrement generator.

@@ -435,6 +435,16 @@ func (m *MemoryMutation) Delete(table string, k []byte) error {
 	return m.memTx.Delete(table, k)
 }
 
+func (m *MemoryMutation) DeleteRange(table string, from []byte, to []byte) (int64, error) {
+	t, ok := m.deletedEntries[table]
+	if !ok {
+		t = make(map[string]struct{})
+		m.deletedEntries[table] = t
+	}
+	t[string(from)] = struct{}{}
+	return m.memTx.DeleteRange(table, from, to)
+}
+
 func (m *MemoryMutation) deleteDup(table string, k, v []byte) {
 	t, ok := m.deletedDups[table]
 	if !ok {
