@@ -216,7 +216,8 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		err = tx.Commit()
 		require.NoError(t, err)
 
-		tx, err = db.BeginTemporalRw(context.Background())
+		// TODO: either make the lint rule smarter about closures, or use db.View/db.Update here
+		tx, err = db.BeginTemporalRw(context.Background()) //nolint:gocritic
 		require.NoError(t, err)
 
 		domains, err = execctx.NewSharedDomains(context.Background(), tx, log.New())
