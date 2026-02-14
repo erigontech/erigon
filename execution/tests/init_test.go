@@ -176,7 +176,7 @@ func (tm *testMatcher) walk(t *testing.T, dir string, runTest any) {
 		fmt.Fprintf(os.Stderr, "can't find test files in %s, did you clone the tests submodule?\n", dir)
 		t.Skip("missing test files")
 	}
-	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	err = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) { //skip magically disappeared files
 				return nil
@@ -184,7 +184,7 @@ func (tm *testMatcher) walk(t *testing.T, dir string, runTest any) {
 			return err
 		}
 		name := filepath.ToSlash(strings.TrimPrefix(path, dir+string(filepath.Separator)))
-		if info.IsDir() {
+		if d.IsDir() {
 			if _, skipload := tm.findSkip(name + "/"); skipload {
 				return filepath.SkipDir
 			}
