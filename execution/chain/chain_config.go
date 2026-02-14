@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -116,6 +117,11 @@ type Config struct {
 
 	// Account Abstraction
 	AllowAA bool
+
+	// observedSecondsPerSlot is set at runtime when the CL provides payload attributes,
+	// allowing the EL to derive the actual slot duration from consecutive block timestamps.
+	// This is needed because devnets/testnets may use non-standard slot durations.
+	observedSecondsPerSlot atomic.Uint64 `copier:"-"`
 }
 
 var (
@@ -482,6 +488,9 @@ func (c *Config) GetMaxRlpBlockSize(time uint64) int {
 }
 
 func (c *Config) SecondsPerSlot() uint64 {
+	if observed := c.observedSecondsPerSlot.Load(); observed > 0 {
+		return observed
+	}
 	if c.Bor != nil {
 		return 2 // Polygon
 	}
@@ -489,6 +498,13 @@ func (c *Config) SecondsPerSlot() uint64 {
 		return 5 // Gnosis
 	}
 	return 12 // Ethereum
+}
+
+// SetObservedSecondsPerSlot records the actual slot duration derived from CL-provided
+// payload attributes timestamps. This allows the EL to adapt to non-standard slot
+// durations used in devnets and testnets.
+func (c *Config) SetObservedSecondsPerSlot(secs uint64) {
+	c.observedSecondsPerSlot.Store(secs)
 }
 
 func (c *Config) SystemContracts(time uint64) map[string]accounts.Address {

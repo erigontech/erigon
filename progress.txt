@@ -1,0 +1,30 @@
+[STEP] Starting investigation of assertoor_regular_test CI failure
+[STEP] Reading CI logs from the failed action URL
+[STEP] Fetching full CI job logs via gh CLI
+[FOUND] stability-check FAILED. Sub-checks: check_consensus_attestation_stats=FAILURE, check_consensus_reorgs=FAILURE. Other checks (finality, forks, sync) passed.
+[STEP] Searching full CI log for erigon panics, errors, crashes
+[STEP] Searching for specific reorg/attestation failures in assertoor_regular_test job
+[FOUND] Root cause: Excessive chain reorgs - "max reorgs per epoch exceeded. (have: 2.125, want <= 2)". Reorg distances escalating from 4 to 12 around 09:18. Attestation votes failing too. Need to check Erigon EL logs for WHY reorgs are happening.
+[STEP] Checking recent git commits that could cause chain reorgs
+[FOUND] This is a flaky failure - same workflow sometimes passes, sometimes fails. The stability-check fails due to excessive reorgs (>2 per epoch). Reorgs grow from distance 4 to 12. Need to understand what in Erigon causes slow/delayed block production that leads to reorgs.
+[STEP] Reading Erigon EL logs from enclave dump
+[FOUND] Block builder keeps timing out with "Stopping block builder due to max build time exceeded" and "[warmBody] failed to open tx for BAL ... err=context canceled". These timeouts cause the EL to miss block production, leading to CL reorgs.
+[STEP] Searching for warmBody and block builder code
+[STEP] Searching for Filtration log source code
+[STEP] Checking another failing run to compare patterns
+[FOUND] SecondsPerSlot() always returns 12 for Ethereum chains. This is the max block build time. Test uses seconds_per_slot=4. So the builder can keep polling for up to 12 seconds, but the slot is only 4 seconds. This means blocks can be built for 3x the slot time, causing reorgs\!
+[STEP] Looking at how Erigon gets config from genesis in Kurtosis devnet
+[FOUND] Genesis JSON has no secondsPerSlot field. CL config.yaml has SECONDS_PER_SLOT: 4. EL has no way to know actual slot time.
+[STEP] Investigating Engine API flow - forkchoiceUpdated receives PayloadAttributes with timestamp
+[FOUND] In engine_server.go:forkchoiceUpdated, we have headHeader.Time and payload timestamp. Difference = actual slot duration.
+[FIX] Applied 3-part fix:
+  1. execution/chain/chain_config.go: Added observedSecondsPerSlot atomic field + SetObservedSecondsPerSlot() method. SecondsPerSlot() now returns observed value if set.
+  2. execution/engineapi/engine_server.go: In forkchoiceUpdated, derive slot duration from (timestamp - headHeader.Time) and store via SetObservedSecondsPerSlot().
+  3. execution/stagedsync/stage_mining_exec.go: Changed "Filtration" log from Info to Debug to eliminate log spam during txpool polling.
+[STEP] Build and lint pass. Running kurtosis test to verify.
+[VERIFY] Run 1: ALL 8 TESTS PASSED (including stability-check). Zero persistent reorgs. Block build times ~1.3s (was 12s+).
+[STEP] Running verification run 2 of 3.
+[VERIFY] Run 2: ALL 8 TESTS PASSED.
+[STEP] Running verification run 3 of 3.
+[VERIFY] Run 3: ALL 8 TESTS PASSED.
+[DONE] Fix verified - 3/3 runs passing. Writing PR description.

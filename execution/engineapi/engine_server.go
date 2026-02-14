@@ -700,6 +700,12 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		return nil, &engine_helpers.InvalidPayloadAttributesErr
 	}
 
+	// Derive actual slot duration from CL-provided timestamps so the EL adapts
+	// to non-standard slot durations used in devnets and testnets.
+	if slotDuration := timestamp - headHeader.Time; slotDuration > 0 {
+		s.config.SetObservedSecondsPerSlot(slotDuration)
+	}
+
 	req := &executionproto.AssembleBlockRequest{
 		ParentHash:            gointerfaces.ConvertHashToH256(forkchoiceState.HeadHash),
 		Timestamp:             timestamp,
