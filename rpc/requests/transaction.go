@@ -159,7 +159,7 @@ func (reqGen *requestGenerator) SendTransaction(signedTx types.Transaction) (com
 	return result, nil
 }
 
-func (reqGen *requestGenerator) SendRawTransactionSync(signedTx types.Transaction, timeoutMs *hexutil.Uint64) (*types.Receipt, error) {
+func (reqGen *requestGenerator) SendRawTransactionSync(signedTx types.Transaction, timeoutMs *uint64) (*types.Receipt, error) {
 	var result *types.Receipt
 
 	var buf bytes.Buffer

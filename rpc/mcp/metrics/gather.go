@@ -26,13 +26,13 @@ func ListMetricNames() ([]string, error) {
 // GatherMetricsFiltered gathers metrics from the Prometheus default registry
 // with optional filtering by metric name pattern (supports wildcards like "db_*" or "*_size").
 // If pattern is empty, returns all metrics.
-func GatherMetricsFiltered(pattern string) (map[string]interface{}, error) {
+func GatherMetricsFiltered(pattern string) (map[string]any, error) {
 	metricFamilies, err := prometheus.DefaultGatherer.Gather()
 	if err != nil {
 		return nil, fmt.Errorf("failed to gather metrics: %w", err)
 	}
 
-	result := make(map[string]interface{})
+	result := make(map[string]any)
 
 	for _, mf := range metricFamilies {
 		if mf == nil || mf.Name == nil {
@@ -47,10 +47,10 @@ func GatherMetricsFiltered(pattern string) (map[string]interface{}, error) {
 		}
 
 		metricType := mf.Type.String()
-		metrics := make([]map[string]interface{}, 0, len(mf.Metric))
+		metrics := make([]map[string]any, 0, len(mf.Metric))
 
 		for _, m := range mf.Metric {
-			metricData := make(map[string]interface{})
+			metricData := make(map[string]any)
 
 			// Add labels
 			if len(m.Label) > 0 {
@@ -75,7 +75,7 @@ func GatherMetricsFiltered(pattern string) (map[string]interface{}, error) {
 				}
 			case dto.MetricType_HISTOGRAM:
 				if m.Histogram != nil {
-					histData := make(map[string]interface{})
+					histData := make(map[string]any)
 					if m.Histogram.SampleCount != nil {
 						histData["sample_count"] = *m.Histogram.SampleCount
 					}
@@ -83,9 +83,9 @@ func GatherMetricsFiltered(pattern string) (map[string]interface{}, error) {
 						histData["sample_sum"] = *m.Histogram.SampleSum
 					}
 					if len(m.Histogram.Bucket) > 0 {
-						buckets := make([]map[string]interface{}, 0, len(m.Histogram.Bucket))
+						buckets := make([]map[string]any, 0, len(m.Histogram.Bucket))
 						for _, bucket := range m.Histogram.Bucket {
-							b := make(map[string]interface{})
+							b := make(map[string]any)
 							if bucket.UpperBound != nil {
 								b["upper_bound"] = *bucket.UpperBound
 							}
@@ -100,7 +100,7 @@ func GatherMetricsFiltered(pattern string) (map[string]interface{}, error) {
 				}
 			case dto.MetricType_SUMMARY:
 				if m.Summary != nil {
-					summaryData := make(map[string]interface{})
+					summaryData := make(map[string]any)
 					if m.Summary.SampleCount != nil {
 						summaryData["sample_count"] = *m.Summary.SampleCount
 					}
@@ -108,9 +108,9 @@ func GatherMetricsFiltered(pattern string) (map[string]interface{}, error) {
 						summaryData["sample_sum"] = *m.Summary.SampleSum
 					}
 					if len(m.Summary.Quantile) > 0 {
-						quantiles := make([]map[string]interface{}, 0, len(m.Summary.Quantile))
+						quantiles := make([]map[string]any, 0, len(m.Summary.Quantile))
 						for _, quantile := range m.Summary.Quantile {
-							q := make(map[string]interface{})
+							q := make(map[string]any)
 							if quantile.Quantile != nil {
 								q["quantile"] = *quantile.Quantile
 							}
@@ -137,7 +137,7 @@ func GatherMetricsFiltered(pattern string) (map[string]interface{}, error) {
 			metrics = append(metrics, metricData)
 		}
 
-		result[metricName] = map[string]interface{}{
+		result[metricName] = map[string]any{
 			"type":    metricType,
 			"help":    getStringPtr(mf.Help),
 			"metrics": metrics,
@@ -185,7 +185,7 @@ func matchPattern(pattern, name string) bool {
 
 // GatherMetrics gathers all metrics from the Prometheus default registry
 // and returns them as a structured map for MCP consumption.
-func GatherMetrics() (map[string]interface{}, error) {
+func GatherMetrics() (map[string]any, error) {
 	return GatherMetricsFiltered("")
 }
 
