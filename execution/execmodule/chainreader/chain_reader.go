@@ -289,8 +289,13 @@ func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool) 
 }
 
 func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks []*types.Block) error {
+	return c.InsertBlocksAndWaitWithAccessLists(ctx, blocks, nil)
+}
+
+func (c ChainReaderWriterEth1) InsertBlocksAndWaitWithAccessLists(ctx context.Context, blocks []*types.Block, accessLists []*executionproto.BlockAccessListEntry) error {
 	request := &executionproto.InsertBlocksRequest{
-		Blocks: moduleutil.ConvertBlocksToRPC(blocks),
+		Blocks:           moduleutil.ConvertBlocksToRPC(blocks),
+		BlockAccessLists: accessLists,
 	}
 	response, err := c.executionModule.InsertBlocks(ctx, request)
 	if err != nil {
@@ -317,8 +322,13 @@ func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks [
 }
 
 func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
+	return c.InsertBlocksWithAccessLists(ctx, blocks, nil)
+}
+
+func (c ChainReaderWriterEth1) InsertBlocksWithAccessLists(ctx context.Context, blocks []*types.Block, accessLists []*executionproto.BlockAccessListEntry) error {
 	request := &executionproto.InsertBlocksRequest{
-		Blocks: moduleutil.ConvertBlocksToRPC(blocks),
+		Blocks:           moduleutil.ConvertBlocksToRPC(blocks),
+		BlockAccessLists: accessLists,
 	}
 	response, err := c.executionModule.InsertBlocks(ctx, request)
 	if err != nil {
