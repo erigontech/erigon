@@ -21,6 +21,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -28,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -74,9 +74,6 @@ func TestEthSubscribe(t *testing.T) {
 }
 
 func TestEthSubscribeReceipts(t *testing.T) {
-	if race.Enabled {
-		t.Skip("This test is flakey during race tetsing.  Remove this when fixed")
-	}
 	ctx := t.Context()
 	logger := log.New()
 	m := mock.Mock(t)
@@ -101,6 +98,14 @@ func TestEthSubscribeReceipts(t *testing.T) {
 		TransactionHashes: []common.Hash{},
 	})
 	defer ff.UnsubscribeReceipts(id)
+	// Wait for the server-side receipt filter to be fully activated before inserting
+	// blocks. SubscribeReceipts sends a filter update request through a channel which
+	// is processed asynchronously by the server goroutine. Without this wait,
+	// InsertChain may execute and call NotifyReceipts before HasReceiptSubscriptions
+	// returns true, causing all receipt notifications to be silently dropped.
+	require.Eventually(t, func() bool {
+		return m.Notifications.Events.HasReceiptSubscriptions()
+	}, 5*time.Second, time.Millisecond)
 	err = m.InsertChain(chain)
 	require.NoError(t, err)
 	highestSeenHeader := chain.TopBlock.NumberU64()
