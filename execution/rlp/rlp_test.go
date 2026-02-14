@@ -53,7 +53,7 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}},
 		}
 	)
-	m := mock.MockWithGenesis(tb, gspec, key, false)
+	m := mock.MockWithGenesis(tb, gspec, key)
 	genesis := m.Genesis
 	db := m.DB
 

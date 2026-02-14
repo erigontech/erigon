@@ -26,7 +26,7 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 		Difficulty            *math.HexOrDecimal256                       `json:"difficulty" gencodec:"required"`
 		Mixhash               common.Hash                                 `json:"mixHash"`
 		Coinbase              common.Address                              `json:"coinbase"`
-		Alloc                 map[common.UnprefixedAddress]GenesisAccount `json:"alloc"      gencodec:"required"`
+		Alloc                 map[common.UnprefixedAddress]GenesisAccount `json:"alloc"`
 		AuRaSeal              *AuRaSeal                                   `json:"seal"`
 		Number                math.HexOrDecimal64                         `json:"number"`
 		GasUsed               math.HexOrDecimal64                         `json:"gasUsed"`
@@ -77,7 +77,7 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 		Difficulty            *math.HexOrDecimal256                       `json:"difficulty" gencodec:"required"`
 		Mixhash               *common.Hash                                `json:"mixHash"`
 		Coinbase              *common.Address                             `json:"coinbase"`
-		Alloc                 map[common.UnprefixedAddress]GenesisAccount `json:"alloc"      gencodec:"required"`
+		Alloc                 map[common.UnprefixedAddress]GenesisAccount `json:"alloc"`
 		AuRaSeal              *AuRaSeal                                   `json:"seal"`
 		Number                *math.HexOrDecimal64                        `json:"number"`
 		GasUsed               *math.HexOrDecimal64                        `json:"gasUsed"`
@@ -119,12 +119,11 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 	if dec.Coinbase != nil {
 		g.Coinbase = *dec.Coinbase
 	}
-	if dec.Alloc == nil {
-		return errors.New("missing required field 'alloc' for Genesis")
-	}
-	g.Alloc = make(GenesisAlloc, len(dec.Alloc))
-	for k, v := range dec.Alloc {
-		g.Alloc[common.Address(k)] = v
+	if dec.Alloc != nil {
+		g.Alloc = make(GenesisAlloc, len(dec.Alloc))
+		for k, v := range dec.Alloc {
+			g.Alloc[common.Address(k)] = v
+		}
 	}
 	if dec.AuRaSeal != nil {
 		g.AuRaSeal = dec.AuRaSeal

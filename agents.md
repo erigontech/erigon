@@ -8,12 +8,14 @@ This file provides guidance for AI agents working with this codebase.
 
 ```bash
 make erigon              # Build main binary (./build/bin/erigon)
-make all                 # Build all binaries
+make integration         # Build integration test binary
+make lint                # Run golangci-lint + mod tidy check
 make test-short          # Quick unit tests (-short -failfast)
 make test-all            # Full test suite with coverage
-make lint                # Run golangci-lint + mod tidy check
 make gen                 # Generate all auto-generated code (mocks, grpc, etc.)
 ```
+
+Before committing, always verify changes with: `make lint && make erigon integration`
 
 Run specific tests:
 ```bash
@@ -51,3 +53,5 @@ Erigon is a high-performance Ethereum execution client with embedded consensus l
 ## Conventions
 
 Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace configs optional`
+
+**Important**: Always run `make lint` after making code changes and before committing. Fix any linter errors before proceeding.

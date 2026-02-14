@@ -26,8 +26,10 @@ import (
 )
 
 type (
-	executionFunc func(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, error)
-	gasFunc       func(*EVM, *CallContext, uint64, uint64) (uint64, error) // last parameter is the requested memory size as a uint64
+	executionFunc    func(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, error)
+	gasFunc          func(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error)
+	statelessGasFunc func(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64, withCallGasCalc bool) (uint64, bool, error)
+	statefulGasFunc  func(evm *EVM, callContext *CallContext, gas uint64, availableGas uint64, transfersValue bool) (uint64, error)
 	// memorySizeFunc returns the required size, and whether the operation overflowed a uint64
 	memorySizeFunc func(*CallContext) (size uint64, overflow bool)
 	stringer       func(pc uint64, callContext *CallContext) string

@@ -8,6 +8,8 @@ on:
     branches:
       - main
       - 'release/**'
+      - performance
+      - performance-stable
     types:
       - opened
       - reopened
@@ -19,6 +21,14 @@ jobs:
   lint:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
+    concurrency:
+      group: >-
+        ${{
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
+          format('{0}-{1}', github.workflow, github.run_id) ||
+          format('{0}-{1}', github.workflow, github.ref)
+        }}
+      cancel-in-progress: true
 
     steps:
       - name: Cleanup space
