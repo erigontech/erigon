@@ -260,6 +260,21 @@ func (c *JsonRpcClient) ForkchoiceUpdatedV3(
 	}, c.backOff(ctx))
 }
 
+func (c *JsonRpcClient) ForkchoiceUpdatedV4(
+	ctx context.Context,
+	forkChoiceState *enginetypes.ForkChoiceState,
+	payloadAttributes *enginetypes.PayloadAttributes,
+) (*enginetypes.ForkChoiceUpdatedResponse, error) {
+	return backoff.RetryWithData(func() (*enginetypes.ForkChoiceUpdatedResponse, error) {
+		var result enginetypes.ForkChoiceUpdatedResponse
+		err := c.rpcClient.CallContext(ctx, &result, "engine_forkchoiceUpdatedV4", forkChoiceState, payloadAttributes)
+		if err != nil {
+			return nil, c.maybeMakePermanent(err)
+		}
+		return &result, nil
+	}, c.backOff(ctx))
+}
+
 func (c *JsonRpcClient) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*enginetypes.ExecutionPayload, error) {
 	return backoff.RetryWithData(func() (*enginetypes.ExecutionPayload, error) {
 		var result enginetypes.ExecutionPayload
