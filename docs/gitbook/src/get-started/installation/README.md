@@ -378,53 +378,27 @@ Set-ExecutionPolicy RemoteSigned
 
 **3. Compiling Erigon**
 
-This section outlines the two primary methods for compiling the Erigon client and its associated modules directly from the source code on a Windows environment. Compiling from source ensures you are running the latest version and gives you control over the final binaries.
+This section outlines how to compile the Erigon client and its associated modules directly from the source code on a Windows environment. Compiling from source ensures you are running the latest version and gives you control over the final binaries. All successfully compiled binaries will be placed in the `.\build\bin\` subfolder of your Erigon directory.
 
-You have two alternative options for compilation, both utilizing PowerShell: a quick, graphical method via File Explorer, and a more controlled, command-line method. All successfully compiled binaries will be placed in the `.\build\bin\` subfolder of your Erigon directory.
-
-<table data-header-hidden><thead><tr><th width="185.22216796875"></th><th></th><th></th></tr></thead><tbody><tr><td><strong>Method</strong></td><td><strong>Pro</strong></td><td><strong>Con</strong></td></tr><tr><td>a. File Explorer (<code>wmake.ps1</code>)</td><td>Fastest and simplest; requires minimal command-line interaction.</td><td>Less control over which specific component is built (builds all modules by default).</td></tr><tr><td>b. PowerShell CLI</td><td>Provides granular control, allowing you to compile only specific components (e.g., just <code>erigon</code> or <code>rpcdaemon</code>).</td><td>Requires CLI familiarity and an additional step to modify the <code>ExecutionPolicy</code> for script permission.</td></tr></tbody></table>
-
-**a. File Explorer (`wmake.ps1`)**
-
-This is the fastest way which normally works for everyone. Open the File Explorer and go to the Erigon folder, then right click the `wmake` file and choose "**Run with PowerShell**".
-
-<figure><img src="../../.gitbook/assets/image (7).png" alt=""><figcaption></figcaption></figure>
-
-PowerShell will compile Erigon and all of its modules. All binaries will be placed in the `.\build\bin\` subfolder.
-
-<figure><img src="../../.gitbook/assets/image (8).png" alt=""><figcaption></figcaption></figure>
-
-**b. PowerShell CLI**
-
-In the search bar on your computer, search for “**Windows PowerShell**” and open it.
-
-<figure><img src="../../.gitbook/assets/image (9).png" alt=""><figcaption></figcaption></figure>
-
-Change the working directory to "**erigon**"
+Open Git Bash (the shell that comes with Git for Windows) and change to the Erigon directory:
 
 ```bash
 cd erigon
 ```
 
-<figure><img src="../../.gitbook/assets/image (10).png" alt=""><figcaption></figcaption></figure>
+Compile Erigon and its components using `make`:
 
-Before modifying security settings, ensure PowerShell script execution is allowed in your Windows account settings using the following command:
-
-```powershell
-Set-ExecutionPolicy Bypass -Scope CurrentUser -Force
+```bash
+make
 ```
 
-This change allows script execution, but use caution to avoid security risks. Remember to only make these adjustments if you trust the scripts you intend to run. Unauthorized changes can impact system security. For more info read [Set-Execution Policy](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/set-executionpolicy?view=powershell-7.3) documentation.
+This builds all modules. All binaries will be placed in the `.\build\bin\` subfolder. The executable binary `erigon.exe` should have been created there.
 
-Now you can compile Erigon and its components:
+You can also build specific targets, for example:
 
-```powershell
-.\wmake.ps1
+```bash
+make erigon
 ```
-
-<figure><img src="../../.gitbook/assets/image (11).png" alt=""><figcaption></figcaption></figure>
-
-The executable binary `erigon.exe` should have been created in the `.\build\bin\` subfolder.
 
 You can use the same command to build other binaries such as `RPCDaemon`, `TxPool`, `Sentry` and `Downloader`.
 

@@ -68,7 +68,7 @@ endif
 
 BUILD_TAGS =
 
-ifneq ($(shell "$(CURDIR)/node/silkworm/silkworm_compat_check.sh"),)
+ifneq ($(shell $(CURDIR)/node/silkworm/silkworm_compat_check.sh),)
 	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
 endif
 
@@ -344,10 +344,6 @@ kurtosis-cleanup:
 	@kurtosis enclave ls
 	@echo "-----------------------------------\n"
 	kurtosis enclave rm -f makefile-kurtosis-testnet
-
-## lint-deps:                         install lint dependencies
-lint-deps:
-	@./tools/golangci_lint.sh --install-deps
 
 ## lintci:                            run golangci-lint linters
 lintci:

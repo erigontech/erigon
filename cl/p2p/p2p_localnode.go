@@ -20,11 +20,11 @@ func newLocalNode(
 	tmpDir string,
 	logger log.Logger,
 ) (*enode.LocalNode, error) {
-	db, err := enode.OpenDB(ctx, "", tmpDir, logger)
+	db, err := enode.OpenDBEx(ctx, "", tmpDir, logger)
 	if err != nil {
 		return nil, fmt.Errorf("could not open node's peer database: %w", err)
 	}
-	localNode := enode.NewLocalNode(db, privKey, logger)
+	localNode := enode.NewLocalNode(db, privKey)
 
 	ipEntry := enr.IP(ipAddr)
 	udpEntry := enr.UDP(udpPort)
@@ -75,7 +75,7 @@ func NewUDPv5Listener(ctx context.Context, cfg *P2PConfig, discCfg discover.Conf
 	}
 
 	// Start stream handlers
-	net, err := discover.ListenV5(ctx, "any", conn, localNode, discCfg)
+	net, err := discover.ListenV5(conn, localNode, discCfg)
 	if err != nil {
 		return nil, err
 	}
