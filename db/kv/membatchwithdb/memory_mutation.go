@@ -793,10 +793,6 @@ func (m *MemoryMutation) PruneSmallBatches(ctx context.Context, timeout time.Dur
 	return m.db.(kv.TemporalRwTx).PruneSmallBatches(ctx, timeout)
 }
 
-func (m *MemoryMutation) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error {
-	return m.db.(kv.TemporalRwTx).GreedyPruneHistory(ctx, domain)
-}
-
 func (m *MemoryMutation) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	return m.db.(kv.TemporalRwTx).Unwind(ctx, txNumUnwindTo, changeset)
 }
