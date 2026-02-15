@@ -444,6 +444,9 @@ func (b *BeaconBody) ExecutionPayloadMerkleProof() ([][32]byte, error) {
 }
 
 func (b *BeaconBody) KzgCommitmentMerkleProof(index int) ([][32]byte, error) {
+	if b.Version >= clparams.GloasVersion {
+		return b.kzgCommitmentsRootMerkleProofGloas()
+	}
 	if index >= b.BlobKzgCommitments.Len() {
 		return nil, errors.New("index out of range")
 	}
@@ -456,7 +459,59 @@ func (b *BeaconBody) KzgCommitmentMerkleProof(index int) ([][32]byte, error) {
 }
 
 func (b *BeaconBody) KzgCommitmentsInclusionProof() ([][32]byte, error) {
+	if b.Version >= clparams.GloasVersion {
+		return b.kzgCommitmentsRootMerkleProofGloas()
+	}
 	return merkle_tree.MerkleProof(4, 11, b.getSchema(false)...)
+}
+
+// kzgCommitmentsRootMerkleProofGloas computes the merkle proof for
+// blob_kzg_commitments_root through the Gloas body tree.
+// In Gloas, blob_kzg_commitments_root is at:
+//   GloasExecutionPayloadHeader[8] -> SignedExecutionPayloadHeader.Message[0] -> BeaconBody[10]
+// Generalized index = (16+10)*2*16 + 8 = 840, total depth = 4+1+4 = 9
+func (b *BeaconBody) kzgCommitmentsRootMerkleProofGloas() ([][32]byte, error) {
+	if b.SignedExecutionPayloadBid == nil {
+		return nil, errors.New("signed_execution_payload_bid is nil")
+	}
+	header := b.SignedExecutionPayloadBid.Message
+	if header == nil {
+		return nil, errors.New("execution_payload_header message is nil")
+	}
+
+	// Level 1: GloasExecutionPayloadHeader tree, proof for field 8 (BlobKzgCommitmentsRoot)
+	// 9 fields -> depth 4
+	headerSchema := []any{
+		header.ParentBlockHash[:], header.ParentBlockRoot[:], header.BlockHash[:],
+		header.FeeRecipient[:], &header.GasLimit, &header.BuilderIndex, &header.Slot, &header.Value,
+		header.BlobKzgCommitmentsRoot[:],
+	}
+	headerProof, err := merkle_tree.MerkleProof(4, 8, headerSchema...)
+	if err != nil {
+		return nil, err
+	}
+
+	// Level 2: SignedExecutionPayloadHeader tree, proof for field 0 (Message)
+	// 2 fields -> depth 1
+	signedHeaderSchema := []any{header, b.SignedExecutionPayloadBid.Signature[:]}
+	signedHeaderProof, err := merkle_tree.MerkleProof(1, 0, signedHeaderSchema...)
+	if err != nil {
+		return nil, err
+	}
+
+	// Level 3: BeaconBody tree, proof for field 10 (SignedExecutionPayloadBid)
+	// 12 fields -> depth 4
+	bodyProof, err := merkle_tree.MerkleProof(4, 10, b.getSchema(false)...)
+	if err != nil {
+		return nil, err
+	}
+
+	// Compose: headerProof (4) + signedHeaderProof (1) + bodyProof (4) = 9
+	proof := make([][32]byte, 0, 9)
+	proof = append(proof, headerProof...)
+	proof = append(proof, signedHeaderProof...)
+	proof = append(proof, bodyProof...)
+	return proof, nil
 }
 
 func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
