@@ -596,7 +596,8 @@ func findBijection(bucket []uint64, salt uint64) uint64 {
 		for i := uint16(0); i < m; i++ {
 			key := bucket[i]
 			// adding `& 31` - it doesn't have runtime overhead, but it tells for compiler that shift can't overflow
-			// and compiler generating less assembly checks: ~10% perf
+			// and compiler generating less assembly checks: ~10% perf.
+			// it's safe because: len(bucket) <= leafSize <= 24
 			mask0 |= uint32(1) << remap16(remix(key+salt), m&31)
 			mask1 |= uint32(1) << remap16(remix(key+salt+1), m&31)
 			mask2 |= uint32(1) << remap16(remix(key+salt+2), m&31)
