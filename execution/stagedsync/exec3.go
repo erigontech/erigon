@@ -140,11 +140,12 @@ func ExecV3(ctx context.Context,
 		if initialCycle {
 			agg.SetCollateAndBuildWorkers(dbg.CollateWorkers) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
 			agg.SetCompressWorkers(dbg.CompressWorkers)
-			agg.SetMergeWorkers(dbg.MergeWorkers) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
+			agg.SetMergeWorkers(dbg.MergeWorkers)
+			panic(dbg.MergeWorkers)
 		} else {
 			agg.SetCollateAndBuildWorkers(1)
 			agg.SetCompressWorkers(dbg.CompressWorkers)
-			agg.SetMergeWorkers(dbg.MergeWorkers) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
+			agg.SetMergeWorkers(dbg.MergeWorkers)
 		}
 	}
 
