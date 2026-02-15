@@ -586,18 +586,25 @@ func findSplit(bucket []uint64, salt uint64, fanout, unit uint16, count []uint16
 
 // findBijection finds a salt value such that all keys in bucket hash to distinct
 // positions in [0, m).
-// Uses 4-way salt parallelism: tries 4 consecutive salts per outer iteration
-// while reading the bucket only once.
+// Uses 8-way salt parallelism with branchless OR-accumulate
+// to exploit CPU instruction-level parallelism and avoid branch mispredictions.
 func findBijection(bucket []uint64, salt uint64) uint64 {
 	m := uint16(len(bucket))
 	fullMask := uint32((1 << m) - 1)
 	for {
-		var mask0, mask1, mask2, mask3 uint32
-		for _, key := range bucket {
-			mask0 |= uint32(1) << (remap16(remix(key+salt), m) & 31)
-			mask1 |= uint32(1) << (remap16(remix(key+salt+1), m) & 31)
-			mask2 |= uint32(1) << (remap16(remix(key+salt+2), m) & 31)
-			mask3 |= uint32(1) << (remap16(remix(key+salt+3), m) & 31)
+		var mask0, mask1, mask2, mask3, mask4, mask5, mask6, mask7 uint32
+		for i := uint16(0); i < m; i++ {
+			key := bucket[i]
+			// adding `& 31` - it doesn't have runtime overhead, but it tells for compiler that shift can't overflow
+			// and compiler generating less assembly checks: ~10% perf
+			mask0 |= uint32(1) << remap16(remix(key+salt), m&31)
+			mask1 |= uint32(1) << remap16(remix(key+salt+1), m&31)
+			mask2 |= uint32(1) << remap16(remix(key+salt+2), m&31)
+			mask3 |= uint32(1) << remap16(remix(key+salt+3), m&31)
+			mask4 |= uint32(1) << remap16(remix(key+salt+4), m&31)
+			mask5 |= uint32(1) << remap16(remix(key+salt+5), m&31)
+			mask6 |= uint32(1) << remap16(remix(key+salt+6), m&31)
+			mask7 |= uint32(1) << remap16(remix(key+salt+7), m&31)
 		}
 		if mask0 == fullMask {
 			return salt
@@ -611,7 +618,19 @@ func findBijection(bucket []uint64, salt uint64) uint64 {
 		if mask3 == fullMask {
 			return salt + 3
 		}
-		salt += 4
+		if mask4 == fullMask {
+			return salt + 4
+		}
+		if mask5 == fullMask {
+			return salt + 5
+		}
+		if mask6 == fullMask {
+			return salt + 6
+		}
+		if mask7 == fullMask {
+			return salt + 7
+		}
+		salt += 8
 	}
 }
 
