@@ -211,26 +211,8 @@ var snapshotCommand = cli.Command{
 			Flags:  joinFlags([]cli.Flag{}),
 		},
 		{
-			Name: "compress",
-			Action: func(c *cli.Context) error {
-				args := c.Args()
-				if args.Len() < 1 {
-					return errors.New("expecting file path as a first argument")
-				}
-				src := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
-
-				srcF := c.String("from")
-				dstF := args.First()
-				if srcF != "" {
-					f, err := os.OpenFile(srcF, 0, 0x655)
-					if err != nil {
-						return err
-					}
-					defer f.Close()
-					src = bufio.NewReaderSize(f, int(128*datasize.MB))
-				}
-				return doCompress(c, src, dstF)
-			},
+			Name:   "compress",
+			Action: doCompress,
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "from"},
