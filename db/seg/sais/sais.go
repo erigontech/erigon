@@ -11,6 +11,7 @@ package sais
 
 // copy of stdlib `index/suffixarray` SA-IS implementation
 // because Go's stdlib doesn't provide enough low-level api to call necessary funcs
+// also for Erigon - it's important to keep control on files reproducibility
 
 // Sais computes the suffix array of data into sa.
 // The caller must provide sa with len(sa) == len(data).
