@@ -86,7 +86,7 @@ func BenchmarkSais(b *testing.B) {
 			sa := make([]int32, size)
 			b.SetBytes(int64(size))
 			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				if err := Sais(data, sa); err != nil {
 					b.Fatal(err)
 				}
