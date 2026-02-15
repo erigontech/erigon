@@ -722,23 +722,25 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 	go func() {
 		peerId := conn.RemotePeer()
 
-		// Check if this peer fills any subnets with zero peers
-		peerFillsEmptySubnet := false
+		// Check if this peer helps any underserved subnets (< minimumPeersPerSubnet)
+		peerHelpsSubnets := false
 		if nodeVal, ok := s.pidToEnr.Load(peerId); ok {
 			if node, ok := nodeVal.(*enode.Node); ok {
-				emptySubnets := s.getEmptySubnets()
-				if len(emptySubnets) > 0 {
-					filledSubnets := s.getFilledSubnets(node, emptySubnets)
-					peerFillsEmptySubnet = len(filledSubnets) > 0
-					if peerFillsEmptySubnet {
-						log.Debug("[Sentinel] Peer fills empty subnets, bypassing limit", "peer", peerId, "subnets", filledSubnets)
+				var peerSubnets bitfield.Bitvector64
+				if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err == nil {
+					coverage := s.getSubnetCoverage()
+					for i := 0; i < attestationSubnetCount; i++ {
+						if peerSubnets[i/8]&(1<<(i%8)) != 0 && coverage[i] < minimumPeersPerSubnet {
+							peerHelpsSubnets = true
+							break
+						}
 					}
 				}
 			}
 		}
 
-		// If peer fills empty subnets, skip the limit check entirely
-		if s.HasTooManyPeers() && !peerFillsEmptySubnet {
+		// If peer helps underserved subnets, skip the limit check
+		if s.HasTooManyPeers() && !peerHelpsSubnets {
 			log.Trace("[Sentinel] Rejecting peer, at peer limit")
 			s.p2p.Host().Peerstore().RemovePeer(peerId)
 			s.p2p.Host().Network().ClosePeer(peerId)
