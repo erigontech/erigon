@@ -150,7 +150,7 @@ func TryFlock(dirs Dirs) (*flock.Flock, bool, error) {
 	l := dirs.newFlock()
 	locked, err := l.TryLock()
 	if err != nil {
-		return nil, false, convertFileLockError(err)
+		return nil, false, fmt.Errorf("%w, %s", convertFileLockError(err), dirs.DataDir)
 	}
 	return l, locked, nil
 }
@@ -169,7 +169,7 @@ func (d Dirs) MustFlock() (Dirs, *flock.Flock, error) {
 		return d, l, err
 	}
 	if !locked {
-		return d, l, ErrDataDirLocked
+		return d, l, fmt.Errorf("%w, %s", ErrDataDirLocked, d.DataDir)
 	}
 	return d, l, nil
 }
@@ -185,7 +185,7 @@ func (d Dirs) TryFlock() (unlock func(), err error) {
 	}()
 	locked, err := f.TryLock()
 	if err != nil {
-		err = convertFileLockError(err)
+		err = fmt.Errorf("%w, %s", convertFileLockError(err), d.DataDir)
 		return
 	}
 	if locked {
@@ -194,7 +194,7 @@ func (d Dirs) TryFlock() (unlock func(), err error) {
 			panicif.Err(f.Unlock())
 		}
 	} else {
-		err = ErrDataDirLocked
+		err = fmt.Errorf("%w %s", ErrDataDirLocked, d.DataDir)
 	}
 	return
 }
