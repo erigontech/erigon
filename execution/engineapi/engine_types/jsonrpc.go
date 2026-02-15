@@ -49,6 +49,7 @@ type ExecutionPayload struct {
 	Withdrawals     []*types.Withdrawal `json:"withdrawals"`
 	BlobGasUsed     *hexutil.Uint64     `json:"blobGasUsed"`
 	ExcessBlobGas   *hexutil.Uint64     `json:"excessBlobGas"`
+	SlotNumber      *hexutil.Uint64     `json:"slotNumber"`
 	BlockAccessList *hexutil.Bytes      `json:"blockAccessList"`
 }
 
@@ -66,6 +67,7 @@ type PayloadAttributes struct {
 	SuggestedFeeRecipient common.Address      `json:"suggestedFeeRecipient" gencodec:"required"`
 	Withdrawals           []*types.Withdrawal `json:"withdrawals"`
 	ParentBeaconBlockRoot *common.Hash        `json:"parentBeaconBlockRoot"`
+	SlotNumber            *hexutil.Uint64     `json:"slotNumber"`
 }
 
 // TransitionConfiguration represents the correct configurations of the CL and the EL
@@ -203,6 +205,10 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 		excessBlobGas := *header.ExcessBlobGas
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
 	}
+	if header.SlotNumber != nil {
+		slotNumber := *header.SlotNumber
+		res.SlotNumber = (*hexutil.Uint64)(&slotNumber)
+	}
 	return res
 }
 
@@ -242,6 +248,10 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
 	}
 	if payload.Version >= 4 {
+		if payload.SlotNumber != nil {
+			slotNumber := *payload.SlotNumber
+			res.SlotNumber = (*hexutil.Uint64)(&slotNumber)
+		}
 		res.BlockAccessList = types.ConvertBlockAccessListFromTypesProto(payload.BlockAccessList)
 	}
 	return res

@@ -669,6 +669,7 @@ func doPrune(t *testing.T, db kv.RwDB, pruneTo uint64) {
 	//logger := testlog.Logger(t, log.LvlCrit)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
+	defer tx.Rollback()
 
 	logEvery := time.NewTicker(20 * time.Second)
 
