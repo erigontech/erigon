@@ -188,3 +188,67 @@ func (s *SequenceReader) ReverseIterator(v int) stream.U64 {
 
 	panic(fmt.Sprintf("unknown sequence encoding: %d", s.currentEnc))
 }
+
+// Merge merges the other sequence into this one, returning a built SequenceBuilder
+// with outBaseNum. Both sequences must be pre-sorted.
+// Call AppendBytes on the result to serialize.
+func (s *SequenceReader) Merge(other *SequenceReader, outBaseNum uint64, it1, it2 *SequenceIterator) (*SequenceBuilder, error) {
+	it1.Reset(s, 0)
+	it2.Reset(other, 0)
+	newSeq := NewBuilder(outBaseNum, s.Count()+other.Count(), other.Max())
+	for it1.HasNext() {
+		v, err := it1.Next()
+		if err != nil {
+			return nil, err
+		}
+		newSeq.AddOffset(v)
+	}
+	for it2.HasNext() {
+		v, err := it2.Next()
+		if err != nil {
+			return nil, err
+		}
+		newSeq.AddOffset(v)
+	}
+	newSeq.Build()
+	return newSeq, nil
+}
+
+// SequenceIterator is a reusable iterator for SequenceReader.
+// Create as a value and call Reset() to (re)initialize — avoids heap allocation
+// for SimpleEncoding (the common case).
+//
+//	var it multiencseq.SequenceIterator
+//	for ... {
+//	    seq.Reset(baseNum, data)
+//	    it.Reset(seq, 0)
+//	    for it.HasNext() { v, _ := it.Next() }
+//	}
+type SequenceIterator struct {
+	sseqIt  simpleseq.SimpleSequenceIterator
+	refIt   eliasfano32.RebasedIterWrapper
+	current stream.U64
+}
+
+func (it *SequenceIterator) Reset(s *SequenceReader, from int) {
+	switch s.currentEnc {
+	case SimpleEncoding:
+		it.sseqIt.Reset(&s.sseq)
+		if from > 0 {
+			it.sseqIt.Seek(uint64(from))
+		}
+		it.current = &it.sseqIt
+	case PlainEliasFano, RebasedEliasFano:
+		it.refIt.Reset(&s.ref, false)
+		if from > 0 {
+			it.refIt.Seek(uint64(from))
+		}
+		it.current = &it.refIt
+	default:
+		panic(fmt.Sprintf("unknown sequence encoding: %d", s.currentEnc))
+	}
+}
+
+func (it *SequenceIterator) HasNext() bool         { return it.current.HasNext() }
+func (it *SequenceIterator) Next() (uint64, error) { return it.current.Next() }
+func (it *SequenceIterator) Close()                {}

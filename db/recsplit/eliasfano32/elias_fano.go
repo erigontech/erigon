@@ -352,7 +352,19 @@ func (efi *EliasFanoIter) HasNext() bool {
 	return efi.itemsIterated <= efi.count
 }
 
-func (efi *EliasFanoIter) Reset() {
+func (efi *EliasFanoIter) Reset(ef *EliasFano, reverse bool) {
+	efi.ef = ef
+	efi.lowerBits = ef.lowerBits
+	efi.upperBits = ef.upperBits
+	efi.count = ef.count
+	efi.lowerBitsMask = ef.lowerBitsMask
+	efi.l = ef.l
+	efi.upperStep = uint64(1) << ef.l
+	efi.reverse = reverse
+	efi.internalReset()
+}
+
+func (efi *EliasFanoIter) internalReset() {
 	efi.upper = 0
 	efi.upperIdx = 0
 	efi.lowerIdx = 0
@@ -381,7 +393,7 @@ func (efi *EliasFanoIter) init() {
 func (efi *EliasFanoIter) Seek(n uint64) {
 	//fmt.Printf("b seek2: efi.upperMask(%d)=%d, upperIdx=%d, lowerIdx=%d, itemsIterated=%d\n", n, bits.TrailingZeros64(efi.upperMask), efi.upperIdx, efi.lowerIdx, efi.itemsIterated)
 	//fmt.Printf("b seek2: efi.upper=%d\n", efi.upper)
-	efi.Reset()
+	efi.internalReset()
 	nn, nextI, ok := efi.ef.search(n, efi.reverse)
 	_ = nn
 	if !ok {
