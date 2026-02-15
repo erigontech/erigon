@@ -634,6 +634,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	if iit.ii.noFsync {
 		comp.DisableFsync()
 	}
+	comp.CollectTimings()
 
 	write := iit.dataWriter(comp, false)
 	p := ps.AddNew(path.Base(datPath), 1)
