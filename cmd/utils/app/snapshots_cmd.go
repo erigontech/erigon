@@ -2200,54 +2200,95 @@ func doUncompress(cliCtx *cli.Context) error {
 		return err
 	}
 	defer l.Unlock()
-	var logger log.Logger
-	if logger, err = debug.SetupSimple(cliCtx, true /* rootLogger */); err != nil {
+	if _, err = debug.SetupSimple(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
-	ctx := cliCtx.Context
 
 	args := cliCtx.Args()
 	if args.Len() < 1 {
 		return errors.New("expecting file path as a first argument")
 	}
-	f := args.First()
 
-	decompressor, err := seg.NewDecompressor(f)
+	decompressor, err := seg.NewDecompressor(args.First())
 	if err != nil {
 		return err
 	}
 	defer decompressor.Close()
 	defer decompressor.MadvSequential().DisableReadAhead()
 
+	src, cleanup := decompressor2bufio(decompressor)
+	defer cleanup()
+
 	wr := bufio.NewWriterSize(os.Stdout, int(128*datasize.MB))
 	defer wr.Flush()
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
+	_, err = io.Copy(wr, src)
+	return err
+}
 
-	var i uint
-	var numBuf [binary.MaxVarintLen64]byte
+// decompressor2bufio reads words from a seg.Decompressor in a background goroutine
+// and returns a bufio.Reader producing uvarint-length-prefixed words.
+// The returned cleanup function must be deferred by the caller.
+func decompressor2bufio(d *seg.Decompressor) (*bufio.Reader, func()) {
+	pr, pw := io.Pipe()
+	go func() {
+		wr := bufio.NewWriterSize(pw, int(128*datasize.MB))
+		var numBuf [binary.MaxVarintLen64]byte
+		g := d.MakeGetter()
+		buf := make([]byte, 0, 1*datasize.MB)
+		for g.HasNext() {
+			buf, _ = g.Next(buf[:0])
+			n := binary.PutUvarint(numBuf[:], uint64(len(buf)))
+			if _, err := wr.Write(numBuf[:n]); err != nil {
+				pw.CloseWithError(err)
+				return
+			}
+			if _, err := wr.Write(buf); err != nil {
+				pw.CloseWithError(err)
+				return
+			}
+		}
+		wr.Flush()
+		pw.Close()
+	}()
+	return bufio.NewReaderSize(pr, int(128*datasize.MB)), func() { pr.Close() }
+}
 
-	g := decompressor.MakeGetter()
-	buf := make([]byte, 0, 1*datasize.MB)
-	for g.HasNext() {
-		buf, _ = g.Next(buf[:0])
-		n := binary.PutUvarint(numBuf[:], uint64(len(buf)))
-		if _, err := wr.Write(numBuf[:n]); err != nil {
-			return err
-		}
-		if _, err := wr.Write(buf); err != nil {
-			return err
-		}
-		i++
+// bufio2compressor reads uvarint-length-prefixed words from src and writes them to a seg.Writer.
+// Optional wordFunc transforms each word before writing; return nil to skip writing the word.
+func bufio2compressor(ctx context.Context, src *bufio.Reader, w *seg.Writer, wordFunc func(word []byte) ([]byte, error)) error {
+	word := make([]byte, 0, int(1*datasize.MB))
+	var l uint64
+	var err error
+	for l, err = binary.ReadUvarint(src); err == nil; l, err = binary.ReadUvarint(src) {
 		select {
-		case <-logEvery.C:
-			_, fileName := filepath.Split(decompressor.FilePath())
-			progress := 100 * float64(i) / float64(decompressor.Count())
-			logger.Info("[uncompress] ", "progress", fmt.Sprintf("%.2f%%", progress), "file", fileName)
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
+
+		if cap(word) < int(l) {
+			word = make([]byte, l)
+		} else {
+			word = word[:l]
+		}
+		if _, err = io.ReadFull(src, word); err != nil {
+			return err
+		}
+		if wordFunc != nil {
+			word, err = wordFunc(word)
+			if err != nil {
+				return err
+			}
+			if word == nil {
+				continue
+			}
+		}
+		if _, err := w.Write(word); err != nil {
+			return err
+		}
+	}
+	if !errors.Is(err, io.EOF) {
+		return err
 	}
 	return nil
 }
@@ -2289,29 +2330,9 @@ func doCompress(cliCtx *cli.Context) error {
 		defer decompressor.MadvSequential().DisableReadAhead()
 		log.Info("[compress] from", "from", srcF)
 
-		pr, pw := io.Pipe()
-		defer pr.Close()
-		go func() {
-			wr := bufio.NewWriterSize(pw, int(128*datasize.MB))
-			var numBuf [binary.MaxVarintLen64]byte
-			g := decompressor.MakeGetter()
-			buf := make([]byte, 0, 1*datasize.MB)
-			for g.HasNext() {
-				buf, _ = g.Next(buf[:0])
-				n := binary.PutUvarint(numBuf[:], uint64(len(buf)))
-				if _, err := wr.Write(numBuf[:n]); err != nil {
-					pw.CloseWithError(err)
-					return
-				}
-				if _, err := wr.Write(buf); err != nil {
-					pw.CloseWithError(err)
-					return
-				}
-			}
-			wr.Flush()
-			pw.Close()
-		}()
-		src = bufio.NewReaderSize(pr, int(128*datasize.MB))
+		var cleanup func()
+		src, cleanup = decompressor2bufio(decompressor)
+		defer cleanup()
 	}
 
 	compressCfg := seg.DefaultCfg
@@ -2347,56 +2368,35 @@ func doCompress(cliCtx *cli.Context) error {
 	defer c.Close()
 	w := seg.NewWriter(c, compression)
 
-	word := make([]byte, 0, int(1*datasize.MB))
 	var snappyBuf, unSnappyBuf []byte
 	var concatBuf []byte
 	concatI := 0
 
-	var l uint64
-	for l, err = binary.ReadUvarint(src); err == nil; l, err = binary.ReadUvarint(src) {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		if cap(word) < int(l) {
-			word = make([]byte, l)
-		} else {
-			word = word[:l]
-		}
-		if _, err = io.ReadFull(src, word); err != nil {
-			return err
-		}
-
+	if err := bufio2compressor(ctx, src, w, func(word []byte) ([]byte, error) {
 		if justPrint {
 			fmt.Printf("%x\n\n", word)
-			continue
+			return nil, nil
 		}
 
 		concatI++
 		if concat > 0 {
 			if concatI%concat != 0 {
 				concatBuf = append(concatBuf, word...)
-				continue
+				return nil, nil
 			}
-
 			word = concatBuf
 			concatBuf = concatBuf[:0]
 		}
 
 		snappyBuf, word = compress.EncodeZstdIfNeed(snappyBuf[:0], word, doSnappyEachWord)
+		var err error
 		unSnappyBuf, word, err = compress.DecodeZstdIfNeed(unSnappyBuf[:0], word, doUnSnappyEachWord)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		_, _ = snappyBuf, unSnappyBuf
-
-		if _, err := w.Write(word); err != nil {
-			return err
-		}
-	}
-	if !errors.Is(err, io.EOF) {
+		return word, nil
+	}); err != nil {
 		return err
 	}
 	if err := c.Compress(); err != nil {
