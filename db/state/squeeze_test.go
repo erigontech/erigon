@@ -71,7 +71,7 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 
 	bk, bv := make([]byte, keySize), make([]byte, valueSize)
 	for i := 0; i < keyCount; i++ {
-		n, err := rnd.Read(bk[:])
+		n, err := rnd.Read(bk)
 		require.Equal(tb, keySize, n)
 		require.NoError(tb, err)
 		keys[i] = common.Copy(bk[:n])
@@ -295,7 +295,7 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	require.NotEmpty(t, finalRoot)
 	require.NotEqual(t, empty.RootHash.Bytes(), finalRoot)
 
-	require.Equal(t, rootInFiles, finalRoot[:])
+	require.Equal(t, rootInFiles, finalRoot)
 }
 
 func composite(k, k2 []byte) []byte {
@@ -390,7 +390,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil, 0)
 		require.NoError(t, err)
 
-		err = domains.DomainPut(kv.CommitmentDomain, tx, someKey, aux[:], txNum, nil, 0)
+		err = domains.DomainPut(kv.CommitmentDomain, tx, someKey, common.Copy(aux[:]), txNum, nil, 0)
 		require.NoError(t, err)
 		maxWrite = txNum
 	}
@@ -442,7 +442,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 
 	v, _, err := roTx.GetLatest(kv.CommitmentDomain, someKey)
 	require.NoError(t, err)
-	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v[:]))
+	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v))
 }
 
 func TestAggregatorV3_SharedDomains(t *testing.T) {

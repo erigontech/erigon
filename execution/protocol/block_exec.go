@@ -21,7 +21,6 @@ package protocol
 
 import (
 	"cmp"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"time"
@@ -91,6 +90,7 @@ func ExecuteBlockEphemerally(
 ) (res *EphemeralExecResult, executeBlockErr error) {
 	defer blockExecutionTimer.ObserveDuration(time.Now())
 	ibs := state.New(stateReader)
+	defer ibs.Release(false)
 	ibs.SetHooks(vmConfig.Tracer)
 	header := block.Header()
 
@@ -156,7 +156,7 @@ func ExecuteBlockEphemerally(
 	receiptSha := types.DeriveSha(receipts)
 	if !vmConfig.StatelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
 		if dbg.LogHashMismatchReason() {
-			logReceipts(receipts, includedTxs, chainConfig, header, logger)
+			ethutils.LogReceipts(log.LvlWarn, "receipt hash mismatch in ExecuteBlockEphemerally", receipts, includedTxs, chainConfig, header, logger)
 		}
 
 		return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
@@ -223,34 +223,6 @@ func ExecuteBlockEphemerally(
 	}
 
 	return execRs, nil
-}
-
-func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Config, header *types.Header, logger log.Logger) string {
-	if len(receipts) == 0 {
-		// no-op, can happen if vmConfig.NoReceipts=true or vmConfig.StatelessExec=true
-		return ""
-	}
-
-	// note we do not return errors from this func since this is a debug-only
-	// informative feature that is best-effort and should not interfere with execution
-	if len(receipts) != len(txns) {
-		logger.Error("receipts and txns sizes differ", "receiptsLen", receipts.Len(), "txnsLen", txns.Len())
-		return ""
-	}
-
-	marshalled := make([]map[string]any, 0, len(receipts))
-	for i, receipt := range receipts {
-		txn := txns[i]
-		marshalled = append(marshalled, ethutils.MarshalReceipt(receipt, txn, cc, header, txn.Hash(), true, false))
-	}
-
-	result, err := json.Marshal(marshalled)
-	if err != nil {
-		logger.Error("marshalling error when logging receipts", "err", err)
-		return ""
-	}
-
-	return string(result)
 }
 
 func rlpHash(x any) (h common.Hash) {
@@ -423,9 +395,7 @@ func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts bool, r
 				return nil
 			}
 			if dbg.LogHashMismatchReason() {
-				if result := logReceipts(receipts, txns, chainConfig, h, logger); len(result) > 0 {
-					logger.Info("marshalled receipts", "block", h.Number.Uint64(), "result", string(result))
-				}
+				ethutils.LogReceipts(log.LvlWarn, "receipt hash mismatch in BlockPostValidation", receipts, txns, chainConfig, h, logger)
 			}
 			return fmt.Errorf("receiptHash mismatch: %x != %x, headerNum=%d, %x",
 				receiptHash, h.ReceiptHash, h.Number.Uint64(), h.Hash())
@@ -438,8 +408,7 @@ func BlockPostValidation(blockGasUsed, blobGasUsed uint64, checkReceipts bool, r
 	}
 
 	if dbg.TraceLogs && dbg.TraceBlock(h.Number.Uint64()) {
-		result := logReceipts(receipts, txns, chainConfig, h, logger)
-		fmt.Println(h.Number.Uint64(), "receipts", result)
+		ethutils.LogReceipts(log.LvlInfo, "trace logs", receipts, txns, chainConfig, h, logger)
 	}
 
 	return nil

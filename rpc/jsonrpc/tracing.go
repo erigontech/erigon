@@ -107,6 +107,11 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	}
 	engine := api.engine()
 
+	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	if err != nil {
+		return err
+	}
+
 	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, api.stateCache, api._txNumReader, tx, 0)
 	if err != nil {
 		return err
@@ -370,6 +375,11 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 		return err
 	}
 
+	err = rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	if err != nil {
+		return err
+	}
+
 	var stateReader state.StateReader
 	if config == nil || config.TxIndex == nil || isLatest {
 		stateReader, err = rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, blockNumber, isLatest, 0, api.stateCache, api._txNumReader)
@@ -379,7 +389,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	if err != nil {
 		return fmt.Errorf("create state reader: %v", err)
 	}
-	header, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNumber), dbtx)
+	header, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNumber), dbtx)
 	if err != nil {
 		return fmt.Errorf("could not fetch header %d(%x): %v", blockNumber, hash, err)
 	}
@@ -499,7 +509,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	}
 
 	var header *types.Header
-	header, err = api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNum), tx)
+	header, err = api.headerByNumber(ctx, rpc.BlockNumber(blockNum), tx)
 	if err != nil {
 		return err
 	}
@@ -509,6 +519,11 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	}
 
 	var stateReader state.StateReader
+
+	err = rpchelper.CheckBlockExecuted(tx, blockNum)
+	if err != nil {
+		return err
+	}
 
 	if simulateContext.TransactionIndex == nil || *simulateContext.TransactionIndex == -1 || isLatest {
 		var blockNrOrHash rpc.BlockNumberOrHash

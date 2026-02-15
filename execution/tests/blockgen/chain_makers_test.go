@@ -20,6 +20,7 @@
 package blockgen_test
 
 import (
+	"bytes"
 	"math/big"
 	"testing"
 
@@ -63,7 +64,7 @@ func TestGenerateChain(t *testing.T) {
 		Difficulty: big.NewInt(0),
 		Alloc:      types.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
 	}
-	m := mock.MockWithGenesis(t, gspec, key1, false)
+	m := mock.MockWithGenesis(t, gspec, key1)
 
 	// This call generates a chain of 5 blocks. The function runs for
 	// each block and adds different features to gen based on the
@@ -206,10 +207,10 @@ func TestGenerateChain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(b) != string(msg.GetData()) {
+	if !bytes.Equal(b, msg.GetData()) {
 		t.Errorf("receipt data %s do not match the expected msg %s", string(msg.GetData()), string(b))
 	}
-	if string(b) != string(msg.GetData()) {
+	if !bytes.Equal(b, msg.GetData()) {
 		t.Errorf("receipt data %s do not match the expected msg %s", string(msg.GetData()), string(b))
 	}
 

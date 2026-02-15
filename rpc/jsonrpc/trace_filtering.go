@@ -99,7 +99,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 
-	header, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNumber), tx)
+	header, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNumber), tx)
 	if err != nil {
 		return nil, err
 	}
@@ -798,6 +798,11 @@ func (api *TraceAPIImpl) callBlock(
 		RequireCanonical: true,
 	}
 
+	err := rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, nil, err
@@ -910,6 +915,11 @@ func (api *TraceAPIImpl) callTransaction(
 		BlockNumber:      &parentNo,
 		BlockHash:        &parentHash,
 		RequireCanonical: true,
+	}
+
+	err := rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	if err != nil {
+		return nil, err
 	}
 
 	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)

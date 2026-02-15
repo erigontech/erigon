@@ -713,6 +713,12 @@ func opNumber(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	return pc, nil, nil
 }
 
+func opSlotNum(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	v := new(uint256.Int).SetUint64(evm.Context.SlotNumber)
+	scope.Stack.push(*v)
+	return pc, nil, nil
+}
+
 func opDifficulty(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	var v *uint256.Int
 	if evm.Context.PrevRanDao != nil {

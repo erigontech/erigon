@@ -50,7 +50,7 @@ type Genesis struct {
 	Difficulty *big.Int       `json:"difficulty" gencodec:"required"`
 	Mixhash    common.Hash    `json:"mixHash"`
 	Coinbase   common.Address `json:"coinbase"`
-	Alloc      GenesisAlloc   `json:"alloc"      gencodec:"required"`
+	Alloc      GenesisAlloc   `json:"alloc"`
 
 	AuRaSeal *AuRaSeal `json:"seal"`
 
@@ -67,6 +67,7 @@ type Genesis struct {
 	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
 	RequestsHash          *common.Hash `json:"requestsHash"`          // EIP-7685
 	BlockAccessListHash   *common.Hash `json:"blockAccessListHash"`   // EIP-7928
+	SlotNumber            *uint64      `json:"slotNumber"`            // EIP-7843
 }
 
 type AuRaSeal struct {
@@ -136,6 +137,7 @@ type genesisSpecMarshaling struct {
 	BaseFee       *math.HexOrDecimal256
 	BlobGasUsed   *math.HexOrDecimal64
 	ExcessBlobGas *math.HexOrDecimal64
+	SlotNumber    *math.HexOrDecimal64
 	Alloc         map[common.UnprefixedAddress]GenesisAccount
 }
 
