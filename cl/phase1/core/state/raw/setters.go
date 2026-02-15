@@ -579,3 +579,35 @@ func (b *BeaconState) SetProposerLookahead(proposerLookahead solid.Uint64VectorS
 	b.proposerLookahead = proposerLookahead
 	b.markLeaf(ProposerLookaheadLeafIndex)
 }
+
+// Gloas/EIP-7732 setters
+
+func (b *BeaconState) SetLatestExecutionPayloadBid(bid *cltypes.ExecutionPayloadBid) {
+	b.latestExecutionPayloadBid = bid
+	b.markLeaf(LatestExecutionPayloadBidLeafIndex)
+}
+
+func (b *BeaconState) SetExecutionPayloadAvailability(availability *solid.BitVector) {
+	b.executionPayloadAvailability = availability
+	b.markLeaf(ExecutionPayloadAvailabilityLeafIndex)
+}
+
+func (b *BeaconState) SetBuilderPendingPayments(payments *solid.VectorSSZ[*cltypes.BuilderPendingPayment]) {
+	b.builderPendingPayments = payments
+	b.markLeaf(BuilderPendingPaymentsLeafIndex)
+}
+
+func (b *BeaconState) SetBuilderPendingWithdrawals(withdrawals *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]) {
+	b.builderPendingWithdrawals = withdrawals
+	b.markLeaf(BuilderPendingWithdrawalsLeafIndex)
+}
+
+func (b *BeaconState) SetLatestBlockHash(hash common.Hash) {
+	b.latestBlockHash = hash
+	b.markLeaf(LatestBlockHashLeafIndex)
+}
+
+func (b *BeaconState) SetLatestWithdrawalsRoot(root common.Hash) {
+	b.latestWithdrawalsRoot = root
+	b.markLeaf(LatestWithdrawalsRootLeafIndex)
+}

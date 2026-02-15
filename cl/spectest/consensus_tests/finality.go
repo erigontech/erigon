@@ -45,6 +45,8 @@ var FinalityFinality = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c spe
 		if err := machine.TransitionState(c.Machine, testState, block); err != nil {
 			require.NoError(t, fmt.Errorf("cannot transition state: %w. slot=%d. start_slot=%d", err, block.Block.Slot, startSlot))
 		}
+		// [Gloas:EIP7732] Simulate execution payload delivery after each block
+		machine.PayloadStateTransitionNoStore(testState, block.Block)
 	}
 	expectedRoot, err := testState.HashSSZ()
 	require.NoError(t, err)

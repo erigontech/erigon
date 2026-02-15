@@ -17,6 +17,9 @@
 package consensus_tests
 
 import (
+	"io/fs"
+	"testing"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -146,10 +149,7 @@ func addSszTests() {
 		With("SyncCommittee", getSSZStaticConsensusTest(&solid.SyncCommittee{})).
 		//	With("SyncCommitteeMessage", getSSZStaticConsensusTest(&cltypes.SyncCommitteeMessage{})).
 		With("Validator", getSSZStaticConsensusTest(solid.NewValidator())).
-		With("ExecutionPayloadHeader", sszStaticTestNewObjectByFunc(
-			func(v clparams.StateVersion) *cltypes.Eth1Header {
-				return cltypes.NewEth1Header(v)
-			}, withTestJson())).
+		With("ExecutionPayloadHeader", executionPayloadHeaderSSZTest()).
 		With("SyncCommitteeContribution", sszStaticTestByEmptyObject(&cltypes.Contribution{})).
 		With("Withdrawal", sszStaticTestByEmptyObject(&cltypes.Withdrawal{}, withTestJson())).
 		With("LightClientHeader", sszStaticTestNewObjectByFunc(
@@ -203,5 +203,35 @@ func addSszTests() {
 		With("PendingPartialWithdrawal", sszStaticTestByEmptyObject(&solid.PendingPartialWithdrawal{}, runAfterVersion(clparams.ElectraVersion))). // no need json test
 		With("DataColumnsByRootIdentifier", sszStaticTestByEmptyObject(&cltypes.DataColumnsByRootIdentifier{}, runAfterVersion(clparams.FuluVersion))).
 		With("MatrixEntry", sszStaticTestByEmptyObject(&cltypes.MatrixEntry{}, withTestJson(), runAfterVersion(clparams.FuluVersion))).
-		With("DataColumnSidecar", sszStaticTestByEmptyObject(&cltypes.DataColumnSidecar{}, withTestJson(), runAfterVersion(clparams.FuluVersion)))
+		With("DataColumnSidecar", sszStaticTestNewObjectByFunc(func(v clparams.StateVersion) *cltypes.DataColumnSidecar {
+			return cltypes.NewDataColumnSidecarWithVersion(v)
+		}, withTestJson(), runAfterVersion(clparams.FuluVersion))).
+		// Gloas/EIP-7732 types
+		With("PayloadAttestationData", sszStaticTestByEmptyObject(&cltypes.PayloadAttestationData{}, runAfterVersion(clparams.GloasVersion))).
+		With("PayloadAttestation", sszStaticTestByEmptyObject(cltypes.NewPayloadAttestation(), runAfterVersion(clparams.GloasVersion))).
+		With("PayloadAttestationMessage", sszStaticTestByEmptyObject(cltypes.NewPayloadAttestationMessage(), runAfterVersion(clparams.GloasVersion))).
+		With("IndexedPayloadAttestation", sszStaticTestByEmptyObject(cltypes.NewIndexedPayloadAttestation(), runAfterVersion(clparams.GloasVersion))).
+		With("BuilderPendingPayment", sszStaticTestByEmptyObject(cltypes.NewBuilderPendingPayment(), runAfterVersion(clparams.GloasVersion))).
+		With("BuilderPendingWithdrawal", sszStaticTestByEmptyObject(&cltypes.BuilderPendingWithdrawal{}, runAfterVersion(clparams.GloasVersion))).
+		With("ExecutionPayloadEnvelope", sszStaticTestByEmptyObject(cltypes.NewExecutionPayloadEnvelope(), withTestJson(), runAfterVersion(clparams.GloasVersion))).
+		With("SignedExecutionPayloadEnvelope", sszStaticTestByEmptyObject(cltypes.NewSignedExecutionPayloadEnvelope(), runAfterVersion(clparams.GloasVersion))).
+		With("SignedExecutionPayloadHeader", sszStaticTestByEmptyObject(cltypes.NewSignedExecutionPayloadHeader(), runAfterVersion(clparams.GloasVersion))).
+		With("ForkChoiceNode", sszStaticTestByEmptyObject(&cltypes.ForkChoiceNode{}, runAfterVersion(clparams.GloasVersion)))
+}
+
+// executionPayloadHeaderSSZTest returns a handler that dispatches to the correct type based on version.
+// Pre-Gloas: ExecutionPayloadHeader is Eth1Header. Gloas+: it's GloasExecutionPayloadHeader.
+func executionPayloadHeaderSSZTest() spectest.Handler {
+	preGloas := sszStaticTestNewObjectByFunc(
+		func(v clparams.StateVersion) *cltypes.Eth1Header {
+			return cltypes.NewEth1Header(v)
+		}, withTestJson())
+	postGloas := sszStaticTestByEmptyObject(cltypes.NewExecutionPayloadBid(), runAfterVersion(clparams.GloasVersion))
+
+	return spectest.HandlerFunc(func(t *testing.T, fsroot fs.FS, c spectest.TestCase) error {
+		if c.Version() >= clparams.GloasVersion {
+			return postGloas.Run(t, fsroot, c)
+		}
+		return preGloas.Run(t, fsroot, c)
+	})
 }

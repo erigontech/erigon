@@ -44,8 +44,9 @@ const (
 type LightClientHeader struct {
 	Beacon *BeaconBlockHeader `json:"beacon"`
 
-	ExecutionPayloadHeader *Eth1Header         `json:"execution_payload_header,omitempty"`
-	ExecutionBranch        solid.HashVectorSSZ `json:"execution_branch,omitempty"`
+	ExecutionPayloadHeader *Eth1Header                  `json:"execution_payload_header,omitempty"`
+	GloasExecution         *GloasExecutionPayloadHeader `json:"execution,omitempty"`
+	ExecutionBranch        solid.HashVectorSSZ          `json:"execution_branch,omitempty"`
 
 	version clparams.StateVersion
 }
@@ -55,6 +56,14 @@ func NewLightClientHeader(version clparams.StateVersion) *LightClientHeader {
 		return &LightClientHeader{
 			version: version,
 			Beacon:  &BeaconBlockHeader{},
+		}
+	}
+	if version >= clparams.GloasVersion {
+		return &LightClientHeader{
+			version:         version,
+			Beacon:          &BeaconBlockHeader{},
+			ExecutionBranch: solid.NewHashVector(ExecutionBranchSize),
+			GloasExecution:  &GloasExecutionPayloadHeader{},
 		}
 	}
 	return &LightClientHeader{
@@ -76,7 +85,10 @@ func (l *LightClientHeader) EncodeSSZ(buf []byte) ([]byte, error) {
 func (l *LightClientHeader) DecodeSSZ(buf []byte, version int) error {
 	l.version = clparams.StateVersion(version)
 	l.Beacon = &BeaconBlockHeader{}
-	if version >= int(clparams.CapellaVersion) {
+	if version >= int(clparams.GloasVersion) {
+		l.GloasExecution = &GloasExecutionPayloadHeader{}
+		l.ExecutionBranch = solid.NewHashVector(ExecutionBranchSize)
+	} else if version >= int(clparams.CapellaVersion) {
 		l.ExecutionPayloadHeader = NewEth1Header(l.version)
 		l.ExecutionBranch = solid.NewHashVector(ExecutionBranchSize)
 	}
@@ -85,7 +97,10 @@ func (l *LightClientHeader) DecodeSSZ(buf []byte, version int) error {
 
 func (l *LightClientHeader) EncodingSizeSSZ() int {
 	size := l.Beacon.EncodingSizeSSZ()
-	if l.version >= clparams.CapellaVersion {
+	if l.version >= clparams.GloasVersion {
+		size += l.GloasExecution.EncodingSizeSSZ()
+		size += l.ExecutionBranch.EncodingSizeSSZ()
+	} else if l.version >= clparams.CapellaVersion {
 		size += l.ExecutionPayloadHeader.EncodingSizeSSZ() + 4 // the extra 4 is for the offset
 		size += l.ExecutionBranch.EncodingSizeSSZ()
 	}
@@ -97,6 +112,9 @@ func (l *LightClientHeader) HashSSZ() ([32]byte, error) {
 }
 
 func (l *LightClientHeader) Static() bool {
+	if l.version >= clparams.GloasVersion {
+		return true // GloasExecutionPayloadHeader is static
+	}
 	return l.version < clparams.CapellaVersion
 }
 
@@ -108,7 +126,9 @@ func (l *LightClientHeader) getSchema() []any {
 	schema := []any{
 		l.Beacon,
 	}
-	if l.version >= clparams.CapellaVersion {
+	if l.version >= clparams.GloasVersion {
+		schema = append(schema, l.GloasExecution, l.ExecutionBranch)
+	} else if l.version >= clparams.CapellaVersion {
 		schema = append(schema, l.ExecutionPayloadHeader, l.ExecutionBranch)
 	}
 	return schema

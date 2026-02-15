@@ -151,6 +151,10 @@ func sszStaticTestNewObjectByFunc[T unmarshalerMarshalerHashable](
 			// skip
 			return nil
 		}
+		if testOptions.runBeforeVersion > 0 && c.Version() >= testOptions.runBeforeVersion {
+			// skip versions at or after the cutoff
+			return nil
+		}
 
 		// expected root
 		rootBytes, err := fs.ReadFile(fsroot, rootsFile)
@@ -197,8 +201,9 @@ func sszStaticTestNewObjectByFunc[T unmarshalerMarshalerHashable](
 }
 
 type sszStaticTestOption struct {
-	testJson        bool
-	runAfterVersion clparams.StateVersion
+	testJson         bool
+	runAfterVersion  clparams.StateVersion
+	runBeforeVersion clparams.StateVersion
 }
 
 func withTestJson() func(*sszStaticTestOption) {
@@ -210,5 +215,11 @@ func withTestJson() func(*sszStaticTestOption) {
 func runAfterVersion(version clparams.StateVersion) func(*sszStaticTestOption) {
 	return func(opt *sszStaticTestOption) {
 		opt.runAfterVersion = version
+	}
+}
+
+func runBeforeVersion(version clparams.StateVersion) func(*sszStaticTestOption) {
+	return func(opt *sszStaticTestOption) {
+		opt.runBeforeVersion = version
 	}
 }

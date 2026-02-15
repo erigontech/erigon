@@ -58,6 +58,8 @@ func (b *BeaconState) baseOffsetSSZ() uint32 {
 		return 2736653
 	case clparams.FuluVersion:
 		return 2736653
+	case clparams.GloasVersion:
+		return 2741821
 	default:
 		// ?????
 		panic("tf is that")
@@ -78,8 +80,11 @@ func (b *BeaconState) getSchema() []any {
 	}
 	s = append(s, b.previousEpochParticipation, b.currentEpochParticipation, &b.justificationBits, &b.previousJustifiedCheckpoint, &b.currentJustifiedCheckpoint,
 		&b.finalizedCheckpoint, b.inactivityScores, b.currentSyncCommittee, b.nextSyncCommittee)
-	if b.version >= clparams.BellatrixVersion {
+	if b.version >= clparams.BellatrixVersion && b.version < clparams.GloasVersion {
 		s = append(s, b.latestExecutionPayloadHeader)
+	}
+	if b.version >= clparams.GloasVersion {
+		s = append(s, b.latestExecutionPayloadBid)
 	}
 	if b.version >= clparams.CapellaVersion {
 		s = append(s, &b.nextWithdrawalIndex, &b.nextWithdrawalValidatorIndex, b.historicalSummaries)
@@ -92,6 +97,11 @@ func (b *BeaconState) getSchema() []any {
 	if b.version >= clparams.FuluVersion {
 		s = append(s, b.proposerLookahead)
 	}
+	if b.version >= clparams.GloasVersion {
+		// Gloas/EIP-7732 fields
+		s = append(s, b.executionPayloadAvailability,
+			b.builderPendingPayments, b.builderPendingWithdrawals, b.latestBlockHash[:], b.latestWithdrawalsRoot[:])
+	}
 	return s
 }
 
@@ -100,7 +110,7 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	if len(buf) < int(b.baseOffsetSSZ()) {
 		return fmt.Errorf("[BeaconState] err: %s", ssz.ErrLowBufferSize)
 	}
-	if version >= int(clparams.BellatrixVersion) {
+	if version >= int(clparams.BellatrixVersion) && version < int(clparams.GloasVersion) {
 		b.latestExecutionPayloadHeader = &cltypes.Eth1Header{}
 	}
 	if version >= int(clparams.ElectraVersion) {
@@ -110,6 +120,12 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	}
 	if version >= int(clparams.FuluVersion) {
 		b.proposerLookahead = solid.NewUint64VectorSSZ(int((b.beaconConfig.MinSeedLookahead + 1) * b.beaconConfig.SlotsPerEpoch))
+	}
+	if version >= int(clparams.GloasVersion) {
+		b.latestExecutionPayloadBid = cltypes.NewExecutionPayloadBid()
+		b.executionPayloadAvailability = solid.NewBitVector(int(b.beaconConfig.SlotsPerHistoricalRoot))
+		b.builderPendingPayments = solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2*b.beaconConfig.SlotsPerEpoch), 52)
+		b.builderPendingWithdrawals = solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](int(b.beaconConfig.BuilderPendingWithdrawalsLimit), 44)
 	}
 	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema()...); err != nil {
 		return err
@@ -144,6 +160,10 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 	}
 	if b.version >= clparams.FuluVersion {
 		size += b.proposerLookahead.EncodingSizeSSZ()
+	}
+	if b.version >= clparams.GloasVersion {
+		// Gloas/EIP-7732 fields (dynamic list only; static fields are in baseOffsetSSZ)
+		size += b.builderPendingWithdrawals.EncodingSizeSSZ()
 	}
 	return
 }

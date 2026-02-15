@@ -18,7 +18,9 @@ package machine
 
 import (
 	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common"
 )
 
 // TransitionState will call impl..ProcessSlots, then impl.VerifyBlockSignature, then ProcessBlock, then impl.VerifyTransition
@@ -45,4 +47,24 @@ func TransitionState(impl Interface, s abstract.BeaconState, block *cltypes.Sign
 	// if validation is successful, transition
 	s.SetPreviousStateRoot(currentBlock.StateRoot)
 	return nil
+}
+
+// PayloadStateTransitionNoStore simulates execution payload delivery for Gloas/EIP-7732.
+// In EIP-7732, execution payloads arrive via separate envelopes after the beacon block.
+// This function mirrors the pyspec's payload_state_transition_no_store helper by:
+// 1. Caching the state root into latest_block_header.state_root
+// 2. Updating latest_block_hash to the committed header's block_hash
+// 3. Clearing PreviousStateRoot so the next slot recomputes it after these mutations
+// Callers should invoke this after TransitionState when simulating payload delivery.
+func PayloadStateTransitionNoStore(s abstract.BeaconState, block *cltypes.BeaconBlock) {
+	if s.Version() < clparams.GloasVersion || block.Body.SignedExecutionPayloadBid == nil {
+		return
+	}
+	latestBlockHeader := s.LatestBlockHeader()
+	if latestBlockHeader.Root == (common.Hash{}) {
+		latestBlockHeader.Root = block.StateRoot
+		s.SetLatestBlockHeader(&latestBlockHeader)
+	}
+	s.SetLatestBlockHash(block.Body.SignedExecutionPayloadBid.Message.BlockHash)
+	s.SetPreviousStateRoot(common.Hash{})
 }

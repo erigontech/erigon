@@ -38,6 +38,7 @@ type BeaconStateUpgradable interface {
 	UpgradeToDeneb() error
 	UpgradeToElectra() error
 	UpgradeToFulu() error
+	UpgradeToGloas() error
 }
 
 type BeaconStateExtension interface {
@@ -70,6 +71,13 @@ type BeaconStateExtension interface {
 	ComputeExitEpochAndUpdateChurn(exitBalance uint64) uint64
 	GetConsolidationBalanceToConsume() uint64
 	GetProposerLookahead() solid.Uint64VectorSSZ
+	// Gloas/EIP-7732
+	LatestExecutionPayloadBid() *cltypes.ExecutionPayloadBid
+	ExecutionPayloadAvailability() *solid.BitVector
+	BuilderPendingPayments() *solid.VectorSSZ[*cltypes.BuilderPendingPayment]
+	BuilderPendingWithdrawals() *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]
+	LatestBlockHash() common.Hash
+	LatestWithdrawalsRoot() common.Hash
 }
 
 type BeaconStateBasic interface {
@@ -143,6 +151,13 @@ type BeaconStateMutator interface {
 	SetConsolidationBalanceToConsume(uint64)
 	SetEarlistConsolidationEpoch(uint64)
 	SetProposerLookahead(proposerLookahead solid.Uint64VectorSSZ)
+	// Gloas/EIP-7732
+	SetLatestExecutionPayloadBid(bid *cltypes.ExecutionPayloadBid)
+	SetExecutionPayloadAvailability(availability *solid.BitVector)
+	SetBuilderPendingPayments(payments *solid.VectorSSZ[*cltypes.BuilderPendingPayment])
+	SetBuilderPendingWithdrawals(withdrawals *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal])
+	SetLatestBlockHash(hash common.Hash)
+	SetLatestWithdrawalsRoot(root common.Hash)
 
 	AddEth1DataVote(vote *cltypes.Eth1Data)
 	AddValidator(validator solid.Validator, balance uint64)

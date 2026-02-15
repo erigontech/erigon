@@ -14,9 +14,10 @@ import (
 )
 
 const (
-	KzgCommitmentsInclusionProofDepth = 4
-	BytesPerCell                      = 2048
-	BytesPerBlob                      = BytesPerCell * 64
+	KzgCommitmentsInclusionProofDepth      = 4
+	KzgCommitmentsInclusionProofDepthGloas = 9
+	BytesPerCell                           = 2048
+	BytesPerBlob                           = BytesPerCell * 64
 )
 
 var (
@@ -40,6 +41,8 @@ type DataColumnSidecar struct {
 	KzgProofs                    *solid.ListSSZ[*KZGProof]      `json:"kzg_proofs"`
 	SignedBlockHeader            *SignedBeaconBlockHeader       `json:"signed_block_header"`
 	KzgCommitmentsInclusionProof solid.HashVectorSSZ            `json:"kzg_commitments_inclusion_proof"`
+
+	version clparams.StateVersion
 }
 
 func NewDataColumnSidecar() *DataColumnSidecar {
@@ -48,13 +51,27 @@ func NewDataColumnSidecar() *DataColumnSidecar {
 	return d
 }
 
+func NewDataColumnSidecarWithVersion(version clparams.StateVersion) *DataColumnSidecar {
+	d := &DataColumnSidecar{version: version}
+	d.tryInit()
+	return d
+}
+
 func (d *DataColumnSidecar) Clone() clonable.Clonable {
 	newSidecar := &DataColumnSidecar{
 		BlockRoot: d.BlockRoot,
 		Slot:      d.Slot,
+		version:   d.version,
 	}
 	newSidecar.tryInit()
 	return newSidecar
+}
+
+func (d *DataColumnSidecar) kzgProofDepth() int {
+	if d.version >= clparams.GloasVersion {
+		return KzgCommitmentsInclusionProofDepthGloas
+	}
+	return KzgCommitmentsInclusionProofDepth
 }
 
 func (d *DataColumnSidecar) tryInit() {
@@ -73,11 +90,13 @@ func (d *DataColumnSidecar) tryInit() {
 		d.SignedBlockHeader.Header = &BeaconBlockHeader{}
 	}
 	if d.KzgCommitmentsInclusionProof == nil {
-		d.KzgCommitmentsInclusionProof = solid.NewHashVector(KzgCommitmentsInclusionProofDepth)
+		d.KzgCommitmentsInclusionProof = solid.NewHashVector(d.kzgProofDepth())
 	}
 }
 
 func (d *DataColumnSidecar) DecodeSSZ(buf []byte, version int) error {
+	d.version = clparams.StateVersion(version)
+	d.KzgCommitmentsInclusionProof = solid.NewHashVector(d.kzgProofDepth())
 	return ssz2.UnmarshalSSZ(buf, version, d.getSchema()...)
 }
 

@@ -245,6 +245,19 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 	}
 	matchingTarget := data.Target.Root == targetRoot
 	matchingHead := matchingTarget && data.BeaconBlockRoot == headRoot
+
+	// [New in Gloas:EIP7732] Payload matching
+	if b.Version() >= clparams.GloasVersion {
+		var payloadMatches bool
+		if isAttestationSameSlot(b, data) {
+			payloadMatches = true
+		} else {
+			slotIndex := data.Slot % b.BeaconConfig().SlotsPerHistoricalRoot
+			payloadAvail := b.ExecutionPayloadAvailability().GetBitAt(int(slotIndex))
+			payloadMatches = (data.CommitteeIndex == 1) == payloadAvail
+		}
+		matchingHead = matchingHead && payloadMatches
+	}
 	participationFlagIndicies := []uint8{}
 	if inclusionDelay <= utils.IntegerSquareRoot(b.BeaconConfig().SlotsPerEpoch) {
 		participationFlagIndicies = append(
@@ -252,18 +265,19 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 			b.BeaconConfig().TimelySourceFlagIndex,
 		)
 	}
-	if b.Version() < clparams.DenebVersion && matchingTarget &&
-		inclusionDelay <= b.BeaconConfig().SlotsPerEpoch {
-		participationFlagIndicies = append(
-			participationFlagIndicies,
-			b.BeaconConfig().TimelyTargetFlagIndex,
-		)
-	}
-	if b.Version() >= clparams.DenebVersion && matchingTarget {
-		participationFlagIndicies = append(
-			participationFlagIndicies,
-			b.BeaconConfig().TimelyTargetFlagIndex,
-		)
+	if matchingTarget {
+		timelyTarget := false
+		if b.Version() < clparams.DenebVersion || b.Version() >= clparams.GloasVersion {
+			timelyTarget = inclusionDelay <= b.BeaconConfig().SlotsPerEpoch
+		} else {
+			timelyTarget = true // Deneb-Fulu: no delay check for TIMELY_TARGET
+		}
+		if timelyTarget {
+			participationFlagIndicies = append(
+				participationFlagIndicies,
+				b.BeaconConfig().TimelyTargetFlagIndex,
+			)
+		}
 	}
 	if matchingHead && inclusionDelay == b.BeaconConfig().MinAttestationInclusionDelay {
 		participationFlagIndicies = append(
@@ -272,6 +286,24 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 		)
 	}
 	return participationFlagIndicies, nil
+}
+
+// isAttestationSameSlot checks if the attestation is for the block proposed at the attestation slot.
+// [New in Gloas:EIP7732]
+func isAttestationSameSlot(b *CachingBeaconState, data *solid.AttestationData) bool {
+	if data.Slot == 0 {
+		return true
+	}
+	blockRoot := data.BeaconBlockRoot
+	slotBlockRoot, err := b.GetBlockRootAtSlot(data.Slot)
+	if err != nil {
+		return false
+	}
+	prevBlockRoot, err := b.GetBlockRootAtSlot(data.Slot - 1)
+	if err != nil {
+		return false
+	}
+	return blockRoot == slotBlockRoot && blockRoot != prevBlockRoot
 }
 
 // GetBeaconCommitee grabs beacon committee using cache first
@@ -372,10 +404,11 @@ func (b *CachingBeaconState) GetAttestingIndicies(
 	attestation *solid.Attestation,
 	checkBitsLength bool,
 ) ([]uint64, error) {
-	// check version
+	// check version — use state version, not config-derived version,
+	// because spec tests may use a genesis state already at a future fork
+	// while the config's fork epoch is set to FAR_FUTURE_EPOCH.
 	slot := attestation.Data.Slot
-	epoch := GetEpochAtSlot(b.BeaconConfig(), slot)
-	clversion := b.BeaconConfig().GetCurrentStateVersion(epoch)
+	clversion := b.Version()
 
 	if clversion.BeforeOrEqual(clparams.DenebVersion) {
 		// deneb and before version

@@ -18,6 +18,7 @@ package solid
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common"
@@ -199,6 +200,57 @@ func (l *ListSSZ[T]) ElementProof(i int) [][32]byte {
 		panic(err)
 	}
 	return append(branch, merkle_tree.Uint64Root(uint64(len(l.list))))
+}
+
+// VectorSSZ wraps a static ListSSZ to behave as an SSZ Vector (fixed-size, inline encoding).
+// Unlike a List, a Vector is encoded inline without offset pointers, and its hash tree root
+// does not include a length mixin.
+type VectorSSZ[T EncodableHashableSSZ] struct {
+	*ListSSZ[T]
+}
+
+func NewVectorSSZ[T EncodableHashableSSZ](size int, bytesPerElement int) *VectorSSZ[T] {
+	return &VectorSSZ[T]{
+		ListSSZ: NewStaticListSSZ[T](size, bytesPerElement),
+	}
+}
+
+func (v *VectorSSZ[T]) Static() bool {
+	return true
+}
+
+// EncodingSizeSSZ returns the fixed size of the vector (limit * bytesPerElement).
+// Unlike a List, a Vector's encoding size is always the full capacity.
+func (v *VectorSSZ[T]) EncodingSizeSSZ() int {
+	return v.ListSSZ.limit * v.ListSSZ.bytesPerElement
+}
+
+// DecodeSSZ decodes exactly limit elements from the buffer.
+func (v *VectorSSZ[T]) DecodeSSZ(buf []byte, version int) error {
+	expectedSize := v.EncodingSizeSSZ()
+	if len(buf) < expectedSize {
+		return fmt.Errorf("VectorSSZ: buffer too small: got %d, need %d", len(buf), expectedSize)
+	}
+	// Only pass the exact bytes for this vector to the underlying list decoder
+	return v.ListSSZ.DecodeSSZ(buf[:expectedSize], version)
+}
+
+func (v *VectorSSZ[T]) HashSSZ() ([32]byte, error) {
+	// Vector hash: merkleize elements WITHOUT length mixin
+	list := v.ListSSZ
+	subLeaves := make([][32]byte, list.Len())
+	for i := 0; i < list.Len(); i++ {
+		h, err := list.Get(i).HashSSZ()
+		if err != nil {
+			return [32]byte{}, err
+		}
+		subLeaves[i] = h
+	}
+	return merkle_tree.MerkleizeVector(subLeaves, uint64(list.Len()))
+}
+
+func (v *VectorSSZ[T]) Clone() clonable.Clonable {
+	return NewVectorSSZ[T](v.ListSSZ.limit, v.ListSSZ.bytesPerElement)
 }
 
 func (l *ListSSZ[T]) ShallowCopy() *ListSSZ[T] {

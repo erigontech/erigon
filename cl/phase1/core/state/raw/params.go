@@ -63,14 +63,23 @@ const (
 	PendingConsolidationsLeafIndex         StateLeafIndex = 36
 	// Fulu
 	ProposerLookaheadLeafIndex StateLeafIndex = 37
+	// Gloas/EIP-7732
+	// In Gloas, latest_execution_payload_bid replaces latest_execution_payload_header at the same position (24)
+	LatestExecutionPayloadBidLeafIndex    StateLeafIndex = LatestExecutionPayloadHeaderLeafIndex // reuses index 24
+	ExecutionPayloadAvailabilityLeafIndex StateLeafIndex = 38
+	BuilderPendingPaymentsLeafIndex       StateLeafIndex = 39
+	BuilderPendingWithdrawalsLeafIndex    StateLeafIndex = 40
+	LatestBlockHashLeafIndex              StateLeafIndex = 41
+	LatestWithdrawalsRootLeafIndex        StateLeafIndex = 42
 )
 
 const (
 	StateLeafSizeDeneb   = 32
 	StateLeafSizeElectra = 37
 	StateLeafSizeFulu    = 38
+	StateLeafSizeGloas   = 43
 
-	StateLeafSizeLatest = StateLeafSizeFulu
+	StateLeafSizeLatest = StateLeafSizeGloas
 
 	LeafInitValue  = 0
 	LeafCleanValue = 1

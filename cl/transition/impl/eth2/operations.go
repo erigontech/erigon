@@ -353,6 +353,15 @@ func (I *impl) ProcessWithdrawals(
 		s.SetNextWithdrawalValidatorIndex(nextIndex % numValidators)
 	}
 
+	// [New in Gloas:EIP7732] Cache the withdrawals root for later payload verification
+	if s.Version() >= clparams.GloasVersion {
+		withdrawalsRoot, err := withdrawals.HashSSZ()
+		if err != nil {
+			return fmt.Errorf("ProcessWithdrawals: failed to hash withdrawals: %w", err)
+		}
+		s.SetLatestWithdrawalsRoot(withdrawalsRoot)
+	}
+
 	return nil
 }
 
@@ -601,9 +610,16 @@ func (I *impl) processAttestationPostAltair(
 	beaconConfig := s.BeaconConfig()
 
 	if s.Version() >= clparams.ElectraVersion {
-		// assert index == 0
-		if data.CommitteeIndex != 0 {
-			return nil, errors.New("processAttestationPostAltair: committee index must be 0")
+		// [Modified in Gloas:EIP7732] data.index encodes payload availability (0 or 1)
+		if s.Version() >= clparams.GloasVersion {
+			if data.CommitteeIndex >= 2 {
+				return nil, errors.New("processAttestationPostAltair: data.index must be < 2 in Gloas")
+			}
+		} else {
+			// assert index == 0
+			if data.CommitteeIndex != 0 {
+				return nil, errors.New("processAttestationPostAltair: committee index must be 0")
+			}
 		}
 		// check committee
 		committeeIndices := attestation.CommitteeBits.GetOnIndices()
@@ -654,6 +670,23 @@ func (I *impl) processAttestationPostAltair(
 
 	isCurrentEpoch := data.Target.Epoch == currentEpoch
 
+	// [New in Gloas:EIP7732] Track whether this is a same-slot attestation for builder payments
+	isGloas := s.Version() >= clparams.GloasVersion
+	var isSameSlot bool
+	var bpp *solid.VectorSSZ[*cltypes.BuilderPendingPayment]
+	var payment *cltypes.BuilderPendingPayment
+	if isGloas {
+		isSameSlot = isAttestationSameSlotAbstract(s, data)
+		if isSameSlot {
+			bpp = s.BuilderPendingPayments()
+			paymentIdx := data.Slot % beaconConfig.SlotsPerEpoch
+			if isCurrentEpoch {
+				paymentIdx += beaconConfig.SlotsPerEpoch
+			}
+			payment = bpp.Get(int(paymentIdx))
+		}
+	}
+
 	for _, attesterIndex := range attestingIndicies {
 		val, err := s.ValidatorEffectiveBalance(int(attesterIndex))
 		if err != nil {
@@ -661,6 +694,7 @@ func (I *impl) processAttestationPostAltair(
 		}
 
 		baseReward := (val / beaconConfig.EffectiveBalanceIncrement) * baseRewardPerIncrement
+		willSetNewFlag := false
 		for flagIndex, weight := range beaconConfig.ParticipationWeights() {
 			flagParticipation := s.EpochParticipationForValidatorIndex(
 				isCurrentEpoch,
@@ -676,7 +710,18 @@ func (I *impl) processAttestationPostAltair(
 				flagParticipation.Add(flagIndex),
 			)
 			proposerRewardNumerator += baseReward * weight
+			willSetNewFlag = true
 		}
+
+		// [New in Gloas:EIP7732] Add weight for same-slot attestations
+		if isGloas && willSetNewFlag && isSameSlot {
+			payment.Weight += val
+		}
+	}
+
+	// [New in Gloas:EIP7732] Write back payment after loop
+	if isGloas && isSameSlot {
+		s.SetBuilderPendingPayments(bpp)
 	}
 	// Reward proposer
 	proposer, err := s.GetBeaconProposerIndex()
@@ -834,6 +879,16 @@ func IsAttestationApplicable(s abstract.BeaconState, attestation *solid.Attestat
 	}
 	cIndex := data.CommitteeIndex
 	if s.Version().AfterOrEqual(clparams.ElectraVersion) {
+		// [Modified in Gloas:EIP7732] data.index encodes payload availability (0 or 1)
+		if s.Version() >= clparams.GloasVersion {
+			if data.CommitteeIndex >= 2 {
+				return errors.New("ProcessAttestation: data.index must be < 2 in Gloas")
+			}
+		} else {
+			if data.CommitteeIndex != 0 {
+				return errors.New("ProcessAttestation: committee index must be 0 in Electra")
+			}
+		}
 		index, err := attestation.GetCommitteeIndexFromBits()
 		if err != nil {
 			return err
@@ -1055,6 +1110,12 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 
 		if state.Epoch(s) == beaconConfig.FuluForkEpoch {
 			if err := s.UpgradeToFulu(); err != nil {
+				return err
+			}
+		}
+
+		if state.Epoch(s) == beaconConfig.GloasForkEpoch {
+			if err := s.UpgradeToGloas(); err != nil {
 				return err
 			}
 		}
@@ -1312,4 +1373,22 @@ func computeConsolidationEpochAndUpdateChurn(s abstract.BeaconState, consolidati
 	s.SetConsolidationBalanceToConsume(consolidationBalanceToConsume - consolidationBalance)
 	s.SetEarlistConsolidationEpoch(earlistConsolidationEpoch)
 	return earlistConsolidationEpoch
+}
+
+// isAttestationSameSlotAbstract checks if the attestation is for the block proposed at the attestation slot.
+// [New in Gloas:EIP7732]
+func isAttestationSameSlotAbstract(s abstract.BeaconState, data *solid.AttestationData) bool {
+	if data.Slot == 0 {
+		return true
+	}
+	blockRoot := data.BeaconBlockRoot
+	slotBlockRoot, err := s.GetBlockRootAtSlot(data.Slot)
+	if err != nil {
+		return false
+	}
+	prevBlockRoot, err := s.GetBlockRootAtSlot(data.Slot - 1)
+	if err != nil {
+		return false
+	}
+	return blockRoot == slotBlockRoot && blockRoot != prevBlockRoot
 }

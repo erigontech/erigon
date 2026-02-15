@@ -383,3 +383,29 @@ func (b *BeaconState) DebugPrint(prefix string) {
 func (b *BeaconState) GetPendingPartialWithdrawals() *solid.ListSSZ[*solid.PendingPartialWithdrawal] {
 	return b.pendingPartialWithdrawals
 }
+
+// Gloas/EIP-7732 getters
+
+func (b *BeaconState) LatestExecutionPayloadBid() *cltypes.ExecutionPayloadBid {
+	return b.latestExecutionPayloadBid
+}
+
+func (b *BeaconState) ExecutionPayloadAvailability() *solid.BitVector {
+	return b.executionPayloadAvailability
+}
+
+func (b *BeaconState) BuilderPendingPayments() *solid.VectorSSZ[*cltypes.BuilderPendingPayment] {
+	return b.builderPendingPayments
+}
+
+func (b *BeaconState) BuilderPendingWithdrawals() *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal] {
+	return b.builderPendingWithdrawals
+}
+
+func (b *BeaconState) LatestBlockHash() common.Hash {
+	return b.latestBlockHash
+}
+
+func (b *BeaconState) LatestWithdrawalsRoot() common.Hash {
+	return b.latestWithdrawalsRoot
+}

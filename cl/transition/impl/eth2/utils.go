@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 
 	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 )
@@ -58,5 +59,13 @@ func transitionSlot(s abstract.BeaconState) error {
 		return err
 	}
 	s.SetBlockRootAt(int(slot%beaconConfig.SlotsPerHistoricalRoot), previousBlockRoot)
+
+	// [New in Gloas:EIP7732] Unset the next payload availability
+	if s.Version() >= clparams.GloasVersion {
+		epa := s.ExecutionPayloadAvailability()
+		epa.SetBitAt(int((slot+1)%beaconConfig.SlotsPerHistoricalRoot), false)
+		s.SetExecutionPayloadAvailability(epa)
+	}
+
 	return nil
 }

@@ -277,3 +277,51 @@ func (b *CachingBeaconState) UpgradeToFulu() error {
 	log.Info("Upgrade to Fulu complete")
 	return nil
 }
+
+func (b *CachingBeaconState) UpgradeToGloas() error {
+	b.previousStateRoot = common.Hash{}
+	epoch := Epoch(b.BeaconState)
+	// update version
+	fork := b.Fork()
+	fork.Epoch = epoch
+	fork.PreviousVersion = fork.CurrentVersion
+	fork.CurrentVersion = utils.Uint32ToBytes4(uint32(b.BeaconConfig().GloasForkVersion))
+	b.SetFork(fork)
+
+	// Get block_hash from the old execution payload header
+	prevHeader := b.LatestExecutionPayloadHeader()
+	blockHash := prevHeader.BlockHash
+
+	// Initialize latest_execution_payload_bid (default/zero-initialized)
+	b.SetLatestExecutionPayloadBid(cltypes.NewExecutionPayloadBid())
+
+	// Set latest_block_hash from the previous execution payload header
+	b.SetLatestBlockHash(blockHash)
+
+	// Initialize execution_payload_availability - all slots set to available (1)
+	availability := solid.NewBitVector(int(b.BeaconConfig().SlotsPerHistoricalRoot))
+	for i := 0; i < int(b.BeaconConfig().SlotsPerHistoricalRoot); i++ {
+		availability.SetBitAt(i, true) //nolint:errcheck
+	}
+	b.SetExecutionPayloadAvailability(availability)
+
+	// Initialize builder_pending_payments with 2*SLOTS_PER_EPOCH empty entries
+	slotsPerEpoch := int(b.BeaconConfig().SlotsPerEpoch)
+	payments := solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](2*slotsPerEpoch, 52)
+	for i := 0; i < 2*slotsPerEpoch; i++ {
+		payments.Append(cltypes.NewBuilderPendingPayment())
+	}
+	b.SetBuilderPendingPayments(payments)
+
+	// Initialize builder_pending_withdrawals (empty)
+	b.SetBuilderPendingWithdrawals(solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](int(b.BeaconConfig().BuilderPendingWithdrawalsLimit), 44))
+
+	// Initialize latest_withdrawals_root (zero hash)
+	b.SetLatestWithdrawalsRoot(common.Hash{})
+
+	// Update the state root cache
+	b.SetVersion(clparams.GloasVersion)
+
+	log.Info("Upgrade to Gloas complete")
+	return nil
+}

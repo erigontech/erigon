@@ -6220,3 +6220,77 @@ func (c *MockBeaconStateVersionCall) DoAndReturn(f func() clparams.StateVersion)
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
+
+// Gloas/EIP-7732 mock methods
+
+func (m *MockBeaconState) LatestExecutionPayloadBid() *cltypes.ExecutionPayloadBid {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LatestExecutionPayloadBid")
+	ret0, _ := ret[0].(*cltypes.ExecutionPayloadBid)
+	return ret0
+}
+
+func (m *MockBeaconState) ExecutionPayloadAvailability() *solid.BitVector {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ExecutionPayloadAvailability")
+	ret0, _ := ret[0].(*solid.BitVector)
+	return ret0
+}
+
+func (m *MockBeaconState) BuilderPendingPayments() *solid.VectorSSZ[*cltypes.BuilderPendingPayment] {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "BuilderPendingPayments")
+	ret0, _ := ret[0].(*solid.VectorSSZ[*cltypes.BuilderPendingPayment])
+	return ret0
+}
+
+func (m *MockBeaconState) BuilderPendingWithdrawals() *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal] {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "BuilderPendingWithdrawals")
+	ret0, _ := ret[0].(*solid.ListSSZ[*cltypes.BuilderPendingWithdrawal])
+	return ret0
+}
+
+func (m *MockBeaconState) LatestBlockHash() common.Hash {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LatestBlockHash")
+	ret0, _ := ret[0].(common.Hash)
+	return ret0
+}
+
+func (m *MockBeaconState) LatestWithdrawalsRoot() common.Hash {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LatestWithdrawalsRoot")
+	ret0, _ := ret[0].(common.Hash)
+	return ret0
+}
+
+func (m *MockBeaconState) SetLatestExecutionPayloadBid(bid *cltypes.ExecutionPayloadBid) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetLatestExecutionPayloadBid", bid)
+}
+
+func (m *MockBeaconState) SetExecutionPayloadAvailability(availability *solid.BitVector) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetExecutionPayloadAvailability", availability)
+}
+
+func (m *MockBeaconState) SetBuilderPendingPayments(payments *solid.VectorSSZ[*cltypes.BuilderPendingPayment]) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetBuilderPendingPayments", payments)
+}
+
+func (m *MockBeaconState) SetBuilderPendingWithdrawals(withdrawals *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetBuilderPendingWithdrawals", withdrawals)
+}
+
+func (m *MockBeaconState) SetLatestBlockHash(hash common.Hash) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetLatestBlockHash", hash)
+}
+
+func (m *MockBeaconState) SetLatestWithdrawalsRoot(root common.Hash) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetLatestWithdrawalsRoot", root)
+}

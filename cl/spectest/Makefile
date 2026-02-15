@@ -10,9 +10,8 @@ tests: download-spec
 	rm -rf tests/mainnet/eip6110
 	rm -rf tests/mainnet/whisk
 	rm -rf tests/mainnet/eip7441
-	rm -rf tests/mainnet/eip7732
+	# rm -rf tests/mainnet/eip7732  # now enabled as gloas
 	rm -rf tests/mainnet/eip7805
-	rm -rf tests/mainnet/gloas
 
 clean:
 	rm -rf tests
@@ -37,3 +36,6 @@ electra:
 
 fulu:
 	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet/fulu/ -v --timeout 30m
+
+gloas:
+	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet/gloas/ -v --timeout 30m

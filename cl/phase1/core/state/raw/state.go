@@ -90,6 +90,14 @@ type BeaconState struct {
 	// Fulu
 	proposerLookahead solid.Uint64VectorSSZ // Vector[ValidatorIndex, (MIN_SEED_LOOKAHEAD + 1) * SLOTS_PER_EPOCH]
 
+	// Gloas/EIP-7732
+	latestExecutionPayloadBid    *cltypes.ExecutionPayloadBid
+	executionPayloadAvailability *solid.BitVector
+	builderPendingPayments       *solid.VectorSSZ[*cltypes.BuilderPendingPayment] // Vector[BuilderPendingPayment, 2 * SLOTS_PER_EPOCH]
+	builderPendingWithdrawals    *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]
+	latestBlockHash              common.Hash
+	latestWithdrawalsRoot        common.Hash
+
 	//  leaves for computing hashes
 	leaves        []byte          // Pre-computed leaves.
 	touchedLeaves []atomic.Uint32 // Maps each leaf to whether they were touched or not.
@@ -130,6 +138,11 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		pendingPartialWithdrawals:    solid.NewPendingWithdrawalList(cfg),
 		pendingConsolidations:        solid.NewPendingConsolidationList(cfg),
 		proposerLookahead:            solid.NewUint64VectorSSZ(int((cfg.MinSeedLookahead + 1) * cfg.SlotsPerEpoch)),
+		// Gloas/EIP-7732
+		latestExecutionPayloadBid:    cltypes.NewExecutionPayloadBid(),
+		executionPayloadAvailability: solid.NewBitVector(int(cfg.SlotsPerHistoricalRoot)),
+		builderPendingPayments:       solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2*cfg.SlotsPerEpoch), 52),
+		builderPendingWithdrawals:    solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](int(cfg.BuilderPendingWithdrawalsLimit), 44),
 	}
 	state.init()
 	return state
@@ -178,8 +191,11 @@ func (b *BeaconState) MarshalJSON() ([]byte, error) {
 		obj["current_sync_committee"] = b.currentSyncCommittee
 		obj["next_sync_committee"] = b.nextSyncCommittee
 	}
-	if b.version >= clparams.BellatrixVersion {
+	if b.version >= clparams.BellatrixVersion && b.version < clparams.GloasVersion {
 		obj["latest_execution_payload_header"] = b.latestExecutionPayloadHeader
+	}
+	if b.version >= clparams.GloasVersion {
+		obj["latest_execution_payload_bid"] = b.latestExecutionPayloadBid
 	}
 	if b.version >= clparams.CapellaVersion {
 		obj["next_withdrawal_index"] = strconv.FormatInt(int64(b.nextWithdrawalIndex), 10)
@@ -199,6 +215,13 @@ func (b *BeaconState) MarshalJSON() ([]byte, error) {
 	}
 	if b.version >= clparams.FuluVersion {
 		obj["proposer_lookahead"] = b.proposerLookahead
+	}
+	if b.version >= clparams.GloasVersion {
+		obj["execution_payload_availability"] = b.executionPayloadAvailability
+		obj["builder_pending_payments"] = b.builderPendingPayments
+		obj["builder_pending_withdrawals"] = b.builderPendingWithdrawals
+		obj["latest_block_hash"] = b.latestBlockHash
+		obj["latest_withdrawals_root"] = b.latestWithdrawalsRoot
 	}
 	return json.Marshal(obj)
 }
