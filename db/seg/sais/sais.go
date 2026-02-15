@@ -671,9 +671,9 @@ func unmap_32(text []int32, sa []int32, numLMS int) {
 func expand_32(text []int32, freq, bucket, sa []int32, numLMS int) {
 	bucketMax_32(text, freq, bucket)
 
-	x := numLMS - 1
-	saX := sa[x]
-	c := text[saX]
+	src := numLMS - 1
+	val := sa[src]
+	c := text[val]
 	b := bucket[c] - 1
 	bucket[c] = b
 
@@ -682,11 +682,11 @@ func expand_32(text []int32, freq, bucket, sa []int32, numLMS int) {
 			sa[i] = 0
 			continue
 		}
-		sa[i] = saX
-		if x > 0 {
-			x--
-			saX = sa[x]
-			c = text[saX]
+		sa[i] = val
+		if src > 0 {
+			src--
+			val = sa[src]
+			c = text[val]
 			b = bucket[c] - 1
 			bucket[c] = b
 		}
