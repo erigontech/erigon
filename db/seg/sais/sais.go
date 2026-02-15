@@ -9,28 +9,9 @@
 
 package sais
 
-import "sync"
-
 // copy of stdlib `index/suffixarray` SA-IS implementation
 // because Go's stdlib doesn't provide enough low-level api to call necessary funcs
 // also for Erigon - it's important to keep control on files reproducibility
-
-// workspace pool to reuse tmp buffers across calls, avoiding repeated allocation.
-var workspacePool sync.Pool
-
-func getWorkspace(minSize int) []int32 {
-	if v := workspacePool.Get(); v != nil {
-		ws := v.([]int32)
-		if cap(ws) >= minSize {
-			return ws[:minSize]
-		}
-	}
-	return make([]int32, minSize)
-}
-
-func putWorkspace(ws []int32) {
-	workspacePool.Put(ws[:cap(ws)])
-}
 
 // Sais computes the suffix array of data into sa.
 // The caller must provide sa with len(sa) == len(data).
@@ -47,16 +28,8 @@ func Sais(data []byte, sa []int32) error {
 	}
 	clear(sa)
 
-	// Pre-allocate workspace large enough for freq/bucket tables (512)
-	// and typically large enough for the recursive subproblem (~N/3).
-	// This avoids an allocation inside recurse_32 for most inputs.
-	wsSize := 512
-	if third := n/3 + 512; third > wsSize {
-		wsSize = third
-	}
-	tmp := getWorkspace(wsSize)
-	sais_8_32(data, 256, sa, tmp)
-	putWorkspace(tmp)
+	var tmp [512]int32
+	sais_8_32(data, 256, sa, tmp[:])
 	return nil
 }
 
@@ -350,7 +323,7 @@ func recurse_32(sa, oldTmp []int32, numLMS, maxID int) {
 		if n < numLMS/2 {
 			n = numLMS / 2
 		}
-		tmp = getWorkspace(n)
+		tmp = make([]int32, n)
 	}
 
 	clear(dst)
