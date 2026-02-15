@@ -1074,7 +1074,7 @@ func (d *Downloader) fetchMetainfoFromWebseeds(ctx context.Context, name string,
 		buf.Reset()
 		var mi metainfo.MetaInfo
 		var w io.Writer = &buf
-		mi, err = GetMetainfoFromWebseed(ctx, base, base, d.metainfoHttpClient, w)
+		mi, err = GetMetainfoFromWebseed(ctx, base, name, d.metainfoHttpClient, w)
 		if err != nil {
 			d.log(log.LvlDebug, "error fetching metainfo from webseed", "err", err, "name", name, "webseed", base)
 			// Whither error?
