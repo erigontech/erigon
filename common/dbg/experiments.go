@@ -81,7 +81,7 @@ var (
 
 	CompressWorkers = EnvInt("COMPRESS_WORKERS", 1)
 	MergeWorkers    = EnvInt("MERGE_WORKERS", 1)
-	CollateWorkers  = EnvInt("COLLAtE_WORKERS", 2)
+	CollateWorkers  = EnvInt("COLLATE_WORKERS", 2)
 
 	TraceAccounts        = EnvStrings("TRACE_ACCOUNTS", ",", nil)
 	TraceStateKeys       = EnvStrings("TRACE_STATE_KEYS", ",", nil)
