@@ -78,7 +78,7 @@ func TestSaisEdgeCases(t *testing.T) {
 }
 
 func BenchmarkSais(b *testing.B) {
-	for _, size := range []int{1 << 10, 1 << 16, 1 << 20} {
+	for _, size := range []int{1 << 10, 64 * 1024, 1024 * 1024, 16 * 1024 * 1024} {
 		b.Run(fmt.Sprintf("%d", size), func(b *testing.B) {
 			rng := rand.New(rand.NewSource(0))
 			data := make([]byte, size)
