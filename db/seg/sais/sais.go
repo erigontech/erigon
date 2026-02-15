@@ -170,13 +170,6 @@ func induceSubL_8_32(text []byte, sa, freq, bucket []int32) {
 		}
 		sa[i] = 0
 
-		// Prefetch: bring next text access into cache while processing current one.
-		//if i+8 < len(sa) {
-		//	if pj := sa[i+8]; pj > 1 {
-		//		_ = text[pj-2]
-		//	}
-		//}
-
 		k := j - 1
 		c0, c1 := text[k-1], text[k]
 		if c0 < c1 {
@@ -212,13 +205,6 @@ func induceSubS_8_32(text []byte, sa, freq, bucket []int32) {
 			sa[top] = int32(-j)
 			continue
 		}
-
-		// Prefetch text access for a future iteration.
-		//if i >= 8 {
-		//	if pj := sa[i-8]; pj > 1 {
-		//		_ = text[pj-2]
-		//	}
-		//}
 
 		k := j - 1
 		c1 := text[k]
@@ -401,13 +387,6 @@ func induceL_8_32(text []byte, sa, freq, bucket []int32) {
 			continue
 		}
 
-		// Prefetch text access for a future iteration.
-		//if i+8 < len(sa) {
-		//	if pj := sa[i+8]; pj > 1 {
-		//		_ = text[pj-2]
-		//	}
-		//}
-
 		k := j - 1
 		c1 := text[k]
 		if k > 0 {
@@ -441,15 +420,6 @@ func induceS_8_32(text []byte, sa, freq, bucket []int32) {
 
 		j = -j
 		sa[i] = int32(j)
-
-		// Prefetch text access for a future iteration.
-		//if i >= 8 {
-		//	if pj := sa[i-8]; pj < 0 {
-		//		pj = -pj
-		//	} else if pj > 1 {
-		//		_ = text[pj-2]
-		//	}
-		//}
 
 		k := j - 1
 		c1 := text[k]
