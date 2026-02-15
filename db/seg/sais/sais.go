@@ -21,7 +21,8 @@ func Sais(data []byte, sa []int32) error {
 		return nil
 	}
 	clear(sa)
-	sais_8_32(data, 256, sa, make([]int32, 2*256))
+	var tmp [512]int32
+	sais_8_32(data, 256, sa, tmp[:])
 	return nil
 }
 
@@ -276,16 +277,20 @@ func map_32(sa []int32, numLMS int) {
 func recurse_32(sa, oldTmp []int32, numLMS, maxID int) {
 	dst, saTmp, text := sa[:numLMS], sa[numLMS:len(sa)-numLMS], sa[len(sa)-numLMS:]
 
+	// Pick the largest available buffer for tmp.
 	tmp := oldTmp
 	if len(tmp) < len(saTmp) {
 		tmp = saTmp
 	}
-	if len(tmp) < numLMS {
-		n := maxID
-		if n < numLMS/2 {
-			n = numLMS / 2
-		}
-		tmp = make([]int32, n)
+	// Ensure tmp is large enough for freq caching (2*maxID) in sais_32.
+	// Without this, freq_32 recomputes character frequencies on every
+	// bucketMin/bucketMax call instead of caching them.
+	need := 2 * maxID
+	if need < numLMS {
+		need = numLMS
+	}
+	if len(tmp) < need {
+		tmp = make([]int32, need)
 	}
 
 	clear(dst)
