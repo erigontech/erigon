@@ -594,10 +594,10 @@ func findBijection(bucket []uint64, salt uint64) uint64 {
 	for {
 		var mask0, mask1, mask2, mask3 uint32
 		for _, key := range bucket {
-			mask0 |= uint32(1) << remap16(remix(key+salt), m)
-			mask1 |= uint32(1) << remap16(remix(key+salt+1), m)
-			mask2 |= uint32(1) << remap16(remix(key+salt+2), m)
-			mask3 |= uint32(1) << remap16(remix(key+salt+3), m)
+			mask0 |= uint32(1) << (remap16(remix(key+salt), m) & 31)
+			mask1 |= uint32(1) << (remap16(remix(key+salt+1), m) & 31)
+			mask2 |= uint32(1) << (remap16(remix(key+salt+2), m) & 31)
+			mask3 |= uint32(1) << (remap16(remix(key+salt+3), m) & 31)
 		}
 		if mask0 == fullMask {
 			return salt
