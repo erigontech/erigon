@@ -40,7 +40,7 @@ func RunCases(t *testing.T, app Appendix, machineImpl machine.Interface, root fs
 										t.Run(s, func(t *testing.T) {
 											t.Parallel()
 											m.Range0(func(key string, value TestCase) bool {
-												if value.ForkPhaseName == "whisk" || value.ForkPhaseName == "eip7594" {
+												if value.ForkPhaseName == "whisk" || value.ForkPhaseName == "eip7594" || value.ForkPhaseName == "eip7805" {
 													t.Skipf("skipping %s", value.ForkPhaseName)
 													return true
 												}

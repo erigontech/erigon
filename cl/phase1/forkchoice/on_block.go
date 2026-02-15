@@ -207,6 +207,16 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		return nil
 	case fork_graph.Success:
 		f.updateChildren(block.Block.Slot-1, block.Block.ParentRoot, blockRoot) // parent slot can be innacurate
+		// [Gloas:EIP7732] Store bid data and initialize PTC vote for payload-aware fork choice
+		if block.Version() >= clparams.GloasVersion {
+			if bid := block.Block.Body.SignedExecutionPayloadBid; bid != nil && bid.Message != nil {
+				f.bidDataMap[blockRoot] = bidData{
+					blockHash:       bid.Message.BlockHash,
+					parentBlockHash: bid.Message.ParentBlockHash,
+				}
+			}
+			f.ptcVote[blockRoot] = make([]bool, cltypes.PtcSize)
+		}
 	case fork_graph.BelowAnchor:
 		log.Debug("replay block", "status", status.String())
 		return nil
@@ -226,8 +236,31 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// Add proposer score boost if the block is timely
 	timeIntoSlot := (f.time.Load() - f.genesisTime) % lastProcessedState.BeaconConfig().SecondsPerSlot
 	isBeforeAttestingInterval := timeIntoSlot < f.beaconCfg.SecondsPerSlot/f.beaconCfg.IntervalsPerSlot
-	if f.Slot() == block.Block.Slot && isBeforeAttestingInterval && f.proposerBoostRoot.Load().(common.Hash) == (common.Hash{}) {
-		f.proposerBoostRoot.Store(common.Hash(blockRoot))
+	if block.Version() >= clparams.GloasVersion {
+		// [Modified in Gloas:EIP7732] Use 25% attestation deadline instead of 33%
+		// ATTESTATION_DUE_BPS_GLOAS = 2500 basis points = 25% of slot
+		attestationDueSeconds := f.beaconCfg.SecondsPerSlot / 4
+		isBeforeAttestingInterval = timeIntoSlot < attestationDueSeconds
+	}
+	isFirstBlock := f.proposerBoostRoot.Load().(common.Hash) == (common.Hash{})
+	if f.Slot() == block.Block.Slot && isBeforeAttestingInterval && isFirstBlock {
+		if block.Version() >= clparams.GloasVersion {
+			// [Modified in Gloas:EIP7732] Only apply proposer boost if the proposer
+			// is the same as the expected proposer on the canonical chain
+			headState := lastProcessedState
+			if headState.Slot() < f.Slot() {
+				// We need to process slots forward, but since we can't easily
+				// copy and process here, we check the proposer lookahead instead
+				proposerIndex := headState.ProposerLookahead().Get(int(block.Block.Slot % f.beaconCfg.SlotsPerEpoch))
+				if block.Block.ProposerIndex == proposerIndex {
+					f.proposerBoostRoot.Store(common.Hash(blockRoot))
+				}
+			} else {
+				f.proposerBoostRoot.Store(common.Hash(blockRoot))
+			}
+		} else {
+			f.proposerBoostRoot.Store(common.Hash(blockRoot))
+		}
 	}
 	if lastProcessedState.Slot()%f.beaconCfg.SlotsPerEpoch == 0 {
 		// Update randao mixes

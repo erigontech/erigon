@@ -206,8 +206,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	anchorBlock, err := spectest.ReadAnchorBlock(root, c.Version(), "anchor_block.ssz_snappy")
 	require.NoError(t, err)
 
-	// TODO: what to do with anchor block ?
-	_ = anchorBlock
+	// [Gloas:EIP7732] anchor block used for payload-aware fork choice init
 
 	anchorState, err := spectest.ReadBeaconState(root, c.Version(), "anchor_state.ssz_snappy")
 	require.NoError(t, err)
@@ -232,6 +231,8 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	require.NoError(t, err)
 	forkStore.SetSynced(true)
 	forkStore.InitPeerDas(peerDas)
+	// [Gloas:EIP7732] Initialize payload-aware fork choice with anchor block
+	forkStore.InitGloasAnchor(anchorBlock)
 
 	var steps []ForkChoiceStep
 	err = spectest.ReadYml(root, "steps.yaml", &steps)
@@ -313,6 +314,15 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 			err = forkStore.OnBlock(ctx, blk, true, true, true)
 			if step.GetValid() {
 				require.NoError(t, err, stepstr)
+				// [Gloas:EIP7732] Simulate payload_state_transition: after on_block, pyspec
+				// adds the block root to store.execution_payload_states to simulate
+				// the execution payload being received and processed.
+				if c.Version() >= clparams.GloasVersion {
+					blockRoot, hashErr := blk.Block.HashSSZ()
+					if hashErr == nil {
+						forkStore.SimulatePayloadExecution(blockRoot)
+					}
+				}
 			} else {
 				require.Error(t, err, stepstr)
 			}

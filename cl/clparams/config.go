@@ -572,6 +572,9 @@ type BeaconChainConfig struct {
 	GloasForkVersion     ConfigForkVersion `yaml:"GLOAS_FORK_VERSION" spec:"true" json:"GLOAS_FORK_VERSION"`            // GloasForkVersion is used to represent the fork version for Gloas.
 	GloasForkEpoch       uint64            `yaml:"GLOAS_FORK_EPOCH" spec:"true" json:"GLOAS_FORK_EPOCH,string"`         // GloasForkEpoch is used to represent the assigned fork epoch for Gloas.
 
+	// Gloas config values
+	BuilderWithdrawalPrefix ConfigByte  `yaml:"BUILDER_WITHDRAWAL_PREFIX" spec:"true" json:"BUILDER_WITHDRAWAL_PREFIX"` // BuilderWithdrawalPrefix is the prefix for builder withdrawal credentials.
+	DomainBeaconBuilder     common.Bytes4 `yaml:"DOMAIN_BEACON_BUILDER" spec:"true" json:"DOMAIN_BEACON_BUILDER"`         // DomainBeaconBuilder defines the BLS signature domain for builder bid verification.
 	// Gloas preset values
 	PtcSize                        uint64 `yaml:"PTC_SIZE" spec:"true" json:"PTC_SIZE,string"`
 	MaxPayloadAttestations         uint64 `yaml:"MAX_PAYLOAD_ATTESTATIONS" spec:"true" json:"MAX_PAYLOAD_ATTESTATIONS,string"`
@@ -888,6 +891,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	DomainApplicationMask:             utils.Uint32ToBytes4(0x00000001),
 	DomainApplicationBuilder:          utils.Uint32ToBytes4(0x00000001),
 	DomainBLSToExecutionChange:        utils.Uint32ToBytes4(0x0A000000),
+	DomainBeaconBuilder:               utils.Uint32ToBytes4(0x0B000000),
 
 	// Prysm constants.
 	ConfigName: "mainnet",
@@ -914,6 +918,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	GloasForkVersion:     0x07000000,
 	GloasForkEpoch:       math.MaxUint64, // TBD
 
+	// Gloas config values
+	BuilderWithdrawalPrefix: 0x03,
 	// Gloas preset values
 	PtcSize:                        512,
 	MaxPayloadAttestations:         4,

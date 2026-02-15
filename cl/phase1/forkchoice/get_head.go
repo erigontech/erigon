@@ -23,6 +23,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -104,6 +105,11 @@ func (f *ForkChoiceStore) computeVotes(justifiedCheckpoint solid.Checkpoint, che
 	return votes
 }
 
+// isGloasActive returns true if we are running in Gloas fork mode.
+func (f *ForkChoiceStore) isGloasActive() bool {
+	return f.anchorVersion >= clparams.GloasVersion
+}
+
 // GetHead returns the head of the fork choice store.
 // it can take an optional auxilliary state to determine the current weights instead of computing the justified state.
 func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error) {
@@ -113,12 +119,19 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 		return f.headHash, f.headSlot, nil
 	}
 	f.mu.RUnlock()
-	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
-	var justificationState *checkpointState
-	var err error
+
 	// Take write lock here
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
+	// [Gloas:EIP7732] Use payload-aware fork choice if active
+	if f.isGloasActive() {
+		return f.getHeadGloas(auxilliaryState)
+	}
+
+	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
+	var justificationState *checkpointState
+	var err error
 	if auxilliaryState == nil {
 		// See which validators can be used for attestation score
 		justificationState, err = f.getCheckpointState(justifiedCheckpoint)

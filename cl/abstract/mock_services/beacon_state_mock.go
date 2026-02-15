@@ -5522,6 +5522,44 @@ func (c *MockBeaconStateUpgradeToFuluCall) DoAndReturn(f func() error) *MockBeac
 	return c
 }
 
+// UpgradeToGloas mocks base method.
+func (m *MockBeaconState) UpgradeToGloas() error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpgradeToGloas")
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpgradeToGloas indicates an expected call of UpgradeToGloas.
+func (mr *MockBeaconStateMockRecorder) UpgradeToGloas() *MockBeaconStateUpgradeToGloasCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpgradeToGloas", reflect.TypeOf((*MockBeaconState)(nil).UpgradeToGloas))
+	return &MockBeaconStateUpgradeToGloasCall{Call: call}
+}
+
+// MockBeaconStateUpgradeToGloasCall wrap *gomock.Call
+type MockBeaconStateUpgradeToGloasCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBeaconStateUpgradeToGloasCall) Return(arg0 error) *MockBeaconStateUpgradeToGloasCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBeaconStateUpgradeToGloasCall) Do(f func() error) *MockBeaconStateUpgradeToGloasCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBeaconStateUpgradeToGloasCall) DoAndReturn(f func() error) *MockBeaconStateUpgradeToGloasCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // ValidatorBalance mocks base method.
 func (m *MockBeaconState) ValidatorBalance(index int) (uint64, error) {
 	m.ctrl.T.Helper()

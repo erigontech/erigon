@@ -119,6 +119,8 @@ func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
 			kv.PendingConsolidationsDump:     getKvGetterForStateTable(db, kv.PendingConsolidationsDump),
 			kv.PendingPartialWithdrawalsDump: getKvGetterForStateTable(db, kv.PendingPartialWithdrawalsDump),
 			kv.PendingDepositsDump:           getKvGetterForStateTable(db, kv.PendingDepositsDump),
+			kv.BuilderPendingWithdrawals:     getKvGetterForStateTable(db, kv.BuilderPendingWithdrawals),
+			kv.BuilderPendingWithdrawalsDump: getKvGetterForStateTable(db, kv.BuilderPendingWithdrawalsDump),
 		},
 		Compression: map[string]bool{},
 	}

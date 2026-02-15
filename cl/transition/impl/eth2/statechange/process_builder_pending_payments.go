@@ -23,13 +23,17 @@ func ProcessBuilderPendingPayments(s abstract.BeaconState) {
 	for i := uint64(0); i < slotsPerEpoch; i++ {
 		payment := bpp.Get(int(i))
 		if payment.Weight > quorum {
-			// Compute withdrawable epoch
-			exitQueueEpoch := s.ComputeExitEpochAndUpdateChurn(payment.Withdrawal.Amount)
-			payment.Withdrawal.WithdrawableEpoch = exitQueueEpoch + beaconConfig.MinValidatorWithdrawabilityDelay
-
+			// Compute withdrawable epoch using exit churn mechanism
+			exitEpoch := s.ComputeExitEpochAndUpdateChurn(payment.Withdrawal.Amount)
+			withdrawal := &cltypes.BuilderPendingWithdrawal{
+				FeeRecipient:      payment.Withdrawal.FeeRecipient,
+				Amount:            payment.Withdrawal.Amount,
+				BuilderIndex:      payment.Withdrawal.BuilderIndex,
+				WithdrawableEpoch: exitEpoch + beaconConfig.MinValidatorWithdrawabilityDelay,
+			}
 			// Append withdrawal to builder_pending_withdrawals
 			bpw := s.BuilderPendingWithdrawals()
-			bpw.Append(payment.Withdrawal)
+			bpw.Append(withdrawal)
 			s.SetBuilderPendingWithdrawals(bpw)
 		}
 	}

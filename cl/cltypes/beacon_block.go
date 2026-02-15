@@ -386,9 +386,13 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (b *BeaconBody) Blinded() (*BlindedBeaconBody, error) {
-	header, err := b.ExecutionPayload.PayloadHeader()
-	if err != nil {
-		return nil, err
+	var header *Eth1Header
+	if b.ExecutionPayload != nil && b.Version < clparams.GloasVersion {
+		var err error
+		header, err = b.ExecutionPayload.PayloadHeader()
+		if err != nil {
+			return nil, err
+		}
 	}
 	return &BlindedBeaconBody{
 		RandaoReveal:       b.RandaoReveal,
@@ -468,8 +472,7 @@ func (b *BeaconBody) KzgCommitmentsInclusionProof() ([][32]byte, error) {
 // kzgCommitmentsRootMerkleProofGloas computes the merkle proof for
 // blob_kzg_commitments_root through the Gloas body tree.
 // In Gloas, blob_kzg_commitments_root is at:
-//   GloasExecutionPayloadHeader[8] -> SignedExecutionPayloadHeader.Message[0] -> BeaconBody[10]
-// Generalized index = (16+10)*2*16 + 8 = 840, total depth = 4+1+4 = 9
+//   ExecutionPayloadBid[8] -> SignedExecutionPayloadBid.Message[0] -> BeaconBody[10]
 func (b *BeaconBody) kzgCommitmentsRootMerkleProofGloas() ([][32]byte, error) {
 	if b.SignedExecutionPayloadBid == nil {
 		return nil, errors.New("signed_execution_payload_bid is nil")
@@ -479,7 +482,7 @@ func (b *BeaconBody) kzgCommitmentsRootMerkleProofGloas() ([][32]byte, error) {
 		return nil, errors.New("execution_payload_header message is nil")
 	}
 
-	// Level 1: GloasExecutionPayloadHeader tree, proof for field 8 (BlobKzgCommitmentsRoot)
+	// Level 1: ExecutionPayloadBid tree, proof for field 8 (BlobKzgCommitmentsRoot)
 	// 9 fields -> depth 4
 	headerSchema := []any{
 		header.ParentBlockHash[:], header.ParentBlockRoot[:], header.BlockHash[:],
@@ -491,7 +494,7 @@ func (b *BeaconBody) kzgCommitmentsRootMerkleProofGloas() ([][32]byte, error) {
 		return nil, err
 	}
 
-	// Level 2: SignedExecutionPayloadHeader tree, proof for field 0 (Message)
+	// Level 2: SignedExecutionPayloadBid tree, proof for field 0 (Message)
 	// 2 fields -> depth 1
 	signedHeaderSchema := []any{header, b.SignedExecutionPayloadBid.Signature[:]}
 	signedHeaderProof, err := merkle_tree.MerkleProof(1, 0, signedHeaderSchema...)

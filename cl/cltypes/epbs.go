@@ -107,18 +107,18 @@ func (p *PayloadAttestation) Clone() clonable.Clonable {
 }
 
 // GloasExecutionPayloadHeader is the Gloas/EIP-7732 replacement for the Bellatrix ExecutionPayloadHeader.
-// In the spec test vectors (v1.6.0-alpha.6), this is called "ExecutionPayloadHeader" and is a STATIC container.
+// In the spec test vectors, this is called "ExecutionPayloadHeader" and is a STATIC container.
 // It replaces the old dynamic Eth1Header at position 24 in the BeaconState.
 type GloasExecutionPayloadHeader struct {
-	ParentBlockHash          common.Hash    `json:"parent_block_hash"`
-	ParentBlockRoot          common.Hash    `json:"parent_block_root"`
-	BlockHash                common.Hash    `json:"block_hash"`
-	FeeRecipient             common.Address `json:"fee_recipient"`
-	GasLimit                 uint64         `json:"gas_limit,string"`
-	BuilderIndex             uint64         `json:"builder_index,string"`
-	Slot                     uint64         `json:"slot,string"`
-	Value                    uint64         `json:"value,string"`
-	BlobKzgCommitmentsRoot   common.Hash    `json:"blob_kzg_commitments_root"`
+	ParentBlockHash        common.Hash    `json:"parent_block_hash"`
+	ParentBlockRoot        common.Hash    `json:"parent_block_root"`
+	BlockHash              common.Hash    `json:"block_hash"`
+	FeeRecipient           common.Address `json:"fee_recipient"`
+	GasLimit               uint64         `json:"gas_limit,string"`
+	BuilderIndex           uint64         `json:"builder_index,string"`
+	Slot                   uint64         `json:"slot,string"`
+	Value                  uint64         `json:"value,string"`
+	BlobKzgCommitmentsRoot common.Hash    `json:"blob_kzg_commitments_root"`
 }
 
 func (e *GloasExecutionPayloadHeader) EncodeSSZ(buf []byte) ([]byte, error) {
@@ -153,6 +153,22 @@ func (e *GloasExecutionPayloadHeader) HashSSZ() ([32]byte, error) {
 func (e *GloasExecutionPayloadHeader) Static() bool { return true }
 func (*GloasExecutionPayloadHeader) Clone() clonable.Clonable {
 	return &GloasExecutionPayloadHeader{}
+}
+func (e *GloasExecutionPayloadHeader) Copy() *GloasExecutionPayloadHeader {
+	if e == nil {
+		return nil
+	}
+	return &GloasExecutionPayloadHeader{
+		ParentBlockHash:        e.ParentBlockHash,
+		ParentBlockRoot:        e.ParentBlockRoot,
+		BlockHash:              e.BlockHash,
+		FeeRecipient:           e.FeeRecipient,
+		GasLimit:               e.GasLimit,
+		BuilderIndex:           e.BuilderIndex,
+		Slot:                   e.Slot,
+		Value:                  e.Value,
+		BlobKzgCommitmentsRoot: e.BlobKzgCommitmentsRoot,
+	}
 }
 
 // ExecutionPayloadBid is an alias for GloasExecutionPayloadHeader used in BeaconState.
@@ -275,6 +291,14 @@ func (b *BuilderPendingWithdrawal) Static() bool { return true }
 func (*BuilderPendingWithdrawal) Clone() clonable.Clonable {
 	return &BuilderPendingWithdrawal{}
 }
+func (b *BuilderPendingWithdrawal) Copy() *BuilderPendingWithdrawal {
+	return &BuilderPendingWithdrawal{
+		FeeRecipient:      b.FeeRecipient,
+		Amount:            b.Amount,
+		BuilderIndex:      b.BuilderIndex,
+		WithdrawableEpoch: b.WithdrawableEpoch,
+	}
+}
 
 // BuilderPendingPayment represents a pending payment for a builder (Gloas/EIP-7732)
 type BuilderPendingPayment struct {
@@ -316,6 +340,12 @@ func (b *BuilderPendingPayment) HashSSZ() ([32]byte, error) {
 func (b *BuilderPendingPayment) Static() bool { return true }
 func (b *BuilderPendingPayment) Clone() clonable.Clonable {
 	return NewBuilderPendingPayment()
+}
+func (b *BuilderPendingPayment) Copy() *BuilderPendingPayment {
+	return &BuilderPendingPayment{
+		Weight:     b.Weight,
+		Withdrawal: b.Withdrawal.Copy(),
+	}
 }
 
 // ExecutionPayloadEnvelope wraps a full execution payload with metadata (Gloas/EIP-7732)

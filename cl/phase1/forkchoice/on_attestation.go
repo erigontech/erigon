@@ -187,6 +187,27 @@ func (f *ForkChoiceStore) processAttestingIndicies(
 	beaconBlockRoot := attestation.Data.BeaconBlockRoot
 	target := attestation.Data.Target
 
+	if f.isGloasActive() {
+		// [Gloas:EIP7732] Use slot-based comparison and track PayloadPresent
+		slot := attestation.Data.Slot
+		payloadPresent := attestation.Data.CommitteeIndex == 1
+		for _, index := range indicies {
+			if f.isUnequivocating(index) {
+				continue
+			}
+			validatorMessage, has := f.getLatestMessage(index)
+			if !has || slot > validatorMessage.Slot {
+				f.setLatestMessage(index, LatestMessage{
+					Epoch:          target.Epoch,
+					Root:           beaconBlockRoot,
+					Slot:           slot,
+					PayloadPresent: payloadPresent,
+				})
+			}
+		}
+		return
+	}
+
 	for _, index := range indicies {
 		if f.isUnequivocating(index) {
 			continue

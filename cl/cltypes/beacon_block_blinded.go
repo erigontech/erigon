@@ -323,16 +323,16 @@ func (b *BlindedBeaconBody) EncodingSizeSSZ() (size int) {
 	size += b.Attestations.EncodingSizeSSZ()
 	size += b.Deposits.EncodingSizeSSZ()
 	size += b.VoluntaryExits.EncodingSizeSSZ()
-	if b.Version >= clparams.BellatrixVersion {
+	if b.Version >= clparams.BellatrixVersion && b.Version < clparams.GloasVersion {
 		size += b.ExecutionPayload.EncodingSizeSSZ()
 	}
 	if b.Version >= clparams.CapellaVersion {
 		size += b.ExecutionChanges.EncodingSizeSSZ()
 	}
-	if b.Version >= clparams.DenebVersion {
-		size += b.ExecutionChanges.EncodingSizeSSZ()
+	if b.Version >= clparams.DenebVersion && b.Version < clparams.GloasVersion {
+		size += b.BlobKzgCommitments.EncodingSizeSSZ()
 	}
-	if b.Version >= clparams.ElectraVersion {
+	if b.Version >= clparams.ElectraVersion && b.Version < clparams.GloasVersion {
 		if b.ExecutionRequests != nil {
 			size += b.ExecutionRequests.EncodingSizeSSZ()
 		}
@@ -347,7 +347,9 @@ func (b *BlindedBeaconBody) DecodeSSZ(buf []byte, version int) error {
 		return fmt.Errorf("[BeaconBody] err: %s", ssz.ErrLowBufferSize)
 	}
 
-	b.ExecutionPayload = NewEth1Header(b.Version)
+	if b.Version < clparams.GloasVersion {
+		b.ExecutionPayload = NewEth1Header(b.Version)
+	}
 
 	err := ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...)
 	return err
@@ -362,16 +364,16 @@ func (b *BlindedBeaconBody) getSchema(storage bool) []any {
 	if b.Version >= clparams.AltairVersion {
 		s = append(s, b.SyncAggregate)
 	}
-	if b.Version >= clparams.BellatrixVersion && !storage {
+	if b.Version >= clparams.BellatrixVersion && b.Version < clparams.GloasVersion && !storage {
 		s = append(s, b.ExecutionPayload)
 	}
 	if b.Version >= clparams.CapellaVersion {
 		s = append(s, b.ExecutionChanges)
 	}
-	if b.Version >= clparams.DenebVersion {
+	if b.Version >= clparams.DenebVersion && b.Version < clparams.GloasVersion {
 		s = append(s, b.BlobKzgCommitments)
 	}
-	if b.Version >= clparams.ElectraVersion {
+	if b.Version >= clparams.ElectraVersion && b.Version < clparams.GloasVersion {
 		s = append(s, b.ExecutionRequests)
 	}
 	return s

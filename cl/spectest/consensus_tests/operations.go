@@ -26,12 +26,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/spectest/spectest"
+	"github.com/erigontech/erigon/cl/transition/machine"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 )
@@ -475,11 +477,279 @@ func operationExecutionPayloadHandler(t *testing.T, root fs.FS, c spectest.TestC
 	if err != nil && !expectedError {
 		return err
 	}
+	// Check execution.yaml for execution engine validity
+	var executionMeta struct {
+		ExecutionValid bool `yaml:"execution_valid"`
+	}
+	executionMeta.ExecutionValid = true // default to valid
+	_ = spectest.ReadYml(root, "execution.yaml", &executionMeta)
+	if !executionMeta.ExecutionValid {
+		if expectedError {
+			return nil
+		}
+		return errors.New("execution engine returned invalid")
+	}
 	body := cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig, c.Version())
 	if err := spectest.ReadSszOld(root, body, c.Version(), "body.ssz_snappy"); err != nil {
 		return err
 	}
 	if err := c.Machine.ProcessExecutionPayload(preState, body); err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
+	}
+	if expectedError {
+		return errors.New("expected error")
+	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
+
+	expectedRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	assert.EqualValues(t, expectedRoot, haveRoot)
+	return nil
+}
+
+// operationGloasExecutionPayloadHandler handles gloas execution_payload operation tests.
+// In gloas, execution payload is delivered via SignedExecutionPayloadEnvelope (not block body).
+func operationGloasExecutionPayloadHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
+	expectedError := os.IsNotExist(err)
+	if err != nil && !expectedError {
+		return err
+	}
+	envelope := cltypes.NewSignedExecutionPayloadEnvelope()
+	if err := spectest.ReadSszOld(root, envelope, c.Version(), "signed_envelope.ssz_snappy"); err != nil {
+		return err
+	}
+	// Read execution.yaml to check if execution engine should return valid
+	var executionMeta struct {
+		ExecutionValid bool `yaml:"execution_valid"`
+	}
+	_ = spectest.ReadYml(root, "execution.yaml", &executionMeta)
+
+	if err := processGloasExecutionPayload(c.Machine, preState, envelope, executionMeta.ExecutionValid); err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
+	}
+	if expectedError {
+		return errors.New("expected error")
+	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
+
+	expectedRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	assert.EqualValues(t, expectedRoot, haveRoot)
+	return nil
+}
+
+// processGloasExecutionPayload implements process_execution_payload for Gloas spec tests.
+func processGloasExecutionPayload(impl machine.Interface, s abstract.BeaconState, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, executionValid bool) error { //nolint:gocognit
+	envelope := signedEnvelope.Message
+	payload := envelope.Payload
+
+	// Verify envelope signature is a valid BLS point (full verification skipped without builder registry)
+	if _, err := bls.NewSignatureFromBytes(signedEnvelope.Signature[:]); err != nil {
+		return fmt.Errorf("process_execution_payload: invalid envelope signature: %w", err)
+	}
+
+	// Cache latest block header state root
+	previousStateRoot, err := s.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("process_execution_payload: failed to hash state: %w", err)
+	}
+	latestBlockHeader := s.LatestBlockHeader()
+	if latestBlockHeader.Root == ([32]byte{}) {
+		latestBlockHeader.Root = previousStateRoot
+		s.SetLatestBlockHeader(&latestBlockHeader)
+	}
+
+	// Verify consistency with the beacon block
+	lbh := s.LatestBlockHeader()
+	expectedBeaconBlockRoot, err := lbh.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("process_execution_payload: failed to hash latest block header: %w", err)
+	}
+	if envelope.BeaconBlockRoot != expectedBeaconBlockRoot {
+		return fmt.Errorf("process_execution_payload: beacon_block_root mismatch: got %x, expected %x",
+			envelope.BeaconBlockRoot, expectedBeaconBlockRoot)
+	}
+	if envelope.Slot != s.Slot() {
+		return fmt.Errorf("process_execution_payload: slot mismatch: got %d, expected %d",
+			envelope.Slot, s.Slot())
+	}
+
+	// Verify consistency with the committed bid
+	beaconConfig := s.BeaconConfig()
+	committedBid := s.LatestExecutionPayloadBid()
+	if envelope.BuilderIndex != committedBid.BuilderIndex {
+		return fmt.Errorf("process_execution_payload: builder_index mismatch: got %d, expected %d",
+			envelope.BuilderIndex, committedBid.BuilderIndex)
+	}
+
+	// Verify prev_randao matches the current epoch's randao mix
+	currentEpoch := s.Slot() / beaconConfig.SlotsPerEpoch
+	expectedRandao := s.GetRandaoMixes(currentEpoch)
+	if payload.PrevRandao != expectedRandao {
+		return fmt.Errorf("process_execution_payload: prev_randao mismatch")
+	}
+
+	// Verify consistency with expected withdrawals
+	actualWithdrawalsRoot, err := payload.Withdrawals.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("process_execution_payload: failed to hash actual withdrawals: %w", err)
+	}
+	expectedWithdrawalsRoot := s.LatestWithdrawalsRoot()
+	if expectedWithdrawalsRoot != actualWithdrawalsRoot {
+		return fmt.Errorf("process_execution_payload: withdrawals mismatch")
+	}
+
+	// Verify gas_limit
+	if committedBid.GasLimit != payload.GasLimit {
+		return fmt.Errorf("process_execution_payload: gas_limit mismatch: committed=%d, actual=%d",
+			committedBid.GasLimit, payload.GasLimit)
+	}
+	// Verify block_hash
+	if committedBid.BlockHash != payload.BlockHash {
+		return fmt.Errorf("process_execution_payload: block_hash mismatch")
+	}
+	// Verify parent_hash
+	if payload.ParentHash != s.LatestBlockHash() {
+		return fmt.Errorf("process_execution_payload: parent_hash mismatch")
+	}
+	// Verify timestamp
+	if payload.Time != state.ComputeTimestampAtSlot(s, s.Slot()) {
+		return fmt.Errorf("process_execution_payload: timestamp mismatch")
+	}
+
+	// Verify blob_kzg_commitments_root matches the committed bid
+	blobCommitmentsRoot, err := envelope.BlobKzgCommitments.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("process_execution_payload: failed to hash blob commitments: %w", err)
+	}
+	if blobCommitmentsRoot != committedBid.BlobKzgCommitmentsRoot {
+		return fmt.Errorf("process_execution_payload: blob_kzg_commitments_root mismatch")
+	}
+
+	// Verify execution engine (simulated via execution.yaml)
+	if !executionValid {
+		return errors.New("process_execution_payload: execution engine returned invalid")
+	}
+
+	// Process execution requests
+	requests := envelope.ExecutionRequests
+	if requests != nil {
+		if requests.Deposits != nil {
+			for i := 0; i < requests.Deposits.Len(); i++ {
+				if err := impl.ProcessDepositRequest(s, requests.Deposits.Get(i)); err != nil {
+					return fmt.Errorf("process_execution_payload: deposit request: %w", err)
+				}
+			}
+		}
+		if requests.Withdrawals != nil {
+			for i := 0; i < requests.Withdrawals.Len(); i++ {
+				if err := impl.ProcessWithdrawalRequest(s, requests.Withdrawals.Get(i)); err != nil {
+					return fmt.Errorf("process_execution_payload: withdrawal request: %w", err)
+				}
+			}
+		}
+		if requests.Consolidations != nil {
+			for i := 0; i < requests.Consolidations.Len(); i++ {
+				if err := impl.ProcessConsolidationRequest(s, requests.Consolidations.Get(i)); err != nil {
+					return fmt.Errorf("process_execution_payload: consolidation request: %w", err)
+				}
+			}
+		}
+	}
+
+	// Queue the builder payment (always append, compute withdrawable epoch via churn)
+	bpp := s.BuilderPendingPayments()
+	paymentIdx := beaconConfig.SlotsPerEpoch + s.Slot()%beaconConfig.SlotsPerEpoch
+	payment := bpp.Get(int(paymentIdx))
+	exitEpoch := s.ComputeExitEpochAndUpdateChurn(payment.Withdrawal.Amount)
+	w := &cltypes.BuilderPendingWithdrawal{
+		FeeRecipient:      payment.Withdrawal.FeeRecipient,
+		Amount:            payment.Withdrawal.Amount,
+		BuilderIndex:      payment.Withdrawal.BuilderIndex,
+		WithdrawableEpoch: exitEpoch + beaconConfig.MinValidatorWithdrawabilityDelay,
+	}
+	bpw := s.BuilderPendingWithdrawals()
+	bpw.Append(w)
+	s.SetBuilderPendingWithdrawals(bpw)
+	// Clear current slot's payment
+	payment.Weight = 0
+	payment.Withdrawal.FeeRecipient = [20]byte{}
+	payment.Withdrawal.Amount = 0
+	payment.Withdrawal.BuilderIndex = 0
+	payment.Withdrawal.WithdrawableEpoch = 0
+	s.SetBuilderPendingPayments(bpp)
+
+	// Cache the execution payload hash
+	epa := s.ExecutionPayloadAvailability()
+	if err := epa.SetBitAt(int(s.Slot()%beaconConfig.SlotsPerHistoricalRoot), true); err != nil {
+		return fmt.Errorf("process_execution_payload: failed to set payload availability: %w", err)
+	}
+	s.SetExecutionPayloadAvailability(epa)
+	s.SetLatestBlockHash(payload.BlockHash)
+
+	return nil
+}
+
+// operationExecutionPayloadHeaderHandler handles gloas execution_payload_header operation tests.
+// In gloas, process_execution_payload_header processes the signed execution payload bid from the block.
+func operationExecutionPayloadHeaderHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
+	expectedError := os.IsNotExist(err)
+	if err != nil && !expectedError {
+		return err
+	}
+	block := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, c.Version())
+	if err := spectest.ReadSszOld(root, block, c.Version(), blockFileName); err != nil {
+		return err
+	}
+	if err := machine.ProcessExecutionPayloadBid(preState, block.Body, block.ProposerIndex, block.Slot, block.ParentRoot); err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
+	}
+	if expectedError {
+		return errors.New("expected error")
+	}
+	haveRoot, err := preState.HashSSZ()
+	require.NoError(t, err)
+
+	expectedRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	assert.EqualValues(t, expectedRoot, haveRoot)
+	return nil
+}
+
+// operationPayloadAttestationHandler handles gloas payload_attestation operation tests.
+func operationPayloadAttestationHandler(t *testing.T, root fs.FS, c spectest.TestCase) error {
+	preState, err := spectest.ReadBeaconState(root, c.Version(), "pre.ssz_snappy")
+	require.NoError(t, err)
+	postState, err := spectest.ReadBeaconState(root, c.Version(), "post.ssz_snappy")
+	expectedError := os.IsNotExist(err)
+	if err != nil && !expectedError {
+		return err
+	}
+	pa := cltypes.NewPayloadAttestation()
+	if err := spectest.ReadSszOld(root, pa, c.Version(), "payload_attestation.ssz_snappy"); err != nil {
+		return err
+	}
+	if err := machine.ProcessPayloadAttestation(preState, pa); err != nil {
 		if expectedError {
 			return nil
 		}

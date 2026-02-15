@@ -54,6 +54,7 @@ type checkpointState struct {
 	fork                  *cltypes.Fork
 	activeBalance, epoch  uint64 // current active balance and epoch
 	checkpoint            solid.Checkpoint
+	stateVersion          clparams.StateVersion // actual state version (not derived from epoch)
 }
 
 func writeToBitset(bitset []byte, i int, value bool) {
@@ -73,7 +74,7 @@ func readFromBitset(bitset []byte, i int) bool {
 }
 
 func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, publicKeysRegistry public_keys_registry.PublicKeyRegistry, validatorSet []solid.Validator, randaoMixes solid.HashVectorSSZ,
-	genesisValidatorsRoot common.Hash, fork *cltypes.Fork, activeBalance, epoch uint64, checkpoint solid.Checkpoint) *checkpointState {
+	genesisValidatorsRoot common.Hash, fork *cltypes.Fork, activeBalance, epoch uint64, checkpoint solid.Checkpoint, stateVersion clparams.StateVersion) *checkpointState {
 	balances := make([]uint64, len(validatorSet))
 
 	bitsetSize := (len(validatorSet) + 7) / 8
@@ -102,6 +103,7 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, publicKeysRegi
 		checkpoint:            checkpoint,
 		epoch:                 epoch,
 		publicKeysRegistry:    publicKeysRegistry,
+		stateVersion:          stateVersion,
 	}
 	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
 		beaconConfig.EpochsPerHistoricalVector
@@ -120,8 +122,7 @@ func (c *checkpointState) getAttestingIndicies(attestation *solid.Attestation, a
 	slot := attestation.Data.Slot
 	epoch := c.epochAtSlot(slot)
 	cIndex := attestation.Data.CommitteeIndex
-	clversion := c.beaconConfig.GetCurrentStateVersion(epoch)
-	if clversion.AfterOrEqual(clparams.ElectraVersion) {
+	if c.stateVersion.AfterOrEqual(clparams.ElectraVersion) {
 		index, err := attestation.GetCommitteeIndexFromBits()
 		if err != nil {
 			return nil, err

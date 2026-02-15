@@ -270,11 +270,13 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	if ret.Version() < clparams.BellatrixVersion {
 		return ret, nil
 	}
-	payloadHeader, err := block.Block.Body.ExecutionPayload.PayloadHeader()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read payload header: %w", err)
+	if ret.Version() < clparams.GloasVersion {
+		payloadHeader, err := block.Block.Body.ExecutionPayload.PayloadHeader()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read payload header: %w", err)
+		}
+		ret.SetLatestExecutionPayloadHeader(payloadHeader)
 	}
-	ret.SetLatestExecutionPayloadHeader(payloadHeader)
 	if ret.Version() < clparams.CapellaVersion {
 		return ret, nil
 	}
@@ -330,6 +332,28 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 
 	ret.SetProposerLookahead(epochData.ProposerLookahead)
+
+	if ret.Version() < clparams.GloasVersion {
+		return ret, nil
+	}
+
+	// Gloas/EIP-7732: Reconstruct latestExecutionPayloadBid from block
+	if block.Block.Body.SignedExecutionPayloadBid != nil {
+		ret.SetLatestExecutionPayloadBid(block.Block.Body.SignedExecutionPayloadBid.Message)
+	}
+	// Scalars and fixed-size vectors from SlotData
+	ret.SetLatestBlockHash(slotData.LatestBlockHash)
+	ret.SetLatestWithdrawalsRoot(slotData.LatestWithdrawalsRoot)
+	ret.SetExecutionPayloadAvailability(slotData.ExecutionPayloadAvailability)
+	ret.SetBuilderPendingPayments(slotData.BuilderPendingPayments)
+
+	// Dynamic list: builder pending withdrawals (dump + diff)
+	builderPendingWithdrawals := solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](int(r.cfg.BuilderPendingWithdrawalsLimit), 44)
+	if err := ReadQueueSSZ(kvGetter, slot, kv.BuilderPendingWithdrawalsDump, kv.BuilderPendingWithdrawals, builderPendingWithdrawals); err != nil {
+		return nil, fmt.Errorf("failed to read builder pending withdrawals: %w", err)
+	}
+	ret.SetBuilderPendingWithdrawals(builderPendingWithdrawals)
+
 	return ret, nil
 }
 

@@ -225,6 +225,23 @@ func (v *VectorSSZ[T]) EncodingSizeSSZ() int {
 	return v.ListSSZ.limit * v.ListSSZ.bytesPerElement
 }
 
+// EncodeSSZ encodes exactly limit elements, padding with zero-initialized elements if needed.
+func (v *VectorSSZ[T]) EncodeSSZ(buf []byte) (dst []byte, err error) {
+	dst = buf
+	l := v.ListSSZ
+	for i := 0; i < l.limit; i++ {
+		if i < len(l.list) {
+			if dst, err = l.list[i].EncodeSSZ(dst); err != nil {
+				return
+			}
+		} else {
+			// Pad with zeros for missing elements
+			dst = append(dst, make([]byte, l.bytesPerElement)...)
+		}
+	}
+	return
+}
+
 // DecodeSSZ decodes exactly limit elements from the buffer.
 func (v *VectorSSZ[T]) DecodeSSZ(buf []byte, version int) error {
 	expectedSize := v.EncodingSizeSSZ()

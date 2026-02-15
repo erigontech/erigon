@@ -146,11 +146,20 @@ type ForkChoiceStore struct {
 	ethClock                eth_clock.EthereumClock
 	optimisticStore         optimistic.OptimisticStore
 	probabilisticHeadGetter bool
+
+	// [Gloas:EIP7732] Payload-aware fork choice
+	anchorVersion          clparams.StateVersion          // version of the anchor state
+	executionPayloadStates map[common.Hash]struct{}   // roots that have received execution payloads
+	bidDataMap             map[common.Hash]bidData     // root -> bid data (block_hash, parent_block_hash)
+	ptcVote                map[common.Hash][]bool      // root -> PTC votes
+	blockTimeliness        map[common.Hash][2]bool     // root -> [attestation_timely, ptc_timely]
 }
 
 type LatestMessage struct {
-	Epoch uint64
-	Root  common.Hash
+	Epoch          uint64
+	Root           common.Hash
+	Slot           uint64 // [Gloas] used instead of Epoch for fork choice
+	PayloadPresent bool   // [Gloas] whether the attestation voted for payload present
 }
 
 type childrens struct {
@@ -287,6 +296,12 @@ func NewForkChoiceStore(
 		pendingDeposits:          pendingDeposits,
 		partialWithdrawals:       partialWithdrawals,
 		proposerLookahead:        proposerLookahead,
+		// [Gloas:EIP7732] Initialize payload-aware fork choice maps
+		anchorVersion:          anchorState.Version(),
+		executionPayloadStates: make(map[common.Hash]struct{}),
+		bidDataMap:             make(map[common.Hash]bidData),
+		ptcVote:                make(map[common.Hash][]bool),
+		blockTimeliness:        make(map[common.Hash][2]bool),
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
 	f.finalizedCheckpoint.Store(anchorCheckpoint)
@@ -297,6 +312,37 @@ func NewForkChoiceStore(
 	f.highestSeen.Store(anchorState.Slot())
 	f.time.Store(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot())
 	return f, nil
+}
+
+// InitGloasAnchor initializes Gloas-specific fork choice state for the anchor block.
+// Must be called after NewForkChoiceStore for Gloas-version states.
+func (f *ForkChoiceStore) InitGloasAnchor(anchorBlock *cltypes.BeaconBlock) {
+	if anchorBlock == nil || anchorBlock.Version() < clparams.GloasVersion {
+		return
+	}
+	anchorRoot, err := anchorBlock.HashSSZ()
+	if err != nil {
+		return
+	}
+	// Per spec: execution_payload_states={anchor_root: copy(anchor_state)}
+	f.executionPayloadStates[anchorRoot] = struct{}{}
+	// Store bid data for the anchor block
+	if bid := anchorBlock.Body.SignedExecutionPayloadBid; bid != nil && bid.Message != nil {
+		f.bidDataMap[anchorRoot] = bidData{
+			blockHash:       bid.Message.BlockHash,
+			parentBlockHash: bid.Message.ParentBlockHash,
+		}
+	}
+	// Initialize PTC vote and timeliness for anchor
+	f.ptcVote[anchorRoot] = make([]bool, cltypes.PtcSize)
+	f.blockTimeliness[anchorRoot] = [2]bool{true, true}
+}
+
+// SimulatePayloadExecution marks a block as having received its execution payload.
+// This is used in spec tests to simulate payload_state_transition, which in pyspec
+// adds the block root to store.execution_payload_states after on_block.
+func (f *ForkChoiceStore) SimulatePayloadExecution(blockRoot common.Hash) {
+	f.executionPayloadStates[blockRoot] = struct{}{}
 }
 
 func (f *ForkChoiceStore) InitPeerDas(peerDas das.PeerDas) {

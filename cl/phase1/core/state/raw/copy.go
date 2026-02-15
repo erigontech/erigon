@@ -68,7 +68,7 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 	dst.nextSyncCommittee = b.nextSyncCommittee.Copy()
 	b.inactivityScores.CopyTo(dst.inactivityScores)
 
-	if b.version >= clparams.BellatrixVersion {
+	if b.version >= clparams.BellatrixVersion && b.version < clparams.GloasVersion {
 		dst.latestExecutionPayloadHeader = b.latestExecutionPayloadHeader.Copy()
 	}
 	dst.nextWithdrawalIndex = b.nextWithdrawalIndex
@@ -93,6 +93,25 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 
 	if b.version >= clparams.FuluVersion {
 		dst.proposerLookahead = b.proposerLookahead
+	}
+
+	if b.version >= clparams.GloasVersion {
+		dst.latestExecutionPayloadBid = b.latestExecutionPayloadBid.Copy()
+		dst.executionPayloadAvailability = b.executionPayloadAvailability.Copy()
+		dst.latestBlockHash = b.latestBlockHash
+		dst.latestWithdrawalsRoot = b.latestWithdrawalsRoot
+		// Deep copy builderPendingPayments (VectorSSZ)
+		dst.builderPendingPayments = solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2*b.beaconConfig.SlotsPerEpoch), 52)
+		b.builderPendingPayments.Range(func(_ int, value *cltypes.BuilderPendingPayment, _ int) bool {
+			dst.builderPendingPayments.Append(value.Copy())
+			return true
+		})
+		// Deep copy builderPendingWithdrawals (ListSSZ)
+		dst.builderPendingWithdrawals = solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](int(b.beaconConfig.BuilderPendingWithdrawalsLimit), 44)
+		b.builderPendingWithdrawals.Range(func(_ int, value *cltypes.BuilderPendingWithdrawal, _ int) bool {
+			dst.builderPendingWithdrawals.Append(value.Copy())
+			return true
+		})
 	}
 
 	dst.version = b.version

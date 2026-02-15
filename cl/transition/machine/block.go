@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -58,7 +59,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 			return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
 		}
 		// [New in Gloas:EIP7732] process_execution_payload_header(state, block)
-		if err := processExecutionPayloadHeader(s, body, block.GetProposerIndex()); err != nil {
+		if err := processExecutionPayloadHeader(s, body, block.GetProposerIndex(), block.GetSlot(), block.GetParentRoot()); err != nil {
 			return fmt.Errorf("processBlock: failed to process execution payload header: %v", err)
 		}
 	} else {
@@ -387,8 +388,14 @@ func processGloasWithdrawals(impl BlockProcessor, s abstract.BeaconState) error 
 	return impl.ProcessWithdrawals(s, expectWithdrawals)
 }
 
-// processExecutionPayloadHeader implements process_execution_payload_header for Gloas/EIP-7732.
-func processExecutionPayloadHeader(s abstract.BeaconState, body cltypes.GenericBeaconBody, proposerIndex uint64) error {
+// ProcessExecutionPayloadBid implements process_execution_payload_header for Gloas/EIP-7732.
+// Exported for use by spec tests.
+func ProcessExecutionPayloadBid(s abstract.BeaconState, body cltypes.GenericBeaconBody, proposerIndex uint64, blockSlot uint64, blockParentRoot common.Hash) error {
+	return processExecutionPayloadHeader(s, body, proposerIndex, blockSlot, blockParentRoot)
+}
+
+// processExecutionPayloadHeader implements process_execution_payload_bid for Gloas/EIP-7732.
+func processExecutionPayloadHeader(s abstract.BeaconState, body cltypes.GenericBeaconBody, proposerIndex uint64, blockSlot uint64, blockParentRoot common.Hash) error {
 	beaconBody, ok := body.(*cltypes.BeaconBody)
 	if !ok {
 		return errors.New("processExecutionPayloadHeader: expected *cltypes.BeaconBody")
@@ -406,19 +413,64 @@ func processExecutionPayloadHeader(s abstract.BeaconState, body cltypes.GenericB
 	builderIndex := bid.BuilderIndex
 	amount := bid.Value
 
-	// For self-builds (builder_index == block.proposer_index), amount must be zero
-	if builderIndex == proposerIndex {
+	// Self-build: builder_index == proposer_index
+	isSelfBuild := builderIndex == proposerIndex
+
+	if isSelfBuild {
+		// For self-builds, amount must be zero
 		if amount != 0 {
 			return errors.New("processExecutionPayloadHeader: self-build bid must have zero value")
 		}
+	} else {
+		// Not a self-build: validate the builder
+		if builderIndex >= uint64(s.ValidatorLength()) {
+			return fmt.Errorf("processExecutionPayloadHeader: builder_index %d out of range", builderIndex)
+		}
+		builder, err := s.ValidatorForValidatorIndex(int(builderIndex))
+		if err != nil {
+			return fmt.Errorf("processExecutionPayloadHeader: failed to get builder validator: %w", err)
+		}
+		// Check withdrawal credentials have builder prefix (0x03)
+		wc := builder.WithdrawalCredentials()
+		if wc[0] != byte(beaconConfig.BuilderWithdrawalPrefix) {
+			return errors.New("processExecutionPayloadHeader: validator is not a builder (wrong withdrawal credentials prefix)")
+		}
+		// Check builder is active and not slashed
+		epoch := state.Epoch(s)
+		if !builder.Active(epoch) {
+			return errors.New("processExecutionPayloadHeader: builder is not active")
+		}
+		if builder.Slashed() {
+			return errors.New("processExecutionPayloadHeader: builder is slashed")
+		}
+		// Check builder can cover the bid
+		builderBalance, err := s.ValidatorBalance(int(builderIndex))
+		if err != nil {
+			return fmt.Errorf("processExecutionPayloadHeader: failed to get builder balance: %w", err)
+		}
+		pendingAmount := getPendingBalanceToWithdrawForBuilder(s, builderIndex)
+		minBalance := beaconConfig.MaxEffectiveBalance + pendingAmount
+		if builderBalance < minBalance || builderBalance-minBalance < amount {
+			return errors.New("processExecutionPayloadHeader: builder cannot cover bid")
+		}
+		// TODO: Verify builder bid signature when builder registry is available.
+		// Currently skipped because the builder pubkey comes from state.builders[]
+		// (a separate registry not yet implemented), not from the validator set.
 	}
 
-	// Verify that the bid is for the current slot
-	if bid.Slot != s.Slot() {
-		return fmt.Errorf("processExecutionPayloadHeader: bid slot %d != state slot %d", bid.Slot, s.Slot())
+	// Verify that the bid is for the current slot (spec: bid.slot == block.slot)
+	if bid.Slot != blockSlot {
+		return fmt.Errorf("processExecutionPayloadHeader: bid slot %d != block slot %d", bid.Slot, blockSlot)
+	}
+	// Verify that the bid is for the right parent block
+	if bid.ParentBlockHash != s.LatestBlockHash() {
+		return fmt.Errorf("processExecutionPayloadHeader: bid parent_block_hash mismatch")
+	}
+	if bid.ParentBlockRoot != blockParentRoot {
+		return fmt.Errorf("processExecutionPayloadHeader: bid parent_block_root mismatch")
 	}
 
-	// Record the pending payment
+	// Record the pending payment (always, even for zero-value bids)
 	bpp := s.BuilderPendingPayments()
 	paymentIdx := beaconConfig.SlotsPerEpoch + bid.Slot%beaconConfig.SlotsPerEpoch
 	payment := bpp.Get(int(paymentIdx))
@@ -431,6 +483,59 @@ func processExecutionPayloadHeader(s abstract.BeaconState, body cltypes.GenericB
 	// Cache the execution payload header
 	s.SetLatestExecutionPayloadBid(bid)
 
+	return nil
+}
+
+// getPendingBalanceToWithdrawForBuilder computes the total pending balance for a builder.
+func getPendingBalanceToWithdrawForBuilder(s abstract.BeaconState, builderIndex uint64) uint64 {
+	var total uint64
+	bpw := s.BuilderPendingWithdrawals()
+	bpw.Range(func(_ int, w *cltypes.BuilderPendingWithdrawal, _ int) bool {
+		if w.BuilderIndex == builderIndex {
+			total += w.Amount
+		}
+		return true
+	})
+	bpp := s.BuilderPendingPayments()
+	bpp.Range(func(_ int, p *cltypes.BuilderPendingPayment, _ int) bool {
+		if p.Withdrawal != nil && p.Withdrawal.BuilderIndex == builderIndex {
+			total += p.Withdrawal.Amount
+		}
+		return true
+	})
+	return total
+}
+
+// ProcessPayloadAttestation processes a single payload attestation for Gloas/EIP-7732.
+// Exported for use by spec tests.
+func ProcessPayloadAttestation(s abstract.BeaconState, pa *cltypes.PayloadAttestation) error {
+	data := pa.Data
+	latestBlockHeader := s.LatestBlockHeader()
+	// Check that the attestation is for the parent beacon block
+	if data.BeaconBlockRoot != latestBlockHeader.ParentRoot {
+		return fmt.Errorf("processPayloadAttestation: beacon_block_root mismatch: got %x, expected %x",
+			data.BeaconBlockRoot, latestBlockHeader.ParentRoot)
+	}
+	// Check that the attestation is for the previous slot
+	if data.Slot+1 != s.Slot() {
+		return fmt.Errorf("processPayloadAttestation: slot mismatch: data.slot=%d, state.slot=%d",
+			data.Slot, s.Slot())
+	}
+	// Check that there is at least one attesting index (non-empty aggregation bits)
+	hasAny := false
+	for i := 0; i < pa.AggregationBits.BitLen(); i++ {
+		if pa.AggregationBits.GetBitAt(i) {
+			hasAny = true
+			break
+		}
+	}
+	if !hasAny {
+		return errors.New("processPayloadAttestation: no attesting indices")
+	}
+	// Verify signature is a valid BLS point (full verification skipped without builder registry)
+	if _, err := bls.NewSignatureFromBytes(pa.Signature[:]); err != nil {
+		return fmt.Errorf("processPayloadAttestation: invalid signature: %w", err)
+	}
 	return nil
 }
 

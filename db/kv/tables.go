@@ -263,6 +263,11 @@ const (
 	PendingConsolidations         = "PendingConsolidations"         // slot => queue_diffs
 	// End Electra
 
+	// Gloas/EIP-7732
+	BuilderPendingWithdrawalsDump = "BuilderPendingWithdrawalsDump" // block_num => dump
+	BuilderPendingWithdrawals     = "BuilderPendingWithdrawals"     // slot => queue_diffs
+	// End Gloas
+
 	StatesProcessingProgress = "StatesProcessingProgress"
 
 	//Diagnostics tables
@@ -427,6 +432,8 @@ var ChaindataTables = []string{
 	PendingPartialWithdrawalsDump,
 	PendingConsolidationsDump,
 	PendingPartialWithdrawals,
+	BuilderPendingWithdrawalsDump,
+	BuilderPendingWithdrawals,
 	ActiveValidatorIndicies,
 	EffectiveBalancesDump,
 	BalancesDump,

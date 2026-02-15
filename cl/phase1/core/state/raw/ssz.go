@@ -162,7 +162,7 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 		size += b.proposerLookahead.EncodingSizeSSZ()
 	}
 	if b.version >= clparams.GloasVersion {
-		// Gloas/EIP-7732 fields (dynamic list only; static fields are in baseOffsetSSZ)
+		// Gloas/EIP-7732 fields (builderPendingWithdrawals is dynamic)
 		size += b.builderPendingWithdrawals.EncodingSizeSSZ()
 	}
 	return

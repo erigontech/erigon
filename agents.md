@@ -1,71 +1,82 @@
-# Erigon Agent Guidelines
+# Implementing the "gloas" hard fork in Erigon's Caplin (CL)
 
-This file provides guidance for AI agents working with this codebase.
+You are implementing the "gloas" Ethereum consensus hard fork. The previous fork is "fulu".
+Consensus specs (read-only reference): /tmp/consensus-specs/specs
 
-**Requirements**: Go 1.24+, GCC 10+ or Clang, 32GB+ RAM, SSD/NVMe storage
+## Spec files to read (if present for this fork)
 
-## Build & Test
+Check `/tmp/consensus-specs/specs/gloas/` for ALL of these — each maps to Erigon code:
+
+| Spec file | What it changes in Erigon |
+|-----------|--------------------------|
+| `beacon-chain.md` | Types, state, block/epoch processing (`cl/cltypes/`, `cl/phase1/core/state/`, `cl/transition/`) |
+| `fork.md` | Upgrade function (`cl/phase1/core/state/upgrade.go`) |
+| `p2p-interface.md` | Gossip topics, message types, networking (`cl/sentinel/`, `cl/phase1/network/`) |
+| `validator.md` | Validator duties, attestation, block proposal (`cl/validator/`, `cl/beacon/handler/`) |
+| `builder.md` | Builder API, MEV-Boost changes (`cl/beacon/handler/builder.go`, `cl/beacon/builder/`) |
+
+Do NOT skip p2p-interface.md, validator.md, or builder.md — they contain critical fork-specific changes.
+
+## Erigon CL architecture
+
+| Area | Key paths |
+|------|-----------|
+| Version constants | `cl/clparams/version.go` (Phase0Version=0..GloasVersion=7), `cl/clparams/config.go` |
+| Types | `cl/cltypes/` (BeaconBlock, BeaconBody, etc.), `cl/cltypes/solid/` (optimized SSZ) |
+| State & upgrades | `cl/phase1/core/state/` (getters/setters), `cl/phase1/core/state/upgrade.go` |
+| Transition | `cl/transition/impl/eth2/operations.go` (block ops), `cl/transition/impl/eth2/statechange/` (epoch) |
+| Block production | `cl/beacon/handler/block_production.go` (version gates), `cl/beacon/handler/builder.go` |
+| Antiquary | `cl/antiquary/state_antiquary.go`, `cl/antiquary/beacon_states_collector.go` |
+| Persistence | `cl/persistence/state/slot_data.go`, `cl/persistence/state/epoch_data.go` |
+| State reconstruction | `cl/persistence/state/historical_states_reader/` |
+| Snapshots | `db/snapshotsync/caplin_state_snapshots.go` |
+| P2P / networking | `cl/sentinel/` (gossip, message types), `cl/phase1/network/` |
+| Validator | `cl/validator/` (attestation producer, duties) |
+| Builder / MEV | `cl/beacon/handler/builder.go`, `cl/beacon/builder/` |
+| Spec tests | `cl/spectest/` (Makefile, spectest/suite.go, consensus_tests/) |
+
+## Spec test enablement — 6 layers (ALL required)
+
+1. **Makefile** (`cl/spectest/Makefile`): Remove `rm -rf tests/mainnet/gloas` line
+2. **suite.go** (`cl/spectest/spectest/suite.go:~43`): Remove from runtime skip list if present
+3. **forks.go** (`cl/spectest/consensus_tests/forks.go`): Add upgrade switch case
+4. **transition.go** (`cl/spectest/consensus_tests/transition.go`): Add fork epoch switch case
+5. **appendix.go**: Register new SSZ types with `runAfterVersion(clparams.GloasVersion)`
+6. **appendix.go**: Register new operation/epoch processing handlers
+
+## Antiquary — 7-step pattern for new fork fields
+
+1. State upgrade in `upgrade.go` — initialize new fields
+2. Collector init in `beacon_states_collector.go` — `etl.NewCollector` for new DB table
+3. Version-gated collection in `state_antiquary.go` — `if version >= clparams.GloasVersion`
+4. Collection method in `beacon_states_collector.go` — `collectNewField()`
+5. Flush in `beacon_states_collector.go:flush()` — `Load()` call
+6. Schema in `slot_data.go` / `epoch_data.go` — version-gated `getSchema()` field
+7. Reconstruction in `historical_states_reader/` — version-gated read
+
+## Hard rules
+
+- **Backward compatible**: NEVER modify behavior for forks before gloas. ALL new logic behind version guards.
+- **finality + random** spec test categories are the most complex — work on them LAST, after everything else passes.
+- **`TestStateAntiquaryGloas`** MUST exist and PASS (in `cl/antiquary/state_antiquary_test.go`).
+- **`caplin_state_snapshots.go`** must compile with the new fork.
+- SSZ field order MUST match the spec exactly.
+- Follow existing code patterns (study "fulu" as template).
+- Use `spectest.UnimplementedHandler` for test categories that aren't implementable yet.
+
+## Test commands
 
 ```bash
-make erigon              # Build main binary (./build/bin/erigon)
-make integration         # Build integration test binary
-make lint                # Run golangci-lint + mod tidy check
-make test-short          # Quick unit tests (-short -failfast)
-make test-all            # Full test suite with coverage
-make gen                 # Generate all auto-generated code (mocks, grpc, etc.)
+# Spec tests — fast first, finality+random last
+cd cl/spectest && CGO_CFLAGS=-D__BLST_PORTABLE__ go test -tags=spectest -run=/mainnet/gloas/ -skip=/(finality|random)/ -v --timeout 30m
+cd cl/spectest && CGO_CFLAGS=-D__BLST_PORTABLE__ go test -tags=spectest -run=/mainnet/gloas/(finality|random)/ -v --timeout 30m
+
+# Antiquary/persistence tests
+CGO_CFLAGS=-D__BLST_PORTABLE__ go test -v ./cl/antiquary/... ./cl/persistence/state/... ./cl/persistence/base_encoding/... ./cl/persistence/format/snapshot_format/... ./cl/phase1/core/state/... --timeout 10m
+
+# Compile check
+go build ./cl/...
+
+# Full backward compat check (all forks)
+cd cl/spectest && CGO_CFLAGS=-D__BLST_PORTABLE__ go test -tags=spectest -run=/mainnet/ -skip=/(finality|random)/ -v --timeout 30m
 ```
-
-Before committing, always verify changes with: `make lint && make erigon integration`
-
-Run specific tests:
-```bash
-go test ./execution/stagedsync/...
-go test -run TestName ./path/to/package/...
-```
-
-Build tag required: `goexperiment.synctest` (set automatically by Makefile)
-
-## Architecture Overview
-
-Erigon is a high-performance Ethereum execution client with embedded consensus layer. Key design principles:
-- **Flat KV storage** instead of tries (reduces write amplification)
-- **Staged synchronization** (ordered pipeline, independent unwind)
-- **Modular services** (sentry, txpool, downloader can run separately)
-
-## Directory Structure
-
-| Directory | Purpose | Component Docs |
-|-----------|---------|----------------|
-| `cmd/` | Entry points: erigon, rpcdaemon, caplin, sentry, downloader | - |
-| `execution/stagedsync/` | Staged sync pipeline | [agents.md](execution/stagedsync/agents.md) |
-| `db/` | Storage: MDBX, snapshots, ETL | [agents.md](db/agents.md) |
-| `cl/` | Consensus layer (Caplin) | [agents.md](cl/agents.md) |
-| `p2p/` | P2P networking (DevP2P) | [agents.md](p2p/agents.md) |
-| `rpc/jsonrpc/` | JSON-RPC API | - |
-
-## Running
-
-```bash
-./build/bin/erigon --datadir=./data --chain=mainnet
-./build/bin/erigon --datadir=dev --chain=dev --mine  # Development
-```
-
-## Conventions
-
-Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace configs optional`
-
-**Important**: Always run `make lint` after making code changes and before committing. Fix any linter errors before proceeding.
-
-## Lint Notes
-
-The linter (`make lint`) is non-deterministic in which files it scans — new issues may appear on subsequent runs. Run lint repeatedly until clean.
-
-Common lint categories and fixes:
-- **ruleguard (defer tx.Rollback/cursor.Close):** The error check must come *before* `defer tx.Rollback()`. Never remove an explicit `.Close()` or `.Rollback()` — add `defer` as a safety net alongside it, since the timing of the explicit call may matter.
-- **prealloc:** Pre-allocate slices when the length is known from a range.
-- **unslice:** Remove redundant `[:]` on variables that are already slices.
-- **newDeref:** Replace `*new(T)` with `T{}`.
-- **appendCombine:** Combine consecutive `append` calls into one.
-- **rangeExprCopy:** Use `&x` in `range` to avoid copying large arrays.
-- **dupArg:** For intentional `x.Equal(x)` self-equality tests, suppress with `//nolint:gocritic`.
-- **Loop ruleguard in benchmarks:** For `BeginRw`/`BeginRo` inside loops where `defer` doesn't apply, suppress with `//nolint:gocritic`.

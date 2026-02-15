@@ -379,6 +379,11 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 						return err
 					}
 				}
+				if s.currentState.Version() >= clparams.GloasVersion {
+					if err := stateAntiquaryCollector.collectBuilderPendingWithdrawalsDump(slot, s.currentState.BuilderPendingWithdrawals()); err != nil {
+						return err
+					}
+				}
 			}
 			if slot%s.cfg.SlotsPerEpoch == 0 {
 				if err := stateAntiquaryCollector.collectBalancesDiffs(ctx, slot, s.balances32, s.currentState.RawBalances()); err != nil {
@@ -444,6 +449,11 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 					return err
 				}
 			}
+			if s.currentState.Version() >= clparams.GloasVersion {
+				if err := stateAntiquaryCollector.collectBuilderPendingWithdrawalsDump(slot, s.currentState.BuilderPendingWithdrawals()); err != nil {
+					return err
+				}
+			}
 		}
 		// collect current diffs.
 		if err := stateAntiquaryCollector.collectBalancesDiffs(ctx, slot, s.balances32, s.currentState.RawBalances()); err != nil {
@@ -452,6 +462,11 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 
 		if s.currentState.Version() >= clparams.ElectraVersion {
 			if err := stateAntiquaryCollector.collectElectraQueuesDiffs(slot, s.currentState.PendingDeposits(), s.currentState.PendingConsolidations(), s.currentState.PendingPartialWithdrawals()); err != nil {
+				return err
+			}
+		}
+		if s.currentState.Version() >= clparams.GloasVersion {
+			if err := stateAntiquaryCollector.collectBuilderPendingWithdrawalsDiffs(slot, s.currentState.BuilderPendingWithdrawals()); err != nil {
 				return err
 			}
 		}

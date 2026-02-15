@@ -23,8 +23,10 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
+	"github.com/erigontech/erigon/common"
 )
 
 type SlotData struct {
@@ -47,6 +49,11 @@ type SlotData struct {
 	EarliestExitEpoch             uint64
 	ConsolidationBalanceToConsume uint64
 	EarliestConsolidationEpoch    uint64
+	// Gloas/EIP-7732
+	LatestBlockHash              common.Hash
+	LatestWithdrawalsRoot        common.Hash
+	ExecutionPayloadAvailability *solid.BitVector
+	BuilderPendingPayments       *solid.VectorSSZ[*cltypes.BuilderPendingPayment]
 
 	// BlockRewards for proposer
 	AttestationsRewards  uint64
@@ -75,7 +82,12 @@ func SlotDataFromBeaconState(s *state.CachingBeaconState) *SlotData {
 		EarliestExitEpoch:             s.EarliestExitEpoch(),
 		ConsolidationBalanceToConsume: s.ConsolidationBalanceToConsume(),
 		EarliestConsolidationEpoch:    s.EarliestConsolidationEpoch(),
-		Fork:                          s.Fork(),
+		// Gloas/EIP-7732
+		LatestBlockHash:              s.LatestBlockHash(),
+		LatestWithdrawalsRoot:        s.LatestWithdrawalsRoot(),
+		ExecutionPayloadAvailability: s.ExecutionPayloadAvailability(),
+		BuilderPendingPayments:       s.BuilderPendingPayments(),
+		Fork:                         s.Fork(),
 	}
 }
 
@@ -112,6 +124,11 @@ func (m *SlotData) ReadFrom(r io.Reader, cfg *clparams.BeaconChainConfig) error 
 	}
 	m.Version = clparams.StateVersion(versionByte[0])
 
+	if m.Version >= clparams.GloasVersion {
+		m.ExecutionPayloadAvailability = solid.NewBitVector(int(cfg.SlotsPerHistoricalRoot))
+		m.BuilderPendingPayments = solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2*cfg.SlotsPerEpoch), 52)
+	}
+
 	lenB := make([]byte, 8)
 	if _, err = r.Read(lenB); err != nil {
 		return err
@@ -145,6 +162,14 @@ func (m *SlotData) getSchema() []any {
 			&m.EarliestExitEpoch,
 			&m.ConsolidationBalanceToConsume,
 			&m.EarliestConsolidationEpoch,
+		)
+	}
+	if m.Version >= clparams.GloasVersion {
+		schema = append(schema,
+			m.LatestBlockHash[:],
+			m.LatestWithdrawalsRoot[:],
+			m.ExecutionPayloadAvailability,
+			m.BuilderPendingPayments,
 		)
 	}
 	return schema

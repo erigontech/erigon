@@ -69,6 +69,18 @@ var phase0_pre_state_ssz_snappy []byte
 //go:embed test_data/phase0/post.ssz_snappy
 var phase0_post_state_ssz_snappy []byte
 
+//go:embed test_data/gloas/blocks_0.ssz_snappy
+var gloas_blocks_0_ssz_snappy []byte
+
+//go:embed test_data/gloas/blocks_1.ssz_snappy
+var gloas_blocks_1_ssz_snappy []byte
+
+//go:embed test_data/gloas/pre.ssz_snappy
+var gloas_pre_state_ssz_snappy []byte
+
+//go:embed test_data/gloas/post.ssz_snappy
+var gloas_post_state_ssz_snappy []byte
+
 // bellatrix is long
 
 //go:embed test_data/bellatrix
@@ -157,6 +169,28 @@ func GetElectraRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState
 	}
 	postState := state.New(&clparams.MainnetBeaconConfig)
 	if err := utils.DecodeSSZSnappy(postState, electra_post_state_ssz_snappy, int(clparams.ElectraVersion)); err != nil {
+		panic(err)
+	}
+	return []*cltypes.SignedBeaconBlock{block1, block2}, preState, postState
+}
+
+func GetGloasRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState) {
+	block1 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	block2 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+
+	if err := utils.DecodeSSZSnappy(block1, gloas_blocks_0_ssz_snappy, int(clparams.GloasVersion)); err != nil {
+		panic(err)
+	}
+	if err := utils.DecodeSSZSnappy(block2, gloas_blocks_1_ssz_snappy, int(clparams.GloasVersion)); err != nil {
+		panic(err)
+	}
+
+	preState := state.New(&clparams.MainnetBeaconConfig)
+	if err := utils.DecodeSSZSnappy(preState, gloas_pre_state_ssz_snappy, int(clparams.GloasVersion)); err != nil {
+		panic(err)
+	}
+	postState := state.New(&clparams.MainnetBeaconConfig)
+	if err := utils.DecodeSSZSnappy(postState, gloas_post_state_ssz_snappy, int(clparams.GloasVersion)); err != nil {
 		panic(err)
 	}
 	return []*cltypes.SignedBeaconBlock{block1, block2}, preState, postState
