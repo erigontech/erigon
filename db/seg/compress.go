@@ -129,12 +129,21 @@ type Compressor struct {
 	lvl              log.Lvl
 	trace            bool
 	logger           log.Logger
-	noFsync          bool // fsync is enabled by default, but tests can manually disable
+
+	noFsync bool // fsync is enabled by default, but tests can manually disable
+	timings Timings
 
 	version             uint8
 	featureFlagBitmask  FeatureFlagBitmask
 	compPageValuesCount uint8
 	metadata            []byte
+}
+type Timings struct {
+	Enabled       bool
+	AddStart      time.Time
+	AddTook       time.Duration
+	CompressStart time.Time
+	CompressTook  time.Duration
 }
 
 func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
@@ -266,6 +275,11 @@ func (c *Compressor) Compress() error {
 	if err := c.uncompressedFile.Flush(); err != nil {
 		return err
 	}
+	if c.timings.Enabled {
+		c.timings.AddTook = time.Since(c.timings.AddStart) // assume Adding data into compressor complete
+		c.timings.CompressStart = time.Now()
+		defer func() { c.timings.CompressTook = time.Since(c.timings.CompressStart) }()
+	}
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -347,7 +361,12 @@ func (c *Compressor) Compress() error {
 	return nil
 }
 
-func (c *Compressor) DisableFsync() { c.noFsync = true }
+func (c *Compressor) DisableFsync()    { c.noFsync = true }
+func (c *Compressor) Timings() Timings { return c.timings }
+
+func (c *Compressor) CollectTimings() {
+	c.timings.Enabled, c.timings.AddStart = true, time.Now() // assume Adding data into compressor starting
+}
 
 // fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
 // To achieve it: write to .tmp file then `rename` when file is ready.

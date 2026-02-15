@@ -402,8 +402,8 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		closeFiles = false
 		return
 	}
-	var tAdd, tCompress, tIndex time.Time
-	tAdd = time.Now()
+	var tAdd, tCompress, tIndex time.Duration
+	tAddStart := time.Now()
 
 	fromStep, toStep := kv.Step(r.values.from/r.aggStep), kv.Step(r.values.to/r.aggStep)
 	kvFilePath := dt.d.kvNewFilePath(fromStep, toStep)
@@ -412,6 +412,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", dt.d.FilenameBase, err)
 	}
+	kvFile.CollectTimings()
 
 	forceNoCompress := toStep-fromStep < DomainMinStepsToCompress
 	kvWriter = dt.dataWriter(kvFile, forceNoCompress)
@@ -420,7 +421,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	}
 
 	defer func() {
-		log.Debug("[merge] timings", "name", path.Base(kvFilePath), "tAdd", time.Since(tAdd), "tCompress", time.Since(tCompress), "tIndex", time.Since(tIndex))
+		log.Debug("[merge] timings", "name", path.Base(kvFilePath), "tAdd", tAdd, "tCompress", tCompress, "tIndex", tIndex)
 	}()
 
 	cnt := 0
@@ -518,15 +519,18 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			return nil, nil, nil, err
 		}
 	}
-	tCompress = time.Now()
+	tAdd = time.Since(tAddStart)
+
+	tCompressStart := time.Now()
 	if err = kvWriter.Compress(); err != nil {
 		return nil, nil, nil, err
 	}
 	kvWriter.Close()
 	kvWriter = nil
 	ps.Delete(p)
+	tCompress = time.Since(tCompressStart)
 
-	tIndex = time.Now()
+	tIndexStart := time.Now()
 	valuesIn = newFilesItem(r.values.from, r.values.to, dt.stepSize, dt.stepsInFrozenFile)
 	valuesIn.frozen = false
 	if valuesIn.decompressor, err = seg.NewDecompressor(kvFilePath); err != nil {
@@ -566,6 +570,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			}
 		}
 	}
+	tIndex = time.Since(tIndexStart)
 
 	closeFiles = false
 	return
@@ -606,6 +611,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	if iit.ii.noFsync {
 		comp.DisableFsync()
 	}
+	comp.CollectTimings()
 
 	write := iit.dataWriter(comp, false)
 	p := ps.AddNew(path.Base(datPath), 1)
