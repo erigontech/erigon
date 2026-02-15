@@ -2281,13 +2281,37 @@ func doCompress(cliCtx *cli.Context) error {
 	src := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
 	srcF := cliCtx.String("from")
 	if srcF != "" {
-		f, err := os.OpenFile(srcF, 0, 0x655)
+		decompressor, err := seg.NewDecompressor(srcF)
 		if err != nil {
 			return err
 		}
-		defer f.Close()
+		defer decompressor.Close()
+		defer decompressor.MadvSequential().DisableReadAhead()
 		log.Info("[compress] from", "from", srcF)
-		src = bufio.NewReaderSize(f, int(128*datasize.MB))
+
+		pr, pw := io.Pipe()
+		defer pr.Close()
+		go func() {
+			wr := bufio.NewWriterSize(pw, int(128*datasize.MB))
+			var numBuf [binary.MaxVarintLen64]byte
+			g := decompressor.MakeGetter()
+			buf := make([]byte, 0, 1*datasize.MB)
+			for g.HasNext() {
+				buf, _ = g.Next(buf[:0])
+				n := binary.PutUvarint(numBuf[:], uint64(len(buf)))
+				if _, err := wr.Write(numBuf[:n]); err != nil {
+					pw.CloseWithError(err)
+					return
+				}
+				if _, err := wr.Write(buf); err != nil {
+					pw.CloseWithError(err)
+					return
+				}
+			}
+			wr.Flush()
+			pw.Close()
+		}()
+		src = bufio.NewReaderSize(pr, int(128*datasize.MB))
 	}
 
 	compressCfg := seg.DefaultCfg
