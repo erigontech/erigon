@@ -420,7 +420,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	}
 
 	defer func() {
-		log.Debug("[merge] timings", "name", kvFile.FileName(), "tAdd", time.Since(tAdd), "tCompress", time.Since(tCompress), "tIndex", time.Since(tIndex))
+		log.Debug("[merge] timings", "name", path.Base(kvFilePath), "tAdd", time.Since(tAdd), "tCompress", time.Since(tCompress), "tIndex", time.Since(tIndex))
 	}()
 
 	cnt := 0
@@ -785,7 +785,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 
 		var tAdd, tCompress, tIndex time.Time
 		defer func() {
-			log.Debug("[merge] timings", "name", comp.FileName(), "tAdd", time.Since(tAdd), "tCompress", time.Since(tCompress), "tIndex", time.Since(tIndex))
+			log.Debug("[merge] timings", "name", path.Base(datPath), "tAdd", time.Since(tAdd), "tCompress", time.Since(tCompress), "tIndex", time.Since(tIndex))
 		}()
 		tAdd = time.Now()
 
