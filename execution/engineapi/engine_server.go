@@ -18,7 +18,6 @@ package engineapi
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -288,15 +287,15 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			blockAccessList = nil
 			header.BlockAccessListHash = &empty.BlockAccessListHash
 		} else {
+			// Decode BAL but don't fail on decode errors - store raw bytes regardless.
+			// Both decode and semantic validation errors will be caught during block execution,
+			// returning INVALID status rather than InvalidParamsError.
 			blockAccessList, err = types.DecodeBlockAccessListBytes(*req.BlockAccessList)
 			if err != nil {
-				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(*req.BlockAccessList))
-				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList decode: %v", err)}
+				s.logger.Debug("[NewPayload] BAL decode error (will be caught during execution)", "err", err)
 			}
-			if err := blockAccessList.Validate(); err != nil {
-				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList validate: %v", err)}
-			}
-			hash := crypto.Keccak256Hash(*req.BlockAccessList)
+			blockAccessListBytes = *req.BlockAccessList
+			hash := crypto.Keccak256Hash(blockAccessListBytes)
 			header.BlockAccessListHash = &hash
 		}
 		if req.SlotNumber != nil {

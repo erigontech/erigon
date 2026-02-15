@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/calltracer"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/shards"
@@ -123,7 +124,8 @@ type Worker struct {
 
 	dirs datadir.Dirs
 
-	metrics *WorkerMetrics
+	metrics     *WorkerMetrics
+	balTracking bool // if true - re-apply VersionMap after ibs.Reset() for BAL computation
 }
 
 func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, chainDb kv.TemporalRoDB, in *QueueWithRetry, blockReader services.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis, results *ResultsQueue, engine rules.Engine, dirs datadir.Dirs, logger log.Logger) *Worker {
@@ -154,6 +156,32 @@ func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, cha
 	w.runnable.Store(true)
 	w.ibs = state.New(w.stateReader)
 	return w
+}
+
+// EnableBALTracking enables VersionedIO tracking on the worker's IBS for BAL computation.
+// The VersionMap is re-applied after each ibs.Reset() call in RunTxTaskNoLock.
+func (rw *Worker) EnableBALTracking() {
+	rw.balTracking = true
+}
+
+// DisableBALTracking disables VersionedIO tracking for BAL computation.
+func (rw *Worker) DisableBALTracking() {
+	rw.balTracking = false
+}
+
+// CollectBALIO collects the versioned reads, writes, and accessed addresses from the worker's IBS,
+// records them into the given VersionedIO, and resets the tracking state.
+func (rw *Worker) CollectBALIO(balIO *state.VersionedIO, accessedAddresses map[accounts.Address]struct{}) {
+	if rw.ibs == nil {
+		return
+	}
+	version := rw.ibs.Version()
+	reads := rw.ibs.VersionedReads()
+	writes := rw.ibs.VersionedWrites(false)
+	balIO.RecordReads(version, reads)
+	balIO.RecordWrites(version, writes)
+	balIO.RecordAccesses(version, accessedAddresses)
+	rw.ibs.ResetVersionedIO()
 }
 
 func (rw *Worker) Pause() {
@@ -429,6 +457,11 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 			Task: txTask,
 			Err:  err,
 		}
+	}
+
+	// Re-apply VersionMap after Reset() clears it, so BAL IO tracking works
+	if rw.balTracking {
+		rw.ibs.SetVersionMap(state.NewVersionMap(nil))
 	}
 
 	result := txTask.Execute(rw.evm, rw.engine, rw.genesis, rw.ibs, rw.stateWriter, rw.chainConfig, rw.chain, rw.dirs, true)

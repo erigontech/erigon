@@ -29,7 +29,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -1319,13 +1318,14 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct)
 		ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
 	}
-	if evm.ChainRules().IsAmsterdam && !balance.IsZero() { // EIP-7708
-		if self != beneficiaryAddr {
-			ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))
-		} else if newContract {
-			ibs.AddLog(misc.EthSelfDestructLog(self.Value(), balance))
-		}
-	}
+	// EIP-7708: ETH transfer/burn logs - not yet scheduled for amsterdam (only "Considered for Inclusion")
+	// if evm.ChainRules().IsAmsterdam && !balance.IsZero() {
+	// 	if self != beneficiaryAddr {
+	// 		ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))
+	// 	} else if newContract {
+	// 		ibs.AddLog(misc.EthSelfDestructLog(self.Value(), balance))
+	// 	}
+	// }
 	tracer := evm.Config().Tracer
 	if tracer != nil && tracer.OnEnter != nil {
 		tracer.OnEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, 0, balance, nil)

@@ -560,12 +560,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		if rules.IsPrague {
 			gasUsed = max(floorGas7623, gasUsed)
 		}
-		if rules.IsAmsterdam {
-			// EIP-7778: Block Gas Accounting without Refunds
-			st.blockGasUsed = max(floorGas7623, st.blockGasUsed)
-		} else {
-			st.blockGasUsed = gasUsed
-		}
+		// EIP-7778: Block Gas Accounting without Refunds - not yet scheduled for amsterdam
+		// (only "Considered for Inclusion"). Use standard Prague accounting for now.
+		st.blockGasUsed = gasUsed
 		st.gasRemaining = st.initialGas - gasUsed
 		st.refundGas()
 	} else if rules.IsPrague {

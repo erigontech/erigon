@@ -455,17 +455,10 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 		return fmt.Errorf("block access list payload exceeds maximum size (%d bytes)", size)
 	}
 	var changes []*AccountChanges
-	var prevAddr common.Address
-	var hasPrev bool
 
 	for {
 		var ac AccountChanges
 		if err = ac.DecodeRLP(s); err != nil {
-			break
-		}
-		address := ac.Address.Value()
-		if hasPrev && bytes.Compare(prevAddr[:], address[:]) >= 0 {
-			err = fmt.Errorf("block access list addresses must be strictly increasing (prev=%s current=%s)", prevAddr.Hex(), address.Hex())
 			break
 		}
 		acCopy := ac
@@ -474,8 +467,6 @@ func decodeBlockAccessList(out *BlockAccessList, s *rlp.Stream) error {
 			err = fmt.Errorf("block access list exceeds maximum accounts (%d)", maxBlockAccessAccounts)
 			break
 		}
-		prevAddr = address
-		hasPrev = true
 	}
 	if err = checkErrListEnd(s, err); err != nil {
 		return err

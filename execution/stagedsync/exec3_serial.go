@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,6 +36,7 @@ type serialExecutor struct {
 	blobGasUsed     uint64
 	lastBlockResult *blockResult
 	worker          *exec.Worker
+	balIO           *state.VersionedIO // BAL (Block Access List) IO tracking for Amsterdam blocks
 }
 
 func warmTxsHashes(block *types.Block) {
@@ -104,21 +106,41 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 		go warmTxsHashes(b)
 
+		// Read BAL (Block Access List) from the database (validation deferred to post-execution).
+		header := b.HeaderNoCopy()
+		if header.BlockAccessListHash != nil {
+			data, err := rawdb.ReadBlockAccessListBytes(se.applyTx, b.Hash(), blockNum)
+			if err != nil {
+				return nil, rwTx, err
+			}
+			if len(data) > 0 {
+				if _, err := types.DecodeBlockAccessListBytes(data); err != nil {
+					// Index ordering errors within account changes are content errors,
+					// not format errors. Use "invalid block access list:" prefix for these.
+					if strings.Contains(err.Error(), "indices must be strictly increasing") ||
+						strings.Contains(err.Error(), "slot list must be strictly increasing") {
+						return nil, rwTx, fmt.Errorf("%w: invalid block access list: %w", rules.ErrInvalidBlock, err)
+					}
+					return nil, rwTx, fmt.Errorf("%w: decode block access list: %w", rules.ErrInvalidBlock, err)
+				}
+			}
+		}
+
 		stateCache := se.doms.GetStateCache()
 		if stateCache != nil {
 			stateCache.ValidateAndPrepare(b.ParentHash(), b.Hash())
 		}
 
 		txs := b.Transactions()
-		header := b.HeaderNoCopy()
 		getHashFnMutex := sync.Mutex{}
 
-		// se.cfg.chainConfig.AmsterdamTime != nil && se.cfg.chainConfig.AmsterdamTime.Uint64() > 0 is
-		// temporary to allow for inital non bals amsterdam testing before parallel exec is live by defualt
-		if se.cfg.chainConfig.AmsterdamTime != nil && se.cfg.chainConfig.AmsterdamTime.Uint64() > 0 && se.cfg.chainConfig.IsAmsterdam(header.Time) {
-			se.logger.Error(fmt.Sprintf("[%s] BLOCK PROCESSING FAILED: Amsterdam processing is not supported by serial exec", se.logPrefix), "fork-block", blockNum)
-			se.logger.Error(fmt.Sprintf("[%s] Run erigon with either '--experimental.bal' or 'export ERIGON_EXEC3_PARALLEL=true'", se.logPrefix))
-			return nil, rwTx, fmt.Errorf("amsterdam processing is not supported by serial exec from block: %d", blockNum)
+		// Enable BAL (Block Access List) tracking for Amsterdam blocks
+		if se.cfg.chainConfig.IsAmsterdam(header.Time) {
+			se.balIO = &state.VersionedIO{}
+			se.worker.EnableBALTracking()
+		} else {
+			se.balIO = nil
+			se.worker.DisableBALTracking()
 		}
 
 		blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
@@ -171,6 +193,27 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		if err != nil {
 			return nil, rwTx, err
 		}
+
+		// Validate BAL (Block Access List) content for Amsterdam blocks
+		if se.balIO != nil && !se.isBlockProduction && header.BlockAccessListHash != nil {
+			computedBAL := CreateBAL(blockNum, se.balIO, se.cfg.dirs.DataDir)
+			computedHash := computedBAL.Hash()
+			headerBALHash := *header.BlockAccessListHash
+			if computedHash != headerBALHash {
+				// Read stored BAL to produce more specific error messages
+				dbBALBytes, _ := rawdb.ReadBlockAccessListBytes(se.applyTx, b.Hash(), blockNum)
+				if len(dbBALBytes) > 0 {
+					if dbBAL, err := types.DecodeBlockAccessListBytes(dbBALBytes); err == nil {
+						if msg := compareBALAccounts(computedBAL, dbBAL); msg != "" {
+							return nil, rwTx, fmt.Errorf("%w, block=%d: %s", rules.ErrInvalidBlock, blockNum, msg)
+						}
+					}
+				}
+				log.Info(fmt.Sprintf("computed BAL: %s", computedBAL.DebugString()))
+				return nil, rwTx, fmt.Errorf("%w, block=%d: block access list mismatch: computed %s, expected %s", rules.ErrInvalidBlock, blockNum, computedHash, headerBALHash)
+			}
+		}
+
 		if stateCache != nil {
 			stateCache.PrintStatsAndReset()
 		}
@@ -348,6 +391,13 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 		result := se.worker.RunTxTask(txTask)
 
+		// Collect BAL IO from the worker for non-finalization tasks (txIndex=-1 and regular txs).
+		// We pass result.AccessedAddresses because TxTask.Execute() already consumed
+		// the addresses from the IBS (via ibs.AccessedAddresses()) and stored them in the result.
+		if se.balIO != nil && !txTask.IsBlockEnd() {
+			se.worker.CollectBALIO(se.balIO, result.AccessedAddresses)
+		}
+
 		if err := func() error {
 			if errors.Is(result.Err, context.Canceled) {
 				return result.Err
@@ -369,6 +419,10 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsGetter(se.applyTx)))
 				defer ibs.Release(true)
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
+				// Enable VersionedIO tracking on the finalization IBS for BAL computation
+				if se.balIO != nil {
+					ibs.SetVersionMap(state.NewVersionMap(nil))
+				}
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 					ret, err := protocol.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, *se.cfg.vmConfig)
 					if err != nil {
@@ -392,6 +446,14 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 
 				if err != nil {
 					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
+				}
+
+				// Collect BAL IO from the finalization IBS
+				if se.balIO != nil {
+					finalVersion := state.Version{BlockNum: txTask.BlockNumber(), TxIndex: txTask.TxIndex}
+					se.balIO.RecordReads(finalVersion, ibs.VersionedReads())
+					se.balIO.RecordWrites(finalVersion, ibs.VersionedWrites(false))
+					se.balIO.RecordAccesses(finalVersion, ibs.AccessedAddresses())
 				}
 
 				if !se.isBlockProduction && startTxIndex == 0 && !isInitialCycle {

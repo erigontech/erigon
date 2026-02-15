@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -614,10 +615,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			if len(data) > 0 {
 				dbBAL, err = types.DecodeBlockAccessListBytes(data)
 				if err != nil {
-					return fmt.Errorf("decode block access list: %w", err)
+					return fmt.Errorf("%w: decode block access list: %w", rules.ErrInvalidBlock, err)
 				}
 				if err := dbBAL.Validate(); err != nil {
-					return fmt.Errorf("invalid block access list: %w", err)
+					return fmt.Errorf("%w: invalid block access list: %w", rules.ErrInvalidBlock, err)
 				}
 			}
 

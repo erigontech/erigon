@@ -477,3 +477,37 @@ func writeBALToFile(bal types.BlockAccessList, blockNum uint64, dataDir string) 
 
 	//log.Info("BAL written to file", "blockNum", blockNum, "filename", filename, "accounts", len(bal))
 }
+
+// compareBALAccounts compares the computed BAL against the stored BAL from the block
+// to produce specific error messages for extra, missing, or structurally invalid accounts.
+func compareBALAccounts(computed, stored types.BlockAccessList) string {
+	computedAddrs := make(map[accounts.Address]struct{}, len(computed))
+	for _, ac := range computed {
+		computedAddrs[ac.Address] = struct{}{}
+	}
+	storedAddrs := make(map[accounts.Address]struct{}, len(stored))
+	for _, ac := range stored {
+		storedAddrs[ac.Address] = struct{}{}
+	}
+
+	// Check for extra accounts in stored BAL (not in computed) - takes priority
+	for addr := range storedAddrs {
+		if _, ok := computedAddrs[addr]; !ok {
+			return fmt.Sprintf("extra account in block access list: %s", addr.Value().Hex())
+		}
+	}
+
+	// Check for missing accounts from stored BAL (in computed but not stored)
+	for addr := range computedAddrs {
+		if _, ok := storedAddrs[addr]; !ok {
+			return fmt.Sprintf("missing account in block access list: %s", addr.Value().Hex())
+		}
+	}
+
+	// Check structural validity of the stored BAL (duplicates, wrong ordering)
+	if err := stored.Validate(); err != nil {
+		return fmt.Sprintf("decode block access list: %s", err.Error())
+	}
+
+	return ""
+}

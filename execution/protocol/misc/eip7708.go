@@ -20,8 +20,6 @@
 package misc
 
 import (
-	"sort"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -82,25 +80,14 @@ func Transfer(db evmtypes.IntraBlockState, sender, recipient accounts.Address, a
 	if err != nil {
 		return err
 	}
-	if rules.IsAmsterdam && !amount.IsZero() && sender != recipient { // EIP-7708
-		db.AddLog(EthTransferLog(sender.Value(), recipient.Value(), amount))
-	}
+	// EIP-7708: ETH transfer logs - not yet scheduled for amsterdam (only "Considered for Inclusion")
+	// if rules.IsAmsterdam && !amount.IsZero() && sender != recipient {
+	// 	db.AddLog(EthTransferLog(sender.Value(), recipient.Value(), amount))
+	// }
 	return nil
 }
 
 func LogSelfDestructedAccounts(ibs evmtypes.IntraBlockState, sender accounts.Address, coinbase accounts.Address, result *evmtypes.ExecutionResult, rules *chain.Rules) {
-	if !rules.IsAmsterdam {
-		return
-	}
-	// Emit SelfDestruct logs where accounts with non-empty balances have been deleted
-	// See case (2) in https://eips.ethereum.org/EIPS/eip-7708#selfdestruct-processing
-	removedWithBalance := ibs.GetRemovedAccountsWithBalance()
-	if removedWithBalance != nil {
-		sort.Slice(removedWithBalance, func(i, j int) bool {
-			return removedWithBalance[i].Address.Cmp(removedWithBalance[j].Address) < 0
-		})
-		for _, sd := range removedWithBalance {
-			ibs.AddLog(EthSelfDestructLog(sd.Address, sd.Balance))
-		}
-	}
+	// EIP-7708: Selfdestruct burn logs - not yet scheduled for amsterdam (only "Considered for Inclusion")
+	return
 }
