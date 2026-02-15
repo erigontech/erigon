@@ -21,8 +21,7 @@ func Sais(data []byte, sa []int32) error {
 		return nil
 	}
 	clear(sa)
-	var tmp [512]int32
-	sais_8_32(data, 256, sa, tmp[:])
+	sais_8_32(data, 256, sa, make([]int32, 2*256))
 	return nil
 }
 
@@ -138,11 +137,6 @@ func induceSubL_8_32(text []byte, sa, freq, bucket []int32) {
 	b++
 
 	for i := 0; i < len(sa); i++ {
-		if i+8 < len(sa) {
-			if jf := int(sa[i+8]); jf > 0 {
-				_ = text[jf-1]
-			}
-		}
 		j := int(sa[i])
 		if j == 0 {
 			continue
@@ -178,11 +172,6 @@ func induceSubS_8_32(text []byte, sa, freq, bucket []int32) {
 
 	top := len(sa)
 	for i := len(sa) - 1; i >= 0; i-- {
-		if i >= 8 {
-			if jf := int(sa[i-8]); jf > 0 {
-				_ = text[jf-1]
-			}
-		}
 		j := int(sa[i])
 		if j == 0 {
 			continue
