@@ -80,6 +80,8 @@ var (
 	Exec3Workers  = EnvInt("EXEC3_WORKERS", numWorkers)
 
 	CompressWorkers = EnvInt("COMPRESS_WORKERS", 1)
+	MergeWorkers    = EnvInt("MERGE_WORKERS", 1)
+	CollateWorkers  = EnvInt("COLLATE_WORKERS", 2)
 
 	TraceAccounts        = EnvStrings("TRACE_ACCOUNTS", ",", nil)
 	TraceStateKeys       = EnvStrings("TRACE_STATE_KEYS", ",", nil)
