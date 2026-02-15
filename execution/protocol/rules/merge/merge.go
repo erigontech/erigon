@@ -357,6 +357,24 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 		return rules.ErrUnexpectedRequests
 	}
 
+	// Verify existence / non-existence of slotNumber & blockAccessListHash
+	amsterdam := chain.Config().IsAmsterdam(header.Time)
+	if amsterdam {
+		if header.SlotNumber == nil {
+			// TODO: No Slot Error Yet - Treate it as optional for hive testing
+			//return rules.ErrMissingSlotNumber
+		}
+		if header.BlockAccessListHash == nil {
+			return rules.ErrMissingBlockAccessListHash
+		}
+	} else {
+		if header.SlotNumber != nil {
+			return rules.ErrUnexpectedSlotNumber
+		}
+		if header.BlockAccessListHash != nil {
+			return rules.ErrUnexpectedBlockAccessListHash
+		}
+	}
 	return nil
 }
 
