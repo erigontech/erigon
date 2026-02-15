@@ -1446,7 +1446,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 		}
 	}()
 
-	at.a.logger.Info("[snapshots] merge state " + r.String())
+	at.a.logger.Info("[snapshots] merge state "+r.String(), "merge_workers", at.a.mergeWorkers)
 	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
 
 	accStorageMerged := new(sync.WaitGroup)
