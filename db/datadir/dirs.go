@@ -194,7 +194,7 @@ func (d Dirs) TryFlock() (unlock func(), err error) {
 			panicif.Err(f.Unlock())
 		}
 	} else {
-		err = ErrDataDirLocked
+		err = fmt.Errorf("%w %s", ErrDataDirLocked, d.DataDir)
 	}
 	return
 }
