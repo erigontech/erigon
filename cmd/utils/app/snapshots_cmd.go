@@ -2304,6 +2304,7 @@ func doCompress(cliCtx *cli.Context) error {
 			return err
 		}
 		defer f.Close()
+		log.Info("[compress] from", "from", srcF)
 		src = bufio.NewReaderSize(f, int(128*datasize.MB))
 	}
 
