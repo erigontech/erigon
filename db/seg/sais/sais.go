@@ -131,8 +131,8 @@ func induceSubL_8_32(text []byte, sa, freq, bucket []int32) {
 		k = -k
 	}
 
-	cB := c1
-	b := bucket[cB]
+	lastC := c1
+	b := bucket[lastC]
 	sa[b] = int32(k)
 	b++
 
@@ -153,10 +153,10 @@ func induceSubL_8_32(text []byte, sa, freq, bucket []int32) {
 			k = -k
 		}
 
-		if cB != c1 {
-			bucket[cB] = b
-			cB = c1
-			b = bucket[cB]
+		if lastC != c1 {
+			bucket[lastC] = b
+			lastC = c1
+			b = bucket[lastC]
 		}
 		sa[b] = int32(k)
 		b++
@@ -167,8 +167,8 @@ func induceSubS_8_32(text []byte, sa, freq, bucket []int32) {
 	bucketMax_8_32(text, freq, bucket)
 	bucket = bucket[:256]
 
-	cB := byte(0)
-	b := bucket[cB]
+	lastC := byte(0)
+	b := bucket[lastC]
 
 	top := len(sa)
 	for i := len(sa) - 1; i >= 0; i-- {
@@ -190,10 +190,10 @@ func induceSubS_8_32(text []byte, sa, freq, bucket []int32) {
 			k = -k
 		}
 
-		if cB != c1 {
-			bucket[cB] = b
-			cB = c1
-			b = bucket[cB]
+		if lastC != c1 {
+			bucket[lastC] = b
+			lastC = c1
+			b = bucket[lastC]
 		}
 		b--
 		sa[b] = int32(k)
@@ -318,9 +318,9 @@ func expand_8_32(text []byte, freq, bucket, sa []int32, numLMS int) {
 	bucketMax_8_32(text, freq, bucket)
 	bucket = bucket[:256]
 
-	x := numLMS - 1
-	saX := sa[x]
-	c := text[saX]
+	src := numLMS - 1
+	val := sa[src]
+	c := text[val]
 	b := bucket[c] - 1
 	bucket[c] = b
 
@@ -329,11 +329,11 @@ func expand_8_32(text []byte, freq, bucket, sa []int32, numLMS int) {
 			sa[i] = 0
 			continue
 		}
-		sa[i] = saX
-		if x > 0 {
-			x--
-			saX = sa[x]
-			c = text[saX]
+		sa[i] = val
+		if src > 0 {
+			src--
+			val = sa[src]
+			c = text[val]
 			b = bucket[c] - 1
 			bucket[c] = b
 		}
@@ -350,8 +350,8 @@ func induceL_8_32(text []byte, sa, freq, bucket []int32) {
 		k = -k
 	}
 
-	cB := c1
-	b := bucket[cB]
+	lastC := c1
+	b := bucket[lastC]
 	sa[b] = int32(k)
 	b++
 
@@ -369,10 +369,10 @@ func induceL_8_32(text []byte, sa, freq, bucket []int32) {
 			}
 		}
 
-		if cB != c1 {
-			bucket[cB] = b
-			cB = c1
-			b = bucket[cB]
+		if lastC != c1 {
+			bucket[lastC] = b
+			lastC = c1
+			b = bucket[lastC]
 		}
 		sa[b] = int32(k)
 		b++
@@ -383,8 +383,8 @@ func induceS_8_32(text []byte, sa, freq, bucket []int32) {
 	bucketMax_8_32(text, freq, bucket)
 	bucket = bucket[:256]
 
-	cB := byte(0)
-	b := bucket[cB]
+	lastC := byte(0)
+	b := bucket[lastC]
 
 	for i := len(sa) - 1; i >= 0; i-- {
 		j := int(sa[i])
@@ -403,10 +403,10 @@ func induceS_8_32(text []byte, sa, freq, bucket []int32) {
 			}
 		}
 
-		if cB != c1 {
-			bucket[cB] = b
-			cB = c1
-			b = bucket[cB]
+		if lastC != c1 {
+			bucket[lastC] = b
+			lastC = c1
+			b = bucket[lastC]
 		}
 		b--
 		sa[b] = int32(k)
@@ -522,8 +522,8 @@ func induceSubL_32(text []int32, sa, freq, bucket []int32) {
 		k = -k
 	}
 
-	cB := c1
-	b := bucket[cB]
+	lastC := c1
+	b := bucket[lastC]
 	sa[b] = int32(k)
 	b++
 
@@ -544,10 +544,10 @@ func induceSubL_32(text []int32, sa, freq, bucket []int32) {
 			k = -k
 		}
 
-		if cB != c1 {
-			bucket[cB] = b
-			cB = c1
-			b = bucket[cB]
+		if lastC != c1 {
+			bucket[lastC] = b
+			lastC = c1
+			b = bucket[lastC]
 		}
 		sa[b] = int32(k)
 		b++
@@ -557,8 +557,8 @@ func induceSubL_32(text []int32, sa, freq, bucket []int32) {
 func induceSubS_32(text []int32, sa, freq, bucket []int32) {
 	bucketMax_32(text, freq, bucket)
 
-	cB := int32(0)
-	b := bucket[cB]
+	lastC := int32(0)
+	b := bucket[lastC]
 
 	top := len(sa)
 	for i := len(sa) - 1; i >= 0; i-- {
@@ -580,10 +580,10 @@ func induceSubS_32(text []int32, sa, freq, bucket []int32) {
 			k = -k
 		}
 
-		if cB != c1 {
-			bucket[cB] = b
-			cB = c1
-			b = bucket[cB]
+		if lastC != c1 {
+			bucket[lastC] = b
+			lastC = c1
+			b = bucket[lastC]
 		}
 		b--
 		sa[b] = int32(k)
