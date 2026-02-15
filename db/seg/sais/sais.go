@@ -263,12 +263,12 @@ func assignID_8_32(text []byte, sa []int32, numLMS int) int {
 }
 
 func map_32(sa []int32, numLMS int) {
-	w := len(sa)
+	dst := len(sa)
 	for i := len(sa) / 2; i >= 0; i-- {
 		j := sa[i]
 		if j > 0 {
-			w--
-			sa[w] = j - 1
+			dst--
+			sa[dst] = j - 1
 		}
 	}
 }
@@ -702,8 +702,8 @@ func induceL_32(text []int32, sa, freq, bucket []int32) {
 		k = -k
 	}
 
-	cB := c1
-	b := bucket[cB]
+	lastC := c1
+	b := bucket[lastC]
 	sa[b] = int32(k)
 	b++
 
@@ -721,10 +721,10 @@ func induceL_32(text []int32, sa, freq, bucket []int32) {
 			}
 		}
 
-		if cB != c1 {
-			bucket[cB] = b
-			cB = c1
-			b = bucket[cB]
+		if lastC != c1 {
+			bucket[lastC] = b
+			lastC = c1
+			b = bucket[lastC]
 		}
 		sa[b] = int32(k)
 		b++
@@ -734,8 +734,8 @@ func induceL_32(text []int32, sa, freq, bucket []int32) {
 func induceS_32(text []int32, sa, freq, bucket []int32) {
 	bucketMax_32(text, freq, bucket)
 
-	cB := int32(0)
-	b := bucket[cB]
+	lastC := int32(0)
+	b := bucket[lastC]
 
 	for i := len(sa) - 1; i >= 0; i-- {
 		j := int(sa[i])
@@ -754,10 +754,10 @@ func induceS_32(text []int32, sa, freq, bucket []int32) {
 			}
 		}
 
-		if cB != c1 {
-			bucket[cB] = b
-			cB = c1
-			b = bucket[cB]
+		if lastC != c1 {
+			bucket[lastC] = b
+			lastC = c1
+			b = bucket[lastC]
 		}
 		b--
 		sa[b] = int32(k)
