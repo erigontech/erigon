@@ -34,8 +34,10 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -86,6 +88,11 @@ func (c Cfg) WithValuesOnCompressedPage(n int) Cfg {
 	c.ValuesOnCompressedPage = n
 	return c
 }
+
+// WorkersLimiter is a caps global active compression workers
+// across all compressor instances in the app. Each worker goroutine acquires 1 from
+// this semaphore before doing CPU-heavy work.
+var WorkersLimiter = semaphore.NewWeighted(int64(dbg.CompressWorkers))
 
 var DefaultCfg = Cfg{
 	MinPatternScore: 1024,
