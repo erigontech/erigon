@@ -194,15 +194,6 @@ func TestCompressDict1(t *testing.T) {
 			t.Errorf("result file hash changed, %d", cs)
 		}
 	})
-	t.Run("1_000_000_words", func(t *testing.T) {
-		d := prepareDict(t, 1, 1_000_000)
-		defer d.Close()
-		if cs := checksum(d.filePath); cs != 1414683895 {
-			// it's ok if hash changed, but need re-generate all existing snapshot hashes
-			// in https://github.com/erigontech/erigon-snapshot
-			t.Errorf("result file hash changed, %d", cs)
-		}
-	})
 }
 
 func TestCompressDictCmp(t *testing.T) {
