@@ -1,7 +1,7 @@
-sais.c is taken from sais-lite-2.4.1 by Yuta Mori <yuta.256@gmail.com>
+Pure Go SA-IS (Suffix Array by Induced Sorting) implementation.
 
-The original upstream is not available, but the source code exists in forks, for example:
+Adapted from Go standard library `index/suffixarray` (BSD-3-clause, Copyright 2019 The Go Authors).
+The stdlib implementation is itself inspired by sais-lite-2.4.1 by Yuta Mori.
 
-* https://github.com/ecnerwala/cp-book/tree/master/third_party/sais-lite-2.4.1
-* https://github.com/kurpicz/saca-bench/tree/master/sais-lite
-* https://github.com/play-co/gcif/tree/master/refs/sais-lite-2.4.1
+Previously this package was a CGo wrapper around sais-lite C code. It was replaced with
+pure Go to eliminate CGo call overhead and enable Go compiler optimizations.
