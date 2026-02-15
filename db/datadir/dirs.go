@@ -174,8 +174,6 @@ func (d Dirs) MustFlock() (Dirs, *flock.Flock, error) {
 	return d, l, nil
 }
 
-./build/bin/erigon seg uncompress --datadir= /erigon-data/ --log.console.verbosity = 1 /erigon-data/snapshots/v1.1-023600-023700-transactions.seg |./build/bin/erigon seg compress --datadir = /erigon-data/alex_backup/ /erigon-data/alex_backup/snapshots/v1.1-023600-023700-transactions_main.seg
-
 // TryFlock a non-blocking lock on the data directory. Converts failure to lock into ErrDataDirLocked.
 // If err is nil, the unlock function must be called to release and close the flock.
 func (d Dirs) TryFlock() (unlock func(), err error) {
