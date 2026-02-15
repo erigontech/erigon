@@ -40,7 +40,9 @@ func (h *Header) MarshalJSON() ([]byte, error) {
 		ParentBeaconBlockRoot *common.Hash    `json:"parentBeaconBlockRoot"`
 		RequestsHash          *common.Hash    `json:"requestsHash"`
 		BlockAccessListHash   *common.Hash    `json:"blockAccessListHash"`
-		Hash                  common.Hash     `json:"hash"`
+		// TODO omitempty is temporary until ci is updated to support slotnumber: null
+		SlotNumber *hexutil.Uint64 `json:"slotNumber,omitempty"`
+		Hash       common.Hash     `json:"hash"`
 	}
 	var enc Header
 	enc.ParentHash = h.ParentHash
@@ -67,6 +69,7 @@ func (h *Header) MarshalJSON() ([]byte, error) {
 	enc.ParentBeaconBlockRoot = h.ParentBeaconBlockRoot
 	enc.RequestsHash = h.RequestsHash
 	enc.BlockAccessListHash = h.BlockAccessListHash
+	enc.SlotNumber = (*hexutil.Uint64)(h.SlotNumber)
 	enc.Hash = h.Hash()
 	return json.Marshal(&enc)
 }
@@ -98,6 +101,7 @@ func (h *Header) UnmarshalJSON(input []byte) error {
 		ParentBeaconBlockRoot *common.Hash    `json:"parentBeaconBlockRoot"`
 		RequestsHash          *common.Hash    `json:"requestsHash"`
 		BlockAccessListHash   *common.Hash    `json:"blockAccessListHash"`
+		SlotNumber            *hexutil.Uint64 `json:"slotNumber"`
 	}
 	var dec Header
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -186,6 +190,9 @@ func (h *Header) UnmarshalJSON(input []byte) error {
 	}
 	if dec.BlockAccessListHash != nil {
 		h.BlockAccessListHash = dec.BlockAccessListHash
+	}
+	if dec.SlotNumber != nil {
+		h.SlotNumber = (*uint64)(dec.SlotNumber)
 	}
 	return nil
 }

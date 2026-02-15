@@ -108,6 +108,7 @@ type Header struct {
 	RequestsHash        *common.Hash `json:"requestsHash"`        // EIP-7685
 	BlockAccessListHash *common.Hash `json:"blockAccessListHash"` // EIP-7928
 
+	SlotNumber *uint64 `json:"slotNumber"` // EIP-7843
 	// by default all headers are immutable
 	// but assembling/mining may use `NewEmptyHeaderForAssembling` to create temporary mutable Header object
 	// then pass it to `block.WithSeal(header)` - to produce new block with immutable `Header`
@@ -165,6 +166,10 @@ func (h *Header) EncodingSize() int {
 
 	if h.BlockAccessListHash != nil {
 		encodingSize += 33
+	}
+
+	if h.SlotNumber != nil {
+		encodingSize += rlp.U64Len(*h.SlotNumber)
 	}
 
 	return encodingSize
@@ -327,6 +332,11 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 		}
 	}
 
+	if h.SlotNumber != nil {
+		if err := rlp.EncodeInt(*h.SlotNumber, w, b[:]); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -505,6 +515,19 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	}
 	h.BlockAccessListHash = new(common.Hash)
 	h.BlockAccessListHash.SetBytes(b)
+
+	var slotNumber uint64
+	if slotNumber, err = s.Uint(); err != nil {
+		if errors.Is(err, rlp.EOL) {
+			h.SlotNumber = nil
+			if err := s.ListEnd(); err != nil {
+				return fmt.Errorf("close header struct (no SlotNumber): %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("read SlotNumber: %w", err)
+	}
+	h.SlotNumber = &slotNumber
 
 	if err := s.ListEnd(); err != nil {
 		return fmt.Errorf("close header struct: %w", err)
@@ -1191,6 +1214,10 @@ func CopyHeader(h *Header) *Header {
 	if h.BlockAccessListHash != nil {
 		cpy.BlockAccessListHash = new(common.Hash)
 		cpy.BlockAccessListHash.SetBytes(h.BlockAccessListHash.Bytes())
+	}
+	if h.SlotNumber != nil {
+		slotNumber := *h.SlotNumber
+		cpy.SlotNumber = &slotNumber
 	}
 	cpy.mutable = h.mutable
 	return &cpy
