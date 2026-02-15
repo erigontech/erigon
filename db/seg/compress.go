@@ -129,8 +129,8 @@ type Compressor struct {
 	lvl              log.Lvl
 	trace            bool
 	logger           log.Logger
-	noFsync          bool // fsync is enabled by default, but tests can manually disable
 
+	noFsync bool // fsync is enabled by default, but tests can manually disable
 	timings Timings
 
 	version             uint8
