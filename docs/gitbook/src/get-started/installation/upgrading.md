@@ -2,6 +2,10 @@
 description: >-
   Erigon Version Upgrade: Latest Features, Data Compatibility, and Downgrade
   Options
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/get-started/installation/upgrading
 ---
 
 # Upgrading from a previous version
@@ -71,7 +75,7 @@ Follow the below instructions depending on your installation method:
 
 ### Pre-built Binaries (only Linux and MacOS)
 
-Download the latest binary file from [https://github.com/erigontech/erigon/releases](https://github.com/erigontech/erigon/releases), do the [checksum](../installation/README.md#pre-built-binaries-linux-only) and reinstall it, no other operation needed.
+Download the latest binary file from [https://github.com/erigontech/erigon/releases](https://github.com/erigontech/erigon/releases), do the [checksum](./#pre-built-binaries-linux-only) and reinstall it, no other operation needed.
 
 ### Docker
 

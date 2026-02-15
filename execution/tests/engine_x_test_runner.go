@@ -84,10 +84,15 @@ func (extr *EngineXTestRunner) Run(ctx context.Context, test EngineXTestDefiniti
 	}
 	if len(test.NewPayloads) > 0 {
 		// make sure each test begins at genesis
-		err = processFcu(ctx, tester, tester.GenesisBlock.Hash(), test.NewPayloads[0].FcuVersion)
-		if err != nil {
-			return err
-		}
+		// TODO actually this should be a call to debug_setHead once we implement it
+		//      because a FCU to an older canonical hash does NOT have to do an unwind as per spec
+		//      (in fact it is in our interest NOT to unwind, and currently this is a no-op)
+		//      hence debug_setHead will be the right way to do this once
+		//      https://github.com/erigontech/erigon/issues/18922 is ready
+		//err = processFcu(ctx, tester, tester.GenesisBlock.Hash(), test.NewPayloads[0].FcuVersion)
+		//if err != nil {
+		//	return err
+		//}
 	}
 	for _, newPayload := range test.NewPayloads {
 		err = processNewPayload(ctx, tester, newPayload)
@@ -224,6 +229,8 @@ func processFcu(ctx context.Context, tester EngineApiTester, head common.Hash, v
 				r, err = tester.EngineApiClient.ForkchoiceUpdatedV2(ctx, &fcu, nil)
 			case "3":
 				r, err = tester.EngineApiClient.ForkchoiceUpdatedV3(ctx, &fcu, nil)
+			case "4":
+				r, err = tester.EngineApiClient.ForkchoiceUpdatedV4(ctx, &fcu, nil)
 			default:
 				return nil, "", fmt.Errorf("unsupported fcu version: %s", version)
 			}

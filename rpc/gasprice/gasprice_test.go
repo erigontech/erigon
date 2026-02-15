@@ -28,6 +28,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -54,7 +55,7 @@ func newTestBackend(t *testing.T) *mock.MockSentry {
 		}
 		signer = types.LatestSigner(gspec.Config)
 	)
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 
 	// Generate testing blocks
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 32, func(i int, b *blockgen.BlockGen) {
@@ -85,7 +86,8 @@ func TestSuggestPrice(t *testing.T) {
 	m := newTestBackend(t) //, big.NewInt(16), c.pending)
 	baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewDummy(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0)
 
-	tx, _ := m.DB.BeginTemporalRo(m.Ctx)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	cache := jsonrpc.NewGasPriceCache()

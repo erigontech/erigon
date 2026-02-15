@@ -277,7 +277,7 @@ func unwindExec3State(ctx context.Context,
 	if changeset != nil {
 		accountDiffs := changeset[kv.AccountsDomain]
 		for _, entry := range accountDiffs {
-			if dbg.TraceDomain(uint16(kv.AccountsDomain)) {
+			if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 				address := entry.Key[:len(entry.Key)-8]
 				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
 				prevStep := ^binary.BigEndian.Uint64(entry.PrevStepBytes)
@@ -482,6 +482,27 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.RwTx, cfg Exe
 				"duration", duration,
 				"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
 			)
+		}
+	}
+
+	if s.ForwardProgress > cfg.syncCfg.MaxReorgDepth {
+		pruneBalLimit := 10_000
+		pruneTimeout := quickPruneTimeout
+		if s.CurrentSyncCycle.IsInitialCycle {
+			pruneBalLimit = math.MaxInt
+			pruneTimeout = time.Hour
+		}
+		if err := rawdb.PruneTable(
+			tx,
+			kv.BlockAccessList,
+			s.ForwardProgress-cfg.syncCfg.MaxReorgDepth,
+			ctx,
+			pruneBalLimit,
+			pruneTimeout,
+			logger,
+			s.LogPrefix(),
+		); err != nil {
+			return err
 		}
 	}
 

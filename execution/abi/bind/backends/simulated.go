@@ -29,9 +29,11 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
 
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
@@ -92,10 +94,18 @@ type SimulatedBackend struct {
 }
 
 func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
+	if !dbg.Exec3Parallel && config.AmsterdamTime != nil {
+		// Amsterdam required parallel processing
+		// - remove this once all tests pass with parallel as default
+		var copy chain.Config
+		copier.Copy(&copy, config)
+		config.AmsterdamTime = nil
+		config = &copy
+	}
 	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	engine := ethash.NewFaker()
 	//SimulatedBackend - it's remote blockchain node. This is reason why it has own `MockSentry` and own `DB` (even if external unit-test have one already)
-	m := mock.MockWithGenesisEngine(t, &genesis, engine, false)
+	m := mock.MockWithGenesisEngine(t, &genesis, engine)
 
 	backend := &SimulatedBackend{
 		m:            m,

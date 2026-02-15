@@ -22,6 +22,7 @@ import (
 	_ "embed"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -31,9 +32,10 @@ import (
 
 	snapshothashes "github.com/erigontech/erigon-snapshot"
 	"github.com/erigontech/erigon-snapshot/webseed"
-	"github.com/erigontech/erigon/db/preverified"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
+
+	"github.com/erigontech/erigon/db/preverified"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -65,8 +67,15 @@ var registry = &preverifiedRegistry{
 		networkname.Gnosis:     fromEmbeddedToml(snapshothashes.Gnosis),
 		networkname.Chiado:     fromEmbeddedToml(snapshothashes.Chiado),
 		networkname.Hoodi:      fromEmbeddedToml(snapshothashes.Hoodi),
+		networkname.Bloatnet:   fromEmbeddedToml(snapshothashes.Bloatnet),
 	},
 	cached: make(map[string]*Cfg),
+}
+
+func (r *preverifiedRegistry) All() map[string]Preverified {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return maps.Clone(r.data)
 }
 
 func (r *preverifiedRegistry) Get(networkName string) (*Cfg, bool) {
@@ -486,6 +495,7 @@ var KnownWebseeds = map[string][]string{
 	networkname.Gnosis:     webseedsParse(webseed.Gnosis),
 	networkname.Chiado:     webseedsParse(webseed.Chiado),
 	networkname.Hoodi:      webseedsParse(webseed.Hoodi),
+	networkname.Bloatnet:   webseedsParse(webseed.Bloatnet),
 }
 
 func webseedsParse(in []byte) (res []string) {
@@ -536,6 +546,7 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 		networkname.Gnosis:     webseedsParse(webseed.Gnosis),
 		networkname.Chiado:     webseedsParse(webseed.Chiado),
 		networkname.Hoodi:      webseedsParse(webseed.Hoodi),
+		networkname.Bloatnet:   webseedsParse(webseed.Bloatnet),
 	}
 
 	// Re-load the preverified hashes
@@ -547,6 +558,7 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 		networkname.Gnosis:     fromEmbeddedToml(snapshothashes.Gnosis),
 		networkname.Chiado:     fromEmbeddedToml(snapshothashes.Chiado),
 		networkname.Hoodi:      fromEmbeddedToml(snapshothashes.Hoodi),
+		networkname.Bloatnet:   fromEmbeddedToml(snapshothashes.Bloatnet),
 	})
 	return
 }
@@ -573,7 +585,25 @@ func GetToml(networkName string) []byte {
 		return snapshothashes.Chiado
 	case networkname.Hoodi:
 		return snapshothashes.Hoodi
+	case networkname.Bloatnet:
+		return snapshothashes.Bloatnet
 	default:
 		return nil
 	}
+}
+
+// Gets the current preverified for all chains.
+func GetAllCurrentPreverified() map[string]Preverified {
+	return registry.All()
+}
+
+// Converts webseed value to URL. Mostly this is just stripping v1: for now, as nothing else is in
+// active use.
+func WebseedToUrl(s string) (_ string, err error) {
+	after, ok := strings.CutPrefix(s, "v1:")
+	if !ok {
+		err = fmt.Errorf("unhandled webseed %q", s)
+		return
+	}
+	return after, nil
 }

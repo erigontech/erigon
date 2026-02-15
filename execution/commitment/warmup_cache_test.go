@@ -61,7 +61,7 @@ func TestWarmupCache_Basic(t *testing.T) {
 	storageKey := make([]byte, 52)
 	rand.Read(storageKey)
 	storageUpdate := &Update{Flags: StorageUpdate, StorageLen: 5}
-	copy(storageUpdate.Storage[:], []byte("hello"))
+	copy(storageUpdate.Storage[:], "hello")
 	cache.PutStorage(storageKey, storageUpdate)
 
 	gotStorage, found := cache.GetStorage(storageKey)

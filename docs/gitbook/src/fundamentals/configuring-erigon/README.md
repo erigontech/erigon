@@ -10,13 +10,13 @@ metaLinks:
 
 The Erigon CLI has a wide range of flags that can be used to customize its behavior. There are 3 ways to configure Erigon, listed by priority:
 
-* [Command line options](configuring-erigon.md#command-line-options) (flags)
-* [Configuration file](configuring-erigon.md#configuration-file)
-* [Environment variables](configuring-erigon.md#environment-variables)
+* [Command line options](./#command-line-options) (flags)
+* [Configuration file](./#configuration-file)
+* [Environment variables](./#environment-variables)
 
 ## Command line options
 
-Here's a breakdown of the most important flags, see [options](configuring-erigon.md#options) for the full list:
+Here's a breakdown of the most important flags, see [options](./#options) for the full list:
 
 ### General Options
 
@@ -29,7 +29,7 @@ These flags cover the general behavior and configuration of the Erigon client.
 * `--config value`: Sets Erigon flags using a YAML/TOML file.
 * `--version, -v`: Prints the version information.
 * `--help, -h`: Displays help information.
-* `--chain value`: Sets the name of the [network](supported-networks.md) to join.
+* `--chain value`: Sets the name of the [network](../supported-networks.md) to join.
   * Default: `mainnet`
 * `--networkid value`: Explicitly sets the network ID.
   * Default: `1`
@@ -74,14 +74,14 @@ These flags control database performance and memory usage.
 
 Flags for managing how old chain data is handled and stored.
 
-* `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`). See also [Sync Modes](../fundamentals/sync-modes.md)
+* `--prune.mode value`: Selects a pruning preset (`full`, `archive`, `minimal`, `blocks`). See also [Sync Modes](../sync-modes.md)
   * Default: `"full"`
 * `--prune.distance value`: Keeps state history for the latest `N` blocks.
   * Default: `0`
 * `--prune.distance.blocks value`: Keeps block history for the latest `N` blocks.
   * Default: `0`
 * `--prune.experimental.include-commitment-history, --experimental.commitment-history`: Enables faster `eth_getProof` for executed blocks.
-  * Default: `false`&#x20;
+  * Default: `false`
 * `--prune.include-commitment-history` : (experimental) Enables the storage of commitment history. When enabled, it allows for blazing fast retrieval of Merkle proofs for executed blocks using the `eth_getProof` JSON-RPC method.
   * Default: `false`
 * `--snap.keepblocks`: Keeps ancient blocks in the database for debugging.
@@ -135,11 +135,17 @@ These flags manage network connectivity, peer discovery, and traffic control.
   * Default: `68`, `69`
 * `--p2p.allowed-ports value`: A comma-separated list of allowed ports for different P2P protocols.
   * Default: `30303, 30304, 30305, 30306, 30307`
-* `--nat value`: The NAT port mapping mechanism.
+* `--nat value`: The NAT port mapping mechanism (See [here](nat.md) for more details).
 * `--nodiscover`: Disables peer discovery.
   * Default: `false`
-* `--v5disc`: Enables the experimental RLPx V5 (Topic Discovery) mechanism.
-  * Default: `false`
+* `--discovery.v4`, `--discv4`: Enables the Node Discovery Protocol v4 (Discv4) for managed ENRs and topic discovery.
+  * Default: `true`
+* `--discovery.v5`, `--discv5`, `--v5disc`: Enables the Node Discovery Protocol v5 (Discv5) for managed ENRs and topic discovery.
+  * Default: `true`
+* `--discovery.parallelism value`: The number of concurrent lookup requests allowed per discovery query.
+  * Default: `3`
+* `**`--discovery.ban-threshold value`: The number of failed handshake attempts before an IP is temporarily blacklisted.
+  * Default: `5`
 * `--netrestrict value`: Restricts network communication to specific IP networks.
 * `--nodekey value`: The P2P node key file.
 * `--nodekeyhex value`: The P2P node key as a hexadecimal string.
@@ -476,8 +482,8 @@ Erigon supports configuration through environment variables, primarily for exper
 
 **Synchronization and Pruning:**
 
-* `NO_PRUNE` - Disables pruning when set to true [5](configuring-erigon.md#0-4)
-* `NO_MERGE` - Disables merging operations [6](configuring-erigon.md#0-5)
+* `NO_PRUNE` - Disables pruning when set to true [5](./#0-4)
+* `NO_MERGE` - Disables merging operations [6](./#0-5)
 * `PRUNE_TOTAL_DIFFICULTY` - Controls total difficulty pruning (default: `true`)
 * `MAX_REORG_DEPTH` - Sets maximum reorganization depth (default: `512`)
 
@@ -550,6 +556,7 @@ The flag listing is reproduced below for your convenience:
 
 {% code overflow="wrap" fullWidth="true" %}
 ```bash
+./build/bin/erigon -h
 NAME:
    erigon - erigon
 
@@ -557,7 +564,7 @@ USAGE:
    erigon [command] [flags]
 
 VERSION:
-   3.3.0-dev-fc7a858a
+   3.3.7-9a898cf7
 
 COMMANDS:
    init                                         Bootstrap and initialize a new genesis block
@@ -591,6 +598,8 @@ GLOBAL OPTIONS:
                                                                                                                                  archive: Keep the entire state history and all blocks,
                                                                                                                                  minimal: Keep only latest state (default: "full")
    --prune.include-commitment-history, --experimental.commitment-history, --prune.experimental.include-commitment-history  Enables blazing fast eth_getProof for executed block (default: false)
+   --fcu.timeout value                                                                                                     FCU timeout before it switches to being process async (use 0 to disable) (default: 1s)
+   --fcu.background.prune                                                                                                  Enables background pruning post fcu (default: true)
    --batchSize value                                                                                                       Batch size for the execution stage (default: "512M")
    --bodies.cache value                                                                                                    Limit on the cache for block bodies (default: "268435456")
    --database.verbosity value                                                                                              Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning. (default: 2)
@@ -602,7 +611,6 @@ GLOBAL OPTIONS:
    --tls.key value                                                                                                         Specify key file
    --tls.cacert value                                                                                                      Specify certificate authority
    --state.stream.disable                                                                                                  Disable streaming of state changes from core to RPC daemon (default: false)
-   --experimental.bal                                                                                                      generate block access list (default: false)
    --sync.loop.throttle value                                                                                              Sets the minimum time between sync loop starts (e.g. 1h30m, default is none)
    --bad.block value                                                                                                       Marks block with given hex string as bad and forces initial reorg before normal staged sync
    --http                                                                                                                  JSON-RPC server (enabled by default). Use --http=false to disable it (default: true)
@@ -636,6 +644,7 @@ GLOBAL OPTIONS:
    --rpc.txfeecap value                                                                                                    Sets a cap on transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap) (default: 1)
    --txpool.api.addr value                                                                                                 TxPool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)
    --trace.maxtraces value                                                                                                 Sets a limit on traces that can be returned in trace_filter (default: 200)
+   --experimental.always-generate-changesets                                                                               Allows to override changesets generation logic (default: false)
    --http.timeouts.read value                                                                                              Maximum duration for reading the entire request, including the body. (default: 30s)
    --http.timeouts.write value                                                                                             Maximum duration before timing out writes of the response. It is reset whenever a new request's header is read. (default: 30m0s)
    --http.timeouts.idle value                                                                                              Maximum amount of time to wait for the next request when keep-alive connections are enabled. If http.timeouts.idle is zero, the value of http.timeouts.read is used. (default: 2m0s)
@@ -679,7 +688,8 @@ GLOBAL OPTIONS:
                                                                                                                                 "stun"               Uses STUN to detect an external IP using a default server
                                                                                                                                 "stun:<server>"      Uses STUN to detect an external IP using the given server (host:port)
    --nodiscover                                                                                                            Disables the peer discovery mechanism (manual peer addition) (default: false)
-   --v5disc                                                                                                                Enables the experimental RLPx V5 (Topic Discovery) mechanism (default: false)
+   --discovery.v4, --discv4                                                                                                Enables the V4 discovery mechanism (default: true)
+   --discovery.v5, --discv5, --v5disc                                                                                      Enables the V5 discovery mechanism (default: true)
    --netrestrict value                                                                                                     Restricts network communication to the given IP networks (CIDR masks)
    --nodekey value                                                                                                         P2P node key file
    --nodekeyhex value                                                                                                      P2P node key as hex (for testing)
@@ -723,6 +733,7 @@ GLOBAL OPTIONS:
    --aa                                                                                                                    Enable AA transactions (default: false)
    --ethstats value                                                                                                        Reporting URL of a ethstats service (nodename:secret@host:port)
    --override.osaka value                                                                                                  Manually specify the Osaka fork time, overriding the bundled setting (default: 0)
+   --override.balancer value                                                                                               Manually specify the Balancer fork time, overriding the bundled setting (default: 0)
    --keep.stored.chain.config                                                                                              Avoid overriding chain config already stored in the DB (default: false)
    --caplin.discovery.addr value                                                                                           Address for Caplin DISCV5 protocol (default: "0.0.0.0")
    --caplin.discovery.port value                                                                                           Port for Caplin DISCV5 protocol (default: 4000)

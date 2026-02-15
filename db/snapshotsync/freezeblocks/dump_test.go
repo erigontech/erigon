@@ -277,7 +277,7 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *m
 		signer = types.LatestSigner(gspec.Config)
 	)
 
-	m := mock.MockWithGenesisPruneMode(t, gspec, key, chainSize, prune.DefaultMode, false)
+	m := mock.MockWithGenesisPruneMode(t, gspec, key, chainSize, prune.DefaultMode)
 
 	// Generate testing blocks
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {

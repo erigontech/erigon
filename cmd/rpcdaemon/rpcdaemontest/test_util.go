@@ -101,7 +101,7 @@ func CreateTestSentry(t *testing.T) (*mock.MockSentry, *blockgen.ChainPack, []*b
 			GasLimit: 10000000,
 		}
 	)
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 
@@ -431,7 +431,7 @@ func CreateTestSentryForTraces(t *testing.T) *mock.MockSentry {
 			},
 		}
 	)
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AAAA
@@ -531,7 +531,7 @@ func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 			},
 		},
 	}
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
