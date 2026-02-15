@@ -2,7 +2,6 @@ package sais
 
 import (
 	"fmt"
-	"index/suffixarray"
 	"math/rand"
 	"testing"
 
@@ -92,22 +91,6 @@ func BenchmarkSais(b *testing.B) {
 				if err := Sais(data, sa); err != nil {
 					b.Fatal(err)
 				}
-			}
-		})
-	}
-}
-
-func BenchmarkStdlibSuffixArray(b *testing.B) {
-	for _, size := range []int{1024, 64 * 1024, 1024 * 1024, 16 * 1024 * 1024} {
-		b.Run(fmt.Sprintf("%d", size), func(b *testing.B) {
-			rng := rand.New(rand.NewSource(0))
-			data := make([]byte, size)
-			rng.Read(data)
-			b.SetBytes(int64(size))
-			b.ReportAllocs()
-			b.ResetTimer()
-			for b.Loop() {
-				suffixarray.New(data)
 			}
 		})
 	}
