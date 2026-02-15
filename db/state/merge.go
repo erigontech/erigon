@@ -25,6 +25,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tidwall/btree"
 
@@ -401,6 +402,8 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		closeFiles = false
 		return
 	}
+	var tAdd, tCompress, tIndex time.Time
+	tAdd = time.Now()
 
 	fromStep, toStep := kv.Step(r.values.from/r.aggStep), kv.Step(r.values.to/r.aggStep)
 	kvFilePath := dt.d.kvNewFilePath(fromStep, toStep)
@@ -415,6 +418,10 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if dt.d.noFsync {
 		kvWriter.DisableFsync()
 	}
+
+	defer func() {
+		log.Debug("[merge] timings", "name", kvFile.FileName(), "tAdd", time.Since(tAdd), "tCompress", time.Since(tCompress), "tIndex", time.Since(tIndex))
+	}()
 
 	cnt := 0
 	for _, item := range domainFiles {
@@ -511,6 +518,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			return nil, nil, nil, err
 		}
 	}
+	tCompress = time.Now()
 	if err = kvWriter.Compress(); err != nil {
 		return nil, nil, nil, err
 	}
@@ -518,6 +526,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	kvWriter = nil
 	ps.Delete(p)
 
+	tIndex = time.Now()
 	valuesIn = newFilesItem(r.values.from, r.values.to, dt.stepSize, dt.stepsInFrozenFile)
 	valuesIn.frozen = false
 	if valuesIn.decompressor, err = seg.NewDecompressor(kvFilePath); err != nil {
@@ -773,6 +782,13 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		if ht.h.noFsync {
 			comp.DisableFsync()
 		}
+
+		var tAdd, tCompress, tIndex time.Time
+		defer func() {
+			log.Debug("[merge] timings", "name", comp.FileName(), "tAdd", time.Since(tAdd), "tCompress", time.Since(tCompress), "tIndex", time.Since(tIndex))
+		}()
+		tAdd = time.Now()
+
 		pagedWr := ht.dataWriter(comp)
 		p := ps.AddNew(path.Base(datPath), 1)
 		defer ps.Delete(p)
@@ -858,6 +874,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				}
 			}
 		}
+		tCompress = time.Now()
 		if err := pagedWr.Compress(); err != nil {
 			return nil, nil, err
 		}
@@ -868,6 +885,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 		ps.Delete(p)
 
+		tIndex = time.Now()
 		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
 			return nil, nil, err
 		}
