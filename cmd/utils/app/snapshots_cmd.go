@@ -211,9 +211,30 @@ var snapshotCommand = cli.Command{
 			Flags:  joinFlags([]cli.Flag{}),
 		},
 		{
-			Name:   "compress",
-			Action: doCompress,
-			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}),
+			Name: "compress",
+			Action: func(c *cli.Context) error {
+				args := c.Args()
+				if args.Len() < 1 {
+					return errors.New("expecting file path as a first argument")
+				}
+				src := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
+
+				srcF := c.String("from")
+				dstF := args.First()
+				if srcF != "" {
+					f, err := os.OpenFile(srcF, 0, 0x655)
+					if err != nil {
+						return err
+					}
+					defer f.Close()
+					src = bufio.NewReaderSize(f, int(128*datasize.MB))
+				}
+				return doCompress(c, src, dstF)
+			},
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.StringFlag{Name: "from"},
+			}),
 		},
 		{
 			Name:   "decompress-speed",
@@ -2249,7 +2270,7 @@ func doUncompress(cliCtx *cli.Context) error {
 	return nil
 }
 
-func doCompress(cliCtx *cli.Context) error {
+func doCompress(cliCtx *cli.Context, src *bufio.Reader, dst string) error {
 	defer func() {
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
@@ -2267,12 +2288,6 @@ func doCompress(cliCtx *cli.Context) error {
 		return err
 	}
 	ctx := cliCtx.Context
-
-	args := cliCtx.Args()
-	if args.Len() < 1 {
-		return errors.New("expecting file path as a first argument")
-	}
-	f := args.First()
 
 	compressCfg := seg.DefaultCfg
 	compressCfg.Workers = estimate.CompressSnapshot.Workers()
@@ -2299,22 +2314,21 @@ func doCompress(cliCtx *cli.Context) error {
 	justPrint := dbg.EnvBool("JustPrint", false)
 	concat := dbg.EnvInt("Concat", 0)
 
-	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg, "SnappyEachWord", doSnappyEachWord)
-	c, err := seg.NewCompressor(ctx, "compress", f, dirs.Tmp, compressCfg, log.LvlInfo, logger)
+	logger.Info("[compress] file", "datadir", dirs.DataDir, "dst", dst, "cfg", compressCfg, "SnappyEachWord", doSnappyEachWord)
+	c, err := seg.NewCompressor(ctx, "compress", dst, dirs.Tmp, compressCfg, log.LvlInfo, logger)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
 	w := seg.NewWriter(c, compression)
 
-	r := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
 	word := make([]byte, 0, int(1*datasize.MB))
 	var snappyBuf, unSnappyBuf []byte
 	var concatBuf []byte
 	concatI := 0
 
 	var l uint64
-	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
+	for l, err = binary.ReadUvarint(src); err == nil; l, err = binary.ReadUvarint(src) {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -2326,7 +2340,7 @@ func doCompress(cliCtx *cli.Context) error {
 		} else {
 			word = word[:l]
 		}
-		if _, err = io.ReadFull(r, word); err != nil {
+		if _, err = io.ReadFull(src, word); err != nil {
 			return err
 		}
 
