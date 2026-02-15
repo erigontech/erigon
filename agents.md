@@ -8,12 +8,14 @@ This file provides guidance for AI agents working with this codebase.
 
 ```bash
 make erigon              # Build main binary (./build/bin/erigon)
-make all                 # Build all binaries
+make integration         # Build integration test binary
+make lint                # Run golangci-lint + mod tidy check
 make test-short          # Quick unit tests (-short -failfast)
 make test-all            # Full test suite with coverage
-make lint                # Run golangci-lint + mod tidy check
 make gen                 # Generate all auto-generated code (mocks, grpc, etc.)
 ```
+
+Before committing, always verify changes with: `make lint && make erigon integration`
 
 Run specific tests:
 ```bash
@@ -53,3 +55,17 @@ Erigon is a high-performance Ethereum execution client with embedded consensus l
 Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace configs optional`
 
 **Important**: Always run `make lint` after making code changes and before committing. Fix any linter errors before proceeding.
+
+## Lint Notes
+
+The linter (`make lint`) is non-deterministic in which files it scans — new issues may appear on subsequent runs. Run lint repeatedly until clean.
+
+Common lint categories and fixes:
+- **ruleguard (defer tx.Rollback/cursor.Close):** The error check must come *before* `defer tx.Rollback()`. Never remove an explicit `.Close()` or `.Rollback()` — add `defer` as a safety net alongside it, since the timing of the explicit call may matter.
+- **prealloc:** Pre-allocate slices when the length is known from a range.
+- **unslice:** Remove redundant `[:]` on variables that are already slices.
+- **newDeref:** Replace `*new(T)` with `T{}`.
+- **appendCombine:** Combine consecutive `append` calls into one.
+- **rangeExprCopy:** Use `&x` in `range` to avoid copying large arrays.
+- **dupArg:** For intentional `x.Equal(x)` self-equality tests, suppress with `//nolint:gocritic`.
+- **Loop ruleguard in benchmarks:** For `BeginRw`/`BeginRo` inside loops where `defer` doesn't apply, suppress with `//nolint:gocritic`.
