@@ -2270,7 +2270,7 @@ func doUncompress(cliCtx *cli.Context) error {
 	return nil
 }
 
-func doCompress(cliCtx *cli.Context, src *bufio.Reader, dst string) error {
+func doCompress(cliCtx *cli.Context) error {
 	defer func() {
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
@@ -2288,6 +2288,24 @@ func doCompress(cliCtx *cli.Context, src *bufio.Reader, dst string) error {
 		return err
 	}
 	ctx := cliCtx.Context
+
+	args := cliCtx.Args()
+	if args.Len() < 1 {
+		return errors.New("expecting file path as a first argument")
+	}
+
+	dst := args.First()
+
+	src := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
+	srcF := cliCtx.String("from")
+	if srcF != "" {
+		f, err := os.OpenFile(srcF, 0, 0x655)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		src = bufio.NewReaderSize(f, int(128*datasize.MB))
+	}
 
 	compressCfg := seg.DefaultCfg
 	compressCfg.Workers = estimate.CompressSnapshot.Workers()
