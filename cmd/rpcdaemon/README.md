@@ -295,6 +295,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 |                                            |         |                                                       |
 | eth_accounts                               | No      | deprecated                                            |
 | eth_sendRawTransaction                     | Yes     | `remote`.                                             |
+| eth_sendRawTransactionSync                 | Yes     | `remote`.                                             |
 | eth_sendTransaction                        | -       | not yet implemented                                   |
 | eth_sign                                   | No      | deprecated                                            |
 | eth_signTransaction                        | -       | not yet implemented                                   |
@@ -323,6 +324,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | engine_forkchoiceUpdatedV1                 | Yes     |                                                       |
 | engine_forkchoiceUpdatedV2                 | Yes     |                                                       |
 | engine_forkchoiceUpdatedV3                 | Yes     |                                                       |
+| engine_forkchoiceUpdatedV4                 | Yes     | Added in Amsterdam                                    |
 | engine_getPayloadV1                        | Yes     |                                                       |
 | engine_getPayloadV2                        | Yes     |                                                       |
 | engine_getPayloadV3                        | Yes     |                                                       |

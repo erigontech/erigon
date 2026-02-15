@@ -19,13 +19,11 @@ package kv
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/mdbx-go/mdbx"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/datadir"
@@ -298,6 +296,18 @@ type RwCursorDupSort interface {
 	DeleteCurrentDuplicates() error       // DeleteCurrentDuplicates - deletes all values of the current key
 	DeleteExact(k1, k2 []byte) error      // DeleteExact - delete 1 value from given key
 	AppendDup(key, value []byte) error    // AppendDup - same as Append, but for sorted dup data
+}
+
+type PseudoDupSortRwCursor interface { // For both DupSort and usual cursors (usual imitates functionality of ds)
+	RwCursor
+	DeleteCurrentDuplicates() error     // DeleteCurrentDuplicates - deletes all values of the current key
+	DeleteExact(k1, k2 []byte) error    // DeleteExact - delete 1 value from given key
+	FirstDup() ([]byte, error)          // FirstDup - position at first data item of current key
+	NextDup() ([]byte, []byte, error)   // NextDup - position at next data item of current key
+	NextNoDup() ([]byte, []byte, error) // NextNoDup - position at first data item of next key
+	LastDup() ([]byte, error)           // LastDup - position at last data item of current key
+
+	CountDuplicates() (uint64, error) // CountDuplicates - number of duplicates for the current key
 }
 
 const Unlim int = -1 // const Unbounded/EOF/EndOfTable []byte = nil
@@ -640,26 +650,6 @@ func InitSummaries(dbLabel Label) {
 			DbCommitTotal:       metrics.GetOrCreateSummaryWithLabels(`db_commit_seconds`, []string{dbLabelName, "phase"}, []string{dbName, "total"}),
 		})
 	}
-}
-
-func RecordSummaries(dbLabel Label, latency mdbx.CommitLatency) error {
-	_summaries, ok := MDBXSummaries.Load(string(dbLabel))
-	if !ok {
-		return fmt.Errorf("MDBX summaries not initialized yet for db=%s", string(dbLabel))
-	}
-	// cast to *DBSummaries
-	summaries, ok := _summaries.(*DBSummaries)
-	if !ok {
-		return fmt.Errorf("type casting to *DBSummaries failed")
-	}
-
-	summaries.DbCommitPreparation.Observe(latency.Preparation.Seconds())
-	summaries.DbCommitWrite.Observe(latency.Write.Seconds())
-	summaries.DbCommitSync.Observe(latency.Sync.Seconds())
-	summaries.DbCommitEnding.Observe(latency.Ending.Seconds())
-	summaries.DbCommitTotal.Observe(latency.Whole.Seconds())
-	return nil
-
 }
 
 var MDBXGauges = InitMDBXMGauges() // global mdbx gauges. each gauge can be filtered by db name

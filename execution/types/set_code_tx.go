@@ -196,20 +196,33 @@ func (tx *SetCodeTransaction) Hash() common.Hash {
 	return hash
 }
 
+type setCodeTxSigHash struct {
+	ChainID    *big.Int
+	Nonce      uint64
+	GasTipCap  *uint256.Int
+	GasFeeCap  *uint256.Int
+	Gas        uint64
+	To         *common.Address
+	Value      *uint256.Int
+	Data       []byte
+	AccessList AccessList
+	AuthList   []Authorization
+}
+
 func (tx *SetCodeTransaction) SigningHash(chainID *big.Int) common.Hash {
 	return prefixedRlpHash(
 		SetCodeTxType,
-		[]any{
-			chainID,
-			tx.Nonce,
-			tx.TipCap,
-			tx.FeeCap,
-			tx.GasLimit,
-			tx.To,
-			tx.Value,
-			tx.Data,
-			tx.AccessList,
-			tx.Authorizations,
+		&setCodeTxSigHash{
+			ChainID:    chainID,
+			Nonce:      tx.Nonce,
+			GasTipCap:  tx.TipCap,
+			GasFeeCap:  tx.FeeCap,
+			Gas:        tx.GasLimit,
+			To:         tx.To,
+			Value:      tx.Value,
+			Data:       tx.Data,
+			AccessList: tx.AccessList,
+			AuthList:   tx.Authorizations,
 		})
 }
 

@@ -246,6 +246,7 @@ func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) e
 	if topicHandle == nil {
 		return fmt.Errorf("topic not found: %s", topic)
 	}
+	// Note: before publishing the message to the network, Publish() internally runs the validator function.
 	return topicHandle.topic.Publish(ctx, compressedData, pubsub.WithReadiness(pubsub.MinTopicSize(1)))
 }
 

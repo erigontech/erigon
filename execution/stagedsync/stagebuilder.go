@@ -44,7 +44,6 @@ func MiningStages(
 	sendersCfg SendersCfg,
 	execCfg MiningExecCfg,
 	finish MiningFinishCfg,
-	astridEnabled bool,
 ) []*Stage {
 	return []*Stage{
 		{

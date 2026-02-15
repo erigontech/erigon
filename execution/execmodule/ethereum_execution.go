@@ -28,6 +28,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
@@ -37,12 +38,15 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -170,7 +174,6 @@ type EthereumExecutionModule struct {
 	// MDBX database
 	db                kv.TemporalRwDB // main database
 	semaphore         *semaphore.Weighted
-	lock              sync.RWMutex
 	executionPipeline *stagedsync.Sync
 	forkValidator     *engine_helpers.ForkValidator
 
@@ -193,12 +196,17 @@ type EthereumExecutionModule struct {
 	// rules engine
 	engine rules.Engine
 
-	doingPostForkchoice bool
-
+	fcuBackgroundPrune      bool
+	fcuBackgroundCommit     bool
+	onlySnapDownloadOnStart bool
 	// metrics for average mgas/sec
 	avgMgasSec float64
 
+	lock           sync.RWMutex
 	currentContext *execctx.SharedDomains
+
+	// stateCache is a cache for state data (accounts, storage, code)
+	stateCache *cache.StateCache
 
 	executionproto.UnimplementedExecutionServer
 }
@@ -211,24 +219,33 @@ func NewEthereumExecutionModule(ctx context.Context, blockReader services.FullBl
 	stateCache *Cache, stateChangeConsumer shards.StateChangeConsumer,
 	logger log.Logger, engine rules.Engine,
 	syncCfg ethconfig.Sync,
+	fcuBackgroundPrune bool,
+	fcuBackgroundCommit bool,
+	onlySnapDownloadOnStart bool,
 ) *EthereumExecutionModule {
+	domainCache := cache.NewDefaultStateCache()
+
 	em := &EthereumExecutionModule{
-		blockReader:         blockReader,
-		db:                  db,
-		executionPipeline:   executionPipeline,
-		logger:              logger,
-		forkValidator:       forkValidator,
-		builders:            make(map[uint64]*builder.BlockBuilder),
-		builderFunc:         builderFunc,
-		config:              config,
-		semaphore:           semaphore.NewWeighted(1),
-		hook:                hook,
-		accumulator:         accumulator,
-		recentReceipts:      recentReceipts,
-		stateChangeConsumer: stateChangeConsumer,
-		engine:              engine,
-		syncCfg:             syncCfg,
-		bacgroundCtx:        ctx,
+		blockReader:             blockReader,
+		db:                      db,
+		executionPipeline:       executionPipeline,
+		logger:                  logger,
+		forkValidator:           forkValidator,
+		builders:                make(map[uint64]*builder.BlockBuilder),
+		builderFunc:             builderFunc,
+		config:                  config,
+		semaphore:               semaphore.NewWeighted(1),
+		hook:                    hook,
+		accumulator:             accumulator,
+		recentReceipts:          recentReceipts,
+		stateChangeConsumer:     stateChangeConsumer,
+		engine:                  engine,
+		syncCfg:                 syncCfg,
+		bacgroundCtx:            ctx,
+		fcuBackgroundPrune:      fcuBackgroundPrune,
+		fcuBackgroundCommit:     fcuBackgroundCommit,
+		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
+		stateCache:              domainCache,
 	}
 
 	if stateCache != nil {
@@ -282,7 +299,6 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 
 func (e *EthereumExecutionModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header) error {
 	currentHeader := header
-
 	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
 		parentBlockHash, parentBlockNum := currentHeader.ParentHash, currentHeader.Number.Uint64()-1
 		currentHeader, err = e.getHeader(e.bacgroundCtx, tx, parentBlockHash, parentBlockNum)
@@ -293,13 +309,26 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(sd *execctx.SharedDoma
 			return makeErrMissingChainSegment(parentBlockHash)
 		}
 	}
+	// Check if you can skip unwind by comparing the current header number with the progress of all stages.
+	// If they are equal, then we are safely already at the common canonical and can skip unwind.
+	unwindPoint := currentHeader.Number.Uint64()
+	commonProgress, allEqual, err := stages.GetStageProgressIfAllEqual(tx,
+		stages.Headers, stages.Senders, stages.Execution)
+	if err != nil {
+		return err
+	}
+	if allEqual && commonProgress == unwindPoint {
+		return nil
+	}
+
 	if err := e.hook.BeforeRun(tx, true); err != nil {
 		return err
 	}
-	if err := e.executionPipeline.UnwindTo(currentHeader.Number.Uint64(), stagedsync.ExecUnwind, tx); err != nil {
+
+	if err := e.executionPipeline.UnwindTo(unwindPoint, stagedsync.ExecUnwind, tx); err != nil {
 		return err
 	}
-	if err := e.executionPipeline.RunUnwind(nil, sd, tx); err != nil {
+	if err := e.executionPipeline.RunUnwind(sd, tx); err != nil {
 		return err
 	}
 	return nil
@@ -316,9 +345,10 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	defer e.semaphore.Release(1)
 
 	e.hook.LastNewBlockSeen(req.Number) // used by eth_syncing
+	e.currentContext.ResetPendingUpdates()
 	e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 	blockHash := gointerfaces.ConvertH256ToHash(req.Hash)
-
+	e.logger.Debug("[execmodule] validating chain", "number", req.Number, "hash", common.Hash(blockHash))
 	var (
 		header             *types.Header
 		body               *types.Body
@@ -335,6 +365,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		if err != nil {
 			return err
 		}
+		exec.AddHeaderAndBodyToGlobalReadAheader(ctx, e.db, header, body)
 		currentBlockNumber = rawdb.ReadCurrentBlockNumber(tx)
 		return nil
 	}); err != nil {
@@ -359,11 +390,16 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		return nil, err
 	}
 	defer tx.Rollback()
+
 	doms, err := execctx.NewSharedDomains(ctx, tx, e.logger)
 	if err != nil {
 		return nil, err
 	}
 
+	// Set state cache in SharedDomains for use during state reading
+	if e.stateCache != nil && dbg.UseStateCache {
+		doms.SetStateCache(e.stateCache)
+	}
 	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
 		doms.Close()
 		return nil, err
@@ -372,6 +408,12 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(ctx, doms, tx, header, body.RawBody(), e.logger)
 	if criticalError != nil {
 		return nil, criticalError
+	}
+
+	// Clear state cache on invalid block
+	isInvalid := status == engine_types.InvalidStatus || status == engine_types.InvalidBlockHashStatus || validationError != nil
+	if e.stateCache != nil && isInvalid {
+		e.stateCache.ClearWithHash(header.ParentHash)
 	}
 
 	// Throw away the tx and start a new one (do not persist changes to the canonical chain)
@@ -445,7 +487,7 @@ func (e *EthereumExecutionModule) Start(ctx context.Context, hook *stageloop.Hoo
 	}
 	defer e.semaphore.Release(1)
 
-	if err := stageloop.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, hook, e.logger); err != nil {
+	if err := stageloop.ProcessFrozenBlocks(ctx, e.db, e.blockReader, e.executionPipeline, hook, e.onlySnapDownloadOnStart, e.logger); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}

@@ -82,6 +82,10 @@ func HeaderToHeaderRPC(header *types.Header) *executionproto.Header {
 		h.BlockAccessListHash = gointerfaces.ConvertHashToH256(*header.BlockAccessListHash)
 	}
 
+	if header.SlotNumber != nil {
+		h.SlotNumber = header.SlotNumber
+	}
+
 	if len(header.AuRaSeal) > 0 {
 		h.AuraSeal = header.AuRaSeal
 		h.AuraStep = &header.AuRaStep
@@ -101,7 +105,7 @@ func HeadersToHeadersRPC(headers []*types.Header) []*executionproto.Header {
 }
 
 func ConvertBlocksToRPC(blocks []*types.Block) []*executionproto.Block {
-	ret := []*executionproto.Block{}
+	ret := make([]*executionproto.Block, 0, len(blocks))
 	for _, block := range blocks {
 		ret = append(ret, ConvertBlockToRPC(block))
 	}
@@ -140,6 +144,7 @@ func HeaderRpcToHeader(header *executionproto.Header) (*types.Header, error) {
 		Nonce:         blockNonce,
 		BlobGasUsed:   header.BlobGasUsed,
 		ExcessBlobGas: header.ExcessBlobGas,
+		SlotNumber:    header.SlotNumber,
 	}
 	if header.AuraStep != nil {
 		h.AuRaSeal = header.AuraSeal
@@ -225,17 +230,16 @@ func ConvertRawBlockBodyToRpc(in *types.RawBody, blockNumber uint64, blockHash c
 	}
 
 	return &executionproto.BlockBody{
-		BlockNumber:     blockNumber,
-		BlockHash:       gointerfaces.ConvertHashToH256(blockHash),
-		Transactions:    in.Transactions,
-		Uncles:          HeadersToHeadersRPC(in.Uncles),
-		Withdrawals:     ConvertWithdrawalsToRpc(in.Withdrawals),
-		BlockAccessList: types.ConvertBlockAccessListToExecutionProto(in.BlockAccessList),
+		BlockNumber:  blockNumber,
+		BlockHash:    gointerfaces.ConvertHashToH256(blockHash),
+		Transactions: in.Transactions,
+		Uncles:       HeadersToHeadersRPC(in.Uncles),
+		Withdrawals:  ConvertWithdrawalsToRpc(in.Withdrawals),
 	}
 }
 
 func ConvertRawBlockBodiesToRpc(in []*types.RawBody, blockNumbers []uint64, blockHashes []common.Hash) []*executionproto.BlockBody {
-	ret := []*executionproto.BlockBody{}
+	ret := make([]*executionproto.BlockBody, 0, len(in))
 
 	for i, body := range in {
 		ret = append(ret, ConvertRawBlockBodyToRpc(body, blockNumbers[i], blockHashes[i]))
@@ -251,15 +255,10 @@ func ConvertRawBlockBodyFromRpc(in *executionproto.BlockBody) (*types.RawBody, e
 	if err != nil {
 		return nil, err
 	}
-	blockAccessList, err := types.ConvertExecutionProtoToBlockAccessList(in.BlockAccessList)
-	if err != nil {
-		return nil, err
-	}
 	return &types.RawBody{
-		Transactions:    in.Transactions,
-		Uncles:          uncles,
-		Withdrawals:     ConvertWithdrawalsFromRpc(in.Withdrawals),
-		BlockAccessList: blockAccessList,
+		Transactions: in.Transactions,
+		Uncles:       uncles,
+		Withdrawals:  ConvertWithdrawalsFromRpc(in.Withdrawals),
 	}, nil
 }
 

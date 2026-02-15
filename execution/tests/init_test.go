@@ -80,6 +80,7 @@ type testMatcher struct {
 	skiploadpat  []*regexp.Regexp
 	slowpat      []*regexp.Regexp
 	whitelistpat *regexp.Regexp
+	noparallel   bool
 }
 
 type testConfig struct {
@@ -175,7 +176,7 @@ func (tm *testMatcher) walk(t *testing.T, dir string, runTest any) {
 		fmt.Fprintf(os.Stderr, "can't find test files in %s, did you clone the tests submodule?\n", dir)
 		t.Skip("missing test files")
 	}
-	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	err = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) { //skip magically disappeared files
 				return nil
@@ -183,7 +184,7 @@ func (tm *testMatcher) walk(t *testing.T, dir string, runTest any) {
 			return err
 		}
 		name := filepath.ToSlash(strings.TrimPrefix(path, dir+string(filepath.Separator)))
-		if info.IsDir() {
+		if d.IsDir() {
 			if _, skipload := tm.findSkip(name + "/"); skipload {
 				return filepath.SkipDir
 			}
@@ -204,7 +205,9 @@ func (tm *testMatcher) walk(t *testing.T, dir string, runTest any) {
 }
 
 func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest any) {
-	t.Parallel()
+	if !tm.noparallel {
+		t.Parallel()
+	}
 	if r, _ := tm.findSkip(name); r != "" {
 		t.Skip(r)
 	}
@@ -229,11 +232,7 @@ func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest any)
 		for _, key := range keys {
 			i++
 			name := name + "/" + key
-			subTestName := key
-			if len(subTestName) > 32 {
-				subTestName = fmt.Sprintf("%s_%s_%d", key[:20], key[len(key)-20:], i)
-			}
-			t.Run(subTestName, func(t *testing.T) {
+			t.Run(key, func(t *testing.T) {
 				if r, _ := tm.findSkip(name); r != "" {
 					t.Skip(r)
 				}

@@ -63,13 +63,13 @@ func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header 
 		if err != nil {
 			return nil, evmtypes.BlockContext{}, nil, nil, nil, err
 		}
-		reader, err = rpchelper.CreateHistoryCachedStateReader(cacheView, dbtx, header.Number.Uint64(), txIndex, txNumsReader)
+		reader, err = rpchelper.CreateHistoryCachedStateReader(ctx, cacheView, dbtx, header.Number.Uint64(), txIndex, txNumsReader)
 		if err != nil {
 			return nil, evmtypes.BlockContext{}, nil, nil, nil, err
 		}
 	} else {
 		var err error
-		reader, err = rpchelper.CreateHistoryStateReader(dbtx, header.Number.Uint64(), txIndex, txNumsReader)
+		reader, err = rpchelper.CreateHistoryStateReader(ctx, dbtx, header.Number.Uint64(), txIndex, txNumsReader)
 		if err != nil {
 			return nil, evmtypes.BlockContext{}, nil, nil, nil, err
 		}
@@ -142,11 +142,11 @@ func TraceTx(
 			return result, err
 		} else {
 			if tracer != nil && tracer.OnTxEnd != nil {
-				tracer.OnTxEnd(&types.Receipt{GasUsed: result.GasUsed}, nil)
+				tracer.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
 			}
 		}
 
-		gasUsed = result.GasUsed
+		gasUsed = result.ReceiptGasUsed
 		return result, err
 	}
 
@@ -242,7 +242,7 @@ func ExecuteTraceTx(
 		stream.WriteArrayEnd()
 		stream.WriteMore()
 		stream.WriteObjectField("gas")
-		stream.WriteUint64(result.GasUsed)
+		stream.WriteUint64(result.ReceiptGasUsed)
 		stream.WriteMore()
 		stream.WriteObjectField("failed")
 		stream.WriteBool(result.Failed())

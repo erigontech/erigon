@@ -86,7 +86,9 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
-	tx, _ := indiciesDB.BeginRw(ctx)
+	tx, err := indiciesDB.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
 
 	startSlot := uint64(100)
 	count := uint64(10)
@@ -99,7 +101,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	r, _ := h.Header.HashSSZ()
 	require.NoError(t, blobStorage.WriteBlobSidecars(ctx, r, sidecars))
 
-	tx.Commit()
+	require.NoError(t, tx.Commit())
 
 	ethClock := getEthClock(t)
 	c := NewConsensusHandlers(
@@ -207,7 +209,9 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
-	tx, _ := indiciesDB.BeginRw(ctx)
+	tx, err := indiciesDB.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
 
 	startSlot := uint64(100)
 	count := uint64(10)
@@ -221,7 +225,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	r, _ := h.Header.HashSSZ()
 	require.NoError(t, blobStorage.WriteBlobSidecars(ctx, r, sidecars))
 
-	tx.Commit()
+	require.NoError(t, tx.Commit())
 
 	c := NewConsensusHandlers(
 		ctx,

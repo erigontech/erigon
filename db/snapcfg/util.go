@@ -20,9 +20,9 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -30,11 +30,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/anacrolix/missinggo/v2/panicif"
 	snapshothashes "github.com/erigontech/erigon-snapshot"
 	"github.com/erigontech/erigon-snapshot/webseed"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
+
+	"github.com/erigontech/erigon/db/preverified"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -42,6 +43,11 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	ver "github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+)
+
+type (
+	PreverifiedItems = preverified.SortedItems
+	PreverifiedItem  = preverified.Item
 )
 
 var snapshotGitBranch = dbg.EnvString("SNAPS_GIT_BRANCH", ver.DefaultSnapshotGitBranch)
@@ -61,8 +67,15 @@ var registry = &preverifiedRegistry{
 		networkname.Gnosis:     fromEmbeddedToml(snapshothashes.Gnosis),
 		networkname.Chiado:     fromEmbeddedToml(snapshothashes.Chiado),
 		networkname.Hoodi:      fromEmbeddedToml(snapshothashes.Hoodi),
+		networkname.Bloatnet:   fromEmbeddedToml(snapshothashes.Bloatnet),
 	},
 	cached: make(map[string]*Cfg),
+}
+
+func (r *preverifiedRegistry) All() map[string]Preverified {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return maps.Clone(r.data)
 }
 
 func (r *preverifiedRegistry) Get(networkName string) (*Cfg, bool) {
@@ -127,57 +140,10 @@ func fromEmbeddedToml(in []byte) Preverified {
 	}
 }
 
-type PreverifiedItem struct {
-	Name string
-	Hash string
-}
-
-type PreverifiedItems []PreverifiedItem
-
 type Preverified struct {
 	Local bool
 	// These should be sorted by Name.
 	Items PreverifiedItems
-}
-
-func (p PreverifiedItems) searchName(name string) (int, bool) {
-	p.assertSorted()
-	return slices.BinarySearchFunc(p, name, func(l PreverifiedItem, target string) int {
-		return strings.Compare(l.Name, target)
-	})
-}
-
-// Preverified.Typed was breaking sort invariance.
-func (me PreverifiedItems) assertSorted() {
-	panicif.False(slices.IsSortedFunc(me, preverifiedItemCompare))
-}
-
-func preverifiedItemCompare(a, b PreverifiedItem) int {
-	return strings.Compare(a.Name, b.Name)
-}
-
-func (me PreverifiedItems) Get(name string) (item PreverifiedItem, found bool) {
-	me.assertSorted()
-	i, found := me.searchName(name)
-	if found {
-		item = me[i]
-	}
-	return
-}
-
-func (me PreverifiedItems) Contains(name string, ignoreVersion ...bool) bool {
-	if len(ignoreVersion) > 0 && ignoreVersion[0] {
-		_, name, _ := strings.Cut(name, "-")
-		for _, item := range me {
-			_, noVersion, _ := strings.Cut(item.Name, "-")
-			if noVersion == name {
-				return true
-			}
-		}
-		return false
-	}
-	_, found := me.searchName(name)
-	return found
 }
 
 func (p Preverified) Typed(types []snaptype.Type) Preverified {
@@ -290,6 +256,13 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	})
 	if len(p.Items) != len(versioned) {
 		log.Root().Warn("Preverified list reduced after applying type filter", "from", len(p.Items), "to", len(versioned))
+		// for _, v := range p.Items {
+		// 	if !slices.ContainsFunc(versioned, func(item PreverifiedItem) bool {
+		// 		return item.Name == v.Name
+		// 	}) {
+		// 		log.Root().Warn("Preverified item removed by type filter", "name", v.Name)
+		// 	}
+		// }
 	} else {
 		log.Root().Debug("Preverified list has same len after applying type filter", "len", len(p.Items))
 	}
@@ -368,43 +341,13 @@ func ExtractBlockFromName(name string, v ver.Version) (block uint64, err error) 
 
 	return block, nil
 }
-
-func (p PreverifiedItems) MarshalJSON() ([]byte, error) {
-	out := map[string]string{}
-
-	for _, i := range p {
-		out[i.Name] = i.Hash
-	}
-
-	return json.Marshal(out)
-}
-
-func (p *PreverifiedItems) UnmarshalJSON(data []byte) error {
-	var outMap map[string]string
-
-	if err := json.Unmarshal(data, &outMap); err != nil {
-		return err
-	}
-
-	*p = doSort(outMap)
-	return nil
-}
-
 func fromToml(in []byte) PreverifiedItems {
 	var outMap map[string]string
 	if err := toml.Unmarshal(in, &outMap); err != nil {
 		panic(err)
 	}
-	return doSort(outMap)
-}
 
-func doSort(in map[string]string) []PreverifiedItem {
-	out := make([]PreverifiedItem, 0, len(in))
-	for k, v := range in {
-		out = append(out, PreverifiedItem{k, v})
-	}
-	slices.SortFunc(out, preverifiedItemCompare)
-	return out
+	return preverified.ItemsFromMap(outMap)
 }
 
 func newCfg(networkName string, preverified Preverified) *Cfg {
@@ -552,6 +495,7 @@ var KnownWebseeds = map[string][]string{
 	networkname.Gnosis:     webseedsParse(webseed.Gnosis),
 	networkname.Chiado:     webseedsParse(webseed.Chiado),
 	networkname.Hoodi:      webseedsParse(webseed.Hoodi),
+	networkname.Bloatnet:   webseedsParse(webseed.Bloatnet),
 }
 
 func webseedsParse(in []byte) (res []string) {
@@ -566,8 +510,10 @@ func webseedsParse(in []byte) (res []string) {
 	return res
 }
 
+const RemotePreverifiedEnvKey = "ERIGON_REMOTE_PREVERIFIED"
+
 func LoadRemotePreverified(ctx context.Context) (err error) {
-	if s, ok := os.LookupEnv("ERIGON_REMOTE_PREVERIFIED"); ok {
+	if s, ok := os.LookupEnv(RemotePreverifiedEnvKey); ok {
 		log.Info("Loading local preverified override file", "file", s)
 
 		b, err := os.ReadFile(s)
@@ -600,6 +546,7 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 		networkname.Gnosis:     webseedsParse(webseed.Gnosis),
 		networkname.Chiado:     webseedsParse(webseed.Chiado),
 		networkname.Hoodi:      webseedsParse(webseed.Hoodi),
+		networkname.Bloatnet:   webseedsParse(webseed.Bloatnet),
 	}
 
 	// Re-load the preverified hashes
@@ -611,6 +558,7 @@ func LoadRemotePreverified(ctx context.Context) (err error) {
 		networkname.Gnosis:     fromEmbeddedToml(snapshothashes.Gnosis),
 		networkname.Chiado:     fromEmbeddedToml(snapshothashes.Chiado),
 		networkname.Hoodi:      fromEmbeddedToml(snapshothashes.Hoodi),
+		networkname.Bloatnet:   fromEmbeddedToml(snapshothashes.Bloatnet),
 	})
 	return
 }
@@ -637,7 +585,25 @@ func GetToml(networkName string) []byte {
 		return snapshothashes.Chiado
 	case networkname.Hoodi:
 		return snapshothashes.Hoodi
+	case networkname.Bloatnet:
+		return snapshothashes.Bloatnet
 	default:
 		return nil
 	}
+}
+
+// Gets the current preverified for all chains.
+func GetAllCurrentPreverified() map[string]Preverified {
+	return registry.All()
+}
+
+// Converts webseed value to URL. Mostly this is just stripping v1: for now, as nothing else is in
+// active use.
+func WebseedToUrl(s string) (_ string, err error) {
+	after, ok := strings.CutPrefix(s, "v1:")
+	if !ok {
+		err = fmt.Errorf("unhandled webseed %q", s)
+		return
+	}
+	return after, nil
 }

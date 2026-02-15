@@ -42,7 +42,12 @@ type FlatRequest struct {
 func (f *FlatRequest) RequestType() byte { return f.Type }
 
 // Encodes flat encoding of request the way it should be serialized
-func (f *FlatRequest) Encode() []byte { return append([]byte{f.Type}, f.RequestData...) }
+func (f *FlatRequest) Encode() []byte {
+	buf := make([]byte, 1+len(f.RequestData))
+	buf[0] = f.Type
+	copy(buf[1:], f.RequestData)
+	return buf
+}
 
 type FlatRequests []FlatRequest
 
@@ -55,7 +60,10 @@ func (r FlatRequests) Hash() *common.Hash {
 		if len(t.RequestData) == 0 {
 			continue
 		}
-		hi := sha256.Sum256(append([]byte{t.Type}, r[i].RequestData...))
+		buf := make([]byte, 1+len(r[i].RequestData))
+		buf[0] = t.Type
+		copy(buf[1:], r[i].RequestData)
+		hi := sha256.Sum256(buf)
 		sha.Write(hi[:])
 	}
 	h := common.BytesToHash(sha.Sum(nil))

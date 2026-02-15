@@ -585,7 +585,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 
 	timeLastBlock := startTime
 	blockNumLastReport := blockNum
-	txNumReader := blockReader.TxnumReader(context.Background())
+	txNumReader := blockReader.TxnumReader()
 
 	for !interrupt {
 		var block *types.Block
@@ -609,7 +609,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 			ot.fsumWriter = bufio.NewWriter(fsum)
 		}
 
-		dbstate, err := rpchelper.CreateHistoryStateReader(historyTx, block.NumberU64(), 0, txNumReader)
+		dbstate, err := rpchelper.CreateHistoryStateReader(context.Background(), historyTx, block.NumberU64(), 0, txNumReader)
 		if err != nil {
 			return err
 		}
@@ -733,8 +733,7 @@ func runBlock(engine rules.Engine, ibs *state.IntraBlockState, txnWriter state.S
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
 	gp := new(protocol.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
-	gasUsed := new(uint64)
-	usedBlobGas := new(uint64)
+	gasUsed := new(protocol.GasUsed)
 	var receipts types.Receipts
 	protocol.InitializeBlockExecution(engine, nil, header, chainConfig, ibs, nil, logger, nil)
 	blockNum := block.NumberU64()
@@ -742,7 +741,7 @@ func runBlock(engine rules.Engine, ibs *state.IntraBlockState, txnWriter state.S
 	rules := blockContext.Rules(chainConfig)
 	for i, txn := range block.Transactions() {
 		ibs.SetTxContext(blockNum, i)
-		receipt, _, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader), engine, accounts.NilAddress, gp, ibs, txnWriter, header, txn, gasUsed, usedBlobGas, vmConfig)
+		receipt, err := protocol.ApplyTransaction(chainConfig, protocol.GetHashFn(header, getHeader), engine, accounts.NilAddress, gp, ibs, txnWriter, header, txn, gasUsed, vmConfig)
 		if err != nil {
 			return nil, fmt.Errorf("could not apply txn %d [%x] failed: %w", i, txn.Hash(), err)
 		}
