@@ -345,10 +345,6 @@ kurtosis-cleanup:
 	@echo "-----------------------------------\n"
 	kurtosis enclave rm -f makefile-kurtosis-testnet
 
-## lint-deps:                         install lint dependencies
-lint-deps:
-	@./tools/golangci_lint.sh --install-deps
-
 ## lintci:                            run golangci-lint linters
 lintci:
 	@CGO_CXXFLAGS="$(CGO_CXXFLAGS)" ./tools/golangci_lint.sh

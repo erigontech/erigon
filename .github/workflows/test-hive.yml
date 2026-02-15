@@ -85,13 +85,16 @@ jobs:
       # Targetting the clients/erigon/Dockerfile.git in the Hive director - 
       # this builds the container from github and uses it for tests
       - name: Get dependencies and build hive
+        env:
+          SOURCE_REPO: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
         run: |
           cd hive
           go get . >> buildlogs.log
           rm clients/erigon/Dockerfile
           mv clients/erigon/Dockerfile.git clients/erigon/Dockerfile
-          branch_name=$(echo ${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}  | sed 's/[&/\]/\\&/g')
-          echo Building Hive with Erigon branch - $branch_name
+          branch_name=$(echo ${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}} | sed 's/[&/\]/\\&/g')
+          echo Building Hive with Erigon repo - ${SOURCE_REPO}, branch - $branch_name
+          sed -i "s|^ARG github=erigontech/erigon$|ARG github=${SOURCE_REPO}|" clients/erigon/Dockerfile
           sed -i "s/^ARG tag=main$/ARG tag=${branch_name}/" clients/erigon/Dockerfile
           go build . >> buildlogs.log
       # Depends on the last line of hive output that prints the number of suites, tests and failed
