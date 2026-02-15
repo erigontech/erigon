@@ -9,6 +9,9 @@
 
 package sais
 
+// copy of stdlib `index/suffixarray` SA-IS implementation
+// because Go's stdlib doesn't provide enough low-level api to call necessary funcs
+
 // Sais computes the suffix array of data into sa.
 // The caller must provide sa with len(sa) == len(data).
 func Sais(data []byte, sa []int32) error {
