@@ -136,7 +136,7 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 		if fromTxNum >= item.startTxNum {
 			continue
 		}
-		if r.values.needMerge && fromTxNum >= r.values.from { //skip small files inside `span`
+		if r.values.needMerge && fromTxNum > r.values.from { //skip small files inside `span`
 			continue
 		}
 
@@ -167,7 +167,7 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 		if startTxNum >= item.startTxNum {
 			continue
 		}
-		if r.history.needMerge && startTxNum >= r.history.from {
+		if r.history.needMerge && startTxNum > r.history.from {
 			continue
 		}
 		r.history = MergeRange{"", true, startTxNum, item.endTxNum}
@@ -218,7 +218,7 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 		if start >= item.startTxNum {
 			continue
 		}
-		if minFound && start >= startTxNum {
+		if minFound && start > startTxNum {
 			continue
 		}
 		minFound = true
@@ -752,8 +752,10 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 	}()
 
-	if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, ps); err != nil {
-		return nil, nil, err
+	if r.index.needMerge {
+		if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, ps); err != nil {
+			return nil, nil, err
+		}
 	}
 	if r.history.needMerge {
 		var comp *seg.Compressor

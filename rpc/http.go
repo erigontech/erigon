@@ -181,6 +181,10 @@ func (hc *httpConn) doRequest(ctx context.Context, msg any) ([]byte, error) {
 		return nil, fmt.Errorf("%s: %s", resp.Status, string(respBody))
 	}
 
+	if len(respBody) == 0 {
+		return nil, errors.New("empty response from JSON-RPC server")
+	}
+
 	return respBody, nil
 }
 
@@ -243,6 +247,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if code, err := validateRequest(r); err != nil {
 		http.Error(w, err.Error(), code)
+		return
+	}
+
+	// Don't serve if server is stopped.
+	if !s.run.Load() {
+		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
 
