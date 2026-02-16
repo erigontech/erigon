@@ -859,6 +859,28 @@ type ExecutionWitnessResult struct {
 	Headers []hexutil.Bytes `json:"headers,omitempty"`
 }
 
+func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64, visitor func(k []byte)) (uint64, error) {
+	// toTxNum is exclusive per kv.TemporalTx.HistoryRange contract [from,to)
+	stream, err := tx.HistoryRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
+	if err != nil {
+		return 0, err
+	}
+	defer stream.Close()
+	var touches uint64
+	for stream.HasNext() {
+		k, _, err := stream.Next()
+		if err != nil {
+			return 0, err
+		}
+		if visitor != nil {
+			visitor(k)
+		}
+		sd.GetCommitmentCtx().TouchKey(d, string(k), nil)
+		touches++
+	}
+	return touches, nil
+}
+
 // ExecutionWitness implements debug_executionWitness.
 // It executes a block using a historical state reader, records all state accesses
 // (accounts, storage, code), and builds merkle proofs for the accessed keys.
@@ -1088,6 +1110,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("parent header %d not found", parentNum)
 	}
 	expectedParentRoot = parentHeader.Root
+	fmt.Printf("EXPECTED PARENT ROOT = %x\n", expectedParentRoot)
 
 	// Get first txnum of blockNum to ensure that correct state root will be restored
 	firstTxNumInBlock, err := api._txNumReader.Min(ctx, tx, blockNum)
@@ -1126,6 +1149,23 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		}
 	}
 
+	touchGroundTruthHistoricalKeys := func(fromTxNum, toTxNum uint64) error {
+		accTouches, err := touchHistoricalKeys(domains, tx, kv.AccountsDomain, fromTxNum, toTxNum, nil)
+		if err != nil {
+			return err
+		}
+		storageTouches, err := touchHistoricalKeys(domains, tx, kv.StorageDomain, fromTxNum, toTxNum, nil)
+		if err != nil {
+			return err
+		}
+		codeTouches, err := touchHistoricalKeys(domains, tx, kv.CodeDomain, fromTxNum, toTxNum, nil)
+		if err != nil {
+			return err
+		}
+		log.Info("commitment touched keys", "accTouches", accTouches, "storageTouches", storageTouches, "codeTouches", codeTouches)
+		return nil
+	}
+
 	// Helper to reset commitment to parent block state and re-seek
 	resetToParentState := func() error {
 		sdCtx.SetHistoryStateReader(tx, firstTxNumInBlock)
@@ -1151,7 +1191,11 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("failed to re-seek commitment for collapse detection: %w", err)
 	}
 
-	touchAllKeys()
+	// touchAllKeys()
+	err = touchGroundTruthHistoricalKeys(firstTxNumInBlock, lastTxNumInBlock+1)
+	if err != nil {
+		return nil, err
+	}
 
 	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
 		fmt.Printf("[witness] node collapse detected at path %x (len=%d)\n", hashedKeyPath, len(hashedKeyPath))
@@ -1217,6 +1261,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("merged witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
 	}
 
+	// witnessTrie.Reset()
 	// Collect all unique RLP-encoded trie nodes by traversing from root to leaves
 	// This avoids duplicates that would occur when calling Prove() separately for each key
 	allNodes, err := witnessTrie.RLPEncode()
@@ -1224,7 +1269,18 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("failed to encode trie nodes: %w", err)
 	}
 	for _, node := range allNodes {
-		result.State = append(result.State, node)
+		result.State = append(result.State, common.Copy(node))
+	}
+
+	// check the RLP decoded trie has the same root hash
+	rlpDecodedTrie, err := trie.RLPDecode(allNodes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to rlp decode state nodes : %w", err)
+	}
+
+	decodedHash := rlpDecodedTrie.Hash()
+	if decodedHash != common.Hash(witnessRoot) {
+		return nil, fmt.Errorf("root hash of decoded trie is incorrect")
 	}
 
 	// Collect headers for BLOCKHASH opcode support
@@ -1659,6 +1715,11 @@ func newWitnessStateless(result *ExecutionWitnessResult) (*witnessStateless, err
 		return nil, fmt.Errorf("failed to decode witness trie: %w", err)
 	}
 
+	targetAddress := common.HexToAddress("0x881D40237659C251811CEC9c364ef91dC08D300C")
+	addrHash, _ := common.HashData(targetAddress[:])
+	acc, ok := witnessTrie.GetAccount(addrHash[:])
+	_, _ = acc, ok
+
 	// Build code map from codes list
 	codeMap := make(map[common.Hash][]byte)
 	for _, code := range result.Codes {
@@ -1974,8 +2035,13 @@ func (s *witnessStateless) debugPrintPendingUpdates(blockNum uint64) {
 func (s *witnessStateless) Finalize() common.Hash {
 	fmt.Printf("\n=== Finalize: Applying updates ===\n")
 
+	targetAddr := common.HexToAddress("0x1121AcC14c63f3C872BFcA497d10926A6098AAc5")
+
 	// Handle created contracts - clear their storage subtries
 	for addr := range s.created {
+		if addr == targetAddr {
+			fmt.Printf("HERE\n")
+		}
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
 			account.Root = trie.EmptyRoot
 		}
@@ -1986,6 +2052,9 @@ func (s *witnessStateless) Finalize() common.Hash {
 
 	// Apply account updates
 	for addr, account := range s.accountUpdates {
+		if addr == targetAddr {
+			fmt.Printf("HERE\n")
+		}
 		addrHash, _ := common.HashData(addr[:])
 		if account != nil {
 			fmt.Printf("  UpdateAccount %x: Nonce=%d, Balance=%s\n", addr[:8], account.Nonce, account.Balance.String())
@@ -2001,6 +2070,9 @@ func (s *witnessStateless) Finalize() common.Hash {
 		if account == nil {
 			continue
 		}
+		if addr == targetAddr {
+			fmt.Printf("HERE\n")
+		}
 		addrHash, _ := common.HashData(addr[:])
 		codeHashValue := account.CodeHash.Value()
 		if code, ok := s.codeUpdates[codeHashValue]; ok {
@@ -2015,6 +2087,9 @@ func (s *witnessStateless) Finalize() common.Hash {
 
 	// Apply storage writes
 	for addr, m := range s.storageWrites {
+		if addr == targetAddr {
+			fmt.Printf("HERE\n")
+		}
 		if _, ok := s.deleted[addr]; ok {
 			continue
 		}
@@ -2025,12 +2100,16 @@ func (s *witnessStateless) Finalize() common.Hash {
 			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
 			fmt.Printf("  Storage write: account=%x, key=%x, value=%x\n", addr[:8], key[:8], v.Bytes())
 			s.t.Update(cKey, v.Bytes())
+			s.t.DeepHash(addrHash[:])
 			// Don't call Hash() here - it would cache node refs and interfere with later updates
 		}
 	}
 
 	// Apply storage deletes
 	for addr, m := range s.storageDeletes {
+		if addr == targetAddr {
+			fmt.Printf("HERE\n")
+		}
 		if _, ok := s.deleted[addr]; ok {
 			continue
 		}
@@ -2046,6 +2125,9 @@ func (s *witnessStateless) Finalize() common.Hash {
 	// Update storage roots for modified accounts
 	// DeepHash computes the storage root, then we update the account with it
 	for addr := range updatedAccounts {
+		if addr == targetAddr {
+			fmt.Printf("HERE\n")
+		}
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
 			addrHash, _ := common.HashData(addr[:])
 			gotRoot, root := s.t.DeepHash(addrHash[:])
@@ -2061,6 +2143,9 @@ func (s *witnessStateless) Finalize() common.Hash {
 
 	// Handle deleted accounts
 	for addr := range s.deleted {
+		if addr == targetAddr {
+			fmt.Printf("HERE\n")
+		}
 		if _, ok := s.created[addr]; ok {
 			continue
 		}
