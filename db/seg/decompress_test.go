@@ -350,6 +350,45 @@ func TestUncompressed(t *testing.T) {
 
 }
 
+func TestMatchPrefixUncompressed_EmptyCases(t *testing.T) {
+	d := prepareLoremDictUncompressed(t)
+	defer d.Close()
+	g := d.MakeGetter()
+
+	// At beginning, first word is empty string due to sorting in prepareLoremDictUncompressed
+	require.True(t, g.MatchPrefixUncompressed(nil))
+	require.True(t, g.MatchPrefixUncompressed([]byte{}))
+	require.False(t, g.MatchPrefixUncompressed([]byte("a")))
+
+	// Move to next (non-empty) word and verify empty prefix still matches
+	_, l := g.SkipUncompressed()
+	require.Equal(t, 0, l) // first was empty
+	_, l = g.SkipUncompressed()
+	require.Greater(t, l, 0)
+	require.True(t, g.MatchPrefixUncompressed(nil))
+	require.True(t, g.MatchPrefixUncompressed([]byte{}))
+}
+
+func TestMatchCmpUncompressed_EmptyCases(t *testing.T) {
+	d := prepareLoremDictUncompressed(t)
+	defer d.Close()
+	g := d.MakeGetter()
+
+	// First word is empty string; both empty should be equal
+	require.Equal(t, 0, g.MatchCmpUncompressed(nil))
+	require.Equal(t, 0, g.MatchCmpUncompressed([]byte{}))
+	// Non-empty buffer vs empty word: buffer > word -> 1
+	require.Equal(t, 1, g.MatchCmpUncompressed([]byte("a")))
+
+	// Move to a non-empty word and check empty buffer is less (-1)
+	_, l := g.SkipUncompressed()
+	require.Equal(t, 0, l) // first was empty
+	_, l = g.SkipUncompressed()
+	require.Greater(t, l, 0)
+	require.Equal(t, -1, g.MatchCmpUncompressed(nil))
+	require.Equal(t, -1, g.MatchCmpUncompressed([]byte{}))
+}
+
 func TestDecompressor_OpenCorrupted(t *testing.T) {
 	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	logger := log.New()
