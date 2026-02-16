@@ -189,7 +189,7 @@ func ExecV3(ctx context.Context,
 
 	commitThreshold := cfg.batchSize.Bytes()
 
-	logInterval := 20 * time.Second
+	logInterval := 10 * time.Second
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	defer resetExecGauges(ctx)
