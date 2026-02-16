@@ -53,7 +53,9 @@ jobs:
         os:
           - ubuntu-latest
         test-group:
-          - execution
+          - execution-spec
+          - execution-heavy
+          - execution-other
           - consensus
           - p2p-rpc
           - core-db
@@ -104,8 +106,30 @@ jobs:
         if: needs.source-of-changes.outputs.changed_files != 'true'
         run: |
           case "${{ matrix.test-group }}" in
-            execution)
-              go test -race -timeout 60m ./execution/...
+            execution-spec)
+              # Heavy spec/state test suites from execution/tests (~32 min originally)
+              # These run ethereum legacy tests, execution-spec tests and state tests
+              go test -race -timeout 60m ./execution/tests -run "TestLegacyBlockchain|TestExecutionSpecBlockchain|TestExecutionSpecBlockchainDevnet|TestState$|TestStateCornerCases|TestRLP$|TestTransaction$|TestDifficulty$"
+              ;;
+            execution-heavy)
+              # Remaining tests from execution/tests + heaviest execution subpackages
+              # commitment (~264s), stagedsync (~241s), state (~84s), vm (~58s), engineapi (~55s)
+              go test -race -timeout 60m ./execution/tests -run "^(?!TestLegacyBlockchain|TestExecutionSpecBlockchain|TestExecutionSpecBlockchainDevnet|TestState$|TestStateCornerCases$|TestRLP$|TestTransaction$|TestDifficulty$)"
+              go test -race -timeout 60m ./execution/tests/blockgen/... ./execution/tests/mock/...
+              go test -race -timeout 60m ./execution/commitment/... ./execution/stagedsync/... ./execution/state/...
+              ;;
+            execution-other)
+              # All remaining execution subdirectories
+              EXEC_HEAVY="execution/tests|execution/commitment|execution/stagedsync|execution/state"
+              DIRS=$(ls -d -- execution/*/ | grep -vE "($EXEC_HEAVY)/" | sed 's/\/$//')
+              for d in $DIRS; do
+                if [ -d "$d" ]; then
+                  TEST_PACKAGES=$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' "./$d/..." 2>/dev/null)
+                  if [ -n "$TEST_PACKAGES" ]; then
+                    go test -race -timeout 30m "./$d/..."
+                  fi
+                fi
+              done
               ;;
             consensus)
               go test -race -timeout 60m ./cl/...
