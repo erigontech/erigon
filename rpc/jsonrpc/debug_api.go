@@ -1201,6 +1201,22 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return originalGetHash(n)
 	}
 
+	// Run block initialization (e.g. EIP-2935 blockhash contract, EIP-4788 beacon root)
+	fullEngine, ok := engine.(rules.Engine)
+	if !ok {
+		return nil, fmt.Errorf("engine does not support full rules.Engine interface")
+	}
+	chainReader := consensuschain.NewReader(chainConfig, tx, api._blockReader, log.Root())
+	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
+		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, fullEngine, constCall, vm.Config{})
+	}
+	if err = fullEngine.Initialize(chainConfig, chainReader, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
+		return nil, fmt.Errorf("failed to initialize block: %w", err)
+	}
+	if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
+		return nil, fmt.Errorf("failed to finalize engine.Initialize tx: %w", err)
+	}
+
 	// Execute all transactions in the block
 	for txIndex, txn := range block.Transactions() {
 		msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
@@ -1224,16 +1240,9 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		}
 	}
 
-	// Run block finalization (rewards, withdrawals) to track all state changes
-	fullEngine, ok := engine.(rules.Engine)
-	if !ok {
-		return nil, fmt.Errorf("engine does not support full rules.Engine interface")
-	}
-
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
 	}
-	chainReader := consensuschain.NewReader(chainConfig, tx, api._blockReader, log.Root())
 
 	if _, err = fullEngine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), nil /* receipts */, block.Withdrawals(), chainReader, syscall, true /* skipReceiptsEval */, log.Root()); err != nil {
 		return nil, fmt.Errorf("failed to finalize block: %w", err)
@@ -2458,6 +2467,17 @@ func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.B
 	blockCtx := protocol.NewEVMBlockContext(header, getHashFn, nil, coinbase, chainConfig)
 	blockRules := blockCtx.Rules(chainConfig)
 	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
+
+	// Run block initialization (e.g. EIP-2935 blockhash contract, EIP-4788 beacon root)
+	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
+		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, engine, constCall, vm.Config{})
+	}
+	if err = engine.Initialize(chainConfig, nil /* chainReader */, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
+		return fmt.Errorf("verification: failed to initialize block: %w", err)
+	}
+	if err = ibs.FinalizeTx(blockRules, stateless); err != nil {
+		return fmt.Errorf("verification: failed to finalize engine.Initialize tx: %w", err)
+	}
 
 	// Execute all transactions in the block
 	for txIndex, txn := range block.Transactions() {
