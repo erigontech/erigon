@@ -47,6 +47,11 @@ func MayContainValuesPlainKeyReferencing(stepSize, from, to uint64) bool {
 	return ((to - from) / stepSize) > minStepsForReferencing
 }
 
+func (at *AggregatorRoTx) PrintMetrics() {
+	fmt.Println("PK metrics:", at.pk)
+	fmt.Println("RK metrics:", at.rk)
+}
+
 // replaceShortenedKeysInBranch expands shortened key references (file offsets) in branch data back to full keys
 // by looking them up in the account and storage domain files.
 func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch commitment.BranchData, fStartTxNum uint64, fEndTxNum uint64) (commitment.BranchData, error) {
@@ -85,6 +90,13 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 		}
 	}
 
+	incrementm := func(m map[uint64]uint64, key uint64) {
+		if _, ok := m[key]; !ok {
+			m[key] = 0
+		}
+		m[key] = m[key] + 1
+	}
+
 	aux := make([]byte, 0, 256)
 	return branch.ReplacePlainKeys(aux, func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
@@ -106,12 +118,19 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 		}
 
 		if len(key) == length.Addr {
+			incrementm(at.pk, uint64(metricI))
 			return nil, nil // save account key as is
 		}
+		incrementm(at.rk, uint64(metricI))
 
 		if dbg.KVReadLevelledMetrics {
 			defer branchKeyDerefSpent[metricI].ObserveDuration(time.Now())
 		}
+
+		// print pk and rk metrics
+		// fmt.Println("PK metrics:", at.pk)
+		// fmt.Println("RK metrics:", at.rk)
+
 		apkBuf, found := acc.lookupByShortenedKey(key, accountGetter)
 		if !found {
 			s0, s1 := fStartTxNum/at.StepSize(), fEndTxNum/at.StepSize()

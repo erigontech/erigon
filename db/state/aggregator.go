@@ -1768,9 +1768,10 @@ func (at *AggregatorRoTx) FileStream(name kv.Domain, fromTxNum, toTxNum uint64) 
 //   - user will not see "partial writes" or "new files appearance"
 //   - last reader removing garbage files inside `Close` method
 type AggregatorRoTx struct {
-	a   *Aggregator
-	d   [kv.DomainLen]*DomainRoTx
-	iis []*InvertedIndexRoTx
+	a      *Aggregator
+	d      [kv.DomainLen]*DomainRoTx
+	iis    []*InvertedIndexRoTx
+	pk, rk map[uint64]uint64
 
 	_leakID uint64 // set only if TRACE_AGG=true
 }
@@ -1792,6 +1793,8 @@ func (a *Aggregator) BeginFilesRo() *AggregatorRoTx {
 		}
 	}
 	a.visibleFilesLock.RUnlock()
+	ac.pk = make(map[uint64]uint64)
+	ac.rk = make(map[uint64]uint64)
 
 	return ac
 }

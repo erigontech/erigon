@@ -289,7 +289,7 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 			continue
 		}
 		eg.Go(func() error {
-			counts, err := checkCommitmentKvDeref(ctx, file, aggTx.StepSize(), failFast, logger)
+			counts, err := checkCommitmentKvDeref(ctx, tx, file, aggTx.StepSize(), failFast, logger)
 			if err == nil {
 				branchKeys.Add(counts.branchKeys)
 				referencedAccounts.Add(counts.referencedAccounts)
@@ -329,7 +329,7 @@ type derefCounts struct {
 	plainStorages      uint64
 }
 
-func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) (derefCounts, error) {
+func checkCommitmentKvDeref(ctx context.Context, tx kv.TemporalTx, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) (derefCounts, error) {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
@@ -393,6 +393,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 				"plainStorages", counts.plainStorages,
 				"kv", fileName,
 			)
+			tx.AggTx().(*state.AggregatorRoTx).PrintMetrics()
 		default: // proceed
 		}
 		branchKey, _ := commReader.Next(branchKeyBuf[:0])
@@ -521,6 +522,24 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 		err = newBranchData.Validate(branchKey)
 		if err != nil {
 			err = fmt.Errorf("branch data validation failure for branch key %x in %s: %w", branchKey, fileName, err)
+			if failFast {
+				return derefCounts{}, err
+			}
+			logger.Warn(err.Error())
+			integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
+		}
+
+		_, found, start, end, err := tx.Debug().GetLatestFromFiles(kv.CommitmentDomain, branchKey, endTxNum-1)
+		if err != nil {
+			err = fmt.Errorf("branch key %x not found in tx for %s: %w", branchKey, fileName, err)
+			if failFast {
+				return derefCounts{}, err
+			}
+			logger.Warn(err.Error())
+			integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
+		}
+		if !found || start != startTxNum || end != endTxNum {
+			err = fmt.Errorf("branch key %x not found with same tx range in %s: found=%v, start=%d, end=%d", branchKey, fileName, found, start, end)
 			if failFast {
 				return derefCounts{}, err
 			}
