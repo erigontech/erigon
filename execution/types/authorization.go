@@ -41,7 +41,7 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common
 		return nil, errors.New("failed assertion: auth.nonce < 2**64 - 1")
 	}
 
-	authLen := (1 + rlp.Uint256LenExcludingHead(ath.ChainID))
+	authLen := rlp.Uint256Len(ath.ChainID)
 	authLen += 1 + length.Addr
 	authLen += rlp.U64Len(ath.Nonce)
 
@@ -66,7 +66,8 @@ func (ath *Authorization) RecoverSigner(data *bytes.Buffer, buf []byte) (*common
 }
 
 func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.Int) (*common.Address, error) {
-	hashData := []byte{params.SetCodeMagicPrefix}
+	hashData := make([]byte, 0, 1+len(rlp))
+	hashData = append(hashData, params.SetCodeMagicPrefix)
 	hashData = append(hashData, rlp...)
 	hash := crypto.Keccak256Hash(hashData)
 
@@ -99,12 +100,10 @@ func RecoverSignerFromRLP(rlp []byte, yParity uint8, r uint256.Int, s uint256.In
 }
 
 func authorizationSize(auth Authorization) (authLen int) {
-	authLen = (1 + rlp.Uint256LenExcludingHead(auth.ChainID))
+	authLen = rlp.Uint256Len(auth.ChainID)
 	authLen += rlp.U64Len(auth.Nonce)
 	authLen += 1 + length.Addr
-
-	authLen += rlp.U64Len(uint64(auth.YParity)) + (1 + rlp.Uint256LenExcludingHead(auth.R)) + (1 + rlp.Uint256LenExcludingHead(auth.S))
-
+	authLen += rlp.U64Len(uint64(auth.YParity)) + rlp.Uint256Len(auth.R) + rlp.Uint256Len(auth.S)
 	return
 }
 

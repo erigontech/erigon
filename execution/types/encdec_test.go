@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const RUNS = 1000 // for local tests increase this number
@@ -288,7 +289,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 			FeeCap:                      uint256.NewInt(*tr.RandUint64()),
 			GasLimit:                    commonTx.GasLimit,
 			AccessList:                  tr.RandAccessList(tr.RandIntInRange(0, 5)),
-			SenderAddress:               &senderAddress,
+			SenderAddress:               accounts.InternAddress(senderAddress),
 			SenderValidationData:        tr.RandBytes(tr.RandIntInRange(128, 1024)),
 			Authorizations:              tr.RandAuthorizations(tr.RandIntInRange(0, 5)),
 			ExecutionData:               tr.RandBytes(tr.RandIntInRange(128, 1024)),
@@ -403,7 +404,7 @@ func isEqualBytes(a, b []byte) bool {
 	return true
 }
 
-func check(t *testing.T, f string, want, got interface{}) {
+func check(t *testing.T, f string, want, got any) {
 	t.Helper()
 
 	if !reflect.DeepEqual(want, got) {

@@ -46,13 +46,15 @@ import (
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/rulesconfig"
 )
 
 // A BlockTest checks handling of entire blocks.
 type BlockTest struct {
-	json btJSON
-	br   services.FullBlockReader
+	json            btJSON
+	br              services.FullBlockReader
+	ExperimentalBAL bool
 }
 
 // UnmarshalJSON implements json.Unmarshaler interface.
@@ -75,6 +77,91 @@ type btBlock struct {
 	ExpectException string
 	Rlp             string
 	UncleHeaders    []*btHeader
+	BlockAccessList btBlockAccessList `json:"blockAccessList"`
+}
+
+// btBlockAccessList and related types for parsing block access list data from test JSON.
+type btBlockAccessList []btAccountChanges
+
+type btAccountChanges struct {
+	Address        common.Address    `json:"address"`
+	StorageChanges []btSlotChanges   `json:"storageChanges"`
+	StorageReads   []hexutil.Bytes   `json:"storageReads"`
+	BalanceChanges []btBalanceChange `json:"balanceChanges"`
+	NonceChanges   []btNonceChange   `json:"nonceChanges"`
+	CodeChanges    []btCodeChange    `json:"codeChanges"`
+}
+
+type btSlotChanges struct {
+	Slot        hexutil.Bytes     `json:"slot"`
+	SlotChanges []btStorageChange `json:"slotChanges"`
+}
+
+type btStorageChange struct {
+	BlockAccessIndex hexutil.Uint16       `json:"blockAccessIndex"`
+	PostValue        math.HexOrDecimal256 `json:"postValue"`
+}
+
+type btBalanceChange struct {
+	BlockAccessIndex hexutil.Uint16       `json:"blockAccessIndex"`
+	PostBalance      math.HexOrDecimal256 `json:"postBalance"`
+}
+
+type btNonceChange struct {
+	BlockAccessIndex hexutil.Uint16      `json:"blockAccessIndex"`
+	PostNonce        math.HexOrDecimal64 `json:"postNonce"`
+}
+
+type btCodeChange struct {
+	BlockAccessIndex hexutil.Uint16 `json:"blockAccessIndex"`
+	NewCode          hexutil.Bytes  `json:"newCode"`
+}
+
+func (bal btBlockAccessList) toBAL() types.BlockAccessList {
+	if len(bal) == 0 {
+		return nil
+	}
+	result := make(types.BlockAccessList, len(bal))
+	for i, ac := range bal {
+		entry := &types.AccountChanges{
+			Address: accounts.InternAddress(ac.Address),
+		}
+		for _, sc := range ac.StorageChanges {
+			slotChanges := &types.SlotChanges{
+				Slot: accounts.InternKey(common.BytesToHash(sc.Slot)),
+			}
+			for _, change := range sc.SlotChanges {
+				slotChanges.Changes = append(slotChanges.Changes, &types.StorageChange{
+					Index: uint16(change.BlockAccessIndex),
+					Value: *uint256.MustFromBig((*big.Int)(&change.PostValue)),
+				})
+			}
+			entry.StorageChanges = append(entry.StorageChanges, slotChanges)
+		}
+		for _, sr := range ac.StorageReads {
+			entry.StorageReads = append(entry.StorageReads, accounts.InternKey(common.BytesToHash(sr)))
+		}
+		for _, bc := range ac.BalanceChanges {
+			entry.BalanceChanges = append(entry.BalanceChanges, &types.BalanceChange{
+				Index: uint16(bc.BlockAccessIndex),
+				Value: *uint256.MustFromBig((*big.Int)(&bc.PostBalance)),
+			})
+		}
+		for _, nc := range ac.NonceChanges {
+			entry.NonceChanges = append(entry.NonceChanges, &types.NonceChange{
+				Index: uint16(nc.BlockAccessIndex),
+				Value: uint64(nc.PostNonce),
+			})
+		}
+		for _, cc := range ac.CodeChanges {
+			entry.CodeChanges = append(entry.CodeChanges, &types.CodeChange{
+				Index:    uint16(cc.BlockAccessIndex),
+				Bytecode: cc.NewCode,
+			})
+		}
+		result[i] = entry
+	}
+	return result
 }
 
 //go:generate gencodec -type btHeader -field-override btHeaderMarshaling -out gen_btheader.go
@@ -102,6 +189,8 @@ type btHeader struct {
 	ExcessBlobGas         *uint64
 	ParentBeaconBlockRoot *common.Hash
 	RequestsHash          *common.Hash
+	BlockAccessListHash   *common.Hash
+	SlotNumber            *uint64
 }
 
 type btHeaderMarshaling struct {
@@ -114,6 +203,7 @@ type btHeaderMarshaling struct {
 	BaseFeePerGas *math.HexOrDecimal256
 	BlobGasUsed   *math.HexOrDecimal64
 	ExcessBlobGas *math.HexOrDecimal64
+	SlotNumber    *math.HexOrDecimal64
 }
 
 func (bt *BlockTest) Run(t *testing.T) error {
@@ -122,7 +212,11 @@ func (bt *BlockTest) Run(t *testing.T) error {
 		return testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
-	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, false)
+	var mOpts []mock.Option
+	if bt.ExperimentalBAL {
+		mOpts = append(mOpts, mock.WithExperimentalBAL())
+	}
+	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, mOpts...)
 
 	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root
@@ -163,7 +257,7 @@ func (bt *BlockTest) RunCLI() error {
 		return testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
-	m := mock.MockWithGenesisEngine(nil, bt.genesis(config), engine, false)
+	m := mock.MockWithGenesisEngine(nil, bt.genesis(config), engine)
 	defer m.DB.Close()
 
 	bt.br = m.BlockReader
@@ -216,6 +310,8 @@ func (bt *BlockTest) genesis(config *chain.Config) *types.Genesis {
 		ExcessBlobGas:         bt.json.Genesis.ExcessBlobGas,
 		ParentBeaconBlockRoot: bt.json.Genesis.ParentBeaconBlockRoot,
 		RequestsHash:          bt.json.Genesis.RequestsHash,
+		BlockAccessListHash:   bt.json.Genesis.BlockAccessListHash,
+		SlotNumber:            bt.json.Genesis.SlotNumber,
 	}
 }
 
@@ -244,8 +340,16 @@ func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
 				return nil, fmt.Errorf("block RLP decoding failed when expected to succeed: %w", err)
 			}
 		}
+		var balBytes []byte
+		if len(b.BlockAccessList) > 0 {
+			bal := b.BlockAccessList.toBAL()
+			balBytes, err = types.EncodeBlockAccessListBytes(bal)
+			if err != nil {
+				return nil, fmt.Errorf("block #%v encode block access list: %w", cb.Number(), err)
+			}
+		}
 		// RLP decoding worked, try to insert into chain:
-		chain := &blockgen.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb}
+		chain := &blockgen.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb, BlockAccessLists: [][]byte{balBytes}}
 
 		err1 := m.InsertChain(chain)
 		if err1 != nil {
@@ -351,6 +455,12 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if !reflect.DeepEqual(h.RequestsHash, h2.RequestsHash) {
 		return fmt.Errorf("requestsHash: want: %v have: %v", h.RequestsHash, h2.RequestsHash)
 	}
+	if !reflect.DeepEqual(h.BlockAccessListHash, h2.BlockAccessListHash) {
+		return fmt.Errorf("blockAccessListHash: want: %v have: %v", h.BlockAccessListHash, h2.BlockAccessListHash)
+	}
+	if !reflect.DeepEqual(h.SlotNumber, h2.SlotNumber) {
+		return fmt.Errorf("slotNumber: want: %v have: %v", h.SlotNumber, h2.SlotNumber)
+	}
 	return nil
 }
 
@@ -358,15 +468,16 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 	// validate post state accounts in test file against what we have in state db
 	for addr, acct := range bt.json.Post {
 		// address is indirectly verified by the other fields, as it's the db key
-		code2, err := statedb.GetCode(addr)
+		address := accounts.InternAddress(addr)
+		code2, err := statedb.GetCode(address)
 		if err != nil {
 			return err
 		}
-		balance2, err := statedb.GetBalance(addr)
+		balance2, err := statedb.GetBalance(address)
 		if err != nil {
 			return err
 		}
-		nonce2, err := statedb.GetNonce(addr)
+		nonce2, err := statedb.GetNonce(address)
 		if err != nil {
 			return err
 		}
@@ -377,14 +488,13 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 			return fmt.Errorf("account code mismatch for addr: %x want: %v have: %s", addr, acct.Code, hex.EncodeToString(code2))
 		}
 		if balance2.ToBig().Cmp(acct.Balance) != 0 {
-			return fmt.Errorf("account balance mismatch for addr: %x, want: %d, have: %d", addr, acct.Balance, balance2)
+			return fmt.Errorf("account balance mismatch for addr: %x, want: %d, have: %d", addr, acct.Balance, &balance2)
 		}
 		for loc, val := range acct.Storage {
 			val1 := uint256.NewInt(0).SetBytes(val.Bytes())
-			val2 := uint256.NewInt(0)
-			statedb.GetState(addr, loc, val2)
-			if !val1.Eq(val2) {
-				return fmt.Errorf("storage mismatch for addr: %x loc: %x want: %d have: %d", addr, loc, val1, val2)
+			val2, _ := statedb.GetState(address, accounts.InternKey(loc))
+			if !val1.Eq(&val2) {
+				return fmt.Errorf("storage mismatch for addr: %x loc: %x want: %d have: %d", addr, loc, val1, &val2)
 			}
 		}
 	}

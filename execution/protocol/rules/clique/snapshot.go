@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"sort"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -38,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // Vote represents a single vote that an authorized signer made to modify the
@@ -60,20 +60,16 @@ type Tally struct {
 type Snapshot struct {
 	config *chain.CliqueConfig // Rules engine parameters to fine tune behavior
 
-	Number  uint64                      `json:"number"`  // Block number where the snapshot was created
-	Hash    common.Hash                 `json:"hash"`    // Block hash where the snapshot was created
-	Signers map[common.Address]struct{} `json:"signers"` // Set of authorized signers at this moment
-	Recents map[uint64]common.Address   `json:"recents"` // Set of recent signers for spam protections
-	Votes   []*Vote                     `json:"votes"`   // List of votes cast in chronological order
-	Tally   map[common.Address]Tally    `json:"tally"`   // Current vote tally to avoid recalculating
+	Number  uint64                        `json:"number"`  // Block number where the snapshot was created
+	Hash    common.Hash                   `json:"hash"`    // Block hash where the snapshot was created
+	Signers map[accounts.Address]struct{} `json:"signers"` // Set of authorized signers at this moment
+	Recents map[uint64]accounts.Address   `json:"recents"` // Set of recent signers for spam protections
+	Votes   []*Vote                       `json:"votes"`   // List of votes cast in chronological order
+	Tally   map[accounts.Address]Tally    `json:"tally"`   // Current vote tally to avoid recalculating
 }
 
-// SignersAscending implements the sort interface to allow sorting a list of addresses
-type SignersAscending []common.Address
-
-func (s SignersAscending) Len() int           { return len(s) }
-func (s SignersAscending) Less(i, j int) bool { return bytes.Compare(s[i][:], s[j][:]) < 0 }
-func (s SignersAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+// SignersAscending is common.Addresses, kept as a type alias for external callers.
+type SignersAscending = common.Addresses
 
 // newSnapshot creates a new snapshot with the specified startup parameters. This
 // method does not initialize the set of recent signers, so only ever use if for
@@ -83,13 +79,13 @@ func newSnapshot(config *chain.CliqueConfig, number uint64, hash common.Hash, si
 		config:  config,
 		Number:  number,
 		Hash:    hash,
-		Signers: make(map[common.Address]struct{}),
-		Recents: make(map[uint64]common.Address),
-		Tally:   make(map[common.Address]Tally),
+		Signers: make(map[accounts.Address]struct{}),
+		Recents: make(map[uint64]accounts.Address),
+		Tally:   make(map[accounts.Address]Tally),
 	}
 
 	for _, signer := range signers {
-		snap.Signers[signer] = struct{}{}
+		snap.Signers[accounts.InternAddress(signer)] = struct{}{}
 	}
 
 	return snap
@@ -155,13 +151,13 @@ func (s *Snapshot) store(db kv.RwDB) error {
 
 // validVote returns whether it makes sense to cast the specified vote in the
 // given snapshot context (e.g. don't try to add an already authorized signer).
-func (s *Snapshot) validVote(address common.Address, authorize bool) bool {
+func (s *Snapshot) validVote(address accounts.Address, authorize bool) bool {
 	_, signer := s.Signers[address]
 	return (signer && !authorize) || (!signer && authorize)
 }
 
 // cast adds a new vote into the tally.
-func (s *Snapshot) cast(address common.Address, authorize bool) bool {
+func (s *Snapshot) cast(address accounts.Address, authorize bool) bool {
 	// Ensure the vote is meaningful
 	if !s.validVote(address, authorize) {
 		return false
@@ -177,7 +173,7 @@ func (s *Snapshot) cast(address common.Address, authorize bool) bool {
 }
 
 // uncast removes a previously cast vote from the tally.
-func (s *Snapshot) uncast(address common.Address, authorize bool) bool {
+func (s *Snapshot) uncast(address accounts.Address, authorize bool) bool {
 	// If there's no tally, it's a dangling vote, just drop
 	tally, ok := s.Tally[address]
 	if !ok {
@@ -199,7 +195,7 @@ func (s *Snapshot) uncast(address common.Address, authorize bool) bool {
 
 // apply creates a new authorization snapshot by applying the given headers to
 // the original one.
-func (s *Snapshot) apply(sigcache *lru.ARCCache[common.Hash, common.Address], logger log.Logger, headers ...*types.Header) (*Snapshot, error) {
+func (s *Snapshot) apply(sigcache *lru.ARCCache[common.Hash, accounts.Address], logger log.Logger, headers ...*types.Header) (*Snapshot, error) {
 	// Allow passing in no headers for cleaner code
 	if len(headers) == 0 {
 		return s, nil
@@ -225,7 +221,7 @@ func (s *Snapshot) apply(sigcache *lru.ARCCache[common.Hash, common.Address], lo
 		number := header.Number.Uint64()
 		if number%s.config.Epoch == 0 {
 			snap.Votes = nil
-			snap.Tally = make(map[common.Address]Tally)
+			snap.Tally = make(map[accounts.Address]Tally)
 		}
 		// Delete the oldest signer from the recent list to allow it signing again
 		if limit := uint64(len(snap.Signers)/2 + 1); number >= limit {
@@ -248,9 +244,9 @@ func (s *Snapshot) apply(sigcache *lru.ARCCache[common.Hash, common.Address], lo
 
 		// Header authorized, discard any previous votes from the signer
 		for i, vote := range snap.Votes {
-			if vote.Signer == signer && vote.Address == header.Coinbase {
+			if vote.Signer == signer.Value() && vote.Address == header.Coinbase {
 				// Uncast the vote from the cached tally
-				snap.uncast(vote.Address, vote.Authorize)
+				snap.uncast(accounts.InternAddress(vote.Address), vote.Authorize)
 
 				// Uncast the vote from the chronological list
 				snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
@@ -267,20 +263,21 @@ func (s *Snapshot) apply(sigcache *lru.ARCCache[common.Hash, common.Address], lo
 		default:
 			return nil, errInvalidVote
 		}
-		if snap.cast(header.Coinbase, authorize) {
+		coinbase := accounts.InternAddress(header.Coinbase)
+		if snap.cast(coinbase, authorize) {
 			snap.Votes = append(snap.Votes, &Vote{
-				Signer:    signer,
+				Signer:    signer.Value(),
 				Block:     number,
 				Address:   header.Coinbase,
 				Authorize: authorize,
 			})
 		}
 		// If the vote passed, update the list of signers
-		if tally := snap.Tally[header.Coinbase]; tally.Votes > len(snap.Signers)/2 {
+		if tally := snap.Tally[coinbase]; tally.Votes > len(snap.Signers)/2 {
 			if tally.Authorize {
-				snap.Signers[header.Coinbase] = struct{}{}
+				snap.Signers[coinbase] = struct{}{}
 			} else {
-				delete(snap.Signers, header.Coinbase)
+				delete(snap.Signers, coinbase)
 
 				// Signer list shrunk, delete any leftover recent caches
 				if limit := uint64(len(snap.Signers)/2 + 1); number >= limit {
@@ -290,7 +287,7 @@ func (s *Snapshot) apply(sigcache *lru.ARCCache[common.Hash, common.Address], lo
 				for i := 0; i < len(snap.Votes); i++ {
 					if snap.Votes[i].Signer == header.Coinbase {
 						// Uncast the vote from the cached tally
-						snap.uncast(snap.Votes[i].Address, snap.Votes[i].Authorize)
+						snap.uncast(accounts.InternAddress(snap.Votes[i].Address), snap.Votes[i].Authorize)
 
 						// Uncast the vote from the chronological list
 						snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
@@ -306,7 +303,7 @@ func (s *Snapshot) apply(sigcache *lru.ARCCache[common.Hash, common.Address], lo
 					i--
 				}
 			}
-			delete(snap.Tally, header.Coinbase)
+			delete(snap.Tally, coinbase)
 		}
 		// If we're taking too much time (ecrecover), notify the user once a while
 		if time.Since(logged) > 8*time.Second {
@@ -338,11 +335,11 @@ func (s *Snapshot) copy() *Snapshot {
 
 // signers retrieves the list of authorized signers in ascending order.
 func (s *Snapshot) GetSigners() []common.Address {
-	sigs := make([]common.Address, 0, len(s.Signers))
+	sigs := make(common.Addresses, 0, len(s.Signers))
 	for sig := range s.Signers {
-		sigs = append(sigs, sig)
+		sigs = append(sigs, sig.Value())
 	}
-	sort.Sort(SignersAscending(sigs))
+	sigs.Sort()
 	return sigs
 }
 

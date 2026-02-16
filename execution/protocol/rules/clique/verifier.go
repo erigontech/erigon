@@ -101,6 +101,14 @@ func (c *Clique) verifyHeader(chain rules.ChainHeaderReader, header *types.Heade
 		return rules.ErrUnexpectedRequests
 	}
 
+	if header.SlotNumber != nil {
+		return rules.ErrUnexpectedSlotNumber
+	}
+
+	if header.BlockAccessListHash != nil {
+		return rules.ErrUnexpectedBlockAccessListHash
+	}
+
 	// All basic checks passed, verify cascading fields
 	return c.verifyCascadingFields(chain, header, parents)
 }
@@ -282,7 +290,7 @@ func (c *Clique) verifySeal(chain rules.ChainHeaderReader, header *types.Header,
 
 	// Ensure that the difficulty corresponds to the turn-ness of the signer
 	if !c.FakeDiff {
-		inturn := snap.inturn(header.Number.Uint64(), signer)
+		inturn := snap.inturn(header.Number.Uint64(), signer.Value())
 		if inturn && header.Difficulty.Cmp(DiffInTurn) != 0 {
 			return errWrongDifficulty
 		}

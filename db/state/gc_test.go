@@ -64,7 +64,13 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 
 			lastInView := hc.files[len(hc.files)-1]
 
-			g := seg.NewPagedReader(hc.statelessGetter(len(hc.files)-1), hc.h.HistoryValuesOnCompressedPage, true)
+			compressedPageValuesCount := lastInView.src.decompressor.CompressedPageValuesCount()
+
+			if lastInView.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+				compressedPageValuesCount = hc.h.HistoryValuesOnCompressedPage
+			}
+
+			g := seg.NewPagedReader(hc.statelessGetter(len(hc.files)-1), compressedPageValuesCount, true)
 			require.Equal(lastInView.startTxNum, lastOnFs.startTxNum)
 			require.Equal(lastInView.endTxNum, lastOnFs.endTxNum)
 			if g.HasNext() {
@@ -130,7 +136,11 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 	test := func(t *testing.T, h *Domain, db kv.RwDB, txs uint64) {
 		t.Helper()
 		require := require.New(t)
-		collateAndMerge(t, db, nil, h, txs)
+		err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
+			collateAndMerge(t, tx, h, txs)
+			return nil
+		})
+		require.NoError(err)
 
 		t.Run("read after: remove when have reader", func(t *testing.T) {
 			tx, err := db.BeginRo(ctx)

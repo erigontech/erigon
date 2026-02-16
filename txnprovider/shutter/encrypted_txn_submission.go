@@ -38,8 +38,8 @@ type EncryptedTxnSubmission struct {
 	BlockNum             uint64
 }
 
-func (ets EncryptedTxnSubmission) IdentityPreimageBytes() []byte {
-	return IdentityPreimageFromSenderPrefix(ets.IdentityPrefix, ets.Sender)[:]
+func (ets EncryptedTxnSubmission) IdentityPreimage() *IdentityPreimage {
+	return IdentityPreimageFromSenderPrefix(ets.IdentityPrefix, ets.Sender)
 }
 
 func EncryptedTxnSubmissionFromLogEvent(event *contracts.SequencerTransactionSubmitted) EncryptedTxnSubmission {

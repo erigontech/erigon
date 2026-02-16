@@ -24,7 +24,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -36,15 +37,17 @@ const (
 )
 
 type StateReader interface {
-	ReadAccountData(address common.Address) (*accounts.Account, error)
-	ReadAccountDataForDebug(address common.Address) (*accounts.Account, error)
-	ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error)
-	HasStorage(address common.Address) (bool, error)
-	ReadAccountCode(address common.Address) ([]byte, error)
-	ReadAccountCodeSize(address common.Address) (int, error)
-	ReadAccountIncarnation(address common.Address) (uint64, error)
+	ReadAccountData(address accounts.Address) (*accounts.Account, error)
+	ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error)
+	ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error)
+	HasStorage(address accounts.Address) (bool, error)
+	ReadAccountCode(address accounts.Address) ([]byte, error)
+	ReadAccountCodeSize(address accounts.Address) (int, error)
+	ReadAccountIncarnation(address accounts.Address) (uint64, error)
 
 	SetTrace(trace bool, tracePrefix string)
+	Trace() bool
+	TracePrefix() string
 }
 
 type HistoricalStateReader interface {
@@ -53,11 +56,11 @@ type HistoricalStateReader interface {
 }
 
 type StateWriter interface {
-	UpdateAccountData(address common.Address, original, account *accounts.Account) error
-	UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error
-	DeleteAccount(address common.Address, original *accounts.Account) error
-	WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error
-	CreateContract(address common.Address) error
+	UpdateAccountData(address accounts.Address, original, account *accounts.Account) error
+	UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error
+	DeleteAccount(address accounts.Address, original *accounts.Account) error
+	WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error
+	CreateContract(address accounts.Address) error
 }
 
 type NoopWriter struct {
@@ -67,34 +70,35 @@ type NoopWriter struct {
 var noopWriter = &NoopWriter{}
 
 func NewNoopWriter(trace ...bool) *NoopWriter {
-	if len(trace) == 0 {
+	if !dbg.TraceNoopIO || len(trace) == 0 {
 		return noopWriter
 	}
 	return &NoopWriter{trace[0]}
 }
 
-func (nw *NoopWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+func (*NoopWriter) SetTx(kv.TemporalTx) {}
+func (nw *NoopWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	if nw.trace {
 		fmt.Printf("acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash)
 	}
 	return nil
 }
 
-func (nw *NoopWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (nw *NoopWriter) DeleteAccount(address accounts.Address, original *accounts.Account) error {
 	if nw.trace {
 		fmt.Printf("del acc: %x\n", address)
 	}
 	return nil
 }
 
-func (nw *NoopWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (nw *NoopWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
 	if nw.trace {
-		fmt.Printf("code: %x, %x, valLen: %d\n", address.Bytes(), codeHash, len(code))
+		fmt.Printf("code: %x, %x, valLen: %d\n", address, codeHash, len(code))
 	}
 	return nil
 }
 
-func (nw *NoopWriter) WriteAccountStorage(address common.Address, incarnation uint64, key common.Hash, original, value uint256.Int) error {
+func (nw *NoopWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
 	if original == value {
 		return nil
 	}
@@ -104,7 +108,7 @@ func (nw *NoopWriter) WriteAccountStorage(address common.Address, incarnation ui
 	return nil
 }
 
-func (nw *NoopWriter) CreateContract(address common.Address) error {
+func (nw *NoopWriter) CreateContract(address accounts.Address) error {
 	if nw.trace {
 		fmt.Printf("create contract: %x\n", address)
 	}
@@ -120,18 +124,21 @@ func NewNoopReader() *NoopReader {
 	return noopReader
 }
 
-func (*NoopReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
+func (*NoopReader) SetTx(kv.TemporalTx) {}
+func (*NoopReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	return nil, nil
 }
-func (*NoopReader) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+func (*NoopReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return nil, nil
 }
-func (*NoopReader) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
+func (*NoopReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (*NoopReader) HasStorage(address common.Address) (bool, error)               { return false, nil }
-func (*NoopReader) ReadAccountCode(address common.Address) ([]byte, error)        { return nil, nil }
-func (*NoopReader) ReadAccountCodeSize(address common.Address) (int, error)       { return 0, nil }
-func (*NoopReader) ReadAccountIncarnation(address common.Address) (uint64, error) { return 0, nil }
+func (*NoopReader) HasStorage(address accounts.Address) (bool, error)               { return false, nil }
+func (*NoopReader) ReadAccountCode(address accounts.Address) ([]byte, error)        { return nil, nil }
+func (*NoopReader) ReadAccountCodeSize(address accounts.Address) (int, error)       { return 0, nil }
+func (*NoopReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) { return 0, nil }
 
 func (*NoopReader) SetTrace(_ bool, _ string) {}
+func (r *NoopReader) Trace() bool             { return false }
+func (r *NoopReader) TracePrefix() string     { return "" }

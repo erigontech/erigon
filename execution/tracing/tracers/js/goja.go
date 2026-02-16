@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	jsassets "github.com/erigontech/erigon/execution/tracing/tracers/js/internal/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -104,7 +105,7 @@ type jsTracer struct {
 	toBuf             toBufFn               // Converts a []byte into a JS buffer
 	fromBuf           fromBufFn             // Converts an array, hex string or Uint8Array to a []byte
 	ctx               map[string]goja.Value // KV-bag passed to JS in `result`
-	activePrecompiles []common.Address      // List of active precompiles at current block
+	activePrecompiles []accounts.Address    // List of active precompiles at current block
 	traceStep         bool                  // True if tracer object exposes a `step()` method
 	traceFrame        bool                  // True if tracer object exposes the `enter()` and `exit()` methods
 	gasLimit          uint64                // Amount of gas bought for the whole tx
@@ -228,7 +229,7 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (*trace
 
 // OnTxStart implements the Tracer interface and is invoked at the beginning of
 // transaction processing.
-func (t *jsTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
+func (t *jsTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	t.env = env
 
 	db := &dbObj{ibs: env.IntraBlockState, vm: t.vm, toBig: t.toBig, toBuf: t.toBuf, fromBuf: t.fromBuf}
@@ -247,7 +248,11 @@ func (t *jsTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from 
 		return
 	}
 	t.ctx["gasPrice"] = gasPriceBig
-	coinbase, err := t.toBuf(t.vm, env.Coinbase.Bytes())
+	var coinbaseValue common.Address
+	if !env.Coinbase.IsNil() {
+		coinbaseValue = env.Coinbase.Value()
+	}
+	coinbase, err := t.toBuf(t.vm, coinbaseValue[:])
 	if err != nil {
 		t.err = err
 		return
@@ -269,7 +274,7 @@ func (t *jsTracer) OnTxEnd(receipt *types.Receipt, err error) {
 }
 
 // onStart implements the Tracer interface to initialize the tracing operation.
-func (t *jsTracer) onStart(from common.Address, to common.Address, create bool, input []byte, gas uint64, value uint256.Int) {
+func (t *jsTracer) onStart(from accounts.Address, to accounts.Address, create bool, input []byte, gas uint64, value uint256.Int) {
 	if t.err != nil {
 		return
 	}
@@ -278,8 +283,10 @@ func (t *jsTracer) onStart(from common.Address, to common.Address, create bool, 
 	} else {
 		t.ctx["type"] = t.vm.ToValue("CALL")
 	}
-	t.ctx["from"] = t.vm.ToValue(from.Bytes())
-	t.ctx["to"] = t.vm.ToValue(to.Bytes())
+	fromValue := from.Value()
+	t.ctx["from"] = t.vm.ToValue(fromValue[:])
+	toValue := to.Value()
+	t.ctx["to"] = t.vm.ToValue(toValue[:])
 	t.ctx["input"] = t.vm.ToValue(input)
 	valueBig, err := t.toBig(t.vm, value.ToBig().String())
 	if err != nil {
@@ -335,7 +342,7 @@ func (t *jsTracer) onEnd(output []byte, gasUsed uint64, err error, reverted bool
 }
 
 // OnEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *jsTracer) OnEnter(depth int, typ byte, from common.Address, to common.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (t *jsTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 	if t.err != nil {
 		return
 	}
@@ -352,7 +359,7 @@ func (t *jsTracer) OnEnter(depth int, typ byte, from common.Address, to common.A
 	t.frame.typ = vm.OpCode(typ).String()
 	t.frame.from = from
 	t.frame.to = to
-	t.frame.input = common.CopyBytes(input)
+	t.frame.input = common.Copy(input)
 	t.frame.gas = uint(gas)
 	t.frame.value = nil
 	t.frame.value = value.ToBig()
@@ -379,7 +386,7 @@ func (t *jsTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, r
 	}
 
 	t.frameResult.gasUsed = uint(gasUsed)
-	t.frameResult.output = common.CopyBytes(output)
+	t.frameResult.output = common.Copy(output)
 	t.frameResult.err = err
 
 	if _, err := t.exit(t.obj, t.frameResultValue); err != nil {
@@ -486,8 +493,8 @@ func (t *jsTracer) setBuiltinFunctions() {
 			vm.Interrupt(err)
 			return nil
 		}
-		code = common.CopyBytes(code)
-		codeHash := crypto.Keccak256(code)
+		code = common.Copy(code)
+		codeHash := accounts.InternCodeHash(common.Hash(crypto.Keccak256(code)))
 		b := types.CreateAddress2(addr, common.HexToHash(salt), codeHash).Bytes()
 		res, err := t.toBuf(vm, b)
 		if err != nil {
@@ -502,7 +509,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 			vm.Interrupt(err)
 			return false
 		}
-		addr := common.BytesToAddress(a)
+		addr := accounts.InternAddress(common.BytesToAddress(a))
 		return slices.Contains(t.activePrecompiles, addr)
 	})
 	vm.Set("slice", func(slice goja.Value, start, end int) goja.Value {
@@ -706,7 +713,7 @@ func (do *dbObj) GetBalance(addrSlice goja.Value) goja.Value {
 		do.vm.Interrupt(err)
 		return nil
 	}
-	addr := common.BytesToAddress(a)
+	addr := accounts.InternAddress(common.BytesToAddress(a))
 	value, err := do.ibs.GetBalance(addr)
 	if err != nil {
 		do.vm.Interrupt(err)
@@ -726,7 +733,7 @@ func (do *dbObj) GetNonce(addrSlice goja.Value) uint64 {
 		do.vm.Interrupt(err)
 		return 0
 	}
-	addr := common.BytesToAddress(a)
+	addr := accounts.InternAddress(common.BytesToAddress(a))
 	nonce, err := do.ibs.GetNonce(addr)
 	if err != nil {
 		do.vm.Interrupt(err)
@@ -741,7 +748,7 @@ func (do *dbObj) GetCode(addrSlice goja.Value) goja.Value {
 		do.vm.Interrupt(err)
 		return nil
 	}
-	addr := common.BytesToAddress(a)
+	addr := accounts.InternAddress(common.BytesToAddress(a))
 	code, err := do.ibs.GetCode(addr)
 	if err != nil {
 		do.vm.Interrupt(err)
@@ -761,15 +768,14 @@ func (do *dbObj) GetState(addrSlice goja.Value, hashSlice goja.Value) goja.Value
 		do.vm.Interrupt(err)
 		return nil
 	}
-	addr := common.BytesToAddress(a)
+	addr := accounts.InternAddress(common.BytesToAddress(a))
 	h, err := do.fromBuf(do.vm, hashSlice, false)
 	if err != nil {
 		do.vm.Interrupt(err)
 		return nil
 	}
-	hash := common.BytesToHash(h)
-	var outValue uint256.Int
-	do.ibs.GetState(addr, hash, &outValue)
+	hash := accounts.InternKey(common.BytesToHash(h))
+	var outValue, _ = do.ibs.GetState(addr, hash)
 	res, err := do.toBuf(do.vm, outValue.PaddedBytes(32))
 	if err != nil {
 		do.vm.Interrupt(err)
@@ -784,7 +790,7 @@ func (do *dbObj) Exists(addrSlice goja.Value) bool {
 		do.vm.Interrupt(err)
 		return false
 	}
-	addr := common.BytesToAddress(a)
+	addr := accounts.InternAddress(common.BytesToAddress(a))
 	exists, err := do.ibs.Exist(addr)
 	if err != nil {
 		do.vm.Interrupt(err)
@@ -811,8 +817,8 @@ type contractObj struct {
 }
 
 func (co *contractObj) GetCaller() goja.Value {
-	caller := co.scope.Caller().Bytes()
-	res, err := co.toBuf(co.vm, caller)
+	callerValue := co.scope.Caller().Value()
+	res, err := co.toBuf(co.vm, callerValue[:])
 	if err != nil {
 		co.vm.Interrupt(err)
 		return nil
@@ -821,8 +827,8 @@ func (co *contractObj) GetCaller() goja.Value {
 }
 
 func (co *contractObj) GetAddress() goja.Value {
-	addr := co.scope.Address().Bytes()
-	res, err := co.toBuf(co.vm, addr)
+	addrValue := co.scope.Address().Value()
+	res, err := co.toBuf(co.vm, addrValue[:])
 	if err != nil {
 		co.vm.Interrupt(err)
 		return nil
@@ -841,7 +847,7 @@ func (co *contractObj) GetValue() goja.Value {
 }
 
 func (co *contractObj) GetInput() goja.Value {
-	input := common.CopyBytes(co.scope.CallInput())
+	input := common.Copy(co.scope.CallInput())
 	res, err := co.toBuf(co.vm, input)
 	if err != nil {
 		co.vm.Interrupt(err)
@@ -865,8 +871,8 @@ type callframe struct {
 	toBuf toBufFn
 
 	typ   string
-	from  common.Address
-	to    common.Address
+	from  accounts.Address
+	to    accounts.Address
 	input []byte
 	gas   uint
 	value *big.Int
@@ -877,8 +883,8 @@ func (f *callframe) GetType() string {
 }
 
 func (f *callframe) GetFrom() goja.Value {
-	from := f.from.Bytes()
-	res, err := f.toBuf(f.vm, from)
+	fromValue := f.from.Value()
+	res, err := f.toBuf(f.vm, fromValue[:])
 	if err != nil {
 		f.vm.Interrupt(err)
 		return nil
@@ -887,8 +893,8 @@ func (f *callframe) GetFrom() goja.Value {
 }
 
 func (f *callframe) GetTo() goja.Value {
-	to := f.to.Bytes()
-	res, err := f.toBuf(f.vm, to)
+	toValue := f.to.Value()
+	res, err := f.toBuf(f.vm, toValue[:])
 	if err != nil {
 		f.vm.Interrupt(err)
 		return nil

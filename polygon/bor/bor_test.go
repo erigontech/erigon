@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/polygon/bor"
@@ -234,13 +235,13 @@ func newValidator(t *testing.T, testHeimdall *testHeimdall, blocks map[uint64]*t
 	bridgeReader.EXPECT().EventsWithinTime(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
 	validatorKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	validatorAddress := crypto.PubkeyToAddress(validatorKey.PublicKey)
+	validatorAddress := accounts.InternAddress(crypto.PubkeyToAddress(validatorKey.PublicKey))
 	bor := bor.New(
 		testHeimdall.chainConfig,
 		nil, /* blockReader */
 		&spanner{
 			ChainSpanner:     bor.NewChainSpanner(borabi.ValidatorSetContractABI(), testHeimdall.chainConfig, false, logger),
-			validatorAddress: validatorAddress,
+			validatorAddress: validatorAddress.Value(),
 		},
 		stateReceiver,
 		logger,
@@ -257,7 +258,7 @@ func newValidator(t *testing.T, testHeimdall *testHeimdall, blocks map[uint64]*t
 		testHeimdall.validatorSet = heimdall.NewValidatorSet([]*heimdall.Validator{
 			{
 				ID:               1,
-				Address:          validatorAddress,
+				Address:          validatorAddress.Value(),
 				VotingPower:      1000,
 				ProposerPriority: 1,
 			},
@@ -266,7 +267,7 @@ func newValidator(t *testing.T, testHeimdall *testHeimdall, blocks map[uint64]*t
 		testHeimdall.validatorSet.UpdateWithChangeSet([]*heimdall.Validator{
 			{
 				ID:               uint64(len(testHeimdall.validatorSet.Validators) + 1),
-				Address:          validatorAddress,
+				Address:          validatorAddress.Value(),
 				VotingPower:      1000,
 				ProposerPriority: 1,
 			},
@@ -285,12 +286,12 @@ func newValidator(t *testing.T, testHeimdall *testHeimdall, blocks map[uint64]*t
 		}).
 		AnyTimes()
 
-	bor.Authorize(validatorAddress, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
+	bor.Authorize(validatorAddress, func(_ accounts.Address, mimeType string, message []byte) ([]byte, error) {
 		return crypto.Sign(crypto.Keccak256(message), validatorKey)
 	})
 
 	return validator{
-		mock.MockWithEverything(t, &types.Genesis{Config: testHeimdall.chainConfig}, validatorKey, prune.DefaultMode, bor, 1024, false, false),
+		mock.MockWithEverything(t, &types.Genesis{Config: testHeimdall.chainConfig}, validatorKey, prune.DefaultMode, bor, 1024, false),
 		testHeimdall,
 		blocks,
 	}

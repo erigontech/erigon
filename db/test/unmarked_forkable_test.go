@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
@@ -27,6 +28,7 @@ func setupBorSpans(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) 
 	id := kv.ForkableId(2)
 	stepSize := uint64(10)
 	name := "borspans"
+	ver := version.V1_0_standart
 	snapCfg := state.NewSnapshotConfig(
 		&state.SnapshotCreationConfig{
 			RootNumPerStep: stepSize,
@@ -34,7 +36,7 @@ func setupBorSpans(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RoDB) 
 			MinimumSize:    10,
 			SafetyMargin:   5,
 		},
-		state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize),
+		state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize, state.NewE2SnapSchemaVersion(ver, ver)),
 	)
 	registerEntityWithSnapshotConfig(dirs, name, id, snapCfg)
 
@@ -69,8 +71,8 @@ func TestUnmarked_PutToDb(t *testing.T) {
 	uma_tx := uma.BeginTemporalTx()
 	defer uma_tx.Close()
 	rwtx, err := db.BeginRw(context.Background())
-	defer rwtx.Rollback()
 	require.NoError(t, err)
+	defer rwtx.Rollback()
 
 	num := Num(0)
 	value := []byte{1, 2, 3, 4, 5}
@@ -102,11 +104,11 @@ func TestUnmarkedPrune(t *testing.T) {
 			uma_tx := uma.BeginTemporalTx()
 			defer uma_tx.Close()
 			rwtx, err := db.BeginRw(ctx)
-			defer rwtx.Rollback()
 			require.NoError(t, err)
+			defer rwtx.Rollback()
 
 			getData := func(i int) (Num, state.Bytes) {
-				return Num(i), state.Bytes(fmt.Sprintf("data%d", i))
+				return Num(i), fmt.Appendf(nil, "data%d", i)
 			}
 
 			for i := range int(entries_count) {
@@ -138,8 +140,8 @@ func TestUnmarkedPrune(t *testing.T) {
 			defer uma_tx.Close()
 
 			rwtx, err = db.BeginRw(ctx)
-			defer rwtx.Rollback()
 			require.NoError(t, err)
+			defer rwtx.Rollback()
 
 			stat, err := uma_tx.Prune(ctx, pruneTo, 1000, nil, rwtx)
 			require.NoError(t, err)
@@ -182,14 +184,14 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 	uma_tx := uma.BeginTemporalTx()
 	defer uma_tx.Close()
 	rwtx, err := db.BeginRw(ctx)
-	defer rwtx.Rollback()
 	require.NoError(t, err)
+	defer rwtx.Rollback()
 	cfg := state.Registry.SnapshotConfig(borSpanId)
 	num_files := uint64(5)
 	entries_count := num_files*cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
 
 	getData := func(i int) (Num, state.Bytes) {
-		return Num(i), state.Bytes(fmt.Sprintf("data%d", i))
+		return Num(i), fmt.Appendf(nil, "data%d", i)
 	}
 
 	for i := range int(entries_count) {
@@ -233,8 +235,8 @@ func TestBuildFiles_Unmarked(t *testing.T) {
 	defer uma_tx.Close()
 
 	rwtx, err = db.BeginRw(ctx)
-	defer rwtx.Rollback()
 	require.NoError(t, err)
+	defer rwtx.Rollback()
 
 	firstRootNumNotInSnap := uma_tx.DebugFiles().VisibleFilesMaxRootNum()
 	firstSpanIdNotInSnap := Num(CustomSpanIdAt(uint64(firstRootNumNotInSnap)))
@@ -279,14 +281,14 @@ func TestBuildFiles_PagedUnmarked(t *testing.T) {
 	uma_tx := uma.BeginTemporalTx()
 	defer uma_tx.Close()
 	rwtx, err := db.BeginRw(ctx)
-	defer rwtx.Rollback()
 	require.NoError(t, err)
+	defer rwtx.Rollback()
 	cfg := state.Registry.SnapshotConfig(pagedDataId)
 	num_files := uint64(5)
 	entries_count := num_files*cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 5
 
 	getData := func(i int) (Num, state.Bytes) {
-		return Num(i), state.Bytes(fmt.Sprintf("data%d", i))
+		return Num(i), fmt.Appendf(nil, "data%d", i)
 	}
 
 	for i := range int(entries_count) {
@@ -330,8 +332,8 @@ func TestBuildFiles_PagedUnmarked(t *testing.T) {
 	defer uma_tx.Close()
 
 	rwtx, err = db.BeginRw(ctx)
-	defer rwtx.Rollback()
 	require.NoError(t, err)
+	defer rwtx.Rollback()
 
 	firstRootNumNotInSnap := uma_tx.DebugFiles().VisibleFilesMaxRootNum()
 	firstNumNotInSnap := uma_tx.DebugFiles().VisibleFilesMaxNum()
@@ -374,6 +376,7 @@ func setupPagedEntity(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RwD
 	id := kv.ForkableId(3)
 	stepSize := uint64(50)
 	name := "random_paged_data"
+	ver := version.V1_0_standart
 	snapCfg := state.NewSnapshotConfig(
 		&state.SnapshotCreationConfig{
 			RootNumPerStep: stepSize,
@@ -381,7 +384,7 @@ func setupPagedEntity(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RwD
 			MinimumSize:    50,
 			SafetyMargin:   5,
 		},
-		state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize),
+		state.NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize, state.NewE2SnapSchemaVersion(ver, ver)),
 	)
 	registerEntityWithSnapshotConfig(dirs, name, id, snapCfg)
 
@@ -392,9 +395,10 @@ func setupPagedEntity(t *testing.T, log log.Logger, dirs datadir.Dirs, db kv.RwD
 
 	rwtx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer rwtx.Commit()
+	defer rwtx.Rollback()
 
 	require.NoError(t, rwtx.CreateTable(cfg.ValsTbl))
+	require.NoError(t, rwtx.Commit())
 
 	uma, err := state.NewUnmarkedForkable(id,
 		cfg,

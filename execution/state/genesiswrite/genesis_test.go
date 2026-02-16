@@ -25,13 +25,13 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -64,7 +65,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		_, block, err := genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, false, datadir.New(t.TempDir()), logger)
+		_, block, err := genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, nil, false, datadir.New(t.TempDir()), logger)
 		require.NoError(t, err)
 
 		expect, err := chainspec.ChainSpecByName(network)
@@ -117,13 +118,13 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 	defer tx.Rollback()
 
 	spec := chainspec.Mainnet
-	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, false, datadir.New(t.TempDir()), logger)
+	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, nil, false, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), seq)
 
-	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, false, datadir.New(t.TempDir()), logger)
+	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, nil, nil, false, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 	seq, err = tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
@@ -140,23 +141,24 @@ func TestAllocConstructor(t *testing.T) {
 	deploymentCode := common.FromHex("602a5f556101c960015560048060135f395ff35f355f55")
 
 	funds := big.NewInt(1000000000)
-	address := common.HexToAddress("0x1000000000000000000000000000000000000001")
+	address := accounts.InternAddress(common.HexToAddress("0x1000000000000000000000000000000000000001"))
 	genSpec := &types.Genesis{
 		Config: chain.AllProtocolChanges,
 		Alloc: types.GenesisAlloc{
-			address: {Constructor: deploymentCode, Balance: funds},
+			address.Value(): {Constructor: deploymentCode, Balance: funds},
 		},
 	}
 
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	m := mock.MockWithGenesis(t, genSpec, key, false)
+	m := mock.MockWithGenesis(t, genSpec, key)
 
-	tx, err := m.DB.BeginTemporalRo(context.Background())
+	ctx := context.Background()
+	tx, err := m.DB.BeginTemporalRo(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
 
 	//TODO: support historyV3
-	reader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, rawdbv3.TxNums)
+	reader, err := rpchelper.CreateHistoryStateReader(ctx, tx, 1, 0, rawdbv3.TxNums)
 	require.NoError(err)
 	state := state.New(reader)
 	balance, err := state.GetBalance(address)
@@ -166,14 +168,14 @@ func TestAllocConstructor(t *testing.T) {
 	require.NoError(err)
 	assert.Equal(common.FromHex("5f355f55"), code)
 
-	key0 := common.HexToHash("0000000000000000000000000000000000000000000000000000000000000000")
-	storage0 := &uint256.Int{}
-	state.GetState(address, key0, storage0)
-	assert.Equal(uint256.NewInt(0x2a), storage0)
-	key1 := common.HexToHash("0000000000000000000000000000000000000000000000000000000000000001")
-	storage1 := &uint256.Int{}
-	state.GetState(address, key1, storage1)
-	assert.Equal(uint256.NewInt(0x01c9), storage1)
+	key0 := accounts.InternKey(common.HexToHash("0000000000000000000000000000000000000000000000000000000000000000"))
+	storage0, err := state.GetState(address, key0)
+	require.NoError(err)
+	assert.Equal(u256.U64(0x2a), storage0)
+	key1 := accounts.InternKey(common.HexToHash("0000000000000000000000000000000000000000000000000000000000000001"))
+	storage1, err := state.GetState(address, key1)
+	require.NoError(err)
+	assert.Equal(u256.U64(0x01c9), storage1)
 }
 
 // See https://github.com/erigontech/erigon/pull/11264
@@ -269,7 +271,7 @@ func TestSetupGenesis(t *testing.T) {
 				// Commit the 'old' genesis block with Homestead transition at #2.
 				// Advance to block #4, past the homestead transition block of customg.
 				key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-				m := mock.MockWithGenesis(t, &oldcustomg, key, false)
+				m := mock.MockWithGenesis(t, &oldcustomg, key)
 
 				chainBlocks, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, nil)
 				if err != nil {

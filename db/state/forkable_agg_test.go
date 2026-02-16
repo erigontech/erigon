@@ -18,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 )
 
 func TestOpenFolder(t *testing.T) {
@@ -79,7 +80,7 @@ func TestOpenFolder(t *testing.T) {
 
 	rwtx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer rwtx.Commit()
+	t.Cleanup(rwtx.Rollback)
 	checkGet(headerTx, bodyTx, rwtx)
 	rwtx.Commit()
 
@@ -106,7 +107,7 @@ func TestOpenFolder(t *testing.T) {
 
 	rwtx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer rwtx.Commit()
+	t.Cleanup(rwtx.Rollback)
 
 	aggTx = agg.BeginTemporalTx()
 	defer aggTx.Close()
@@ -155,7 +156,7 @@ func TestRecalcVisibleFilesAligned(t *testing.T) {
 
 	rwtx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer rwtx.Commit()
+	t.Cleanup(rwtx.Rollback)
 
 	amount := 36
 
@@ -216,7 +217,7 @@ func TestRecalcVisibleFilesUnaligned(t *testing.T) {
 
 	rwtx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer rwtx.Commit()
+	t.Cleanup(rwtx.Rollback)
 
 	amount := 36
 
@@ -303,7 +304,7 @@ func TestClose(t *testing.T) {
 
 	rwtx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer rwtx.Commit()
+	t.Cleanup(rwtx.Rollback)
 
 	amount := 36
 	aggTx := agg.BeginTemporalTx()
@@ -408,7 +409,7 @@ func TestMergedFileGet(t *testing.T) {
 
 	rwtx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer rwtx.Commit()
+	defer rwtx.Rollback()
 	checkGet(headerTx, bodyTx, rwtx)
 	rwtx.Commit()
 
@@ -434,7 +435,7 @@ func TestMergedFileGet(t *testing.T) {
 	defer aggTx.Close()
 	rwtx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)
-	defer rwtx.Commit()
+	defer rwtx.Rollback()
 	headerTx, bodyTx = aggTx.Marked(headerId), aggTx.Marked(bodyId)
 	checkGet(headerTx, bodyTx, rwtx)
 
@@ -506,7 +507,8 @@ func setupBodies(t *testing.T, db kv.RwDB, log log.Logger, dirs datadir.Dirs) (k
 
 func registerEntity(dirs datadir.Dirs, name string, id kv.ForkableId) *SnapshotConfig {
 	stepSize := uint64(10)
-	schema := NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize)
+	ver := version.V1_0_standart
+	schema := NewE2SnapSchemaWithStep(dirs, name, []string{name}, stepSize, NewE2SnapSchemaVersion(ver, ver))
 
 	snapCfg := NewSnapshotConfig(&SnapshotCreationConfig{
 		RootNumPerStep: 10,

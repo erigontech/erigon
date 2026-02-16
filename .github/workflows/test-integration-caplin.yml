@@ -8,6 +8,8 @@ on:
     branches:
       - main
       - 'release/**'
+      - performance
+      - performance-stable
     types:
       - opened
       - reopened
@@ -23,7 +25,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
@@ -36,7 +38,13 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt update -y && sudo apt install -y build-essential
 
-      - name: test-integration-caplin
+      - name: Download consensus spec tests
+        id: download-spec-tests
+        continue-on-error: true
+        run: cd cl/spectest && make download-spec
+
+      - name: Run consensus spec tests
+        if: steps.download-spec-tests.outcome == 'success'
         run: cd cl/spectest && make tests && make mainnet
 
   tests-windows:
@@ -46,7 +54,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
@@ -55,5 +63,9 @@ jobs:
           go-version: '1.25'
           cache: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
 
+      - name: Install make
+        run: choco install make -y
+
       - name: test-integration-caplin
-        run: cd ./cl/spectest/ && .\wmake.ps1 Tests Mainnet
+        shell: bash
+        run: cd cl/spectest && make tests mainnet

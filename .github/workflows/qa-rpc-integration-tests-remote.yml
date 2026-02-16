@@ -27,7 +27,7 @@ jobs:
           format('{0}-{1}', github.workflow, github.ref)
         }}
       cancel-in-progress: true
-    runs-on: [ self-hosted, qa, Ethereum, rpc-integration ]
+    runs-on: [ self-hosted, qa, Ethereum, rpc-integration-commitment ]
     env:
       ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version/datadir
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
@@ -38,7 +38,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Clean Erigon Build Directory
         run: |
@@ -71,7 +71,7 @@ jobs:
         run: |
           echo "Starting Erigon..."
           
-          ./erigon --datadir $ERIGON_REFERENCE_DATA_DIR  --ethash.dagdir $ERIGON_REFERENCE_DATA_DIR --nodiscover --maxpeers 0 --no-downloader --prune.mode=archive --http=false > erigon.log 2>&1 &
+          ./erigon --datadir $ERIGON_REFERENCE_DATA_DIR --persist.receipts --prune.experimental.include-commitment-history --nodiscover --maxpeers 0 --no-downloader --prune.mode=archive --http=false > erigon.log 2>&1 &
 
           ERIGON_PID=$!          
           ERIGON_EXIT_STATUS=$?
@@ -131,7 +131,7 @@ jobs:
         run: |
           mkdir -p $RPC_PAST_TEST_DIR
           commit=$(git -C ${{runner.workspace}}/erigon rev-parse --short HEAD)
-          TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_${commit}_http/"
+          TEST_RESULT_DIR="$RPC_PAST_TEST_DIR/mainnet_$(date +%Y%m%d_%H%M%S)_integration_${commit}_http"
           echo "TEST_RESULT_DIR=$TEST_RESULT_DIR" >> $GITHUB_ENV
 
           chmod +x ${{ runner.workspace }}/erigon/.github/workflows/scripts/run_rpc_tests_remote_ethereum.sh
@@ -148,9 +148,34 @@ jobs:
             echo "RPC tests completed successfully"
             echo "TEST_RESULT=success" >> "$GITHUB_OUTPUT"
           else
-            echo "Error detected during RPC tests"
+            echo "::error::Error detected during RPC tests: some tests failed, check the logs or the artifacts for more details"
             echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
+            exit 1
           fi
+
+      - name: Generate Summary
+        if: always() && steps.test_step.outputs.test_executed == 'true'
+        run: |
+          SUMMARY_FILE="${{ env.TEST_RESULT_DIR }}/summary.md"
+          LOG_FILE="${{ env.TEST_RESULT_DIR }}/output.log"
+
+          cat << 'EOF' > $SUMMARY_FILE
+          # ${{ github.workflow }} Report
+
+          ## Test Configuration
+          - **Chain:** ${{ env.CHAIN }}
+          - **Result:** ${{ steps.test_step.outputs.TEST_RESULT }}
+
+          ## Test Output
+          ```
+          EOF
+
+          cat $LOG_FILE >> $SUMMARY_FILE
+
+          echo '```' >> $SUMMARY_FILE
+
+          cat $SUMMARY_FILE
+          cat $SUMMARY_FILE >> $GITHUB_STEP_SUMMARY
 
       - name: Stop Erigon & RpcDaemon
         if: always()
@@ -173,7 +198,7 @@ jobs:
           fi
 
       - name: Restore Erigon Chaindata Directory
-        if: ${{ always() }}
+        if: always()
         run: |
           if [ -d "$ERIGON_TESTBED_AREA/chaindata-prev" ] && [ "${{ steps.save_chaindata_step.outcome }}" == "success" ]; then
           rm -rf $ERIGON_REFERENCE_DATA_DIR/chaindata
@@ -182,21 +207,22 @@ jobs:
           fi
 
       - name: Resume the Erigon instance dedicated to db maintenance
-        if: ${{ always() }}
+        if: always()
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
       - name: Upload test results
-        if: steps.test_step.outputs.test_executed == 'true'
-        uses: actions/upload-artifact@v5
+        if: always() && steps.test_step.outputs.test_executed == 'true'
+        uses: actions/upload-artifact@v6
         with:
           name: test-results
           path: |
             ${{ env.TEST_RESULT_DIR }}
-            ${{ env.ERIGON_REFERENCE_DATA_DIR }}/logs/
+            ${{ github.workspace }}/build/bin/rpcdaemon.log 
+            ${{ github.workspace }}/build/bin/erigon.log 
 
       - name: Save test results
-        if: steps.test_step.outputs.test_executed == 'true'
+        if: always() && steps.test_step.outputs.test_executed == 'true'
         working-directory: ${{ github.workspace }}
         env:
           TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
@@ -219,10 +245,4 @@ jobs:
       - name: Action for Success
         if: steps.test_step.outputs.TEST_RESULT == 'success'
         run: echo "::notice::Tests completed successfully"
-
-      - name: Action for Failure
-        if: steps.test_step.outputs.TEST_RESULT != 'success'
-        run: |
-          echo "::error::Error detected during tests: some tests failed, check the logs or the artifacts for more details"
-          exit 1
 

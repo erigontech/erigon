@@ -80,7 +80,7 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 		if stx, ok := tx.(*types.SetCodeTransaction); ok {
 			authorizationsLen = uint64(len(stx.GetAuthorizations()))
 		}
-		requiredGas, floorGas, overflow := fixedgas.IntrinsicGas(msg.Data(), uint64(len(msg.AccessList())), uint64(msg.AccessList().StorageKeys()), msg.To() == nil, rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai, rules.IsPrague, false, authorizationsLen)
+		requiredGas, floorGas, overflow := fixedgas.IntrinsicGas(msg.Data(), uint64(len(msg.AccessList())), uint64(msg.AccessList().StorageKeys()), msg.To().IsNil(), rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai, rules.IsPrague, false, authorizationsLen)
 		if rules.IsPrague && floorGas > requiredGas {
 			requiredGas = floorGas
 		}
@@ -110,7 +110,8 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 			return nil, nil, requiredGas, fmt.Errorf("%w: nonce: %d", protocol.ErrNonceMax, msg.Nonce())
 		}
 		h := tx.Hash()
-		return &sender, &h, requiredGas, nil
+		senderValue := sender.Value()
+		return &senderValue, &h, requiredGas, nil
 	}
 
 	for _, testcase := range []struct {

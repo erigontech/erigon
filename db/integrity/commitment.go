@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/rand"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -64,6 +65,9 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.Fu
 	}
 	var integrityErr error
 	for i, file := range files {
+		if !strings.HasSuffix(file.Fullpath(), ".kv") {
+			continue
+		}
 		recompute := !onlyRecomputeLastFile || i == len(files)-1
 		err = checkCommitmentRootInFile(ctx, db, br, file, recompute, logger)
 		if err != nil {
@@ -151,12 +155,12 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br se
 	if txNum < startTxNum {
 		return info, fmt.Errorf("%w: commitment root txNum is lt startTxNum: %d < %d", ErrIntegrity, txNum, startTxNum)
 	}
-	txNumReader := br.TxnumReader(ctx)
-	blockMinTxNum, err := txNumReader.Min(tx, blockNum)
+	txNumReader := br.TxnumReader()
+	blockMinTxNum, err := txNumReader.Min(ctx, tx, blockNum)
 	if err != nil {
 		return info, err
 	}
-	blockMaxTxNum, err := txNumReader.Max(tx, blockNum)
+	blockMaxTxNum, err := txNumReader.Max(ctx, tx, blockNum)
 	if err != nil {
 		return info, err
 	}
@@ -193,7 +197,7 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br se
 
 func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.VisibleFile, info commitmentRootInfo, logger log.Logger) (*execctx.SharedDomains, error) {
 	maxTxNum := f.EndRootNum() - 1
-	sd, err := execctx.NewSharedDomains(tx, logger)
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +243,7 @@ func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *
 		return err
 	}
 	logger.Info("recomputing commitment root after", "touches", touches, "file", filepath.Base(f.Fullpath()))
-	recomputedBytes, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, sd.BlockNum(), sd.TxNum(), "integrity", nil)
+	recomputedBytes, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, sd.BlockNum(), sd.TxNum(), "integrity", nil /* commitProgress */)
 	if err != nil {
 		return err
 	}
@@ -279,7 +283,6 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 	if dbg.EnvBool("CHECK_COMMITMENT_KVS_DEREF_SEQUENTIAL", false) {
 		eg.SetLimit(1)
 	}
-	var integrityErr error
 	var branchKeys, referencedAccounts, plainAccounts, referencedStorages, plainStorages atomic.Uint64
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".kv") {
@@ -315,7 +318,7 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 		"referencedStorages", referencedStorages.Load(),
 		"plainStorages", plainStorages.Load(),
 	)
-	return integrityErr
+	return nil
 }
 
 type derefCounts struct {
@@ -559,6 +562,163 @@ func deriveReaderForOtherDomain(baseFile string, oldDomain, newDomain kv.Domain)
 	return seg.NewReader(decomp.MakeGetter(), compression), decomp.Close, nil
 }
 
+func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, failFast bool, logger log.Logger) error {
+	start := time.Now()
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	files := tx.Debug().DomainFiles(kv.CommitmentDomain)
+	var eg *errgroup.Group
+	if failFast {
+		// if 1 goroutine fails, fail others
+		eg, ctx = errgroup.WithContext(ctx)
+	} else {
+		eg = &errgroup.Group{}
+	}
+	if dbg.EnvBool("CHECK_COMMITMENT_HIST_VAL_SEQUENTIAL", false) {
+		eg.SetLimit(1)
+	} else {
+		eg.SetLimit(dbg.EnvInt("CHECK_COMMITMENT_HIST_VAL_WORKERS", 8))
+	}
+	var totalVals atomic.Uint64
+	for _, file := range files {
+		if !strings.HasSuffix(file.Fullpath(), ".v") {
+			continue
+		}
+		eg.Go(func() error {
+			tx, err := db.BeginTemporalRo(ctx) // each worker has its own RoTx
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			valCount, err := checkCommitmentHistVal(ctx, tx, br, file, failFast, logger)
+			if err == nil {
+				totalVals.Add(valCount)
+				return nil
+			}
+			if !failFast {
+				logger.Warn(err.Error())
+			}
+			return err
+		})
+	}
+	err = eg.Wait()
+	if err != nil {
+		return err
+	}
+	dur := time.Since(start)
+	total := totalVals.Load()
+	rate := float64(total) / dur.Seconds()
+	logger.Info("checked commitment history vals", "dur", time.Since(start), "files", len(files), "vals", total, "vals/s", rate)
+	return nil
+}
+
+func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, file state.VisibleFile, failFast bool, logger log.Logger) (uint64, error) {
+	start := time.Now()
+	fileName := filepath.Base(file.Fullpath())
+	startTxNum := file.StartRootNum()
+	endTxNum := file.EndRootNum()
+	txCount := endTxNum - startTxNum
+	// cover 5% by doing random bucket sampling from each file
+	coverageQuotient := dbg.EnvUint("CHECK_COMMITMENT_HIST_VAL_COVERAGE_QUOTIENT", 20)
+	if coverageQuotient > txCount {
+		panic(fmt.Errorf("coverage quotient %d is greater than total tx count %d", coverageQuotient, txCount))
+	}
+	bucket := rand.Intn(int(coverageQuotient))
+	bucketSize := txCount / coverageQuotient
+	bucketStart := startTxNum + uint64(bucket)*bucketSize
+	bucketEnd := min(bucketStart+bucketSize, endTxNum)
+	logger.Info(
+		"checking commitment hist vals in",
+		"v", fileName,
+		"startTxNum", startTxNum,
+		"endTxNum", endTxNum,
+		"coverageQuotient", coverageQuotient,
+		"bucket", bucket,
+		"bucketSize", bucketSize,
+		"bucketStart", bucketStart,
+		"bucketEnd", bucketEnd,
+	)
+	txNumReader := br.TxnumReader()
+	it, err := tx.HistoryRange(kv.CommitmentDomain, int(bucketStart), int(bucketEnd), order.Asc, -1)
+	if err != nil {
+		return 0, err
+	}
+	defer it.Close()
+	logTicker := time.NewTicker(30 * time.Second)
+	defer logTicker.Stop()
+	var total uint64
+	var integrityErr error
+	for it.HasNext() {
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-logTicker.C:
+			rate := float64(total) / time.Since(start).Seconds()
+			logger.Info("checking commitment hist vals progress", "at", total, "vals/s", rate, "v", fileName)
+		default:
+			// no-op
+		}
+		k, v, err := it.Next()
+		if err != nil {
+			return 0, err
+		}
+		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+			rootHashBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(v)
+			if err != nil {
+				return 0, fmt.Errorf("issue extracting state root value in %s for [%d,%d) tx nums: %w", fileName, bucketStart, bucketEnd, err)
+			}
+			maxTxNum, err := txNumReader.Max(ctx, tx, blockNum)
+			if err != nil {
+				return 0, err
+			}
+			if txNum < maxTxNum {
+				logger.Info("skipping commitment state as it is for partial block", "blockNum", blockNum, "txNum", txNum, "maxTxNum", maxTxNum, "v", fileName)
+				continue
+			}
+			if txNum != maxTxNum {
+				err = fmt.Errorf("commitment state txNum mismatch for block %d in %s: %d != %d", blockNum, fileName, txNum, maxTxNum)
+				if failFast {
+					return 0, err
+				}
+				logger.Warn(err.Error())
+				integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
+			}
+			rootHash := common.Hash(rootHashBytes)
+			header, err := br.HeaderByNumber(ctx, tx, blockNum)
+			if err != nil {
+				return 0, err
+			}
+			if rootHash != header.Root {
+				err = fmt.Errorf("commitment state root mismatch for block %d, tx %d in %s: %s != %s", blockNum, txNum, fileName, rootHash, header.Root)
+				if failFast {
+					return 0, err
+				}
+				logger.Warn(err.Error())
+				integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
+			}
+		} else {
+			branchData := commitment.BranchData(v)
+			err = branchData.Validate(k)
+			if err != nil {
+				err = fmt.Errorf("branch data validation failure for branch key %x in %s: %w", k, fileName, err)
+				if failFast {
+					return 0, err
+				}
+				logger.Warn(err.Error())
+				integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
+			}
+		}
+		total++
+	}
+	dur := time.Since(start)
+	rate := float64(total) / dur.Seconds()
+	logger.Info("checked commitment history vals in", "dur", dur, "vals", total, "vals/s", rate, "v", fileName)
+	return total, integrityErr
+}
+
 func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, blockNum uint64, logger log.Logger) error {
 	logger.Info("checking commitment hist at block", "blockNum", blockNum)
 	start := time.Now()
@@ -571,22 +731,23 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if err != nil {
 		return err
 	}
-	txNumsReader := br.TxnumReader(ctx)
-	minTxNum, err := txNumsReader.Min(tx, blockNum)
+	txNumsReader := br.TxnumReader()
+	minTxNum, err := txNumsReader.Min(ctx, tx, blockNum)
 	if err != nil {
 		return err
 	}
-	maxTxNum, err := txNumsReader.Max(tx, blockNum)
+	maxTxNum, err := txNumsReader.Max(ctx, tx, blockNum)
 	if err != nil {
 		return err
 	}
 	toTxNum := maxTxNum + 1
-	sd, err := execctx.NewSharedDomains(tx, logger)
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
 		return err
 	}
 	sd.GetCommitmentCtx().SetHistoryStateReader(tx, toTxNum)
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
+	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
 	err = sd.SeekCommitment(ctx, tx) // seek commitment again with new history state reader
 	if err != nil {
 		return err
@@ -660,7 +821,8 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 }
 
 func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64, visitor func(k []byte)) (uint64, error) {
-	stream, err := tx.HistoryRange(d, int(fromTxNum), int(toTxNum)+1, order.Asc, -1)
+	// toTxNum is exclusive per kv.TemporalTx.HistoryRange contract [from,to)
+	stream, err := tx.HistoryRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
 	if err != nil {
 		return 0, err
 	}

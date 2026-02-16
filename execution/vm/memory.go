@@ -91,15 +91,14 @@ func (m *Memory) Resize(size uint64) {
 		return
 	}
 
-	grow := size - currLen
 	if uint64(cap(m.store)) >= size {
 		m.store = m.store[:size]
-		for i := currLen; i < size; i++ {
-			m.store[i] = 0
-		}
+		// Use clear() for fast zeroing (compiler optimizes to memclr)
+		clear(m.store[currLen:])
 		return
 	}
 
+	grow := size - currLen
 	if grow <= uint64(len(zeroes)) {
 		m.store = append(m.store, zeroes[:grow]...)
 		return

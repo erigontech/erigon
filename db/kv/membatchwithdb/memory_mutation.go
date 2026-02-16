@@ -33,13 +33,15 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 )
 
+var _ kv.TemporalRwTx = &MemoryMutation{}
+
 type MemoryMutation struct {
 	memTx            kv.RwTx
 	memDb            kv.RwDB
 	deletedEntries   map[string]map[string]struct{}
 	deletedDups      map[string]map[string]map[string]struct{}
 	clearedTables    map[string]struct{}
-	db               kv.Tx
+	db               kv.TemporalTx
 	statelessCursors map[string]kv.RwCursor
 }
 
@@ -51,7 +53,7 @@ type MemoryMutation struct {
 // defer batch.Close()
 // ... some calculations on `batch`
 // batch.Commit()
-func NewMemoryBatch(tx kv.Tx, tmpDir string, logger log.Logger) *MemoryMutation {
+func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) *MemoryMutation {
 	tmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(nil, tmpDir).GrowthStep(64 * datasize.MB).MapSize(512 * datasize.GB).MustOpen()
 	memTx, err := tmpDB.BeginRw(context.Background()) // nolint:gocritic
 	if err != nil {
@@ -71,18 +73,11 @@ func NewMemoryBatch(tx kv.Tx, tmpDir string, logger log.Logger) *MemoryMutation 
 	}
 }
 
-func NewMemoryBatchWithCustomDB(tx kv.Tx, db kv.RwDB, uTx kv.RwTx) *MemoryMutation {
-	return &MemoryMutation{
-		db:             tx,
-		memDb:          db,
-		memTx:          uTx,
-		deletedEntries: make(map[string]map[string]struct{}),
-		deletedDups:    map[string]map[string]map[string]struct{}{},
-		clearedTables:  make(map[string]struct{}),
-	}
+func (m *MemoryMutation) UnderlyingTx() kv.TemporalTx {
+	return m.db
 }
 
-func (m *MemoryMutation) UpdateTxn(tx kv.Tx) {
+func (m *MemoryMutation) UpdateTxn(tx kv.TemporalTx) {
 	m.db = tx
 	m.statelessCursors = nil
 }
@@ -657,12 +652,8 @@ func isTablePurelyDupsort(bucket string) bool {
 	return !config.AutoDupSortKeysConversion && config.Flags == kv.DupSort
 }
 
-func (m *MemoryMutation) MemDB() kv.RwDB {
-	return m.memDb
-}
-
-func (m *MemoryMutation) MemTx() kv.RwTx {
-	return m.memTx
+func (m *MemoryMutation) MemDB() kv.TemporalRwDB {
+	return temporaldb{m}
 }
 
 // Cursor creates a new cursor (the real fun begins here)
@@ -730,56 +721,56 @@ func (m *MemoryMutation) AggTx() any {
 
 func (m *MemoryMutation) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
 	// panic("not supported")
-	return m.db.(kv.TemporalTx).GetLatest(name, k)
+	return m.db.GetLatest(name, k)
 }
 
 func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	// panic("not supported")
-	return m.db.(kv.TemporalTx).GetAsOf(name, k, ts)
+	return m.db.GetAsOf(name, k, ts)
 }
 
 func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	return m.db.(kv.TemporalTx).HasPrefix(name, prefix)
+	return m.db.HasPrefix(name, prefix)
 }
 
 func (m *MemoryMutation) StepsInFiles(entitySet ...kv.Domain) kv.Step {
-	return m.db.(kv.TemporalTx).StepsInFiles(entitySet...)
+	return m.db.StepsInFiles(entitySet...)
 }
 
 func (m *MemoryMutation) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {
 	// panic("not supported")
-	return m.db.(kv.TemporalTx).RangeAsOf(name, fromKey, toKey, ts, asc, limit)
+	return m.db.RangeAsOf(name, fromKey, toKey, ts, asc, limit)
 }
 
 func (m *MemoryMutation) HistorySeek(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	panic("not supported")
-	// return m.db.(kv.TemporalTx).HistorySeek(name, k, ts)
+	// return m.db.HistorySeek(name, k, ts)
 }
 
 func (m *MemoryMutation) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps stream.U64, err error) {
 	// panic("not supported")
-	return m.db.(kv.TemporalTx).IndexRange(name, k, fromTs, toTs, asc, limit)
+	return m.db.IndexRange(name, k, fromTs, toTs, asc, limit)
 }
 
 func (m *MemoryMutation) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, limit int) (it stream.KV, err error) {
 	panic("not supported")
-	// return m.db.(kv.TemporalTx).HistoryRange(name, fromTs, toTs, asc, limit)
+	// return m.db.HistoryRange(name, fromTs, toTs, asc, limit)
 }
 
 func (m *MemoryMutation) HistoryStartFrom(name kv.Domain) uint64 {
-	return m.db.(kv.TemporalTx).Debug().HistoryStartFrom(name)
+	return m.db.Debug().HistoryStartFrom(name)
 }
 func (m *MemoryMutation) FreezeInfo() kv.FreezeInfo {
 	panic("not supported")
 }
-func (m *MemoryMutation) Debug() kv.TemporalDebugTx { return m.db.(kv.TemporalTx).Debug() }
+func (m *MemoryMutation) Debug() kv.TemporalDebugTx { return m.db.Debug() }
 
 func (m *MemoryMutation) AggForkablesTx(id kv.ForkableId) any {
-	return m.db.(kv.TemporalTx).AggForkablesTx(id)
+	return m.db.AggForkablesTx(id)
 }
 
 func (m *MemoryMutation) Unmarked(id kv.ForkableId) kv.UnmarkedTx {
-	return m.db.(kv.TemporalTx).Unmarked(id)
+	return m.db.Unmarked(id)
 }
 
 func (m *MemoryMutation) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
@@ -802,10 +793,82 @@ func (m *MemoryMutation) PruneSmallBatches(ctx context.Context, timeout time.Dur
 	return m.db.(kv.TemporalRwTx).PruneSmallBatches(ctx, timeout)
 }
 
-func (m *MemoryMutation) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error {
-	return m.db.(kv.TemporalRwTx).GreedyPruneHistory(ctx, domain)
-}
-
 func (m *MemoryMutation) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	return m.db.(kv.TemporalRwTx).Unwind(ctx, txNumUnwindTo, changeset)
 }
+
+type temporaldb struct {
+	memoryMutation *MemoryMutation
+}
+
+var _ kv.TemporalRwDB = temporaldb{}
+
+func (td temporaldb) AllTables() kv.TableCfg {
+	return td.memoryMutation.memDb.AllTables()
+}
+
+func (td temporaldb) BeginRo(ctx context.Context) (kv.Tx, error) {
+	return td.memoryMutation, nil
+}
+
+func (td temporaldb) BeginRw(ctx context.Context) (kv.RwTx, error) {
+	return td.memoryMutation, nil
+}
+
+func (td temporaldb) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
+	return td.memoryMutation, nil
+}
+
+func (td temporaldb) Close() {
+	td.memoryMutation.memDb.Close()
+}
+
+func (td temporaldb) CHandle() unsafe.Pointer {
+	return td.memoryMutation.memDb.CHandle()
+}
+
+func (td temporaldb) PageSize() datasize.ByteSize {
+	return td.memoryMutation.memDb.PageSize()
+}
+
+func (td temporaldb) ReadOnly() bool {
+	return td.memoryMutation.memDb.ReadOnly()
+}
+
+func (td temporaldb) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
+	return td.memoryMutation.memDb.Update(ctx, f)
+}
+func (td temporaldb) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
+	return td.memoryMutation.memDb.UpdateNosync(ctx, f)
+}
+func (td temporaldb) View(ctx context.Context, f func(tx kv.Tx) error) error {
+	return td.memoryMutation.memDb.View(ctx, f)
+}
+
+func (td temporaldb) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	return td.memoryMutation, nil
+}
+
+func (td temporaldb) BeginTemporalRw(ctx context.Context) (kv.TemporalRwTx, error) {
+	return td.memoryMutation, nil
+}
+
+func (td temporaldb) BeginTemporalRwNosync(ctx context.Context) (kv.TemporalRwTx, error) {
+	return td.memoryMutation, nil
+}
+
+func (td temporaldb) Debug() kv.TemporalDebugDB {
+	panic("not implemented")
+}
+
+func (td temporaldb) UpdateTemporal(ctx context.Context, f func(tx kv.TemporalRwTx) error) error {
+	return f(td.memoryMutation)
+}
+
+func (td temporaldb) OnFilesChange(onChange kv.OnFilesChange, onDelete kv.OnFilesChange) {}
+
+func (td temporaldb) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
+	return f(td.memoryMutation)
+}
+
+func (td temporaldb) Path() string { return "<mem>" }

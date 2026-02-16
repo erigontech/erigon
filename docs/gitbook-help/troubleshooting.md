@@ -14,7 +14,7 @@ Erigon is highly resilient and uses a fully-transactional database. This design 
 
 When an issue arises, follow these steps to methodically diagnose and resolve the problem.
 
-1. **Check Hardware Requirements:** The most common cause of issues is insufficient disk or RAM. Ensure your system meets the recommended specifications. Note that Erigon is very adaptive—adding more RAM to the server will make Erigon faster without requiring any setting changes.
+1. **Check Hardware Requirements:** The most common cause of issues is insufficient disk or RAM. Ensure your system meets the recommended [specifications](https://docs.erigon.tech/get-started/hardware-requirements). Note that Erigon is very adaptive—adding more RAM to the server will make Erigon faster without requiring any setting changes.
 2. **Inspect Erigon Logs:** The logs are your best friend. Use `tail -f erigon.log` or `journalctl` to see real-time output and identify error messages or warnings.
 3. **Verify Sync Status:** Use `curl localhost:8545 \-X POST \-H "Content-Type: application/json" \--data '{"jsonrpc":"2.0","method":"eth\_syncing","params":\[\],"id":1}'` to check if the node is actively syncing.
 4. **Monitor System Resources:** Use `htop`, `top`, or `iostat` to monitor CPU, RAM, and disk I/O. This can help you identify a performance bottleneck.
@@ -26,7 +26,7 @@ When an issue arises, follow these steps to methodically diagnose and resolve th
 10. **Check P2P Peer Connections:** Use `net\_peerCount` or similar RPC methods to check if you have a healthy number of peers. A low count may indicate a network problem.
 11. **Review Firewall Rules:** Confirm that your firewall is not blocking inbound or outbound traffic on the required P2P and RPC ports.
 12. **Double-Check Configuration Flags:** Review all your command-line flags for typos or incorrect values. A single misplaced character can cause a cryptic error.
-13. **Check for Snapshot File Issues:** For version upgrades, a known issue with snapshot filenames can cause problems. Use snapshot [upgrade](https://docs.erigon.tech/get-started/installation-2/upgrading#snapshots-upgrade-options) and [repair](https://docs.erigon.tech/get-started/installation-2/upgrading#managing-your-data) options.
+13. **Check for Snapshot File Issues:** For version upgrades, a known issue with snapshot filenames can cause problems. Use snapshot [upgrade](https://docs.erigon.tech/get-started/installation/upgrading) and repair options.
 14. **Correct File Ownership:** If using a dedicated user or Docker, confirm that the user has full read/write access to the datadir.
 15. **Adjust RPC Timeouts:** If specific RPC requests are timing out, try increasing the timeout values to allow more time for heavy requests to complete.
 16. **Check for `DB.read.concurrency` issues:** If you have high RPC traffic and low TPS, try reducing the `--DB.read.concurrency` flag.

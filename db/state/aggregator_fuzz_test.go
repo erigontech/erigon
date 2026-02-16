@@ -46,7 +46,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 	require.NoError(f, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 
@@ -80,7 +80,7 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 			acc := accounts.Account{
 				Nonce:       1,
 				Balance:     uint256.Int{},
-				CodeHash:    common.Hash{},
+				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
@@ -143,13 +143,13 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		require.NoError(t, err)
 		require.NotNil(t, v, "key %x not found", commKey1)
 
-		require.Equal(t, maxWrite, binary.BigEndian.Uint64(v[:]))
+		require.Equal(t, maxWrite, binary.BigEndian.Uint64(v))
 
 		v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2)
 		require.NoError(t, err)
 		require.NotNil(t, v, "key %x not found", commKey2)
 
-		require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
+		require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v))
 	})
 
 }
@@ -162,7 +162,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 	require.NoError(f, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), rwTx, log.New())
 	require.NoError(f, err)
 	defer domains.Close()
 
@@ -191,7 +191,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 			acc := accounts.Account{
 				Nonce:       1,
 				Balance:     *uint256.NewInt(txNum * 1e6),
-				CodeHash:    common.Hash{},
+				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)

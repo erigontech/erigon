@@ -44,14 +44,24 @@ jobs:
                  /usr/share/miniconda \
                  /usr/share/swift
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
+          lfs: true
+
+      - name: Cleanup space
+        if: runner.os == 'Linux'
+        run: |
+          rm -fr /opt/az \
+                 /opt/microsoft \
+                 /usr/share/dotnet \
+                 /usr/share/miniconda \
+                 /usr/share/swift
 
       - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
-          cache: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
+          cache: true
 
       - name: Install dependencies on Linux runner
         if: runner.os == 'Linux'
@@ -95,17 +105,22 @@ jobs:
           minimum-size: 8GB
           disk-root: "C:"
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
       - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
-          cache: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
+          cache: true
+
+      - name: Install make
+        run: choco install make -y
 
       - name: Testing build all
-        run: .\wmake.ps1 all
+        shell: bash
+        run: make all
 
       - name: Execute test-short
-        run: .\wmake.ps1 test-short
+        shell: bash
+        run: make test-short

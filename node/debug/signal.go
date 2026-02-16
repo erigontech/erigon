@@ -14,36 +14,35 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !windows
-
 package debug
 
 import (
-	"io"
 	"os"
 	"os/signal"
 	"runtime/pprof"
 
-	"golang.org/x/sys/unix"
+	g "github.com/anacrolix/generics"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-func ListenSignals(stack io.Closer, logger log.Logger) {
+func listenSignalsInner(handle func(), logger log.Logger, shutdown []os.Signal, prof g.Option[os.Signal]) {
 	sigc := make(chan os.Signal, 1)
-	signal.Notify(sigc, unix.SIGINT, unix.SIGTERM)
+	signal.Notify(sigc, shutdown...)
 	dbg.GetSigC(&sigc)
 	defer signal.Stop(sigc)
 
 	usr1 := make(chan os.Signal, 1)
-	signal.Notify(usr1, unix.SIGUSR1)
+	if prof.Ok {
+		signal.Notify(usr1, prof.Value)
+	}
 	for {
 		select {
 		case <-sigc:
 			logger.Info("Got interrupt, shutting down...")
-			if stack != nil {
-				go stack.Close()
+			if handle != nil {
+				go handle()
 			}
 			for i := 10; i > 0; i-- {
 				<-sigc

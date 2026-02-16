@@ -59,6 +59,7 @@ type HttpCfg struct {
 
 	API                               []string
 	Gascap                            uint64
+	RangeLimit                        int
 	Feecap                            float64
 	MaxTraces                         uint64
 	WebsocketPort                     int
@@ -107,6 +108,6 @@ type HttpCfg struct {
 
 	RPCSlowLogThreshold time.Duration
 
-	ErigonDBStepSize          uint64
-	ErigonDBStepsInFrozenFile uint64
+	RpcTxSyncDefaultTimeout time.Duration // Default timeout for eth_sendRawTransactionSync
+	RpcTxSyncMaxTimeout     time.Duration // Maximum timeout for eth_sendRawTransactionSync
 }

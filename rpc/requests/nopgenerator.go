@@ -83,7 +83,7 @@ func (n NopRequestGenerator) SubscribeFilterLogs(ctx context.Context, query ethe
 	return nil, ErrNotImplemented
 }
 
-func (n NopRequestGenerator) Subscribe(ctx context.Context, method SubMethod, subChan interface{}, args ...interface{}) (ethereum.Subscription, error) {
+func (n NopRequestGenerator) Subscribe(ctx context.Context, method SubMethod, subChan any, args ...any) (ethereum.Subscription, error) {
 	return nil, ErrNotImplemented
 }
 

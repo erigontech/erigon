@@ -1,5 +1,9 @@
 ---
 description: Run a Gnosis Chain node with Erigon and an external Consensus Layer (CL).
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/get-started/easy-nodes/how-to-run-a-gnosis-chain-node/gnosis-with-an-external-cl
 ---
 
 # Gnosis Chain with an external CL
@@ -40,7 +44,7 @@ Because Erigon needs a target head in order to sync, Lighthouse must be synced b
 
 To communicate with Erigon, the execution endpoint must be specified as `<erigon address>:8551`, where `<erigon address>` is either `http://localhost` or the IP address of the device running Erigon.
 
-1.  Lighthouse must point to the [JWT secret](https://erigon.gitbook.io/docs/fundamentals/jwt) automatically created by Erigon in the `--datadir` directory. In the following example the default data directory is used.
+1.  Lighthouse must point to the [JWT secret](../../../fundamentals/jwt.md) automatically created by Erigon in the `--datadir` directory. In the following example the default data directory is used.
 
     Copy
 
@@ -67,7 +71,5 @@ To communicate with Erigon, the execution endpoint must be specified as `<erigon
      --execution-jwt /home/user/.local/share/erigon/jwt.hex \
      --checkpoint-sync-url "https://checkpoint.chiadochain.net"
     ```
-
-
 
 Check the Erigon and Lightouse logs to make sure that the EL and CL are communicating and that your is syncing correctly.

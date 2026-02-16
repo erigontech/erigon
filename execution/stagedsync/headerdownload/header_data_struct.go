@@ -110,7 +110,7 @@ func (lq LinkQueue) Swap(i, j int) {
 }
 
 // Push (part of heap.Interface) places a new link onto the end of queue. Note that idx attribute is set to the correct position of the new link
-func (lq *LinkQueue) Push(x interface{}) {
+func (lq *LinkQueue) Push(x any) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
 	l := x.(*Link)
@@ -119,7 +119,7 @@ func (lq *LinkQueue) Push(x interface{}) {
 }
 
 // Pop (part of heap.Interface) removes the first link from the queue
-func (lq *LinkQueue) Pop() interface{} {
+func (lq *LinkQueue) Pop() any {
 	old := *lq
 	n := len(old)
 	x := old[n-1]
@@ -233,14 +233,14 @@ func (iq InsertQueue) Swap(i, j int) {
 	iq[i].idx, iq[j].idx = i, j // Restore indices after the swap
 }
 
-func (iq *InsertQueue) Push(x interface{}) {
+func (iq *InsertQueue) Push(x any) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
 	x.(*Link).idx = len(*iq)
 	*iq = append(*iq, x.(*Link))
 }
 
-func (iq *InsertQueue) Pop() interface{} {
+func (iq *InsertQueue) Pop() any {
 	old := *iq
 	n := len(old)
 	x := old[n-1]

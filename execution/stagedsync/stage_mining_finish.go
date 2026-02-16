@@ -19,6 +19,7 @@ package stagedsync
 import (
 	"fmt"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
@@ -27,10 +28,10 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 )
 
 type MiningFinishCfg struct {
-	db                    kv.RwDB
 	chainConfig           *chain.Config
 	engine                rules.Engine
 	sealCancel            chan struct{}
@@ -40,7 +41,6 @@ type MiningFinishCfg struct {
 }
 
 func StageMiningFinishCfg(
-	db kv.RwDB,
 	chainConfig *chain.Config,
 	engine rules.Engine,
 	miningState MiningState,
@@ -49,7 +49,6 @@ func StageMiningFinishCfg(
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore,
 ) MiningFinishCfg {
 	return MiningFinishCfg{
-		db:                    db,
 		chainConfig:           chainConfig,
 		engine:                engine,
 		miningState:           miningState,
@@ -69,7 +68,14 @@ func SpawnMiningFinishStage(s *StageState, sd *execctx.SharedDomains, tx kv.Temp
 	//}
 
 	block := types.NewBlockForAsembling(current.Header, current.Txns, current.Uncles, current.Receipts, current.Withdrawals)
-	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: current.Receipts, Requests: current.Requests}
+	if current.BlockAccessList != nil {
+		hash := current.BlockAccessList.Hash()
+		block.HeaderNoCopy().BlockAccessListHash = &hash
+	}
+	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: current.Receipts, Requests: current.Requests, BlockAccessList: current.BlockAccessList}
+	if dbg.LogHashMismatchReason() {
+		ethutils.LogReceipts(log.LvlInfo, "Block built", current.Receipts, current.Txns, cfg.chainConfig, current.Header, logger)
+	}
 	*current = MiningBlock{} // hack to clean global data
 
 	//sealHash := engine.SealHash(block.Header())

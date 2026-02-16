@@ -16,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
 
@@ -27,7 +28,7 @@ func ValidateAATransaction(
 	evm *vm.EVM,
 	chainConfig *chain.Config,
 ) (paymasterContext []byte, validationGasUsed uint64, err error) {
-	senderCodeSize, err := ibs.GetCodeSize(*tx.SenderAddress)
+	senderCodeSize, err := ibs.GetCodeSize(tx.SenderAddress)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -35,14 +36,14 @@ func ValidateAATransaction(
 	var paymasterCodeSize, deployerCodeSize int
 
 	if tx.Paymaster != nil {
-		paymasterCodeSize, err = ibs.GetCodeSize(*tx.Paymaster)
+		paymasterCodeSize, err = ibs.GetCodeSize(accounts.InternAddress(*tx.Paymaster))
 		if err != nil {
 			return nil, 0, err
 		}
 	}
 
 	if tx.Deployer != nil {
-		deployerCodeSize, err = ibs.GetCodeSize(*tx.Deployer)
+		deployerCodeSize, err = ibs.GetCodeSize(accounts.InternAddress(*tx.Deployer))
 		if err != nil {
 			return nil, 0, err
 		}
@@ -77,7 +78,7 @@ func ValidateAATransaction(
 	// TODO: Nonce manager frame
 	// applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
 
-	senderNonce, _ := ibs.GetNonce(*tx.SenderAddress)
+	senderNonce, _ := ibs.GetNonce(tx.SenderAddress)
 	if tx.Nonce > senderNonce+1 { // ibs returns last used nonce
 		return nil, 0, errors.New("nonce too low")
 	}
@@ -101,7 +102,7 @@ func ValidateAATransaction(
 	}
 	entryPointTracer.Reset()
 
-	deploymentGasUsed := applyRes.GasUsed
+	deploymentGasUsed := applyRes.ReceiptGasUsed
 
 	// Validation frame
 	msg, err = tx.ValidationFrame(chainConfig.ChainID, deploymentGasUsed, rules, hasEIP3860)
@@ -125,7 +126,7 @@ func ValidateAATransaction(
 	}
 	entryPointTracer.Reset()
 
-	validationGasUsed += applyRes.GasUsed
+	validationGasUsed += applyRes.ReceiptGasUsed
 
 	// Paymaster frame
 	msg, err = tx.PaymasterFrame(chainConfig.ChainID)
@@ -151,7 +152,7 @@ func ValidateAATransaction(
 			return nil, 0, err
 		}
 		entryPointTracer.Reset()
-		validationGasUsed += applyRes.GasUsed
+		validationGasUsed += applyRes.ReceiptGasUsed
 	}
 
 	log.Info("validation gas report", "gasUsed", validationGasUsed, "nonceManager", 0, "refund", 0, "pretransactioncost", preTxCost)
@@ -176,7 +177,7 @@ func validateValidityTimeRange(time uint64, validAfter uint64, validUntil uint64
 }
 
 func deployValidation(tx *types.AccountAbstractionTransaction, ibs *state.IntraBlockState) error {
-	senderCodeSize, err := ibs.GetCodeSize(*tx.SenderAddress)
+	senderCodeSize, err := ibs.GetCodeSize(tx.SenderAddress)
 	if err != nil {
 		return wrapError(fmt.Errorf(
 			"error getting code for sender:%s err:%s",
@@ -199,7 +200,9 @@ func validationValidation(tx *types.AccountAbstractionTransaction, header *types
 	if ept.Input == nil {
 		return errors.New("account validation did not call the EntryPoint 'acceptAccount' callback")
 	}
-	if !bytes.Equal(ept.From[:], tx.SenderAddress[:]) {
+	fromValue := ept.From.Value()
+	senderAddress := tx.SenderAddress.Value()
+	if !bytes.Equal(fromValue[:], senderAddress[:]) {
 		return fmt.Errorf("invalid call to EntryPoint contract from a wrong account address, wanted %s got %s", tx.SenderAddress.String(), ept.From)
 	}
 
@@ -217,8 +220,8 @@ func paymasterValidation(tx *types.AccountAbstractionTransaction, header *types.
 	if ept.Input == nil {
 		return nil, errors.New("paymaster validation did not call the EntryPoint 'acceptPaymaster' callback")
 	}
-
-	if !bytes.Equal(ept.From[:], tx.Paymaster[:]) {
+	fromValue := ept.From.Value()
+	if !bytes.Equal(fromValue[:], tx.Paymaster[:]) {
 		return nil, errors.New("invalid call to EntryPoint contract from a wrong paymaster address")
 	}
 	paymasterValidity, err := types.DecodeAcceptPaymaster(ept.Input) // TODO: find better name
@@ -253,11 +256,11 @@ func ExecuteAATransaction(
 ) (executionStatus uint64, gasUsed uint64, err error) {
 	executionStatus = types.ExecutionStatusSuccess
 
-	nonce, err := ibs.GetNonce(*tx.SenderAddress)
+	nonce, err := ibs.GetNonce(tx.SenderAddress)
 	if err != nil {
 		return 0, 0, err
 	}
-	if err = ibs.SetNonce(*tx.SenderAddress, nonce+1); err != nil {
+	if err = ibs.SetNonce(tx.SenderAddress, nonce+1); err != nil {
 		return 0, 0, err
 	}
 
@@ -272,13 +275,13 @@ func ExecuteAATransaction(
 		executionStatus = types.ExecutionStatusExecutionFailure
 	}
 
-	execRefund := capRefund(tx.GasLimit-applyRes.GasUsed, applyRes.GasUsed) // TODO: can be moved into statetransition
+	execRefund := capRefund(tx.GasLimit-applyRes.ReceiptGasUsed, applyRes.ReceiptGasUsed) // TODO: can be moved into statetransition
 	validationRefund := capRefund(tx.ValidationGasLimit-validationGasUsed, validationGasUsed)
 
-	executionGasPenalty := (tx.GasLimit - applyRes.GasUsed) * types.AA_GAS_PENALTY_PCT / 100
-	gasUsed = validationGasUsed + applyRes.GasUsed + executionGasPenalty
+	executionGasPenalty := (tx.GasLimit - applyRes.ReceiptGasUsed) * types.AA_GAS_PENALTY_PCT / 100
+	gasUsed = validationGasUsed + applyRes.ReceiptGasUsed + executionGasPenalty
 	gasRefund := capRefund(execRefund+validationRefund, gasUsed)
-	log.Info("execution gas used", "gasUsed", applyRes.GasUsed, "penalty", executionGasPenalty)
+	log.Info("execution gas used", "gasUsed", applyRes.ReceiptGasUsed, "penalty", executionGasPenalty)
 
 	// Paymaster post-op frame
 	if len(paymasterContext) != 0 {
@@ -299,17 +302,17 @@ func ExecuteAATransaction(
 			}
 		}
 
-		validationGasPenalty := (tx.PostOpGasLimit - applyRes.GasUsed) * types.AA_GAS_PENALTY_PCT / 100
-		gasRefund += capRefund(tx.PostOpGasLimit-applyRes.GasUsed, applyRes.GasUsed)
-		gasUsed += applyRes.GasUsed + validationGasPenalty
-		log.Info("post op gas used", "gasUsed", applyRes.GasUsed, "penalty", validationGasPenalty)
+		validationGasPenalty := (tx.PostOpGasLimit - applyRes.ReceiptGasUsed) * types.AA_GAS_PENALTY_PCT / 100
+		gasRefund += capRefund(tx.PostOpGasLimit-applyRes.ReceiptGasUsed, applyRes.ReceiptGasUsed)
+		gasUsed += applyRes.ReceiptGasUsed + validationGasPenalty
+		log.Info("post op gas used", "gasUsed", applyRes.ReceiptGasUsed, "penalty", validationGasPenalty)
 	}
 
 	if err = refundGas(header, tx, ibs, gasUsed-gasRefund); err != nil {
 		return 0, 0, err
 	}
 
-	if err = payCoinbase(header, tx, ibs, gasUsed-gasRefund, evm.Context.Coinbase); err != nil {
+	if err = payCoinbase(header, tx, ibs, gasUsed-gasRefund, evm.Context.Coinbase.Value()); err != nil {
 		return 0, 0, err
 	}
 
@@ -419,7 +422,7 @@ type ValidationPhaseError struct {
 	frameReverted    bool
 }
 
-func (v *ValidationPhaseError) ErrorData() interface{} {
+func (v *ValidationPhaseError) ErrorData() any {
 	return v.reason
 }
 

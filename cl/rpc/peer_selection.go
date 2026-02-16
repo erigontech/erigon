@@ -28,6 +28,13 @@ var (
 
 var (
 	peersCandidateRefreshInterval = time.Second * 15
+	allCustodyIndices             = func() map[uint64]bool {
+		indices := make(map[uint64]bool)
+		for i := uint64(0); i < 128; i++ {
+			indices[i] = true
+		}
+		return indices
+	}()
 )
 
 type columnDataPeers struct {
@@ -67,9 +74,8 @@ type peerDataKey struct {
 }
 
 type peerData struct {
-	pid                   string
-	mask                  map[uint64]bool
-	earliestAvailableSlot uint64
+	pid  string
+	mask map[uint64]bool
 }
 
 func (c *columnDataPeers) refreshPeers(ctx context.Context) {
@@ -106,46 +112,24 @@ func (c *columnDataPeers) refreshPeers(ctx context.Context) {
 				log.Debug("[peerSelector] empty cgc", "peer", pid)
 				continue
 			}
-			// request status
-			buf := new(bytes.Buffer)
-			forkDigest, err := c.ethClock.CurrentForkDigest()
-			if err != nil {
-				log.Debug("[peerSelector] failed to get fork digest", "peer", pid, "err", err)
-				continue
-			}
-			myStatus := &cltypes.Status{
-				ForkDigest:            forkDigest,
-				FinalizedRoot:         c.beaconState.FinalizedCheckpoint().Root,
-				FinalizedEpoch:        c.beaconState.FinalizedCheckpoint().Epoch,
-				HeadRoot:              c.beaconState.FinalizedCheckpoint().Root,
-				HeadSlot:              c.beaconState.FinalizedCheckpoint().Epoch * c.beaconConfig.SlotsPerEpoch,
-				EarliestAvailableSlot: new(uint64),
-			}
-			if err := ssz_snappy.EncodeAndWrite(buf, myStatus); err != nil {
-				log.Debug("[peerSelector] failed to encode my status", "peer", pid, "err", err)
-				continue
-			}
-			status := &cltypes.Status{}
-			if err := c.simpleReuqest(ctx, pid, communication.StatusProtocolV2, status, buf.Bytes()); err != nil {
-				log.Debug("[peerSelector] failed to request peer status", "peer", pid, "err", err)
-				continue
-			}
-			if status.EarliestAvailableSlot == nil {
-				log.Debug("[peerSelector] empty earliest available slot", "peer", pid)
-				continue
+			var custodyIndices map[cltypes.CustodyIndex]bool
+			if peer.EnodeId == "" {
+				// if no enode id, use all custody indices
+				custodyIndices = allCustodyIndices
+			} else {
+				// get custody indices
+				enodeId := enode.HexID(peer.EnodeId)
+				custodyIndices, err = peerdasutils.GetCustodyColumns(enodeId, *metadata.CustodyGroupCount)
+				if err != nil {
+					log.Debug("[peerSelector] failed to get custody indices", "peer", pid, "err", err)
+					continue
+				}
 			}
 
-			// get custody indices
-			enodeId := enode.HexID(peer.EnodeId)
-			custodyIndices, err := peerdasutils.GetCustodyColumns(enodeId, *metadata.CustodyGroupCount)
-			if err != nil {
-				log.Debug("[peerSelector] failed to get custody indices", "peer", pid, "err", err)
-				continue
-			}
-			data := &peerData{pid: pid, mask: custodyIndices, earliestAvailableSlot: *status.EarliestAvailableSlot}
+			data := &peerData{pid: pid, mask: custodyIndices}
 			c.peerMetaCache.Add(peerKey, data)
 			newPeers = append(newPeers, *data)
-			log.Debug("[peerSelector] added peer", "peer", pid, "custodies", len(custodyIndices), "earliestAvailableSlot", *status.EarliestAvailableSlot)
+			log.Debug("[peerSelector] added peer", "peer", pid, "custodies", len(custodyIndices))
 		}
 		c.peersMutex.Lock()
 		c.peersQueue = newPeers

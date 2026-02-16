@@ -1,5 +1,9 @@
 ---
 description: 'Erigon Hardware Requirements: Disk Type and Size, RAM, and CPU for Node Types'
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/get-started/hardware-requirements
 ---
 
 # Hardware Requirements
@@ -12,7 +16,7 @@ A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory E
 
 ## Disk Size and RAM Requirements
 
-The amount of disk space recommended and RAM you need depends on the [sync mode](fundamentals/sync-modes.md) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](fundamentals/caplin.md)  configuration, with the sole exception of the `--prune.mode` flag.
+The amount of disk space recommended and RAM you need depends on the [sync mode](../fundamentals/sync-modes.md) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin.md) configuration, with the sole exception of the `--prune.mode` flag.
 
 {% hint style="info" %}
 Please note that these figures are from September 2025, and the blockchain data size is continuously increasing.
@@ -20,7 +24,7 @@ Please note that these figures are from September 2025, and the blockchain data 
 
 {% tabs %}
 {% tab title="Ethereum mainnet" %}
-<table data-header-hidden><thead><tr><th width="109"></th><th width="157.11114501953125"></th><th></th><th width="116"></th><th></th></tr></thead><tbody><tr><td><strong>Sync Mode</strong></td><td><strong>Current Disk Usage</strong></td><td><strong>Disk Size (Recommended)</strong></td><td><strong>RAM (Required)</strong></td><td><strong>RAM (Recommended)</strong></td></tr><tr><td>Archive </td><td>1.77 TB</td><td>4 TB</td><td>32 GB</td><td>64 GB</td></tr><tr><td>Full (Default)</td><td>920 GB</td><td>2 TB</td><td>16 GB</td><td>32 GB</td></tr><tr><td>Minimal</td><td>350 GB</td><td>1 TB</td><td>16 GB</td><td>64 GB</td></tr></tbody></table>
+<table data-header-hidden><thead><tr><th width="109"></th><th width="157.11114501953125"></th><th></th><th width="116"></th><th></th></tr></thead><tbody><tr><td><strong>Sync Mode</strong></td><td><strong>Current Disk Usage</strong></td><td><strong>Disk Size (Recommended)</strong></td><td><strong>RAM (Required)</strong></td><td><strong>RAM (Recommended)</strong></td></tr><tr><td>Archive</td><td>1.77 TB</td><td>4 TB</td><td>32 GB</td><td>64 GB</td></tr><tr><td>Full (Default)</td><td>920 GB</td><td>2 TB</td><td>16 GB</td><td>32 GB</td></tr><tr><td>Minimal</td><td>350 GB</td><td>1 TB</td><td>16 GB</td><td>64 GB</td></tr></tbody></table>
 {% endtab %}
 
 {% tab title="Gnosis Chain" %}
@@ -45,7 +49,7 @@ The final release series of Erigon that officially supports Polygon is 3.1.\*. F
 {% endtabs %}
 
 {% hint style="success" %}
-See also how you can [optimize storage](fundamentals/optimizing-storage.md).
+See also how you can [optimize storage](../fundamentals/optimizing-storage.md).
 {% endhint %}
 
 ## Bandwidth Requirements

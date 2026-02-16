@@ -36,7 +36,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTtx1.Rollback()
 
-	sd, err := execctx.NewSharedDomains(rwTtx1, log.Root())
+	sd, err := execctx.NewSharedDomains(ctx, rwTtx1, log.Root())
 	require.NoError(t, err)
 	defer sd.Close()
 
@@ -241,7 +241,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	rwTtx1, err := temporalDb.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer rwTtx1.Rollback()
-	sd, err := execctx.NewSharedDomains(rwTtx1, log.Root())
+	sd, err := execctx.NewSharedDomains(ctx, rwTtx1, log.Root())
 	require.NoError(t, err)
 	defer sd.Close()
 

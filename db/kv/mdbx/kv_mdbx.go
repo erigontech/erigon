@@ -26,8 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
-	"strings"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -98,7 +97,7 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 		bucketsCfg: WithChaindataTables,
 		flags:      mdbx.NoReadahead | mdbx.Durable,
 		log:        log,
-		pageSize:   kv.DefaultPageSize(),
+		pageSize:   DefaultPageSize(),
 
 		mapSize:         DefaultMapSize,
 		growthStep:      DefaultGrowthStep,
@@ -109,7 +108,14 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 	}
 	if label == dbcfg.ChainDB {
 		opts = opts.RemoveFlags(mdbx.NoReadahead) // enable readahead for chaindata by default. Erigon3 require fast updates and prune. Also it's chaindata is small (doesen GB)
+		if dbg.MdbxNoSync {
+			opts = opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.SafeNoSync })
+		}
+		if dbg.MdbxNoSyncUnsafe {
+			opts = opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.UtterlyNoSync | mdbx.NoMetaSync })
+		}
 	}
+
 	return opts
 }
 
@@ -276,7 +282,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		//   - after they will require rwtx-lock, which is not acceptable in ACCEDEE mode.
 		pageSize := opts.pageSize
 		if pageSize == 0 {
-			pageSize = kv.DefaultPageSize()
+			pageSize = DefaultPageSize()
 		}
 		var dirtySpace uint64
 		if opts.dirtySpace > 0 {
@@ -411,7 +417,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	}
 	db.path = opts.path
-	if dbg.MdbxLockInRam() && opts.label == dbcfg.ChainDB {
+	if dbg.MdbxLockInRam && opts.label == dbcfg.ChainDB {
 		log.Info("[dbg] locking db in mem", "label", opts.label)
 		if err := db.View(ctx, func(tx kv.Tx) error { return tx.(*MdbxTx).LockDBInRam() }); err != nil {
 			return nil, err
@@ -1003,14 +1009,6 @@ func (tx *MdbxTx) Commit() error {
 	}()
 	tx.closeCursors()
 
-	//slowTx := 10 * time.Second
-	//if debug.SlowCommit() > 0 {
-	//	slowTx = debug.SlowCommit()
-	//}
-	//
-	//if debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
-	//	tx.PrintDebugInfo()
-	//}
 	tx.CollectMetrics()
 
 	latency, err := tx.tx.Commit()
@@ -1020,7 +1018,7 @@ func (tx *MdbxTx) Commit() error {
 
 	if tx.db.opts.metrics {
 		dbLabel := tx.db.opts.label
-		err = kv.RecordSummaries(dbLabel, latency)
+		err = RecordSummaries(dbLabel, latency)
 		if err != nil {
 			tx.db.opts.log.Error("failed to record mdbx summaries", "err", err)
 		}
@@ -1406,6 +1404,66 @@ func (c *MdbxCursor) Close() {
 
 func (c *MdbxCursor) IsClosed() bool { return c.c == nil }
 
+type MdbxCursorPseudoDupSort struct {
+	*MdbxCursor
+}
+
+func (c *MdbxCursorPseudoDupSort) DeleteExact(k1, k2 []byte) error {
+	return c.Delete(k1)
+}
+
+// NextNoDup - iterate with skipping all duplicates
+func (c *MdbxCursorPseudoDupSort) NextNoDup() ([]byte, []byte, error) {
+	k, v, err := c.Next()
+	if err != nil {
+		if mdbx.IsNotFound(err) {
+			return nil, nil, nil
+		}
+		return []byte{}, nil, fmt.Errorf("in NextNoDup: %w", err)
+	}
+	return k, v, nil
+}
+
+// NextDup - iterate only over duplicates of current key
+func (c *MdbxCursorPseudoDupSort) NextDup() ([]byte, []byte, error) {
+	return nil, nil, nil
+}
+
+func (c *MdbxCursorPseudoDupSort) FirstDup() ([]byte, error) {
+	_, v, err := c.Current()
+	if err != nil {
+		if mdbx.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("in FirstDup: tbl=%s, %w", c.bucketName, err)
+	}
+	return v, nil
+}
+
+func (c *MdbxCursorPseudoDupSort) LastDup() ([]byte, error) {
+	_, v, err := c.Current()
+	if err != nil {
+		if mdbx.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("in FirstDup: tbl=%s, %w", c.bucketName, err)
+	}
+	return v, nil
+}
+
+// DeleteCurrentDuplicates - delete all of the data items for the current key.
+func (c *MdbxCursorPseudoDupSort) DeleteCurrentDuplicates() error {
+	if err := c.DeleteCurrent(); err != nil {
+		return fmt.Errorf("label: %s,in DeleteCurrentDuplicates: %w", c.label, err)
+	}
+	return nil
+}
+
+// CountDuplicates returns the number of duplicates for the current key. See mdb_cursor_count
+func (c *MdbxCursorPseudoDupSort) CountDuplicates() (uint64, error) {
+	return 1, nil
+}
+
 type MdbxDupSortCursor struct {
 	*MdbxCursor
 }
@@ -1442,6 +1500,17 @@ func (c *MdbxDupSortCursor) SeekBothRange(key, value []byte) ([]byte, error) {
 		return nil, fmt.Errorf("in SeekBothRange, table=%s: %w", c.bucketName, err)
 	}
 	return v, nil
+}
+
+func (c *MdbxDupSortCursor) DeleteBothRange(key, value []byte) error {
+	_, _, err := c.c.Get(key, value, mdbx.GetBothRange)
+	if err != nil {
+		if mdbx.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("in SeekBothRange, table=%s: %w", c.bucketName, err)
+	}
+	return c.c.Del(mdbx.Current)
 }
 
 func (c *MdbxDupSortCursor) FirstDup() ([]byte, error) {
@@ -1556,9 +1625,7 @@ func bucketSlice(b kv.TableCfg) []string {
 	for name := range b {
 		buckets = append(buckets, name)
 	}
-	sort.Slice(buckets, func(i, j int) bool {
-		return strings.Compare(buckets[i], buckets[j]) < 0
-	})
+	slices.Sort(buckets)
 	return buckets
 }
 

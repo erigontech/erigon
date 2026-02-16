@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -21,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -34,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/calltracer"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/shards"
 )
@@ -92,8 +95,8 @@ type parallelExecutor struct {
 
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
-	initialTxNum uint64, inputTxNum uint64, useExternalTx bool, initialCycle bool, rwTx kv.TemporalRwTx,
-	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker, flushEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
+	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
+	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
 	var asyncTxChan mdbx.TxApplyChan
 	var asyncTx kv.TemporalTx
@@ -110,17 +113,22 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	applyResults := make(chan applyResult, 100_000)
 
 	if blockLimit > 0 && min(startBlockNum+blockLimit, maxBlockNum) > startBlockNum+16 || maxBlockNum > startBlockNum+16 {
-		log.Info(fmt.Sprintf("[%s] %s starting", execStage.LogPrefix(), "parallel"),
+		log.Info(fmt.Sprintf("[%s] parallel starting", execStage.LogPrefix()),
 			"from", startBlockNum, "to", maxBlockNum, "limit", startBlockNum+blockLimit-1, "initialTxNum", initialTxNum,
-			"initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx,
-			"inMem", pe.inMemExec)
+			"initialBlockTxOffset", offsetFromBlockBeginning, "initialCycle", initialCycle,
+			"isForkValidation", pe.isForkValidation, "isBlockProduction", pe.isBlockProduction, "isApplyingBlocks", pe.isApplyingBlocks)
 	}
 
-	executorContext, executorCancel := pe.run(ctx)
-
+	executorContext, executorCancel, err := pe.run(ctx)
 	defer executorCancel()
 
-	pe.resetWorkers(ctx, pe.rs, rwTx)
+	if err != nil {
+		return nil, rwTx, err
+	}
+
+	if err := pe.resetWorkers(ctx, pe.rs, rwTx); err != nil {
+		return nil, rwTx, err
+	}
 
 	if err := pe.executeBlocks(executorContext, asyncTx, startBlockNum, maxBlockNum, blockLimit, initialTxNum, readAhead, initialCycle, applyResults); err != nil {
 		return nil, rwTx, err
@@ -134,13 +142,19 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	var uncommittedTransactions uint64
 	var uncommittedGas int64
 	var flushPending bool
+	var hasLoggedExecution bool
+	var hasLoggedCommittments atomic.Bool
+	var commitStart time.Time
+
+	var stepsInDb = rawdbhelpers.IdxStepsCountV3(rwTx, pe.agg.StepSize())
+	var lastProgress commitment.CommitProgress
 
 	execErr := func() (err error) {
 		defer func() {
 			if rec := recover(); rec != nil {
 				pe.logger.Warn("["+execStage.LogPrefix()+"] rw panic", "rec", rec, "stack", dbg.Stack())
-			} else if err != nil && !errors.Is(err, context.Canceled) {
-				pe.logger.Warn("["+execStage.LogPrefix()+"] rw exit", "err", err)
+			} else if err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, &ErrLoopExhausted{})) {
+				pe.logger.Warn("["+execStage.LogPrefix()+"] rw exit", "err", err, "stack", dbg.Stack())
 			} else {
 				pe.logger.Debug("[" + execStage.LogPrefix() + "] rw exit")
 			}
@@ -162,7 +176,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 			case applyResult := <-applyResults:
 				switch applyResult := applyResult.(type) {
 				case *txResult:
-					uncommittedGas += applyResult.gasUsed
+					uncommittedGas += applyResult.blockGasUsed
 					uncommittedTransactions++
 					pe.rs.SetTxNum(applyResult.blockNum, applyResult.txNum)
 					if dbg.TraceApply && dbg.TraceBlock(applyResult.blockNum) {
@@ -171,7 +185,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					}
 					blockUpdateCount += applyResult.stateUpdates.UpdateCount()
 					err := pe.rs.ApplyTxState(ctx, rwTx, applyResult.blockNum, applyResult.txNum, applyResult.stateUpdates,
-						nil, applyResult.receipt, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
+						nil, applyResult.receipt, applyResult.blobGasUsed, applyResult.logs, applyResult.traceFroms, applyResult.traceTos,
 						pe.cfg.chainConfig, applyResult.rules, false)
 					blockApplyCount += applyResult.stateUpdates.UpdateCount()
 					pe.rs.SetTrace(false)
@@ -182,7 +196,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					if applyResult.BlockNum > 0 && !applyResult.isPartial { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 						checkReceipts := !pe.cfg.vmConfig.StatelessExec &&
 							pe.cfg.chainConfig.IsByzantium(applyResult.BlockNum) &&
-							!pe.cfg.vmConfig.NoReceipts && !pe.isMining
+							!pe.cfg.vmConfig.NoReceipts && !pe.isBlockProduction
 
 						b, err := pe.cfg.blockReader.BlockByHash(ctx, rwTx, applyResult.BlockHash)
 
@@ -200,27 +214,55 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							return fmt.Errorf("block %d: applyCount mismatch: got: %d expected %d", applyResult.BlockNum, blockUpdateCount, applyResult.ApplyCount)
 						}
 
-						// TODO --- BAL Implementation integration point ---
-						//  At this stage applyResult.TxIO contains the reads and writes for all of the completed
-						// transactions in the block.  The state.VersionedRead, and state.VersionedWrite objects contain
-						// version information contains details the data read & writes and the associated transactions
-						//
-						// It should be possible to iterate this list and construct the blocks BAL here
-						//
-						// For more details on how to iterate this list look at:
-						//
-						// dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
-						//
-						// which iterates the list and prints it contents
-						//
-						if err := protocol.BlockPostValidation(applyResult.GasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
-							lastHeader, pe.isMining, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
+						if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
+							bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO, pe.cfg.dirs.DataDir)
+							if err := bal.Validate(); err != nil {
+								return fmt.Errorf("block %d: invalid computed block access list: %w", applyResult.BlockNum, err)
+							}
+							log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash())
+							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) {
+								if lastHeader.BlockAccessListHash == nil {
+									if pe.isBlockProduction {
+										hash := bal.Hash()
+										lastHeader.BlockAccessListHash = &hash
+									} else {
+										return fmt.Errorf("block %d: missing block access list hash", applyResult.BlockNum)
+									}
+								}
+								headerBALHash := *lastHeader.BlockAccessListHash
+								if !pe.isBlockProduction {
+									dbBALBytes, err := rawdb.ReadBlockAccessListBytes(rwTx, applyResult.BlockHash, applyResult.BlockNum)
+									if err != nil {
+										return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
+									}
+									dbBAL, err := types.DecodeBlockAccessListBytes(dbBALBytes)
+									if err != nil {
+										return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
+									}
+									if err = dbBAL.Validate(); err != nil {
+										return fmt.Errorf("block %d: db block access list is invalid: %w", applyResult.BlockNum, err)
+									}
+
+									if headerBALHash != dbBAL.Hash() {
+										log.Info(fmt.Sprintf("bal from block: %s", dbBAL.DebugString()))
+										return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, dbBAL.Hash(), headerBALHash)
+									}
+									if headerBALHash != bal.Hash() {
+										log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))
+										return fmt.Errorf("%w, block=%d: block access list mismatch: got %s expected %s", rules.ErrInvalidBlock, applyResult.BlockNum, bal.Hash(), headerBALHash)
+									}
+								}
+							}
+						}
+
+						if err := pe.getPostValidator().Process(applyResult.BlockGasUsed, applyResult.BlobGasUsed, checkReceipts, applyResult.Receipts,
+							lastHeader, pe.isBlockProduction, b.Transactions(), pe.cfg.chainConfig, pe.logger); err != nil {
 							dumpTxIODebug(applyResult.BlockNum, applyResult.TxIO)
 							return fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err) //same as in stage_exec.go
 						}
 
-						if !pe.isMining && !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle {
-							pe.cfg.notifications.RecentLogs.Add(applyResult.Receipts)
+						if !pe.isBlockProduction && !applyResult.isPartial && !execStage.CurrentSyncCycle.IsInitialCycle {
+							pe.cfg.notifications.RecentReceipts.Add(applyResult.Receipts, b.Transactions(), lastHeader)
 						}
 					}
 
@@ -231,13 +273,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						lastBlockResult = *applyResult
 					}
 
-					flushPending = pe.rs.SizeEstimate() > pe.cfg.batchSize.Bytes()
+					flushPending = pe.rs.SizeEstimateBeforeCommitment() > pe.cfg.batchSize.Bytes()
 
 					if !dbg.DiscardCommitment() {
 						if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||
 							applyResult.Exhausted != nil ||
 							pe.cfg.syncCfg.KeepExecutionProofs ||
-							(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum) {
+							(flushPending && lastBlockResult.BlockNum > pe.lastCommittedBlockNum.Load()) {
 
 							resetExecGauges(ctx)
 
@@ -245,7 +287,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								fmt.Println(applyResult.BlockNum, "applied count", blockApplyCount, "last tx", applyResult.lastTxNum)
 							}
 
-							var trace bool
+							trace := dbg.TraceDomainIO && !dbg.BatchCommitments
 							if dbg.TraceBlock(applyResult.BlockNum) {
 								fmt.Println(applyResult.BlockNum, "Commitment")
 								trace = true
@@ -253,33 +295,33 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							pe.doms.SetTrace(trace, !dbg.BatchCommitments)
 
 							commitProgress := make(chan *commitment.CommitProgress, 100)
-							logCommittedDone := make(chan struct{})
+							LogCommitmentsDone := make(chan struct{})
+							commitStart = time.Now()
+
 							go func() {
-								defer close(logCommittedDone)
+								defer close(LogCommitmentsDone)
 								logEvery := time.NewTicker(20 * time.Second)
-								commitStart := time.Now()
 
 								defer logEvery.Stop()
-								var lastProgress commitment.CommitProgress
-
 								var prevCommitedBlocks uint64
 								var prevCommittedTransactions uint64
 								var prevCommitedGas uint64
 
-								logCommitted := func(commitProgress commitment.CommitProgress) {
+								LogCommitments := func(commitProgress commitment.CommitProgress) {
 									// this is an approximation of blcok prgress - it assumnes an
 									// even distribution of keys to blocks
-									if commitProgress.KeyIndex > 0 {
+									if commitProgress.KeyIndex > 0 && commitProgress.KeyIndex < commitProgress.UpdateCount {
 										progress := float64(commitProgress.KeyIndex) / float64(commitProgress.UpdateCount)
-										committedGas := uint64(float64(uncommittedGas) * progress)
-										committedTransactions := uint64(float64(uncommittedTransactions) * progress)
-										commitedBlocks := uint64(float64(uncommittedBlocks) * progress)
+										committedGas := uint64(math.Round(float64(uncommittedGas) * progress))
+										committedTransactions := uint64(math.Round(float64(uncommittedTransactions) * progress))
+										commitedBlocks := uint64(math.Round(float64(uncommittedBlocks) * progress))
 
-										if committedTransactions-prevCommittedTransactions > 0 {
-											pe.LogCommitted(commitStart,
+										if commitedBlocks > prevCommitedBlocks {
+											hasLoggedCommittments.Store(true)
+											pe.LogCommitments(commitStart,
 												commitedBlocks-prevCommitedBlocks,
 												committedTransactions-prevCommittedTransactions,
-												committedGas-prevCommitedGas, rawdbhelpers.IdxStepsCountV3(rwTx, pe.agg.StepSize()), commitProgress)
+												committedGas-prevCommitedGas, stepsInDb, commitProgress)
 										}
 
 										lastCommitedLog = time.Now()
@@ -299,25 +341,30 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 										return
 									case progress, ok := <-commitProgress:
 										if !ok {
-											if time.Since(lastCommitedLog) > logInterval/20 {
-												logCommitted(lastProgress)
+											if !hasLoggedCommittments.Load() || time.Since(lastCommitedLog) > logInterval/20 {
+												hasLoggedCommittments.Store(true)
+												pe.LogCommitments(commitStart,
+													uint64(uncommittedBlocks), uncommittedTransactions,
+													uint64(uncommittedGas), stepsInDb, lastProgress)
 											}
 											return
 										}
 										lastProgress = *progress
 									case <-logEvery.C:
 										if time.Since(lastCommitedLog) > logInterval-(logInterval/90) {
-											logCommitted(lastProgress)
+											LogCommitments(lastProgress)
 										}
 									}
 								}
 							}()
 
 							if time.Since(lastExecutedLog) > logInterval/50 {
-								pe.LogExecuted()
+								hasLoggedExecution = true
+								pe.LogExecution()
 								lastExecutedLog = time.Now()
 							}
 
+							// Warmup is enabled via EnableTrieWarmup at executor init
 							rh, err := pe.doms.ComputeCommitment(ctx, rwTx, true, applyResult.BlockNum, applyResult.lastTxNum, pe.logPrefix, commitProgress)
 							close(commitProgress)
 							captured := pe.doms.SetTrace(false, false)
@@ -326,13 +373,15 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 							}
 							resetCommitmentGauges(ctx)
 
+							// on chain tip we run receipt root verification in parallel alongside commitment computation
+							// make sure to wait for it to finish and check for an error
+							err = pe.getPostValidator().Wait()
+							if err != nil {
+								return err
+							}
+
 							if shouldGenerateChangesets {
 								pe.domains().SavePastChangesetAccumulator(applyResult.BlockHash, applyResult.BlockNum, changeSet)
-								if !pe.inMemExec {
-									if err := changeset.WriteDiffSet(rwTx, applyResult.BlockNum, applyResult.BlockHash, changeSet); err != nil {
-										return err
-									}
-								}
 							}
 							pe.domains().SetChangesetAccumulator(nil)
 
@@ -348,17 +397,16 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 								return handleIncorrectRootHashError(
 									applyResult.BlockNum, applyResult.BlockHash, applyResult.ParentHash,
-									rwTx, pe.cfg, execStage, maxBlockNum, pe.logger, u)
+									rwTx, pe.cfg, execStage, pe.logger, u)
 							}
+
+							<-LogCommitmentsDone // make sure no async mutations by LogCommitments can happen at this point
 							// fix these here - they will contain estimates after commit logging
-							select {
-							case <-logCommittedDone: // make sure no async mutations by LogCommitted can happen at this point
-							}
-							pe.txExecutor.lastCommittedBlockNum = lastBlockResult.BlockNum
-							pe.txExecutor.lastCommittedTxNum = lastBlockResult.lastTxNum
+							pe.txExecutor.lastCommittedBlockNum.Store(lastBlockResult.BlockNum)
+							pe.txExecutor.lastCommittedTxNum.Store(lastBlockResult.lastTxNum)
 							uncommittedBlocks = 0
 							uncommittedGas = 0
-							uncommittedGas = 0
+							uncommittedTransactions = 0
 						}
 					}
 
@@ -375,12 +423,15 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					if applyResult.Exhausted != nil {
 						return applyResult.Exhausted
 					}
-
 					if shouldGenerateChangesets && applyResult.BlockNum > 0 {
 						changeSet = &changeset.StateChangeSet{}
 						pe.domains().SetChangesetAccumulator(changeSet)
 					}
+					if flushPending {
+						return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
+					}
 				}
+
 			case <-executorContext.Done():
 				err = pe.wait(ctx)
 				return fmt.Errorf("executor context failed: %w", err)
@@ -388,23 +439,12 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 				return ctx.Err()
 			case <-logEvery.C:
 				if time.Since(lastExecutedLog) > logInterval-(logInterval/90) {
+					hasLoggedExecution = true
 					lastExecutedLog = time.Now()
-					pe.LogExecuted()
+					pe.LogExecution()
 					if pe.agg.HasBackgroundFilesBuild() {
 						pe.logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", pe.agg.BackgroundProgress())
 					}
-				}
-			case <-flushEvery.C:
-				if flushPending {
-					if !initialCycle {
-						return &ErrLoopExhausted{From: startBlockNum, To: lastBlockResult.BlockNum, Reason: "block batch is full"}
-					}
-
-					if rwTx, err = pe.flushAndCommit(ctx, execStage, rwTx, asyncTxChan, useExternalTx); err != nil {
-						return fmt.Errorf("flush failed: %w", err)
-					}
-
-					flushPending = false
 				}
 			}
 		}
@@ -412,24 +452,34 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 	executorCancel()
 
+	if !hasLoggedExecution {
+		pe.LogExecution()
+	}
+
+	// Wait for all goroutines to complete before reading shared state
+	if err := pe.wait(ctx); err != nil {
+		return nil, rwTx, err
+	}
+
+	if !hasLoggedCommittments.Load() && !commitStart.IsZero() {
+		pe.LogCommitments(commitStart, pe.txExecutor.lastCommittedBlockNum.Load(), uncommittedTransactions, uint64(uncommittedGas), stepsInDb, lastProgress)
+	}
+
 	if execErr != nil {
 		if !(errors.Is(execErr, context.Canceled) || errors.Is(execErr, &ErrLoopExhausted{})) {
 			return nil, rwTx, execErr
 		}
 	}
 
-	var err error
-	if rwTx, err = pe.flushAndCommit(ctx, execStage, rwTx, asyncTxChan, useExternalTx); err != nil {
-		return nil, rwTx, fmt.Errorf("flush failed: %w", err)
+	if err = execStage.Update(rwTx, pe.lastCommittedBlockNum.Load()); err != nil {
+		return nil, rwTx, err
 	}
-	if err = pe.wait(ctx); err != nil {
-		return nil, rwTx, fmt.Errorf("wait failed: %w", err)
-	}
+
 	return lastHeader, rwTx, execErr
 }
 
-func (pe *parallelExecutor) LogExecuted() {
-	pe.progress.LogExecuted(pe.rs.StateV3, pe)
+func (pe *parallelExecutor) LogExecution() {
+	pe.progress.LogExecution(pe.rs.StateV3, pe)
 	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
 		pe.logger.Info(fmt.Sprintf("[%s] domain reads", pe.logPrefix), domainMetrics...)
 	}
@@ -438,11 +488,11 @@ func (pe *parallelExecutor) LogExecuted() {
 	}
 }
 
-func (pe *parallelExecutor) LogCommitted(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
-	pe.committedGas += int64(committedGas)
-	pe.txExecutor.lastCommittedBlockNum += committedBlocks
-	pe.txExecutor.lastCommittedTxNum += committedTransactions
-	pe.progress.LogCommitted(pe.rs.StateV3, pe, commitStart, stepsInDb, lastProgress)
+func (pe *parallelExecutor) LogCommitments(commitStart time.Time, committedBlocks uint64, committedTransactions uint64, committedGas uint64, stepsInDb float64, lastProgress commitment.CommitProgress) {
+	pe.committedGas.Add(int64(committedGas))
+	pe.txExecutor.lastCommittedBlockNum.Add(committedBlocks)
+	pe.txExecutor.lastCommittedTxNum.Add(committedTransactions)
+	pe.progress.LogCommitments(pe.rs.StateV3, pe, commitStart, stepsInDb, lastProgress)
 	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
 		pe.logger.Info(fmt.Sprintf("[%s] domain reads", pe.logPrefix), domainMetrics...)
 	}
@@ -458,71 +508,6 @@ func (pe *parallelExecutor) LogComplete(stepsInDb float64) {
 	}
 	for domain, domainMetrics := range pe.domains().DomainLogMetrics() {
 		pe.logger.Debug(fmt.Sprintf("[%s] %s", pe.logPrefix, domain), domainMetrics...)
-	}
-}
-
-func (pe *parallelExecutor) flushAndCommit(ctx context.Context, execStage *StageState, applyTx kv.TemporalRwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.TemporalRwTx, error) {
-	flushStart := time.Now()
-	var flushTime time.Duration
-
-	if !pe.inMemExec {
-		if err := pe.doms.Flush(ctx, applyTx); err != nil {
-			return applyTx, err
-		}
-		flushTime = time.Since(flushStart)
-	}
-
-	commitStart := time.Now()
-	var t2 time.Duration
-	var err error
-	if applyTx, t2, err = pe.commit(ctx, execStage, applyTx, asyncTxChan, useExternalTx); err != nil {
-		return applyTx, err
-	}
-
-	pe.logger.Info("["+pe.logPrefix+"] flushed", "block", pe.doms.BlockNum(), "time", time.Since(flushStart), "flush", flushTime, "commit", time.Since(commitStart), "db", t2, "externaltx", useExternalTx)
-	return applyTx, nil
-}
-
-func (pe *parallelExecutor) commit(ctx context.Context, execStage *StageState, tx kv.TemporalRwTx, asyncTxChan mdbx.TxApplyChan, useExternalTx bool) (kv.TemporalRwTx, time.Duration, error) {
-	pe.pause()
-	defer pe.resume()
-
-	for {
-		waiter, paused := pe.paused()
-		if paused {
-			break
-		}
-		select {
-		case request := <-asyncTxChan:
-			request.Apply()
-		case <-ctx.Done():
-			return nil, 0, ctx.Err()
-		case <-waiter:
-		}
-	}
-
-	return pe.txExecutor.commit(ctx, execStage, tx, useExternalTx, pe.resetWorkers)
-}
-
-func (pe *parallelExecutor) pause() {
-	for _, worker := range pe.execWorkers {
-		worker.Pause()
-	}
-}
-
-func (pe *parallelExecutor) paused() (chan any, bool) {
-	for _, worker := range pe.execWorkers {
-		if waiter, paused := worker.Paused(); !paused {
-			return waiter, false
-		}
-	}
-
-	return nil, true
-}
-
-func (pe *parallelExecutor) resume() {
-	for _, worker := range pe.execWorkers {
-		worker.Resume()
 	}
 }
 
@@ -575,11 +560,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			}
 
 			if pe.applyTx == nil {
-				temporalDb, ok := pe.cfg.db.(kv.TemporalRwDB)
-				if !ok {
-					return errors.New("pe.cfg.db is not a temporal db")
-				}
-				pe.applyTx, err = temporalDb.BeginTemporalRo(ctx) //nolint
+				pe.applyTx, err = pe.cfg.db.BeginTemporalRo(ctx) //nolint
 
 				if err != nil {
 					return err
@@ -644,13 +625,24 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				if blockResult.BlockNum > 0 {
 					result := blockExecutor.results[len(blockExecutor.results)-1]
 
+					finalTask := blockExecutor.tasks[len(blockExecutor.tasks)-1].Task
+					finalVersion := finalTask.Version()
 					stateUpdates, err := func() (state.StateUpdates, error) {
 						pe.RLock()
 						defer pe.RUnlock()
 
-						ibs := state.New(state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))))
-						ibs.SetTxContext(result.Version().BlockNum, result.Version().TxIndex)
-						ibs.SetVersion(result.Version().Incarnation)
+						var reader state.StateReader
+						if finalTask.IsHistoric() {
+							reader = state.NewHistoryReaderV3(applyTx, finalVersion.TxNum)
+						} else {
+							reader = state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
+						}
+						ibs := state.New(state.NewBufferedReader(pe.rs, reader))
+						defer ibs.Release(true)
+						ibs.SetVersion(finalVersion.Incarnation)
+						localVersionMap := state.NewVersionMap(nil)
+						ibs.SetVersionMap(localVersionMap)
+						ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
 
 						txTask, ok := result.Task.(*taskVersion).Task.(*exec.TxTask)
 
@@ -658,7 +650,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							return state.StateUpdates{}, nil
 						}
 
-						syscall := func(contract common.Address, data []byte) ([]byte, error) {
+						syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 							ret, err := protocol.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
 							if err != nil {
 								return nil, err
@@ -668,7 +660,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						}
 
 						chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
-						if pe.isMining {
+						if pe.isBlockProduction {
 							_, _, err =
 								pe.cfg.engine.FinalizeAndAssemble(
 									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
@@ -676,16 +668,24 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						} else {
 							_, err =
 								pe.cfg.engine.Finalize(
-									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
+									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, blockReceipts,
 									txTask.Withdrawals, chainReader, syscall, false, pe.logger)
 						}
 
 						if err != nil {
-							return state.StateUpdates{}, fmt.Errorf("can't finalize block: %w", err)
+							return state.StateUpdates{}, fmt.Errorf("can't finalize block %d: %w", blockResult.BlockNum, err)
+						}
+
+						blockExecutor.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
+						blockExecutor.blockIO.RecordAccesses(finalVersion, ibs.AccessedAddresses())
+
+						finalWrites := ibs.VersionedWrites(true)
+						if len(finalWrites) > 0 {
+							blockExecutor.blockIO.RecordWrites(finalVersion, finalWrites)
+							blockExecutor.versionMap.FlushVersionedWrites(finalWrites, true, "")
 						}
 
 						stateWriter := state.NewBufferedWriter(pe.rs, nil)
-
 						if err = ibs.MakeWriteSet(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter); err != nil {
 							return state.StateUpdates{}, err
 						}
@@ -704,13 +704,14 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 					}
 
 					blockExecutor.applyResults <- &txResult{
-						blockNum:     blockResult.BlockNum,
-						txNum:        blockResult.lastTxNum,
-						rules:        result.Rules(),
-						stateUpdates: stateUpdates,
-						logs:         result.Logs,
-						traceFroms:   result.TraceFroms,
-						traceTos:     result.TraceTos,
+						blockNum:              blockResult.BlockNum,
+						txNum:                 blockResult.lastTxNum,
+						rules:                 result.Rules(),
+						stateUpdates:          stateUpdates,
+						logs:                  result.Logs,
+						traceFroms:            result.TraceFroms,
+						traceTos:              result.TraceTos,
+						cumulativeBlobGasUsed: blockExecutor.blobGasUsed,
 					}
 				}
 
@@ -738,7 +739,19 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 }
 
 func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *execRequest) (err error) {
-	prevSenderTx := map[common.Address]int{}
+	// Validate state cache before processing block - ensures cache is cleared after reorgs
+	// This matches the behavior in serial execution (exec3_serial.go)
+	if len(execRequest.tasks) > 0 {
+		if txTask, ok := execRequest.tasks[0].(*exec.TxTask); ok && txTask.Header != nil {
+			parentHash := txTask.Header.ParentHash
+			blockHash := execRequest.blockHash
+			if stateCache := pe.doms.GetStateCache(); stateCache != nil {
+				stateCache.ValidateAndPrepare(parentHash, blockHash)
+			}
+		}
+	}
+
+	prevSenderTx := map[accounts.Address]int{}
 	var scheduleable *blockExecutor
 	var executor *blockExecutor
 
@@ -791,13 +804,13 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			if err != nil {
 				return err
 			}
-			if sender != nil {
-				if tx, ok := prevSenderTx[*sender]; ok {
+			if !sender.IsNil() {
+				if tx, ok := prevSenderTx[sender]; ok {
 					executor.execTasks.addDependency(tx, i)
 					executor.execTasks.clearPending(i)
 				}
 
-				prevSenderTx[*sender] = i
+				prevSenderTx[sender] = i
 			}
 		}
 
@@ -857,7 +870,7 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tempo
 	return blockResult, nil
 }
 
-func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.CancelFunc) {
+func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.CancelFunc, error) {
 	pe.execRequests = make(chan *execRequest, 100_000)
 	pe.in = exec.NewQueueWithRetry(100_000)
 
@@ -867,10 +880,15 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	execLoopCtx, execLoopCtxCancel := context.WithCancel(ctx)
 	pe.execLoopGroup, execLoopCtx = errgroup.WithContext(execLoopCtx)
 
-	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers = exec.NewWorkersPool(
+	var err error
+	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers, err = exec.NewWorkersPool(
 		execLoopCtx, nil, true, pe.cfg.db, nil, nil, nil, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
-		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.isMining, pe.logger)
+		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.isBlockProduction, pe.logger)
+
+	if err != nil {
+		return execLoopCtx, execLoopCtxCancel, err
+	}
 
 	pe.execLoopGroup.Go(func() error {
 		defer pe.rws.Close()
@@ -881,10 +899,13 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 
 	return execLoopCtx, func() {
 		execLoopCtxCancel()
-		pe.wait(ctx)
-		pe.stopWorkers()
-		pe.in.Close()
-	}
+		defer pe.stopWorkers()
+		defer pe.in.Close()
+
+		if err := pe.wait(ctx); err != nil {
+			pe.logger.Debug("exec loop cancel failed", "err", err)
+		}
+	}, nil
 }
 
 func (pe *parallelExecutor) wait(ctx context.Context) error {
@@ -912,40 +933,41 @@ func (pe *parallelExecutor) wait(ctx context.Context) error {
 	}
 }
 
-type applyResult interface {
-}
+type applyResult any
 
 type blockResult struct {
-	BlockNum    uint64
-	BlockTime   uint64
-	BlockHash   common.Hash
-	ParentHash  common.Hash
-	StateRoot   common.Hash
-	Err         error
-	GasUsed     uint64
-	BlobGasUsed uint64
-	lastTxNum   uint64
-	complete    bool
-	isPartial   bool
-	ApplyCount  int
-	TxIO        *state.VersionedIO
-	Receipts    types.Receipts
-	Stats       map[int]ExecutionStat
-	Deps        *state.DAG
-	AllDeps     map[int]map[int]bool
-	Exhausted   *ErrLoopExhausted
+	BlockNum     uint64
+	BlockTime    uint64
+	BlockHash    common.Hash
+	ParentHash   common.Hash
+	StateRoot    common.Hash
+	Err          error
+	BlockGasUsed uint64
+	BlobGasUsed  uint64
+	lastTxNum    uint64
+	complete     bool
+	isPartial    bool
+	ApplyCount   int
+	TxIO         *state.VersionedIO
+	Receipts     types.Receipts
+	Stats        map[int]ExecutionStat
+	Deps         *state.DAG
+	AllDeps      map[int]map[int]bool
+	Exhausted    *ErrLoopExhausted
 }
 
 type txResult struct {
-	blockNum     uint64
-	txNum        uint64
-	gasUsed      int64
-	receipt      *types.Receipt
-	logs         []*types.Log
-	traceFroms   map[common.Address]struct{}
-	traceTos     map[common.Address]struct{}
-	stateUpdates state.StateUpdates
-	rules        *chain.Rules
+	blockNum              uint64
+	txNum                 uint64
+	blockGasUsed          int64
+	blobGasUsed           uint64
+	cumulativeBlobGasUsed uint64
+	receipt               *types.Receipt
+	logs                  []*types.Log
+	traceFroms            map[accounts.Address]struct{}
+	traceTos              map[accounts.Address]struct{}
+	stateUpdates          state.StateUpdates
+	rules                 *chain.Rules
 }
 
 type execTask struct {
@@ -959,11 +981,11 @@ type execResult struct {
 	stateUpdates *state.StateUpdates
 }
 
-func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, error) {
+func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engine, vm *state.VersionMap, stateReader state.StateReader, stateWriter state.StateWriter) (*types.Receipt, state.ReadSet, state.VersionedWrites, error) {
 	task, ok := result.Task.(*taskVersion)
 
 	if !ok {
-		return nil, fmt.Errorf("unexpected task type: %T", result.Task)
+		return nil, nil, nil, fmt.Errorf("unexpected task type: %T", result.Task)
 	}
 
 	blockNum := task.Version().BlockNum
@@ -971,7 +993,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	txIncarnation := task.Version().Incarnation
 
 	txTrace := dbg.TraceTransactionIO &&
-		(dbg.TraceTx(blockNum, txIndex) || dbg.TraceAccount(result.Coinbase) || dbg.TraceAccount(result.ExecutionResult.BurntContractAddress))
+		(dbg.TraceTx(blockNum, txIndex) || dbg.TraceAccount(result.Coinbase.Handle()) || dbg.TraceAccount(result.ExecutionResult.BurntContractAddress.Handle()))
 
 	var tracePrefix string
 	if txTrace {
@@ -988,31 +1010,38 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	txTask, ok := task.Task.(*exec.TxTask)
 
 	if !ok {
-		return nil, nil
+		return nil, nil, nil, nil
 	}
 
 	ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
+	// defer ibs.Release(true) - do not release this one because it is long lived. TODO: fix.
 	ibs.SetTxContext(blockNum, txIndex)
 	ibs.SetVersion(txIncarnation)
-	if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
-		return nil, err
-	}
 	ibs.SetVersionMap(&state.VersionMap{})
+	if err := ibs.ApplyVersionedWrites(result.TxOut); err != nil {
+		return nil, nil, nil, err
+	}
 	ibs.SetTrace(txTask.Trace)
 
+	rules := txTask.EvmBlockContext.Rules(txTask.Config)
+
 	if task.IsBlockEnd() || txIndex < 0 {
-		if blockNum == 0 || txTask.Config.IsByzantium(blockNum) {
-			ibs.FinalizeTx(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter)
+		if err := ibs.FinalizeTx(rules, stateWriter); err != nil {
+			return nil, nil, nil, err
 		}
-		return nil, nil
+		return nil, ibs.VersionedReads(), ibs.VersionedWrites(true), nil
 	}
 
 	if task.shouldDelayFeeCalc {
-		if txTask.Config.IsLondon(blockNum) {
-			ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy)
+		if !result.ExecutionResult.BurntContractAddress.IsNil() && txTask.Config.IsLondon(blockNum) {
+			if err := ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy); err != nil {
+				return nil, nil, nil, err
+			}
 		}
 
-		ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee)
+		if err := ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
+			return nil, nil, nil, err
+		}
 
 		if engine != nil {
 			if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
@@ -1020,7 +1049,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 				coinbase, err := stateReader.ReadAccountData(result.Coinbase) // to generate logs we want the initial balance
 
 				if err != nil {
-					return nil, err
+					return nil, nil, nil, err
 				}
 
 				if coinbase != nil {
@@ -1032,7 +1061,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 
 				message, err := task.TxMessage()
 				if err != nil {
-					return nil, err
+					return nil, nil, nil, err
 				}
 
 				postApplyMessageFunc(
@@ -1040,6 +1069,7 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 					message.From(),
 					result.Coinbase,
 					&execResult,
+					rules,
 				)
 
 				// capture postApplyMessageFunc side affects
@@ -1055,24 +1085,23 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 
 	// we need to flush the finalized writes to the version map so
 	// they are taken into account by subsequent transactions
-	vm.FlushVersionedWrites(ibs.VersionedWrites(true), true, tracePrefix)
-	vm.SetTrace(false)
+	allWrites := ibs.VersionedWrites(true)
 
-	if txTask.Config.IsByzantium(blockNum) {
-		ibs.FinalizeTx(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter)
-	}
+	vm.FlushVersionedWrites(allWrites, true, tracePrefix)
+	vm.SetTrace(false)
+	ibs.FinalizeTx(rules, stateWriter)
 
 	receipt, err := result.CreateNextReceipt(prevReceipt)
 
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 
 	if hooks := result.TracingHooks(); hooks != nil && hooks.OnTxEnd != nil {
 		hooks.OnTxEnd(receipt, result.Err)
 	}
 
-	return receipt, nil
+	return receipt, ibs.VersionedReads(), allWrites, nil
 }
 
 type taskVersion struct {
@@ -1225,10 +1254,10 @@ type blockExecutor struct {
 	// Stats for debugging purposes
 	cntExec, cntSpecExec, cntSuccess, cntAbort, cntTotalValidations, cntValidationFail, cntFinalized int
 
-	// cummulative gas for this block
-	gasUsed     uint64
-	blobGasUsed uint64
-	gasPool     *protocol.GasPool
+	// cumulative gas for this block
+	blockGasUsed uint64
+	blobGasUsed  uint64
+	gasPool      *protocol.GasPool
 
 	execFailed, execAborted []int
 
@@ -1281,15 +1310,16 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 			if res.Version().Incarnation > len(be.tasks) {
 				if execErr.OriginError != nil {
-					return nil, fmt.Errorf("could not apply tx %d:%d [%v]: %w: too many incarnations: %d", be.blockNum, res.Version().TxIndex, task.TxHash(), execErr.OriginError, res.Version().Incarnation)
+					return nil, fmt.Errorf("could not apply tx %d:%d [%v]: %w: too many incarnations: %d, expected: %d", be.blockNum, res.Version().TxIndex, task.TxHash(), execErr.OriginError, res.Version().Incarnation, len(be.tasks))
 				} else {
-					return nil, fmt.Errorf("could not apply tx %d:%d [%v]: too many incarnations: %d", be.blockNum, res.Version().TxIndex, task.TxHash(), res.Version().Incarnation)
+					return nil, fmt.Errorf("could not apply tx %d:%d [%v]: too many incarnations: %d, expected: %d", be.blockNum, res.Version().TxIndex, task.TxHash(), res.Version().Incarnation, len(be.tasks))
 				}
 			}
 			if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
 				fmt.Println(be.blockNum, "err", execErr)
 			}
 			be.blockIO.RecordReads(res.Version(), res.TxIn)
+			be.blockIO.RecordAccesses(res.Version(), res.AccessedAddresses)
 			var addedDependencies bool
 			if execErr.DependencyTxIndex >= 0 {
 				dependency := execErr.DependencyTxIndex + 1
@@ -1334,12 +1364,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.txIncarnations[tx]++
 			be.cntAbort++
 		} else {
-			return nil, fmt.Errorf("unexptected exec error: %w", res.Err)
+			return nil, fmt.Errorf("unexpected exec error: %w", res.Err)
 		}
 	} else {
 		txVersion := res.Version()
 
 		be.blockIO.RecordReads(txVersion, res.TxIn)
+		be.blockIO.RecordAccesses(txVersion, res.AccessedAddresses)
 
 		if res.Version().Incarnation == 0 {
 			be.blockIO.RecordWrites(txVersion, res.TxOut)
@@ -1348,7 +1379,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			hasWriteChange := res.TxOut.HasNewWrite(prevWrites)
 
 			// Remove entries that were previously written but are no longer written
-			cmpMap := map[common.Address]map[state.AccountKey]struct{}{}
+			cmpMap := map[accounts.Address]map[state.AccountKey]struct{}{}
 
 			for _, w := range res.TxOut {
 				keys, ok := cmpMap[w.Address]
@@ -1454,7 +1485,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				txResult := be.results[tx]
 
-				if err := be.gasPool.SubGas(txResult.ExecutionResult.GasUsed); err != nil {
+				if err := be.gasPool.SubGas(txResult.ExecutionResult.BlockGasUsed); err != nil {
 					return nil, err
 				}
 
@@ -1469,15 +1500,36 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				if stateReader == nil {
-					stateReader = state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx)))
+					if txTask.IsHistoric() {
+						stateReader = state.NewBufferedReader(pe.rs, state.NewHistoryReaderV3(applyTx, txTask.Version().TxNum))
+					} else {
+						stateReader = state.NewBufferedReader(pe.rs, state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx)))
+					}
 				}
 
 				stateWriter := state.NewBufferedWriter(pe.rs, nil)
 
-				_, err = txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, stateWriter)
+				_, addReads, addWrites, err := txResult.finalize(prevReceipt, pe.cfg.engine, be.versionMap, stateReader, stateWriter)
 
 				if err != nil {
 					return nil, err
+				}
+
+				// Merge any additional reads/writes produced during finalize (fee calc, post apply, etc)
+				if addReads != nil {
+					mergedReads := mergeReadSets(be.blockIO.ReadSet(txVersion.TxIndex), addReads)
+					be.blockIO.RecordReads(txVersion, mergedReads)
+				}
+				if len(addWrites) > 0 {
+					existing := be.blockIO.WriteSet(txVersion.TxIndex)
+					if len(existing) > 0 {
+						combined := append(state.VersionedWrites{}, existing...)
+						combined = append(combined, addWrites...)
+						be.blockIO.RecordWrites(txVersion, combined)
+					} else {
+						log.Info(fmt.Sprintf("writing %d, a: %v", len(addWrites), addWrites))
+						be.blockIO.RecordWrites(txVersion, addWrites)
+					}
 				}
 
 				stateUpdates := stateWriter.WriteSet()
@@ -1520,26 +1572,31 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			result := be.results[tx]
 
 			applyResult := txResult{
-				blockNum:   be.blockNum,
-				traceFroms: map[common.Address]struct{}{},
-				traceTos:   map[common.Address]struct{}{},
-				txNum:      task.Version().TxNum,
-				rules:      task.Rules(),
+				blockNum:              be.blockNum,
+				traceFroms:            map[accounts.Address]struct{}{},
+				traceTos:              map[accounts.Address]struct{}{},
+				txNum:                 task.Version().TxNum,
+				rules:                 task.Rules(),
+				cumulativeBlobGasUsed: be.blobGasUsed,
+			}
+
+			if tx := result.Tx(); tx != nil {
+				applyResult.blobGasUsed = tx.GetBlobGas()
 			}
 
 			if result.Receipt != nil {
-				applyResult.gasUsed += int64(result.Receipt.GasUsed)
-				be.gasUsed += result.Receipt.GasUsed
+				applyResult.blockGasUsed = int64(result.ExecutionResult.BlockGasUsed)
+				be.blockGasUsed += result.ExecutionResult.BlockGasUsed
 				applyResult.receipt = result.Receipt
+				applyResult.logs = append(applyResult.logs, result.Receipt.Logs...)
+				pe.executedGas.Add(int64(applyResult.blockGasUsed))
 			}
 
-			applyResult.logs = append(applyResult.logs, result.Logs...)
 			maps.Copy(applyResult.traceFroms, result.TraceFroms)
 			maps.Copy(applyResult.traceTos, result.TraceTos)
 			be.cntFinalized++
 			be.publishTasks.markComplete(tx)
 
-			pe.executedGas.Add(int64(applyResult.gasUsed))
 			pe.lastExecutedTxNum.Store(int64(applyResult.txNum))
 			if result.stateUpdates != nil {
 				applyResult.stateUpdates = *result.stateUpdates
@@ -1584,7 +1641,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			txTask.ParentHash(),
 			txTask.BlockRoot(),
 			nil,
-			be.gasUsed,
+			be.blockGasUsed,
 			be.blobGasUsed,
 			txTask.Version().TxNum,
 			true,
@@ -1615,7 +1672,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		txTask.ParentHash(),
 		txTask.BlockRoot(),
 		nil,
-		be.gasUsed,
+		be.blockGasUsed,
 		be.blobGasUsed,
 		lastTxNum,
 		false,
@@ -1687,4 +1744,59 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 				statsMutex: &be.Mutex})
 		}
 	}
+}
+
+func mergeReadSets(a state.ReadSet, b state.ReadSet) state.ReadSet {
+	if a == nil && b == nil {
+		return nil
+	}
+	out := make(state.ReadSet)
+	if a != nil {
+		a.Scan(func(vr *state.VersionedRead) bool {
+			out.Set(*vr)
+			return true
+		})
+	}
+	if b != nil {
+		b.Scan(func(vr *state.VersionedRead) bool {
+			out.Set(*vr)
+			return true
+		})
+	}
+	return out
+}
+
+func mergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrites {
+	if len(prev) == 0 {
+		return next
+	}
+	if len(next) == 0 {
+		return prev
+	}
+	merged := state.WriteSet{}
+	for _, v := range prev {
+		merged.Set(*v)
+	}
+	for _, v := range next {
+		merged.Set(*v)
+	}
+	out := make(state.VersionedWrites, 0, merged.Len())
+	merged.Scan(func(v *state.VersionedWrite) bool {
+		out = append(out, v)
+		return true
+	})
+	return out
+}
+
+func mergeAccessedAddresses(dst, src map[accounts.Address]struct{}) map[accounts.Address]struct{} {
+	if len(src) == 0 {
+		return dst
+	}
+	if dst == nil {
+		dst = make(map[accounts.Address]struct{}, len(src))
+	}
+	for addr := range src {
+		dst[addr] = struct{}{}
+	}
+	return dst
 }

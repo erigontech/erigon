@@ -52,9 +52,9 @@ func txDeferRollback(m dsl.Matcher) {
 		`$tx, $err := $db.BeginRwNosync($ctx); $chk; $rollback`,
 		`$tx, $err = $db.BeginRwNosync($ctx); $chk; $rollback`,
 	).
-		Where(!m["rollback"].Text.Matches(`defer .*\.Rollback()`)).
+		Where(!m["rollback"].Text.Matches(`defer .*\.Rollback()`) && !m["rollback"].Text.Matches(`t\.Cleanup\(.*\.Rollback\)`)).
 		//At(m["rollback"]).
-		Report(`Add "defer $tx.Rollback()" right after transaction creation error check. 
+		Report(`Add "defer $tx.Rollback()" or "t.Cleanup($tx.Rollback)" right after transaction creation error check. 
 			If you are in the loop - consider using "$db.View" or "$db.Update" or extract whole transaction to function.
 			Without rollback in defer - app can deadlock on error or panic.
 			Rules are in ./rules.go file.
@@ -72,9 +72,9 @@ func cursorDeferClose(m dsl.Matcher) {
 		`$c, $err = $db.RwCursorDupSort($table); $chk; $close`,
 		`$c, $err := $db.RwCursorDupSort($table); $chk; $close`,
 	).
-		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
-		//At(m["rollback"]).
-		Report(`Add "defer $c.Close()" right after cursor creation error check`)
+		Where(!m["close"].Text.Matches(`defer .*\.Close()`) && !m["close"].Text.Matches(`t\.Cleanup\(.*\.Close\)`)).
+		//At(m["close"]).
+		Report(`Add "defer $c.Close()" or "t.Cleanup($c.Close)" right after cursor creation error check`)
 }
 
 func streamDeferClose(m dsl.Matcher) {
@@ -86,16 +86,16 @@ func streamDeferClose(m dsl.Matcher) {
 		`$c, $err = $db.Prefix($params); $chk; $close`,
 		`$c, $err := $db.Prefix($params); $chk; $close`,
 	).
-		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
-		//At(m["rollback"]).
-		Report(`Add "defer $c.Close()" right after cursor creation error check`)
+		Where(!m["close"].Text.Matches(`defer .*\.Close()`) && !m["close"].Text.Matches(`t\.Cleanup\(.*\.Close\)`)).
+		//At(m["close"]).
+		Report(`Add "defer $c.Close()" or "t.Cleanup($c.Close)" right after cursor creation error check`)
 }
 
 func closeCollector(m dsl.Matcher) {
-	m.Match(`$c := etl.NewCollector($*_); $close`).
-		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
-		Report(`Add "defer $c.Close()" right after collector creation`)
-	m.Match(`$c := etl.NewCollectorWithAllocator($*_); $close`).
+	m.Match(
+		`$c := etl.NewCollector($*_); $close`,
+		`$c := etl.NewCollectorWithAllocator($*_); $close`,
+	).
 		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
 		Report(`Add "defer $c.Close()" right after collector creation`)
 }
@@ -144,4 +144,20 @@ func forbidOsRemove(m dsl.Matcher) {
 
 func filepathWalkToCheckToSkipNonExistingFiles(m dsl.Matcher) {
 	m.Match(`filepath.Walk($dir, $cb)`).Report(`report("Use filepath.WalkDir or fs.WalkDir, because Walk does not skip removed files and does much more syscalls")`)
+}
+
+func osCreateBlankAssign(m dsl.Matcher) {
+	m.Match(
+		`_, $err := os.Create($path)`,
+		`_, $err = os.Create($path)`,
+		`_, _ = os.Create($path)`,
+		`_, $err := os.CreateTemp($dir, $pattern)`,
+		`_, $err = os.CreateTemp($dir, $pattern)`,
+		`_, _ = os.CreateTemp($dir, $pattern)`,
+		`_, $err := os.OpenFile($path, $flag, $perm)`,
+		`_, $err = os.OpenFile($path, $flag, $perm)`,
+		`_, _ = os.OpenFile($path, $flag, $perm)`,
+	).
+		Report(`os.Create/OpenFile result assigned to _ leaks a file descriptor. Assign to a variable and close it.
+			Rules are in ./rules.go file.`)
 }

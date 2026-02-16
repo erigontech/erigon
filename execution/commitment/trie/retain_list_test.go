@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -74,10 +75,9 @@ func TestProofRetainerConstruction(t *testing.T) {
 	pr, err := NewProofRetainer(
 		common.Address{0x1},
 		&accounts.Account{
-			Initialised: true,
 			Nonce:       2,
-			Balance:     *uint256.NewInt(6e9),
-			CodeHash:    common.Hash{3},
+			Balance:     u256.U64(6e9),
+			CodeHash:    accounts.InternCodeHash(common.Hash{3}),
 			Incarnation: 3,
 		},
 		[]common.Hash{{1}, {2}, {3}},
@@ -87,14 +87,14 @@ func TestProofRetainerConstruction(t *testing.T) {
 	require.Len(t, rl.hexes, 4)
 
 	validKeys := [][]byte{
-		pr.storageHexKeys[2][:],
+		pr.storageHexKeys[2],
 		pr.storageHexKeys[2][:98],
 		pr.storageHexKeys[2][:95],
-		pr.storageHexKeys[1][:],
+		pr.storageHexKeys[1],
 		pr.storageHexKeys[1][:90],
-		pr.storageHexKeys[0][:],
+		pr.storageHexKeys[0],
 		pr.storageHexKeys[0][:85],
-		pr.accHexKey[:],
+		pr.accHexKey,
 		pr.accHexKey[:15],
 		{},
 	}

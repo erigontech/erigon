@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/calltracer"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -108,20 +109,17 @@ func NewHistoricalTraceWorker(
 		execArgs: execArgs,
 
 		background:  background,
-		stateReader: state.NewHistoryReaderV3(),
+		stateReader: state.NewHistoryReaderV3(nil, 0),
 
 		taskGasPool: new(protocol.GasPool),
-		vmCfg:       &vm.Config{JumpDestCache: vm.NewJumpDestCache(vm.JumpDestCacheLimit)},
+		vmCfg:       &vm.Config{},
 	}
 	ie.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, *ie.vmCfg)
-	ie.taskGasPool.AddBlobGas(execArgs.ChainConfig.GetMaxBlobGasPerBlock(0))
 	ie.ibs = state.New(ie.stateReader)
 	return ie
 }
 
-func (rw *HistoricalTraceWorker) LogStats() {
-	rw.evm.Config().JumpDestCache.LogStats()
-}
+func (rw *HistoricalTraceWorker) LogStats() {}
 
 func (rw *HistoricalTraceWorker) Run() (err error) {
 	defer func() { // convert panic to err - because it's background workers
@@ -190,18 +188,20 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
-		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+		syscall := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 			ret, err := protocol.SysCallContract(contract, data, cc, ibs, header, rw.execArgs.Engine, constCall /* constCall */, *rw.vmCfg)
 			return ret, err
 		}
-		rw.execArgs.Engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
-		result.Err = ibs.FinalizeTx(rules, noop)
+		result.Err = rw.execArgs.Engine.Initialize(cc, rw.chain, header, ibs, syscall, rw.logger, hooks)
+		if result.Err == nil {
+			result.Err = ibs.FinalizeTx(rules, noop)
+		}
 	case txTask.IsBlockEnd():
 		// this is handled by the reducer in process results
 	default:
 		tracer := calltracer.NewCallTracer(nil)
 		result.Err = func() error {
-			rw.taskGasPool.Reset(txTask.Tx().GetGasLimit(), cc.GetMaxBlobGasPerBlock(header.Time))
+			rw.taskGasPool.Reset(txTask.Tx().GetGasLimit(), txTask.Tx().GetBlobGas())
 			rw.vmCfg.Tracer = tracer.Tracer().Hooks
 			ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 			txn := txTask.Tx()
@@ -314,7 +314,8 @@ func (rw *HistoricalTraceWorker) execAATxn(txTask *TxTask, tracer *calltracer.Ca
 		return result
 	}
 
-	result.ExecutionResult.GasUsed = gasUsed
+	result.ExecutionResult.ReceiptGasUsed = gasUsed
+	result.ExecutionResult.BlockGasUsed = gasUsed
 	// Update the state with pending changes
 	rw.ibs.SoftFinalise()
 	result.Logs = rw.ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
@@ -360,7 +361,8 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 	g.Go(func() (err error) {
 		defer func() {
 			if rec := recover(); rec != nil {
-				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
+				err = fmt.Errorf("'map worker' paniced: %s, %s", rec, dbg.Stack())
+				logger.Error("map worker panic", "error", err)
 			}
 		}()
 		defer func() {
@@ -372,6 +374,7 @@ func NewHistoricalTraceWorkers(consumer TraceConsumer, cfg *ExecArgs, ctx contex
 		defer func() {
 			if rec := recover(); rec != nil {
 				err = fmt.Errorf("'reduce worker' paniced: %s, %s", rec, dbg.Stack())
+				logger.Error("reduce worker panic", "error", err)
 			}
 		}()
 		return doHistoryReduce(ctx, consumer, cfg, toTxNum, outputTxNum, out, logger)
@@ -482,12 +485,11 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 			if result.BlockNumber() > 0 {
 				chainReader := consensuschain.NewReader(cfg.ChainConfig, tx, cfg.BlockReader, logger)
 				// End of block transaction in a block
-				reader := state.NewHistoryReaderV3()
-				reader.SetTx(tx)
-				reader.SetTxNum(outputTxNum)
+				reader := state.NewHistoryReaderV3(tx, outputTxNum)
 				ibs := state.New(reader)
+				defer ibs.Release(false)
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
-				syscall := func(contract common.Address, data []byte) ([]byte, error) {
+				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 					ret, err := protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{
 						Tracer: result.TracingHooks(),
 					})
@@ -495,7 +497,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 					return ret, err
 				}
 
-				_, err := cfg.Engine.Finalize(cfg.ChainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, p.blockResult.Receipts, txTask.Withdrawals, chainReader, syscall, true /* skipReceiptsEval */, logger)
+				_, err := cfg.Engine.Finalize(cfg.ChainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, p.blockResult.Receipts, txTask.Withdrawals, chainReader, syscall, true /* skipReceiptsEval */, logger)
 				if err != nil {
 					result.Err = err
 				}
@@ -530,16 +532,16 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 	br := cfg.BlockReader
 	chainConfig := cfg.ChainConfig
 
-	txNumsReader := cfg.BlockReader.TxnumReader(ctx)
+	txNumsReader := cfg.BlockReader.TxnumReader()
 
-	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
+	fromTxNum, err := txNumsReader.Min(ctx, tx, fromBlock)
 	if err != nil {
 		return err
 	}
 	if toBlock > 0 {
 		toBlock-- // [fromBlock,toBlock)
 	}
-	toTxNum, err := txNumsReader.Max(tx, toBlock)
+	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
 	if err != nil {
 		return err
 	}
@@ -555,7 +557,7 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 	}
 
 	{
-		fromStep, toStep, err := BlkRangeToSteps(tx, fromBlock, toBlock, txNumsReader)
+		fromStep, toStep, err := BlkRangeToSteps(ctx, tx, fromBlock, toBlock, txNumsReader)
 		if err != nil {
 			return err
 		}
@@ -599,10 +601,7 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 	readAhead, clean := BlocksReadAhead(ctx, 2, cfg.ChainDB, cfg.Engine, cfg.BlockReader)
 	defer clean()
 
-	inputTxNum, err := txNumsReader.Min(tx, fromBlock)
-	if err != nil {
-		return err
-	}
+	inputTxNum := fromTxNum
 	for blockNum := fromBlock; blockNum <= toBlock && !workersExited.Load(); blockNum++ {
 		select {
 		case readAhead <- blockNum:
@@ -627,7 +626,7 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 			defer getHashFnMute.Unlock()
 			return f(n)
 		}
-		blockContext := protocol.NewEVMBlockContext(header, getHashFn, cfg.Engine, nil /* author */, chainConfig)
+		blockContext := protocol.NewEVMBlockContext(header, getHashFn, cfg.Engine, accounts.NilAddress /* author */, chainConfig)
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &TxTask{
@@ -685,12 +684,12 @@ func BlockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader ser
 	}
 	return b, err
 }
-func BlkRangeToSteps(tx kv.TemporalTx, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
-	fromTxNum, err := txNumsReader.Min(tx, fromBlock)
+func BlkRangeToSteps(ctx context.Context, tx kv.TemporalTx, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
+	fromTxNum, err := txNumsReader.Min(ctx, tx, fromBlock)
 	if err != nil {
 		return 0, 0, err
 	}
-	toTxNum, err := txNumsReader.Min(tx, toBlock)
+	toTxNum, err := txNumsReader.Max(ctx, tx, toBlock)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -699,11 +698,11 @@ func BlkRangeToSteps(tx kv.TemporalTx, fromBlock, toBlock uint64, txNumsReader r
 	return float64(fromTxNum) / float64(stepSize), float64(toTxNum) / float64(stepSize), nil
 }
 
-func BlkRangeToStepsOnDB(db kv.TemporalRoDB, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
-	tx, err := db.BeginTemporalRo(context.Background())
+func BlkRangeToStepsOnDB(ctx context.Context, db kv.TemporalRoDB, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
+	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return 0, 0, err
 	}
 	defer tx.Rollback()
-	return BlkRangeToSteps(tx, fromBlock, toBlock, txNumsReader)
+	return BlkRangeToSteps(ctx, tx, fromBlock, toBlock, txNumsReader)
 }

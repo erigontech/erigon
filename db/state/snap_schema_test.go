@@ -20,7 +20,8 @@ func setup(tb testing.TB) datadir.Dirs {
 
 func TestE2SnapSchema(t *testing.T) {
 	dirs := setup(t)
-	p := NewE2SnapSchema(dirs, "bodies")
+	e2version := NewE2SnapSchemaVersion(version.V1_0_standart, version.V1_0_standart)
+	p := NewE2SnapSchema(dirs, "bodies", e2version)
 
 	info, ok := p.Parse("v1.0-000100-000500-bodies.seg")
 	require.True(t, ok)
@@ -48,7 +49,7 @@ func TestE2SnapSchema(t *testing.T) {
 	require.False(t, ok)
 
 	// for transactions
-	p = NewE2SnapSchemaWithIndexTag(dirs, "transactions", []string{"transactions", "transactions-to-block"})
+	p = NewE2SnapSchemaWithIndexTag(dirs, "transactions", []string{"transactions", "transactions-to-block"}, e2version)
 	_, ok = p.Parse("v1.0-000100-000500-transactions.seg")
 	require.True(t, ok)
 
@@ -71,15 +72,15 @@ func TestE2SnapSchema(t *testing.T) {
 	require.Equal(t, string(AccessorExtensionIdx), info.Ext)
 
 	stepFrom, stepTo := RootNum(5*1000), RootNum(20*1000)
-	dataFileFull := p.DataFile(version.V1_0, stepFrom, stepTo)
+	dataFileFull, _ := p.DataFile(version.V1_0, stepFrom, stepTo)
 	_, fName := filepath.Split(dataFileFull)
 	require.Equal(t, "v1.0-000005-000020-transactions.seg", fName)
 
-	acc1Full := p.AccessorIdxFile(version.V1_0, stepFrom, stepTo, 0)
+	acc1Full, _ := p.AccessorIdxFile(version.V1_0, stepFrom, stepTo, 0)
 	_, fName = filepath.Split(acc1Full)
 	require.Equal(t, "v1.0-000005-000020-transactions.idx", fName)
 
-	acc2Full := p.AccessorIdxFile(version.V1_0, stepFrom, stepTo, 1)
+	acc2Full, _ := p.AccessorIdxFile(version.V1_0, stepFrom, stepTo, 1)
 	_, fName = filepath.Split(acc2Full)
 	require.Equal(t, "v1.0-000005-000020-transactions-to-block.idx", fName)
 
@@ -106,11 +107,12 @@ func TestE3SnapSchemaForDomain1(t *testing.T) {
 	// account domain test
 
 	dirs := setup(t)
+	ver := version.V1_0_standart
 	stepSize := uint64(config3.DefaultStepSize)
 	p := NewE3SnapSchemaBuilder(statecfg.AccessorBTree|statecfg.AccessorExistence, stepSize).
-		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressKeys).
-		BtIndex().
-		Existence().Build()
+		Data(dirs.SnapDomain, "accounts", DataExtensionKv, seg.CompressKeys, ver).
+		BtIndex(ver).
+		Existence(ver).Build()
 
 	stepFrom := RootNum(stepSize * 288)
 	stepTo := RootNum(stepSize * 296)
@@ -141,10 +143,10 @@ func TestE3SnapSchemaForDomain1(t *testing.T) {
 	require.Equal(t, "accounts", info.FileType)
 	require.Equal(t, ".kvei", info.Ext)
 
-	dataFileFull := p.DataFile(version.V1_0, stepFrom, stepTo)
+	dataFileFull, _ := p.DataFile(ver.Current, stepFrom, stepTo)
 	_, fName := filepath.Split(dataFileFull)
 	require.Equal(t, "v1.0-accounts.288-296.kv", fName)
-	accFull := p.BtIdxFile(version.V1_0, stepFrom, stepTo)
+	accFull, _ := p.BtIdxFile(version.V1_0, stepFrom, stepTo)
 	_, fName = filepath.Split(accFull)
 	require.Equal(t, "v1.0-accounts.288-296.bt", fName)
 
@@ -152,7 +154,7 @@ func TestE3SnapSchemaForDomain1(t *testing.T) {
 		p.AccessorIdxFile(version.V1_0, stepFrom, stepTo, 0)
 	})
 
-	exFull := p.ExistenceFile(version.V1_0, stepFrom, stepTo)
+	exFull, _ := p.ExistenceFile(ver.Current, stepFrom, stepTo)
 	_, fName = filepath.Split(exFull)
 	require.Equal(t, "v1.0-accounts.288-296.kvei", fName)
 
@@ -164,9 +166,10 @@ func TestE3SnapSchemaForDomain1(t *testing.T) {
 func TestE3SnapSchemaForCommitmentDomain(t *testing.T) {
 	dirs := setup(t)
 	stepSize := uint64(config3.DefaultStepSize)
+	ver := version.V1_0_standart
 	p := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapDomain, "commitments", DataExtensionKv, seg.CompressKeys).
-		Accessor(dirs.SnapDomain).Build()
+		Data(dirs.SnapDomain, "commitments", DataExtensionKv, seg.CompressKeys, ver).
+		Accessor(dirs.SnapDomain, ver).Build()
 
 	stepFrom := RootNum(stepSize * 288)
 	stepTo := RootNum(stepSize * 296)
@@ -188,10 +191,10 @@ func TestE3SnapSchemaForCommitmentDomain(t *testing.T) {
 	require.Equal(t, "commitments", info.FileType)
 	require.Equal(t, string(AccessorExtensionKvi), info.Ext)
 
-	dataFileFull := p.DataFile(version.V1_0, stepFrom, stepTo)
+	dataFileFull, _ := p.DataFile(ver.Current, stepFrom, stepTo)
 	_, fName := filepath.Split(dataFileFull)
 	require.Equal(t, "v1.0-commitments.288-296.kv", fName)
-	accFull := p.AccessorIdxFile(version.V1_0, stepFrom, stepTo, 0)
+	accFull, _ := p.AccessorIdxFile(ver.Current, stepFrom, stepTo, 0)
 	_, fName = filepath.Split(accFull)
 	require.Equal(t, "v1.0-commitments.288-296.kvi", fName)
 
@@ -210,9 +213,10 @@ func TestE3SnapSchemaForCommitmentDomain(t *testing.T) {
 func TestE3SnapSchemaForHistory(t *testing.T) {
 	dirs := setup(t)
 	stepSize := uint64(config3.DefaultStepSize)
+	ver := version.V1_0_standart
 	p := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapHistory, "accounts", DataExtensionV, seg.CompressKeys).
-		Accessor(dirs.SnapAccessors).Build()
+		Data(dirs.SnapHistory, "accounts", DataExtensionV, seg.CompressKeys, ver).
+		Accessor(dirs.SnapAccessors, ver).Build()
 
 	stepFrom, stepTo := RootNum(stepSize*192), RootNum(stepSize*256)
 	info, ok := p.Parse("v1.0-accounts.192-256.v")
@@ -233,12 +237,12 @@ func TestE3SnapSchemaForHistory(t *testing.T) {
 	require.Equal(t, "accounts", info.FileType)
 	require.Equal(t, string(AccessorExtensionVi), info.Ext)
 
-	dataFileFull := p.DataFile(version.V1_0, stepFrom, stepTo)
+	dataFileFull, _ := p.DataFile(ver.Current, stepFrom, stepTo)
 	path, fName := filepath.Split(dataFileFull)
 	require.Equal(t, filepath.Clean(path), filepath.Clean(dirs.SnapHistory))
 	require.Equal(t, "v1.0-accounts.192-256.v", fName)
 
-	accFull := p.AccessorIdxFile(version.V1_0, stepFrom, stepTo, 0)
+	accFull, _ := p.AccessorIdxFile(ver.Current, stepFrom, stepTo, 0)
 	path, fName = filepath.Split(accFull)
 	require.Equal(t, filepath.Clean(path), filepath.Clean(dirs.SnapAccessors))
 	require.Equal(t, "v1.0-accounts.192-256.vi", fName)
@@ -259,9 +263,10 @@ func TestE3SnapSchemaForHistory(t *testing.T) {
 func TestE3SnapSchemaForII(t *testing.T) {
 	dirs := setup(t)
 	stepSize := uint64(config3.DefaultStepSize)
+	ver := version.V1_0_standart
 	p := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
-		Data(dirs.SnapIdx, "logaddrs", DataExtensionEf, seg.CompressNone).
-		Accessor(dirs.SnapAccessors).Build()
+		Data(dirs.SnapIdx, "logaddrs", DataExtensionEf, seg.CompressNone, ver).
+		Accessor(dirs.SnapAccessors, ver).Build()
 
 	stepFrom, stepTo := RootNum(stepSize*128), RootNum(stepSize*192)
 	info, ok := p.Parse("v1.0-logaddrs.128-192.ef")
@@ -285,12 +290,12 @@ func TestE3SnapSchemaForII(t *testing.T) {
 	_, ok = p.Parse("v1.0-logaddrs.128-192.crazy")
 	require.False(t, ok)
 
-	fileName := p.DataFile(version.V1_0, stepFrom, stepTo)
+	fileName, _ := p.DataFile(ver.Current, stepFrom, stepTo)
 	path, fName := filepath.Split(fileName)
 	require.Equal(t, filepath.Clean(path), filepath.Clean(dirs.SnapIdx))
 	require.Equal(t, "v1.0-logaddrs.128-192.ef", fName)
 
-	accFull := p.AccessorIdxFile(version.V1_0, stepFrom, stepTo, 0)
+	accFull, _ := p.AccessorIdxFile(ver.Current, stepFrom, stepTo, 0)
 	path, fName = filepath.Split(accFull)
 	require.Equal(t, filepath.Clean(path), filepath.Clean(dirs.SnapAccessors))
 	require.Equal(t, "v1.0-logaddrs.128-192.efi", fName)

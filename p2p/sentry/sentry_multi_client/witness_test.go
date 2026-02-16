@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync"
@@ -42,8 +43,7 @@ func addTestWitnessData(db kv.TemporalRwDB, hash common.Hash, witnessData []byte
 		return err
 	}
 
-	blockNumberBytes := dbutils.EncodeBlockNumber(blockNumber)
-	err = tx.Put(kv.HeaderNumber, hash.Bytes(), blockNumberBytes)
+	err = rawdb.WriteHeaderNumber(tx, hash, blockNumber)
 	if err != nil {
 		return err
 	}

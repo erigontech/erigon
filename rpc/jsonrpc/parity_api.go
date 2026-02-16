@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -65,7 +66,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 		return nil, fmt.Errorf("listStorageKeys cannot open tx: %w", err)
 	}
 	defer tx.Rollback()
-	a, err := rpchelper.NewLatestStateReader(tx).ReadAccountData(account)
+	a, err := rpchelper.NewLatestStateReader(tx).ReadAccountData(accounts.InternAddress(account))
 	if err != nil {
 		return nil, err
 	} else if a == nil {
@@ -73,7 +74,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 	}
 
 	bn := rawdb.ReadCurrentBlockNumber(tx)
-	minTxNum, err := api._txNumReader.Min(tx, *bn)
+	minTxNum, err := api._txNumReader.Min(ctx, tx, *bn)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +94,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 		if err != nil {
 			return nil, err
 		}
-		keys = append(keys, common.CopyBytes(k[20:]))
+		keys = append(keys, common.Copy(k[20:]))
 	}
 	return keys, nil
 }

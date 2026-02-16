@@ -37,7 +37,7 @@ import (
 func testingHeaderBody(t *testing.T) (h *types.Header, b *types.RawBody) {
 	t.Helper()
 
-	txn := &types.DynamicFeeTransaction{TipCap: u256.N1, FeeCap: u256.N1, ChainID: u256.N1, CommonTx: types.CommonTx{Value: u256.N1, GasLimit: 1, Nonce: 1}}
+	txn := &types.DynamicFeeTransaction{TipCap: &u256.N1, FeeCap: &u256.N1, ChainID: &u256.N1, CommonTx: types.CommonTx{Value: &u256.N1, GasLimit: 1, Nonce: 1}}
 	buf := bytes.NewBuffer(nil)
 	err := txn.MarshalBinary(buf)
 	require.NoError(t, err)
@@ -53,8 +53,8 @@ func TestBodiesCanonical(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	m := mock.Mock(t)
-	tx, err := m.DB.BeginRw(m.Ctx)
 	require := require.New(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(err)
 	defer tx.Rollback()
 	m.HistoryV3 = true

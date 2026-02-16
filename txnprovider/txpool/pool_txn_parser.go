@@ -307,7 +307,7 @@ func parseSignature(payload []byte, pos int, legacy bool, cfgChainId *uint256.In
 		return 0, 0, fmt.Errorf("v: %w", err)
 	}
 	if legacy {
-		preEip155 := sig.V.Eq(u256.N27) || sig.V.Eq(u256.N28)
+		preEip155 := sig.V.Eq(&u256.N27) || sig.V.Eq(&u256.N28)
 		// Compute chainId from V
 		if preEip155 {
 			yParity = byte(sig.V.Uint64() - 27)
@@ -318,7 +318,7 @@ func parseSignature(payload []byte, pos int, legacy bool, cfgChainId *uint256.In
 			if sig.V.LtUint64(35) {
 				return 0, 0, fmt.Errorf("EIP-155 implies V>=35 (was %d)", sig.V.Uint64())
 			}
-			sig.ChainID.Sub(&sig.V, u256.N35)
+			sig.ChainID.Sub(&sig.V, &u256.N35)
 			yParity = byte(sig.ChainID.Uint64() % 2)
 			sig.ChainID.Rsh(&sig.ChainID, 1)
 			if !sig.ChainID.Eq(cfgChainId) {
@@ -513,6 +513,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 			return 0, fmt.Errorf("%w: authorizations len: %s", ErrParseTxn, err) //nolint
 		}
 		authPos := dataPos
+		var hashBuf [32]byte
 		for authPos < dataPos+dataLen {
 			var authLen int
 			authPos, authLen, err = rlp.ParseList(payload, authPos)
@@ -533,7 +534,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 			if err != nil {
 				return 0, fmt.Errorf("%w: authorization address: %s", ErrParseTxn, err) //nolint
 			}
-			auth.Address = common.Address(payload[p2 : p2+length.Addr])
+			auth.Address = common.BytesToAddress(payload[p2 : p2+length.Addr])
 			p2 += length.Addr
 			p2, auth.Nonce, err = rlp.ParseU64(payload, p2) // nonce
 			if err != nil {
@@ -547,7 +548,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 			}
 			auth.R, auth.S = sig.R, sig.S
 
-			authority, err := auth.RecoverSigner(bytes.NewBuffer(nil), make([]byte, 32))
+			authority, err := auth.RecoverSigner(bytes.NewBuffer(nil), hashBuf[:])
 			if err != nil {
 				return 0, fmt.Errorf("%w: recover authorization signer: %s stack: %s", ErrParseTxn, err, dbg.Stack()) //nolint
 			}
@@ -597,7 +598,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 	}
 
 	if legacy {
-		preEip155 := ctx.V.Eq(u256.N27) || ctx.V.Eq(u256.N28)
+		preEip155 := ctx.V.Eq(&u256.N27) || ctx.V.Eq(&u256.N28)
 		if !preEip155 {
 			chainIDBits = ctx.ChainID.BitLen()
 			if chainIDBits <= 7 {
@@ -805,7 +806,7 @@ func parseTransactionBodyAA(ctx *TxnParseContext, payload []byte, p int, slot *T
 		return 0, fmt.Errorf("%w: postOpGasLimit: %s", ErrParseTxn, err)
 	}
 
-	var execData []byte
+	execData := make([]byte, 0, len(slot.DeployerData)+len(slot.PaymasterData)+len(slot.ExecutionData))
 	execData = append(execData, slot.DeployerData...)
 	execData = append(execData, slot.PaymasterData...)
 	execData = append(execData, slot.ExecutionData...)

@@ -37,7 +37,7 @@ import (
 
 type RetainDecider interface {
 	Retain([]byte) bool
-	IsCodeTouched(common.Hash) bool
+	IsCodeTouched(accounts.CodeHash) bool
 }
 
 type RetainDeciderWithMarker interface {
@@ -184,7 +184,7 @@ func (pr *DefaultProofRetainer) ProofResult() (*accounts.AccProofResult, error) 
 		Address:  pr.addr,
 		Balance:  (*hexutil.Big)(pr.acc.Balance.ToBig()),
 		Nonce:    hexutil.Uint64(pr.acc.Nonce),
-		CodeHash: pr.acc.CodeHash,
+		CodeHash: pr.acc.CodeHash.Value(),
 	}
 
 	for _, pe := range pr.proofs {
@@ -197,7 +197,7 @@ func (pr *DefaultProofRetainer) ProofResult() (*accounts.AccProofResult, error) 
 		}
 	}
 
-	if pr.acc.Initialised && result.StorageHash == (common.Hash{}) {
+	if result.StorageHash == (common.Hash{}) {
 		return nil, errors.New("did not find storage root in proof elements")
 	}
 
@@ -205,7 +205,7 @@ func (pr *DefaultProofRetainer) ProofResult() (*accounts.AccProofResult, error) 
 	for i, sk := range pr.storageKeys {
 		result.StorageProof[i].Key = uint256.NewInt(0).SetBytes(sk[:]).Hex()
 		hexKey := pr.storageHexKeys[i]
-		if !pr.acc.Initialised || result.StorageHash == EmptyRoot {
+		if result.StorageHash == EmptyRoot {
 			// The yellow paper makes it clear that the EmptyRoot is a special case
 			// when the trie has no nodes, but EIP-1186 states that the proof is
 			// "starting with the storageHash-Node".  Since the trie has no nodes,
@@ -285,12 +285,12 @@ type RetainList struct {
 	lteIndex    int  // Index of the "LTE" key in the keys slice. Next one is "GT"
 	hexes       [][]byte
 	markers     []bool
-	codeTouches map[common.Hash]struct{}
+	codeTouches map[accounts.CodeHash]struct{}
 }
 
 // NewRetainList creates new RetainList
 func NewRetainList(minLength int) *RetainList {
-	return &RetainList{minLength: minLength, codeTouches: make(map[common.Hash]struct{})}
+	return &RetainList{minLength: minLength, codeTouches: make(map[accounts.CodeHash]struct{})}
 }
 
 func (rl *RetainList) Len() int {
@@ -330,11 +330,11 @@ func (rl *RetainList) AddMarker(marker bool) {
 }
 
 // AddCodeTouch adds a new code touch into the resolve set
-func (rl *RetainList) AddCodeTouch(codeHash common.Hash) {
+func (rl *RetainList) AddCodeTouch(codeHash accounts.CodeHash) {
 	rl.codeTouches[codeHash] = struct{}{}
 }
 
-func (rl *RetainList) IsCodeTouched(codeHash common.Hash) bool {
+func (rl *RetainList) IsCodeTouched(codeHash accounts.CodeHash) bool {
 	_, ok := rl.codeTouches[codeHash]
 	return ok
 }

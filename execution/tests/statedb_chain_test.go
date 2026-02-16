@@ -38,13 +38,14 @@ import (
 	"github.com/erigontech/erigon/execution/tests/contracts"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestSelfDestructReceive(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		address = crypto.PubkeyToAddress(key.PublicKey)
+		address = accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
 		funds   = big.NewInt(1000000000)
 		gspec   = &types.Genesis{
 			Config: &chain.Config{
@@ -56,14 +57,14 @@ func TestSelfDestructReceive(t *testing.T) {
 				SpuriousDragonBlock:   new(big.Int),
 			},
 			Alloc: types.GenesisAlloc{
-				address: {Balance: funds},
+				address.Value(): {Balance: funds},
 			},
 		}
 		// this code generates a log
 		signer = types.LatestSignerForChainID(nil)
 	)
 
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
@@ -93,7 +94,7 @@ func TestSelfDestructReceive(t *testing.T) {
 			}
 			block.AddTx(txn)
 			// Send 1 wei to contract after self-destruction
-			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address), contractAddress, uint256.NewInt(1000), 21000, uint256.NewInt(1), nil), *signer, key)
+			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address.Value()), contractAddress, uint256.NewInt(1000), 21000, uint256.NewInt(1), nil), *signer, key)
 			block.AddTx(txn)
 		}
 		contractBackend.Commit()
@@ -111,7 +112,7 @@ func TestSelfDestructReceive(t *testing.T) {
 		if !exist {
 			t.Error("expected account to exist")
 		}
-		exist, err = st.Exist(contractAddress)
+		exist, err = st.Exist(accounts.InternAddress(contractAddress))
 		if err != nil {
 			return err
 		}
@@ -145,14 +146,14 @@ func TestSelfDestructReceive(t *testing.T) {
 		if !exist {
 			t.Error("expected account to exist")
 		}
-		exist, err = st.Exist(contractAddress)
+		exist, err = st.Exist(accounts.InternAddress(contractAddress))
 		if err != nil {
 			t.Error(err)
 		}
 		if !exist {
 			t.Error("expected contractAddress to exist at the block 2", contractAddress.String())
 		}
-		code, err := st.GetCode(contractAddress)
+		code, err := st.GetCode(accounts.InternAddress(contractAddress))
 		if err != nil {
 			t.Error(err)
 		}

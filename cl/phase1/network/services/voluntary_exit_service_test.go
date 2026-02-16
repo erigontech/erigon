@@ -115,8 +115,7 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 				t.operationsPool.VoluntaryExitsPool.Insert(mockValidatorIndex, mockMsg.SignedVoluntaryExit)
 			},
 			msg:     mockMsg,
-			wantErr: true,
-			err:     ErrIgnore,
+			wantErr: false, // Silent ignore: returns nil when already in pool
 		},
 		{
 			name: "state is nil",

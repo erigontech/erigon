@@ -17,50 +17,47 @@
 package downloader
 
 import (
-	"cmp"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"iter"
 	"maps"
 	"math"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/puzpuzpuz/xsync/v4"
-
 	"github.com/c2h5oh/datasize"
+	"github.com/klauspost/compress/gzip"
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/time/rate"
 
-	"github.com/anacrolix/chansync"
 	g "github.com/anacrolix/generics"
 	// Make Go expvars available to Prometheus for diagnostics.
 	_ "github.com/anacrolix/missinggo/v2/expvar-prometheus"
 	"github.com/anacrolix/missinggo/v2/panicif"
+	"github.com/anacrolix/sync"
 	"github.com/anacrolix/torrent"
+	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
-	"github.com/anacrolix/torrent/types/infohash"
 	"github.com/anacrolix/torrent/webseed"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
@@ -68,7 +65,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
 )
 
 var debugWebseed = false
@@ -80,53 +76,44 @@ func init() {
 	webseed.PrintDebug = debugWebseed
 }
 
-// Downloader - component which downloading historical files. Can use BitTorrent, or other protocols
-type Downloader struct {
-	addWebSeedOpts []torrent.AddWebSeedsOpt
-	torrentClient  *torrent.Client
+type snapshotName = string
 
-	cfg *downloadercfg.Cfg
-
-	torrentStorage storage.ClientImplCloser
-
-	ctx          context.Context
-	stopMainLoop context.CancelFunc
-	wg           sync.WaitGroup
-
-	// TODO: Add an implicit prefix to messages from this.
-	logger    log.Logger
-	verbosity log.Lvl
-	// Whether to log seeding (for snap downloaders I think).
-	logSeeding bool
-	// Reset the log interval after making new requests.
-	resetLogInterval chansync.BroadcastCond
-
-	torrentFS *AtomicTorrentFS
-
-	logPrefix string
-	// Set when the downloader discovers something isn't complete. Probably doesn't belong in the
-	// Downloader.
-	startTime time.Time
-
-	lock sync.RWMutex
-	// Files having extra verification due to file size mismatches. Use atomics for this map since
-	// locking requirements are mixed, and it's not coupled to anything else.
-	filesBeingVerified    *xsync.Map[*torrent.File, struct{}]
-	verificationOccurring chansync.Flag
-	// Torrents that block completion. They were requested specifically. Torrents added from disk
-	// that aren't subsequently requested are not required to satisfy the sync stage.
-	// https://github.com/erigontech/erigon/issues/15514
-	requiredTorrents map[*torrent.Torrent]struct{}
-	// The "name" or file path of a torrent is used throughout as a unique identifier for the
-	// torrent. Make it explicit rather than fold it into DisplayName or guess at the name at
-	// various points. This might change if multi-file torrents are used.
-	torrentsByName map[string]*torrent.Torrent
-	stats          AggStats
+// Just a pair of name and known infohash.
+type snapshot struct {
+	InfoHash metainfo.Hash
+	Name     string
 }
 
-// Sets the log interval low again after making new requests.
-func (me *Downloader) ResetLogInterval() {
-	me.resetLogInterval.Broadcast()
+// Snapshot pair with valid name.
+type preverifiedSnapshot = snapshot
+
+// Downloader - component which downloading historical files. Can use BitTorrent, or other protocols
+type Downloader struct {
+	addWebSeedOpts     []torrent.AddWebSeedsOpt
+	metainfoHttpClient *http.Client
+	cfg                *downloadercfg.Cfg
+	logger             log.Logger
+	torrentFS          *AtomicTorrentFS
+
+	ctx  context.Context
+	stop context.CancelFunc
+
+	// The background logger only runs when there are no active downloads.
+	activeDownloadRequestsLock sync.Mutex
+	activeDownloadRequests     int
+	zeroActiveDownloadRequests sync.Cond
+
+	// Synchronizes state-sensitive changes to things affected by Downloader.Close.
+	lock           sync.RWMutex
+	torrentClient  *torrent.Client
+	torrentStorage storage.ClientImplCloser
+	// Tasks with lifetimes attached to Downloader.
+	wg                     sync.WaitGroup
+	initedBackgroundLogger bool
+	torrentsByName         map[snapshotName]*torrent.Torrent
+	// Torrents that were added for download. The first time a torrent is added here, the adder is
+	// responsible for fetching metainfo and executing after-add handlers.
+	downloads map[*torrent.Torrent]struct{}
 }
 
 type AggStats struct {
@@ -153,13 +140,6 @@ type AggStats struct {
 
 	BytesHashed, BytesFlushed uint64
 	HashRate, FlushRate       uint64
-
-	WebseedActiveTrips    *atomic.Int64
-	WebseedMaxActiveTrips *atomic.Int64
-	WebseedTripCount      *atomic.Int64
-	WebseedDiscardCount   *atomic.Int64
-	WebseedServerFails    *atomic.Int64
-	WebseedBytesDownload  *atomic.Int64
 }
 
 func (me *AggStats) AllTorrentsComplete() bool {
@@ -168,8 +148,7 @@ func (me *AggStats) AllTorrentsComplete() bool {
 
 type requestHandler struct {
 	// Separated this rather than embedded it to ensure our wrapper RoundTrip is called.
-	rt         http.RoundTripper
-	downloader *Downloader
+	rt http.RoundTripper
 }
 
 var cloudflareHeaders = http.Header{
@@ -189,49 +168,14 @@ func (me roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) 
 
 // TODO(anacrolix): Upstream any logic that works reliably.
 func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err error) {
-	r.downloader.lock.RLock()
-	// Peak
-	webseedMaxActiveTrips := r.downloader.stats.WebseedMaxActiveTrips
-	webseedActiveTrips := r.downloader.stats.WebseedActiveTrips
-	webseedTripCount := r.downloader.stats.WebseedTripCount
-	webseedBytesDownload := r.downloader.stats.WebseedBytesDownload
-	webseedDiscardCount := r.downloader.stats.WebseedDiscardCount
-	WebseedServerFails := r.downloader.stats.WebseedServerFails
-	r.downloader.lock.RUnlock()
-
-	activeTrips := webseedActiveTrips.Add(1)
-	if activeTrips > webseedMaxActiveTrips.Load() {
-		webseedMaxActiveTrips.Store(activeTrips)
-	}
-
-	defer func() {
-		webseedActiveTrips.Add(-1)
-	}()
-
 	insertCloudflareHeaders(req)
 
-	webseedTripCount.Add(1)
 	resp, err = r.rt.RoundTrip(req)
 	if err != nil {
 		return
 	}
 
 	switch resp.StatusCode {
-	case http.StatusOK:
-		if req.Header.Get("Range") != "" {
-			// the torrent lib is expecting http.StatusPartialContent so it will discard this
-			// if this count is higher than 0, it's likely there is a server side config issue
-			// as it implies that the server is not handling range requests correctly and is just
-			// returning the whole file - which the torrent lib can't handle
-			//
-			// TODO: We could count the bytes - probably need to take this from the req though
-			// as its not clear the amount of the content which will be read.  This needs
-			// further investigation - if required.
-			webseedDiscardCount.Add(1)
-		}
-
-		webseedBytesDownload.Add(resp.ContentLength)
-
 	// the first two statuses here have been observed from cloudflare
 	// during testing.  The remainder are generally understood to be
 	// retry-able http responses, calcBackoff will use the Retry-After
@@ -245,10 +189,7 @@ func (r *requestHandler) RoundTrip(req *http.Request) (resp *http.Response, err 
 			// An interesting error that the torrent lib should probably handle.
 			fmt.Printf("got webseed response status %v\n", resp.Status)
 		}
-
-		WebseedServerFails.Add(1)
 	default:
-		webseedBytesDownload.Add(resp.ContentLength)
 	}
 
 	return resp, err
@@ -324,24 +265,21 @@ func configureHttp2(t *http.Transport) {
 	h2t.MaxReadFrameSize = 1 << 20 // Same as net/http.Transport.ReadBufferSize?
 }
 
-func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosity log.Lvl) (*Downloader, error) {
+func MakeWebseedRoundTripper() http.RoundTripper {
 	requestHandler := &requestHandler{}
-	{
-		requestHandler.rt = makeTransport()
-		cfg.ClientConfig.WebTransport = requestHandler
-		// requestHandler.downloader is set later.
-	}
-	{
-		metainfoSourcesTransport := makeTransport()
+	requestHandler.rt = makeTransport()
+	return requestHandler
+}
+
+func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downloader, error) {
+	cfg.ClientConfig.WebTransport = MakeWebseedRoundTripper()
+	metainfoSourcesHttpClient := func() *http.Client {
 		// Separate transport so webseed requests and metainfo fetching don't block each other.
-		// Additionally, we can tune for their specific workloads.
-		cfg.ClientConfig.MetainfoSourcesClient = &http.Client{
-			Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
-				insertCloudflareHeaders(req)
-				return metainfoSourcesTransport.RoundTrip(req)
-			}),
+		return &http.Client{
+			Transport: MakeWebseedRoundTripper(),
 		}
-	}
+	}()
+	cfg.ClientConfig.MetainfoSourcesClient = metainfoSourcesHttpClient
 
 	db, err := openMdbx(ctx, cfg.Dirs.Downloader, cfg.MdbxWriteMap)
 	if err != nil {
@@ -352,7 +290,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 
 	var addWebSeedOpts []torrent.AddWebSeedsOpt //nolint:prealloc
 
-	for value := range cfg.SeparateWebseedDownloadRateLimit.Iter() {
+	for value := range cfg.SeparateWebseedDownloadRateLimit.Iter {
 		addWebSeedOpts = append(
 			addWebSeedOpts,
 			torrent.WebSeedResponseBodyRateLimiter(rate.NewLimiter(value, 0)),
@@ -378,68 +316,51 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 		}
 	}
 
-	stats := AggStats{
-		WebseedActiveTrips:    &atomic.Int64{},
-		WebseedMaxActiveTrips: &atomic.Int64{},
-		WebseedTripCount:      &atomic.Int64{},
-		WebseedBytesDownload:  &atomic.Int64{},
-		WebseedDiscardCount:   &atomic.Int64{},
-		WebseedServerFails:    &atomic.Int64{},
-	}
-
 	d := &Downloader{
+		metainfoHttpClient: metainfoSourcesHttpClient,
 		cfg:                cfg,
 		torrentStorage:     m,
 		torrentClient:      torrentClient,
 		addWebSeedOpts:     addWebSeedOpts,
-		stats:              stats,
 		logger:             logger,
-		verbosity:          verbosity,
 		torrentFS:          &AtomicTorrentFS{dir: cfg.Dirs.Snap},
-		filesBeingVerified: xsync.NewMap[*torrent.File, struct{}](),
 	}
 
-	d.logTorrentClientParams()
+	d.zeroActiveDownloadRequests.L = &d.activeDownloadRequestsLock
 
-	if len(cfg.WebSeedUrls) == 0 {
-		logger.Warn("downloader has no webseed urls configured")
-	}
+	d.logConfig()
 
-	requestHandler.downloader = d
-
-	d.ctx, d.stopMainLoop = context.WithCancel(context.Background())
-
-	if d.cfg.AddTorrentsFromDisk {
-		if d.cfg.VerifyTorrentData {
-			return nil, errors.New("must add torrents from disk synchronously if downloader verify enabled")
-		}
-		d.spawn(func() {
-			err := d.AddTorrentsFromDisk(d.ctx)
-			if err == nil || ctx.Err() != nil {
-				return
-			}
-			log.Error("error adding torrents from disk", "err", err)
-		})
-	}
+	d.ctx, d.stop = context.WithCancel(context.Background())
 
 	return d, nil
 }
 
-// This should be called synchronously after Downloader.New and probably before adding
-// torrents/requests. However, I call it based on the existing config field for now.
-func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) error {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	// Does WalkDir do path or filepath?
-	if err := fs.WalkDir(
-		os.DirFS(d.SnapDir()),
+// Add completed torrents from disk. It's assumed that torrents should be completed, and if they're
+// partial they will be requested soon. We don't add incomplete files in case they are failures from
+// previous sync attempts. These probably should be cleaned up somewhere, we'll assume the node
+// knows to delete or ignore stuff that's not complete.
+func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) (incompleteTorrents int, err error) {
+	d.log(log.LvlInfo, "Adding torrents from disk")
+	var newTorrents []*torrent.Torrent
+	defer func() {
+		d.log(log.LvlInfo, "Finished adding torrents from disk", "new", len(newTorrents))
+		go func() {
+			for _, t := range newTorrents {
+				d.afterAdd(t)
+			}
+		}()
+	}()
+	// The fs module should use forward slash style paths only. We need this guarantee for how we use
+	// the metainfo.Info.Name field for nested snapshot names.
+	err = fs.WalkDir(
+		os.DirFS(d.snapDir()),
 		".",
 		func(path string, de fs.DirEntry, err error) error {
 			if ctx.Err() != nil {
 				return context.Cause(ctx)
 			}
 			if err != nil {
-				d.logger.Warn("error walking snapshots dir", "path", path, "err", err)
+				d.log(log.LvlWarn, "error walking snapshots dir", "path", path, "err", err)
 				return nil
 			}
 			if de.IsDir() {
@@ -450,188 +371,94 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) error {
 			if !ok {
 				return nil
 			}
-			_, err = d.addPreverifiedTorrent(g.None[metainfo.Hash](), name)
+			t, complete, new, err := d.addTorrentIfComplete(name)
 			if err != nil {
 				err = fmt.Errorf("adding torrent for %v: %w", path, err)
 				return err
 			}
+			if !complete {
+				d.log(log.LvlDebug, "add torrents from disk: skipping incomplete torrent",
+					"name", name)
+				incompleteTorrents++
+			}
+			if new {
+				newTorrents = append(newTorrents, t)
+			}
 			return nil
 		},
-	); err != nil {
-		return err
-	}
-
-	d.afterAdd()
-	return nil
-}
-
-// This should only be called once...?
-func (d *Downloader) MainLoopInBackground(logSeeding bool) {
-	d.spawn(func() {
-		// Given this should only be called once, set this locally until clarified. Race detector
-		// will notice if it's done in poor taste.
-		d.logSeeding = logSeeding
-		if err := d.loggerRoutine(); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				d.logger.Warn("[snapshots]", "err", err)
-			}
-		}
-	})
-}
-
-func (d *Downloader) loggerRoutine() error {
-restart:
-	nextLog := time.Now()
-	var step time.Duration
-	reset := d.resetLogInterval.Signaled()
-	for {
-		select {
-		case <-d.ctx.Done():
-			return d.ctx.Err()
-		case <-time.After(time.Until(nextLog)):
-			d.ReCalcStats()
-			d.logStats()
-			switch s := d.state(); s {
-			case Idle, Seeding:
-				step = min(max(step*2, time.Minute), time.Hour)
-			case Syncing:
-				step = min(max(step, time.Second)*2, 30*time.Second)
-			default:
-				panic(s)
-			}
-			nextLog = nextLog.Add(step)
-		case <-reset:
-			goto restart
-		}
-	}
-}
-
-func (d *Downloader) SnapDir() string { return d.cfg.Dirs.Snap }
-
-// TODO: Zero start-time when true. We're done for now. Return true for this on required torrents?
-func (d *Downloader) allTorrentsComplete() (ret bool) {
-	ret = true
-	for _, t := range d.torrentClient.Torrents() {
-		if !t.Complete().Bool() {
-			if g.MapContains(d.requiredTorrents, t) {
-				ret = false
-			}
-			continue
-		}
-		// Keep going even if this fails, because we want to trigger piece verification for all
-		// torrents that fail. We also validate torrents that weren't explicitly requested, because
-		// behaviour might depend on those. If they fail validation they might get made into part
-		// files again and protect the corruption from spreading.
-		if !d.validateCompletedSnapshot(t) {
-			if g.MapContains(d.requiredTorrents, t) {
-				ret = false
-			}
-		}
-		// TODO: Should we write the torrent files here instead of in the goroutine spawned in addTorrentSpec?
-	}
-	// Require that we're not waiting on any file verification. NB this isn't just requiredTorrent
-	// pieces, but that might be best.
-	if d.filesBeingVerified.Size() != 0 {
-		ret = false
-	}
+	)
 	return
 }
 
-// Basic checks and fixes for a snapshot torrent claiming it's complete. If passed is false, come
-// back later and check again. You could ask why this isn't in the torrent lib. This is an extra
-// level of pedantry due to some file modification I saw from outside the torrent lib. TODO: Revisit
-// this now partial files support is stable. Should be sufficient to tell the Client to reverify
-// data.
-func (d *Downloader) validateCompletedSnapshot(t *torrent.Torrent) (passed bool) {
-	passed = true
-	// This has to be available if it's complete.
-	for _, f := range t.Files() {
-		// Technically this works, we're preemptively handling multifile torrents here.
-		fp := d.filePathForName(f.Path())
-		fi, err := os.Stat(fp)
-		if err == nil {
-			if fi.Size() == f.Length() {
-				continue
-			}
-			d.logger.Warn(
-				"snapshot file has wrong size",
-				"name", f.Path(),
-				"expected", f.Length(),
-				"actual", fi.Size(),
-			)
-		} else if passed {
-			// In Erigon 3.1, .torrent files are only written when the data is complete.
-			d.logger.Warn("torrent file is present but data is incomplete", "name", f.Path(), "err", err)
-		}
-		passed = false
-		d.verifyFile(f)
-	}
-	return
-}
-
-// Run verification for pieces of the file that aren't already being verified.
-func (d *Downloader) verifyFile(f *torrent.File) {
-	_, loaded := d.filesBeingVerified.LoadOrStore(f, struct{}{})
-	if loaded {
+// I haven't removed logSeeding yet because I think Alex will want it back at some point.
+func (d *Downloader) InitBackgroundLogger(logSeeding bool) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	if d.initedBackgroundLogger {
 		return
 	}
-	d.updateVerificationOccurring()
-	d.spawn(func() {
-		for p := range f.Pieces() {
-			err := p.VerifyDataContext(d.ctx)
-			if d.ctx.Err() != nil {
-				return
-			}
-			panicif.Err(err)
+	d.initedBackgroundLogger = true
+	// This go is actually intended. We hold the downloader lock but spawn also takes it. But
+	// Downloader.spawn checks that the Downloader isn't closed so it's fine.
+	go d.spawn(d.backgroundLogger)
+}
+
+func (d *Downloader) snapDir() string { return d.cfg.Dirs.Snap }
+
+// Check snapshot data looks right.
+func (d *Downloader) snapshotDataLooksComplete(info *metainfo.Info) bool {
+	for f := range info.UpvertedFilesIter() {
+		pathParts := append([]string{info.BestName()}, f.BestPath()...)
+		slashPath := path.Join(pathParts...)
+		expectedLength := f.Length
+		// Technically this works, we're preemptively handling multifile torrents here.
+		fp := d.filePathForName(slashPath)
+		fi, err := os.Stat(fp)
+		if err != nil {
+			return false
 		}
-		_, loaded := d.filesBeingVerified.LoadAndDelete(f)
-		// We should be the ones removing this value.
-		panicif.False(loaded)
-		d.updateVerificationOccurring()
-	})
-}
-
-// Interval is how long between recalcs.
-func (d *Downloader) ReCalcStats() {
-	d.lock.RLock()
-	prevStats := d.stats
-	d.lock.RUnlock()
-
-	stats := d.newStats(prevStats)
-
-	d.lock.Lock()
-	d.stats = stats
-	d.lock.Unlock()
-
-	if !stats.AllTorrentsComplete() {
-		log.Debug("[snapshots] downloading",
-			"len", stats.NumTorrents,
-			"hashed", common.ByteCount(stats.BytesHashed),
-			"hash-rate", common.ByteCount(stats.HashRate)+"/s",
-			"completed", common.ByteCount(stats.BytesCompleted),
-			"completion-rate", common.ByteCount(stats.CompletionRate)+"/s",
-			"flushed", common.ByteCount(stats.BytesFlushed),
-			"flush-rate", common.ByteCount(stats.FlushRate)+"/s",
-			"downloaded", common.ByteCount(stats.BytesDownload),
-			"download-rate", common.ByteCount(stats.DownloadRate)+"/s",
-			"webseed-trips", stats.WebseedTripCount.Load(),
-			"webseed-active", stats.WebseedActiveTrips.Load(),
-			"webseed-max-active", stats.WebseedMaxActiveTrips.Load(),
-			"webseed-discards", stats.WebseedDiscardCount.Load(),
-			"webseed-fails", stats.WebseedServerFails.Load(),
-			"webseed-bytes", common.ByteCount(uint64(stats.WebseedBytesDownload.Load())))
+		if fi.Size() != expectedLength {
+			return false
+		}
 	}
+	return true
 }
 
-func (d *Downloader) newStats(prevStats AggStats) AggStats {
-	torrentClient := d.torrentClient
+// Log the names of torrents missing metainfo. We can pass a level in to scale the urgency of the
+// situation.
+func (d *Downloader) logNoMetadata(lvl log.Lvl, torrents []snapshot) {
+	noMetadata := make([]string, 0, len(torrents))
+
+	for _, ps := range torrents {
+		t, ok := d.torrentClient.Torrent(ps.InfoHash)
+		if !ok {
+			// Don't report missing metainfo, because we haven't even added it yet.
+			continue
+		}
+		if t.Info() != nil {
+			continue
+		}
+		noMetadata = append(noMetadata, ps.Name)
+	}
+
+	if len(noMetadata) == 0 {
+		return
+	}
+	amount := len(noMetadata)
+	if len(noMetadata) > 5 {
+		noMetadata = append(noMetadata[:5], "...")
+	}
+	d.log(lvl, "No metadata yet", "files", amount, "list", noMetadata)
+}
+
+// We take preverifiedSnapshot because it's convenient. We want to log torrents that potentially
+// aren't initialized yet.
+func (d *Downloader) newStats(prevStats AggStats, torrents []snapshot) AggStats {
 	peers := make(map[torrent.PeerID]struct{}, 16)
 	stats := prevStats
-	logger := d.logger
 
 	// Call these methods outside `lock` critical section, because they have own locks with contention.
-	torrents := torrentClient.Torrents()
-	connStats := torrentClient.Stats()
+	connStats := d.torrentClient.Stats()
 
 	stats.BytesUpload = uint64(connStats.BytesWrittenData.Int64())
 	stats.BytesHashed = uint64(connStats.BytesHashed.Int64())
@@ -644,42 +471,27 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 	stats.TorrentsCompleted = 0
 	stats.NumTorrents = len(torrents)
 
-	var noMetadata []string
-
-	isDiagEnabled := diaglib.TypeOf(diaglib.SnapshoFilesList{}).Enabled()
-	if isDiagEnabled {
-		filesList := make([]string, 0, len(torrents))
-		for _, t := range torrents {
-			filesList = append(filesList, t.Name())
+	for _, ps := range torrents {
+		t, ok := d.torrentClient.Torrent(ps.InfoHash)
+		if !ok {
+			// Don't report missing metainfo, because we haven't even added it yet.
+			continue
 		}
-		diaglib.Send(diaglib.SnapshoFilesList{Files: filesList})
-	}
-
-	for _, t := range torrents {
-		stats.BytesCompleted += uint64(t.BytesCompleted())
-		select {
-		case <-t.GotInfo():
-		default: // if some torrents have no metadata, we are for-sure incomplete
-			noMetadata = append(noMetadata, t.Name())
+		if t.Info() == nil {
 			continue
 		}
 
-		torrentName := t.Name()
+		stats.BytesCompleted += uint64(t.BytesCompleted())
 		torrentComplete := t.Complete().Bool()
 		stats.MetadataReady++
 
 		// call methods once - to reduce internal mutex contention
 		peersOfThisFile := t.PeerConns()
-		weebseedPeersOfThisFile := t.WebseedPeerConns()
 
 		tLen := t.Length()
-		var bytesCompleted int64
 
 		if torrentComplete {
 			stats.TorrentsCompleted++
-			bytesCompleted = tLen
-		} else {
-			bytesCompleted = t.BytesCompleted()
 		}
 
 		stats.BytesTotal += uint64(tLen)
@@ -688,25 +500,6 @@ func (d *Downloader) newStats(prevStats AggStats) AggStats {
 			stats.ConnectionsTotal++
 			peers[peer.PeerID] = struct{}{}
 		}
-
-		_, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName, t.Complete().Bool())
-		_, segmentPeers := getPeersRatesForlogs(peersOfThisFile, torrentName)
-
-		diaglib.Send(diaglib.SegmentDownloadStatistics{
-			Name:            torrentName,
-			TotalBytes:      uint64(tLen),
-			DownloadedBytes: uint64(bytesCompleted),
-			Webseeds:        webseeds,
-			Peers:           segmentPeers,
-		})
-	}
-
-	if len(noMetadata) > 0 {
-		amount := len(noMetadata)
-		if len(noMetadata) > 5 {
-			noMetadata = append(noMetadata[:5], "...")
-		}
-		logger.Info("[snapshots] no metadata yet", "files", amount, "list", strings.Join(noMetadata, ","))
 	}
 
 	stats.When = time.Now()
@@ -741,68 +534,6 @@ func calculateRate(current, previous uint64, prevRate uint64, interval time.Dura
 	return 0
 }
 
-// Adds segment peer fields common to Peer instances.
-func setCommonPeerSegmentFields(peer *torrent.Peer, stats *torrent.PeerStats, segment *diaglib.SegmentPeer) {
-	segment.DownloadRate = uint64(stats.DownloadRate)
-	segment.UploadRate = uint64(stats.LastWriteUploadRate)
-	segment.PiecesCount = uint64(stats.RemotePieceCount)
-	segment.RemoteAddr = peer.RemoteAddr.String()
-}
-
-func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName string, finished bool) ([]interface{}, []diaglib.SegmentPeer) {
-	seeds := make([]diaglib.SegmentPeer, 0, len(weebseedPeersOfThisFile))
-	webseedRates := make([]interface{}, 0, len(weebseedPeersOfThisFile)*2)
-	webseedRates = append(webseedRates, "file", fName)
-	for _, peer := range weebseedPeersOfThisFile {
-		if peerUrl, err := webPeerUrl(peer); err == nil {
-			if shortUrl, err := url.JoinPath(peerUrl.Host, peerUrl.Path); err == nil {
-				stats := peer.Stats()
-				if !finished {
-					seed := diaglib.SegmentPeer{
-						Url:         peerUrl.Host,
-						TorrentName: fName,
-					}
-					setCommonPeerSegmentFields(peer, &stats, &seed)
-					seeds = append(seeds, seed)
-				}
-				webseedRates = append(
-					webseedRates,
-					strings.TrimSuffix(shortUrl, "/"),
-					common.ByteCount(uint64(stats.DownloadRate))+"/s",
-				)
-			}
-		}
-	}
-
-	return webseedRates, seeds
-}
-
-func webPeerUrl(peer *torrent.Peer) (*url.URL, error) {
-	root, _ := path.Split(strings.Trim(strings.TrimPrefix(peer.String(), "webseed peer for "), "\""))
-	return url.Parse(root)
-}
-
-func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]interface{}, []diaglib.SegmentPeer) {
-	peers := make([]diaglib.SegmentPeer, 0, len(peersOfThisFile))
-	rates := make([]interface{}, 0, len(peersOfThisFile)*2)
-	rates = append(rates, "file", fName)
-
-	for _, peer := range peersOfThisFile {
-		url := fmt.Sprintf("%v", peer.PeerClientName.Load())
-		stats := peer.Stats()
-		segPeer := diaglib.SegmentPeer{
-			Url:         url,
-			PeerId:      peer.PeerID,
-			TorrentName: fName,
-		}
-		setCommonPeerSegmentFields(&peer.Peer, &stats, &segPeer)
-		peers = append(peers, segPeer)
-		rates = append(rates, url, common.ByteCount(uint64(stats.DownloadRate))+"/s")
-	}
-
-	return rates, peers
-}
-
 // Check all loaded torrents by forcing a new verification then checking if the client considers
 // them complete. If whitelist is not empty, torrents are verified if their name contains any
 // whitelist entry as a prefix, suffix, or total match. TODO: This is too coupled to cmd/Downloader.
@@ -832,8 +563,8 @@ func (d *Downloader) VerifyData(
 		totalBytes += t.Length()
 	}
 
-	d.logger.Info("[snapshots] Verify start")
-	defer d.logger.Info("[snapshots] Verify done", "files", len(toVerify), "whiteList", whiteList)
+	d.log(log.LvlInfo, "Verify start")
+	defer d.log(log.LvlInfo, "Verify done", "files", len(toVerify), "whiteList", whiteList)
 
 	var (
 		verifiedBytes  atomic.Int64
@@ -853,10 +584,10 @@ func (d *Downloader) VerifyData(
 					case <-ctx.Done():
 						return
 					case <-logEvery.C:
-						d.logger.Info("[snapshots] Verify",
+						d.log(log.LvlInfo, "Verify",
 							"progress", fmt.Sprintf("%.2f%%", 100*float64(completedBytes.Load())/float64(totalBytes)),
 							"files", fmt.Sprintf("%d/%d", completedFiles.Load(), len(toVerify)),
-							"sz_gb", downloadercfg.DefaultPieceSize*completedBytes.Load()/1024/1024/1024,
+							"sz_gib", completedBytes.Load()>>30,
 						)
 					}
 				}
@@ -869,7 +600,7 @@ func (d *Downloader) VerifyData(
 		for _, t := range toVerify {
 			g.Go(func() error {
 				defer completedFiles.Add(1)
-				return VerifyFileFailFast(ctx, t, d.SnapDir(), &completedBytes)
+				return VerifyFileFailFast(ctx, t, d.snapDir(), &completedBytes)
 			})
 		}
 
@@ -887,11 +618,12 @@ func (d *Downloader) VerifyData(
 		defer logEvery.Stop()
 		d.spawn(func() {
 			for {
+				// d.ctx?
 				select {
 				case <-ctx.Done():
 					return
 				case <-logEvery.C:
-					d.logger.Info("[snapshots] Verify",
+					d.log(log.LvlInfo, "Verify",
 						"progress", fmt.Sprintf("%.2f%%", 100*float64(verifiedBytes.Load())/float64(totalBytes)),
 						"files", fmt.Sprintf("%d/%d", completedFiles.Load(), len(toVerify)),
 						// GB not GiB?
@@ -932,46 +664,35 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	}
 
 	// if we don't have the torrent file we build it if we have the .seg file
-	_, err := BuildTorrentIfNeed(ctx, name, d.SnapDir(), d.torrentFS)
+	_, err := BuildTorrentIfNeed(ctx, name, d.snapDir(), d.torrentFS)
 	if err != nil {
 		return fmt.Errorf("building metainfo for new seedable file: %w", err)
 	}
-	d.lock.Lock()
-	defer d.lock.Unlock()
 	// The above BuildTorrentIfNeed should put the metainfo in the right place for name.
-	// addPreverifiedTorrent is the correct wrapper to check for existing torrents in the client.
-	_, err = d.addPreverifiedTorrent(g.None[metainfo.Hash](), name)
+	_, _, err = d.addCompleteTorrent(name)
 	if err != nil {
 		return fmt.Errorf("adding torrent: %w", err)
 	}
 	return nil
 }
 
-func (d *Downloader) alreadyHaveThisName(name string) bool {
-	return g.MapContains(d.torrentsByName, name)
+func (d *Downloader) loadMetainfoFromDisk(name string) (mi *metainfo.MetaInfo, err error) {
+	miPath := d.metainfoFilePathForName(name)
+	return metainfo.LoadFromFile(miPath)
 }
 
 // Loads metainfo from disk, removing it if it's invalid. Returns Some metainfo if it's valid. Logs
 // errors.
-func (d *Downloader) loadSpecFromDisk(name string) (spec g.Option[*torrent.TorrentSpec]) {
-	miPath := d.filePathForName(name) + ".torrent"
+func (d *Downloader) maybeLoadMetainfoFromDisk(name string) (miOpt g.Option[*metainfo.MetaInfo], err error) {
+	miPath := d.metainfoFilePathForName(name)
 	mi, err := metainfo.LoadFromFile(miPath)
-	if errors.Is(err, fs.ErrNotExist) {
-		return
-	}
-	removeMetainfo := func() {
-		err := dir.RemoveFile(miPath)
-		if err != nil {
-			d.logger.Error("error removing metainfo file", "err", err, "name", name)
-		}
-	}
 	if err != nil {
-		d.logger.Error("loading metainfo from disk", "err", err, "name", name)
-		removeMetainfo()
+		if errors.Is(err, fs.ErrNotExist) {
+			err = nil
+		}
 		return
 	}
-	// TODO: Are we missing a check that the name and the Info.Name match here?
-	spec.Set(torrent.TorrentSpecFromMetaInfo(mi))
+	miOpt.Set(mi)
 	return
 }
 
@@ -979,210 +700,507 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 	return slices.Values(d.cfg.WebSeedUrls)
 }
 
-// RequestSnapshot Add a torrent with a known info hash. Either someone else made it, or it was on disk.
-func (d *Downloader) RequestSnapshot(
-	infoHash metainfo.Hash, // The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
+// Download the provided snapshots in their entirety. No consumers should do this asynchronously.
+// Logging is bound specific and bound to the lifetime of the call. Target is a name for what we're
+// syncing.
+func (d *Downloader) DownloadSnapshots(ctx context.Context, items []preverifiedSnapshot, target string) (err error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	wait, err := d.startSnapshotsDownload(ctx, items, target)
+	if err != nil {
+		return
+	}
+	return wait(ctx)
+}
+
+// Starts downloading, returns a function to wait for completion. Wait or err are returned. Wait
+// must be called, even with an expired Context in order to clean up resources.
+func (d *Downloader) startSnapshotsDownload(
+	ctx context.Context,
+	items []preverifiedSnapshot,
+	target string,
+) (wait func(context.Context) error, err error) {
+	// Before we start logging the download, this will block/sleep the idle logger.
+	d.incDownloadRequests()
+	batch := downloadBatch{
+		d: d,
+	}
+	g.MakeSliceWithCap(&batch.torrents, len(items))
+	g.MakeChanWithLen(&batch.afterTasks, len(items))
+	var batchCtx context.Context
+	batchCtx, batch.cancel = context.WithCancelCause(d.ctx)
+
+	batch.all.Add(1)
+	go func() {
+		defer batch.all.Done()
+		d.logDownload(
+			batchCtx,
+			items,
+			target,
+			func() log.Lvl {
+				if batch.finishedMetadataTasks.Load() {
+					// If we've finished synchronously fetching webseeds directly, then missing
+					// metainfos are a potential problem: We must now rely on fetching metainfo from
+					// peers, which usually indicates there's an issue with webseeds.
+					return log.LvlWarn
+				} else {
+					// We used to log this at info. There's a warning for each failed webseed fetch,
+					// and then only after that's all done does it become interesting.
+					return log.LvlDebug
+				}
+			},
+		)
+	}()
+
+	defer func() {
+		if err != nil {
+			batch.abandon()
+		}
+	}()
+	err = batch.addAllItems(ctx, items)
+	wait = batch.wait
+	return
+}
+
+func (d *Downloader) incDownloadRequests() {
+	d.activeDownloadRequestsLock.Lock()
+	d.activeDownloadRequests++
+	d.activeDownloadRequestsLock.Unlock()
+}
+
+func (d *Downloader) decDownloadRequests() {
+	d.activeDownloadRequestsLock.Lock()
+	d.activeDownloadRequests--
+	d.activeDownloadRequestsLock.Unlock()
+	if d.activeDownloadRequests == 0 {
+		d.zeroActiveDownloadRequests.Broadcast()
+	}
+}
+
+// Returns all torrents, with names, because if a Torrent info isn't available, we can't just yank
+// the name from there.
+func (d *Downloader) allActiveSnapshots() (ret []snapshot) {
+	for name, t := range d.torrentsByName {
+		ret = append(ret, snapshot{
+			Name:     name,
+			InfoHash: t.InfoHash(),
+		})
+	}
+	return
+}
+
+func (d *Downloader) backgroundLogger() {
+	ctx := d.ctx
+	for ctx.Err() == nil {
+		d.activeDownloadRequestsLock.Lock()
+		for d.activeDownloadRequests > 0 {
+			// This goes to zero when Downloader closes, so we won't get stuck.
+			d.zeroActiveDownloadRequests.Wait()
+		}
+		d.activeDownloadRequestsLock.Unlock()
+		d.backgroundLogging(ctx)
+	}
+}
+
+func (d *Downloader) backgroundLogging(ctx context.Context) {
+	// Reset stats when we start background logging.
+	stats := d.newStats(AggStats{}, d.allActiveSnapshots())
+	interval := time.Minute
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+			interval = min(interval*2, 5*time.Minute)
+		}
+		// Ensure no download requests start while we log, it looks spammy in the logs.
+		d.activeDownloadRequestsLock.Lock()
+		if d.activeDownloadRequests > 0 {
+			d.activeDownloadRequestsLock.Unlock()
+			return
+		}
+		allActiveSnapshots := d.allActiveSnapshots()
+		stats = d.newStats(stats, allActiveSnapshots)
+		// Flexibility to add seeding and warn on unexpected behaviour in torrent client here. We
+		// should probably change the status message if downloading but nobody is actively waiting
+		// on sync. We can also report seeding if we see upload activity and everything is synced.
+		d.logStatsInner(log.LvlDebug, stats, "Idle", nil, false)
+		// There are missing torrent infos but nobody is waiting on a download request to complete.
+		// Let me (anacrolix) know why this should happen.
+		d.logNoMetadata(log.LvlError, allActiveSnapshots)
+		d.activeDownloadRequestsLock.Unlock()
+	}
+}
+
+// We take preverifiedSnapshot because it's convenient. We want to log torrents that potentially
+// aren't initialized yet.
+func (d *Downloader) logDownload(
+	ctx context.Context,
+	ts []preverifiedSnapshot,
+	target string,
+	getNoMetadataLvl func() log.Lvl,
+) {
+	startTime := time.Now()
+	stats := d.newStats(AggStats{}, ts)
+	interval := time.Second
+	for {
+		stats = d.newStats(stats, ts)
+		d.logSyncStats(startTime, stats, target)
+		d.logNoMetadata(getNoMetadataLvl(), ts)
+		if ctx.Err() != nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(interval):
+		}
+		interval = min(interval*2, 15*time.Second)
+	}
+}
+
+// testStartSingleDownloadNoWait Starts a snapshot download bug doesn't care about waiting.
+func (d *Downloader) testStartSingleDownload(
+	ctx context.Context,
+	infoHash metainfo.Hash,
+	name string,
+) (func(context.Context) error, error) {
+	return d.startSnapshotsDownload(ctx, []preverifiedSnapshot{
+		{infoHash, name},
+	}, "testing")
+}
+
+// testStartSingleDownloadNoWait Starts a snapshot download bug doesn't care about waiting.
+func (d *Downloader) testStartSingleDownloadNoWait(
+	ctx context.Context,
+	infoHash metainfo.Hash,
 	name string,
 ) error {
-	panicif.Zero(infoHash)
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	t, err := d.addPreverifiedTorrent(g.Some(infoHash), name)
+	wait, err := d.startSnapshotsDownload(ctx, []preverifiedSnapshot{
+		{infoHash, name},
+	}, "testing")
 	if err != nil {
 		return err
 	}
-	d.addRequired(t)
-	return nil
+	ctx, cancel := context.WithCancelCause(ctx)
+	die := errors.New("testStartSingleDownloadNoWait")
+	cancel(die)
+	err = wait(ctx)
+	if errors.Is(err, die) {
+		err = nil
+	}
+	return err
 }
 
-func (d *Downloader) addRequired(t *torrent.Torrent) {
-	panicif.Nil(t)
-	g.MakeMapIfNil(&d.requiredTorrents)
-	g.MapInsert(d.requiredTorrents, t, struct{}{})
-	d.setStartTime()
+func (d *Downloader) invalidateData(name snapshotName, infoHash metainfo.Hash) (err error) {
+	_, ok := d.torrentClient.Torrent(infoHash)
+	// Torrent in use, bad idea to proceed. This shouldn't happen since we should have found
+	// the existing name earlier.
+	panicif.True(ok)
+	// Ensure the data isn't reused. We're presuming the storage in use, but we can't afford
+	// to wait until another torrent is fetched, and then we mistake a non-partial file with
+	// the correct size as being complete.
+	err = os.Rename(d.filePathForName(name), d.filePathForName(name+".part"))
+	if err != nil && errors.Is(err, os.ErrNotExist) {
+		err = nil
+	}
+	return
+}
+
+// Download a preverified file. That means it has a published manifest (metainfo), and a known info
+// hash. Caller is responsible for flushing missing metainfos to disk when complete.
+func (d *Downloader) addPreverifiedSnapshotForDownload(
+	infoHash metainfo.Hash,
+	name string,
+) (
+	t *torrent.Torrent,
+	// First add of this Torrent that asked to download. The caller is responsible for adding
+	// download tasks.
+	firstDownloader bool,
+	miOpt g.Option[*metainfo.MetaInfo],
+	err error,
+) {
+	// Prevent anyone else from trying to add a torrent in the meanwhile, so we can do data
+	// invalidation, and identify the first downloader.
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	t, ok, err := d.getExistingSnapshotTorrent(name, infoHash)
+	if err != nil {
+		return
+	}
+	// We can invalidate data if a torrent isn't yet loaded.
+	if !ok {
+		miOpt, err = d.loadMatchingMetainfoOrInvalidateData(infoHash, name)
+		if err != nil {
+			return
+		}
+		var new bool
+		t, new, err = d.addTorrent(name, infoHash)
+		if err != nil {
+			return
+		}
+		panicif.False(new)
+	}
+	g.MakeMapIfNil(&d.downloads)
+	firstDownloader = !g.MapInsert(d.downloads, t, struct{}{}).Ok
+	return
+}
+
+func (d *Downloader) loadMatchingMetainfoOrInvalidateData(
+	infoHash metainfo.Hash,
+	name string,
+) (
+	miOpt g.Option[*metainfo.MetaInfo],
+	err error,
+) {
+	miOpt, err = d.maybeLoadMetainfoFromDisk(name)
+	if err != nil {
+		d.log(log.LvlError, "error loading metainfo from disk", "err", err, "name", name)
+		err = nil
+	}
+	if miOpt.Ok {
+		loadedIh := miOpt.Value.HashInfoBytes()
+		if loadedIh == infoHash {
+			return
+		}
+		// This is fine if we're doing initial sync. If we're not we shouldn't be here.
+		d.log(log.LvlWarn, "preverified snapshot hash has changed",
+			"expected", infoHash,
+			"actual", loadedIh,
+			"name", name)
+		// Forget the metainfo we loaded, it's wrong (probably changed hash but not name...)
+		miOpt.SetNone()
+	} else {
+		d.log(log.LvlDebug, "snapshot metainfo missing", "name", name)
+	}
+	err = d.invalidateData(name, infoHash)
+	if err != nil {
+		err = fmt.Errorf("invalidating old snapshot data: %w", err)
+		return
+	}
+	return
+}
+
+func (d *Downloader) addedFirstDownloader(
+	ctx context.Context,
+	t *torrent.Torrent,
+	miOpt g.Option[*metainfo.MetaInfo],
+	name string,
+	infoHash metainfo.Hash,
+) (afterAdd func()) {
+	// Try again, we would have invalidated data for changed infohashes now.
+	if !miOpt.Ok {
+		// Yes I mean for this error to be scoped here.
+		err := d.fetchMetainfoFromWebseeds(ctx, name, infoHash)
+		if err == nil {
+			// Always reuse code paths to ensure no surprises later. I.e. load the metainfo again
+			// through the same path that is used on a good run. No data invalidation here, at this
+			// point we've added the torrent, and already invalidated if the metainfo was missing
+			// the first time.
+			miOpt, err = d.maybeLoadMetainfoFromDisk(name)
+			if err != nil {
+				// Should this error be returned instead?
+				d.log(log.LvlError, "error loading metainfo from disk", "err", err, "name", name)
+			}
+		} else {
+			d.log(log.LvlWarn, "error fetching metainfo from webseeds", "err", err, "name", name, "infohash", infoHash)
+		}
+	}
+
+	if miOpt.Ok {
+		// Good case: We have a metainfo with the right infohash, either just fetched from a
+		// webseed, or it was cached on disk.
+		err := d.applyMetainfo(miOpt.Value, t)
+		if err != nil {
+			d.log(log.LvlError, "error applying metainfo", "err", err, "name", name)
+		}
+	}
+
+	// Defer these actions to not compete with downloading metainfos directly from webseed first.
+	if t.Info() == nil {
+		return func() { d.afterAddForDownloadMissingMetainfo(t, name) }
+	} else {
+		return func() { d.afterAddForDownloadHadMetainfo(t) }
+	}
+
+}
+
+func (d *Downloader) addTorrentFromMetainfo(
+	mi *metainfo.MetaInfo,
+	name string,
+	infoHash metainfo.Hash,
+) (
+	t *torrent.Torrent,
+	new bool,
+	err error,
+) {
+	t, new, err = d.addTorrent(name, infoHash)
+	if err != nil {
+		return
+	}
+	err = d.applyMetainfo(mi, t)
+	return
+}
+
+func (d *Downloader) applyMetainfo(
+	mi *metainfo.MetaInfo,
+	t *torrent.Torrent,
+) (
+	err error,
+) {
+	err = t.SetInfoBytes(mi.InfoBytes)
+	if err != nil {
+		return
+	}
+	// The only field which can be verified, and isn't erigon-wide configuration (for now). If it
+	// errors we also don't currently care, it's BitTorrent v2, and we're not using it.
+	t.AddPieceLayers(mi.PieceLayers)
+	return
+}
+
+func (d *Downloader) webseedMetainfoUrls(snapshotName string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		for base := range d.webSeedUrlStrs() {
+			if !yield(webseedMetainfoUrl(base, snapshotName)) {
+				return
+			}
+		}
+	}
+}
+
+func (d *Downloader) fetchMetainfoFromWebseeds(ctx context.Context, name string, ih metainfo.Hash) (err error) {
+	err = errors.New("no webseed urls")
+	var buf bytes.Buffer
+	for base := range d.webSeedUrlStrs() {
+		buf.Reset()
+		var mi metainfo.MetaInfo
+		var w io.Writer = &buf
+		mi, err = GetMetainfoFromWebseed(ctx, base, name, d.metainfoHttpClient, w)
+		if err != nil {
+			d.log(log.LvlDebug, "error fetching metainfo from webseed", "err", err, "name", name, "webseed", base)
+			// Whither error?
+			continue
+		}
+		actualIh := mi.HashInfoBytes()
+		if actualIh != ih {
+			d.log(log.LvlWarn, "webseed infohash mismatch",
+				"expected", ih,
+				"actual", mi.HashInfoBytes(),
+				"name", name,
+				"webseed", base)
+			continue
+		}
+		return os.WriteFile(d.metainfoFilePathForName(name), buf.Bytes(), 0o666)
+	}
+	err = fmt.Errorf("all webseed urls failed. last error: %w", err)
+	return
+}
+
+func webseedMetainfoUrl(webseedUrlBase, snapshotName string) string {
+	return webseedUrlBase + snapshotName + ".torrent"
+}
+
+func GetMetainfoFromWebseed(
+	ctx context.Context,
+	webseedUrlBase string,
+	name string,
+	httpClient *http.Client,
+	w io.Writer, // Receives the serialized metainfo
+) (
+	mi metainfo.MetaInfo,
+	err error,
+) {
+	url := webseedMetainfoUrl(webseedUrlBase, name)
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("fetching from %q: %w", url, err)
+		}
+	}()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		err = fmt.Errorf("unexpected http response status code: %v", resp.StatusCode)
+		return
+	}
+	tr := io.TeeReader(resp.Body, w)
+	dec := bencode.NewDecoder(tr)
+	err = dec.Decode(&mi)
+	if err != nil {
+		err = fmt.Errorf("decoding metainfo response body: %w", err)
+		return
+	}
+	// Do we want dec.ReadEOF here? Answer: Yes. If we get a response that replies incorrectly with
+	// valid bencoding and then more stuff we're doing the wrong thing.
+	err = dec.ReadEOF()
+	return
 }
 
 // Add a torrent with a known info hash. Either someone else made it, or it was on disk. This might
 // be two functions now, the infoHashHint is getting a bit heavy.
-func (d *Downloader) addPreverifiedTorrent(
-	infoHashHint g.Option[metainfo.Hash], // The infohash to use if there isn't one on disk. If there isn't one on disk then we can't proceed.
+func (d *Downloader) addTorrentIfComplete(
 	name string,
-) (t *torrent.Torrent, err error) {
-	diskSpecOpt := d.loadSpecFromDisk(name)
-	if !diskSpecOpt.Ok && !infoHashHint.Ok {
-		err = fmt.Errorf("can't add torrent without infohash. name=%s", name)
-		return
-	}
-	if diskSpecOpt.Ok && infoHashHint.Ok && diskSpecOpt.Value.InfoHash != infoHashHint.Value {
-		// This is allowed if the torrent file was committed to disk. It's assumed the torrent was
-		// downloaded in its entirety with a previous hash. TODO: Should we check there were
-		// actually info bytes?
-		d.logger.Debug("disk metainfo hash mismatch",
-			"expected", infoHashHint,
-			"actual", diskSpecOpt.Value.InfoHash,
-			"name", name)
-	}
-	// Prefer the infohash from disk, then the caller's.
-	finalInfoHash := func() infohash.T {
-		if diskSpecOpt.Ok {
-			return diskSpecOpt.Value.InfoHash
-		}
-		return infoHashHint.Unwrap()
-	}()
-	panicif.Zero(finalInfoHash)
-
-	ok, err := d.shouldAddTorrent(finalInfoHash, name)
+) (t *torrent.Torrent, complete, new bool, err error) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	mi, err := d.loadMetainfoFromDisk(name)
 	if err != nil {
+		err = fmt.Errorf("loading metainfo from disk: %w", err)
 		return
 	}
-	if !ok {
-		// Return the existing torrent to the caller. If the torrent doesn't exist we should have
-		// returned with an error already.
-		t, _ = d.torrentClient.Torrent(finalInfoHash)
-		return
-	}
-
-	// TorrentSpec was created before I knew better about Go's heap... Set a default
-	spec := diskSpecOpt.UnwrapOr(new(torrent.TorrentSpec))
-	// This will trigger a mismatch if info bytes are known and don't match. We would have already
-	// failed if the info bytes aren't known.
-	spec.InfoHash = finalInfoHash
-	spec.DisplayName = cmp.Or(spec.DisplayName, name)
-	spec.Sources = nil
-	for s := range d.webSeedUrlStrs() {
-		u := s + name + ".torrent"
-		spec.Sources = append(spec.Sources, u)
-	}
-	t, ok, err = d.addTorrentSpec(spec, name)
+	info, err := mi.UnmarshalInfo()
 	if err != nil {
+		err = fmt.Errorf("unmarshalling info from metainfo: %w", err)
 		return
 	}
-	if !ok {
+	if !d.snapshotDataLooksComplete(&info) {
+		err = nil
 		return
 	}
-
-	if d.cfg.VerifyTorrentData {
-		d.addRequired(t)
-	}
-
-	metainfoOnDisk := diskSpecOpt.Ok
-	if metainfoOnDisk {
-		d.spawn(func() {
-			if !d.validateCompletedSnapshot(t) {
-				// This is totally recoverable. It's not great if it happens for files that aren't
-				// in the current preverified set because we have no guarantees about WebSeeds or
-				// other peers.
-				d.logger.Warn("torrent metainfo on disk but torrent failed validation", "name", t.Name())
-				// Maybe we could replace the torrent with the infoHashHint?
-			}
-		})
-	} else {
-		d.setStartTime()
-	}
-
-	d.afterAddNewTorrent(metainfoOnDisk, t)
+	t, new, err = d.addCompleteTorrentFromMetainfo(name, mi)
+	complete = err == nil
 	return
 }
 
-// Check the proposed infohash and name combo don't conflict with an existing torrent. Names need to
-// be unique, and infohashes are 160bit hashes of data that includes the name...
-func (d *Downloader) shouldAddTorrent(
-	infoHash metainfo.Hash,
+// Add a complete snapshot file. The metainfo .torrent file should be present alongside.
+func (d *Downloader) addCompleteTorrent(
 	name string,
-) (bool, error) {
-	if !IsSnapNameAllowed(name) {
-		return false, fmt.Errorf("snap name %q is not allowed", name)
+) (t *torrent.Torrent, new bool, err error) {
+	mi, err := d.loadMetainfoFromDisk(name)
+	if err != nil {
+		err = fmt.Errorf("loading metainfo from disk: %w", err)
+		return
 	}
-	t, ok := d.torrentClient.Torrent(infoHash)
-	if ok {
-		if t.Info() == nil {
-			d.logger.Warn("infohash already added but info not obtained. can't verify unique name", "infohash", infoHash, "name", name)
-		} else {
-			// Assume the info is already obtained. Pretty sure the node won't try to add torrents
-			// until previous stages are complete and this means the info is known. This can be
-			// changed.
-			existingName := t.Info().Name
-			if existingName != name {
-				return false, fmt.Errorf("torrent with hash %v already exists with name %q", infoHash, existingName)
-			}
-		}
-	} else if d.alreadyHaveThisName(name) {
-		return false, errors.New("name exists with different torrent hash")
-	}
-	return !ok, nil
+	return d.addCompleteTorrentFromMetainfo(name, mi)
 }
 
-// Add a torrent with a known info hash. Either someone else made it, or it was on disk.
-func (d *Downloader) afterAddNewTorrent(metainfoOnDisk bool, t *torrent.Torrent) {
-	// TODO: If the metainfo was on disk already, do we want to ensure Info exists?
-	d.spawn(func() {
-		select {
-		case <-d.ctx.Done():
-			return
-		case <-t.GotInfo():
-		}
-		// Always download, even if we think we're complete already. Failure to validate, or things
-		// changing can result in us needing to be in the download state to repair. It costs nothing
-		// if the torrent is already complete.
-		t.DownloadAll()
-		if !metainfoOnDisk {
-			d.saveMetainfoWhenComplete(t)
-		}
-	})
+func (d *Downloader) addCompleteTorrentFromMetainfo(
+	name string,
+	mi *metainfo.MetaInfo,
+) (t *torrent.Torrent, new bool, err error) {
+	t, new, err = d.addTorrentFromMetainfo(mi, name, mi.HashInfoBytes())
+	if err != nil {
+		return
+	}
+	if !d.cfg.VerifyTorrentData && !d.cfg.ManualDataVerification && !t.Complete().Bool() {
+		d.log(log.LvlWarn, "expected completed snapshot but torrent client disagrees",
+			"snapshot name", name,
+			"infohash", t.InfoHash())
+	}
+	return
 }
 
-func (d *Downloader) saveMetainfoWhenComplete(t *torrent.Torrent) {
-	for {
-		select {
-		case <-d.ctx.Done():
-			return
-		case <-t.Complete().On():
-		}
-		select {
-		case <-d.ctx.Done():
-			return
-		case <-d.verificationOccurring.Off():
-			// This could be filtered to only files we care about...
-		}
-		if func() (done bool) {
-			d.lock.Lock()
-			defer d.lock.Unlock()
-			if !t.Complete().Bool() || d.filesBeingVerified.Size() != 0 {
-				return
-			}
-			err := d.saveMetainfoPrecheck(t)
-			if err != nil {
-				d.logger.Warn("torrent failed metainfo commit precheck", "err", err, "name", t.Name())
-				return
-			}
-			err = d.saveMetainfo(t)
-			if err != nil {
-				// This is unrecoverable. We have to give up.
-				d.logger.Error("failed to save torrent metainfo", "err", err, "name", t.Name())
-			}
-			return true
-		}() {
-			break
-		}
-	}
-}
-
-func (d *Downloader) saveMetainfoPrecheck(t *torrent.Torrent) error {
-	if !t.Complete().Bool() {
-		return errors.New("torrent is not complete")
-	}
-	if !d.validateCompletedSnapshot(t) {
-		return errors.New("completed torrent failed validation")
-	}
-	return nil
-}
-
-func (d *Downloader) saveMetainfo(t *torrent.Torrent) error {
+func (d *Downloader) saveMetainfoFromTorrent(t *torrent.Torrent) error {
 	mi := t.Metainfo()
 	// This checks for existence last I checked, which isn't really what we want.
 	created, err := d.torrentFS.CreateWithMetaInfo(t.Info(), &mi)
 	if err == nil && !created {
-		err = errors.New("metainfo file already exists")
+		err = fs.ErrExist
 	}
 	if err != nil {
 		return fmt.Errorf("error creating metainfo file: %w", err)
@@ -1225,22 +1243,22 @@ func SeedableFiles(dirs datadir.Dirs, chainName string, all bool) ([]string, err
 	return slices.Concat(files, l1, l2, l3, l4, l5), nil
 }
 
-func (d *Downloader) Stats() AggStats {
-	d.lock.RLock()
-	defer d.lock.RUnlock()
-	return d.stats
+func (d *Downloader) Close() {
+	d.log(log.LvlInfo, "Stopping", "files", len(d.torrentClient.Torrents()))
+	d.lockingClose()
+	d.wg.Wait()
+	d.log(log.LvlInfo, "Stopped")
 }
 
-func (d *Downloader) Close() {
-	d.logger.Info("[snapshots] stopping downloader", "files", len(d.torrentClient.Torrents()))
-	d.stopMainLoop()
-	d.wg.Wait()
-	d.logger.Info("[snapshots] closing torrents")
+func (d *Downloader) lockingClose() {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	d.stop()
+	d.log(log.LvlDebug, "Closing torrents")
 	d.torrentClient.Close()
 	if err := d.torrentStorage.Close(); err != nil {
-		d.logger.Warn("[snapshots] torrentStorage.close", "err", err)
+		d.log(log.LvlWarn, "Error closing torrent storage", "err", err)
 	}
-	d.logger.Info("[snapshots] downloader stopped")
 }
 
 func (d *Downloader) PeerID() []byte {
@@ -1318,10 +1336,10 @@ func newTorrentClient(
 
 // Moved from EthConfig to be as close to torrent client init as possible. Logs important torrent
 // parameters.
-func (d *Downloader) logTorrentClientParams() {
+func (d *Downloader) logConfig() {
 	cfg := d.cfg.ClientConfig
-	d.logger.Info(
-		"[Downloader] Running with",
+	d.log(log.LvlInfo,
+		"Torrent config",
 		"ipv6-enabled", !cfg.DisableIPv6,
 		"ipv4-enabled", !cfg.DisableIPv4,
 		"download.rate", rateLimitString(torrent.EffectiveDownloadRateLimit(cfg.DownloadRateLimiter)),
@@ -1333,6 +1351,7 @@ func (d *Downloader) logTorrentClientParams() {
 			return "shared with p2p"
 		}(),
 		"upload.rate", rateLimitString(cfg.UploadRateLimiter.Limit()),
+		"webseed-urls", d.cfg.WebSeedUrls,
 	)
 }
 
@@ -1344,44 +1363,37 @@ func rateLimitString(rateLimit rate.Limit) string {
 	return datasize.ByteSize(rateLimit).String()
 }
 
-func (d *Downloader) SetLogPrefix(prefix string) {
-	// Data race?
-	d.logPrefix = prefix
-}
-
-// Collects Downloader states in a loggable form (the "task"). Used for logging intervals etc.
-type DownloaderState string
-
-const (
-	Idle    DownloaderState = "Idle"
-	Syncing DownloaderState = "Syncing"
-	Seeding DownloaderState = "Seeding"
-)
-
-func (d *Downloader) state() DownloaderState {
-	if !d.stats.AllTorrentsComplete() {
-		return Syncing
-	}
-	if d.stats.NumTorrents > 0 && d.cfg.ClientConfig.Seed && d.logSeeding {
-		return Seeding
-	}
-	return Idle
-}
-
-// Currently only called if not all torrents are complete.
-func (d *Downloader) logStats() {
-	d.lock.RLock()
-	// This is set externally. Everything else here is only modified by the caller.
-	startTime := d.startTime
-	d.lock.RUnlock()
-	stats := d.stats
+func (d *Downloader) logSyncStats(startTime time.Time, stats AggStats, target string) {
 	bytesDone := stats.BytesCompleted
-	percentDone := float32(100) * (float32(bytesDone) / float32(stats.BytesTotal))
 	remainingBytes := stats.BytesTotal - bytesDone
 
-	haveAllMetadata := stats.MetadataReady == stats.NumTorrents
-
 	var logCtx []any
+
+	addCtx := func(ctx ...any) {
+		logCtx = append(logCtx, ctx...)
+	}
+
+	addCtx(
+		"time-left", calculateTime(remainingBytes, stats.CompletionRate),
+		"time-elapsed", time.Since(startTime).Truncate(time.Second).String(),
+	)
+
+	d.logStatsInner(log.LvlInfo, stats, fmt.Sprintf("Syncing %v", target), logCtx, true)
+}
+
+// TODO: Determine the message from the stats, which has everything we need to know to determine a
+// good message.
+func (d *Downloader) logStatsInner(
+	level log.Lvl,
+	stats AggStats,
+	msg string,
+	logCtx []any,
+	zeroDownload bool, // Log if download rates are zero.
+) {
+	bytesDone := stats.BytesCompleted
+	percentDone := float32(100) * (float32(bytesDone) / float32(stats.BytesTotal))
+
+	haveAllMetadata := stats.MetadataReady == stats.NumTorrents
 
 	addCtx := func(ctx ...any) {
 		logCtx = append(logCtx, ctx...)
@@ -1393,36 +1405,34 @@ func (d *Downloader) logStats() {
 			addCtx("banned peers", len(ips))
 		}
 	}
-	state := d.state()
-	switch state {
-	case Syncing:
-		// TODO: Include what we're syncing.
+	addCtx(
+		"file-metadata", fmt.Sprintf("%d/%d", stats.MetadataReady, stats.NumTorrents),
+		"files", fmt.Sprintf(
+			"%d/%d",
+			// For now it's 1:1 files:torrents.
+			stats.TorrentsCompleted,
+			stats.NumTorrents,
+		),
+		"data", func() string {
+			if haveAllMetadata {
+				return fmt.Sprintf(
+					"%.2f%% - %s/%s",
+					percentDone,
+					common.ByteCount(bytesDone),
+					common.ByteCount(stats.BytesTotal),
+				)
+			} else {
+				return common.ByteCount(bytesDone)
+			}
+		}(),
+		"hashing-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
+	)
+
+	if zeroDownload || (stats.ClientWebseedBytesDownloadRate != 0 || stats.PeerConnBytesDownloadRate != 0) {
+		// If these were happening without active download requests it would be unusual.
 		addCtx(
-			"file-metadata", fmt.Sprintf("%d/%d", stats.MetadataReady, stats.NumTorrents),
-			"files", fmt.Sprintf(
-				"%d/%d",
-				// For now it's 1:1 files:torrents.
-				stats.TorrentsCompleted,
-				stats.NumTorrents,
-			),
-			"data", func() string {
-				if haveAllMetadata {
-					return fmt.Sprintf(
-						"%.2f%% - %s/%s",
-						percentDone,
-						common.ByteCount(bytesDone),
-						common.ByteCount(stats.BytesTotal),
-					)
-				} else {
-					return common.ByteCount(bytesDone)
-				}
-			}(),
-			// TODO: Reset on each stage.
-			"time-left", calculateTime(remainingBytes, stats.CompletionRate),
-			"total-time", time.Since(startTime).Truncate(time.Second).String(),
 			"webseed-download", fmt.Sprintf("%s/s", common.ByteCount(stats.ClientWebseedBytesDownloadRate)),
 			"peer-download", fmt.Sprintf("%s/s", common.ByteCount(stats.PeerConnBytesDownloadRate)),
-			"hashing-rate", fmt.Sprintf("%s/s", common.ByteCount(stats.HashRate)),
 		)
 	}
 
@@ -1437,22 +1447,7 @@ func (d *Downloader) logStats() {
 		"sys", common.ByteCount(m.Sys),
 	)
 
-	log.Info(fmt.Sprintf("[%s] %s", cmp.Or(d.logPrefix, "snapshots"), state), logCtx...)
-
-	diaglib.Send(diaglib.SnapshotDownloadStatistics{
-		Downloaded:           bytesDone,
-		Total:                stats.BytesTotal,
-		TotalTime:            time.Since(startTime).Round(time.Second).Seconds(),
-		DownloadRate:         stats.DownloadRate,
-		UploadRate:           stats.UploadRate,
-		Peers:                stats.PeersUnique,
-		Files:                int32(stats.FilesTotal),
-		Connections:          stats.ConnectionsTotal,
-		Alloc:                m.Alloc,
-		Sys:                  m.Sys,
-		DownloadFinished:     stats.AllTorrentsComplete(),
-		TorrentMetadataReady: int32(stats.MetadataReady),
-	})
+	d.log(level, msg, logCtx...)
 }
 
 func calculateTime(amountLeft, rate uint64) string {
@@ -1462,17 +1457,30 @@ func calculateTime(amountLeft, rate uint64) string {
 	return time.Duration(float64(amountLeft) / float64(rate) * float64(time.Second)).Truncate(time.Second).String()
 }
 
-func (d *Downloader) Completed() bool {
-	d.lock.Lock()
-	defer d.lock.Unlock()
-	return d.allTorrentsComplete()
-}
-
 // Expose torrent client status to HTTP on the public/default serve mux used by GOPPROF=http, and
 // the provided "debug" mux if non-nil. Only do this if you have a single instance of a Downloader.
 func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		d.torrentClient.WriteStatus(w)
+		// WriteStatus holds the client lock until it finishes. For large torrent counts, the output
+		// can be very large (90 MB).
+		var buf bytes.Buffer
+		gzW := gzip.NewWriter(&buf)
+		d.torrentClient.WriteStatus(gzW)
+		gzW.Close()
+		h := r.Header.Get("Accept-Encoding")
+		d.log(log.LvlDebug, "compressed torrent client status", "size", buf.Len(), "Accept-Encoding", h)
+		if strings.Contains(h, "gzip") {
+			w.Header().Set("Content-Encoding", "gzip")
+			w.Write(buf.Bytes())
+		} else {
+			gzR, err := gzip.NewReader(&buf)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			io.Copy(w, gzR)
+			gzR.Close()
+		}
 	})
 
 	// This is for gopprof.
@@ -1483,32 +1491,34 @@ func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
 	}
 }
 
-func (d *Downloader) spawn(f func()) {
+func (d *Downloader) spawn(f func()) bool {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	if d.ctx.Err() != nil {
+		return false
+	}
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
 		f()
 	}()
+	return true
 }
 
-func (d *Downloader) updateVerificationOccurring() {
-	d.verificationOccurring.SetBool(d.filesBeingVerified.Size() != 0)
-}
-
-// Delete - stop seeding, remove file, remove .torrent.
-func (s *Downloader) Delete(name string) error {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	// This needs to occur first to prevent it being added again, and also even if it isn't actually
-	// in the Downloader right now.
-	err := s.torrentFS.Delete(name)
+// Delete - stop seeding, remove file, remove .torrent. TODO: Double check the usage of this.
+func (d *Downloader) Delete(name string) error {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	// The ordering here no longer matters. As long as the .torrent file is deleted and torrent
+	// dropped while the lock is held.
+	err := d.torrentFS.Delete(name)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			err = nil
 		}
 		// Return the error, but try to remove everything from the client anyway.
 	}
-	t, ok := s.torrentsByName[name]
+	t, ok := d.torrentsByName[name]
 	if !ok {
 		// Return torrent file deletion error.
 		return err
@@ -1516,20 +1526,136 @@ func (s *Downloader) Delete(name string) error {
 	// Stop seeding. Erigon will remove data-file and .torrent by self
 	// But we also can delete .torrent: earlier is better (`kill -9` may come at any time)
 	t.Drop()
-	g.MustDelete(s.torrentsByName, name)
-	// I wonder if it's an issue if this occurs before initial sync has completed.
-	delete(s.requiredTorrents, t)
+	g.MustDelete(d.torrentsByName, name)
+	delete(d.downloads, t)
 	// Return torrent file deletion error.
 	return err
 }
 
 func (d *Downloader) filePathForName(name string) string {
-	return filepath.Join(d.SnapDir(), filepath.FromSlash(name))
+	return filepath.Join(d.snapDir(), filepath.FromSlash(name))
 }
 
-// Set the start time for the progress logging. Only set when we determine we're actually starting work.
-func (d *Downloader) setStartTime() {
-	if d.startTime.IsZero() {
-		d.startTime = time.Now()
+func (d *Downloader) metainfoFilePathForName(name string) string {
+	return d.filePathForName(name) + ".torrent"
+}
+
+// This does all the checks: Valid name, no overlaps on infohash and names.
+func (d *Downloader) getExistingSnapshotTorrent(name string, infoHash metainfo.Hash) (t *torrent.Torrent, ok bool, err error) {
+	if !IsSnapNameAllowed(name) {
+		err = errors.New("invalid snapshot name")
+		return
 	}
+	t, ok = d.torrentsByName[name]
+	if ok {
+		if t.InfoHash() != infoHash {
+			err = fmt.Errorf("snapshot already loaded with different infohash: %v", t.InfoHash().HexString())
+		}
+		return
+	}
+	t, ok = d.torrentClient.Torrent(infoHash)
+	if ok {
+		// This is *really* unlikely. You would have to get the name wrong somehow, or generate a
+		// SHA1 collision.
+		err = fmt.Errorf("snapshot exists with a different name: %q", t.Name())
+	}
+	return
+}
+
+// Central function through which all must pass. Does name and infoHash validation (in
+// getExistingSnapshotTorrent).
+func (d *Downloader) addTorrent(name string, infoHash metainfo.Hash) (t *torrent.Torrent, new bool, err error) {
+	t, ok, err := d.getExistingSnapshotTorrent(name, infoHash)
+	if err != nil || ok {
+		return
+	}
+	opts := d.makeAddTorrentOpts(infoHash)
+	t, new = d.torrentClient.AddTorrentOpt(opts)
+	if !new {
+		return
+	}
+	t.SetDisplayName(name)
+	g.MakeMapIfNil(&d.torrentsByName)
+	g.MapMustAssignNew(d.torrentsByName, name, t)
+	return
+}
+
+func (d *Downloader) makeAddTorrentOpts(
+	infoHash metainfo.Hash,
+) (ts torrent.AddTorrentOpts) {
+	ts.InfoHash = infoHash
+	ts.ChunkSize = downloadercfg.NetworkChunkSize
+	ts.DisallowDataDownload = true
+	ts.DisallowDataUpload = true
+	// I wonder how this should be handled for AddNewSeedableFile. What if there's bad piece
+	// completion data? We might want to clobber any piece completion and force the client to accept
+	// what we provide, assuming we trust our own metainfo generation more.
+	ts.IgnoreUnverifiedPieceCompletion = d.cfg.VerifyTorrentData
+	ts.DisableInitialPieceCheck = d.cfg.ManualDataVerification
+	return
+}
+
+// After adding a new torrent that we want to download.
+func (d *Downloader) afterAddForDownload(t *torrent.Torrent) {
+	d.afterAdd(t)
+	// add webseed first - otherwise opts will be ignored
+	t.AddWebSeeds(d.cfg.WebSeedUrls, d.addWebSeedOpts...)
+	t.AllowDataDownload()
+}
+
+// After adding a new torrent that we want to download.
+func (d *Downloader) afterAddForDownloadHadMetainfo(t *torrent.Torrent) {
+	d.afterAddForDownload(t)
+	t.DownloadAll()
+}
+
+func (d *Downloader) afterAddForDownloadMissingMetainfo(t *torrent.Torrent, name string) {
+	// A direct request for the metainfo already failed if we're here. Now we fall back to getting
+	// it from the peers or using the sources mechanism in the torrent client.
+	t.AddSources(slices.Collect(d.webseedMetainfoUrls(name)))
+	d.afterAddForDownload(t)
+	d.spawn(func() {
+		d.delayedGotInfoHandler(t)
+	})
+}
+
+// This is a workaround for a minor edge case: We have no existing way to wait for infos for
+// multiple Torrents, but we rarely add Torrents when the metainfo isn't available.
+func (d *Downloader) delayedGotInfoHandler(t *torrent.Torrent) {
+	select {
+	// Make sure this handler stops if Downloader.Delete is called on it.
+	case <-t.Closed():
+		return
+	case <-t.GotInfo():
+	}
+	d.log(log.LvlDebug, "got metainfo from network", "name", t.Name(), "infohash", t.InfoHash())
+	// Make sure the Torrent isn't closed while we're saving the metainfo.
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+	// Don't save the metainfo in case Downloader.Delete was called. TODO: Why doesn't
+	// chansync.SetOnce have a read-only form, or events.Done have a helper?
+	select {
+	case <-t.Closed():
+		return
+	default:
+	}
+	if err := d.saveMetainfoFromTorrent(t); err != nil {
+		d.log(log.LvlWarn, "error saving delayed metainfo",
+			"name", t.Name(),
+			"infohash", t.InfoHash(),
+			"err", err)
+	}
+	t.DownloadAll()
+}
+
+// After adding a new torrent that should already be completed. This is safe to call without
+// Downloader.lock.
+func (d *Downloader) afterAdd(t *torrent.Torrent) {
+	// Should be disabled by no download rate or the disable trackers flag.
+	t.AddTrackers(Trackers)
+	t.AllowDataUpload()
+}
+
+func (d *Downloader) log(level log.Lvl, msg string, ctx ...any) {
+	d.logger.Log(level, d.cfg.LogPrefix+msg, ctx...)
 }

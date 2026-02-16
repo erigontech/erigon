@@ -23,13 +23,14 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/polygon/bor"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
 type DifficultyCalculator struct {
 	borConfig            *borcfg.BorConfig
-	signaturesCache      *lru.ARCCache[common.Hash, common.Address]
+	signaturesCache      *lru.ARCCache[common.Hash, accounts.Address]
 	blockProducersReader blockProducersReader
 }
 
@@ -44,7 +45,7 @@ func (calc *DifficultyCalculator) HeaderDifficulty(ctx context.Context, header *
 
 func (calc *DifficultyCalculator) signerDifficulty(
 	ctx context.Context,
-	signer common.Address,
+	signer accounts.Address,
 	headerNum uint64,
 ) (uint64, error) {
 	producers, err := calc.blockProducersReader.Producers(ctx, headerNum)

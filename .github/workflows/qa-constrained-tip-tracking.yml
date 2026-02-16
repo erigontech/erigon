@@ -33,7 +33,7 @@ jobs:
 
     steps:
     - name: Check out repository
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
 
     - name: Clean Erigon Build Directory
       run: |
@@ -124,17 +124,18 @@ jobs:
             echo "Error detected during tests"
             echo "::error::Tip-tracking test encountered an error"
           fi
+          exit 1
         fi
 
     - name: Upload Downloader Torrent Client Status
-      if: always()
-      uses: actions/upload-artifact@v5
+      if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+      uses: actions/upload-artifact@v6
       with:
         name: torrent-client-status-${{ env.CHAIN }}
         path: torrent-client-status.txt
 
     - name: Save test results
-      if: steps.test_step.outputs.test_executed == 'true'
+      if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
       env:
         TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
       run: |
@@ -155,15 +156,15 @@ jobs:
           --result_file ${{ github.workspace }}/result-$CHAIN.json
 
     - name: Upload test results
-      if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v5
+      if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+      uses: actions/upload-artifact@v6
       with:
         name: test-results-${{ env.CHAIN }}
         path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
     - name: Upload erigon logs
-      if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v5
+      if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+      uses: actions/upload-artifact@v6
       with:
         name: erigon-logs-${{ env.CHAIN }}
         path: |
@@ -171,11 +172,18 @@ jobs:
           ${{ env.ERIGON_TESTBED_DATA_DIR }}/proc_stat.log
 
     - name: Upload metric plots
-      if: steps.test_step.outputs.test_executed == 'true'
-      uses: actions/upload-artifact@v5
+      if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+      uses: actions/upload-artifact@v6
       with:
         name: metric-plots-${{ env.CHAIN }}
         path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
+
+    - name: Upload FD Leak Analysis
+      if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+      uses: actions/upload-artifact@v6
+      with:
+        name: fd-leak-analysis-${{ env.CHAIN }}
+        path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md
 
     - name: Delete Erigon Testbed Data Directory
       if: ${{ always() }}
@@ -189,10 +197,3 @@ jobs:
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
-    - name: Action for Not Success
-      if: ${{ always() }}
-      run: |
-        if [[ "${{ steps.test_step.outputs.TEST_RESULT }}" != "success" ]]; then
-          echo "::error::Error detected during tests, please see the summary section for details"
-          exit 1
-        fi 

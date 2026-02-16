@@ -338,7 +338,7 @@ func (c *Config) parsePersistentNodes(w *bool, path string, logger log.Logger) [
 
 var warnLock sync.Mutex
 
-func (c *Config) warnOnce(logger log.Logger, w *bool, format string, args ...interface{}) {
+func (c *Config) warnOnce(logger log.Logger, w *bool, format string, args ...any) {
 	warnLock.Lock()
 	defer warnLock.Unlock()
 

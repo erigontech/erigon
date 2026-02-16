@@ -15,17 +15,14 @@ import (
 )
 
 func (obj *TestingStruct) EncodingSize() (size int) {
-	size += rlp.IntLenExcludingHead(uint64(obj.a)) + 1
+	size += rlp.U64Len(uint64(obj.a))
 	if obj.aa != nil {
-		size += rlp.IntLenExcludingHead(uint64(*obj.aa)) + 1
+		size += rlp.U64Len(uint64(*obj.aa))
 	}
-	size += rlp.BigIntLenExcludingHead(&obj.b) + 1
-	size += 1
-	if obj.bb != nil {
-		size += rlp.BigIntLenExcludingHead(obj.bb)
-	}
-	size += rlp.Uint256LenExcludingHead(obj.c) + 1
-	size += rlp.Uint256LenExcludingHead(*obj.cc) + 1
+	size += rlp.BigIntLen(&obj.b)
+	size += rlp.BigIntLen(obj.bb)
+	size += rlp.Uint256Len(obj.c)
+	size += rlp.Uint256Len(*obj.cc)
 	size += 8 + 1
 	size += 1
 	if obj.dd != nil {

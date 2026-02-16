@@ -38,10 +38,13 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-var toAddr = common.BytesToAddress
+func toAddr(a []byte) accounts.Address {
+	return accounts.InternAddress(common.BytesToAddress(a))
+}
 
 func TestNull(t *testing.T) {
 	t.Parallel()
@@ -55,12 +58,12 @@ func TestNull(t *testing.T) {
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	state := New(r)
 
-	address := common.HexToAddress("0x823140710bf13990e4500136726d8b55")
+	address := accounts.InternAddress(common.HexToAddress("0x823140710bf13990e4500136726d8b55"))
 	state.CreateAccount(address, true)
 	//value := common.FromHex("0x823140710bf13990e4500136726d8b55")
 	var value uint256.Int
 
-	state.SetState(address, common.Hash{}, value)
+	state.SetState(address, accounts.ZeroKey, value)
 
 	err = state.FinalizeTx(&chain.Rules{}, w)
 	require.NoError(t, err)
@@ -68,7 +71,9 @@ func TestNull(t *testing.T) {
 	err = state.CommitBlock(&chain.Rules{}, w)
 	require.NoError(t, err)
 
-	state.GetCommittedState(address, common.Hash{}, &value)
+	value, err = state.GetCommittedState(address, accounts.ZeroKey)
+	require.NoError(t, err)
+
 	if !value.IsZero() {
 		t.Errorf("expected empty hash. got %x", value)
 	}
@@ -86,7 +91,7 @@ func TestTouchDelete(t *testing.T) {
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	state := New(r)
 
-	state.GetOrNewStateObject(common.Address{})
+	state.GetOrNewStateObject(accounts.ZeroAddress)
 
 	err = state.FinalizeTx(&chain.Rules{}, w)
 	require.NoError(t, err)
@@ -96,8 +101,9 @@ func TestTouchDelete(t *testing.T) {
 
 	state.Reset()
 
-	snapshot := state.Snapshot()
-	state.AddBalance(common.Address{}, uint256.Int{}, tracing.BalanceChangeUnspecified)
+	snapshot := state.PushSnapshot()
+	defer state.PopSnapshot(snapshot)
+	state.AddBalance(accounts.ZeroAddress, uint256.Int{}, tracing.BalanceChangeUnspecified)
 
 	if len(state.journal.dirties) != 1 {
 		t.Fatal("expected one dirty state object")
@@ -119,32 +125,36 @@ func TestSnapshot(t *testing.T) {
 	state := New(r)
 
 	stateobjaddr := toAddr([]byte("aa"))
-	var storageaddr common.Hash
+	storageaddr := accounts.ZeroKey
 	data1 := uint256.NewInt(42)
 	data2 := uint256.NewInt(43)
 
 	// snapshot the genesis state
-	genesis := state.Snapshot()
+	genesis := state.PushSnapshot()
 
 	// set initial state object value
 	state.SetState(stateobjaddr, storageaddr, *data1)
-	snapshot := state.Snapshot()
+	snapshot := state.PushSnapshot()
 
 	// set a new state object value, revert it and ensure correct content
 	state.SetState(stateobjaddr, storageaddr, *data2)
 	state.RevertToSnapshot(snapshot, nil)
-
-	var value uint256.Int
-	state.GetState(stateobjaddr, storageaddr, &value)
+	state.PopSnapshot(snapshot)
+	value, err := state.GetState(stateobjaddr, storageaddr)
+	require.NoError(t, err)
 	require.Equal(t, *data1, value)
-	state.GetCommittedState(stateobjaddr, storageaddr, &value)
+	value, err = state.GetCommittedState(stateobjaddr, storageaddr)
+	require.NoError(t, err)
 	require.Equal(t, uint256.Int{}, value)
 
 	// revert up to the genesis state and ensure correct content
 	state.RevertToSnapshot(genesis, nil)
-	state.GetState(stateobjaddr, storageaddr, &value)
+	state.PopSnapshot(genesis)
+	value, err = state.GetState(stateobjaddr, storageaddr)
+	require.NoError(t, err)
 	require.Equal(t, uint256.Int{}, value)
-	state.GetCommittedState(stateobjaddr, storageaddr, &value)
+	value, err = state.GetCommittedState(stateobjaddr, storageaddr)
+	require.NoError(t, err)
 	require.Equal(t, uint256.Int{}, value)
 }
 
@@ -158,7 +168,9 @@ func TestSnapshotEmpty(t *testing.T) {
 	r := NewReaderV3(domains.AsGetter(tx))
 	state := New(r)
 
-	state.RevertToSnapshot(state.Snapshot(), nil)
+	snapshot := state.PushSnapshot()
+	state.RevertToSnapshot(snapshot, nil)
+	state.PopSnapshot(snapshot)
 }
 
 // use testing instead of checker because checker does not support
@@ -178,7 +190,7 @@ func TestSnapshot2(t *testing.T) {
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
-	var storageaddr common.Hash
+	storageaddr := accounts.ZeroKey
 
 	data0 := uint256.NewInt(17)
 	data1 := uint256.NewInt(18)
@@ -187,11 +199,11 @@ func TestSnapshot2(t *testing.T) {
 	state.SetState(stateobjaddr1, storageaddr, *data1)
 
 	// db, trie are already non-empty values
-	so0, err := state.getStateObject(stateobjaddr0)
+	so0, err := state.getStateObject(stateobjaddr0, true)
 	require.NoError(t, err)
 	so0.SetBalance(*uint256.NewInt(42), true, tracing.BalanceChangeUnspecified)
 	so0.SetNonce(43, true)
-	so0.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e'}), []byte{'c', 'a', 'f', 'e'}, true)
+	so0.SetCode(accounts.InternCodeHash(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e'})), []byte{'c', 'a', 'f', 'e'}, true)
 	so0.selfdestructed = false
 	so0.deleted = false
 	state.setStateObject(stateobjaddr0, so0)
@@ -203,39 +215,91 @@ func TestSnapshot2(t *testing.T) {
 	require.NoError(t, err)
 
 	// and one with deleted == true
-	so1, err := state.getStateObject(stateobjaddr1)
+	so1, err := state.getStateObject(stateobjaddr1, true)
 	require.NoError(t, err)
 	so1.SetBalance(*uint256.NewInt(52), true, tracing.BalanceChangeUnspecified)
 	so1.SetNonce(53, true)
-	so1.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e', '2'}), []byte{'c', 'a', 'f', 'e', '2'}, true)
+	so1.SetCode(accounts.InternCodeHash(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e', '2'})), []byte{'c', 'a', 'f', 'e', '2'}, true)
 	so1.selfdestructed = true
 	so1.deleted = true
 	state.setStateObject(stateobjaddr1, so1)
 
-	so1, err = state.getStateObject(stateobjaddr1)
+	so1, err = state.getStateObject(stateobjaddr1, true)
 	require.NoError(t, err)
 	if so1 != nil && !so1.deleted {
 		t.Fatalf("deleted object not nil when getting")
 	}
 
-	snapshot := state.Snapshot()
+	snapshot := state.PushSnapshot()
 	state.RevertToSnapshot(snapshot, nil)
+	state.PopSnapshot(snapshot)
 
-	so0Restored, err := state.getStateObject(stateobjaddr0)
+	so0Restored, err := state.getStateObject(stateobjaddr0, true)
 	require.NoError(t, err)
 	// Update lazily-loaded values before comparing.
-	var tmp uint256.Int
-	so0Restored.GetState(storageaddr, &tmp)
+	so0Restored.GetState(storageaddr)
 	so0Restored.Code()
 	// non-deleted is equal (restored)
 	compareStateObjects(so0Restored, so0, t)
 
 	// deleted should be nil, both before and after restore of state copy
-	so1Restored, err := state.getStateObject(stateobjaddr1)
+	so1Restored, err := state.getStateObject(stateobjaddr1, true)
 	require.NoError(t, err)
 	if so1Restored != nil && !so1Restored.deleted {
 		t.Fatalf("deleted object not nil after restoring snapshot: %+v", so1Restored)
 	}
+}
+
+func TestCodeResolve(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+
+	txNum := uint64(1)
+	err := rawdbv3.TxNums.Append(tx, 1, 1)
+	require.NoError(t, err)
+
+	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
+
+	state := New(NewReaderV3(domains.AsGetter(tx)))
+
+	stateobjaddr0 := toAddr([]byte("so0"))
+	stateobjaddr1 := toAddr([]byte("so1"))
+
+	so0, err := state.GetOrNewStateObject(stateobjaddr0)
+	require.NoError(t, err)
+	del := types.AddressToDelegation(stateobjaddr1)
+	so0.SetCode(accounts.InternCodeHash(crypto.Keccak256Hash(del)), del, true)
+	so0.selfdestructed = false
+	so0.deleted = false
+	state.setStateObject(stateobjaddr0, so0)
+
+	so1, err := state.GetOrNewStateObject(stateobjaddr1)
+	require.NoError(t, err)
+	target := []byte{'c', 'a', 'f', 'e'}
+	so1.SetCode(accounts.InternCodeHash(crypto.Keccak256Hash(target)), target, true)
+	so1.selfdestructed = false
+	so1.deleted = false
+	state.setStateObject(stateobjaddr1, so1)
+
+	err = state.FinalizeTx(&chain.Rules{}, w)
+	require.NoError(t, err)
+
+	err = state.CommitBlock(&chain.Rules{}, w)
+	require.NoError(t, err)
+
+	state1 := New(NewReaderV3(domains.AsGetter(tx)))
+	state1.SetVersionMap(&VersionMap{})
+	state1.Prepare(&chain.Rules{}, accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, nil, nil, nil)
+
+	_, ok, err := state1.GetDelegatedDesignation(stateobjaddr0)
+	require.NoError(t, err)
+	require.True(t, ok)
+	code, err := state1.GetCode(stateobjaddr0)
+	require.NoError(t, err)
+	require.Equal(t, del, code)
+	code, err = state1.ResolveCode(stateobjaddr0)
+	require.NoError(t, err)
+	require.Equal(t, target, code)
 }
 
 func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
@@ -299,7 +363,7 @@ func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Shar
 	require.NoError(tb, err)
 	tb.Cleanup(tx.Rollback)
 
-	domains, err := execctx.NewSharedDomains(tx, log.New())
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	require.NoError(tb, err)
 	tb.Cleanup(domains.Close)
 
@@ -321,7 +385,7 @@ func TestDump(t *testing.T) {
 	st.AddBalance(toAddr([]byte{0x01}), *uint256.NewInt(22), tracing.BalanceChangeUnspecified)
 	obj2, err := st.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
 	require.NoError(t, err)
-	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3}, true)
+	obj2.SetCode(accounts.InternCodeHash(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3})), []byte{3, 3, 3, 3, 3, 3, 3}, true)
 	obj2.setIncarnation(1)
 	obj3, err := st.GetOrNewStateObject(toAddr([]byte{0x02}))
 	require.NoError(t, err)

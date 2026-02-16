@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/db/datadir"
 	"golang.org/x/sync/semaphore"
 
 	"google.golang.org/grpc"
@@ -218,6 +219,7 @@ type MultiClient struct {
 var _ eth.ReceiptsGetter = new(receipts.Generator) // compile-time interface-check
 
 func NewMultiClient(
+	dirs datadir.Dirs,
 	db kv.TemporalRoDB,
 	chainConfig *chain.Config,
 	engine rules.Engine,
@@ -287,7 +289,7 @@ func NewMultiClient(
 		disableBlockDownload:              disableBlockDownload,
 		logger:                            logger,
 		getReceiptsActiveGoroutineNumber:  semaphore.NewWeighted(1),
-		ethApiWrapper:                     receipts.NewGenerator(blockReader, engine, 5*time.Minute),
+		ethApiWrapper:                     receipts.NewGenerator(dirs, blockReader, engine, nil, 5*time.Minute),
 	}
 
 	return cs, nil
@@ -386,7 +388,8 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 		if err != nil {
 			return fmt.Errorf("decode 3 BlockHeadersPacket66: %w", err)
 		}
-		hRaw := append([]byte{}, headerRaw...)
+		hRaw := make([]byte, len(headerRaw))
+		copy(hRaw, headerRaw)
 		number := header.Number.Uint64()
 		if number > highestBlock {
 			highestBlock = number
@@ -1081,18 +1084,17 @@ func (cs *MultiClient) makeStatusData(ctx context.Context) (*sentryproto.StatusD
 
 func GrpcClient(ctx context.Context, sentryAddr string) (*direct.SentryClientRemote, error) {
 	// creating grpc client connection
-	var dialOpts []grpc.DialOption
-
 	backoffCfg := backoff.DefaultConfig
 	backoffCfg.BaseDelay = 500 * time.Millisecond
 	backoffCfg.MaxDelay = 10 * time.Second
-	dialOpts = []grpc.DialOption{
+	dialOpts := make([]grpc.DialOption, 0, 4)
+	dialOpts = append(dialOpts,
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16 * datasize.MB))),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16*datasize.MB))),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
-	}
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
 
-	dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	conn, err := grpc.DialContext(ctx, sentryAddr, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("creating client connection to sentry P2P: %w", err)

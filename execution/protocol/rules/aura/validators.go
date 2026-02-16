@@ -17,14 +17,12 @@
 package aura
 
 import (
-	"container/list"
+	"cmp"
 	"errors"
 	"fmt"
 	"math"
-	"sort"
+	"slices"
 	"strings"
-	"sync"
-	"sync/atomic"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
@@ -35,9 +33,9 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/aura/auraabi"
-	"github.com/erigontech/erigon/execution/protocol/rules/aura/aurainterfaces"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // nolint
@@ -222,9 +220,9 @@ type Multi struct {
 	parent func(common.Hash) *types.Header
 }
 
-func (s *Multi) Less(i, j int) bool { return s.sorted[i].num < s.sorted[j].num }
-func (s *Multi) Len() int           { return len(s.sorted) }
-func (s *Multi) Swap(i, j int)      { s.sorted[i], s.sorted[j] = s.sorted[j], s.sorted[i] }
+func (s *Multi) Sort() {
+	slices.SortFunc(s.sorted, func(a, b MultiItem) int { return cmp.Compare(a.num, b.num) })
+}
 
 func NewMulti(m map[uint64]ValidatorSet) *Multi {
 	if _, ok := m[0]; !ok {
@@ -237,7 +235,7 @@ func NewMulti(m map[uint64]ValidatorSet) *Multi {
 		i++
 	}
 	multi := &Multi{sorted: list}
-	sort.Sort(multi)
+	multi.Sort()
 	return multi
 }
 
@@ -353,85 +351,11 @@ func NewSimpleList(validators []common.Address) *SimpleList {
 	return &SimpleList{validators: validators}
 }
 
-// nolint
-type ReportQueueItem struct {
-	addr     common.Address
-	blockNum uint64
-	data     []byte
-}
-
-// nolint
-type ReportQueue struct {
-	mu   sync.RWMutex
-	list *list.List
-}
-
-// nolint
-func (q *ReportQueue) push(addr common.Address, blockNum uint64, data []byte) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.list.PushBack(&ReportQueueItem{addr: addr, blockNum: blockNum, data: data})
-}
-
-// Filters reports of validators that have already been reported or are banned.
-// nolint
-func (q *ReportQueue) filter(abi aurainterfaces.ValidatorSetABI, client client, ourAddr, contractAddr common.Address) error {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	for e := q.list.Front(); e != nil; e = e.Next() {
-		el := e.Value.(*ReportQueueItem)
-		// Check if the validator should be reported.
-		maliciousValidatorAddress := el.addr
-		data, decoder := abi.ShouldValidatorReport(ourAddr, maliciousValidatorAddress, el.blockNum)
-		res, err := client.CallAtLatestBlock(contractAddr, data)
-		if err != nil {
-			return err
-		}
-		if res.execError != "" {
-			log.Warn("Failed to query report status, dropping pending report.", "reason", res.execError)
-			continue
-		}
-		var shouldReport bool
-		err = decoder(res.data, &res)
-		if err != nil {
-			return err
-		}
-		if !shouldReport {
-			q.list.Remove(e)
-		}
-	}
-	return nil
-}
-
-// Removes reports from the queue if it contains more than `MAX_QUEUED_REPORTS` entries.
-// nolint
-func (q *ReportQueue) truncate() {
-	// The maximum number of reports to keep queued.
-	const MaxQueuedReports = 10
-
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-	// Removes reports from the queue if it contains more than `MAX_QUEUED_REPORTS` entries.
-	if q.list.Len() > MaxQueuedReports {
-		log.Warn("Removing reports from report cache, even though it has not been finalized", "amount", q.list.Len()-MaxQueuedReports)
-	}
-	i := 0
-	for e := q.list.Front(); e != nil; e = e.Next() {
-		if i > MaxQueuedReports {
-			q.list.Remove(e)
-		}
-		i++
-	}
-}
-
 // The validator contract should have the following interface:
 // nolint
 type ValidatorSafeContract struct {
 	contractAddress common.Address
 	validators      *lru.Cache[common.Hash, *SimpleList] // RwLock<MemoryLruCache<H256, SimpleList>>,
-	reportQueue     ReportQueue                          //Mutex<ReportQueue>,
-	// The block number where we resent the queued reports last time.
-	resentReportsInBlock atomic.Uint64
 	// If set, this is the block number at which the rules engine switches from AuRa to AuRa
 	// with POSDAO modifications.
 	posdaoTransition *uint64
@@ -636,7 +560,7 @@ func (s *ValidatorSafeContract) getList(caller rules.Call) (*SimpleList, bool) {
 	if err != nil {
 		panic(err)
 	}
-	out, err := caller(s.contractAddress, packed)
+	out, err := caller(accounts.InternAddress(s.contractAddress), packed)
 	if err != nil {
 		panic(err)
 	}
@@ -653,7 +577,7 @@ func (s *ValidatorSafeContract) getListSyscall(caller rules.SystemCall) (*Simple
 	if err != nil {
 		panic(err)
 	}
-	out, err := caller(s.contractAddress, packed)
+	out, err := caller(accounts.InternAddress(s.contractAddress), packed)
 	if err != nil {
 		panic(err)
 	}
@@ -671,7 +595,7 @@ func (s *ValidatorSafeContract) genesisEpochData(header *types.Header, call rule
 
 func (s *ValidatorSafeContract) onEpochBegin(firstInEpoch bool, header *types.Header, caller rules.SystemCall) error {
 	data := common.FromHex("75286211") // s.abi.Pack("finalizeChange")
-	_, err := caller(s.contractAddress, data)
+	_, err := caller(accounts.InternAddress(s.contractAddress), data)
 	if err != nil {
 		return err
 	}

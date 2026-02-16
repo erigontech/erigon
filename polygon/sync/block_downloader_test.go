@@ -147,7 +147,7 @@ func (hdt blockDownloaderTest) fakeCheckpoints(count int) []*heimdall.Checkpoint
 			Fields: heimdall.WaypointFields{
 				StartBlock: big.NewInt(int64(start)),
 				EndBlock:   big.NewInt(int64(end)),
-				RootHash:   common.BytesToHash([]byte(fmt.Sprintf("0x%d", i+1))),
+				RootHash:   common.BytesToHash(fmt.Appendf(nil, "0x%d", i+1)),
 			},
 		}
 	}
@@ -164,7 +164,7 @@ func (hdt blockDownloaderTest) fakeMilestones(count int) []*heimdall.Milestone {
 			Fields: heimdall.WaypointFields{
 				StartBlock: big.NewInt(int64(start)),
 				EndBlock:   big.NewInt(int64(end)),
-				RootHash:   common.BytesToHash([]byte(fmt.Sprintf("0x%d", i+1))),
+				RootHash:   common.BytesToHash(fmt.Appendf(nil, "0x%d", i+1)),
 			},
 		}
 	}

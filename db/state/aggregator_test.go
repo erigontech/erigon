@@ -85,10 +85,11 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 		bufSize = 1 * datasize.MB
 	}
 	collector := etl.NewCollector(BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(bufSize), logger)
+	defer collector.Close()
 
 	for i := 0; i < keyCount; i++ {
 		key := make([]byte, keySize)
-		n, err := rnd.Read(key[:])
+		n, err := rnd.Read(key)
 		require.Equal(tb, keySize, n)
 		binary.BigEndian.PutUint64(key[keySize-8:], uint64(i))
 		require.NoError(tb, err)
@@ -157,7 +158,7 @@ func generateInputData(tb testing.TB, keySize, valueSize, keyCount int) ([][]byt
 
 	bk, bv := make([]byte, keySize), make([]byte, valueSize)
 	for i := 0; i < keyCount; i++ {
-		n, err := rnd.Read(bk[:])
+		n, err := rnd.Read(bk)
 		require.Equal(tb, keySize, n)
 		require.NoError(tb, err)
 		keys[i] = common.Copy(bk[:n])
@@ -178,7 +179,7 @@ func Test_helper_decodeAccountv3Bytes(t *testing.T) {
 
 	acc := accounts.Account{}
 	_ = accounts.DeserialiseV3(&acc, input)
-	fmt.Printf("input %x nonce %d balance %d codeHash %d\n", input, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash.Bytes())
+	fmt.Printf("input %x nonce %d balance %d codeHash %d\n", input, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash.Value())
 }
 
 func TestAggregator_CheckDependencyHistoryII(t *testing.T) {
@@ -395,11 +396,12 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 
 func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []testFileRange) {
 	t.Helper()
+	ver := version.V1_0_standart
 	domainR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
 		accessors := statecfg.AccessorBTree | statecfg.AccessorExistence
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
-			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone).
-			BtIndex().Existence().
+			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone, ver).
+			BtIndex(ver).Existence(ver).
 			Build()
 		return name, schema
 	})
@@ -409,8 +411,8 @@ func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []
 	domainHR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
 		accessors := statecfg.AccessorHashMap
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
-			Data(dirs.SnapHistory, name, DataExtensionV, seg.CompressNone).
-			Accessor(dirs.SnapAccessors).
+			Data(dirs.SnapHistory, name, DataExtensionV, seg.CompressNone, ver).
+			Accessor(dirs.SnapAccessors, ver).
 			Build()
 		return name, schema
 	})
@@ -420,8 +422,8 @@ func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []
 	domainII := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (dn string, schema SnapNameSchema) {
 		accessors := statecfg.AccessorHashMap
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
-			Data(dirs.SnapIdx, name, DataExtensionEf, seg.CompressNone).
-			Accessor(dirs.SnapAccessors).
+			Data(dirs.SnapIdx, name, DataExtensionEf, seg.CompressNone, ver).
+			Accessor(dirs.SnapAccessors, ver).
 			Build()
 		return name, schema
 	})
@@ -446,12 +448,13 @@ func generateStorageFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange
 
 func generateCommitmentFile(t *testing.T, dirs datadir.Dirs, ranges []testFileRange) {
 	t.Helper()
+	ver := version.V1_0_standart
 	commitmentR := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
 		accessors := statecfg.AccessorHashMap
 		name = "commitment"
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
-			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone).
-			Accessor(dirs.SnapDomain).
+			Data(dirs.SnapDomain, name, DataExtensionKv, seg.CompressNone, ver).
+			Accessor(dirs.SnapDomain, ver).
 			Build()
 		return name, schema
 	})

@@ -25,9 +25,8 @@ import (
 	"strings"
 	"time"
 
-	"google.golang.org/grpc"
-
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 )
 
 var GreatOtterBanner = `
@@ -91,22 +91,19 @@ const (
 	AlsoCaplin CaplinMode = 3
 )
 
-func BuildProtoRequest(downloadRequest []services.DownloadRequest) *downloaderproto.AddRequest {
-	req := &downloaderproto.AddRequest{Items: make([]*downloaderproto.AddItem, 0, len(snaptype2.BlockSnapshotTypes))}
+func BuildDownloadRequest(
+	downloadRequest []services.DownloadRequest,
+	logTarget string,
+) *downloaderproto.DownloadRequest {
+	req := &downloaderproto.DownloadRequest{
+		Items:     make([]*downloaderproto.DownloadItem, 0, len(snaptype2.BlockSnapshotTypes)),
+		LogTarget: logTarget,
+	}
 	for _, r := range downloadRequest {
-		if r.Path == "" {
-			continue
-		}
-		if r.TorrentHash != "" {
-			req.Items = append(req.Items, &downloaderproto.AddItem{
-				TorrentHash: downloadergrpc.String2Proto(r.TorrentHash),
-				Path:        r.Path,
-			})
-		} else {
-			req.Items = append(req.Items, &downloaderproto.AddItem{
-				Path: r.Path,
-			})
-		}
+		req.Items = append(req.Items, &downloaderproto.DownloadItem{
+			TorrentHash: downloadergrpc.String2Proto(r.TorrentHash),
+			Path:        r.Path,
+		})
 	}
 	return req
 }
@@ -115,14 +112,12 @@ func BuildProtoRequest(downloadRequest []services.DownloadRequest) *downloaderpr
 func RequestSnapshotsDownload(
 	ctx context.Context,
 	downloadRequest []services.DownloadRequest,
-	downloader downloaderproto.DownloaderClient,
-	logPrefix string,
+	downloaderClient downloader.Client,
+	logTarget string,
 ) error {
-	preq := &downloaderproto.SetLogPrefixRequest{Prefix: logPrefix}
-	downloader.SetLogPrefix(ctx, preq)
 	// start seed large .seg of large size
-	req := BuildProtoRequest(downloadRequest)
-	if _, err := downloader.Add(ctx, req, grpc.WaitForReady(true)); err != nil {
+	req := BuildDownloadRequest(downloadRequest, logTarget)
+	if err := downloaderClient.Download(ctx, req); err != nil {
 		return err
 	}
 	return nil
@@ -200,7 +195,7 @@ type blockReader interface {
 	FreezingCfg() ethconfig.BlocksFreezing
 	AllTypes() []snaptype.Type
 	FrozenFiles() (list []string)
-	TxnumReader(ctx context.Context) rawdbv3.TxNumsReader
+	TxnumReader() rawdbv3.TxNumsReader
 }
 
 // getMinimumBlocksToDownload - get the minimum number of blocks to download
@@ -301,7 +296,7 @@ func isTransactionsSegmentExpired(cc *chain.Config, pruneMode prune.Mode, p snap
 }
 
 // isReceiptsSegmentExpired - check if the receipts segment is expired according to whichever history expiry policy we use.
-func isReceiptsSegmentPruned(tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *chain.Config, pruneMode prune.Mode, head uint64, p snapcfg.PreverifiedItem, stepSize uint64) bool {
+func isReceiptsSegmentPruned(ctx context.Context, tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *chain.Config, pruneMode prune.Mode, head uint64, p snapcfg.PreverifiedItem, stepSize uint64) bool {
 	if strings.Contains(p.Name, "domain") {
 		return false // domain snapshots are never pruned
 	}
@@ -315,7 +310,7 @@ func isReceiptsSegmentPruned(tx kv.RwTx, txNumsReader rawdbv3.TxNumsReader, cc *
 	if !ok {
 		return false
 	}
-	minTxNum, err := txNumsReader.Min(tx, pruneHeight)
+	minTxNum, err := txNumsReader.Min(ctx, tx, pruneHeight)
 	if err != nil {
 		log.Crit("Failed to get minimum transaction number", "err", err)
 		return false
@@ -346,7 +341,7 @@ func SyncSnapshots(
 	tx kv.RwTx,
 	blockReader blockReader,
 	cc *chain.Config,
-	snapshotDownloader downloaderproto.DownloaderClient,
+	snapshotDownloader downloader.Client,
 	syncCfg ethconfig.Sync,
 	stepSize uint64,
 ) error {
@@ -364,7 +359,7 @@ func SyncSnapshots(
 		toBlock := syncCfg.SnapshotDownloadToBlock // exclusive [0, toBlock)
 		toStep := uint64(math.MaxUint64)           // exclusive [0, toStep)
 		if !headerchain && toBlock > 0 {
-			toTxNum, err := blockReader.TxnumReader(ctx).Min(tx, syncCfg.SnapshotDownloadToBlock)
+			toTxNum, err := blockReader.TxnumReader().Min(ctx, tx, syncCfg.SnapshotDownloadToBlock)
 			if err != nil {
 				return err
 			}
@@ -382,18 +377,27 @@ func SyncSnapshots(
 				toDeleteDownloader = append(toDeleteDownloader, f, strings.Replace(f, ".seg", ".idx", 1))
 			}
 			log.Debug(fmt.Sprintf("[%s] deleting", logPrefix), "toDeleteSeg", toDeleteSeg, "toDeleteDownloader", toDeleteDownloader)
-			if _, err = snapshotDownloader.Delete(ctx, &downloaderproto.DeleteRequest{Paths: toDeleteDownloader}); err != nil {
+			err = snapshotDownloader.Delete(ctx, toDeleteDownloader)
+			if err != nil {
 				return err
 			}
-			if err = blockReader.Snapshots().Delete(toDeleteSeg...); err != nil {
+			err = blockReader.Snapshots().Delete(toDeleteSeg...)
+			if err != nil {
 				return err
+			}
+			// re-open headers and bodies with alignMin=false after deletes,
+			// otherwise no headers/bodies will be visible since transactions are not downloaded yet
+			err = blockReader.Snapshots().OpenSegments([]snaptype.Type{snaptype2.Headers, snaptype2.Bodies}, true, false)
+			if err != nil {
+				return fmt.Errorf("error opening segments after to block filter deletion: %w", err)
 			}
 		}
 
-		txNumsReader := blockReader.TxnumReader(ctx)
+		txNumsReader := blockReader.TxnumReader()
 
-		// This clause belongs in another function.
-		log.Info(fmt.Sprintf("[%s] Checking %s", logPrefix, task))
+		// This clause belongs in another function. We can take a long time here to determine what
+		// requests to send to the Downloader. Need to communicate that.
+		log.Info(fmt.Sprintf("[%s] Preparing snapshots request for %s", logPrefix, task))
 
 		frozenBlocks := blockReader.Snapshots().SegmentsMax()
 		//Corner cases:
@@ -467,7 +471,7 @@ func SyncSnapshots(
 				strings.Contains(p.Name, kv.LogAddrIdx.String()) ||
 				strings.Contains(p.Name, kv.LogTopicIdx.String())
 
-			if isRcacheRelatedSegment && isReceiptsSegmentPruned(tx, txNumsReader, cc, prune, frozenBlocks, p, stepSize) {
+			if isRcacheRelatedSegment && isReceiptsSegmentPruned(ctx, tx, txNumsReader, cc, prune, frozenBlocks, p, stepSize) {
 				continue
 			}
 
@@ -489,39 +493,26 @@ func SyncSnapshots(
 
 		log.Info(fmt.Sprintf("[%s] Requesting %s from downloader", logPrefix, task))
 		for {
+			err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader, task)
+			if err == nil {
+				break
+			}
+			if ctx.Err() != nil {
+				return err
+			}
+			if !grpcutil.IsRetryLater(err) {
+				return err
+			}
+			log.Error(fmt.Sprintf("[%s] error requesting snapshots download from downloader", logPrefix), "err", err)
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
-			default:
+				return context.Cause(ctx)
+			case <-time.After(10 * time.Second):
 			}
-			if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader, logPrefix); err != nil {
-				log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
-				time.Sleep(10 * time.Second)
-				continue
-			}
-			break
 		}
+		log.Info(fmt.Sprintf("[%s] Downloader completed %s", logPrefix, task))
 	}
 
-	// Check for completion immediately, then growing intervals.
-	interval := time.Second
-	for {
-		completedResp, err := snapshotDownloader.Completed(ctx, &downloaderproto.CompletedRequest{})
-		if err != nil {
-			return fmt.Errorf("waiting for snapshot download: %w", err)
-		}
-		if completedResp.GetCompleted() {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return context.Cause(ctx)
-		case <-time.After(interval):
-		}
-		interval = min(interval*2, 20*time.Second)
-	}
-	log.Info(fmt.Sprintf("[%s] Downloader completed %s", logPrefix, task))
-	log.Info(fmt.Sprintf("[%s] Synced %s", logPrefix, task))
 	return nil
 }
 

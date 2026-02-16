@@ -23,6 +23,7 @@ package vm
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -36,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
@@ -110,19 +112,18 @@ func init() {
 
 func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFunc, name string) {
 	var (
-		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
-		callContext    = &CallContext{}
-		pc             = uint64(0)
-		evmInterpreter = env.interpreter.(*EVMInterpreter)
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+		callContext = &CallContext{}
+		pc          = uint64(0)
 	)
 
 	for i, test := range tests {
-		x := *new(uint256.Int).SetBytes(common.Hex2Bytes(test.X))
-		y := *new(uint256.Int).SetBytes(common.Hex2Bytes(test.Y))
+		x := *uint256.NewInt(0).SetBytes(common.Hex2Bytes(test.X))
+		y := *uint256.NewInt(0).SetBytes(common.Hex2Bytes(test.Y))
 		expected := new(uint256.Int).SetBytes(common.Hex2Bytes(test.Expected))
 		callContext.Stack.push(x)
 		callContext.Stack.push(y)
-		opFn(pc, evmInterpreter, callContext)
+		opFn(pc, evm, callContext)
 		if len(callContext.Stack.data) != 1 {
 			t.Errorf("Expected one item on stack after %v, got %d: ", name, len(callContext.Stack.data))
 		}
@@ -214,10 +215,9 @@ func TestSAR(t *testing.T) {
 func TestAddMod(t *testing.T) {
 	t.Parallel()
 	var (
-		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
-		callContext    = &CallContext{}
-		evmInterpreter = NewEVMInterpreter(env, env.Config())
-		pc             = uint64(0)
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+		callContext = &CallContext{}
+		pc          = uint64(0)
 	)
 	tests := []struct {
 		x        string
@@ -242,7 +242,7 @@ func TestAddMod(t *testing.T) {
 		callContext.Stack.push(z)
 		callContext.Stack.push(y)
 		callContext.Stack.push(x)
-		opAddmod(pc, evmInterpreter, callContext)
+		opAddmod(pc, evm, callContext)
 		actual := callContext.Stack.pop()
 		if actual.Cmp(expected) != 0 {
 			t.Errorf("Testcase %d, expected  %x, got %x", i, expected, actual)
@@ -253,10 +253,9 @@ func TestAddMod(t *testing.T) {
 // getResult is a convenience function to generate the expected values
 // func getResult(args []*twoOperandParams, opFn executionFunc) []TwoOperandTestcase {
 // 	var (
-// 		env         = NewEVM(BlockContext{}, TxContext{}, nil, chain.TestChainConfig, Config{})
+// 		evm         = NewEVM(BlockContext{}, TxContext{}, nil, chain.TestChainConfig, Config{})
 // 		stack       = stack.New()
 // 		pc          = uint64(0)
-// 		interpreter = env.interpreter.(*EVMInterpreter)
 // 	)
 // 	result := make([]TwoOperandTestcase, len(args))
 // 	for i, param := range args {
@@ -264,7 +263,7 @@ func TestAddMod(t *testing.T) {
 // 		y := new(uint256.Int).SetBytes(common.Hex2Bytes(param.y))
 // 		stack.push(x)
 // 		stack.push(y)
-// 		opFn(&pc, interpreter, &callCtx{nil, stack, nil})
+// 		opFn(&pc, evm, &callCtx{nil, stack, nil})
 // 		actual := stack.pop()
 // 		result[i] = TwoOperandTestcase{param.x, param.y, fmt.Sprintf("%064x", actual)}
 // 	}
@@ -302,12 +301,10 @@ func TestJsonTestcases(t *testing.T) {
 
 func opBenchmark(b *testing.B, op executionFunc, args ...string) {
 	var (
-		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
-		callContext    = &CallContext{}
-		evmInterpreter = NewEVMInterpreter(env, env.Config())
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+		callContext = &CallContext{}
 	)
 
-	env.interpreter = evmInterpreter
 	// convert args
 	byteArgs := make([][]byte, len(args))
 	for i, arg := range args {
@@ -315,12 +312,12 @@ func opBenchmark(b *testing.B, op executionFunc, args ...string) {
 	}
 	pc := uint64(0)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		for _, arg := range byteArgs {
 			a := *new(uint256.Int).SetBytes(arg)
 			callContext.Stack.push(a)
 		}
-		op(pc, evmInterpreter, callContext)
+		op(pc, evm, callContext)
 		callContext.Stack.pop()
 	}
 }
@@ -536,24 +533,22 @@ func BenchmarkOpIsZero(b *testing.B) {
 func TestOpMstore(t *testing.T) {
 	t.Parallel()
 	var (
-		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
-		callContext    = &CallContext{}
-		evmInterpreter = NewEVMInterpreter(env, env.Config())
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+		callContext = &CallContext{}
 	)
 
-	env.interpreter = evmInterpreter
 	callContext.Memory.Resize(64)
 	pc := uint64(0)
 	v := "abcdef00000000000000abba000000000deaf000000c0de00100000000133700"
 	callContext.Stack.push(*new(uint256.Int).SetBytes(common.Hex2Bytes(v)))
-	callContext.Stack.push(*new(uint256.Int))
-	opMstore(pc, evmInterpreter, callContext)
+	callContext.Stack.push(uint256.Int{})
+	opMstore(pc, evm, callContext)
 	if got := common.Bytes2Hex(callContext.Memory.GetCopy(0, 32)); got != v {
 		t.Fatalf("Mstore fail, got %v, expected %v", got, v)
 	}
 	callContext.Stack.push(*new(uint256.Int).SetOne())
-	callContext.Stack.push(*new(uint256.Int))
-	opMstore(pc, evmInterpreter, callContext)
+	callContext.Stack.push(uint256.Int{})
+	opMstore(pc, evm, callContext)
 	if common.Bytes2Hex(callContext.Memory.GetCopy(0, 32)) != "0000000000000000000000000000000000000000000000000000000000000001" {
 		t.Fatalf("Mstore failed to overwrite previous value")
 	}
@@ -561,50 +556,46 @@ func TestOpMstore(t *testing.T) {
 
 func BenchmarkOpMstore(bench *testing.B) {
 	var (
-		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
-		callContext    = &CallContext{}
-		evmInterpreter = NewEVMInterpreter(env, env.Config())
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+		callContext = &CallContext{}
 	)
 
-	env.interpreter = evmInterpreter
 	callContext.Memory.Resize(64)
 	pc := uint64(0)
-	memStart := *new(uint256.Int)
+	memStart := uint256.Int{}
 	value := *new(uint256.Int).SetUint64(0x1337)
 
 	for bench.Loop() {
 		callContext.Stack.push(value)
 		callContext.Stack.push(memStart)
-		opMstore(pc, evmInterpreter, callContext)
+		opMstore(pc, evm, callContext)
 	}
 }
 
 func TestOpTstore(t *testing.T) {
 	t.Parallel()
 	var (
-		state          = state.New(nil)
-		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, state, chain.TestChainConfig, Config{})
-		evmInterpreter = NewEVMInterpreter(env, env.Config())
-		caller         = common.Address{}
-		to             = common.Address{1}
-		callContext    = &CallContext{Contract: *NewContract(caller, caller, to, uint256.Int{}, NewJumpDestCache(16))}
-		value          = common.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
+		state       = state.New(nil)
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, state, chain.TestChainConfig, Config{})
+		caller      = accounts.ZeroAddress
+		to          = accounts.InternAddress(common.Address{1})
+		callContext = &CallContext{Contract: *NewContract(caller, caller, to, uint256.Int{})}
+		value       = common.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
 	)
 
-	env.interpreter = evmInterpreter
 	pc := uint64(0)
 	// push the value to the stack
 	callContext.Stack.push(*new(uint256.Int).SetBytes(value))
 	// push the location to the stack
-	callContext.Stack.push(*new(uint256.Int))
-	opTstore(pc, evmInterpreter, callContext)
+	callContext.Stack.push(uint256.Int{})
+	opTstore(pc, evm, callContext)
 	// there should be no elements on the stack after TSTORE
 	if callContext.Stack.len() != 0 {
 		t.Fatal("stack wrong size")
 	}
 	// push the location to the stack
-	callContext.Stack.push(*new(uint256.Int))
-	opTload(pc, evmInterpreter, callContext)
+	callContext.Stack.push(uint256.Int{})
+	opTload(pc, evm, callContext)
 	// there should be one element on the stack after TLOAD
 	if callContext.Stack.len() != 1 {
 		t.Fatal("stack wrong size")
@@ -617,11 +608,9 @@ func TestOpTstore(t *testing.T) {
 
 func BenchmarkOpKeccak256(bench *testing.B) {
 	var (
-		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
-		callContext    = &CallContext{}
-		evmInterpreter = NewEVMInterpreter(env, env.Config())
+		evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+		callContext = &CallContext{}
 	)
-	env.interpreter = evmInterpreter
 	callContext.Memory.Resize(32)
 	pc := uint64(0)
 	start := uint256.Int{}
@@ -629,7 +618,7 @@ func BenchmarkOpKeccak256(bench *testing.B) {
 	for bench.Loop() {
 		callContext.Stack.push(*uint256.NewInt(32))
 		callContext.Stack.push(start)
-		opKeccak256(pc, evmInterpreter, callContext)
+		opKeccak256(pc, evm, callContext)
 	}
 }
 
@@ -690,7 +679,7 @@ func TestCreate2Addreses(t *testing.T) {
 		origin := common.BytesToAddress(common.FromHex(tt.origin))
 		salt := common.BytesToHash(common.FromHex(tt.salt))
 		code := common.FromHex(tt.code)
-		codeHash := crypto.Keccak256(code)
+		codeHash := accounts.InternCodeHash(common.Hash(crypto.Keccak256(code)))
 		address := types.CreateAddress2(origin, salt, codeHash)
 		/*
 			stack          := newstack()
@@ -791,10 +780,9 @@ func TestOpMCopy(t *testing.T) {
 		},
 	} {
 		var (
-			env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
-			callContext    = &CallContext{}
-			pc             = uint64(0)
-			evmInterpreter = NewEVMInterpreter(env, env.Config())
+			evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+			callContext = &CallContext{}
+			pc          = uint64(0)
 		)
 		data := common.FromHex(strings.ReplaceAll(tc.pre, " ", ""))
 		// Set pre
@@ -824,7 +812,7 @@ func TestOpMCopy(t *testing.T) {
 		}
 		// and the dynamic cost
 		var haveGas uint64
-		if dynamicCost, err := gasMcopy(env, callContext, 0, memorySize); err != nil {
+		if dynamicCost, err := gasMcopy(evm, callContext, 0, memorySize); err != nil {
 			t.Error(err)
 		} else {
 			haveGas = GasFastestStep + dynamicCost
@@ -834,7 +822,7 @@ func TestOpMCopy(t *testing.T) {
 			callContext.Memory.Resize(memorySize)
 		}
 		// Do the copy
-		opMcopy(pc, evmInterpreter, callContext)
+		opMcopy(pc, evm, callContext)
 		want := common.FromHex(strings.ReplaceAll(tc.want, " ", ""))
 		if have := callContext.Memory.store; !bytes.Equal(want, have) {
 			t.Errorf("case %d: \nwant: %#x\nhave: %#x\n", i, want, have)
@@ -861,9 +849,8 @@ func TestOpCLZ(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var (
-				env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
-				callContext    = &CallContext{}
-				evmInterpreter = NewEVMInterpreter(env, env.Config())
+				evm         = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+				callContext = &CallContext{}
 			)
 
 			pc := uint64(0)
@@ -876,7 +863,7 @@ func TestOpCLZ(t *testing.T) {
 			}
 
 			callContext.Stack.push(*val)
-			opCLZ(pc, evmInterpreter, callContext)
+			opCLZ(pc, evm, callContext)
 
 			if gotLen := callContext.Stack.len(); gotLen != 1 {
 				t.Fatalf("stack length = %d; want 1", gotLen)
@@ -885,6 +872,293 @@ func TestOpCLZ(t *testing.T) {
 
 			if got := result.Uint64(); got != tc.want {
 				t.Fatalf("clz(%q) = %d; want %d", tc.inputHex, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPush sanity-checks how code with immediates are handled when the code size is
+// smaller than the size of the immediate.
+func TestPush(t *testing.T) {
+	code := common.FromHex("0011223344556677889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a19181716151413121")
+	push32 := makePush(32, 32)
+
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+	callContext := &CallContext{}
+	callContext.Contract.Code = code
+
+	for i, want := range []string{
+		"0x11223344556677889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1",
+		"0x223344556677889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1e1",
+		"0x3344556677889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1",
+		"0x44556677889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1",
+		"0x556677889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1",
+		"0x6677889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a1",
+		"0x77889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a191",
+		"0x889900aabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a19181",
+		"0x9900aabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a1918171",
+		"0xaabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a191817161",
+		"0xaabbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a19181716151",
+		"0xbbccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a1918171615141",
+		"0xccddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a191817161514131",
+		"0xddeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a19181716151413121",
+		"0xeeff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a1918171615141312100",
+		"0xff0102030405060708090a0b0c0d0e0ff1e1d1c1b1a191817161514131210000",
+		"0x102030405060708090a0b0c0d0e0ff1e1d1c1b1a19181716151413121000000",
+		"0x2030405060708090a0b0c0d0e0ff1e1d1c1b1a1918171615141312100000000",
+		"0x30405060708090a0b0c0d0e0ff1e1d1c1b1a191817161514131210000000000",
+		"0x405060708090a0b0c0d0e0ff1e1d1c1b1a19181716151413121000000000000",
+		"0x5060708090a0b0c0d0e0ff1e1d1c1b1a1918171615141312100000000000000",
+		"0x60708090a0b0c0d0e0ff1e1d1c1b1a191817161514131210000000000000000",
+		"0x708090a0b0c0d0e0ff1e1d1c1b1a19181716151413121000000000000000000",
+		"0x8090a0b0c0d0e0ff1e1d1c1b1a1918171615141312100000000000000000000",
+		"0x90a0b0c0d0e0ff1e1d1c1b1a191817161514131210000000000000000000000",
+		"0xa0b0c0d0e0ff1e1d1c1b1a19181716151413121000000000000000000000000",
+		"0xb0c0d0e0ff1e1d1c1b1a1918171615141312100000000000000000000000000",
+		"0xc0d0e0ff1e1d1c1b1a191817161514131210000000000000000000000000000",
+		"0xd0e0ff1e1d1c1b1a19181716151413121000000000000000000000000000000",
+		"0xe0ff1e1d1c1b1a1918171615141312100000000000000000000000000000000",
+		"0xff1e1d1c1b1a191817161514131210000000000000000000000000000000000",
+		"0xf1e1d1c1b1a19181716151413121000000000000000000000000000000000000",
+		"0xe1d1c1b1a1918171615141312100000000000000000000000000000000000000",
+		"0xd1c1b1a191817161514131210000000000000000000000000000000000000000",
+		"0xc1b1a19181716151413121000000000000000000000000000000000000000000",
+		"0xb1a1918171615141312100000000000000000000000000000000000000000000",
+		"0xa191817161514131210000000000000000000000000000000000000000000000",
+		"0x9181716151413121000000000000000000000000000000000000000000000000",
+		"0x8171615141312100000000000000000000000000000000000000000000000000",
+		"0x7161514131210000000000000000000000000000000000000000000000000000",
+		"0x6151413121000000000000000000000000000000000000000000000000000000",
+		"0x5141312100000000000000000000000000000000000000000000000000000000",
+		"0x4131210000000000000000000000000000000000000000000000000000000000",
+		"0x3121000000000000000000000000000000000000000000000000000000000000",
+		"0x2100000000000000000000000000000000000000000000000000000000000000",
+		"0x0",
+	} {
+		pc := uint64(i)
+		push32(pc, evm, callContext)
+		res := callContext.Stack.pop()
+		if have := res.Hex(); have != want {
+			t.Fatalf("case %d, have %v want %v", i, have, want)
+		}
+	}
+}
+
+func TestEIP8024_Execution(t *testing.T) {
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
+
+	tests := []struct {
+		name       string
+		codeHex    string
+		wantErr    error
+		wantOpcode OpCode
+		wantVals   []uint64
+	}{
+		{
+			name:    "DUPN",
+			codeHex: "60016000808080808080808080808080808080e600",
+			wantVals: []uint64{
+				1,
+				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+				1,
+			},
+		},
+		{
+			name:    "DUPN_MISSING_IMMEDIATE",
+			codeHex: "60016000808080808080808080808080808080e6",
+			wantVals: []uint64{
+				1,
+				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+				1,
+			},
+		},
+		{
+			name:    "SWAPN",
+			codeHex: "600160008080808080808080808080808080806002e700",
+			wantVals: []uint64{
+				1,
+				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+				2,
+			},
+		},
+		{
+			name:    "SWAPN_MISSING_IMMEDIATE",
+			codeHex: "600160008080808080808080808080808080806002e7",
+			wantVals: []uint64{
+				1,
+				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+				2,
+			},
+		},
+		{
+			name:     "EXCHANGE",
+			codeHex:  "600060016002e801",
+			wantVals: []uint64{2, 0, 1},
+		},
+		{
+			name:    "EXCHANGE_MISSING_IMMEDIATE",
+			codeHex: "600060006000600060006000600060006000600060006000600060006000600060006000600060006000600060006000600060006000600060016002e8",
+			wantVals: []uint64{
+				2,
+				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+				1,
+			},
+		},
+		{
+			name:       "INVALID_SWAPN_LOW",
+			codeHex:    "e75b",
+			wantErr:    &ErrInvalidOpCode{},
+			wantOpcode: SWAPN,
+		},
+		{
+			name:    "JUMP over INVALID_DUPN",
+			codeHex: "600456e65b",
+			wantErr: nil,
+		},
+		{
+			name:       "UNDERFLOW_DUPN_1",
+			codeHex:    "6000808080808080808080808080808080e600",
+			wantErr:    &ErrStackUnderflow{},
+			wantOpcode: DUPN,
+		},
+		// Additional test cases
+		{
+			name:       "INVALID_DUPN_LOW",
+			codeHex:    "e65b",
+			wantErr:    &ErrInvalidOpCode{},
+			wantOpcode: DUPN,
+		},
+		{
+			name:       "INVALID_EXCHANGE_LOW",
+			codeHex:    "e850",
+			wantErr:    &ErrInvalidOpCode{},
+			wantOpcode: EXCHANGE,
+		},
+		{
+			name:       "INVALID_DUPN_HIGH",
+			codeHex:    "e67f",
+			wantErr:    &ErrInvalidOpCode{},
+			wantOpcode: DUPN,
+		},
+		{
+			name:       "INVALID_SWAPN_HIGH",
+			codeHex:    "e77f",
+			wantErr:    &ErrInvalidOpCode{},
+			wantOpcode: SWAPN,
+		},
+		{
+			name:       "INVALID_EXCHANGE_HIGH",
+			codeHex:    "e87f",
+			wantErr:    &ErrInvalidOpCode{},
+			wantOpcode: EXCHANGE,
+		},
+		{
+			name:       "UNDERFLOW_DUPN_2",
+			codeHex:    "5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5fe600", // (n=17, need 17 items, have 16)
+			wantErr:    &ErrStackUnderflow{},
+			wantOpcode: DUPN,
+		},
+		{
+			name:       "UNDERFLOW_SWAPN",
+			codeHex:    "5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5fe700", // (n=17, need 18 items, have 17)
+			wantErr:    &ErrStackUnderflow{},
+			wantOpcode: SWAPN,
+		},
+		{
+			name:       "UNDERFLOW_EXCHANGE",
+			codeHex:    "60016002e801", // (n,m)=(1,2), need 3 items, have 2
+			wantErr:    &ErrStackUnderflow{},
+			wantOpcode: EXCHANGE,
+		},
+		{
+			name:     "PC_INCREMENT",
+			codeHex:  "600060006000e80115",
+			wantVals: []uint64{1, 0, 0},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			code := common.FromHex(tc.codeHex)
+			pc := uint64(0)
+			callContext := new(CallContext)
+			callContext.Contract.Code = code
+			var err error
+			var errOp OpCode
+			for pc < uint64(len(code)) && err == nil {
+				op := code[pc]
+				switch OpCode(op) {
+				case STOP:
+					return
+				case PUSH1:
+					pc, _, err = opPush1(pc, evm, callContext)
+				case DUP1:
+					dup1 := makeDup(1)
+					pc, _, err = dup1(pc, evm, callContext)
+				case JUMP:
+					pc, _, err = opJump(pc, evm, callContext)
+				case JUMPDEST:
+					pc, _, err = opJumpdest(pc, evm, callContext)
+				case DUPN:
+					pc, _, err = opDupN(pc, evm, callContext)
+				case ISZERO:
+					pc, _, err = opIszero(pc, evm, callContext)
+				case PUSH0:
+					pc, _, err = opPush0(pc, evm, callContext)
+				case SWAPN:
+					pc, _, err = opSwapN(pc, evm, callContext)
+				case EXCHANGE:
+					pc, _, err = opExchange(pc, evm, callContext)
+				default:
+					t.Fatalf("unexpected opcode %s at pc=%d", OpCode(op), pc)
+				}
+				if err != nil {
+					errOp = OpCode(op)
+				}
+				pc++
+			}
+			if tc.wantErr != nil {
+				// Fail because we wanted an error, but didn't get one.
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				// Fail if the wrong opcode threw an error.
+				if errOp != tc.wantOpcode {
+					t.Fatalf("expected error from opcode %s, got %s", tc.wantOpcode, errOp)
+				}
+				// Fail if we don't get the error we expect.
+				switch tc.wantErr.(type) {
+				case *ErrInvalidOpCode:
+					var want *ErrInvalidOpCode
+					if !errors.As(err, &want) {
+						t.Fatalf("expected ErrInvalidOpCode, got %v", err)
+					}
+				case *ErrStackUnderflow:
+					var want *ErrStackUnderflow
+					if !errors.As(err, &want) {
+						t.Fatalf("expected ErrStackUnderflow, got %v", err)
+					}
+				default:
+					t.Fatalf("unsupported wantErr type %T", tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			stack := callContext.Stack
+			got := make([]uint64, 0, stack.len())
+			for i := stack.len() - 1; i >= 0; i-- {
+				got = append(got, stack.data[i].Uint64())
+			}
+			if len(got) != len(tc.wantVals) {
+				t.Fatalf("stack len=%d; want %d", len(got), len(tc.wantVals))
+			}
+			for i := range got {
+				if got[i] != tc.wantVals[i] {
+					t.Fatalf("[%s] stack[%d]=%d; want %d\nstack=%v",
+						tc.name, i, got[i], tc.wantVals[i], got)
+				}
 			}
 		})
 	}

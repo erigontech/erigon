@@ -95,7 +95,7 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 		result := dt.findMergeRange(4, 32)
 		assert.True(t, result.values.needMerge)
 		assert.Equal(t, uint64(0), result.values.from)
-		assert.Equal(t, uint64(2), result.values.to)
+		assert.Equal(t, uint64(4), result.values.to)
 	})
 
 	t.Run("aggregation_steps", func(t *testing.T) {
@@ -192,8 +192,8 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		defer hc.Close()
 		r := hc.findMergeRange(4, 32)
 		assert.True(t, r.history.needMerge)
-		assert.Equal(t, 2, int(r.history.to))
-		assert.Equal(t, 2, int(r.index.to))
+		assert.Equal(t, 4, int(r.history.to))
+		assert.Equal(t, 4, int(r.index.to))
 	})
 	t.Run("not equal amount of files", func(t *testing.T) {
 		ii, h := newTestDomain()
@@ -294,11 +294,11 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		r := hc.findMergeRange(4, 32)
 		assert.False(t, r.index.needMerge)
 		assert.True(t, r.history.needMerge)
-		assert.Equal(t, 2, int(r.history.to))
+		assert.Equal(t, 4, int(r.history.to))
 		idxFiles, histFiles, err := hc.staticFilesInRange(r)
 		require.NoError(t, err)
-		require.Len(t, idxFiles, 2)
-		require.Len(t, histFiles, 2)
+		require.Len(t, idxFiles, 4)
+		require.Len(t, histFiles, 4)
 	})
 	t.Run("idx merged and small files lost", func(t *testing.T) {
 		ii, h := newTestDomain()
@@ -329,7 +329,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		r := hc.findMergeRange(4, 32)
 		assert.False(t, r.index.needMerge)
 		assert.True(t, r.history.needMerge)
-		assert.Equal(t, 2, int(r.history.to))
+		assert.Equal(t, 4, int(r.history.to))
 		_, _, err := hc.staticFilesInRange(r)
 		require.Error(t, err)
 	})
@@ -503,6 +503,206 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		require.Len(t, idxFiles, 3)
 	})
 }
+
+// TestFindMergeRange_Optimal documents the desired merge range selection.
+// When multiple single-step files accumulate before the merge loop runs,
+// the algorithm should pick the largest power-of-2-aligned range so that
+// all files merge in a single pass (the CursorHeap already supports N-way merge).
+func TestFindMergeRange_Optimal(t *testing.T) {
+	t.Parallel()
+
+	newDomainRoTx := func(stepSize uint64, files []visibleFile) *DomainRoTx {
+		return &DomainRoTx{
+			name:     kv.AccountsDomain,
+			files:    files,
+			stepSize: stepSize,
+			ht:       &HistoryRoTx{iit: &InvertedIndexRoTx{}},
+		}
+	}
+	newIIRoTx := func(stepSize uint64, files []visibleFile) *InvertedIndexRoTx {
+		return &InvertedIndexRoTx{
+			name:     kv.AccountsHistoryIdx,
+			files:    files,
+			stepSize: stepSize,
+		}
+	}
+	f := func(from, to uint64) visibleFile {
+		return visibleFile{
+			startTxNum: from,
+			endTxNum:   to,
+			src:        &FilesItem{startTxNum: from, endTxNum: to},
+		}
+	}
+
+	// -- Cases where the current algorithm is already optimal --
+
+	t.Run("domain/natural_decreasing_already_optimal", func(t *testing.T) {
+		// Files in the "natural shape" from prior merges: sizes match binary representation.
+		// 32 = 100000₂ → single merge 0-32 in one pass.
+		files := []visibleFile{
+			f(0, 16), f(16, 24), f(24, 28), f(28, 30), f(30, 31), f(31, 32),
+		}
+		r := newDomainRoTx(1, files).findMergeRange(32, 32)
+		assert.True(t, r.values.needMerge)
+		assert.Equal(t, 0, int(r.values.from))
+		assert.Equal(t, 32, int(r.values.to))
+	})
+	t.Run("ii/natural_decreasing_already_optimal", func(t *testing.T) {
+		files := []visibleFile{
+			f(0, 16), f(16, 24), f(24, 28), f(28, 30), f(30, 31), f(31, 32),
+		}
+		mr := newIIRoTx(1, files).findMergeRange(32, 32)
+		assert.True(t, mr.needMerge)
+		assert.Equal(t, 0, int(mr.from))
+		assert.Equal(t, 32, int(mr.to))
+	})
+	t.Run("domain/after_partial_merge", func(t *testing.T) {
+		// After a prior merge produced 0-32, the remaining files allow 0-64.
+		files := []visibleFile{f(0, 32), f(32, 48), f(48, 64)}
+		r := newDomainRoTx(16, files).findMergeRange(64, 64)
+		assert.True(t, r.values.needMerge)
+		assert.Equal(t, 0, int(r.values.from))
+		assert.Equal(t, 64, int(r.values.to))
+	})
+
+	// -- Cases with equal-sized files --
+
+	t.Run("domain/four_equal_steps", func(t *testing.T) {
+		// 4 single-step files → merges 0-64 directly (4-way, single pass).
+		files := []visibleFile{f(0, 16), f(16, 32), f(32, 48), f(48, 64)}
+		r := newDomainRoTx(16, files).findMergeRange(64, 64)
+		assert.True(t, r.values.needMerge)
+		assert.Equal(t, 0, int(r.values.from))
+		assert.Equal(t, 64, int(r.values.to))
+	})
+	t.Run("ii/four_equal_steps", func(t *testing.T) {
+		files := []visibleFile{f(0, 16), f(16, 32), f(32, 48), f(48, 64)}
+		mr := newIIRoTx(16, files).findMergeRange(64, 64)
+		assert.True(t, mr.needMerge)
+		assert.Equal(t, 0, int(mr.from))
+		assert.Equal(t, 64, int(mr.to))
+	})
+	t.Run("domain/eight_equal_steps", func(t *testing.T) {
+		// 8 single-step files → merges 0-8 directly (8-way, single pass).
+		files := []visibleFile{
+			f(0, 1), f(1, 2), f(2, 3), f(3, 4),
+			f(4, 5), f(5, 6), f(6, 7), f(7, 8),
+		}
+		r := newDomainRoTx(1, files).findMergeRange(8, 8)
+		assert.True(t, r.values.needMerge)
+		assert.Equal(t, 0, int(r.values.from))
+		assert.Equal(t, 8, int(r.values.to))
+	})
+	t.Run("ii/eight_equal_steps", func(t *testing.T) {
+		files := []visibleFile{
+			f(0, 1), f(1, 2), f(2, 3), f(3, 4),
+			f(4, 5), f(5, 6), f(6, 7), f(7, 8),
+		}
+		mr := newIIRoTx(1, files).findMergeRange(8, 8)
+		assert.True(t, mr.needMerge)
+		assert.Equal(t, 0, int(mr.from))
+		assert.Equal(t, 8, int(mr.to))
+	})
+	t.Run("domain/six_equal_steps", func(t *testing.T) {
+		// 6 files: largest aligned merge is 0-4 (endStep=4, span=4).
+		files := []visibleFile{
+			f(0, 1), f(1, 2), f(2, 3), f(3, 4), f(4, 5), f(5, 6),
+		}
+		r := newDomainRoTx(1, files).findMergeRange(6, 8)
+		assert.True(t, r.values.needMerge)
+		assert.Equal(t, 0, int(r.values.from))
+		assert.Equal(t, 4, int(r.values.to))
+	})
+	t.Run("domain/five_equal_steps", func(t *testing.T) {
+		// 5 files: largest aligned merge is 0-4.
+		files := []visibleFile{
+			f(0, 1), f(1, 2), f(2, 3), f(3, 4), f(4, 5),
+		}
+		r := newDomainRoTx(1, files).findMergeRange(5, 8)
+		assert.True(t, r.values.needMerge)
+		assert.Equal(t, 0, int(r.values.from))
+		assert.Equal(t, 4, int(r.values.to))
+	})
+	t.Run("ii/five_equal_steps", func(t *testing.T) {
+		files := []visibleFile{
+			f(0, 1), f(1, 2), f(2, 3), f(3, 4), f(4, 5),
+		}
+		mr := newIIRoTx(1, files).findMergeRange(5, 8)
+		assert.True(t, mr.needMerge)
+		assert.Equal(t, 0, int(mr.from))
+		assert.Equal(t, 4, int(mr.to))
+	})
+	t.Run("ii/six_equal_steps", func(t *testing.T) {
+		files := []visibleFile{
+			f(0, 1), f(1, 2), f(2, 3), f(3, 4), f(4, 5), f(5, 6),
+		}
+		mr := newIIRoTx(1, files).findMergeRange(6, 8)
+		assert.True(t, mr.needMerge)
+		assert.Equal(t, 0, int(mr.from))
+		assert.Equal(t, 4, int(mr.to))
+	})
+
+	// -- History cases --
+
+	newHistRoTx := func(stepSize uint64, iiFiles, histFiles []visibleFile) *HistoryRoTx {
+		return &HistoryRoTx{
+			iit: &InvertedIndexRoTx{
+				files:    iiFiles,
+				stepSize: stepSize,
+			},
+			files:    histFiles,
+			stepSize: stepSize,
+		}
+	}
+
+	t.Run("history/four_equal_steps", func(t *testing.T) {
+		files := []visibleFile{f(0, 1), f(1, 2), f(2, 3), f(3, 4)}
+		r := newHistRoTx(1, files, files).findMergeRange(4, 32)
+		assert.True(t, r.index.needMerge)
+		assert.Equal(t, 0, int(r.index.from))
+		assert.Equal(t, 4, int(r.index.to))
+		assert.True(t, r.history.needMerge)
+		assert.Equal(t, 0, int(r.history.from))
+		assert.Equal(t, 4, int(r.history.to))
+	})
+	t.Run("history/natural_decreasing_already_optimal", func(t *testing.T) {
+		files := []visibleFile{
+			f(0, 16), f(16, 24), f(24, 28), f(28, 30), f(30, 31), f(31, 32),
+		}
+		r := newHistRoTx(1, files, files).findMergeRange(32, 32)
+		assert.True(t, r.index.needMerge)
+		assert.Equal(t, 0, int(r.index.from))
+		assert.Equal(t, 32, int(r.index.to))
+		assert.True(t, r.history.needMerge)
+		assert.Equal(t, 0, int(r.history.from))
+		assert.Equal(t, 32, int(r.history.to))
+	})
+	t.Run("history/eight_equal_steps", func(t *testing.T) {
+		files := []visibleFile{
+			f(0, 1), f(1, 2), f(2, 3), f(3, 4),
+			f(4, 5), f(5, 6), f(6, 7), f(7, 8),
+		}
+		r := newHistRoTx(1, files, files).findMergeRange(8, 8)
+		assert.True(t, r.index.needMerge)
+		assert.Equal(t, 0, int(r.index.from))
+		assert.Equal(t, 8, int(r.index.to))
+		assert.True(t, r.history.needMerge)
+		assert.Equal(t, 0, int(r.history.from))
+		assert.Equal(t, 8, int(r.history.to))
+	})
+	t.Run("history/not_equal_ii_and_hist", func(t *testing.T) {
+		// II has 4 files → finds 0-4. Hist has 2 files → finds 0-2.
+		// Coordination: historyIsBehind (2 < 4) → index cleared, only hist merges.
+		iiFiles := []visibleFile{f(0, 1), f(1, 2), f(2, 3), f(3, 4)}
+		histFiles := []visibleFile{f(0, 1), f(1, 2)}
+		r := newHistRoTx(1, iiFiles, histFiles).findMergeRange(4, 32)
+		assert.False(t, r.index.needMerge)
+		assert.True(t, r.history.needMerge)
+		assert.Equal(t, 0, int(r.history.from))
+		assert.Equal(t, 2, int(r.history.to))
+	})
+}
+
 func Test_mergeEliasFano(t *testing.T) {
 	t.Skip()
 
@@ -603,7 +803,11 @@ func TestMergeFiles(t *testing.T) {
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	collateAndMerge(t, db, nil, d, txs)
+	err = db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
+		collateAndMerge(t, tx, d, txs)
+		return nil
+	})
+	require.NoError(t, err)
 
 	rwTx, err = db.BeginRw(context.Background())
 	require.NoError(t, err)

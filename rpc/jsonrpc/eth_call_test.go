@@ -48,11 +48,11 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
-	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -62,7 +62,7 @@ func TestEstimateGas(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mock.Mock(t))
 	mining := txpoolproto.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log)
-	api := NewEthAPI(NewBaseApi(ff, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	if _, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
@@ -76,7 +76,7 @@ func TestEstimateGas(t *testing.T) {
 func TestEthCallNonCanonical(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(nil, stateCache, m), m.DB, nil, nil)
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(common.HexToHash("0x3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b"), true)
@@ -98,7 +98,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 
 	m, bankAddress, contractAddress, _ := chainWithDeployedContract(t)
 	doPrune(t, m.DB, pruneTo)
-	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
 	callData := hexutil.MustDecode("0x2e64cec1")
 	callDataBytes := hexutil.Bytes(callData)
@@ -119,7 +119,17 @@ func TestGetProof(t *testing.T) {
 	var maxGetProofRewindBlockCount = 1   // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
 	statecfg.EnableHistoricalCommitment() // enable commitment history to test historical proofs
 	m, bankAddr, contractAddr, receiverAddress := chainWithDeployedContract(t)
-	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, maxGetProofRewindBlockCount, 128, log.New())
+	cfg := &EthApiConfig{
+		GasCap:                      5000000,
+		FeeCap:                      ethconfig.Defaults.RPCTxFeeCap,
+		ReturnDataLimit:             100_000,
+		AllowUnprotectedTxs:         false,
+		MaxGetProofRewindBlockCount: maxGetProofRewindBlockCount,
+		SubscribeLogsChannelSize:    128,
+		RpcTxSyncDefaultTimeout:     20 * time.Second,
+		RpcTxSyncMaxTimeout:         1 * time.Minute,
+	}
+	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, cfg, log.New())
 
 	key := func(b byte) hexutil.Bytes {
 		result := common.Hash{}
@@ -229,7 +239,7 @@ func TestGetProof(t *testing.T) {
 			tx, err := m.DB.BeginTemporalRo(context.Background())
 			require.NoError(t, err)
 			defer tx.Rollback()
-			header, err := api.headerByRPCNumber(context.Background(), rpc.BlockNumber(tt.blockNum), tx)
+			header, err := api.headerByNumber(context.Background(), rpc.BlockNumber(tt.blockNum), tx)
 			require.NoError(t, err)
 
 			require.Equal(t, tt.addr, proof.Address)
@@ -567,7 +577,7 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, 
 	_, fillerPublicKeys, err := generatePseudoRandomECDSAKeyPairs(rng, nFillerAccounts)
 	require.NoError(t, err)
 
-	m := mock.MockWithGenesis(t, gspec, bankKey, false)
+	m := mock.MockWithGenesis(t, gspec, bankKey)
 	db := m.DB
 
 	var contractAddr common.Address
@@ -628,25 +638,26 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, 
 	err = m.InsertChain(chain)
 	require.NoError(t, err)
 
-	tx, err := db.BeginTemporalRo(context.Background())
+	ctx := context.Background()
+	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		t.Fatalf("read only db tx to read state: %v", err)
 	}
 	defer tx.Rollback()
 
-	stateReader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, rawdbv3.TxNums)
+	stateReader, err := rpchelper.CreateHistoryStateReader(ctx, tx, 1, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st := state.New(stateReader)
 	require.NoError(t, err)
-	exist, err := st.Exist(contractAddr)
+	exist, err := st.Exist(accounts.InternAddress(contractAddr))
 	require.NoError(t, err)
 	assert.False(t, exist, "Contract should not exist at block #1")
 
-	stateReader, err = rpchelper.CreateHistoryStateReader(tx, 2, 0, rawdbv3.TxNums)
+	stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, 2, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st = state.New(stateReader)
 	require.NoError(t, err)
-	exist, err = st.Exist(contractAddr)
+	exist, err = st.Exist(accounts.InternAddress(contractAddr))
 	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #2")
 
@@ -658,6 +669,7 @@ func doPrune(t *testing.T, db kv.RwDB, pruneTo uint64) {
 	//logger := testlog.Logger(t, log.LvlCrit)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
+	defer tx.Rollback()
 
 	logEvery := time.NewTicker(20 * time.Second)
 

@@ -19,13 +19,13 @@ package snaptype
 import "github.com/erigontech/erigon/db/version"
 
 var (
-	BeaconBlocks = snapType{
+	BeaconBlocks = SnapType{
 		enum:     CaplinEnums.BeaconBlocks,
 		name:     "beaconblocks",
 		versions: version.V1_1_standart,
 		indexes:  []Index{CaplinIndexes.BeaconBlockSlot},
 	}
-	BlobSidecars = snapType{
+	BlobSidecars = SnapType{
 		enum:     CaplinEnums.BlobSidecars,
 		name:     "blobsidecars",
 		versions: version.V1_1_standart,

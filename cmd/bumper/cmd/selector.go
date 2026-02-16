@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -125,7 +126,8 @@ func (m *SelectorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *SelectorModel) View() string {
 	header := "←/→ to switch columns or OK/Cancel, ↑/↓ to move, enter/space to toggle, tab to confirm"
-	s := lipgloss.NewStyle().Margin(1, 2).Render(header) + "\n"
+	var s strings.Builder
+	s.WriteString(lipgloss.NewStyle().Margin(1, 2).Render(header) + "\n")
 	maxRows := max(len(m.domains), len(m.exts))
 	for i := 0; i < maxRows; i++ {
 		left := "   "
@@ -153,9 +155,9 @@ func (m *SelectorModel) View() string {
 			}
 			right = fmt.Sprintf("%s %s %s", prefix, checked, e)
 		}
-		s += fmt.Sprintf("%-30s %s\n", left, right)
+		s.WriteString(fmt.Sprintf("%-30s %s\n", left, right))
 	}
-	s += "\n"
+	s.WriteString("\n")
 	if m.confirmMode {
 		opts := []string{"OK", "Cancel"}
 		for idx, opt := range opts {
@@ -163,13 +165,13 @@ func (m *SelectorModel) View() string {
 			if m.confirmCursor == idx {
 				prefix = "> "
 			}
-			s += fmt.Sprintf("%s%s   ", prefix, opt)
+			s.WriteString(fmt.Sprintf("%s%s   ", prefix, opt))
 		}
-		s += "\n"
+		s.WriteString("\n")
 	} else {
-		s += "(Tab to switch to OK/Cancel)\n"
+		s.WriteString("(Tab to switch to OK/Cancel)\n")
 	}
-	return s
+	return s.String()
 }
 
 func (m *SelectorModel) toggleCurrent() {

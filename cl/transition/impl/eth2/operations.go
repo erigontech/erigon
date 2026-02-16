@@ -610,7 +610,7 @@ func (I *impl) processAttestationPostAltair(
 		committeeOffset := 0
 		for _, committeeIndex := range committeeIndices {
 			// assert committee_index < get_committee_count_per_slot(state, data.target.epoch)
-			if uint64(committeeIndex) >= s.CommitteeCount(currentEpoch) {
+			if uint64(committeeIndex) >= s.CommitteeCount(data.Target.Epoch) {
 				return nil, errors.New("processAttestationPostAltair: committee index out of bounds")
 			}
 			committee, err := s.GetBeaconCommitee(data.Slot, uint64(committeeIndex))

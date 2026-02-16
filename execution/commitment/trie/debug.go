@@ -26,6 +26,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/erigontech/erigon/common"
 )
@@ -59,15 +60,16 @@ func (t *Trie) PrintDiff(t2 *Trie, w io.Writer) {
 }
 
 func (n *FullNode) fstring(ind string) string {
-	resp := fmt.Sprintf("full\n%s  ", ind)
+	var resp strings.Builder
+	resp.WriteString(fmt.Sprintf("full\n%s  ", ind))
 	for i, node := range &n.Children {
 		if node == nil {
-			resp += indices[i] + ": <nil> "
+			resp.WriteString(indices[i] + ": <nil> ")
 		} else {
-			resp += indices[i] + ": " + node.fstring(ind+"  ")
+			resp.WriteString(indices[i] + ": " + node.fstring(ind+"  "))
 		}
 	}
-	return resp + "\n" + ind + "]"
+	return resp.String() + "\n" + ind + "]"
 }
 func (n *FullNode) print(w io.Writer) {
 	fmt.Fprintf(w, "f(")
@@ -81,11 +83,13 @@ func (n *FullNode) print(w io.Writer) {
 }
 
 func (n *DuoNode) fstring(ind string) string {
-	resp := fmt.Sprintf("duo[\n%s  ", ind)
+	var resp strings.Builder
+	resp.WriteString(fmt.Sprintf("duo[\n%s  ", ind))
 	i1, i2 := n.childrenIdx()
-	resp += fmt.Sprintf("%s: %v", indices[i1], n.child1.fstring(ind+"  "))
-	resp += fmt.Sprintf("%s: %v", indices[i2], n.child2.fstring(ind+"  "))
-	return resp + fmt.Sprintf("\n%s] ", ind)
+	resp.WriteString(fmt.Sprintf("%s: %v", indices[i1], n.child1.fstring(ind+"  ")))
+	resp.WriteString(fmt.Sprintf("%s: %v", indices[i2], n.child2.fstring(ind+"  ")))
+	resp.WriteString(fmt.Sprintf("\n%s] ", ind))
+	return resp.String()
 }
 func (n *DuoNode) print(w io.Writer) {
 	fmt.Fprintf(w, "d(")

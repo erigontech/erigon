@@ -17,7 +17,6 @@
 package sync
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"math/big"
@@ -84,7 +83,7 @@ func (test *connectCCBTest) makeHeader(parent *types.Header, difficulty uint64) 
 		Difficulty: new(big.Int).SetUint64(difficulty),
 		Number:     big.NewInt(parent.Number.Int64() + 1),
 		Time:       test.currentHeaderTime,
-		Extra:      bytes.Repeat([]byte{0x00}, types.ExtraVanityLength+types.ExtraSealLength),
+		Extra:      make([]byte, types.ExtraVanityLength+types.ExtraSealLength),
 	}
 }
 

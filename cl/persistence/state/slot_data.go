@@ -131,8 +131,8 @@ func (m *SlotData) ReadFrom(r io.Reader, cfg *clparams.BeaconChainConfig) error 
 	return ssz2.UnmarshalSSZ(buf, int(m.Version), m.getSchema()...)
 }
 
-func (m *SlotData) getSchema() []interface{} {
-	schema := []interface{}{m.Eth1Data, m.Fork, &m.Eth1DepositIndex, &m.ValidatorLength, &m.Eth1DataLength, &m.AttestationsRewards, &m.SyncAggregateRewards, &m.ProposerSlashings, &m.AttesterSlashings}
+func (m *SlotData) getSchema() []any {
+	schema := []any{m.Eth1Data, m.Fork, &m.Eth1DepositIndex, &m.ValidatorLength, &m.Eth1DataLength, &m.AttestationsRewards, &m.SyncAggregateRewards, &m.ProposerSlashings, &m.AttesterSlashings}
 	if m.Version >= clparams.CapellaVersion {
 		schema = append(schema, &m.NextWithdrawalIndex, &m.NextWithdrawalValidatorIndex)
 	}

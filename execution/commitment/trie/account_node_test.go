@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -34,15 +35,15 @@ func TestGetAccount(t *testing.T) {
 	acc1 := &accounts.Account{
 		Nonce:       1,
 		Incarnation: 1,
-		Balance:     *uint256.NewInt(100),
+		Balance:     u256.U64(100),
 		Root:        EmptyRoot,
 	}
 	acc2 := &accounts.Account{
 		Nonce:       2,
 		Incarnation: 2,
-		Balance:     *uint256.NewInt(200),
+		Balance:     u256.U64(200),
 		Root:        common.BytesToHash([]byte("0x1")),
-		CodeHash:    common.BytesToHash([]byte("0x01")),
+		CodeHash:    accounts.InternCodeHash(common.BytesToHash([]byte("0x01"))),
 	}
 	trie := newEmpty()
 	key1 := []byte("acc1")
@@ -70,9 +71,9 @@ func TestAddSomeValuesToAccountAndCheckDeepHashForThem(t *testing.T) {
 	acc := &accounts.Account{
 		Nonce:       2,
 		Incarnation: 2,
-		Balance:     *uint256.NewInt(200),
+		Balance:     u256.U64(200),
 		Root:        EmptyRoot,
-		CodeHash:    emptyState,
+		CodeHash:    accounts.InternCodeHash(emptyState),
 	}
 
 	_, _, addrHash, err := generateAcc()
@@ -116,9 +117,9 @@ func TestHash(t *testing.T) {
 	addr1 := common.HexToAddress("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b")
 	acc1 := &accounts.Account{
 		Nonce:    1,
-		Balance:  *uint256.NewInt(209488),
+		Balance:  u256.U64(209488),
 		Root:     common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
-		CodeHash: common.HexToHash("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"),
+		CodeHash: accounts.InternCodeHash(common.HexToHash("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470")),
 	}
 
 	addr2 := common.HexToAddress("0xb94f5374fce5edbc8e2a8697c15331677e6ebf0b")
@@ -126,15 +127,15 @@ func TestHash(t *testing.T) {
 		Nonce:    0,
 		Balance:  uint256.Int{},
 		Root:     common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
-		CodeHash: common.HexToHash("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"),
+		CodeHash: accounts.InternCodeHash(common.HexToHash("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470")),
 	}
 
 	addr3 := common.HexToAddress("0xc94f5374fce5edbc8e2a8697c15331677e6ebf0b")
 	acc3 := &accounts.Account{
 		Nonce:    0,
-		Balance:  *uint256.NewInt(1010),
+		Balance:  u256.U64(1010),
 		Root:     common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
-		CodeHash: common.HexToHash("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"),
+		CodeHash: accounts.InternCodeHash(common.HexToHash("0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470")),
 	}
 
 	trie := New(common.Hash{})

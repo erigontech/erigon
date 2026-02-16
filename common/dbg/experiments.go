@@ -17,7 +17,9 @@
 package dbg
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -26,6 +28,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unique"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/estimate"
@@ -33,15 +36,18 @@ import (
 )
 
 var (
-	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 512)
+	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
 	noMemstat            = EnvBool("NO_MEMSTAT", false)
 	saveHeapProfile      = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath  = EnvString("HEAP_PROFILE_FILE_PATH", "")
 	heapProfileThreshold = EnvUint("HEAP_PROFILE_THRESHOLD", 35)
 	heapProfileFrequency = EnvDuration("HEAP_PROFILE_FREQUENCY", 30*time.Second)
-	mdbxLockInRam        = EnvBool("MDBX_LOCK_IN_RAM", false)
 	StagesOnlyBlocks     = EnvBool("STAGES_ONLY_BLOCKS", false)
+
+	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
+	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
+	MdbxNoSyncUnsafe = EnvBool("MDBX_NO_FSYNC_UNSAFE", false)
 
 	stopBeforeStage = EnvString("STOP_BEFORE_STAGE", "")
 	stopAfterStage  = EnvString("STOP_AFTER_STAGE", "")
@@ -67,32 +73,38 @@ var (
 	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", true)
 	OnlyCreateDB    = EnvBool("ONLY_CREATE_DB", false)
 
-	CommitEachStage = EnvBool("COMMIT_EACH_STAGE", false)
-
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
 	Exec3Parallel = EnvBool("EXEC3_PARALLEL", false)
 	numWorkers    = runtime.NumCPU() / 2
 	Exec3Workers  = EnvInt("EXEC3_WORKERS", numWorkers)
 
+	CompressWorkers = EnvInt("COMPRESS_WORKERS", 1)
+
 	TraceAccounts        = EnvStrings("TRACE_ACCOUNTS", ",", nil)
 	TraceStateKeys       = EnvStrings("TRACE_STATE_KEYS", ",", nil)
 	TraceInstructions    = EnvBool("TRACE_INSTRUCTIONS", false)
 	TraceTransactionIO   = EnvBool("TRACE_TRANSACTION_IO", false)
+	TraceDomainIO        = EnvBool("TRACE_DOMAIN_IO", false)
+	TraceNoopIO          = EnvBool("TRACE_NOOP_IO", false)
 	TraceLogs            = EnvBool("TRACE_LOGS", false)
 	TraceGas             = EnvBool("TRACE_GAS", false)
-	TraceDyanmicGas      = EnvBool("TRACE_DYNAMIC_GAS", false)
+	TraceDynamicGas      = EnvBool("TRACE_DYNAMIC_GAS", false)
 	TraceApply           = EnvBool("TRACE_APPLY", false)
 	TraceBlocks          = EnvUints("TRACE_BLOCKS", ",", nil)
 	TraceTxIndexes       = EnvInts("TRACE_TXINDEXES", ",", nil)
 	TraceUnwinds         = EnvBool("TRACE_UNWINDS", false)
+	traceDomains         = EnvStrings("TRACE_DOMAINS", ",", nil)
 	StopAfterBlock       = EnvUint("STOP_AFTER_BLOCK", 0)
 	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
+	UseStateCache        = EnvBool("USE_STATE_CACHE", true)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
+
+	RpcDropResponse = EnvBool("RPC_DROP_RESPONSE", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {
@@ -101,8 +113,6 @@ func ReadMemStats(m *runtime.MemStats) {
 	}
 	runtime.ReadMemStats(m)
 }
-
-func MdbxLockInRam() bool { return mdbxLockInRam }
 
 func DiscardCommitment() bool    { return discardCommitment }
 func NoPrune() bool              { return noPrune }
@@ -116,7 +126,7 @@ var (
 
 func DirtySpace() uint64 {
 	dirtySaceOnce.Do(func() {
-		v, _ := os.LookupEnv("MDBX_DIRTY_SPACE_MB")
+		v, _ := envLookup("MDBX_DIRTY_SPACE_MB")
 		if v != "" {
 			i := MustParseInt(v)
 			log.Info("[Experiment]", "MDBX_DIRTY_SPACE_MB", i)
@@ -135,7 +145,7 @@ var (
 
 func SlowTx() time.Duration {
 	slowTxOnce.Do(func() {
-		v, _ := os.LookupEnv("SLOW_TX")
+		v, _ := envLookup("SLOW_TX")
 		if v != "" {
 			var err error
 			slowTx, err = time.ParseDuration(v)
@@ -162,8 +172,8 @@ var (
 
 func LogHashMismatchReason() bool {
 	logHashMismatchReasonOnce.Do(func() {
-		v, _ := os.LookupEnv("LOG_HASH_MISMATCH_REASON")
-		if v == "true" {
+		v, _ := envLookup("LOG_HASH_MISMATCH_REASON")
+		if strings.EqualFold(v, "true") {
 			logHashMismatchReason = true
 			log.Info("[Experiment]", "LOG_HASH_MISMATCH_REASON", logHashMismatchReason)
 		}
@@ -224,34 +234,67 @@ func SaveHeapProfileNearOOM(opts ...SaveHeapOption) {
 		return
 	}
 
-	// above 45%
+	// above threshold - save heap profile
 	var filePath string
 	if heapProfileFilePath == "" {
 		filePath = filepath.Join(os.TempDir(), "erigon-mem.prof")
 	} else {
 		filePath = heapProfileFilePath
 	}
+
 	if logger != nil {
-		logger.Info("[Experiment] saving heap profile as near OOM", "filePath", filePath)
+		logger.Info("[Experiment] saving heap profile as near OOM", "filePath", filePath, "alloc", common.ByteCount(memStats.Alloc))
 	}
 
-	f, err := os.Create(filePath)
-	if err != nil && logger != nil {
-		logger.Warn("[Experiment] could not create heap profile file", "err", err)
-	}
-
-	defer func() {
-		err := f.Close()
-		if err != nil && logger != nil {
-			logger.Warn("[Experiment] could not close heap profile file", "err", err)
+	// Write heap profile to buffer first
+	var buf bytes.Buffer
+	if err := pprof.WriteHeapProfile(&buf); err != nil {
+		if logger != nil {
+			logger.Warn("[Experiment] could not write heap profile to buffer", "err", err)
 		}
-	}()
-
-	runtime.GC()
-	err = pprof.WriteHeapProfile(f)
-	if err != nil && logger != nil {
-		logger.Warn("[Experiment] could not write heap profile file", "err", err)
+		return
 	}
+	logger.Info("[Experiment] wrote heap profile to buffer", "size", common.ByteCount(uint64(buf.Len())))
+
+	// create temp file-> write buffer -> fsync -> rename
+	// Writing to the temporary file first and then renaming to the output file ensures durability of data in case of an OOM
+	// If there is an OOM crash while writing to the .tmp file we still have the previous heap profile result saved
+	// in the output file. The rename() operation is atomic for POSIX systems, so there is no danger of corruption if the OOM comes
+	// when os.Rename() is being called.
+	tmpPath := filePath + ".tmp"
+	f, err := os.Create(tmpPath)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("[Experiment] could not create heap profile temp file", "err", err)
+		}
+		return
+	}
+	defer f.Close()
+	defer os.Remove(tmpPath) //nolint
+
+	if _, err := f.Write(buf.Bytes()); err != nil {
+		if logger != nil {
+			logger.Warn("[Experiment] could not write heap profile temp file", "err", err)
+		}
+		return
+	}
+
+	if err := f.Sync(); err != nil {
+		if logger != nil {
+			logger.Warn("[Experiment] could not sync heap profile temp file", "err", err)
+		}
+		return
+	}
+
+	// Atomic rename (on linux/mac; best-effort on Windows)
+	if err := os.Rename(tmpPath, filePath); err != nil {
+		if logger != nil {
+			logger.Warn("[Experiment] could not rename heap profile file", "err", err)
+		}
+		return
+	}
+
+	logger.Info("[Experiment] wrote heap profile to disk")
 }
 
 func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOption) {
@@ -275,7 +318,9 @@ func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOpt
 var tracedBlocks map[uint64]struct{}
 var traceAllBlocks bool
 var tracedTxIndexes map[int64]struct{}
-var tracedAccounts map[common.Address]struct{}
+var tracedAccounts map[unique.Handle[common.Address]]struct{}
+var traceAllDomains bool
+var tracedDomains map[uint16]struct{}
 
 var traceInit sync.Once
 
@@ -291,10 +336,51 @@ func initTraceMaps() {
 	for _, index := range TraceTxIndexes {
 		tracedTxIndexes[index] = struct{}{}
 	}
-	tracedAccounts = map[common.Address]struct{}{}
+	tracedAccounts = map[unique.Handle[common.Address]]struct{}{}
 	for _, account := range TraceAccounts {
 		account, _ = strings.CutPrefix(strings.ToLower(account), "Ox")
-		tracedAccounts[common.HexToAddress(account)] = struct{}{}
+		tracedAccounts[unique.Make(common.HexToAddress(account))] = struct{}{}
+	}
+	if len(traceDomains) == 1 &&
+		(strings.EqualFold(traceDomains[0], "all") || strings.EqualFold(traceDomains[0], "any") ||
+			strings.EqualFold(traceDomains[0], "true")) {
+		traceAllDomains = true
+	} else {
+		tracedDomains = map[uint16]struct{}{}
+		for _, domain := range traceDomains {
+			if d, err := string2Domain(domain); err == nil {
+				tracedDomains[d] = struct{}{}
+			}
+		}
+	}
+}
+
+func string2Domain(in string) (uint16, error) {
+	const (
+		accountsDomain   uint16 = 0 // Eth Accounts
+		storageDomain    uint16 = 1 // Eth Account's Storage
+		codeDomain       uint16 = 2 // Eth Smart-Contract Code
+		commitmentDomain uint16 = 3 // Merkle Trie
+		receiptDomain    uint16 = 4 // Tiny Receipts - without logs. Required for node-operations.
+		rCacheDomain     uint16 = 5 // Fat Receipts - with logs. Optional.
+		domainLen        uint16 = 6 // Technical marker of Enum. Not real Domain.
+	)
+
+	switch strings.ToLower(in) {
+	case "accounts":
+		return accountsDomain, nil
+	case "storage":
+		return storageDomain, nil
+	case "code":
+		return codeDomain, nil
+	case "commitment":
+		return commitmentDomain, nil
+	case "receipt":
+		return receiptDomain, nil
+	case "rcache":
+		return rCacheDomain, nil
+	default:
+		return math.MaxUint16, fmt.Errorf("unknown name: %s", in)
 	}
 }
 
@@ -322,7 +408,7 @@ func TraceTx(blockNum uint64, txIndex int) bool {
 	return true
 }
 
-func TraceAccount(addr common.Address) bool {
+func TraceAccount(addr unique.Handle[common.Address]) bool {
 	traceInit.Do(initTraceMaps)
 	if len(tracedAccounts) != 0 {
 		_, ok := tracedAccounts[addr]
@@ -333,4 +419,13 @@ func TraceAccount(addr common.Address) bool {
 
 func TracingAccounts() bool {
 	return len(tracedAccounts) > 0
+}
+
+func TraceDomain(domain uint16) bool {
+	traceInit.Do(initTraceMaps)
+	if traceAllDomains {
+		return true
+	}
+	_, ok := tracedDomains[domain]
+	return ok
 }

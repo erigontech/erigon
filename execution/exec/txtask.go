@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/calltracer"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -65,7 +66,7 @@ type Task interface {
 	Tx() types.Transaction
 	TxType() uint8
 	TxHash() common.Hash
-	TxSender() (*common.Address, error)
+	TxSender() (accounts.Address, error)
 	TxMessage() (*types.Message, error)
 
 	BlockNumber() uint64
@@ -101,15 +102,16 @@ type TxResult struct {
 	ExecutionResult   evmtypes.ExecutionResult
 	ValidationResults []AAValidationResult
 	Err               error
-	Coinbase          common.Address
+	Coinbase          accounts.Address
 	TxIn              state.ReadSet
 	TxOut             state.VersionedWrites
 
 	Receipt *types.Receipt
 	Logs    []*types.Log
 
-	TraceFroms map[common.Address]struct{}
-	TraceTos   map[common.Address]struct{}
+	TraceFroms        map[accounts.Address]struct{}
+	TraceTos          map[accounts.Address]struct{}
+	AccessedAddresses map[accounts.Address]struct{}
 }
 
 func (r *TxResult) compare(other *TxResult) int {
@@ -136,7 +138,7 @@ func (r *TxResult) CreateNextReceipt(prev *types.Receipt) (*types.Receipt, error
 		}
 	}
 
-	cumulativeGasUsed += r.ExecutionResult.GasUsed
+	cumulativeGasUsed += r.ExecutionResult.ReceiptGasUsed
 
 	var err error
 	r.Receipt, err = r.CreateReceipt(txIndex, cumulativeGasUsed, firstLogIndex)
@@ -156,7 +158,7 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 		BlockHash:                r.BlockHash(),
 		TransactionIndex:         uint(txIndex),
 		Type:                     r.TxType(),
-		GasUsed:                  r.ExecutionResult.GasUsed,
+		GasUsed:                  r.ExecutionResult.ReceiptGasUsed,
 		CumulativeGasUsed:        cumulativeGasUsed,
 		TxHash:                   r.TxHash(),
 		Logs:                     r.Logs,
@@ -181,12 +183,12 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 		return nil, err
 	}
 
-	if txMessage != nil && txMessage.To() == nil {
+	if txMessage != nil && txMessage.To().IsNil() {
 		txSender, err := r.TxSender()
 		if err != nil {
 			return nil, err
 		}
-		receipt.ContractAddress = types.CreateAddress(*txSender, r.Tx().GetNonce())
+		receipt.ContractAddress = types.CreateAddress(txSender.Value(), r.Tx().GetNonce())
 	}
 
 	return receipt, nil
@@ -211,7 +213,7 @@ type TxTask struct {
 	Withdrawals        types.Withdrawals
 	EvmBlockContext    evmtypes.BlockContext
 	HistoryExecution   bool // use history reader for that txn instead of state reader
-	BalanceIncreaseSet map[common.Address]uint256.Int
+	BalanceIncreaseSet map[accounts.Address]uint256.Int
 
 	Incarnation           int
 	Tracer                *calltracer.CallTracer
@@ -224,7 +226,7 @@ type TxTask struct {
 	InBatch               bool   // set to true for consecutive RIP-7560 transactions after the first one (first one is false)
 
 	gasPool      *protocol.GasPool
-	sender       *common.Address
+	sender       accounts.Address
 	message      *types.Message
 	signer       *types.Signer
 	dependencies []int
@@ -264,15 +266,15 @@ func (t *TxTask) TxHash() common.Hash {
 	return t.Tx().Hash()
 }
 
-func (t *TxTask) TxSender() (*common.Address, error) {
-	if t.sender != nil {
+func (t *TxTask) TxSender() (accounts.Address, error) {
+	if !t.sender.IsNil() {
 		return t.sender, nil
 	}
 	if t.TxIndex < 0 || t.TxIndex >= len(t.Txs) {
-		return nil, nil
+		return accounts.NilAddress, nil
 	}
 	if sender, ok := t.Tx().GetSender(); ok {
-		t.sender = &sender
+		t.sender = sender
 		return t.sender, nil
 	}
 	if t.signer == nil {
@@ -280,9 +282,9 @@ func (t *TxTask) TxSender() (*common.Address, error) {
 	}
 	sender, err := t.signer.Sender(t.Tx())
 	if err != nil {
-		return nil, err
+		return accounts.NilAddress, err
 	}
-	t.sender = &sender
+	t.sender = sender
 	log.Warn("[Execution] expensive lazy sender recovery", "blockNum", t.BlockNumber(), "txIdx", t.TxIndex)
 	return t.sender, nil
 }
@@ -363,7 +365,7 @@ func (t *TxTask) Rules() *chain.Rules {
 func (t *TxTask) ResetTx(txNum uint64, txIndex int) {
 	t.TxNum = txNum
 	t.TxIndex = txIndex
-	t.sender = nil
+	t.sender = accounts.NilAddress
 	t.message = nil
 	t.signer = nil
 	t.dependencies = nil
@@ -478,21 +480,23 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
-		syscall := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+		syscall := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 			ret, err := protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config())
 			return ret, err
 		}
-		engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
-		result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
+		result.Err = engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
+		if result.Err == nil {
+			result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
+		}
 	case txTask.IsBlockEnd():
 		if txTask.BlockNumber() == 0 {
 			break
 		}
 
-		result.TraceTos = map[common.Address]struct{}{}
-		result.TraceTos[txTask.Header.Coinbase] = struct{}{}
+		result.TraceTos = map[accounts.Address]struct{}{}
+		result.TraceTos[accounts.InternAddress(txTask.Header.Coinbase)] = struct{}{}
 		for _, uncle := range txTask.Uncles {
-			result.TraceTos[uncle.Coinbase] = struct{}{}
+			result.TraceTos[accounts.InternAddress(uncle.Coinbase)] = struct{}{}
 		}
 	default:
 		if txTask.Tx().Type() == types.AccountAbstractionTxType {
@@ -557,14 +561,11 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if result.Err == nil {
 		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-		for addr, bal := range txTask.BalanceIncreaseSet {
-			fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &bal)
-		}
-
 		if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
 			panic(err)
 		}
 
+		result.AccessedAddresses = ibs.AccessedAddresses()
 		result.TxIn = txTask.VersionedReads(ibs)
 		result.TxOut = txTask.VersionedWrites(ibs)
 	}
@@ -636,7 +637,8 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 		return &result
 	}
 
-	result.ExecutionResult.GasUsed = gasUsed
+	result.ExecutionResult.ReceiptGasUsed = gasUsed
+	result.ExecutionResult.BlockGasUsed = gasUsed
 	// Update the state with pending changes
 	ibs.SoftFinalise()
 	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())

@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
@@ -50,7 +51,7 @@ type StateContext struct {
 	TransactionIndex *int
 }
 
-func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, stateOverride *ethapi.StateOverrides, timeoutMilliSecondsPtr *int64) ([][]map[string]interface{}, error) {
+func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, stateOverride *ethapi.StateOverrides, timeoutMilliSecondsPtr *int64) ([][]map[string]any, error) {
 	var (
 		hash               common.Hash
 		replayTransactions types.Transactions
@@ -87,6 +88,16 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	defer func(start time.Time) { log.Trace("Executing EVM callMany finished", "runtime", time.Since(start)) }(time.Now())
 
 	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, simulateContext.BlockNumber, tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
+	err = rpchelper.CheckBlockExecuted(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -135,20 +146,19 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		return hash, err
 	}
 
-	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), nil /* author */, chainConfig)
+	blockCtx = protocol.NewEVMBlockContext(header, getHash, api.engine(), accounts.NilAddress /* author */, chainConfig)
 
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{})
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := evm.ChainRules()
 
-	timeoutMilliSeconds := int64(5000)
+	timeout := api.evmCallTimeout
 
-	if timeoutMilliSecondsPtr != nil {
-		timeoutMilliSeconds = *timeoutMilliSecondsPtr
+	if timeoutMilliSecondsPtr != nil && *timeoutMilliSecondsPtr > 0 {
+		timeout = time.Duration(*timeoutMilliSecondsPtr) * time.Millisecond
 	}
 
-	timeout := time.Millisecond * time.Duration(timeoutMilliSeconds)
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
 	var cancel context.CancelFunc
@@ -196,13 +206,13 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// after replaying the txns, we want to overload the state
 	// overload state
 	if stateOverride != nil {
-		err = stateOverride.Override(evm.IntraBlockState())
+		err = stateOverride.Override(evm.IntraBlockState(), nil, blockCtx.Rules(chainConfig))
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	ret := make([][]map[string]interface{}, 0)
+	ret := make([][]map[string]any, 0)
 
 	for _, bundle := range bundles {
 		// first change blockContext
@@ -213,7 +223,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			blockCtx.BaseFee = *bundle.BlockOverride.BaseFee
 		}
 		if bundle.BlockOverride.Coinbase != nil {
-			blockCtx.Coinbase = *bundle.BlockOverride.Coinbase
+			blockCtx.Coinbase = accounts.InternAddress(*bundle.BlockOverride.Coinbase)
 		}
 		if bundle.BlockOverride.Difficulty != nil {
 			blockCtx.Difficulty = new(big.Int).SetUint64(uint64(*bundle.BlockOverride.Difficulty))
@@ -227,7 +237,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		if bundle.BlockOverride.BlockHash != nil {
 			maps.Copy(overrideBlockHash, *bundle.BlockOverride.BlockHash)
 		}
-		results := []map[string]interface{}{}
+		results := []map[string]any{}
 		for _, txn := range bundle.Transactions {
 			if txn.Gas == nil || *(txn.Gas) == 0 {
 				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
@@ -249,11 +259,11 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			if evm.Cancelled() {
 				return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 			}
-			jsonResult := make(map[string]interface{})
+			jsonResult := make(map[string]any)
 			if result.Err != nil {
 				if len(result.Revert()) > 0 {
 					revertErr := ethapi.NewRevertError(result)
-					jsonResult["error"] = map[string]interface{}{
+					jsonResult["error"] = map[string]any{
 						"message": revertErr.Error(),
 						"data":    revertErr.ErrorData(),
 					}

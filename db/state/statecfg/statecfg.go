@@ -57,7 +57,7 @@ type HistCfg struct {
 	SnapshotsDisabled  bool // don't produce .v and .ef files, keep in db table. old data will be pruned anyway.
 	HistoryDisabled    bool // skip all write operations to this History (even in DB)
 
-	HistoryValuesOnCompressedPage int // when collating .v files: concat 16 values and snappy them
+	HistoryValuesOnCompressedPage int // deprecated, it is only for ver.0 snapshots backward compatibility
 
 	Accessors     Accessors
 	CompressorCfg seg.Cfg             // Compression settings for history files
@@ -91,13 +91,13 @@ type InvIdxCfg struct {
 }
 
 type BlockDataFilesCfg struct {
-	Version BlockDataVersionTypes
-	Name    string
+	FileVersion BlockDataVersionTypes
+	Name        string
 }
 
 type BlockIdxFilesCfg struct {
-	Version BlockIdxVersionTypes
-	Name    string
+	FileVersion BlockIdxVersionTypes
+	Name        string
 }
 
 func (ii InvIdxCfg) GetVersions() VersionTypes {
@@ -147,16 +147,16 @@ type BlockIdxVersionTypes struct {
 
 func (b BlockDataFilesCfg) GetVersions() VersionTypes {
 	return VersionTypes{
-		BlockData: &b.Version,
+		BlockData: &b.FileVersion,
 		BlockIdx: &BlockIdxVersionTypes{
-			b.Version.AccessorIdx,
+			b.FileVersion.AccessorIdx,
 		},
 	}
 }
 
 func (b BlockIdxFilesCfg) GetVersions() VersionTypes {
 	return VersionTypes{
-		BlockIdx: &b.Version,
+		BlockIdx: &b.FileVersion,
 	}
 }
 

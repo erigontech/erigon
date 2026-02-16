@@ -6,13 +6,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/db/version"
 	"math"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/erigontech/erigon/db/version"
 
 	"github.com/c2h5oh/datasize"
 
@@ -320,7 +321,7 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 	}
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	if err != nil {
 		return "", err
 	}
@@ -328,9 +329,10 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 	if err != nil {
 		return "", err
 	}
-	s := fmt.Sprintf("[commitment] Latest: blockNum: %d txNum: %d latestRootHash: %x\n", domains.BlockNum(), domains.TxNum(), rootHash)
-	s += fmt.Sprintf("[commitment] stepSize %d, ReplaceKeysInValues enabled %t\n", rwTx.Debug().StepSize(), a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues)
-	return s, nil
+	var s strings.Builder
+	s.WriteString(fmt.Sprintf("[commitment] Latest: blockNum: %d txNum: %d latestRootHash: %x\n", domains.BlockNum(), domains.TxNum(), rootHash))
+	s.WriteString(fmt.Sprintf("[commitment] stepSize %d, ReplaceKeysInValues enabled %t\n", rwTx.Debug().StepSize(), a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues))
+	return s.String(), nil
 }
 
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
@@ -408,7 +410,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		keysPerStep := totalKeys / stepsInShard // how many keys in just one step?
 
 		//shardStepsSize := kv.Step(2)
-		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), 128))
+		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), 16))
 		if uint64(shardStepsSize) != stepsInShard { // processing shard in several smaller steps
 			shardTo = shardFrom + shardStepsSize // if shard is quite big, we will process it in several steps
 		}
@@ -437,8 +439,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			return nil, err
 		}
 		keyIter := stream.UnionKV(streamAcc, streamSto, -1)
-		//blockNum, ok, err := txNumsReader.FindBlockNum(roTx, rangeToTxNum-1)
-		blockNum, ok, err := txNumsReader.FindBlockNum(roTx, rangeToTxNum-1)
+		//blockNum, ok, err := txNumsReader.FindBlockNum(ctx, roTx, rangeToTxNum-1)
+		blockNum, ok, err := txNumsReader.FindBlockNum(ctx, roTx, rangeToTxNum-1)
 		if err != nil {
 			return nil, fmt.Errorf("CommitmentRebuild: FindBlockNum(%d) %w", rangeToTxNum, err)
 		}
@@ -474,7 +476,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			}
 			defer rwTx.Rollback()
 
-			domains, err := execctx.NewSharedDomains(rwTx, log.New())
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 			if err != nil {
 				return nil, err
 			}
@@ -554,6 +556,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 
 	logger.Info(fmt.Sprintf("[squeeze] latest root %x", latestRoot))
+	a.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
 
 	actx := a.BeginFilesRo()
 	defer actx.Close()
@@ -564,8 +567,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		return nil, err
 	}
 	actx.Close()
-	if err = a.OpenFolder(); err != nil {
-		logger.Warn("[squeeze] failed to open folder after sqeeze", "err", err)
+	if err = a.ReloadFiles(); err != nil {
+		logger.Warn("[squeeze] failed to reload folder after sqeeze", "err", err)
 	}
 
 	if err = a.BuildMissedAccessors(ctx, 4); err != nil {

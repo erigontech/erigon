@@ -2,34 +2,35 @@ package trie
 
 import (
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // RetainListBuilder is the structure that accumulates the list of keys that were read or changes (touched) during
 // the execution of a block. It also tracks the contract codes that were created and used during the execution
 // of a block
 type RetainListBuilder struct {
-	touches        [][]byte                 // Read/change set of account keys (account hashes)
-	storageTouches [][]byte                 // Read/change set of storage keys (account hashes concatenated with storage key hashes)
-	proofCodes     map[common.Hash][]byte   // Contract codes that have been accessed (codeHash)
-	createdCodes   map[common.Hash]struct{} // Contract codes that were created (deployed) (codeHash)
+	touches        [][]byte                       // Read/change set of account keys (account hashes)
+	storageTouches [][]byte                       // Read/change set of storage keys (account hashes concatenated with storage key hashes)
+	proofCodes     map[accounts.CodeHash][]byte   // Contract codes that have been accessed (codeHash)
+	createdCodes   map[accounts.CodeHash]struct{} // Contract codes that were created (deployed) (codeHash)
 }
 
 // NewRetainListBuilder creates new ProofGenerator and initialised its maps
 func NewRetainListBuilder() *RetainListBuilder {
 	return &RetainListBuilder{
-		proofCodes:   make(map[common.Hash][]byte),
-		createdCodes: make(map[common.Hash]struct{}),
+		proofCodes:   make(map[accounts.CodeHash][]byte),
+		createdCodes: make(map[accounts.CodeHash]struct{}),
 	}
 }
 
 // AddTouch adds a key (in KEY encoding) into the read/change set of account keys
 func (rlb *RetainListBuilder) AddTouch(touch []byte) {
-	rlb.touches = append(rlb.touches, common.CopyBytes(touch))
+	rlb.touches = append(rlb.touches, common.Copy(touch))
 }
 
 // AddStorageTouch adds a key (in KEY encoding) into the read/change set of storage keys
 func (rlb *RetainListBuilder) AddStorageTouch(touch []byte) {
-	rlb.storageTouches = append(rlb.storageTouches, common.CopyBytes(touch))
+	rlb.storageTouches = append(rlb.storageTouches, common.Copy(touch))
 }
 
 // ExtractTouches returns accumulated read/change sets and clears them for the next block's execution
@@ -43,22 +44,22 @@ func (rlb *RetainListBuilder) ExtractTouches() ([][]byte, [][]byte) {
 
 // extractCodeTouches returns the set of all contract codes that were required during the block's execution
 // but were not created during that same block. It also clears the set for the next block's execution
-func (rlb *RetainListBuilder) extractCodeTouches() map[common.Hash][]byte {
+func (rlb *RetainListBuilder) extractCodeTouches() map[accounts.CodeHash][]byte {
 	proofCodes := rlb.proofCodes
-	rlb.proofCodes = make(map[common.Hash][]byte)
-	rlb.createdCodes = make(map[common.Hash]struct{})
+	rlb.proofCodes = make(map[accounts.CodeHash][]byte)
+	rlb.createdCodes = make(map[accounts.CodeHash]struct{})
 	return proofCodes
 }
 
 // ReadCode registers that given contract code has been accessed during current block's execution
-func (rlb *RetainListBuilder) ReadCode(codeHash common.Hash, code []byte) {
+func (rlb *RetainListBuilder) ReadCode(codeHash accounts.CodeHash, code []byte) {
 	if _, ok := rlb.proofCodes[codeHash]; !ok {
 		rlb.proofCodes[codeHash] = code
 	}
 }
 
 // CreateCode registers that given contract code has been created (deployed) during current block's execution
-func (rlb *RetainListBuilder) CreateCode(codeHash common.Hash) {
+func (rlb *RetainListBuilder) CreateCode(codeHash accounts.CodeHash) {
 	if _, ok := rlb.proofCodes[codeHash]; !ok {
 		rlb.createdCodes[codeHash] = struct{}{}
 	}

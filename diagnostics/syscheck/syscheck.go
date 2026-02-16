@@ -56,15 +56,15 @@ func CheckKernelAllocationHints(ctx context.Context, log log.Logger) {
 		switch v {
 		case 0:
 			logHint(
-				"vm.overcommit_memory=0 can cause fork()/allocation failures under load; set to 1",
+				"vm.overcommit_memory=0 can cause allocation failures under load; set to 1",
 				"current", v,
-				"fix", `echo "vm.overcommit_memory = 1" | sudo tee /etc/sysctl.d/99-erigon.conf && sudo sysctl -p /etc/sysctl.d/99-erigon.conf`,
+				"fix", `echo "vm.overcommit_memory = 1" | sudo tee -a /etc/sysctl.d/99-erigon.conf && sudo sysctl -p /etc/sysctl.d/99-erigon.conf`,
 			)
 		case 2:
 			logHint(
 				"vm.overcommit_memory=2 (strict) may cause allocation failures for large mmap/fork workloads; consider 1",
 				"current", v,
-				"fix", `echo "vm.overcommit_memory = 1" | sudo tee /etc/sysctl.d/99-erigon.conf && sudo sysctl -p /etc/sysctl.d/99-erigon.conf`,
+				"fix", `echo "vm.overcommit_memory = 1" | sudo tee -a /etc/sysctl.d/99-erigon.conf && sudo sysctl -p /etc/sysctl.d/99-erigon.conf`,
 			)
 		default:
 			log.Info("vm.overcommit_memory looks OK", "current", v)
@@ -99,7 +99,7 @@ func CheckKernelAllocationHints(ctx context.Context, log log.Logger) {
 		headroom := float64(vmStat.Available) / float64(vmStat.Total+1)
 		if headroom < 0.15 && (swapStat == nil || swapStat.Total == 0) {
 			logHint(
-				"Low available memory headroom and no swap may cause fork()/allocation failures",
+				"Low available memory headroom and no swap may cause allocation failures",
 				"mem_total", vmStat.Total,
 				"mem_available", vmStat.Available,
 				"swap_total", func() uint64 {
@@ -121,7 +121,4 @@ func CheckKernelAllocationHints(ctx context.Context, log log.Logger) {
 		log.Info("running under container cgroup; ensure sysctls are applied on the host or via --sysctl in the runtime")
 	}
 
-	if len(hints) == 0 {
-		log.Info("kernel allocation settings look sane for mmap/fork workloads")
-	}
 }

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sync"
 
 	"github.com/holiman/uint256"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -66,6 +68,10 @@ var (
 // Note: After the Merge the work is mostly done on the Consensus Layer, so nothing much is to be added on this side.
 type Merge struct {
 	eth1Engine rules.Engine // Original rules engine used in eth1, e.g. ethash or clique
+
+	// Reusable buffer for collecting logs in Finalize - protected by logsBufMu
+	logsBufMu sync.Mutex
+	logsBuf   types.Logs
 }
 
 // New creates a new instance of the Merge Engine with the given embedded eth1 engine.
@@ -89,11 +95,11 @@ func (s *Merge) Type() chain.RulesName {
 // Author implements rules.Engine, returning the header's coinbase as the
 // proof-of-stake verified author of the block.
 // This is thread-safe (only access the header.Coinbase or the underlying engine's thread-safe method)
-func (s *Merge) Author(header *types.Header) (common.Address, error) {
+func (s *Merge) Author(header *types.Header) (accounts.Address, error) {
 	if !misc.IsPoSHeader(header) {
 		return s.eth1Engine.Author(header)
 	}
-	return header.Coinbase, nil
+	return accounts.InternAddress(header.Coinbase), nil
 }
 
 func (s *Merge) VerifyHeader(chain rules.ChainHeaderReader, header *types.Header, seal bool) error {
@@ -150,11 +156,11 @@ func (s *Merge) CalculateRewards(config *chain.Config, header *types.Header, unc
 }
 
 func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 	chain rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.FlatRequests, error) {
 	if !misc.IsPoSHeader(header) {
-		return s.eth1Engine.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, skipReceiptsEval, logger)
+		return s.eth1Engine.Finalize(config, header, state, uncles, receipts, withdrawals, chain, syscall, skipReceiptsEval, logger)
 	}
 
 	rewards, err := s.CalculateRewards(config, header, uncles, syscall)
@@ -180,22 +186,39 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		} else {
 			for _, w := range withdrawals {
 				amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(common.GWei))
-				state.AddBalance(w.Address, *amountInWei, tracing.BalanceIncreaseWithdrawal)
+				state.AddBalance(accounts.InternAddress(w.Address), *amountInWei, tracing.BalanceIncreaseWithdrawal)
 			}
 		}
 	}
 
 	var rs types.FlatRequests
 	if config.IsPrague(header.Time) && !skipReceiptsEval {
-		rs = make(types.FlatRequests, 0)
-		allLogs := make(types.Logs, 0)
+		rs = make(types.FlatRequests, 0, 3) // deposit, withdrawal, consolidation
+
+		// Try to reuse buffer, fall back to allocation if concurrent access
+		var allLogs types.Logs
+		reuseBuffer := s.logsBufMu.TryLock()
+		if reuseBuffer {
+			allLogs = s.logsBuf[:0]
+		} else {
+			allLogs = make(types.Logs, 0, len(receipts)*4)
+		}
+
 		for i, rec := range receipts {
 			if rec == nil {
+				if reuseBuffer {
+					s.logsBuf = allLogs
+					s.logsBufMu.Unlock()
+				}
 				return nil, fmt.Errorf("nil receipt: block %d, txId %d, receipts %s", header.Number, i, receipts)
 			}
 			allLogs = append(allLogs, rec.Logs...)
 		}
 		depositReqs, err := misc.ParseDepositLogs(allLogs, config.DepositContract)
+		if reuseBuffer {
+			s.logsBuf = allLogs // save back (might have grown)
+			s.logsBufMu.Unlock()
+		}
 		if err != nil {
 			return nil, fmt.Errorf("error: could not parse requests logs: %v", err)
 		}
@@ -219,7 +242,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 		if header.RequestsHash != nil {
 			rh := rs.Hash()
 			if *header.RequestsHash != *rh {
-				return nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got :%v", header.RequestsHash, rh)
+				return nil, fmt.Errorf("error: invalid requests root hash in header, expected: %v, got:%v", header.RequestsHash, rh)
 			}
 		}
 	}
@@ -234,7 +257,7 @@ func (s *Merge) FinalizeAndAssemble(config *chain.Config, header *types.Header, 
 		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, call, logger)
 	}
 	header.RequestsHash = nil
-	outRequests, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, false, logger)
+	outRequests, err := s.Finalize(config, header, state, uncles, receipts, withdrawals, chain, syscall, false, logger)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -334,6 +357,24 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 		return rules.ErrUnexpectedRequests
 	}
 
+	// Verify existence / non-existence of slotNumber & blockAccessListHash
+	amsterdam := chain.Config().IsAmsterdam(header.Time)
+	if amsterdam {
+		if header.SlotNumber == nil {
+			// TODO: No Slot Error Yet - Treate it as optional for hive testing
+			//return rules.ErrMissingSlotNumber
+		}
+		if header.BlockAccessListHash == nil {
+			return rules.ErrMissingBlockAccessListHash
+		}
+	} else {
+		if header.SlotNumber != nil {
+			return rules.ErrUnexpectedSlotNumber
+		}
+		if header.BlockAccessListHash != nil {
+			return rules.ErrUnexpectedBlockAccessListHash
+		}
+	}
 	return nil
 }
 
@@ -341,6 +382,7 @@ func (s *Merge) Seal(chain rules.ChainHeaderReader, blockWithReceipts *types.Blo
 	block := blockWithReceipts.Block
 	receipts := blockWithReceipts.Receipts
 	requests := blockWithReceipts.Requests
+	blockAccessList := blockWithReceipts.BlockAccessList
 	if !misc.IsPoSHeader(block.HeaderNoCopy()) {
 		return s.eth1Engine.Seal(chain, blockWithReceipts, results, stop)
 	}
@@ -349,7 +391,7 @@ func (s *Merge) Seal(chain rules.ChainHeaderReader, blockWithReceipts *types.Blo
 	header.Nonce = ProofOfStakeNonce
 
 	select {
-	case results <- &types.BlockWithReceipts{Block: block.WithSeal(header), Receipts: receipts, Requests: requests}:
+	case results <- &types.BlockWithReceipts{Block: block.WithSeal(header), Receipts: receipts, Requests: requests, BlockAccessList: blockAccessList}:
 	default:
 		log.Warn("Sealing result is not read", "sealhash", block.Hash())
 	}
@@ -357,27 +399,43 @@ func (s *Merge) Seal(chain rules.ChainHeaderReader, blockWithReceipts *types.Blo
 	return nil
 }
 
-func (s *Merge) IsServiceTransaction(sender common.Address, syscall rules.SystemCall) bool {
+func (s *Merge) IsServiceTransaction(sender accounts.Address, syscall rules.SystemCall) bool {
 	return s.eth1Engine.IsServiceTransaction(sender, syscall)
 }
 
 func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
-) {
-	auraEngine, isAura := s.eth1Engine.(*aura.AuRa)
+) error {
 	if !misc.IsPoSHeader(header) {
-		s.eth1Engine.Initialize(config, chain, header, state, syscall, logger, tracer)
-	} else if isAura {
-		auraEngine.RewriteBytecode(header, state)
+		return s.eth1Engine.Initialize(config, chain, header, state, syscall, logger, tracer)
 	}
-	if chain.Config().IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
-		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr common.Address, data []byte) ([]byte, error) {
+
+	cfg := chain.Config()
+
+	// See https://hackmd.io/@filoozom/rycoQITlWl
+	if cfg.BalancerTime != nil && header.Time >= cfg.BalancerTime.Uint64() {
+		parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+		if parent == nil {
+			return rules.ErrUnknownAncestor
+		}
+		if parent.Time < cfg.BalancerTime.Uint64() { // first Balancer HF block
+			for address, rewrittenCode := range cfg.BalancerRewriteBytecode {
+				state.SetCode(accounts.InternAddress(address), rewrittenCode)
+			}
+		}
+	}
+
+	if cfg.IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
+		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr accounts.Address, data []byte) ([]byte, error) {
 			return syscall(addr, data, state, header, false /* constCall */)
 		}, tracer)
 	}
-	if chain.Config().IsPrague(header.Time) {
-		_ = misc.StoreBlockHashesEip2935(header, state)
+	if cfg.IsPrague(header.Time) {
+		if err := misc.StoreBlockHashesEip2935(header, state); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (s *Merge) APIs(chain rules.ChainHeaderReader) []rpc.API {
@@ -389,7 +447,7 @@ func (s *Merge) GetTransferFunc() evmtypes.TransferFunc {
 }
 
 func (s *Merge) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
-	return s.eth1Engine.GetPostApplyMessageFunc()
+	return misc.LogSelfDestructedAccounts // EIP-7708
 }
 
 func (s *Merge) Close() error {

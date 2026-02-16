@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
 
@@ -43,7 +44,7 @@ func init() {
 	register("prestateTracer", newPrestateTracer)
 }
 
-type state = map[common.Address]*account
+type state = map[accounts.Address]*account
 
 type account struct {
 	Balance  *big.Int                    `json:"balance,omitempty"`
@@ -67,13 +68,13 @@ type prestateTracer struct {
 	pre       state
 	post      state
 	create    bool
-	to        common.Address
+	to        accounts.Address
 	gasLimit  uint64 // Amount of gas bought for the whole tx
 	config    prestateTracerConfig
 	interrupt atomic.Bool // Atomic flag to signal execution interruption
 	reason    error       // Textual reason for the interruption
-	created   map[common.Address]bool
-	deleted   map[common.Address]bool
+	created   map[accounts.Address]bool
+	deleted   map[accounts.Address]bool
 }
 
 type prestateTracerConfig struct {
@@ -100,8 +101,8 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 		pre:     state{},
 		post:    state{},
 		config:  config,
-		created: make(map[common.Address]bool),
-		deleted: make(map[common.Address]bool),
+		created: make(map[accounts.Address]bool),
+		deleted: make(map[accounts.Address]bool),
 	}
 
 	return &tracers.Tracer{
@@ -147,6 +148,10 @@ func (t *prestateTracer) OnExit(depth int, output []byte, gasUsed uint64, err er
 
 // OnOpcode implements the EVMLogger interface to trace a single step of VM execution.
 func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+	// Skip if tracing was interrupted
+	if t.interrupt.Load() {
+		return
+	}
 	op := vm.OpCode(opcode)
 	stackData := scope.StackData()
 	stackLen := len(stackData)
@@ -156,7 +161,7 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 		slot := common.Hash(stackData[stackLen-1].Bytes32())
 		t.lookupStorage(caller, slot)
 	case stackLen >= 1 && (op == vm.EXTCODECOPY || op == vm.EXTCODEHASH || op == vm.EXTCODESIZE || op == vm.BALANCE || op == vm.SELFDESTRUCT):
-		addr := common.Address(stackData[stackLen-1].Bytes20())
+		addr := accounts.InternAddress(stackData[stackLen-1].Bytes20())
 		t.lookupAccount(addr)
 		if op == vm.SELFDESTRUCT {
 			if t.env.ChainConfig.IsCancun(t.env.Time) {
@@ -171,11 +176,19 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 		}
 
 	case stackLen >= 5 && (op == vm.DELEGATECALL || op == vm.CALL || op == vm.STATICCALL || op == vm.CALLCODE):
-		addr := common.Address(stackData[stackLen-2].Bytes20())
+		addr := accounts.InternAddress(stackData[stackLen-2].Bytes20())
 		t.lookupAccount(addr)
+		// Lookup the delegation target
+		if t.env.ChainConfig.IsPrague(t.env.Time) {
+			code, _ := t.env.IntraBlockState.GetCode(addr)
+			if target, ok := types.ParseDelegation(code); ok {
+				t.lookupAccount(target)
+			}
+		}
+
 	case op == vm.CREATE:
 		nonce, _ := t.env.IntraBlockState.GetNonce(caller)
-		addr := types.CreateAddress(caller, nonce)
+		addr := accounts.InternAddress(types.CreateAddress(caller.Value(), nonce))
 		t.lookupAccount(addr)
 		t.created[addr] = true
 	case stackLen >= 4 && op == vm.CREATE2:
@@ -186,25 +199,32 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 			t.Stop(fmt.Errorf("failed to copy CREATE2 in prestate tracer input err: %s", err))
 			return
 		}
-		inithash := crypto.Keccak256(init)
+		inithash := accounts.InternCodeHash(common.Hash(crypto.Keccak256(init)))
 		salt := stackData[stackLen-4]
-		addr := types.CreateAddress2(caller, salt.Bytes32(), inithash)
+		addr := accounts.InternAddress(types.CreateAddress2(caller.Value(), salt.Bytes32(), inithash))
 		t.lookupAccount(addr)
 		t.created[addr] = true
 	}
 }
 
-func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
+func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	t.env = env
 
 	nounce, _ := env.IntraBlockState.GetNonce(from)
 
 	if tx.GetTo() == nil {
 		t.create = true
-		t.to = types.CreateAddress(from, nounce)
+		t.to = accounts.InternAddress(types.CreateAddress(from.Value(), nounce))
 	} else {
-		t.to = *tx.GetTo()
+		t.to = accounts.InternAddress(*tx.GetTo())
 		t.create = false
+		// Lookup the delegation target
+		if t.env.ChainConfig.IsPrague(t.env.Time) {
+			code, _ := t.env.IntraBlockState.GetCode(t.to)
+			if target, ok := types.ParseDelegation(code); ok {
+				t.lookupAccount(target)
+			}
+		}
 	}
 
 	t.lookupAccount(from)
@@ -220,7 +240,7 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 		if err != nil {
 			continue
 		}
-		t.lookupAccount(*addr)
+		t.lookupAccount(accounts.InternAddress(*addr))
 	}
 
 	if t.create && t.config.DiffMode {
@@ -257,6 +277,11 @@ func (t *prestateTracer) processDiffState() {
 		postAccount := &account{Storage: make(map[common.Hash]common.Hash)}
 		newBalance, _ := t.env.IntraBlockState.GetBalance(addr)
 		newNonce, _ := t.env.IntraBlockState.GetNonce(addr)
+		newCode, _ := t.env.IntraBlockState.GetCode(addr)
+		newCodeHash := common.Hash{}
+		if len(newCode) > 0 {
+			newCodeHash = crypto.Keccak256Hash(newCode)
+		}
 
 		if newBalance.ToBig().Cmp(t.pre[addr].Balance) != 0 {
 			modified = true
@@ -267,26 +292,21 @@ func (t *prestateTracer) processDiffState() {
 			postAccount.Nonce = newNonce
 		}
 
+		prevCodeHash := common.Hash{}
+		if t.pre[addr].CodeHash != nil {
+			prevCodeHash = *t.pre[addr].CodeHash
+		}
+
+		if newCodeHash != prevCodeHash {
+			modified = true
+			postAccount.CodeHash = &newCodeHash
+		}
+
 		if !t.config.DisableCode {
 			newCode, _ := t.env.IntraBlockState.GetCode(addr)
 			if !bytes.Equal(newCode, t.pre[addr].Code) {
 				modified = true
 				postAccount.Code = newCode
-			}
-
-			newCodeHash := common.Hash{}
-			if len(newCode) > 0 {
-				newCodeHash = crypto.Keccak256Hash(newCode)
-			}
-
-			prevCodeHash := common.Hash{}
-			if t.pre[addr].CodeHash != nil {
-				prevCodeHash = *t.pre[addr].CodeHash
-			}
-
-			if newCodeHash != prevCodeHash {
-				modified = true
-				postAccount.CodeHash = &newCodeHash
 			}
 		}
 
@@ -297,8 +317,7 @@ func (t *prestateTracer) processDiffState() {
 					delete(t.pre[addr].Storage, key)
 				}
 
-				var newVal uint256.Int
-				t.env.IntraBlockState.GetState(addr, key, &newVal)
+				var newVal, _ = t.env.IntraBlockState.GetState(addr, accounts.InternKey(key))
 				if new(uint256.Int).SetBytes(val[:]).Eq(&newVal) {
 					// Omit unchanged slots
 					delete(t.pre[addr].Storage, key)
@@ -347,7 +366,7 @@ func (t *prestateTracer) Stop(err error) {
 
 // lookupAccount fetches details of an account and adds it to the prestate
 // if it doesn't exist there.
-func (t *prestateTracer) lookupAccount(addr common.Address) {
+func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 	if _, ok := t.pre[addr]; ok {
 		return
 	}
@@ -360,15 +379,15 @@ func (t *prestateTracer) lookupAccount(addr common.Address) {
 		Balance: balance.ToBig(),
 		Nonce:   nonce,
 	}
+	if len(code) > 0 {
+		codeHash := crypto.Keccak256Hash(code)
+		t.pre[addr].CodeHash = &codeHash
+	} else {
+		t.pre[addr].CodeHash = nil
+	}
 
 	if !t.config.DisableCode {
 		t.pre[addr].Code = code
-		if len(code) > 0 {
-			codeHash := crypto.Keccak256Hash(code)
-			t.pre[addr].CodeHash = &codeHash
-		} else {
-			t.pre[addr].CodeHash = nil
-		}
 	}
 	if !t.config.DisableStorage {
 		t.pre[addr].Storage = make(map[common.Hash]common.Hash)
@@ -378,7 +397,7 @@ func (t *prestateTracer) lookupAccount(addr common.Address) {
 // lookupStorage fetches the requested storage slot and adds
 // it to the prestate of the given contract. It assumes `lookupAccount`
 // has been performed on the contract before.
-func (t *prestateTracer) lookupStorage(addr common.Address, key common.Hash) {
+func (t *prestateTracer) lookupStorage(addr accounts.Address, key common.Hash) {
 	if t.config.DisableStorage {
 		return
 	}
@@ -386,7 +405,6 @@ func (t *prestateTracer) lookupStorage(addr common.Address, key common.Hash) {
 	if _, ok := t.pre[addr].Storage[key]; ok {
 		return
 	}
-	var val uint256.Int
-	t.env.IntraBlockState.GetState(addr, key, &val)
+	var val, _ = t.env.IntraBlockState.GetState(addr, accounts.InternKey(key))
 	t.pre[addr].Storage[key] = val.Bytes32()
 }

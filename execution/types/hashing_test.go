@@ -32,7 +32,7 @@ func genTransactions(n uint64) Transactions {
 	txs := Transactions{}
 
 	for i := uint64(0); i < n; i++ {
-		tx := NewTransaction(i, common.Address{}, uint256.NewInt(1000+i), 10+i, uint256.NewInt(1000+i), []byte(fmt.Sprintf("hello%d", i)))
+		tx := NewTransaction(i, common.Address{}, uint256.NewInt(1000+i), 10+i, uint256.NewInt(1000+i), fmt.Appendf(nil, "hello%d", i))
 		txs = append(txs, tx)
 	}
 
@@ -103,7 +103,7 @@ func legacyDeriveSha(list DerivableList) common.Hash {
 		valbuf.Reset()
 		_ = rlp.Encode(keybuf, uint(i))
 		list.EncodeIndex(i, valbuf)
-		trie.Update(keybuf.Bytes(), common.CopyBytes(valbuf.Bytes()))
+		trie.Update(keybuf.Bytes(), common.Copy(valbuf.Bytes()))
 	}
 	return trie.Hash()
 }

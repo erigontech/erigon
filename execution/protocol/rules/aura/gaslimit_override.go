@@ -17,6 +17,8 @@
 package aura
 
 import (
+	"errors"
+
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 
@@ -26,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type GasLimitOverride struct {
@@ -72,19 +75,20 @@ func (c *AuRa) GetBlockGasLimitFromContract(_ *chain.Config, syscall rules.Syste
 	return gasLimit.Uint64()
 }
 
-func (c *AuRa) verifyGasLimitOverride(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscallCustom rules.SysCallCustom) {
+func (c *AuRa) verifyGasLimitOverride(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscallCustom rules.SysCallCustom) error {
 	//IsPoSHeader check is necessary as merge.go calls Initialize on AuRa indiscriminately
 	gasLimitOverride := c.HasGasLimitContract() && !misc.IsPoSHeader(header)
 	if gasLimitOverride {
-		syscallPrevHeader := func(addr common.Address, data []byte) ([]byte, error) {
+		syscallPrevHeader := func(addr accounts.Address, data []byte) ([]byte, error) {
 			return syscallCustom(addr, data, state, chain.GetHeaderByHash(header.ParentHash), true)
 		}
 		blockGasLimit := c.GetBlockGasLimitFromContract(config, syscallPrevHeader)
 
 		if blockGasLimit > 0 {
 			if header.GasLimit != blockGasLimit {
-				panic("Block gas limit doesn't match BlockGasLimitContract with AuRa")
+				return errors.New("Block gas limit doesn't match BlockGasLimitContract with AuRa")
 			}
 		}
 	}
+	return nil
 }

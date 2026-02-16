@@ -12,7 +12,7 @@ import (
 func TestNoLargeFilesInRecentGitHistory(t *testing.T) {
 	const gitCommand = `git rev-list --objects --since="1 month ago" HEAD |
 		git cat-file --batch-check="%(objecttype) %(objectsize) %(rest)" | grep blob |
-		grep -v testdata | grep -v test_data | grep -v execution-spec-tests | grep -v 'tests/files' |
+		grep -v testdata | grep -v test_data | grep -v execution-spec-tests | grep -v engineapi-performance-tests | grep -v 'tests/files' |
 		grep -v initial_state |
 		grep -v 'docs/lmdb' | grep -v 'docs/gitbook' |
 		grep -v 'cl/phase1/core/state/tests' |

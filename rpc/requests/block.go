@@ -107,9 +107,9 @@ func (b *Block) UnmarshalJSON(input []byte) error {
 	b.Transactions = bd.Transactions
 
 	if bd.Transactions != nil {
-		b.TransactionHashes = make([]common.Hash, len(b.Transactions))
-		for _, t := range bd.Transactions {
-			b.TransactionHashes = append(b.TransactionHashes, t.Hash)
+		b.TransactionHashes = make([]common.Hash, len(bd.Transactions))
+		for i, t := range bd.Transactions {
+			b.TransactionHashes[i] = t.Hash
 		}
 	}
 

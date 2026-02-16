@@ -64,13 +64,13 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 		require.NoError(t, err)
 
 		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, nil, nil)
-		rootHashDirect, err := hph.Process(ctx, upds, "", nil)
+		rootHashDirect, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		require.Len(t, rootHashDirect, length.Hash, "invalid root hash length")
 		upds.Close()
 
 		anotherUpds := WrapKeyUpdates(t, ModeUpdate, KeyToHexNibbleHash, nil, nil)
-		rootHashUpdate, err := hphAnother.Process(ctx, anotherUpds, "", nil)
+		rootHashUpdate, err := hphAnother.Process(ctx, anotherUpds, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		require.Len(t, rootHashUpdate, length.Hash, "invalid root hash length")
 		require.Equal(t, rootHashDirect, rootHashUpdate, "storage-based and update-based rootHash mismatch")
@@ -131,7 +131,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 			}
 
 			plainKeys[k] = make([]byte, kl)
-			keysSeed.Read(plainKeys[k][:])
+			keysSeed.Read(plainKeys[k])
 		}
 
 		ms := NewMockState(t)
@@ -148,7 +148,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 			require.NoError(t, err)
 
 			updsDirect := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
-			rootHashDirect, err := hph.Process(ctx, updsDirect, "", nil)
+			rootHashDirect, err := hph.Process(ctx, updsDirect, "", nil, WarmupConfig{})
 			updsDirect.Close()
 			require.NoError(t, err)
 			require.Len(t, rootHashDirect, length.Hash, "invalid root hash length")
@@ -157,7 +157,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 			require.NoError(t, err)
 
 			upds := WrapKeyUpdates(t, ModeUpdate, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
-			rootHashAnother, err := hphAnother.Process(ctx, upds, "", nil)
+			rootHashAnother, err := hphAnother.Process(ctx, upds, "", nil, WarmupConfig{})
 			upds.Close()
 			require.NoError(t, err)
 			require.Len(t, rootHashAnother, length.Hash, "invalid root hash length")
@@ -214,7 +214,7 @@ func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
 		upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 		defer upds.Close()
 
-		rootHash, err := hph.Process(ctx, upds, "", nil)
+		rootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 		require.Lenf(t, rootHash, length.Hash, "invalid root hash length")
 	})

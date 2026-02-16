@@ -24,11 +24,15 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -41,6 +45,7 @@ import (
 	protocolrules "github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
@@ -78,11 +83,11 @@ type CallResult struct {
 	Logs       []*types.RPCLog `json:"logs"`
 	GasUsed    hexutil.Uint64  `json:"gasUsed"`
 	Status     hexutil.Uint64  `json:"status"`
-	Error      interface{}     `json:"error,omitempty"`
+	Error      any             `json:"error,omitempty"`
 }
 
 // SimulatedBlockResult represents the result of the simulated calls for a single block (i.e. one SimulatedBlock).
-type SimulatedBlockResult map[string]interface{}
+type SimulatedBlockResult map[string]any
 
 // SimulationResult represents the result contained in an eth_simulateV1 response.
 type SimulationResult []SimulatedBlockResult
@@ -138,7 +143,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 	}
 
 	// Create a simulator instance to help with input sanitisation and execution of the simulated blocks.
-	sim := newSimulator(&req, block.Header(), chainConfig, api.engine(), api._blockReader, api.logger, api.GasCap, api.ReturnDataLimit, api.evmCallTimeout, commitmentHistory)
+	sim := newSimulator(&req, block.Header(), chainConfig, api.dirs, api.engine(), api._txNumReader, api._blockReader, api.logger, api.GasCap, api.ReturnDataLimit, api.evmCallTimeout, commitmentHistory)
 	simulatedBlocks, err := sim.sanitizeSimulatedBlocks(req.BlockStateCalls)
 	if err != nil {
 		return nil, err
@@ -148,16 +153,17 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	sharedDomains, err := execctx.NewSharedDomains(tx, api.logger)
+	sharedDomains, err := execctx.NewSharedDomains(ctx, tx, api.logger)
 	if err != nil {
 		return nil, err
 	}
 	defer sharedDomains.Close()
+	sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
 
 	// Iterate over each given SimulatedBlock
 	parent := sim.base
 	for index, bsc := range simulatedBlocks {
-		blockResult, current, err := sim.simulateBlock(ctx, tx, api._txNumReader, sharedDomains, &bsc, headers[index], parent, headers[:index], blockNumber == latestBlockNumber)
+		blockResult, current, err := sim.simulateBlock(ctx, tx, sharedDomains, &bsc, headers[index], parent, headers[:index], blockNumber == latestBlockNumber)
 		if err != nil {
 			return nil, err
 		}
@@ -172,7 +178,9 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 type simulator struct {
 	base              *types.Header
 	chainConfig       *chain.Config
+	dirs              datadir.Dirs
 	engine            protocolrules.EngineReader
+	txNumReader       rawdbv3.TxNumsReader
 	blockReader       services.FullBlockReader
 	logger            log.Logger
 	gasPool           *protocol.GasPool
@@ -188,7 +196,9 @@ func newSimulator(
 	req *SimulationRequest,
 	header *types.Header,
 	chainConfig *chain.Config,
+	dirs datadir.Dirs,
 	engine protocolrules.EngineReader,
+	txNumReader rawdbv3.TxNumsReader,
 	blockReader services.FullBlockReader,
 	logger log.Logger,
 	gasCap uint64,
@@ -199,7 +209,9 @@ func newSimulator(
 	return &simulator{
 		base:              header,
 		chainConfig:       chainConfig,
+		dirs:              dirs,
 		engine:            engine,
+		txNumReader:       txNumReader,
 		blockReader:       blockReader,
 		logger:            logger,
 		gasPool:           new(protocol.GasPool).AddGas(gasCap),
@@ -321,7 +333,7 @@ func (s *simulator) sanitizeCall(
 	if args.Nonce == nil {
 		nonce, err := intraBlockState.GetNonce(args.FromOrEmpty())
 		if err != nil {
-			return fmt.Errorf("failed to get nonce for %s: %w", args.FromOrEmpty().Hex(), err)
+			return fmt.Errorf("failed to get nonce for %s: %w", args.FromOrEmpty(), err)
 		}
 		args.Nonce = (*hexutil.Uint64)(&nonce)
 	}
@@ -372,10 +384,84 @@ func (s *simulator) sanitizeCall(
 	return nil
 }
 
+// diffTrackingWriter is a state.Writer delegating its write responsibilities to the inner writer while tracking
+// the touched state keys.
+type diffTrackingWriter struct {
+	delegate    *state.Writer
+	touchedKeys keysByAccount
+}
+
+type storageKeys []accounts.StorageKey
+type keysByAccount map[accounts.Address]storageKeys
+
+var _ state.StateWriter = (*diffTrackingWriter)(nil)
+
+func newDiffTrackingWriter(tx kv.TemporalPutDel, txNum uint64) *diffTrackingWriter {
+	return &diffTrackingWriter{
+		delegate:    state.NewWriter(tx, nil, txNum),
+		touchedKeys: make(map[accounts.Address]storageKeys),
+	}
+}
+
+func (w diffTrackingWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
+	err := w.delegate.UpdateAccountData(address, original, account)
+	if err != nil {
+		return err
+	}
+	if _, ok := w.touchedKeys[address]; !ok {
+		w.touchedKeys[address] = storageKeys{}
+	}
+	return nil
+}
+
+func (w diffTrackingWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
+	err := w.delegate.UpdateAccountCode(address, incarnation, codeHash, code)
+	if err != nil {
+		return err
+	}
+	if _, ok := w.touchedKeys[address]; !ok {
+		w.touchedKeys[address] = storageKeys{}
+	}
+	return nil
+}
+
+func (w diffTrackingWriter) DeleteAccount(address accounts.Address, original *accounts.Account) error {
+	err := w.delegate.DeleteAccount(address, original)
+	if err != nil {
+		return err
+	}
+	if _, ok := w.touchedKeys[address]; !ok {
+		w.touchedKeys[address] = storageKeys{}
+	}
+	return nil
+}
+
+func (w diffTrackingWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
+	err := w.delegate.WriteAccountStorage(address, incarnation, key, original, value)
+	if err != nil {
+		return err
+	}
+	if _, ok := w.touchedKeys[address]; !ok {
+		w.touchedKeys[address] = storageKeys{}
+	}
+	w.touchedKeys[address] = append(w.touchedKeys[address], key)
+	return nil
+}
+
+func (w diffTrackingWriter) CreateContract(address accounts.Address) error {
+	err := w.delegate.CreateContract(address)
+	if err != nil {
+		return err
+	}
+	if _, ok := w.touchedKeys[address]; !ok {
+		w.touchedKeys[address] = storageKeys{}
+	}
+	return nil
+}
+
 func (s *simulator) simulateBlock(
 	ctx context.Context,
 	tx kv.TemporalTx,
-	txNumReader rawdbv3.TxNumsReader,
 	sharedDomains *execctx.SharedDomains,
 	bsc *SimulatedBlock,
 	header *types.Header,
@@ -411,7 +497,7 @@ func (s *simulator) simulateBlock(
 	cumulativeGasUsed := uint64(0)
 	cumulativeBlobGasUsed := uint64(0)
 
-	minTxNum, err := txNumReader.Min(tx, blockNumber)
+	minTxNum, err := s.txNumReader.Min(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -422,17 +508,14 @@ func (s *simulator) simulateBlock(
 	if latest {
 		stateReader = state.NewReaderV3(sharedDomains.AsGetter(tx))
 	} else {
-		historyStateReader := state.NewHistoryReaderV3()
-		historyStateReader.SetTx(tx)
-		if minTxNum < historyStateReader.StateHistoryStartFrom() {
-			return nil, nil, state.PrunedError
+		if minTxNum < state.StateHistoryStartTxNum(tx) {
+			return nil, nil, fmt.Errorf("%w: min tx: %d", state.PrunedError, minTxNum)
 		}
-		historyStateReader.SetTxNum(minTxNum)
-		stateReader = historyStateReader
+		stateReader = state.NewHistoryReaderV3(tx, minTxNum)
 
 		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
 		if s.commitmentHistory && minTxNum < commitmentStartingTxNum {
-			return nil, nil, state.PrunedError
+			return nil, nil, fmt.Errorf("%w: min commitment: %d, min tx: %d", state.PrunedError, commitmentStartingTxNum, minTxNum)
 		}
 	}
 	intraBlockState := state.New(stateReader)
@@ -451,7 +534,7 @@ func (s *simulator) simulateBlock(
 	// Override the state before block execution.
 	stateOverrides := bsc.StateOverrides
 	if stateOverrides != nil {
-		if err := stateOverrides.OverrideWithPrecompiles(intraBlockState, activePrecompiles); err != nil {
+		if err := stateOverrides.Override(intraBlockState, activePrecompiles, rules); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -468,17 +551,20 @@ func (s *simulator) simulateBlock(
 	if !ok {
 		return nil, nil, errors.New("rules engine reader does not support full rules.Engine")
 	}
-	systemCallCustom := func(contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
+	systemCallCustom := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 		return protocol.SysCallContract(contract, data, s.chainConfig, ibs, header, engine, constCall, vmConfig)
 	}
 	chainReader := consensuschain.NewReader(s.chainConfig, tx, s.blockReader, s.logger)
-	engine.Initialize(s.chainConfig, chainReader, header, intraBlockState, systemCallCustom, s.logger, vmConfig.Tracer)
+	err = engine.Initialize(s.chainConfig, chainReader, header, intraBlockState, systemCallCustom, s.logger, vmConfig.Tracer)
+	if err != nil {
+		return nil, nil, err
+	}
 	err = intraBlockState.FinalizeTx(rules, state.NewNoopWriter())
 	if err != nil {
 		return nil, nil, err
 	}
 
-	stateWriter := state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
+	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), sharedDomains.TxNum())
 	callResults := make([]CallResult, 0, len(bsc.Calls))
 	for callIndex, call := range bsc.Calls {
 		callResult, txn, receipt, err := s.simulateCall(ctx, blockCtx, intraBlockState, callIndex, &call, header,
@@ -503,7 +589,7 @@ func (s *simulator) simulateBlock(
 	if s.chainConfig.IsShanghai(header.Time) {
 		withdrawals = types.Withdrawals{}
 	}
-	systemCall := func(contract common.Address, data []byte) ([]byte, error) {
+	systemCall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		return systemCallCustom(contract, data, intraBlockState, header, false)
 	}
 	block, _, err := engine.FinalizeAndAssemble(s.chainConfig, header, intraBlockState, txnList, nil,
@@ -526,7 +612,7 @@ func (s *simulator) simulateBlock(
 			}
 			// Change the state reader to a commitment-only history reader that reads non-commitment domains from the latest state.
 			txNum := minTxNum + 1 + uint64(len(bsc.Calls))
-			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains.AsGetter(tx), txNum+1))
+			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains, txNum+1))
 		}
 		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNumber, sharedDomains.TxNum(), "eth_simulateV1", nil)
 		if err != nil {
@@ -534,12 +620,20 @@ func (s *simulator) simulateBlock(
 		}
 		block.HeaderNoCopy().Root = common.BytesToHash(stateRoot)
 	} else {
-		//nolint:staticcheck
-		// We cannot compute the state root for historical state w/o commitment history, so we just use the zero hash (default value).
+		// We can efficiently compute the root from state history if it's not frozen, otherwise we just use the zero hash (default value).
+		if s.blockReader.FrozenBlocks() == 0 {
+			txNum := minTxNum + 1 + uint64(len(bsc.Calls))
+			stateRoot, err := s.computeCommitmentFromStateHistory(ctx, tx, sharedDomains, stateWriter.touchedKeys, parent.Number.Uint64(), txNum)
+			if err != nil {
+				return nil, nil, err
+			}
+			s.logger.Debug("stateRoot", "root", common.Bytes2Hex(stateRoot))
+			block.HeaderNoCopy().Root = common.BytesToHash(stateRoot)
+		}
 	}
 
 	// Marshal the block in RPC format including the call results in a custom field.
-	additionalFields := make(map[string]interface{})
+	additionalFields := make(map[string]any)
 	blockResult, err := ethapi.RPCMarshalBlock(block, true, s.fullTransactions, additionalFields)
 	if err != nil {
 		return nil, nil, err
@@ -614,7 +708,7 @@ func (s *simulator) simulateCall(
 	if evm.Cancelled() {
 		return nil, nil, nil, fmt.Errorf("execution aborted (timeout = %v)", s.evmCallTimeout)
 	}
-	*cumulativeGasUsed += result.GasUsed
+	*cumulativeGasUsed += result.ReceiptGasUsed
 	receipt := protocol.MakeReceipt(header.Number, common.Hash{}, msg, txn, *cumulativeGasUsed, result, intraBlockState, evm)
 	*cumulativeBlobGasUsed += receipt.BlobGasUsed
 
@@ -625,7 +719,7 @@ func (s *simulator) simulateCall(
 		logs = receipt.Logs
 	}
 
-	callResult := CallResult{GasUsed: hexutil.Uint64(result.GasUsed)}
+	callResult := CallResult{GasUsed: hexutil.Uint64(result.ReceiptGasUsed)}
 	callResult.Logs = make([]*types.RPCLog, 0, len(logs))
 	for _, l := range logs {
 		rpcLog := &types.RPCLog{
@@ -646,7 +740,7 @@ func (s *simulator) simulateCall(
 			if errors.Is(result.Err, vm.ErrExecutionReverted) {
 				// If the result contains a revert reason, try to unpack and return it.
 				revertError := ethapi.NewRevertError(result)
-				callResult.Error = rpc.NewJsonError(rpc.ErrCodeReverted, revertError.Error(), revertError.ErrorData().(string))
+				callResult.Error = rpc.NewJsonError(revertError.ErrorCode(), revertError.Error(), revertError.ErrorData().(string))
 			} else {
 				// Otherwise, we just capture the error message.
 				callResult.Error = rpc.NewJsonError(rpc.ErrCodeVMError, result.Err.Error(), nil)
@@ -659,7 +753,7 @@ func (s *simulator) simulateCall(
 	}
 	// Set the sender just to make it appear in the result if it was provided in the request.
 	if call.From != nil {
-		txn.SetSender(*call.From)
+		txn.SetSender(accounts.InternAddress(*call.From))
 	}
 	return &callResult, txn, receipt, nil
 }
@@ -753,36 +847,47 @@ func clientLimitExceededError(message string) error {
 	return &rpc.CustomError{Message: message, Code: rpc.ErrCodeClientLimitExceeded}
 }
 
-type HistoryCommitmentOnlyReader struct {
-	latestReader  commitmentdb.StateReader
-	historyReader commitmentdb.StateReader
+func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, limitReadAsOfTxNum uint64) commitmentdb.StateReader {
+	// Commitment values are read from history, whereas account/storage/code values are read from latest state
+	return rpchelper.NewCommitmentSplitStateReader(commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum), commitmentdb.NewLatestStateReader(roTx, sd), true)
 }
 
-func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, getter kv.TemporalGetter, limitReadAsOfTxNum uint64) commitmentdb.StateReader {
-	latestReader := commitmentdb.NewLatestStateReader(getter)
-	historyReader := commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum)
-	return &HistoryCommitmentOnlyReader{latestReader, historyReader}
+func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomains) commitmentdb.StateReader {
+	// Both commitment and account/storage/code values are read from latest state *but* on different SharedDomains instances
+	return rpchelper.NewCommitmentSplitStateReader(commitmentdb.NewLatestStateReader(ttx, tsd), commitmentdb.NewLatestStateReader(tx, sd), false)
 }
 
-func (r *HistoryCommitmentOnlyReader) WithHistory() bool {
-	return r.historyReader.WithHistory()
-}
-
-func (r *HistoryCommitmentOnlyReader) CheckDataAvailable(kv.Domain, kv.Step) error {
-	return nil
-}
-
-func (r *HistoryCommitmentOnlyReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
-	if d == kv.CommitmentDomain {
-		enc, step, err = r.historyReader.Read(d, plainKey, stepSize)
-		if err != nil {
-			return nil, 0, fmt.Errorf("HistoryCommitmentOnlyReader historyReader %q: %w", d, err)
+// computeCommitmentFromStateHistory calculates the commitment root for simulated block from state history
+func (s *simulator) computeCommitmentFromStateHistory(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	sd *execctx.SharedDomains,
+	touched keysByAccount,
+	baseBlockNum uint64,
+	simMaxTxNum uint64,
+) ([]byte, error) {
+	replay := rpchelper.NewCommitmentReplay(s.dirs, s.txNumReader, s.logger)
+	// For computing the simulated block commitment we need to:
+	// - use a custom state reader which uses both the primary db (tx, sd) and temporary commitment db (ttx, tsd)
+	// - touch the keys registered by diffTrackingWriter during IntraBlockState flush
+	simBlockComputeCommitment := func(ctx context.Context, ttx kv.TemporalTx, tsd *execctx.SharedDomains) ([]byte, error) {
+		simBlockNum := baseBlockNum + 1
+		tsd.GetCommitmentCtx().SetStateReader(newSimulateStateReader(ttx, tx, tsd, sd))
+		storageFullKey := make([]byte, length.Addr+length.Hash)
+		for address, locations := range touched {
+			addressKey := address.Value().Bytes()
+			tsd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(addressKey), nil)
+			s.logger.Debug("Touch key", "domain", kv.AccountsDomain, "key", address.Value().Hex()[2:])
+			for _, loc := range locations {
+				locationKey := loc.Value().Bytes()
+				copy(storageFullKey[:length.Addr], addressKey)
+				copy(storageFullKey[length.Addr:], locationKey)
+				tsd.GetCommitmentCtx().TouchKey(kv.StorageDomain, string(storageFullKey), nil)
+				s.logger.Debug("Touch key", "domain", kv.StorageDomain, "key", address.Value().Hex()[2:]+loc.Value().Hex()[2:])
+			}
 		}
-		return enc, step, nil
+
+		return tsd.ComputeCommitment(ctx, ttx, false, simBlockNum, simMaxTxNum, "commitment-from-history", nil)
 	}
-	enc, step, err = r.latestReader.Read(d, plainKey, stepSize)
-	if err != nil {
-		return nil, 0, fmt.Errorf("HistoryCommitmentOnlyReader latestReader %q: %w", d, err)
-	}
-	return enc, step, nil
+	return replay.ComputeCustomCommitmentFromStateHistory(ctx, tx, baseBlockNum, simBlockComputeCommitment)
 }

@@ -136,7 +136,7 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 		if fromTxNum >= item.startTxNum {
 			continue
 		}
-		if r.values.needMerge && fromTxNum >= r.values.from { //skip small files inside `span`
+		if r.values.needMerge && fromTxNum > r.values.from { //skip small files inside `span`
 			continue
 		}
 
@@ -167,7 +167,7 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 		if startTxNum >= item.startTxNum {
 			continue
 		}
-		if r.history.needMerge && startTxNum >= r.history.from {
+		if r.history.needMerge && startTxNum > r.history.from {
 			continue
 		}
 		r.history = MergeRange{"", true, startTxNum, item.endTxNum}
@@ -218,7 +218,7 @@ func (iit *InvertedIndexRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) *Merge
 		if start >= item.startTxNum {
 			continue
 		}
-		if minFound && start >= startTxNum {
+		if minFound && start > startTxNum {
 			continue
 		}
 		minFound = true
@@ -241,17 +241,17 @@ func NewHistoryRanges(history MergeRange, index MergeRange) HistoryRanges {
 }
 
 func (r HistoryRanges) String(aggStep uint64) string {
-	var str string
+	var str strings.Builder
 	if r.history.needMerge {
-		str += r.history.String("hist", aggStep)
+		str.WriteString(r.history.String("hist", aggStep))
 	}
 	if r.index.needMerge {
-		if str != "" {
-			str += ", "
+		if str.Len() > 0 {
+			str.WriteString(", ")
 		}
-		str += r.index.String("idx", aggStep)
+		str.WriteString(r.index.String("idx", aggStep))
 	}
-	return str
+	return str.String()
 }
 func (r HistoryRanges) any() bool {
 	return r.history.needMerge || r.index.needMerge
@@ -458,7 +458,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			val, _ := g.Next(nil)
 			heap.Push(&cp, &CursorItem{
 				t:          FILE_CURSOR,
-				idx:        g,
+				kvReader:   g,
 				key:        key,
 				val:        val,
 				startTxNum: item.startTxNum,
@@ -484,9 +484,9 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			i++
 			ci1 := heap.Pop(&cp).(*CursorItem)
-			if ci1.idx.HasNext() {
-				ci1.key, _ = ci1.idx.Next(ci1.key[:0])
-				ci1.val, _ = ci1.idx.Next(ci1.val[:0])
+			if ci1.kvReader.HasNext() {
+				ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
+				ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])
 				heap.Push(&cp, ci1)
 			}
 		}
@@ -499,10 +499,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 		if keyBuf != nil {
 			if vt != nil {
 				if !bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) { // no replacement for state key
-					valBuf, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
+					valBufRet, err := vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 					if err != nil {
 						return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
 					}
+					valBuf = append(valBuf[:0], valBufRet...)
 				}
 			}
 			if _, err = kvWriter.Write(keyBuf); err != nil {
@@ -520,10 +521,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	if keyBuf != nil {
 		if vt != nil {
 			if !bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) { // no replacement for state key
-				valBuf, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
+				valBufRet, err := vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 				if err != nil {
 					return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
 				}
+				valBuf = append(valBuf[:0], valBufRet...)
 			}
 		}
 		if _, err = kvWriter.Write(keyBuf); err != nil {
@@ -636,7 +638,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 			//fmt.Printf("heap push %s [%d] %x\n", item.decompressor.FilePath(), item.endTxNum, key)
 			heap.Push(&cp, &CursorItem{
 				t:          FILE_CURSOR,
-				idx:        g,
+				kvReader:   g,
 				key:        key,
 				val:        val,
 				startTxNum: item.startTxNum,
@@ -683,9 +685,9 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 				mergedOnce = true
 			}
 			// fmt.Printf("multi-way %s [%d] %x\n", ii.KeysTable, ci1.endTxNum, ci1.key)
-			if ci1.idx.HasNext() {
-				ci1.key, _ = ci1.idx.Next(ci1.key[:0])
-				ci1.val, _ = ci1.idx.Next(ci1.val[:0])
+			if ci1.kvReader.HasNext() {
+				ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
+				ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])
 				// fmt.Printf("heap next push %s [%d] %x\n", ii.KeysTable, ci1.endTxNum, ci1.key)
 				heap.Push(&cp, ci1)
 			}
@@ -750,8 +752,10 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 	}()
 
-	if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, ps); err != nil {
-		return nil, nil, err
+	if r.index.needMerge {
+		if indexIn, err = ht.iit.mergeFiles(ctx, indexFiles, r.index.from, r.index.to, ps); err != nil {
+			return nil, nil, err
+		}
 	}
 	if r.history.needMerge {
 		var comp *seg.Compressor
@@ -787,7 +791,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		if ht.h.noFsync {
 			comp.DisableFsync()
 		}
-		pagedWr := ht.datarWriter(comp)
+		pagedWr := ht.dataWriter(comp)
 		p := ps.AddNew(path.Base(datPath), 1)
 		defer ps.Delete(p)
 
@@ -800,7 +804,13 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				var g2 *seg.PagedReader
 				for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
 					if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
-						g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), ht.h.HistoryValuesOnCompressedPage, true)
+						compressedPageValuesCount := hi.decompressor.CompressedPageValuesCount()
+
+						if hi.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+							compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
+						}
+
+						g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), compressedPageValuesCount, true)
 						break
 					}
 				}
@@ -811,7 +821,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				val, _ := g.Next(nil)
 				heap.Push(&cp, &CursorItem{
 					t:          FILE_CURSOR,
-					idx:        g,
+					kvReader:   g,
 					hist:       g2,
 					key:        key,
 					val:        val,
@@ -826,31 +836,40 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned
 		// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
 		// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
-		var lastKey, valBuf []byte
-		var keyCount int
+		var lastKey, valBuf, histKeyBuf []byte
 		for cp.Len() > 0 {
 			lastKey = append(lastKey[:0], cp[0].key...)
 			// Advance all the items that have this key (including the top)
 			for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 				ci1 := heap.Pop(&cp).(*CursorItem)
-				count := multiencseq.Count(ci1.startTxNum, ci1.val)
-				for i := uint64(0); i < count; i++ {
-					if !ci1.hist.HasNext() {
-						panic(fmt.Errorf("assert: no value??? %s, i=%d, count=%d, lastKey=%x, ci1.key=%x", ci1.hist.FileName(), i, count, lastKey, ci1.key))
+
+				seq := multiencseq.ReadMultiEncSeq(ci1.startTxNum, ci1.val)
+				ss := seq.Iterator(0)
+
+				for ss.HasNext() {
+					txNum, err := ss.Next()
+					if err != nil {
+						panic(fmt.Sprintf("failed to extract txNum from ef. File: %s Key: %x", ci1.kvReader.FileName(), ci1.key))
 					}
 
-					var k, v []byte
-					k, v, valBuf, _ = ci1.hist.Next2(valBuf[:0])
-					if err = pagedWr.Add(k, v); err != nil {
+					if !ci1.hist.HasNext() {
+						panic(fmt.Errorf("assert: no value??? %s, txNum=%d, lastKey=%x, ci1.key=%x", ci1.hist.FileName(), txNum, lastKey, ci1.key))
+					}
+
+					var v []byte
+					_, v, valBuf, _ = ci1.hist.Next2(valBuf[:0]) // key from .v file can be empty if file is not compressed -> need to be built from txNum + key
+
+					histKeyBuf = historyKey(txNum, ci1.key, histKeyBuf)
+
+					if err = pagedWr.Add(histKeyBuf, v); err != nil {
 						return nil, nil, err
 					}
 				}
 
 				// fmt.Printf("fput '%x'->%x\n", lastKey, ci1.val)
-				keyCount += int(count)
-				if ci1.idx.HasNext() {
-					ci1.key, _ = ci1.idx.Next(ci1.key[:0])
-					ci1.val, _ = ci1.idx.Next(ci1.val[:0])
+				if ci1.kvReader.HasNext() {
+					ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
+					ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])
 					heap.Push(&cp, ci1)
 				}
 			}

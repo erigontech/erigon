@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -40,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -83,7 +86,7 @@ func TestSharedDomain_Unwind(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -102,7 +105,7 @@ Loop:
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err = execctx.NewSharedDomains(rwTx, log.New())
+	domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -117,7 +120,7 @@ Loop:
 			acc := accounts3.Account{
 				Nonce:       txNum,
 				Balance:     *uint256.NewInt(uint64(i*10e6) + uint64(accs*10e2)),
-				CodeHash:    common.Hash{},
+				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
 			v := accounts3.SerialiseV3(&acc)
@@ -184,7 +187,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -195,16 +198,16 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	k0 := make([]byte, length.Addr)
 	l0 := make([]byte, length.Hash)
 	commitStep := 3
-	accounts := 1
+	noaccounts := 1
 
 	var blockNum uint64
 	for ; i < int(maxTx); i++ {
 		txNum := uint64(i)
-		for accs := 0; accs < accounts; accs++ {
+		for accs := 0; accs < noaccounts; accs++ {
 			acc := accounts3.Account{
 				Nonce:       uint64(i),
 				Balance:     *uint256.NewInt(uint64(i*10e6) + uint64(accs*10e2)),
-				CodeHash:    common.Hash{},
+				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
 			v := accounts3.SerialiseV3(&acc)
@@ -261,13 +264,14 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 	rwTx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
+	t.Cleanup(rwTx.Rollback)
 
-	domains, err = execctx.NewSharedDomains(rwTx, log.New())
+	domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 
 	txNum := domains.TxNum()
-	for accs := 0; accs < accounts; accs++ {
+	for accs := 0; accs < noaccounts; accs++ {
 		k0[0] = byte(accs)
 		pv, step, err := domains.GetLatest(kv.AccountsDomain, rwTx, k0)
 		require.NoError(t, err)
@@ -342,7 +346,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 	}
 
-	domains, err := execctx.NewSharedDomains(rwTx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(err)
 	defer domains.Close()
 
@@ -372,7 +376,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = execctx.NewSharedDomains(rwTx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize), iterCount(domains))
@@ -381,7 +385,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	{ // delete marker is in RAM
 		require.NoError(domains.Flush(ctx, rwTx))
 		domains.Close()
-		domains, err = execctx.NewSharedDomains(rwTx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize), iterCount(domains))
@@ -411,7 +415,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = execctx.NewSharedDomains(rwTx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize*2+2-2), iterCount(domains))
@@ -432,7 +436,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		_, err := ac.PruneSmallBatches(ctx, time.Hour, rwTx)
 		require.NoError(err)
 
-		domains, err = execctx.NewSharedDomains(rwTx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize*2+2-2), iterCount(domains))
@@ -441,7 +445,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	{ // delete/update more keys in RAM
 		require.NoError(domains.Flush(ctx, rwTx))
 		domains.Close()
-		domains, err = execctx.NewSharedDomains(rwTx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 
@@ -461,7 +465,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = execctx.NewSharedDomains(rwTx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		require.Equal(int(stepSize*2+2-3), iterCount(domains))
@@ -471,7 +475,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		domains.Close()
 
-		domains, err = execctx.NewSharedDomains(rwTx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
 		err := domains.DomainDelPrefix(kv.StorageDomain, rwTx, []byte{}, txNum+1)
@@ -492,7 +496,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 	rwTtx1, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	t.Cleanup(rwTtx1.Rollback)
-	sd, err := execctx.NewSharedDomains(rwTtx1, log.New())
+	sd, err := execctx.NewSharedDomains(ctx, rwTtx1, log.New())
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
@@ -703,5 +707,149 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, append(append([]byte{}, acc1.Bytes()...), acc1slot1.Bytes()...), firstKey)
 		require.Equal(t, []byte{3}, firstVal)
 		roTtx4.Rollback()
+	}
+}
+
+func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	stepSize := uint64(1)
+	db1 := newTestDb(t, stepSize)
+
+	db1RwTx, err := db1.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	t.Cleanup(db1RwTx.Rollback)
+	sd1, err := execctx.NewSharedDomains(ctx, db1RwTx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd1.Close)
+
+	acc1Addr := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	acc1Slot := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
+	storageK1 := append(append([]byte{}, acc1Addr.Bytes()...), acc1Slot.Bytes()...)
+	storageV1 := []byte{1}
+	acc1 := accounts.NewAccount()
+	acc1.Balance.SetUint64(1)
+	acc1Encoded := accounts3.SerialiseV3(&acc1)
+
+	// --- check 1: non-existing account & storage and empty commitment trie ---
+	{
+		acc1Value, _, err := sd1.GetLatest(kv.AccountsDomain, db1RwTx, acc1Addr.Bytes())
+		require.NoError(t, err)
+		require.Nil(t, acc1Value)
+
+		acc1SlotValue, _, err := sd1.GetLatest(kv.StorageDomain, db1RwTx, acc1Slot.Bytes())
+		require.NoError(t, err)
+		require.Nil(t, acc1SlotValue)
+
+		rootHash, err := sd1.GetCommitmentContext().Trie().RootHash()
+		require.NoError(t, err)
+		require.Equal(t, empty.RootHash.Bytes(), rootHash)
+	}
+
+	// --- check 2: write state in db1 and verify is present in history ---
+	txNum := uint64(1)
+	{
+		// write account and storage in db1
+		err = sd1.DomainPut(kv.AccountsDomain, db1RwTx, acc1Addr.Bytes(), acc1Encoded, txNum, nil, 0)
+		require.NoError(t, err)
+		err = sd1.DomainPut(kv.StorageDomain, db1RwTx, storageK1, storageV1, txNum, nil, 0)
+		require.NoError(t, err)
+
+		// flush and commit
+		err = sd1.Flush(ctx, db1RwTx)
+		require.NoError(t, err)
+		err = db1RwTx.Commit()
+		require.NoError(t, err)
+
+		// verify account and storage are present in history
+		db1RoTx, err := db1.BeginRo(ctx)
+		require.NoError(t, err)
+		t.Cleanup(db1RoTx.Rollback)
+		c1, err := db1RoTx.CursorDupSort(kv.TblAccountVals)
+		require.NoError(t, err)
+		t.Cleanup(c1.Close)
+		k, v, err := c1.Next()
+		require.NoError(t, err)
+		require.Equal(t, acc1Addr.Bytes(), k)
+		wantValueBytes := make([]byte, 8)                       // 8 bytes for uint64 step num
+		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(1))  // step num
+		wantValueBytes = append(wantValueBytes, acc1Encoded...) // value we wrote to the account
+		require.Equal(t, wantValueBytes, v)
+		k, v, err = c1.Next()
+		require.NoError(t, err)
+		require.Nil(t, k)
+		require.Nil(t, v)
+		c2, err := db1RoTx.CursorDupSort(kv.TblStorageVals)
+		require.NoError(t, err)
+		t.Cleanup(c2.Close)
+		k, v, err = c2.Next()
+		require.NoError(t, err)
+		require.Equal(t, append(append([]byte{}, acc1Addr.Bytes()...), acc1Slot.Bytes()...), k)
+		wantValueBytes = make([]byte, 8)                       // 8 bytes for uint64 step num
+		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(1)) // step num
+		wantValueBytes = append(wantValueBytes, storageV1...)  // value we wrote to the storage slot
+		require.Equal(t, wantValueBytes, v)
+		k, v, err = c2.Next()
+		require.NoError(t, err)
+		require.Nil(t, k)
+		require.Nil(t, v)
+	}
+
+	// --- test: computing commitment by touching changed keys from history *must* produce the same commitment root
+	{
+		blockNum := uint64(1)
+		fromTxNum := txNum
+		toTxNum := txNum
+
+		// compute the expected commitment root in db1 using sd1
+		db1RoTx, err := db1.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		t.Cleanup(db1RoTx.Rollback)
+		require.Equal(t, uint64(0), db1RoTx.Debug().TxNumsInFiles(kv.StorageDomain))
+		expectedRootHash, err := sd1.ComputeCommitment(ctx, db1RoTx, false, blockNum, toTxNum, "", nil)
+		if err != nil {
+			return
+		}
+		require.NoError(t, err)
+
+		// now create a new empty database db2 and SharedDomains sd2 over it
+		db2 := newTestDb(t, stepSize)
+		roTx2, err := db2.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		t.Cleanup(roTx2.Rollback)
+		sd2, err := execctx.NewSharedDomains(ctx, roTx2, log.New())
+		require.NoError(t, err)
+		t.Cleanup(sd2.Close)
+
+		// check that the initial commitment trie is empty in db2
+		initialRootHash, err := sd2.GetCommitmentContext().Trie().RootHash()
+		require.NoError(t, err)
+		require.Equal(t, empty.RootHash.Bytes(), initialRootHash)
+
+		// double-check: if we try to compute the initial commitment trie root in db2, it is empty
+		initialRootHash, err = sd2.ComputeCommitment(ctx, roTx2, false, blockNum, toTxNum, "", nil)
+		if err != nil {
+			return
+		}
+		require.NoError(t, err)
+		require.Equal(t, empty.RootHash.Bytes(), initialRootHash)
+
+		// test core: touch in sd2 the changed keys in [fromTxNum, toTxNum+1) using historical state changes from db1
+		accountChanges, storageChanges, err := sd2.TouchChangedKeysFromHistory(db1RoTx, fromTxNum, toTxNum+1)
+		require.NoError(t, err)
+		require.Equal(t, 1, accountChanges)
+		require.Equal(t, 1, storageChanges)
+
+		// compute the commitment trie root in sd2 reading state for touched keys from db1
+		sd2.GetCommitmentContext().SetStateReader(commitmentdb.NewLatestStateReader(db1RoTx, sd1))
+		rootHash, err := sd2.ComputeCommitment(ctx, roTx2, false, blockNum, toTxNum, "", nil)
+		if err != nil {
+			return
+		}
+		require.NoError(t, err)
+		require.Equal(t, expectedRootHash, rootHash)
 	}
 }

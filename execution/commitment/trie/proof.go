@@ -49,7 +49,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 		case *ShortNode:
 			if fromLevel == 0 {
 				if rlp, err := hasher.hashChildren(n, 0); err == nil {
-					proof = append(proof, common.CopyBytes(rlp))
+					proof = append(proof, common.Copy(rlp))
 				} else {
 					return nil, err
 				}
@@ -71,7 +71,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 		case *DuoNode:
 			if fromLevel == 0 {
 				if rlp, err := hasher.hashChildren(n, 0); err == nil {
-					proof = append(proof, common.CopyBytes(rlp))
+					proof = append(proof, common.Copy(rlp))
 				} else {
 					return nil, err
 				}
@@ -93,7 +93,7 @@ func (t *Trie) Prove(key []byte, fromLevel int, storage bool) ([][]byte, error) 
 		case *FullNode:
 			if fromLevel == 0 {
 				if rlp, err := hasher.hashChildren(n, 0); err == nil {
-					proof = append(proof, common.CopyBytes(rlp))
+					proof = append(proof, common.Copy(rlp))
 				} else {
 					return nil, err
 				}

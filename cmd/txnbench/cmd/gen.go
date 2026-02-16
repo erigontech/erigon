@@ -30,7 +30,7 @@ var genCmd = &cobra.Command{
 			return err
 		}
 
-		fname := "benchdata.toml"
+		fname := fmt.Sprintf("benchdata-%s.toml", time.Now().Format("20060102150405"))
 		f, err := os.Create(fname)
 		if err != nil {
 			return fmt.Errorf("create %s: %w", fname, err)

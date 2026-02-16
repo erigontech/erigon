@@ -21,11 +21,6 @@ const (
 	KZG_COMMITMENTS_INCLUSION_PROOF_DEPTH = 4
 )
 
-type DataColumnsByRootIdentifier struct {
-	BlockRoot common.Hash
-	Columns   []cltypes.ColumnIndex
-}
-
 // VerifyDataColumnSidecar verifies if the data column sidecar is valid according to protocol rules.
 // This function is re-entrant and thread-safe.
 func VerifyDataColumnSidecar(sidecar *cltypes.DataColumnSidecar) bool {

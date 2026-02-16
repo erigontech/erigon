@@ -20,12 +20,12 @@
 package state
 
 import (
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/holiman/uint256"
 )
 
 // transientStorage is a representation of EIP-1153 "Transient Storage".
-type transientStorage map[common.Address]Storage
+type transientStorage map[accounts.Address]Storage
 
 // newTransientStorage creates a new instance of a transientStorage.
 func newTransientStorage() transientStorage {
@@ -33,7 +33,7 @@ func newTransientStorage() transientStorage {
 }
 
 // Set sets the transient-storage `value` for `key` at the given `addr`.
-func (t transientStorage) Set(addr common.Address, key common.Hash, value uint256.Int) {
+func (t transientStorage) Set(addr accounts.Address, key accounts.StorageKey, value uint256.Int) {
 	if _, ok := t[addr]; !ok {
 		t[addr] = make(Storage)
 	}
@@ -41,7 +41,7 @@ func (t transientStorage) Set(addr common.Address, key common.Hash, value uint25
 }
 
 // Get gets the transient storage for `key` at the given `addr`.
-func (t transientStorage) Get(addr common.Address, key common.Hash) uint256.Int {
+func (t transientStorage) Get(addr accounts.Address, key accounts.StorageKey) uint256.Int {
 	val, ok := t[addr]
 	if !ok {
 		return uint256.Int{}

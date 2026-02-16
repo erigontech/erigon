@@ -34,27 +34,28 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.
 func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (common.Hash, error),
-	engine rules.EngineReader, author *common.Address, config *chain.Config) evmtypes.BlockContext {
+	engine rules.EngineReader, author accounts.Address, config *chain.Config) evmtypes.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
-	var beneficiary common.Address
-	if author == nil {
+	var beneficiary accounts.Address
+	if author.IsNil() {
 		if config.Bor != nil && config.Bor.IsRio(header.Number.Uint64()) {
 			beneficiary = config.Bor.CalculateCoinbase(header.Number.Uint64())
 
 			// In case the coinbase is not set post Rio, use the default coinbase
-			if beneficiary == (common.Address{}) {
+			if beneficiary.IsNil() {
 				beneficiary, _ = engine.Author(header)
 			}
 		} else {
 			beneficiary, _ = engine.Author(header) // Ignore error, we're past header validation
 		}
 	} else {
-		beneficiary = *author
+		beneficiary = author
 	}
 	var baseFee uint256.Int
 	if header.BaseFee != nil {
@@ -86,9 +87,15 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		transferFunc = engine.GetTransferFunc()
 		postApplyMessageFunc = engine.GetPostApplyMessageFunc()
 	} else {
-		transferFunc = rules.Transfer
-		postApplyMessageFunc = nil
+		transferFunc = misc.Transfer
+		postApplyMessageFunc = misc.LogSelfDestructedAccounts
 	}
+
+	var slotNumber uint64
+	if header.SlotNumber != nil {
+		slotNumber = *header.SlotNumber
+	}
+
 	blockContext := evmtypes.BlockContext{
 		CanTransfer:      CanTransfer,
 		Transfer:         transferFunc,
@@ -101,6 +108,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		GasLimit:         header.GasLimit,
 		PrevRanDao:       prevRandDao,
 		BlobBaseFee:      blobBaseFee,
+		SlotNumber:       slotNumber,
 	}
 	if header.Difficulty != nil {
 		blockContext.Difficulty = new(big.Int).Set(header.Difficulty)
@@ -201,10 +209,10 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 
 // CanTransfer checks whether there are enough funds in the address' account to make a transfer.
 // This does not take the necessary gas in to account to make the transfer valid.
-func CanTransfer(db evmtypes.IntraBlockState, addr common.Address, amount uint256.Int) (can bool, err error) {
+func CanTransfer(db evmtypes.IntraBlockState, addr accounts.Address, amount uint256.Int) (can bool, err error) {
 	balance, err := db.GetBalance(addr)
 
-	if dbg.TraceTransactionIO && db.Trace() || dbg.TraceAccount(addr) {
+	if dbg.TraceTransactionIO && db.Trace() || dbg.TraceAccount(addr.Handle()) {
 		balance := balance // avoid capture allocation unless we're tracing
 		defer func() {
 			if !can {

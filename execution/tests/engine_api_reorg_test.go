@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
@@ -32,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/rpc"
 )
 
 func TestEngineApiInvalidPayloadThenValidCanonicalFcuWithPayloadShouldSucceed(t *testing.T) {
@@ -59,7 +61,8 @@ func TestEngineApiInvalidPayloadThenValidCanonicalFcuWithPayloadShouldSucceed(t 
 		status, err := eat.MockCl.InsertNewPayload(ctx, b3Faulty)
 		require.NoError(t, err)
 		require.Equal(t, enginetypes.InvalidStatus, status.Status)
-		require.True(t, strings.Contains(status.ValidationError.Error().Error(), "wrong trie root"))
+		t.Log(status.ValidationError.Error().Error())
+		require.True(t, strings.Contains(status.ValidationError.Error().Error(), "invalid block hash"))
 		// build b4 on the canonical chain
 		txn, err = changer.Change(transactOpts)
 		require.NoError(t, err)
@@ -161,5 +164,123 @@ func TestEngineApiExecBlockBatchWithLenLtMaxReorgDepthAtTipThenUnwindShouldSucce
 		require.NoError(t, err)
 		_, err = eatSync.MockCl.InsertNewPayload(ctx, sideChain[len(sideChain)-1])
 		require.NoError(t, err)
+	})
+}
+
+func TestEthGetLogsDoNotGetAffectedAfterNewPayloadOnSideChain(t *testing.T) {
+	logLvl := log.LvlDebug
+	sharedGenesis, coinbaseKey := DefaultEngineApiTesterGenesis(t)
+	var b2Side *MockClPayload
+	eatSide := InitialiseEngineApiTester(t, EngineApiTesterInitArgs{
+		Logger:      testlog.Logger(t, logLvl),
+		DataDir:     t.TempDir(),
+		Genesis:     sharedGenesis,
+		CoinbaseKey: coinbaseKey,
+	})
+	eatSide.Run(t, func(ctx context.Context, t *testing.T, eat EngineApiTester) {
+		// do a simple eth transfer at bn2
+		txn, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, common.HexToAddress("0x333"), big.NewInt(1))
+		require.NoError(t, err)
+		b2Side, err = eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b2Side.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+	})
+	eatCanonical := InitialiseEngineApiTester(t, EngineApiTesterInitArgs{
+		Logger:      testlog.Logger(t, logLvl),
+		DataDir:     t.TempDir(),
+		Genesis:     sharedGenesis,
+		CoinbaseKey: coinbaseKey,
+	})
+	eatCanonical.Run(t, func(ctx context.Context, t *testing.T, eat EngineApiTester) {
+		// deploy a smart contract at bn2
+		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
+		require.NoError(t, err)
+		transactOpts.GasLimit = params.MaxTxnGasLimit
+		_, txn, poly, err := contracts.DeployPoly(transactOpts, eat.ContractBackend)
+		require.NoError(t, err)
+		b2Canon, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b2Canon.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+		// interact with the smart contract at bn3 to produce a log
+		txn, err = poly.Deploy(transactOpts, big.NewInt(1))
+		require.NoError(t, err)
+		b3Canon, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, b3Canon.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+		// check the log is present by querying rpc
+		latestBlock, err := eat.RpcApiClient.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
+		require.NoError(t, err)
+		require.Equal(t, uint64(3), latestBlock.Number.Uint64())
+		logs, err := eat.RpcApiClient.FilterLogs(ctx, ethereum.FilterQuery{BlockHash: &latestBlock.Hash})
+		require.NoError(t, err)
+		require.Len(t, logs, 1)
+		require.Equal(t, uint64(3), logs[0].BlockNumber)
+		// now insert a new payload on the side chain and check the log is still present
+		_, err = eat.MockCl.InsertNewPayload(ctx, b2Side)
+		require.NoError(t, err)
+		logs, err = eat.RpcApiClient.FilterLogs(ctx, ethereum.FilterQuery{BlockHash: &latestBlock.Hash})
+		require.NoError(t, err)
+		require.Len(t, logs, 1)
+		require.Equal(t, uint64(3), logs[0].BlockNumber)
+	})
+}
+
+func TestNewPayloadShouldReturnValidWhenSideChainGoingBackIsLtMaxReorgDepth(t *testing.T) {
+	// we had an issue where some benchmark tests were doing more than a 32-block reorg backwards
+	// while our MAX_REORG_DEPTH was 96 blocks, however, NewPayload returned ACCEPTED instead of VALID
+	// and caused issues with benchmarkoor
+	// this test captures that by calling NewPayload for a side fork back to block 1 from canonical fork at block 34
+	logLvl := log.LvlDebug
+	canonicalChainLen := 34 // a few blocks > 32
+	maxReorgDepth := uint64(96)
+	receiver1 := common.HexToAddress("0x111")
+	receiver2 := common.HexToAddress("0x222")
+	sharedGenesis, coinbaseKey := DefaultEngineApiTesterGenesis(t)
+	// Generate a side chain which goes up to 1
+	var sideChain *MockClPayload
+	eatSide := InitialiseEngineApiTester(t, EngineApiTesterInitArgs{
+		Logger:      testlog.Logger(t, logLvl),
+		DataDir:     t.TempDir(),
+		Genesis:     sharedGenesis,
+		CoinbaseKey: coinbaseKey,
+		EthConfigTweaker: func(config *ethconfig.Config) {
+			config.MaxReorgDepth = maxReorgDepth
+		},
+	})
+	eatSide.Run(t, func(ctx context.Context, t *testing.T, eatSide EngineApiTester) {
+		txn, err := eatSide.Transactor.SubmitSimpleTransfer(eatSide.CoinbaseKey, receiver2, big.NewInt(1))
+		require.NoError(t, err)
+		clPayload, err := eatSide.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		err = eatSide.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, clPayload.ExecutionPayload, txn.Hash())
+		require.NoError(t, err)
+		sideChain = clPayload
+	})
+	eatCanonical := InitialiseEngineApiTester(t, EngineApiTesterInitArgs{
+		Logger:      testlog.Logger(t, logLvl),
+		DataDir:     t.TempDir(),
+		Genesis:     sharedGenesis,
+		CoinbaseKey: coinbaseKey,
+		EthConfigTweaker: func(config *ethconfig.Config) {
+			config.MaxReorgDepth = maxReorgDepth
+		},
+	})
+	eatCanonical.Run(t, func(ctx context.Context, t *testing.T, eatCanonical EngineApiTester) {
+		// build the canonical chain up to canonicalChainLen
+		for i := 0; i < canonicalChainLen; i++ {
+			txn, err := eatCanonical.Transactor.SubmitSimpleTransfer(eatCanonical.CoinbaseKey, receiver1, big.NewInt(1))
+			require.NoError(t, err)
+			clPayload, err := eatCanonical.MockCl.BuildCanonicalBlock(ctx)
+			require.NoError(t, err)
+			err = eatCanonical.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, clPayload.ExecutionPayload, txn.Hash())
+			require.NoError(t, err)
+		}
+		// now do a new payload on the side chain at block 1
+		ps, err := eatCanonical.MockCl.InsertNewPayload(ctx, sideChain)
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.ValidStatus, ps.Status)
 	})
 }

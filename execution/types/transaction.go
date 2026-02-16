@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 var (
@@ -90,10 +91,10 @@ type Transaction interface {
 	// Sender may cache the address, allowing it to be used regardless of
 	// signing method. The cache is invalidated if the cached signer does
 	// not match the signer used in the current call.
-	Sender(Signer) (common.Address, error)
-	cachedSender() (common.Address, bool)
-	GetSender() (common.Address, bool)
-	SetSender(common.Address)
+	Sender(Signer) (accounts.Address, error)
+	cachedSender() (accounts.Address, bool)
+	GetSender() (accounts.Address, bool)
+	SetSender(accounts.Address)
 	IsContractDeploy() bool
 	Unwrap() Transaction // If this is a network wrapper, returns the unwrapped txn. Otherwise returns itself.
 }
@@ -103,7 +104,7 @@ type Transaction interface {
 type TransactionMisc struct {
 	// caches
 	hash atomic.Pointer[common.Hash]
-	from atomic.Pointer[common.Address]
+	from accounts.Address
 }
 
 // RLP-marshalled legacy transactions and binary-marshalled (not wrapped into an RLP string) typed (EIP-2718) transactions
@@ -273,7 +274,7 @@ func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		result[i] = common.CopyBytes(buf.Bytes())
+		result[i] = common.Copy(buf.Bytes())
 	}
 	return result, nil
 }
@@ -377,8 +378,8 @@ func (s TxByNonce) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 // Message is a fully derived transaction and implements core.Message
 type Message struct {
-	to               *common.Address
-	from             common.Address
+	to               accounts.Address
+	from             accounts.Address
 	nonce            uint64
 	amount           uint256.Int
 	gasLimit         uint64
@@ -396,7 +397,7 @@ type Message struct {
 	authorizations   []Authorization
 }
 
-func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
+func NewMessage(from accounts.Address, to accounts.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
 	gasPrice *uint256.Int, feeCap, tipCap *uint256.Int, data []byte, accessList AccessList, checkNonce bool,
 	checkTransaction bool, checkGas bool, isFree bool, maxFeePerBlobGas *uint256.Int,
 ) *Message {
@@ -428,8 +429,8 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *u
 	return &m
 }
 
-func (m *Message) From() common.Address            { return m.from }
-func (m *Message) To() *common.Address             { return m.to }
+func (m *Message) From() accounts.Address          { return m.from }
+func (m *Message) To() accounts.Address            { return m.to }
 func (m *Message) GasPrice() *uint256.Int          { return &m.gasPrice }
 func (m *Message) FeeCap() *uint256.Int            { return &m.feeCap }
 func (m *Message) TipCap() *uint256.Int            { return &m.tipCap }

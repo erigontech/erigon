@@ -20,14 +20,14 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
-
-type RpcEventType uint64
 
 type NewSnapshotSubscription func() error
 type HeaderSubscription func(headerRLP []byte) error
@@ -48,12 +48,15 @@ type Events struct {
 	pendingTxsSubscriptions     map[int]PendingTxsSubscription
 	logsSubscriptions           map[int]chan []*remoteproto.SubscribeLogsReply
 	hasLogSubscriptions         bool
+	receiptsSubscriptions       map[int]chan []*remoteproto.SubscribeReceiptsReply
+	hasReceiptSubscriptions     bool
 	lock                        sync.RWMutex
 }
 
 func NewEvents() *Events {
 	return &Events{
 		headerSubscriptions:         map[int]chan [][]byte{},
+		receiptsSubscriptions:       map[int]chan []*remoteproto.SubscribeReceiptsReply{},
 		pendingLogsSubscriptions:    map[int]PendingLogsSubscription{},
 		pendingBlockSubscriptions:   map[int]PendingBlockSubscription{},
 		pendingTxsSubscriptions:     map[int]PendingTxsSubscription{},
@@ -72,9 +75,36 @@ func (e *Events) AddHeaderSubscription() (chan [][]byte, func()) {
 	id := e.id
 	e.headerSubscriptions[id] = ch
 	return ch, func() {
+		e.lock.Lock()
+		defer e.lock.Unlock()
 		delete(e.headerSubscriptions, id)
 		close(ch)
 	}
+}
+
+func (e *Events) AddReceiptsSubscription() (chan []*remoteproto.SubscribeReceiptsReply, func()) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	ch := make(chan []*remoteproto.SubscribeReceiptsReply, 8)
+	e.id++
+	id := e.id
+	e.receiptsSubscriptions[id] = ch
+	return ch, func() {
+		delete(e.receiptsSubscriptions, id)
+		close(ch)
+	}
+}
+
+func (e *Events) EmptyReceiptSubscription(empty bool) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	e.hasReceiptSubscriptions = !empty
+}
+
+func (e *Events) HasReceiptSubscriptions() bool {
+	e.lock.RLock()
+	defer e.lock.RUnlock()
+	return e.hasReceiptSubscriptions
 }
 
 func (e *Events) AddNewSnapshotSubscription() (chan struct{}, func()) {
@@ -187,6 +217,14 @@ func (e *Events) OnLogs(logs []*remoteproto.SubscribeLogsReply) {
 	}
 }
 
+func (e *Events) OnReceipts(receipts []*remoteproto.SubscribeReceiptsReply) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	for _, ch := range e.receiptsSubscriptions {
+		common.PrioritizedSend(ch, receipts)
+	}
+}
+
 func (e *Events) OnRetirementStart(started bool) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
@@ -207,7 +245,7 @@ type Notifications struct {
 	Events               *Events
 	Accumulator          *Accumulator // StateAccumulator
 	StateChangesConsumer StateChangeConsumer
-	RecentLogs           *RecentLogs
+	RecentReceipts       *RecentReceipts
 	LastNewBlockSeen     atomic.Uint64 // This is used by eth_syncing as an heuristic to determine if the node is syncing or not.
 }
 
@@ -219,7 +257,7 @@ func NewNotifications(StateChangesConsumer StateChangeConsumer) *Notifications {
 	return &Notifications{
 		Events:               NewEvents(),
 		Accumulator:          NewAccumulator(),
-		RecentLogs:           NewRecentLogs(512),
+		RecentReceipts:       NewRecentReceipts(512),
 		StateChangesConsumer: StateChangesConsumer,
 	}
 }
@@ -228,25 +266,33 @@ func NewNotifications(StateChangesConsumer StateChangeConsumer) *Notifications {
 // - Erigon3 doesn't store logs in db (yet)
 // - need support unwind of receipts
 // - need send notification after `rwtx.Commit` (or user will recv notification, but can't request new data by RPC)
-type RecentLogs struct {
+type RecentReceipts struct {
 	receipts map[uint64]types.Receipts
+	txs      map[uint64][]types.Transaction
+	headers  map[uint64]*types.Header
 	limit    uint64
 	mu       sync.Mutex
 }
 
-func NewRecentLogs(limit uint64) *RecentLogs {
-	return &RecentLogs{receipts: make(map[uint64]types.Receipts, limit), limit: limit}
+func NewRecentReceipts(limit uint64) *RecentReceipts {
+	return &RecentReceipts{
+		receipts: make(map[uint64]types.Receipts, limit),
+		txs:      make(map[uint64][]types.Transaction, limit),
+		headers:  make(map[uint64]*types.Header, limit),
+		limit:    limit,
+	}
 }
 
+// Notify sends log notifications (for logs subscription)
 // [from,to)
-func (r *RecentLogs) Notify(n *Events, from, to uint64, isUnwind bool) {
+func (r *RecentReceipts) NotifyLogs(n *Events, from, to uint64, isUnwind bool) {
 	if !n.HasLogSubscriptions() {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for bn, receipts := range r.receipts {
-		if bn+r.limit < from { //evict old
+		if bn+r.limit < from { // evict old
 			delete(r.receipts, bn)
 			continue
 		}
@@ -293,7 +339,7 @@ func (r *RecentLogs) Notify(n *Events, from, to uint64, isUnwind bool) {
 	}
 }
 
-func (r *RecentLogs) Add(receipts types.Receipts) {
+func (r *RecentReceipts) Add(receipts types.Receipts, txs []types.Transaction, header *types.Header) {
 	if len(receipts) == 0 {
 		return
 	}
@@ -313,23 +359,143 @@ func (r *RecentLogs) Add(receipts types.Receipts) {
 		return
 	}
 	r.receipts[blockNum] = receipts
+	r.txs[blockNum] = txs
+	r.headers[blockNum] = header
 
-	//enforce `limit`: drop all items older than `limit` blocks
+	// enforce `limit`: drop all items older than `limit` blocks
 	if len(r.receipts) <= int(r.limit) {
 		return
 	}
 	for bn := range r.receipts {
 		if bn+r.limit < blockNum {
 			delete(r.receipts, bn)
+			delete(r.txs, bn)
+			delete(r.headers, bn)
 		}
 	}
 }
 
-func (r *RecentLogs) CopyAndReset(target *RecentLogs) {
+// NotifyReceipts sends receipt Proto notifications (for receipts subscription)
+// [from,to)
+func (r *RecentReceipts) NotifyReceipts(n *Events, from, to uint64, isUnwind bool) {
+	if !n.HasReceiptSubscriptions() {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for blockNum, receipts := range r.receipts {
+		if blockNum+r.limit < from { // evict old
+			delete(r.receipts, blockNum)
+			delete(r.txs, blockNum)
+			delete(r.headers, blockNum)
+			continue
+		}
+		if blockNum < from || blockNum >= to {
+			continue
+		}
+
+		txs := r.txs[blockNum]
+		header := r.headers[blockNum]
+		if len(receipts) == 0 || len(txs) == 0 || header == nil {
+			continue
+		}
+
+		var reply []*remoteproto.SubscribeReceiptsReply
+		signer := types.MakeSigner(nil, blockNum, 0)
+
+		for _, receipt := range receipts {
+			if receipt == nil {
+				continue
+			}
+
+			txIndex := receipt.TransactionIndex
+			if int(txIndex) >= len(txs) {
+				continue
+			}
+			txn := txs[txIndex]
+
+			// Convert logs to Proto format
+			protoLogs := make([]*remoteproto.SubscribeLogsReply, 0, len(receipt.Logs))
+			for _, l := range receipt.Logs {
+				protoLog := &remoteproto.SubscribeLogsReply{
+					Address:          gointerfaces.ConvertAddressToH160(l.Address),
+					BlockHash:        gointerfaces.ConvertHashToH256(receipt.BlockHash),
+					BlockNumber:      blockNum,
+					Data:             l.Data,
+					LogIndex:         uint64(l.Index),
+					Topics:           make([]*typesproto.H256, 0, len(l.Topics)),
+					TransactionHash:  gointerfaces.ConvertHashToH256(receipt.TxHash),
+					TransactionIndex: uint64(l.TxIndex),
+					Removed:          isUnwind,
+				}
+				for _, topic := range l.Topics {
+					protoLog.Topics = append(protoLog.Topics, gointerfaces.ConvertHashToH256(topic))
+				}
+				protoLogs = append(protoLogs, protoLog)
+			}
+
+			// Build Proto receipt with all metadata
+			protoReceipt := &remoteproto.SubscribeReceiptsReply{
+				BlockHash:         gointerfaces.ConvertHashToH256(receipt.BlockHash),
+				BlockNumber:       blockNum,
+				TransactionHash:   gointerfaces.ConvertHashToH256(receipt.TxHash),
+				TransactionIndex:  uint64(txIndex),
+				Type:              uint32(receipt.Type),
+				Status:            receipt.Status,
+				CumulativeGasUsed: receipt.CumulativeGasUsed,
+				GasUsed:           receipt.GasUsed,
+				LogsBloom:         receipt.Bloom[:],
+				Logs:              protoLogs,
+				BlobGasUsed:       receipt.BlobGasUsed,
+			}
+
+			// Add contract address if present
+			if receipt.ContractAddress != (common.Address{}) {
+				protoReceipt.ContractAddress = gointerfaces.ConvertAddressToH160(receipt.ContractAddress)
+			}
+
+			// Add transaction data (from/to) from txs array
+			if sender, err := txn.Sender(*signer); err == nil {
+				protoReceipt.From = gointerfaces.ConvertAddressToH160(sender.Value())
+			}
+			if to := txn.GetTo(); to != nil {
+				protoReceipt.To = gointerfaces.ConvertAddressToH160(*to)
+			}
+			protoReceipt.TxType = uint32(txn.Type())
+
+			// Add header data
+			if header.BaseFee != nil {
+				baseFee, _ := uint256.FromBig(header.BaseFee)
+				protoReceipt.BaseFee = gointerfaces.ConvertUint256IntToH256(baseFee)
+			}
+			protoReceipt.BlockTime = header.Time
+			if header.ExcessBlobGas != nil {
+				protoReceipt.ExcessBlobGas = *header.ExcessBlobGas
+			}
+
+			// Add blob gas price for EIP-4844 if needed
+			// Can be calculated from ExcessBlobGas
+
+			reply = append(reply, protoReceipt)
+		}
+
+		// Send batch per block
+		if len(reply) > 0 {
+			n.OnReceipts(reply)
+		}
+	}
+}
+
+func (r *RecentReceipts) CopyAndReset(target *RecentReceipts) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for blockNum, receipts := range r.receipts {
-		target.Add(receipts)
+		txs := r.txs[blockNum]
+		header := r.headers[blockNum]
+		target.Add(receipts, txs, header)
 		delete(r.receipts, blockNum)
+		delete(r.txs, blockNum)
+		delete(r.headers, blockNum)
 	}
 }

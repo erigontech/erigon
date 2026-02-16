@@ -54,7 +54,7 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 }
 
 // Syncing implements eth_syncing. Returns a data object detailing the status of the sync process or false if not syncing.
-func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
+func (api *APIImpl) Syncing(ctx context.Context) (any, error) {
 	reply, err := api.ethBackend.Syncing(ctx)
 	if err != nil {
 		return false, err
@@ -76,7 +76,7 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		stagesMap[i].BlockNumber = hexutil.Uint64(stage.BlockNumber)
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"startingBlock": "0x0", // 0x0 is a placeholder, I do not think it matters what we return here
 		"currentBlock":  hexutil.Uint64(currentBlock),
 		"highestBlock":  hexutil.Uint64(highestBlock),
@@ -211,7 +211,7 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 	}
 	defer tx.Rollback()
 	header := rawdb.ReadCurrentHeader(tx)
-	if header == nil || header.BlobGasUsed == nil {
+	if header == nil || header.ExcessBlobGas == nil {
 		return (*hexutil.Big)(common.Big0), nil
 	}
 	config, err := api.BaseAPI.chainConfig(ctx, tx)
@@ -222,7 +222,7 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 		return (*hexutil.Big)(common.Big0), nil
 	}
 	nextBlockTime := header.Time + config.SecondsPerSlot()
-	ret256, err := misc.GetBlobGasPrice(config, misc.CalcExcessBlobGas(config, header, nextBlockTime), nextBlockTime)
+	ret256, err := misc.GetBlobGasPrice(config, *header.ExcessBlobGas, nextBlockTime)
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +285,7 @@ func (api *APIImpl) Config(ctx context.Context, blockTimeOverride *hexutil.Uint6
 		// optional utility arg to aid with testing
 		currentBlockTime = blockTimeOverride.Uint64()
 	} else {
-		h, err := api.headerByRPCNumber(ctx, rpc.LatestBlockNumber, tx)
+		h, err := api.headerByNumber(ctx, rpc.LatestBlockNumber, tx)
 		if err != nil {
 			return nil, err
 		}
@@ -341,9 +341,13 @@ func fillForkConfig(chainConfig *chain.Config, forkId [4]byte, activationTime ui
 	precompiles := vm.Precompiles(blockContext.Rules(chainConfig))
 	forkConfig.Precompiles = make(map[string]common.Address, len(precompiles))
 	for addr, precompile := range precompiles {
-		forkConfig.Precompiles[precompile.Name()] = addr
+		forkConfig.Precompiles[precompile.Name()] = addr.Value()
 	}
-	forkConfig.SystemContracts = chainConfig.SystemContracts(activationTime)
+	systemContracts := chainConfig.SystemContracts(activationTime)
+	forkConfig.SystemContracts = make(map[string]common.Address, len(systemContracts))
+	for name, contract := range systemContracts {
+		forkConfig.SystemContracts[name] = contract.Value()
+	}
 	return &forkConfig
 }
 
@@ -357,7 +361,7 @@ func NewGasPriceOracleBackend(tx kv.TemporalTx, baseApi *BaseAPI) *GasPriceOracl
 }
 
 func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
-	header, err := b.baseApi.headerByRPCNumber(ctx, number, b.tx)
+	header, err := b.baseApi.headerByNumber(ctx, number, b.tx)
 	if err != nil {
 		return nil, err
 	}
@@ -366,16 +370,24 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 	}
 	return header, nil
 }
+
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
-	return b.baseApi.blockByRPCNumber(ctx, number, b.tx)
+	return b.baseApi.blockByNumberWithSenders(ctx, b.tx, number.Uint64())
 }
+
 func (b *GasPriceOracleBackend) ChainConfig() *chain.Config {
 	cc, _ := b.baseApi.chainConfig(context.Background(), b.tx)
 	return cc
 }
+
+func (b *GasPriceOracleBackend) GetLatestBlockNumber() (uint64, error) {
+	return rpchelper.GetLatestBlockNumber(b.tx)
+}
+
 func (b *GasPriceOracleBackend) GetReceipts(ctx context.Context, block *types.Block) (types.Receipts, error) {
 	return b.baseApi.getReceipts(ctx, b.tx, block)
 }
+
 func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
 	return nil, nil
 }

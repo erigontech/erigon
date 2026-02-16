@@ -386,7 +386,7 @@ MainLoop:
 			if !fileScanner.Scan() {
 				break MainLoop
 			}
-			k := common.CopyBytes(fileScanner.Bytes())
+			k := common.Copy(fileScanner.Bytes())
 			if bytes.Equal(k, endData) {
 				break
 			}
@@ -394,7 +394,7 @@ MainLoop:
 			if !fileScanner.Scan() {
 				break MainLoop
 			}
-			v := common.CopyBytes(fileScanner.Bytes())
+			v := common.Copy(fileScanner.Bytes())
 			v = common.FromHex(string(v[1:]))
 
 			if casted, ok := c.(kv.RwCursorDupSort); ok {

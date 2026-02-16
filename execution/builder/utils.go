@@ -17,10 +17,12 @@
 package builder
 
 import (
-	"github.com/erigontech/erigon/common"
+	"slices"
+
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // IsLocalBlock checks whether the specified block is mined
@@ -28,7 +30,7 @@ import (
 //
 // We regard two types of accounts as local miner account: etherbase
 // and accounts specified via `txpool.locals` flag.
-func IsLocalBlock(engine rules.Engine, etherbase common.Address, txPoolLocals []common.Address, header *types.Header) bool {
+func IsLocalBlock(engine rules.Engine, etherbase accounts.Address, txPoolLocals []accounts.Address, header *types.Header) bool {
 	author, err := engine.Author(header)
 	if err != nil {
 		log.Warn("Failed to retrieve block author", "number", header.Number, "header_hash", header.Hash(), "err", err)
@@ -40,10 +42,5 @@ func IsLocalBlock(engine rules.Engine, etherbase common.Address, txPoolLocals []
 	}
 	// Check whether the given address is specified by `txpool.local`
 	// CLI flag.
-	for _, account := range txPoolLocals {
-		if account == author {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(txPoolLocals, author)
 }

@@ -181,7 +181,7 @@ func (d *BlockDownloader) downloadBlocksUsingWaypoints(
 	waypoints = d.limitWaypoints(waypoints)
 	waypoints = limitWaypointsEndBlock(waypoints, end)
 
-	initialInfoLogArgs := []interface{}{
+	initialInfoLogArgs := []any{
 		"start", start,
 		"waypointsLen", len(waypoints),
 		"waypointsStart", waypoints[0].StartBlock().Uint64(),

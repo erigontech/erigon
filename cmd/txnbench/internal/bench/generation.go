@@ -9,7 +9,8 @@ import (
 )
 
 const (
-	searchUpLimit = 10
+	searchUpLimit  = 10
+	divisionFactor = 11007
 )
 
 func GenerateBenchData(ctx context.Context, c *rpcclient.Client) (BenchData, error) {
@@ -22,20 +23,20 @@ func GenerateBenchData(ctx context.Context, c *rpcclient.Client) (BenchData, err
 		return BenchData{}, fmt.Errorf("eth_chainId: %w", err)
 	}
 
-	targets := []uint64{
-		uint64(math.Floor(float64(latest) * 0.25)),
-		uint64(math.Floor(float64(latest) * 0.50)),
-		uint64(math.Floor(float64(latest) * 0.75)),
+	var targets []uint64
+	for i := 1; i < divisionFactor; i++ {
+		targets = append(targets, uint64(math.Floor(float64(latest)*float64(i)/divisionFactor)))
 	}
 
 	blocks := make([]BenchItem, 0, len(targets))
 	for _, t := range targets {
 		num, hashes, err := findBlockWithTxs(ctx, c, t)
 		if err != nil {
-			return BenchData{}, err
+			continue
+			// return BenchData{}, err
 		}
 
-		take := min(len(hashes), 2)
+		take := min(len(hashes), 100)
 		item := BenchItem{
 			Number: num,
 			Txs:    append([]string{}, hashes[:take]...),

@@ -4,12 +4,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 
 	"github.com/heimdalr/dag"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -56,7 +56,7 @@ const (
 	ReadSetRead
 )
 
-type ReadSet map[common.Address]map[AccountKey]*VersionedRead
+type ReadSet map[accounts.Address]map[AccountKey]*VersionedRead
 
 func (rs ReadSet) Set(v VersionedRead) {
 	reads, ok := rs[v.Address]
@@ -92,7 +92,7 @@ func (s ReadSet) Len() int {
 	return l
 }
 
-func (s ReadSet) Delete(addr common.Address, key AccountKey) {
+func (s ReadSet) Delete(addr accounts.Address, key AccountKey) {
 	if reads, ok := s[addr]; ok {
 		delete(reads, key)
 		if len(reads) == 0 {
@@ -101,7 +101,7 @@ func (s ReadSet) Delete(addr common.Address, key AccountKey) {
 	}
 }
 
-type WriteSet map[common.Address]map[AccountKey]*VersionedWrite
+type WriteSet map[accounts.Address]map[AccountKey]*VersionedWrite
 
 func (s WriteSet) Set(v VersionedWrite) {
 	writes, ok := s[v.Address]
@@ -119,7 +119,7 @@ func (s WriteSet) Set(v VersionedWrite) {
 	}
 }
 
-func (s WriteSet) Delete(addr common.Address, key AccountKey) {
+func (s WriteSet) Delete(addr accounts.Address, key AccountKey) {
 	if writes, ok := s[addr]; ok {
 		delete(writes, key)
 		if len(writes) == 0 {
@@ -147,12 +147,12 @@ func (s WriteSet) Scan(yield func(input *VersionedWrite) bool) {
 }
 
 type VersionedRead struct {
-	Address common.Address
+	Address accounts.Address
 	Path    AccountPath
-	Key     common.Hash
+	Key     accounts.StorageKey
 	Source  ReadSource
 	Version Version
-	Val     interface{}
+	Val     any
 }
 
 func (vr VersionedRead) String() string {
@@ -160,16 +160,16 @@ func (vr VersionedRead) String() string {
 }
 
 type VersionedWrite struct {
-	Address common.Address
+	Address accounts.Address
 	Path    AccountPath
-	Key     common.Hash
+	Key     accounts.StorageKey
 	Version Version
-	Val     interface{}
+	Val     any
 	Reason  tracing.BalanceChangeReason
 }
 
 func (vr VersionedWrite) String() string {
-	return fmt.Sprintf("%x %s: %s", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, valueString(vr.Path, vr.Val))
+	return fmt.Sprintf("%x %s: %s (%d.%d)", vr.Address, AccountKey{Path: vr.Path, Key: vr.Key}, valueString(vr.Path, vr.Val), vr.Version.TxIndex, vr.Version.Incarnation)
 }
 
 func valueString(path AccountPath, value any) string {
@@ -185,7 +185,7 @@ func valueString(path AccountPath, value any) string {
 	case StoragePath:
 		num := value.(uint256.Int)
 		return fmt.Sprintf("%x", &num)
-	case NoncePath:
+	case NoncePath, IncarnationPath:
 		return strconv.FormatUint(value.(uint64), 10)
 	case CodePath:
 		l := min(len(value.([]byte)), 40)
@@ -212,7 +212,15 @@ func (vr *versionedStateReader) SetTrace(trace bool, tracePrefix string) {
 	vr.stateReader.SetTrace(trace, tracePrefix)
 }
 
-func (vr *versionedStateReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
+func (vr *versionedStateReader) Trace() bool {
+	return vr.stateReader.Trace()
+}
+
+func (vr *versionedStateReader) TracePrefix() string {
+	return vr.stateReader.TracePrefix()
+}
+
+func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
 		if account, ok := r.Val.(*accounts.Account); ok {
 			updated := vr.applyVersionedUpdates(address, *account)
@@ -236,7 +244,7 @@ func (vr *versionedStateReader) ReadAccountData(address common.Address) (*accoun
 	return nil, nil
 }
 
-func versionedUpdate[T any](versionMap *VersionMap, addr common.Address, path AccountPath, key common.Hash, txIndex int) (T, bool) {
+func versionedUpdate[T any](versionMap *VersionMap, addr accounts.Address, path AccountPath, key accounts.StorageKey, txIndex int) (T, bool) {
 	if res := versionMap.Read(addr, path, key, txIndex); res.Status() == MVReadResultDone {
 		return res.Value().(T), true
 	}
@@ -249,20 +257,23 @@ func versionedUpdate[T any](versionMap *VersionMap, addr common.Address, path Ac
 // may lead to updated from pervious transactions being missed where we only update a subset of the fiels as these won't
 // be recored as reads and hence the varification process will miss them.  We don't want to creat a fail but
 // we do  want to capture the updates
-func (vr versionedStateReader) applyVersionedUpdates(address common.Address, account accounts.Account) accounts.Account {
-	if update, ok := versionedUpdate[uint256.Int](vr.versionMap, address, BalancePath, common.Hash{}, vr.txIndex); ok {
+func (vr versionedStateReader) applyVersionedUpdates(address accounts.Address, account accounts.Account) accounts.Account {
+	if update, ok := versionedUpdate[uint256.Int](vr.versionMap, address, BalancePath, accounts.NilKey, vr.txIndex); ok {
 		account.Balance = update
 	}
-	if update, ok := versionedUpdate[uint64](vr.versionMap, address, NoncePath, common.Hash{}, vr.txIndex); ok {
+	if update, ok := versionedUpdate[uint64](vr.versionMap, address, NoncePath, accounts.NilKey, vr.txIndex); ok {
 		account.Nonce = update
 	}
-	if update, ok := versionedUpdate[common.Hash](vr.versionMap, address, CodeHashPath, common.Hash{}, vr.txIndex); ok {
+	if update, ok := versionedUpdate[uint64](vr.versionMap, address, IncarnationPath, accounts.NilKey, vr.txIndex); ok {
+		account.Incarnation = update
+	}
+	if update, ok := versionedUpdate[accounts.CodeHash](vr.versionMap, address, CodeHashPath, accounts.NilKey, vr.txIndex); ok {
 		account.CodeHash = update
 	}
 	return account
 }
 
-func (vr versionedStateReader) ReadAccountDataForDebug(address common.Address) (*accounts.Account, error) {
+func (vr versionedStateReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
 		if account, ok := r.Val.(*accounts.Account); ok {
 			updated := vr.applyVersionedUpdates(address, *account)
@@ -284,7 +295,7 @@ func (vr versionedStateReader) ReadAccountDataForDebug(address common.Address) (
 	return nil, nil
 }
 
-func (vr versionedStateReader) ReadAccountStorage(address common.Address, key common.Hash) (uint256.Int, bool, error) {
+func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: StoragePath, Key: key}]; ok && r.Val != nil {
 		val := r.Val.(uint256.Int)
 		return val, true, nil
@@ -297,7 +308,7 @@ func (vr versionedStateReader) ReadAccountStorage(address common.Address, key co
 	return uint256.Int{}, false, nil
 }
 
-func (vr versionedStateReader) HasStorage(address common.Address) (bool, error) {
+func (vr versionedStateReader) HasStorage(address accounts.Address) (bool, error) {
 	if r, ok := vr.reads[address]; ok {
 		for k := range r {
 			if k.Path == StoragePath {
@@ -313,7 +324,7 @@ func (vr versionedStateReader) HasStorage(address common.Address) (bool, error) 
 	return false, nil
 }
 
-func (vr versionedStateReader) ReadAccountCode(address common.Address) ([]byte, error) {
+func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: CodePath}]; ok && r.Val != nil {
 		if code, ok := r.Val.([]byte); ok {
 			return code, nil
@@ -327,7 +338,7 @@ func (vr versionedStateReader) ReadAccountCode(address common.Address) ([]byte, 
 	return nil, nil
 }
 
-func (vr versionedStateReader) ReadAccountCodeSize(address common.Address) (int, error) {
+func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: CodePath}]; ok && r.Val != nil {
 		if code, ok := r.Val.([]byte); ok {
 			return len(code), nil
@@ -341,7 +352,7 @@ func (vr versionedStateReader) ReadAccountCodeSize(address common.Address) (int,
 	return 0, nil
 }
 
-func (vr versionedStateReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
+func (vr versionedStateReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
 		return r.Val.(*accounts.Account).Incarnation, nil
 	}
@@ -363,7 +374,7 @@ func (writes VersionedWrites) HasNewWrite(cmpSet []*VersionedWrite) bool {
 		return true
 	}
 
-	cmpMap := map[common.Address]map[AccountKey]struct{}{}
+	cmpMap := map[accounts.Address]map[AccountKey]struct{}{}
 
 	for _, vw := range cmpSet {
 		keys, ok := cmpMap[vw.Address]
@@ -383,9 +394,9 @@ func (writes VersionedWrites) HasNewWrite(cmpSet []*VersionedWrite) bool {
 	return false
 }
 
-func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountPath, key common.Hash, commited bool, defaultV T, copyV func(T) T, readStorage func(sdb *stateObject) (T, error)) (T, ReadSource, Version, error) {
+func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, commited bool, defaultV T, copyV func(T) T, readStorage func(sdb *stateObject) (T, error)) (T, ReadSource, Version, error) {
 	if s.versionMap == nil {
-		so, err := s.getStateObject(addr)
+		so, err := s.getStateObject(addr, true)
 
 		if err != nil || readStorage == nil {
 			return defaultV, StorageRead, UnknownVersion, err
@@ -394,10 +405,20 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 		return val, StorageRead, UnknownVersion, err
 	}
 
+	var destrcutedVersion Version
 	if so, ok := s.stateObjects[addr]; ok && so.deleted {
 		return defaultV, StorageRead, UnknownVersion, nil
-	} else if res := s.versionMap.Read(addr, SelfDestructPath, common.Hash{}, s.txIndex); res.Status() == MVReadResultDone {
-		return defaultV, MapRead, Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, nil
+	} else if !commited {
+		if res := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex); res.Status() == MVReadResultDone && res.value.(bool) {
+			if path != CodePath {
+				if vw, ok := s.versionedWrite(addr, SelfDestructPath, key); !ok || vw.Val.(bool) {
+					return defaultV, MapRead, Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, nil
+				}
+				destrcutedVersion = Version{
+					TxIndex: res.DepIdx(),
+				}
+			}
+		}
 	}
 
 	res := s.versionMap.Read(addr, path, key, s.txIndex)
@@ -417,12 +438,12 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 		if vw, ok := s.versionedWrite(addr, path, key); ok {
 			if res.Status() == MVReadResultDone {
 				if pr, ok := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
-					if vr.Version != pr.Version {
+					if vr.Version.TxIndex > destrcutedVersion.TxIndex && vr.Version != pr.Version {
 						if vr.Version.TxIndex > s.dep {
 							s.dep = vr.Version.TxIndex
 						}
 
-						if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
+						if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 							fmt.Printf("%d (%d.%d) WR DEP (%d.%d)!=(%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key}, valueString(path, pr.Val))
 						}
 
@@ -435,7 +456,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 				}
 			}
 
-			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
+			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 				fmt.Printf("%d (%d.%d) RD (%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, WriteSetRead, addr, AccountKey{path, key}, valueString(path, vw.Val))
 			}
 
@@ -450,8 +471,8 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 
 		if pr, ok := s.versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 			if pr.Version == vr.Version {
-				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
-					fmt.Printf("%d (%d.%d) RD (%s:%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key}, valueString(path, pr.Val))
+				if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
+					fmt.Printf("%d (%d.%d) RD (%s:%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepString(), addr, AccountKey{path, key}, valueString(path, pr.Val))
 				}
 
 				return pr.Val.(T), vr.Source, vr.Version, nil
@@ -461,7 +482,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 				s.dep = vr.Version.TxIndex
 			}
 
-			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
+			if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 				fmt.Printf("%d (%d.%d) RD DEP (%d.%d)!=(%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key})
 			}
 
@@ -476,11 +497,18 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 
 		var ok bool
 		if v, ok = res.Value().(T); !ok {
-			return defaultV, MapRead, vr.Version, fmt.Errorf("unexpected type: %T", res.Value())
+			return defaultV, UnknownSource, vr.Version, fmt.Errorf("unexpected type: got: %T, expected %v", res.Value(), reflect.TypeFor[T]())
 		}
 
-		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
-			fmt.Printf("%d (%d.%d) RD (%s:%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key}, valueString(path, v))
+		if path == CodePath {
+			sdres := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex)
+			if sdres.Status() == MVReadResultDone && sdres.Value().(bool) && sdres.DepIdx() >= res.DepIdx() {
+				return defaultV, MapRead, Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, nil
+			}
+		}
+
+		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
+			fmt.Printf("%d (%d.%d) RD (%s:%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, MapRead, res.DepString(), addr, AccountKey{path, key}, valueString(path, v))
 		}
 
 		if copyV == nil {
@@ -490,7 +518,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 		vr.Val = copyV(v)
 
 	case MVReadResultDependency:
-		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
+		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) MP DEP (%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, res.DepIdx(), res.Incarnation(), addr, AccountKey{path, key})
 		}
 
@@ -505,10 +533,10 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 		panic(ErrDependency)
 
 	case MVReadResultNone:
-		if versionedReads := s.versionedReads; versionedReads != nil {
+		if versionedReads := s.versionedReads; !commited && versionedReads != nil {
 			if pr, ok := versionedReads[addr][AccountKey{Path: path, Key: key}]; ok {
 				if pr.Version == vr.Version {
-					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
+					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d (%d.%d) RD (%s) %x %s: %s\n", s.blockNum, s.txIndex, s.version, ReadSetRead, addr, AccountKey{path, key}, valueString(path, pr.Val))
 					}
 
@@ -516,15 +544,15 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 				}
 
 				if pr.Source == MapRead {
-					if path == BalancePath || path == NoncePath || path == CodeHashPath {
-						if _, source, version, _ := versionedRead(s, addr, AddressPath, common.Hash{}, false, nil,
+					if path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath {
+						if _, source, version, _ := versionedRead(s, addr, AddressPath, accounts.NilKey, false, nil,
 							func(v *accounts.Account) *accounts.Account { return v }, nil); source == pr.Source && version == pr.Version {
 							return pr.Val.(T), ReadSetRead, pr.Version, nil
 						}
 					}
 
 					// a previous dependency has been removed from the map
-					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
+					if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 						fmt.Printf("%d (%d.%d) RM DEP (%d.%d)!=(%d.%d) %x %s\n", s.blockNum, s.txIndex, s.version, pr.Version.TxIndex, pr.Version.Incarnation, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key})
 					}
 
@@ -544,8 +572,8 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 		var so *stateObject
 		var err error
 
-		if path == BalancePath || path == NoncePath || path == CodeHashPath {
-			readAccount, source, version, err := versionedRead(s, addr, AddressPath, common.Hash{}, false, nil,
+		if path == BalancePath || path == NoncePath || path == IncarnationPath || path == CodeHashPath {
+			readAccount, source, version, err := versionedRead(s, addr, AddressPath, accounts.NilKey, false, nil,
 				func(v *accounts.Account) *accounts.Account { return v }, nil)
 
 			if err != nil {
@@ -561,7 +589,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 
 		if so == nil {
 			vr.Source = StorageRead
-			so, err = s.getStateObject(addr)
+			so, err = s.getStateObject(addr, true)
 			if err != nil {
 				return defaultV, StorageRead, UnknownVersion, err
 			}
@@ -571,7 +599,7 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 			return defaultV, StorageRead, UnknownVersion, err
 		}
 
-		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr)) {
+		if dbg.TraceTransactionIO && (s.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) RD (%s:%d.%d) %x %s: %s\n", s.blockNum, s.txIndex, s.version, vr.Source, vr.Version.TxIndex, vr.Version.Incarnation, addr, AccountKey{path, key}, valueString(path, v))
 		}
 
@@ -593,11 +621,16 @@ func versionedRead[T any](s *IntraBlockState, addr common.Address, path AccountP
 type VersionedIO struct {
 	inputs     []versionedReadSet
 	outputs    []VersionedWrites // write sets that should be checked during validation
-	outputsSet []map[common.Address]map[AccountKey]struct{}
+	outputsSet []map[accounts.Address]map[AccountKey]struct{}
+	accessed   []map[accounts.Address]struct{}
 }
 
 func (io *VersionedIO) Inputs() []versionedReadSet {
 	return io.inputs
+}
+
+func (io *VersionedIO) Outputs() []VersionedWrites {
+	return io.outputs
 }
 
 func (io *VersionedIO) ReadSet(txnIdx int) ReadSet {
@@ -651,7 +684,7 @@ func (io *VersionedIO) HasReads(txnIdx int) bool {
 	return len(io.inputs[txnIdx+1].readSet) > 0
 }
 
-func (io *VersionedIO) HasWritten(txnIdx int, addr common.Address, path AccountPath, key common.Hash) bool {
+func (io *VersionedIO) HasWritten(txnIdx int, addr accounts.Address, path AccountPath, key accounts.StorageKey) bool {
 	if len(io.outputsSet) <= txnIdx+1 {
 		return false
 	}
@@ -674,7 +707,8 @@ func NewVersionedIO(numTx int) *VersionedIO {
 	return &VersionedIO{
 		inputs:     make([]versionedReadSet, numTx+1),
 		outputs:    make([]VersionedWrites, numTx+1),
-		outputsSet: make([]map[common.Address]map[AccountKey]struct{}, numTx+1),
+		outputsSet: make([]map[accounts.Address]map[AccountKey]struct{}, numTx+1),
+		accessed:   make([]map[accounts.Address]struct{}, numTx+1),
 	}
 }
 
@@ -694,9 +728,9 @@ func (io *VersionedIO) RecordWrites(txVersion Version, output VersionedWrites) {
 	io.outputs[txId+1] = output
 
 	if len(io.outputsSet) <= txId+1 {
-		io.outputsSet = append(io.outputsSet, make([]map[common.Address]map[AccountKey]struct{}, txId+2-len(io.outputsSet))...)
+		io.outputsSet = append(io.outputsSet, make([]map[accounts.Address]map[AccountKey]struct{}, txId+2-len(io.outputsSet))...)
 	}
-	io.outputsSet[txId+1] = map[common.Address]map[AccountKey]struct{}{}
+	io.outputsSet[txId+1] = map[accounts.Address]map[AccountKey]struct{}{}
 
 	for _, v := range output {
 		keys, ok := io.outputsSet[txId+1][v.Address]
@@ -706,6 +740,27 @@ func (io *VersionedIO) RecordWrites(txVersion Version, output VersionedWrites) {
 		}
 		keys[AccountKey{v.Path, v.Key}] = struct{}{}
 	}
+}
+
+func (io *VersionedIO) RecordAccesses(txVersion Version, addresses map[accounts.Address]struct{}) {
+	if len(addresses) == 0 {
+		return
+	}
+	if len(io.accessed) <= txVersion.TxIndex+1 {
+		io.accessed = append(io.accessed, make([]map[accounts.Address]struct{}, txVersion.TxIndex+2-len(io.accessed))...)
+	}
+	dest := make(map[accounts.Address]struct{}, len(addresses))
+	for addr := range addresses {
+		dest[addr] = struct{}{}
+	}
+	io.accessed[txVersion.TxIndex+1] = dest
+}
+
+func (io *VersionedIO) AccessedAddresses(txIndex int) map[accounts.Address]struct{} {
+	if len(io.accessed) <= txIndex+1 {
+		return nil
+	}
+	return io.accessed[txIndex+1]
 }
 
 type DAG struct {

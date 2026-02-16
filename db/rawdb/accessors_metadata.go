@@ -20,6 +20,7 @@
 package rawdb
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -104,7 +105,7 @@ func ReadGenesis(db kv.Getter) (*types.Genesis, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(val) == 0 || string(val) == "null" {
+	if len(val) == 0 || bytes.Equal(val, []byte("null")) {
 		return nil, nil
 	}
 	var g types.Genesis
@@ -118,6 +119,7 @@ func AllSegmentsDownloadComplete(tx kv.Getter) (allSegmentsDownloadComplete bool
 	snapshotsStageProgress, err := stages.GetStageProgress(tx, stages.Snapshots)
 	return snapshotsStageProgress > 0, err
 }
+
 func AllSegmentsDownloadCompleteFromDB(db kv.RoDB) (allSegmentsDownloadComplete bool, err error) {
 	err = db.View(context.Background(), func(tx kv.Tx) error {
 		allSegmentsDownloadComplete, err = AllSegmentsDownloadComplete(tx)

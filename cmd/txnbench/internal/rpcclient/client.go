@@ -26,10 +26,10 @@ func New(url string, timeout time.Duration) *Client {
 }
 
 type rpcReq struct {
-	JsonRPC string      `json:"jsonrpc"`
-	ID      int         `json:"id"`
-	Method  string      `json:"method"`
-	Params  interface{} `json:"params"`
+	JsonRPC string `json:"jsonrpc"`
+	ID      int    `json:"id"`
+	Method  string `json:"method"`
+	Params  any    `json:"params"`
 }
 
 type rpcResp[T any] struct {
@@ -42,7 +42,7 @@ type rpcResp[T any] struct {
 	} `json:"error,omitempty"`
 }
 
-func (c *Client) Call(ctx context.Context, method string, params interface{}, out any) error {
+func (c *Client) Call(ctx context.Context, method string, params any, out any) error {
 	body, _ := json.Marshal(rpcReq{JsonRPC: "2.0", ID: 1, Method: method, Params: params})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(body))
 	if err != nil {

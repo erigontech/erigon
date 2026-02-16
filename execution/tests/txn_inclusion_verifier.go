@@ -20,7 +20,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	mapset "github.com/deckarep/golang-set/v2"
 
 	"github.com/erigontech/erigon/common"
@@ -51,7 +53,16 @@ func (v TxnInclusionVerifier) VerifyTxnsInclusion(
 			return err
 		}
 
-		r, err := v.rpcApiClient.GetTransactionReceipt(ctx, txn.Hash())
+		// fcu persistance is now asynchronous so this can get called
+		// in the test loop before the tx data is coommited in which
+		// case it will fail and needs to retry
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		backOff := backoff.WithContext(backoff.BackOff(backoff.NewConstantBackOff(50*time.Millisecond)), ctx)
+		defer cancel()
+		r, err := backoff.RetryWithData(func() (*types.Receipt, error) {
+			return v.rpcApiClient.GetTransactionReceipt(ctx, txn.Hash())
+		}, backOff)
+
 		if err != nil {
 			return err
 		}
@@ -97,7 +108,15 @@ func (v TxnInclusionVerifier) VerifyTxnsOrderedInclusion(
 			continue
 		}
 
-		r, err := v.rpcApiClient.GetTransactionReceipt(ctx, txn.Hash())
+		// fcu persistance is now asynchronous so this can get called
+		// in the test loop before the tx data is coommited in which
+		// case it will fail and needs to retry
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		backOff := backoff.WithContext(backoff.BackOff(backoff.NewConstantBackOff(50*time.Millisecond)), ctx)
+		defer cancel()
+		r, err := backoff.RetryWithData(func() (*types.Receipt, error) {
+			return v.rpcApiClient.GetTransactionReceipt(ctx, txn.Hash())
+		}, backOff)
 		if err != nil {
 			return err
 		}

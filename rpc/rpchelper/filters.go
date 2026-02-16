@@ -52,13 +52,16 @@ type Filters struct {
 
 	pendingBlock *types.Block
 
-	headsSubs        *concurrent.SyncMap[HeadsSubID, Sub[*types.Header]]
-	pendingLogsSubs  *concurrent.SyncMap[PendingLogsSubID, Sub[types.Logs]]
-	pendingBlockSubs *concurrent.SyncMap[PendingBlockSubID, Sub[*types.Block]]
-	pendingTxsSubs   *concurrent.SyncMap[PendingTxsSubID, Sub[[]types.Transaction]]
-	logsSubs         *LogsFilterAggregator
-	logsRequestor    atomic.Value
-	onNewSnapshot    func()
+	headsSubs             *concurrent.SyncMap[HeadsSubID, Sub[*types.Header]]
+	pendingLogsSubs       *concurrent.SyncMap[PendingLogsSubID, Sub[types.Logs]]
+	pendingBlockSubs      *concurrent.SyncMap[PendingBlockSubID, Sub[*types.Block]]
+	pendingTxsSubs        *concurrent.SyncMap[PendingTxsSubID, Sub[[]types.Transaction]]
+	logsSubs              *LogsFilterAggregator
+	logsRequestor         atomic.Value
+	receiptsSubs          *ReceiptsFilterAggregator
+	receiptsRequestor     atomic.Value
+	pendingReceiptsUpdate atomic.Bool
+	onNewSnapshot         func()
 
 	logsStores         *concurrent.SyncMap[LogsSubID, []*types.Log]
 	pendingHeadsStores *concurrent.SyncMap[HeadsSubID, []*types.Header]
@@ -79,6 +82,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 		pendingTxsSubs:     concurrent.NewSyncMap[PendingTxsSubID, Sub[[]types.Transaction]](),
 		pendingLogsSubs:    concurrent.NewSyncMap[PendingLogsSubID, Sub[types.Logs]](),
 		pendingBlockSubs:   concurrent.NewSyncMap[PendingBlockSubID, Sub[*types.Block]](),
+		receiptsSubs:       NewReceiptsFilterAggregator(),
 		logsSubs:           NewLogsFilterAggregator(),
 		onNewSnapshot:      onNewSnapshot,
 		logsStores:         concurrent.NewSyncMap[LogsSubID, []*types.Log](),
@@ -141,6 +145,43 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 					continue
 				}
 				logger.Warn("rpc filters: error subscribing to logs", "err", err)
+			}
+		}
+	}()
+
+	go func() {
+		if ethBackend == nil {
+			return
+		}
+		activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Receipts"}).Inc()
+		for {
+			select {
+			case <-ctx.Done():
+				activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Receipts"}).Dec()
+				return
+			default:
+			}
+			if err := ethBackend.SubscribeReceipts(ctx, ff.OnReceipts, func(send func(*remoteproto.ReceiptsFilterRequest) error) {
+				ff.mu.Lock()
+				ff.receiptsRequestor.Store(send)
+				ff.mu.Unlock()
+				if ff.pendingReceiptsUpdate.CompareAndSwap(true, false) {
+					if err := ff.sendReceiptsFilterUpdate(); err != nil {
+						logger.Warn("rpc filters: error sending pending receipts filter update", "err", err)
+					}
+				}
+			}); err != nil {
+				select {
+				case <-ctx.Done():
+					activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Receipts"}).Dec()
+					return
+				default:
+				}
+				if grpcutil.IsEndOfStream(err) || grpcutil.IsRetryLater(err) {
+					time.Sleep(3 * time.Second)
+					continue
+				}
+				logger.Warn("rpc filters: error subscribing to receipts", "err", err)
 			}
 		}
 	}()
@@ -433,6 +474,49 @@ func (ff *Filters) UnsubscribePendingTxs(id PendingTxsSubID) bool {
 	return true
 }
 
+// SubscribeReceipts subscribes to transaction receipts and returns a channel to receive the receipts
+// and a subscription ID to manage the subscription.
+func (ff *Filters) SubscribeReceipts(size int, criteria filters.ReceiptsFilterCriteria) (<-chan *remoteproto.SubscribeReceiptsReply, ReceiptsSubID) {
+	sub := newChanSub[*remoteproto.SubscribeReceiptsReply](size)
+	id := ff.receiptsSubs.insertReceiptsFilter(sub, criteria.TransactionHashes, ff.config.RpcSubscriptionFiltersMaxLogs)
+	if err := ff.sendReceiptsFilterUpdate(); err != nil {
+		ff.logger.Warn("Could not update remote receipts filter", "err", err)
+		ff.receiptsSubs.removeReceiptsFilter(id)
+	}
+	return sub.ch, id
+}
+
+// UnsubscribeReceipts unsubscribes from transaction receipts using the given subscription ID.
+// It returns true if the unsubscription was successful, otherwise false.
+func (ff *Filters) UnsubscribeReceipts(id ReceiptsSubID) bool {
+	removed := ff.receiptsSubs.removeReceiptsFilter(id)
+	if !removed {
+		return false
+	}
+	if err := ff.sendReceiptsFilterUpdate(); err != nil {
+		ff.logger.Warn("Could not update remote receipts filter after unsubscribe", "err", err)
+	}
+	return true
+}
+
+// sendReceiptsFilterUpdate sends the current receipts filter state to the server.
+// If the requestor is not yet available, it sets a flag so the onReady callback
+// will send the update once the receipts subscription goroutine connects.
+// The load-or-flag operation is atomic under ff.mu to prevent a race with onReady
+// storing the requestor concurrently.
+func (ff *Filters) sendReceiptsFilterUpdate() error {
+	rfr := ff.receiptsSubs.createFilterRequest()
+	ff.mu.Lock()
+	loaded := ff.receiptsRequestor.Load()
+	if loaded == nil {
+		ff.pendingReceiptsUpdate.Store(true)
+		ff.mu.Unlock()
+		return nil
+	}
+	ff.mu.Unlock()
+	return loaded.(func(*remoteproto.ReceiptsFilterRequest) error)(rfr)
+}
+
 // SubscribeLogs subscribes to logs using the specified filter criteria and returns a channel to receive the logs
 // and a subscription ID to manage the subscription.
 func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria) (<-chan *types.Log, LogsSubID) {
@@ -641,6 +725,11 @@ func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 		v.Send(&header)
 		return nil
 	})
+}
+
+// OnReceipts handles a new receipt event from the remote and processes it.
+func (ff *Filters) OnReceipts(reply *remoteproto.SubscribeReceiptsReply) {
+	ff.receiptsSubs.distributeReceipt(reply)
 }
 
 // OnNewTx handles a new transaction event from the transaction pool and processes it.

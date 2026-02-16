@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -37,7 +38,7 @@ type dummyContractRef struct {
 }
 
 func (dummyContractRef) ReturnGas(*big.Int)          {}
-func (dummyContractRef) Address() common.Address     { return common.Address{} }
+func (dummyContractRef) Address() common.Address     { return accounts.ZeroAddress.Value() }
 func (dummyContractRef) Value() *big.Int             { return new(big.Int) }
 func (dummyContractRef) SetCode(common.Hash, []byte) {}
 func (d *dummyContractRef) ForEachStorage(callback func(key, value common.Hash) bool) {
@@ -50,19 +51,19 @@ func (d *dummyContractRef) SetNonce(uint64)            {}
 func (d *dummyContractRef) Balance() *big.Int          { return new(big.Int) }
 
 func TestStoreCapture(t *testing.T) {
-	c := vm.NewJumpDestCache(128)
+	//c := vm.NewJumpDestCache(128)
 	ibs := state.New(state.NewNoopReader())
 	ibs.AddRefund(1337)
 
 	var (
 		logger   = NewStructLogger(nil)
 		evm      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainConfig, vm.Config{Tracer: logger.Hooks()})
-		contract = *vm.NewContract(common.Address{}, common.Address{}, common.Address{}, uint256.Int{}, c)
+		contract = *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 	)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x0, byte(vm.SSTORE)}
 	var index common.Hash
-	logger.OnTxStart(evm.GetVMContext(), nil, common.Address{})
-	_, _, err := evm.Interpreter().Run(contract, 100000, []byte{}, false)
+	logger.OnTxStart(evm.GetVMContext(), nil, accounts.ZeroAddress)
+	_, _, err := evm.Run(contract, 100000, []byte{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,12 +84,12 @@ func TestStoreCapture(t *testing.T) {
 //		env      = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, chain.TestChainConfig, vm.Config{Tracer: logger.Hooks()})
 //		mem      = vm.NewMemory()
 //		stack    = vm.New()
-//		contract = vm.NewContract(&dummyContractRef{}, common.Address{}, new(uint256.Int), 0, c)
+//		contract = vm.NewContract(&dummyContractRef{}, accounts.ZeroAddress, new(uint256.Int), 0, c)
 //	)
 //	stack.push(uint256.NewInt(1))
 //	stack.push(uint256.NewInt(0))
 //	var index common.Hash
-//	logger.OnTxStart(env.GetVMContext(), nil, common.Address{})
+//	logger.OnTxStart(env.GetVMContext(), nil, accounts.ZeroAddress)
 //	logger.OnOpcode(0, byte(vm.SSTORE), 0, 0, &vm.ScopeContext{
 //		Memory:   mem,
 //		Stack:    stack,

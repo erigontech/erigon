@@ -23,7 +23,7 @@ func TestAppendReceipt(t *testing.T) {
 	defer tx.Rollback()
 
 	ttx := tx
-	doms, err := execctx.NewSharedDomains(ttx, log.New())
+	doms, err := execctx.NewSharedDomains(context.Background(), ttx, log.New())
 	require.NoError(err)
 	defer doms.Close()
 

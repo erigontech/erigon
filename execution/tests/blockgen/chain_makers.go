@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
@@ -36,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
 
@@ -49,10 +51,11 @@ type BlockGen struct {
 	stateReader state.StateReader
 	ibs         *state.IntraBlockState
 
-	gasPool  *protocol.GasPool
-	txs      []types.Transaction
-	receipts []*types.Receipt
-	uncles   []*types.Header
+	gasPool     *protocol.GasPool
+	txs         []types.Transaction
+	receipts    types.Receipts
+	uncles      []*types.Header
+	withdrawals []*types.Withdrawal
 
 	config *chain.Config
 	engine rules.Engine
@@ -121,7 +124,9 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 		b.SetCoinbase(common.Address{})
 	}
 	b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
-	receipt, _, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
+	gasUsed := protocol.NewGasUsed(b.header, b.receipts.CumulativeGasUsed())
+	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, gasUsed, vm.Config{})
+	protocol.SetGasUsed(b.header, gasUsed)
 	if err != nil {
 		panic(err)
 	}
@@ -137,7 +142,9 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 		b.SetCoinbase(common.Address{})
 	}
 	b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
-	receipt, _, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, &b.header.GasUsed, b.header.BlobGasUsed, vm.Config{})
+	gasUsed := protocol.NewGasUsed(b.header, b.receipts.CumulativeGasUsed())
+	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, gasUsed, vm.Config{})
+	protocol.SetGasUsed(b.header, gasUsed)
 	_ = err // accept failed transactions
 	b.txs = append(b.txs, txn)
 	b.receipts = append(b.receipts, receipt)
@@ -150,6 +157,10 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 // chain processing. This is best used in conjunction with raw block insertion.
 func (b *BlockGen) AddUncheckedTx(tx types.Transaction) {
 	b.txs = append(b.txs, tx)
+}
+
+func (b *BlockGen) AddWithdrawal(withdrawal *types.Withdrawal) {
+	b.withdrawals = append(b.withdrawals, withdrawal)
 }
 
 // Number returns the block number of the block being generated.
@@ -169,14 +180,14 @@ func (b *BlockGen) AddUncheckedReceipt(receipt *types.Receipt) {
 // TxNonce returns the next valid transaction nonce for the
 // account at addr. It panics if the account does not exist.
 func (b *BlockGen) TxNonce(addr common.Address) uint64 {
-	exist, err := b.ibs.Exist(addr)
+	exist, err := b.ibs.Exist(accounts.InternAddress(addr))
 	if err != nil {
 		panic(fmt.Sprintf("can't get account: %s", err))
 	}
 	if !exist {
 		panic("account does not exist")
 	}
-	nonce, err := b.ibs.GetNonce(addr)
+	nonce, err := b.ibs.GetNonce(accounts.InternAddress(addr))
 	if err != nil {
 		panic(fmt.Sprintf("can't get account: %s", err))
 	}
@@ -238,10 +249,11 @@ func (b *BlockGen) GetReceipts() []*types.Receipt {
 var GenerateTrace bool
 
 type ChainPack struct {
-	Headers  []*types.Header
-	Blocks   []*types.Block
-	Receipts []types.Receipts
-	TopBlock *types.Block // Convenience field to access the last block
+	Headers          []*types.Header
+	Blocks           []*types.Block
+	Receipts         []types.Receipts
+	TopBlock         *types.Block // Convenience field to access the last block
+	BlockAccessLists [][]byte     // RLP-encoded block access list bytes, indexed parallel to Blocks (nil entry = no BAL)
 }
 
 func (cp *ChainPack) Length() int {
@@ -251,12 +263,16 @@ func (cp *ChainPack) Length() int {
 // OneBlock returns a ChainPack which contains just one
 // block with given index
 func (cp *ChainPack) Slice(i, j int) *ChainPack {
-	return &ChainPack{
+	result := &ChainPack{
 		Headers:  cp.Headers[i:j],
 		Blocks:   cp.Blocks[i:j],
 		Receipts: cp.Receipts[i:j],
 		TopBlock: cp.Blocks[j-1],
 	}
+	if len(cp.BlockAccessLists) > 0 {
+		result.BlockAccessLists = cp.BlockAccessLists[i:j]
+	}
+	return result
 }
 
 // Copy creates a deep copy of the ChainPack.
@@ -282,11 +298,23 @@ func (cp *ChainPack) Copy() *ChainPack {
 
 	topBlock := cp.TopBlock.Copy()
 
+	var blockAccessLists [][]byte
+	if len(cp.BlockAccessLists) > 0 {
+		blockAccessLists = make([][]byte, len(cp.BlockAccessLists))
+		for i, bal := range cp.BlockAccessLists {
+			if bal != nil {
+				blockAccessLists[i] = make([]byte, len(bal))
+				copy(blockAccessLists[i], bal)
+			}
+		}
+	}
+
 	return &ChainPack{
-		Headers:  headers,
-		Blocks:   blocks,
-		Receipts: receipts,
-		TopBlock: topBlock,
+		Headers:          headers,
+		Blocks:           blocks,
+		Receipts:         receipts,
+		TopBlock:         topBlock,
+		BlockAccessLists: blockAccessLists,
 	}
 }
 
@@ -316,7 +344,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	defer tx.Rollback()
 	logger := log.New("generate-chain", config.ChainName)
 
-	domains, err := execctx.NewSharedDomains(tx, logger)
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -325,11 +353,14 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	stateReader := state.NewReaderV3(domains.AsGetter(tx))
 	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
 
-	txNum := -1
+	txNum, err := rawdbv3.TxNums.Max(ctx, tx, parent.NumberU64())
+	if err != nil {
+		return nil, err
+	}
 	txNumIncrement := func() {
 		txNum++
-		stateWriter.SetTxNum(uint64(txNum))
-		domains.SetTxNum(uint64(txNum))
+		stateWriter.SetTxNum(txNum)
+		domains.SetTxNum(txNum)
 	}
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
 		stateWriter state.StateWriter) (*types.Block, types.Receipts, error) {
@@ -340,12 +371,15 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				txNumIncrement()
 			},
 		}
+		if chainreader.Config().IsShanghai(parent.Time()) {
+			b.withdrawals = []*types.Withdrawal{}
+		}
 		b.header = makeHeader(chainreader, parent, ibs, b.engine)
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			limit := new(big.Int).Add(daoBlock, misc.DAOForkExtraRange)
 			if b.header.Number.Cmp(daoBlock) >= 0 && b.header.Number.Cmp(limit) < 0 {
-				b.header.Extra = common.CopyBytes(misc.DAOForkBlockExtra)
+				b.header.Extra = common.Copy(misc.DAOForkBlockExtra)
 			}
 		}
 		if b.engine != nil {
@@ -365,7 +399,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db
-			blockContext := protocol.NewEVMBlockContext(b.header, protocol.GetHashFn(b.header, nil), b.engine, nil, config)
+			blockContext := protocol.NewEVMBlockContext(b.header, protocol.GetHashFn(b.header, nil), b.engine, accounts.NilAddress, config)
 			if err := ibs.CommitBlock(blockContext.Rules(config), stateWriter); err != nil {
 				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
@@ -381,7 +415,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			b.header.Root = common.BytesToHash(stateRoot)
 
 			// Recreating block to make sure Root makes it into the header
-			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, nil /* withdrawals */)
+			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, b.withdrawals)
 			return block, b.receipts, nil
 		}
 		return nil, nil, errors.New("no engine to generate blocks")

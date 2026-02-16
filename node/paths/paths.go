@@ -114,6 +114,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		return networkDataDirCheckingLegacy(datadir, "gnosis")
 	case networkname.Chiado:
 		return networkDataDirCheckingLegacy(datadir, "chiado")
+	case networkname.Bloatnet:
+		return networkDataDirCheckingLegacy(datadir, "bloatnet")
 
 	default:
 		return datadir

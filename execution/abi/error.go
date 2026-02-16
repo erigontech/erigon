@@ -82,7 +82,7 @@ func (e *Error) String() string {
 	return e.str
 }
 
-func (e *Error) Unpack(data []byte) (interface{}, error) {
+func (e *Error) Unpack(data []byte) (any, error) {
 	if len(data) < 4 {
 		return "", errors.New("invalid data for unpacking")
 	}
@@ -147,6 +147,6 @@ func typeCheck(t Type, value reflect.Value) error {
 }
 
 // typeErr returns a formatted type casting error.
-func typeErr(expected, got interface{}) error {
+func typeErr(expected, got any) error {
 	return fmt.Errorf("abi: cannot use %v as type %v as argument", got, expected)
 }

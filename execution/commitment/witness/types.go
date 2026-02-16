@@ -12,5 +12,5 @@ type AccountWithAddress struct {
 
 type CodeWithHash struct {
 	Code     []byte
-	CodeHash common.Hash
+	CodeHash accounts.CodeHash
 }

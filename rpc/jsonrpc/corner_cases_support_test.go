@@ -24,53 +24,63 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc"
 )
 
 // TestNotFoundMustReturnNil - next methods - when record not found in db - must return nil instead of error
 // see https://github.com/erigontech/erigon/issues/1645
 func TestNotFoundMustReturnNil(t *testing.T) {
-	require := require.New(t)
+	assertions := require.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	api := NewEthAPI(newBaseApiForTest(m),
-		m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	ctx := context.Background()
 
 	a, err := api.GetTransactionByBlockNumberAndIndex(ctx, 10_000, 1)
-	require.Nil(a)
-	require.NoError(err)
+	assertions.Nil(a)
+	assertions.NoError(err)
 
 	b, err := api.GetTransactionByBlockHashAndIndex(ctx, common.Hash{}, 1)
-	require.Nil(b)
-	require.NoError(err)
+	assertions.Nil(b)
+	assertions.NoError(err)
 
 	c, err := api.GetTransactionByBlockNumberAndIndex(ctx, 10_000, 1)
-	require.Nil(c)
-	require.NoError(err)
+	assertions.Nil(c)
+	assertions.NoError(err)
 
 	d, err := api.GetTransactionReceipt(ctx, common.Hash{})
-	require.Nil(d)
-	require.NoError(err)
+	assertions.Nil(d)
+	assertions.NoError(err)
 
 	e, err := api.GetBlockByHash(ctx, rpc.BlockNumberOrHashWithHash(common.Hash{}, true), false)
-	require.Nil(e)
-	require.NoError(err)
+	assertions.Nil(e)
+	assertions.NoError(err)
 
 	f, err := api.GetBlockByNumber(ctx, 10_000, false)
-	require.Nil(f)
-	require.NoError(err)
+	assertions.Nil(f)
+	assertions.NoError(err)
 
 	g, err := api.GetUncleByBlockHashAndIndex(ctx, common.Hash{}, 1)
-	require.Nil(g)
-	require.NoError(err)
+	assertions.Nil(g)
+	assertions.NoError(err)
 
 	h, err := api.GetUncleByBlockNumberAndIndex(ctx, 10_000, 1)
-	require.Nil(h)
-	require.NoError(err)
+	assertions.Nil(h)
+	assertions.NoError(err)
 
 	j, err := api.GetBlockTransactionCountByNumber(ctx, 10_000)
-	require.Nil(j)
-	require.NoError(err)
+	assertions.Nil(j)
+	assertions.NoError(err)
+}
+
+// TestNotFoundMustReturnError - next methods - when record not found in db - must return error
+// see https://github.com/erigontech/erigon/issues/18225
+func TestNotFoundMustReturnError(t *testing.T) {
+	assertions := require.New(t)
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := context.Background()
+
+	a, err := api.GetBalance(ctx, common.Address{}, rpc.BlockNumberOrHashWithNumber(10_000))
+	assertions.Nil(a)
+	assertions.EqualError(err, "block not found: 10000")
 }

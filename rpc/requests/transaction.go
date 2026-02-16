@@ -159,6 +159,21 @@ func (reqGen *requestGenerator) SendTransaction(signedTx types.Transaction) (com
 	return result, nil
 }
 
+func (reqGen *requestGenerator) SendRawTransactionSync(signedTx types.Transaction, timeoutMs *uint64) (*types.Receipt, error) {
+	var result *types.Receipt
+
+	var buf bytes.Buffer
+	if err := signedTx.MarshalBinary(&buf); err != nil {
+		return nil, fmt.Errorf("failed to marshal binary: %v", err)
+	}
+
+	if err := reqGen.rpcCallOnce(context.Background(), &result, Methods.ETHSendRawTransactionSync, hexutil.Bytes(buf.Bytes()), timeoutMs); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
 func (req *requestGenerator) GetTransactionByHash(hash common.Hash) (*ethapi.RPCTransaction, error) {
 	var result ethapi.RPCTransaction
 

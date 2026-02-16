@@ -17,8 +17,10 @@
 package stagedsync
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -40,7 +42,7 @@ type UnwindFunc func(u *UnwindState, s *StageState, doms *execctx.SharedDomains,
 
 // PruneFunc is the execution function for the stage to prune old data.
 // * state - is the current state of the stage and contains stage data.
-type PruneFunc func(p *PruneState, tx kv.RwTx, logger log.Logger) error
+type PruneFunc func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error
 
 // Stage is a single sync stage in staged sync.
 type Stage struct {
@@ -89,8 +91,13 @@ func (s *StageState) SyncMode() stages.Mode {
 
 // Update updates the stage state (current block number) in the database. Can be called multiple times during stage execution.
 func (s *StageState) Update(db kv.Putter, newBlockNum uint64) error {
-	return stages.SaveStageProgress(db, s.ID, newBlockNum)
+	if err := stages.SaveStageProgress(db, s.ID, newBlockNum); err != nil {
+		return err
+	}
+	s.BlockNumber = newBlockNum
+	return nil
 }
+
 func (s *StageState) UpdatePrune(db kv.Putter, blockNum uint64) error {
 	return stages.SaveStagePruneProgress(db, s.ID, blockNum)
 }
