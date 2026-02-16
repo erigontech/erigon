@@ -20,11 +20,43 @@
 package vm
 
 import (
+	"fmt"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
+
+// CheckMaxInitCodeSize checks the size of contract initcode against the protocol-defined limit.
+func CheckMaxInitCodeSize(IsAmsterdam, IsShanghai bool, size uint64) error {
+	if IsAmsterdam {
+		if size > params.MaxInitCodeSizeAmsterdam {
+			return fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, size, params.MaxCodeSizeAmsterdam)
+		}
+	} else if IsShanghai {
+		if size > params.MaxInitCodeSize {
+			return fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, size, params.MaxInitCodeSize)
+		}
+	}
+	return nil
+}
+
+// CheckMaxCodeSize checks the size of contract code against the protocol-defined limit.
+func CheckMaxCodeSize(rules *chain.Rules, size uint64) error {
+	if rules.IsAmsterdam {
+		if size > params.MaxCodeSizeAmsterdam {
+			return fmt.Errorf("%w: code size %v limit %v", ErrMaxCodeSizeExceeded, size, params.MaxCodeSizeAmsterdam)
+		}
+	} else if rules.IsSpuriousDragon {
+		if size > params.MaxCodeSize {
+			return fmt.Errorf("%w: code size %v limit %v", ErrMaxCodeSizeExceeded, size, params.MaxCodeSize)
+		}
+	}
+	return nil
+}
 
 // calcMemSize64 calculates the required memory size, and returns
 // the size and whether the result overflowed uint64

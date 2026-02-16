@@ -365,8 +365,6 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	sender := msg.From()
 	contractCreation := msg.To().IsNil()
 	rules := st.evm.ChainRules()
-	vmConfig := st.evm.Config()
-	isEIP3860 := vmConfig.HasEip3860(rules)
 	accessTuples := slices.Clone[types.AccessList](msg.AccessList())
 
 	// set code tx
@@ -377,10 +375,11 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	}
 
 	// Check whether the init code size has been exceeded.
-	if isEIP3860 && contractCreation && len(st.data) > params.MaxInitCodeSize {
-		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
+	if contractCreation {
+		if err := vm.CheckMaxInitCodeSize(rules.IsAmsterdam, rules.IsShanghai, uint64(len(st.data))); err != nil {
+			return nil, err
+		}
 	}
-
 	// Execute the preparatory steps for state transition which includes:
 	// - prepare accessList(post-berlin; eip-7702)
 	// - reset transient storage(eip 1153)
@@ -523,8 +522,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 
 	// Check whether the init code size has been exceeded.
-	if isEIP3860 && contractCreation && len(st.data) > params.MaxInitCodeSize {
-		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
+	if contractCreation {
+		if err := vm.CheckMaxInitCodeSize(rules.IsAmsterdam, rules.IsShanghai, uint64(len(st.data))); err != nil {
+			return nil, err
+		}
 	}
 
 	// Execute the preparatory steps for state transition which includes:

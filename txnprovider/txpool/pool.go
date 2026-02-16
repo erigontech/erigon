@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
@@ -146,6 +147,8 @@ type TxPool struct {
 	isPostPrague            atomic.Bool
 	osakaTime               *uint64
 	isPostOsaka             atomic.Bool
+	amsterdamTime           *uint64
+	isPostAmsterdam         atomic.Bool
 	feeCalculator           FeeCalculator
 	p2pFetcher              *Fetch
 	p2pSender               *Send
@@ -292,6 +295,13 @@ func New(
 		}
 		osakaTimeU64 := chainConfig.OsakaTime.Uint64()
 		res.osakaTime = &osakaTimeU64
+	}
+	if chainConfig.AmsterdamTime != nil {
+		if !chainConfig.AmsterdamTime.IsUint64() {
+			return nil, errors.New("amsterdamTime overflow")
+		}
+		amsterdamTimeU64 := chainConfig.AmsterdamTime.Uint64()
+		res.amsterdamTime = &amsterdamTimeU64
 	}
 
 	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, res.chainID, logger, opts...)
@@ -927,10 +937,15 @@ func toBlobs(_blobs [][]byte) []*goethkzg.Blob {
 }
 
 func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) txpoolcfg.DiscardReason {
-	isEIP3860 := p.isShanghai() || p.isAgra()
+	isShanghai := p.isShanghai()
+	isEIP3860 := isShanghai || p.isAgra()
 	isPrague := p.isPrague() || p.isBhilai()
-	if isEIP3860 && txn.Creation && txn.DataLen > params.MaxInitCodeSize {
-		return txpoolcfg.InitCodeTooLarge // EIP-3860
+	isAmsterdam := p.isAmsterdam()
+
+	if txn.Creation {
+		if err := vm.CheckMaxInitCodeSize(isAmsterdam, isShanghai, uint64(txn.DataLen)); err != nil {
+			return txpoolcfg.InitCodeTooLarge
+		}
 	}
 
 	if txn.Type == types.AccountAbstractionTxType {
@@ -1220,6 +1235,10 @@ func (p *TxPool) isPrague() bool {
 
 func (p *TxPool) isOsaka() bool {
 	return isTimeBasedForkActivated(&p.isPostOsaka, p.osakaTime)
+}
+
+func (p *TxPool) isAmsterdam() bool {
+	return isTimeBasedForkActivated(&p.isPostAmsterdam, p.amsterdamTime)
 }
 
 func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
