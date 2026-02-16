@@ -1118,87 +1118,8 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return result, nil
 	}
 
-	// === PHASE 1: Regular Witness Generation ===
-	// Touch all accessed/modified accounts, storage keys, and code keys
-	for addr := range allAddresses {
-		sdCtx.TouchKey(kv.AccountsDomain, string(addr.Bytes()), nil)
-	}
-	for addr, keys := range allStorageKeys {
-		for key := range keys {
-			storageKey := string(common.FromHex(addr.Hex()[2:] + key.Hex()[2:]))
-			sdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
-		}
-	}
-	for addr := range allCode {
-		sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
-	}
-
-	// Generate the regular witness trie (no collapse tracing)
-	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, codeReads, "debug_executionWitness")
-	if err != nil {
-		return nil, err
-	}
-
-	// === PHASE 2: Collapse Detection via ComputeCommitment ===
-	// Detect trie node collapses by running the full commitment for this block.
-	// When a FullNode is reduced to a single child (e.g., due to storage deletes),
-	// the remaining child's data must be included in the witness for correct
-	// state root computation during stateless execution.
-	//
-	// We only record sibling paths here (not build witness tries), because the grid
-	// is mutated during ComputeCommitment and would produce incorrect root hashes.
-	// After collecting paths, we reset to parent state and regenerate the witness
-	// with sibling keys included.
-	var collapseSiblingPaths [][]byte
-
-	// Set up split reader: branch data from parent state, plain state from end of block
-	branchDataReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
-	plainStateReader := commitmentdb.NewHistoryStateReader(tx, lastTxNumInBlock+1)
-	splitStateReader := rpchelper.NewCommitmentSplitStateReader(branchDataReader, plainStateReader /* withHistory */, true)
-	sdCtx.SetCustomHistoryStateReader(splitStateReader)
-	if err := domains.SeekCommitment(context.Background(), tx); err != nil {
-		return nil, fmt.Errorf("failed to re-seek commitment for collapse detection: %w", err)
-	}
-
-	// Touch all keys for the commitment run (HashSort consumed them during Witness)
-	for addr := range allAddresses {
-		sdCtx.TouchKey(kv.AccountsDomain, string(addr.Bytes()), nil)
-	}
-	for addr, keys := range allStorageKeys {
-		for key := range keys {
-			storageKey := string(common.FromHex(addr.Hex()[2:] + key.Hex()[2:]))
-			sdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
-		}
-	}
-	for addr := range allCode {
-		sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
-	}
-
-	// Set up collapse tracer that only records the sibling hashed key paths
-	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
-		fmt.Printf("[witness] node collapse detected at path %x (len=%d)\n", hashedKeyPath, len(hashedKeyPath))
-		collapseSiblingPaths = append(collapseSiblingPaths, common.Copy(hashedKeyPath))
-	})
-
-	// Run full commitment to detect collapses
-	_, err = sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
-	if err != nil {
-		fmt.Printf("[witness] collapse detection via ComputeCommitment failed: %v\n", err)
-	}
-	sdCtx.SetCollapseTracer(nil)
-
-	// If collapses were detected, regenerate the witness with sibling keys included.
-	// Reset to parent state so that toWitnessTrie reads clean pre-state data.
-	if len(collapseSiblingPaths) > 0 {
-		fmt.Printf("[witness] detected %d collapse sibling paths, regenerating witness with siblings\n", len(collapseSiblingPaths))
-
-		// Reset to parent state (branch + plain data from start of block)
-		sdCtx.SetHistoryStateReader(tx, firstTxNumInBlock)
-		if err := domains.SeekCommitment(context.Background(), tx); err != nil {
-			return nil, fmt.Errorf("failed to re-seek commitment for collapse witness: %w", err)
-		}
-
-		// Re-touch all original keys
+	// Helper to touch all accessed/modified accounts, storage keys, and code keys
+	touchAllKeys := func() {
 		for addr := range allAddresses {
 			sdCtx.TouchKey(kv.AccountsDomain, string(addr.Bytes()), nil)
 		}
@@ -1211,25 +1132,92 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		for addr := range allCode {
 			sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
 		}
+	}
 
-		// Touch the collapse sibling hashed keys (these may be partial/intermediate keys)
+	// Helper to reset commitment to parent block state and re-seek
+	resetToParentState := func() error {
+		sdCtx.SetHistoryStateReader(tx, firstTxNumInBlock)
+		return domains.SeekCommitment(context.Background(), tx)
+	}
+
+	// === STEP 1: Collapse Detection via ComputeCommitment ===
+	// Detect trie node collapses by running the full commitment for this block.
+	// When a FullNode is reduced to a single child (e.g., due to storage deletes),
+	// the remaining child's data must be included in the witness for correct
+	// state root computation during stateless execution.
+	//
+	// We only record sibling paths here (not build witness tries), because the grid
+	// is mutated during ComputeCommitment and would produce incorrect root hashes.
+	var collapseSiblingPaths [][]byte
+
+	// Set up split reader: branch data from parent state, plain state from end of block
+	branchDataReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
+	plainStateReader := commitmentdb.NewHistoryStateReader(tx, lastTxNumInBlock+1)
+	splitStateReader := rpchelper.NewCommitmentSplitStateReader(branchDataReader, plainStateReader /* withHistory */, true)
+	sdCtx.SetCustomHistoryStateReader(splitStateReader)
+	if err := domains.SeekCommitment(context.Background(), tx); err != nil {
+		return nil, fmt.Errorf("failed to re-seek commitment for collapse detection: %w", err)
+	}
+
+	touchAllKeys()
+
+	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
+		fmt.Printf("[witness] node collapse detected at path %x (len=%d)\n", hashedKeyPath, len(hashedKeyPath))
+		collapseSiblingPaths = append(collapseSiblingPaths, common.Copy(hashedKeyPath))
+	})
+
+	_, err = sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
+	if err != nil {
+		fmt.Printf("[witness] collapse detection via ComputeCommitment failed: %v\n", err)
+	}
+	sdCtx.SetCollapseTracer(nil)
+
+	// === STEP 2: Generate witness for the regular (non-collapse) keys ===
+	if err := resetToParentState(); err != nil {
+		return nil, fmt.Errorf("failed to reset commitment for regular witness: %w", err)
+	}
+	touchAllKeys()
+
+	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, codeReads, "debug_executionWitness")
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(witnessRoot, expectedParentRoot[:]) {
+		return nil, fmt.Errorf("regular witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
+	}
+	fmt.Printf("[witness] regular witness root OK: %x\n", witnessRoot)
+
+	// === STEP 3: If collapses detected, generate a separate witness for sibling keys and merge ===
+	if len(collapseSiblingPaths) > 0 {
+		fmt.Printf("[witness] detected %d collapse sibling paths, generating collapse witness\n", len(collapseSiblingPaths))
+
 		for _, siblingPath := range collapseSiblingPaths {
 			fmt.Printf("[witness] touching collapse sibling hashed key: %x (len=%d)\n", siblingPath, len(siblingPath))
 			sdCtx.TouchHashedKey(siblingPath)
 		}
 
-		// Regenerate witness with all keys (original + sibling)
-		witnessTrie, witnessRoot, err = sdCtx.Witness(ctx, codeReads, "debug_executionWitness_with_collapses")
+		collapseTrie, collapseRoot, err := sdCtx.Witness(ctx, codeReads, "debug_executionWitness_collapses")
 		if err != nil {
-			return nil, fmt.Errorf("failed to generate witness with collapse siblings: %w", err)
+			return nil, fmt.Errorf("failed to generate collapse witness: %w", err)
 		}
+		if !bytes.Equal(collapseRoot, expectedParentRoot[:]) {
+			return nil, fmt.Errorf("collapse witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(collapseRoot), expectedParentRoot)
+		}
+		fmt.Printf("[witness] collapse witness root OK: %x\n", collapseRoot)
+
+		// Merge regular witness and collapse witness into one trie
+		witnessTrie, err = trie.MergeTries([]*trie.Trie{witnessTrie, collapseTrie})
+		if err != nil {
+			return nil, fmt.Errorf("failed to merge regular and collapse witness tries: %w", err)
+		}
+		witnessRoot = witnessTrie.Root()
 	}
 
 	printPreStateCheck(witnessTrie, readAddresses, writeAddresses, readStorageKeys, writeStorageKeys)
 
-	// Verify root matches parent state root
+	// Final verification: merged root matches parent state root
 	if !bytes.Equal(witnessRoot, expectedParentRoot[:]) {
-		return nil, fmt.Errorf("Witness root mismatch: calculated=%x , expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
+		return nil, fmt.Errorf("merged witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
 	}
 
 	// Collect all unique RLP-encoded trie nodes by traversing from root to leaves
