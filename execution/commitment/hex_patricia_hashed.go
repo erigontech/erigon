@@ -2458,11 +2458,6 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 			if err != nil {
 				return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
 			}
-			if hph.collapseTracer != nil {
-				compact, _ := CompactKey(hashedKey)
-				fmt.Printf("[collapse-db] storage read: plainKey=%x, hashedKey=%x, flags=%d, deleted=%v, storageLen=%d\n",
-					plainKey, compact, stateUpdate.Flags, stateUpdate.Deleted(), stateUpdate.StorageLen)
-			}
 		}
 	}
 	hph.updateCell(plainKey, hashedKey, stateUpdate)
