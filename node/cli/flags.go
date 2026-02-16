@@ -234,12 +234,6 @@ var (
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
-	chainId := cfg.NetworkID
-	if cfg.Genesis != nil {
-		chainId = cfg.Genesis.Config.ChainID.Uint64()
-	}
-	_ = chainId
-
 	blockDistance := ctx.Uint64(PruneBlocksDistanceFlag.Name)
 	distance := ctx.Uint64(PruneDistanceFlag.Name)
 
