@@ -251,10 +251,10 @@ func (c *Compressor) AddWord(word []byte) error {
 		c.superstring[off+2*len(word)] = 0
 		c.superstring[off+2*len(word)+1] = 0
 
-		for _, a := range word {
-			c.superstring = append(c.superstring, 1, a)
-		}
-		c.superstring = append(c.superstring, 0, 0)
+		//for _, a := range word {
+		//	c.superstring = append(c.superstring, 1, a)
+		//}
+		//c.superstring = append(c.superstring, 0, 0)
 	}
 
 	//if c.superstringCount%c.SamplingFactor == 0 {
