@@ -1088,43 +1088,134 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 	expectedParentRoot = parentHeader.Root
 
-	// Get first txnum of parentNum+1 to ensure that correct state root will be restored
-	lastTxnInBlock, err := api._txNumReader.Min(ctx, tx, parentNum+1)
+	// Get first txnum of blockNum to ensure that correct state root will be restored
+	firstTxNumInBlock, err := api._txNumReader.Min(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
+	// last txnum in block used for commitment calculation and collapsed paths tracing
+	lastTxNumInBlock, err := api._txNumReader.Max(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
 	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
-	if lastTxnInBlock < commitmentStartingTxNum {
-		return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, lastTxnInBlock)
+	if firstTxNumInBlock < commitmentStartingTxNum {
+		return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
 	}
 
-	sdCtx.SetHistoryStateReader(tx, lastTxnInBlock)
+	// we want to read paths as of beginning of the given block
+	sdCtx.SetHistoryStateReader(tx, firstTxNumInBlock)
 	if err := domains.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, err
 	}
+	fmt.Printf("[witness] after SeekCommitment: blockNum=%d, txNum=%d, parentNum=%d,  firstTxnumInBlock=%d\n",
+		domains.BlockNum(), domains.TxNum(), parentNum, firstTxNumInBlock)
 
 	if len(allAddresses)+len(allStorageKeys) == 0 { // nothing touched, return empty witness
 		return result, nil
 	}
 
-	// Touch all accessed/modified accounts for proof generation
+	// === PHASE 1: Regular Witness Generation ===
+	// Touch all accessed/modified accounts, storage keys, and code keys
 	for addr := range allAddresses {
 		sdCtx.TouchKey(kv.AccountsDomain, string(addr.Bytes()), nil)
 	}
-
-	// Touch all accessed/modified storage keys
 	for addr, keys := range allStorageKeys {
 		for key := range keys {
 			storageKey := string(common.FromHex(addr.Hex()[2:] + key.Hex()[2:]))
 			sdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
 		}
 	}
+	for addr := range allCode {
+		sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
+	}
 
-	// Generate the witness trie with all proofs
+	// Generate the regular witness trie (no collapse tracing)
 	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, codeReads, "debug_executionWitness")
 	if err != nil {
 		return nil, err
+	}
+
+	// we want to compute commitment for blockNr, so we need to set the state as of the end of that block
+	sdCtx.SetHistoryStateReader(tx, lastTxNumInBlock)
+	// Re-seek commitment to restore trie state
+	if err := domains.SeekCommitment(context.Background(), tx); err != nil {
+		return nil, fmt.Errorf("failed to re-seek commitment after witness: %w", err)
+	}
+
+	// === PHASE 2: Collapse Detection via ComputeCommitment ===
+	// Detect trie node collapses by running the full commitment for this block.
+	// When a FullNode is reduced to a single child (e.g., due to storage deletes),
+	// the remaining child's data must be included in the witness for correct
+	// state root computation during stateless execution.
+	type collapseInfo struct {
+		path []byte
+		tr   *trie.Trie
+	}
+	var collapses []collapseInfo
+
+	// Touch all keys again (HashSort consumed them during Witness)
+	for addr := range allAddresses {
+		sdCtx.TouchKey(kv.AccountsDomain, string(addr.Bytes()), nil)
+	}
+	for addr, keys := range allStorageKeys {
+		for key := range keys {
+			storageKey := string(common.FromHex(addr.Hex()[2:] + key.Hex()[2:]))
+			fmt.Printf("[collapse-touch] storage key: %x\n", []byte(storageKey))
+			sdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
+		}
+	}
+	for addr := range allCode {
+		sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
+	}
+
+	// Set up collapse tracer
+	sdCtx.SetCollapseTracer(func(path []byte, collapseTrie *trie.Trie) {
+		fmt.Printf("[witness] node collapse detected at path %x (len=%d), trie=%v\n", path, len(path), collapseTrie != nil)
+		if collapseTrie != nil {
+			collapseTrie.Reset()
+			collapses = append(collapses, collapseInfo{path: common.Copy(path), tr: collapseTrie})
+		}
+	})
+
+	// Run full commitment to detect collapses
+	_, err = sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
+	if err != nil {
+		fmt.Printf("[witness] collapse detection via ComputeCommitment failed: %v\n", err)
+		// Continue - we'll try without collapse tries
+	}
+
+	// Clear the tracer
+	sdCtx.SetCollapseTracer(nil)
+
+	if len(collapses) > 0 {
+		fmt.Printf("[witness] collected %d collapse witness tries\n", len(collapses))
+		for i, c := range collapses {
+			ctHash := c.tr.Hash()
+			match := ctHash == expectedParentRoot
+			fmt.Printf("[witness] collapse trie %d: path=%x (len=%d), hash=%x, expectedParentRoot=%x, match=%v\n",
+				i, c.path, len(c.path), ctHash, expectedParentRoot, match)
+		}
+	}
+
+	// Merge collapse witness tries into the regular witness trie
+	if len(collapses) > 0 {
+		allTries := make([]*trie.Trie, 0, 1+len(collapses))
+		allTries = append(allTries, witnessTrie)
+		for _, c := range collapses {
+			if c.tr.Hash() == expectedParentRoot {
+				allTries = append(allTries, c.tr)
+			}
+		}
+		if len(allTries) > 1 {
+			witnessTrie, err = trie.MergeTries(allTries)
+			if err != nil {
+				return nil, fmt.Errorf("failed to merge collapse tries with witness: %w", err)
+			}
+			witnessRoot = witnessTrie.Root()
+		}
 	}
 
 	printPreStateCheck(witnessTrie, readAddresses, writeAddresses, readStorageKeys, writeStorageKeys)

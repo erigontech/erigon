@@ -63,6 +63,13 @@ type DomainPutter = stateifs.DomainPutter
 // CommitmentWrite represents a commitment domain write that needs to be added to changesets.
 type CommitmentWrite = stateifs.CommitmentWrite
 
+// CollapseTracer is a callback invoked when a trie node collapse occurs during commitment.
+// When a FullNode is reduced to a single child (updateKindPropagate), the remaining child
+// may be a HashNode that needs to be resolved for proper witness generation.
+// The callback receives the hashed key path to the remaining child along with the witness
+// trie built by toWitnessTrie at the point of collapse.
+type CollapseTracer func(hashedKeyPath []byte, witnessTrie *trie.Trie)
+
 // HexPatriciaHashed implements commitment based on patricia merkle tree with radix 16,
 // with keys pre-hashed by keccak256
 type HexPatriciaHashed struct {
@@ -112,6 +119,10 @@ type HexPatriciaHashed struct {
 	// applies deferred updates inline.
 	leaveDeferredForCaller bool
 
+	// collapseTracer is called when a node collapse occurs (FullNode reduced to single child).
+	// Used by witness generation to capture paths that need resolution for collapsed HashNodes.
+	collapseTracer CollapseTracer
+
 	//processing metrics
 	metrics       *Metrics
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
@@ -145,6 +156,13 @@ func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext) *HexPatricia
 	hph.branchEncoder.setMetrics(hph.metrics)
 	hph.branchEncoder.SetDeferUpdates(true) // Enable deferred branch updates by default
 	return hph
+}
+
+// SetCollapseTracer sets a callback that will be invoked when a node collapse occurs
+// during commitment calculation. This is used by witness generation to capture paths
+// to HashNodes that need resolution when a FullNode is reduced to a single child.
+func (hph *HexPatriciaHashed) SetCollapseTracer(tracer CollapseTracer) {
+	hph.collapseTracer = tracer
 }
 
 type cell struct {
@@ -2271,11 +2289,74 @@ func (hph *HexPatriciaHashed) deleteCell(hashedKey []byte) {
 	cell.reset()
 }
 
+// detectCollapseBeforeDelete checks the row above the deepest row to see if
+// deleting the current key will cause a node collapse. If that row has exactly
+// 2 non-empty cells, one of them is on the delete path and the other is the
+// sibling that will survive the collapse.
+func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
+	if hph.activeRows < 2 {
+		return
+	}
+	parentRow := hph.activeRows - 2
+	children := bits.OnesCount16(hph.afterMap[parentRow])
+	if children != 2 {
+		return
+	}
+
+	// Exactly 2 children in the parent row — one is on the delete path,
+	// the other is the sibling that will survive the collapse.
+	depth := hph.depths[parentRow] - 1
+	deleteNibble := int(hashedKey[depth])
+
+	// Find the sibling nibble (the other set bit in afterMap)
+	siblingNibble := -1
+	for i := 0; i < 16; i++ {
+		if hph.afterMap[parentRow]&(1<<i) != 0 && i != deleteNibble {
+			siblingNibble = i
+			break
+		}
+	}
+	if siblingNibble < 0 {
+		return
+	}
+
+	siblingCell := &hph.grid[parentRow][siblingNibble]
+
+	// Build the sibling's full hashed key path
+	siblingPath := make([]byte, int(depth)+1+int(siblingCell.hashedExtLen))
+	copy(siblingPath, hph.currentKey[:depth])
+	siblingPath[depth] = byte(siblingNibble)
+	if siblingCell.hashedExtLen > 0 {
+		copy(siblingPath[int(depth)+1:], siblingCell.hashedExtension[:siblingCell.hashedExtLen])
+	}
+
+	compactSibling, _ := CompactKey(siblingPath)
+	fmt.Printf("[collapse] FOUND at parentRow=%d depth=%d: deleteNibble=%x, siblingNibble=%x, siblingPath=%x (len=%d), hashLen=%d, extLen=%d\n",
+		parentRow, depth, deleteNibble, siblingNibble, compactSibling, len(siblingPath), siblingCell.hashLen, siblingCell.hashedExtLen)
+
+	collapseTrie, trieErr := hph.toWitnessTrie(siblingPath, nil)
+	if trieErr != nil {
+		fmt.Printf("[collapse] failed to build sibling witness trie: %v\n", trieErr)
+	}
+	hph.collapseTracer(siblingPath, collapseTrie)
+}
+
 // fetches cell by key and set touch/after maps. Requires that prefix to be already unfolded
 func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) (cell *cell) {
 	hph.metrics.Updates(plainKey)
 
+	if hph.collapseTracer != nil {
+		compact, _ := CompactKey(hashedKey)
+		fmt.Printf("[collapse-debug] updateCell: hashedKey=%x (len=%d nibbles), deleted=%v, flags=%d, activeRows=%d\n",
+			compact, len(hashedKey), u.Deleted(), u.Flags, hph.activeRows)
+	}
+
 	if u.Deleted() {
+		// Before the delete, check if this will cause a node collapse (FullNode → single child).
+		if hph.collapseTracer != nil && hph.activeRows > 0 {
+			hph.detectCollapseBeforeDelete(hashedKey)
+		}
+
 		hph.deleteCell(hashedKey)
 		return nil
 	}
@@ -2385,6 +2466,11 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 			if err != nil {
 				return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
 			}
+			if hph.collapseTracer != nil {
+				compact, _ := CompactKey(hashedKey)
+				fmt.Printf("[collapse-db] storage read: plainKey=%x, hashedKey=%x, flags=%d, deleted=%v, storageLen=%d\n",
+					plainKey, compact, stateUpdate.Flags, stateUpdate.Deleted(), stateUpdate.StorageLen)
+			}
 		}
 	}
 	hph.updateCell(plainKey, hashedKey, stateUpdate)
@@ -2452,6 +2538,7 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 
 	defer logEvery.Stop()
 	var tries []*trie.Trie = make([]*trie.Trie, 0, len(updates.keys)) // slice of tries, i.e the witness for each key, these will be all merged into single trie
+
 	err = updates.HashSort(ctx, nil, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
 		select {
 		case <-logEvery.C:

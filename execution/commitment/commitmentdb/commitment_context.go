@@ -363,6 +363,16 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 	return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
 }
 
+// SetCollapseTracer sets a callback that will be invoked when a node collapse occurs
+// during commitment calculation. This is used by witness generation to capture paths
+// to HashNodes that need resolution when a FullNode is reduced to a single child.
+func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.CollapseTracer) {
+	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
+	if ok {
+		hexPatriciaHashed.SetCollapseTracer(tracer)
+	}
+}
+
 // ComputeCommitment Evaluates commitment for gathered updates.
 // If warmup was set via EnableTrieWarmup, pre-warms MDBX page cache by reading Branch data in parallel before processing.
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, commitProgress chan *commitment.CommitProgress) (rootHash []byte, err error) {

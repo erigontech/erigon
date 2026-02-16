@@ -180,6 +180,7 @@ func generateChain(
 	var poly *contracts.Poly
 	var tokenContract *contracts.Token
 	var tokenContract2 *contracts.Token
+	var tokenContract2Address common.Address
 
 	// We generate the blocks without plain state because it's not supported in blockgen.GenerateChain
 	return blockgen.GenerateChain(config, parent, engine, db, 13, func(i int, block *blockgen.BlockGen) {
@@ -291,7 +292,7 @@ func generateChain(
 			break
 		case 11:
 			// Mint to address so it has a known balance to drain in the next block
-			_, txn, tokenContract2, err = contracts.DeployToken(transactOpts, contractBackend, address)
+			tokenContract2Address, txn, tokenContract2, err = contracts.DeployToken(transactOpts, contractBackend, address)
 			if err != nil {
 				panic(err)
 			}
@@ -301,12 +302,27 @@ func generateChain(
 				panic(err)
 			}
 			txs = append(txs, txn)
+			tokenContract2AddrHash := crypto.Keccak256(tokenContract2Address[:])
 			balanceStorageKeyPath := computeMappingStorageKey(address1, 1) // balance in slot 1
+			// The trie path for storage is keccak256(address) + keccak256(storage_slot)
+			hashedBalanceKey := crypto.Keccak256(balanceStorageKeyPath[:])
+			fullPath := make([]byte, 64)
+			copy(fullPath[:32], tokenContract2AddrHash[:])
+			copy(fullPath[32:], hashedBalanceKey[:])
+			fmt.Printf("FULL PATH of node about to be deleted: %x\n", fullPath)
+
 			sameStoragePrefixAddresses = findAddressesWithMatchingStorageKeyPrefix(balanceStorageKeyPath, 1, 1, 1)
 			sameStorageKeyPath := computeMappingStorageKey(sameStoragePrefixAddresses[0], 1)
-			// Assert first nibble is the same
-			if (sameStorageKeyPath[0] >> 4) != (balanceStorageKeyPath[0] >> 4) {
-				panic("storage key prefix mismatch")
+			hashedSiblingKey := crypto.Keccak256(sameStorageKeyPath[:])
+
+			fullPathSibling := make([]byte, 64)
+			copy(fullPathSibling[:32], tokenContract2AddrHash[:])
+			copy(fullPathSibling[32:], hashedSiblingKey[:])
+			fmt.Printf("FULL PATH of surviving sibling node: %x\n", fullPathSibling)
+
+			// Assert first nibble of the HASHED storage key is the same (trie path)
+			if (hashedSiblingKey[0] >> 4) != (hashedBalanceKey[0] >> 4) {
+				panic("hashed storage key prefix mismatch in trie")
 			}
 			txn, err = tokenContract2.Mint(transactOpts, common.Address(sameStoragePrefixAddresses[0]), big.NewInt(500))
 			if err != nil {
@@ -358,13 +374,15 @@ func computeMappingStorageKey(addr common.Address, slot uint64) common.Hash {
 // result shares the first nNibbles with the target storage key.
 // This is useful for creating storage entries that share trie paths to test node collapses.
 func findAddressWithMatchingStorageKeyPrefix(targetKey common.Hash, slot uint64, nNibbles int) common.Address {
-	// Convert target key to nibbles for prefix comparison
+	// The trie path for a storage slot is keccak256(computeMappingStorageKey(addr, slot)).
+	// We need to match the first nNibbles of that hashed value.
+	targetHashedKey := crypto.Keccak256Hash(targetKey[:])
 	targetNibbles := make([]byte, nNibbles)
 	for i := 0; i < nNibbles; i++ {
 		if i%2 == 0 {
-			targetNibbles[i] = targetKey[i/2] >> 4
+			targetNibbles[i] = targetHashedKey[i/2] >> 4
 		} else {
-			targetNibbles[i] = targetKey[i/2] & 0x0f
+			targetNibbles[i] = targetHashedKey[i/2] & 0x0f
 		}
 	}
 
@@ -375,15 +393,16 @@ func findAddressWithMatchingStorageKeyPrefix(targetKey common.Hash, slot uint64,
 		randMu.Unlock()
 
 		storageKey := computeMappingStorageKey(addr, slot)
+		hashedStorageKey := crypto.Keccak256Hash(storageKey[:])
 
-		// Compare nibbles
+		// Compare nibbles of the hashed storage key (the actual trie path)
 		match := true
 		for i := 0; i < nNibbles; i++ {
 			var nibble byte
 			if i%2 == 0 {
-				nibble = storageKey[i/2] >> 4
+				nibble = hashedStorageKey[i/2] >> 4
 			} else {
-				nibble = storageKey[i/2] & 0x0f
+				nibble = hashedStorageKey[i/2] & 0x0f
 			}
 			if nibble != targetNibbles[i] {
 				match = false
