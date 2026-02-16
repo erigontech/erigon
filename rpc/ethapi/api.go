@@ -465,6 +465,9 @@ func RPCMarshalHeader(head *types.Header) map[string]any {
 	if head.BlockAccessListHash != nil {
 		result["blockAccessListHash"] = head.BlockAccessListHash
 	}
+	if head.SlotNumber != nil {
+		result["slotNumber"] = (*hexutil.Uint64)(head.SlotNumber)
+	}
 
 	// For Gnosis only
 	if head.AuRaSeal != nil {

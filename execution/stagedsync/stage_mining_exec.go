@@ -28,8 +28,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/metrics"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/temporal"
@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -211,6 +212,18 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 		return fmt.Errorf("cannot finalize block execution: %s", err)
 	}
 
+	// Note: This gets reset in MiningFinish - but we need it here to
+	// process execv3 - when we remove that this becomes redundant
+	header := block.HeaderNoCopy()
+
+	if execCfg.chainConfig.IsPrague(header.Time) {
+		hash := common.Hash{}
+		if len(current.Requests) > 0 {
+			hash = *current.Requests.Hash()
+		}
+		header.RequestsHash = &hash
+	}
+
 	blockHeight := block.NumberU64()
 	if needBAL {
 		systemReads = mergeReadSets(systemReads, ibs.VersionedReads())
@@ -223,7 +236,18 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 		balIO.RecordWrites(systemVersion, systemWrites)
 		balIO.RecordAccesses(systemVersion, systemAccess)
 		current.BlockAccessList = CreateBAL(blockHeight, balIO, execCfg.dirs.DataDir)
+		// Note: This gets reset in MiningFinish - but we need it here to
+		// process execv3 - when we remove that this becomes redundant
+		hash := current.BlockAccessList.Hash()
+		header.BlockAccessListHash = &hash
+	} else {
+		// Note: This gets reset in MiningFinish - but we need it here to
+		// process execv3 - when we remove that this becomes redundant
+		if execCfg.chainConfig.IsAmsterdam(current.Header.Time) {
+			header.BlockAccessListHash = &empty.BlockAccessListHash
+		}
 	}
+
 	writeBlockForExecution := func(rwTx kv.TemporalRwTx) error {
 		if err = rawdb.WriteHeader(rwTx, block.Header()); err != nil {
 			return fmt.Errorf("cannot write header: %s", err)
@@ -260,7 +284,7 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 
 	// This flag will skip checking the state root
 	execS := &StageState{state: s.state, ID: stages.Execution, BlockNumber: blockHeight - 1}
-	forceParallel := dbg.Exec3Parallel || cfg.chainConfig.IsAmsterdam(current.Header.Time)
+	forceParallel := dbg.Exec3Parallel /*|| cfg.chainConfig.IsAmsterdam(current.Header.Time)*/ // TODO Re-enable after bals testing
 	execTx := tx
 	execSd := sd
 	var execCleanup func()

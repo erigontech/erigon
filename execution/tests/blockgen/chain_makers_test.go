@@ -20,6 +20,7 @@
 package blockgen_test
 
 import (
+	"bytes"
 	"math/big"
 	"testing"
 
@@ -206,10 +207,10 @@ func TestGenerateChain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(b) != string(msg.GetData()) {
+	if !bytes.Equal(b, msg.GetData()) {
 		t.Errorf("receipt data %s do not match the expected msg %s", string(msg.GetData()), string(b))
 	}
-	if string(b) != string(msg.GetData()) {
+	if !bytes.Equal(b, msg.GetData()) {
 		t.Errorf("receipt data %s do not match the expected msg %s", string(msg.GetData()), string(b))
 	}
 

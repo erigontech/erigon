@@ -68,8 +68,8 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 				{
 					Slot: accounts.InternKey(common.HexToHash("0x01")),
 					Changes: []*StorageChange{
-						{Index: 1, Value: common.Hash(uint256.NewInt(2).Bytes32())},
-						{Index: 5, Value: common.Hash(uint256.NewInt(3).Bytes32())},
+						{Index: 1, Value: *uint256.NewInt(2)},
+						{Index: 5, Value: *uint256.NewInt(3)},
 					},
 				},
 			},
@@ -83,7 +83,7 @@ func TestBlockAccessListRLPEncoding(t *testing.T) {
 				{Index: 9, Value: 7},
 			},
 			CodeChanges: []*CodeChange{
-				{Index: 2, Data: []byte{0xbe, 0xef}},
+				{Index: 2, Bytecode: []byte{0xbe, 0xef}},
 			},
 		},
 	}

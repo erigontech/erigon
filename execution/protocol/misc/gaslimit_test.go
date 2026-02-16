@@ -1,4 +1,4 @@
-// Copyright 2021 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,20 +14,19 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package metrics
+package misc
 
-// Config contains the configuration for the metric collection.
-type Config struct { //nolint:maligned
-	Enabled          bool   `toml:",omitempty"`
-	EnabledExpensive bool   `toml:",omitempty"`
-	HTTP             string `toml:",omitempty"`
-	Port             int    `toml:",omitempty"`
-}
+import (
+	"testing"
 
-// DefaultConfig is the default config for metrics used in go-ethereum.
-var DefaultConfig = Config{
-	Enabled:          false,
-	EnabledExpensive: false,
-	HTTP:             "127.0.0.1",
-	Port:             6061,
+	"github.com/stretchr/testify/assert"
+)
+
+// A test for https://github.com/erigontech/erigon/issues/18424
+func TestCalcGasLimit(t *testing.T) {
+	// https://gnosisscan.io//block/43788389
+	parentGasLimit := uint64(16_999_984)
+	desiredLimit := uint64(17_000_000)
+	gasLimit := CalcGasLimit(parentGasLimit, desiredLimit)
+	assert.Equal(t, desiredLimit, gasLimit)
 }

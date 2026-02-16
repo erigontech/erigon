@@ -183,6 +183,11 @@ var (
 		"enr:-Ku4QNkWjw5tNzo8DtWqKm7CnDdIq_y7xppD6c1EZSwjB8rMOkSFA1wJPLoKrq5UvA7wcxIotH6Usx3PAugEN2JMncIBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpBd9cEGEAAJEP__________gmlkgnY0gmlwhIbHuBeJc2VjcDI1NmsxoQP3FwrhFYB60djwRjAoOjttq6du94DtkQuaN99wvgqaIYN1ZHCCIyk",
 		"enr:-OS4QMJGE13xEROqvKN1xnnt7U-noc51VXyM6wFMuL9LMhQDfo1p1dF_zFdS4OsnXz_vIYk-nQWnqJMWRDKvkSK6_CwDh2F0dG5ldHOIAAAAADAAAACGY2xpZW502IpMaWdodGhvdXNljDcuMC4wLWJldGEuM4RldGgykNLxmX9gAAkQAAgAAAAAAACCaWSCdjSCaXCEhse4F4RxdWljgiMqiXNlY3AyNTZrMaECef77P8k5l3PC_raLw42OAzdXfxeQ-58BJriNaqiRGJSIc3luY25ldHMAg3RjcIIjKIN1ZHCCIyg",
 	}
+	BloatnetBootstrapNodes = []string{
+		"enr:-Iq4QO5d3m9DzBlj1PLCovLotwN8b9mFp_MrCx-KiNjzltphcYYT7oeD-VU7qyuNJd50X3wlJwjd6C989B3DkVcQ3tiGAZfpKz9kgmlkgnY0gmlwhJ20DuWJc2VjcDI1NmsxoQJJ3h8aUO3GJHv-bdvHtsQZ2OEisutelYfGjXO4lSg8BYN1ZHCCIzI",
+		"enr:-LK4QAtyVYCHLTOF1iJ8TK84phLbeuUt42ub5x9OODjTbvnwHS96e6NFlpappH6eeUcyiVmS98usL3cwHUb8F1Y3NTwIh2F0dG5ldHOIAACAAQAAAACEZXRoMpBAw1JZYIAnZP__________gmlkgnY0gmlwhJ20DuWJc2VjcDI1NmsxoQJMpOlHHZBgztApCE2mE4_MZRqgAi2Y81u446NOF7RE04N0Y3CCIyiDdWRwgiMo",
+		"enr:-Mq4QNiucamyTUE9hnWkibGb5BgmKQkEBTkzhLCZJa0SpH6IOLWx4Bkx0E-xzVea9A0-cmtBbk3Sz416oVN8tCq1IMGGAZfpPPVeh2F0dG5ldHOIAAADAAAAAACEZXRoMpBAw1JZcAAAAP__________gmlkgnY0gmlwhJ20DuGEcXVpY4IyyIlzZWNwMjU2azGhA7HMxNX8T5X4lwmmbnuglDAgSHvAw_XSIEu4sf0I4gdYiHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
+	}
 )
 
 type NetworkConfig struct {
@@ -315,6 +320,27 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		MinimumPeersInSubnetSearch:      20,
 		BootNodes:                       HoodiBootstrapNodes,
 	},
+
+	chainspec.BloatnetNetworkID: { // Bloatnet - uses mainnet config
+		GossipMaxSize:                   10485760,
+		GossipMaxSizeBellatrix:          15728640,
+		MaxChunkSize:                    MaxChunkSize,
+		AttestationSubnetCount:          64,
+		AttestationPropagationSlotRange: 32,
+		AttestationSubnetPrefixBits:     6,
+		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
+		RespTimeout:                     ConfigDurationSec(RespTimeout),
+		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
+		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
+		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		Eth2key:                         "eth2",
+		AttSubnetKey:                    "attnets",
+		SyncCommsSubnetKey:              "syncnets",
+		CgcKey:                          "cgc",
+		NfdKey:                          "nfd",
+		MinimumPeersInSubnetSearch:      20,
+		BootNodes:                       BloatnetBootstrapNodes,
+	},
 }
 
 // Trusted checkpoint sync endpoints: https://eth-clients.github.io/checkpoint-sync-endpoints/
@@ -341,6 +367,9 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 	chainspec.HoodiChainID: {
 		"https://checkpoint-sync.hoodi.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 		"https://hoodi-checkpoint-sync.attestant.io/eth/v2/debug/beacon/states/finalized",
+	},
+	chainspec.BloatnetNetworkID: {
+		"https://checkpoint-sync.perf-devnet-2.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 	},
 }
 
@@ -1078,6 +1107,63 @@ func hoodiConfig() BeaconChainConfig {
 
 }
 
+func bloatnetConfig() BeaconChainConfig {
+	cfg := MainnetBeaconConfig
+	cfg.ConfigName = "testnet"
+	cfg.MinGenesisActiveValidatorCount = 500
+	cfg.MinGenesisTime = 1751967000 // 2025-Jul-08 09:30:00 AM UTC
+	cfg.GenesisForkVersion = 0x10802764
+	cfg.GenesisDelay = 60
+
+	// Time parameters
+	cfg.SecondsPerSlot = 12
+	cfg.SecondsPerETH1Block = 12
+	cfg.Eth1FollowDistance = 2048
+	cfg.MinValidatorWithdrawabilityDelay = 2
+	cfg.ShardCommitteePeriod = 256
+
+	// Validator cycle
+	cfg.InactivityScoreBias = 4
+	cfg.InactivityScoreRecoveryRate = 16
+	cfg.EjectionBalance = 16000000000
+	cfg.MinPerEpochChurnLimit = 4
+	cfg.ChurnLimitQuotient = 128
+	cfg.MaxPerEpochActivationChurnLimit = 8
+
+	// Forking - all forks at epoch 0 except Fulu
+	cfg.AltairForkEpoch = 0
+	cfg.AltairForkVersion = 0x20802764
+	cfg.BellatrixForkEpoch = 0
+	cfg.BellatrixForkVersion = 0x30802764
+	cfg.CapellaForkEpoch = 0
+	cfg.CapellaForkVersion = 0x40802764
+	cfg.DenebForkEpoch = 0
+	cfg.DenebForkVersion = 0x50802764
+	cfg.ElectraForkEpoch = 0
+	cfg.ElectraForkVersion = 0x60802764
+	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkVersion = 0x70000000
+	cfg.TerminalTotalDifficulty = "58750000000000000000000"
+	cfg.TerminalBlockHash = [32]byte{}
+	cfg.TerminalBlockHashActivationEpoch = math.MaxUint64
+
+	// Deposit contract (same as mainnet)
+	cfg.DepositContractAddress = "0x00000000219ab540356cBB839Cbe05303d7705Fa"
+	cfg.DepositChainID = chainspec.MainnetChainID
+	cfg.DepositNetworkID = chainspec.MainnetChainID
+
+	// Blob parameters
+	cfg.MaxBlobsPerBlock = 6
+	cfg.MaxBlobsPerBlockElectra = 9
+	cfg.BlobSidecarSubnetCountElectra = 9
+
+	// Clear BlobSchedule since Fulu/Osaka is disabled on bloatnet
+	cfg.BlobSchedule = []BlobParameters{}
+
+	cfg.InitializeForkSchedule()
+	return cfg
+}
+
 func gnosisConfig() BeaconChainConfig {
 	cfg := MainnetBeaconConfig
 	cfg.PresetBase = "gnosis"
@@ -1231,11 +1317,12 @@ func (b *BeaconChainConfig) GetPenaltyQuotient(version StateVersion) uint64 {
 
 // Beacon configs
 var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChainConfig{
-	chainspec.MainnetChainID: mainnetConfig(),
-	chainspec.SepoliaChainID: sepoliaConfig(),
-	chainspec.HoodiChainID:   hoodiConfig(),
-	chainspec.GnosisChainID:  gnosisConfig(),
-	chainspec.ChiadoChainID:  chiadoConfig(),
+	chainspec.MainnetChainID:    mainnetConfig(),
+	chainspec.SepoliaChainID:    sepoliaConfig(),
+	chainspec.HoodiChainID:      hoodiConfig(),
+	chainspec.GnosisChainID:     gnosisConfig(),
+	chainspec.ChiadoChainID:     chiadoConfig(),
+	chainspec.BloatnetNetworkID: bloatnetConfig(),
 }
 
 // Eth1DataVotesLength returns the maximum length of the votes on the Eth1 data,
@@ -1420,12 +1507,17 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 }
 
 // Check if chain with a specific ID is supported or not
-func EmbeddedSupported(id uint64) bool {
-	return id == chainspec.MainnetChainID ||
-		id == chainspec.SepoliaChainID ||
-		id == chainspec.GnosisChainID ||
-		id == chainspec.ChiadoChainID ||
-		id == chainspec.HoodiChainID
+//
+// note: the following code uses chainID constants because they are usually the same as the network ID,
+// but the context of usage is they are checked against network ID. Shadowforks like bloatnet make
+// this evident (same chainID as mainnet, but different network ID))
+func EmbeddedSupported(networkId uint64) bool {
+	return networkId == chainspec.MainnetChainID ||
+		networkId == chainspec.SepoliaChainID ||
+		networkId == chainspec.GnosisChainID ||
+		networkId == chainspec.ChiadoChainID ||
+		networkId == chainspec.HoodiChainID ||
+		networkId == chainspec.BloatnetNetworkID
 }
 
 func SupportBackfilling(networkId uint64) bool {
@@ -1433,7 +1525,8 @@ func SupportBackfilling(networkId uint64) bool {
 		networkId == chainspec.SepoliaChainID ||
 		networkId == chainspec.GnosisChainID ||
 		networkId == chainspec.ChiadoChainID ||
-		networkId == chainspec.HoodiChainID
+		networkId == chainspec.HoodiChainID ||
+		networkId == chainspec.BloatnetNetworkID
 }
 
 func EpochToPaths(slot uint64, config *BeaconChainConfig, suffix string) (string, string) {

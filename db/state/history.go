@@ -119,7 +119,10 @@ func (h *History) vFilePathMask(fromStep, toStep kv.Step) string {
 	return filepath.Join(h.dirs.SnapHistory, h.vFileNameMask(fromStep, toStep))
 }
 func (h *History) vAccessorFilePathMask(fromStep, toStep kv.Step) string {
-	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("*-%s.%d-%d.vi", h.FilenameBase, fromStep, toStep))
+	return filepath.Join(h.dirs.SnapAccessors, h.vAccessorFileNameMask(fromStep, toStep))
+}
+func (h *History) vAccessorFileNameMask(fromStep, toStep kv.Step) string {
+	return fmt.Sprintf("*-%s.%d-%d.vi", h.FilenameBase, fromStep, toStep)
 }
 
 func (h *History) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
@@ -134,21 +137,21 @@ func (h *History) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (h *History) openList(idxFiles, histNames []string) error {
-	if err := h.InvertedIndex.openList(idxFiles); err != nil {
+func (h *History) openList(idxFiles, histNames, accessorFiles []string) error {
+	if err := h.InvertedIndex.openList(idxFiles, accessorFiles); err != nil {
 		return err
 	}
 
 	h.closeWhatNotInList(histNames)
 	h.scanDirtyFiles(histNames)
-	if err := h.openDirtyFiles(); err != nil {
+	if err := h.openDirtyFiles(histNames, accessorFiles); err != nil {
 		return fmt.Errorf("History(%s).openList: %w", h.FilenameBase, err)
 	}
 	return nil
 }
 
 func (h *History) openFolder(scanDirsRes *ScanDirsResult) error {
-	return h.openList(scanDirsRes.iiFiles, scanDirsRes.historyFiles)
+	return h.openList(scanDirsRes.iiFiles, scanDirsRes.historyFiles, scanDirsRes.accessorFiles)
 }
 
 func (h *History) scanDirtyFiles(fileNames []string) {
@@ -1477,6 +1480,27 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 		return nil, err
 	}
 	return stream.UnionKV(itOnFiles, itOnDB, limit), nil
+}
+
+// HistoryKeyTxNumRange returns (key, txNum) pairs for every txNum at which a key changed in [fromTxNum, toTxNum).
+// Output is sorted by key ASC. Duplicates across files are not deduplicated.
+func (ht *HistoryRoTx) HistoryKeyTxNumRange(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KU64, error) {
+	if asc == order.Desc {
+		panic("not supported yet")
+	}
+	itOnFiles, err := ht.iterateKeyTxNumFrozen(fromTxNum, toTxNum, asc, limit)
+	if err != nil {
+		return nil, err
+	}
+	dbFrom := fromTxNum
+	if len(ht.iit.files) > 0 {
+		dbFrom = max(fromTxNum, int(ht.iit.files.EndTxNum()))
+	}
+	itOnDB, err := ht.iterateKeyTxNumRecent(dbFrom, toTxNum, asc, limit, roTx)
+	if err != nil {
+		return nil, err
+	}
+	return stream.MultisetKU64(itOnFiles, itOnDB, limit), nil
 }
 
 func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, dumpTo func(key []byte, txNum uint64, val []byte)) error {

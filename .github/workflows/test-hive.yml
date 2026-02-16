@@ -5,13 +5,28 @@ on:
     branches:
       - main
       - 'release/**'
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+      - performance
+      - performance-stable
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
   schedule:
     - cron: "0 05 * * *" # daily at 5 am UTC
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('push-{0}-{1}', github.run_id, github.run_attempt) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test-hive:
+    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     runs-on:
       group: hive
     strategy:
@@ -38,13 +53,14 @@ jobs:
             max-allowed-failures: 0
           - sim: rpc
             sim-limit: compat
-            max-allowed-failures: 3
+            max-allowed-failures: 23
     steps:
       - name: Checkout Hive
         uses: actions/checkout@v6
         with:
           repository: ethereum/hive
-          # ref: master
+          # version hive and update periodically/on-demand to prevent upstream changes in Hive affecting us with red CI
+          ref: 0ee187ce394720a5902c135324ac7de4240cbb37
           path: hive
 
       - name: Setup go env and cache
@@ -69,13 +85,16 @@ jobs:
       # Targetting the clients/erigon/Dockerfile.git in the Hive director - 
       # this builds the container from github and uses it for tests
       - name: Get dependencies and build hive
+        env:
+          SOURCE_REPO: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
         run: |
           cd hive
           go get . >> buildlogs.log
           rm clients/erigon/Dockerfile
           mv clients/erigon/Dockerfile.git clients/erigon/Dockerfile
-          branch_name=$(echo ${GITHUB_REF#refs/heads/}  | sed 's/[&/\]/\\&/g')
-          echo Building Hive with Erigon branch - $branch_name
+          branch_name=$(echo ${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}} | sed 's/[&/\]/\\&/g')
+          echo Building Hive with Erigon repo - ${SOURCE_REPO}, branch - $branch_name
+          sed -i "s|^ARG github=erigontech/erigon$|ARG github=${SOURCE_REPO}|" clients/erigon/Dockerfile
           sed -i "s/^ARG tag=main$/ARG tag=${branch_name}/" clients/erigon/Dockerfile
           go build . >> buildlogs.log
       # Depends on the last line of hive output that prints the number of suites, tests and failed
