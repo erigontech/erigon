@@ -263,8 +263,15 @@ func WithStepSize(stepSize uint64) Option {
 	}
 }
 
+func WithExperimentalBAL() Option {
+	return func(opts *options) {
+		opts.experimentalBAL = true
+	}
+}
+
 type options struct {
-	stepSize *uint64
+	stepSize        *uint64
+	experimentalBAL bool
 }
 
 func applyOptions(opts []Option) options {
@@ -279,9 +286,9 @@ func MockWithGenesis(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey,
 	return MockWithGenesisPruneMode(tb, gspec, key, blockBufferSize, prune.MockMode, opts...)
 }
 
-func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine rules.Engine) *MockSentry {
+func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine rules.Engine, opts ...Option) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	return MockWithEverything(tb, gspec, key, prune.MockMode, engine, blockBufferSize, false)
+	return MockWithEverything(tb, gspec, key, prune.MockMode, engine, blockBufferSize, false, opts...)
 }
 
 func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, blockBufferSize int, prune prune.Mode, opts ...Option) *MockSentry {
@@ -321,6 +328,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.Prune = prune
 	cfg.FcuBackgroundCommit = true
 	cfg.FcuBackgroundPrune = true
+	cfg.ExperimentalBAL = opt.experimentalBAL
 
 	logLvl := log.LvlError
 	if lvl, ok := os.LookupEnv("MOCK_SENTRY_LOG_LEVEL"); ok {

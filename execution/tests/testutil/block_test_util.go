@@ -52,8 +52,9 @@ import (
 
 // A BlockTest checks handling of entire blocks.
 type BlockTest struct {
-	json btJSON
-	br   services.FullBlockReader
+	json            btJSON
+	br              services.FullBlockReader
+	ExperimentalBAL bool
 }
 
 // UnmarshalJSON implements json.Unmarshaler interface.
@@ -103,6 +104,8 @@ type btHeader struct {
 	ExcessBlobGas         *uint64
 	ParentBeaconBlockRoot *common.Hash
 	RequestsHash          *common.Hash
+	BlockAccessListHash   *common.Hash
+	SlotNumber            *uint64
 }
 
 type btHeaderMarshaling struct {
@@ -115,6 +118,7 @@ type btHeaderMarshaling struct {
 	BaseFeePerGas *math.HexOrDecimal256
 	BlobGasUsed   *math.HexOrDecimal64
 	ExcessBlobGas *math.HexOrDecimal64
+	SlotNumber    *math.HexOrDecimal64
 }
 
 func (bt *BlockTest) Run(t *testing.T) error {
@@ -123,7 +127,11 @@ func (bt *BlockTest) Run(t *testing.T) error {
 		return testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
-	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine)
+	var mOpts []mock.Option
+	if bt.ExperimentalBAL {
+		mOpts = append(mOpts, mock.WithExperimentalBAL())
+	}
+	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, mOpts...)
 
 	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root
@@ -217,6 +225,8 @@ func (bt *BlockTest) genesis(config *chain.Config) *types.Genesis {
 		ExcessBlobGas:         bt.json.Genesis.ExcessBlobGas,
 		ParentBeaconBlockRoot: bt.json.Genesis.ParentBeaconBlockRoot,
 		RequestsHash:          bt.json.Genesis.RequestsHash,
+		BlockAccessListHash:   bt.json.Genesis.BlockAccessListHash,
+		SlotNumber:            bt.json.Genesis.SlotNumber,
 	}
 }
 
@@ -351,6 +361,12 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	}
 	if !reflect.DeepEqual(h.RequestsHash, h2.RequestsHash) {
 		return fmt.Errorf("requestsHash: want: %v have: %v", h.RequestsHash, h2.RequestsHash)
+	}
+	if !reflect.DeepEqual(h.BlockAccessListHash, h2.BlockAccessListHash) {
+		return fmt.Errorf("blockAccessListHash: want: %v have: %v", h.BlockAccessListHash, h2.BlockAccessListHash)
+	}
+	if !reflect.DeepEqual(h.SlotNumber, h2.SlotNumber) {
+		return fmt.Errorf("slotNumber: want: %v have: %v", h.SlotNumber, h2.SlotNumber)
 	}
 	return nil
 }
