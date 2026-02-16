@@ -55,6 +55,12 @@ jobs:
             sim-limit: compat
             max-allowed-failures: 23
     steps:
+      - name: Checkout Erigon go.mod
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: go.mod
+          path: erigon-src
+
       - name: Checkout Hive
         uses: actions/checkout@v6
         with:
@@ -66,7 +72,7 @@ jobs:
       - name: Setup go env and cache
         uses: actions/setup-go@v6
         with:
-          go-version: '>=1.24'
+          go-version: '>=1.25'
           go-version-file: 'hive/go.mod'
 
       - name: Conditional Docker Login
@@ -96,6 +102,9 @@ jobs:
           echo Building Hive with Erigon repo - ${SOURCE_REPO}, branch - $branch_name
           sed -i "s|^ARG github=erigontech/erigon$|ARG github=${SOURCE_REPO}|" clients/erigon/Dockerfile
           sed -i "s/^ARG tag=main$/ARG tag=${branch_name}/" clients/erigon/Dockerfile
+          go_version=$(go mod edit -json ../erigon-src/go.mod | jq -r .Go)
+          echo "Patching builder Go version to ${go_version}"
+          sed -i "s|golang:[0-9.]*-alpine|golang:${go_version}-alpine|" clients/erigon/Dockerfile
           go build . >> buildlogs.log
       # Depends on the last line of hive output that prints the number of suites, tests and failed
       # Currently, we fail even if suites and tests are too few, indicating the tests did not run
