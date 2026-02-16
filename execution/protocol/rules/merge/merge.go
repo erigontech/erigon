@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sync"
 
 	"github.com/holiman/uint256"
 
@@ -67,6 +68,10 @@ var (
 // Note: After the Merge the work is mostly done on the Consensus Layer, so nothing much is to be added on this side.
 type Merge struct {
 	eth1Engine rules.Engine // Original rules engine used in eth1, e.g. ethash or clique
+
+	// Reusable buffer for collecting logs in Finalize - protected by logsBufMu
+	logsBufMu sync.Mutex
+	logsBuf   types.Logs
 }
 
 // New creates a new instance of the Merge Engine with the given embedded eth1 engine.
@@ -188,15 +193,32 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 
 	var rs types.FlatRequests
 	if config.IsPrague(header.Time) && !skipReceiptsEval {
-		rs = make(types.FlatRequests, 0)
-		allLogs := make(types.Logs, 0)
+		rs = make(types.FlatRequests, 0, 3) // deposit, withdrawal, consolidation
+
+		// Try to reuse buffer, fall back to allocation if concurrent access
+		var allLogs types.Logs
+		reuseBuffer := s.logsBufMu.TryLock()
+		if reuseBuffer {
+			allLogs = s.logsBuf[:0]
+		} else {
+			allLogs = make(types.Logs, 0, len(receipts)*4)
+		}
+
 		for i, rec := range receipts {
 			if rec == nil {
+				if reuseBuffer {
+					s.logsBuf = allLogs
+					s.logsBufMu.Unlock()
+				}
 				return nil, fmt.Errorf("nil receipt: block %d, txId %d, receipts %s", header.Number, i, receipts)
 			}
 			allLogs = append(allLogs, rec.Logs...)
 		}
 		depositReqs, err := misc.ParseDepositLogs(allLogs, config.DepositContract)
+		if reuseBuffer {
+			s.logsBuf = allLogs // save back (might have grown)
+			s.logsBufMu.Unlock()
+		}
 		if err != nil {
 			return nil, fmt.Errorf("error: could not parse requests logs: %v", err)
 		}
@@ -335,6 +357,24 @@ func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *type
 		return rules.ErrUnexpectedRequests
 	}
 
+	// Verify existence / non-existence of slotNumber & blockAccessListHash
+	amsterdam := chain.Config().IsAmsterdam(header.Time)
+	if amsterdam {
+		if header.SlotNumber == nil {
+			// TODO: No Slot Error Yet - Treate it as optional for hive testing
+			//return rules.ErrMissingSlotNumber
+		}
+		if header.BlockAccessListHash == nil {
+			return rules.ErrMissingBlockAccessListHash
+		}
+	} else {
+		if header.SlotNumber != nil {
+			return rules.ErrUnexpectedSlotNumber
+		}
+		if header.BlockAccessListHash != nil {
+			return rules.ErrUnexpectedBlockAccessListHash
+		}
+	}
 	return nil
 }
 
@@ -342,6 +382,7 @@ func (s *Merge) Seal(chain rules.ChainHeaderReader, blockWithReceipts *types.Blo
 	block := blockWithReceipts.Block
 	receipts := blockWithReceipts.Receipts
 	requests := blockWithReceipts.Requests
+	blockAccessList := blockWithReceipts.BlockAccessList
 	if !misc.IsPoSHeader(block.HeaderNoCopy()) {
 		return s.eth1Engine.Seal(chain, blockWithReceipts, results, stop)
 	}
@@ -350,7 +391,7 @@ func (s *Merge) Seal(chain rules.ChainHeaderReader, blockWithReceipts *types.Blo
 	header.Nonce = ProofOfStakeNonce
 
 	select {
-	case results <- &types.BlockWithReceipts{Block: block.WithSeal(header), Receipts: receipts, Requests: requests}:
+	case results <- &types.BlockWithReceipts{Block: block.WithSeal(header), Receipts: receipts, Requests: requests, BlockAccessList: blockAccessList}:
 	default:
 		log.Warn("Sealing result is not read", "sealhash", block.Hash())
 	}

@@ -42,6 +42,10 @@ type StateChangeConsumer interface {
 	SendStateChanges(ctx context.Context, sc *remoteproto.StateChangeBatch)
 }
 
+func (a *Accumulator) Changes() []*remoteproto.StateChange {
+	return a.changes
+}
+
 func (a *Accumulator) Reset(plainStateID uint64) {
 	a.changes = nil
 	a.latestChange = nil

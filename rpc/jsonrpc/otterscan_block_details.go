@@ -34,6 +34,11 @@ func (api *OtterscanAPIImpl) GetBlockDetails(ctx context.Context, number rpc.Blo
 	}
 	defer tx.Rollback()
 
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, number.Uint64())
+	if err != nil {
+		return nil, err
+	}
+
 	b, senders, err := api.getBlockWithSenders(ctx, number, tx)
 	if err != nil {
 		return nil, err
@@ -60,6 +65,12 @@ func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash com
 	if blockNumber == nil {
 		return nil, fmt.Errorf("couldn't find block number for hash %v", hash.Bytes())
 	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, *blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
 	b, err := api.blockWithSenders(ctx, tx, hash, *blockNumber)
 	if err != nil {
 		return nil, err
@@ -88,7 +99,7 @@ func (api *OtterscanAPIImpl) getBlockDetailsImpl(ctx context.Context, tx kv.Temp
 	}
 	receipts, err := api.getReceipts(ctx, tx, b)
 	if err != nil {
-		return nil, fmt.Errorf("getReceipts error: %v", err)
+		return nil, err
 	}
 	feesRes, err := delegateBlockFees(ctx, tx, b, senders, chainConfig, receipts)
 	if err != nil {

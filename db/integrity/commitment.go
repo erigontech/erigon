@@ -747,6 +747,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	}
 	sd.GetCommitmentCtx().SetHistoryStateReader(tx, toTxNum)
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
+	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
 	err = sd.SeekCommitment(ctx, tx) // seek commitment again with new history state reader
 	if err != nil {
 		return err

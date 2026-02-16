@@ -21,6 +21,7 @@ package state
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/holiman/uint256"
 
@@ -28,6 +29,14 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+var journalPool = sync.Pool{
+	New: func() any {
+		return &journal{
+			dirties: make(map[accounts.Address]int),
+		}
+	},
+}
 
 // journalEntry is a modification entry in the state change journal that can be
 // reverted on demand.
@@ -47,11 +56,15 @@ type journal struct {
 	dirties map[accounts.Address]int // Dirty accounts and the number of changes
 }
 
-// newJournal create a new initialized journal.
+// newJournal gets a journal from the pool.
 func newJournal() *journal {
-	return &journal{
-		dirties: make(map[accounts.Address]int),
-	}
+	return journalPool.Get().(*journal)
+}
+
+// release returns the journal to the pool after resetting it.
+func (j *journal) release() {
+	j.Reset()
+	journalPool.Put(j)
 }
 func (j *journal) Reset() {
 	j.entries = j.entries[:0]
@@ -181,6 +194,9 @@ type (
 //}
 
 func (ch createObjectChange) revert(s *IntraBlockState) error {
+	if so, ok := s.stateObjects[ch.account]; ok {
+		so.release()
+	}
 	delete(s.stateObjects, ch.account)
 	delete(s.stateObjectsDirty, ch.account)
 	return nil
@@ -191,6 +207,9 @@ func (ch createObjectChange) dirtied() (accounts.Address, bool) {
 }
 
 func (ch resetObjectChange) revert(s *IntraBlockState) error {
+	if current, ok := s.stateObjects[ch.account]; ok && current != ch.prev {
+		current.release()
+	}
 	s.setStateObject(ch.account, ch.prev)
 	return nil
 }
@@ -495,12 +514,12 @@ func (ch refundChange) dirtied() (accounts.Address, bool) {
 }
 
 func (ch addLogChange) revert(s *IntraBlockState) error {
-	if ch.txIndex >= len(s.logs) {
+	if ch.txIndex+1 >= len(s.logs) {
 		panic(fmt.Sprintf("can't revert log index %v, max: %v", ch.txIndex, len(s.logs)-1))
 	}
-	txnLogs := s.logs[ch.txIndex]
-	s.logs[ch.txIndex] = txnLogs[:len(txnLogs)-1] // revert 1 log
-	if len(s.logs[ch.txIndex]) == 0 {
+	txnLogs := s.logs[ch.txIndex+1]
+	s.logs[ch.txIndex+1] = txnLogs[:len(txnLogs)-1] // revert 1 log
+	if len(s.logs[ch.txIndex+1]) == 0 {
 		s.logs = s.logs[:len(s.logs)-1] // revert txn
 	}
 	s.logSize--

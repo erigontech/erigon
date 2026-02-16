@@ -2,6 +2,10 @@
 description: >-
   The Erigon RPC Service: Enabling JSON-RPC, Transports (HTTP/WS/gRPC), and API
   Namespaces
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/interacting-with-erigon/interacting-with-erigon
 ---
 
 # RPC Service
@@ -22,9 +26,7 @@ The Erigon RPC Service, managed by Erigon's modular [RPC daemon](../fundamentals
 * [`internal`](internal.md): Erigon specific API for development and debugging purposes.
 * [`gRPC`](grpc.md): API for lower-level data access.
 
-{% include "../../../.gitbook/includes/warning-admin_-and-debug_-....md" %}
-
-For a complete reference on the standard Ethereum JSON-RPC methods, especially those in the `eth`, `net`, and `web3` namespaces, it is recommended to consult the general documentation on [ethereum.org's JSON-RPC API page](https://ethereum.org/en/developers/docs/apis/json-rpc/). Additionally, for the formal specification of the `debug`, `engine`, and `eth` namespaces, including unique, detailed descriptions for methods like `eth_getProof` and `eth_simulateV1`, refer to the [Execution APIs documentation](https://ethereum.github.io/execution-apis/api-documentation/).
+For a complete reference on the standard Ethereum JSON-RPC methods, especially those in the `eth`, `net`, and `web3` namespaces, it is recommended to consult the general documentation on [ethereum.org's JSON-RPC API page](https://ethereum.org/en/developers/docs/apis/json-rpc/). Additionally, for the formal specification of the `debug`, `engine`, and `eth` namespaces, including unique, detailed descriptions for methods like `eth_getProof` and `eth_simulateV1`, refer to the [Execution APIs documentation](https://ethereum.github.io/execution-apis).
 
 {% embed url="https://ethereum.org/en/developers/docs/apis/json-rpc/" %}
 

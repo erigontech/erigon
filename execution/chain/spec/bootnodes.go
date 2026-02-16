@@ -31,6 +31,17 @@ var mainnetBootnodes = []string{
 	"enode://4aeb4ab6c14b23e2c4cfdce879c04b0748a20d8e9b59e25ded2a08143e265c6c25936e74cbc8e641e3312ca288673d91f2f93f8e277de3cfa444ecdaaf982052@157.90.35.166:30303", // bootnode-hetzner-fsn
 }
 
+// bloatnetBootnodes are the enode URLs of the P2P bootstrap nodes running on
+// the bloatnet (perfdevnet-2) network.
+var bloatnetBootnodes = []string{
+	// ethpandaops bootnodes
+	"enode://22c1dd13d7738ae461740bbe1340733bdabe88c0682b5788bb308bb80f0d6281085196600416f187dc0f1d5d9613b1c2590e6e5b4003329a464910f613bd096a@157.180.14.229:30303",
+	"enode://d220de2edb15e5170383435fa9e55d9e2997c9dd4c8a07f6414ca46ac178375eec0274cd2fbcb70967c8f46b1d5150b5cac54a33907a47d6d954a0fdc477e2ad@157.180.14.230:30303",
+	"enode://3ba5f46aa1a9d863de4ce5ff67ec46704c43b2a1d5100e272dbfec5e56b350113018d3e67c400f09db60d4ec55df025bd209802c67826717a33a48acbe13b305@157.180.14.226:30303",
+	"enode://6867a722d721cc444ae26f58d896844694264f7532b409f1d31797e77c5603728cc834b46b1e8f0d8dcd734e50280dc711cfab8c5fc5211430894c5fbcf0a86e@157.180.14.225:30303",
+	"enode://d38286e50eea1bb75da0f89a65fa8236255d0e52b2980998c7d903be4c69e3477f9f0e54f6039c2308d8e3c41123f3d1aeee2ad4f2811ebd48557a3dc406a273@157.180.14.228:30303",
+}
+
 // hoodiBootnodes are the enode URLs of the P2P bootstrap nodes running on the
 // Hoodi test network.
 var hoodiBootnodes = []string{

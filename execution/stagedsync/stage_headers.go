@@ -74,19 +74,19 @@ func StageHeadersCfg(
 	}
 }
 
-func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, test bool, logger log.Logger) error {
+func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, logger log.Logger) error {
 	if s.CurrentSyncCycle.IsInitialCycle {
 		if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.blockReader); err != nil {
 			return err
 		}
 	}
 	cfg.hd.Progress()
-	return HeadersPOW(s, u, ctx, tx, cfg, test, logger)
+	return HeadersPOW(s, u, ctx, tx, cfg, logger)
 
 }
 
 // HeadersPOW progresses Headers stage for Proof-of-Work headers
-func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, test bool, logger log.Logger) error {
+func HeadersPOW(s *StageState, u Unwinder, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, logger log.Logger) error {
 	var err error
 
 	startTime := time.Now()
@@ -229,15 +229,6 @@ Loop:
 			break
 		}
 
-		if test {
-			announces := cfg.hd.GrabAnnounces()
-			if len(announces) > 0 {
-				cfg.announceNewHashes(ctx, announces)
-			}
-
-			break
-		}
-
 		timer := time.NewTimer(1 * time.Second)
 		select {
 		case <-ctx.Done():
@@ -368,7 +359,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 	return nil
 }
 
-func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, test bool) (err error) {
+func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg) (err error) {
 	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
 	// Delete canonical hashes that are being unwound
 	unwindBlock := (u.Reason.Block != nil)
@@ -409,40 +400,38 @@ func HeadersUnwind(ctx context.Context, u *UnwindState, s *StageState, tx kv.RwT
 		var maxHash common.Hash
 		var maxNum uint64 = 0
 
-		if test { // If we are not in the test, we can do searching for the heaviest chain in the next cycle
-			// Find header with biggest TD
-			tdCursor, cErr := tx.Cursor(kv.HeaderTD)
-			if cErr != nil {
-				return cErr
+		// Find header with biggest TD
+		tdCursor, cErr := tx.Cursor(kv.HeaderTD)
+		if cErr != nil {
+			return cErr
+		}
+		defer tdCursor.Close()
+		var k, v []byte
+		k, v, err = tdCursor.Last()
+		if err != nil {
+			return err
+		}
+		for ; err == nil && k != nil; k, v, err = tdCursor.Prev() {
+			if len(k) != 40 {
+				return fmt.Errorf("key in TD table has to be 40 bytes long: %x", k)
 			}
-			defer tdCursor.Close()
-			var k, v []byte
-			k, v, err = tdCursor.Last()
-			if err != nil {
+			var hash common.Hash
+			copy(hash[:], k[8:])
+			if cfg.hd.IsBadHeader(hash) {
+				continue
+			}
+			var td big.Int
+			if err = rlp.DecodeBytes(v, &td); err != nil {
 				return err
 			}
-			for ; err == nil && k != nil; k, v, err = tdCursor.Prev() {
-				if len(k) != 40 {
-					return fmt.Errorf("key in TD table has to be 40 bytes long: %x", k)
-				}
-				var hash common.Hash
-				copy(hash[:], k[8:])
-				if cfg.hd.IsBadHeader(hash) {
-					continue
-				}
-				var td big.Int
-				if err = rlp.DecodeBytes(v, &td); err != nil {
-					return err
-				}
-				if td.Cmp(&maxTd) > 0 {
-					maxTd.Set(&td)
-					copy(maxHash[:], k[8:])
-					maxNum = binary.BigEndian.Uint64(k[:8])
-				}
+			if td.Cmp(&maxTd) > 0 {
+				maxTd.Set(&td)
+				copy(maxHash[:], k[8:])
+				maxNum = binary.BigEndian.Uint64(k[:8])
 			}
-			if err != nil {
-				return err
-			}
+		}
+		if err != nil {
+			return err
 		}
 		/* TODO(yperbasis): Is it safe?
 		if err := rawdb.TruncateTd(tx, u.UnwindPoint+1); err != nil {

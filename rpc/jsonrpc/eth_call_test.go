@@ -239,7 +239,7 @@ func TestGetProof(t *testing.T) {
 			tx, err := m.DB.BeginTemporalRo(context.Background())
 			require.NoError(t, err)
 			defer tx.Rollback()
-			header, err := api.headerByRPCNumber(context.Background(), rpc.BlockNumber(tt.blockNum), tx)
+			header, err := api.headerByNumber(context.Background(), rpc.BlockNumber(tt.blockNum), tx)
 			require.NoError(t, err)
 
 			require.Equal(t, tt.addr, proof.Address)
@@ -577,7 +577,7 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, 
 	_, fillerPublicKeys, err := generatePseudoRandomECDSAKeyPairs(rng, nFillerAccounts)
 	require.NoError(t, err)
 
-	m := mock.MockWithGenesis(t, gspec, bankKey, false)
+	m := mock.MockWithGenesis(t, gspec, bankKey)
 	db := m.DB
 
 	var contractAddr common.Address
@@ -669,6 +669,7 @@ func doPrune(t *testing.T, db kv.RwDB, pruneTo uint64) {
 	//logger := testlog.Logger(t, log.LvlCrit)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
+	defer tx.Rollback()
 
 	logEvery := time.NewTicker(20 * time.Second)
 

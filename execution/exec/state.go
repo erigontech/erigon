@@ -332,7 +332,7 @@ func (rw *Worker) RunTxTask(txTask Task) (result *TxResult) {
 		rw.notifier.Wait()
 	}
 
-	if rw.metrics != nil {
+	if rw.metrics != nil && dbg.KVReadLevelledMetrics {
 		rw.metrics.Active.Add(1)
 		start := time.Now()
 		defer func() {

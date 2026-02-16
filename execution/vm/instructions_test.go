@@ -23,6 +23,7 @@ package vm
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -117,8 +118,8 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 	)
 
 	for i, test := range tests {
-		x := *new(uint256.Int).SetBytes(common.Hex2Bytes(test.X))
-		y := *new(uint256.Int).SetBytes(common.Hex2Bytes(test.Y))
+		x := *uint256.NewInt(0).SetBytes(common.Hex2Bytes(test.X))
+		y := *uint256.NewInt(0).SetBytes(common.Hex2Bytes(test.Y))
 		expected := new(uint256.Int).SetBytes(common.Hex2Bytes(test.Expected))
 		callContext.Stack.push(x)
 		callContext.Stack.push(y)
@@ -540,13 +541,13 @@ func TestOpMstore(t *testing.T) {
 	pc := uint64(0)
 	v := "abcdef00000000000000abba000000000deaf000000c0de00100000000133700"
 	callContext.Stack.push(*new(uint256.Int).SetBytes(common.Hex2Bytes(v)))
-	callContext.Stack.push(*new(uint256.Int))
+	callContext.Stack.push(uint256.Int{})
 	opMstore(pc, evm, callContext)
 	if got := common.Bytes2Hex(callContext.Memory.GetCopy(0, 32)); got != v {
 		t.Fatalf("Mstore fail, got %v, expected %v", got, v)
 	}
 	callContext.Stack.push(*new(uint256.Int).SetOne())
-	callContext.Stack.push(*new(uint256.Int))
+	callContext.Stack.push(uint256.Int{})
 	opMstore(pc, evm, callContext)
 	if common.Bytes2Hex(callContext.Memory.GetCopy(0, 32)) != "0000000000000000000000000000000000000000000000000000000000000001" {
 		t.Fatalf("Mstore failed to overwrite previous value")
@@ -561,7 +562,7 @@ func BenchmarkOpMstore(bench *testing.B) {
 
 	callContext.Memory.Resize(64)
 	pc := uint64(0)
-	memStart := *new(uint256.Int)
+	memStart := uint256.Int{}
 	value := *new(uint256.Int).SetUint64(0x1337)
 
 	for bench.Loop() {
@@ -586,14 +587,14 @@ func TestOpTstore(t *testing.T) {
 	// push the value to the stack
 	callContext.Stack.push(*new(uint256.Int).SetBytes(value))
 	// push the location to the stack
-	callContext.Stack.push(*new(uint256.Int))
+	callContext.Stack.push(uint256.Int{})
 	opTstore(pc, evm, callContext)
 	// there should be no elements on the stack after TSTORE
 	if callContext.Stack.len() != 0 {
 		t.Fatal("stack wrong size")
 	}
 	// push the location to the stack
-	callContext.Stack.push(*new(uint256.Int))
+	callContext.Stack.push(uint256.Int{})
 	opTload(pc, evm, callContext)
 	// there should be one element on the stack after TLOAD
 	if callContext.Stack.len() != 1 {
@@ -947,10 +948,11 @@ func TestEIP8024_Execution(t *testing.T) {
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.TestChainConfig, Config{})
 
 	tests := []struct {
-		name     string
-		codeHex  string
-		wantErr  bool
-		wantVals []uint64
+		name       string
+		codeHex    string
+		wantErr    error
+		wantOpcode OpCode
+		wantVals   []uint64
 	}{
 		{
 			name:    "DUPN",
@@ -1003,55 +1005,70 @@ func TestEIP8024_Execution(t *testing.T) {
 			},
 		},
 		{
-			name:    "INVALID_SWAPN_LOW",
-			codeHex: "e75b",
-			wantErr: true,
+			name:       "INVALID_SWAPN_LOW",
+			codeHex:    "e75b",
+			wantErr:    &ErrInvalidOpCode{},
+			wantOpcode: SWAPN,
 		},
 		{
 			name:    "JUMP over INVALID_DUPN",
 			codeHex: "600456e65b",
-			wantErr: false,
+			wantErr: nil,
+		},
+		{
+			name:       "UNDERFLOW_DUPN_1",
+			codeHex:    "6000808080808080808080808080808080e600",
+			wantErr:    &ErrStackUnderflow{},
+			wantOpcode: DUPN,
 		},
 		// Additional test cases
 		{
-			name:    "INVALID_DUPN_LOW",
-			codeHex: "e65b",
-			wantErr: true,
+			name:       "INVALID_DUPN_LOW",
+			codeHex:    "e65b",
+			wantErr:    &ErrInvalidOpCode{},
+			wantOpcode: DUPN,
 		},
 		{
-			name:    "INVALID_EXCHANGE_LOW",
-			codeHex: "e850",
-			wantErr: true,
+			name:       "INVALID_EXCHANGE_LOW",
+			codeHex:    "e850",
+			wantErr:    &ErrInvalidOpCode{},
+			wantOpcode: EXCHANGE,
 		},
 		{
-			name:    "INVALID_DUPN_HIGH",
-			codeHex: "e67f",
-			wantErr: true,
+			name:       "INVALID_DUPN_HIGH",
+			codeHex:    "e67f",
+			wantErr:    &ErrInvalidOpCode{},
+			wantOpcode: DUPN,
 		},
 		{
-			name:    "INVALID_SWAPN_HIGH",
-			codeHex: "e77f",
-			wantErr: true,
+			name:       "INVALID_SWAPN_HIGH",
+			codeHex:    "e77f",
+			wantErr:    &ErrInvalidOpCode{},
+			wantOpcode: SWAPN,
 		},
 		{
-			name:    "INVALID_EXCHANGE_HIGH",
-			codeHex: "e87f",
-			wantErr: true,
+			name:       "INVALID_EXCHANGE_HIGH",
+			codeHex:    "e87f",
+			wantErr:    &ErrInvalidOpCode{},
+			wantOpcode: EXCHANGE,
 		},
 		{
-			name:    "UNDERFLOW_DUPN",
-			codeHex: "5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5fe600", // (n=17, need 17 items, have 16)
-			wantErr: true,
+			name:       "UNDERFLOW_DUPN_2",
+			codeHex:    "5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5fe600", // (n=17, need 17 items, have 16)
+			wantErr:    &ErrStackUnderflow{},
+			wantOpcode: DUPN,
 		},
 		{
-			name:    "UNDERFLOW_SWAPN",
-			codeHex: "5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5fe700", // (n=17, need 18 items, have 17)
-			wantErr: true,
+			name:       "UNDERFLOW_SWAPN",
+			codeHex:    "5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5fe700", // (n=17, need 18 items, have 17)
+			wantErr:    &ErrStackUnderflow{},
+			wantOpcode: SWAPN,
 		},
 		{
-			name:    "UNDERFLOW_EXCHANGE",
-			codeHex: "60016002e801", // (n,m)=(1,2), need 3 items, have 2
-			wantErr: true,
+			name:       "UNDERFLOW_EXCHANGE",
+			codeHex:    "60016002e801", // (n,m)=(1,2), need 3 items, have 2
+			wantErr:    &ErrStackUnderflow{},
+			wantOpcode: EXCHANGE,
 		},
 		{
 			name:     "PC_INCREMENT",
@@ -1067,6 +1084,7 @@ func TestEIP8024_Execution(t *testing.T) {
 			callContext := new(CallContext)
 			callContext.Contract.Code = code
 			var err error
+			var errOp OpCode
 			for pc < uint64(len(code)) && err == nil {
 				op := code[pc]
 				switch OpCode(op) {
@@ -1085,18 +1103,43 @@ func TestEIP8024_Execution(t *testing.T) {
 					pc, _, err = opDupN(pc, evm, callContext)
 				case ISZERO:
 					pc, _, err = opIszero(pc, evm, callContext)
+				case PUSH0:
+					pc, _, err = opPush0(pc, evm, callContext)
 				case SWAPN:
 					pc, _, err = opSwapN(pc, evm, callContext)
 				case EXCHANGE:
 					pc, _, err = opExchange(pc, evm, callContext)
 				default:
-					err = &ErrInvalidOpCode{opcode: OpCode(op)}
+					t.Fatalf("unexpected opcode %s at pc=%d", OpCode(op), pc)
+				}
+				if err != nil {
+					errOp = OpCode(op)
 				}
 				pc++
 			}
-			if tc.wantErr {
+			if tc.wantErr != nil {
+				// Fail because we wanted an error, but didn't get one.
 				if err == nil {
 					t.Fatalf("expected error, got nil")
+				}
+				// Fail if the wrong opcode threw an error.
+				if errOp != tc.wantOpcode {
+					t.Fatalf("expected error from opcode %s, got %s", tc.wantOpcode, errOp)
+				}
+				// Fail if we don't get the error we expect.
+				switch tc.wantErr.(type) {
+				case *ErrInvalidOpCode:
+					var want *ErrInvalidOpCode
+					if !errors.As(err, &want) {
+						t.Fatalf("expected ErrInvalidOpCode, got %v", err)
+					}
+				case *ErrStackUnderflow:
+					var want *ErrStackUnderflow
+					if !errors.As(err, &want) {
+						t.Fatalf("expected ErrStackUnderflow, got %v", err)
+					}
+				default:
+					t.Fatalf("unsupported wantErr type %T", tc.wantErr)
 				}
 				return
 			}

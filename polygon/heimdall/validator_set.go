@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"slices"
 	"sort"
 	"strings"
 
@@ -188,8 +189,8 @@ type MinimalVal struct {
 
 // SortMinimalValByAddress sorts validators
 func SortMinimalValByAddress(a []MinimalVal) []MinimalVal {
-	sort.Slice(a, func(i, j int) bool {
-		return bytes.Compare(a[i].Signer.Bytes(), a[j].Signer.Bytes()) < 0
+	slices.SortFunc(a, func(i, j MinimalVal) int {
+		return bytes.Compare(i.Signer.Bytes(), j.Signer.Bytes())
 	})
 
 	return a

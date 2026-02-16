@@ -914,7 +914,12 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		isBorStateSyncTxn = true
 	}
 
-	header, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNum), tx)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
+	header, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNum), tx)
 	if err != nil {
 		return nil, err
 	}
@@ -989,6 +994,11 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		return nil, err
 	}
 
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
 	// Extract transactions from block
 	block, bErr := api.blockWithSenders(ctx, tx, blockHash, blockNumber)
 	if bErr != nil {
@@ -1059,12 +1069,17 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		blockNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
 
-	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, *blockNrOrHash, tx, api._blockReader, api.filters)
+	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, *blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
 
-	header, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNumber), tx)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	header, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNumber), tx)
 	if err != nil {
 		return nil, err
 	}
@@ -1072,7 +1087,12 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, *blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1245,12 +1265,17 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		var num = rpc.LatestBlockNumber
 		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
-	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, tx, api._blockReader, api.filters)
+	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
 
-	parentHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNumber), tx)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	parentHeader, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNumber), tx)
 	if err != nil {
 		return nil, err
 	}
@@ -1278,7 +1303,12 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		}
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, *parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1317,7 +1347,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	}
 	noop := state.NewNoopWriter()
 
-	parentHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(parentBlockNumber), dbtx)
+	parentHeader, err := api.headerByNumber(ctx, rpc.BlockNumber(parentBlockNumber), dbtx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1405,13 +1435,15 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			blockCtx.MaxGasLimit = true
 		}
 
-		// Clone the state cache before applying the changes for diff after transaction execution, clone is discarded
+		// Reset and clone only needed when stateDiff is requested:
+		// stateDiff requires per-tx isolation to compute before/after state.
+		// For trace/vmTrace only, skip Reset to match whole-block replay semantics (issue #12607).
 		var cloneReader state.StateReader
 		var sd *StateDiff
 		if traceTypeStateDiff {
+			ibs.Reset()
 			cloneCache := stateCache.Clone()
 			cloneReader = state.NewCachedReader(stateReader, cloneCache)
-			//cloneReader = stateReader
 			if isHistoricalStateReader {
 				historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
 			}
@@ -1420,7 +1452,6 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			sd = &StateDiff{sdMap: sdMap}
 		}
 
-		ibs.Reset()
 		var finalizeTxStateWriter state.StateWriter
 		if sd != nil {
 			finalizeTxStateWriter = sd
@@ -1490,15 +1521,16 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 					return nil, nil, err
 				}
 			}
-			if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
-				return nil, nil, err
-			}
 		} else {
 			if !txFinalized {
 				if err = ibs.FinalizeTx(chainRules, noop); err != nil {
 					return nil, nil, err
 				}
 			}
+		}
+		if traceTypeStateDiff {
+			// CommitBlock after each tx to flush ibs changes into stateCache,
+			// so the next tx's cloneReader captures the correct "before" state
 			if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
 				return nil, nil, err
 			}
@@ -1534,7 +1566,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	}
 	noop := state.NewNoopWriter()
 
-	parentHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(parentBlockNumber), dbtx)
+	parentHeader, err := api.headerByNumber(ctx, rpc.BlockNumber(parentBlockNumber), dbtx)
 	if err != nil {
 		return nil, err
 	}

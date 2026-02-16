@@ -173,7 +173,7 @@ func TestEthConfig(t *testing.T) {
 			var genesis types.Genesis
 			err = json.Unmarshal(genesisBytes, &genesis)
 			require.NoError(t, err)
-			m := mock.MockWithGenesis(t, &genesis, key, false)
+			m := mock.MockWithGenesis(t, &genesis, key)
 			defer m.Close()
 			eth := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 			if test.head != nil {
@@ -212,7 +212,7 @@ func createGasPriceTestKV(t *testing.T, chainSize int) *mock.MockSentry {
 		}
 		signer = types.LatestSigner(gspec.Config)
 	)
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 
 	// Generate testing blocks
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {

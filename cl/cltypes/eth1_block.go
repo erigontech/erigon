@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -115,6 +114,8 @@ func (*Eth1Block) Static() bool {
 }
 
 func (b *Eth1Block) MarshalJSON() ([]byte, error) {
+	baseFeePerGas := uint256.NewInt(0).SetBytes32(b.BaseFeePerGas[:])
+	baseFeePerGas.ReverseBytes(baseFeePerGas)
 	return json.Marshal(struct {
 		ParentHash    common.Hash                 `json:"parent_hash"`
 		FeeRecipient  common.Address              `json:"fee_recipient"`
@@ -145,7 +146,7 @@ func (b *Eth1Block) MarshalJSON() ([]byte, error) {
 		GasUsed:       b.GasUsed,
 		Time:          b.Time,
 		Extra:         b.Extra,
-		BaseFeePerGas: uint256.NewInt(0).SetBytes32(utils.ReverseOfByteSlice(b.BaseFeePerGas[:])).Dec(),
+		BaseFeePerGas: baseFeePerGas.Dec(),
 		BlockHash:     b.BlockHash,
 		Transactions:  b.Transactions,
 		Withdrawals:   b.Withdrawals,
@@ -193,9 +194,8 @@ func (b *Eth1Block) UnmarshalJSON(data []byte) error {
 	if err := tmp.SetFromDecimal(aux.BaseFeePerGas); err != nil {
 		return err
 	}
-	tmpBaseFee := tmp.Bytes32()
-	b.BaseFeePerGas = common.Hash{}
-	copy(b.BaseFeePerGas[:], utils.ReverseOfByteSlice(tmpBaseFee[:]))
+	tmp.ReverseBytes(tmp)
+	tmp.WriteToArray32((*[32]byte)(&b.BaseFeePerGas))
 	b.BlockHash = aux.BlockHash
 	b.Transactions = aux.Transactions
 	b.Withdrawals = aux.Withdrawals

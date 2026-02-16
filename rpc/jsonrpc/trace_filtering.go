@@ -76,6 +76,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	if err != nil {
 		return nil, err
 	}
+
 	if !ok {
 		if chainConfig.Bor == nil {
 			return nil, nil
@@ -93,7 +94,12 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		isBorStateSyncTxn = true
 	}
 
-	header, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNumber), tx)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	header, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNumber), tx)
 	if err != nil {
 		return nil, err
 	}
@@ -193,6 +199,13 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return []ParityTrace{}, nil
 	}
 	bn := hexutil.Uint64(blockNum)
+
+	// if we've pruned this history away for this block then just return early
+	// to save any red herring errors
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
 
 	// Extract transactions from block
 	block, bErr := api.blockWithSenders(ctx, tx, hash, blockNum)
@@ -344,6 +357,14 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	}
 	if fromBlock > toBlock {
 		return errors.New("invalid parameters: fromBlock cannot be greater than toBlock")
+	}
+
+	// if we've pruned this history away for this block then just return early
+	// to save any red herring errors
+
+	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, fromBlock)
+	if err != nil {
+		return err
 	}
 
 	return api.filterV3(ctx, dbtx, fromBlock, toBlock, req, stream, *gasBailOut, traceConfig)
@@ -777,6 +798,11 @@ func (api *TraceAPIImpl) callBlock(
 		RequireCanonical: true,
 	}
 
+	err := rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, nil, err
@@ -889,6 +915,11 @@ func (api *TraceAPIImpl) callTransaction(
 		BlockNumber:      &parentNo,
 		BlockHash:        &parentHash,
 		RequireCanonical: true,
+	}
+
+	err := rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	if err != nil {
+		return nil, err
 	}
 
 	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)

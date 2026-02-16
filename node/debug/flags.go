@@ -291,7 +291,7 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *htt
 	}
 
 	if metricsEnabled || pprofEnabled {
-		torrentMsg := fmt.Sprintf("curl -s http://%s%s > torrentStatus.txt", torrentClientStatusAddr, downloader.TorrentClientStatusPath)
+		torrentMsg := fmt.Sprintf("curl -fSs http://%s%s > torrentStatus.txt", torrentClientStatusAddr, downloader.TorrentClientStatusPath)
 		log.Info("To get torrent client status", "command", torrentMsg)
 	}
 
@@ -321,6 +321,12 @@ func Setup(ctx *cli.Context, rootLogger bool) (log.Logger, *tracers.Tracer, *htt
 	}
 
 	return logger, tracer, metricsMux, pprofMux, nil
+}
+
+// SetupSimple is like Setup but only returns the logger, discarding the tracer and muxes.
+func SetupSimple(ctx *cli.Context, rootLogger bool) (log.Logger, error) {
+	logger, _, _, _, err := Setup(ctx, rootLogger)
+	return logger, err
 }
 
 func StartPProf(address string, metricsMux *http.ServeMux) *http.ServeMux {

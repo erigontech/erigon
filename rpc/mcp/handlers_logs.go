@@ -246,7 +246,7 @@ func grepLog(filename, pattern string, maxLines int, caseInsensitive bool) ([]st
 }
 
 // getLogStats returns statistics about a log file
-func getLogStats(filename string) (map[string]interface{}, error) {
+func getLogStats(filename string) (map[string]any, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, err
@@ -284,7 +284,7 @@ func getLogStats(filename string) (map[string]interface{}, error) {
 		return nil, err
 	}
 
-	stats := map[string]interface{}{
+	stats := map[string]any{
 		"file_name":    filepath.Base(filename),
 		"file_size":    fileInfo.Size(),
 		"file_size_mb": float64(fileInfo.Size()) / (1024 * 1024),

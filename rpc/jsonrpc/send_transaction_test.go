@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"bytes"
-	"math/big"
 	"testing"
 	"time"
 
@@ -27,86 +26,46 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/params"
-	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
-	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
 // Do 1 step to start txPool
-func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *testing.T) {
+func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions) {
 	chain, err := blockgen.GenerateChain(mockSentry.ChainConfig, mockSentry.Genesis, mockSentry.Engine, mockSentry.DB, 1 /*number of blocks:*/, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	require.NoError(err)
-
-	// Send NewBlock message
-	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: chain.TopBlock,
-		TD:    big.NewInt(1), // This is ignored anyway
-	})
+	err = mockSentry.InsertChain(chain)
 	require.NoError(err)
-
-	mockSentry.ReceiveWg.Add(1)
-	for _, err = range mockSentry.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_NEW_BLOCK_66, Data: b, PeerId: mockSentry.PeerId}) {
-		require.NoError(err)
-	}
-	// Send all the headers
-	b, err = rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
-		RequestId:          1,
-		BlockHeadersPacket: chain.Headers,
-	})
-	require.NoError(err)
-	mockSentry.ReceiveWg.Add(1)
-	for _, err = range mockSentry.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: mockSentry.PeerId}) {
-		require.NoError(err)
-	}
-	mockSentry.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
-
-	initialCycle, firstCycle := mock.MockInsertAsInitialCycle, false
-
-	err = stageloop.StageLoopIteration(mockSentry.Ctx, mockSentry.DB, mockSentry.Sync, initialCycle, firstCycle, log.New(), mockSentry.BlockReader, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 }
 
 func TestSendRawTransaction(t *testing.T) {
 	if testing.Short() {
 		t.Skip("too slow for testing.Short")
 	}
-
-	mockSentry, require := mock.MockWithTxPool(t), require.New(t)
-
-	oneBlockStep(mockSentry, require, t)
-
+	mockSentry := mock.MockWithTxPool(t)
+	require := require.New(t)
+	oneBlockStep(mockSentry, require)
 	expectedValue := uint64(1234)
 	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectedValue), params.TxGas, uint256.NewInt(10*common.GWei), nil), *types.LatestSignerForChainID(mockSentry.ChainConfig.ChainID), mockSentry.Key)
 	require.NoError(err)
-
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
 	txPool := txpoolproto.NewTxpoolClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log)
 	api := newEthApiForTest(newBaseApiForTest(mockSentry), mockSentry.DB, txPool, nil)
-
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)
 	require.NoError(err)
-
 	txsCh, id := ff.SubscribePendingTxs(1)
 	defer ff.UnsubscribePendingTxs(id)
-
 	txHash, err := api.SendRawTransaction(ctx, buf.Bytes())
 	require.NoError(err)
-
 	select {
 	case got := <-txsCh:
 		require.Equal(expectedValue, got[0].GetValue().Uint64())
@@ -116,55 +75,43 @@ func TestSendRawTransaction(t *testing.T) {
 		require.NoError(err)
 		require.Equal(expectedValue, jsonTx.Value.Uint64())
 	}
-
 	//send same txn second time and expect error
 	_, err = api.SendRawTransaction(ctx, buf.Bytes())
 	require.Error(err)
 	expectedErr := txpoolproto.ImportResult_name[int32(txpoolproto.ImportResult_ALREADY_EXISTS)] + ": " + txpoolcfg.AlreadyKnown.String()
 	require.Equal(expectedErr, err.Error())
 	mockSentry.ReceiveWg.Wait()
-
 	//TODO: make propagation easy to test - now race
 	//time.Sleep(time.Second)
-	//sent := m.SentMessage(0)
-	//require.Equal(eth.ToProto[m.MultiClient.Protocol()][eth.NewPooledTransactionHashesMsg], sent.Id)
+	//sent := mockSentry.SentMessage(0)
+	//require.Equal(eth.ToProto[mockSentry.MultiClient.Protocol()][eth.NewPooledTransactionHashesMsg], sent.Id)
 }
 
 func TestSendRawTransactionUnprotected(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-
-	mockSentry, require := mock.MockWithTxPool(t), require.New(t)
-
-	oneBlockStep(mockSentry, require, t)
-
+	mockSentry := mock.MockWithTxPool(t)
+	require := require.New(t)
+	oneBlockStep(mockSentry, require)
 	expectedTxValue := uint64(4444)
-
 	// Create a legacy signer pre-155
 	unprotectedSigner := types.MakeFrontierSigner()
-
 	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectedTxValue), params.TxGas, uint256.NewInt(10*common.GWei), nil), *unprotectedSigner, mockSentry.Key)
 	require.NoError(err)
-
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mockSentry)
 	txPool := txpoolproto.NewTxpoolClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log)
 	api := newEthApiForTest(newBaseApiForTest(mockSentry), mockSentry.DB, txPool, nil)
-
 	// Enable unprotected txs flag
 	api.AllowUnprotectedTxs = true
-
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)
 	require.NoError(err)
-
 	txsCh, id := ff.SubscribePendingTxs(1)
 	defer ff.UnsubscribePendingTxs(id)
-
 	txHash, err := api.SendRawTransaction(ctx, buf.Bytes())
 	require.NoError(err)
-
 	select {
 	case got := <-txsCh:
 		require.Equal(expectedTxValue, got[0].GetValue().Uint64())

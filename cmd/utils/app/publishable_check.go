@@ -33,11 +33,9 @@ func CheckFilesForSchema(schema state.SnapNameSchema, params CheckFilesParams) (
 	// - each data file has corresponding index/bt etc.1
 	// - versions: between min supported version and max
 	// - lastFileTo check
-	// - sum = maxTo check (probably redundant if no gaps/overlaps)
 
 	// collect all data files
 	dataFiles := make([]state.SnapInfo, 0)
-	sumRange := uint64(0)
 	if err := filepath.WalkDir(schema.DataDirectory(), func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) { //it's ok if some file get removed during walk
@@ -61,7 +59,6 @@ func CheckFilesForSchema(schema state.SnapNameSchema, params CheckFilesParams) (
 			return nil
 		}
 
-		sumRange += res.To - res.From
 		dataFiles = append(dataFiles, *res)
 
 		return nil

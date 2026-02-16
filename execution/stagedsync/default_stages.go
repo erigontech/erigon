@@ -27,7 +27,8 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
-func DefaultStages(ctx context.Context,
+func DefaultStages(
+	ctx context.Context,
 	snapshots SnapshotsCfg,
 	headers HeadersCfg,
 	blockHashCfg BlockHashesCfg,
@@ -36,7 +37,6 @@ func DefaultStages(ctx context.Context,
 	exec ExecuteBlockCfg,
 	txLookup TxLookupCfg,
 	finish FinishCfg,
-	test bool,
 ) []*Stage {
 	return []*Stage{
 		{
@@ -62,10 +62,10 @@ func DefaultStages(ctx context.Context,
 				if badBlockUnwind {
 					return nil
 				}
-				return SpawnStageHeaders(s, u, ctx, tx, headers, test, logger)
+				return SpawnStageHeaders(s, u, ctx, tx, headers, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return HeadersUnwind(ctx, u, s, tx, headers, test)
+				return HeadersUnwind(ctx, u, s, tx, headers)
 			},
 			Prune: func(ctx context.Context, p *PruneState, tx kv.RwTx, timeout time.Duration, logger log.Logger) error {
 				return nil
@@ -88,7 +88,7 @@ func DefaultStages(ctx context.Context,
 			ID:          stages.Bodies,
 			Description: "Download block bodies",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return BodiesForward(s, u, ctx, tx, bodies, test, logger)
+				return BodiesForward(s, u, ctx, tx, bodies, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return UnwindBodiesStage(u, tx, bodies)
@@ -288,7 +288,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 				return nil
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return HeadersUnwind(ctx, u, s, tx, headers, false)
+				return HeadersUnwind(ctx, u, s, tx, headers)
 			},
 		},
 		{

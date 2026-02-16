@@ -166,6 +166,19 @@ func (d *Domain) kvBtAccessorFilePathMask(fromStep, toStep kv.Step) string {
 	return filepath.Join(d.dirs.SnapDomain, fmt.Sprintf("*-%s.%d-%d.bt", d.FilenameBase, fromStep, toStep))
 }
 
+func (d *Domain) kvFileNameMask(fromStep, toStep kv.Step) string {
+	return fmt.Sprintf("*-%s.%d-%d.kv", d.FilenameBase, fromStep, toStep)
+}
+func (d *Domain) kviAccessorFileNameMask(fromStep, toStep kv.Step) string {
+	return fmt.Sprintf("*-%s.%d-%d.kvi", d.FilenameBase, fromStep, toStep)
+}
+func (d *Domain) kvExistenceIdxFileNameMask(fromStep, toStep kv.Step) string {
+	return fmt.Sprintf("*-%s.%d-%d.kvei", d.FilenameBase, fromStep, toStep)
+}
+func (d *Domain) kvBtAccessorFileNameMask(fromStep, toStep kv.Step) string {
+	return fmt.Sprintf("*-%s.%d-%d.bt", d.FilenameBase, fromStep, toStep)
+}
+
 // maxStepInDB - return the latest available step in db (at-least 1 value in such step)
 func (d *Domain) maxStepInDB(tx kv.Tx) (lstInDb kv.Step) {
 	lstIdx, _ := kv.LastKey(tx, d.History.KeysTable)
@@ -214,14 +227,14 @@ func (dt *DomainRoTx) NewWriter() *DomainBufferedWriter { return dt.newWriter(dt
 // It's ok if some files was open earlier.
 // If some file already open: noop.
 // If some file already open but not in provided list: close and remove from `files` field.
-func (d *Domain) OpenList(idxFiles, histFiles, domainFiles []string) error {
-	if err := d.History.openList(idxFiles, histFiles); err != nil {
+func (d *Domain) OpenList(scanResult ScanDirsResult) error {
+	if err := d.History.openList(scanResult.iiFiles, scanResult.historyFiles, scanResult.accessorFiles); err != nil {
 		return err
 	}
 
-	d.closeWhatNotInList(domainFiles)
-	d.scanDirtyFiles(domainFiles)
-	if err := d.openDirtyFiles(); err != nil {
+	d.closeWhatNotInList(scanResult.domainFiles)
+	d.scanDirtyFiles(scanResult.domainFiles)
+	if err := d.openDirtyFiles(scanResult.domainFiles); err != nil {
 		return fmt.Errorf("Domain(%s).openList: %w", d.FilenameBase, err)
 	}
 	d.protectFromHistoryFilesAheadOfDomainFiles()
@@ -239,11 +252,7 @@ func (d *Domain) openFolder(r *ScanDirsResult) error {
 	if d.Disable {
 		return nil
 	}
-
-	if err := d.OpenList(r.iiFiles, r.historyFiles, r.domainFiles); err != nil {
-		return err
-	}
-	return nil
+	return d.OpenList(*r)
 }
 
 func (d *Domain) closeFilesAfterStep(lowerBound kv.Step) {
@@ -536,7 +545,7 @@ func domainReadMetric(name kv.Domain, level int) metrics.Summary {
 	return mxsKVGet[name][level]
 }
 
-func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok bool, offset uint64, err error) {
+func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte, hi, lo uint64) (v []byte, ok bool, offset uint64, err error) {
 	if dbg.KVReadLevelledMetrics {
 		defer domainReadMetric(dt.name, i).ObserveDuration(time.Now())
 	}
@@ -554,7 +563,7 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey []byte) (v []byte, ok boo
 		if reader.Empty() {
 			return nil, false, 0, nil
 		}
-		offset, ok := reader.TwoLayerLookup(filekey)
+		offset, ok := reader.TwoLayerLookupByHash(hi, lo)
 		if !ok {
 			return nil, false, 0, nil
 		}
@@ -1348,7 +1357,7 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 	useExistenceFilter := dt.d.Accessors.Has(statecfg.AccessorExistence)
 	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
 
-	hi, _ := dt.ht.iit.hashKey(k)
+	hi, lo := dt.ht.iit.hashKey(k)
 
 	getFromFileCache := dt.getFromFileCache
 
@@ -1358,7 +1367,7 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		}
 		getFromFileCache = dt.getFromFileCache
 	}
-	if getFromFileCache != nil && maxTxNum == math.MaxUint64 {
+	if getFromFileCache != nil && useCache {
 		if cv, ok := getFromFileCache.Get(hi); ok {
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
@@ -1389,7 +1398,7 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 			}
 		}
 
-		v, found, _, err = dt.getLatestFromFile(i, k)
+		v, found, _, err = dt.getLatestFromFile(i, k, hi, lo)
 		if err != nil {
 			return nil, false, 0, 0, err
 		}
@@ -1403,7 +1412,7 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dt.name.String(), k, dt.files[i].src.decompressor.FileName())
 		}
 
-		if dt.getFromFileCache != nil {
+		if dt.getFromFileCache != nil && useCache {
 			dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), v: v})
 		}
 		return v, true, dt.files[i].startTxNum, dt.files[i].endTxNum, nil
@@ -1412,7 +1421,7 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		fmt.Printf("GetLatest(%s, %x) -> not found in %d files\n", dt.name.String(), k, len(dt.files))
 	}
 
-	if dt.getFromFileCache != nil {
+	if dt.getFromFileCache != nil && useCache {
 		dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: 0, v: nil})
 	}
 	return nil, false, 0, 0, nil
@@ -1675,14 +1684,14 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics
 		return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}
 	if found && foundStep <= maxStep {
-		if metrics != nil {
+		if metrics != nil && dbg.KVReadLevelledMetrics {
 			metrics.UpdateDbReads(dt.name, start)
 		}
 		return v, foundStep, true, nil
 	}
 
 	v, foundInFile, _, endTxNum, err := dt.getLatestFromFiles(key, 0)
-	if metrics != nil {
+	if metrics != nil && dbg.KVReadLevelledMetrics {
 		metrics.UpdateFileReads(dt.name, start)
 	}
 

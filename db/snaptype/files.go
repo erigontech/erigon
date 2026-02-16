@@ -360,7 +360,7 @@ func SeedableV2Extensions() []string {
 }
 
 func AllV2Extensions() []string {
-	return []string{".seg", ".idx", ".txt"}
+	return []string{".seg", ".idx", ".txt", ".toml"}
 }
 
 func SeedableV3Extensions() []string {

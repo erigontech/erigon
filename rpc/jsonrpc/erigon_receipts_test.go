@@ -240,7 +240,7 @@ func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.B
 	m := mock.MockWithGenesis(t, &types.Genesis{
 		Config: chain.TestChainConfig,
 		Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
-	}, testKey, false)
+	}, testKey)
 	if blocks > 0 {
 		chain, _ := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, generator)
 		err := m.InsertChain(chain)

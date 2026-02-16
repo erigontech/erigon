@@ -148,8 +148,7 @@ func (me *AggStats) AllTorrentsComplete() bool {
 
 type requestHandler struct {
 	// Separated this rather than embedded it to ensure our wrapper RoundTrip is called.
-	rt         http.RoundTripper
-	downloader *Downloader
+	rt http.RoundTripper
 }
 
 var cloudflareHeaders = http.Header{
@@ -266,22 +265,18 @@ func configureHttp2(t *http.Transport) {
 	h2t.MaxReadFrameSize = 1 << 20 // Same as net/http.Transport.ReadBufferSize?
 }
 
-func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downloader, error) {
+func MakeWebseedRoundTripper() http.RoundTripper {
 	requestHandler := &requestHandler{}
-	{
-		requestHandler.rt = makeTransport()
-		cfg.ClientConfig.WebTransport = requestHandler
-		// requestHandler.downloader is set later.
-	}
+	requestHandler.rt = makeTransport()
+	return requestHandler
+}
+
+func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downloader, error) {
+	cfg.ClientConfig.WebTransport = MakeWebseedRoundTripper()
 	metainfoSourcesHttpClient := func() *http.Client {
-		tr := makeTransport()
 		// Separate transport so webseed requests and metainfo fetching don't block each other.
-		// Additionally, we can tune for their specific workloads.
 		return &http.Client{
-			Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
-				insertCloudflareHeaders(req)
-				return tr.RoundTrip(req)
-			}),
+			Transport: MakeWebseedRoundTripper(),
 		}
 	}()
 	cfg.ClientConfig.MetainfoSourcesClient = metainfoSourcesHttpClient
@@ -334,8 +329,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downl
 	d.zeroActiveDownloadRequests.L = &d.activeDownloadRequestsLock
 
 	d.logConfig()
-
-	requestHandler.downloader = d
 
 	d.ctx, d.stop = context.WithCancel(context.Background())
 
@@ -434,7 +427,7 @@ func (d *Downloader) snapshotDataLooksComplete(info *metainfo.Info) bool {
 // Log the names of torrents missing metainfo. We can pass a level in to scale the urgency of the
 // situation.
 func (d *Downloader) logNoMetadata(lvl log.Lvl, torrents []snapshot) {
-	var noMetadata []string
+	noMetadata := make([]string, 0, len(torrents))
 
 	for _, ps := range torrents {
 		t, ok := d.torrentClient.Torrent(ps.InfoHash)
@@ -1067,7 +1060,7 @@ func (d *Downloader) applyMetainfo(
 func (d *Downloader) webseedMetainfoUrls(snapshotName string) iter.Seq[string] {
 	return func(yield func(string) bool) {
 		for base := range d.webSeedUrlStrs() {
-			if !yield(d.webseedMetainfoUrl(base, snapshotName)) {
+			if !yield(webseedMetainfoUrl(base, snapshotName)) {
 				return
 			}
 		}
@@ -1080,7 +1073,8 @@ func (d *Downloader) fetchMetainfoFromWebseeds(ctx context.Context, name string,
 	for base := range d.webSeedUrlStrs() {
 		buf.Reset()
 		var mi metainfo.MetaInfo
-		mi, err = d.fetchMetainfoFromWebseed(ctx, name, base, &buf)
+		var w io.Writer = &buf
+		mi, err = GetMetainfoFromWebseed(ctx, base, name, d.metainfoHttpClient, w)
 		if err != nil {
 			d.log(log.LvlDebug, "error fetching metainfo from webseed", "err", err, "name", name, "webseed", base)
 			// Whither error?
@@ -1101,20 +1095,21 @@ func (d *Downloader) fetchMetainfoFromWebseeds(ctx context.Context, name string,
 	return
 }
 
-func (d *Downloader) webseedMetainfoUrl(webseedUrlBase, snapshotName string) string {
+func webseedMetainfoUrl(webseedUrlBase, snapshotName string) string {
 	return webseedUrlBase + snapshotName + ".torrent"
 }
 
-func (d *Downloader) fetchMetainfoFromWebseed(
+func GetMetainfoFromWebseed(
 	ctx context.Context,
-	name string,
 	webseedUrlBase string,
+	name string,
+	httpClient *http.Client,
 	w io.Writer, // Receives the serialized metainfo
 ) (
 	mi metainfo.MetaInfo,
 	err error,
 ) {
-	url := d.webseedMetainfoUrl(webseedUrlBase, name)
+	url := webseedMetainfoUrl(webseedUrlBase, name)
 	defer func() {
 		if err != nil {
 			err = fmt.Errorf("fetching from %q: %w", url, err)
@@ -1124,15 +1119,15 @@ func (d *Downloader) fetchMetainfoFromWebseed(
 	if err != nil {
 		return
 	}
-	resp, err := d.metainfoHttpClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		err = fmt.Errorf("unexpected http response status code: %v", resp.StatusCode)
 		return
 	}
-	defer resp.Body.Close()
 	tr := io.TeeReader(resp.Body, w)
 	dec := bencode.NewDecoder(tr)
 	err = dec.Decode(&mi)

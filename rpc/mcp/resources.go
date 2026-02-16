@@ -115,7 +115,7 @@ func (e *ErigonMCPServer) handleResourceChainConfig(ctx context.Context, req mcp
 		mcp.TextResourceContents{
 			URI:      "erigon://chain/config",
 			MIMEType: "application/json",
-			Text: toJSONText(map[string]interface{}{
+			Text: toJSONText(map[string]any{
 				"current_block": blockNum,
 				"note":          "Chain config details would come from Erigon's chain spec",
 			}),
@@ -130,7 +130,7 @@ func (e *ErigonMCPServer) handleResourceRecentBlocks(ctx context.Context, req mc
 		return nil, err
 	}
 
-	blocks := make([]interface{}, 0, 10)
+	blocks := make([]any, 0, 10)
 	for i := 0; i < 10; i++ {
 		blockNum := currentBlock - hexutil.Uint64(i)
 		block, err := e.ethAPI.GetBlockByNumber(ctx, rpc.BlockNumber(blockNum), false)
@@ -157,7 +157,7 @@ func (e *ErigonMCPServer) handleResourceNetworkStatus(ctx context.Context, req m
 
 	currentBlock, _ := e.ethAPI.BlockNumber(ctx)
 
-	status := map[string]interface{}{
+	status := map[string]any{
 		"node_info":     nodeInfo,
 		"current_block": currentBlock,
 		"syncing":       false, // Would check actual sync status
@@ -181,7 +181,7 @@ func (e *ErigonMCPServer) handleResourceGasInfo(ctx context.Context, req mcp.Rea
 	// Get latest block for base fee
 	block, _ := e.ethAPI.GetBlockByNumber(ctx, rpc.LatestBlockNumber, false)
 
-	gasInfo := map[string]interface{}{
+	gasInfo := map[string]any{
 		"gas_price": gasPrice,
 	}
 	if block != nil {
@@ -207,7 +207,7 @@ func (e *ErigonMCPServer) handleResourceAddressSummary(ctx context.Context, req 
 	nonce, _ := e.ethAPI.GetTransactionCount(ctx, common.HexToAddress(address), rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
 	code, _ := e.ethAPI.GetCode(ctx, common.HexToAddress(address), rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
 
-	summary := map[string]interface{}{
+	summary := map[string]any{
 		"address":     address,
 		"balance":     balance,
 		"nonce":       nonce,
@@ -254,7 +254,7 @@ func (e *ErigonMCPServer) handleResourceTransactionAnalysis(ctx context.Context,
 	tx, _ := e.ethAPI.GetTransactionByHash(ctx, common.HexToHash(txHash))
 	receipt, _ := e.ethAPI.GetTransactionReceipt(ctx, common.HexToHash(txHash))
 
-	analysis := map[string]interface{}{
+	analysis := map[string]any{
 		"transaction": tx,
 		"receipt":     receipt,
 		"status":      "success", // Would check receipt status

@@ -48,9 +48,6 @@ const (
 
 const timingsCacheSize = 16
 
-// the maximum point from the current head, past which side forks are not validated anymore.
-const maxForkDepth = 32 // 32 slots is the duration of an epoch thus there cannot be side forks in PoS deeper than 32 blocks from head.
-
 type validatePayloadFunc func(*execctx.SharedDomains, kv.TemporalRwTx, uint64, []*types.Header, []*types.RawBody, *shards.Notifications) error
 
 type ForkValidator struct {
@@ -61,6 +58,7 @@ type ForkValidator struct {
 	// hash of chain head that extend canonical fork.
 	extendingForkHeadHash common.Hash
 	extendingForkNumber   uint64
+	maxReorgDepth         uint64
 	// this is the function we use to perform payload validation.
 	validatePayload validatePayloadFunc
 	blockReader     services.FullBlockReader
@@ -78,24 +76,8 @@ type ForkValidator struct {
 	timingsCache *lru.Cache[common.Hash, BlockTimings]
 }
 
-func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
-	validHashes, err := lru.New[common.Hash, bool]("validHashes", maxForkDepth*8)
-	if err != nil {
-		panic(err)
-	}
-	timingsCache, err := lru.New[common.Hash, BlockTimings]("timingsCache", timingsCacheSize)
-	if err != nil {
-		panic(err)
-	}
-	return &ForkValidator{
-		currentHeight: currentHeight,
-		validHashes:   validHashes,
-		timingsCache:  timingsCache,
-	}
-}
-
-func NewForkValidator(ctx context.Context, currentHeight uint64, validatePayload validatePayloadFunc, tmpDir string, blockReader services.FullBlockReader) *ForkValidator {
-	validHashes, err := lru.New[common.Hash, bool]("validHashes", maxForkDepth*8)
+func NewForkValidator(ctx context.Context, currentHeight uint64, validatePayload validatePayloadFunc, tmpDir string, blockReader services.FullBlockReader, maxReorgDepth uint64) *ForkValidator {
+	validHashes, err := lru.New[common.Hash, bool]("validHashes", int(maxReorgDepth)*8)
 	if err != nil {
 		panic(err)
 	}
@@ -112,6 +94,7 @@ func NewForkValidator(ctx context.Context, currentHeight uint64, validatePayload
 		ctx:             ctx,
 		validHashes:     validHashes,
 		timingsCache:    timingsCache,
+		maxReorgDepth:   maxReorgDepth,
 	}
 }
 
@@ -140,17 +123,16 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 	fv.extendingForkHeadHash = common.Hash{}
 }
 
-// FlushExtendingFork flush the current extending fork if fcu chooses its head hash as the its forkchoice.
-func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts) error {
+// MergeExtendingFork merges the shared domains of the current extending fork into the current shared domains if fcu chooses its head hash as the fork choice.
+func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, accumulator *shards.Accumulator, recentReceipts *shards.RecentReceipts) error {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	start := time.Now()
-
-	// Flush changes to db.
 	if fv.sharedDom != nil {
-		sd.Merge(fv.sharedDom)
-
-		_, err := sd.ComputeCommitment(ctx, tx, true, sd.BlockNum(), sd.TxNum(), "flush-commitment", nil)
+		if err := fv.sharedDom.FlushPendingUpdates(ctx, tx); err != nil {
+			return err
+		}
+		err := sd.Merge(fv.sharedDom)
 		if err != nil {
 			return err
 		}
@@ -162,7 +144,6 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, sd *execctx.Sha
 	fv.extendingForkNotifications.RecentReceipts.CopyAndReset(recentReceipts)
 	// Clean extending fork data
 	fv.sharedDom = nil
-
 	fv.extendingForkHeadHash = common.Hash{}
 	fv.extendingForkNumber = 0
 	fv.extendingForkNotifications = nil
@@ -194,8 +175,8 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 		return
 	}
 
-	// if the block is not in range of maxForkDepth from head then we do not validate it.
-	if math.AbsoluteDifference(fv.currentHeight, header.Number.Uint64()) > maxForkDepth {
+	// if the block is not in range of maxReorgDepth from head then we do not validate it.
+	if math.AbsoluteDifference(fv.currentHeight, header.Number.Uint64()) > fv.maxReorgDepth {
 		status = engine_types.AcceptedStatus
 		return
 	}

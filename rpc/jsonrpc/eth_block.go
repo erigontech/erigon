@@ -60,19 +60,25 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	var txs types.Transactions
 
 	for _, txHash := range txHashes {
-		blockNum, _, ok, err := api.txnLookup(ctx, tx, txHash)
+		blockNumber, _, ok, err := api.txnLookup(ctx, tx, txHash)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
 			return nil, nil
 		}
-		block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+
+		err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+		if err != nil {
+			return nil, err
+		}
+
+		block, err := api.blockByNumberWithSenders(ctx, tx, blockNumber)
 		if err != nil {
 			return nil, err
 		}
 		if block == nil {
-			return nil, nil
+			return nil, fmt.Errorf("block not found %d", blockNumber)
 		}
 		var txn types.Transaction
 		for _, transaction := range block.Transactions() {
@@ -107,7 +113,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	}
 	ibs := state.New(stateReader)
 
-	parent, _ := api.headerByRPCNumber(ctx, rpc.BlockNumber(stateBlockNumber), tx)
+	parent, _ := api.headerByNumber(ctx, rpc.BlockNumber(stateBlockNumber), tx)
 	if parent == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", stateBlockNumber, hash)
 	}
@@ -215,6 +221,11 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		return nil, err
 	}
 	defer tx.Rollback()
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, number.Uint64())
+	if err != nil {
+		return nil, err
+	}
+
 	b, err := api.blockByNumber(ctx, number, tx)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
@@ -277,6 +288,16 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 
 	additionalFields := make(map[string]any)
 
+	blockNumber, _, _, err := rpchelper.GetBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, nil
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
 	block, err := api.blockByHashWithSenders(ctx, tx, hash)
 	if err != nil {
 		return nil, err
@@ -324,7 +345,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 	defer tx.Rollback()
 
 	if blockNr == rpc.PendingBlockNumber {
-		b, err := api.blockByRPCNumber(ctx, blockNr, tx)
+		b, err := api.blockByNumberWithSenders(ctx, tx, blockNr.Uint64())
 		if err != nil {
 			return nil, err
 		}
@@ -342,6 +363,12 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		}
 		return nil, err
 	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
 	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(tx)
 	if err != nil {
 		return nil, err
@@ -396,6 +423,11 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		return nil, nil
 	}
 
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
 	_, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
@@ -423,9 +455,9 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	return &numOfTx, nil
 }
 
-func (api *APIImpl) blockByNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
-	if number != rpc.PendingBlockNumber {
-		return api.blockByRPCNumber(ctx, number, tx)
+func (api *APIImpl) blockByNumber(ctx context.Context, blockNumber rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
+	if blockNumber != rpc.PendingBlockNumber {
+		return api.blockByNumberWithSenders(ctx, tx, blockNumber.Uint64())
 	}
 
 	if block := api.pendingBlock(); block != nil {
@@ -440,5 +472,5 @@ func (api *APIImpl) blockByNumber(ctx context.Context, number rpc.BlockNumber, t
 		return block, nil
 	}
 
-	return api.blockByRPCNumber(ctx, number, tx)
+	return api.blockByNumberWithSenders(ctx, tx, blockNumber.Uint64())
 }

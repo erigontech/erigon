@@ -44,12 +44,12 @@ import (
 	"github.com/erigontech/erigon/common"
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/metrics"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -407,6 +407,16 @@ var (
 	RpcTraceCompatFlag = cli.BoolFlag{
 		Name:  "trace.compat",
 		Usage: "Bug for bug compatibility with OE for trace_ routines",
+	}
+	RpcTxSyncDefaultTimeoutFlag = cli.DurationFlag{
+		Name:  "rpc.txsync.defaulttimeout",
+		Usage: "Default timeout for eth_sendRawTransactionSync (default: 25 secs).",
+		Value: rpccfg.DefaultRpcTxSyncDefaultTimeout,
+	}
+	RpcTxSyncMaxTimeoutFlag = cli.DurationFlag{
+		Name:  "rpc.txsync.maxtimeout",
+		Usage: "Maximum allowed timeout for eth_sendRawTransactionSync (default: 1 min).",
+		Value: rpccfg.DefaultRpcTxSyncMaxTimeout,
 	}
 
 	TxpoolApiAddrFlag = cli.StringFlag{
@@ -1566,9 +1576,6 @@ func setTxPool(ctx *cli.Context, dbDir string, fullCfg *ethconfig.Config) {
 			cfg.TracedSenders[i] = string(sender[:])
 		}
 	}
-	if ctx.IsSet(TxPoolBlobPriceBumpFlag.Name) {
-		cfg.BlobPriceBump = ctx.Uint64(TxPoolBlobPriceBumpFlag.Name)
-	}
 	if ctx.IsSet(DbWriteMapFlag.Name) {
 		cfg.MdbxWriteMap = ctx.Bool(DbWriteMapFlag.Name)
 	}
@@ -1902,7 +1909,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			Fatalf("chain name is not recognized: %s", chain)
 			return
 		}
-		cfg.NetworkID = spec.Config.ChainID.Uint64()
+		// Use custom NetworkID from spec if set, otherwise use ChainID
+		if spec.NetworkID != 0 {
+			cfg.NetworkID = spec.NetworkID
+		} else {
+			cfg.NetworkID = spec.Config.ChainID.Uint64()
+		}
 	}
 
 	cfg.Dirs = nodeConfig.Dirs
@@ -1914,10 +1926,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Snapshot.DownloaderAddr = strings.TrimSpace(ctx.String(DownloaderAddrFlag.Name))
 	cfg.Snapshot.ChainName = chain
 	nodeConfig.Http.Snap = cfg.Snapshot
-
-	if ctx.Command.Name == "import" {
-		cfg.ImportMode = true
-	}
 
 	setEtherbase(ctx, cfg)
 	setGPO(ctx, &cfg.GPO)
@@ -2137,7 +2145,7 @@ func CobraFlags(cmd *cobra.Command, urfaveCliFlagsLists ...[]cli.Flag) {
 			case *cli.UintFlag:
 				flags.Uint(f.Name, f.Value, f.Usage)
 			case *cli.StringFlag:
-				flags.String(f.Name, f.Value, f.Usage)
+				flags.StringVar(&f.Value, f.Name, f.Value, f.Usage)
 			case *cli.StringSliceFlag:
 				var val []string
 				if f.Value != nil {

@@ -1,3 +1,9 @@
+---
+metaLinks:
+  alternates:
+    - https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/about/how-to-reach-us
+---
+
 # How to reach us
 
 The Erigon Technologies AG office is located in the CV Labs in Zug:
@@ -10,4 +16,3 @@ Switzerland
 ```
 
 [**erigon.tech**](https://erigon.tech)
-

@@ -35,23 +35,14 @@ import (
 )
 
 func TestConcurrentDownload(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("copied from TestChangeInfoHashOfSameFile")
-	}
-
 	require := require.New(t)
-	dirs := datadir.New(t.TempDir())
-	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
-	require.NoError(err)
-	d, err := New(context.Background(), cfg, log.New())
-	require.NoError(err)
-	defer d.Close()
+	test := newDownloaderTest(t)
 	const conc = 2
 	waits := make(chan func(ctx context.Context) error, conc)
 	g, ctx := errgroup.WithContext(t.Context())
 	for range conc {
 		g.Go(func() error {
-			wait, err := d.testStartSingleDownload(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
+			wait, err := test.downloader.testStartSingleDownload(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
 			if err != nil {
 				return err
 			}
@@ -61,7 +52,7 @@ func TestConcurrentDownload(t *testing.T) {
 	}
 	require.NoError(g.Wait())
 	close(waits)
-	d.Close()
+	test.downloader.Close()
 	for w := range waits {
 		// Make sure we don't get stuck. The torrents shouldn't exist, and the Downloader is closed.
 		w(t.Context())
@@ -69,26 +60,17 @@ func TestConcurrentDownload(t *testing.T) {
 }
 
 func TestChangeInfoHashOfSameFile(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please")
-	}
-
 	ctx := t.Context()
 	require := require.New(t)
-	dirs := datadir.New(t.TempDir())
-	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
+	test := newDownloaderTest(t)
+	err := test.downloader.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
 	require.NoError(err)
-	d, err := New(context.Background(), cfg, log.New())
-	require.NoError(err)
-	defer d.Close()
-	err = d.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
-	require.NoError(err)
-	tt, ok := d.torrentClient.Torrent(snaptype.Hex2InfoHash("aa"))
+	tt, ok := test.downloader.torrentClient.Torrent(snaptype.Hex2InfoHash("aa"))
 	require.True(ok)
 	require.Equal("a.seg", tt.Name())
 
 	// adding same file twice is ok
-	err = d.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
+	err = test.downloader.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("aa"), "a.seg")
 	require.NoError(err)
 
 	// adding same file with another infoHash - is ok, must be skipped
@@ -96,11 +78,11 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 	//	- release of re-compressed version of same file,
 	//	- ErigonV1.24 produced file X, then ErigonV1.25 released with new compression algorithm and produced X with anouther infoHash.
 	//		ErigonV1.24 node must keep using existing file instead of downloading new one.
-	err = d.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("bb"), "a.seg")
+	err = test.downloader.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("bb"), "a.seg")
 	// I'm not sure if this is a good idea.
 	//require.Error(err)
 	_ = err
-	tt, ok = d.torrentClient.Torrent(snaptype.Hex2InfoHash("aa"))
+	tt, ok = test.downloader.torrentClient.Torrent(snaptype.Hex2InfoHash("aa"))
 	require.True(ok)
 	require.Equal("a.seg", tt.Name())
 }
@@ -128,75 +110,44 @@ func TestNoEscape(t *testing.T) {
 }
 
 func TestVerifyDataNoTorrents(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please")
-	}
 	require := require.New(t)
-	dirs := datadir.New(t.TempDir())
-	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
-	require.NoError(err)
-	d, err := New(context.Background(), cfg, log.New())
-	require.NoError(err)
-	defer d.Close()
-	err = d.VerifyData(d.ctx, nil, false)
+	test := newDownloaderTest(t)
+	err := test.downloader.VerifyData(test.downloader.ctx, nil, false)
 	require.NoError(err)
 }
 
 func TestVerifyData(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please")
-	}
 	require := require.New(t)
-	dirs := datadir.New(t.TempDir())
-	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
+	test := newDownloaderTest(t)
+	os.WriteFile(filepath.Join(test.dirs.Snap, "a"), nil, 0o444)
+	err := test.downloader.AddNewSeedableFile(t.Context(), "a")
 	require.NoError(err)
-	d, err := New(context.Background(), cfg, log.New())
-	require.NoError(err)
-	defer d.Close()
-	os.WriteFile(filepath.Join(dirs.Snap, "a"), nil, 0o444)
-	err = d.AddNewSeedableFile(t.Context(), "a")
-	require.NoError(err)
-	err = d.VerifyData(d.ctx, nil, false)
+	err = test.downloader.VerifyData(test.downloader.ctx, nil, false)
 	require.NoError(err)
 }
 
 func TestVerifyDataDownloaderClosed(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please")
-	}
 	require := require.New(t)
-	dirs := datadir.New(t.TempDir())
-	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
-	require.NoError(err)
-	d, err := New(context.Background(), cfg, log.New())
-	require.NoError(err)
-	d.Close()
-	err = d.VerifyData(d.ctx, nil, false)
+	test := newDownloaderTest(t)
+	test.downloader.Close()
+	err := test.downloader.VerifyData(test.downloader.ctx, nil, false)
 	require.NoError(err)
 }
 
 func TestAddDel(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fix me on win please")
-	}
-
 	require := require.New(t)
-	dirs := datadir.New(t.TempDir())
+	test := newDownloaderTest(t)
 	ctx := context.Background()
-
-	cfg, err := downloadercfg.New(context.Background(), dirs, "", log.LvlInfo, 0, 0, nil, "testnet", false, downloadercfg.NewCfgOpts{})
-	require.NoError(err)
-	d, err := New(context.Background(), cfg, log.New())
-	require.NoError(err)
-	defer d.Close()
 
 	// In the following tests we use combinations of f1Abs, f1, f2, and f1BadAbs. Absolute file
 	// paths are allowed to calls to RpcClient if they're local to the SnapDir, it does the required
 	// conversion. This is the behaviour consumers will see.
 
-	f1Abs := filepath.Join(dirs.Snap, "a.seg")      // block file
-	f2Abs := filepath.Join(dirs.SnapDomain, "a.kv") // state file
-	_, _ = os.Create(f1Abs)
+	f1Abs := filepath.Join(test.dirs.Snap, "a.seg")      // block file
+	f2Abs := filepath.Join(test.dirs.SnapDomain, "a.kv") // state file
+	f, err := os.Create(f1Abs)
+	require.NoError(err)
+	assert.NoError(t, f.Close())
 	require.NoError(os.WriteFile(f2Abs, []byte("a.kv"), 0o666))
 
 	// Create a second datadir, not relative to the one the Downloader expects.
@@ -204,9 +155,9 @@ func TestAddDel(t *testing.T) {
 	// Mixed and matched with f1Abs, which is now allowed but heavily warned against.
 	f1BadAbs := filepath.Join(invalidDirs.Snap, "a.seg")
 
-	grpcServer, _ := NewGrpcServer(d)
+	grpcServer, _ := NewGrpcServer(test.downloader)
 
-	server := NewRpcClient(DirectGrpcServerClient(grpcServer), dirs.Snap)
+	server := NewRpcClient(DirectGrpcServerClient(grpcServer), test.dirs.Snap)
 
 	// So... errors.AsType is coming.
 	var errRpcSnapName errRpcSnapName
@@ -214,49 +165,101 @@ func TestAddDel(t *testing.T) {
 	// Add: expect relative paths
 	err = server.Seed(ctx, []string{f1BadAbs})
 	require.ErrorAs(err, &errRpcSnapName)
-	require.Equal(0, len(d.torrentClient.Torrents()))
+	require.Equal(0, len(test.downloader.torrentClient.Torrents()))
 
-	f1, _ := filepath.Rel(dirs.Snap, f1Abs)
-	f2, _ := filepath.Rel(dirs.Snap, f2Abs)
+	f1, _ := filepath.Rel(test.dirs.Snap, f1Abs)
+	f2, _ := filepath.Rel(test.dirs.Snap, f2Abs)
 	err = server.Seed(ctx, []string{f1Abs})
 	require.NoError(err)
 	err = server.Seed(ctx, []string{f2})
 	require.NoError(err)
-	require.Equal(2, len(d.torrentClient.Torrents()))
+	require.Equal(2, len(test.downloader.torrentClient.Torrents()))
 
 	// add idempotency
 	err = server.Seed(ctx, []string{f1})
 	require.NoError(err)
 	err = server.Seed(ctx, []string{f2})
 	require.NoError(err)
-	require.Equal(2, len(d.torrentClient.Torrents()))
+	require.Equal(2, len(test.downloader.torrentClient.Torrents()))
 
 	// Del: expect relative paths
 	err = server.Delete(ctx, []string{f1BadAbs})
 	require.ErrorAs(err, &errRpcSnapName)
-	require.Equal(2, len(d.torrentClient.Torrents()))
+	require.Equal(2, len(test.downloader.torrentClient.Torrents()))
 
 	// Del: idempotency
 	err = server.Delete(ctx, []string{f1Abs})
 	require.NoError(err)
-	require.Equal(1, len(d.torrentClient.Torrents()))
+	require.Equal(1, len(test.downloader.torrentClient.Torrents()))
 	err = server.Delete(ctx, []string{f1})
 	require.NoError(err)
-	require.Equal(1, len(d.torrentClient.Torrents()))
+	require.Equal(1, len(test.downloader.torrentClient.Torrents()))
 
 	err = server.Delete(ctx, []string{f2})
 	require.NoError(err)
-	require.Equal(0, len(d.torrentClient.Torrents()))
+	require.Equal(0, len(test.downloader.torrentClient.Torrents()))
 	err = server.Delete(ctx, []string{f2})
 	require.NoError(err)
-	require.Equal(0, len(d.torrentClient.Torrents()))
+	require.Equal(0, len(test.downloader.torrentClient.Torrents()))
 
 	// Batch
 	err = server.Seed(ctx, []string{f1, f2})
 	require.NoError(err)
-	require.Equal(2, len(d.torrentClient.Torrents()))
+	require.Equal(2, len(test.downloader.torrentClient.Torrents()))
 	err = server.Delete(ctx, []string{f1Abs, f2})
 	require.NoError(err)
-	require.Equal(0, len(d.torrentClient.Torrents()))
+	require.Equal(0, len(test.downloader.torrentClient.Torrents()))
 
+}
+
+// downloaderTest holds test fixtures for Downloader tests.
+type downloaderTest struct {
+	dirs       datadir.Dirs
+	cfg        *downloadercfg.Cfg
+	downloader *Downloader
+}
+
+// newDownloaderTest creates a Downloader with proper cleanup handling.
+// All resources (cfg.TorrentLogFile and downloader) are automatically cleaned up via t.Cleanup.
+func newDownloaderTest(t *testing.T) *downloaderTest {
+	require := require.New(t)
+
+	dirs := datadir.New(t.TempDir())
+	cfg, err := downloadercfg.New(
+		context.Background(),
+		dirs,
+		"",
+		log.LvlInfo,
+		0, 0,
+		nil,
+		"testnet",
+		false,
+		downloadercfg.NewCfgOpts{},
+	)
+	require.NoError(err)
+
+	if runtime.GOOS == "windows" {
+		// Disable UTP (UDP-based transport) to avoid Windows Server 2025 Hyper-V/WinNAT port
+		// reservation conflicts where TCP and UDP port availability is asymmetric (WSAEACCES
+		// on UDP bind).
+		cfg.ClientConfig.DisableUTP = true
+	}
+
+	d, err := New(context.Background(), cfg, log.New())
+	require.NoError(err)
+
+	// Register cleanup in reverse order (downloader closes before config file)
+	t.Cleanup(func() {
+		d.Close()
+		// This must be closed to cleanup test temp dir on Windows.
+		if err := cfg.CloseTorrentLogFile(); err != nil {
+			t.Logf("warning: failed to close torrent log file: %v", err)
+		}
+	})
+
+	return &downloaderTest{
+		dirs:       dirs,
+		cfg:        cfg,
+		downloader: d,
+	}
 }

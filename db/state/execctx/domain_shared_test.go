@@ -264,6 +264,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 	rwTx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
+	t.Cleanup(rwTx.Rollback)
 
 	domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)

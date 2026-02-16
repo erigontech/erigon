@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
-func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.Address, chainConfig *chain.Config, idx int, bNum uint64, results []*TransactionsWithReceipts) {
+func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.Address, chainConfig *chain.Config, idx int, blockNumber uint64, results []*TransactionsWithReceipts) {
 	// Trace block for Txs
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -44,7 +44,12 @@ func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.A
 	}
 	defer tx.Rollback()
 
-	_, result, err := api.traceBlock(tx, ctx, bNum, addr, chainConfig)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return
+	}
+
+	_, result, err := api.traceBlock(tx, ctx, blockNumber, addr, chainConfig)
 	if err != nil {
 		log.Error("Search trace error", "err", err)
 		results[idx] = nil
@@ -72,6 +77,11 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 	}
 	if block == nil {
 		return false, nil, nil
+	}
+
+	err = rpchelper.CheckBlockExecuted(dbtx, blockNum)
+	if err != nil {
+		return false, nil, err
 	}
 
 	reader, err := rpchelper.CreateHistoryStateReader(ctx, dbtx, blockNum, 0, api._txNumReader)
@@ -143,7 +153,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.TemporalTx, ctx context.Context,
 				}
 				return false, nil, fmt.Errorf("requested receipt idx %d, but have only %d", idx, len(blockReceipts)) // otherwise return some error for debugging
 			}
-			rpcTx := ethapi.NewRPCTransaction(txn, block.Hash(), blockNum, uint64(idx), block.BaseFee())
+			rpcTx := ethapi.NewRPCTransaction(txn, block.Hash(), block.Time(), blockNum, uint64(idx), block.BaseFee())
 			mReceipt := ethutils.MarshalReceipt(blockReceipts[idx], txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, false)
 			mReceipt["timestamp"] = block.Time()
 			rpcTxs = append(rpcTxs, rpcTx)

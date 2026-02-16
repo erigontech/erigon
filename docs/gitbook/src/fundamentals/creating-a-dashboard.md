@@ -1,5 +1,9 @@
 ---
 description: Enhancing Erigon Node Monitoring with Prometheus and Grafana
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/fundamentals/creating-a-dashboard
 ---
 
 # Creating a dashboard
@@ -71,11 +75,11 @@ The dedicated panels in the `erigon.json` dashboard track accurate Go memory sta
 
 You can customize the setup using environment variables:
 
-| **Variable**                  | **Description**                            |
-| ------------------------------| -------------------------------------------|
-| `XDG_DATA_HOME`               | Changes default database folder location.  |
-| `ERIGON_PROMETHEUS_CONFIG`    | Path to a custom `prometheus.yml` file.    |
-| `ERIGON_GRAFANA_CONFIG`       | Path to a custom `grafana.ini` file.       |
+| **Variable**               | **Description**                           |
+| -------------------------- | ----------------------------------------- |
+| `XDG_DATA_HOME`            | Changes default database folder location. |
+| `ERIGON_PROMETHEUS_CONFIG` | Path to a custom `prometheus.yml` file.   |
+| `ERIGON_GRAFANA_CONFIG`    | Path to a custom `grafana.ini` file.      |
 
 Example with a Custom Prometheus Configuration:
 

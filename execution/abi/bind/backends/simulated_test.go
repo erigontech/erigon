@@ -135,10 +135,6 @@ func TestNewSimulatedBackend(t *testing.T) {
 	if sim.m.ChainConfig != chain.TestChainConfig {
 		t.Errorf("expected sim config to equal chain.TestChainConfig, got %v", sim.m.ChainConfig)
 	}
-
-	if sim.m.ChainConfig != chain.TestChainConfig {
-		t.Errorf("expected sim blockchain config to equal chain.TestChainConfig, got %v", sim.m.ChainConfig)
-	}
 	tx, err1 := sim.DB().BeginTemporalRo(context.Background())
 	if err1 != nil {
 		t.Errorf("TestNewSimulatedBackend create tx: %v", err1)

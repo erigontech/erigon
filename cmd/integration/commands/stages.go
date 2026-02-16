@@ -864,7 +864,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 		return err
 	}
-	if execProgress == 0 {
+	if execProgress == 0 { // then fallback to how much data we have in stat_snapshots
 		doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
 		if err != nil {
 			panic(err)
@@ -872,7 +872,6 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		execProgress = doms.BlockNum()
 		doms.Close()
 	}
-
 	if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
 		return err
 	}
@@ -881,7 +880,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		block = sendersProgress
 	}
 
-	doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
 		return err
 	}
@@ -893,16 +892,31 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 				if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
 					return err
 				}
-				if err := doms.Flush(ctx, tx); err != nil {
-					return err
-				}
-				doms.ClearRam(true)
-				if err := tx.Commit(); err != nil {
-					return err
-				}
-				if tx, err = db.BeginTemporalRw(ctx); err != nil {
-					return err
-				}
+			}
+			if err := doms.Flush(ctx, tx); err != nil {
+				return err
+			}
+			doms.ClearRam(true)
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			if tx, err = db.BeginTemporalRw(ctx); err != nil {
+				return err
+			}
+
+			pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
+			if err != nil {
+				return err
+			}
+			if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
+				return err
+			}
+
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			if tx, err = db.BeginTemporalRw(ctx); err != nil {
+				return err
 			}
 		}
 		if err := doms.Flush(ctx, tx); err != nil {
@@ -923,6 +937,15 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 			return err
 		}
 		doms.ClearRam(true)
+
+		pruneStage, err := sync.PruneStageState(stages.Execution, s.BlockNumber, tx, s.CurrentSyncCycle.IsInitialCycle)
+		if err != nil {
+			return err
+		}
+		if err := stagedsync.PruneExecutionStage(ctx, pruneStage, tx, cfg, 0, logger); err != nil {
+			return err
+		}
+
 		if !noCommit {
 			if err := tx.Commit(); err != nil {
 				return err
@@ -1239,6 +1262,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
 
 	sentryControlServer, err := sentry_multi_client.NewMultiClient(
+		dirs,
 		db,
 		chainConfig,
 		engine,

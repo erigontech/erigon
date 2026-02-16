@@ -45,11 +45,20 @@ func encodeBlock(payload *cltypes.Eth1Block, parentRoot common.Hash, executionRe
 		// electra version
 		requestsHash := cltypes.ComputeExecutionRequestHash(executionRequestsList)
 		// version + parentRoot + requestsHash + encodedPayload
-		return utils.CompressSnappy(append([]byte{byte(payload.Version())}, append(append(parentRoot[:], requestsHash[:]...), encodedPayload...)...)), nil
+		buf := make([]byte, 1+32+32+len(encodedPayload))
+		buf[0] = byte(payload.Version())
+		copy(buf[1:], parentRoot[:])
+		copy(buf[33:], requestsHash[:])
+		copy(buf[65:], encodedPayload)
+		return utils.CompressSnappy(buf), nil
 	}
 	// Use snappy compression that the temporary files do not take too much disk.
 	// version + parentRoot + encodedPayload
-	return utils.CompressSnappy(append([]byte{byte(payload.Version())}, append(parentRoot[:], encodedPayload...)...)), nil
+	buf := make([]byte, 1+32+len(encodedPayload))
+	buf[0] = byte(payload.Version())
+	copy(buf[1:], parentRoot[:])
+	copy(buf[33:], encodedPayload)
+	return utils.CompressSnappy(buf), nil
 }
 
 // payloadKey returns the key for the payload: number + payload.HashTreeRoot()

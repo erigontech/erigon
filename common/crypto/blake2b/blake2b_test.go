@@ -285,7 +285,7 @@ func TestSelfTest(t *testing.T) {
 			md := computeHash(msg[:msgLength], hashSize)
 			h.Write(md)
 
-			generateSequence(key[:], uint32(hashSize)) // keyed hash
+			generateSequence(key, uint32(hashSize)) // keyed hash
 			md = computeMAC(msg[:msgLength], hashSize, key[:hashSize])
 			h.Write(md)
 		}

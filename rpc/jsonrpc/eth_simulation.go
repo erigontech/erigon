@@ -24,7 +24,8 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -33,13 +34,9 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -47,17 +44,14 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	protocolrules "github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
-	"github.com/holiman/uint256"
 )
 
 const (
@@ -402,9 +396,9 @@ type keysByAccount map[accounts.Address]storageKeys
 
 var _ state.StateWriter = (*diffTrackingWriter)(nil)
 
-func newDiffTrackingWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator, txNum uint64) *diffTrackingWriter {
+func newDiffTrackingWriter(tx kv.TemporalPutDel, txNum uint64) *diffTrackingWriter {
 	return &diffTrackingWriter{
-		delegate:    state.NewWriter(tx, accumulator, txNum),
+		delegate:    state.NewWriter(tx, nil, txNum),
 		touchedKeys: make(map[accounts.Address]storageKeys),
 	}
 }
@@ -570,7 +564,7 @@ func (s *simulator) simulateBlock(
 		return nil, nil, err
 	}
 
-	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
+	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), sharedDomains.TxNum())
 	callResults := make([]CallResult, 0, len(bsc.Calls))
 	for callIndex, call := range bsc.Calls {
 		callResult, txn, receipt, err := s.simulateCall(ctx, blockCtx, intraBlockState, callIndex, &call, header,
@@ -746,7 +740,7 @@ func (s *simulator) simulateCall(
 			if errors.Is(result.Err, vm.ErrExecutionReverted) {
 				// If the result contains a revert reason, try to unpack and return it.
 				revertError := ethapi.NewRevertError(result)
-				callResult.Error = rpc.NewJsonError(rpc.ErrCodeReverted, revertError.Error(), revertError.ErrorData().(string))
+				callResult.Error = rpc.NewJsonError(revertError.ErrorCode(), revertError.Error(), revertError.ErrorData().(string))
 			} else {
 				// Otherwise, we just capture the error message.
 				callResult.Error = rpc.NewJsonError(rpc.ErrCodeVMError, result.Err.Error(), nil)
@@ -853,92 +847,14 @@ func clientLimitExceededError(message string) error {
 	return &rpc.CustomError{Message: message, Code: rpc.ErrCodeClientLimitExceeded}
 }
 
-type HistoryCommitmentOnlyReader struct {
-	latestReader       commitmentdb.StateReader
-	historyReader      commitmentdb.StateReader
-	sd                 *execctx.SharedDomains
-	limitReadAsOfTxNum uint64
-}
-
 func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, limitReadAsOfTxNum uint64) commitmentdb.StateReader {
-	return &HistoryCommitmentOnlyReader{
-		latestReader:       commitmentdb.NewLatestStateReader(roTx, sd),
-		historyReader:      commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum),
-		sd:                 sd,
-		limitReadAsOfTxNum: limitReadAsOfTxNum,
-	}
-}
-
-func (r *HistoryCommitmentOnlyReader) WithHistory() bool {
-	return r.historyReader.WithHistory()
-}
-
-func (r *HistoryCommitmentOnlyReader) CheckDataAvailable(kv.Domain, kv.Step) error {
-	return nil
-}
-
-func (r *HistoryCommitmentOnlyReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
-	if d == kv.CommitmentDomain {
-		enc, step, err = r.historyReader.Read(d, plainKey, stepSize)
-		if err != nil {
-			return nil, 0, fmt.Errorf("HistoryCommitmentOnlyReader historyReader %q: %w", d, err)
-		}
-		return enc, step, nil
-	}
-	enc, step, err = r.latestReader.Read(d, plainKey, stepSize)
-	if err != nil {
-		return nil, 0, fmt.Errorf("HistoryCommitmentOnlyReader latestReader %q: %w", d, err)
-	}
-	return enc, step, nil
-}
-
-func (r *HistoryCommitmentOnlyReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
-	return newHistoryCommitmentOnlyReader(tx, r.sd, r.limitReadAsOfTxNum)
-}
-
-var _ commitmentdb.StateReader = (*splitStateReader)(nil)
-
-// splitStateReader implements commitmentdb.StateReader using (potentially) different state readers for commitment
-// data and account/storage/code data.
-type splitStateReader struct {
-	commitmentReader commitmentdb.StateReader
-	plainStateReader commitmentdb.StateReader
-}
-
-func (r splitStateReader) WithHistory() bool {
-	// Claim that we do not operate on history, so we can temporarily save commitment state if needed
-	return false
-}
-
-func (r splitStateReader) CheckDataAvailable(_ kv.Domain, _ kv.Step) error {
-	return nil
-}
-
-func (r splitStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
-	if d == kv.CommitmentDomain {
-		return r.commitmentReader.Read(d, plainKey, stepSize)
-	}
-	return r.plainStateReader.Read(d, plainKey, stepSize)
-}
-
-func (r splitStateReader) Clone(kv.TemporalTx) commitmentdb.StateReader {
-	// Do *NOT* propagate kv.TemporalTx because each reader needs its own
-	return newSplitStateReader(r.commitmentReader, r.plainStateReader)
-}
-
-func newSplitStateReader(commitmentReader commitmentdb.StateReader, plainStateReader commitmentdb.StateReader) commitmentdb.StateReader {
-	return splitStateReader{
-		commitmentReader: commitmentReader,
-		plainStateReader: plainStateReader,
-	}
-}
-
-func newReplayStateReader(ttx, tx kv.TemporalTx, tsd *execctx.SharedDomains, plainStateAsOf uint64) commitmentdb.StateReader {
-	return newSplitStateReader(commitmentdb.NewLatestStateReader(ttx, tsd), commitmentdb.NewHistoryStateReader(tx, plainStateAsOf))
+	// Commitment values are read from history, whereas account/storage/code values are read from latest state
+	return rpchelper.NewCommitmentSplitStateReader(commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum), commitmentdb.NewLatestStateReader(roTx, sd), true)
 }
 
 func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomains) commitmentdb.StateReader {
-	return newSplitStateReader(commitmentdb.NewLatestStateReader(ttx, tsd), commitmentdb.NewLatestStateReader(tx, sd))
+	// Both commitment and account/storage/code values are read from latest state *but* on different SharedDomains instances
+	return rpchelper.NewCommitmentSplitStateReader(commitmentdb.NewLatestStateReader(ttx, tsd), commitmentdb.NewLatestStateReader(tx, sd), false)
 }
 
 // computeCommitmentFromStateHistory calculates the commitment root for simulated block from state history
@@ -950,6 +866,10 @@ func (s *simulator) computeCommitmentFromStateHistory(
 	baseBlockNum uint64,
 	simMaxTxNum uint64,
 ) ([]byte, error) {
+	replay := rpchelper.NewCommitmentReplay(s.dirs, s.txNumReader, s.logger)
+	// For computing the simulated block commitment we need to:
+	// - use a custom state reader which uses both the primary db (tx, sd) and temporary commitment db (ttx, tsd)
+	// - touch the keys registered by diffTrackingWriter during IntraBlockState flush
 	simBlockComputeCommitment := func(ctx context.Context, ttx kv.TemporalTx, tsd *execctx.SharedDomains) ([]byte, error) {
 		simBlockNum := baseBlockNum + 1
 		tsd.GetCommitmentCtx().SetStateReader(newSimulateStateReader(ttx, tx, tsd, sd))
@@ -969,91 +889,5 @@ func (s *simulator) computeCommitmentFromStateHistory(
 
 		return tsd.ComputeCommitment(ctx, ttx, false, simBlockNum, simMaxTxNum, "commitment-from-history", nil)
 	}
-	return s.computeCustomCommitmentFromStateHistory(ctx, tx, baseBlockNum, simBlockComputeCommitment)
-}
-
-// computeCustomCommitmentFromStateHistory calculates the commitment root resulting from:
-// - replaying the state history up to baseBlockNum
-// - applying a custom delta computation function
-func (s *simulator) computeCustomCommitmentFromStateHistory(
-	ctx context.Context,
-	tx kv.TemporalTx,
-	baseBlockNum uint64,
-	deltaComputation func(ctx context.Context, ttx kv.TemporalTx, tsd *execctx.SharedDomains) ([]byte, error),
-) ([]byte, error) {
-	// Prepare a temporary data storage for commitment replay computation
-	db := mdbx.New(dbcfg.TemporaryDB, s.logger).
-		InMem(nil, s.dirs.Tmp).MapSize(2 * datasize.TB).GrowthStep(1 * datasize.MB).MustOpen()
-	defer db.Close()
-
-	agg, err := dbstate.New(s.dirs).Logger(s.logger).Open(ctx, db)
-	if err != nil {
-		return nil, err
-	}
-	defer agg.Close()
-
-	tdb, err := temporal.New(db, agg)
-	if err != nil {
-		return nil, err
-	}
-	defer tdb.Close()
-
-	ttx, err := tdb.BeginTemporalRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer ttx.Rollback()
-
-	tsd, err := execctx.NewSharedDomains(ctx, ttx, s.logger)
-	if err != nil {
-		return nil, err
-	}
-	defer tsd.Close()
-	tsd.GetCommitmentContext().SetDeferBranchUpdates(false)
-
-	// We must compute genesis commitment from scratch because there's no history for block 0
-	genesis, err := rawdb.ReadGenesis(tx)
-	if err != nil {
-		return nil, err
-	}
-	genesisHeader, _ := genesiswrite.GenesisWithoutStateToBlock(genesis)
-	_, _, err = genesiswrite.ComputeGenesisCommitment(ctx, genesis, ttx, tsd, genesisHeader)
-	if err != nil {
-		return nil, err
-	}
-	genesisRoot, err := tsd.GetCommitmentCtx().Trie().RootHash()
-	if err != nil {
-		return nil, err
-	}
-	s.logger.Debug("Genesis", "root", common.Bytes2Hex(genesisRoot))
-
-	// We can obtain the historical commitment at baseBlockNum by touching all state keys from history, then compute
-	minTxNum, err := s.txNumReader.Min(ctx, tx, 1)
-	if err != nil {
-		return nil, err
-	}
-	maxTxNum, err := s.txNumReader.Max(ctx, tx, baseBlockNum)
-	if err != nil {
-		return nil, err
-	}
-	tsd.GetCommitmentCtx().SetStateReader(newReplayStateReader(ttx, tx, tsd, maxTxNum+1))
-	s.logger.Debug("Touch historical keys", "fromTxNum", minTxNum, "toTxNum", maxTxNum+1)
-	_, _, err = tsd.TouchChangedKeysFromHistory(tx, minTxNum, maxTxNum+1)
-	if err != nil {
-		return nil, err
-	}
-	historicalStateRoot, err := tsd.ComputeCommitment(ctx, ttx, true, baseBlockNum, maxTxNum, "commitment-from-history", nil)
-	if err != nil {
-		return nil, err
-	}
-	s.logger.Debug("Historical state", "historicalStateRoot", common.Bytes2Hex(historicalStateRoot))
-
-	// Apply custom delta computation to produce the final state root
-	stateRoot, err := deltaComputation(ctx, ttx, tsd)
-	if err != nil {
-		return nil, err
-	}
-	s.logger.Debug("Simulated block", "root", common.Bytes2Hex(stateRoot))
-
-	return stateRoot, nil
+	return replay.ComputeCustomCommitmentFromStateHistory(ctx, tx, baseBlockNum, simBlockComputeCommitment)
 }

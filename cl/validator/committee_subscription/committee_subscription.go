@@ -35,8 +35,6 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 var (
@@ -50,11 +48,9 @@ var (
 )
 
 type CommitteeSubscribeMgmt struct {
-	indiciesDB    kv.RoDB
 	ethClock      eth_clock.EthereumClock
 	beaconConfig  *clparams.BeaconChainConfig
 	netConfig     *clparams.NetworkConfig
-	sentinel      sentinelproto.SentinelClient
 	state         *state.CachingBeaconState
 	syncedData    *synced_data.SyncedDataManager
 	gossipManager *gossipMgr.GossipManager
@@ -66,21 +62,17 @@ type CommitteeSubscribeMgmt struct {
 
 func NewCommitteeSubscribeManagement(
 	ctx context.Context,
-	indiciesDB kv.RoDB,
 	beaconConfig *clparams.BeaconChainConfig,
 	netConfig *clparams.NetworkConfig,
 	ethClock eth_clock.EthereumClock,
-	sentinel sentinelproto.SentinelClient,
 	aggregationPool aggregation.AggregationPool,
 	syncedData *synced_data.SyncedDataManager,
 	gossipManager *gossipMgr.GossipManager,
 ) *CommitteeSubscribeMgmt {
 	c := &CommitteeSubscribeMgmt{
-		indiciesDB:      indiciesDB,
 		beaconConfig:    beaconConfig,
 		netConfig:       netConfig,
 		ethClock:        ethClock,
-		sentinel:        sentinel,
 		aggregationPool: aggregationPool,
 		syncedData:      syncedData,
 		gossipManager:   gossipManager,

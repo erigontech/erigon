@@ -153,6 +153,13 @@ func (ii *InvertedIndex) efFilePathMask(fromStep, toStep kv.Step) string {
 	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("*-%s.%d-%d.ef", ii.FilenameBase, fromStep, toStep))
 }
 
+func (ii *InvertedIndex) efFileNameMask(fromStep, toStep kv.Step) string {
+	return fmt.Sprintf("*-%s.%d-%d.ef", ii.FilenameBase, fromStep, toStep)
+}
+func (ii *InvertedIndex) efAccessorFileNameMask(fromStep, toStep kv.Step) string {
+	return fmt.Sprintf("*-%s.%d-%d.efi", ii.FilenameBase, fromStep, toStep)
+}
+
 var invIdxExistenceForceInMem = dbg.EnvBool("INV_IDX_EXISTENCE_MEM", false)
 
 func (ii *InvertedIndex) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
@@ -187,10 +194,10 @@ func filesFromDir(dir string) ([]string, error) {
 	return filtered, nil
 }
 
-func (ii *InvertedIndex) openList(fNames []string) error {
+func (ii *InvertedIndex) openList(fNames, accessorFiles []string) error {
 	ii.closeWhatNotInList(fNames)
 	ii.scanDirtyFiles(fNames)
-	if err := ii.openDirtyFiles(); err != nil {
+	if err := ii.openDirtyFiles(fNames, accessorFiles); err != nil {
 		return fmt.Errorf("InvertedIndex(%s).openDirtyFiles: %w", ii.FilenameBase, err)
 	}
 	return nil
@@ -200,7 +207,7 @@ func (ii *InvertedIndex) openFolder(r *ScanDirsResult) error {
 	if ii.Disable {
 		return nil
 	}
-	return ii.openList(r.iiFiles)
+	return ii.openList(r.iiFiles, r.accessorFiles)
 }
 
 func (ii *InvertedIndex) scanDirtyFiles(fileNames []string) {

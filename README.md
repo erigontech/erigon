@@ -70,7 +70,7 @@ Set `--prune.mode` to "archive" if you need an archive node or to "minimal" if y
 System Requirements
 ===================
 
-RAM: >=32GB, [Golang >= 1.24](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
+RAM: >=32GB, [Golang >= 1.25](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
 architecture.
 
 - ArchiveNode Ethereum Mainnet: 1.6TB (May 2025). FullNode: 1.1TB (May 2025)
@@ -686,18 +686,14 @@ echo 1 > /proc/sys/vm/compact_memory
 
 Windows users may run erigon in 3 possible ways:
 
-* Build executable binaries natively for Windows using provided `wmake.ps1` PowerShell script. Usage syntax is the same
-  as `make` command so you have to run `.\wmake.ps1 [-target] <targetname>`. Example: `.\wmake.ps1 erigon` builds erigon
+* Build executable binaries natively for Windows using `make`. Example: `make erigon` builds the erigon
   executable. All binaries are placed in `.\build\bin\` subfolder. There are some requirements for a successful native
   build on windows :
-    * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
-      likely you already have it
-    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.24
-    * GNU CC Compiler at least version 13 (is highly suggested that you install `chocolatey` package manager - see
-      following point)
-    * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
-      then [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. By Chocolatey you need
-      to install the following components : `cmake`, `make`, `mingw` by `choco install cmake make mingw`. Make sure
+    * [Git](https://git-scm.com/downloads) for Windows must be installed (provides bash and MSYS2 environment). If
+      you're cloning this repository is very likely you already have it
+    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.25
+    * [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. Then install the required
+      build tools: `choco install cmake make mingw` (provides GNU CC Compiler >= 13, GNU Make, and CMake). Make sure
       Windows System "Path" variable has:
       C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin
 

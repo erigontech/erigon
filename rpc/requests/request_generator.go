@@ -78,7 +78,7 @@ type RequestGenerator interface {
 	GetTransactionCount(address common.Address, blockRef rpc.BlockReference) (*big.Int, error)
 	BlockNumber() (uint64, error)
 	SendTransaction(signedTx types.Transaction) (common.Hash, error)
-	SendRawTransactionSync(signedTx types.Transaction, timeoutMs *hexutil.Uint64) (*types.Receipt, error)
+	SendRawTransactionSync(signedTx types.Transaction, timeoutMs *uint64) (*types.Receipt, error)
 	FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error)
 	SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error)
 	Subscribe(ctx context.Context, method SubMethod, subChan any, args ...any) (ethereum.Subscription, error)

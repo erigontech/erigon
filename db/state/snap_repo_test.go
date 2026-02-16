@@ -488,7 +488,9 @@ func TestRecalcVisibleFilesAfterMerge(t *testing.T) {
 
 		merged := newFilesItemWithSnapConfig(mr.from, mr.to, repo.cfg)
 		repo.IntegrateDirtyFile(merged)
-		require.NoError(t, repo.openDirtyFiles())
+		dirEntries, err := filesFromDir(repo.schema.DataDirectory())
+		require.NoError(t, err)
+		require.NoError(t, repo.openDirtyFiles(dirEntries))
 		repo.RecalcVisibleFiles(RootNum(MaxUint64))
 
 		vf = repo.visibleFiles()
@@ -547,14 +549,14 @@ func cleanupFiles(t *testing.T, repo *SnapshotRepo, dirs datadir.Dirs) {
 	repo.Close()
 	repo.RecalcVisibleFiles(0)
 
-	filepath.Walk(dirs.DataDir, func(path string, info os.FileInfo, err error) error {
+	filepath.WalkDir(dirs.DataDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) { //skip magically disappeared files
 				return nil
 			}
 			return err
 		}
-		if info.IsDir() {
+		if d.IsDir() {
 			return nil
 		}
 		err = dir.RemoveFile(path)

@@ -1,5 +1,8 @@
 ---
 description: A Guide to Running an MEV-Resistant Shutterized Validator
+metaLinks:
+  alternates:
+    - https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/staking/shutter-network
 ---
 
 # Shutter Network
