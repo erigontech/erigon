@@ -939,6 +939,165 @@ type ExecutionWitnessResult struct {
 	Headers []hexutil.Bytes `json:"headers,omitempty"`
 }
 
+// debugCompareRecordedVsGroundTruth streams historical keys for the given txnum range
+// and prints any discrepancies compared to what the RecordingState captured.
+func debugCompareRecordedVsGroundTruth(
+	tx kv.TemporalTx,
+	recordingState *RecordingState,
+	allAddresses map[common.Address]struct{},
+	allStorageKeys map[common.Address]map[common.Hash]struct{},
+	readAddresses []common.Address,
+	writeAddresses []common.Address,
+	readStorageKeys map[common.Address][]common.Hash,
+	writeStorageKeys map[common.Address][]common.Hash,
+	firstTxNumInBlock, lastTxNumInBlock uint64,
+) error {
+	// Collect ground truth account keys from history
+	gtAccounts := make(map[common.Address]struct{})
+	accStream, err := tx.HistoryRange(kv.AccountsDomain, int(firstTxNumInBlock), int(lastTxNumInBlock+1), order.Asc, -1)
+	if err != nil {
+		return fmt.Errorf("ground truth account stream: %w", err)
+	}
+	for accStream.HasNext() {
+		k, _, err := accStream.Next()
+		if err != nil {
+			accStream.Close()
+			return err
+		}
+		var addr common.Address
+		copy(addr[:], k)
+		gtAccounts[addr] = struct{}{}
+	}
+	accStream.Close()
+
+	// Collect ground truth storage keys from history
+	gtStorage := make(map[common.Address]map[common.Hash]struct{})
+	storStream, err := tx.HistoryRange(kv.StorageDomain, int(firstTxNumInBlock), int(lastTxNumInBlock+1), order.Asc, -1)
+	if err != nil {
+		return fmt.Errorf("ground truth storage stream: %w", err)
+	}
+	for storStream.HasNext() {
+		k, _, err := storStream.Next()
+		if err != nil {
+			storStream.Close()
+			return err
+		}
+		addr := common.BytesToAddress(k[:20])
+		var key common.Hash
+		copy(key[:], k[20:])
+		if gtStorage[addr] == nil {
+			gtStorage[addr] = make(map[common.Hash]struct{})
+		}
+		gtStorage[addr][key] = struct{}{}
+	}
+	storStream.Close()
+
+	// Count totals
+	gtStorageTotal := 0
+	for _, keys := range gtStorage {
+		gtStorageTotal += len(keys)
+	}
+	ourStorageTotal := 0
+	for _, keys := range allStorageKeys {
+		ourStorageTotal += len(keys)
+	}
+
+	fmt.Printf("[debug] Ground truth: %d accounts, %d storage keys | Recorded: %d accounts, %d storage keys\n",
+		len(gtAccounts), gtStorageTotal, len(allAddresses), ourStorageTotal)
+
+	// Find accounts in ground truth but missing from our recording
+	missingAccounts := 0
+	for addr := range gtAccounts {
+		if _, ok := allAddresses[addr]; !ok {
+			missingAccounts++
+			fmt.Printf("[debug] MISSING ACCOUNT: %s (in ground truth but not recorded)\n", addr.Hex())
+		}
+	}
+
+	// Find accounts in our recording but not in ground truth
+	extraAccounts := 0
+	for addr := range allAddresses {
+		if _, ok := gtAccounts[addr]; !ok {
+			extraAccounts++
+			fmt.Printf("[debug] EXTRA ACCOUNT: %s (recorded but not in ground truth)\n", addr.Hex())
+		}
+	}
+
+	// Find storage keys in ground truth but missing from our recording
+	missingStorage := 0
+	for addr, gtKeys := range gtStorage {
+		ourKeys := allStorageKeys[addr]
+		for key := range gtKeys {
+			if ourKeys == nil {
+				missingStorage++
+				fmt.Printf("[debug] MISSING STORAGE: account=%s key=%s (account has no recorded storage)\n", addr.Hex(), key.Hex())
+			} else if _, ok := ourKeys[key]; !ok {
+				missingStorage++
+				fmt.Printf("[debug] MISSING STORAGE: account=%s key=%s\n", addr.Hex(), key.Hex())
+			}
+		}
+	}
+
+	// Find storage keys in our recording but not in ground truth
+	extraStorage := 0
+	for addr, ourKeys := range allStorageKeys {
+		gtKeys := gtStorage[addr]
+		for key := range ourKeys {
+			if gtKeys == nil {
+				extraStorage++
+			} else if _, ok := gtKeys[key]; !ok {
+				extraStorage++
+			}
+		}
+	}
+
+	fmt.Printf("[debug] Accounts: %d missing, %d extra | Storage: %d missing, %d extra\n",
+		missingAccounts, extraAccounts, missingStorage, extraStorage)
+
+	// Breakdown by read vs write
+	readStorageCount := 0
+	for _, keys := range readStorageKeys {
+		readStorageCount += len(keys)
+	}
+	writeStorageCount := 0
+	for _, keys := range writeStorageKeys {
+		writeStorageCount += len(keys)
+	}
+	fmt.Printf("[debug] Breakdown: readAccounts=%d, writeAccounts=%d, readStorageKeys=%d, writeStorageKeys=%d\n",
+		len(readAddresses), len(writeAddresses), readStorageCount, writeStorageCount)
+
+	// Check which missing accounts are deleted vs truly never touched
+	for addr := range gtAccounts {
+		if _, ok := allAddresses[addr]; !ok {
+			if _, deleted := recordingState.DeletedAccounts[addr]; deleted {
+				fmt.Printf("[debug]   -> MISSING ACCOUNT %s was DELETED\n", addr.Hex())
+			}
+			if _, modified := recordingState.ModifiedAccounts[addr]; modified {
+				fmt.Printf("[debug]   -> MISSING ACCOUNT %s was MODIFIED (but not in allAddresses?!)\n", addr.Hex())
+			}
+		}
+	}
+
+	// Check which missing storage keys belong to deleted accounts
+	for addr, gtKeys := range gtStorage {
+		ourKeys := allStorageKeys[addr]
+		for key := range gtKeys {
+			isMissing := ourKeys == nil
+			if !isMissing {
+				_, found := ourKeys[key]
+				isMissing = !found
+			}
+			if isMissing {
+				if _, deleted := recordingState.DeletedAccounts[addr]; deleted {
+					fmt.Printf("[debug]   -> MISSING STORAGE %s/%s belongs to DELETED account\n", addr.Hex(), key.Hex())
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
 func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64, visitor func(k []byte)) (uint64, error) {
 	// toTxNum is exclusive per kv.TemporalTx.HistoryRange contract [from,to)
 	stream, err := tx.HistoryRange(d, int(fromTxNum), int(toTxNum), order.Asc, -1)
@@ -1201,6 +1360,14 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
 	}
 
+	if err := debugCompareRecordedVsGroundTruth(
+		tx, recordingState, allAddresses, allStorageKeys,
+		readAddresses, writeAddresses, readStorageKeys, writeStorageKeys,
+		firstTxNumInBlock, lastTxNumInBlock,
+	); err != nil {
+		return nil, err
+	}
+
 	if len(allAddresses)+len(allStorageKeys) == 0 { // nothing touched, return empty witness
 		return result, nil
 	}
@@ -1237,6 +1404,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		log.Info("commitment touched keys", "accTouches", accTouches, "storageTouches", storageTouches, "codeTouches", codeTouches)
 		return nil
 	}
+	_ = touchGroundTruthHistoricalKeys
 
 	// Helper to reset commitment to parent block state and re-seek
 	resetToParentState := func() error {
@@ -1263,8 +1431,8 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("failed to re-seek commitment for collapse detection: %w", err)
 	}
 
-	// touchAllKeys()
-	err = touchGroundTruthHistoricalKeys(firstTxNumInBlock, lastTxNumInBlock+1)
+	touchAllKeys()
+	// err = touchGroundTruthHistoricalKeys(firstTxNumInBlock, lastTxNumInBlock+1)
 	if err != nil {
 		return nil, err
 	}
