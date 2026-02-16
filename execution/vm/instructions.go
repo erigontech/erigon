@@ -1317,7 +1317,7 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		if self != beneficiaryAddr {
 			ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))
 		} else if newContract {
-			ibs.AddLog(misc.EthSelfDestructLog(self.Value(), balance))
+			ibs.AddLog(misc.EthBurnLog(self.Value(), balance))
 		}
 	}
 	tracer := evm.Config().Tracer
