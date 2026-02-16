@@ -358,8 +358,9 @@ func (tx *ArbitrumUnsignedTx) DecodeRLP(s *rlp.Stream) error {
 	if len(b) != 20 {
 		return fmt.Errorf("wrong size for From: %d", len(b))
 	}
-	addrFrom := tx.From.Value()
-	copy(addrFrom[:], b)
+	addr := common.Address{}
+	copy(addr[:], b)
+	tx.From = accounts.InternAddress(addr)
 
 	// Decode Nonce (uint64)
 	if tx.Nonce, err = s.Uint(); err != nil {
