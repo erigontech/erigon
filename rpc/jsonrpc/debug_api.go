@@ -939,20 +939,15 @@ type ExecutionWitnessResult struct {
 	Headers []hexutil.Bytes `json:"headers,omitempty"`
 }
 
-// debugCompareRecordedVsGroundTruth streams historical keys for the given txnum range
-// and prints any discrepancies compared to what the RecordingState captured.
+// debugCompareRecordedVsGroundTruth compares account and storage writes recorded
+// by the RecordingState against the ground truth from HistoryRange (which only
+// contains writes). Prints any discrepancies.
 func debugCompareRecordedVsGroundTruth(
 	tx kv.TemporalTx,
 	recordingState *RecordingState,
-	allAddresses map[common.Address]struct{},
-	allStorageKeys map[common.Address]map[common.Hash]struct{},
-	readAddresses []common.Address,
-	writeAddresses []common.Address,
-	readStorageKeys map[common.Address][]common.Hash,
-	writeStorageKeys map[common.Address][]common.Hash,
 	firstTxNumInBlock, lastTxNumInBlock uint64,
 ) error {
-	// Collect ground truth account keys from history
+	// Collect ground truth account writes from history
 	gtAccounts := make(map[common.Address]struct{})
 	accStream, err := tx.HistoryRange(kv.AccountsDomain, int(firstTxNumInBlock), int(lastTxNumInBlock+1), order.Asc, -1)
 	if err != nil {
@@ -970,7 +965,7 @@ func debugCompareRecordedVsGroundTruth(
 	}
 	accStream.Close()
 
-	// Collect ground truth storage keys from history
+	// Collect ground truth storage writes from history
 	gtStorage := make(map[common.Address]map[common.Hash]struct{})
 	storStream, err := tx.HistoryRange(kv.StorageDomain, int(firstTxNumInBlock), int(lastTxNumInBlock+1), order.Asc, -1)
 	if err != nil {
@@ -992,55 +987,68 @@ func debugCompareRecordedVsGroundTruth(
 	}
 	storStream.Close()
 
+	// Build our write sets from the RecordingState
+	// Account writes = ModifiedAccounts + DeletedAccounts
+	ourAccounts := make(map[common.Address]struct{})
+	for addr := range recordingState.ModifiedAccounts {
+		ourAccounts[addr] = struct{}{}
+	}
+	for addr := range recordingState.DeletedAccounts {
+		ourAccounts[addr] = struct{}{}
+	}
+
+	// Storage writes = ModifiedStorage
+	ourStorage := recordingState.ModifiedStorage
+
 	// Count totals
 	gtStorageTotal := 0
 	for _, keys := range gtStorage {
 		gtStorageTotal += len(keys)
 	}
 	ourStorageTotal := 0
-	for _, keys := range allStorageKeys {
+	for _, keys := range ourStorage {
 		ourStorageTotal += len(keys)
 	}
 
-	fmt.Printf("[debug] Ground truth: %d accounts, %d storage keys | Recorded: %d accounts, %d storage keys\n",
-		len(gtAccounts), gtStorageTotal, len(allAddresses), ourStorageTotal)
+	fmt.Printf("[debug] Ground truth writes: %d accounts, %d storage | Recorded writes: %d accounts, %d storage\n",
+		len(gtAccounts), gtStorageTotal, len(ourAccounts), ourStorageTotal)
 
-	// Find accounts in ground truth but missing from our recording
+	// Find accounts in ground truth but missing from our writes
 	missingAccounts := 0
 	for addr := range gtAccounts {
-		if _, ok := allAddresses[addr]; !ok {
+		if _, ok := ourAccounts[addr]; !ok {
 			missingAccounts++
-			fmt.Printf("[debug] MISSING ACCOUNT: %s (in ground truth but not recorded)\n", addr.Hex())
+			fmt.Printf("[debug] MISSING ACCOUNT WRITE: %s (in ground truth but not in recorded writes)\n", addr.Hex())
 		}
 	}
 
-	// Find accounts in our recording but not in ground truth
+	// Find accounts in our writes but not in ground truth
 	extraAccounts := 0
-	for addr := range allAddresses {
+	for addr := range ourAccounts {
 		if _, ok := gtAccounts[addr]; !ok {
 			extraAccounts++
-			fmt.Printf("[debug] EXTRA ACCOUNT: %s (recorded but not in ground truth)\n", addr.Hex())
+			fmt.Printf("[debug] EXTRA ACCOUNT WRITE: %s (in recorded writes but not in ground truth)\n", addr.Hex())
 		}
 	}
 
-	// Find storage keys in ground truth but missing from our recording
+	// Find storage keys in ground truth but missing from our writes
 	missingStorage := 0
 	for addr, gtKeys := range gtStorage {
-		ourKeys := allStorageKeys[addr]
+		ourKeys := ourStorage[addr]
 		for key := range gtKeys {
 			if ourKeys == nil {
 				missingStorage++
-				fmt.Printf("[debug] MISSING STORAGE: account=%s key=%s (account has no recorded storage)\n", addr.Hex(), key.Hex())
+				fmt.Printf("[debug] MISSING STORAGE WRITE: account=%s key=%s (account has no recorded storage writes)\n", addr.Hex(), key.Hex())
 			} else if _, ok := ourKeys[key]; !ok {
 				missingStorage++
-				fmt.Printf("[debug] MISSING STORAGE: account=%s key=%s\n", addr.Hex(), key.Hex())
+				fmt.Printf("[debug] MISSING STORAGE WRITE: account=%s key=%s\n", addr.Hex(), key.Hex())
 			}
 		}
 	}
 
-	// Find storage keys in our recording but not in ground truth
+	// Find storage keys in our writes but not in ground truth
 	extraStorage := 0
-	for addr, ourKeys := range allStorageKeys {
+	for addr, ourKeys := range ourStorage {
 		gtKeys := gtStorage[addr]
 		for key := range ourKeys {
 			if gtKeys == nil {
@@ -1051,36 +1059,23 @@ func debugCompareRecordedVsGroundTruth(
 		}
 	}
 
-	fmt.Printf("[debug] Accounts: %d missing, %d extra | Storage: %d missing, %d extra\n",
+	fmt.Printf("[debug] Account writes: %d missing, %d extra | Storage writes: %d missing, %d extra\n",
 		missingAccounts, extraAccounts, missingStorage, extraStorage)
 
-	// Breakdown by read vs write
-	readStorageCount := 0
-	for _, keys := range readStorageKeys {
-		readStorageCount += len(keys)
-	}
-	writeStorageCount := 0
-	for _, keys := range writeStorageKeys {
-		writeStorageCount += len(keys)
-	}
-	fmt.Printf("[debug] Breakdown: readAccounts=%d, writeAccounts=%d, readStorageKeys=%d, writeStorageKeys=%d\n",
-		len(readAddresses), len(writeAddresses), readStorageCount, writeStorageCount)
-
-	// Check which missing accounts are deleted vs truly never touched
+	// For missing accounts, check if they were accessed (read) but not written
 	for addr := range gtAccounts {
-		if _, ok := allAddresses[addr]; !ok {
-			if _, deleted := recordingState.DeletedAccounts[addr]; deleted {
-				fmt.Printf("[debug]   -> MISSING ACCOUNT %s was DELETED\n", addr.Hex())
-			}
-			if _, modified := recordingState.ModifiedAccounts[addr]; modified {
-				fmt.Printf("[debug]   -> MISSING ACCOUNT %s was MODIFIED (but not in allAddresses?!)\n", addr.Hex())
+		if _, ok := ourAccounts[addr]; !ok {
+			if _, accessed := recordingState.AccessedAccounts[addr]; accessed {
+				fmt.Printf("[debug]   -> MISSING ACCOUNT WRITE %s was READ but not written\n", addr.Hex())
+			} else {
+				fmt.Printf("[debug]   -> MISSING ACCOUNT WRITE %s was NEVER TOUCHED\n", addr.Hex())
 			}
 		}
 	}
 
-	// Check which missing storage keys belong to deleted accounts
+	// For missing storage keys, check if the account was deleted or if the key was read
 	for addr, gtKeys := range gtStorage {
-		ourKeys := allStorageKeys[addr]
+		ourKeys := ourStorage[addr]
 		for key := range gtKeys {
 			isMissing := ourKeys == nil
 			if !isMissing {
@@ -1089,7 +1084,15 @@ func debugCompareRecordedVsGroundTruth(
 			}
 			if isMissing {
 				if _, deleted := recordingState.DeletedAccounts[addr]; deleted {
-					fmt.Printf("[debug]   -> MISSING STORAGE %s/%s belongs to DELETED account\n", addr.Hex(), key.Hex())
+					fmt.Printf("[debug]   -> MISSING STORAGE WRITE %s/%s belongs to DELETED account\n", addr.Hex(), key.Hex())
+				} else if accessedKeys, ok := recordingState.AccessedStorage[addr]; ok {
+					if _, accessed := accessedKeys[key]; accessed {
+						fmt.Printf("[debug]   -> MISSING STORAGE WRITE %s/%s was READ but not written\n", addr.Hex(), key.Hex())
+					} else {
+						fmt.Printf("[debug]   -> MISSING STORAGE WRITE %s/%s was NEVER TOUCHED\n", addr.Hex(), key.Hex())
+					}
+				} else {
+					fmt.Printf("[debug]   -> MISSING STORAGE WRITE %s/%s account NEVER TOUCHED\n", addr.Hex(), key.Hex())
 				}
 			}
 		}
@@ -1360,11 +1363,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
 	}
 
-	if err := debugCompareRecordedVsGroundTruth(
-		tx, recordingState, allAddresses, allStorageKeys,
-		readAddresses, writeAddresses, readStorageKeys, writeStorageKeys,
-		firstTxNumInBlock, lastTxNumInBlock,
-	); err != nil {
+	if err := debugCompareRecordedVsGroundTruth(tx, recordingState, firstTxNumInBlock, lastTxNumInBlock); err != nil {
 		return nil, err
 	}
 
