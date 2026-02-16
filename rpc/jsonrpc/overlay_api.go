@@ -147,6 +147,11 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 
 	replayTransactions = block.Transactions()[:transactionIndex]
 
+	err = rpchelper.CheckBlockExecuted(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
 	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err

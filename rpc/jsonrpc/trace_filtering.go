@@ -763,6 +763,11 @@ func (api *TraceAPIImpl) callBlock(
 		RequireCanonical: true,
 	}
 
+	err := rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, nil, err
@@ -875,6 +880,11 @@ func (api *TraceAPIImpl) callTransaction(
 		BlockNumber:      &parentNo,
 		BlockHash:        &parentHash,
 		RequireCanonical: true,
+	}
+
+	err := rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	if err != nil {
+		return nil, err
 	}
 
 	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)

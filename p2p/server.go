@@ -22,7 +22,6 @@ package p2p
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"crypto/ecdsa"
 	"encoding/hex"
@@ -593,7 +592,13 @@ func (srv *Server) setupDialScheduler() {
 		dialer:         srv.Dialer,
 		clock:          srv.clock,
 	}
-	config.resolver = cmp.Or[nodeResolver](srv.discv5, srv.discv4)
+	// NOTE: cmp.Or cannot be used here because wrapping a nil concrete pointer
+	// in an interface produces a non-nil interface value (Go nil interface trap).
+	if srv.discv5 != nil {
+		config.resolver = srv.discv5
+	} else if srv.discv4 != nil {
+		config.resolver = srv.discv4
+	}
 	if config.dialer == nil {
 		config.dialer = tcpDialer{&net.Dialer{Timeout: defaultDialTimeout}}
 	}

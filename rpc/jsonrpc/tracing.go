@@ -106,6 +106,11 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	}
 	engine := api.engine()
 
+	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	if err != nil {
+		return err
+	}
+
 	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, api._txNumReader, tx, 0)
 	if err != nil {
 		return err
@@ -368,6 +373,11 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 		return err
 	}
 
+	err = rpchelper.CheckBlockExecuted(dbtx, blockNumber)
+	if err != nil {
+		return err
+	}
+
 	var stateReader state.StateReader
 	if config == nil || config.TxIndex == nil || isLatest {
 		stateReader, err = rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
@@ -496,6 +506,11 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	if header == nil {
 		stream.WriteNil()
 		return fmt.Errorf("block %d(%x) not found", blockNum, hash)
+	}
+
+	err = rpchelper.CheckBlockExecuted(tx, blockNum)
+	if err != nil {
+		return err
 	}
 
 	var stateReader state.StateReader

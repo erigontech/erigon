@@ -48,6 +48,19 @@ func (e BlockNotFoundErr) Error() string {
 	return fmt.Sprintf("block %x not found", e.Hash)
 }
 
+func CheckBlockExecuted(tx kv.Tx, blockNumber uint64) error {
+	lastExecutedBlock, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+
+	if blockNumber > lastExecutedBlock {
+		return fmt.Errorf("block %d is not executed (last block: %d)", blockNumber, lastExecutedBlock)
+	}
+
+	return nil
+}
+
 func GetBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (uint64, common.Hash, bool, error) {
 	bn, bh, latest, _, err := _GetBlockNumber(ctx, blockNrOrHash.RequireCanonical, blockNrOrHash, tx, br, filters)
 	return bn, bh, latest, err

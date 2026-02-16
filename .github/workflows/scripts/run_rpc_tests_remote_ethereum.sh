@@ -14,7 +14,10 @@ DISABLED_TEST_LIST=(
   eth_getProof
   eth_simulateV1
   # tests not updated after cherry-picking
+  eth_getBalance/test_05.json
   eth_getStorageAt/test_09.json
+  ots_hasCode/test_06.json
+  ots_hasCode/test_09.json
   # Disabled because of an incorrect response.
   eth_createAccessList/test_19.json
 )

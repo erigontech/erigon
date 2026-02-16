@@ -1057,6 +1057,11 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
+	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
 	header, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNumber), tx)
 	if err != nil {
 		return nil, err
@@ -1239,6 +1244,11 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
 	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
