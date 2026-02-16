@@ -52,6 +52,7 @@ type SharedDomainsCommitmentContext struct {
 
 func (sdc *SharedDomainsCommitmentContext) SetTrace(enable bool) {
 	sdc.trace = enable
+	sdc.patriciaTrie.SetTrace(enable)
 }
 
 // Limits max txNum for read operations. If set to 0, all read operations will be from latest value.

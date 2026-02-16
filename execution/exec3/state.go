@@ -52,11 +52,8 @@ import (
 	"github.com/erigontech/erigon/turbo/shards"
 )
 
-var arbTrace bool
-
 func init() {
 	gethhook.RequireHookedGeth()
-	arbTrace = dbg.EnvBool("ARB_TRACE", false)
 }
 
 var noop = state.NewNoopWriter()
@@ -244,12 +241,12 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 
 	rw.ibs.Reset()
 	ibs, hooks, cc := rw.ibs, rw.hooks, rw.chainConfig
-	rw.ibs.SetTrace(arbTrace)
+	rw.ibs.SetTrace(dbg.ArbTrace())
 	ibs.SetHooks(hooks)
 
 	var err error
 	rules, header := txTask.Rules, txTask.Header
-	if arbTrace {
+	if dbg.ArbTrace() {
 		fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxNum, txTask.BlockNum, txTask.HistoryExecution)
 	}
 
@@ -306,7 +303,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			break
 		}
 
-		if arbTrace {
+		if dbg.ArbTrace() {
 			fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		}
 		rw.callTracer.Reset()
@@ -393,13 +390,13 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask, isMining, skipPostEvalua
 			}
 		}
 	}
-	if arbTrace {
+	if dbg.ArbTrace() {
 		fmt.Printf("---- txnIdx %d block %d DONE------\n", txTask.TxIndex, txTask.BlockNum)
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if txTask.Error == nil {
 		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-		if arbTrace {
+		if dbg.ArbTrace() {
 			for addr, bal := range txTask.BalanceIncreaseSet {
 				fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &(bal.Amount))
 			}

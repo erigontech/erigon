@@ -87,7 +87,7 @@ type Progress struct {
 	logger       log.Logger
 }
 
-func (p *Progress) Log(suffix string, rs *state.ParallelExecutionState, in *state.QueueWithRetry, rws *state.ResultsQueue, txCount uint64, gas uint64, inputBlockNum uint64, outputBlockNum uint64, outTxNum uint64, repeatCount uint64, idxStepsAmountInDB float64, commitEveryBlock bool, inMemExec bool) {
+func (p *Progress) Log(suffix string, rs *state.ParallelExecutionState, in *state.QueueWithRetry, rws *state.ResultsQueue, txCount uint64, gas uint64, inputBlockNum uint64, outputBlockNum uint64, outTxNum uint64, repeatCount uint64, idxStepsAmountInDB float64, commitEveryBlock bool, inMemExec bool, arbosVersion uint64) {
 	mxExecStepsInDB.Set(idxStepsAmountInDB * 100)
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -125,6 +125,7 @@ func (p *Progress) Log(suffix string, rs *state.ParallelExecutionState, in *stat
 		"stepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
 		"step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(config3.DefaultStepSize)),
 		"inMem", inMemExec,
+		"ArbOS", arbosVersion,
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
 
@@ -354,6 +355,7 @@ func ExecV3(ctx context.Context,
 	var logGas uint64
 	var stepsInDB float64
 	var executor executor
+	_ArbOSVersion := uint64(0)
 
 	if parallel {
 		pe := &parallelExecutor{
@@ -385,7 +387,7 @@ func ExecV3(ctx context.Context,
 		defer executorCancel()
 
 		defer func() {
-			progress.Log("Done", executor.readState(), nil, pe.rws, 0 /*txCount - TODO*/, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, pe.shouldGenerateChangeSets(), inMemExec)
+			progress.Log("Done", executor.readState(), nil, pe.rws, 0 /*txCount - TODO*/, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, pe.shouldGenerateChangeSets(), inMemExec, _ArbOSVersion)
 		}()
 
 		executor = pe
@@ -414,7 +416,7 @@ func ExecV3(ctx context.Context,
 		}
 
 		defer func() {
-			progress.Log("Done", executor.readState(), nil, nil, se.txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, se.shouldGenerateChangeSets() || cfg.syncCfg.KeepExecutionProofs, inMemExec)
+			progress.Log("Done", executor.readState(), nil, nil, se.txCount, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, se.shouldGenerateChangeSets() || cfg.syncCfg.KeepExecutionProofs, inMemExec, _ArbOSVersion)
 		}()
 
 		executor = se
@@ -499,8 +501,12 @@ Loop:
 		var arbosv uint64
 		signer := *types.LatestSignerForChainID(chainConfig.ChainID)
 		if chainConfig.IsArbitrum() {
-			arbosv = types.GetArbOSVersion(header, chainConfig)
-			signer = *types.MakeSignerArb(chainConfig, blockNum, header.Time, arbosv)
+			osver := types.GetArbOSVersion(header, chainConfig)
+			if osver > _ArbOSVersion {
+				log.Warn(fmt.Sprintf("ArbOS version upgrade %d->%d", _ArbOSVersion, osver), "block", header.Number.Uint64(), "hash", header.Hash())
+			}
+			_ArbOSVersion = osver
+			signer = *types.MakeSignerArb(chainConfig, blockNum, header.Time, _ArbOSVersion)
 		}
 
 		getHashFnMute := &sync.Mutex{}
@@ -676,9 +682,9 @@ Loop:
 		if ERIGON_COMMIT_EACH_BLOCK || shouldGenerateChangesets || cfg.syncCfg.KeepExecutionProofs {
 			start := time.Now()
 			if blockNum == 0 {
-				executor.domains().GetCommitmentContext().Trie().SetTrace(true)
+				executor.domains().SetTrace(true)
 			} else {
-				executor.domains().GetCommitmentContext().Trie().SetTrace(false)
+				executor.domains().SetTrace(false)
 			}
 			rh, err := executor.domains().ComputeCommitment(ctx, true, blockNum, inputTxNum, execStage.LogPrefix())
 			if err != nil {
@@ -720,7 +726,7 @@ Loop:
 				}
 
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(executor.tx())
-				progress.Log("", executor.readState(), nil, nil, count, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec)
+				progress.Log("", executor.readState(), nil, nil, count, logGas, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), mxExecRepeats.GetValueUint64(), stepsInDB, shouldGenerateChangesets, inMemExec, _ArbOSVersion)
 
 				//TODO: https://github.com/erigontech/erigon/issues/10724
 				//if executor.tx().(dbstate.HasAggTx).AggTx().(*dbstate.AggregatorRoTx).CanPrune(executor.tx(), outputTxNum.Load()) {

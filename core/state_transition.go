@@ -45,12 +45,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-var arbTrace bool
-
-func init() {
-	arbTrace = dbg.EnvBool("ARB_TRACE", false)
-}
-
 /*
 The State Transitioning Model
 
@@ -274,7 +268,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 
 	// Check for overflow before adding gas
 	if st.gasRemaining > math.MaxUint64-st.msg.Gas() {
-		panic(fmt.Sprintf("gasRemaining overflow in buyGas: gasRemaining=%d, msg.Gas()=%d", st.gasRemaining, st.msg.Gas()))
+		return fmt.Errorf("gasRemaining overflow in buyGas: gasRemaining=%d, msg.Gas()=%d", st.gasRemaining, st.msg.Gas())
 	}
 
 	//fmt.Printf("buyGas: adding gas %d from %x\n", st.msg.Gas(), st.msg.From())
@@ -409,7 +403,7 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	msg := st.msg
 	// Check for overflow before adding gas
 	if st.gasRemaining > math.MaxUint64-st.msg.Gas() {
-		panic(fmt.Sprintf("gasRemaining overflow in ApplyFrame: gasRemaining=%d, msg.Gas()=%d", st.gasRemaining, st.msg.Gas()))
+		return nil, fmt.Errorf("gasRemaining overflow in ApplyFrame: gasRemaining=%d, msg.Gas()=%d", st.gasRemaining, st.msg.Gas())
 	}
 	st.gasRemaining += st.msg.Gas()
 	st.initialGas = st.msg.Gas()
@@ -618,7 +612,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 	// Check for underflow before subtracting intrinsic gas (should be caught by earlier check, but be safe)
 	if st.gasRemaining < gas {
-		panic(fmt.Sprintf("gasRemaining underflow in TransitionDb (intrinsic gas): gasRemaining=%d, gas=%d", st.gasRemaining, gas))
+		return nil, fmt.Errorf("gasRemaining underflow in TransitionDb (intrinsic gas): gasRemaining=%d, gas=%d", st.gasRemaining, gas)
 	}
 	st.gasRemaining -= gas
 	usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
@@ -771,7 +765,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		if burntContractAddress != nil {
 			burnAmount = *(&uint256.Int{}).Mul((&uint256.Int{}).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
 
-			if arbTrace {
+			if dbg.ArbTrace() {
 				fmt.Printf("burnAddr %x tipAddr %x\n", burntContractAddress, tipReceipient)
 			}
 			tracingTipAmount = burnAmount.Clone()
@@ -878,11 +872,11 @@ func (st *StateTransition) handleRevertedTx(msg *types.Message, usedMultiGas mul
 
 		// Calculate adjusted gas since l2GasUsed contains params.TxGas
 		if l2GasUsed < params.TxGas {
-			panic(fmt.Sprintf("adjustedGas underflow in handleRevertedTx: l2GasUsed=%d, params.TxGas=%d", l2GasUsed, params.TxGas))
+			return usedMultiGas, fmt.Errorf("adjustedGas underflow in handleRevertedTx: l2GasUsed=%d, params.TxGas=%d", l2GasUsed, params.TxGas)
 		}
 		adjustedGas := l2GasUsed - params.TxGas
 		if st.gasRemaining < adjustedGas {
-			panic(fmt.Sprintf("gasRemaining underflow in handleRevertedTx: gasRemaining=%d, adjustedGas=%d", st.gasRemaining, adjustedGas))
+			return usedMultiGas, fmt.Errorf("gasRemaining underflow in handleRevertedTx: gasRemaining=%d, adjustedGas=%d", st.gasRemaining, adjustedGas)
 		}
 		st.gasRemaining -= adjustedGas
 
@@ -1111,7 +1105,7 @@ func (st *StateTransition) refundGas() {
 	if st.state.Trace() || st.state.TraceAccount(st.msg.From()) {
 		fmt.Printf("(%d.%d) Refund %x: remaining: %d, price: %d val: %d\n", st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining, st.gasPrice, remaining)
 	}
-	if arbTrace {
+	if dbg.ArbTrace() {
 		fmt.Printf("[ST] refund remaining gas %d to %x\n", remaining, st.msg.From())
 	}
 

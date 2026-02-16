@@ -84,7 +84,11 @@ var (
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
 	TraceDeletion        = EnvBool("TRACE_DELETION", false)
+
+	arbTrace = EnvBool("ARB_TRACE", false)
 )
+
+func ArbTrace() bool { return arbTrace }
 
 func ReadMemStats(m *runtime.MemStats) {
 	if noMemstat {

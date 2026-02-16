@@ -858,16 +858,19 @@ func commitUpdate(tx kv.RwTx, blocks []*types.Block) error {
 			return fmt.Errorf("cannot write body: %s", err)
 		}
 
-		parentTd, err := rawdb.ReadTd(tx, blk.Header().ParentHash, blockNum-1)
-		if err != nil || parentTd == nil {
-			return fmt.Errorf("failed to read parent total difficulty for block %d: %w", blockNum, err)
+		td := new(big.Int).Set(blk.Difficulty())
+		if blockNum > 0 {
+			parentTd, err := rawdb.ReadTd(tx, blk.Header().ParentHash, blockNum-1)
+			if err != nil || parentTd == nil {
+				return fmt.Errorf("failed to read parent total difficulty for block %d: %w", blockNum, err)
+			}
+			td.Add(td, parentTd)
 		}
-		td := new(big.Int).Add(parentTd, blk.Difficulty())
-		if err = rawdb.WriteTd(tx, blk.Hash(), blockNum, td); err != nil {
+		if err := rawdb.WriteTd(tx, blk.Hash(), blockNum, td); err != nil {
 			return fmt.Errorf("failed to write total difficulty %d: %w", blockNum, err)
 		}
 
-		if err = rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
+		if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
 			return fmt.Errorf("error writing canonical hash %d: %w", blockNum, err)
 		}
 
@@ -1084,21 +1087,24 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 					log.Info("receipt queries", "total", receiptQueries.Load())
 					return fmt.Errorf("failed to get receipt for tx %s after %d attempts: %w", txData["hash"], maxRetries, err)
 				}
-				//if tx.Hash() != receipt.TransactionHash {
-				//	log.Error("fetched receipt tx hash mismatch", "expected", txData["hash"],
-				//		"got", receipt.TransactionHash, "txIndex", idx,
-				//		"receipt", fmt.Sprintf("%+v", receipt))
-				//	return fmt.Errorf("receipt tx hash mismatch for tx %s", txData["hash"])
-				//}
-				// can use receipts if blockMetadata is not available
-				//if receipt.Timeboosted != nil {
-				//	tx.SetTimeboosted(receipt.Timeboosted)
-				//}
+				if receipt.TransactionHash != (common.Hash{}) {
+					//if tx.Hash() != receipt.TransactionHash {
+					//	log.Error("fetched receipt tx hash mismatch", "expected", txData["hash"],
+					//		"got", receipt.TransactionHash, "txIndex", idx,
+					//		"receipt", fmt.Sprintf("%+v", receipt))
+					//	return fmt.Errorf("receipt tx hash mismatch for tx %s", txData["hash"])
+					//}
+					// can use receipts if blockMetadata is not available
+					//if receipt.Timeboosted != nil {
+					//	tx.SetTimeboosted(receipt.Timeboosted)
+					//}
 
-				if egu := receipt.GasUsed; egu != nil && egu.Uint64() > 0 {
-					if srtx, ok := tx.(*types.ArbitrumSubmitRetryableTx); ok {
-						srtx.EffectiveGasUsed = egu.Uint64()
-						tx = srtx
+
+					if egu := receipt.GasUsed; egu != nil && egu.Uint64() > 0 {
+						if srtx, ok := tx.(*types.ArbitrumSubmitRetryableTx); ok {
+							srtx.EffectiveGasUsed = egu.Uint64()
+							tx = srtx
+						}
 					}
 				}
 			}

@@ -164,11 +164,15 @@ func (rs *ParallelExecutionState) applyState(txTask *TxTask, domains *dbstate.Sh
 		}
 		acc.Balance.Add(&acc.Balance, &increase.Amount)
 		if !increase.IsEscrow && emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
+			log.Warn("escrow protection deleted", "address", addr)
 			if err := domains.DomainDel(kv.AccountsDomain, rs.tx, addrBytes, txTask.TxNum, enc0, step0); err != nil {
 				return err
 			}
 		} else {
 			enc1 := accounts.SerialiseV3(&acc)
+			if increase.IsEscrow {
+				log.Warn("escrow protected", "address", addr)
+			}
 			if err := domains.DomainPut(kv.AccountsDomain, rs.tx, addrBytes, enc1, txTask.TxNum, enc0, step0); err != nil {
 				return err
 			}
