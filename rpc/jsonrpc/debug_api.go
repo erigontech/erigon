@@ -651,96 +651,253 @@ func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.H
 	return nil, nil
 }
 
-// RecordingStateReader wraps a StateReader and records all state accesses (accounts, storage, code).
-// This is used for building execution witnesses.
-type RecordingStateReader struct {
+// RecordingState combines a StateReader and StateWriter with an in-memory overlay.
+// Reads check the overlay first (accounting for deletes and modifications), then
+// fall back to the inner reader. Writes go to the overlay. All accesses and
+// modifications are recorded for witness generation.
+type RecordingState struct {
 	inner  state.StateReader
 	trace  bool
 	prefix string
-	// Recorded accesses
+
+	// Read tracking (all accessed keys, including reads that hit the overlay)
 	AccessedAccounts map[common.Address]struct{}
 	AccessedStorage  map[common.Address]map[common.Hash]struct{}
 	AccessedCode     map[common.Address][]byte
+
+	// In-memory state overlay (writes)
+	accountOverlay map[common.Address]*accounts.Account // non-nil = updated, entry present with nil value = deleted
+	storageOverlay map[common.Address]map[common.Hash]uint256.Int
+	codeOverlay    map[common.Address][]byte
+
+	// Write tracking
+	ModifiedAccounts map[common.Address]struct{}
+	ModifiedStorage  map[common.Address]map[common.Hash]struct{}
+	ModifiedCode     map[common.Address][]byte
+	DeletedAccounts  map[common.Address]struct{}
+	CreatedContracts map[common.Address]struct{}
 }
 
-// NewRecordingStateReader creates a new RecordingStateReader wrapping the given inner reader.
-func NewRecordingStateReader(inner state.StateReader) *RecordingStateReader {
-	return &RecordingStateReader{
+// NewRecordingState creates a new RecordingState wrapping the given inner reader.
+func NewRecordingState(inner state.StateReader) *RecordingState {
+	return &RecordingState{
 		inner:            inner,
 		AccessedAccounts: make(map[common.Address]struct{}),
 		AccessedStorage:  make(map[common.Address]map[common.Hash]struct{}),
 		AccessedCode:     make(map[common.Address][]byte),
+		accountOverlay:   make(map[common.Address]*accounts.Account),
+		storageOverlay:   make(map[common.Address]map[common.Hash]uint256.Int),
+		codeOverlay:      make(map[common.Address][]byte),
+		ModifiedAccounts: make(map[common.Address]struct{}),
+		ModifiedStorage:  make(map[common.Address]map[common.Hash]struct{}),
+		ModifiedCode:     make(map[common.Address][]byte),
+		DeletedAccounts:  make(map[common.Address]struct{}),
+		CreatedContracts: make(map[common.Address]struct{}),
 	}
 }
 
-func (r *RecordingStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	r.AccessedAccounts[address.Value()] = struct{}{}
-	return r.inner.ReadAccountData(address)
-}
+// --- StateReader implementation ---
 
-func (r *RecordingStateReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
-	r.AccessedAccounts[address.Value()] = struct{}{}
-	return r.inner.ReadAccountDataForDebug(address)
-}
-
-func (r *RecordingStateReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
-	r.AccessedAccounts[address.Value()] = struct{}{}
-	if r.AccessedStorage[address.Value()] == nil {
-		r.AccessedStorage[address.Value()] = make(map[common.Hash]struct{})
+func (s *RecordingState) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	addr := address.Value()
+	s.AccessedAccounts[addr] = struct{}{}
+	// Check overlay: deleted accounts return nil
+	if _, deleted := s.DeletedAccounts[addr]; deleted {
+		return nil, nil
 	}
-	r.AccessedStorage[address.Value()][key.Value()] = struct{}{}
-	return r.inner.ReadAccountStorage(address, key)
+	if acc, ok := s.accountOverlay[addr]; ok {
+		return acc, nil
+	}
+	return s.inner.ReadAccountData(address)
 }
 
-func (r *RecordingStateReader) HasStorage(address accounts.Address) (bool, error) {
-	r.AccessedAccounts[address.Value()] = struct{}{}
-	return r.inner.HasStorage(address)
+func (s *RecordingState) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
+	addr := address.Value()
+	s.AccessedAccounts[addr] = struct{}{}
+	if _, deleted := s.DeletedAccounts[addr]; deleted {
+		return nil, nil
+	}
+	if acc, ok := s.accountOverlay[addr]; ok {
+		return acc, nil
+	}
+	return s.inner.ReadAccountDataForDebug(address)
 }
 
-func (r *RecordingStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
-	code, err := r.inner.ReadAccountCode(address)
+func (s *RecordingState) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	addr := address.Value()
+	s.AccessedAccounts[addr] = struct{}{}
+	if s.AccessedStorage[addr] == nil {
+		s.AccessedStorage[addr] = make(map[common.Hash]struct{})
+	}
+	s.AccessedStorage[addr][key.Value()] = struct{}{}
+	// Deleted accounts have no storage
+	if _, deleted := s.DeletedAccounts[addr]; deleted {
+		return uint256.Int{}, false, nil
+	}
+	// Check if this storage slot has been written in the overlay
+	if mods, ok := s.ModifiedStorage[addr]; ok {
+		if _, modified := mods[key.Value()]; modified {
+			val := s.storageOverlay[addr][key.Value()]
+			return val, !val.IsZero(), nil
+		}
+	}
+	return s.inner.ReadAccountStorage(address, key)
+}
+
+func (s *RecordingState) HasStorage(address accounts.Address) (bool, error) {
+	s.AccessedAccounts[address.Value()] = struct{}{}
+	// Check overlay for any non-zero storage
+	if mods, ok := s.storageOverlay[address.Value()]; ok {
+		for _, val := range mods {
+			if !val.IsZero() {
+				return true, nil
+			}
+		}
+	}
+	if _, deleted := s.DeletedAccounts[address.Value()]; deleted {
+		return false, nil
+	}
+	return s.inner.HasStorage(address)
+}
+
+func (s *RecordingState) ReadAccountCode(address accounts.Address) ([]byte, error) {
+	addr := address.Value()
+	s.AccessedAccounts[addr] = struct{}{}
+	if _, deleted := s.DeletedAccounts[addr]; deleted {
+		return nil, nil
+	}
+	if code, ok := s.codeOverlay[addr]; ok {
+		if len(code) > 0 {
+			s.AccessedCode[addr] = code
+		}
+		return code, nil
+	}
+	code, err := s.inner.ReadAccountCode(address)
 	if err != nil {
 		return nil, err
 	}
-	r.AccessedAccounts[address.Value()] = struct{}{}
 	if len(code) > 0 {
-		r.AccessedCode[address.Value()] = code
+		s.AccessedCode[addr] = code
 	}
 	return code, nil
 }
 
-func (r *RecordingStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
-	r.AccessedAccounts[address.Value()] = struct{}{}
-	return r.inner.ReadAccountCodeSize(address)
+func (s *RecordingState) ReadAccountCodeSize(address accounts.Address) (int, error) {
+	addr := address.Value()
+	s.AccessedAccounts[addr] = struct{}{}
+	if _, deleted := s.DeletedAccounts[addr]; deleted {
+		return 0, nil
+	}
+	if code, ok := s.codeOverlay[addr]; ok {
+		return len(code), nil
+	}
+	return s.inner.ReadAccountCodeSize(address)
 }
 
-func (r *RecordingStateReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
-	r.AccessedAccounts[address.Value()] = struct{}{}
-	return r.inner.ReadAccountIncarnation(address)
+func (s *RecordingState) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
+	s.AccessedAccounts[address.Value()] = struct{}{}
+	return s.inner.ReadAccountIncarnation(address)
 }
 
-func (r *RecordingStateReader) SetTrace(trace bool, tracePrefix string) {
-	r.trace = trace
-	r.prefix = tracePrefix
+func (s *RecordingState) SetTrace(trace bool, tracePrefix string) {
+	s.trace = trace
+	s.prefix = tracePrefix
 }
 
-func (r *RecordingStateReader) Trace() bool {
-	return r.trace
+func (s *RecordingState) Trace() bool {
+	return s.trace
 }
 
-func (r *RecordingStateReader) TracePrefix() string {
-	return r.prefix
+func (s *RecordingState) TracePrefix() string {
+	return s.prefix
 }
 
-// GetAccessedKeys returns slices of all accessed account addresses and storage keys
-func (r *RecordingStateReader) GetAccessedKeys() ([]common.Address, map[common.Address][]common.Hash) {
-	addresses := make([]common.Address, 0, len(r.AccessedAccounts))
-	for addr := range r.AccessedAccounts {
+// --- StateWriter implementation ---
+
+func (s *RecordingState) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
+	addr := address.Value()
+	s.ModifiedAccounts[addr] = struct{}{}
+	// Store a copy in the overlay
+	acctCopy := *account
+	s.accountOverlay[addr] = &acctCopy
+	delete(s.DeletedAccounts, addr)
+	return nil
+}
+
+func (s *RecordingState) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
+	addr := address.Value()
+	s.ModifiedAccounts[addr] = struct{}{}
+	s.codeOverlay[addr] = common.Copy(code)
+	if len(code) > 0 {
+		s.ModifiedCode[addr] = common.Copy(code)
+	}
+	return nil
+}
+
+func (s *RecordingState) DeleteAccount(address accounts.Address, original *accounts.Account) error {
+	addr := address.Value()
+	s.ModifiedAccounts[addr] = struct{}{}
+	s.DeletedAccounts[addr] = struct{}{}
+	delete(s.accountOverlay, addr)
+	// Clear storage overlay for this account
+	delete(s.storageOverlay, addr)
+	delete(s.codeOverlay, addr)
+	return nil
+}
+
+func (s *RecordingState) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
+	addr := address.Value()
+	s.ModifiedAccounts[addr] = struct{}{}
+	if s.ModifiedStorage[addr] == nil {
+		s.ModifiedStorage[addr] = make(map[common.Hash]struct{})
+	}
+	s.ModifiedStorage[addr][key.Value()] = struct{}{}
+	// Store in overlay
+	if s.storageOverlay[addr] == nil {
+		s.storageOverlay[addr] = make(map[common.Hash]uint256.Int)
+	}
+	s.storageOverlay[addr][key.Value()] = value
+	return nil
+}
+
+func (s *RecordingState) CreateContract(address accounts.Address) error {
+	addr := address.Value()
+	s.ModifiedAccounts[addr] = struct{}{}
+	s.CreatedContracts[addr] = struct{}{}
+	delete(s.DeletedAccounts, addr)
+	return nil
+}
+
+// --- Query methods ---
+
+// GetAccessedKeys returns all accessed account addresses and storage keys (reads + writes)
+func (s *RecordingState) GetAccessedKeys() ([]common.Address, map[common.Address][]common.Hash) {
+	addresses := make([]common.Address, 0, len(s.AccessedAccounts))
+	for addr := range s.AccessedAccounts {
 		addresses = append(addresses, addr)
 	}
 
 	storageKeys := make(map[common.Address][]common.Hash)
-	for addr, keys := range r.AccessedStorage {
+	for addr, keys := range s.AccessedStorage {
+		keySlice := make([]common.Hash, 0, len(keys))
+		for key := range keys {
+			keySlice = append(keySlice, key)
+		}
+		storageKeys[addr] = keySlice
+	}
+
+	return addresses, storageKeys
+}
+
+// GetModifiedKeys returns all modified account addresses and storage keys
+func (s *RecordingState) GetModifiedKeys() ([]common.Address, map[common.Address][]common.Hash) {
+	addresses := make([]common.Address, 0, len(s.ModifiedAccounts))
+	for addr := range s.ModifiedAccounts {
+		addresses = append(addresses, addr)
+	}
+
+	storageKeys := make(map[common.Address][]common.Hash)
+	for addr, keys := range s.ModifiedStorage {
 		keySlice := make([]common.Hash, 0, len(keys))
 		for key := range keys {
 			keySlice = append(keySlice, key)
@@ -752,95 +909,18 @@ func (r *RecordingStateReader) GetAccessedKeys() ([]common.Address, map[common.A
 }
 
 // GetAccessedCode returns all accessed contract code
-func (r *RecordingStateReader) GetAccessedCode() map[common.Address][]byte {
-	result := make(map[common.Address][]byte, len(r.AccessedCode))
-	for addr, code := range r.AccessedCode {
+func (s *RecordingState) GetAccessedCode() map[common.Address][]byte {
+	result := make(map[common.Address][]byte, len(s.AccessedCode))
+	for addr, code := range s.AccessedCode {
 		result[addr] = common.Copy(code)
 	}
 	return result
 }
 
-// RecordingStateWriter wraps a StateWriter and records all state modifications (accounts, storage, code).
-// This is used for building execution witnesses to capture all written keys.
-type RecordingStateWriter struct {
-	inner state.StateWriter
-	// Recorded modifications
-	ModifiedAccounts map[common.Address]struct{}
-	ModifiedStorage  map[common.Address]map[common.Hash]struct{}
-	ModifiedCode     map[common.Address][]byte
-	DeletedAccounts  map[common.Address]struct{}
-	CreatedContracts map[common.Address]struct{}
-}
-
-// NewRecordingStateWriter creates a new RecordingStateWriter wrapping the given inner writer.
-func NewRecordingStateWriter(inner state.StateWriter) *RecordingStateWriter {
-	return &RecordingStateWriter{
-		inner:            inner,
-		ModifiedAccounts: make(map[common.Address]struct{}),
-		ModifiedStorage:  make(map[common.Address]map[common.Hash]struct{}),
-		ModifiedCode:     make(map[common.Address][]byte),
-		DeletedAccounts:  make(map[common.Address]struct{}),
-		CreatedContracts: make(map[common.Address]struct{}),
-	}
-}
-
-func (w *RecordingStateWriter) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
-	w.ModifiedAccounts[address.Value()] = struct{}{}
-	return w.inner.UpdateAccountData(address, original, account)
-}
-
-func (w *RecordingStateWriter) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
-	w.ModifiedAccounts[address.Value()] = struct{}{}
-	if len(code) > 0 {
-		w.ModifiedCode[address.Value()] = common.Copy(code)
-	}
-	return w.inner.UpdateAccountCode(address, incarnation, codeHash, code)
-}
-
-func (w *RecordingStateWriter) DeleteAccount(address accounts.Address, original *accounts.Account) error {
-	w.ModifiedAccounts[address.Value()] = struct{}{}
-	w.DeletedAccounts[address.Value()] = struct{}{}
-	return w.inner.DeleteAccount(address, original)
-}
-
-func (w *RecordingStateWriter) WriteAccountStorage(address accounts.Address, incarnation uint64, key accounts.StorageKey, original, value uint256.Int) error {
-	w.ModifiedAccounts[address.Value()] = struct{}{}
-	if w.ModifiedStorage[address.Value()] == nil {
-		w.ModifiedStorage[address.Value()] = make(map[common.Hash]struct{})
-	}
-	w.ModifiedStorage[address.Value()][key.Value()] = struct{}{}
-	return w.inner.WriteAccountStorage(address, incarnation, key, original, value)
-}
-
-func (w *RecordingStateWriter) CreateContract(address accounts.Address) error {
-	w.ModifiedAccounts[address.Value()] = struct{}{}
-	w.CreatedContracts[address.Value()] = struct{}{}
-	return w.inner.CreateContract(address)
-}
-
-// GetModifiedKeys returns slices of all modified account addresses and storage keys
-func (w *RecordingStateWriter) GetModifiedKeys() ([]common.Address, map[common.Address][]common.Hash) {
-	addresses := make([]common.Address, 0, len(w.ModifiedAccounts))
-	for addr := range w.ModifiedAccounts {
-		addresses = append(addresses, addr)
-	}
-
-	storageKeys := make(map[common.Address][]common.Hash)
-	for addr, keys := range w.ModifiedStorage {
-		keySlice := make([]common.Hash, 0, len(keys))
-		for key := range keys {
-			keySlice = append(keySlice, key)
-		}
-		storageKeys[addr] = keySlice
-	}
-
-	return addresses, storageKeys
-}
-
 // GetModifiedCode returns all modified contract code
-func (w *RecordingStateWriter) GetModifiedCode() map[common.Address][]byte {
-	result := make(map[common.Address][]byte, len(w.ModifiedCode))
-	for addr, code := range w.ModifiedCode {
+func (s *RecordingState) GetModifiedCode() map[common.Address][]byte {
+	result := make(map[common.Address][]byte, len(s.ModifiedCode))
+	for addr, code := range s.ModifiedCode {
 		result[addr] = common.Copy(code)
 	}
 	return result
@@ -935,11 +1015,11 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		}
 	}
 
-	// Wrap with recording reader to track all state accesses
-	recordingReader := NewRecordingStateReader(stateReader)
+	// Create a combined recording state (reader + writer with in-memory overlay)
+	recordingState := NewRecordingState(stateReader)
 
-	// Create the in-block state with the recording reader
-	ibs := state.New(recordingReader)
+	// Create the in-block state with the recording state as reader
+	ibs := state.New(recordingState)
 
 	// Get header for block context
 	header := block.Header()
@@ -955,14 +1035,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	blockCtx.GetHash = func(n uint64) (common.Hash, error) {
 		accessedBlockHashes = append(accessedBlockHashes, n)
 		return originalGetHash(n)
-	}
-
-	// Create recording writer to track all state modifications
-	noop := state.NewNoopWriter()
-	recordingWriter := NewRecordingStateWriter(noop)
-
-	if blockNum == 4 {
-		fmt.Printf("BLOCK 4\n")
 	}
 
 	// Execute all transactions in the block
@@ -983,7 +1055,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 			return nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
 		}
 
-		if err = ibs.FinalizeTx(blockRules, recordingWriter); err != nil {
+		if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
 			return nil, fmt.Errorf("failed to finalize tx %d: %w", txIndex, err)
 		}
 	}
@@ -1003,7 +1075,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("failed to finalize block: %w", err)
 	}
 
-	if err = ibs.CommitBlock(blockRules, recordingWriter); err != nil {
+	if err = ibs.CommitBlock(blockRules, recordingState); err != nil {
 		return nil, fmt.Errorf("failed to commit block: %w", err)
 	}
 
@@ -1015,10 +1087,10 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	// Collect all accessed keys (reads) for the Keys field
-	readAddresses, readStorageKeys := recordingReader.GetAccessedKeys()
+	readAddresses, readStorageKeys := recordingState.GetAccessedKeys()
 
 	// Collect all modified keys (writes) for the Keys field
-	writeAddresses, writeStorageKeys := recordingWriter.GetModifiedKeys()
+	writeAddresses, writeStorageKeys := recordingState.GetModifiedKeys()
 
 	// Merge read and write addresses into a deduplicated set
 	allAddresses := make(map[common.Address]struct{})
@@ -1063,8 +1135,8 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	// Collect codes from both reads and writes
-	accessedCode := recordingReader.GetAccessedCode()
-	modifiedCode := recordingWriter.GetModifiedCode()
+	accessedCode := recordingState.GetAccessedCode()
+	modifiedCode := recordingState.GetModifiedCode()
 
 	// Merge codes (deduplicated by address, prefer modified if both exist)
 	allCode := make(map[common.Address][]byte)
