@@ -241,19 +241,19 @@ func (c *Compressor) AddWord(word []byte) error {
 	}
 
 	if c.superstringCount%c.SamplingFactor == 0 {
-		off := len(c.superstring)
-		c.superstring = c.superstring[:off+2*len(word)+2]
-		for i, a := range word {
-			c.superstring[off+2*i] = 1
-			c.superstring[off+2*i+1] = a
-		}
-		c.superstring[off+2*len(word)] = 0
-		c.superstring[off+2*len(word)+1] = 0
-
-		//for _, a := range word {
-		//	c.superstring = append(c.superstring, 1, a)
+		//off := len(c.superstring)
+		//c.superstring = c.superstring[:off+2*len(word)+2]
+		//for i, a := range word {
+		//	c.superstring[off+2*i] = 1
+		//	c.superstring[off+2*i+1] = a
 		//}
-		//c.superstring = append(c.superstring, 0, 0)
+		//c.superstring[off+2*len(word)] = 0
+		//c.superstring[off+2*len(word)+1] = 0
+
+		for _, a := range word {
+			c.superstring = append(c.superstring, 1, a)
+		}
+		c.superstring = append(c.superstring, 0, 0)
 	}
 
 	//if c.superstringCount%c.SamplingFactor == 0 {
