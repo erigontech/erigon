@@ -232,7 +232,7 @@ func TestNewPayloadShouldReturnValidWhenSideChainGoingBackIsLtMaxReorgDepth(t *t
 	// we had an issue where some benchmark tests were doing more than a 32-block reorg backwards
 	// while our MAX_REORG_DEPTH was 96 blocks, however, NewPayload returned ACCEPTED instead of VALID
 	// and caused issues with benchmarkoor
-	// this test captures that by calling NewPaylod for a side fork back to block 1 from canonical fork at block 34
+	// this test captures that by calling NewPayload for a side fork back to block 1 from canonical fork at block 34
 	logLvl := log.LvlDebug
 	canonicalChainLen := 34 // a few blocks > 32
 	maxReorgDepth := uint64(96)
