@@ -294,17 +294,12 @@ func getModifiedAccounts(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]commo
 	defer it.Close()
 
 	var result []common.Address
-	saw := make(map[common.Address]struct{})
 	for it.HasNext() {
 		k, _, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
-		//TODO: data is sorted, enough to compare with prevKey
-		if _, ok := saw[common.BytesToAddress(k)]; !ok {
-			saw[common.BytesToAddress(k)] = struct{}{}
-			result = append(result, common.BytesToAddress(k))
-		}
+		result = append(result, common.BytesToAddress(k))
 	}
 	return result, nil
 }
