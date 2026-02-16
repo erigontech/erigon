@@ -932,7 +932,7 @@ func NewRawWordsFile(filePath string) (*RawWordsFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	w := bufio.NewWriterSize(f, 2*etl.BufIOSize)
+	w := bufio.NewWriterSize(f, int(1*datasize.MB))
 	return &RawWordsFile{filePath: filePath, f: f, w: w, buf: make([]byte, 128)}, nil
 }
 func OpenRawWordsFile(filePath string) (*RawWordsFile, error) {
@@ -940,7 +940,7 @@ func OpenRawWordsFile(filePath string) (*RawWordsFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	w := bufio.NewWriterSize(f, 2*etl.BufIOSize)
+	w := bufio.NewWriterSize(f, int(1*datasize.MB))
 	return &RawWordsFile{filePath: filePath, f: f, w: w, buf: make([]byte, 128)}, nil
 }
 func (f *RawWordsFile) Flush() error {

@@ -344,12 +344,14 @@ func BenchmarkCompressorAddWord(b *testing.B) {
 			rng := rand.New(rand.NewSource(0))
 			rng.Read(word)
 
-			b.SetBytes(int64(wordSize))
+			b.SetBytes(100 * int64(wordSize))
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
-				if err := c.AddWord(word); err != nil {
-					b.Fatal(err)
+				for i := 0; i < 100; i++ {
+					if err := c.AddWord(word); err != nil {
+						b.Fatal(err)
+					}
 				}
 			}
 		})
