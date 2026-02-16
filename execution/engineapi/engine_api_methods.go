@@ -23,6 +23,8 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
@@ -44,7 +46,9 @@ var ourCapabilities = []string{
 	"engine_getPayloadV5",
 	"engine_getPayloadV6",
 	"engine_getPayloadBodiesByHashV1",
+	"engine_getPayloadBodiesByHashV2",
 	"engine_getPayloadBodiesByRangeV1",
+	"engine_getPayloadBodiesByRangeV2",
 	"engine_getClientVersionV1",
 	"engine_getBlobsV1",
 	"engine_getBlobsV2",
@@ -178,10 +182,120 @@ func (e *EngineServer) GetPayloadBodiesByHashV1(ctx context.Context, hashes []co
 	return e.getPayloadBodiesByHash(ctx, hashes)
 }
 
+// Returns an array of execution payload bodies referenced by their block hashes,
+// including blockAccessList sidecars from DB.
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadbodiesbyhashv2
+func (e *EngineServer) GetPayloadBodiesByHashV2(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+	bodies, err := e.getPayloadBodiesByHash(ctx, hashes)
+	if err != nil {
+		return nil, err
+	}
+
+	bodyHashes := make([]common.Hash, len(bodies))
+	bodyNumbers := make([]*uint64, len(bodies))
+	for i := range bodies {
+		if i >= len(hashes) {
+			break
+		}
+		bodyHashes[i] = hashes[i]
+		number, err := e.chainRW.HeaderNumber(ctx, hashes[i])
+		if err != nil {
+			return nil, err
+		}
+		bodyNumbers[i] = number
+	}
+
+	blockAccessLists, err := e.readBlockAccessLists(ctx, bodyHashes, bodyNumbers)
+	if err != nil {
+		return nil, err
+	}
+
+	resp := make([]*engine_types.ExecutionPayloadBodyV2, len(bodies))
+	for i := range bodies {
+		if bodies[i] == nil {
+			continue
+		}
+		resp[i] = &engine_types.ExecutionPayloadBodyV2{
+			Transactions:    bodies[i].Transactions,
+			Withdrawals:     bodies[i].Withdrawals,
+			BlockAccessList: blockAccessLists[i],
+		}
+	}
+	return resp, nil
+}
+
 // Returns an ordered (as per canonical chain) array of execution payload bodies, with corresponding execution block numbers from "start", up to "count"
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1
 func (e *EngineServer) GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) ([]*engine_types.ExecutionPayloadBody, error) {
 	return e.getPayloadBodiesByRange(ctx, uint64(start), uint64(count))
+}
+
+// Returns an ordered (as per canonical chain) array of execution payload bodies, with corresponding execution block numbers from "start", up to "count",
+// including blockAccessList sidecars from DB.
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadbodiesbyrangev2
+func (e *EngineServer) GetPayloadBodiesByRangeV2(ctx context.Context, start, count hexutil.Uint64) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+	bodies, err := e.getPayloadBodiesByRange(ctx, uint64(start), uint64(count))
+	if err != nil {
+		return nil, err
+	}
+
+	bodyHashes := make([]common.Hash, len(bodies))
+	bodyNumbers := make([]*uint64, len(bodies))
+	for i := range bodies {
+		blockNumber := uint64(start) + uint64(i)
+		header := e.chainRW.GetHeaderByNumber(ctx, blockNumber)
+		if header == nil {
+			continue
+		}
+		bodyHashes[i] = header.Hash()
+		number := blockNumber
+		bodyNumbers[i] = &number
+	}
+
+	blockAccessLists, err := e.readBlockAccessLists(ctx, bodyHashes, bodyNumbers)
+	if err != nil {
+		return nil, err
+	}
+
+	resp := make([]*engine_types.ExecutionPayloadBodyV2, len(bodies))
+	for i := range bodies {
+		if bodies[i] == nil {
+			continue
+		}
+		resp[i] = &engine_types.ExecutionPayloadBodyV2{
+			Transactions:    bodies[i].Transactions,
+			Withdrawals:     bodies[i].Withdrawals,
+			BlockAccessList: blockAccessLists[i],
+		}
+	}
+	return resp, nil
+}
+
+func (e *EngineServer) readBlockAccessLists(ctx context.Context, hashes []common.Hash, numbers []*uint64) ([]*hexutil.Bytes, error) {
+	resp := make([]*hexutil.Bytes, len(hashes))
+	if e.db == nil {
+		return resp, nil
+	}
+	if err := e.db.View(ctx, func(tx kv.Tx) error {
+		for i := range hashes {
+			if numbers[i] == nil {
+				continue
+			}
+			balBytes, err := rawdb.ReadBlockAccessListBytes(tx, hashes[i], *numbers[i])
+			if err != nil {
+				return err
+			}
+			if len(balBytes) == 0 {
+				continue
+			}
+			balCopy := hexutil.Bytes(append([]byte(nil), balBytes...))
+			resp[i] = &balCopy
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 // Returns the node's code and commit details in a slice

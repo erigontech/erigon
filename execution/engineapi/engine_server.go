@@ -76,6 +76,7 @@ type EngineServer struct {
 	caplin           bool // we need to send errors for caplin.
 	executionService executionproto.ExecutionClient
 	txpool           txpoolproto.TxpoolClient // needed for getBlobs
+	db               kv.TemporalRoDB
 
 	chainRW chainreader.ChainReaderWriterEth1
 	lock    sync.Mutex
@@ -127,6 +128,8 @@ func (e *EngineServer) Start(
 	eth rpchelper.ApiBackend,
 	mining txpoolproto.MiningClient,
 ) error {
+	e.db = db
+
 	var eg errgroup.Group
 	if !e.caplin {
 		eg.Go(func() error {

@@ -103,6 +103,12 @@ type ExecutionPayloadBody struct {
 	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
 }
 
+type ExecutionPayloadBodyV2 struct {
+	Transactions    []hexutil.Bytes     `json:"transactions" gencodec:"required"`
+	Withdrawals     []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
+	BlockAccessList *hexutil.Bytes      `json:"blockAccessList"`
+}
+
 type PayloadStatus struct {
 	Status          EngineStatus      `json:"status" gencodec:"required"`
 	ValidationError *StringifiedError `json:"validationError"`
