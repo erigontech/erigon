@@ -79,7 +79,8 @@ func (at *AggregatorRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx context.
 
 func (dt *DomainRoTx) IntegrityDomainFilesWithKey(k []byte) (res []string, err error) {
 	for i := len(dt.files) - 1; i >= 0; i-- {
-		_, ok, _, err := dt.getLatestFromFile(i, k)
+		hi, lo := dt.ht.iit.hashKey(k)
+		_, ok, _, err := dt.getLatestFromFile(i, k, hi, lo)
 		if err != nil {
 			return res, err
 		}
