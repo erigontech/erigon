@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
@@ -323,5 +324,90 @@ func Test_CompressWithMetadata(t *testing.T) {
 			t.Errorf("expected %s, got (hex) [%s]", expected, word)
 		}
 		i++
+	}
+}
+
+func BenchmarkCompressorAddWord(b *testing.B) {
+	logger := log.New()
+	for _, wordSize := range []int{2000} {
+		b.Run(fmt.Sprintf("%dB", wordSize), func(b *testing.B) {
+			tmpDir := b.TempDir()
+			file := filepath.Join(tmpDir, "compressed")
+			cfg := DefaultCfg
+			c, err := NewCompressor(context.Background(), b.Name(), file, tmpDir, cfg, log.LvlError, logger)
+			if err != nil {
+				b.Fatal(err)
+			}
+			defer c.Close()
+
+			word := make([]byte, wordSize)
+			rng := rand.New(rand.NewSource(0))
+			rng.Read(word)
+
+			b.SetBytes(int64(wordSize))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				if err := c.AddWord(word); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkCompressorAddUncompressedWord(b *testing.B) {
+	logger := log.New()
+	for _, wordSize := range []int{20, 100, 500, 2000} {
+		b.Run(fmt.Sprintf("%dB", wordSize), func(b *testing.B) {
+			tmpDir := b.TempDir()
+			file := filepath.Join(tmpDir, "compressed")
+			cfg := DefaultCfg
+			c, err := NewCompressor(context.Background(), b.Name(), file, tmpDir, cfg, log.LvlError, logger)
+			if err != nil {
+				b.Fatal(err)
+			}
+			defer c.Close()
+
+			word := make([]byte, wordSize)
+			rng := rand.New(rand.NewSource(0))
+			rng.Read(word)
+
+			b.SetBytes(int64(wordSize))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				if err := c.AddUncompressedWord(word); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkRawWordsFileAppend(b *testing.B) {
+	for _, wordSize := range []int{20, 100, 500, 2000} {
+		b.Run(fmt.Sprintf("%dB", wordSize), func(b *testing.B) {
+			tmpDir := b.TempDir()
+			file := filepath.Join(tmpDir, "raw.idt")
+			f, err := NewRawWordsFile(file)
+			if err != nil {
+				b.Fatal(err)
+			}
+			defer f.CloseAndRemove()
+
+			word := make([]byte, wordSize)
+			rng := rand.New(rand.NewSource(0))
+			rng.Read(word)
+
+			b.SetBytes(int64(wordSize))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				if err := f.Append(word); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }

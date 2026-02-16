@@ -172,6 +172,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 		ctx:              ctx,
 		superstrings:     superstrings,
 		suffixCollectors: suffixCollectors,
+		superstring:      superStringsPool.Get().([]byte)[:0],
 		lvl:              lvl,
 		wg:               wg,
 		logger:           logger,
@@ -240,11 +241,39 @@ func (c *Compressor) AddWord(word []byte) error {
 	}
 
 	if c.superstringCount%c.SamplingFactor == 0 {
-		for _, a := range word {
-			c.superstring = append(c.superstring, 1, a)
+		off := len(c.superstring)
+		c.superstring = c.superstring[:off+2*len(word)+2]
+		for i, a := range word {
+			c.superstring[off+2*i] = 1
+			c.superstring[off+2*i+1] = a
 		}
-		c.superstring = append(c.superstring, 0, 0)
+		c.superstring[off+2*len(word)] = 0
+		c.superstring[off+2*len(word)+1] = 0
+
+		//for _, a := range word {
+		//	c.superstring = append(c.superstring, 1, a)
+		//}
+		//c.superstring = append(c.superstring, 0, 0)
 	}
+
+	//if c.superstringCount%c.SamplingFactor == 0 {
+	//	l := 2*len(word) + 2
+	//	if len(c.superstring)+l > superstringLimit {
+	//		c.superstrings <- c.superstring
+	//		c.superstringCount++
+	//		c.superstring = superStringsPool.Get().([]byte)[:0]
+	//	}
+	//	if c.superstringCount%c.SamplingFactor == 0 {
+	//		off := len(c.superstring)
+	//		c.superstring = c.superstring[:off+2*len(word)+2]
+	//		for i, a := range word {
+	//			c.superstring[off+2*i] = 1
+	//			c.superstring[off+2*i+1] = a
+	//		}
+	//		c.superstring[off+2*len(word)] = 0
+	//		c.superstring[off+2*len(word)+1] = 0
+	//	}
+	//}
 
 	return c.uncompressedFile.Append(word)
 }
