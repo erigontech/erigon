@@ -188,7 +188,7 @@ func testMarshalUnmarshal(t *testing.T, h hash.Hash) {
 	if err != nil {
 		t.Errorf("MarshalBinary: %v", err)
 	}
-	h.Write(bytes.Repeat([]byte{0}, 200))
+	h.Write(make([]byte, 200))
 	if err := h.(encoding.BinaryUnmarshaler).UnmarshalBinary(b); err != nil {
 		t.Errorf("UnmarshalBinary: %v", err)
 	}
