@@ -85,6 +85,7 @@ type EngineServer struct {
 	engineLogSpamer *engine_logs_spammer.EngineLogsSpammer
 	// TODO Remove this on next release
 	printPectraBanner bool
+	maxReorgDepth     uint64
 }
 
 func NewEngineServer(
@@ -97,6 +98,7 @@ func NewEngineServer(
 	consuming bool,
 	txPool txpoolproto.TxpoolClient,
 	fcuTimeout time.Duration,
+	maxReorgDepth uint64,
 ) *EngineServer {
 	chainRW := chainreader.NewChainReaderEth1(config, executionService, uint64(fcuTimeout.Milliseconds()))
 	srv := &EngineServer{
@@ -110,6 +112,7 @@ func NewEngineServer(
 		engineLogSpamer:   engine_logs_spammer.NewEngineLogsSpammer(logger, config),
 		printPectraBanner: true,
 		txpool:            txPool,
+		maxReorgDepth:     maxReorgDepth,
 	}
 
 	srv.consuming.Store(consuming)
@@ -908,7 +911,7 @@ func (e *EngineServer) HandleNewPayload(
 		return nil, err
 	}
 
-	if math.AbsoluteDifference(*currentHeadNumber, headerNumber) >= 32 {
+	if math.AbsoluteDifference(*currentHeadNumber, headerNumber) >= e.maxReorgDepth {
 		return &engine_types.PayloadStatus{Status: engine_types.AcceptedStatus}, nil
 	}
 
