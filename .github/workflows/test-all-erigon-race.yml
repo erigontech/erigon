@@ -76,7 +76,6 @@ jobs:
           lfs: true
 
       - name: Cleanup space
-        if: runner.os == 'ubuntu-latest'
         run: |
           rm -fr /opt/az \
                  /opt/microsoft \
