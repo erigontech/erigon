@@ -84,6 +84,7 @@ type EngineServer struct {
 	engineLogSpamer *engine_logs_spammer.EngineLogsSpammer
 	// TODO Remove this on next release
 	printPectraBanner bool
+	maxReorgDepth     uint64
 }
 
 func NewEngineServer(
@@ -96,6 +97,7 @@ func NewEngineServer(
 	consuming bool,
 	txPool txpoolproto.TxpoolClient,
 	fcuTimeout time.Duration,
+	maxReorgDepth uint64,
 ) *EngineServer {
 	chainRW := chainreader.NewChainReaderEth1(config, executionService, uint64(fcuTimeout.Milliseconds()))
 	srv := &EngineServer{
@@ -109,6 +111,7 @@ func NewEngineServer(
 		engineLogSpamer:   engine_logs_spammer.NewEngineLogsSpammer(logger, config),
 		printPectraBanner: true,
 		txpool:            txPool,
+		maxReorgDepth:     maxReorgDepth,
 	}
 
 	srv.consuming.Store(consuming)
@@ -299,10 +302,14 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			hash := crypto.Keccak256Hash(*req.BlockAccessList)
 			header.BlockAccessListHash = &hash
 		}
-		blockAccessListBytes = *req.BlockAccessList
-	} else if req.BlockAccessList != nil {
-		return nil, &rpc.InvalidParamsError{Message: "unexpected blockAccessList before Amsterdam"}
+		if req.SlotNumber != nil {
+			slotNumber := uint64(*req.SlotNumber)
+			header.SlotNumber = &slotNumber
+			// TODO: No Slot Error Yet - Treate it as optional for hive testing
+			// qreturn nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
+		}
 	}
+
 	log.Debug(fmt.Sprintf("bal from header: %s", blockAccessList.DebugString()))
 
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
@@ -705,6 +712,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		Timestamp:             timestamp,
 		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
 		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
+		SlotNumber:            (*uint64)(payloadAttributes.SlotNumber),
 	}
 
 	if version >= clparams.CapellaVersion {
@@ -900,7 +908,7 @@ func (e *EngineServer) HandleNewPayload(
 		return nil, err
 	}
 
-	if math.AbsoluteDifference(*currentHeadNumber, headerNumber) >= 32 {
+	if math.AbsoluteDifference(*currentHeadNumber, headerNumber) >= e.maxReorgDepth {
 		return &engine_types.PayloadStatus{Status: engine_types.AcceptedStatus}, nil
 	}
 

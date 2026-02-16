@@ -874,9 +874,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 		Amount:    1001,
 	}
 
-	withdrawals := make([]*types.Withdrawal, 0)
-	withdrawals = append(withdrawals, &w)
-	withdrawals = append(withdrawals, &w2)
+	withdrawals := []*types.Withdrawal{&w, &w2}
 
 	// Create a test block to move around the database and make sure it's really new
 	block := types.NewBlockWithHeader(&types.Header{
