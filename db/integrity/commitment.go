@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, failFast bool, logger log.Logger) error {
@@ -745,7 +746,11 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if err != nil {
 		return err
 	}
-	sd.GetCommitmentCtx().SetHistoryStateReader(tx, toTxNum)
+	// Set up split reader: branch data from parent state, plain state from end of block
+	branchDataReader := commitmentdb.NewHistoryStateReader(tx, minTxNum)
+	plainStateReader := commitmentdb.NewHistoryStateReader(tx, toTxNum)
+	splitStateReader := rpchelper.NewCommitmentSplitStateReader(branchDataReader, plainStateReader /* withHistory */, true)
+	sd.GetCommitmentCtx().SetCustomHistoryStateReader(splitStateReader)
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
 	err = sd.SeekCommitment(ctx, tx) // seek commitment again with new history state reader
