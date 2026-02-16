@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -1138,8 +1139,12 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
+	// branch data should be read from start of block
+	branchDataReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
+	plainStateReader := commitmentdb.NewHistoryStateReader(tx, lastTxNumInBlock+1)
+	splitStateReader := rpchelper.NewCommitmentSplitStateReader(branchDataReader, plainStateReader /* withHistory */, true)
 	// we want to compute commitment for blockNr, so we need to set the state as of the end of that block
-	sdCtx.SetHistoryStateReader(tx, lastTxNumInBlock)
+	sdCtx.SetCustomHistoryStateReader(splitStateReader)
 	// Re-seek commitment to restore trie state
 	if err := domains.SeekCommitment(context.Background(), tx); err != nil {
 		return nil, fmt.Errorf("failed to re-seek commitment after witness: %w", err)
