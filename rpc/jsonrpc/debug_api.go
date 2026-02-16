@@ -1160,7 +1160,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
 	if err != nil {
-		fmt.Printf("[witness] collapse detection via ComputeCommitment failed: %v\n", err)
+		return nil, fmt.Errorf("[witness] collapse detection via ComputeCommitment failed: %v\n", err)
 	}
 
 	if common.Hash(computedRootHash) != block.Root() {
