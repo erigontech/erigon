@@ -161,13 +161,20 @@ func (c *StateCache) PrintStatsAndReset() {
 	}
 }
 
-func (c *StateCache) RevertWithDiffset(diffset *[6][]kv.DomainEntryDiff, newBlockHash common.Hash) {
+func (c *StateCache) RevertWithDiffset(diffset *[6][]kv.DomainEntryDiff, revertFromHash, newBlockHash common.Hash) {
+	// If the cache's block hash doesn't match the block we're unwinding from,
+	// the cache was modified by a rolled-back tx (e.g. ValidatePayload).
+	// Clear everything and set the new hash — surgical eviction can't fix stale data
+	// from a different execution path.
+	for _, cache := range c.caches {
+		if cache != nil && cache.GetBlockHash() != revertFromHash {
+			c.ClearWithHash(newBlockHash)
+			return
+		}
+	}
+
 	for _, entry := range diffset[kv.AccountsDomain] {
 		k := []byte(entry.Key[:len(entry.Key)-8])
-		//prevStep := ^binary.BigEndian.Uint64(entry.PrevStepBytes)
-		//currStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-
-		//fmt.Println(common.Bytes2Hex(k), "prevStep", prevStep, "currStep", currStep)
 		c.Delete(kv.CodeDomain, k)
 		c.Delete(kv.AccountsDomain, k)
 	}
@@ -179,12 +186,11 @@ func (c *StateCache) RevertWithDiffset(diffset *[6][]kv.DomainEntryDiff, newBloc
 		k := []byte(entry.Key[:len(entry.Key)-8])
 		c.Delete(kv.StorageDomain, k)
 	}
-	// still adding kv.CommitmentDomain for expandability.
 	for _, entry := range diffset[kv.CommitmentDomain] {
 		k := []byte(entry.Key[:len(entry.Key)-8])
 		c.Delete(kv.CommitmentDomain, k)
 	}
-	// Update block hash on all caches after unwind so ValidateAndPrepare works correctly
+	// Update block hash after successful surgical eviction
 	for _, cache := range c.caches {
 		if cache != nil {
 			cache.SetBlockHash(newBlockHash)
