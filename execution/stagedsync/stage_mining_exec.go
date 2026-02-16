@@ -103,6 +103,7 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 	stateReader := state.NewReaderV3(sd.AsGetter(tx))
 	ibs := state.New(stateReader)
 	defer ibs.Release(false)
+	ibs.SetTxContext(current.Header.Number.Uint64(), 0)
 	var balIO *state.VersionedIO
 	var systemReads state.ReadSet
 	var systemWrites state.VersionedWrites
@@ -527,7 +528,6 @@ func addTransactionsToMiningBlock(
 	logger log.Logger,
 ) (types.Logs, bool, error) {
 	header := current.Header
-	txnIdx := ibs.TxnIndex()
 	gasPool := new(protocol.GasPool).AddGas(header.GasLimit - header.GasUsed)
 	if header.BlobGasUsed != nil {
 		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed)
@@ -555,8 +555,6 @@ func addTransactionsToMiningBlock(
 	}
 
 	var miningCommitTx = func(txn types.Transaction, coinbase accounts.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
-		ibs.Reset()
-		ibs.SetTxContext(current.Header.Number.Uint64(), txnIdx)
 		gasSnap := gasPool.Gas()
 		blobGasSnap := gasPool.BlobGas()
 		snap := ibs.PushSnapshot()
@@ -586,6 +584,7 @@ func addTransactionsToMiningBlock(
 
 			current.AddTxn(txn)
 			current.Receipts = append(current.Receipts, receipt)
+			ibs.SetTxContext(current.Header.Number.Uint64(), ibs.TxIndex()+1)
 			return receipt.Logs, nil
 		}
 
@@ -599,6 +598,7 @@ func addTransactionsToMiningBlock(
 		protocol.SetGasUsed(header, gasUsed)
 		current.AddTxn(txn)
 		current.Receipts = append(current.Receipts, receipt)
+		ibs.SetTxContext(current.Header.Number.Uint64(), ibs.TxIndex()+1)
 		return receipt.Logs, nil
 	}
 
@@ -685,7 +685,6 @@ LOOP:
 			// Everything ok, collect the logs and proceed to the next transaction
 			logger.Trace(fmt.Sprintf("[%s] Added transaction", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce(), "payload", payloadId)
 			coalescedLogs = append(coalescedLogs, logs...)
-			txnIdx++
 		} else {
 			// Strange error, discard the transaction and get the next in line (note, the
 			// nonce-too-high clause will prevent us from executing in vain).
