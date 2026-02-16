@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sort"
@@ -37,6 +38,7 @@ func init() {
 	withDataDir2(printCmd)
 	withHistoryDomain(printCmd)
 	withHistoryKey(printCmd)
+	withDuplicates(printCmd)
 
 	distributionCmd.Flags().Uint64Var(&fromStep, "from", 0, "step from which history to be printed")
 	distributionCmd.Flags().Uint64Var(&toStep, "to", 1e18, "step to which history to be printed")
@@ -58,6 +60,10 @@ func withHistoryDomain(cmd *cobra.Command) {
 	must(cmd.MarkFlagRequired("domain"))
 }
 
+func withDuplicates(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&duplicates, "duplicates", false, "Show only duplicates")
+}
+
 func withHistoryKey(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&historyKey, "key", "", "Dump values of a specific key in hex format")
 }
@@ -67,6 +73,7 @@ var (
 	toStep        uint64
 	historyKey    string
 	historyDomain string
+	duplicates    bool
 )
 
 var historyCmd = &cobra.Command{
@@ -114,12 +121,26 @@ var printCmd = &cobra.Command{
 			keyToDump = &key
 		}
 
+		prevKey := []byte{}
+		prevVal := []byte{}
+
 		err = roTx.HistoryDump(
 			int(fromStep)*config3.DefaultStepSize,
 			int(toStep)*config3.DefaultStepSize,
 			keyToDump,
 			func(key []byte, txNum uint64, val []byte) {
-				fmt.Printf("key: %x, txn: %d, val: %x\n", key, txNum, val)
+				if !duplicates {
+					fmt.Printf("key: %x, txn: %d, val: %x\n", key, txNum, val)
+					return
+				}
+
+				if bytes.Equal(prevKey, key) && bytes.Equal(prevVal, val) {
+					fmt.Printf("key: %x, txn: %d, val: %x\n", key, txNum, val)
+				}
+
+				prevKey = key
+				prevVal = val
+
 			},
 		)
 		if err != nil {
