@@ -279,7 +279,8 @@ func TestGetPayloadBodiesByHashV2(t *testing.T) {
 	oneBlockStep(mockSentry, req)
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, nil, ethconfig.Defaults.FcuTimeout)
+	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
 	engineServer.db = mockSentry.DB
 
 	const blockNum = 1
@@ -312,7 +313,8 @@ func TestGetPayloadBodiesByRangeV2(t *testing.T) {
 	oneBlockSteps(mockSentry, req, 2)
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
-	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, nil, ethconfig.Defaults.FcuTimeout)
+	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
 	engineServer.db = mockSentry.DB
 
 	const (
