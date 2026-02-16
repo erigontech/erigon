@@ -678,7 +678,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 		return nil
 	}
-	backend.forkValidator = engine_helpers.NewForkValidator(ctx, currentBlockNumber, inMemoryExecution, tmpdir, backend.blockReader)
+	backend.forkValidator = engine_helpers.NewForkValidator(ctx, currentBlockNumber, inMemoryExecution, tmpdir, backend.blockReader, config.MaxReorgDepth)
 
 	statusDataProvider := sentry.NewStatusDataProvider(
 		backend.chainDB,
@@ -1044,6 +1044,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		!config.PolygonPosSingleSlotFinality,
 		backend.txPoolRpcClient,
 		config.FcuTimeout,
+		config.MaxReorgDepth,
 	)
 	backend.engineBackendRPC = engineBackendRPC
 	// If we choose not to run a consensus layer, run our embedded.
