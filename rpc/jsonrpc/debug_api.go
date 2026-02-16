@@ -1358,10 +1358,11 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	fmt.Printf("EXPECTED PARENT ROOT = %x\n", expectedParentRoot)
 
 	// Get first txnum of blockNum to ensure that correct state root will be restored
-	firstTxNumInBlock, err := api._txNumReader.Min(ctx, tx, blockNum)
+	firstTxNumInBlock, err := api._txNumReader.Max(ctx, tx, blockNum-1)
 	if err != nil {
 		return nil, err
 	}
+	firstTxNumInBlock++
 
 	// last txnum in block used for commitment calculation and collapsed paths tracing
 	lastTxNumInBlock, err := api._txNumReader.Max(ctx, tx, blockNum)
