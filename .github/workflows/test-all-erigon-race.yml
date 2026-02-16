@@ -105,16 +105,16 @@ jobs:
         run: |
           case "${{ matrix.test-group }}" in
             execution)
-              go test -race -timeout 30m ./execution/...
+              go test -race -timeout 60m ./execution/...
               ;;
             consensus)
-              go test -race -timeout 30m ./cl/...
+              go test -race -timeout 60m ./cl/...
               ;;
             p2p-rpc)
-              go test -timeout 20m ./p2p/... ./rpc/...
+              go test -race -timeout 30m ./p2p/... ./rpc/...
               ;;
             core-db)
-              go test -timeout 20m ./db/... ./node/... ./txnprovider/...
+              go test -race -timeout 30m ./db/... ./node/... ./txnprovider/...
               ;;
             other)
               DIRS=$(ls -d -- */ | grep -vE '^(execution|cl|p2p|rpc|db|node|txnprovider|dashboards)/$' | sed 's/\/$//')
@@ -122,7 +122,7 @@ jobs:
                 if [ -d "$d" ]; then
                   TEST_PACKAGES=$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' "./$d/...")
                   if [ -n "$TEST_PACKAGES" ]; then
-                    go test -timeout 20m "./$d/..."
+                    go test -race -timeout 30m "./$d/..."
                   fi
                 fi
               done
