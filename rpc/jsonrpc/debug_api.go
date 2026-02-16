@@ -1053,8 +1053,10 @@ func debugCompareRecordedVsGroundTruth(
 		for key := range ourKeys {
 			if gtKeys == nil {
 				extraStorage++
+				fmt.Printf("[debug] EXTRA STORAGE WRITE: account=%s key=%s (account has no ground truth storage writes)\n", addr.Hex(), key.Hex())
 			} else if _, ok := gtKeys[key]; !ok {
 				extraStorage++
+				fmt.Printf("[debug] EXTRA STORAGE WRITE: account=%s key=%s\n", addr.Hex(), key.Hex())
 			}
 		}
 	}
