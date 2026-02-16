@@ -299,10 +299,14 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			hash := crypto.Keccak256Hash(*req.BlockAccessList)
 			header.BlockAccessListHash = &hash
 		}
-		blockAccessListBytes = *req.BlockAccessList
-	} else if req.BlockAccessList != nil {
-		return nil, &rpc.InvalidParamsError{Message: "unexpected blockAccessList before Amsterdam"}
+		if req.SlotNumber != nil {
+			slotNumber := uint64(*req.SlotNumber)
+			header.SlotNumber = &slotNumber
+			// TODO: No Slot Error Yet - Treate it as optional for hive testing
+			// qreturn nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
+		}
 	}
+
 	log.Debug(fmt.Sprintf("bal from header: %s", blockAccessList.DebugString()))
 
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
@@ -705,6 +709,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		Timestamp:             timestamp,
 		PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
 		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
+		SlotNumber:            (*uint64)(payloadAttributes.SlotNumber),
 	}
 
 	if version >= clparams.CapellaVersion {

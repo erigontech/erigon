@@ -26,8 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
-	"strings"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1634,9 +1633,7 @@ func bucketSlice(b kv.TableCfg) []string {
 	for name := range b {
 		buckets = append(buckets, name)
 	}
-	sort.Slice(buckets, func(i, j int) bool {
-		return strings.Compare(buckets[i], buckets[j]) < 0
-	})
+	slices.Sort(buckets)
 	return buckets
 }
 

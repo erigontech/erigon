@@ -112,8 +112,8 @@ default: all
 
 ## go-version:                        print and verify go version
 go-version:
-	@if [ $(shell $(GO) version | cut -c 16-17) -lt 20 ]; then \
-		echo "minimum required Golang version is 1.20"; \
+	@if [ $(shell $(GO) version | cut -c 16-17) -lt 25 ]; then \
+		echo "minimum required Golang version is 1.25"; \
 		exit 1 ;\
 	fi
 
@@ -344,10 +344,6 @@ kurtosis-cleanup:
 	@kurtosis enclave ls
 	@echo "-----------------------------------\n"
 	kurtosis enclave rm -f makefile-kurtosis-testnet
-
-## lint-deps:                         install lint dependencies
-lint-deps:
-	@./tools/golangci_lint.sh --install-deps
 
 ## lintci:                            run golangci-lint linters
 lintci:
