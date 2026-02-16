@@ -433,10 +433,10 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 			fmt.Printf("\n4. Trie batch update (%d updates)\n", len(updates))
 			fmt.Printf("active rows %d touchmap %16b aftermap %16b\n", trieBatchR.activeRows, trieBatchR.touchMap[0], trieBatchR.afterMap[0])
 
-			err := stateBatch.applyPlainUpdates(plainKeys[:], updates[:])
+			err := stateBatch.applyPlainUpdates(plainKeys, updates)
 			require.NoError(t, err)
 
-			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
+			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 			wc := WarmupConfig{
 				CtxFactory: func() (PatriciaContext, func()) {
 					return stateBatch, func() {}
@@ -488,10 +488,10 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 			fmt.Printf("\n6. Trie batch update (%d updates)\n", len(updates))
 			fmt.Printf("active rows %d touchmap %16b aftermap %16b\n", trieBatchR.activeRows, trieBatchR.touchMap[0], trieBatchR.afterMap[0])
 
-			err := stateBatch.applyPlainUpdates(plainKeys[:], updates[:])
+			err := stateBatch.applyPlainUpdates(plainKeys, updates)
 			require.NoError(t, err)
 
-			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
+			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 			wc := WarmupConfig{
 				CtxFactory: func() (PatriciaContext, func()) {
 					return stateBatch, func() {}
@@ -584,10 +584,10 @@ func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
 		fmt.Printf("1. Trie sequential update (%d updates)\n", len(updates))
 		// for i := 0; i < len(updates); i++ {
 		// err := stateSeq.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
-		err := stateSeq.applyPlainUpdates(plainKeys[:], updates[:])
+		err := stateSeq.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
+		updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 
 		sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 		require.NoError(t, err)
@@ -612,10 +612,10 @@ func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
 
 		fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
 
-		err := stateBatch.applyPlainUpdates(plainKeys[:], updates[:])
+		err := stateBatch.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
+		updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 
 		wc := WarmupConfig{
 			CtxFactory: func() (PatriciaContext, func()) {
@@ -960,7 +960,7 @@ func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	s.Root = make([]byte, 128)
 	rnd := rand.New(rand.NewSource(42))
 
-	n, err := rnd.Read(s.Root[:])
+	n, err := rnd.Read(s.Root)
 	require.NoError(t, err)
 	require.Equal(t, len(s.Root), n)
 	s.RootPresent = true
@@ -990,7 +990,7 @@ func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	err = s1.Decode(enc)
 	require.NoError(t, err)
 
-	require.Equal(t, s.Root[:], s1.Root[:])
+	require.Equal(t, s.Root, s1.Root)
 	require.Equal(t, s.Depths[:], s1.Depths[:])
 	require.Equal(t, s.AfterMap[:], s1.AfterMap[:])
 	require.Equal(t, s.TouchMap[:], s1.TouchMap[:])
@@ -1199,7 +1199,7 @@ func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 
 	err = trieOne.SetState(buf)
 	require.NoError(t, err)
-	require.Equal(t, beforeRestore[:], trieOne.root.hash[:])
+	require.Equal(t, beforeRestore, trieOne.root.hash[:])
 
 	hashAfterRestore, err := trieOne.RootHash()
 	require.NoError(t, err)
@@ -2471,5 +2471,71 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 
 		// Generate witness for both the address and its storage slot
 		buildTrieAndWitness(t, builder, [][]byte{plainKeys5[0], fullStorageKey}, []bool{true, true})
+	})
+
+	t.Run("Multiproof_NonExistentStorageProof", func(t *testing.T) {
+		t.Logf("Multiproof_NonExistentStorageProof")
+		// Create multiple accounts with different hash prefixes
+		// All accounts EXCEPT ONE will have storage
+		plainKeys1, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x1}, length.Addr, 1, 3)
+		plainKeys5, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x5}, length.Addr, 1, 50)
+		plainKeysA, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0xa}, length.Addr, 1, 2)
+		plainKeysF, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0xf}, length.Addr, 1, 1)
+
+		// Collect all accounts
+		allAccounts := append([][]byte(nil), plainKeys1...)
+		allAccounts = append(allAccounts, plainKeys5...)
+		allAccounts = append(allAccounts, plainKeysA...)
+		allAccounts = append(allAccounts, plainKeysF...)
+
+		// The  account WITHOUT storage - we'll prove non-existent storage for this
+		addrWithoutStorage := common.Copy(plainKeys5[len(plainKeys5)-1])
+
+		// Account WITH storage - we'll prove both the account and one of its storage slots
+		addrWithStorage := common.Copy(plainKeys5[0])
+		var existingStorageSlot []byte // Will be set when we add storage to this account
+
+		// Generate a non-existent storage key for the account without storage
+		storageSlotToProve, _ := generateKeyWithHashedPrefix([]byte{0x7, 0x8}, length.Hash)
+		fullNonExistentStorageKey := common.Copy(addrWithoutStorage)
+		fullNonExistentStorageKey = append(fullNonExistentStorageKey, storageSlotToProve...)
+		require.Equal(t, len(fullNonExistentStorageKey), length.Addr+length.Hash)
+
+		builder := NewUpdateBuilder()
+
+		// Add balance to all accounts and storage to every account EXCEPT addrWithoutStorage
+		for i, addr := range allAccounts {
+			builder.Balance(common.Bytes2Hex(addr), uint64(i+1))
+			fmt.Printf("addr %x\n", addr)
+
+			// Skip storage for the one account we want to prove non-existent storage for
+			if bytes.Equal(addr, addrWithoutStorage) {
+				continue
+			}
+
+			// Generate unique storage slots for this account
+			storageSlots, _ := generatePlainKeysWithSameHashPrefix(t, []byte{0x7}, length.Hash, 2, 50)
+			for _, slot := range storageSlots {
+				builder.Storage(common.Bytes2Hex(addr), common.Bytes2Hex(slot), common.Bytes2Hex(slot))
+			}
+
+			// Save one existing storage slot for the account we'll prove
+			if bytes.Equal(addr, addrWithStorage) {
+				existingStorageSlot = common.Copy(storageSlots[0])
+			}
+		}
+
+		// Build full key for the existing storage slot
+		fullExistingStorageKey := common.Copy(addrWithStorage)
+		fullExistingStorageKey = append(fullExistingStorageKey, existingStorageSlot...)
+		require.Equal(t, len(fullExistingStorageKey), length.Addr+length.Hash)
+
+		// Request proofs for:
+		// 1. plainKeys5[0] account (exists)
+		// 2. One of plainKeys5[0]'s existing storage slots (exists)
+		// 3. Non-existent storage key on addrWithoutStorage (doesn't exist)
+		keysToProve := [][]byte{addrWithStorage, fullExistingStorageKey, fullNonExistentStorageKey}
+		keyExists := []bool{true, true, false}
+		buildTrieAndWitness(t, builder, keysToProve, keyExists)
 	})
 }

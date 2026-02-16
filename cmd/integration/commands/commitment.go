@@ -673,7 +673,7 @@ func benchHistoryLookup(ctx context.Context, logger log.Logger) error {
 
 // benchSnapshotsHistoryLookup benchmarks history lookups across snapshot files
 func benchSnapshotsHistoryLookup(ctx context.Context, tx kv.TemporalTx, historyFiles []dbstate.VisibleFile, compactKey []byte, samplePct float64, rng *rand.Rand, logger log.Logger) ([]HistoryBenchStats, error) {
-	var allFileStats []HistoryBenchStats
+	allFileStats := make([]HistoryBenchStats, 0, len(historyFiles))
 
 	for _, f := range historyFiles {
 		fpath := f.Fullpath()

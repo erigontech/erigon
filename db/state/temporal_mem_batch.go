@@ -314,6 +314,18 @@ func (sd *TemporalMemBatch) SavePastChangesetAccumulator(blockHash common.Hash, 
 	sd.pastChangesAccumulator[toStringZeroCopy(key)] = acc
 }
 
+// GetChangesetByBlockNum returns the changeset for a given block number and its block hash.
+func (sd *TemporalMemBatch) GetChangesetByBlockNum(blockNumber uint64) (common.Hash, *changeset.StateChangeSet) {
+	for key, cs := range sd.pastChangesAccumulator {
+		keyBytes := toBytesZeroCopy(key)
+		if binary.BigEndian.Uint64(keyBytes[:8]) == blockNumber {
+			blockHash := common.BytesToHash(keyBytes[8:])
+			return blockHash, cs
+		}
+	}
+	return common.Hash{}, nil
+}
+
 func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error) {
 	var key [40]byte
 	binary.BigEndian.PutUint64(key[:8], blockNumber)

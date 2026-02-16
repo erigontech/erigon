@@ -53,8 +53,8 @@ func TestBodiesCanonical(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
 	m := mock.Mock(t)
-	tx, err := m.DB.BeginRw(m.Ctx)
 	require := require.New(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(err)
 	defer tx.Rollback()
 	m.HistoryV3 = true

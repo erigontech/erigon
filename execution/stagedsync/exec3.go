@@ -125,6 +125,7 @@ func ExecV3(ctx context.Context,
 	logger log.Logger) (execErr error) {
 	isBlockProduction := execStage.SyncMode() == stages.ModeBlockProduction
 	isForkValidation := execStage.SyncMode() == stages.ModeForkValidation
+
 	isApplyingBlocks := execStage.SyncMode() == stages.ModeApplyingBlocks
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
 	hooks := cfg.vmConfig.Tracer
@@ -133,6 +134,7 @@ func ExecV3(ctx context.Context,
 	if err != nil {
 		return err
 	}
+
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if isApplyingBlocks {
 		if initialCycle {
@@ -218,9 +220,16 @@ func ExecV3(ctx context.Context,
 	doms.EnableWarmupCache(isChainTip)
 	log.Debug("Warmup Cache", "enabled", isChainTip)
 	postValidator := newBlockPostExecutionValidator()
+	doms.SetDeferCommitmentUpdates(false)
 	if isChainTip {
 		postValidator = newParallelBlockPostExecutionValidator()
+		// Only defer branch updates in fork validation mode (engine API flow)
+		// where MergeExtendingFork will flush the pending updates
+		if isForkValidation {
+			doms.SetDeferCommitmentUpdates(true)
+		}
 	}
+	defer doms.SetDeferCommitmentUpdates(false)
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
 	// it also warmsup state a bit - by touching senders/coninbase accounts and code
@@ -597,6 +606,21 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			}
 			go warmTxsHashes(b)
 
+			var dbBAL types.BlockAccessList
+			data, err := rawdb.ReadBlockAccessListBytes(tx, b.Hash(), blockNum)
+			if err != nil {
+				return err
+			}
+			if len(data) > 0 {
+				dbBAL, err = types.DecodeBlockAccessListBytes(data)
+				if err != nil {
+					return fmt.Errorf("decode block access list: %w", err)
+				}
+				if err := dbBAL.Validate(); err != nil {
+					return fmt.Errorf("invalid block access list: %w", err)
+				}
+			}
+
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()
 			getHashFnMutex := sync.Mutex{}
@@ -660,8 +684,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			te.execRequests <- &execRequest{
 				b.Number().Uint64(), b.Hash(),
 				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				b.BlockAccessList(),
-				txTasks, applyResults, false, exhausted,
+				dbBAL, txTasks, applyResults, false, exhausted,
 			}
 
 			mxExecBlocks.Add(1)

@@ -235,6 +235,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	var evm *vm.EVM
 	var genEnv *ReceiptEnv
 
+	err = rpchelper.CheckBlockExecuted(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
 	cumGasUsed, _, logIdxAfterTx, err = rawtemporaldb.ReceiptAsOf(tx, txNum+1)
 	if err != nil {
 		return nil, err
@@ -419,6 +424,11 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	defer g.blockExecMutex.unlock(mu, blockHash)
 	if receipts, ok := g.receiptsCache.Get(blockHash); ok {
 		return receipts, nil
+	}
+
+	err = rpchelper.CheckBlockExecuted(tx, blockNum)
+	if err != nil {
+		return nil, err
 	}
 
 	// Check if we have commitment history: this is required to know if state root will be computed or left zero for historical state.

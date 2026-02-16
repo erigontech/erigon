@@ -18,11 +18,12 @@ package kvcache
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"fmt"
 	"hash"
-	"sort"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -652,7 +653,7 @@ func DebugStats(cache Cache) []Stat {
 		})
 	}
 	casted.lock.Unlock()
-	sort.Slice(res, func(i, j int) bool { return res[i].BlockNum < res[j].BlockNum })
+	slices.SortFunc(res, func(a, b Stat) int { return cmp.Compare(a.BlockNum, b.BlockNum) })
 	return res
 }
 func AssertCheckValues(ctx context.Context, tx kv.TemporalTx, cache Cache) (int, error) {
