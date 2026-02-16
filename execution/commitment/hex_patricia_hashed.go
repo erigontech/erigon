@@ -2340,15 +2340,12 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) (cell *cell) {
 	hph.metrics.Updates(plainKey)
 
-	if hph.collapseTracer != nil {
-		compact, _ := CompactKey(hashedKey)
-		fmt.Printf("[collapse-debug] updateCell: hashedKey=%x (len=%d nibbles), deleted=%v, flags=%d, activeRows=%d\n",
-			compact, len(hashedKey), u.Deleted(), u.Flags, hph.activeRows)
-	}
-
 	if u.Deleted() {
 		// Before the delete, check if this will cause a node collapse (FullNode → single child).
 		if hph.collapseTracer != nil && hph.activeRows > 0 {
+			compact, _ := CompactKey(hashedKey)
+			fmt.Printf("[collapse-debug] updateCell: hashedKey=%x (len=%d nibbles), deleted=%v, flags=%d, activeRows=%d\n",
+				compact, len(hashedKey), u.Deleted(), u.Flags, hph.activeRows)
 			hph.detectCollapseBeforeDelete(hashedKey)
 		}
 
