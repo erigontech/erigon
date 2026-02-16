@@ -221,6 +221,14 @@ func init() {
 	c = configCopy(c)
 	c.Bpo4Time = big.NewInt(0)
 	Forks["BPO4"] = c
+
+	c = configCopy(c)
+	c.AmsterdamTime = big.NewInt(15_000)
+	Forks["BPO2ToAmsterdamAtTime15k"] = c
+
+	c = configCopy(c)
+	c.AmsterdamTime = big.NewInt(0)
+	Forks["Amsterdam"] = c
 }
 
 func configCopy(c *chain.Config) *chain.Config {

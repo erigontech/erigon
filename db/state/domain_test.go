@@ -627,6 +627,7 @@ func TestDomain_MergeFiles(t *testing.T) {
 	db, d, txs := filledDomain(t, logger)
 	rwTx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
+	defer rwTx.Rollback()
 
 	collateAndMerge(t, rwTx, d, txs)
 	err = rwTx.Commit()
@@ -2090,12 +2091,12 @@ func TestDomain_PruneProgress(t *testing.T) {
 
 	keysCursor, err := rwTx.RwCursorDupSort(domainRoTx.d.ValuesTable)
 	require.NoError(t, err)
+	defer keysCursor.Close()
 
 	k, istep, err := keysCursor.Seek(key)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, k, key)
 	require.NotEqualValues(t, 0, ^binary.BigEndian.Uint64(istep))
-	keysCursor.Close()
 
 	var i int
 	for step := kv.Step(0); ; step++ {
@@ -2118,13 +2119,12 @@ func TestDomain_PruneProgress(t *testing.T) {
 
 			keysCursor, err := rwTx.RwCursorDupSort(domainRoTx.d.ValuesTable)
 			require.NoError(t, err)
+			defer keysCursor.Close()
 
 			// check there are no keys with 0 step left
 			for k, v, err := keysCursor.First(); k != nil && err == nil; k, v, err = keysCursor.Next() {
 				require.NotEqualValues(t, 0, ^binary.BigEndian.Uint64(v))
 			}
-
-			keysCursor.Close()
 			break
 		}
 
@@ -2235,12 +2235,12 @@ func TestDomain_Unwind(t *testing.T) {
 			t.Helper()
 
 			etx, err := tmpDb.BeginRo(ctx)
-			defer etx.Rollback()
 			require.NoError(t, err)
+			defer etx.Rollback()
 
 			utx, err := db.BeginRo(ctx)
-			defer utx.Rollback()
 			require.NoError(t, err)
+			defer utx.Rollback()
 
 			ectx := expected.BeginFilesRo()
 			defer ectx.Close()
@@ -2258,12 +2258,12 @@ func TestDomain_Unwind(t *testing.T) {
 			t.Helper()
 
 			etx, err := tmpDb.BeginRo(ctx)
-			defer etx.Rollback()
 			require.NoError(t, err)
+			defer etx.Rollback()
 
 			utx, err := db.BeginRo(ctx)
-			defer utx.Rollback()
 			require.NoError(t, err)
+			defer utx.Rollback()
 
 			ectx := expected.BeginFilesRo()
 			defer ectx.Close()
@@ -2281,12 +2281,12 @@ func TestDomain_Unwind(t *testing.T) {
 			t.Helper()
 
 			etx, err := tmpDb.BeginRo(ctx)
-			defer etx.Rollback()
 			require.NoError(t, err)
+			defer etx.Rollback()
 
 			utx, err := db.BeginRo(ctx)
-			defer utx.Rollback()
 			require.NoError(t, err)
+			defer utx.Rollback()
 
 			ectx := expected.BeginFilesRo()
 			defer ectx.Close()
@@ -2305,12 +2305,12 @@ func TestDomain_Unwind(t *testing.T) {
 			t.Helper()
 
 			etx, err := tmpDb.BeginRo(ctx)
-			defer etx.Rollback()
 			require.NoError(t, err)
+			defer etx.Rollback()
 
 			utx, err := db.BeginRo(ctx)
-			defer utx.Rollback()
 			require.NoError(t, err)
+			defer utx.Rollback()
 
 			ectx := expected.BeginFilesRo()
 			defer ectx.Close()
@@ -2412,6 +2412,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		ctx := context.Background()
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
+		defer tx.Rollback()
 		_, err = domainRoTx.ht.Prune(ctx, tx, pruneFrom, pruneTo, math.MaxUint64, true, time.NewTicker(time.Second))
 		require.NoError(t, err)
 		err = tx.Commit()
@@ -2424,6 +2425,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		ctx := context.Background()
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
+		defer tx.Rollback()
 		_, err = domainRoTx.Prune(ctx, tx, step, pruneFrom, pruneTo, math.MaxUint64, time.NewTicker(time.Second))
 		require.NoError(t, err)
 		err = tx.Commit()
@@ -2495,6 +2497,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		ctx := context.Background()
 		rotx, err := db.BeginRo(ctx)
 		require.NoError(t, err)
+		t.Cleanup(rotx.Rollback)
 
 		domainRoTx := d.BeginFilesRo()
 		v, vs, ok, err := domainRoTx.GetLatest(pruningKey, rotx)
@@ -2517,8 +2520,8 @@ func TestDomain_PruneSimple(t *testing.T) {
 		//checkKeyPruned(t, domainRoTx, db, stepSize, pruneFrom, pruneTo)
 
 		rotx, err = db.BeginRo(ctx)
-		defer rotx.Rollback()
 		require.NoError(t, err)
+		t.Cleanup(rotx.Rollback)
 
 		v, vs, ok, err = domainRoTx.GetLatest(pruningKey, rotx)
 		require.NoError(t, err)
