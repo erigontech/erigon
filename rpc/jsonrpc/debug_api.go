@@ -1156,7 +1156,20 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	engine := api.engine()
 
-	// Create a state reader at the parent block state
+	// Get first txnum of blockNum — this is the exact txnum of the parent block's
+	// final state (before any system txns in this block have been applied).
+	firstTxNumInBlock, err := api._txNumReader.Min(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
+	// last txnum in block used for commitment calculation and collapsed paths tracing
+	lastTxNumInBlock, err := api._txNumReader.Max(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a state reader at the parent block state using the exact txnum
 	var stateReader state.StateReader
 	var parentNum uint64
 	if blockNum == 0 {
@@ -1166,17 +1179,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		parentNum = 0
 	} else {
 		parentNum = blockNum - 1
-		parentHash := block.ParentHash()
-		parentBlockNum := rpc.BlockNumber(parentNum)
-		parentNrOrHash := rpc.BlockNumberOrHash{
-			BlockNumber:      &parentBlockNum,
-			BlockHash:        &parentHash,
-			RequireCanonical: true,
-		}
-		stateReader, err = rpchelper.CreateStateReader(ctx, tx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
-		if err != nil {
-			return nil, err
-		}
+		stateReader = state.NewHistoryReaderV3(tx, firstTxNumInBlock)
 	}
 
 	// Create a combined recording state (reader + writer with in-memory overlay)
@@ -1356,19 +1359,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 	expectedParentRoot = parentHeader.Root
 	fmt.Printf("EXPECTED PARENT ROOT = %x\n", expectedParentRoot)
-
-	// Get first txnum of blockNum to ensure that correct state root will be restored
-	firstTxNumInBlock, err := api._txNumReader.Max(ctx, tx, blockNum-1)
-	if err != nil {
-		return nil, err
-	}
-	firstTxNumInBlock++
-
-	// last txnum in block used for commitment calculation and collapsed paths tracing
-	lastTxNumInBlock, err := api._txNumReader.Max(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
 
 	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
 	if firstTxNumInBlock < commitmentStartingTxNum {
