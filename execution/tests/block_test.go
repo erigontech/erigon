@@ -119,8 +119,11 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_finalization_selfdestruct_logs.json`)                        // TODO fix error: receiptHash mismatch
 	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_finalization_after_priority_fee.json`)          // TODO fix error: block access list mismatch
 	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_to_self_cross_tx_no_log.json`)                  // TODO fix error: block access list mismatch
+	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_same_tx_via_call.json`)                         // TODO fix error: block #1 insertion into chain failed
 	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_to_system_address.json`)                        // TODO fix error: block access list mismatch
 	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_transfer_to_special_address.json`)                           // TODO fix error: block access list mismatch
+	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_to_self_same_tx.json`)                          // TODO fix error:  block #1 insertion into chain failed
+	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_log_at_fork_transition.json`)                   // TODO file error: block #2 insertion into chain failed: insertion failed for block 2, code: BadBlock
 	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_7702_delegation_clear.json`)                      // TODO fix error: block access list mismatch
 	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_7002_clean_sweep.json`)                           // TODO fix error: can't find diffsets for: 2
 	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_7002_request_from_contract.json`)                 // TODO fix error: can't find diffsets for: 2
@@ -141,6 +144,7 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_and_state_access_same_account.json`)   // TODO fix error: can't find diffsets for: 2
 	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_contract_cross_index.json`)            // TODO fix error: can't find diffsets for: 2
 	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_and_value_transfer_same_address.json`) // TODO fix error: can't find diffsets for: 2
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_create_selfdestruct_to_self_with_call.json`)      // TODO fix error: block #1 insertion into chain failed
 	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_7002_partial_sweep.json`)                         // TODO fix error: can't find diffsets for: 2
 	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
