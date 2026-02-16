@@ -66,9 +66,8 @@ type CommitmentWrite = stateifs.CommitmentWrite
 // CollapseTracer is a callback invoked when a trie node collapse occurs during commitment.
 // When a FullNode is reduced to a single child (updateKindPropagate), the remaining child
 // may be a HashNode that needs to be resolved for proper witness generation.
-// The callback receives the hashed key path to the remaining child along with the witness
-// trie built by toWitnessTrie at the point of collapse.
-type CollapseTracer func(hashedKeyPath []byte, witnessTrie *trie.Trie)
+// The callback receives the hashed key path (in nibble format) to the remaining child.
+type CollapseTracer func(hashedKeyPath []byte)
 
 // HexPatriciaHashed implements commitment based on patricia merkle tree with radix 16,
 // with keys pre-hashed by keccak256
@@ -2334,11 +2333,7 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 	fmt.Printf("[collapse] FOUND at parentRow=%d depth=%d: deleteNibble=%x, siblingNibble=%x, siblingPath=%x (len=%d), hashLen=%d, extLen=%d\n",
 		parentRow, depth, deleteNibble, siblingNibble, compactSibling, len(siblingPath), siblingCell.hashLen, siblingCell.hashedExtLen)
 
-	collapseTrie, trieErr := hph.toWitnessTrie(siblingPath, nil)
-	if trieErr != nil {
-		fmt.Printf("[collapse] failed to build sibling witness trie: %v\n", trieErr)
-	}
-	hph.collapseTracer(siblingPath, collapseTrie)
+	hph.collapseTracer(siblingPath)
 }
 
 // fetches cell by key and set touch/after maps. Requires that prefix to be already unfolded
@@ -2556,24 +2551,27 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 			fmt.Printf("\n%d/%d) witnessing [%x] hashedKey [%x] currentKey [%x]\n", ki+1, updatesCount, plainKey, printableHashedKey, hph.currentKey[:hph.currentKeyLen])
 		}
 
-		var update *Update
-		if int16(len(plainKey)) == hph.accountKeyLen { // account
-			update, err = hph.accountFromCacheOrDB(plainKey)
-			if err != nil {
-				return fmt.Errorf("account with plainkey=%x not found: %w", plainKey, err)
+		if len(plainKey) > 0 {
+			var update *Update
+			if int16(len(plainKey)) == hph.accountKeyLen { // account
+				update, err = hph.accountFromCacheOrDB(plainKey)
+				if err != nil {
+					return fmt.Errorf("account with plainkey=%x not found: %w", plainKey, err)
+				}
+				if hph.trace {
+					addrHash := crypto.Keccak256(plainKey)
+					fmt.Printf("account with plainKey=%x, addrHash=%x FOUND = %v\n", plainKey, addrHash, update)
+				}
+			} else {
+				update, err = hph.storageFromCacheOrDB(plainKey)
+				if err != nil {
+					return fmt.Errorf("storage with plainkey=%x not found: %w", plainKey, err)
+				}
+				if hph.trace {
+					fmt.Printf("storage found = %v\n", update.Storage[:update.StorageLen])
+				}
 			}
-			if hph.trace {
-				addrHash := crypto.Keccak256(plainKey)
-				fmt.Printf("account with plainKey=%x, addrHash=%x FOUND = %v\n", plainKey, addrHash, update)
-			}
-		} else {
-			update, err = hph.storageFromCacheOrDB(plainKey)
-			if err != nil {
-				return fmt.Errorf("storage with plainkey=%x not found: %w", plainKey, err)
-			}
-			if hph.trace {
-				fmt.Printf("storage found = %v\n", update.Storage[:update.StorageLen])
-			}
+			_ = update // update is used for diagnostics; cells are populated during unfold
 		}
 
 		// Keep folding until the currentKey is the prefix of the key we modify

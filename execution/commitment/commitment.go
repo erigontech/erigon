@@ -1604,6 +1604,33 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 	}
 }
 
+// TouchHashedKey adds a pre-hashed key (in nibble format) to the update set without a corresponding plain key.
+// This is used for witness generation of collapse siblings and intermediate trie nodes
+// where no plain key exists. The key will be included in HashSort order and processed
+// by GenerateWitness, which will skip the DB lookup when plainKey is empty.
+func (t *Updates) TouchHashedKey(hashedKey []byte) {
+	switch t.mode {
+	case ModeDirect:
+		dedupKey := string(hashedKey)
+		if _, ok := t.keys[dedupKey]; !ok {
+			var err error
+			if !t.sortPerNibble {
+				err = t.etl.Collect(hashedKey, []byte{})
+			} else {
+				err = t.nibbles[hashedKey[0]].Collect(hashedKey, []byte{})
+			}
+			if err != nil {
+				log.Warn("failed to collect hashed key", "hashedKey", fmt.Sprintf("%x", hashedKey), "err", err)
+			}
+			t.keys[dedupKey] = struct{}{}
+		}
+	case ModeUpdate:
+		pivot := &KeyUpdate{hashedKey: common.Copy(hashedKey), update: new(Update)}
+		t.tree.ReplaceOrInsert(pivot)
+	default:
+	}
+}
+
 func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 	if len(val) == 0 {
 		c.update.Flags = DeleteUpdate
