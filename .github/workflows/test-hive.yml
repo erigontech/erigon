@@ -59,6 +59,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           sparse-checkout: go.mod
+          sparse-checkout-cone-mode: false
           path: erigon-src
 
       - name: Checkout Hive
