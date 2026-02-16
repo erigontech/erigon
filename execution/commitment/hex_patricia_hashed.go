@@ -2302,6 +2302,11 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 		return
 	}
 
+	// collapse detected!
+	compact, _ := CompactKey(hashedKey)
+	fmt.Printf("[collapse-debug] updateCell: hashedKey=%x (len=%d nibbles), deleted=true, activeRows=%d\n",
+		compact, len(hashedKey), hph.activeRows)
+
 	// Exactly 2 children in the parent row — one is on the delete path,
 	// the other is the sibling that will survive the collapse.
 	depth := hph.depths[parentRow] - 1
@@ -2343,9 +2348,6 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) 
 	if u.Deleted() {
 		// Before the delete, check if this will cause a node collapse (FullNode → single child).
 		if hph.collapseTracer != nil && hph.activeRows > 0 {
-			compact, _ := CompactKey(hashedKey)
-			fmt.Printf("[collapse-debug] updateCell: hashedKey=%x (len=%d nibbles), deleted=%v, flags=%d, activeRows=%d\n",
-				compact, len(hashedKey), u.Deleted(), u.Flags, hph.activeRows)
 			hph.detectCollapseBeforeDelete(hashedKey)
 		}
 
