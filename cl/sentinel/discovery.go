@@ -38,7 +38,7 @@ const (
 	peerSubnetTarget                 = 4
 	goRoutinesOpeningPeerConnections = 4
 	attestationSubnetCount           = 64
-	minimumPeersPerSubnet            = 3  // Minimum peers needed per subnet before proactive search stops
+	minimumPeersPerSubnet            = 4  // Minimum peers needed per subnet before proactive search stops
 	subnetSearchTimeout              = 30 * time.Second
 	subnetSearchInterval             = 12 * time.Second // Check every slot
 	peerPruneInterval                = 60 * time.Second // How often to check for excess peers
