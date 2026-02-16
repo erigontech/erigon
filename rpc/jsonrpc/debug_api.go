@@ -1106,14 +1106,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
 	}
 
-	// we want to read paths as of beginning of the given block
-	sdCtx.SetHistoryStateReader(tx, firstTxNumInBlock)
-	if err := domains.SeekCommitment(context.Background(), tx); err != nil {
-		return nil, err
-	}
-	fmt.Printf("[witness] after SeekCommitment: blockNum=%d, txNum=%d, parentNum=%d,  firstTxnumInBlock=%d\n",
-		domains.BlockNum(), domains.TxNum(), parentNum, firstTxNumInBlock)
-
 	if len(allAddresses)+len(allStorageKeys) == 0 { // nothing touched, return empty witness
 		return result, nil
 	}
@@ -1166,10 +1158,15 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		collapseSiblingPaths = append(collapseSiblingPaths, common.Copy(hashedKeyPath))
 	})
 
-	_, err = sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
+	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
 	if err != nil {
 		fmt.Printf("[witness] collapse detection via ComputeCommitment failed: %v\n", err)
 	}
+
+	if common.Hash(computedRootHash) != block.Root() {
+		return nil, fmt.Errorf("[witness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, block.Root())
+	}
+
 	sdCtx.SetCollapseTracer(nil)
 
 	// === STEP 2: Generate witness for the regular (non-collapse) keys ===
