@@ -1523,10 +1523,14 @@ func (I *impl) ProcessDepositRequest(s abstract.BeaconState, depositRequest *sol
 	// [New in Gloas:EIP7732] Route builder deposits immediately
 	if s.Version() >= clparams.GloasVersion {
 		isBuilder := state.IsBuilderPubkey(s, depositRequest.PubKey)
-		_, isValidator := s.ValidatorIndexByPubkey(depositRequest.PubKey)
-		isBuilderPrefix := state.IsBuilderWithdrawalCredential(depositRequest.WithdrawalCredentials, s.BeaconConfig())
+		_, isExistingValidator := s.ValidatorIndexByPubkey(depositRequest.PubKey)
+		hasBuilderPrefix := state.IsBuilderWithdrawalCredential(depositRequest.WithdrawalCredentials, s.BeaconConfig())
+		// Check if there's a pending deposit with valid signature for this pubkey
+		isPendingValidator := state.IsPendingValidator(s, depositRequest.PubKey)
+		// isValidator includes both existing validators and pending validators with valid signatures
+		isValidator := isExistingValidator || isPendingValidator
 
-		if isBuilder || (isBuilderPrefix && !isValidator) {
+		if isBuilder || (hasBuilderPrefix && !isValidator) {
 			state.ApplyDepositForBuilder(s, depositRequest.PubKey, depositRequest.WithdrawalCredentials, depositRequest.Amount, depositRequest.Signature, s.Slot())
 			return nil
 		}
