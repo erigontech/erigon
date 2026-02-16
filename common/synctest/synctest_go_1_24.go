@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
+//go:build go1.24 && !go1.25
+
 package synctest
 
 import (
@@ -21,10 +23,8 @@ import (
 	"testing/synctest"
 )
 
-//
-// NOTE: we can remove this pkg once go1.26 is out, and we've dropped support for go1.24
-//
-
-var Wait = synctest.Wait // nolint:govet
-
-type testFunc func(t *testing.T, f func(*testing.T))
+var Test testFunc = func(t *testing.T, f func(*testing.T)) {
+	synctest.Run(func() {
+		f(t)
+	})
+}
