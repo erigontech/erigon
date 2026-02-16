@@ -77,6 +77,91 @@ type btBlock struct {
 	ExpectException string
 	Rlp             string
 	UncleHeaders    []*btHeader
+	BlockAccessList btBlockAccessList `json:"blockAccessList"`
+}
+
+// btBlockAccessList and related types for parsing block access list data from test JSON.
+type btBlockAccessList []btAccountChanges
+
+type btAccountChanges struct {
+	Address        common.Address    `json:"address"`
+	StorageChanges []btSlotChanges   `json:"storageChanges"`
+	StorageReads   []hexutil.Bytes   `json:"storageReads"`
+	BalanceChanges []btBalanceChange `json:"balanceChanges"`
+	NonceChanges   []btNonceChange   `json:"nonceChanges"`
+	CodeChanges    []btCodeChange    `json:"codeChanges"`
+}
+
+type btSlotChanges struct {
+	Slot        hexutil.Bytes     `json:"slot"`
+	SlotChanges []btStorageChange `json:"slotChanges"`
+}
+
+type btStorageChange struct {
+	BlockAccessIndex hexutil.Uint16       `json:"blockAccessIndex"`
+	PostValue        math.HexOrDecimal256 `json:"postValue"`
+}
+
+type btBalanceChange struct {
+	BlockAccessIndex hexutil.Uint16       `json:"blockAccessIndex"`
+	PostBalance      math.HexOrDecimal256 `json:"postBalance"`
+}
+
+type btNonceChange struct {
+	BlockAccessIndex hexutil.Uint16      `json:"blockAccessIndex"`
+	PostNonce        math.HexOrDecimal64 `json:"postNonce"`
+}
+
+type btCodeChange struct {
+	BlockAccessIndex hexutil.Uint16 `json:"blockAccessIndex"`
+	NewCode          hexutil.Bytes  `json:"newCode"`
+}
+
+func (bal btBlockAccessList) toBAL() types.BlockAccessList {
+	if len(bal) == 0 {
+		return nil
+	}
+	result := make(types.BlockAccessList, len(bal))
+	for i, ac := range bal {
+		entry := &types.AccountChanges{
+			Address: accounts.InternAddress(ac.Address),
+		}
+		for _, sc := range ac.StorageChanges {
+			slotChanges := &types.SlotChanges{
+				Slot: accounts.InternKey(common.BytesToHash(sc.Slot)),
+			}
+			for _, change := range sc.SlotChanges {
+				slotChanges.Changes = append(slotChanges.Changes, &types.StorageChange{
+					Index: uint16(change.BlockAccessIndex),
+					Value: *uint256.MustFromBig((*big.Int)(&change.PostValue)),
+				})
+			}
+			entry.StorageChanges = append(entry.StorageChanges, slotChanges)
+		}
+		for _, sr := range ac.StorageReads {
+			entry.StorageReads = append(entry.StorageReads, accounts.InternKey(common.BytesToHash(sr)))
+		}
+		for _, bc := range ac.BalanceChanges {
+			entry.BalanceChanges = append(entry.BalanceChanges, &types.BalanceChange{
+				Index: uint16(bc.BlockAccessIndex),
+				Value: *uint256.MustFromBig((*big.Int)(&bc.PostBalance)),
+			})
+		}
+		for _, nc := range ac.NonceChanges {
+			entry.NonceChanges = append(entry.NonceChanges, &types.NonceChange{
+				Index: uint16(nc.BlockAccessIndex),
+				Value: uint64(nc.PostNonce),
+			})
+		}
+		for _, cc := range ac.CodeChanges {
+			entry.CodeChanges = append(entry.CodeChanges, &types.CodeChange{
+				Index:    uint16(cc.BlockAccessIndex),
+				Bytecode: cc.NewCode,
+			})
+		}
+		result[i] = entry
+	}
+	return result
 }
 
 //go:generate gencodec -type btHeader -field-override btHeaderMarshaling -out gen_btheader.go
@@ -255,8 +340,16 @@ func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
 				return nil, fmt.Errorf("block RLP decoding failed when expected to succeed: %w", err)
 			}
 		}
+		var balBytes []byte
+		if len(b.BlockAccessList) > 0 {
+			bal := b.BlockAccessList.toBAL()
+			balBytes, err = types.EncodeBlockAccessListBytes(bal)
+			if err != nil {
+				return nil, fmt.Errorf("block #%v encode block access list: %w", cb.Number(), err)
+			}
+		}
 		// RLP decoding worked, try to insert into chain:
-		chain := &blockgen.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb}
+		chain := &blockgen.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb, BlockAccessLists: [][]byte{balBytes}}
 
 		err1 := m.InsertChain(chain)
 		if err1 != nil {

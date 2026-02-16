@@ -779,7 +779,18 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 		insertedBlocks[chain.Blocks[i].NumberU64()] = struct{}{}
 	}
 
-	if err := wr.InsertBlocksAndWait(ms.Ctx, chain.Blocks); err != nil {
+	var balEntries []*executionproto.BlockAccessListEntry
+	for i, bal := range chain.BlockAccessLists {
+		if len(bal) > 0 {
+			block := chain.Blocks[i]
+			balEntries = append(balEntries, &executionproto.BlockAccessListEntry{
+				BlockHash:       gointerfaces.ConvertHashToH256(block.Hash()),
+				BlockNumber:     block.NumberU64(),
+				BlockAccessList: bal,
+			})
+		}
+	}
+	if err := wr.InsertBlocksAndWaitWithAccessLists(ms.Ctx, chain.Blocks, balEntries); err != nil {
 		return err
 	}
 

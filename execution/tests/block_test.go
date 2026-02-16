@@ -113,8 +113,8 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	dir := filepath.Join(eestDir, "blockchain_tests_devnet")
 	bt := new(testMatcher)
-	//bt.whitelist(`.*amsterdam/eip8024_dupn_swapn_exchange.*`)
-	bt.whitelist(`.*amsterdam.*`)
+	bt.whitelist(`.*amsterdam/eip8024_dupn_swapn_exchange.*`)
+	//bt.whitelist(`.*amsterdam.*`)
 	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
 		test.ExperimentalBAL = true // TODO eventually remove this from BlockTest and run normally
