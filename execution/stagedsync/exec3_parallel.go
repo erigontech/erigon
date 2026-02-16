@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -215,7 +216,10 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 						if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
 							bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO, pe.cfg.dirs.DataDir)
-							log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash(), "valid", bal.Validate() == nil)
+							if err := bal.Validate(); err != nil {
+								return fmt.Errorf("block %d: invalid computed block access list: %w", applyResult.BlockNum, err)
+							}
+							log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash())
 							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) {
 								if lastHeader.BlockAccessListHash == nil {
 									if pe.isBlockProduction {
@@ -227,9 +231,21 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								}
 								headerBALHash := *lastHeader.BlockAccessListHash
 								if !pe.isBlockProduction {
-									if headerBALHash != b.BlockAccessList().Hash() {
-										log.Info(fmt.Sprintf("bal from block: %s", b.BlockAccessList().DebugString()))
-										return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, b.BlockAccessList().Hash(), headerBALHash)
+									dbBALBytes, err := rawdb.ReadBlockAccessListBytes(rwTx, applyResult.BlockHash, applyResult.BlockNum)
+									if err != nil {
+										return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
+									}
+									dbBAL, err := types.DecodeBlockAccessListBytes(dbBALBytes)
+									if err != nil {
+										return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
+									}
+									if err = dbBAL.Validate(); err != nil {
+										return fmt.Errorf("block %d: db block access list is invalid: %w", applyResult.BlockNum, err)
+									}
+
+									if headerBALHash != dbBAL.Hash() {
+										log.Info(fmt.Sprintf("bal from block: %s", dbBAL.DebugString()))
+										return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, dbBAL.Hash(), headerBALHash)
 									}
 									if headerBALHash != bal.Hash() {
 										log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))

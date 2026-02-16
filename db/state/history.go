@@ -1482,6 +1482,27 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 	return stream.UnionKV(itOnFiles, itOnDB, limit), nil
 }
 
+// HistoryKeyTxNumRange returns (key, txNum) pairs for every txNum at which a key changed in [fromTxNum, toTxNum).
+// Output is sorted by key ASC. Duplicates across files are not deduplicated.
+func (ht *HistoryRoTx) HistoryKeyTxNumRange(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KU64, error) {
+	if asc == order.Desc {
+		panic("not supported yet")
+	}
+	itOnFiles, err := ht.iterateKeyTxNumFrozen(fromTxNum, toTxNum, asc, limit)
+	if err != nil {
+		return nil, err
+	}
+	dbFrom := fromTxNum
+	if len(ht.iit.files) > 0 {
+		dbFrom = max(fromTxNum, int(ht.iit.files.EndTxNum()))
+	}
+	itOnDB, err := ht.iterateKeyTxNumRecent(dbFrom, toTxNum, asc, limit, roTx)
+	if err != nil {
+		return nil, err
+	}
+	return stream.MultisetKU64(itOnFiles, itOnDB, limit), nil
+}
+
 func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, dumpTo func(key []byte, txNum uint64, val []byte)) error {
 	if len(ht.iit.files) == 0 {
 		return nil
