@@ -53,8 +53,7 @@ jobs:
         os:
           - ubuntu-latest
         test-group:
-          - execution-spec
-          - execution-heavy
+          - execution-tests
           - execution-other
           - consensus
           - p2p-rpc
@@ -106,22 +105,13 @@ jobs:
         if: needs.source-of-changes.outputs.changed_files != 'true'
         run: |
           case "${{ matrix.test-group }}" in
-            execution-spec)
-              # Heavy spec/state test suites from execution/tests (~32 min originally)
-              # These run ethereum legacy tests, execution-spec tests and state tests
-              go test -race -timeout 60m ./execution/tests -run "TestLegacyBlockchain|TestExecutionSpecBlockchain|TestExecutionSpecBlockchainDevnet|TestState$|TestStateCornerCases|TestRLP$|TestTransaction$|TestDifficulty$"
-              ;;
-            execution-heavy)
-              # Remaining tests from execution/tests + heaviest execution subpackages
-              # commitment (~264s), stagedsync (~241s), state (~84s), vm (~58s), engineapi (~55s)
-              go test -race -timeout 60m ./execution/tests -run "^(?!TestLegacyBlockchain|TestExecutionSpecBlockchain|TestExecutionSpecBlockchainDevnet|TestState$|TestStateCornerCases$|TestRLP$|TestTransaction$|TestDifficulty$)"
-              go test -race -timeout 60m ./execution/tests/blockgen/... ./execution/tests/mock/...
-              go test -race -timeout 60m ./execution/commitment/... ./execution/stagedsync/... ./execution/state/...
+            execution-tests)
+              # execution/tests/... contains the heaviest test suites (~32 min)
+              go test -race -timeout 60m ./execution/tests/...
               ;;
             execution-other)
-              # All remaining execution subdirectories
-              EXEC_HEAVY="execution/tests|execution/commitment|execution/stagedsync|execution/state"
-              DIRS=$(ls -d -- execution/*/ | grep -vE "($EXEC_HEAVY)/" | sed 's/\/$//')
+              # All execution subdirectories except execution/tests
+              DIRS=$(ls -d -- execution/*/ | grep -vE "execution/tests/" | sed 's/\/$//')
               for d in $DIRS; do
                 if [ -d "$d" ]; then
                   TEST_PACKAGES=$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' "./$d/..." 2>/dev/null)
