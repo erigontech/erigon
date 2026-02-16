@@ -249,10 +249,11 @@ func (b *BlockGen) GetReceipts() []*types.Receipt {
 var GenerateTrace bool
 
 type ChainPack struct {
-	Headers  []*types.Header
-	Blocks   []*types.Block
-	Receipts []types.Receipts
-	TopBlock *types.Block // Convenience field to access the last block
+	Headers          []*types.Header
+	Blocks           []*types.Block
+	Receipts         []types.Receipts
+	TopBlock         *types.Block // Convenience field to access the last block
+	BlockAccessLists [][]byte     // RLP-encoded block access list bytes, indexed parallel to Blocks (nil entry = no BAL)
 }
 
 func (cp *ChainPack) Length() int {
@@ -262,12 +263,16 @@ func (cp *ChainPack) Length() int {
 // OneBlock returns a ChainPack which contains just one
 // block with given index
 func (cp *ChainPack) Slice(i, j int) *ChainPack {
-	return &ChainPack{
+	result := &ChainPack{
 		Headers:  cp.Headers[i:j],
 		Blocks:   cp.Blocks[i:j],
 		Receipts: cp.Receipts[i:j],
 		TopBlock: cp.Blocks[j-1],
 	}
+	if len(cp.BlockAccessLists) > 0 {
+		result.BlockAccessLists = cp.BlockAccessLists[i:j]
+	}
+	return result
 }
 
 // Copy creates a deep copy of the ChainPack.
@@ -293,11 +298,23 @@ func (cp *ChainPack) Copy() *ChainPack {
 
 	topBlock := cp.TopBlock.Copy()
 
+	var blockAccessLists [][]byte
+	if len(cp.BlockAccessLists) > 0 {
+		blockAccessLists = make([][]byte, len(cp.BlockAccessLists))
+		for i, bal := range cp.BlockAccessLists {
+			if bal != nil {
+				blockAccessLists[i] = make([]byte, len(bal))
+				copy(blockAccessLists[i], bal)
+			}
+		}
+	}
+
 	return &ChainPack{
-		Headers:  headers,
-		Blocks:   blocks,
-		Receipts: receipts,
-		TopBlock: topBlock,
+		Headers:          headers,
+		Blocks:           blocks,
+		Receipts:         receipts,
+		TopBlock:         topBlock,
+		BlockAccessLists: blockAccessLists,
 	}
 }
 
