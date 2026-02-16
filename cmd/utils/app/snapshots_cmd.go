@@ -230,7 +230,8 @@ var snapshotCommand = cli.Command{
 			Description: "Search for a key in a btree index",
 		},
 		{
-			Name: "rm-all-state-snapshots",
+			Name:    "rm-all-state-snapshots",
+			Aliases: []string{"rm-all-state"},
 			Action: func(cliCtx *cli.Context) error {
 				dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
 				if err != nil {
