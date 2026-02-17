@@ -22,6 +22,8 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring/v2"
+
+	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 
 	"github.com/erigontech/erigon/common"
@@ -218,6 +220,25 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	return rpcLogs, nil
 }
 
+// receiptsAvailable corner cases:
+//   - `--persist.receipts`: means all receipts available (even in `--prune.mode=minimal` mode)
+//   - `--prune.mode=minimal` (and `full`) can serve receipts as much as "state history" available (by re-executing blocks)
+//
+// returns `state.PrunedError` if not available for given `fromTxNum`
+func assertReceiptsAvailable(fromTxNum uint64, tx kv.TemporalTx) error {
+	persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
+	if err != nil {
+		return err
+	}
+	if persistReceipts {
+		return nil
+	}
+	if minTxNum := state.StateHistoryStartTxNum(tx); fromTxNum < minTxNum {
+		return fmt.Errorf("%w: from tx: %d, min tx: %d", state.PrunedError, fromTxNum, minTxNum)
+	}
+	return nil
+}
+
 func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, asc order.By) (out stream.U64, err error) {
 	//[from,to)
 	var fromTxNum, toTxNum uint64
@@ -226,8 +247,8 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 		if err != nil {
 			return out, err
 		}
-		if minTxNum := state.StateHistoryStartTxNum(tx); fromTxNum < minTxNum {
-			return out, fmt.Errorf("%w: from tx: %d, min tx: %d", state.PrunedError, fromTxNum, minTxNum)
+		if err := receiptsAvailable(fromTxNum, tx); err != nil {
+			return out, err
 		}
 	}
 
