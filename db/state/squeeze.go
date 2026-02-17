@@ -491,6 +491,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	domains.DiscardWrites(kv.AccountsDomain)
 	domains.DiscardWrites(kv.StorageDomain)
 	domains.DiscardWrites(kv.CodeDomain)
+	domains.EnableParaTrieDB(rwDb)
+	domains.EnableTrieWarmup(true)
 	domains.EnableWarmupCache(true)
 
 	batchBlockCount := dbg.EnvInt("ERIGON_REBUILD_BATCH_BLOCKS", 5000)
@@ -554,6 +556,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		domains.DiscardWrites(kv.AccountsDomain)
 		domains.DiscardWrites(kv.StorageDomain)
 		domains.DiscardWrites(kv.CodeDomain)
+		domains.EnableParaTrieDB(rwDb)
+		domains.EnableTrieWarmup(true)
 		domains.EnableWarmupCache(true)
 		return nil
 	}
