@@ -182,7 +182,7 @@ func TestAssembleBlock(t *testing.T) {
 	}
 	t.Parallel()
 	ctx := t.Context()
-	m := mock.MockWithTxPoolOsaka(t)
+	m := mock.MockWithTxPoolAllProtocolChanges(t)
 	exec := m.Eth1ExecutionService
 	txpool := m.TxPoolGrpcServer
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {

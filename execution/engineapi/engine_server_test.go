@@ -127,7 +127,7 @@ func TestGetBlobsV1(t *testing.T) {
 
 func TestGetBlobsV2(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
-	mockSentry, require := mock.MockWithTxPoolOsaka(t), require.New(t)
+	mockSentry, require := mock.MockWithTxPoolAllProtocolChanges(t), require.New(t)
 	oneBlockStep(mockSentry, require)
 
 	wrappedTxn := types.MakeV1WrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
@@ -187,7 +187,7 @@ func TestGetBlobsV2(t *testing.T) {
 
 func TestGetBlobsV3(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
-	mockSentry, require := mock.MockWithTxPoolOsaka(t), require.New(t)
+	mockSentry, require := mock.MockWithTxPoolAllProtocolChanges(t), require.New(t)
 	oneBlockStep(mockSentry, require)
 
 	wrappedTxn := types.MakeV1WrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
