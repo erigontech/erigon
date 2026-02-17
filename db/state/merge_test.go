@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
@@ -745,11 +746,15 @@ func Test_mergeEliasFano(t *testing.T) {
 		require.Contains(t, secondList, int(v))
 	}
 
-	menc, err := mergeNumSeqs(firstBytes, secondBytes, 0, 0, nil, 0)
+	var seq1, seq2 multiencseq.SequenceReader
+	var it1, it2 multiencseq.SequenceIterator
+	seq1.Reset(0, firstBytes)
+	seq2.Reset(0, secondBytes)
+	mergedSeq, err := seq1.Merge(&seq2, 0, &it1, &it2)
 	require.NoError(t, err)
+	menc := mergedSeq.AppendBytes(nil)
 
 	merged, _ := eliasfano32.ReadEliasFano(menc)
-	require.NoError(t, err)
 	require.EqualValues(t, len(uniq), merged.Count())
 	require.Equal(t, merged.Count(), eliasfano32.Count(menc))
 	mergedLists := append(firstList, secondList...)
