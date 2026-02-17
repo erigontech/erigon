@@ -4,9 +4,9 @@ participants_matrix:
       el_image: test/erigon:current
   cl:
     - cl_type: lighthouse
-      cl_image: sigp/lighthouse:v7.0.1
+      cl_image: sigp/lighthouse:latest
     - cl_type: teku
-      cl_image: consensys/teku:25.9.1
+      cl_image: consensys/teku:latest
 network_params:
   #electra_fork_epoch: 1
   min_validator_withdrawability_delay: 1
