@@ -70,7 +70,7 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 				}
 				//del, before create: to clanup code/storage
 				address := update.address.Value()
-				if err = domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil, 0); err != nil {
+				if err = domains.DomainDel(kv.CodeDomain, roTx, address[:], txNum, nil); err != nil {
 					return false
 				}
 				if err = domains.DomainDelPrefix(kv.StorageDomain, roTx, address[:], txNum); err != nil {
@@ -84,7 +84,7 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 						fmt.Printf("%d apply:put account: %x balance:%d,nonce:%d,codehash:%x\n", blockNum, update.address, &update.data.Balance, update.data.Nonce, update.data.CodeHash)
 					}
 					address := update.address.Value()
-					if err = domains.DomainPut(kv.AccountsDomain, roTx, address[:], accounts.SerialiseV3(update.data), txNum, nil, 0); err != nil {
+					if err = domains.DomainPut(kv.AccountsDomain, roTx, address[:], accounts.SerialiseV3(update.data), txNum, nil); err != nil {
 						return false
 					}
 				}
@@ -98,7 +98,7 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 						fmt.Printf("%d apply:put code: %x %x\n", blockNum, update.address, code)
 					}
 					address := update.address.Value()
-					if err = domains.DomainPut(kv.CodeDomain, roTx, address[:], update.code, txNum, nil, 0); err != nil {
+					if err = domains.DomainPut(kv.CodeDomain, roTx, address[:], update.code, txNum, nil); err != nil {
 						return false
 					}
 				}
@@ -113,14 +113,14 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 							if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address.Handle())) {
 								fmt.Printf("%d apply:del storage: %x q%x\n", blockNum, update.address, i.key)
 							}
-							if err = domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil, 0); err != nil {
+							if err = domains.DomainDel(kv.StorageDomain, roTx, composite, txNum, nil); err != nil {
 								return false
 							}
 						} else {
 							if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address.Handle())) {
 								fmt.Printf("%d apply:put storage: %x %x %x\n", blockNum, update.address, i.key, &i.value)
 							}
-							if err = domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil, 0); err != nil {
+							if err = domains.DomainPut(kv.StorageDomain, roTx, composite, v, txNum, nil); err != nil {
 								return false
 							}
 						}
@@ -136,7 +136,7 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 					fmt.Printf("%d apply:del account: %x\n", blockNum, update.address)
 				}
 				address := update.address.Value()
-				if err = domains.DomainDel(kv.AccountsDomain, roTx, address[:], txNum, nil, 0); err != nil {
+				if err = domains.DomainDel(kv.AccountsDomain, roTx, address[:], txNum, nil); err != nil {
 					return false
 				}
 			}
@@ -152,7 +152,7 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 	emptyRemoval := rules.IsSpuriousDragon
 	for addr, increase := range balanceIncreases {
 		addrValue := addr.Value()
-		enc0, step0, err := domains.GetLatest(kv.AccountsDomain, roTx, addrValue[:])
+		enc0, _, err := domains.GetLatest(kv.AccountsDomain, roTx, addrValue[:])
 		if err != nil {
 			return err
 		}
@@ -165,13 +165,13 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 		acc.Balance.Add(&acc.Balance, &increase)
 		if emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
 			addrValue := addr.Value()
-			if err := domains.DomainDel(kv.AccountsDomain, roTx, addrValue[:], txNum, enc0, step0); err != nil {
+			if err := domains.DomainDel(kv.AccountsDomain, roTx, addrValue[:], txNum, enc0); err != nil {
 				return err
 			}
 		} else {
 			enc1 := accounts.SerialiseV3(&acc)
 			addrValue := addr.Value()
-			if err := domains.DomainPut(kv.AccountsDomain, roTx, addrValue[:], enc1, txNum, enc0, step0); err != nil {
+			if err := domains.DomainPut(kv.AccountsDomain, roTx, addrValue[:], enc1, txNum, enc0); err != nil {
 				return err
 			}
 		}
@@ -624,7 +624,7 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 	addressValue := address.Value()
 	if original.Incarnation > account.Incarnation {
 		//del, before create: to clanup code/storage
-		if err := w.tx.DomainDel(kv.CodeDomain, addressValue[:], w.txNum, nil, 0); err != nil {
+		if err := w.tx.DomainDel(kv.CodeDomain, addressValue[:], w.txNum, nil); err != nil {
 			return err
 		}
 		if err := w.tx.DomainDelPrefix(kv.StorageDomain, addressValue[:], w.txNum); err != nil {
@@ -636,7 +636,7 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 		w.accumulator.ChangeAccount(addressValue, account.Incarnation, value)
 	}
 
-	if err := w.tx.DomainPut(kv.AccountsDomain, addressValue[:], value, w.txNum, nil, 0); err != nil {
+	if err := w.tx.DomainPut(kv.AccountsDomain, addressValue[:], value, w.txNum, nil); err != nil {
 		return err
 	}
 	return nil
@@ -647,7 +647,7 @@ func (w *Writer) UpdateAccountCode(address accounts.Address, incarnation uint64,
 		fmt.Printf("code: %x, %x, valLen: %d\n", address, codeHash, len(code))
 	}
 	addressValue := address.Value()
-	if err := w.tx.DomainPut(kv.CodeDomain, addressValue[:], code, w.txNum, nil, 0); err != nil {
+	if err := w.tx.DomainPut(kv.CodeDomain, addressValue[:], code, w.txNum, nil); err != nil {
 		return err
 	}
 	if w.accumulator != nil {
@@ -664,11 +664,11 @@ func (w *Writer) DeleteAccount(address accounts.Address, original *accounts.Acco
 	//if err := w.tx.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
 	//	return err
 	//}
-	//if err := w.tx.DomainDel(kv.CodeDomain, address[:], nil, 0); err != nil {
+	//if err := w.tx.DomainDel(kv.CodeDomain, address[:], nil); err != nil {
 	//	return err
 	//}
 	addressValue := address.Value()
-	if err := w.tx.DomainDel(kv.AccountsDomain, addressValue[:], w.txNum, nil, 0); err != nil {
+	if err := w.tx.DomainDel(kv.AccountsDomain, addressValue[:], w.txNum, nil); err != nil {
 		return err
 	}
 	// if w.accumulator != nil { TODO: investigate later. basically this will always panic. keeping this out should be fine anyway.
@@ -695,13 +695,13 @@ func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint6
 		fmt.Printf("storage: %x,%x,%x\n", address, key, v)
 	}
 	if len(v) == 0 {
-		return w.tx.DomainDel(kv.StorageDomain, composite, w.txNum, nil, 0)
+		return w.tx.DomainDel(kv.StorageDomain, composite, w.txNum, nil)
 	}
 	if w.accumulator != nil {
 		w.accumulator.ChangeStorage(addressValue, incarnation, keyValue, v)
 	}
 
-	return w.tx.DomainPut(kv.StorageDomain, composite, v, w.txNum, nil, 0)
+	return w.tx.DomainPut(kv.StorageDomain, composite, v, w.txNum, nil)
 }
 
 var fastCreate = dbg.EnvBool("FAST_CREATE", false)

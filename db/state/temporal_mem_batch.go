@@ -180,20 +180,14 @@ func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, s
 		if sd.unwindChangeset != nil {
 			if values := sd.unwindChangeset[domain]; values != nil {
 				if value, ok := values[key]; ok {
-					prevStep := ^binary.BigEndian.Uint64(value.PrevStepBytes)
+					keyStep := kv.Step(^binary.BigEndian.Uint64([]byte(value.Key[len(value.Key)-8:])))
 
-					if len(value.Value) == 0 {
-						keyStep := ^binary.BigEndian.Uint64([]byte(value.Key[len(value.Key)-8:]))
-
-						if keyStep != prevStep {
-							if prevStep != 0 {
-								return nil, kv.Step(prevStep), false
-							}
-						}
-
-						return nil, kv.Step(prevStep), true
+					if value.Value == nil {
+						// Different step: the entry at this step was deleted, key doesn't exist here
+						return nil, keyStep, false
 					}
-					return value.Value, kv.Step(prevStep), true
+					// Same step: restore this value
+					return value.Value, keyStep, true
 				}
 			}
 		}

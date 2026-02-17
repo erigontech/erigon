@@ -130,12 +130,12 @@ type temporalPutDel struct {
 	tx kv.TemporalTx
 }
 
-func (pd *temporalPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
-	return pd.sd.DomainPut(domain, pd.tx, k, v, txNum, prevVal, prevStep)
+func (pd *temporalPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
+	return pd.sd.DomainPut(domain, pd.tx, k, v, txNum, prevVal)
 }
 
-func (pd *temporalPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
-	return pd.sd.DomainDel(domain, pd.tx, k, txNum, prevVal, prevStep)
+func (pd *temporalPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
+	return pd.sd.DomainDel(domain, pd.tx, k, txNum, prevVal)
 }
 
 func (pd *temporalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
@@ -504,19 +504,24 @@ func (sd *SharedDomains) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []b
 //   - user can provide `prevVal != nil` - then it will not read prev value from storage
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
-func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte) error {
 	if v == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
 	ks := string(k)
 	sd.sdCtx.TouchKey(domain, ks, v)
 
+	var prevStep kv.Step
 	if prevVal == nil {
 		var err error
 		prevVal, prevStep, err = sd.GetLatest(domain, roTx, k)
 		if err != nil {
 			return err
 		}
+	} else {
+		// Caller provided prevVal but we still need prevStep for the diff.
+		// Look it up from the DB (bypass cache for correct step).
+		_, prevStep, _ = sd.GetLatest(domain, roTx, k)
 	}
 	switch domain {
 	case kv.CodeDomain, kv.AccountsDomain, kv.StorageDomain, kv.CommitmentDomain:
