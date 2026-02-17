@@ -2273,7 +2273,7 @@ func (s *witnessStateless) debugPrintPendingUpdates(blockNum uint64) {
 
 // Finalize applies all pending updates to the trie and returns the new root hash
 func (s *witnessStateless) Finalize() (common.Hash, error) {
-	fmt.Printf("\n=== Finalize: Applying updates ===\n")
+	// fmt.Printf("\n=== Finalize: Applying updates ===\n")
 
 	// Handle created contracts - clear their storage subtries
 	for addr := range s.created {
