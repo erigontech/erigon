@@ -193,6 +193,25 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	return rpcLogs, nil
 }
 
+func receiptsAvailable(fromTxNum uint64, tx kv.TemporalTx) (ok bool, err error) {
+	// Corner case:
+	//	- `--persist.receipts`: means all receipts available (even in `--prune.mode=minimal` mode)
+	//  - `--prune.mode=minimal` (and `full`) can serve receipts as much as "state history" available (by re-executing blocks)
+	persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
+	if err != nil {
+		return false, err
+	}
+	if persistReceipts {
+		return true, nil
+	}
+	r := state.NewHistoryReaderV3()
+	r.SetTx(tx)
+	if fromTxNum < r.StateHistoryStartFrom() {
+		return false, state.PrunedError
+	}
+	return true, nil
+}
+
 func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, asc order.By) (out stream.U64, err error) {
 	//[from,to)
 	var fromTxNum, toTxNum uint64
@@ -201,21 +220,7 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 		if err != nil {
 			return out, err
 		}
-		// When --persist.receipts is enabled, receipt data is stored independently
-		// of state history, so we can serve eth_getLogs even for pruned state ranges.
-		// Only check state history availability when receipts need to be re-generated
-		// from state execution.
-		persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
-		if err != nil {
-			return out, err
-		}
-		if !persistReceipts {
-			r := state.NewHistoryReaderV3()
-			r.SetTx(tx)
-			if fromTxNum < r.StateHistoryStartFrom() {
-				return out, state.PrunedError
-			}
-		}
+
 	}
 
 	toTxNum, err = txNumsReader.Max(tx, end)
