@@ -55,6 +55,13 @@ jobs:
             sim-limit: compat
             max-allowed-failures: 23
     steps:
+      - name: Checkout Erigon go.mod
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: go.mod
+          sparse-checkout-cone-mode: false
+          path: erigon-src
+
       - name: Checkout Hive
         uses: actions/checkout@v6
         with:
