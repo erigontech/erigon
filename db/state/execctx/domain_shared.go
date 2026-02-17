@@ -90,7 +90,7 @@ type SharedDomains struct {
 
 	logger log.Logger
 
-	txNum             uint64
+	txNum             atomic.Uint64
 	blockNum          atomic.Uint64
 	trace             bool //nolint
 	commitmentCapture bool
@@ -156,7 +156,7 @@ type changesetSwitcher interface {
 }
 
 func (sd *SharedDomains) Merge(other *SharedDomains) error {
-	if sd.txNum > other.txNum {
+	if sd.txNum.Load() > other.txNum.Load() {
 		return fmt.Errorf("can't merge backwards: txnum: %d > %d", sd.txNum, other.txNum)
 	}
 
@@ -316,10 +316,10 @@ func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
 // Requires for sd.rwTx because of commitment evaluation in shared domains if stepSize is reached
 func (sd *SharedDomains) SetTxNum(txNum uint64) {
-	sd.txNum = txNum
+	sd.txNum.Store(txNum)
 }
 
-func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
+func (sd *SharedDomains) TxNum() uint64 { return sd.txNum.Load() }
 
 func (sd *SharedDomains) BlockNum() uint64 { return sd.blockNum.Load() }
 
@@ -411,7 +411,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		// files merge so this is not a problem in practice. file 0-1 will be non-deterministic
 		// but file 0-2 will be deterministic as it will include all entries from file 0-1 and so on.
 		if v, ok := sd.stateCache.Get(domain, k); ok {
-			return v, kv.Step(sd.txNum / sd.stepSize), nil
+			return v, kv.Step(sd.txNum.Load() / sd.stepSize), nil
 		}
 	}
 

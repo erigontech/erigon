@@ -23,7 +23,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
@@ -96,7 +95,7 @@ type parallelExecutor struct {
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
-	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
+	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
 	var asyncTxChan mdbx.TxApplyChan
 	var asyncTx kv.TemporalTx
@@ -146,7 +145,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	var hasLoggedCommittments atomic.Bool
 	var commitStart time.Time
 
-	var stepsInDb = rawdbhelpers.IdxStepsCountV3(rwTx, pe.agg.StepSize())
 	var lastProgress commitment.CommitProgress
 
 	execErr := func() (err error) {
@@ -1587,8 +1585,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if result.Receipt != nil {
 				applyResult.blockGasUsed = int64(result.ExecutionResult.BlockGasUsed)
 				be.blockGasUsed += result.ExecutionResult.BlockGasUsed
-				applyResult.receipt = result.Receipt
-				applyResult.logs = append(applyResult.logs, result.Receipt.Logs...)
+				receipt := *result.Receipt
+				applyResult.receipt = &receipt
+				applyResult.receipt.Logs = append([]*types.Log{}, result.Receipt.Logs...)
+				applyResult.logs = applyResult.receipt.Logs
 				pe.executedGas.Add(int64(applyResult.blockGasUsed))
 			}
 
