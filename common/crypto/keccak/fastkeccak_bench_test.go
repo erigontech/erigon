@@ -14,13 +14,16 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package crypto
+package keccak_test
 
 import (
 	"testing"
 
-	keccak "github.com/Giulio2002/fastkeccak"
 	"golang.org/x/crypto/sha3"
+
+	keccak "github.com/Giulio2002/fastkeccak"
+
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 // BenchmarkKeccak256_Sha3 benchmarks the standard x/crypto/sha3 LegacyKeccak256 one-shot hash.
@@ -55,7 +58,7 @@ func BenchmarkKeccakStreaming_Sha3(b *testing.B) {
 	for i := range data {
 		data[i] = byte(i)
 	}
-	h := sha3.NewLegacyKeccak256().(keccakState)
+	h := sha3.NewLegacyKeccak256().(crypto.KeccakState)
 	var buf [32]byte
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -77,17 +80,5 @@ func BenchmarkKeccakStreaming_FastKeccak(b *testing.B) {
 		h.Reset()
 		h.Write(data)
 		h.Sum256()
-	}
-}
-
-// BenchmarkKeyToHexNibbleHash benchmarks the key-to-nibble hashing used in commitment (uses fastkeccak).
-func BenchmarkKeyToHexNibbleHash(b *testing.B) {
-	key := make([]byte, 20) // account key
-	for i := range key {
-		key[i] = byte(i)
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		KeyToHexNibbleHash(key)
 	}
 }

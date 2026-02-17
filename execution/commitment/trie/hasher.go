@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/crypto/keccak"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/rlp"
 )
@@ -52,7 +53,7 @@ type keccakState interface {
 var hashersPool = sync.Pool{
 	New: func() any {
 		return &hasher{
-			sha: crypto.NewFastKeccak(),
+			sha: keccak.NewFastKeccak(),
 			bw:  &ByteArrayWriter{},
 		}
 	},

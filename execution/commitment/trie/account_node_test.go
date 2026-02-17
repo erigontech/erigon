@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/crypto/keccak"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -174,7 +175,7 @@ func generateAcc() (*ecdsa.PrivateKey, common.Address, common.Hash, error) {
 }
 
 func hashVal(v []byte) (common.Hash, error) {
-	sha := crypto.NewFastKeccak()
+	sha := keccak.NewFastKeccak()
 	sha.Reset()
 	_, err := sha.Write(v)
 	if err != nil {

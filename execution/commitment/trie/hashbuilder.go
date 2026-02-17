@@ -25,7 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/crypto/keccak"
 	length2 "github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -62,7 +62,7 @@ type HashBuilder struct {
 // NewHashBuilder creates a new HashBuilder
 func NewHashBuilder(trace bool) *HashBuilder {
 	return &HashBuilder{
-		sha:             crypto.NewFastKeccak(),
+		sha:             keccak.NewFastKeccak(),
 		byteArrayWriter: &ByteArrayWriter{},
 		trace:           trace,
 	}

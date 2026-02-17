@@ -27,7 +27,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/crypto/keccak"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -362,7 +362,7 @@ func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 	data := scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 
 	if evm.hasher == nil {
-		evm.hasher = crypto.NewFastKeccak()
+		evm.hasher = keccak.NewFastKeccak()
 	} else {
 		evm.hasher.Reset()
 	}
