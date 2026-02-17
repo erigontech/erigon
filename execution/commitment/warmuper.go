@@ -331,7 +331,6 @@ func (w *Warmuper) WaitAndClose() {
 	}
 	w.Wait()
 	w.Close()
-	return
 }
 
 // Close cancels all warmup work and releases resources.
