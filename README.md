@@ -70,7 +70,7 @@ Set `--prune.mode` to "archive" if you need an archive node or to "minimal" if y
 System Requirements
 ===================
 
-RAM: >=32GB, [Golang >= 1.25](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
+RAM: >=32GB, [Golang >= 1.24](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4. 64-bit
 architecture.
 
 - ArchiveNode Ethereum Mainnet: 1.6TB (May 2025). FullNode: 1.1TB (May 2025)
@@ -691,7 +691,7 @@ Windows users may run erigon in 3 possible ways:
   build on windows :
     * [Git](https://git-scm.com/downloads) for Windows must be installed (provides bash and MSYS2 environment). If
       you're cloning this repository is very likely you already have it
-    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.25
+    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.24
     * [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. Then install the required
       build tools: `choco install cmake make mingw` (provides GNU CC Compiler >= 13, GNU Make, and CMake). Make sure
       Windows System "Path" variable has:
