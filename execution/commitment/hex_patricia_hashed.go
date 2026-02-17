@@ -1492,14 +1492,15 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 		fmt.Printf("[witness] root node %s, pos %d\n", hph.root.FullString(), keyPos)
 	}
 
+	var nextNode trie.Node
+	var row int
 	pathDivergenceFound := false // indicates if the extension node has a common prefix path that diverges from what is found in the hashedKey
-	for row := 0; row < hph.activeRows && keyPos < int16(len(hashedKey)); row++ {
+	for row = 0; row < hph.activeRows && keyPos < int16(len(hashedKey)); row++ {
 		if pathDivergenceFound { // path divergence found in previous iteration, cannot expand further the proof trie
 			break
 		}
 		currentNibble := hashedKey[keyPos]
 		// determine the type of the next node to expand (in the next iteration)
-		var nextNode trie.Node
 		// need to check node type along the key path
 		cellToExpand := &hph.grid[row][currentNibble]
 		// determine the next node
@@ -1700,6 +1701,23 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 		}
 		currentNode = nextNode
 	}
+
+	// dealing with terminal full node
+	if fullNode, ok := nextNode.(*trie.FullNode); ok && row < hph.activeRows {
+		for col := 0; col < 16; col++ {
+			currentCell := &hph.grid[hph.activeRows-1][col]
+			if currentCell.IsEmpty() {
+				fullNode.Children[col] = nil
+				continue
+			}
+			cellHash, _, _, err := hph.witnessComputeCellHashWithStorage(currentCell, hph.depths[hph.activeRows-1], nil)
+			if err != nil {
+				return nil, err
+			}
+			fullNode.Children[col] = trie.NewHashNode(common.Copy(cellHash[1:])) // because cellHash has 33 bytes and we want 32
+		}
+	}
+
 	tr := trie.NewInMemoryTrie(rootNode)
 	return tr, nil
 }
@@ -2304,7 +2322,7 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 
 	// collapse detected!
 	compact := NibblesToString(hashedKey)
-	fmt.Printf("[collapse-debug] updateCell: hashedKey=sx (len=%d nibbles), deleted=true, activeRows=%d\n",
+	fmt.Printf("[collapse-debug] updateCell: hashedKey=%s (len=%d nibbles), deleted=true, activeRows=%d\n",
 		compact, len(hashedKey), hph.activeRows)
 
 	// Exactly 2 children in the parent row — one is on the delete path,
@@ -2334,8 +2352,8 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 		copy(siblingPath[int(depth)+1:], siblingCell.hashedExtension[:siblingCell.hashedExtLen])
 	}
 
-	compactSibling, _ := CompactKey(siblingPath)
-	fmt.Printf("[collapse] FOUND at parentRow=%d depth=%d: deleteNibble=%x, siblingNibble=%x, siblingPath=%x (len=%d), hashLen=%d, extLen=%d\n",
+	compactSibling := NibblesToString(siblingPath)
+	fmt.Printf("[collapse] FOUND at parentRow=%d depth=%d: deleteNibble=%x, siblingNibble=%x, siblingPath=%s (len=%d), hashLen=%d, extLen=%d\n",
 		parentRow, depth, deleteNibble, siblingNibble, compactSibling, len(siblingPath), siblingCell.hashLen, siblingCell.hashedExtLen)
 
 	hph.collapseTracer(siblingPath)
@@ -2580,6 +2598,18 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 				return fmt.Errorf("unfold: %w", err)
 			}
 		}
+
+		// unfold one more level if necessary
+		lastNibble := int(hashedKey[hph.currentKeyLen])
+		lastCell := &hph.grid[hph.activeRows-1][lastNibble]
+		// if last cell is a branch node, we need to unfold one more level
+		if int16(len(hashedKey)) == hph.depths[hph.activeRows-1] && len(hashedKey) != 64 && len(hashedKey) != 128 && lastCell.hashLen > 0 {
+
+			if err := hph.unfold(hashedKey, 1); err != nil {
+				return fmt.Errorf("extra unfold: %w", err)
+			}
+		}
+
 		//hph.PrintGrid()
 		//hph.updateCell(plainKey, hashedKey, update)
 
@@ -2587,6 +2617,10 @@ func (hph *HexPatriciaHashed) GenerateWitness(ctx context.Context, updates *Upda
 		tr, err = hph.toWitnessTrie(hashedKey, codeReads) // build witness trie for this key, based on the current state of the grid
 		if err != nil {
 			return err
+		}
+		if len(plainKey) == 0 { // sibling trie
+			hashedKeyStr := NibblesToString(hashedKey)
+			fmt.Printf("sibling key #%d/%d hashedKey=%s tr.Hash=%x\n", ki+1, updatesCount, hashedKeyStr, tr.Hash())
 		}
 		tr.Reset()
 		tries = append(tries, tr)

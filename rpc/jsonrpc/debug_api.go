@@ -1543,16 +1543,16 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("[debug_executionWitness] stateless block execution failed: %w", err)
 	}
 	_ = stateless
-	/*
-			// Query the expected state for all modified accounts from the actual state DB
-		expectedState, expectedStorage, err := api.buildExpectedPostState(ctx, tx, blockNum, block,
-			readAddresses, writeAddresses, readStorageKeys, writeStorageKeys)
-		if err != nil {
-			return nil, err
-		}
-	*/
-	// //  Compare computed state vs expected state for debugging
-	// compareComputedVsExpectedState(stateless, expectedState, expectedStorage, stateless.storageDeletes)
+
+	// Query the expected state for all modified accounts from the actual state DB
+	expectedState, expectedStorage, err := api.buildExpectedPostState(ctx, tx, blockNum, block,
+		readAddresses, writeAddresses, readStorageKeys, writeStorageKeys)
+	if err != nil {
+		return nil, err
+	}
+
+	//  Compare computed state vs expected state for debugging
+	compareComputedVsExpectedState(stateless, expectedState, expectedStorage, stateless.storageDeletes)
 
 	// Verify the root matches the block's state root
 	expectedRoot := block.Root()
