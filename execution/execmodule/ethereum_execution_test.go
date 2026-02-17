@@ -168,11 +168,11 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 		b.AddTx(tx)
 	})
 	require.NoError(t, err)
-	err = insertValidateAndUfc1By1(t.Context(), m.Eth1ExecutionService, longerFork)
+	err = insertValidateAndUfc1By1(t.Context(), m.Eth1ExecutionService, longerFork.Blocks)
 	require.NoError(t, err)
-	err = insertValidateAndUfc1By1(t.Context(), m.Eth1ExecutionService, shorterFork)
+	err = insertValidateAndUfc1By1(t.Context(), m.Eth1ExecutionService, shorterFork.Blocks)
 	require.NoError(t, err)
-	err = insertValidateAndUfc1By1(t.Context(), m.Eth1ExecutionService, longerFork2)
+	err = insertValidateAndUfc1By1(t.Context(), m.Eth1ExecutionService, longerFork2.Blocks)
 	require.NoError(t, err)
 }
 
@@ -240,9 +240,8 @@ func TestAssembleBlock(t *testing.T) {
 	require.Equal(t, uint64(2), block.NumberU64())
 	require.Len(t, block.Transactions(), 2)
 
-	insertRes, err := insertBlocks(ctx, exec, []*types.Block{block})
+	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
 	require.NoError(t, err)
-	require.Equal(t, executionproto.ExecutionStatus_Success, insertRes.Result)
 }
 
 func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
@@ -280,7 +279,7 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 	require.NoError(t, err)
 
 	// Add new transactions with a delay
-	time.Sleep(1 * time.Second)
+	time.Sleep(300 * time.Millisecond)
 	addTwoTxnsToPool(ctx, 3, t, m, txpool, baseFee)
 
 	// The block should have all four transactions
@@ -289,9 +288,8 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 	require.Equal(t, uint64(2), block.NumberU64())
 	require.Len(t, block.Transactions(), 4)
 
-	insertRes, err := insertBlocks(ctx, exec, []*types.Block{block})
+	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
 	require.NoError(t, err)
-	require.Equal(t, executionproto.ExecutionStatus_Success, insertRes.Result)
 }
 
 func insertBlocks(ctx context.Context, exec *execmodule.EthereumExecutionModule, blocks []*types.Block) (*executionproto.InsertionResult, error) {
@@ -337,15 +335,15 @@ func updateForkChoice(ctx context.Context, exec *execmodule.EthereumExecutionMod
 	})
 }
 
-func insertValidateAndUfc1By1(ctx context.Context, exec *execmodule.EthereumExecutionModule, chainPack *blockgen.ChainPack) error {
-	ir, err := insertBlocks(ctx, exec, chainPack.Blocks)
+func insertValidateAndUfc1By1(ctx context.Context, exec *execmodule.EthereumExecutionModule, blocks []*types.Block) error {
+	ir, err := insertBlocks(ctx, exec, blocks)
 	if err != nil {
 		return err
 	}
 	if ir.Result != executionproto.ExecutionStatus_Success {
 		return fmt.Errorf("unexpected insertBlocks status: %s", ir.Result)
 	}
-	for _, b := range chainPack.Blocks {
+	for _, b := range blocks {
 		h := b.Header()
 		vr, err := validateChain(ctx, exec, h)
 		if err != nil {
