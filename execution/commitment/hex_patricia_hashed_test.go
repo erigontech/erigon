@@ -1099,7 +1099,7 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 	// Previously we did not apply updates in this test - trieTwo simply read same commitment data from msOne.
 	// Now when branch data is written during ProcessKeys, need to use separated state for this exact case.
 	for ck, cv := range msOne.cm {
-		err = msTwo.PutBranch([]byte(ck), cv, nil, 0)
+		err = msTwo.PutBranch([]byte(ck), cv, nil)
 		require.NoError(t, err)
 	}
 

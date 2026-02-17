@@ -63,7 +63,7 @@ func (ms *MockState) TempDir() string {
 	return ms.t.TempDir()
 }
 
-func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error {
+func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte) error {
 	// updates already merged by trie
 	if ms.concurrent.Load() {
 		ms.mu.Lock()
