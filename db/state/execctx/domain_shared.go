@@ -367,11 +367,11 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		}
 	}
 	switch domain {
-	case kv.CodeDomain:
-		if bytes.Equal(prevVal, v) {
+	case kv.CodeDomain, kv.AccountsDomain, kv.StorageDomain, kv.CommitmentDomain:
+		if bytes.Equal(prevVal, v) { // If insert unchanged values: Domain tables will be fine, but History will contain duplicate events (and it will make history invalid)
 			return nil
 		}
-	case kv.StorageDomain, kv.AccountsDomain, kv.CommitmentDomain, kv.RCacheDomain:
+	case kv.RCacheDomain:
 		//noop
 	default:
 		if bytes.Equal(prevVal, v) {
