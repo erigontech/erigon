@@ -2692,6 +2692,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	}
 	if warmuper != nil {
 		warmuper.DrainPending()
+		warmuper.Wait()
 	}
 
 	if hph.branchEncoder.DeferUpdatesEnabled() && !hph.leaveDeferredForCaller {
