@@ -298,7 +298,7 @@ func (t *Trie) Get(key []byte) (value []byte, gotValue bool) {
 		return nil, true
 	}
 
-	hex := keybytesToHex(key)
+	hex := KeybytesToHex(key)
 	return t.get(t.RootNode, hex, 0)
 }
 
@@ -307,7 +307,7 @@ func (t *Trie) FindPath(key []byte) (value []byte, parents [][]byte, gotValue bo
 		return nil, nil, true
 	}
 
-	hex := keybytesToHex(key)
+	hex := KeybytesToHex(key)
 	return t.getPath(t.RootNode, nil, hex, 0)
 }
 
@@ -316,7 +316,7 @@ func (t *Trie) GetAccount(key []byte) (value *accounts.Account, gotValue bool) {
 		return nil, true
 	}
 
-	hex := keybytesToHex(key)
+	hex := KeybytesToHex(key)
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode != nil {
@@ -332,7 +332,7 @@ func (t *Trie) GetAccountCode(key []byte) (value []byte, gotValue bool) {
 		return nil, false
 	}
 
-	hex := keybytesToHex(key)
+	hex := KeybytesToHex(key)
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode != nil {
@@ -354,7 +354,7 @@ func (t *Trie) GetAccountCodeSize(key []byte) (value int, gotValue bool) {
 		return 0, false
 	}
 
-	hex := keybytesToHex(key)
+	hex := KeybytesToHex(key)
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode != nil {
@@ -498,7 +498,7 @@ func (t *Trie) getPath(origNode Node, parents [][]byte, key []byte, pos int) ([]
 // stored in the trie.
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Update(key, value []byte) {
-	hex := keybytesToHex(key)
+	hex := KeybytesToHex(key)
 
 	newnode := ValueNode(value)
 
@@ -514,7 +514,7 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 	value := new(accounts.Account)
 	value.Copy(acc)
 
-	hex := keybytesToHex(key)
+	hex := KeybytesToHex(key)
 
 	var newnode *AccountNode
 	if value.Root == EmptyRoot || value.Root == (common.Hash{}) {
@@ -536,7 +536,7 @@ func (t *Trie) UpdateAccountCode(key []byte, code CodeNode) error {
 		return nil
 	}
 
-	hex := keybytesToHex(key)
+	hex := KeybytesToHex(key)
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode == nil || !gotValue {
@@ -563,7 +563,7 @@ func (t *Trie) UpdateAccountCodeSize(key []byte, codeSize int) error {
 		return nil
 	}
 
-	hex := keybytesToHex(key)
+	hex := KeybytesToHex(key)
 
 	accNode, gotValue := t.getAccount(t.RootNode, hex, 0)
 	if accNode == nil || !gotValue {
@@ -1044,7 +1044,7 @@ func (t *Trie) touchAll(n Node, hex []byte, del bool, incarnation uint64) {
 // Delete removes any existing value for key from the trie.
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Delete(key []byte) {
-	hex := keybytesToHex(key)
+	hex := KeybytesToHex(key)
 	_, t.RootNode = t.delete(t.RootNode, hex, false)
 }
 
@@ -1271,7 +1271,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 // The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 // wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 func (t *Trie) DeleteSubtree(keyPrefix []byte) {
-	hexPrefix := keybytesToHex(keyPrefix)
+	hexPrefix := KeybytesToHex(keyPrefix)
 
 	_, t.RootNode = t.delete(t.RootNode, hexPrefix, true)
 
@@ -1320,7 +1320,7 @@ func (t *Trie) getHasher() *hasher {
 // key prefix is removed from the key.
 // First returned value is `true` if the node with the specified prefix is found.
 func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
-	hexPrefix := keybytesToHex(keyPrefix)
+	hexPrefix := KeybytesToHex(keyPrefix)
 	accNode, gotValue := t.getAccount(t.RootNode, hexPrefix, 0)
 	if !gotValue {
 		return false, common.Hash{}
@@ -1801,4 +1801,71 @@ func resolveHashNodes(node Node, nodeMap map[common.Hash]Node, insideStorageTree
 	default:
 		return n, nil
 	}
+}
+
+// GetNode returns the trie node found at the given hex-nibble path,
+// or nil if the path does not lead to a node.
+func (t *Trie) GetNode(path []byte) Node {
+	return getNode(t.RootNode, path, 0)
+}
+
+func getNode(n Node, path []byte, pos int) Node {
+	if n == nil {
+		return nil
+	}
+	if pos >= len(path) {
+		return n
+	}
+	switch nd := n.(type) {
+	case *ShortNode:
+		key := nd.Key
+		// Strip terminator if present
+		if len(key) > 0 && key[len(key)-1] == 16 {
+			key = key[:len(key)-1]
+		}
+		remaining := path[pos:]
+		if len(remaining) < len(key) {
+			// Path is a prefix of the short node key — we're inside this node
+			if hasPrefix(key, remaining) {
+				return nd
+			}
+			return nil
+		}
+		if !hasPrefix(remaining, key) {
+			return nil
+		}
+		return getNode(nd.Val, path, pos+len(key))
+	case *FullNode:
+		child := nd.Children[path[pos]]
+		return getNode(child, path, pos+1)
+	case *DuoNode:
+		i1, i2 := nd.childrenIdx()
+		nibble := path[pos]
+		if nibble == i1 {
+			return getNode(nd.child1, path, pos+1)
+		}
+		if nibble == i2 {
+			return getNode(nd.child2, path, pos+1)
+		}
+		return nil
+	case *AccountNode:
+		// If we've reached an account node and there's more path,
+		// descend into the account's storage trie
+		return getNode(nd.Storage, path, pos)
+	default:
+		// HashNode, ValueNode — terminal, no further traversal
+		return n
+	}
+}
+
+func hasPrefix(s, prefix []byte) bool {
+	if len(s) < len(prefix) {
+		return false
+	}
+	for i, b := range prefix {
+		if s[i] != b {
+			return false
+		}
+	}
+	return true
 }

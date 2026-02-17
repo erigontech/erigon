@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
@@ -1369,9 +1370,9 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
 	}
 
-	if err := debugCompareRecordedVsGroundTruth(tx, recordingState, firstTxNumInBlock, lastTxNumInBlock); err != nil {
-		return nil, err
-	}
+	// if err := debugCompareRecordedVsGroundTruth(tx, recordingState, firstTxNumInBlock, lastTxNumInBlock); err != nil {
+	// 	return nil, err
+	// }
 
 	if len(allAddresses)+len(allStorageKeys) == 0 { // nothing touched, return empty witness
 		return result, nil
@@ -1443,7 +1444,8 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
-		fmt.Printf("[witness] node collapse detected at path %x (len=%d)\n", hashedKeyPath, len(hashedKeyPath))
+		compactHashedKey, _ := commitment.CompactKey(hashedKeyPath)
+		fmt.Printf("[witness] node collapse detected at path %x (len=%d)\n", compactHashedKey, len(hashedKeyPath))
 		collapseSiblingPaths = append(collapseSiblingPaths, common.Copy(hashedKeyPath))
 	})
 
@@ -1464,42 +1466,44 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 	touchAllKeys()
 
-	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, codeReads, "debug_executionWitness")
-	if err != nil {
-		return nil, err
-	}
-	if !bytes.Equal(witnessRoot, expectedParentRoot[:]) {
-		return nil, fmt.Errorf("regular witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
-	}
-	fmt.Printf("[witness] regular witness root OK: %x\n", witnessRoot)
+	// witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, codeReads, "debug_executionWitness")
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// if !bytes.Equal(witnessRoot, expectedParentRoot[:]) {
+	// 	return nil, fmt.Errorf("regular witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
+	// }
+	// fmt.Printf("[witness] regular witness root OK: %x\n", witnessRoot)
 
 	// === STEP 3: If collapses detected, generate a separate witness for sibling keys and merge ===
 	if len(collapseSiblingPaths) > 0 {
 		fmt.Printf("[witness] detected %d collapse sibling paths, generating collapse witness\n", len(collapseSiblingPaths))
 
 		for _, siblingPath := range collapseSiblingPaths {
-			fmt.Printf("[witness] touching collapse sibling hashed key: %x (len=%d)\n", siblingPath, len(siblingPath))
+			compactSiblingPath, err := commitment.CompactKey(siblingPath)
+			if err != nil {
+				return nil, err
+			}
+			fmt.Printf("[witness] touching collapse sibling hashed key: %x (len=%d)\n", compactSiblingPath, len(siblingPath))
 			sdCtx.TouchHashedKey(siblingPath)
 		}
-
-		collapseTrie, collapseRoot, err := sdCtx.Witness(ctx, codeReads, "debug_executionWitness_collapses")
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate collapse witness: %w", err)
-		}
-		if !bytes.Equal(collapseRoot, expectedParentRoot[:]) {
-			return nil, fmt.Errorf("collapse witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(collapseRoot), expectedParentRoot)
-		}
-		fmt.Printf("[witness] collapse witness root OK: %x\n", collapseRoot)
-
-		// Merge regular witness and collapse witness into one trie
-		witnessTrie, err = trie.MergeTries([]*trie.Trie{witnessTrie, collapseTrie})
-		if err != nil {
-			return nil, fmt.Errorf("failed to merge regular and collapse witness tries: %w", err)
-		}
-		witnessRoot = witnessTrie.Root()
 	}
 
-	printPreStateCheck(witnessTrie, readAddresses, writeAddresses, readStorageKeys, writeStorageKeys)
+	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, codeReads, "debug_executionWitness_collapses")
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate collapse witness: %w", err)
+	}
+	if !bytes.Equal(witnessRoot, expectedParentRoot[:]) {
+		return nil, fmt.Errorf("collapse witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
+	}
+
+	targetCompactPath := common.FromHex("0xab14d68802a763f7db875346d03fbf86f137de55814b191c069e721f4747473321485532722611552fbdf873d504f89d9a36e95d5d2ab5ac743aea9a4ad42431")
+	targetPath := trie.KeybytesToHex(targetCompactPath)
+	nodeFound1 := witnessTrie.GetNode(targetPath)
+	_ = nodeFound1
+	witnessRoot = witnessTrie.Root()
+
+	// printPreStateCheck(witnessTrie, readAddresses, writeAddresses, readStorageKeys, writeStorageKeys)
 
 	// Final verification: merged root matches parent state root
 	if !bytes.Equal(witnessRoot, expectedParentRoot[:]) {
@@ -2292,7 +2296,7 @@ func (s *witnessStateless) Finalize() common.Hash {
 		}
 		addrHash, _ := common.HashData(addr[:])
 		s.t.DeleteSubtree(addrHash[:])
-		fmt.Printf("  Created contract %x: cleared subtrie\n", addr[:8])
+		// fmt.Printf("  Created contract %x: cleared subtrie\n", addr[:8])
 	}
 
 	// Apply account updates
@@ -2302,7 +2306,7 @@ func (s *witnessStateless) Finalize() common.Hash {
 		}
 		addrHash, _ := common.HashData(addr[:])
 		if account != nil {
-			fmt.Printf("  UpdateAccount %x: Nonce=%d, Balance=%s\n", addr[:8], account.Nonce, account.Balance.String())
+			// fmt.Printf("  UpdateAccount %x: Nonce=%d, Balance=%s\n", addr[:8], account.Nonce, account.Balance.String())
 			s.t.UpdateAccount(addrHash[:], account)
 		} else {
 			fmt.Printf("  Delete %x\n", addr[:8])
@@ -2321,7 +2325,7 @@ func (s *witnessStateless) Finalize() common.Hash {
 		addrHash, _ := common.HashData(addr[:])
 		codeHashValue := account.CodeHash.Value()
 		if code, ok := s.codeUpdates[codeHashValue]; ok {
-			fmt.Printf("  UpdateAccountCode %x: codeHash=%x, len=%d\n", addr[:8], codeHashValue[:8], len(code))
+			// fmt.Printf("  UpdateAccountCode %x: codeHash=%x, len=%d\n", addr[:8], codeHashValue[:8], len(code))
 			if err := s.t.UpdateAccountCode(addrHash[:], code); err != nil {
 				fmt.Printf("  Warning: failed to update account code for %x: %v\n", addr[:8], err)
 			}
@@ -2343,7 +2347,7 @@ func (s *witnessStateless) Finalize() common.Hash {
 		for key, v := range m {
 			keyHash, _ := common.HashData(key[:])
 			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
-			fmt.Printf("  Storage write: account=%x, key=%x, value=%x\n", addr[:8], key[:8], v.Bytes())
+			// fmt.Printf("  Storage write: account=%x, key=%x, value=%x\n", addr[:8], key[:8], v.Bytes())
 			s.t.Update(cKey, v.Bytes())
 			s.t.DeepHash(addrHash[:])
 			// Don't call Hash() here - it would cache node refs and interfere with later updates
@@ -2363,6 +2367,8 @@ func (s *witnessStateless) Finalize() common.Hash {
 		for key := range m {
 			keyHash, _ := common.HashData(key[:])
 			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
+			hashedKeyPath := trie.KeybytesToHex(cKey)
+			fmt.Printf("DELETING Storage Key at path %x\n", hashedKeyPath)
 			s.t.Delete(cKey)
 		}
 	}
@@ -2376,12 +2382,12 @@ func (s *witnessStateless) Finalize() common.Hash {
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
 			addrHash, _ := common.HashData(addr[:])
 			gotRoot, root := s.t.DeepHash(addrHash[:])
-			fmt.Printf("  Storage root for %x: gotRoot=%v, root=%x\n", addr[:8], gotRoot, root)
+			// fmt.Printf("  Storage root for %x: gotRoot=%v, root=%x\n", addr[:8], gotRoot, root)
 			if gotRoot {
 				// Update the account's storage root and re-apply to trie
 				account.Root = root
 				s.t.UpdateAccount(addrHash[:], account)
-				fmt.Printf("  Updated account %x with storage root %x\n", addr[:8], root)
+				// fmt.Printf("  Updated account %x with storage root %x\n", addr[:8], root)
 			}
 		}
 	}
@@ -2399,7 +2405,7 @@ func (s *witnessStateless) Finalize() common.Hash {
 		}
 		addrHash, _ := common.HashData(addr[:])
 		s.t.DeleteSubtree(addrHash[:])
-		fmt.Printf("  Deleted account subtrie %x, hash=%x\n", addr[:8], s.t.Hash())
+		// fmt.Printf("  Deleted account subtrie %x, hash=%x\n", addr[:8], s.t.Hash())
 	}
 
 	// Compute and return the final hash

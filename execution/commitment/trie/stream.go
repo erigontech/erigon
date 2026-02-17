@@ -812,12 +812,12 @@ func HashWithModifications(
 	offset := 0
 	for ki < keyCount {
 		if accountKeyHex == nil && ai < len(aKeys) {
-			accountKeyHex = keybytesToHex(aKeys[ai][:])
+			accountKeyHex = KeybytesToHex(aKeys[ai][:])
 			accountKeyHex = accountKeyHex[:len(accountKeyHex)-1]
 			ai++
 		}
 		if storageKeyHex == nil && si < len(sKeys) {
-			storageKeyHex = keybytesToHex(sKeys[si][:])
+			storageKeyHex = KeybytesToHex(sKeys[si][:])
 			storageKeyHex = storageKeyHex[:len(storageKeyHex)-1]
 			si++
 		}

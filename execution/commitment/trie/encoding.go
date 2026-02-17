@@ -65,7 +65,7 @@ func compactToHex(compact []byte) []byte {
 	if len(compact) == 0 {
 		return compact
 	}
-	base := keybytesToHex(compact)
+	base := KeybytesToHex(compact)
 	// delete terminator flag
 	if base[0] < 2 {
 		base = base[:len(base)-1]
@@ -158,7 +158,7 @@ func (x *Keybytes) DecodeRLP(s *rlp.Stream) error {
 	return nil
 }
 
-func keybytesToHex(str []byte) []byte {
+func KeybytesToHex(str []byte) []byte {
 	l := len(str)*2 + 1
 	var nibbles = make([]byte, l)
 	for i, b := range str {
