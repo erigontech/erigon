@@ -27,6 +27,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -105,7 +106,7 @@ func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
 		return nil, err
 	}
 
-	w := bufio.NewWriterSize(bufferFile, BufIOSize)
+	w := bufio.NewWriterSize(bufferFile, length.BufIOSize)
 	defer w.Flush() //nolint:errcheck
 
 	if err = b.Write(w); err != nil {
@@ -120,7 +121,7 @@ func (p *fileDataProvider) Next(keyBuf, valBuf []byte) ([]byte, []byte, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		r := bufio.NewReaderSize(p.file, BufIOSize)
+		r := bufio.NewReaderSize(p.file, length.BufIOSize)
 		p.reader = r
 		p.byteReader = r
 

@@ -38,3 +38,6 @@ const (
 	// Incarnation length of uint64 for contract incarnations
 	Incarnation = 8
 )
+
+// BufIO constant is for bufio.NewReaderSize and bufio.NewWriterSize. Default: 4Kb. Increasing over `256Kb` doesn't speedup on SSD/NVMe, but speedup on CloudDrives (like: gp3, pd-ssd)
+const BufIOSize = 16 * 1024

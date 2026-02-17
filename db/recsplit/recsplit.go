@@ -29,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/version"
 
 	"github.com/spaolacci/murmur3"
@@ -760,7 +761,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	}
 
 	defer rs.indexF.Close()
-	rs.indexW = bufio.NewWriterSize(rs.indexF, etl.BufIOSize)
+	rs.indexW = bufio.NewWriterSize(rs.indexF, length.BufIOSize)
 	// 1 byte: dataStructureVersion, 7 bytes: app-specific minimal dataID (of current shard)
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)
 	rs.numBuf[0] = uint8(rs.dataStructureVersion)

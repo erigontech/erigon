@@ -48,13 +48,13 @@ import (
 	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/disk"
 	"github.com/erigontech/erigon/common/estimate"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/compress"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/downloader/webseeds"
-	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -1999,7 +1999,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 
 		t := time.Now()
 		g := decompressor.MakeGetter()
-		buf := make([]byte, 0, 16*etl.BufIOSize)
+		buf := make([]byte, 0, 16*length.BufIOSize)
 		for g.HasNext() {
 			buf, _ = g.Next(buf[:0])
 		}

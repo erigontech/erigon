@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/etl"
@@ -267,7 +268,7 @@ func (btw *BtIndexWriter) Build() error {
 		return fmt.Errorf("create temp index file for %s: %w", btw.args.IndexFile, err)
 	}
 	defer btw.indexF.Close()
-	btw.indexW = bufio.NewWriterSize(btw.indexF, etl.BufIOSize)
+	btw.indexW = bufio.NewWriterSize(btw.indexF, length.BufIOSize)
 
 	defer btw.collector.Close()
 	log.Log(btw.args.Lvl, "[index] calculating", "file", btw.indexFileName)

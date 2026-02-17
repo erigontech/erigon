@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/seg/patricia"
@@ -302,7 +303,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	intermediatePath := intermediateFile.Name()
 	defer dir.RemoveFile(intermediatePath)
 	defer intermediateFile.Close()
-	intermediateW := bufio.NewWriterSize(intermediateFile, 8*etl.BufIOSize)
+	intermediateW := bufio.NewWriterSize(intermediateFile, 8*length.BufIOSize)
 
 	var inCount, outCount, emptyWordsCount uint64 // Counters words sent to compression and returned for compression
 	var numBuf [binary.MaxVarintLen64]byte
@@ -535,7 +536,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] Effective dictionary", logPrefix), logCtx...)
 	}
-	cw := bufio.NewWriterSize(cf, 4*etl.BufIOSize)
+	cw := bufio.NewWriterSize(cf, 4*length.BufIOSize)
 	// 1-st, output amount of words - just a useful metadata
 	binary.BigEndian.PutUint64(numBuf[:], inCount) // Dictionary size
 	if _, err = cw.Write(numBuf[:8]); err != nil {
@@ -652,7 +653,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	wc := 0
 	var hc BitWriter
 	hc.w = cw
-	r := bufio.NewReaderSize(intermediateFile, 2*etl.BufIOSize)
+	r := bufio.NewReaderSize(intermediateFile, 2*length.BufIOSize)
 	copyNBuf := make([]byte, 32*1024)
 
 	var l uint64
@@ -984,7 +985,7 @@ func PersistDictionary(fileName string, db *DictionaryBuilder) error {
 	if err != nil {
 		return err
 	}
-	w := bufio.NewWriterSize(df, 2*etl.BufIOSize)
+	w := bufio.NewWriterSize(df, 2*length.BufIOSize)
 	db.ForEach(func(score uint64, word []byte) { fmt.Fprintf(w, "%d %x\n", score, word) })
 	if err = w.Flush(); err != nil {
 		return err
@@ -1003,7 +1004,7 @@ func ReadSimpleFile(fileName string, walker func(v []byte) error) error {
 		return err
 	}
 	defer f.Close()
-	r := bufio.NewReaderSize(f, etl.BufIOSize)
+	r := bufio.NewReaderSize(f, length.BufIOSize)
 	buf := make([]byte, 4096)
 	for l, e := binary.ReadUvarint(r); ; l, e = binary.ReadUvarint(r) {
 		if e != nil {

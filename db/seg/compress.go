@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	dir2 "github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 )
@@ -902,7 +903,7 @@ func NewRawWordsFile(filePath string) (*RawWordsFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	w := bufio.NewWriterSize(f, 2*etl.BufIOSize)
+	w := bufio.NewWriterSize(f, 2*length.BufIOSize)
 	return &RawWordsFile{filePath: filePath, f: f, w: w, buf: make([]byte, 128)}, nil
 }
 func OpenRawWordsFile(filePath string) (*RawWordsFile, error) {
@@ -910,7 +911,7 @@ func OpenRawWordsFile(filePath string) (*RawWordsFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	w := bufio.NewWriterSize(f, 2*etl.BufIOSize)
+	w := bufio.NewWriterSize(f, 2*length.BufIOSize)
 	return &RawWordsFile{filePath: filePath, f: f, w: w, buf: make([]byte, 128)}, nil
 }
 func (f *RawWordsFile) Flush() error {
