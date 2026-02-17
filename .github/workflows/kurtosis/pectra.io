@@ -10,12 +10,12 @@ participants_matrix:
       cl_image: sigp/lighthouse:v7.0.1
 
 network_params:
-  electra_fork_epoch: 1
+  electra_fork_epoch: 0
   min_validator_withdrawability_delay: 1
   shard_committee_period: 1
   churn_limit_quotient: 16
   seconds_per_slot: 4
-  genesis_delay: 90
+  genesis_delay: 120
 
 additional_services:
   - assertoor
