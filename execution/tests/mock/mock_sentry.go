@@ -326,8 +326,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
 	cfg.Genesis = gspec
 	cfg.Prune = prune
-	cfg.FcuBackgroundCommit = true
-	cfg.FcuBackgroundPrune = true
+	cfg.FcuBackgroundCommit = false
+	cfg.FcuBackgroundPrune = false
 	cfg.ExperimentalBAL = opt.experimentalBAL
 
 	logLvl := log.LvlError
