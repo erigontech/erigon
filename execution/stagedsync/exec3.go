@@ -130,7 +130,7 @@ func ExecV3(ctx context.Context,
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
 	hooks := cfg.vmConfig.Tracer
 	applyTx := rwTx
-	err := doms.SeekCommitment(ctx, applyTx)
+	_, _, err := doms.SeekCommitment(ctx, applyTx)
 	if err != nil {
 		return err
 	}
@@ -138,11 +138,13 @@ func ExecV3(ctx context.Context,
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if isApplyingBlocks {
 		if initialCycle {
-			agg.SetCollateAndBuildWorkers(2) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
+			agg.SetCollateAndBuildWorkers(dbg.CollateWorkers) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
 			agg.SetCompressWorkers(dbg.CompressWorkers)
+			agg.SetMergeWorkers(dbg.MergeWorkers) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
 		} else {
 			agg.SetCollateAndBuildWorkers(1)
 			agg.SetCompressWorkers(dbg.CompressWorkers)
+			agg.SetMergeWorkers(dbg.MergeWorkers) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
 		}
 	}
 
