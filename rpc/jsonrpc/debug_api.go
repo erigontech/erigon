@@ -833,9 +833,7 @@ func (s *RecordingState) UpdateAccountCode(address accounts.Address, incarnation
 	addr := address.Value()
 	s.ModifiedAccounts[addr] = struct{}{}
 	s.codeOverlay[addr] = common.Copy(code)
-	if len(code) > 0 {
-		s.ModifiedCode[addr] = common.Copy(code)
-	}
+	s.ModifiedCode[addr] = common.Copy(code)
 	return nil
 }
 
