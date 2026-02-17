@@ -279,6 +279,14 @@ func (sdc *SharedDomainsCommitmentContext) EnableWarmupCache(enable bool) {
 	sdc.patriciaTrie.EnableWarmupCache(enable)
 }
 
+// ClearWarmupCache discards any stale account/storage values held in the active
+// warmup cache. Safe to call at block boundaries between ComputeCommitment calls.
+func (sdc *SharedDomainsCommitmentContext) ClearWarmupCache() {
+	if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok && hph.Cache() != nil {
+		hph.Cache().Clear()
+	}
+}
+
 func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix string) {
 	sdc.patriciaTrie.EnableCsvMetrics(filePathPrefix)
 }
