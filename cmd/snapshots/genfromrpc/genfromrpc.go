@@ -933,7 +933,8 @@ func GetBlockByNumber(ctx context.Context, client, receiptClient *rpc.Client, bl
 		return nil, err
 	}
 
-	txs, err := unMarshalTransactions(ctx, receiptClient, block.Transactions, verify, isArbitrum, blockMetadata)
+	timeboostActivated := block.Number.Uint64() > 327_000_000 // for arb1
+	txs, err := unMarshalTransactions(ctx, receiptClient, block.Transactions, verify, isArbitrum, blockMetadata, timeboostActivated)
 	if err != nil {
 		return nil, err
 	}
@@ -983,7 +984,7 @@ func GetBlockByNumber(ctx context.Context, client, receiptClient *rpc.Client, bl
 	return blk, nil
 }
 
-func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool, blockMetadata []byte) (types.Transactions, error) {
+func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map[string]interface{}, verify bool, isArbitrum bool, blockMetadata []byte, timeboostActivated bool) (types.Transactions, error) {
 	txs := make(types.Transactions, len(rawTxs))
 
 	receiptsEnabled := client != nil
@@ -1042,7 +1043,7 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 			}
 
 			// Set timeboosted from block metadata if available
-			if len(blockMetadata) > 0 && timeboostedTxTypes[typeTx] {
+			if timeboostActivated && len(blockMetadata) > 0 && timeboostedTxTypes[typeTx] {
 				timeboosted := IsTxTimeboosted(blockMetadata, idx)
 				if timeboosted != nil {
 					tx.SetTimeboosted(timeboosted)
@@ -1093,6 +1094,11 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 					//		"receipt", fmt.Sprintf("%+v", receipt))
 					//	return fmt.Errorf("receipt tx hash mismatch for tx %s", txData["hash"])
 					//}
+					// can use receipts if blockMetadata is not available
+					//if receipt.Timeboosted != nil {
+					//	tx.SetTimeboosted(receipt.Timeboosted)
+					//}
+
 
 					if egu := receipt.GasUsed; egu != nil && egu.Uint64() > 0 {
 						if srtx, ok := tx.(*types.ArbitrumSubmitRetryableTx); ok {

@@ -263,7 +263,14 @@ var (
 				defer d.MadvSequential().DisableReadAhead()
 				defer bodiesSegment.MadvSequential().DisableReadAhead()
 
-				uniq := make(map[common.Hash]uint64, 1_000_00)
+				txnHashDupesExpected := chainConfig.IsArbitrum() && chainConfig.ChainName == networkname.ArbitrumOne
+				// in arbitrum One chain there are few txn hash duplicates, first seen is always accepted while follow-ups are rejected, but still visible in explorer/RPC
+				// Duplicates breaks index creation, have to filter them out
+				var uniqTxnHashes map[common.Hash]uint64
+				if txnHashDupesExpected {
+					uniqTxnHashes = make(map[common.Hash]uint64, 100_000)
+				}
+
 				for {
 					g, bodyGetter := d.MakeGetter(), bodiesSegment.MakeGetter()
 					var ti, offset, nextPos uint64
@@ -313,16 +320,24 @@ var (
 							}
 							txnHash = txn.Hash()
 						}
-						// if chainConfig.IsArbitrum() {
-						_, ok := uniq[txnHash]
-						uniq[txnHash]++
-						if ok {
-							_, err = rand.Read(txnHash[:])
-							if err != nil {
-								return fmt.Errorf("failed to generate new txnHash: %w", err)
+						if txnHashDupesExpected {
+							_, hashExisted := uniqTxnHashes[txnHash]
+							uniqTxnHashes[txnHash]++
+							if hashExisted {
+								//ti++
+								//offset = nextPos
+								//expectedCount--
+								//continue
+								// TODO should we really generate random hash or just skip this txn at all? non existing txn is not much better than duplicate
+								//   it also increases following txn position in block which is not something good - this txn should not be even included
+								//   it affects TxsAmountBasedOnBodiesSnapshots - we should reduce it as well, but this could be used for snapshot verification or something
+
+								_, err = rand.Read(txnHash[:])
+								if err != nil {
+									return fmt.Errorf("failed to generate new txnHash: %w", err)
+								}
 							}
 						}
-						// }
 
 						if err := txnHashIdx.AddKey(txnHash[:], offset); err != nil {
 							return err
@@ -345,7 +360,7 @@ var (
 							txnHashIdx.ResetNextSalt()
 							txnHash2BlockNumIdx.ResetNextSalt()
 
-							uniq = make(map[common.Hash]uint64, 1_000_00)
+							clear(uniqTxnHashes)
 							continue
 						}
 						return fmt.Errorf("txnHashIdx: %w", err)
@@ -355,12 +370,20 @@ var (
 							logger.Warn("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
 							txnHashIdx.ResetNextSalt()
 							txnHash2BlockNumIdx.ResetNextSalt()
-							uniq = make(map[common.Hash]uint64, 1_000_00)
+
+							clear(uniqTxnHashes)
 							continue
 						}
 						return fmt.Errorf("txnHash2BlockNumIdx: %w", err)
 					}
 
+					if txnHashDupesExpected {
+						for txh, dupCount := range uniqTxnHashes {
+							if dupCount > 1 {
+								log.Warn("Duplicate transaction hash", "txHash", txh, "dupes", dupCount, "file", sn.Name())
+							}
+						}
+					}
 					return nil
 				}
 			}),

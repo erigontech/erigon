@@ -26,6 +26,7 @@ type ArbitrumChainParams struct {
 	InitialArbOSVersion       uint64         `json:"InitialArbOSVersion"`
 	InitialChainOwner         common.Address `json:"InitialChainOwner"`
 	GenesisBlockNum           uint64         `json:"GenesisBlockNum"`
+	GenesisTxNum              uint64         `json:"GenesisTxNum"`
 
 	MaxCodeSize     uint64 `json:"MaxCodeSize,omitempty"`     // Maximum bytecode to permit for a contract. 0 value implies params.DefaultMaxCodeSize
 	MaxInitCodeSize uint64 `json:"MaxInitCodeSize,omitempty"` // Maximum initcode to permit in a creation transaction and create instructions. 0 value implies params.DefaultMaxInitCodeSize

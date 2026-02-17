@@ -206,6 +206,12 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		return healthCheckErr
 	}
 
+	// Debug: fetch single block to test TD seeding
+	//if err := DebugFetchSingleBlock(ctx, tx, client, receiptClient, 87800000); err != nil {
+	//	log.Error("[Debug] Single block fetch failed", "err", err)
+	//}
+	//return nil // Debug: exit early after single block test
+
 	if firstBlock >= latestRemoteBlock.Uint64() {
 		return nil
 	}
@@ -839,4 +845,65 @@ func (cr ChainReaderImpl) GetBlock(hash common.Hash, number uint64) *types.Block
 func (cr ChainReaderImpl) HasBlock(hash common.Hash, number uint64) bool {
 	b, _ := cr.blockReader.BodyRlp(context.Background(), cr.tx, hash, number)
 	return b != nil
+}
+
+// DebugFetchSingleBlock is a one-shot debug function to fetch a single block,
+// write its header/body/TD, and verify everything is correctly filled.
+// Does not update stage progress
+func DebugFetchSingleBlock(ctx context.Context, tx kv.RwTx, client, receiptClient *rpc.Client, blockNum uint64) error {
+	log.Info("[Debug] Fetching single block", "block", blockNum)
+
+	var metadataMap map[uint64][]byte
+	var err error
+	metadataMap, err = snapshots.FetchBlockMetadataBatch(context.Background(), client, blockNum, blockNum+1)
+	if err != nil {
+		log.Crit("Failed to fetch block metadata batch", "err", err)
+	}
+
+	blk, err := snapshots.GetBlockByNumber(ctx, client, receiptClient, new(big.Int).SetUint64(blockNum), true, true, metadataMap[blockNum])
+	if err != nil {
+		return fmt.Errorf("failed to fetch block %d: %w", blockNum, err)
+	}
+
+	log.Info("[Debug] Block fetched",
+		"number", blk.NumberU64(),
+		"hash", blk.Hash(),
+		"parentHash", blk.ParentHash(),
+		"txCount", len(blk.Transactions()),
+		"difficulty", blk.Difficulty(),
+	)
+
+	if err := rawdb.WriteHeader(tx, blk.Header()); err != nil {
+		return fmt.Errorf("failed to write header: %w", err)
+	}
+	log.Info("[Debug] Header written", "block", blockNum)
+
+	if _, err := rawdb.WriteRawBodyIfNotExists(tx, blk.Hash(), blockNum, blk.RawBody()); err != nil {
+		return fmt.Errorf("failed to write body: %w", err)
+	}
+	log.Info("[Debug] Body written", "block", blockNum)
+
+	parentTd, err := rawdb.ReadTd(tx, blk.ParentHash(), blockNum-1)
+	if err != nil {
+		return fmt.Errorf("failed to read parent TD: %w", err)
+	}
+	if parentTd == nil {
+		log.Warn("[Debug] Parent TD is nil, seeding with block number", "parentBlock", blockNum-1)
+		return fmt.Errorf("td is nil")
+	} else {
+		log.Info("[Debug] Parent TD exists", "parentBlock", blockNum-1, "td", parentTd)
+	}
+
+	td := new(big.Int).Add(parentTd, blk.Difficulty())
+	if err := rawdb.WriteTd(tx, blk.Hash(), blockNum, td); err != nil {
+		return fmt.Errorf("failed to write TD: %w", err)
+	}
+	log.Info("[Debug] TD written", "block", blockNum, "td", td)
+
+	if err := rawdb.WriteCanonicalHash(tx, blk.Hash(), blockNum); err != nil {
+		return fmt.Errorf("failed to write canonical hash: %w", err)
+	}
+	log.Info("[Debug] Canonical hash written", "block", blockNum)
+
+	return nil
 }

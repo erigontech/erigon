@@ -26,8 +26,9 @@ import (
 )
 
 // GetConfig retrieves the consensus settings based on the given genesis hash.
-func GetConfig(db kv.Getter, buf []byte) (*Config, error) {
-	hash, err := CanonicalHash(db, 0, buf)
+func GetConfig(db kv.Getter, buf []byte, genBlockNumber uint64) (*Config, error) {
+	//arb1 genesis block is 22207817
+	hash, err := CanonicalHash(db, genBlockNumber, buf)
 	if err != nil {
 		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
 	}
