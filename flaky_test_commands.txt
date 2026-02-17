@@ -1,0 +1,20 @@
+# CI commands that run the flaky tests
+# This is exactly what CI executes — use it as ground truth.
+# Extracted from .github/workflows/
+
+============================================================
+Action: win (windows-2025)
+============================================================
+
+# Workflow: ci.yml
+# Step: Install make
+choco install make -y
+
+# Workflow: ci.yml
+# Step: Testing build all
+make all
+
+# Workflow: ci.yml
+# Step: Execute test-short
+make test-short
+
