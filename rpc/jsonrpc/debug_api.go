@@ -2272,7 +2272,7 @@ func (s *witnessStateless) debugPrintPendingUpdates(blockNum uint64) {
 }
 
 // Finalize applies all pending updates to the trie and returns the new root hash
-func (s *witnessStateless) Finalize() common.Hash {
+func (s *witnessStateless) Finalize() (common.Hash, error) {
 	fmt.Printf("\n=== Finalize: Applying updates ===\n")
 
 	// Handle created contracts - clear their storage subtries
@@ -2307,7 +2307,7 @@ func (s *witnessStateless) Finalize() common.Hash {
 		if code, ok := s.codeUpdates[codeHashValue]; ok {
 			// fmt.Printf("  UpdateAccountCode %x: codeHash=%x, len=%d\n", addr[:8], codeHashValue[:8], len(code))
 			if err := s.t.UpdateAccountCode(addrHash[:], code); err != nil {
-				fmt.Printf("  Warning: failed to update account code for %x: %v\n", addr[:8], err)
+				return common.Hash{}, fmt.Errorf("failed to update account code for addr %x: %v\n", addr, err)
 			}
 		}
 	}
@@ -2378,8 +2378,7 @@ func (s *witnessStateless) Finalize() common.Hash {
 
 	// Compute and return the final hash
 	finalHash := s.t.Hash()
-	fmt.Printf("=== Finalize complete: final hash=%x ===\n\n", finalHash)
-	return finalHash
+	return finalHash, nil
 }
 
 // execBlockStatelessly executes the block statelessly.
@@ -2424,11 +2423,6 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	header := block.Header()
 	blockNum := block.NumberU64()
 
-	// Debug: print block info and verify pre-state
-	fmt.Printf("\n=== Block %d verification ===\n", blockNum)
-	fmt.Printf("Witness trie root: %x\n", stateless.t.Hash())
-	fmt.Printf("Block state root (expected after execution): %x\n", block.Root())
-
 	// Create EVM block context - pass header.Coinbase as the author/beneficiary
 	// This ensures gas fees go to the correct address based on the block header
 	coinbase := accounts.InternAddress(header.Coinbase)
@@ -2468,7 +2462,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 
 		// Finalize tx - state changes go to the witness stateless
 		if err = ibs.FinalizeTx(blockRules, stateless); err != nil {
-			return common.Hash{}, stateless, fmt.Errorf("[statelessExec]] failed to finalize tx %d: %w", txIndex, err)
+			return common.Hash{}, stateless, fmt.Errorf("[statelessExec] failed to finalize tx %d: %w", txIndex, err)
 		}
 	}
 
@@ -2489,7 +2483,10 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	}
 
 	// Finalize and compute the resulting state root
-	newStateRoot := stateless.Finalize()
+	newStateRoot, err := stateless.Finalize()
+	if err != nil {
+		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] stateless.Finalize() failed: %w", err)
+	}
 	return newStateRoot, stateless, nil
 }
 
