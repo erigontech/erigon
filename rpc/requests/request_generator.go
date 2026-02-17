@@ -26,7 +26,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"sync"
+	sync "github.com/linkdata/deadlock"
 	"time"
 
 	"github.com/valyala/fastjson"

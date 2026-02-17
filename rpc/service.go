@@ -25,7 +25,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	"sync"
+	sync "github.com/linkdata/deadlock"
 	"unicode"
 
 	"github.com/erigontech/erigon/common/dbg"
