@@ -98,9 +98,12 @@ fi
 # Run the RPC integration tests
 set +e # Disable exit on error for test run
 
+
+# move to home dir of rpc-tests
+cd ..
 retries=0
 while true; do
-   python3 ./run_tests.py --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail --json-diff $OPTIONAL_FLAGS --exclude-api-list "$DISABLED_TESTS" | tee "$LOG_FILE"
+   go run cmd/integration/main.go --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail --json-diff $OPTIONAL_FLAGS --exclude-api-list "$DISABLED_TESTS" | tee "$LOG_FILE"
    RUN_TESTS_EXIT_CODE=${PIPESTATUS[0]}
 
    if [ "$RUN_TESTS_EXIT_CODE" -eq 0 ]; then
