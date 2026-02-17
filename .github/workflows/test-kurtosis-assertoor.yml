@@ -53,7 +53,7 @@ jobs:
         with:
             enclave_name: "kurtosis-run1-${{ github.run_id }}"
             ethereum_package_args: ".github/workflows/kurtosis/regular-assertoor.io"
-            ethereum_package_branch: "5.0.1"
+            ethereum_package_branch: "6.0.0"
             kurtosis_extra_args: --verbosity detailed --cli-log-level trace
             persistent_logs: "true"
 
@@ -94,6 +94,6 @@ jobs:
         with:
             enclave_name: "kurtosis-run2-${{ github.run_id }}"
             ethereum_package_args: ".github/workflows/kurtosis/pectra.io"
-            ethereum_package_branch: "5.0.1"
+            ethereum_package_branch: "6.0.0"
             kurtosis_extra_args: --verbosity detailed --cli-log-level trace
             persistent_logs: "true"
