@@ -21,18 +21,16 @@ package trie
 
 import (
 	"errors"
-	"hash"
 	"sync"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/keccak"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
 type hasher struct {
-	sha                  crypto.KeccakState
+	sha                  keccak.KeccakState
 	valueNodesRlpEncoded bool
 	buffers              [1024 * 1024]byte
 	prefixBuf            [8]byte
@@ -41,14 +39,6 @@ type hasher struct {
 }
 
 const rlpPrefixLength = 4
-
-// keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
-// Read to get a variable amount of data from the hash state. Read is faster than Sum
-// because it doesn't copy the internal state, but also modifies the internal state.
-type keccakState interface {
-	hash.Hash
-	Read([]byte) (int, error)
-}
 
 var hashersPool = sync.Pool{
 	New: func() any {

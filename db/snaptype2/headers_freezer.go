@@ -9,6 +9,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/crypto/keccak"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -90,7 +91,7 @@ func (f *HeaderFreezer) Freeze(ctx context.Context, blockFrom, blockTo state.Roo
 var _ state.IndexKeyFactory = (*HeaderAccessorIndexKeyFactory)(nil)
 
 type HeaderAccessorIndexKeyFactory struct {
-	s crypto.KeccakState
+	s keccak.KeccakState
 	h common.Hash
 }
 

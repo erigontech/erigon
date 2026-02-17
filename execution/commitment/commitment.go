@@ -1131,7 +1131,7 @@ func validateAfterMap(afterMap uint16, row [16]*cell) error {
 	return nil
 }
 
-func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccakState) error {
+func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccak.KeccakState) error {
 	uncompactedBranchKey := uncompactNibbles(branchKey)
 	if HasTerm(uncompactedBranchKey) {
 		uncompactedBranchKey = uncompactedBranchKey[:len(uncompactedBranchKey)-1]

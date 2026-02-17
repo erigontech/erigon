@@ -17,10 +17,20 @@
 package keccak
 
 import (
+	"hash"
+
 	keccak "github.com/Giulio2002/fastkeccak"
 )
 
-// fastKeccakState wraps fastkeccak.Hasher to implement the keccakState interface.
+// KeccakState wraps the keccak hasher (backed by fastkeccak). In addition to the usual hash methods, it also supports
+// Read to get a variable amount of data from the hash state. Read is faster than Sum
+// because it doesn't copy the internal state, but also modifies the internal state.
+type KeccakState interface {
+	hash.Hash
+	Read([]byte) (int, error)
+}
+
+// fastKeccakState wraps fastkeccak.Hasher to implement the KeccakState interface.
 // It provides the same streaming hash interface but uses platform-optimized assembly
 // (NEON SHA3 on arm64, unrolled permutation on amd64) for significantly faster hashing.
 type fastKeccakState struct {
