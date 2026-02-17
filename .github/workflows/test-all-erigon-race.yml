@@ -125,8 +125,11 @@ jobs:
             consensus)
               go test -race -timeout 60m ./cl/...
               ;;
-            core-rpc)
-              go test -race -timeout 30m ./db/... ./node/... ./txnprovider/... ./p2p/... ./rpc/...
+            p2p-rpc)
+              go test -race -timeout 30m ./p2p/... ./rpc/...
+              ;;
+            core-db)
+              go test -race -timeout 30m ./db/... ./node/... ./txnprovider/...
               ;;
             other)
               DIRS=$(ls -d -- */ | grep -vE '^(execution|cl|p2p|rpc|db|node|txnprovider|dashboards)/$' | sed 's/\/$//')
@@ -138,6 +141,11 @@ jobs:
                   fi
                 fi
               done
+              ;;
+            *)
+              echo "Error: Unknown test-group value '${{ matrix.test-group }}'"
+              echo "Expected one of: execution-tests, execution-other, consensus, p2p-rpc, core-db, other"
+              exit 1
               ;;
           esac
 
