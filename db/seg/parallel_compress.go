@@ -181,10 +181,6 @@ func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, o
 
 func coverWordsByPatternsWorker(ctx context.Context, trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, trie *patricia.PatriciaTree, inputSize, outputSize *atomic.Uint64, posMap map[uint64]uint64) {
 	defer completion.Done()
-	if err := WorkersLimiter.Acquire(ctx, 1); err != nil {
-		return
-	}
-	defer WorkersLimiter.Release(1)
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
 	var patterns = make([]int, 0, 256)
@@ -779,10 +775,6 @@ func copyN(r io.Reader, w io.Writer, uncoveredCount int, buf []byte) error {
 func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byte, dictCollector *etl.Collector, cfg Cfg, completion *sync.WaitGroup, logger log.Logger) {
 	minPatternScore, minPatternLen, maxPatternLen := cfg.MinPatternScore, cfg.MinPatternLen, cfg.MaxPatternLen
 	defer completion.Done()
-	if err := WorkersLimiter.Acquire(ctx, 1); err != nil {
-		return
-	}
-	defer WorkersLimiter.Release(1)
 	dictVal := make([]byte, 8)
 	dictKey := make([]byte, maxPatternLen)
 	var lcp, sa, inv []int32
