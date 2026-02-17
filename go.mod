@@ -47,7 +47,7 @@ require (
 	github.com/elastic/go-freelru v0.16.0
 	github.com/ethereum/go-bigmodexpfix v0.0.0-20250911101455-f9e208c548ab
 	github.com/felixge/fgprof v0.9.5
-	github.com/go-chi/chi/v5 v5.2.5
+	github.com/go-chi/chi/v5 v5.2.3
 	github.com/go-chi/cors v1.2.2
 	github.com/go-echarts/go-echarts/v2 v2.6.7
 	github.com/go-quicktest/qt v1.101.0
@@ -112,11 +112,11 @@ require (
 	github.com/tidwall/btree v1.8.1
 	github.com/ugorji/go/codec v1.2.13
 	github.com/urfave/cli/v2 v2.27.7
-	github.com/valyala/fastjson v1.6.7
+	github.com/valyala/fastjson v1.6.4
 	github.com/vektah/gqlparser/v2 v2.5.31
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/mock v0.6.0
-	go.uber.org/zap v1.27.1
+	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.48.0
 	golang.org/x/exp v0.0.0-20251113190631-e25ba8c21ef6
 	golang.org/x/net v0.50.0
@@ -360,7 +360,7 @@ require (
 	github.com/nishanths/predeclared v0.2.2 // indirect
 	github.com/nunnatsa/ginkgolinter v0.22.0 // indirect
 	github.com/onsi/ginkgo/v2 v2.27.2 // indirect
-	github.com/opencontainers/runtime-spec v1.3.0 // indirect
+	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	github.com/pion/datachannel v1.5.9 // indirect
 	github.com/pion/dtls/v2 v2.2.12 // indirect
 	github.com/pion/dtls/v3 v3.0.3 // indirect
