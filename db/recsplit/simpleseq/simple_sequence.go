@@ -59,7 +59,7 @@ func (s *SimpleSequence) AddOffset(offset uint64) {
 	s.pos++
 }
 
-func (s *SimpleSequence) Reset(baseNum uint64, raw []byte) { // no `return parameter` to avoid heap-allocation
+func (s *SimpleSequence) Reset(baseNum uint64, raw []byte) { // no `return parameter` to avoid heap-allocation of `s` object
 	s.baseNum = baseNum
 	s.raw = raw
 	s.pos = len(raw) / 4
