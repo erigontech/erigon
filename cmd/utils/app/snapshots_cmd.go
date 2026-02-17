@@ -20,7 +20,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -213,7 +212,10 @@ var snapshotCommand = cli.Command{
 		{
 			Name:   "compress",
 			Action: doCompress,
-			Flags:  joinFlags([]cli.Flag{&utils.DataDirFlag}),
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.StringFlag{Name: "from"},
+			}),
 		},
 		{
 			Name:   "decompress-speed",
@@ -1217,7 +1219,10 @@ func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
 	defer db.Close()
 	blockReader, _ := blockRetire.IO()
 	blockNum := cliCtx.Uint64("block")
-	return integrity.CheckCommitmentHistAtBlk(ctx, db, blockReader, blockNum, logger)
+	if err = integrity.CheckCommitmentHistAtBlk(ctx, db, blockReader, blockNum, logger); err != nil {
+		return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
+	}
+	return nil
 }
 
 func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) error {
@@ -1656,8 +1661,9 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 
 func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) error {
 	type interval struct {
-		from uint64
-		to   uint64
+		from  uint64
+		to    uint64
+		fName string
 	}
 
 	intervals := []interval{}
@@ -1678,7 +1684,7 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 		if !ok {
 			return nil
 		}
-		intervals = append(intervals, interval{from: res.From, to: res.To})
+		intervals = append(intervals, interval{from: res.From, to: res.To, fName: info.Name()})
 		return nil
 	}); err != nil {
 		return err
@@ -1690,18 +1696,18 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 		return fmt.Errorf("no snapshot files found in %s for type: %s", snapDir, snapType)
 	}
 	if intervals[0].from != 0 {
-		return fmt.Errorf("gap at start: snapshots start at (%d-%d). snaptype: %s", intervals[0].from, intervals[0].to, snapType)
+		return fmt.Errorf("gap at start: snapshots start at (%d-%d). snaptype: %s. files: %s", intervals[0].from, intervals[0].to, snapType, intervals[0].fName)
 	}
 	// Check that there are no overlaps
 	for i := 1; i < len(intervals); i++ {
 		if intervals[i].from < intervals[i-1].to {
-			return fmt.Errorf("overlap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
+			return fmt.Errorf("overlap between (%d-%d) and (%d-%d). snaptype: %s. files: %s %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType, intervals[i-1].fName, intervals[i].fName)
 		}
 	}
 	// Check that there are no gaps
 	for i := 1; i < len(intervals); i++ {
 		if intervals[i].from != intervals[i-1].to {
-			return fmt.Errorf("gap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
+			return fmt.Errorf("gap between (%d-%d) and (%d-%d). snaptype: %s. files: %s %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType, intervals[i-1].fName, intervals[i].fName)
 		}
 	}
 
@@ -2198,56 +2204,29 @@ func doUncompress(cliCtx *cli.Context) error {
 		return err
 	}
 	defer l.Unlock()
-	var logger log.Logger
-	if logger, err = debug.SetupSimple(cliCtx, true /* rootLogger */); err != nil {
+	if _, err = debug.SetupSimple(cliCtx, true /* rootLogger */); err != nil {
 		return err
 	}
-	ctx := cliCtx.Context
 
 	args := cliCtx.Args()
 	if args.Len() < 1 {
 		return errors.New("expecting file path as a first argument")
 	}
-	f := args.First()
 
-	decompressor, err := seg.NewDecompressor(f)
+	decompressor, err := seg.NewDecompressor(args.First())
 	if err != nil {
 		return err
 	}
 	defer decompressor.Close()
 	defer decompressor.MadvSequential().DisableReadAhead()
 
+	src, cleanup := seg.Decompressor2bufio(decompressor)
+	defer cleanup()
+
 	wr := bufio.NewWriterSize(os.Stdout, int(128*datasize.MB))
 	defer wr.Flush()
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-
-	var i uint
-	var numBuf [binary.MaxVarintLen64]byte
-
-	g := decompressor.MakeGetter()
-	buf := make([]byte, 0, 1*datasize.MB)
-	for g.HasNext() {
-		buf, _ = g.Next(buf[:0])
-		n := binary.PutUvarint(numBuf[:], uint64(len(buf)))
-		if _, err := wr.Write(numBuf[:n]); err != nil {
-			return err
-		}
-		if _, err := wr.Write(buf); err != nil {
-			return err
-		}
-		i++
-		select {
-		case <-logEvery.C:
-			_, fileName := filepath.Split(decompressor.FilePath())
-			progress := 100 * float64(i) / float64(decompressor.Count())
-			logger.Info("[uncompress] ", "progress", fmt.Sprintf("%.2f%%", progress), "file", fileName)
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-	}
-	return nil
+	_, err = io.Copy(wr, src)
+	return err
 }
 
 func doCompress(cliCtx *cli.Context) error {
@@ -2273,7 +2252,24 @@ func doCompress(cliCtx *cli.Context) error {
 	if args.Len() < 1 {
 		return errors.New("expecting file path as a first argument")
 	}
-	f := args.First()
+
+	dst := args.First()
+
+	src := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
+	srcF := cliCtx.String("from")
+	if srcF != "" {
+		decompressor, err := seg.NewDecompressor(srcF)
+		if err != nil {
+			return err
+		}
+		defer decompressor.Close()
+		defer decompressor.MadvSequential().DisableReadAhead()
+		log.Info("[compress] from", "from", srcF)
+
+		var cleanup func()
+		src, cleanup = seg.Decompressor2bufio(decompressor)
+		defer cleanup()
+	}
 
 	compressCfg := seg.DefaultCfg
 	compressCfg.Workers = estimate.CompressSnapshot.Workers()
@@ -2300,65 +2296,43 @@ func doCompress(cliCtx *cli.Context) error {
 	justPrint := dbg.EnvBool("JustPrint", false)
 	concat := dbg.EnvInt("Concat", 0)
 
-	logger.Info("[compress] file", "datadir", dirs.DataDir, "f", f, "cfg", compressCfg, "SnappyEachWord", doSnappyEachWord)
-	c, err := seg.NewCompressor(ctx, "compress", f, dirs.Tmp, compressCfg, log.LvlInfo, logger)
+	logger.Info("[compress] file", "datadir", dirs.DataDir, "dst", dst, "cfg", compressCfg, "SnappyEachWord", doSnappyEachWord)
+	c, err := seg.NewCompressor(ctx, "compress", dst, dirs.Tmp, compressCfg, log.LvlInfo, logger)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
 	w := seg.NewWriter(c, compression)
 
-	r := bufio.NewReaderSize(os.Stdin, int(128*datasize.MB))
-	word := make([]byte, 0, int(1*datasize.MB))
 	var snappyBuf, unSnappyBuf []byte
 	var concatBuf []byte
 	concatI := 0
 
-	var l uint64
-	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		if cap(word) < int(l) {
-			word = make([]byte, l)
-		} else {
-			word = word[:l]
-		}
-		if _, err = io.ReadFull(r, word); err != nil {
-			return err
-		}
-
+	if err := seg.Bufio2compressor(ctx, src, w, func(word []byte) ([]byte, error) {
 		if justPrint {
 			fmt.Printf("%x\n\n", word)
-			continue
+			return nil, nil
 		}
 
 		concatI++
 		if concat > 0 {
 			if concatI%concat != 0 {
 				concatBuf = append(concatBuf, word...)
-				continue
+				return nil, nil
 			}
-
 			word = concatBuf
 			concatBuf = concatBuf[:0]
 		}
 
 		snappyBuf, word = compress.EncodeZstdIfNeed(snappyBuf[:0], word, doSnappyEachWord)
+		var err error
 		unSnappyBuf, word, err = compress.DecodeZstdIfNeed(unSnappyBuf[:0], word, doUnSnappyEachWord)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		_, _ = snappyBuf, unSnappyBuf
-
-		if _, err := w.Write(word); err != nil {
-			return err
-		}
-	}
-	if !errors.Is(err, io.EOF) {
+		return word, nil
+	}); err != nil {
 		return err
 	}
 	if err := c.Compress(); err != nil {
