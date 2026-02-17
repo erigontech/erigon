@@ -134,9 +134,20 @@ func updateAccountWrite(account *accountState, vw *state.VersionedWrite, accessI
 	switch vw.Path {
 	case state.StoragePath:
 		addStorageUpdate(account.changes, vw, accessIndex)
+	case state.SelfDestructPath:
+		if deleted, ok := vw.Val.(bool); ok && deleted {
+			account.selfDestructed = true
+		}
 	case state.BalancePath:
 		val, ok := vw.Val.(uint256.Int)
 		if !ok {
+			return
+		}
+		// Skip non-zero balance writes for selfdestructed accounts.
+		// Post-selfdestruct ETH (e.g. priority fee applied during finalize) must
+		// not appear in the BAL per EIP-7928 — only the zero-balance write from
+		// the selfdestruct itself belongs there.
+		if account.selfDestructed && !val.IsZero() {
 			return
 		}
 		// If we haven't seen a balance and the first write is zero, treat it as a touch only.
@@ -202,11 +213,12 @@ func blockAccessIndex(txIndex int) uint16 {
 }
 
 type accountState struct {
-	changes      *types.AccountChanges
-	balance      *fieldTracker[uint256.Int]
-	nonce        *fieldTracker[uint64]
-	code         *fieldTracker[[]byte]
-	balanceValue *uint256.Int // tracks latest seen balance
+	changes        *types.AccountChanges
+	balance        *fieldTracker[uint256.Int]
+	nonce          *fieldTracker[uint64]
+	code           *fieldTracker[[]byte]
+	balanceValue   *uint256.Int // tracks latest seen balance
+	selfDestructed bool         // true once SelfDestructPath=true is seen for this account
 }
 
 // check pre- and post-values, add to BAL if different
