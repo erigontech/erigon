@@ -564,7 +564,7 @@ func (s *simulator) simulateBlock(
 		return nil, nil, err
 	}
 
-	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), latestTxNum)
+	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), minTxNum)
 	callResults := make([]CallResult, 0, len(bsc.Calls))
 	for callIndex, call := range bsc.Calls {
 		callResult, txn, receipt, err := s.simulateCall(ctx, blockCtx, intraBlockState, callIndex, &call, header,
@@ -607,15 +607,16 @@ func (s *simulator) simulateBlock(
 		if !latest {
 			// Restore the commitment state at the start of the simulated block using historical state reader.
 			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
-			latestTxNum, _, err = sharedDomains.SeekCommitment(context.Background(), tx)
+			latestTxNum, _, err := sharedDomains.SeekCommitment(context.Background(), tx)
 			if err != nil {
 				return nil, nil, err
 			}
 			// Change the state reader to a commitment-only history reader that reads non-commitment domains from the latest state.
 			txNum := minTxNum + 1 + uint64(len(bsc.Calls))
 			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains, txNum+1))
+			_ = latestTxNum
 		}
-		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNumber, latestTxNum, "eth_simulateV1", nil)
+		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNumber, minTxNum, "eth_simulateV1", nil)
 		if err != nil {
 			return nil, nil, err
 		}
