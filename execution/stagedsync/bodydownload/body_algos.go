@@ -49,13 +49,17 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (err error) {
 	// Resetting for requesting a new range of blocks
 	bd.requestedLow = bodyProgress + 1
 	bd.requestedMap = make(map[BodyHashes]uint64)
-	bd.delivered.Clear()
+	if bd.deliveriesH == nil {
+		bd.delivered.Clear()
+	}
 	bd.deliveredCount = 0
 	bd.wastedCount = 0
 	clear(bd.deliveriesH)
 	clear(bd.requests)
 	clear(bd.peerMap)
-	bd.ClearBodyCache()
+	if bd.bodyCache != nil {
+		bd.ClearBodyCache()
+	}
 	return nil
 }
 
