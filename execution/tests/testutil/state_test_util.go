@@ -330,6 +330,10 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 		return nil, err
 	}
 	defer domains.Close()
+	seekTxNum, seekBlockNum, err := domains.SeekCommitment(context.Background(), tx)
+	if err != nil {
+		return nil, err
+	}
 
 	w := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), blockNr-1)
 
@@ -341,7 +345,7 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 		return nil, err
 	}
 
-	_, err = domains.ComputeCommitment(context.Background(), tx, true, domains.BlockNum(), domains.TxNum(), "flush-commitment", nil)
+	_, err = domains.ComputeCommitment(context.Background(), tx, true, seekBlockNum, seekTxNum, "flush-commitment", nil)
 	if err != nil {
 		return nil, err
 	}
