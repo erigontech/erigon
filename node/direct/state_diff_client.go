@@ -50,18 +50,13 @@ func (c *StateDiffClientDirect) Snapshots(ctx context.Context, in *remoteproto.S
 
 func (c *StateDiffClientDirect) StateChanges(ctx context.Context, in *remoteproto.StateChangeRequest, opts ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error) {
 	ch := make(chan *stateDiffReply, 16384)
-	streamServer := &StateDiffStreamS{ch: ch, ctx: ctx}
-	// there is a timing hole on startup which breaks tests
-	// really we need a subscribed event so the subscriber
-	// can ensure that the subcription is complete before it
-	// starts processing - this just shortens the gap
-	started := make(chan *struct{}, 1)
+	subscribed := make(chan struct{})
+	streamServer := &StateDiffStreamS{ch: ch, ctx: ctx, subscribed: subscribed}
 	go func() {
 		defer close(ch)
-		started <- nil
 		streamServer.Err(c.server.StateChanges(in, streamServer))
 	}()
-	<-started
+	<-subscribed
 	return &StateDiffStreamC{ch: ch, ctx: ctx}, nil
 }
 
@@ -87,9 +82,14 @@ func (c *StateDiffStreamC) Context() context.Context { return c.ctx }
 
 // StateDiffStreamS implements proto_sentry.Sentry_ReceiveMessagesServer
 type StateDiffStreamS struct {
-	ch  chan *stateDiffReply
-	ctx context.Context
+	ch         chan *stateDiffReply
+	ctx        context.Context
+	subscribed chan struct{}
 	grpc.ServerStream
+}
+
+func (s *StateDiffStreamS) NotifySubscribed() {
+	close(s.subscribed)
 }
 
 func (s *StateDiffStreamS) Send(m *remoteproto.StateChangeBatch) error {
