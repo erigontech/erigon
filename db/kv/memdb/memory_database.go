@@ -23,6 +23,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -45,8 +46,9 @@ func NewTestDB(tb testing.TB, label kv.Label) kv.RwDB {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	tb.Cleanup(func() { os.RemoveAll(dirname) })
+	tb.Cleanup(func() { dir.RemoveAll(dirname) })
 	db := New(tb, dirname, label)
+	tb.Cleanup(func() { db.Close() })
 	return db
 }
 

@@ -37,13 +37,8 @@ var (
 	// keccak256('Transfer(address,address,uint256)')
 	EthTransferLogEvent = common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
 
-	// TODO: This is the latest spec event, but as of 5.1.0 the bal hive tests still use the legacy event naming
-	// this should be updated once the hive tests are upto the latest spec 
-	// keccak256('Burn(address,uint256)')
-	//EthBurnLogEvent = common.HexToHash("0xcc16f5dbb4873280815c1ee09dbd06736cffcc184412cf7a71a0fdb75d397ca5")
-	
 	// keccak256('Selfdestruct(address,uint256)')
-	EthBurnLogEvent = common.HexToHash("0x4bfaba3443c1a1836cd362418edc679fc96cae8449cbefccb6457cdf2c943083")
+	EthSelfDestructLogEvent = common.HexToHash("0x4bfaba3443c1a1836cd362418edc679fc96cae8449cbefccb6457cdf2c943083")
 )
 
 // EthTransferLog creates and ETH transfer log according to EIP-7708.
@@ -61,14 +56,14 @@ func EthTransferLog(from, to common.Address, amount uint256.Int) *types.Log {
 	}
 }
 
-// EthBurnLog creates an ETH burn log according to EIP-7708.
+// EthSelfDestructLog creates and ETH self-destruct burn log according to EIP-7708.
 // Specification: https://eips.ethereum.org/EIPS/eip-7708
-func EthBurnLog(from common.Address, amount uint256.Int) *types.Log {
+func EthSelfDestructLog(from common.Address, amount uint256.Int) *types.Log {
 	amount32 := amount.Bytes32()
 	return &types.Log{
 		Address: params.SystemAddress.Value(),
 		Topics: []common.Hash{
-			EthBurnLogEvent,
+			EthSelfDestructLogEvent,
 			from.Hash(),
 		},
 		Data: amount32[:],
@@ -97,7 +92,7 @@ func LogSelfDestructedAccounts(ibs evmtypes.IntraBlockState, sender accounts.Add
 	if !rules.IsAmsterdam {
 		return
 	}
-	// Emit burn logs where accounts with non-empty balances have been deleted.
+	// Emit SelfDestruct logs where accounts with non-empty balances have been deleted
 	// See case (2) in https://eips.ethereum.org/EIPS/eip-7708#selfdestruct-processing
 	//
 	// Prefer the pre-computed list from execution time: in the parallel executor the
@@ -116,7 +111,7 @@ func LogSelfDestructedAccounts(ibs evmtypes.IntraBlockState, sender accounts.Add
 			return removedWithBalance[i].Address.Cmp(removedWithBalance[j].Address) < 0
 		})
 		for _, sd := range removedWithBalance {
-			ibs.AddLog(EthBurnLog(sd.Address, sd.Balance))
+			ibs.AddLog(EthSelfDestructLog(sd.Address, sd.Balance))
 		}
 	}
 }

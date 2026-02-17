@@ -36,6 +36,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
@@ -314,7 +315,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		// we can't use tb.TempDir() here becuase things like TestExecutionSpecBlockchain
 		// produces test names that cause 'file name too long' errors
 		tb.Cleanup(func() {
-			os.RemoveAll(tmpdir)
+			dir.RemoveAll(tmpdir)
 		})
 	}
 	ctrl := gomock.NewController(tb)
