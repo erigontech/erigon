@@ -1344,14 +1344,36 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 	var chainConfig *chain2.Config
 	var genesisBlock *types.Block
 	if chain == networkname.ArbitrumOne {
-		// this is genesis from block 21M something. Not able to commit it as usual genesis block due to huge existing state
-		spec, err := chainspec.ChainSpecByName(networkname.ArbitrumOne)
-		if err != nil {
-			panic(err)
+		importFile := filepath.Join(dirs.ArbImport, "init.json")
+		if _, statErr := os.Stat(importFile); statErr == nil {
+			// Import data present — go through full genesis init (computes state from import)
+			var genesisErr error
+			chainConfig, genesisBlock, genesisErr = genesiswrite.CommitGenesisBlock(db, arbChain.ArbOneGenesis(), dirs, logger)
+			if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
+				panic(genesisErr)
+			}
+		} else {
+			// No import data — write hardcoded genesis block shell + chain config
+			spec, err := chainspec.ChainSpecByName(networkname.ArbitrumOne)
+			if err != nil {
+				panic(err)
+			}
+			chainConfig = spec.Config
+			genesisBlock = arbChain.ArbOneGenesisBlock()
+
+			if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+				storedHash, err := rawdb.ReadCanonicalHash(tx, genesisBlock.NumberU64())
+				if err != nil {
+					return err
+				}
+				if storedHash == (common.Hash{}) {
+					return genesiswrite.WriteCustomGenesisBlock(tx, arbChain.ArbOneGenesis(), genesisBlock, spec.Genesis.Difficulty, chainConfig)
+				}
+				return rawdb.WriteChainConfig(tx, storedHash, chainConfig)
+			}); err != nil {
+				panic(err)
+			}
 		}
-		chainConfig = spec.Config
-		genesisBlock = arbChain.ArbOneGenesisBlock()
-		fmt.Printf("newSync: would you not like to write arbitrum one genesis here??")
 	} else {
 		var genesisErr error
 		chainConfig, genesisBlock, genesisErr = genesiswrite.CommitGenesisBlock(db, genesis, dirs, logger)

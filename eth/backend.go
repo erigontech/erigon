@@ -364,19 +364,43 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var genesis *types.Block
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
 		if config.Genesis.Config.ChainName == networkname.ArbitrumOne {
+			importFile := filepath.Join(dirs.ArbImport, "init.json")
+			if _, statErr := os.Stat(importFile); statErr == nil {
+				// Import data present — go through full genesis init
+				genesisSpec := config.Genesis
+				h, err := rawdb.ReadCanonicalHash(tx, config.Genesis.Number)
+				if err != nil {
+					return err
+				}
+				if h != (common.Hash{}) {
+					genesisSpec = nil
+				}
+				var genesisErr error
+				chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.OverrideOsakaTime, config.KeepStoredChainConfig, dirs, logger)
+				if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
+					return genesisErr
+				}
+				return nil
+			}
+
+			// No import data — write hardcoded genesis block shell + chain config
 			arbOne, err := chainspec.ChainSpecByName(networkname.ArbitrumOne)
 			if err != nil {
 				return err
 			}
-
 			chainConfig = arbOne.Config
-			fmt.Printf("backend.New reading genesis block with hash %v of block %d chainParams.genBlockNum %d\n",
-				arbOne.GenesisHash, chainConfig.ArbitrumChainParams.GenesisBlockNum, arbOne.Genesis.Number)
 			genesis = rawdb.ReadBlock(tx, arbOne.GenesisHash, chainConfig.ArbitrumChainParams.GenesisBlockNum)
 
 			if genesis == nil {
-				log.Info("db genesis block is nil, set hardcoded genesis for Arbitrum One")
 				genesis = arbChain.ArbOneGenesisBlock()
+				if err := genesiswrite.WriteCustomGenesisBlock(tx, arbChain.ArbOneGenesis(), genesis, arbOne.Genesis.Difficulty, chainConfig); err != nil {
+					return err
+				}
+				log.Info("wrote arb1 genesis block and chain config", "number", genesis.NumberU64(), "hash", genesis.Hash())
+			} else {
+				if err := rawdb.WriteChainConfig(tx, genesis.Hash(), chainConfig); err != nil {
+					return err
+				}
 			}
 			return nil
 		}
