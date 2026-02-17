@@ -530,13 +530,18 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		}
 		defer pruneRwTx.Rollback()
 		aggTx := AggTx(pruneRwTx)
-		pruneLogEvery := time.NewTicker(30 * time.Second)
-		step := kv.Step(lastToTxNum / a.StepSize())
-		_, pruneErr := aggTx.d[kv.CommitmentDomain].Prune(ctx, pruneRwTx, step, 0, lastToTxNum+1, math.MaxUint64, pruneLogEvery)
-		pruneLogEvery.Stop()
-		if pruneErr != nil {
-			pruneRwTx.Rollback()
-			return fmt.Errorf("[rebuild_commitment_history] prune commitment: %w", pruneErr)
+		commitFilesEndTxNum := aggTx.d[kv.CommitmentDomain].files.EndTxNum()
+		logger.Info("[rebuild_commitment_history] prune check",
+			"commitFilesEndTxNum", commitFilesEndTxNum, "lastToTxNum", lastToTxNum)
+		if commitFilesEndTxNum > 0 {
+			pruneLogEvery := time.NewTicker(30 * time.Second)
+			step := kv.Step((commitFilesEndTxNum - 1) / a.StepSize())
+			_, pruneErr := aggTx.d[kv.CommitmentDomain].Prune(ctx, pruneRwTx, step, 0, commitFilesEndTxNum, math.MaxUint64, pruneLogEvery)
+			pruneLogEvery.Stop()
+			if pruneErr != nil {
+				pruneRwTx.Rollback()
+				return fmt.Errorf("[rebuild_commitment_history] prune commitment: %w", pruneErr)
+			}
 		}
 		if err = pruneRwTx.Commit(); err != nil {
 			return err
