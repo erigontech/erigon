@@ -122,6 +122,8 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 	return blockValue
 }
 
+// GetAssembledBlockRaw returns a Block, unlike GetAssembledBlock, which returns a GetAssembledBlockResponse.
+// Used in tests.
 func (e *EthereumExecutionModule) GetAssembledBlockRaw(payloadId uint64) (block *types.Block, busy bool, err error) {
 	if !e.semaphore.TryAcquire(1) {
 		return nil, true, nil
