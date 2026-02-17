@@ -302,10 +302,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 			// commitment is indexed by txNum of the first tx (system-tx) of the block
 			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
-			if _, _, err := sharedDomains.SeekCommitment(ctx, tx); err != nil {
+			seekTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
+			if err != nil {
 				return nil, err
 			}
-			stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
+			stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, seekTxNum)
 
 			evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
 			ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
@@ -486,10 +487,11 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
 		// commitment are indexed by txNum of the first tx (system-tx) of the block
 		sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
-		if _, _, err := sharedDomains.SeekCommitment(ctx, tx); err != nil {
+		seekTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
+		if err != nil {
 			return nil, err
 		}
-		stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
+		stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, seekTxNum)
 	} else {
 		stateWriter = genEnv.noopWriter
 	}
