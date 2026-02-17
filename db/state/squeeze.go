@@ -645,7 +645,10 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 					}
 				}
 				// Set correct state reader and clear stale warmup cache before TouchKey calls begin.
-				domains.GetCommitmentCtx().SetStateReader(backtester.NewRebuildStateReader(rwTx, domains, batch.TxNum(blockNum)+1))
+				toTxNum := batch.TxNum(blockNum)
+				domains.SetBlockNum(blockNum)
+				domains.SetTxNum(toTxNum)
+				domains.GetCommitmentCtx().SetStateReader(backtester.NewRebuildStateReader(rwTx, domains, toTxNum+1))
 				domains.ClearWarmupCache()
 				curBlock = blockNum
 			}
