@@ -95,9 +95,10 @@ func (cc *ExecutionClientRpc) NewPayload(
 		engineMethod = rpc_helper.EngineNewPayloadV2
 	case clparams.DenebVersion:
 		engineMethod = rpc_helper.EngineNewPayloadV3
-	case clparams.ElectraVersion:
+	case clparams.ElectraVersion, clparams.FuluVersion:
 		engineMethod = rpc_helper.EngineNewPayloadV4
-	// TODO: Add Fulu case
+	case clparams.GloasVersion:
+		engineMethod = rpc_helper.EngineNewPayloadV5
 	default:
 		return PayloadStatusNone, errors.New("invalid payload version")
 	}

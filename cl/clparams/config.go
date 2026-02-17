@@ -562,6 +562,8 @@ type BeaconChainConfig struct {
 	ElectraForkEpoch     uint64            `yaml:"ELECTRA_FORK_EPOCH" spec:"true" json:"ELECTRA_FORK_EPOCH,string"`     // ElectraForkEpoch is used to represent the assigned fork epoch for Electra.
 	FuluForkVersion      ConfigForkVersion `yaml:"FULU_FORK_VERSION" spec:"true" json:"FULU_FORK_VERSION"`              // FuluForkVersion is used to represent the fork version for Fulu.
 	FuluForkEpoch        uint64            `yaml:"FULU_FORK_EPOCH" spec:"true" json:"FULU_FORK_EPOCH,string"`           // FuluForkEpoch is used to represent the assigned fork epoch for Fulu.
+	GloasForkVersion     ConfigForkVersion `yaml:"GLOAS_FORK_VERSION" spec:"true" json:"GLOAS_FORK_VERSION"`            // GloasForkVersion is used to represent the fork version for Gloas.
+	GloasForkEpoch       uint64            `yaml:"GLOAS_FORK_EPOCH" spec:"true" json:"GLOAS_FORK_EPOCH,string"`         // GloasForkEpoch is used to represent the assigned fork epoch for Gloas.
 
 	ForkVersionSchedule map[common.Bytes4]VersionScheduleEntry `json:"-"` // Schedule of fork epochs by version.
 
@@ -706,6 +708,10 @@ func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
 		b.ElectraForkEpoch,
 		b.FuluForkEpoch,
 	}
+	// Keep Gloas optional until all network configs set explicit values.
+	if b.GloasForkVersion != 0 {
+		forkEpochList = append(forkEpochList, b.GloasForkEpoch)
+	}
 	stateVersion := Phase0Version
 	for _, forkEpoch := range forkEpochList {
 		if forkEpoch > epoch {
@@ -734,6 +740,9 @@ func configForkSchedule(b *BeaconChainConfig) map[common.Bytes4]VersionScheduleE
 	fvs[utils.Uint32ToBytes4(uint32(b.DenebForkVersion))] = VersionScheduleEntry{b.DenebForkEpoch, DenebVersion}
 	fvs[utils.Uint32ToBytes4(uint32(b.ElectraForkVersion))] = VersionScheduleEntry{b.ElectraForkEpoch, ElectraVersion}
 	fvs[utils.Uint32ToBytes4(uint32(b.FuluForkVersion))] = VersionScheduleEntry{b.FuluForkEpoch, FuluVersion}
+	if b.GloasForkVersion != 0 {
+		fvs[utils.Uint32ToBytes4(uint32(b.GloasForkVersion))] = VersionScheduleEntry{b.GloasForkEpoch, GloasVersion}
+	}
 	return fvs
 }
 
@@ -890,6 +899,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	ElectraForkEpoch:     364032,
 	FuluForkVersion:      0x06000000,
 	FuluForkEpoch:        411392,
+	GloasForkVersion:     0x07000000,
+	GloasForkEpoch:       math.MaxUint64,
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
@@ -1036,6 +1047,8 @@ func sepoliaConfig() BeaconChainConfig {
 	cfg.ElectraForkVersion = 0x90000074
 	cfg.FuluForkEpoch = 272640
 	cfg.FuluForkVersion = 0x90000075
+	cfg.GloasForkEpoch = math.MaxUint64
+	cfg.GloasForkVersion = 0x90000076
 	cfg.TerminalTotalDifficulty = "17000000000000000"
 	cfg.DepositContractAddress = "0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D"
 
@@ -1074,6 +1087,8 @@ func hoodiConfig() BeaconChainConfig {
 	cfg.ElectraForkVersion = 0x60000910
 	cfg.FuluForkEpoch = 50688
 	cfg.FuluForkVersion = 0x70000910
+	cfg.GloasForkEpoch = math.MaxUint64
+	cfg.GloasForkVersion = 0x80000910
 	cfg.TerminalTotalDifficulty = "0"
 	cfg.TerminalBlockHash = [32]byte{}
 	cfg.TerminalBlockHashActivationEpoch = math.MaxUint64
@@ -1123,7 +1138,7 @@ func bloatnetConfig() BeaconChainConfig {
 	cfg.ChurnLimitQuotient = 128
 	cfg.MaxPerEpochActivationChurnLimit = 8
 
-	// Forking - all forks at epoch 0 except Fulu
+	// Forking - all forks at epoch 0 except Fulu/Gloas
 	cfg.AltairForkEpoch = 0
 	cfg.AltairForkVersion = 0x20802764
 	cfg.BellatrixForkEpoch = 0
@@ -1136,6 +1151,8 @@ func bloatnetConfig() BeaconChainConfig {
 	cfg.ElectraForkVersion = 0x60802764
 	cfg.FuluForkEpoch = math.MaxUint64
 	cfg.FuluForkVersion = 0x70000000
+	cfg.GloasForkEpoch = math.MaxUint64
+	cfg.GloasForkVersion = 0x80000000
 	cfg.TerminalTotalDifficulty = "58750000000000000000000"
 	cfg.TerminalBlockHash = [32]byte{}
 	cfg.TerminalBlockHashActivationEpoch = math.MaxUint64
@@ -1183,6 +1200,8 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.ElectraForkVersion = 0x05000064
 	cfg.FuluForkEpoch = math.MaxUint64
 	cfg.FuluForkVersion = 0x06000064
+	cfg.GloasForkEpoch = math.MaxUint64
+	cfg.GloasForkVersion = 0x07000064
 	cfg.TerminalTotalDifficulty = "8626000000000000000000058750000000000000000000"
 	cfg.DepositContractAddress = "0x0B98057eA310F4d31F2a452B414647007d1645d9"
 	cfg.BaseRewardFactor = 25
@@ -1231,6 +1250,8 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.ElectraForkVersion = 0x0500006f
 	cfg.FuluForkEpoch = math.MaxUint64
 	cfg.FuluForkVersion = 0x0600006f
+	cfg.GloasForkEpoch = math.MaxUint64
+	cfg.GloasForkVersion = 0x0700006f
 	cfg.TerminalTotalDifficulty = "231707791542740786049188744689299064356246512"
 	cfg.DepositContractAddress = "0xb97036A26259B7147018913bD58a774cf91acf25"
 	cfg.BaseRewardFactor = 25
@@ -1262,7 +1283,7 @@ func (b *BeaconChainConfig) GetMinSlashingPenaltyQuotient(version StateVersion) 
 		return b.MinSlashingPenaltyQuotientBellatrix
 	case DenebVersion:
 		return b.MinSlashingPenaltyQuotientBellatrix
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return b.MinSlashingPenaltyQuotientElectra
 	default:
 		panic("not implemented")
@@ -1282,7 +1303,7 @@ func (b *BeaconChainConfig) GetProportionalSlashingMultiplier(version StateVersi
 		return b.ProportionalSlashingMultiplier
 	case AltairVersion:
 		return b.ProportionalSlashingMultiplierAltair
-	case BellatrixVersion, CapellaVersion, DenebVersion, ElectraVersion, FuluVersion:
+	case BellatrixVersion, CapellaVersion, DenebVersion, ElectraVersion, FuluVersion, GloasVersion:
 		return b.ProportionalSlashingMultiplierBellatrix
 	default:
 		panic("not implemented")
@@ -1301,7 +1322,7 @@ func (b *BeaconChainConfig) GetPenaltyQuotient(version StateVersion) uint64 {
 		return b.InactivityPenaltyQuotientBellatrix
 	case DenebVersion:
 		return b.InactivityPenaltyQuotientBellatrix
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return b.InactivityPenaltyQuotientBellatrix
 	default:
 		panic("not implemented")
@@ -1342,7 +1363,7 @@ func (b *BeaconChainConfig) MaxEffectiveBalanceForVersion(version StateVersion) 
 	switch version {
 	case Phase0Version, AltairVersion, BellatrixVersion, CapellaVersion, DenebVersion:
 		return b.MaxEffectiveBalance
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return b.MaxEffectiveBalanceElectra
 	default:
 		panic("invalid version")
@@ -1353,7 +1374,7 @@ func (b *BeaconChainConfig) MaxBlobsPerBlockByVersion(v StateVersion) uint64 {
 	switch v {
 	case Phase0Version, AltairVersion, BellatrixVersion, CapellaVersion, DenebVersion:
 		return b.MaxBlobsPerBlock
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return b.MaxBlobsPerBlockElectra
 	}
 	panic("invalid version")
@@ -1363,7 +1384,7 @@ func (b *BeaconChainConfig) MaxRequestBlobSidecarsByVersion(v StateVersion) int 
 	switch v {
 	case DenebVersion:
 		return int(b.MaxRequestBlobSidecars)
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return int(b.MaxRequestBlobSidecarsElectra)
 	}
 	panic("invalid version")
@@ -1373,7 +1394,7 @@ func (b *BeaconChainConfig) BlobSidecarSubnetCountByVersion(v StateVersion) uint
 	switch v {
 	case Phase0Version, AltairVersion, BellatrixVersion, CapellaVersion, DenebVersion:
 		return b.BlobSidecarSubnetCount
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return b.BlobSidecarSubnetCountElectra
 	}
 	panic("invalid version")
@@ -1395,6 +1416,8 @@ func (b *BeaconChainConfig) GetForkVersionByVersion(v StateVersion) uint32 {
 		return uint32(b.ElectraForkVersion)
 	case FuluVersion:
 		return uint32(b.FuluForkVersion)
+	case GloasVersion:
+		return uint32(b.GloasForkVersion)
 	}
 	panic("invalid version")
 }
@@ -1415,6 +1438,8 @@ func (b *BeaconChainConfig) GetForkEpochByVersion(v StateVersion) uint64 {
 		return b.ElectraForkEpoch
 	case FuluVersion:
 		return b.FuluForkEpoch
+	case GloasVersion:
+		return b.GloasForkEpoch
 	}
 	panic("invalid version")
 }

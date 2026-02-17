@@ -277,3 +277,23 @@ func (b *CachingBeaconState) UpgradeToFulu() error {
 	log.Info("Upgrade to Fulu complete")
 	return nil
 }
+
+func (b *CachingBeaconState) UpgradeToGloas() error {
+	b.previousStateRoot = common.Hash{}
+	epoch := Epoch(b.BeaconState)
+	// update version
+	fork := b.Fork()
+	fork.Epoch = epoch
+	fork.PreviousVersion = fork.CurrentVersion
+	fork.CurrentVersion = utils.Uint32ToBytes4(uint32(b.BeaconConfig().GloasForkVersion))
+	b.SetFork(fork)
+	// Update the payload header.
+	header := b.LatestExecutionPayloadHeader()
+	header.SetVersion(clparams.GloasVersion)
+	b.SetLatestExecutionPayloadHeader(header)
+	// Update the state root cache
+	b.SetVersion(clparams.GloasVersion)
+
+	log.Info("Upgrade to Gloas complete")
+	return nil
+}
