@@ -1488,7 +1488,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 		t.Skip()
 	}
 
-	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 25, log.New())
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 5, log.New())
 	require := require.New(t)
 
 	tx, err := db.BeginRw(context.Background())
@@ -1507,7 +1507,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 
 	keySize1 := uint64(length.Addr)
 	keySize2 := uint64(length.Addr + length.Hash)
-	totalTx := uint64(3000)
+	totalTx := uint64(1500)
 	keyTxsLimit := uint64(50)
 	keyLimit := uint64(200)
 
@@ -1677,7 +1677,7 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 
 	t.Parallel()
 
-	aggStep, ctx := uint64(25), context.Background()
+	aggStep, ctx := uint64(5), context.Background()
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, aggStep, log.New())
 
 	tx, err := db.BeginRw(ctx)
@@ -1696,7 +1696,7 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 
 	keySize1 := uint64(length.Addr)
 	keySize2 := uint64(length.Addr + length.Hash)
-	totalTx := uint64(5000)
+	totalTx := uint64(2500)
 	keyTxsLimit := uint64(50)
 	keyLimit := uint64(200)
 	// Put some kvs
@@ -1774,7 +1774,7 @@ func TestDomain_CanHashPruneAfterAggregation(t *testing.T) {
 
 	t.Parallel()
 
-	aggStep, ctx := uint64(25), context.Background()
+	aggStep, ctx := uint64(5), context.Background()
 	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, aggStep, log.New())
 
 	tx, err := db.BeginRw(ctx)
@@ -1793,7 +1793,7 @@ func TestDomain_CanHashPruneAfterAggregation(t *testing.T) {
 
 	keySize1 := uint64(length.Addr)
 	keySize2 := uint64(length.Addr + length.Hash)
-	totalTx := uint64(5000)
+	totalTx := uint64(2500)
 	keyTxsLimit := uint64(50)
 	keyLimit := uint64(200)
 	SaveExecV3PrunableProgress(tx, kv.MinimumPrunableStepDomainKey, 0)
@@ -1871,7 +1871,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 
 	t.Parallel()
 
-	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 25, log.New())
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 5, log.New())
 	defer db.Close()
 	defer d.Close()
 
@@ -1890,7 +1890,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 
 	keySize1 := uint64(length.Addr)
 	keySize2 := uint64(length.Addr + length.Hash)
-	totalTx := uint64(5000)
+	totalTx := uint64(2500)
 	keyTxsLimit := uint64(50)
 	keyLimit := uint64(200)
 
@@ -2548,7 +2548,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 		t.Skip()
 	}
 
-	db, d := testDbAndDomain(t, log.New())
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 5, log.New())
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -2561,7 +2561,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 
 	keySize1 := uint64(length.Addr)
 	keySize2 := uint64(length.Addr + length.Hash)
-	totalTx := uint64(5000)
+	totalTx := uint64(2500)
 	keyTxsLimit := uint64(50)
 	keyLimit := uint64(200)
 
