@@ -791,6 +791,10 @@ func (s *RecordingState) ReadAccountCodeSize(address accounts.Address) (int, err
 	if code, ok := s.codeOverlay[addr]; ok {
 		return len(code), nil
 	}
+	_, err := s.ReadAccountCode(address) // need to read code here because witness has no way of knowing code size without reading the code first
+	if err != nil {
+		return 0, err
+	}
 	return s.inner.ReadAccountCodeSize(address)
 }
 
