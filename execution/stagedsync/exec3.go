@@ -261,7 +261,12 @@ func ExecV3(ctx context.Context,
 			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
 		pe.lastCommittedTxNum.Store(doms.TxNum())
-		pe.lastCommittedBlockNum.Store(blockNum)
+		// blockNum is the next block to execute (from doms.BlockNum()), so the last
+		// committed block is blockNum-1. LogCommitments uses Add to accumulate deltas
+		// on top of this value, so initializing to blockNum would double-count.
+		if blockNum > 0 {
+			pe.lastCommittedBlockNum.Store(blockNum - 1)
+		}
 
 		defer func() {
 			if !isChainTip {
