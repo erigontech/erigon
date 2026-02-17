@@ -352,7 +352,7 @@ func (efi *EliasFanoIter) HasNext() bool {
 	return efi.itemsIterated <= efi.count
 }
 
-func (efi *EliasFanoIter) Reset() { // no `return parameter` to avoid heap-allocation of `s` object
+func (efi *EliasFanoIter) Reset() { // no `return parameter` to avoid heap-allocation of `efi` object
 	efi.upper = 0
 	efi.upperIdx = 0
 	efi.lowerIdx = 0
@@ -540,7 +540,7 @@ func ReadEliasFano(r []byte) (*EliasFano, int) {
 }
 
 // Reset - like ReadEliasFano, but for existing object
-func (ef *EliasFano) Reset(r []byte) *EliasFano { // no `return parameter` to avoid heap-allocation of `s` object
+func (ef *EliasFano) Reset(r []byte) *EliasFano { // no `return parameter` to avoid heap-allocation of `ef` object
 	ef.count = binary.BigEndian.Uint64(r[:8])
 	ef.u = binary.BigEndian.Uint64(r[8:16])
 	ef.data = unsafe.Slice((*uint64)(unsafe.Pointer(&r[16])), (len(r)-16)/uint64Size)
