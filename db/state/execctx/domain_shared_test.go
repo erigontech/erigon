@@ -249,7 +249,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	err = db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(maxTx - stepSize)
+	err = db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(maxTx-stepSize, true)
 	require.NoError(t, err)
 
 	{ //prune
@@ -424,7 +424,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		domains.Close()
 		err = rwTx.Commit() // otherwise agg.BuildFiles will not see data
 		require.NoError(err)
-		require.NoError(db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(stepSize * 2))
+		require.NoError(db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(stepSize*2, true))
 
 		rwTx, err = db.BeginTemporalRw(ctx)
 		require.NoError(err)
@@ -600,7 +600,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		require.NoError(t, err)
 
 		// build files
-		err = db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(2)
+		err = db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(2, true)
 		require.NoError(t, err)
 		rwTtx3, err := db.BeginTemporalRw(ctx)
 		require.NoError(t, err)

@@ -780,10 +780,13 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 	return
 }
 
-func (a *Aggregator) BuildFiles(toTxNum uint64) (err error) {
-	finished := a.BuildFilesInBackground(toTxNum)
-	if !(a.buildingFiles.Load() || a.mergingFiles.Load()) {
+func (a *Aggregator) BuildFiles(toTxNum uint64, doMerge bool) (err error) {
+	finished := a.BuildFilesInBackground(toTxNum, doMerge)
+	// If fin is already closed, nothing was scheduled — return immediately.
+	select {
+	case <-finished:
 		return nil
+	default:
 	}
 
 	logEvery := time.NewTicker(20 * time.Second)
@@ -1619,7 +1622,7 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 }
 
 // Returns channel which is closed when aggregation is done
-func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
+func (a *Aggregator) BuildFilesInBackground(txNum uint64, doMerge bool) chan struct{} {
 	fin := make(chan struct{})
 
 	if !a.produce {
@@ -1627,8 +1630,25 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 		return fin
 	}
 
-	if (txNum + 1) <= a.visibleFilesMinimaxTxNum.Load()+a.stepSize {
+	needBuild := (txNum + 1) > a.visibleFilesMinimaxTxNum.Load()+a.stepSize
+	if !needBuild && !doMerge {
 		close(fin)
+		return fin
+	}
+
+	// merge-only shortcut: no step files to build, just kick off MergeLoop
+	if !needBuild {
+		a.wg.Add(1)
+		go func() {
+			defer a.wg.Done()
+			defer close(fin)
+			if err := a.MergeLoop(a.ctx); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+					return
+				}
+				a.logger.Warn("[snapshots] merge", "err", err)
+			}
+		}()
 		return fin
 	}
 
@@ -1662,7 +1682,6 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB)
 
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
-		//lastInDB := lastIdInDB(a.db, a.d[kv.AccountsDomain])
 		hasData := lastInDB > step // `step` must be fully-written - means `step+1` records must be visible
 		if !hasData {
 			close(fin)
@@ -1687,16 +1706,20 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 			}
 			a.onFilesChange(nil)
 		}
-		go func() {
-			defer close(fin)
 
-			if err := a.MergeLoop(a.ctx); err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
-					return
+		if doMerge {
+			go func() {
+				defer close(fin)
+				if err := a.MergeLoop(a.ctx); err != nil {
+					if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+						return
+					}
+					a.logger.Warn("[snapshots] merge", "err", err)
 				}
-				a.logger.Warn("[snapshots] merge", "err", err)
-			}
-		}()
+			}()
+		} else {
+			close(fin)
+		}
 	}()
 	return fin
 }

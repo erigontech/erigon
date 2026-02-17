@@ -101,7 +101,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 			err = domains.Flush(ctx, rwTx)
 			require.NoError(t, err)
 			if i/stepSize > 3 {
-				err = agg.BuildFiles(i - (2 * stepSize))
+				err = agg.BuildFiles(i-(2*stepSize), true)
 				require.NoError(t, err)
 			}
 		}

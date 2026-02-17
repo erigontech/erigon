@@ -2612,7 +2612,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	logger.Info("Build state history snapshots")
-	if err = agg.BuildFiles(lastTxNum); err != nil {
+	if err = agg.BuildFiles(lastTxNum, true); err != nil {
 		return err
 	}
 

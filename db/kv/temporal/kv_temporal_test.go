@@ -123,7 +123,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.NoError(t, err)
 
 		// build files
-		err = agg.BuildFiles(2)
+		err = agg.BuildFiles(2, true)
 		require.NoError(t, err)
 		rwTtx3, err := temporalDb.BeginTemporalRw(ctx)
 		require.NoError(t, err)
