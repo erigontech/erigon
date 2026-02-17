@@ -157,7 +157,7 @@ type changesetSwitcher interface {
 
 func (sd *SharedDomains) Merge(other *SharedDomains) error {
 	if sd.txNum.Load() > other.txNum.Load() {
-		return fmt.Errorf("can't merge backwards: txnum: %d > %d", sd.txNum, other.txNum)
+		return fmt.Errorf("can't merge backwards: txnum: %d > %d", sd.txNum.Load(), other.txNum.Load())
 	}
 
 	if err := sd.mem.Merge(other.mem); err != nil {
