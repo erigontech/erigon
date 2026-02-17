@@ -498,6 +498,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	batchBlockCount := dbg.EnvInt("ERIGON_REBUILD_BATCH_BLOCKS", 5000)
 
 	var totalKeysProcessed uint64
+	var blocksProcessed uint64
+	const flushEveryBlocks = 200_000
 	var rh []byte
 	var lastToTxNum uint64
 	lastLogTime := time.Now()
@@ -574,6 +576,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			return err
 		}
 		lastToTxNum = toTxNum
+		blocksProcessed++
 
 		header, err := blockReader.HeaderByNumber(ctx, rwTx, blockNum)
 		if err != nil {
@@ -672,10 +675,11 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 		blockFrom = batchEnd + 1
 
-		if domains.Size() > uint64(batchSize) || blockFrom > blockTo {
+		if blocksProcessed >= flushEveryBlocks || blockFrom > blockTo {
 			if err := flushDomainsAndRebuild(); err != nil {
 				return nil, err
 			}
+			blocksProcessed = 0
 		}
 	}
 
