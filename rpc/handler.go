@@ -31,8 +31,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/linkdata/deadlock"
+
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
