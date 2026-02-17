@@ -1,4 +1,7 @@
-// Copyright 2025 The Erigon Authors
+// Copyright 2016 The go-ethereum Authors
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,17 +17,18 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package synctest
+//go:build !go1.5
 
-import (
-	"testing"
-	"testing/synctest"
-)
+// no-op implementation of tracing methods for Go < 1.5.
 
-//
-// NOTE: we can remove this pkg once go1.26 is out, and we've dropped support for go1.24
-//
+package debug
 
-var Wait = synctest.Wait // nolint:govet
+import "errors"
 
-type testFunc func(t *testing.T, f func(*testing.T))
+func (*HandlerT) StartGoTrace(string) error {
+	return errors.New("tracing is not supported on Go < 1.5")
+}
+
+func (*HandlerT) StopGoTrace() error {
+	return errors.New("tracing is not supported on Go < 1.5")
+}

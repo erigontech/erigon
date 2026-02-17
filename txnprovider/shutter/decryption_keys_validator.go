@@ -169,6 +169,8 @@ func (v DecryptionKeysValidator) validateSignatures(msg *proto.DecryptionKeys, e
 		identityPreimages[i] = ip
 	}
 
+	identityPreimagesSSZ := identityPreimages.ToListSSZ()
+
 	for i, sig := range extraData.Signatures {
 		signerIdx := extraData.SignerIndices[i]
 		signer, err := eon.KeyperAt(signerIdx)
@@ -181,7 +183,7 @@ func (v DecryptionKeysValidator) validateSignatures(msg *proto.DecryptionKeys, e
 			Eon:               EonIndex(msg.Eon),
 			Slot:              extraData.Slot,
 			TxnPointer:        extraData.TxPointer,
-			IdentityPreimages: identityPreimages.ToListSSZ(),
+			IdentityPreimages: identityPreimagesSSZ,
 		}
 
 		ok, err := signatureData.Verify(sig, signer)
