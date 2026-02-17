@@ -367,11 +367,11 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		}
 	}
 	switch domain {
-	case kv.CodeDomain:
+	case kv.CodeDomain, kv.AccountsDomain, kv.StorageDomain, kv.CommitmentDomain:
 		if bytes.Equal(prevVal, v) {
 			return nil
 		}
-	case kv.StorageDomain, kv.AccountsDomain, kv.CommitmentDomain, kv.RCacheDomain:
+	case kv.RCacheDomain:
 		//noop
 	default:
 		if bytes.Equal(prevVal, v) {
