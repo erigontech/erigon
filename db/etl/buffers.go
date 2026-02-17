@@ -42,7 +42,7 @@ const (
 	SortableOldestAppearedBuffer
 
 	//BufIOSize - 128 pages | default is 1 page | increasing over `64 * 4096` doesn't show speedup on SSD/NVMe, but show speedup in cloud drives
-	BufIOSize = 128 * 4096
+	BufIOSize = 16 * 1024
 )
 
 var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var because we want to sometimes change it from tests or command-line flags */
