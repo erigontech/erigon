@@ -1109,7 +1109,7 @@ func (branchData BranchData) Validate(branchKey []byte) error {
 	if err = validateAfterMap(afterMap, row); err != nil {
 		return err
 	}
-	if err = validatePlainKeys(branchKey, row, newFastKeccak()); err != nil {
+	if err = validatePlainKeys(branchKey, row, crypto.NewFastKeccak()); err != nil {
 		return err
 	}
 	return nil

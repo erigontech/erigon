@@ -130,8 +130,8 @@ func (hph *HexPatriciaHashed) SpawnSubTrie(ctx PatriciaContext, forNibble int) *
 func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext) *HexPatriciaHashed {
 	hph := &HexPatriciaHashed{
 		ctx:           ctx,
-		keccak:        newFastKeccak(),
-		keccak2:       newFastKeccak(),
+		keccak:        crypto.NewFastKeccak(),
+		keccak2:       crypto.NewFastKeccak(),
 		accountKeyLen: accountKeyLen,
 		auxBuffer:     bytes.NewBuffer(make([]byte, 8192)),
 		hadToLoadL:    make(map[uint64]skipStat),

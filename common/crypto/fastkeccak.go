@@ -21,6 +21,8 @@ import (
 )
 
 // fastKeccakState wraps fastkeccak.Hasher to implement the keccakState interface.
+// It provides the same streaming hash interface but uses platform-optimized assembly
+// (NEON SHA3 on arm64, unrolled permutation on amd64) for significantly faster hashing.
 type fastKeccakState struct {
 	h keccak.Hasher
 }
