@@ -287,7 +287,11 @@ func (d *DomainDiff) DomainUpdate(k []byte, step Step, prevValue []byte, prevSte
 	if _, ok := d.prevValues[valsKey]; !ok {
 		valsKeySCopy := strings.Clone(valsKey)
 		if prevStep == step {
-			d.prevValues[valsKeySCopy] = common.Copy(prevValue) // may be []byte{} for empty prev value
+			if prevValue == nil {
+				d.prevValues[valsKeySCopy] = []byte{} // same step, no prev value → restore empty on unwind
+			} else {
+				d.prevValues[valsKeySCopy] = common.Copy(prevValue) // same step, restore this value
+			}
 		} else {
 			d.prevValues[valsKeySCopy] = nil // sentinel: delete only, don't restore
 		}
