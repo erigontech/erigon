@@ -354,10 +354,6 @@ func ExecV3(ctx context.Context,
 		lastCommittedTxNum = se.lastCommittedTxNum.Load()
 	}
 
-	if false && !isForkValidation {
-		dumpPlainStateDebug(applyTx, doms)
-	}
-
 	lastCommitedStep := kv.Step((lastCommittedTxNum) / doms.StepSize())
 	lastFrozenStep := applyTx.StepsInFiles(kv.CommitmentDomain)
 
