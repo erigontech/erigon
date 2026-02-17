@@ -23,7 +23,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto/keccak"
 )
 
-// keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
+// keccakState wraps the keccak hasher (backed by fastkeccak). In addition to the usual hash methods, it also supports
 // Read to get a variable amount of data from the hash state. Read is faster than Sum
 // because it doesn't copy the internal state, but also modifies the internal state.
 type keccakState interface {
