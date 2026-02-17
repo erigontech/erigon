@@ -18,7 +18,6 @@ package metrics
 
 import (
 	"fmt"
-	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -390,11 +389,6 @@ func (s *Set) GetOrCreateGaugeVec(name string, labels []string, help ...string) 
 
 	if nm.metric == nil {
 		return nil, fmt.Errorf("metric %q is nil", name)
-	}
-
-	metricType := reflect.TypeFor[*prometheus.GaugeVec]()
-	if metricType != reflect.TypeFor[*prometheus.GaugeVec]() {
-		return nil, fmt.Errorf("metric %q isn't a GaugeVec. It is %s", name, metricType)
 	}
 
 	return nm.metric, nil
