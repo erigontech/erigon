@@ -125,7 +125,8 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 			continue
 		}
 
-		txNum, ok := hi.seq.Reset(top.startTxNum, idxVal).Seek(hi.startTxNum)
+		hi.seq.Reset(top.startTxNum, idxVal)
+		txNum, ok := hi.seq.Seek(hi.startTxNum)
 		if !ok {
 			continue
 		}
@@ -425,7 +426,8 @@ func (hi *HistoryChangesIterFiles) advance() error {
 			continue
 		}
 
-		txNum, ok := hi.seq.Reset(top.startTxNum, idxVal).Seek(hi.startTxNum)
+		hi.seq.Reset(top.startTxNum, idxVal)
+		txNum, ok := hi.seq.Seek(hi.startTxNum)
 		if !ok {
 			continue
 		}
