@@ -2810,8 +2810,8 @@ func (hph *HexPatriciaHashed) ResetContext(ctx PatriciaContext) {
 // branchFromCacheOrDB reads branch data from cache if available, otherwise from DB.
 func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, kv.Step, error) {
 	if hph.cache != nil {
-		if data, step, found := hph.cache.GetBranch(key); found {
-			return data, step, nil
+		if data, found := hph.cache.GetBranch(key); found {
+			return data, 0, nil
 		}
 	}
 	return hph.ctx.Branch(key)

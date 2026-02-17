@@ -107,11 +107,11 @@ func (w *Warmuper) Cache() *WarmupCache {
 // branchFromCacheOrDB reads branch data from cache if available, otherwise from DB and caches it.
 func (w *Warmuper) branchFromCacheOrDB(trieCtx PatriciaContext, prefix []byte) ([]byte, error) {
 	if w.cache != nil {
-		if data, _, found := w.cache.GetBranch(prefix); found {
+		if data, found := w.cache.GetBranch(prefix); found {
 			return data, nil
 		}
 	}
-	branchData, step, err := trieCtx.Branch(prefix)
+	branchData, _, err := trieCtx.Branch(prefix)
 	if err != nil {
 		return nil, err
 	}

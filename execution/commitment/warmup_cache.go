@@ -20,7 +20,6 @@ import (
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/maphash"
-	"github.com/erigontech/erigon/db/kv"
 )
 
 type branchEntry struct {
