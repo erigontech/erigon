@@ -330,7 +330,7 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 		return nil, err
 	}
 	defer domains.Close()
-	seekTxNum, seekBlockNum, err := domains.SeekCommitment(context.Background(), tx)
+	latestTxNum, latestBlockNum, err := domains.SeekCommitment(context.Background(), tx)
 	if err != nil {
 		return nil, err
 	}
@@ -345,7 +345,7 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 		return nil, err
 	}
 
-	_, err = domains.ComputeCommitment(context.Background(), tx, true, seekBlockNum, seekTxNum, "flush-commitment", nil)
+	_, err = domains.ComputeCommitment(context.Background(), tx, true, latestBlockNum, latestTxNum, "flush-commitment", nil)
 	if err != nil {
 		return nil, err
 	}

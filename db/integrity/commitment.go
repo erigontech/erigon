@@ -204,20 +204,20 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 	}
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentCtx().SetLimitedHistoryStateReader(tx, maxTxNum) // to use tx.Debug().GetLatestFromFiles with maxTxNum
-	seekTxNum, _, err := sd.SeekCommitment(ctx, tx)                  // seek commitment again to use the new state reader instead
+	latestTxNum, _, err := sd.SeekCommitment(ctx, tx)                // seek commitment again to use the new state reader instead
 	if err != nil {
 		return nil, err
 	}
-	if seekTxNum > maxTxNum {
-		return nil, fmt.Errorf("%w: commitment root sd txNum should is gt maxTxNum: %d > %d", ErrIntegrity, seekTxNum, maxTxNum)
+	if latestTxNum > maxTxNum {
+		return nil, fmt.Errorf("%w: commitment root sd txNum should is gt maxTxNum: %d > %d", ErrIntegrity, latestTxNum, maxTxNum)
 	}
-	if seekTxNum > info.blockMaxTxNum {
-		return nil, fmt.Errorf("%w: commitment root sd txNum should is gt blockMaxTxNum: %d > %d", ErrIntegrity, seekTxNum, info.blockMaxTxNum)
+	if latestTxNum > info.blockMaxTxNum {
+		return nil, fmt.Errorf("%w: commitment root sd txNum should is gt blockMaxTxNum: %d > %d", ErrIntegrity, latestTxNum, info.blockMaxTxNum)
 	}
-	if seekTxNum < info.blockMinTxNum {
-		return nil, fmt.Errorf("%w: commitment root sd txNum should is lt blockMinTxNum: %d < %d", ErrIntegrity, seekTxNum, info.blockMinTxNum)
+	if latestTxNum < info.blockMinTxNum {
+		return nil, fmt.Errorf("%w: commitment root sd txNum should is lt blockMinTxNum: %d < %d", ErrIntegrity, latestTxNum, info.blockMinTxNum)
 	}
-	if seekTxNum == 0 {
+	if latestTxNum == 0 {
 		return nil, fmt.Errorf("%w: commitment root sd txNum should not be zero", ErrIntegrity)
 	}
 	if info.PartialBlock() {
@@ -749,15 +749,15 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	sd.GetCommitmentCtx().SetHistoryStateReader(tx, toTxNum)
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
-	seekTxNum, seekBlockNum, err := sd.SeekCommitment(ctx, tx) // seek commitment again with new history state reader
+	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx) // seek commitment again with new history state reader
 	if err != nil {
 		return err
 	}
-	if seekBlockNum != blockNum {
-		return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d", seekBlockNum, blockNum)
+	if latestBlockNum != blockNum {
+		return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d", latestBlockNum, blockNum)
 	}
-	if seekTxNum != maxTxNum {
-		return fmt.Errorf("commitment state txNum doesn't match maxTxNum: %d != %d", seekTxNum, maxTxNum)
+	if latestTxNum != maxTxNum {
+		return fmt.Errorf("commitment state txNum doesn't match maxTxNum: %d != %d", latestTxNum, maxTxNum)
 	}
 	logger.Info("commitment recalc info", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
 	touchLoggingVisitor := func(k []byte) {
