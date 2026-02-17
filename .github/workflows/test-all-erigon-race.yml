@@ -140,7 +140,7 @@ jobs:
               ;;
             *)
               echo "Error: Unknown test-group value '${{ matrix.test-group }}'"
-              echo "Expected one of: execution-tests, execution-other, consensus, p2p-rpc, core-db, other"
+              echo "Expected one of: execution-tests, execution-other, consensus, core-rpc, other"
               exit 1
               ;;
           esac
