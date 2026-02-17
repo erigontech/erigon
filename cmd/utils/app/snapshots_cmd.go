@@ -1218,7 +1218,10 @@ func doCheckCommitmentHistAtBlk(cliCtx *cli.Context, logger log.Logger) error {
 	defer db.Close()
 	blockReader, _ := blockRetire.IO()
 	blockNum := cliCtx.Uint64("block")
-	return integrity.CheckCommitmentHistAtBlk(ctx, db, blockReader, blockNum, logger)
+	if err = integrity.CheckCommitmentHistAtBlk(ctx, db, blockReader, blockNum, logger); err != nil {
+		return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
+	}
+	return nil
 }
 
 func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) error {
