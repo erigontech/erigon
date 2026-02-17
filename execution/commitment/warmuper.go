@@ -116,7 +116,7 @@ func (w *Warmuper) branchFromCacheOrDB(trieCtx PatriciaContext, prefix []byte) (
 		return nil, err
 	}
 	if w.cache != nil && len(branchData) > 0 {
-		w.cache.PutBranch(prefix, branchData, step)
+		w.cache.PutBranch(prefix, branchData)
 	}
 	return branchData, nil
 }

@@ -25,7 +25,6 @@ import (
 
 type branchEntry struct {
 	data      []byte
-	step      kv.Step
 	isEvicted atomic.Bool
 }
 
@@ -72,7 +71,7 @@ func (c *WarmupCache) IsEnabled() bool {
 }
 
 // PutBranch stores branch data in the cache.
-func (c *WarmupCache) PutBranch(prefix []byte, data []byte, step kv.Step) {
+func (c *WarmupCache) PutBranch(prefix []byte, data []byte) {
 	if !c.enabled.Load() {
 		return
 	}
@@ -80,33 +79,32 @@ func (c *WarmupCache) PutBranch(prefix []byte, data []byte, step kv.Step) {
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
 
-	c.branches.Set(prefix, &branchEntry{data: dataCopy, step: step})
+	c.branches.Set(prefix, &branchEntry{data: dataCopy})
 }
 
 // GetBranch retrieves branch data from the cache.
-func (c *WarmupCache) GetBranch(prefix []byte) ([]byte, kv.Step, bool) {
+func (c *WarmupCache) GetBranch(prefix []byte) ([]byte, bool) {
 	if !c.enabled.Load() {
-		return nil, 0, false
+		return nil, false
 	}
 	entry, found := c.branches.Get(prefix)
 	if !found || entry.isEvicted.Load() {
-		return nil, 0, false
+		return nil, false
 	}
-	return entry.data, entry.step, true
+	return entry.data, true
 }
 
 // GetAndEvictBranch retrieves branch data and marks the entry as evicted in one operation.
-// Returns the entry pointer allowing the caller to read the data before it's considered evicted.
-func (c *WarmupCache) GetAndEvictBranch(prefix []byte) ([]byte, kv.Step, bool) {
+func (c *WarmupCache) GetAndEvictBranch(prefix []byte) ([]byte, bool) {
 	if !c.enabled.Load() {
-		return nil, 0, false
+		return nil, false
 	}
 	entry, found := c.branches.Get(prefix)
 	if !found || entry.isEvicted.Load() {
-		return nil, 0, false
+		return nil, false
 	}
 	entry.isEvicted.Store(true)
-	return entry.data, entry.step, true
+	return entry.data, true
 }
 
 // EvictBranch marks a branch entry as evicted without retrieving it.
