@@ -391,10 +391,8 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 		return s.eth1Engine.Initialize(config, chain, header, state, syscall, logger, tracer)
 	}
 
-	cfg := chain.Config()
-
 	// See https://hackmd.io/@filoozom/rycoQITlWl
-	if cfg.BalancerTime != nil && header.Time >= cfg.BalancerTime.Uint64() {
+	if config.BalancerTime != nil && header.Time >= cfg.BalancerTime.Uint64() {
 		parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
 		if parent == nil {
 			return rules.ErrUnknownAncestor
@@ -406,12 +404,12 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 		}
 	}
 
-	if cfg.IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
+	if config.IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
 		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr accounts.Address, data []byte) ([]byte, error) {
 			return syscall(addr, data, state, header, false /* constCall */)
 		}, tracer)
 	}
-	if cfg.IsPrague(header.Time) {
+	if config.IsPrague(header.Time) {
 		if err := misc.StoreBlockHashesEip2935(header, state); err != nil {
 			return err
 		}
