@@ -18,6 +18,7 @@ package execmodule
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 
@@ -119,6 +120,22 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 		blockValue.Add(blockValue, txValue)
 	}
 	return blockValue
+}
+
+func (e *EthereumExecutionModule) GetAssembledBlockRaw(payloadId uint64) (block *types.Block, busy bool, err error) {
+	if !e.semaphore.TryAcquire(1) {
+		return nil, true, nil
+	}
+	defer e.semaphore.Release(1)
+	builder, ok := e.builders[payloadId]
+	if !ok {
+		return nil, false, errors.New("unknown payloadId")
+	}
+	blockWithReceipts, err := builder.Stop()
+	if err != nil {
+		return nil, false, err
+	}
+	return blockWithReceipts.Block, false, nil
 }
 
 func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error) {
