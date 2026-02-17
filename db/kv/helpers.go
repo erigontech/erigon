@@ -274,7 +274,7 @@ func (d *DomainDiff) Len() int {
 // prevValue is the previous value at the key. If prevStep != step, the previous value lives
 // at a different step position in the DB and doesn't need restoring on unwind (just delete current).
 // We encode this as nil in prevValues. If prevStep == step, we store the actual prevValue.
-func (d *DomainDiff) DomainUpdate(k []byte, step Step, prevValue []byte, prevStep Step) {
+func (d *DomainDiff) DomainUpdate(k []byte, step Step, prevValue []byte) {
 	if d.prevValues == nil {
 		d.prevValues = make(map[string][]byte, 16)
 		d.currentStepBuf = make([]byte, 8)
@@ -286,14 +286,10 @@ func (d *DomainDiff) DomainUpdate(k []byte, step Step, prevValue []byte, prevSte
 	valsKey := toStringZeroCopy(d.keyBuf)
 	if _, ok := d.prevValues[valsKey]; !ok {
 		valsKeySCopy := strings.Clone(valsKey)
-		if prevStep == step {
-			if prevValue == nil {
-				d.prevValues[valsKeySCopy] = []byte{} // same step, no prev value → restore empty on unwind
-			} else {
-				d.prevValues[valsKeySCopy] = common.Copy(prevValue) // same step, restore this value
-			}
+		if prevValue == nil {
+			d.prevValues[valsKeySCopy] = []byte{} // no previous value (new key)
 		} else {
-			d.prevValues[valsKeySCopy] = nil // sentinel: delete only, don't restore
+			d.prevValues[valsKeySCopy] = common.Copy(prevValue)
 		}
 		d.prevValsSlice = nil
 	}

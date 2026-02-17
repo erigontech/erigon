@@ -793,12 +793,11 @@ func TestMergeFiles(t *testing.T) {
 	w := dc.NewWriter()
 
 	prev := []byte{}
-	prevStep := kv.Step(0)
 	for key, upd := range data {
 		for _, v := range upd {
-			err := w.PutWithPrev([]byte(key), v.value, v.txNum, prev, prevStep)
+			err := w.PutWithPrev([]byte(key), v.value, v.txNum, prev)
 
-			prev, prevStep = v.value, kv.Step(v.txNum/d.stepSize)
+			prev = v.value
 			require.NoError(t, err)
 		}
 	}

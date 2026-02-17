@@ -510,17 +510,14 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	ks := string(k)
 	sd.sdCtx.TouchKey(domain, ks, v)
 
-	var prevStep kv.Step
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.GetLatest(domain, roTx, k)
+		prevVal, _, err = sd.GetLatest(domain, roTx, k)
 		if err != nil {
 			return err
 		}
 	} else {
-		// Caller provided prevVal but we still need prevStep for the diff.
 		// Look it up from the DB (bypass cache for correct step).
-		_, prevStep, _ = sd.GetLatest(domain, roTx, k)
 	}
 	switch domain {
 	case kv.CodeDomain, kv.AccountsDomain, kv.StorageDomain, kv.CommitmentDomain:
@@ -540,7 +537,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		sd.stateCache.Put(domain, k, v)
 	}
 
-	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal, prevStep)
+	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal)
 }
 
 // DomainDel
@@ -552,15 +549,13 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	ks := string(k)
 	sd.sdCtx.TouchKey(domain, ks, nil)
 
-	var prevStep kv.Step
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.GetLatest(domain, tx, k)
+		prevVal, _, err = sd.GetLatest(domain, tx, k)
 		if err != nil {
 			return err
 		}
 	} else {
-		_, prevStep, _ = sd.GetLatest(domain, tx, k)
 	}
 
 	switch domain {
@@ -576,7 +571,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 			sd.stateCache.Delete(kv.AccountsDomain, k)
 			sd.stateCache.Delete(kv.CodeDomain, k)
 		}
-		return sd.mem.DomainDel(kv.AccountsDomain, ks, txNum, prevVal, prevStep)
+		return sd.mem.DomainDel(kv.AccountsDomain, ks, txNum, prevVal)
 	case kv.StorageDomain:
 		// Remove from state cache when storage is deleted
 		if sd.stateCache != nil {
@@ -593,7 +588,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	default:
 		//noop
 	}
-	return sd.mem.DomainDel(domain, ks, txNum, prevVal, prevStep)
+	return sd.mem.DomainDel(domain, ks, txNum, prevVal)
 }
 
 func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.TemporalTx, prefix []byte, txNum uint64) error {

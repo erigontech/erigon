@@ -100,21 +100,21 @@ func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	return sd
 }
 
-func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
+func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte) error {
 	sd.putLatest(domain, k, v, txNum)
-	return sd.putHistory(domain, toBytesZeroCopy(k), v, txNum, preval, prevStep)
+	return sd.putHistory(domain, toBytesZeroCopy(k), v, txNum, preval)
 }
 
-func (sd *TemporalMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, preval []byte, prevStep kv.Step) error {
+func (sd *TemporalMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, preval []byte) error {
 	sd.putLatest(domain, k, nil, txNum)
-	return sd.putHistory(domain, toBytesZeroCopy(k), nil, txNum, preval, prevStep)
+	return sd.putHistory(domain, toBytesZeroCopy(k), nil, txNum, preval)
 }
 
-func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
+func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint64, preval []byte) error {
 	if len(v) == 0 {
-		return sd.domainWriters[domain].DeleteWithPrev(k, txNum, preval, prevStep)
+		return sd.domainWriters[domain].DeleteWithPrev(k, txNum, preval)
 	}
-	return sd.domainWriters[domain].PutWithPrev(k, v, txNum, preval, prevStep)
+	return sd.domainWriters[domain].PutWithPrev(k, v, txNum, preval)
 }
 
 func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, txNum uint64) {

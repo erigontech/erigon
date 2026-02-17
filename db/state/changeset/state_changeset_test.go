@@ -196,7 +196,7 @@ func createTestDiffSet(tb testing.TB, numAccounts, numStorage, numCode, numCommi
 		key[0] = byte(i >> 8)
 		key[1] = byte(i)
 		value := make([]byte, 70) // typical account encoding size
-		diffSet.Diffs[kv.AccountsDomain].DomainUpdate(key, kv.Step(100), value, kv.Step(99))
+		diffSet.Diffs[kv.AccountsDomain].DomainUpdate(key, kv.Step(100), value)
 	}
 
 	// Storage domain - 20 byte address + 32 byte location
@@ -206,7 +206,7 @@ func createTestDiffSet(tb testing.TB, numAccounts, numStorage, numCode, numCommi
 		key[1] = byte(i >> 8)
 		key[2] = byte(i)
 		value := make([]byte, 32) // storage value
-		diffSet.Diffs[kv.StorageDomain].DomainUpdate(key, kv.Step(100), value, kv.Step(99))
+		diffSet.Diffs[kv.StorageDomain].DomainUpdate(key, kv.Step(100), value)
 	}
 
 	// Code domain - 20 byte address with code hash
@@ -215,7 +215,7 @@ func createTestDiffSet(tb testing.TB, numAccounts, numStorage, numCode, numCommi
 		key[0] = byte(i >> 8)
 		key[1] = byte(i)
 		value := make([]byte, 32) // code hash
-		diffSet.Diffs[kv.CodeDomain].DomainUpdate(key, kv.Step(100), value, kv.Step(99))
+		diffSet.Diffs[kv.CodeDomain].DomainUpdate(key, kv.Step(100), value)
 	}
 
 	// Commitment domain - variable key with trie node data
@@ -224,7 +224,7 @@ func createTestDiffSet(tb testing.TB, numAccounts, numStorage, numCode, numCommi
 		key[0] = byte(i >> 8)
 		key[1] = byte(i)
 		value := make([]byte, 64+i%64) // variable length values
-		diffSet.Diffs[kv.CommitmentDomain].DomainUpdate(key, kv.Step(100), value, kv.Step(99))
+		diffSet.Diffs[kv.CommitmentDomain].DomainUpdate(key, kv.Step(100), value)
 	}
 
 	return diffSet
