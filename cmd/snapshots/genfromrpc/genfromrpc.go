@@ -684,6 +684,19 @@ var timeboostedTxTypes = map[string]bool{
 	"0x68": true,
 }
 
+// TimeboostBlock returns the block number at which timeboost was activated for
+// the given chain ID. Returns 0 for unknown chains (timeboost disabled).
+func TimeboostBlock(chainID uint64) uint64 {
+	switch chainID {
+	case 42161: // Arbitrum One
+		return 327_000_000
+	case 421614: // Arbitrum Sepolia
+		return 45_000_000
+	default:
+		return 0
+	}
+}
+
 // genFromRPc connects to the RPC, fetches blocks starting from the given block,
 // and writes them into the local database.
 func genFromRPc(cliCtx *cli.Context) error {
@@ -750,12 +763,24 @@ func genFromRPc(cliCtx *cli.Context) error {
 
 	noWrite := cliCtx.Bool(NoWrite.Name)
 
+	var timeboostBlock uint64
+	if isArbitrum {
+		var chainIdHex string
+		if err := client.CallContext(context.Background(), &chainIdHex, "eth_chainId"); err != nil {
+			return fmt.Errorf("failed to query chain ID: %w", err)
+		}
+		chainID := new(big.Int)
+		chainID.SetString(chainIdHex[2:], 16)
+		timeboostBlock = TimeboostBlock(chainID.Uint64())
+		log.Info("Timeboost activation", "chainId", chainID, "block", timeboostBlock)
+	}
+
 	blockRPS := cliCtx.Int(turbocli.L2RPCBlockRPSFlag.Name)
 	blockBurst := cliCtx.Int(turbocli.L2RPCBlockBurstFlag.Name)
 	receiptRPS := cliCtx.Int(turbocli.L2RPCReceiptRPSFlag.Name)
 	receiptBurst := cliCtx.Int(turbocli.L2RPCReceiptBurstFlag.Name)
 
-	_, err = GetAndCommitBlocks(context.Background(), db, nil, client, receiptClient, start, latestBlock.Uint64(), verification, isArbitrum, noWrite, nil, blockRPS, blockBurst, receiptRPS, receiptBurst)
+	_, err = GetAndCommitBlocks(context.Background(), db, nil, client, receiptClient, start, latestBlock.Uint64(), verification, isArbitrum, noWrite, nil, timeboostBlock, blockRPS, blockBurst, receiptRPS, receiptBurst)
 	return err
 }
 
@@ -764,7 +789,7 @@ var (
 	prevReceiptTime = new(atomic.Uint64)
 )
 
-func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, receiptClient *rpc.Client, startBlockNum, endBlockNum uint64, verify, isArbitrum, dryRun bool, f func(tx kv.RwTx, lastBlockNum uint64) error, blockRPS, blockBurst, receiptRPS, receiptBurst int) (lastBlockNum uint64, err error) {
+func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, receiptClient *rpc.Client, startBlockNum, endBlockNum uint64, verify, isArbitrum, dryRun bool, f func(tx kv.RwTx, lastBlockNum uint64) error, timeboostBlock uint64, blockRPS, blockBurst, receiptRPS, receiptBurst int) (lastBlockNum uint64, err error) {
 	var (
 		batchSize = uint64(5)
 
@@ -782,7 +807,7 @@ func GetAndCommitBlocks(ctx context.Context, db kv.RwDB, rwTx kv.RwTx, client, r
 	client.SetRequestLimit(rate.Limit(blockRPS), blockBurst)
 
 	for prev := startBlockNum; prev < endBlockNum; {
-		blocks, err := FetchBlocksBatch(client, receiptClient, prev, endBlockNum, batchSize, verify, isArbitrum)
+		blocks, err := FetchBlocksBatch(client, receiptClient, prev, endBlockNum, batchSize, verify, isArbitrum, timeboostBlock)
 		if err != nil {
 			log.Warn("Error fetching block batch", "startBlockNum", prev, "err", err)
 			return lastBlockNum, err
@@ -926,14 +951,15 @@ func FetchBlockMetadataBatch(ctx context.Context, client *rpc.Client, startBlock
 }
 
 // GetBlockByNumber retrieves a block via RPC, decodes it, and (if requested) verifies its hash.
-func GetBlockByNumber(ctx context.Context, client, receiptClient *rpc.Client, blockNumber *big.Int, verify, isArbitrum bool, blockMetadata []byte) (*types.Block, error) {
+// timeboostBlock is the block number at which timeboost was activated (0 = disabled).
+func GetBlockByNumber(ctx context.Context, client, receiptClient *rpc.Client, blockNumber *big.Int, verify, isArbitrum bool, blockMetadata []byte, timeboostBlock uint64) (*types.Block, error) {
 	var block BlockJson
 	err := client.CallContext(ctx, &block, "eth_getBlockByNumber", fmt.Sprintf("0x%x", blockNumber), true)
 	if err != nil {
 		return nil, err
 	}
 
-	timeboostActivated := block.Number.Uint64() > 327_000_000 // for arb1
+	timeboostActivated := timeboostBlock > 0 && block.Number.Uint64() > timeboostBlock
 	txs, err := unMarshalTransactions(ctx, receiptClient, block.Transactions, verify, isArbitrum, blockMetadata, timeboostActivated)
 	if err != nil {
 		return nil, err
@@ -1122,7 +1148,7 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 }
 
 // FetchBlocksBatch fetches multiple blocks concurrently and returns them sorted by block number
-func FetchBlocksBatch(client, receiptClient *rpc.Client, startBlock, endBlock, batchSize uint64, verify, isArbitrum bool) ([]*types.Block, error) {
+func FetchBlocksBatch(client, receiptClient *rpc.Client, startBlock, endBlock, batchSize uint64, verify, isArbitrum bool, timeboostBlock uint64) ([]*types.Block, error) {
 	if startBlock >= endBlock {
 		return nil, nil
 	}
@@ -1150,7 +1176,7 @@ func FetchBlocksBatch(client, receiptClient *rpc.Client, startBlock, endBlock, b
 
 		eg.Go(func() error {
 			blockNumber := new(big.Int).SetUint64(blockNum)
-			blk, err := GetBlockByNumber(context.Background(), client, receiptClient, blockNumber, verify, isArbitrum, blockMetadata)
+			blk, err := GetBlockByNumber(context.Background(), client, receiptClient, blockNumber, verify, isArbitrum, blockMetadata, timeboostBlock)
 			if err != nil {
 				return fmt.Errorf("error fetching block %d: %w", blockNum, err)
 			}

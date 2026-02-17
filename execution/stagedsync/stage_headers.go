@@ -234,7 +234,7 @@ func SpawnStageHeaders(s *StageState, u Unwinder, ctx context.Context, tx kv.RwT
 		return nil
 	}
 
-	lastCommittedBlockNum, err := snapshots.GetAndCommitBlocks(ctx, cfg.db, tx, client, receiptClient, firstBlock, stopBlock, false, true, false, finaliseState, cfg.L2RPC.BlockRPS, cfg.L2RPC.BlockBurst, cfg.L2RPC.ReceiptRPS, cfg.L2RPC.ReceiptBurst)
+	lastCommittedBlockNum, err := snapshots.GetAndCommitBlocks(ctx, cfg.db, tx, client, receiptClient, firstBlock, stopBlock, false, true, false, finaliseState, snapshots.TimeboostBlock(cfg.chainConfig.ChainID.Uint64()), cfg.L2RPC.BlockRPS, cfg.L2RPC.BlockBurst, cfg.L2RPC.ReceiptRPS, cfg.L2RPC.ReceiptBurst)
 	if err != nil {
 		return fmt.Errorf("error fetching and committing blocks from rpc: %w", err)
 	}
@@ -860,7 +860,7 @@ func DebugFetchSingleBlock(ctx context.Context, tx kv.RwTx, client, receiptClien
 		log.Crit("Failed to fetch block metadata batch", "err", err)
 	}
 
-	blk, err := snapshots.GetBlockByNumber(ctx, client, receiptClient, new(big.Int).SetUint64(blockNum), true, true, metadataMap[blockNum])
+	blk, err := snapshots.GetBlockByNumber(ctx, client, receiptClient, new(big.Int).SetUint64(blockNum), true, true, metadataMap[blockNum], 0)
 	if err != nil {
 		return fmt.Errorf("failed to fetch block %d: %w", blockNum, err)
 	}
