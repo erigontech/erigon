@@ -28,10 +28,12 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/erigontech/erigon/db/version"
 
 	"github.com/spaolacci/murmur3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/assert"
@@ -374,6 +376,20 @@ func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, sec
 		panic("rs.leafSize >= 3 && nodes > 0x7FF")
 	}
 	table[m] |= nodes << 16
+}
+
+func precomputeGolombTable(maxM int, leafSize, primaryAggrBound, secondaryAggrBound uint16) []uint32 {
+	table := make([]uint32, maxM+1)
+	for s := 0; s <= maxM; s++ {
+		if s == 0 {
+			table[0] = (bijMemo[0] << 27) | bijMemo[0]
+		} else if uint16(s) <= leafSize {
+			table[s] = (bijMemo[s] << 27) | (uint32(1) << 16) | bijMemo[s]
+		} else {
+			computeGolombRice(uint16(s), table, leafSize, primaryAggrBound, secondaryAggrBound)
+		}
+	}
+	return table
 }
 
 // golombParam returns the optimal Golomb parameter to use for encoding
@@ -783,23 +799,265 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return fmt.Errorf("write bytes per record: %w", err)
 	}
 
-	rs.currentBucketIdx = math.MaxUint64 // To make sure 0 bucket is detected
 	defer rs.bucketCollector.Close()
 	if rs.lvl < log.LvlTrace {
 		log.Log(rs.lvl, "[index] calculating", "file", rs.fileName)
 	}
-	if err := rs.bucketCollector.Load(nil, "", rs.loadFuncBucket, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
+
+	type grEntry struct {
+		val        uint64
+		log2golomb int
 	}
-	if len(rs.currentBucket) > 0 {
-		if err := rs.recsplitCurrentBucket(); err != nil {
+	type bucketJob struct {
+		keys    []uint64
+		offsets []uint64
+		idx     uint64
+	}
+	type recsplitWorker struct {
+		keys      []uint64 // working copy of keys (parallel phase modifies this, originals preserved for replay)
+		buf       []uint64 // partition scratch
+		count     []uint16
+		grEntries []grEntry
+		unary     []uint64
+	}
+
+	batchSize := runtime.NumCPU()
+	golombTable := precomputeGolombTable(rs.bucketSize, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
+	batch := make([]bucketJob, 0, batchSize)
+	workers := make([]recsplitWorker, batchSize)
+	for w := range workers {
+		workers[w].keys = make([]uint64, rs.bucketSize+1)
+		workers[w].buf = make([]uint64, rs.bucketSize+1)
+		workers[w].count = make([]uint16, rs.secondaryAggrBound)
+	}
+	// Scratch buffers for sequential replay (single-threaded, reused across all buckets)
+	replayBuf := make([]uint64, rs.bucketSize+1)
+	replayOffBuf := make([]uint64, rs.bucketSize+1)
+
+	// flushBatch: parallel salt computation, then sequential offset replay + assembly.
+	flushBatch := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		// Extend golomb table if any bucket exceeds current size
+		maxM := len(golombTable) - 1
+		for _, b := range batch {
+			if len(b.keys) > maxM {
+				maxM = len(b.keys)
+			}
+		}
+		if maxM > len(golombTable)-1 {
+			golombTable = precomputeGolombTable(maxM, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
+		}
+
+		// Phase 1: Parallel - find salts only (CPU-heavy, no I/O, no offsets)
+		var g errgroup.Group
+		g.SetLimit(batchSize)
+		for i := range batch {
+			g.Go(func() error {
+				w := &workers[i]
+				m := len(batch[i].keys)
+				if len(w.keys) < m {
+					w.keys = make([]uint64, m)
+					w.buf = make([]uint64, m)
+				}
+				w.grEntries = w.grEntries[:0]
+				w.unary = w.unary[:0]
+				if m <= 1 {
+					return nil
+				}
+				for j := 1; j < m; j++ {
+					if batch[i].keys[j] == batch[i].keys[j-1] {
+						return fmt.Errorf("%w: %x", ErrCollision, batch[i].keys[j])
+					}
+				}
+				copy(w.keys[:m], batch[i].keys)
+				var findSalts func(level int, bkt []uint64) error
+				findSalts = func(level int, bkt []uint64) error {
+					salt := rs.startSeed[level]
+					m := uint16(len(bkt))
+					if m <= rs.leafSize {
+						salt = findBijection(bkt, salt)
+						salt -= rs.startSeed[level]
+						log2golomb := int(golombTable[m] >> 27)
+						w.grEntries = append(w.grEntries, grEntry{salt, log2golomb})
+						w.unary = append(w.unary, salt>>log2golomb)
+					} else {
+						fanout, unit := splitParams(m, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
+						salt = findSplit(bkt, salt, fanout, unit, w.count)
+						for k, c := uint16(0), uint16(0); k < fanout; k++ {
+							w.count[k] = c
+							c += unit
+						}
+						for k := uint16(0); k < m; k++ {
+							j := remap16(remix(bkt[k]+salt), m) / unit
+							w.buf[w.count[j]] = bkt[k]
+							w.count[j]++
+						}
+						copy(bkt, w.buf[:m])
+						salt -= rs.startSeed[level]
+						log2golomb := int(golombTable[m] >> 27)
+						w.grEntries = append(w.grEntries, grEntry{salt, log2golomb})
+						w.unary = append(w.unary, salt>>log2golomb)
+						var k uint16
+						for k = 0; k < m-unit; k += unit {
+							if err := findSalts(level+1, bkt[k:k+unit]); err != nil {
+								return err
+							}
+						}
+						if m-k > 1 {
+							if err := findSalts(level+1, bkt[k:]); err != nil {
+								return err
+							}
+						}
+					}
+					return nil
+				}
+				return findSalts(0, w.keys[:m])
+			})
+		}
+		if err := g.Wait(); err != nil {
+			if errors.Is(err, ErrCollision) {
+				rs.collision = true
+			}
 			return err
 		}
+
+		// Phase 2: Sequential - replay salts to reorder offsets and write directly to indexW
+		for i, b := range batch {
+			w := &workers[i]
+			m := len(b.keys)
+			for len(rs.bucketSizeAcc) <= int(b.idx)+1 {
+				rs.bucketSizeAcc = append(rs.bucketSizeAcc, rs.bucketSizeAcc[len(rs.bucketSizeAcc)-1])
+			}
+			rs.bucketSizeAcc[int(b.idx)+1] += uint64(m)
+
+			if m > 1 {
+				if len(replayBuf) < m {
+					replayBuf = make([]uint64, m)
+					replayOffBuf = make([]uint64, m)
+				}
+				entryIdx := 0
+				var replay func(level int, bkt, offs []uint64) error
+				replay = func(level int, bkt, offs []uint64) error {
+					entry := w.grEntries[entryIdx]
+					entryIdx++
+					salt := entry.val + rs.startSeed[level]
+					m := uint16(len(bkt))
+					if m <= rs.leafSize {
+						for k := uint16(0); k < m; k++ {
+							replayOffBuf[remap16(remix(bkt[k]+salt), m)] = offs[k]
+						}
+						for k := uint16(0); k < m; k++ {
+							binary.BigEndian.PutUint64(rs.numBuf[:], replayOffBuf[k])
+							if _, err := rs.indexW.Write(rs.numBuf[8-rs.bytesPerRec:]); err != nil {
+								return err
+							}
+						}
+					} else {
+						fanout, unit := splitParams(m, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
+						for k, c := uint16(0), uint16(0); k < fanout; k++ {
+							w.count[k] = c
+							c += unit
+						}
+						for k := uint16(0); k < m; k++ {
+							j := remap16(remix(bkt[k]+salt), m) / unit
+							replayBuf[w.count[j]] = bkt[k]
+							replayOffBuf[w.count[j]] = offs[k]
+							w.count[j]++
+						}
+						copy(bkt, replayBuf[:m])
+						copy(offs, replayOffBuf[:m])
+						var k uint16
+						for k = 0; k < m-unit; k += unit {
+							if err := replay(level+1, bkt[k:k+unit], offs[k:k+unit]); err != nil {
+								return err
+							}
+						}
+						if m-k > 1 {
+							if err := replay(level+1, bkt[k:], offs[k:]); err != nil {
+								return err
+							}
+						} else if m-k == 1 {
+							binary.BigEndian.PutUint64(rs.numBuf[:], offs[k])
+							if _, err := rs.indexW.Write(rs.numBuf[8-rs.bytesPerRec:]); err != nil {
+								return err
+							}
+						}
+					}
+					return nil
+				}
+				if err := replay(0, b.keys, b.offsets); err != nil {
+					return err
+				}
+			} else {
+				for _, offset := range b.offsets {
+					binary.BigEndian.PutUint64(rs.numBuf[:], offset)
+					if _, err := rs.indexW.Write(rs.numBuf[8-rs.bytesPerRec:]); err != nil {
+						return err
+					}
+				}
+			}
+
+			for _, entry := range w.grEntries {
+				rs.gr.appendFixed(entry.val, entry.log2golomb)
+			}
+			rs.gr.appendUnaryAll(w.unary)
+			for len(rs.bucketPosAcc) <= int(b.idx)+1 {
+				rs.bucketPosAcc = append(rs.bucketPosAcc, rs.bucketPosAcc[len(rs.bucketPosAcc)-1])
+			}
+			rs.bucketPosAcc[int(b.idx)+1] = uint64(rs.gr.Bits())
+		}
+		batch = batch[:0]
+		return nil
 	}
+
+	// Pre-allocate contiguous storage for batch key/offset data to avoid per-bucket allocations.
+	slotSize := rs.bucketSize + 1
+	batchKeyStore := make([]uint64, batchSize*slotSize)
+	batchOffStore := make([]uint64, batchSize*slotSize)
+	curSlot := 0
+	curKeys := batchKeyStore[0:0:slotSize]
+	curOffsets := batchOffStore[0:0:slotSize]
+	var curIdx uint64 = math.MaxUint64
+
+	collectFunc := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		bucketIdx := binary.BigEndian.Uint64(k)
+		if curIdx != bucketIdx {
+			if curIdx != math.MaxUint64 {
+				batch = append(batch, bucketJob{keys: curKeys, offsets: curOffsets, idx: curIdx})
+				if len(batch) >= batchSize {
+					if err := flushBatch(); err != nil {
+						return err
+					}
+					curSlot = 0
+				} else {
+					curSlot++
+				}
+				start := curSlot * slotSize
+				curKeys = batchKeyStore[start : start : start+slotSize]
+				curOffsets = batchOffStore[start : start : start+slotSize]
+			}
+			curIdx = bucketIdx
+		}
+		curKeys = append(curKeys, binary.BigEndian.Uint64(k[8:]))
+		curOffsets = append(curOffsets, binary.BigEndian.Uint64(v))
+		return nil
+	}
+	if err := rs.bucketCollector.Load(nil, "", collectFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if len(curKeys) > 0 {
+		batch = append(batch, bucketJob{keys: curKeys, offsets: curOffsets, idx: curIdx})
+	}
+	if err := flushBatch(); err != nil {
+		return err
+	}
+	rs.golombRice = golombTable
 
 	if assert.Enable {
 		_ = rs.indexW.Flush()
-		rs.indexF.Seek(0, 0)
+		rs.indexF.Seek(0, 0) //nolint:errcheck
 		b, _ := io.ReadAll(rs.indexF)
 		if len(b) != 9+int(rs.keysAdded)*rs.bytesPerRec {
 			panic(fmt.Errorf("expected: %d, got: %d; rs.keysAdded=%d, rs.bytesPerRec=%d, %s", 9+int(rs.keysAdded)*rs.bytesPerRec, len(b), rs.keysAdded, rs.bytesPerRec, rs.filePath))
