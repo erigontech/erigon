@@ -305,7 +305,7 @@ func TestGetPayloadBodiesByHashV2(t *testing.T) {
 	req.Len(bodies, 1)
 	req.NotNil(bodies[0])
 	req.NotNil(bodies[0].BlockAccessList)
-	req.Equal(hexutil.Bytes(balBytes), *bodies[0].BlockAccessList)
+	req.Equal(hexutil.Bytes(balBytes), bodies[0].BlockAccessList)
 }
 
 func TestGetPayloadBodiesByRangeV2(t *testing.T) {
@@ -350,6 +350,6 @@ func TestGetPayloadBodiesByRangeV2(t *testing.T) {
 	req.NotNil(bodies[1])
 	req.NotNil(bodies[0].BlockAccessList)
 	req.NotNil(bodies[1].BlockAccessList)
-	req.Equal(hexutil.Bytes(balBytes1), *bodies[0].BlockAccessList)
-	req.Equal(hexutil.Bytes(balBytes2), *bodies[1].BlockAccessList)
+	req.Equal(hexutil.Bytes(balBytes1), bodies[0].BlockAccessList)
+	req.Equal(hexutil.Bytes(balBytes2), bodies[1].BlockAccessList)
 }

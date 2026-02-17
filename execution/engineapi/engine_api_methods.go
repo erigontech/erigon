@@ -271,8 +271,8 @@ func (e *EngineServer) GetPayloadBodiesByRangeV2(ctx context.Context, start, cou
 	return resp, nil
 }
 
-func (e *EngineServer) readBlockAccessLists(ctx context.Context, hashes []common.Hash, numbers []*uint64) ([]*hexutil.Bytes, error) {
-	resp := make([]*hexutil.Bytes, len(hashes))
+func (e *EngineServer) readBlockAccessLists(ctx context.Context, hashes []common.Hash, numbers []*uint64) ([]hexutil.Bytes, error) {
+	resp := make([]hexutil.Bytes, len(hashes))
 	if e.db == nil {
 		return resp, nil
 	}
@@ -288,8 +288,7 @@ func (e *EngineServer) readBlockAccessLists(ctx context.Context, hashes []common
 			if len(balBytes) == 0 {
 				continue
 			}
-			balCopy := hexutil.Bytes(append([]byte(nil), balBytes...))
-			resp[i] = &balCopy
+			resp[i] = append([]byte(nil), balBytes...)
 		}
 		return nil
 	}); err != nil {

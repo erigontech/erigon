@@ -50,7 +50,7 @@ type ExecutionPayload struct {
 	BlobGasUsed     *hexutil.Uint64     `json:"blobGasUsed"`
 	ExcessBlobGas   *hexutil.Uint64     `json:"excessBlobGas"`
 	SlotNumber      *hexutil.Uint64     `json:"slotNumber"`
-	BlockAccessList *hexutil.Bytes      `json:"blockAccessList"`
+	BlockAccessList hexutil.Bytes       `json:"blockAccessList"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -106,7 +106,7 @@ type ExecutionPayloadBody struct {
 type ExecutionPayloadBodyV2 struct {
 	Transactions    []hexutil.Bytes     `json:"transactions" gencodec:"required"`
 	Withdrawals     []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
-	BlockAccessList *hexutil.Bytes      `json:"blockAccessList"`
+	BlockAccessList hexutil.Bytes       `json:"blockAccessList"`
 }
 
 type PayloadStatus struct {
@@ -258,7 +258,9 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 			slotNumber := *payload.SlotNumber
 			res.SlotNumber = (*hexutil.Uint64)(&slotNumber)
 		}
-		res.BlockAccessList = types.ConvertBlockAccessListFromTypesProto(payload.BlockAccessList)
+		if blockAccessList := types.ConvertBlockAccessListFromTypesProto(payload.BlockAccessList); blockAccessList != nil {
+			res.BlockAccessList = blockAccessList
+		}
 	}
 	return res
 }
