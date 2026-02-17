@@ -56,8 +56,12 @@ func (c *StateDiffClientDirect) StateChanges(ctx context.Context, in *remoteprot
 		defer close(ch)
 		streamServer.Err(c.server.StateChanges(in, streamServer))
 	}()
-	<-subscribed
-	return &StateDiffStreamC{ch: ch, ctx: ctx}, nil
+	select {
+	case <-subscribed:
+		return &StateDiffStreamC{ch: ch, ctx: ctx}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 type stateDiffReply struct {
