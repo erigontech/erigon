@@ -55,6 +55,13 @@ jobs:
             sim-limit: compat
             max-allowed-failures: 23
     steps:
+      - name: Checkout Erigon go.mod
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: go.mod
+          sparse-checkout-cone-mode: false
+          path: erigon-src
+
       - name: Checkout Hive
         uses: actions/checkout@v6
         with:
@@ -113,7 +120,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}-${2}"
             echo -e "\n"
-            ./hive -docker.auth --sim ethereum/"${1}" --sim.limit="${2}" --client erigon 2>&1 | tee output.log || {
+            ./hive -docker.auth --sim ethereum/"${1}" --sim.limit="${2}" --sim.parallelism=4 --client erigon 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi

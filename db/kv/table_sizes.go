@@ -1,8 +1,9 @@
 package kv
 
 import (
+	"cmp"
 	"context"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -65,8 +66,8 @@ func CollectTableSizes(ctx context.Context, db RoDB) ([]TableSize, error) {
 		Size: amountOfFreePagesInDb * db.PageSize().Bytes(),
 	})
 
-	sort.Slice(tableSizes, func(i, j int) bool {
-		return tableSizes[i].Size > tableSizes[j].Size
+	slices.SortFunc(tableSizes, func(a, b TableSize) int {
+		return cmp.Compare(b.Size, a.Size)
 	})
 
 	return tableSizes, nil

@@ -55,8 +55,6 @@ import (
 	"github.com/erigontech/erigon/node/shards"
 )
 
-const maxBlocksLookBehind = 32
-
 var ErrMissingChainSegment = errors.New("missing chain segment")
 
 func makeErrMissingChainSegment(blockHash common.Hash) error {
@@ -378,7 +376,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		}, nil
 	}
 
-	if math.AbsoluteDifference(*currentBlockNumber, req.Number) >= maxBlocksLookBehind {
+	if math.AbsoluteDifference(*currentBlockNumber, req.Number) >= e.syncCfg.MaxReorgDepth {
 		return &executionproto.ValidationReceipt{
 			ValidationStatus: executionproto.ExecutionStatus_TooFarAway,
 			LatestValidHash:  gointerfaces.ConvertHashToH256(common.Hash{}),

@@ -876,7 +876,7 @@ func (h *History) dataWriter(f *seg.Compressor) *seg.PagedWriter {
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0, h.dirs.Tmp)
+	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0)
 }
 func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return ht.h.dataReader(f) }
 func (ht *HistoryRoTx) dataWriter(f *seg.Compressor) *seg.PagedWriter {
