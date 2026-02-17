@@ -405,16 +405,10 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
-	if sd.stateCache != nil {
-		// This is fine, we will have some extra entries into domain worst case.
-		// regarding file determinism: probability of non-deterministic goes to 0 as we do
-		// files merge so this is not a problem in practice. file 0-1 will be non-deterministic
-		// but file 0-2 will be deterministic as it will include all entries from file 0-1 and so on.
-		if v, ok := sd.stateCache.Get(domain, k); ok {
-			return v, kv.Step(sd.txNum / sd.stepSize), nil
-		}
-	}
-
+	// Always go to DB/files for the correct (value, step) pair.
+	// The stateCache only stores values without step, so we cannot return
+	// step from cache (the old code returned sd.txNum/sd.stepSize which is
+	// the CURRENT step, not when the key was last written — see #19240).
 	type MeteredGetter interface {
 		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
 	}
@@ -428,9 +422,14 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
-	// Populate state cache on successful storage read
+	// Use cached value if available (more up-to-date than DB within current batch),
+	// but keep DB step which is correct for DomainDiff tracking.
 	if sd.stateCache != nil {
-		sd.stateCache.Put(domain, k, v)
+		if cachedV, ok := sd.stateCache.Get(domain, k); ok {
+			v = cachedV
+		} else {
+			sd.stateCache.Put(domain, k, v)
+		}
 	}
 
 	return v, step, nil
