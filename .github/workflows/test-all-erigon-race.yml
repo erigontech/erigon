@@ -35,32 +35,32 @@ jobs:
               - '**/.github/workflows/backups-dashboards.yml'
   tests-linux:
     needs: source-of-changes
+    timeout-minutes: 90
     concurrency:
       # concurrency group: there can be at most one running and one pending job in a 
       # concurrency group at any time. So for commits on main/release, we use different 
       # concurrency group per commit; for other branches, we use a branch-level CG.
       group: >-
         ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
-          format('{0}-{1}-{2}', github.workflow, matrix.os, github.run_id) ||
-          format('{0}-{1}-{2}', github.workflow, matrix.os, github.ref)
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
+          format('{0}-{1}-{2}-{3}', github.workflow, matrix.os, matrix.test-group, github.run_id) ||
+          format('{0}-{1}-{2}-{3}', github.workflow, matrix.os, matrix.test-group, github.ref)
         }}
       cancel-in-progress: true
     strategy:
+      fail-fast: false
       matrix:
         os:
           - ubuntu-latest
+        test-group:
+          - execution-tests
+          - execution-other
+          - consensus
+          - core-rpc
+          - other
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: Cleanup space
-        run: |
-          rm -fr /opt/az \
-                 /opt/microsoft \
-                 /usr/share/dotnet \
-                 /usr/share/miniconda \
-                 /usr/share/swift
-
       - name: Declare runners
         if: needs.source-of-changes.outputs.changed_files != 'true'
         run: |
@@ -76,7 +76,6 @@ jobs:
           lfs: true
 
       - name: Cleanup space
-        if: runner.os == 'Linux'
         run: |
           rm -fr /opt/az \
                  /opt/microsoft \
@@ -89,17 +88,62 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: '1.25'
-          cache: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
+          cache: true
           
       - name: Install dependencies on Linux
         if: needs.source-of-changes.outputs.changed_files != 'true'
         run: sudo apt update -y && sudo apt install -y build-essential
         
-      - name: Run all tests on ${{ matrix.os }}
+      - name: Run ${{ matrix.test-group }} tests on ${{ matrix.os }}
         env:
           SKIP_FLAKY_TESTS: 'true'
+          GODEBUG: cgocheck=0
+          GOTRACEBACK: 1
+          GOEXPERIMENT: synctest
+          GOGC: 80
+          CGO_CFLAGS: -D__BLST_PORTABLE__
         if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: GOGC=80 make test-all-race
+        run: |
+          case "${{ matrix.test-group }}" in
+            execution-tests)
+              # execution/tests/... contains the heaviest test suites (~32 min)
+              go test -race -timeout 60m ./execution/tests/...
+              ;;
+            execution-other)
+              # All execution subdirectories except execution/tests
+              DIRS=$(ls -d -- execution/*/ | grep -vE "execution/tests/" | sed 's/\/$//')
+              for d in $DIRS; do
+                if [ -d "$d" ]; then
+                  TEST_PACKAGES=$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' "./$d/..." 2>/dev/null)
+                  if [ -n "$TEST_PACKAGES" ]; then
+                    go test -race -timeout 30m "./$d/..."
+                  fi
+                fi
+              done
+              ;;
+            consensus)
+              go test -race -timeout 60m ./cl/...
+              ;;
+            core-rpc)
+              go test -race -timeout 30m ./db/... ./node/... ./txnprovider/... ./p2p/... ./rpc/...
+              ;;
+            other)
+              DIRS=$(ls -d -- */ | grep -vE '^(execution|cl|p2p|rpc|db|node|txnprovider|dashboards)/$' | sed 's/\/$//')
+              for d in $DIRS; do
+                if [ -d "$d" ]; then
+                  TEST_PACKAGES=$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' "./$d/...")
+                  if [ -n "$TEST_PACKAGES" ]; then
+                    go test -race -timeout 30m "./$d/..."
+                  fi
+                fi
+              done
+              ;;
+            *)
+              echo "Error: Unknown test-group value '${{ matrix.test-group }}'"
+              echo "Expected one of: execution-tests, execution-other, consensus, core-rpc, other"
+              exit 1
+              ;;
+          esac
 
       - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
         if: needs.source-of-changes.outputs.changed_files == 'true'
