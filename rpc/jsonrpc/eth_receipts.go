@@ -247,7 +247,7 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 		if err != nil {
 			return out, err
 		}
-		if err := receiptsAvailable(fromTxNum, tx); err != nil {
+		if err := assertReceiptsAvailable(fromTxNum, tx); err != nil {
 			return out, err
 		}
 	}
