@@ -711,6 +711,12 @@ func opNumber(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	return pc, nil, nil
 }
 
+func opSlotNum(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	v := new(uint256.Int).SetUint64(evm.Context.SlotNumber)
+	scope.Stack.push(*v)
+	return pc, nil, nil
+}
+
 func opDifficulty(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	var v *uint256.Int
 	if evm.Context.PrevRanDao != nil {
@@ -1315,7 +1321,7 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		if self != beneficiaryAddr {
 			ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))
 		} else if newContract {
-			ibs.AddLog(misc.EthSelfDestructLog(self.Value(), balance))
+			ibs.AddLog(misc.EthBurnLog(self.Value(), balance))
 		}
 	}
 	tracer := evm.Config().Tracer

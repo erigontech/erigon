@@ -613,7 +613,7 @@ func TestUDPv5_talkHandling(t *testing.T) {
 		if !bytes.Equal(p.ReqID, []byte("2")) {
 			t.Error("wrong request ID in response:", p.ReqID)
 		}
-		if string(p.Message) != "" {
+		if len(p.Message) != 0 {
 			t.Errorf("wrong talk response message: %q", p.Message)
 		}
 		if recvMessage != nil {

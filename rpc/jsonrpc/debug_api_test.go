@@ -549,6 +549,7 @@ func TestGetBadBlocks(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
+	defer tx.Rollback()
 
 	putBlock := func(number uint64) common.Hash {
 		// prepare db so it works with our test
@@ -585,6 +586,13 @@ func TestGetBadBlocks(t *testing.T) {
 
 	tx.Commit()
 
+	// Reset the global bad block cache so it reads only from this test's DB
+	tx2, err := m.DB.BeginRo(ctx)
+	require.NoError(err)
+	defer tx2.Rollback()
+	require.NoError(rawdb.ResetBadBlockCache(tx2, 100))
+	tx2.Rollback()
+
 	data, err := api.GetBadBlocks(ctx)
 	require.NoError(err)
 
@@ -605,6 +613,7 @@ func TestGetRawTransaction(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not begin read transaction: %s", err)
 	}
+	defer tx.Rollback()
 	number := *rawdb.ReadCurrentBlockNumber(tx)
 	tx.Commit()
 
@@ -615,9 +624,9 @@ func TestGetRawTransaction(t *testing.T) {
 	for i := uint64(0); i < number; i++ {
 		tx, err := m.DB.BeginRo(ctx)
 		require.NoError(err)
+		defer tx.Rollback()
 		block, err := api._blockReader.BlockByNumber(ctx, tx, i)
 		require.NoError(err)
-		tx.Rollback()
 		txns := block.Transactions()
 
 		for _, txn := range txns {

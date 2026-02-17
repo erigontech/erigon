@@ -90,6 +90,12 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		transferFunc = misc.Transfer
 		postApplyMessageFunc = misc.LogSelfDestructedAccounts
 	}
+
+	var slotNumber uint64
+	if header.SlotNumber != nil {
+		slotNumber = *header.SlotNumber
+	}
+
 	blockContext := evmtypes.BlockContext{
 		CanTransfer:      CanTransfer,
 		Transfer:         transferFunc,
@@ -102,6 +108,7 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		GasLimit:         header.GasLimit,
 		PrevRanDao:       prevRandDao,
 		BlobBaseFee:      blobBaseFee,
+		SlotNumber:       slotNumber,
 	}
 	if header.Difficulty != nil {
 		blockContext.Difficulty = new(big.Int).Set(header.Difficulty)
