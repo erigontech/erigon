@@ -1444,8 +1444,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
-		compactHashedKey, _ := commitment.CompactKey(hashedKeyPath)
-		fmt.Printf("[debug_executionWitness] node collapse detected at path %x (len=%d)\n", compactHashedKey, len(hashedKeyPath))
+		fmt.Printf("[debug_executionWitness] node collapse detected at path %s (len=%d)\n", commitment.NibblesToString(hashedKeyPath), len(hashedKeyPath))
 		collapseSiblingPaths = append(collapseSiblingPaths, common.Copy(hashedKeyPath))
 	})
 
@@ -1470,11 +1469,11 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		fmt.Printf("[debug_executionWitness] detected %d sibling paths\n", len(collapseSiblingPaths))
 
 		for _, siblingPath := range collapseSiblingPaths {
-			compactSiblingPath, err := commitment.CompactKey(siblingPath)
+			compactSiblingPath := commitment.NibblesToString(siblingPath)
 			if err != nil {
 				return nil, err
 			}
-			fmt.Printf("[debug_executionWitness] touching  sibling hashed key: %x (len=%d)\n", compactSiblingPath, len(siblingPath))
+			fmt.Printf("[debug_executionWitness] touching  sibling hashed key: %s (len=%d)\n", compactSiblingPath, len(siblingPath))
 			sdCtx.TouchHashedKey(siblingPath)
 		}
 	}

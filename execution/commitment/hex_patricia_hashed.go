@@ -2303,8 +2303,8 @@ func (hph *HexPatriciaHashed) detectCollapseBeforeDelete(hashedKey []byte) {
 	}
 
 	// collapse detected!
-	compact, _ := CompactKey(hashedKey)
-	fmt.Printf("[collapse-debug] updateCell: hashedKey=%x (len=%d nibbles), deleted=true, activeRows=%d\n",
+	compact := NibblesToString(hashedKey)
+	fmt.Printf("[collapse-debug] updateCell: hashedKey=sx (len=%d nibbles), deleted=true, activeRows=%d\n",
 		compact, len(hashedKey), hph.activeRows)
 
 	// Exactly 2 children in the parent row — one is on the delete path,
