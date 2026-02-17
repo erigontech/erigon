@@ -17,7 +17,7 @@
 package rpchelper
 
 import (
-	"sync"
+	sync "github.com/linkdata/deadlock"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/concurrent"
