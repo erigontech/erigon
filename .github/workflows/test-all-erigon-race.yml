@@ -102,6 +102,7 @@ jobs:
           GOTRACEBACK: 1
           GOEXPERIMENT: synctest
           GOGC: 80
+          CGO_CFLAGS: -D__BLST_PORTABLE__
         if: needs.source-of-changes.outputs.changed_files != 'true'
         run: |
           case "${{ matrix.test-group }}" in
