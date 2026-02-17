@@ -261,7 +261,7 @@ func fakeRlpTxn(slot *TxnSlot, data []byte) []byte {
 	p += rlp.EncodeU64(1, buf[p:])        //r
 	p += rlp.EncodeU64(1, buf[p:])        //s
 	_ = p
-	return buf[:]
+	return buf
 }
 
 func iterateSubPoolUnordered(subPool *SubPool, f func(txn *metaTxn)) {
