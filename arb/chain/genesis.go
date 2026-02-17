@@ -67,7 +67,7 @@ func ArbOneGenesisBlock() *types.Block {
 		BlobGasUsed:   g.BlobGasUsed,
 		ExcessBlobGas: g.ExcessBlobGas,
 		RequestsHash:  g.RequestsHash,
-		Root:          common.HexToHash("0x7f2bfc4481d02bfcfc606ebb949384ef78d03a0f30a2dc9cccd652eb80926ae1"),
+		Root:          Arb1GenesisStateRoot,
 	}
 	if g.AuRaSeal != nil && len(g.AuRaSeal.AuthorityRound.Signature) > 0 {
 		head.AuRaSeal = g.AuRaSeal.AuthorityRound.Signature
