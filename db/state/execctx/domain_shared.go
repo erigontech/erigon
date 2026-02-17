@@ -169,7 +169,7 @@ func (sd *SharedDomains) Merge(other *SharedDomains) error {
 		sd.sdCtx.SetPendingUpdate(otherUpd)
 	}
 
-	sd.txNum = other.txNum
+	sd.txNum.Store(other.txNum.Load())
 	sd.blockNum.Store(other.blockNum.Load())
 	return nil
 }
