@@ -463,7 +463,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	}
 
 	if !hasLoggedCommittments.Load() && !commitStart.IsZero() {
-		pe.LogCommitments(commitStart, uint64(uncommittedBlocks), uncommittedTransactions, uint64(uncommittedGas), stepsInDb, lastProgress)
+		pe.LogCommitments(commitStart, 0, 0, 0, stepsInDb, lastProgress)
 	}
 
 	if execErr != nil {
