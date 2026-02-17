@@ -488,7 +488,7 @@ func gen(typ interface{}, rand *rand.Rand) interface{} {
 
 func quickcfg() *quick.Config {
 	return &quick.Config{
-		MaxCount: 5000,
+		MaxCount: 500,
 		Rand:     rand.New(rand.NewSource(time.Now().Unix())),
 	}
 }

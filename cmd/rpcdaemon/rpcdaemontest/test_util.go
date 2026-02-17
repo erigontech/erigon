@@ -112,7 +112,7 @@ func CreateTestSentry(t *testing.T) (*mock.MockSentry, *blockgen.ChainPack, []*b
 		t.Fatal(err)
 	}
 
-	chain, err := getChainInstance(&addresses, m.ChainConfig, m.Genesis, m.Engine, m.DB, contractBackend)
+	chain, err := generateChain(&addresses, m.ChainConfig, m.Genesis, m.Engine, m.DB, contractBackend)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,23 +125,6 @@ func CreateTestSentry(t *testing.T) (*mock.MockSentry, *blockgen.ChainPack, []*b
 	}
 
 	return m, chain, []*blockgen.ChainPack{orphanedChain}
-}
-
-var chainInstance *blockgen.ChainPack
-
-func getChainInstance(
-	addresses *testAddresses,
-	config *chain.Config,
-	parent *types.Block,
-	engine rules.Engine,
-	db kv.TemporalRwDB,
-	contractBackend *backends.SimulatedBackend,
-) (*blockgen.ChainPack, error) {
-	var err error
-	if chainInstance == nil {
-		chainInstance, err = generateChain(addresses, config, parent, engine, db, contractBackend)
-	}
-	return chainInstance.Copy(), err
 }
 
 func generateChain(
