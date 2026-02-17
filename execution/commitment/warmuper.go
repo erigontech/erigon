@@ -279,9 +279,9 @@ func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int) {
 }
 
 // Wait waits for all warmup work to complete.
-func (w *Warmuper) wait() {
+func (w *Warmuper) Wait() error {
 	if !w.started.Load() || w.numWorkers <= 0 {
-		return
+		return nil
 	}
 
 	// Only close the channel once
@@ -295,7 +295,7 @@ func (w *Warmuper) wait() {
 		"spent", time.Since(w.startTime),
 	)
 
-	return
+	return nil
 }
 
 // Stats returns statistics about the warmup.
@@ -329,7 +329,7 @@ func (w *Warmuper) WaitAndClose() {
 	if w.closed.Swap(true) {
 		return // Already closed
 	}
-	w.wait()
+	w.Wait()
 	w.Close()
 	return
 }
