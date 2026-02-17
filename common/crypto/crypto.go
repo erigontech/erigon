@@ -37,6 +37,7 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/keccak"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
 )
@@ -325,7 +326,7 @@ func PubkeyToAddress(p ecdsa.PublicKey) common.Address {
 // hasherPool holds LegacyKeccak hashers.
 var hasherPool = sync.Pool{
 	New: func() any {
-		return sha3.NewLegacyKeccak256()
+		return keccak.NewFastKeccak()
 	},
 }
 

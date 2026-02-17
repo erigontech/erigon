@@ -6,9 +6,9 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/keccak"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -205,7 +205,7 @@ func (t *ValidationRulesTracer) isAssociatedStorage(slot accounts.StorageKey, ad
 	buf := make([]byte, 52)
 	copy(buf, addrValue[:])
 
-	hash := sha3.NewLegacyKeccak256()
+	hash := keccak.NewFastKeccak()
 	result := make([]byte, 32)
 
 	for x := 0; x < 50; x++ {

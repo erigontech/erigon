@@ -20,7 +20,7 @@ import (
 	"hash"
 	"sync"
 
-	"golang.org/x/crypto/sha3"
+	"github.com/erigontech/erigon/common/crypto/keccak"
 )
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -37,7 +37,7 @@ type Hasher struct {
 
 var hashersPool = sync.Pool{
 	New: func() any {
-		return &Hasher{Sha: sha3.NewLegacyKeccak256().(keccakState)}
+		return &Hasher{Sha: keccak.NewFastKeccak()}
 	},
 }
 
