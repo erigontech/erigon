@@ -23,10 +23,10 @@ import (
 	"fmt"
 	"io"
 	"reflect"
-	"sync"
 	"sync/atomic"
 	"time"
 
+	sync "github.com/linkdata/deadlock"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"google.golang.org/grpc"
