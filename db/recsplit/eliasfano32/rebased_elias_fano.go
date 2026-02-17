@@ -32,7 +32,7 @@ func (ref *RebasedEliasFano) Count() uint64 {
 	return ref.ef.Count()
 }
 
-func (ref *RebasedEliasFano) Reset(baseNum uint64, raw []byte) { // no `return parameter` to avoid heap-allocation of `s` object
+func (ref *RebasedEliasFano) Reset(baseNum uint64, raw []byte) { // no `return parameter` to avoid heap-allocation of `ref` object
 	ref.baseNum = baseNum
 	ref.ef.Reset(raw)
 }
