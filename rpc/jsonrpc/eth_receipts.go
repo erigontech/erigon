@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -200,11 +201,21 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 		if err != nil {
 			return out, err
 		}
-		r := state.NewHistoryReaderV3()
-		r.SetTx(tx)
-		//if fromTxNum < r.StateHistoryStartFrom() {
-		//	return out, state.PrunedError
-		//}
+		// When --persist.receipts is enabled, receipt data is stored independently
+		// of state history, so we can serve eth_getLogs even for pruned state ranges.
+		// Only check state history availability when receipts need to be re-generated
+		// from state execution.
+		persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
+		if err != nil {
+			return out, err
+		}
+		if !persistReceipts {
+			r := state.NewHistoryReaderV3()
+			r.SetTx(tx)
+			if fromTxNum < r.StateHistoryStartFrom() {
+				return out, state.PrunedError
+			}
+		}
 	}
 
 	toTxNum, err = txNumsReader.Max(tx, end)
