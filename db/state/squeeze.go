@@ -555,6 +555,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		if err != nil {
 			return err
 		}
+		logger.Info("[rebuild_commitment_history] after flush: SeekCommitment restored",
+			"block", domains.BlockNum(), "txNum", domains.TxNum())
 		domains.DiscardWrites(kv.AccountsDomain)
 		domains.DiscardWrites(kv.StorageDomain)
 		domains.DiscardWrites(kv.CodeDomain)
@@ -586,7 +588,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			return fmt.Errorf("[rebuild_commitment_history] canonical header not found for block %d", blockNum)
 		}
 		if common.Hash(rh) != header.Root {
-			return fmt.Errorf("[rebuild_commitment_history] root mismatch at block %d: computed %x, expected %x", blockNum, rh, header.Root)
+			return fmt.Errorf("[rebuild_commitment_history] root mismatch at block %d (toTxNum=%d): computed %x, expected %x",
+				blockNum, toTxNum, rh, header.Root)
 		}
 
 		select {
