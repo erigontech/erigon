@@ -691,7 +691,7 @@ func TimeboostBlock(chainID uint64) uint64 {
 	case 42161: // Arbitrum One
 		return 327_000_000
 	case 421614: // Arbitrum Sepolia
-		return 45_000_000
+		return 123_000_000
 	default:
 		return 0
 	}
