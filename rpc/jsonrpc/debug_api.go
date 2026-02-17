@@ -2068,9 +2068,16 @@ func (s *witnessStateless) ReadAccountCode(address accounts.Address) ([]byte, er
 		return nil, err
 	}
 
-	// Check code updates first
-	if code, ok := s.codeUpdates[addrHash]; ok {
-		return code, nil
+	// Check code updates first — look up by the account's code hash (matching UpdateAccountCode key)
+	acc, err := s.ReadAccountData(address)
+	if err != nil {
+		return nil, err
+	}
+	if acc != nil {
+		codeHashValue := acc.CodeHash.Value()
+		if code, ok := s.codeUpdates[codeHashValue]; ok {
+			return code, nil
+		}
 	}
 
 	// Check trie for code
@@ -2079,10 +2086,6 @@ func (s *witnessStateless) ReadAccountCode(address accounts.Address) ([]byte, er
 	}
 
 	// Check code map (from witness)
-	acc, err := s.ReadAccountData(address)
-	if err != nil {
-		return nil, err
-	}
 	if acc != nil {
 		codeHashValue := acc.CodeHash.Value()
 		if code, ok := s.codeMap[codeHashValue]; ok {
