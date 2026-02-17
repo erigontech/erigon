@@ -116,7 +116,7 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt := new(testMatcher)
 	// to run only tests for 1 eip do:
 	// bt.whitelist(`.*eip7708_eth_transfer_logs/test_finalization_selfdestruct_logs.json`)
-	bt.whitelist(`.*amsterdam.*`) // TODO run tests for older forks too once we fix amsterdam eips, for now focus only on amsterdam eips
+	bt.whitelist(`.*amsterdam.*`)                                                                              // TODO run tests for older forks too once we fix amsterdam eips, for now focus only on amsterdam eips
 	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_finalization_after_priority_fee.json`)          // TODO fix error: block access list mismatch
 	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_to_self_cross_tx_no_log.json`)                  // TODO fix error: block access list mismatch
 	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_same_tx_via_call.json`)                         // TODO fix error: block #1 insertion into chain failed
