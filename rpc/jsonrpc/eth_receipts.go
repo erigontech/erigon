@@ -193,13 +193,12 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	return rpcLogs, nil
 }
 
-// receiptsAvailable corner cases:
+// assertReceiptsAvailable corner cases:
 //   - `--persist.receipts`: means all receipts available (even in `--prune.mode=minimal` mode)
 //   - `--prune.mode=minimal` (and `full`) can serve receipts as much as "state history" available (by re-executing blocks)
 //
 // returns `state.PrunedError` if not available for given `fromTxNum`
-func receiptsAvailable(fromTxNum uint64, tx kv.TemporalTx) error {
-	//
+func assertReceiptsAvailable(fromTxNum uint64, tx kv.TemporalTx) error {
 	persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
 	if err != nil {
 		return err
@@ -223,7 +222,7 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 		if err != nil {
 			return out, err
 		}
-		if err := receiptsAvailable(fromTxNum, tx); err != nil {
+		if err := assertReceiptsAvailable(fromTxNum, tx); err != nil {
 			return out, err
 		}
 	}
