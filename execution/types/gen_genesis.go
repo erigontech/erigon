@@ -37,6 +37,7 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 		ParentBeaconBlockRoot *common.Hash                                `json:"parentBeaconBlockRoot"`
 		RequestsHash          *common.Hash                                `json:"requestsHash"`
 		BlockAccessListHash   *common.Hash                                `json:"blockAccessListHash"`
+		SlotNumber            *math.HexOrDecimal64                        `json:"slotNumber"`
 	}
 	var enc Genesis
 	enc.Config = g.Config
@@ -63,6 +64,7 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 	enc.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
 	enc.RequestsHash = g.RequestsHash
 	enc.BlockAccessListHash = g.BlockAccessListHash
+	enc.SlotNumber = (*math.HexOrDecimal64)(g.SlotNumber)
 	return json.Marshal(&enc)
 }
 
@@ -88,6 +90,7 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 		ParentBeaconBlockRoot *common.Hash                                `json:"parentBeaconBlockRoot"`
 		RequestsHash          *common.Hash                                `json:"requestsHash"`
 		BlockAccessListHash   *common.Hash                                `json:"blockAccessListHash"`
+		SlotNumber            *math.HexOrDecimal64                        `json:"slotNumber"`
 	}
 	var dec Genesis
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -154,6 +157,9 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 	}
 	if dec.BlockAccessListHash != nil {
 		g.BlockAccessListHash = dec.BlockAccessListHash
+	}
+	if dec.SlotNumber != nil {
+		g.SlotNumber = (*uint64)(dec.SlotNumber)
 	}
 	return nil
 }
