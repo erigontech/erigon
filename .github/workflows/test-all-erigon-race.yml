@@ -35,7 +35,7 @@ jobs:
               - '**/.github/workflows/backups-dashboards.yml'
   tests-linux:
     needs: source-of-changes
-    timeout-minutes: 60
+    timeout-minutes: 90
     concurrency:
       # concurrency group: there can be at most one running and one pending job in a 
       # concurrency group at any time. So for commits on main/release, we use different 
