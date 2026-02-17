@@ -270,6 +270,11 @@ func (c *Compressor) AddUncompressedWord(word []byte) error {
 }
 
 func (c *Compressor) Compress() error {
+	if err := WorkersLimiter.Acquire(c.ctx, 1); err != nil {
+		return err
+	}
+	defer WorkersLimiter.Release(1)
+
 	if err := c.uncompressedFile.Flush(); err != nil {
 		return err
 	}
