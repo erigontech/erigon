@@ -111,6 +111,22 @@ func (test *udpTest) packetInFrom(wantError error, key *ecdsa.PrivateKey, addr n
 	}
 }
 
+// packetInFromTolerate handles a packet like packetInFrom but additionally
+// tolerates the given error. This is useful for replies (e.g. Pong) that may
+// arrive after the corresponding request matcher has timed out under CI load.
+func (test *udpTest) packetInFromTolerate(key *ecdsa.PrivateKey, addr netip.AddrPort, data v4wire.Packet, toleratedErr error) {
+	test.t.Helper()
+
+	enc, _, err := v4wire.Encode(key, data)
+	if err != nil {
+		test.t.Errorf("%s encode error: %v", data.Name(), err)
+	}
+	test.sent = append(test.sent, enc)
+	if err = test.udp.handlePacket(addr, enc); err != nil && err != toleratedErr {
+		test.t.Errorf("error mismatch: got %q, want nil or %q", err, toleratedErr)
+	}
+}
+
 // waits for a packet to be sent by the transport.
 // validate should have type func(X, netip.AddrPort, []byte), where X is a packet type.
 func (test *udpTest) waitPacketOut(validate any) (closed bool) {
