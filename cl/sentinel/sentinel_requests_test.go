@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -295,4 +296,52 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 
 		require.Equal(t, root1, root2)
 	}
+}
+
+func TestSentinelStatusRequest(t *testing.T) {
+	ctx := context.Background()
+	db, blocks, _, _, reader := loadChain(t)
+	ethClock := getEthClock(t)
+
+	sent := newTestSentinel(t, ethClock, reader, db, newMockPeerDasStateReader(t))
+	h := sent.Host()
+
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
+
+	err = h.Connect(ctx, peer.AddrInfo{
+		ID:    host1.ID(),
+		Addrs: host1.Addrs(),
+	})
+	require.NoError(t, err)
+
+	req := &cltypes.Status{
+		HeadRoot:       common.Hash(blocks[0].Block.ParentRoot),
+		HeadSlot:       1234,
+		FinalizedRoot:  common.Hash{},
+		FinalizedEpoch: 0,
+	}
+	sent.SetStatus(req)
+
+	stream, err := host1.NewStream(ctx, h.ID(), protocol.ID(communication.StatusProtocolV1))
+	require.NoError(t, err)
+
+	if err := ssz_snappy.EncodeAndWrite(stream, req); err != nil {
+		return
+	}
+
+	code := make([]byte, 1)
+	_, err = stream.Read(code)
+	require.NoError(t, err)
+	require.Equal(t, uint8(0), code[0])
+
+	resp := &cltypes.Status{}
+	err = ssz_snappy.DecodeAndReadNoForkDigest(stream, resp, 0)
+	require.NoError(t, err)
+
+	require.Equal(t, req.HeadRoot, resp.HeadRoot)
+	require.Equal(t, req.HeadSlot, resp.HeadSlot)
+	require.Equal(t, req.FinalizedRoot, resp.FinalizedRoot)
+	require.Equal(t, req.FinalizedEpoch, resp.FinalizedEpoch)
 }
