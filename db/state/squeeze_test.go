@@ -426,7 +426,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.NoError(t, err)
 	defer dom2.Close()
 
-	err = dom2.SeekCommitment(ctx, rwTx)
+	_, _, err = dom2.SeekCommitment(ctx, rwTx)
 	sstartTx := dom2.TxNum()
 
 	require.NoError(t, err)

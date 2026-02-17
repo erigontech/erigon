@@ -442,7 +442,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		return err
 	}
 
-	doms.SeekCommitment(ctx, rwTx)
+	_, _, _ = doms.SeekCommitment(ctx, rwTx)
 	//dumpPlainStateDebug(tx, nil)
 	return nil
 }

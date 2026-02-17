@@ -204,7 +204,7 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 	}
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentCtx().SetLimitedHistoryStateReader(tx, maxTxNum) // to use tx.Debug().GetLatestFromFiles with maxTxNum
-	err = sd.SeekCommitment(ctx, tx)                                 // seek commitment again to use the new state reader instead
+	_, _, err = sd.SeekCommitment(ctx, tx)                           // seek commitment again to use the new state reader instead
 	if err != nil {
 		return nil, err
 	}
@@ -749,7 +749,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	sd.GetCommitmentCtx().SetHistoryStateReader(tx, toTxNum)
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
-	err = sd.SeekCommitment(ctx, tx) // seek commitment again with new history state reader
+	_, _, err = sd.SeekCommitment(ctx, tx) // seek commitment again with new history state reader
 	if err != nil {
 		return err
 	}

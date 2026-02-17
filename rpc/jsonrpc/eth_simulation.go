@@ -607,7 +607,7 @@ func (s *simulator) simulateBlock(
 		if !latest {
 			// Restore the commitment state at the start of the simulated block using historical state reader.
 			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
-			if err := sharedDomains.SeekCommitment(context.Background(), tx); err != nil {
+			if _, _, err := sharedDomains.SeekCommitment(context.Background(), tx); err != nil {
 				return nil, nil, err
 			}
 			// Change the state reader to a commitment-only history reader that reads non-commitment domains from the latest state.

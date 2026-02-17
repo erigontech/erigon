@@ -153,7 +153,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer newDoms.Close()
 
-	err = newDoms.SeekCommitment(ctx, tx)
+	_, _, err = newDoms.SeekCommitment(ctx, tx)
 	require.NoError(t, err)
 	latestTx := newDoms.TxNum()
 	t.Logf("seek to latest_tx=%d", latestTx)

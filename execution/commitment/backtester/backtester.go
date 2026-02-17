@@ -209,7 +209,7 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	sd.GetCommitmentCtx().SetStateReader(newBacktestStateReader(tx, fromTxNum, toTxNum))
 	sd.GetCommitmentCtx().SetTrace(bt.logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentCtx().EnableCsvMetrics(deriveBlockMetricsFilePrefix(blockOutputDir))
-	err = sd.SeekCommitment(ctx, tx)
+	_, _, err = sd.SeekCommitment(ctx, tx)
 	if err != nil {
 		return err
 	}

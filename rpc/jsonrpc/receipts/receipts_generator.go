@@ -302,7 +302,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 			// commitment is indexed by txNum of the first tx (system-tx) of the block
 			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
-			if err := sharedDomains.SeekCommitment(ctx, tx); err != nil {
+			if _, _, err := sharedDomains.SeekCommitment(ctx, tx); err != nil {
 				return nil, err
 			}
 			stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
@@ -486,7 +486,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
 		// commitment are indexed by txNum of the first tx (system-tx) of the block
 		sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
-		if err := sharedDomains.SeekCommitment(ctx, tx); err != nil {
+		if _, _, err := sharedDomains.SeekCommitment(ctx, tx); err != nil {
 			return nil, err
 		}
 		stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())

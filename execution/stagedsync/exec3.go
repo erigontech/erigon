@@ -130,7 +130,7 @@ func ExecV3(ctx context.Context,
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
 	hooks := cfg.vmConfig.Tracer
 	applyTx := rwTx
-	err := doms.SeekCommitment(ctx, applyTx)
+	_, _, err := doms.SeekCommitment(ctx, applyTx)
 	if err != nil {
 		return err
 	}
