@@ -627,6 +627,11 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 						}
 					}
 				}
+				if domains.Size() > uint64(batchSize) {
+					if err := flushDomainsAndRebuild(); err != nil {
+						return err
+					}
+				}
 				curBlock = blockNum
 			}
 			domain := kv.AccountsDomain
