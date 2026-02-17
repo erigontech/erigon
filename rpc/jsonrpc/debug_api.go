@@ -1130,6 +1130,23 @@ func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domai
 	return touches, nil
 }
 
+func touchGroundTruthHistoricalKeys(domains *execctx.SharedDomains, tx kv.TemporalTx, fromTxNum, toTxNum uint64) error {
+	accTouches, err := touchHistoricalKeys(domains, tx, kv.AccountsDomain, fromTxNum, toTxNum, nil)
+	if err != nil {
+		return err
+	}
+	storageTouches, err := touchHistoricalKeys(domains, tx, kv.StorageDomain, fromTxNum, toTxNum, nil)
+	if err != nil {
+		return err
+	}
+	codeTouches, err := touchHistoricalKeys(domains, tx, kv.CodeDomain, fromTxNum, toTxNum, nil)
+	if err != nil {
+		return err
+	}
+	log.Info("commitment touched keys", "accTouches", accTouches, "storageTouches", storageTouches, "codeTouches", codeTouches)
+	return nil
+}
+
 // ExecutionWitness implements debug_executionWitness.
 // It executes a block using a historical state reader, records all state accesses
 // (accounts, storage, code), and builds merkle proofs for the accessed keys.
@@ -1374,7 +1391,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	// 	return nil, err
 	// }
 
-	if len(allAddresses)+len(allStorageKeys) == 0 { // nothing touched, return empty witness
+	if len(allAddresses)+len(allStorageKeys)+len(allCode) == 0 { // nothing touched, return empty witness
 		return result, nil
 	}
 
@@ -1394,24 +1411,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		}
 	}
 
-	touchGroundTruthHistoricalKeys := func(fromTxNum, toTxNum uint64) error {
-		accTouches, err := touchHistoricalKeys(domains, tx, kv.AccountsDomain, fromTxNum, toTxNum, nil)
-		if err != nil {
-			return err
-		}
-		storageTouches, err := touchHistoricalKeys(domains, tx, kv.StorageDomain, fromTxNum, toTxNum, nil)
-		if err != nil {
-			return err
-		}
-		codeTouches, err := touchHistoricalKeys(domains, tx, kv.CodeDomain, fromTxNum, toTxNum, nil)
-		if err != nil {
-			return err
-		}
-		log.Info("commitment touched keys", "accTouches", accTouches, "storageTouches", storageTouches, "codeTouches", codeTouches)
-		return nil
-	}
-	_ = touchGroundTruthHistoricalKeys
-
 	// Helper to reset commitment to parent block state and re-seek
 	resetToParentState := func() error {
 		sdCtx.SetHistoryStateReader(tx, firstTxNumInBlock)
@@ -1419,12 +1418,12 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	// === STEP 1: Collapse Detection via ComputeCommitment ===
-	// Detect trie node collapses by running the full commitment for this block.
+	// Detect trie node collapses by running the full commitment calculation for this block.
 	// When a FullNode is reduced to a single child (e.g., due to storage deletes),
 	// the remaining child's data must be included in the witness for correct
 	// state root computation during stateless execution.
 	//
-	// We only record sibling paths here (not build witness tries), because the grid
+	// We only record sibling paths  (not build witness tries) in this first step, because the grid
 	// is mutated during ComputeCommitment and would produce incorrect root hashes.
 	var collapseSiblingPaths [][]byte
 
@@ -1438,6 +1437,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	touchAllKeys()
+	//  for debugging purposes the historical keys can be used to compute commitment, but the query is extremely slow
 	// err = touchGroundTruthHistoricalKeys(firstTxNumInBlock, lastTxNumInBlock+1)
 	if err != nil {
 		return nil, err
@@ -1445,72 +1445,52 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	sdCtx.SetCollapseTracer(func(hashedKeyPath []byte) {
 		compactHashedKey, _ := commitment.CompactKey(hashedKeyPath)
-		fmt.Printf("[witness] node collapse detected at path %x (len=%d)\n", compactHashedKey, len(hashedKeyPath))
+		fmt.Printf("[debug_executionWitness] node collapse detected at path %x (len=%d)\n", compactHashedKey, len(hashedKeyPath))
 		collapseSiblingPaths = append(collapseSiblingPaths, common.Copy(hashedKeyPath))
 	})
 
 	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
 	if err != nil {
-		return nil, fmt.Errorf("[witness] collapse detection via ComputeCommitment failed: %v\n", err)
+		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %v\n", err)
 	}
 
 	if common.Hash(computedRootHash) != block.Root() {
-		return nil, fmt.Errorf("[witness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, block.Root())
+		return nil, fmt.Errorf("[debug_executionWitness] computedRootHash(%x)!= expectedRootHash(%x)", computedRootHash, block.Root())
 	}
 
 	sdCtx.SetCollapseTracer(nil)
 
-	// === STEP 2: Generate witness for the regular (non-collapse) keys ===
+	// === STEP 2: Generate witness for regular keys + siblings from collapses
 	if err := resetToParentState(); err != nil {
 		return nil, fmt.Errorf("failed to reset commitment for regular witness: %w", err)
 	}
 	touchAllKeys()
 
-	// witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, codeReads, "debug_executionWitness")
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// if !bytes.Equal(witnessRoot, expectedParentRoot[:]) {
-	// 	return nil, fmt.Errorf("regular witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
-	// }
-	// fmt.Printf("[witness] regular witness root OK: %x\n", witnessRoot)
-
-	// === STEP 3: If collapses detected, generate a separate witness for sibling keys and merge ===
 	if len(collapseSiblingPaths) > 0 {
-		fmt.Printf("[witness] detected %d collapse sibling paths, generating collapse witness\n", len(collapseSiblingPaths))
+		fmt.Printf("[debug_executionWitness] detected %d sibling paths\n", len(collapseSiblingPaths))
 
 		for _, siblingPath := range collapseSiblingPaths {
 			compactSiblingPath, err := commitment.CompactKey(siblingPath)
 			if err != nil {
 				return nil, err
 			}
-			fmt.Printf("[witness] touching collapse sibling hashed key: %x (len=%d)\n", compactSiblingPath, len(siblingPath))
+			fmt.Printf("[debug_executionWitness] touching  sibling hashed key: %x (len=%d)\n", compactSiblingPath, len(siblingPath))
 			sdCtx.TouchHashedKey(siblingPath)
 		}
 	}
 
 	witnessTrie, witnessRoot, err := sdCtx.Witness(ctx, codeReads, "debug_executionWitness_collapses")
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate collapse witness: %w", err)
+		return nil, fmt.Errorf("failed to generate witness: %w", err)
 	}
+
+	// printPreStateCheck(witnessTrie, readAddresses, writeAddresses, readStorageKeys, writeStorageKeys)
+
+	// pre-state root verification
 	if !bytes.Equal(witnessRoot, expectedParentRoot[:]) {
 		return nil, fmt.Errorf("collapse witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
 	}
 
-	targetCompactPath := common.FromHex("0xab14d68802a763f7db875346d03fbf86f137de55814b191c069e721f4747473321485532722611552fbdf873d504f89d9a36e95d5d2ab5ac743aea9a4ad42431")
-	targetPath := trie.KeybytesToHex(targetCompactPath)
-	nodeFound1 := witnessTrie.GetNode(targetPath)
-	_ = nodeFound1
-	witnessRoot = witnessTrie.Root()
-
-	// printPreStateCheck(witnessTrie, readAddresses, writeAddresses, readStorageKeys, writeStorageKeys)
-
-	// Final verification: merged root matches parent state root
-	if !bytes.Equal(witnessRoot, expectedParentRoot[:]) {
-		return nil, fmt.Errorf("merged witness root mismatch: calculated=%x, expected=%x", common.BytesToHash(witnessRoot), expectedParentRoot)
-	}
-
-	// witnessTrie.Reset()
 	// Collect all unique RLP-encoded trie nodes by traversing from root to leaves
 	// This avoids duplicates that would occur when calling Prove() separately for each key
 	allNodes, err := witnessTrie.RLPEncode()
@@ -1521,16 +1501,16 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		result.State = append(result.State, common.Copy(node))
 	}
 
-	// check the RLP decoded trie has the same root hash
-	rlpDecodedTrie, err := trie.RLPDecode(allNodes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to rlp decode state nodes : %w", err)
-	}
+	// // check the RLP decoded trie has the same root hash
+	// rlpDecodedTrie, err := trie.RLPDecode(allNodes)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed to rlp decode state nodes : %w", err)
+	// }
 
-	decodedHash := rlpDecodedTrie.Hash()
-	if decodedHash != common.Hash(witnessRoot) {
-		return nil, fmt.Errorf("root hash of decoded trie is incorrect")
-	}
+	// decodedHash := rlpDecodedTrie.Hash()
+	// if decodedHash != common.Hash(witnessRoot) {
+	// 	return nil, fmt.Errorf("root hash of decoded trie is incorrect")
+	// }
 
 	// Collect headers for BLOCKHASH opcode support
 	// Include headers from accessed block numbers
@@ -1559,18 +1539,29 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, fmt.Errorf("failed to get chain config: %w", err)
 	}
 
-	// Query the expected state for all modified accounts from the actual state DB
-	expectedState, expectedStorage, err := api.buildExpectedPostState(ctx, tx, blockNum, block,
-		readAddresses, writeAddresses, readStorageKeys, writeStorageKeys)
+	newStateRoot, stateless, err := execBlockStatelessly(result, block, chainCfg, fullEngine)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("[debug_executionWitness] stateless block execution failed: %w", err)
+	}
+	_ = stateless
+	/*
+			// Query the expected state for all modified accounts from the actual state DB
+		expectedState, expectedStorage, err := api.buildExpectedPostState(ctx, tx, blockNum, block,
+			readAddresses, writeAddresses, readStorageKeys, writeStorageKeys)
+		if err != nil {
+			return nil, err
+		}
+	*/
+	// //  Compare computed state vs expected state for debugging
+	// compareComputedVsExpectedState(stateless, expectedState, expectedStorage, stateless.storageDeletes)
+
+	// Verify the root matches the block's state root
+	expectedRoot := block.Root()
+	if newStateRoot != expectedRoot {
+		return nil, fmt.Errorf("[debug_executionWitness] state root mismatch after stateless execution : got %x, expected %x", newStateRoot, expectedRoot)
 	}
 
-	// Print expected post-state in human-readable format
-	if err = verifyExecutionWitnessResult(result, block, chainCfg, fullEngine, expectedState, expectedStorage); err != nil {
-		return nil, fmt.Errorf("witness verification failed: %w", err)
-	}
-	fmt.Printf("Witness for block %d successfully verified 🚀\n", blockNum)
+	log.Info("Witness successfully verified 🚀\n", "blockNum", blockNum)
 	return result, nil
 }
 
@@ -2284,13 +2275,8 @@ func (s *witnessStateless) debugPrintPendingUpdates(blockNum uint64) {
 func (s *witnessStateless) Finalize() common.Hash {
 	fmt.Printf("\n=== Finalize: Applying updates ===\n")
 
-	targetAddr := common.HexToAddress("0x1121AcC14c63f3C872BFcA497d10926A6098AAc5")
-
 	// Handle created contracts - clear their storage subtries
 	for addr := range s.created {
-		if addr == targetAddr {
-			fmt.Printf("HERE\n")
-		}
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
 			account.Root = trie.EmptyRoot
 		}
@@ -2301,9 +2287,6 @@ func (s *witnessStateless) Finalize() common.Hash {
 
 	// Apply account updates
 	for addr, account := range s.accountUpdates {
-		if addr == targetAddr {
-			fmt.Printf("HERE\n")
-		}
 		addrHash, _ := common.HashData(addr[:])
 		if account != nil {
 			// fmt.Printf("  UpdateAccount %x: Nonce=%d, Balance=%s\n", addr[:8], account.Nonce, account.Balance.String())
@@ -2319,9 +2302,6 @@ func (s *witnessStateless) Finalize() common.Hash {
 		if account == nil {
 			continue
 		}
-		if addr == targetAddr {
-			fmt.Printf("HERE\n")
-		}
 		addrHash, _ := common.HashData(addr[:])
 		codeHashValue := account.CodeHash.Value()
 		if code, ok := s.codeUpdates[codeHashValue]; ok {
@@ -2336,9 +2316,6 @@ func (s *witnessStateless) Finalize() common.Hash {
 
 	// Apply storage writes
 	for addr, m := range s.storageWrites {
-		if addr == targetAddr {
-			fmt.Printf("HERE\n")
-		}
 		if _, ok := s.deleted[addr]; ok {
 			continue
 		}
@@ -2356,9 +2333,6 @@ func (s *witnessStateless) Finalize() common.Hash {
 
 	// Apply storage deletes
 	for addr, m := range s.storageDeletes {
-		if addr == targetAddr {
-			fmt.Printf("HERE\n")
-		}
 		if _, ok := s.deleted[addr]; ok {
 			continue
 		}
@@ -2367,8 +2341,8 @@ func (s *witnessStateless) Finalize() common.Hash {
 		for key := range m {
 			keyHash, _ := common.HashData(key[:])
 			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
-			hashedKeyPath := trie.KeybytesToHex(cKey)
-			fmt.Printf("DELETING Storage Key at path %x\n", hashedKeyPath)
+			// hashedKeyPath := trie.KeybytesToHex(cKey)
+			// fmt.Printf("DELETING Storage Key at path %x\n", hashedKeyPath)
 			s.t.Delete(cKey)
 		}
 	}
@@ -2376,9 +2350,6 @@ func (s *witnessStateless) Finalize() common.Hash {
 	// Update storage roots for modified accounts
 	// DeepHash computes the storage root, then we update the account with it
 	for addr := range updatedAccounts {
-		if addr == targetAddr {
-			fmt.Printf("HERE\n")
-		}
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
 			addrHash, _ := common.HashData(addr[:])
 			gotRoot, root := s.t.DeepHash(addrHash[:])
@@ -2394,9 +2365,6 @@ func (s *witnessStateless) Finalize() common.Hash {
 
 	// Handle deleted accounts
 	for addr := range s.deleted {
-		if addr == targetAddr {
-			fmt.Printf("HERE\n")
-		}
 		if _, ok := s.created[addr]; ok {
 			continue
 		}
@@ -2414,24 +2382,23 @@ func (s *witnessStateless) Finalize() common.Hash {
 	return finalHash
 }
 
-// verifyExecutionWitnessResult verifies the execution witness by re-executing the block statelessly.
-// It decodes the witness trie, executes all transactions, and verifies the resulting state root
-// matches the block's state root.
-func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config, engine rules.Engine, expectedState map[common.Address]*accounts.Account, expectedStorage map[common.Address]map[common.Hash]uint256.Int) error {
+// execBlockStatelessly executes the block statelessly.
+// It decodes the witness trie, executes all transactions and returns the resulting state root
+func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config, engine rules.Engine) (postStateRoot common.Hash, stateless *witnessStateless, err error) {
 	// Skip verification for genesis block - it has no transactions to execute
 	// but has pre-allocated accounts which would cause a state root mismatch
 	if block.NumberU64() == 0 {
-		return nil
+		return
 	}
 
 	// Skip verification if the witness trie is empty
 	if len(result.State) == 0 {
-		return nil
+		return common.Hash{}, nil, fmt.Errorf("empty State field in witness")
 	}
 	// Create stateless state from the witness - this is both reader and writer
-	stateless, err := newWitnessStateless(result)
+	stateless, err = newWitnessStateless(result)
 	if err != nil {
-		return fmt.Errorf("failed to create witness stateless: %w", err)
+		return common.Hash{}, nil, fmt.Errorf("failed to create witness stateless: %w", err)
 	}
 
 	// Build header lookup map from result.Headers for BLOCKHASH opcode
@@ -2474,17 +2441,17 @@ func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.B
 		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, engine, constCall, vm.Config{})
 	}
 	if err = engine.Initialize(chainConfig, nil /* chainReader */, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
-		return fmt.Errorf("verification: failed to initialize block: %w", err)
+		return common.Hash{}, stateless, fmt.Errorf("verification: failed to initialize block: %w", err)
 	}
 	if err = ibs.FinalizeTx(blockRules, stateless); err != nil {
-		return fmt.Errorf("verification: failed to finalize engine.Initialize tx: %w", err)
+		return common.Hash{}, stateless, fmt.Errorf("verification: failed to finalize engine.Initialize tx: %w", err)
 	}
 
 	// Execute all transactions in the block
 	for txIndex, txn := range block.Transactions() {
 		msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
 		if err != nil {
-			return fmt.Errorf("verification: failed to convert tx %d to message: %w", txIndex, err)
+			return common.Hash{}, stateless, fmt.Errorf("[statelessExec] failed to convert tx %d to message: %w", txIndex, err)
 		}
 
 		txCtx := protocol.NewEVMTxContext(msg)
@@ -2496,12 +2463,12 @@ func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.B
 		// Apply the message - gasBailout must be false to properly deduct gas from sender
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
-			return fmt.Errorf("verification: failed to apply tx %d: %w", txIndex, err)
+			return common.Hash{}, stateless, fmt.Errorf("[statelessExec] failed to apply tx %d: %w", txIndex, err)
 		}
 
 		// Finalize tx - state changes go to the witness stateless
 		if err = ibs.FinalizeTx(blockRules, stateless); err != nil {
-			return fmt.Errorf("verification: failed to finalize tx %d: %w", txIndex, err)
+			return common.Hash{}, stateless, fmt.Errorf("[statelessExec]] failed to finalize tx %d: %w", txIndex, err)
 		}
 	}
 
@@ -2513,27 +2480,17 @@ func verifyExecutionWitnessResult(result *ExecutionWitnessResult, block *types.B
 	// can be implemented later. For now use ChainReader = nil, as this is sufficient for Ethereum.
 	_, err = engine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles() /*receipts */, nil, block.Withdrawals() /*chainReader */, nil, syscall /*skipReceiptsEval*/, true, log.Root())
 	if err != nil {
-		return fmt.Errorf("[verifyExecutionWitnessResult] engine.Finalize failed : %w", err)
+		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)
 	}
 
 	err = ibs.CommitBlock(blockRules, stateless)
 	if err != nil {
-		return fmt.Errorf("[verifyExecutionWitnessReulst] ibs.CommitBlock() failed : %w", err)
+		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] ibs.CommitBlock() failed : %w", err)
 	}
 
 	// Finalize and compute the resulting state root
 	newStateRoot := stateless.Finalize()
-
-	// Compare computed state vs expected state
-	compareComputedVsExpectedState(stateless, expectedState, expectedStorage, stateless.storageDeletes)
-
-	// Verify the root matches the block's state root
-	expectedRoot := block.Root()
-	if newStateRoot != expectedRoot {
-		return fmt.Errorf("state root mismatch: got %x, expected %x", newStateRoot, expectedRoot)
-	}
-
-	return nil
+	return newStateRoot, stateless, nil
 }
 
 // MemStats returns detailed runtime memory statistics.
