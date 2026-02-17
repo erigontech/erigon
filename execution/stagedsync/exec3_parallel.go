@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -214,8 +215,12 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						}
 
 						if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
+							log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash())
 							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) {
 								bal := applyResult.TxIO.AsBlockAccessList()
+								if err := bal.Validate(); err != nil {
+									return fmt.Errorf("block %d: invalid computed block access list: %w", applyResult.BlockNum, err)
+								}
 								if dbg.TraceBlockAccessLists && dbg.TraceBlock(applyResult.BlockNum) {
 									writeBALToFile(bal, applyResult.BlockNum, pe.cfg.dirs.DataDir)
 								}
@@ -230,9 +235,21 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								}
 								headerBALHash := *lastHeader.BlockAccessListHash
 								if !pe.isBlockProduction {
-									if headerBALHash != b.BlockAccessList().Hash() {
-										log.Info(fmt.Sprintf("bal from block: %s", b.BlockAccessList().DebugString()))
-										return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, b.BlockAccessList().Hash(), headerBALHash)
+									dbBALBytes, err := rawdb.ReadBlockAccessListBytes(rwTx, applyResult.BlockHash, applyResult.BlockNum)
+									if err != nil {
+										return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
+									}
+									dbBAL, err := types.DecodeBlockAccessListBytes(dbBALBytes)
+									if err != nil {
+										return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
+									}
+									if err = dbBAL.Validate(); err != nil {
+										return fmt.Errorf("block %d: db block access list is invalid: %w", applyResult.BlockNum, err)
+									}
+
+									if headerBALHash != dbBAL.Hash() {
+										log.Info(fmt.Sprintf("bal from block: %s", dbBAL.DebugString()))
+										return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, dbBAL.Hash(), headerBALHash)
 									}
 									if headerBALHash != bal.Hash() {
 										log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))
@@ -260,7 +277,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						lastBlockResult = *applyResult
 					}
 
-					flushPending = pe.rs.SizeEstimate() > pe.cfg.batchSize.Bytes()
+					flushPending = pe.rs.SizeEstimateBeforeCommitment() > pe.cfg.batchSize.Bytes()
 
 					if !dbg.DiscardCommitment() && !pe.isBlockProduction {
 						if !dbg.BatchCommitments || shouldGenerateChangesets || lastBlockResult.BlockNum == maxBlockNum ||

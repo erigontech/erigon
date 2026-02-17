@@ -7,10 +7,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/google/go-cmp/cmp"
 	lru "github.com/hashicorp/golang-lru/v2"
+
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -234,6 +235,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	var evm *vm.EVM
 	var genEnv *ReceiptEnv
 
+	err = rpchelper.CheckBlockExecuted(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
 	cumGasUsed, _, logIdxAfterTx, err = rawtemporaldb.ReceiptAsOf(tx, txNum+1)
 	if err != nil {
 		return nil, err
@@ -420,6 +426,11 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		return receipts, nil
 	}
 
+	err = rpchelper.CheckBlockExecuted(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+
 	// Check if we have commitment history: this is required to know if state root will be computed or left zero for historical state.
 	var commitmentHistory bool
 	commitmentHistory, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
@@ -537,7 +548,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		}
 		receipts[i] = receipt
 
-		if dbg.AssertEnabled && receiptsFromDB != nil {
+		if dbg.AssertEnabled && receiptsFromDB != nil && i < len(receiptsFromDB) {
 			g.assertEqualReceipts(receipt, receiptsFromDB[i])
 		}
 	}
@@ -567,10 +578,14 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
 
 	generated := fromExecution.Copy()
 	if generated.TransactionIndex != fromDB.TransactionIndex {
-		panic(fmt.Sprintf("assert: %d, %d", generated.TransactionIndex, fromDB.TransactionIndex))
+		panic(fmt.Sprintf("assert: txn index mismatch: %d, %d", generated.TransactionIndex, fromDB.TransactionIndex))
 	}
 	if generated.FirstLogIndexWithinBlock != fromDB.FirstLogIndexWithinBlock {
-		panic(fmt.Sprintf("assert: %d, %d", generated.FirstLogIndexWithinBlock, fromDB.FirstLogIndexWithinBlock))
+		panic(fmt.Sprintf("assert: first log index mismatch: %d, %d", generated.FirstLogIndexWithinBlock, fromDB.FirstLogIndexWithinBlock))
+	}
+	if len(generated.Logs) != len(fromDB.Logs) {
+		panic(fmt.Sprintf("assert: logs length mismatch: generated=%d, fromDB=%d, bn=%d, txnIdx=%d",
+			len(generated.Logs), len(fromDB.Logs), generated.BlockNumber.Uint64(), generated.TransactionIndex))
 	}
 
 	for i := range generated.Logs {

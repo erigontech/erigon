@@ -224,8 +224,9 @@ func TestAssembleBlock(t *testing.T) {
 	for _, res := range r.Imported {
 		require.Equal(t, txpoolproto.ImportResult_SUCCESS, res)
 	}
-	var beaconBlockRoot common.Hash
-	_, err = rand.Read(beaconBlockRoot[:])
+
+	var parentBeaconBlockRoot common.Hash
+	_, err = rand.Read(parentBeaconBlockRoot[:])
 	require.NoError(t, err)
 	payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
 		ParentHash:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Hash()),
@@ -233,7 +234,7 @@ func TestAssembleBlock(t *testing.T) {
 		PrevRandao:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Header().MixDigest),
 		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
 		Withdrawals:           make([]*typesproto.Withdrawal, 0),
-		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(beaconBlockRoot),
+		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(parentBeaconBlockRoot),
 	})
 	require.NoError(t, err)
 	blockData, err := getAssembledBlock(ctx, exec, payloadId)

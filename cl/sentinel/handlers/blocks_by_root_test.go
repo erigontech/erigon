@@ -64,7 +64,9 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
-	tx, _ := indiciesDB.BeginRw(ctx)
+	tx, err := indiciesDB.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
 
 	startSlot := uint64(100)
 	count := uint64(10)
@@ -161,5 +163,4 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	}
 
 	defer indiciesDB.Close()
-	defer tx.Rollback()
 }

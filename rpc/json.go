@@ -151,7 +151,7 @@ func NewJsonErrorFromErr(err error) any {
 }
 
 func newJsonError(err error) *jsonError {
-	jsonErr := &jsonError{Code: defaultErrorCode, Message: err.Error()}
+	jsonErr := &jsonError{Code: ErrCodeDefault, Message: err.Error()}
 	var ec Error
 	ok := errors.As(err, &ec)
 	if ok {

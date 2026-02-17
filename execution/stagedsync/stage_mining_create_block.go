@@ -199,6 +199,8 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv
 		}
 		header.MixDigest = cfg.blockBuilderParameters.PrevRandao
 		header.ParentBeaconBlockRoot = cfg.blockBuilderParameters.ParentBeaconBlockRoot
+		header.SlotNumber = cfg.blockBuilderParameters.SlotNumber
+
 		cfg.miner.BlockAssembler = exec.NewBlockAssembler(
 			exec.AssemblerCfg{
 				ChainConfig:     cfg.chainConfig,
@@ -207,6 +209,7 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv
 				ExperimentalBAL: cfg.experimentalBAL,
 			},
 			cfg.blockBuilderParameters.PayloadId, parent.Time, header, nil, cfg.blockBuilderParameters.Withdrawals)
+
 		return nil
 	}
 

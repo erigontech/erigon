@@ -289,8 +289,13 @@ func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool) 
 }
 
 func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks []*types.Block) error {
+	return c.InsertBlocksAndWaitWithAccessLists(ctx, blocks, nil)
+}
+
+func (c ChainReaderWriterEth1) InsertBlocksAndWaitWithAccessLists(ctx context.Context, blocks []*types.Block, accessLists []*executionproto.BlockAccessListEntry) error {
 	request := &executionproto.InsertBlocksRequest{
-		Blocks: moduleutil.ConvertBlocksToRPC(blocks),
+		Blocks:           moduleutil.ConvertBlocksToRPC(blocks),
+		BlockAccessLists: accessLists,
 	}
 	response, err := c.executionModule.InsertBlocks(ctx, request)
 	if err != nil {
@@ -317,8 +322,13 @@ func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks [
 }
 
 func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
+	return c.InsertBlocksWithAccessLists(ctx, blocks, nil)
+}
+
+func (c ChainReaderWriterEth1) InsertBlocksWithAccessLists(ctx context.Context, blocks []*types.Block, accessLists []*executionproto.BlockAccessListEntry) error {
 	request := &executionproto.InsertBlocksRequest{
-		Blocks: moduleutil.ConvertBlocksToRPC(blocks),
+		Blocks:           moduleutil.ConvertBlocksToRPC(blocks),
+		BlockAccessLists: accessLists,
 	}
 	response, err := c.executionModule.InsertBlocks(ctx, request)
 	if err != nil {
@@ -454,7 +464,7 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block,
 		BlockHash:     blockHash,
 		BaseFeePerGas: gointerfaces.ConvertH256ToHash(payloadRpc.BaseFeePerGas),
 	}
-	copy(block.BaseFeePerGas[:], utils.ReverseOfByteSlice(block.BaseFeePerGas[:])) // reverse the byte slice
+	utils.ReverseBytes(&block.BaseFeePerGas)
 	if payloadRpc.ExcessBlobGas != nil {
 		block.ExcessBlobGas = *payloadRpc.ExcessBlobGas
 	}

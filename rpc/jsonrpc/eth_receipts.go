@@ -571,7 +571,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 
 	receipt, err := api.getReceipt(ctx, chainConfig, tx, header, txn, txnIndex, txNum, postState)
 	if err != nil {
-		return nil, fmt.Errorf("getReceipt error: %w", err)
+		return nil, err
 	}
 
 	return ethutils.MarshalReceipt(receipt, txn, chainConfig, header, txnHash, true, true), nil
@@ -610,7 +610,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	}
 	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
-		return nil, fmt.Errorf("getReceipts error: %w", err)
+		return nil, err
 	}
 	result := make([]map[string]any, 0, len(receipts))
 	for _, receipt := range receipts {

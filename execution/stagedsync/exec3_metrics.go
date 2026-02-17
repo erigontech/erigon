@@ -592,7 +592,7 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 	curTaskGasPerSec := int64(float64(curTaskGas) / seconds)
 
 	uncommitedGas := uint64(te.executedGas.Load() - te.committedGas.Load())
-	sizeEstimate := rs.SizeEstimate()
+	sizeEstimate := rs.SizeEstimateBeforeCommitment()
 
 	switch ex.(type) {
 	case *parallelExecutor:
@@ -874,7 +874,10 @@ func (p *Progress) log(mode string, suffix string, te *txExecutor, rs *state.Sta
 	var vals []any
 
 	if mode == "done" {
-		vals = []any{"in", interval}
+		vals = []any{
+			"in", interval,
+			"buf", fmt.Sprintf("%s/%s", common.ByteCount(rs.SizeEstimateAfterCommitment()), common.ByteCount(p.commitThreshold)),
+		}
 	}
 
 	vals = append(vals, []any{

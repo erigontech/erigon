@@ -56,17 +56,30 @@ func ReadPrealloc(fileSys fs.FS, filename string) types.GenesisAlloc {
 var (
 	// to preserve same pointer in genesis.Config and Spec.Config, init once and reuse configs
 
-	mainnetChainConfig = ReadChainConfig(chainspecs, "chainspecs/mainnet.json")
-	sepoliaChainConfig = ReadChainConfig(chainspecs, "chainspecs/sepolia.json")
-	hoodiChainConfig   = ReadChainConfig(chainspecs, "chainspecs/hoodi.json")
-	gnosisChainConfig  = ReadChainConfig(chainspecs, "chainspecs/gnosis.json")
-	chiadoChainConfig  = ReadChainConfig(chainspecs, "chainspecs/chiado.json")
+	mainnetChainConfig  = ReadChainConfig(chainspecs, "chainspecs/mainnet.json")
+	sepoliaChainConfig  = ReadChainConfig(chainspecs, "chainspecs/sepolia.json")
+	hoodiChainConfig    = ReadChainConfig(chainspecs, "chainspecs/hoodi.json")
+	gnosisChainConfig   = ReadChainConfig(chainspecs, "chainspecs/gnosis.json")
+	chiadoChainConfig   = ReadChainConfig(chainspecs, "chainspecs/chiado.json")
+	bloatnetChainConfig = ReadChainConfig(chainspecs, "chainspecs/bloatnet.json")
 )
 
 // MainnetGenesisBlock returns the Ethereum main net genesis block.
 func MainnetGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     mainnetChainConfig,
+		Nonce:      66,
+		ExtraData:  hexutil.MustDecode("0x11bbe8db4e347b4e8c937c1c8370e4b5ed33adb3db69cbdb7a38e1e50b1b82fa"),
+		GasLimit:   5000,
+		Difficulty: big.NewInt(17179869184),
+		Alloc:      ReadPrealloc(allocs, "allocs/mainnet.json"),
+	}
+}
+
+// BloatnetGenesisBlock returns the bloatnet genesis block (identical to mainnet).
+func BloatnetGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     bloatnetChainConfig,
 		Nonce:      66,
 		ExtraData:  hexutil.MustDecode("0x11bbe8db4e347b4e8c937c1c8370e4b5ed33adb3db69cbdb7a38e1e50b1b82fa"),
 		GasLimit:   5000,

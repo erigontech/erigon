@@ -70,7 +70,7 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 		}
 		receipts, err = api.getReceipts(ctx, tx, block)
 		if err != nil {
-			return nil, fmt.Errorf("getReceipts error: %w", err)
+			return nil, err
 		}
 	}
 	logs := make([][]*types.Log, len(receipts))
@@ -113,7 +113,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 			if crit.FromBlock.Sign() >= 0 {
 				begin = crit.FromBlock.Uint64()
 			} else if !crit.FromBlock.IsInt64() || crit.FromBlock.Int64() != int64(rpc.LatestBlockNumber) {
-				return nil, fmt.Errorf("negative value for FromBlock: %v", crit.FromBlock)
+				return nil, &rpc.CustomError{Message: fmt.Sprintf("negative value for FromBlock: %v", crit.FromBlock), Code: rpc.ErrCodeInvalidParams}
 			}
 		}
 		end = latest
@@ -121,15 +121,19 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 			if crit.ToBlock.Sign() >= 0 {
 				end = crit.ToBlock.Uint64()
 			} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(rpc.LatestBlockNumber) {
-				return nil, fmt.Errorf("negative value for ToBlock: %v", crit.ToBlock)
+				return nil, &rpc.CustomError{Message: fmt.Sprintf("negative value for ToBlock: %v", crit.ToBlock), Code: rpc.ErrCodeInvalidParams}
 			}
 		}
 	}
+
+	if len(crit.Topics) > maxTopics {
+		return nil, &rpc.CustomError{Message: errExceedMaxTopics, Code: rpc.ErrCodeInvalidParams}
+	}
 	if end < begin {
-		return nil, fmt.Errorf("end (%d) < begin (%d)", end, begin)
+		return nil, &rpc.CustomError{Message: fmt.Sprintf("invalid block range: end (%d) < begin (%d)", end, begin), Code: rpc.ErrCodeInvalidParams}
 	}
 	if end > roaring.MaxUint32 {
-		return nil, fmt.Errorf("end (%d) > MaxUint32", end)
+		return nil, &rpc.CustomError{Message: fmt.Sprintf("end (%d) > MaxUint32)", end), Code: rpc.ErrCodeInvalidParams}
 	}
 
 	err := api.BaseAPI.checkPruneHistory(ctx, tx, begin)
@@ -204,7 +208,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			if crit.FromBlock.Sign() >= 0 {
 				begin = crit.FromBlock.Uint64()
 			} else if !crit.FromBlock.IsInt64() || crit.FromBlock.Int64() != int64(rpc.LatestBlockNumber) {
-				return nil, fmt.Errorf("negative value for FromBlock: %v", crit.FromBlock)
+				return nil, &rpc.CustomError{Message: fmt.Sprintf("negative value for FromBlock: %v", crit.FromBlock), Code: rpc.ErrCodeInvalidParams}
 			}
 		}
 		end = latest
@@ -212,16 +216,16 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			if crit.ToBlock.Sign() >= 0 {
 				end = crit.ToBlock.Uint64()
 			} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(rpc.LatestBlockNumber) {
-				return nil, fmt.Errorf("negative value for ToBlock: %v", crit.ToBlock)
+				return nil, &rpc.CustomError{Message: fmt.Sprintf("negative value for ToBlock: %v", crit.ToBlock), Code: rpc.ErrCodeInvalidParams}
 			}
 		}
 	}
 	if end < begin {
-		return nil, fmt.Errorf("end (%d) < begin (%d)", end, begin)
+		return nil, &rpc.CustomError{Message: fmt.Sprintf("invalid block range: end (%d) < begin (%d)", end, begin), Code: rpc.ErrCodeInvalidParams}
 	}
 
 	if api.rangeLimit != 0 && (end-begin) > uint64(api.rangeLimit) {
-		return nil, fmt.Errorf("%s: %d", errExceedBlockRange, api.rangeLimit)
+		return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: %d", errExceedBlockRange, api.rangeLimit), Code: rpc.ErrCodeInvalidParams}
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, begin)
@@ -418,7 +422,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	}
 	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
-		return nil, fmt.Errorf("getReceipts error: %w", err)
+		return nil, err
 	}
 
 	result := make([]map[string]any, 0, len(receipts))

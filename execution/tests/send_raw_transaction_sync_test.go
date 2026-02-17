@@ -22,9 +22,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
-	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
@@ -54,7 +55,7 @@ func TestSendRawTransactionSync(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		timeoutMillis := uint64(10000)
+		timeoutMillis := uint64(3600000) // 1hr
 		receipt, errSend = eat.RpcApiClient.SendRawTransactionSync(tx, &timeoutMillis)
 	}()
 

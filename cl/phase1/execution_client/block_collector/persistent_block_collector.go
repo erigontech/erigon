@@ -136,6 +136,7 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	blocksBatch := []*types.Block{}
 	inserted := uint64(0)
 
+	minInsertableBlockNumber := p.engine.FrozenBlocks(ctx)
 	var prevBlockNum uint64
 	if err := p.db.View(ctx, func(tx kv.Tx) error {
 		cursor, err := tx.Cursor(kv.Headers)
@@ -155,6 +156,9 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 				continue
 			}
 			if block == nil {
+				continue
+			}
+			if block.NumberU64() < minInsertableBlockNumber {
 				continue
 			}
 
@@ -245,7 +249,7 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, error) {
 		return nil, err
 	}
 
-	return types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals, nil), nil
+	return types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals), nil
 }
 
 func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch []*types.Block, inserted *uint64) error {

@@ -19,6 +19,7 @@ package stagedsync
 import (
 	"fmt"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -28,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 )
 
 type MiningFinishCfg struct {
@@ -74,8 +76,10 @@ func SpawnMiningFinishStage(s *StageState, sd *execctx.SharedDomains, tx kv.Temp
 			block.HeaderNoCopy().BlockAccessListHash = &hash
 		}
 	}
-	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: blockAssembler.Receipts, Requests: blockAssembler.Requests}
-	cfg.miningState.BlockAssembler = nil
+
+	if dbg.LogHashMismatchReason() {
+		ethutils.LogReceipts(log.LvlInfo, "Block built", current.Receipts, current.Txns, cfg.chainConfig, current.Header, logger)
+	}
 
 	//sealHash := engine.SealHash(block.Header())
 	// Reject duplicate sealing work due to resubmitting.

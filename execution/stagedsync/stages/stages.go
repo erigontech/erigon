@@ -70,6 +70,33 @@ func GetStageProgress(db kv.Getter, stage SyncStage) (uint64, error) {
 	return unmarshalData(v)
 }
 
+// GetStageProgress retrieves saved progress of given sync stage from the database
+func GetStageProgressIfAllEqual(db kv.Getter, stage ...SyncStage) (progress uint64, equal bool, err error) {
+	if len(stage) == 0 {
+		panic("GetStageProgressIfAllEqual should be called with at least one stage")
+	}
+	currentProgress := int64(-1)
+	for _, s := range stage {
+		v, err := db.GetOne(kv.SyncStageProgress, []byte(s))
+		if err != nil {
+			return 0, false, err
+		}
+		progressU64, err := unmarshalData(v)
+		if err != nil {
+			return 0, false, err
+		}
+		if currentProgress == -1 {
+			currentProgress = int64(progressU64)
+			continue
+		}
+		if currentProgress != int64(progressU64) {
+			return 0, false, nil
+		}
+	}
+
+	return uint64(currentProgress), true, nil
+}
+
 func SaveStageProgress(db kv.Putter, stage SyncStage, progress uint64) error {
 	if m, ok := SyncMetrics[stage]; ok {
 		m.SetUint64(progress)

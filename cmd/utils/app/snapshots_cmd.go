@@ -35,8 +35,8 @@ import (
 	"strings"
 	"time"
 
+	g "github.com/anacrolix/generics"
 	"github.com/c2h5oh/datasize"
-	"github.com/erigontech/erigon/db/downloader"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
@@ -53,6 +53,8 @@ import (
 	"github.com/erigontech/erigon/db/compress"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/downloader/webseeds"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
@@ -283,7 +285,7 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&dryRunFlag,
 				&removeLocalFlag,
-				&preverifiedFlag,
+				&PreverifiedFlag,
 			},
 		},
 		{
@@ -293,7 +295,7 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "step"},
-				&cli.BoolFlag{Name: "latest"},
+				&cli.BoolFlag{Name: "recentStep", Aliases: []string{"latest", "latestStep", "recent"}, Usage: "remove minimal possible recent/latest files: and Domain and History. Useful when have 1 corrupted recent file"},
 				&cli.BoolFlag{Name: "dry-run"},
 				&cli.StringSliceFlag{Name: "domain"},
 			},
@@ -498,6 +500,33 @@ var snapshotCommand = cli.Command{
 						&cli.UintFlag{Name: "domain", Required: true},
 					}),
 				},
+			},
+		},
+		{
+			Name: "preverified",
+			Action: func(cliCtx *cli.Context) (err error) {
+				var dataDir string
+				// Don't use the default, it must be set to apply.
+				if cliCtx.IsSet(utils.DataDirFlag.Name) {
+					dataDir = cliCtx.String(utils.DataDirFlag.Name)
+				}
+				var targetChain g.Option[string]
+				// Don't use the default, it must be set to apply.
+				if cliCtx.IsSet(VerifyChainFlag.Name) {
+					targetChain.Set(VerifyChainFlag.Get(cliCtx))
+				}
+				return webseeds.Verify(
+					cliCtx.Context,
+					PreverifiedFlag.Get(cliCtx),
+					dataDir,
+					ConcurrencyFlag.Get(cliCtx),
+					targetChain,
+				)
+			},
+			Flags: []cli.Flag{
+				&PreverifiedFlag,
+				&VerifyChainFlag,
+				&ConcurrencyFlag,
 			},
 		},
 	},
@@ -2609,11 +2638,6 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 
 	logger.Info("Prune state history")
-	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		return tx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain)
-	}); err != nil {
-		return err
-	}
 	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
 			hasMoreToPrune, err = tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, 30*time.Second)

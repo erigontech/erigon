@@ -270,9 +270,16 @@ func WithLogLevel(logLevel log.Lvl) Option {
 	}
 }
 
+func WithExperimentalBAL() Option {
+	return func(opts *options) {
+		opts.experimentalBAL = true
+	}
+}
+
 type options struct {
-	stepSize *uint64
-	logLevel *log.Lvl
+	stepSize        *uint64
+	logLevel        *log.Lvl
+	experimentalBAL bool
 }
 
 func applyOptions(opts []Option) options {
@@ -287,9 +294,9 @@ func MockWithGenesis(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey,
 	return MockWithGenesisPruneMode(tb, gspec, key, blockBufferSize, prune.MockMode, opts...)
 }
 
-func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine rules.Engine) *MockSentry {
+func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine rules.Engine, opts ...Option) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	return MockWithEverything(tb, gspec, key, prune.MockMode, engine, blockBufferSize, false)
+	return MockWithEverything(tb, gspec, key, prune.MockMode, engine, blockBufferSize, false, opts...)
 }
 
 func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, blockBufferSize int, prune prune.Mode, opts ...Option) *MockSentry {
@@ -329,6 +336,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	cfg.Prune = prune
 	cfg.FcuBackgroundCommit = true
 	cfg.FcuBackgroundPrune = true
+	cfg.ExperimentalBAL = opt.experimentalBAL
 
 	logLvl := log.LvlError
 	if opt.logLevel != nil {
@@ -472,7 +480,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		}
 		return nil
 	}
-	forkValidator := enginehelpers.NewForkValidator(ctx, 1, inMemoryExecution, dirs.Tmp, mock.BlockReader)
+	forkValidator := enginehelpers.NewForkValidator(ctx, 1, inMemoryExecution, dirs.Tmp, mock.BlockReader, cfg.MaxReorgDepth)
 	mock.ForkValidator = forkValidator
 
 	statusDataProvider := sentry.NewStatusDataProvider(
@@ -784,7 +792,18 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 		insertedBlocks[chain.Blocks[i].NumberU64()] = struct{}{}
 	}
 
-	if err := wr.InsertBlocksAndWait(ms.Ctx, chain.Blocks); err != nil {
+	var balEntries []*executionproto.BlockAccessListEntry
+	for i, bal := range chain.BlockAccessLists {
+		if len(bal) > 0 {
+			block := chain.Blocks[i]
+			balEntries = append(balEntries, &executionproto.BlockAccessListEntry{
+				BlockHash:       gointerfaces.ConvertHashToH256(block.Hash()),
+				BlockNumber:     block.NumberU64(),
+				BlockAccessList: bal,
+			})
+		}
+	}
+	if err := wr.InsertBlocksAndWaitWithAccessLists(ms.Ctx, chain.Blocks, balEntries); err != nil {
 		return err
 	}
 
