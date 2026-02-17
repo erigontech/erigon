@@ -586,6 +586,13 @@ func TestGetBadBlocks(t *testing.T) {
 
 	tx.Commit()
 
+	// Reset the global bad block cache so it reads only from this test's DB
+	tx2, err := m.DB.BeginRo(ctx)
+	require.NoError(err)
+	defer tx2.Rollback()
+	require.NoError(rawdb.ResetBadBlockCache(tx2, 100))
+	tx2.Rollback()
+
 	data, err := api.GetBadBlocks(ctx)
 	require.NoError(err)
 
