@@ -1255,7 +1255,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
 		ibs.SetTxContext(blockNum, txIndex)
 
-		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
+		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
 			return nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
 		}
