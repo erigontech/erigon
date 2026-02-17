@@ -731,7 +731,8 @@ func MockWithTxPoolCancun(t *testing.T) *MockSentry {
 	address := crypto.PubkeyToAddress(key.PublicKey)
 
 	var chainConfig chain.Config
-	copier.CopyWithOption(&chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true})
+	err := copier.CopyWithOption(&chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true})
+	require.NoError(t, err)
 	// disable post-cancun forks
 	chainConfig.PragueTime = nil
 	chainConfig.OsakaTime = nil
