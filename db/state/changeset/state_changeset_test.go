@@ -60,6 +60,10 @@ func TestSerializeDeserializeDiff(t *testing.T) {
 	t.Parallel()
 
 	d := []kv.DomainEntryDiff{
+		{Key: "key188888888", Value: []byte("value1")},
+		{Key: "key288888888", Value: []byte("value2")},
+		{Key: "key388888888", Value: []byte("value3")},
+		{Key: "key388888888", Value: []byte("value3")},
 	}
 
 	serialized := changeset.SerializeDiffSet(d, nil)
@@ -74,7 +78,7 @@ func TestSerializeDeserializeDiffEmpty(t *testing.T) {
 
 	var empty []kv.DomainEntryDiff
 	serialized := changeset.SerializeDiffSet(empty, nil)
-	require.Equal(t, []byte{0, 0, 0, 0, 0}, serialized) // dict len (1) + diffSet len (4)
+	require.Equal(t, []byte{0, 0, 0, 0}, serialized) // count (4 bytes, zero entries)
 	deserialized := changeset.DeserializeDiffSet(serialized)
 	require.Empty(t, deserialized)
 }
@@ -83,9 +87,15 @@ func TestMergeDiffSet(t *testing.T) {
 	t.Parallel()
 
 	d1 := []kv.DomainEntryDiff{
+		{Key: "key188888888", Value: []byte("value1")},
+		{Key: "key288888888", Value: []byte("value2")},
+		{Key: "key388888888", Value: []byte("value3")},
 	}
 
 	d2 := []kv.DomainEntryDiff{
+		{Key: "key188888888", Value: []byte("value5")},
+		{Key: "key388888888", Value: []byte("value6")},
+		{Key: "key488888888", Value: []byte("value4")},
 	}
 
 	merged := changeset.MergeDiffSets(d1, d2)
