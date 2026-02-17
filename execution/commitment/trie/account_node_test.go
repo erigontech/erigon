@@ -21,12 +21,13 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/holiman/uint256"
 )
 
 func TestGetAccount(t *testing.T) {
@@ -173,7 +174,7 @@ func generateAcc() (*ecdsa.PrivateKey, common.Address, common.Hash, error) {
 }
 
 func hashVal(v []byte) (common.Hash, error) {
-	sha := newFastKeccak()
+	sha := crypto.NewFastKeccak()
 	sha.Reset()
 	_, err := sha.Write(v)
 	if err != nil {

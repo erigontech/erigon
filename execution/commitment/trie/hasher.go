@@ -52,7 +52,7 @@ type keccakState interface {
 var hashersPool = sync.Pool{
 	New: func() any {
 		return &hasher{
-			sha: newFastKeccak(),
+			sha: crypto.NewFastKeccak(),
 			bw:  &ByteArrayWriter{},
 		}
 	},
