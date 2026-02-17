@@ -49,7 +49,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (err error) {
 	// Resetting for requesting a new range of blocks
 	bd.requestedLow = bodyProgress + 1
 	bd.requestedMap = make(map[BodyHashes]uint64)
-	if bd.deliveriesH == nil {
+	if bd.deliveriesH != nil {
 		bd.delivered.Clear()
 	}
 	bd.deliveredCount = 0
