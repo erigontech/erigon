@@ -1657,8 +1657,9 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 
 func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) error {
 	type interval struct {
-		from uint64
-		to   uint64
+		from  uint64
+		to    uint64
+		fName string
 	}
 
 	intervals := []interval{}
@@ -1679,7 +1680,7 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 		if !ok {
 			return nil
 		}
-		intervals = append(intervals, interval{from: res.From, to: res.To})
+		intervals = append(intervals, interval{from: res.From, to: res.To, fName: info.Name()})
 		return nil
 	}); err != nil {
 		return err
@@ -1691,18 +1692,18 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 		return fmt.Errorf("no snapshot files found in %s for type: %s", snapDir, snapType)
 	}
 	if intervals[0].from != 0 {
-		return fmt.Errorf("gap at start: snapshots start at (%d-%d). snaptype: %s", intervals[0].from, intervals[0].to, snapType)
+		return fmt.Errorf("gap at start: snapshots start at (%d-%d). snaptype: %s. files: %s", intervals[0].from, intervals[0].to, snapType, intervals[0].fName)
 	}
 	// Check that there are no overlaps
 	for i := 1; i < len(intervals); i++ {
 		if intervals[i].from < intervals[i-1].to {
-			return fmt.Errorf("overlap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
+			return fmt.Errorf("overlap between (%d-%d) and (%d-%d). snaptype: %s. files: %s %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType, intervals[i-1].fName, intervals[i].fName)
 		}
 	}
 	// Check that there are no gaps
 	for i := 1; i < len(intervals); i++ {
 		if intervals[i].from != intervals[i-1].to {
-			return fmt.Errorf("gap between (%d-%d) and (%d-%d). snaptype: %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType)
+			return fmt.Errorf("gap between (%d-%d) and (%d-%d). snaptype: %s. files: %s %s", intervals[i-1].from, intervals[i-1].to, intervals[i].from, intervals[i].to, snapType, intervals[i-1].fName, intervals[i].fName)
 		}
 	}
 
