@@ -421,9 +421,20 @@ func handleOp(c kv.Cursor, stream remoteproto.KV_TxServer, in *remoteproto.Curso
 	return nil
 }
 
+// StateChangeSubscriber is an optional interface that a StateChanges stream server
+// can implement to be notified when the subscription is active. This closes a timing
+// hole in the direct (in-process) client where state change events could be published
+// before the subscription is registered.
+type StateChangeSubscriber interface {
+	NotifySubscribed()
+}
+
 func (s *KvServer) StateChanges(_ *remoteproto.StateChangeRequest, server remoteproto.KV_StateChangesServer) error {
 	ch, remove := s.stateChangeStreams.Sub()
 	defer remove()
+	if sub, ok := server.(StateChangeSubscriber); ok {
+		sub.NotifySubscribed()
+	}
 	for {
 		select {
 		case reply := <-ch:

@@ -998,6 +998,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				}
 			case <-backend.sentriesClient.Hd.QuitPoWMining:
 				return
+			case <-ctx.Done():
+				return
 			}
 		}
 	}()
