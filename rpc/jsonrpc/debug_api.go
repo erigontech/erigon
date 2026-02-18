@@ -928,6 +928,11 @@ func (s *RecordingState) UpdateAccountCode(address accounts.Address, incarnation
 	s.ModifiedAccounts[addr] = struct{}{}
 	s.codeOverlay[addr] = common.Copy(code)
 	s.ModifiedCode[addr] = common.Copy(code)
+	// Keep accountOverlay CodeHash in sync so ReadAccountData returns a
+	// consistent CodeHash even before UpdateAccountData is called.
+	if acc, ok := s.accountOverlay[addr]; ok && acc != nil {
+		acc.CodeHash = codeHash
+	}
 	if s.tracing(addr) {
 		fmt.Printf("[TRACE] UpdateAccountCode %s codeHash=%x len=%d\n", addr.Hex(), codeHash, len(code))
 	}
@@ -2280,6 +2285,12 @@ func (s *witnessStateless) DeleteAccount(address accounts.Address, original *acc
 
 func (s *witnessStateless) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
 	s.codeUpdates[codeHash.Value()] = code
+	// Keep accountUpdates CodeHash in sync so ReadAccountData returns a
+	// consistent CodeHash even before UpdateAccountData is called.
+	addr := address.Value()
+	if acc, ok := s.accountUpdates[addr]; ok && acc != nil {
+		acc.CodeHash = codeHash
+	}
 	return nil
 }
 
