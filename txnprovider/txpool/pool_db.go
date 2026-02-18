@@ -23,8 +23,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/execution/chain/networkname"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"time"
 
 	"github.com/erigontech/erigon-lib/common"
@@ -155,12 +153,12 @@ func SaveChainConfigIfNeed(
 				return err
 			}
 
-			fmt.Printf("SaveChainConfigIfNeeded: read config %+v\n", cc)
-			{
-				spec, _ := chainspec.ChainSpecByName(networkname.ArbitrumOne)
-				cc = spec.Config
-			}
-			fmt.Printf("SaveChainConfigIfNeeded: hardcode config %+v\n", cc)
+			fmt.Printf("SaveChainConfigIfNeeded: got config from db %+v\n", cc)
+			//{
+			//	spec, _ := chainspec.ChainSpecByName(networkname.ArbitrumOne)
+			//	cc = spec.Config
+			//}
+			//fmt.Printf("SaveChainConfigIfNeeded: hardcode config %+v\n", cc)
 
 			n, err := chain.CurrentBlockNumber(tx)
 			if err != nil {

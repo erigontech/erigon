@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
@@ -327,15 +328,14 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 }
 
 func firstNonGenesisCheck(tx kv.RwTx, snapshots snapshotsync.BlockSnapshots, logPrefix string, dirs datadir.Dirs) error {
-	c, err := tx.Cursor(kv.Headers)
-	if err != nil {
-		return err
-	}
-
-	firstNonGenesis, _, err := c.Next()
-	defer c.Close()
-
-	//firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
+	//c, err := tx.Cursor(kv.Headers)
+	//if err != nil {
+	//	return err
+	//}
+	//
+	//firstNonGenesis, _, err := c.Next()
+	//defer c.Close()
+	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
 	if err != nil {
 		return err
 	}

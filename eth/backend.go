@@ -633,12 +633,13 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	var currentBlock *types.Block
 	// TODO awskii: arb1 fails to read current block
-	//if err := backend.chainDB.View(context.Background(), func(tx kv.Tx) error {
-	//	currentBlock, err = blockReader.CurrentBlock(tx)
-	//	return err
-	//}); err != nil {
-	//	panic(err)
-	//}
+	//
+	if err := backend.chainDB.View(context.Background(), func(tx kv.Tx) error {
+		currentBlock, err = blockReader.CurrentBlock(tx)
+		return err
+	}); err != nil {
+		panic(err)
+	}
 
 	currentBlockNumber := uint64(0)
 	if currentBlock != nil {

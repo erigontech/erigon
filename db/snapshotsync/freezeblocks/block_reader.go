@@ -466,8 +466,8 @@ func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint
 
 // findFirstCompleteBlock finds the first block (after genesis) where block body is available, returns math.Uint64 if no block is found
 func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, error) {
-	//firstKey, err := rawdbv3.SecondKey(tx, kv.BlockBody)
-	firstKey, err := rawdbv3.FirstKey(tx, kv.BlockBody)
+	firstKey, err := rawdbv3.SecondKey(tx, kv.BlockBody)
+	//firstKey, err := rawdbv3.FirstKey(tx, kv.BlockBody)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get first BlockBody key after genesis: %w", err)
 	}

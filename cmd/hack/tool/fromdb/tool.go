@@ -18,7 +18,6 @@ package fromdb
 
 import (
 	"context"
-	arbparams "github.com/erigontech/erigon/arb/chain/params"
 
 	"github.com/erigontech/erigon/cmd/hack/tool"
 	"github.com/erigontech/erigon/db/kv"
@@ -32,9 +31,9 @@ func ChainConfig(db kv.RoDB) (cc *chain.Config) {
 		return nil
 	})
 	tool.Check(err)
-	if cc == nil {
-		return arbparams.ArbitrumOneChainConfig()
-	}
+	//if cc == nil {
+	//	return arbparams.ArbitrumOneChainConfig()
+	//}
 	if cc == nil {
 		panic("database is not initialized")
 	}
