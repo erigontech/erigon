@@ -1460,13 +1460,14 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		allCode[addr] = code // Modified code takes precedence
 	}
 
-	// Build codeReads map for witness generation (keyed by code hash)
+	// Build codeReads map for witness generation (keyed by address hash)
 	codeReads := make(map[common.Hash]witnesstypes.CodeWithHash)
-	for _, code := range allCode {
+	for addr, code := range allCode {
 		if len(code) > 0 {
 			result.Codes = append(result.Codes, code)
 			codeHash := crypto.Keccak256Hash(code)
-			codeReads[codeHash] = witnesstypes.CodeWithHash{
+			addrHash := crypto.Keccak256Hash(addr.Bytes())
+			codeReads[addrHash] = witnesstypes.CodeWithHash{
 				Code:     code,
 				CodeHash: accounts.InternCodeHash(codeHash),
 			}
