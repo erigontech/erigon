@@ -26,7 +26,7 @@ import (
 	"strings"
 	"time"
 
-	sync "github.com/linkdata/deadlock"
+	"sync"
 
 	"github.com/erigontech/erigon/common/log/v3"
 )

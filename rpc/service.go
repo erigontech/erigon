@@ -27,7 +27,7 @@ import (
 	"strings"
 	"unicode"
 
-	sync "github.com/linkdata/deadlock"
+	"sync"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
