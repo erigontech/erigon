@@ -125,7 +125,7 @@ func NewBuilderState(cfg *buildercfg.BuilderConfig) BuilderState {
 }
 
 type BuilderCreateBlockCfg struct {
-	miner                  BuilderState
+	builder                BuilderState
 	chainConfig            *chain.Config
 	engine                 rules.Engine
 	blockBuilderParameters *builder.Parameters
@@ -133,14 +133,14 @@ type BuilderCreateBlockCfg struct {
 }
 
 func StageBuilderCreateBlockCfg(
-	miner BuilderState,
+	builder BuilderState,
 	chainConfig *chain.Config,
 	engine rules.Engine,
 	blockBuilderParameters *builder.Parameters,
 	blockReader services.FullBlockReader,
 ) BuilderCreateBlockCfg {
 	return BuilderCreateBlockCfg{
-		miner:                  miner,
+		builder:                builder,
 		chainConfig:            chainConfig,
 		engine:                 engine,
 		blockBuilderParameters: blockBuilderParameters,
@@ -152,10 +152,10 @@ func StageBuilderCreateBlockCfg(
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
 func SpawnBuilderCreateBlockStage(s *stagedsync.StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg BuilderCreateBlockCfg, quit <-chan struct{}, logger log.Logger) (err error) {
-	current := cfg.miner.BuiltBlock
+	current := cfg.builder.BuiltBlock
 	*current = BuiltBlock{}             // always start with a clean state
 	var txPoolLocals []accounts.Address //txPoolV2 has no concept of local addresses (yet?)
-	coinbase := accounts.InternAddress(cfg.miner.BuilderConfig.Etherbase)
+	coinbase := accounts.InternAddress(cfg.builder.BuilderConfig.Etherbase)
 
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.
@@ -176,9 +176,9 @@ func SpawnBuilderCreateBlockStage(s *stagedsync.StageState, sd *execctx.SharedDo
 		return fmt.Errorf("wrong head block: %x (current) vs %x (requested)", parent.Hash(), cfg.blockBuilderParameters.ParentHash)
 	}
 
-	if cfg.miner.BuilderConfig.Etherbase == (common.Address{}) {
+	if cfg.builder.BuilderConfig.Etherbase == (common.Address{}) {
 		if cfg.blockBuilderParameters == nil {
-			return errors.New("refusing to mine without etherbase")
+			return errors.New("refusing to build without etherbase")
 		}
 		// If we do not have an etherbase, let's use the suggested one
 		coinbase = accounts.InternAddress(cfg.blockBuilderParameters.SuggestedFeeRecipient)
@@ -233,21 +233,21 @@ func SpawnBuilderCreateBlockStage(s *stagedsync.StageState, sd *execctx.SharedDo
 		uncles:    mapset.NewSet[common.Hash](),
 	}
 
-	header := builder.MakeEmptyHeader(parent, cfg.chainConfig, timestamp, cfg.miner.BuilderConfig.GasLimit)
+	header := builder.MakeEmptyHeader(parent, cfg.chainConfig, timestamp, cfg.builder.BuilderConfig.GasLimit)
 	if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
 		logger.Warn("Failed to verify gas limit given by the validator, defaulting to parent gas limit", "err", err)
 		header.GasLimit = parent.GasLimit
 	}
 
 	header.Coinbase = coinbase.Value()
-	header.Extra = cfg.miner.BuilderConfig.ExtraData
+	header.Extra = cfg.builder.BuilderConfig.ExtraData
 
-	logger.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
+	logger.Info(fmt.Sprintf("[%s] Start building", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
 	ibs := state.New(state.NewReaderV3(sd.AsGetter(tx)))
 	defer ibs.Release(false)
 
 	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
-		logger.Error("Failed to prepare header for mining",
+		logger.Error("Failed to prepare header for building",
 			"err", err,
 			"headerNumber", header.Number.Uint64(),
 			"headerRoot", header.Root.String(),

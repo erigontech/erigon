@@ -36,15 +36,15 @@ type BuilderFinishCfg struct {
 	chainConfig           *chain.Config
 	engine                rules.Engine
 	sealCancel            chan struct{}
-	miningState           BuilderState
+	builderState          BuilderState
 	blockReader           services.FullBlockReader
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore
 }
 
-func StageMiningFinishCfg(
+func StageBuilderFinishCfg(
 	chainConfig *chain.Config,
 	engine rules.Engine,
-	miningState BuilderState,
+	builderState BuilderState,
 	sealCancel chan struct{},
 	blockReader services.FullBlockReader,
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore,
@@ -52,7 +52,7 @@ func StageMiningFinishCfg(
 	return BuilderFinishCfg{
 		chainConfig:           chainConfig,
 		engine:                engine,
-		miningState:           miningState,
+		builderState:          builderState,
 		sealCancel:            sealCancel,
 		blockReader:           blockReader,
 		latestBlockBuiltStore: latestBlockBuiltStore,
@@ -61,7 +61,7 @@ func StageMiningFinishCfg(
 
 func SpawnBuilderFinishStage(s *stagedsync.StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg BuilderFinishCfg, quit <-chan struct{}, logger log.Logger) error {
 	logPrefix := s.LogPrefix()
-	current := cfg.miningState.BuiltBlock
+	current := cfg.builderState.BuiltBlock
 
 	// Short circuit when receiving duplicate result caused by resubmitting.
 	//if w.chain.HasBlock(block.Hash(), block.NumberU64()) {
@@ -92,12 +92,12 @@ func SpawnBuilderFinishStage(s *stagedsync.StageState, sd *execctx.SharedDomains
 	if block.NonceU64() != 0 {
 		// Note: To propose a new signer for Clique consensus, the block nonce should be set to 0xFFFFFFFFFFFFFFFF.
 		if cfg.engine.Type() != chain.CliqueRules {
-			cfg.miningState.BuilderResultCh <- blockWithReceipts
+			cfg.builderState.BuilderResultCh <- blockWithReceipts
 			return nil
 		}
 	}
 
-	cfg.miningState.PendingResultCh <- block
+	cfg.builderState.PendingResultCh <- block
 
 	if block.Transactions().Len() > 0 {
 		logger.Info(fmt.Sprintf("[%s] block ready for seal", logPrefix),
@@ -121,7 +121,7 @@ func SpawnBuilderFinishStage(s *stagedsync.StageState, sd *execctx.SharedDomains
 		logger.Trace("No in-flight sealing task.")
 	}
 	chain := stagedsync.ChainReader{Cfg: cfg.chainConfig, Db: tx, BlockReader: cfg.blockReader, Logger: logger}
-	if err := cfg.engine.Seal(chain, blockWithReceipts, cfg.miningState.BuilderResultCh, cfg.sealCancel); err != nil {
+	if err := cfg.engine.Seal(chain, blockWithReceipts, cfg.builderState.BuilderResultCh, cfg.sealCancel); err != nil {
 		logger.Warn("Block sealing failed", "err", err)
 	}
 

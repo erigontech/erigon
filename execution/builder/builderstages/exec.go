@@ -65,8 +65,8 @@ type BuilderExecCfg struct {
 	txnProvider  txnprovider.TxnProvider
 }
 
-func StageMiningExecCfg(
-	miningState BuilderState,
+func StageBuilderExecCfg(
+	builderState BuilderState,
 	notifier stagedsync.ChainEventNotifier,
 	chainConfig *chain.Config,
 	engine rules.Engine,
@@ -78,7 +78,7 @@ func StageMiningExecCfg(
 	blockReader services.FullBlockReader,
 ) BuilderExecCfg {
 	return BuilderExecCfg{
-		builderState: miningState,
+		builderState: builderState,
 		notifier:     notifier,
 		chainConfig:  chainConfig,
 		engine:       engine,
@@ -114,7 +114,7 @@ func SpawnBuilderExecStage(ctx context.Context, s *stagedsync.StageState, sd *ex
 	}
 	// Clique consensus needs forced author in the evm context
 	//if cfg.chainConfig.Consensus == chain.CliqueConsensus {
-	//	execCfg.author = &cfg.miningState.MiningConfig.Etherbase
+	//	execCfg.author = &cfg.builderState.BuilderConfig.Etherbase
 	//}
 	execCfg = execCfg.WithAuthor(accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase))
 
@@ -165,7 +165,7 @@ func SpawnBuilderExecStage(ctx context.Context, s *stagedsync.StageState, sd *ex
 		}
 
 		if len(txns) > 0 {
-			logs, stop, err := addTransactionsToMiningBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, coinbase, ibs, balIO, interrupt, cfg.payloadId, logger)
+			logs, stop, err := addTransactionsToBlock(ctx, logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txns, coinbase, ibs, balIO, interrupt, cfg.payloadId, logger)
 			if err != nil {
 				return err
 			}
@@ -189,7 +189,7 @@ func SpawnBuilderExecStage(ctx context.Context, s *stagedsync.StageState, sd *ex
 
 	metrics.UpdateBlockProducerProductionDelay(current.ParentHeaderTime, current.Header.Number.Uint64(), logger)
 
-	logger.Debug("SpawnMiningExecStage", "block", current.Header.Number, "txn", current.Txns.Len(), "payload", cfg.payloadId)
+	logger.Debug("SpawnBuilderExecStage", "block", current.Header.Number, "txn", current.Txns.Len(), "payload", cfg.payloadId)
 	if current.Uncles == nil {
 		current.Uncles = []*types.Header{}
 	}
@@ -213,7 +213,7 @@ func SpawnBuilderExecStage(ctx context.Context, s *stagedsync.StageState, sd *ex
 		return fmt.Errorf("cannot finalize block execution: %s", err)
 	}
 
-	// Note: This gets reset in MiningFinish - but we need it here to
+	// Note: This gets reset in BuilderFinish - but we need it here to
 	// process execv3 - when we remove that this becomes redundant
 	header := block.HeaderNoCopy()
 
@@ -237,12 +237,12 @@ func SpawnBuilderExecStage(ctx context.Context, s *stagedsync.StageState, sd *ex
 		balIO.RecordWrites(systemVersion, systemWrites)
 		balIO.RecordAccesses(systemVersion, systemAccess)
 		current.BlockAccessList = stagedsync.CreateBAL(blockHeight, balIO, execCfg.DirsDataDir())
-		// Note: This gets reset in MiningFinish - but we need it here to
+		// Note: This gets reset in BuilderFinish - but we need it here to
 		// process execv3 - when we remove that this becomes redundant
 		hash := current.BlockAccessList.Hash()
 		header.BlockAccessListHash = &hash
 	} else {
-		// Note: This gets reset in MiningFinish - but we need it here to
+		// Note: This gets reset in BuilderFinish - but we need it here to
 		// process execv3 - when we remove that this becomes redundant
 		if execCfg.ChainConfig().IsAmsterdam(current.Header.Time) {
 			header.BlockAccessListHash = &empty.BlockAccessListHash
@@ -511,7 +511,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 	return filtered, nil
 }
 
-func addTransactionsToMiningBlock(
+func addTransactionsToBlock(
 	ctx context.Context,
 	logPrefix string,
 	current *BuiltBlock,
@@ -676,10 +676,10 @@ LOOP:
 			// Skip the env out-of-gas transaction
 			logger.Debug(fmt.Sprintf("[%s] Gas limit exceeded for env block", logPrefix), "hash", txn.Hash(), "sender", from)
 		} else if errors.Is(err, protocol.ErrNonceTooLow) {
-			// New head notification data race between the transaction pool and miner, skip
+			// New head notification data race between the transaction pool and builder, skip
 			logger.Debug(fmt.Sprintf("[%s] Skipping transaction with low nonce", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce(), "err", err)
 		} else if errors.Is(err, protocol.ErrNonceTooHigh) {
-			// Reorg notification data race between the transaction pool and miner, skip
+			// Reorg notification data race between the transaction pool and builder, skip
 			logger.Debug(fmt.Sprintf("[%s] Skipping transaction with high nonce", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce())
 		} else if err == nil {
 			// Everything ok, collect the logs and proceed to the next transaction
