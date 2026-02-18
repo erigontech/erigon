@@ -419,7 +419,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			tracer.Hooks.OnBlockchainInit(config.Genesis.Config)
 		}
 
-		h, err := rawdb.ReadCanonicalHash(tx, genesisConfig.Number)
+		h, err := rawdb.ReadCanonicalHash(tx, config.Genesis.Number)
 		if err != nil {
 			panic(err)
 		}
