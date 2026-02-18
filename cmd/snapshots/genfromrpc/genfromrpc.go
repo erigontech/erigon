@@ -1076,6 +1076,7 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 				}
 			}
 
+			receiptsEnabled = false
 			// For ArbitrumSubmitRetryableTxType, we still need to fetch receipt to get EffectiveGasUsed
 			if receiptsEnabled && tx.Type() == types.ArbitrumSubmitRetryableTxType {
 				if txData["hash"] == "" {
@@ -1124,7 +1125,6 @@ func unMarshalTransactions(ctx context.Context, client *rpc.Client, rawTxs []map
 					//if receipt.Timeboosted != nil {
 					//	tx.SetTimeboosted(receipt.Timeboosted)
 					//}
-
 
 					if egu := receipt.GasUsed; egu != nil && egu.Uint64() > 0 {
 						if srtx, ok := tx.(*types.ArbitrumSubmitRetryableTx); ok {
