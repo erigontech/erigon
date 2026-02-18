@@ -118,10 +118,10 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	// bt.whitelist(`.*eip7708_eth_transfer_logs/test_finalization_selfdestruct_logs.json`)
 	bt.whitelist(`.*amsterdam.*`)                                                                              // TODO run tests for older forks too once we fix amsterdam eips, for now focus only on amsterdam eips
 	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_finalization_after_priority_fee.json`)          // TODO fix error: block access list mismatch
-	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_to_self_cross_tx_no_log.json`)                  // TODO fix error: block access list mismatch
+	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_to_self_cross_tx_no_log.json`)                  // TODO fix error: block access list mismatch (parallel executor gas accounting)
+	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_to_system_address.json`)                        // TODO fix error: can't find diffsets for: 2 (BAL now correct, state root issue)
+	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_transfer_to_special_address.json`)                           // TODO fix error: can't find diffsets for: 2 (BAL now correct, state root issue)
 	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_same_tx_via_call.json`)                         // TODO fix error: block #1 insertion into chain failed
-	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_to_system_address.json`)                        // TODO fix error: block access list mismatch
-	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_transfer_to_special_address.json`)                           // TODO fix error: block access list mismatch
 	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_to_self_same_tx.json`)                          // TODO fix error:  block #1 insertion into chain failed
 	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_log_at_fork_transition.json`)                   // TODO file error: block #2 insertion into chain failed: insertion failed for block 2, code: BadBlock
 	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_7702_delegation_clear.json`)                      // TODO fix error: block access list mismatch
