@@ -30,8 +30,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/linkdata/deadlock"
 )
 
 const (
@@ -192,7 +190,7 @@ type jsonCodec struct {
 	closer  sync.Once         // close closed channel once
 	closeCh chan any          // closed on Close
 	decode  func(v any) error // decoder to allow multiple transports
-	encMu   deadlock.Mutex    // guards the encoder
+	encMu   sync.Mutex        // guards the encoder
 	encode  func(v any) error // encoder to allow multiple transports
 	conn    deadlineCloser
 }
