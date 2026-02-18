@@ -36,7 +36,6 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/linkdata/deadlock"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -58,7 +57,7 @@ type httpConn struct {
 	url       string
 	closeOnce sync.Once
 	closeCh   chan any
-	mu        deadlock.Mutex // protects headers
+	mu        sync.Mutex // protects headers
 	headers   http.Header
 }
 

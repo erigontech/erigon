@@ -29,8 +29,6 @@ import (
 	"reflect"
 	"strings"
 	"sync"
-
-	"github.com/linkdata/deadlock"
 )
 
 var (
@@ -148,7 +146,7 @@ type RemoteNotifier struct {
 	h         *handler
 	namespace string
 
-	mu           deadlock.Mutex
+	mu           sync.Mutex
 	sub          *Subscription
 	buffer       []json.RawMessage
 	callReturned bool

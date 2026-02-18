@@ -21,13 +21,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	sync "github.com/linkdata/deadlock"
 	"io"
 	"math/big"
 	"net"
 	"net/http"
 	"strings"
 	"time"
+
+	sync "github.com/linkdata/deadlock"
 
 	"github.com/valyala/fastjson"
 
