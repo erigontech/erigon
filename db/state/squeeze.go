@@ -711,7 +711,15 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 
 	logger.Info("[rebuild_commitment_history] merging built files")
-	<-a.BuildFilesInBackground(lastToTxNum)
+	for {
+		somethingMerged, err := a.mergeLoopStep(ctx, lastToTxNum)
+		if err != nil {
+			return nil, fmt.Errorf("[rebuild_commitment_history] merge: %w", err)
+		}
+		if !somethingMerged {
+			break
+		}
+	}
 
 	// Squeeze pass: re-compress commitment files with ReplaceKeysInValues
 	if !squeeze && !statecfg.Schema.CommitmentDomain.ReplaceKeysInValues {

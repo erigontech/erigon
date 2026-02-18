@@ -1632,19 +1632,8 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 		return fin
 	}
 
-	needBuild := (txNum + 1) > a.visibleFilesMinimaxTxNum.Load()+a.stepSize
-	if !needBuild {
-		a.wg.Add(1)
-		go func() {
-			defer a.wg.Done()
-			defer close(fin)
-			if err := a.MergeLoop(a.ctx); err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
-					return
-				}
-				a.logger.Warn("[snapshots] merge", "err", err)
-			}
-		}()
+	if (txNum + 1) <= a.visibleFilesMinimaxTxNum.Load()+a.stepSize {
+		close(fin)
 		return fin
 	}
 
