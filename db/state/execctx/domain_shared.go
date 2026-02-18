@@ -322,7 +322,7 @@ func (sd *SharedDomains) SetTxNum(txNum uint64) {
 	sd.currentStep = kv.Step(txNum / sd.stepSize)
 }
 
-func (sd *SharedDomains) TxNum() uint64 { return sd.txNum.Load() }
+func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
 
 func (sd *SharedDomains) BlockNum() uint64 { return sd.blockNum.Load() }
 
