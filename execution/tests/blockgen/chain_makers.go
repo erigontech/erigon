@@ -399,7 +399,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		txNumIncrement()
 		if b.engine != nil {
 			// Finalize and seal the block
-			if _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil, logger); err != nil {
+			syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
+				return protocol.SysCallContract(contract, data, config, ibs, b.header, b.engine, false /* constCall */, vm.Config{})
+			}
+			if _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, syscall, nil, logger); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db

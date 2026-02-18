@@ -121,36 +121,26 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 	return blockValue
 }
 
-func (e *EthereumExecutionModule) GetAssembledBlockWithReceipts(payloadId uint64) (block *types.BlockWithReceipts, busy bool, err error) {
-	if !e.semaphore.TryAcquire(1) {
-		return nil, true, nil
-	}
-	defer e.semaphore.Release(1)
-	builder, ok := e.builders[payloadId]
-	if !ok {
-		return nil, false, nil
-	}
-	blockWithReceipts, err := builder.Stop()
-	return blockWithReceipts, false, err
-}
-
 func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error) {
-	blockWithReceipts, busy, err := e.GetAssembledBlockWithReceipts(req.Id)
-	if err != nil {
-		e.logger.Error("Failed to build PoS block", "err", err)
-		return nil, err
-	}
-	if busy {
+	if !e.semaphore.TryAcquire(1) {
 		return &executionproto.GetAssembledBlockResponse{
 			Busy: true,
 		}, nil
 	}
-	if blockWithReceipts == nil {
+	defer e.semaphore.Release(1)
+	payloadId := req.Id
+	builder, ok := e.builders[payloadId]
+	if !ok {
 		return &executionproto.GetAssembledBlockResponse{
 			Busy: false,
 		}, nil
 	}
 
+	blockWithReceipts, err := builder.Stop()
+	if err != nil {
+		e.logger.Error("Failed to build PoS block", "err", err)
+		return nil, err
+	}
 	block := blockWithReceipts.Block
 	header := block.Header()
 

@@ -62,6 +62,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/bodydownload"
 	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
@@ -366,6 +367,10 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	allBorSnapshots := heimdall.NewRoSnapshots(cfg.Snapshot, dirs.Snap, logger)
 
 	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
+
+	if _, isMergeAlready := engine.(*merge.Merge); gspec.Config.TerminalTotalDifficulty != nil && !isMergeAlready {
+		engine = merge.New(engine)
+	}
 
 	mock := &MockSentry{
 		Ctx: ctx, cancel: ctxCancel, DB: db,
@@ -738,13 +743,9 @@ func MockWithTxPoolCancun(t *testing.T) *MockSentry {
 	chainConfig.OsakaTime = nil
 	chainConfig.AmsterdamTime = nil
 
-	gspec := &types.Genesis{
-		Config: &chainConfig,
-		Alloc: types.GenesisAlloc{
-			address: {Balance: funds},
-		},
-	}
-
+	gspec, _ := blockgen.DefaultEngineApiTesterGenesis(t)
+	gspec.Config = &chainConfig
+	gspec.Alloc[address] = types.GenesisAccount{Balance: funds}
 	return MockWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true)
 }
 
@@ -753,13 +754,9 @@ func MockWithTxPoolAllProtocolChanges(t *testing.T) *MockSentry {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := chain.AllProtocolChanges
-	gspec := &types.Genesis{
-		Config: chainConfig,
-		Alloc: types.GenesisAlloc{
-			address: {Balance: funds},
-		},
-	}
-
+	gspec, _ := blockgen.DefaultEngineApiTesterGenesis(t)
+	gspec.Config = chainConfig
+	gspec.Alloc[address] = types.GenesisAccount{Balance: funds}
 	return MockWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true)
 }
 
