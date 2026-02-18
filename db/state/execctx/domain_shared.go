@@ -155,9 +155,9 @@ type changesetSwitcher interface {
 	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet)
 }
 
-func (sd *SharedDomains) Merge(other *SharedDomains) error {
-	if sd.txNum > other.txNum {
-		return fmt.Errorf("can't merge backwards: txnum: %d > %d", sd.txNum, other.txNum)
+func (sd *SharedDomains) Merge(other *SharedDomains, sdTxNum, otherTxNum uint64) error {
+	if sdTxNum > otherTxNum {
+		return fmt.Errorf("can't merge backwards: txnum: %d > %d", sdTxNum, otherTxNum)
 	}
 
 	if err := sd.mem.Merge(other.mem); err != nil {
@@ -169,7 +169,7 @@ func (sd *SharedDomains) Merge(other *SharedDomains) error {
 		sd.sdCtx.SetPendingUpdate(otherUpd)
 	}
 
-	sd.txNum = other.txNum
+	sd.txNum = otherTxNum
 	sd.blockNum.Store(other.blockNum.Load())
 	return nil
 }
