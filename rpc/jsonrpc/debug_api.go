@@ -1318,6 +1318,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	recordingState.SetAccountsToTrace([]common.Address{
 		// Add addresses to trace here, e.g.:
 		// common.HexToAddress("0x8863786beBE8eB9659DF00b49f8f1eeEc7e2C8c1"),
+		common.HexToAddress("0xb1356799bA5f399bbc1Cf99778a0A6f1aA319c67"),
 	})
 
 	// Create the in-block state with the recording state as reader
@@ -1357,6 +1358,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 
 	// Execute all transactions in the block
 	for txIndex, txn := range block.Transactions() {
+		fmt.Printf("Executing txIndex=%d , txHash=%x of blockNum=%d\n", txIndex, txn.Hash(), block.NumberU64())
 		msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert tx %d to message: %w", txIndex, err)
@@ -2048,6 +2050,24 @@ type witnessStateless struct {
 	deleted        map[common.Address]struct{}                    // deleted accounts
 	created        map[common.Address]struct{}                    // created contracts
 	trace          bool
+
+	// Debug: addresses to trace operations on
+	accountsToTrace map[common.Address]struct{}
+}
+
+func (s *witnessStateless) SetAccountsToTrace(addrs []common.Address) {
+	s.accountsToTrace = make(map[common.Address]struct{}, len(addrs))
+	for _, a := range addrs {
+		s.accountsToTrace[a] = struct{}{}
+	}
+}
+
+func (s *witnessStateless) tracing(addr common.Address) bool {
+	if s.accountsToTrace == nil {
+		return false
+	}
+	_, ok := s.accountsToTrace[addr]
+	return ok
 }
 
 // Ensure witnessStateless implements both interfaces
@@ -2119,16 +2139,33 @@ func (s *witnessStateless) ReadAccountData(address accounts.Address) (*accounts.
 
 	// Check if account has been updated in memory
 	if acc, ok := s.accountUpdates[addr]; ok {
+		if s.tracing(addr) {
+			if acc != nil {
+				fmt.Printf("[TRACE-S] ReadAccountData %s -> updates nonce=%d balance=%d codeHash=%x\n", addr.Hex(), acc.Nonce, &acc.Balance, acc.CodeHash)
+			} else {
+				fmt.Printf("[TRACE-S] ReadAccountData %s -> updates nil\n", addr.Hex())
+			}
+		}
 		return acc, nil
 	}
 
 	// Check if account has been deleted
 	if _, ok := s.deleted[addr]; ok {
+		if s.tracing(addr) {
+			fmt.Printf("[TRACE-S] ReadAccountData %s -> deleted\n", addr.Hex())
+		}
 		return nil, nil
 	}
 
 	// Read from trie
 	acc, ok := s.t.GetAccount(addrHash[:])
+	if s.tracing(addr) {
+		if ok && acc != nil {
+			fmt.Printf("[TRACE-S] ReadAccountData %s -> trie nonce=%d balance=%d codeHash=%x\n", addr.Hex(), acc.Nonce, &acc.Balance, acc.CodeHash)
+		} else {
+			fmt.Printf("[TRACE-S] ReadAccountData %s -> trie nil\n", addr.Hex())
+		}
+	}
 	if ok {
 		return acc, nil
 	}
@@ -2152,6 +2189,9 @@ func (s *witnessStateless) ReadAccountStorage(address accounts.Address, key acco
 	// Check if storage has been updated in memory
 	if m, ok := s.storageWrites[addr]; ok {
 		if v, ok := m[keyValue]; ok {
+			if s.tracing(addr) {
+				fmt.Printf("[TRACE-S] ReadAccountStorage %s key=%s -> writes val=%d\n", addr.Hex(), keyValue.Hex(), &v)
+			}
 			return v, true, nil
 		}
 	}
@@ -2159,6 +2199,9 @@ func (s *witnessStateless) ReadAccountStorage(address accounts.Address, key acco
 	// Check if storage has been deleted
 	if d, ok := s.storageDeletes[addr]; ok {
 		if _, ok := d[keyValue]; ok {
+			if s.tracing(addr) {
+				fmt.Printf("[TRACE-S] ReadAccountStorage %s key=%s -> deleted\n", addr.Hex(), keyValue.Hex())
+			}
 			return uint256.Int{}, false, nil
 		}
 	}
@@ -2168,9 +2211,15 @@ func (s *witnessStateless) ReadAccountStorage(address accounts.Address, key acco
 	if enc, ok := s.t.Get(cKey); ok {
 		var res uint256.Int
 		res.SetBytes(enc)
+		if s.tracing(addr) {
+			fmt.Printf("[TRACE-S] ReadAccountStorage %s key=%s -> trie val=%d\n", addr.Hex(), keyValue.Hex(), &res)
+		}
 		return res, true, nil
 	}
 
+	if s.tracing(addr) {
+		fmt.Printf("[TRACE-S] ReadAccountStorage %s key=%s -> not found\n", addr.Hex(), keyValue.Hex())
+	}
 	return uint256.Int{}, false, nil
 }
 
@@ -2189,12 +2238,18 @@ func (s *witnessStateless) ReadAccountCode(address accounts.Address) ([]byte, er
 	if acc != nil {
 		codeHashValue := acc.CodeHash.Value()
 		if code, ok := s.codeUpdates[codeHashValue]; ok {
+			if s.tracing(addr) {
+				fmt.Printf("[TRACE-S] ReadAccountCode %s -> codeUpdates len=%d\n", addr.Hex(), len(code))
+			}
 			return code, nil
 		}
 	}
 
 	// Check trie for code
 	if code, ok := s.t.GetAccountCode(addrHash[:]); ok {
+		if s.tracing(addr) {
+			fmt.Printf("[TRACE-S] ReadAccountCode %s -> trie len=%d\n", addr.Hex(), len(code))
+		}
 		return code, nil
 	}
 
@@ -2202,10 +2257,16 @@ func (s *witnessStateless) ReadAccountCode(address accounts.Address) ([]byte, er
 	if acc != nil {
 		codeHashValue := acc.CodeHash.Value()
 		if code, ok := s.codeMap[codeHashValue]; ok {
+			if s.tracing(addr) {
+				fmt.Printf("[TRACE-S] ReadAccountCode %s -> codeMap len=%d\n", addr.Hex(), len(code))
+			}
 			return code, nil
 		}
 	}
 
+	if s.tracing(addr) {
+		fmt.Printf("[TRACE-S] ReadAccountCode %s -> not found\n", addr.Hex())
+	}
 	return nil, nil
 }
 
@@ -2214,10 +2275,18 @@ func (s *witnessStateless) ReadAccountCodeSize(address accounts.Address) (int, e
 	if err != nil {
 		return 0, err
 	}
+	addr := address.Value()
+	if s.tracing(addr) {
+		fmt.Printf("[TRACE-S] ReadAccountCodeSize %s -> %d\n", addr.Hex(), len(code))
+	}
 	return len(code), nil
 }
 
 func (s *witnessStateless) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
+	addr := address.Value()
+	if s.tracing(addr) {
+		fmt.Printf("[TRACE-S] ReadAccountIncarnation %s -> 0\n", addr.Hex())
+	}
 	return 0, nil
 }
 
@@ -2230,12 +2299,18 @@ func (s *witnessStateless) HasStorage(address accounts.Address) (bool, error) {
 
 	// Check if account has been deleted
 	if _, ok := s.deleted[addr]; ok {
+		if s.tracing(addr) {
+			fmt.Printf("[TRACE-S] HasStorage %s -> deleted false\n", addr.Hex())
+		}
 		return false, nil
 	}
 
 	// Check if we know about any storage updates with non-empty values
 	for _, v := range s.storageWrites[addr] {
 		if !v.IsZero() {
+			if s.tracing(addr) {
+				fmt.Printf("[TRACE-S] HasStorage %s -> writes true\n", addr.Hex())
+			}
 			return true, nil
 		}
 	}
@@ -2243,10 +2318,17 @@ func (s *witnessStateless) HasStorage(address accounts.Address) (bool, error) {
 	// Check account in trie
 	acc, ok := s.t.GetAccount(addrHash[:])
 	if !ok {
+		if s.tracing(addr) {
+			fmt.Printf("[TRACE-S] HasStorage %s -> trie not found false\n", addr.Hex())
+		}
 		return false, nil
 	}
 
-	return acc.Root != trie.EmptyRoot, nil
+	has := acc.Root != trie.EmptyRoot
+	if s.tracing(addr) {
+		fmt.Printf("[TRACE-S] HasStorage %s -> trie root=%x has=%v\n", addr.Hex(), acc.Root, has)
+	}
+	return has, nil
 }
 
 // StateWriter interface implementation
@@ -2258,8 +2340,14 @@ func (s *witnessStateless) UpdateAccountData(address accounts.Address, original,
 		accCopy := new(accounts.Account)
 		accCopy.Copy(account)
 		s.accountUpdates[addr] = accCopy
+		if s.tracing(addr) {
+			fmt.Printf("[TRACE-S] UpdateAccountData %s nonce=%d balance=%d codeHash=%x\n", addr.Hex(), account.Nonce, &account.Balance, account.CodeHash)
+		}
 	} else {
 		s.accountUpdates[addr] = nil
+		if s.tracing(addr) {
+			fmt.Printf("[TRACE-S] UpdateAccountData %s nil\n", addr.Hex())
+		}
 	}
 	return nil
 }
@@ -2275,11 +2363,16 @@ func (s *witnessStateless) DeleteAccount(address accounts.Address, original *acc
 	existingInTrie, wasInTrie := s.t.GetAccount(addrHash[:])
 	_, wasUpdated := s.accountUpdates[addr]
 	if (!wasInTrie || existingInTrie == nil) && !wasUpdated {
-		// Account wasn't in the original state, skip deletion
+		if s.tracing(addr) {
+			fmt.Printf("[TRACE-S] DeleteAccount %s -> skipped (not in trie or updates)\n", addr.Hex())
+		}
 		return nil
 	}
 	s.accountUpdates[addr] = nil
 	s.deleted[addr] = struct{}{}
+	if s.tracing(addr) {
+		fmt.Printf("[TRACE-S] DeleteAccount %s\n", addr.Hex())
+	}
 	return nil
 }
 
@@ -2290,6 +2383,9 @@ func (s *witnessStateless) UpdateAccountCode(address accounts.Address, incarnati
 	addr := address.Value()
 	if acc, ok := s.accountUpdates[addr]; ok && acc != nil {
 		acc.CodeHash = codeHash
+	}
+	if s.tracing(addr) {
+		fmt.Printf("[TRACE-S] UpdateAccountCode %s codeHash=%x len=%d\n", addr.Hex(), codeHash, len(code))
 	}
 	return nil
 }
@@ -2311,6 +2407,9 @@ func (s *witnessStateless) WriteAccountStorage(address accounts.Address, incarna
 		if m, ok := s.storageWrites[addr]; ok {
 			delete(m, keyValue)
 		}
+		if s.tracing(addr) {
+			fmt.Printf("[TRACE-S] WriteAccountStorage %s key=%s -> delete\n", addr.Hex(), keyValue.Hex())
+		}
 	} else {
 		// Write: add to storageWrites, remove from storageDeletes
 		m, ok := s.storageWrites[addr]
@@ -2324,6 +2423,9 @@ func (s *witnessStateless) WriteAccountStorage(address accounts.Address, incarna
 		if d, ok := s.storageDeletes[addr]; ok {
 			delete(d, keyValue)
 		}
+		if s.tracing(addr) {
+			fmt.Printf("[TRACE-S] WriteAccountStorage %s key=%s val=%d\n", addr.Hex(), keyValue.Hex(), &value)
+		}
 	}
 	return nil
 }
@@ -2332,6 +2434,9 @@ func (s *witnessStateless) CreateContract(address accounts.Address) error {
 	addr := address.Value()
 	s.created[addr] = struct{}{}
 	delete(s.deleted, addr)
+	if s.tracing(addr) {
+		fmt.Printf("[TRACE-S] CreateContract %s\n", addr.Hex())
+	}
 	return nil
 }
 
@@ -2520,6 +2625,11 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	if err != nil {
 		return common.Hash{}, nil, fmt.Errorf("failed to create witness stateless: %w", err)
 	}
+	stateless.SetAccountsToTrace([]common.Address{
+		// Add addresses to trace here, e.g.:
+		// common.HexToAddress("0x8863786beBE8eB9659DF00b49f8f1eeEc7e2C8c1"),
+		common.HexToAddress("0xb1356799bA5f399bbc1Cf99778a0A6f1aA319c67"),
+	})
 
 	// Build header lookup map from result.Headers for BLOCKHASH opcode
 	headerByNumber := make(map[uint64]*types.Header)
