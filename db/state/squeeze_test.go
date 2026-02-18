@@ -426,13 +426,12 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.NoError(t, err)
 	defer dom2.Close()
 
-	err = dom2.SeekCommitment(ctx, rwTx)
-	sstartTx := dom2.TxNum()
+	latestTxNum, _, err := dom2.SeekCommitment(ctx, rwTx)
 
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, sstartTx, startTx)
-	require.GreaterOrEqual(t, sstartTx, latestCommitTxNum)
-	_ = sstartTx
+	require.GreaterOrEqual(t, latestTxNum, startTx)
+	require.GreaterOrEqual(t, latestTxNum, latestCommitTxNum)
+	_ = latestTxNum
 	rwTx.Rollback()
 
 	// Check the history

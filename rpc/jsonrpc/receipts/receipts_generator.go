@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/linkdata/deadlock"
+
 	"github.com/google/go-cmp/cmp"
 	lru "github.com/hashicorp/golang-lru/v2"
 
@@ -302,10 +304,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 			// commitment is indexed by txNum of the first tx (system-tx) of the block
 			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
-			if err := sharedDomains.SeekCommitment(ctx, tx); err != nil {
+			latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
+			if err != nil {
 				return nil, err
 			}
-			stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
+			stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, latestTxNum)
 
 			evm = protocol.CreateEVM(cfg, protocol.GetHashFn(genEnv.header, genEnv.getHeader), g.engine, accounts.NilAddress, genEnv.ibs, genEnv.header, vm.Config{})
 			ctx, cancel := context.WithTimeout(ctx, g.evmTimeout)
@@ -486,10 +489,11 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		sharedDomains.GetCommitmentContext().SetDeferBranchUpdates(false)
 		// commitment are indexed by txNum of the first tx (system-tx) of the block
 		sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
-		if err := sharedDomains.SeekCommitment(ctx, tx); err != nil {
+		latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
+		if err != nil {
 			return nil, err
 		}
-		stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, sharedDomains.TxNum())
+		stateWriter = state.NewWriter(sharedDomains.AsPutDel(tx), nil, latestTxNum)
 	} else {
 		stateWriter = genEnv.noopWriter
 	}
@@ -640,14 +644,14 @@ type loaderMutex[K comparable] struct {
 	sync.Map
 }
 
-func (m *loaderMutex[K]) lock(key K) *sync.Mutex {
-	value, _ := m.LoadOrStore(key, &sync.Mutex{})
-	mu := value.(*sync.Mutex)
+func (m *loaderMutex[K]) lock(key K) *deadlock.Mutex {
+	value, _ := m.LoadOrStore(key, &deadlock.Mutex{})
+	mu := value.(*deadlock.Mutex)
 	mu.Lock()
 	return mu
 }
 
-func (m *loaderMutex[K]) unlock(mu *sync.Mutex, key K) {
+func (m *loaderMutex[K]) unlock(mu *deadlock.Mutex, key K) {
 	mu.Unlock()
 	m.Delete(key)
 }
