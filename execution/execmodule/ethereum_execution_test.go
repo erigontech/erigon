@@ -380,6 +380,7 @@ func assembleBlock(ctx context.Context, exec *execmodule.EthereumExecutionModule
 		return r.Id, executionproto.ExecutionStatus_Success, nil
 	})
 }
+
 func getAssembledBlock(ctx context.Context, exe *execmodule.EthereumExecutionModule, payloadId uint64) (*executionproto.AssembledBlockData, error) {
 	return retryBusy(ctx, func() (*executionproto.AssembledBlockData, executionproto.ExecutionStatus, error) {
 		br, err := exe.GetAssembledBlock(ctx, &executionproto.GetAssembledBlockRequest{Id: payloadId})
