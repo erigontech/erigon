@@ -50,14 +50,15 @@ func CreateBAL(blockNum uint64, txIO *state.VersionedIO, dataDir string) types.B
 
 	bal := make([]*types.AccountChanges, 0, len(ac))
 	for _, account := range ac {
-		// The system address shows up as a touched address due to a balance check in IBS
-		// during a system call, however this should not be included in the BAL.
-		if isSystemBALAddress(account.changes.Address) {
-			continue
-		}
-
 		account.finalize()
 		normalizeAccountChanges(account.changes)
+		// The system address is touched during system calls (EIP-4788 beacon root)
+		// because it is msg.sender. Exclude it when it has no actual state changes,
+		// but keep it when a user tx sends real ETH to it (e.g. SELFDESTRUCT to
+		// the system address or a plain value transfer).
+		if isSystemBALAddress(account.changes.Address) && !hasAccountChanges(account.changes) {
+			continue
+		}
 		bal = append(bal, account.changes)
 	}
 
@@ -134,9 +135,20 @@ func updateAccountWrite(account *accountState, vw *state.VersionedWrite, accessI
 	switch vw.Path {
 	case state.StoragePath:
 		addStorageUpdate(account.changes, vw, accessIndex)
+	case state.SelfDestructPath:
+		if deleted, ok := vw.Val.(bool); ok && deleted {
+			account.selfDestructed = true
+		}
 	case state.BalancePath:
 		val, ok := vw.Val.(uint256.Int)
 		if !ok {
+			return
+		}
+		// Skip non-zero balance writes for selfdestructed accounts.
+		// Post-selfdestruct ETH (e.g. priority fee applied during finalize) must
+		// not appear in the BAL per EIP-7928 — only the zero-balance write from
+		// the selfdestruct itself belongs there.
+		if account.selfDestructed && !val.IsZero() {
 			return
 		}
 		// If we haven't seen a balance and the first write is zero, treat it as a touch only.
@@ -171,6 +183,11 @@ func isSystemBALAddress(addr accounts.Address) bool {
 	return addr == params.SystemAddress
 }
 
+func hasAccountChanges(ac *types.AccountChanges) bool {
+	return len(ac.StorageChanges) > 0 || len(ac.StorageReads) > 0 ||
+		len(ac.BalanceChanges) > 0 || len(ac.NonceChanges) > 0 || len(ac.CodeChanges) > 0
+}
+
 func hasStorageWrite(ac *types.AccountChanges, slot accounts.StorageKey) bool {
 	for _, sc := range ac.StorageChanges {
 		if sc != nil && sc.Slot == slot {
@@ -202,11 +219,12 @@ func blockAccessIndex(txIndex int) uint16 {
 }
 
 type accountState struct {
-	changes      *types.AccountChanges
-	balance      *fieldTracker[uint256.Int]
-	nonce        *fieldTracker[uint64]
-	code         *fieldTracker[[]byte]
-	balanceValue *uint256.Int // tracks latest seen balance
+	changes        *types.AccountChanges
+	balance        *fieldTracker[uint256.Int]
+	nonce          *fieldTracker[uint64]
+	code           *fieldTracker[[]byte]
+	balanceValue   *uint256.Int // tracks latest seen balance
+	selfDestructed bool         // true once SelfDestructPath=true is seen for this account
 }
 
 // check pre- and post-values, add to BAL if different
