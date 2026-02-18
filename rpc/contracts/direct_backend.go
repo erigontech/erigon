@@ -52,7 +52,7 @@ func (b DirectBackend) CodeAt(ctx context.Context, account common.Address, block
 
 func (b DirectBackend) CallContract(ctx context.Context, callMsg ethereum.CallMsg, blockNum *big.Int) ([]byte, error) {
 	blockNumberOrHash := BlockNumArg(blockNum)
-	var blockNumberOrHashRef *rpc.BlockNumberOrHash = &blockNumberOrHash
+	var blockNumberOrHashRef = &blockNumberOrHash
 
 	return b.api.Call(ctx, CallArgsFromCallMsg(callMsg), blockNumberOrHashRef, nil, nil)
 }

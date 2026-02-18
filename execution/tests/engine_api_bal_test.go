@@ -50,9 +50,9 @@ func TestEngineApiGeneratedPayloadIncludesBlockAccessList(t *testing.T) {
 
 		balBytes := payload.ExecutionPayload.BlockAccessList
 		require.NotNil(t, balBytes)
-		require.NotEmpty(t, *balBytes)
+		require.NotEmpty(t, balBytes)
 
-		bal, err := types.DecodeBlockAccessListBytes(*balBytes)
+		bal, err := types.DecodeBlockAccessListBytes(balBytes)
 		require.NoError(t, err)
 		require.NoError(t, bal.Validate())
 		require.NotEmpty(t, bal)
