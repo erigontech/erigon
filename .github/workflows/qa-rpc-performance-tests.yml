@@ -216,18 +216,17 @@ jobs:
             # clean temporary area
             cd $workspace/rpc-tests/perf
             rm -rf ./reports/$network
+            cd ..
           
-            python3 ./run_perf_tests.py --blockchain "$network" \
+            go run ./cmd/perf --blockchain "$network" \
                                       --test-type "$method" \
-                                      --pattern-file pattern/"$network"/"$pattern".tar \
+                                      --pattern-file perf/pattern/"$network"/"$pattern".tar \
                                       --test-sequence "$sequence" \
                                       --repetitions 5 \
-                                      --erigon-dir "/" \
-                                      --silk-dir "/" \
-                                      --test-mode 2 \
+                                      --client-build-dir "/" \
                                       --test-report \
                                       --json-report $result_dir/$result_file \
-                                      --testing-daemon $client
+                                      --testing-client $client
           
             # Capture test runner script exit status
             perf_exit_status=$?
