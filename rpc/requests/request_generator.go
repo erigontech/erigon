@@ -28,7 +28,7 @@ import (
 	"strings"
 	"time"
 
-	sync "github.com/linkdata/deadlock"
+	"sync"
 
 	"github.com/valyala/fastjson"
 
