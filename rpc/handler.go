@@ -31,8 +31,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/linkdata/deadlock"
-
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -75,7 +73,7 @@ type handler struct {
 	allowList     AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
 	forbiddenList ForbiddenList
 
-	subLock             deadlock.Mutex
+	subLock             sync.Mutex
 	serverSubs          map[ID]*Subscription
 	maxBatchConcurrency uint
 	traceRequests       bool
