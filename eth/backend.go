@@ -419,16 +419,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			tracer.Hooks.OnBlockchainInit(config.Genesis.Config)
 		}
 
-		h, err := rawdb.ReadCanonicalHash(tx, config.Genesis.Number)
-		if err != nil {
-			panic(err)
-		}
-		genesisSpec := config.Genesis
-		if h != (common.Hash{}) { // fallback to db content
-			genesisSpec = nil
-		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.OverrideOsakaTime, config.KeepStoredChainConfig, dirs, logger)
+		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, config.Genesis, config.OverrideOsakaTime, config.KeepStoredChainConfig, dirs, logger)
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
