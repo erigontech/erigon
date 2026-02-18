@@ -266,6 +266,17 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
 	}
 
+	if cfg.syncConfig.SnapshotDownloadToBlockWithRebuildCommitment && s.BlockNumber == 0 {
+		txNumsReader := cfg.blockReader.TxnumReader(ctx)
+		_, err = state.RebuildCommitmentFiles(ctx, cfg.db, &txNumsReader, logger, true /*squeeze*/)
+		if err != nil {
+			return fmt.Errorf("failed to rebuild commitment files: %w", err)
+		}
+		if temporal, ok := tx.(*temporal.RwTx); ok {
+			temporal.ForceReopenAggCtx() // otherwise next stages will not see new files
+		}
+	}
+
 	// It's ok to notify before tx.Commit(), because RPCDaemon does read list of files by gRPC (not by reading from db)
 	if cfg.notifier.Events != nil {
 		cfg.notifier.Events.OnNewSnapshot()

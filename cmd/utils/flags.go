@@ -695,6 +695,11 @@ var (
 		Usage:   "Download snapshots up to the given block number (exclusive). Disabled by default. Useful for testing and shadow forks.",
 		Aliases: []string{"shadow.fork.block"},
 	}
+	SnapDownloadToBlockWithRebuildCommitmentFlag = cli.BoolFlag{
+		Name:  "snap.download.to.block.with.rebuild.commitment",
+		Usage: "Rebuild commitment domain files based on storage/acc/code. Only used with snap.download.to.block. Needed when all downloaded commitment files are purified.",
+		Value: false,
+	}
 	TorrentVerbosityFlag = cli.IntFlag{
 		Name:  "torrent.verbosity",
 		Value: 1,
