@@ -218,7 +218,7 @@ jobs:
             rm -rf ./reports/$network
             cd ..
           
-            go run ./cmd/perf --blockchain "$network" \
+            go run ./cmd/perf/main.go --blockchain "$network" \
                                       --test-type "$method" \
                                       --pattern-file perf/pattern/"$network"/"$pattern".tar \
                                       --test-sequence "$sequence" \
