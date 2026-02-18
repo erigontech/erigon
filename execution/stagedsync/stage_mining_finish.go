@@ -70,15 +70,21 @@ func SpawnMiningFinishStage(s *StageState, sd *execctx.SharedDomains, tx kv.Temp
 
 	block := types.NewBlockForAsembling(blockAssembler.Header, blockAssembler.Txns, blockAssembler.Uncles, blockAssembler.Receipts, blockAssembler.Withdrawals)
 	if blockAssembler.BlockAccessList != nil {
-		block.SetBlockAccessList(blockAssembler.BlockAccessList)
 		if block.BlockAccessListHash() == nil {
 			hash := empty.BlockAccessListHash
 			block.HeaderNoCopy().BlockAccessListHash = &hash
 		}
 	}
 
+	blockWithReceipts := &types.BlockWithReceipts{
+		Block:           block,
+		Receipts:        blockAssembler.Receipts,
+		Requests:        blockAssembler.Requests,
+		BlockAccessList: blockAssembler.BlockAccessList,
+	}
+
 	if dbg.LogHashMismatchReason() {
-		ethutils.LogReceipts(log.LvlInfo, "Block built", current.Receipts, current.Txns, cfg.chainConfig, current.Header, logger)
+		ethutils.LogReceipts(log.LvlInfo, "Block built", blockAssembler.Receipts, blockAssembler.Txns, cfg.chainConfig, blockAssembler.Header, logger)
 	}
 
 	//sealHash := engine.SealHash(block.Header())

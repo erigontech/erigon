@@ -503,7 +503,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			b.header.Root = common.BytesToHash(stateRoot)
 			// Recreating block to make sure Root makes it into the header
 			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, b.withdrawals)
-			block.SetBlockAccessList(bal)
 			return block, b.receipts, nil
 		}
 		return nil, nil, errors.New("no engine to generate blocks")

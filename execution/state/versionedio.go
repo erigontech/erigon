@@ -13,7 +13,6 @@ import (
 	"github.com/heimdalr/dag"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -925,8 +924,8 @@ func newCodeTracker() *fieldTracker[[]byte] {
 func applyToCode(ct *fieldTracker[[]byte], ac *types.AccountChanges) {
 	ct.changes.apply(func(idx uint16, value []byte) {
 		ac.CodeChanges = append(ac.CodeChanges, &types.CodeChange{
-			Index: idx,
-			Data:  bytes.Clone(value),
+			Index:    idx,
+			Bytecode: bytes.Clone(value),
 		})
 	})
 }
@@ -1037,29 +1036,27 @@ func (account *accountState) updateRead(vr *VersionedRead) {
 }
 
 func addStorageUpdate(ac *types.AccountChanges, vw *VersionedWrite, txIndex uint16) {
-	val := vw.Val.(uint256.Int)
-	value := common.Hash(val.Bytes32())
 	// If we already recorded a read for this slot, drop it because a write takes precedence.
 	removeStorageRead(ac, vw.Key)
 
 	if ac.StorageChanges == nil {
 		ac.StorageChanges = []*types.SlotChanges{{
 			Slot:    vw.Key,
-			Changes: []*types.StorageChange{{Index: txIndex, Value: value}},
+			Changes: []*types.StorageChange{{Index: txIndex, Value: vw.Val.(uint256.Int)}},
 		}}
 		return
 	}
 
 	for _, slotChange := range ac.StorageChanges {
 		if slotChange.Slot == vw.Key {
-			slotChange.Changes = append(slotChange.Changes, &types.StorageChange{Index: txIndex, Value: value})
+			slotChange.Changes = append(slotChange.Changes, &types.StorageChange{Index: txIndex, Value: vw.Val.(uint256.Int)})
 			return
 		}
 	}
 
 	ac.StorageChanges = append(ac.StorageChanges, &types.SlotChanges{
 		Slot:    vw.Key,
-		Changes: []*types.StorageChange{{Index: txIndex, Value: value}},
+		Changes: []*types.StorageChange{{Index: txIndex, Value: vw.Val.(uint256.Int)}},
 	})
 }
 

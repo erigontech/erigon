@@ -342,7 +342,7 @@ func (ba BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *state
 	}
 
 	if ba.HasBAL() {
-		block.SetBlockAccessList(ba.balIO.AsBlockAccessList())
+		ba.BlockAccessList = ba.balIO.AsBlockAccessList()
 	}
 
 	return block, nil

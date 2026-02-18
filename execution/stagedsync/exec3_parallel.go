@@ -215,7 +215,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						}
 
 						if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
-							log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash())
 							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) {
 								bal := applyResult.TxIO.AsBlockAccessList()
 								if err := bal.Validate(); err != nil {

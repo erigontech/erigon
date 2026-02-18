@@ -27,7 +27,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
@@ -189,8 +188,8 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 
 	if execCfg.chainConfig.IsPrague(header.Time) {
 		hash := common.Hash{}
-		if len(current.Requests) > 0 {
-			hash = *current.Requests.Hash()
+		if len(blockAssembler.Requests) > 0 {
+			hash = *blockAssembler.Requests.Hash()
 		}
 		header.RequestsHash = &hash
 	}
