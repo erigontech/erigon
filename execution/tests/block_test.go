@@ -108,44 +108,39 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 		// TODO fix -race issues with parallel exec
 		t.Skip("skipping from race tests until parallel exec flow is race free")
 	}
+
 	t.Parallel()
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	dir := filepath.Join(eestDir, "blockchain_tests_devnet")
 	bt := new(testMatcher)
 	// to run only tests for 1 eip do:
-	//bt.whitelist(`.*amsterdam/eip8024_dupn_swapn_exchange.*`)
+	// bt.whitelist(`.*eip7708_eth_transfer_logs/test_finalization_selfdestruct_logs.json`)
 	bt.whitelist(`.*amsterdam.*`)                                                                              // TODO run tests for older forks too once we fix amsterdam eips, for now focus only on amsterdam eips
-	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_finalization_selfdestruct_logs.json`)                        // TODO fix error: receiptHash mismatch
-	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_finalization_after_priority_fee.json`)          // TODO fix error: block access list mismatch
-	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_to_self_cross_tx_no_log.json`)                  // TODO fix error: block access list mismatch
-	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_same_tx_via_call.json`)                         // TODO fix error: block #1 insertion into chain failed
-	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_to_system_address.json`)                        // TODO fix error: block access list mismatch
-	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_transfer_to_special_address.json`)                           // TODO fix error: block access list mismatch
-	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_to_self_same_tx.json`)                          // TODO fix error:  block #1 insertion into chain failed
-	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_log_at_fork_transition.json`)                   // TODO file error: block #2 insertion into chain failed: insertion failed for block 2, code: BadBlock
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_7702_delegation_clear.json`)                      // TODO fix error: block access list mismatch
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_7002_clean_sweep.json`)                           // TODO fix error: can't find diffsets for: 2
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_7002_request_from_contract.json`)                 // TODO fix error: can't find diffsets for: 2
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_consolidation_contract_cross_index.json`)         // TODO fix error: can't find diffsets for: 2
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_multiple_withdrawals_same_address.json`)          // TODO fix error: can't find diffsets for: 2
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_system_dequeue_consolidations_eip7251.json`)      // TODO fix error: can't find diffsets for: 2
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_and_new_contract.json`)                // TODO fix error: can't find diffsets for: 2
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_and_selfdestruct.json`)                // TODO fix error: can't find diffsets for: 2
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_and_transaction.json`)                 // TODO fix error: can't find diffsets for: 2
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_empty_block.json`)                     // TODO fix error: can't find diffsets for: 2
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_no_evm_execution.json`)                // TODO fix error: can't find diffsets for: 2
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_to_7702_delegation.json`)              // TODO fix error: can't find diffsets for: 2
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_to_coinbase.json`)                     // TODO fix error: can't find diffsets for: 2
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_to_coinbase_empty_block.json`)         // TODO fix error: can't find diffsets for: 2
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_to_nonexistent_account.json`)          // TODO fix error: can't find diffsets for: 2
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_to_precompiles.json`)                  // TODO fix error: can't find diffsets for: 2
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_largest_amount.json`)                  // TODO fix error: can't find diffsets for: 2
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_and_state_access_same_account.json`)   // TODO fix error: can't find diffsets for: 2
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_contract_cross_index.json`)            // TODO fix error: can't find diffsets for: 2
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_and_value_transfer_same_address.json`) // TODO fix error: can't find diffsets for: 2
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_create_selfdestruct_to_self_with_call.json`)      // TODO fix error: block #1 insertion into chain failed
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_7002_partial_sweep.json`)                         // TODO fix error: can't find diffsets for: 2
+	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_to_self_cross_tx_no_log.json`)                  // TODO fix error: block access list mismatch (parallel executor gas accounting)
+	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_to_system_address.json`)                        // TODO fix: invalid state root hash
+	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_transfer_to_special_address.json`)                           // TODO fix: invalid state root hash
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_7002_clean_sweep.json`)                           // TODO fix: invalid state root hash
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_7002_request_from_contract.json`)                 // TODO fix: invalid state root hash
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_consolidation_contract_cross_index.json`)         // TODO fix: invalid state root hash
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_multiple_withdrawals_same_address.json`)          // TODO fix: invalid state root hash
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_system_dequeue_consolidations_eip7251.json`)      // TODO fix: invalid state root hash
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_and_new_contract.json`)                // TODO fix: invalid state root hash
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_and_selfdestruct.json`)                // TODO fix: invalid state root hash
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_and_transaction.json`)                 // TODO fix: invalid state root hash
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_empty_block.json`)                     // TODO fix: invalid state root hash
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_no_evm_execution.json`)                // TODO fix: invalid state root hash
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_to_7702_delegation.json`)              // TODO fix: invalid state root hash
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_to_coinbase.json`)                     // TODO fix: invalid state root hash
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_to_coinbase_empty_block.json`)         // TODO fix: invalid state root hash
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_to_nonexistent_account.json`)          // TODO fix: invalid state root hash
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_to_precompiles.json`)                  // TODO fix: invalid state root hash
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_largest_amount.json`)                  // TODO fix: invalid state root hash
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_and_state_access_same_account.json`)   // TODO fix: invalid state root hash
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_contract_cross_index.json`)            // TODO fix: invalid state root hash
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_and_value_transfer_same_address.json`) // TODO fix: invalid state root hash
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_create_selfdestruct_to_self_with_call.json`)      // TODO fix error: block access list mismatch
+	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_7002_partial_sweep.json`)                         // TODO fix: invalid state root hash
 	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
 		test.ExperimentalBAL = true // TODO eventually remove this from BlockTest and run normally

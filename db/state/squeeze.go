@@ -325,12 +325,16 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 	if err != nil {
 		return "", err
 	}
+	latestTx, latestBlock, err := domains.SeekCommitment(ctx, rwTx)
+	if err != nil {
+		return "", err
+	}
 	rootHash, err := domains.GetCommitmentCtx().Trie().RootHash()
 	if err != nil {
 		return "", err
 	}
 	var s strings.Builder
-	s.WriteString(fmt.Sprintf("[commitment] Latest: blockNum: %d txNum: %d latestRootHash: %x\n", domains.BlockNum(), domains.TxNum(), rootHash))
+	s.WriteString(fmt.Sprintf("[commitment] Latest: blockNum: %d txNum: %d latestRootHash: %x\n", latestBlock, latestTx, rootHash))
 	s.WriteString(fmt.Sprintf("[commitment] stepSize %d, ReplaceKeysInValues enabled %t\n", rwTx.Debug().StepSize(), a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues))
 	return s.String(), nil
 }

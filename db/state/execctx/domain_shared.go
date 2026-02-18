@@ -118,7 +118,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) 
 
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
 
-	if err := sd.SeekCommitment(ctx, tx); err != nil {
+	if _, _, err := sd.SeekCommitment(ctx, tx); err != nil {
 		return sd, err
 	}
 
@@ -641,12 +641,14 @@ func (sd *SharedDomains) GetCommitmentContext() *commitmentdb.SharedDomainsCommi
 }
 
 // SeekCommitment lookups latest available commitment and sets it as current
-func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (err error) {
-	_, _, _, err = sd.sdCtx.SeekCommitment(ctx, tx)
+func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (txNum, blockNum uint64, err error) {
+	txNum, blockNum, err = sd.sdCtx.SeekCommitment(ctx, tx)
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
-	return nil
+	sd.SetBlockNum(blockNum)
+	sd.SetTxNum(txNum)
+	return txNum, blockNum, nil
 }
 
 // ComputeCommitment evaluates commitment for gathered updates.
