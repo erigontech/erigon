@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -192,6 +193,27 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	return rpcLogs, nil
 }
 
+// assertReceiptsAvailable corner cases:
+//   - `--persist.receipts`: means all receipts available (even in `--prune.mode=minimal` mode)
+//   - `--prune.mode=minimal` (and `full`) can serve receipts as much as "state history" available (by re-executing blocks)
+//
+// returns `state.PrunedError` if not available for given `fromTxNum`
+func assertReceiptsAvailable(fromTxNum uint64, tx kv.TemporalTx) error {
+	persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
+	if err != nil {
+		return err
+	}
+	if persistReceipts {
+		return nil
+	}
+	r := state.NewHistoryReaderV3()
+	r.SetTx(tx)
+	if fromTxNum < r.StateHistoryStartFrom() {
+		return state.PrunedError
+	}
+	return nil
+}
+
 func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, asc order.By) (out stream.U64, err error) {
 	//[from,to)
 	var fromTxNum, toTxNum uint64
@@ -200,10 +222,8 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 		if err != nil {
 			return out, err
 		}
-		r := state.NewHistoryReaderV3()
-		r.SetTx(tx)
-		if fromTxNum < r.StateHistoryStartFrom() {
-			return out, state.PrunedError
+		if err := assertReceiptsAvailable(fromTxNum, tx); err != nil {
+			return out, err
 		}
 	}
 
