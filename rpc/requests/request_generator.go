@@ -29,8 +29,6 @@ import (
 	"sync"
 	"time"
 
-	"sync"
-
 	"github.com/valyala/fastjson"
 
 	ethereum "github.com/erigontech/erigon"
