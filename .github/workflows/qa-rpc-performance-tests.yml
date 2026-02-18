@@ -216,9 +216,10 @@ jobs:
             # clean temporary area
             cd $workspace/rpc-tests/perf
             rm -rf ./reports/$network
+
+            # Move to home dir of rpc-tests
             cd ..
-          
-            go run ./cmd/perf/main.go --blockchain "$network" \
+            go run ./cmd/perf --blockchain "$network" \
                                       --test-type "$method" \
                                       --pattern-file perf/pattern/"$network"/"$pattern".tar \
                                       --test-sequence "$sequence" \
