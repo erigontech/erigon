@@ -227,7 +227,7 @@ jobs:
                                       --client-build-dir "/" \
                                       --test-report \
                                       --json-report $result_dir/$result_file \
-                                      --testing-client $client \ # temporary
+                                      --testing-client $client \
                                       --not-verify-server-alive  
           
             # Capture test runner script exit status
