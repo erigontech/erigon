@@ -215,37 +215,105 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 	}, nil
 }
 
-func (e *EthereumExecutionModule) GetBlockAccessListsByHashes(ctx context.Context, req *executionproto.GetBlockAccessListsByHashesRequest) (*executionproto.GetBlockAccessListsResponse, error) {
+func (e *EthereumExecutionModule) GetPayloadBodiesByHash(ctx context.Context, req *executionproto.GetPayloadBodiesByHashRequest) (*executionproto.GetPayloadBodiesBatchResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetBlockAccessListsByHashes: could not begin database tx %w", err)
+		return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: could not begin database tx %w", err)
 	}
 	defer tx.Rollback()
 
-	blockAccessLists := make([][]byte, 0, len(req.Hashes))
-
+	bodies := make([]*typesproto.ExecutionPayloadBody, 0, len(req.Hashes))
 	for _, hash := range req.Hashes {
 		h := gointerfaces.ConvertH256ToHash(hash)
 		number, err := e.blockReader.HeaderNumber(ctx, tx, h)
 		if err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.GetBlockAccessListsByHashes: HeaderNumber error %w", err)
+			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: HeaderNumber error %w", err)
 		}
 		if number == nil {
-			blockAccessLists = append(blockAccessLists, nil)
+			bodies = append(bodies, nil)
 			continue
+		}
+		body, err := e.getBody(ctx, tx, h, *number)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: getBody error %w", err)
+		}
+		if body == nil {
+			bodies = append(bodies, nil)
+			continue
+		}
+		txs, err := types.MarshalTransactionsBinary(body.Transactions)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: MarshalTransactionsBinary error %w", err)
 		}
 		balBytes, err := rawdb.ReadBlockAccessListBytes(tx, h, *number)
 		if err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.GetBlockAccessListsByHashes: ReadBlockAccessListBytes error %w", err)
+			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: ReadBlockAccessListBytes error %w", err)
 		}
-		if len(balBytes) == 0 {
-			blockAccessLists = append(blockAccessLists, nil)
-			continue
-		}
-		blockAccessLists = append(blockAccessLists, bytes.Clone(balBytes))
+
+		bodies = append(bodies, &typesproto.ExecutionPayloadBody{
+			Transactions:    txs,
+			Withdrawals:     moduleutil.ConvertWithdrawalsToRpc(body.Withdrawals),
+			BlockAccessList: bytes.Clone(balBytes),
+		})
 	}
 
-	return &executionproto.GetBlockAccessListsResponse{BlockAccessLists: blockAccessLists}, nil
+	return &executionproto.GetPayloadBodiesBatchResponse{Bodies: bodies}, nil
+}
+
+func (e *EthereumExecutionModule) GetPayloadBodiesByRange(ctx context.Context, req *executionproto.GetPayloadBodiesByRangeRequest) (*executionproto.GetPayloadBodiesBatchResponse, error) {
+	tx, err := e.db.BeginRo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: could not begin database tx %w", err)
+	}
+	defer tx.Rollback()
+
+	bodies := make([]*typesproto.ExecutionPayloadBody, 0, req.Count)
+
+	for i := uint64(0); i < req.Count; i++ {
+		blockNum := req.Start + i
+		hash, err := e.canonicalHash(ctx, tx, blockNum)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: ReadCanonicalHash error %w", err)
+		}
+		if hash == (common.Hash{}) {
+			break
+		}
+
+		body, err := e.getBody(ctx, tx, hash, blockNum)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: getBody error %w", err)
+		}
+		if body == nil {
+			bodies = append(bodies, nil)
+			continue
+		}
+
+		txs, err := types.MarshalTransactionsBinary(body.Transactions)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: MarshalTransactionsBinary error %w", err)
+		}
+		balBytes, err := rawdb.ReadBlockAccessListBytes(tx, hash, blockNum)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: ReadBlockAccessListBytes error %w", err)
+		}
+
+		bodies = append(bodies, &typesproto.ExecutionPayloadBody{
+			Transactions:    txs,
+			Withdrawals:     moduleutil.ConvertWithdrawalsToRpc(body.Withdrawals),
+			BlockAccessList: bytes.Clone(balBytes),
+		})
+	}
+
+	// Remove trailing nil values
+	for i := len(bodies) - 1; i >= 0; i-- {
+		if bodies[i] == nil {
+			bodies = bodies[:i]
+		} else {
+			break
+		}
+	}
+
+	return &executionproto.GetPayloadBodiesBatchResponse{Bodies: bodies}, nil
 }
 
 func (e *EthereumExecutionModule) GetHeaderHashNumber(ctx context.Context, req *typesproto.H256) (*executionproto.GetHeaderHashNumberResponse, error) {

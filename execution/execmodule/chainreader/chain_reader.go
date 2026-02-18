@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -250,21 +251,48 @@ func (c ChainReaderWriterEth1) GetBodiesByRange(ctx context.Context, start, coun
 	return ret, nil
 }
 
-func (c ChainReaderWriterEth1) GetBlockAccessListsByHashes(ctx context.Context, hashes []common.Hash) ([][]byte, error) {
+func (c ChainReaderWriterEth1) GetPayloadBodiesByHash(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
 	grpcHashes := make([]*typesproto.H256, len(hashes))
 	for i := range grpcHashes {
 		grpcHashes[i] = gointerfaces.ConvertHashToH256(hashes[i])
 	}
-	resp, err := c.executionModule.GetBlockAccessListsByHashes(ctx, &executionproto.GetBlockAccessListsByHashesRequest{
+	resp, err := c.executionModule.GetPayloadBodiesByHash(ctx, &executionproto.GetPayloadBodiesByHashRequest{
 		Hashes: grpcHashes,
 	})
 	if err != nil {
 		return nil, err
 	}
-	if resp == nil {
-		return nil, nil
+	return convertPayloadBodiesFromRpc(resp.Bodies), nil
+}
+
+func (c ChainReaderWriterEth1) GetPayloadBodiesByRange(ctx context.Context, start, count uint64) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+	resp, err := c.executionModule.GetPayloadBodiesByRange(ctx, &executionproto.GetPayloadBodiesByRangeRequest{
+		Start: start,
+		Count: count,
+	})
+	if err != nil {
+		return nil, err
 	}
-	return resp.BlockAccessLists, nil
+	return convertPayloadBodiesFromRpc(resp.Bodies), nil
+}
+
+func convertPayloadBodiesFromRpc(bodies []*typesproto.ExecutionPayloadBody) []*engine_types.ExecutionPayloadBodyV2 {
+	result := make([]*engine_types.ExecutionPayloadBodyV2, len(bodies))
+	for i, body := range bodies {
+		if body == nil {
+			continue
+		}
+		txs := make([]hexutil.Bytes, len(body.Transactions))
+		for j, tx := range body.Transactions {
+			txs[j] = tx
+		}
+		result[i] = &engine_types.ExecutionPayloadBodyV2{
+			Transactions:    txs,
+			Withdrawals:     moduleutil.ConvertWithdrawalsFromRpc(body.Withdrawals),
+			BlockAccessList: body.BlockAccessList,
+		}
+	}
+	return result
 }
 
 func (c ChainReaderWriterEth1) Ready(ctx context.Context) (bool, error) {

@@ -25,7 +25,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/rpc"
 )
 
 var ourCapabilities = []string{
@@ -185,28 +187,11 @@ func (e *EngineServer) GetPayloadBodiesByHashV1(ctx context.Context, hashes []co
 // including blockAccessList sidecars from DB.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadbodiesbyhashv2
 func (e *EngineServer) GetPayloadBodiesByHashV2(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
-	bodies, err := e.getPayloadBodiesByHash(ctx, hashes)
-	if err != nil {
-		return nil, err
+	if len(hashes) > 1024 {
+		return nil, &engine_helpers.TooLargeRequestErr
 	}
-
-	blockAccessLists, err := e.readBlockAccessLists(ctx, hashes)
-	if err != nil {
-		return nil, err
-	}
-
-	resp := make([]*engine_types.ExecutionPayloadBodyV2, len(bodies))
-	for i := range bodies {
-		if bodies[i] == nil {
-			continue
-		}
-		resp[i] = &engine_types.ExecutionPayloadBodyV2{
-			Transactions:    bodies[i].Transactions,
-			Withdrawals:     bodies[i].Withdrawals,
-			BlockAccessList: blockAccessLists[i],
-		}
-	}
-	return resp, nil
+	e.engineLogSpamer.RecordRequest()
+	return e.chainRW.GetPayloadBodiesByHash(ctx, hashes)
 }
 
 // Returns an ordered (as per canonical chain) array of execution payload bodies, with corresponding execution block numbers from "start", up to "count"
@@ -219,58 +204,13 @@ func (e *EngineServer) GetPayloadBodiesByRangeV1(ctx context.Context, start, cou
 // including blockAccessList sidecars from DB.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadbodiesbyrangev2
 func (e *EngineServer) GetPayloadBodiesByRangeV2(ctx context.Context, start, count hexutil.Uint64) ([]*engine_types.ExecutionPayloadBodyV2, error) {
-	bodies, err := e.getPayloadBodiesByRange(ctx, uint64(start), uint64(count))
-	if err != nil {
-		return nil, err
+	if uint64(start) == 0 || uint64(count) == 0 {
+		return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid start or count, start: %v count: %v", start, count)}
 	}
-
-	bodyHashes := make([]common.Hash, len(bodies))
-	for i := range bodies {
-		blockNumber := uint64(start) + uint64(i)
-		header := e.chainRW.GetHeaderByNumber(ctx, blockNumber)
-		if header == nil {
-			return nil, fmt.Errorf("unable to get header for block %d", blockNumber)
-		}
-		bodyHashes[i] = header.Hash()
+	if uint64(count) > 1024 {
+		return nil, &engine_helpers.TooLargeRequestErr
 	}
-
-	blockAccessLists, err := e.readBlockAccessLists(ctx, bodyHashes)
-	if err != nil {
-		return nil, err
-	}
-
-	resp := make([]*engine_types.ExecutionPayloadBodyV2, len(bodies))
-	for i := range bodies {
-		if bodies[i] == nil {
-			continue
-		}
-		resp[i] = &engine_types.ExecutionPayloadBodyV2{
-			Transactions:    bodies[i].Transactions,
-			Withdrawals:     bodies[i].Withdrawals,
-			BlockAccessList: blockAccessLists[i],
-		}
-	}
-	return resp, nil
-}
-
-func (e *EngineServer) readBlockAccessLists(ctx context.Context, hashes []common.Hash) ([]hexutil.Bytes, error) {
-	resp := make([]hexutil.Bytes, len(hashes))
-	if len(hashes) == 0 {
-		return resp, nil
-	}
-
-	balBytes, err := e.chainRW.GetBlockAccessListsByHashes(ctx, hashes)
-	if err != nil {
-		return nil, err
-	}
-	for i := range hashes {
-		if i >= len(balBytes) || len(balBytes[i]) == 0 {
-			continue
-		}
-		resp[i] = append([]byte(nil), balBytes[i]...)
-	}
-
-	return resp, nil
+	return e.chainRW.GetPayloadBodiesByRange(ctx, uint64(start), uint64(count))
 }
 
 // Returns the node's code and commit details in a slice
