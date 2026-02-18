@@ -750,9 +750,9 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 		Build()
 
 	trieSequential := NewHexPatriciaHashed(length.Addr, stateSeq)
-	trieSequential.trace = true
+	//trieSequential.trace = true
 	trieBatch := NewHexPatriciaHashed(length.Addr, stateBatch)
-	trieBatch.trace = true
+	//trieBatch.trace = true
 
 	plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
 
@@ -2021,7 +2021,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 		defer toProcess.Close()
 
-		hph.trace = true
+		//hph.trace = true
 		root, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 

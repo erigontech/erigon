@@ -25,9 +25,8 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	"unicode"
-
 	"sync"
+	"unicode"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"

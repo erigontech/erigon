@@ -21,11 +21,11 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
-	"sync"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
