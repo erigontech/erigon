@@ -19,12 +19,11 @@ package engineapi
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
@@ -191,21 +190,7 @@ func (e *EngineServer) GetPayloadBodiesByHashV2(ctx context.Context, hashes []co
 		return nil, err
 	}
 
-	bodyHashes := make([]common.Hash, len(bodies))
-	bodyNumbers := make([]*uint64, len(bodies))
-	for i := range bodies {
-		if i >= len(hashes) {
-			break
-		}
-		bodyHashes[i] = hashes[i]
-		number, err := e.chainRW.HeaderNumber(ctx, hashes[i])
-		if err != nil {
-			return nil, err
-		}
-		bodyNumbers[i] = number
-	}
-
-	blockAccessLists, err := e.readBlockAccessLists(ctx, bodyHashes, bodyNumbers)
+	blockAccessLists, err := e.readBlockAccessLists(ctx, hashes)
 	if err != nil {
 		return nil, err
 	}
@@ -240,19 +225,16 @@ func (e *EngineServer) GetPayloadBodiesByRangeV2(ctx context.Context, start, cou
 	}
 
 	bodyHashes := make([]common.Hash, len(bodies))
-	bodyNumbers := make([]*uint64, len(bodies))
 	for i := range bodies {
 		blockNumber := uint64(start) + uint64(i)
 		header := e.chainRW.GetHeaderByNumber(ctx, blockNumber)
 		if header == nil {
-			continue
+			return nil, fmt.Errorf("unable to get header for block %d", blockNumber)
 		}
 		bodyHashes[i] = header.Hash()
-		number := blockNumber
-		bodyNumbers[i] = &number
 	}
 
-	blockAccessLists, err := e.readBlockAccessLists(ctx, bodyHashes, bodyNumbers)
+	blockAccessLists, err := e.readBlockAccessLists(ctx, bodyHashes)
 	if err != nil {
 		return nil, err
 	}
@@ -271,29 +253,23 @@ func (e *EngineServer) GetPayloadBodiesByRangeV2(ctx context.Context, start, cou
 	return resp, nil
 }
 
-func (e *EngineServer) readBlockAccessLists(ctx context.Context, hashes []common.Hash, numbers []*uint64) ([]hexutil.Bytes, error) {
+func (e *EngineServer) readBlockAccessLists(ctx context.Context, hashes []common.Hash) ([]hexutil.Bytes, error) {
 	resp := make([]hexutil.Bytes, len(hashes))
-	if e.db == nil {
+	if len(hashes) == 0 {
 		return resp, nil
 	}
-	if err := e.db.View(ctx, func(tx kv.Tx) error {
-		for i := range hashes {
-			if numbers[i] == nil {
-				continue
-			}
-			balBytes, err := rawdb.ReadBlockAccessListBytes(tx, hashes[i], *numbers[i])
-			if err != nil {
-				return err
-			}
-			if len(balBytes) == 0 {
-				continue
-			}
-			resp[i] = append([]byte(nil), balBytes...)
-		}
-		return nil
-	}); err != nil {
+
+	balBytes, err := e.chainRW.GetBlockAccessListsByHashes(ctx, hashes)
+	if err != nil {
 		return nil, err
 	}
+	for i := range hashes {
+		if i >= len(balBytes) || len(balBytes[i]) == 0 {
+			continue
+		}
+		resp[i] = append([]byte(nil), balBytes[i]...)
+	}
+
 	return resp, nil
 }
 

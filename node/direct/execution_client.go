@@ -46,6 +46,10 @@ func (s *ExecutionClientDirect) GetBodiesByRange(ctx context.Context, in *execut
 	return s.server.GetBodiesByRange(ctx, in)
 }
 
+func (s *ExecutionClientDirect) GetBlockAccessListsByHashes(ctx context.Context, in *executionproto.GetBlockAccessListsByHashesRequest, opts ...grpc.CallOption) (*executionproto.GetBlockAccessListsResponse, error) {
+	return s.server.GetBlockAccessListsByHashes(ctx, in)
+}
+
 func (s *ExecutionClientDirect) HasBlock(ctx context.Context, in *executionproto.GetSegmentRequest, opts ...grpc.CallOption) (*executionproto.HasBlockResponse, error) {
 	return s.server.HasBlock(ctx, in)
 }

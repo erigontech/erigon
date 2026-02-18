@@ -281,7 +281,6 @@ func TestGetPayloadBodiesByHashV2(t *testing.T) {
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
 	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
-	engineServer.db = mockSentry.DB
 
 	const blockNum = 1
 	blockHash := canonicalHashAt(t, mockSentry.DB, blockNum)
@@ -315,7 +314,6 @@ func TestGetPayloadBodiesByRangeV2(t *testing.T) {
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
 	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
-	engineServer.db = mockSentry.DB
 
 	const (
 		start = 1

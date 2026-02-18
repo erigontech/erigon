@@ -21,23 +21,24 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Execution_InsertBlocks_FullMethodName        = "/execution.Execution/InsertBlocks"
-	Execution_ValidateChain_FullMethodName       = "/execution.Execution/ValidateChain"
-	Execution_UpdateForkChoice_FullMethodName    = "/execution.Execution/UpdateForkChoice"
-	Execution_AssembleBlock_FullMethodName       = "/execution.Execution/AssembleBlock"
-	Execution_GetAssembledBlock_FullMethodName   = "/execution.Execution/GetAssembledBlock"
-	Execution_CurrentHeader_FullMethodName       = "/execution.Execution/CurrentHeader"
-	Execution_GetTD_FullMethodName               = "/execution.Execution/GetTD"
-	Execution_GetHeader_FullMethodName           = "/execution.Execution/GetHeader"
-	Execution_GetBody_FullMethodName             = "/execution.Execution/GetBody"
-	Execution_HasBlock_FullMethodName            = "/execution.Execution/HasBlock"
-	Execution_GetBodiesByRange_FullMethodName    = "/execution.Execution/GetBodiesByRange"
-	Execution_GetBodiesByHashes_FullMethodName   = "/execution.Execution/GetBodiesByHashes"
-	Execution_IsCanonicalHash_FullMethodName     = "/execution.Execution/IsCanonicalHash"
-	Execution_GetHeaderHashNumber_FullMethodName = "/execution.Execution/GetHeaderHashNumber"
-	Execution_GetForkChoice_FullMethodName       = "/execution.Execution/GetForkChoice"
-	Execution_Ready_FullMethodName               = "/execution.Execution/Ready"
-	Execution_FrozenBlocks_FullMethodName        = "/execution.Execution/FrozenBlocks"
+	Execution_InsertBlocks_FullMethodName                = "/execution.Execution/InsertBlocks"
+	Execution_ValidateChain_FullMethodName               = "/execution.Execution/ValidateChain"
+	Execution_UpdateForkChoice_FullMethodName            = "/execution.Execution/UpdateForkChoice"
+	Execution_AssembleBlock_FullMethodName               = "/execution.Execution/AssembleBlock"
+	Execution_GetAssembledBlock_FullMethodName           = "/execution.Execution/GetAssembledBlock"
+	Execution_CurrentHeader_FullMethodName               = "/execution.Execution/CurrentHeader"
+	Execution_GetTD_FullMethodName                       = "/execution.Execution/GetTD"
+	Execution_GetHeader_FullMethodName                   = "/execution.Execution/GetHeader"
+	Execution_GetBody_FullMethodName                     = "/execution.Execution/GetBody"
+	Execution_HasBlock_FullMethodName                    = "/execution.Execution/HasBlock"
+	Execution_GetBodiesByRange_FullMethodName            = "/execution.Execution/GetBodiesByRange"
+	Execution_GetBodiesByHashes_FullMethodName           = "/execution.Execution/GetBodiesByHashes"
+	Execution_GetBlockAccessListsByHashes_FullMethodName = "/execution.Execution/GetBlockAccessListsByHashes"
+	Execution_IsCanonicalHash_FullMethodName             = "/execution.Execution/IsCanonicalHash"
+	Execution_GetHeaderHashNumber_FullMethodName         = "/execution.Execution/GetHeaderHashNumber"
+	Execution_GetForkChoice_FullMethodName               = "/execution.Execution/GetForkChoice"
+	Execution_Ready_FullMethodName                       = "/execution.Execution/Ready"
+	Execution_FrozenBlocks_FullMethodName                = "/execution.Execution/FrozenBlocks"
 )
 
 // ExecutionClient is the client API for Execution service.
@@ -62,6 +63,8 @@ type ExecutionClient interface {
 	// Ranges
 	GetBodiesByRange(ctx context.Context, in *GetBodiesByRangeRequest, opts ...grpc.CallOption) (*GetBodiesBatchResponse, error)
 	GetBodiesByHashes(ctx context.Context, in *GetBodiesByHashesRequest, opts ...grpc.CallOption) (*GetBodiesBatchResponse, error)
+	// Block access lists (EIP-7928)
+	GetBlockAccessListsByHashes(ctx context.Context, in *GetBlockAccessListsByHashesRequest, opts ...grpc.CallOption) (*GetBlockAccessListsResponse, error)
 	// Chain checkers
 	IsCanonicalHash(ctx context.Context, in *typesproto.H256, opts ...grpc.CallOption) (*IsCanonicalResponse, error)
 	GetHeaderHashNumber(ctx context.Context, in *typesproto.H256, opts ...grpc.CallOption) (*GetHeaderHashNumberResponse, error)
@@ -201,6 +204,16 @@ func (c *executionClient) GetBodiesByHashes(ctx context.Context, in *GetBodiesBy
 	return out, nil
 }
 
+func (c *executionClient) GetBlockAccessListsByHashes(ctx context.Context, in *GetBlockAccessListsByHashesRequest, opts ...grpc.CallOption) (*GetBlockAccessListsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetBlockAccessListsResponse)
+	err := c.cc.Invoke(ctx, Execution_GetBlockAccessListsByHashes_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *executionClient) IsCanonicalHash(ctx context.Context, in *typesproto.H256, opts ...grpc.CallOption) (*IsCanonicalResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(IsCanonicalResponse)
@@ -273,6 +286,8 @@ type ExecutionServer interface {
 	// Ranges
 	GetBodiesByRange(context.Context, *GetBodiesByRangeRequest) (*GetBodiesBatchResponse, error)
 	GetBodiesByHashes(context.Context, *GetBodiesByHashesRequest) (*GetBodiesBatchResponse, error)
+	// Block access lists (EIP-7928)
+	GetBlockAccessListsByHashes(context.Context, *GetBlockAccessListsByHashesRequest) (*GetBlockAccessListsResponse, error)
 	// Chain checkers
 	IsCanonicalHash(context.Context, *typesproto.H256) (*IsCanonicalResponse, error)
 	GetHeaderHashNumber(context.Context, *typesproto.H256) (*GetHeaderHashNumberResponse, error)
@@ -327,6 +342,9 @@ func (UnimplementedExecutionServer) GetBodiesByRange(context.Context, *GetBodies
 }
 func (UnimplementedExecutionServer) GetBodiesByHashes(context.Context, *GetBodiesByHashesRequest) (*GetBodiesBatchResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetBodiesByHashes not implemented")
+}
+func (UnimplementedExecutionServer) GetBlockAccessListsByHashes(context.Context, *GetBlockAccessListsByHashesRequest) (*GetBlockAccessListsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetBlockAccessListsByHashes not implemented")
 }
 func (UnimplementedExecutionServer) IsCanonicalHash(context.Context, *typesproto.H256) (*IsCanonicalResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method IsCanonicalHash not implemented")
@@ -580,6 +598,24 @@ func _Execution_GetBodiesByHashes_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Execution_GetBlockAccessListsByHashes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetBlockAccessListsByHashesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ExecutionServer).GetBlockAccessListsByHashes(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Execution_GetBlockAccessListsByHashes_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ExecutionServer).GetBlockAccessListsByHashes(ctx, req.(*GetBlockAccessListsByHashesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Execution_IsCanonicalHash_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(typesproto.H256)
 	if err := dec(in); err != nil {
@@ -724,6 +760,10 @@ var Execution_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetBodiesByHashes",
 			Handler:    _Execution_GetBodiesByHashes_Handler,
+		},
+		{
+			MethodName: "GetBlockAccessListsByHashes",
+			Handler:    _Execution_GetBlockAccessListsByHashes_Handler,
 		},
 		{
 			MethodName: "IsCanonicalHash",

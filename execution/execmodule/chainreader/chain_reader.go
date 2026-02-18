@@ -250,6 +250,23 @@ func (c ChainReaderWriterEth1) GetBodiesByRange(ctx context.Context, start, coun
 	return ret, nil
 }
 
+func (c ChainReaderWriterEth1) GetBlockAccessListsByHashes(ctx context.Context, hashes []common.Hash) ([][]byte, error) {
+	grpcHashes := make([]*typesproto.H256, len(hashes))
+	for i := range grpcHashes {
+		grpcHashes[i] = gointerfaces.ConvertHashToH256(hashes[i])
+	}
+	resp, err := c.executionModule.GetBlockAccessListsByHashes(ctx, &executionproto.GetBlockAccessListsByHashesRequest{
+		Hashes: grpcHashes,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, nil
+	}
+	return resp.BlockAccessLists, nil
+}
+
 func (c ChainReaderWriterEth1) Ready(ctx context.Context) (bool, error) {
 	resp, err := c.executionModule.Ready(ctx, &emptypb.Empty{})
 	if err != nil {

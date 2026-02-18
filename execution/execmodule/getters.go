@@ -17,6 +17,7 @@
 package execmodule
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -212,6 +213,39 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 	return &executionproto.GetBodiesBatchResponse{
 		Bodies: bodies,
 	}, nil
+}
+
+func (e *EthereumExecutionModule) GetBlockAccessListsByHashes(ctx context.Context, req *executionproto.GetBlockAccessListsByHashesRequest) (*executionproto.GetBlockAccessListsResponse, error) {
+	tx, err := e.db.BeginRo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.GetBlockAccessListsByHashes: could not begin database tx %w", err)
+	}
+	defer tx.Rollback()
+
+	blockAccessLists := make([][]byte, 0, len(req.Hashes))
+
+	for _, hash := range req.Hashes {
+		h := gointerfaces.ConvertH256ToHash(hash)
+		number, err := e.blockReader.HeaderNumber(ctx, tx, h)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.GetBlockAccessListsByHashes: HeaderNumber error %w", err)
+		}
+		if number == nil {
+			blockAccessLists = append(blockAccessLists, nil)
+			continue
+		}
+		balBytes, err := rawdb.ReadBlockAccessListBytes(tx, h, *number)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.GetBlockAccessListsByHashes: ReadBlockAccessListBytes error %w", err)
+		}
+		if len(balBytes) == 0 {
+			blockAccessLists = append(blockAccessLists, nil)
+			continue
+		}
+		blockAccessLists = append(blockAccessLists, bytes.Clone(balBytes))
+	}
+
+	return &executionproto.GetBlockAccessListsResponse{BlockAccessLists: blockAccessLists}, nil
 }
 
 func (e *EthereumExecutionModule) GetHeaderHashNumber(ctx context.Context, req *typesproto.H256) (*executionproto.GetHeaderHashNumberResponse, error) {
