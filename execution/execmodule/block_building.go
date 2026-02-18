@@ -18,7 +18,6 @@ package execmodule
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reflect"
 
@@ -122,44 +121,36 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 	return blockValue
 }
 
-// GetAssembledBlockRaw returns a Block, unlike GetAssembledBlock, which returns a GetAssembledBlockResponse.
-// Used in tests.
-func (e *EthereumExecutionModule) GetAssembledBlockRaw(payloadId uint64) (block *types.Block, busy bool, err error) {
+func (e *EthereumExecutionModule) GetAssembledBlockWithReceipts(payloadId uint64) (block *types.BlockWithReceipts, busy bool, err error) {
 	if !e.semaphore.TryAcquire(1) {
 		return nil, true, nil
 	}
 	defer e.semaphore.Release(1)
 	builder, ok := e.builders[payloadId]
 	if !ok {
-		return nil, false, errors.New("unknown payloadId")
+		return nil, false, nil
 	}
 	blockWithReceipts, err := builder.Stop()
-	if err != nil {
-		return nil, false, err
-	}
-	return blockWithReceipts.Block, false, nil
+	return blockWithReceipts, false, err
 }
 
 func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error) {
-	if !e.semaphore.TryAcquire(1) {
+	blockWithReceipts, busy, err := e.GetAssembledBlockWithReceipts(req.Id)
+	if err != nil {
+		e.logger.Error("Failed to build PoS block", "err", err)
+		return nil, err
+	}
+	if busy {
 		return &executionproto.GetAssembledBlockResponse{
 			Busy: true,
 		}, nil
 	}
-	defer e.semaphore.Release(1)
-	payloadId := req.Id
-	builder, ok := e.builders[payloadId]
-	if !ok {
+	if blockWithReceipts == nil {
 		return &executionproto.GetAssembledBlockResponse{
 			Busy: false,
 		}, nil
 	}
 
-	blockWithReceipts, err := builder.Stop()
-	if err != nil {
-		e.logger.Error("Failed to build PoS block", "err", err)
-		return nil, err
-	}
 	block := blockWithReceipts.Block
 	header := block.Header()
 

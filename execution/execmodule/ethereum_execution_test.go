@@ -375,11 +375,11 @@ func assembleBlock(ctx context.Context, exec *execmodule.EthereumExecutionModule
 
 func getAssembledBlock(ctx context.Context, exe *execmodule.EthereumExecutionModule, payloadId uint64) (*types.Block, error) {
 	return retryBusy(ctx, func() (*types.Block, bool, error) {
-		block, busy, err := exe.GetAssembledBlockRaw(payloadId)
+		br, busy, err := exe.GetAssembledBlockWithReceipts(payloadId)
 		if err != nil {
 			return nil, false, err
 		}
-		return block, busy, nil
+		return br.Block, busy, nil
 	})
 }
 
