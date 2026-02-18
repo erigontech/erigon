@@ -344,8 +344,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 											if !hasLoggedCommittments.Load() || time.Since(lastCommitedLog) > logInterval/20 {
 												hasLoggedCommittments.Store(true)
 												pe.LogCommitments(commitStart,
-													uint64(uncommittedBlocks), uncommittedTransactions,
-													uint64(uncommittedGas), stepsInDb, lastProgress)
+													uint64(uncommittedBlocks)-prevCommitedBlocks,
+													uncommittedTransactions-prevCommittedTransactions,
+													uint64(uncommittedGas)-prevCommitedGas, stepsInDb, lastProgress)
 											}
 											return
 										}
@@ -462,7 +463,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	}
 
 	if !hasLoggedCommittments.Load() && !commitStart.IsZero() {
-		pe.LogCommitments(commitStart, pe.txExecutor.lastCommittedBlockNum.Load(), uncommittedTransactions, uint64(uncommittedGas), stepsInDb, lastProgress)
+		pe.LogCommitments(commitStart, 0, 0, 0, stepsInDb, lastProgress)
 	}
 
 	if execErr != nil {

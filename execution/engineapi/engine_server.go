@@ -76,6 +76,7 @@ type EngineServer struct {
 	caplin           bool // we need to send errors for caplin.
 	executionService executionproto.ExecutionClient
 	txpool           txpoolproto.TxpoolClient // needed for getBlobs
+	db               kv.TemporalRoDB
 
 	chainRW chainreader.ChainReaderWriterEth1
 	lock    sync.Mutex
@@ -130,6 +131,8 @@ func (e *EngineServer) Start(
 	eth rpchelper.ApiBackend,
 	mining txpoolproto.MiningClient,
 ) error {
+	e.db = db
+
 	var eg errgroup.Group
 	if !e.caplin {
 		eg.Go(func() error {
@@ -287,19 +290,19 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		if req.BlockAccessList == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
-		if len(*req.BlockAccessList) == 0 {
+		if len(req.BlockAccessList) == 0 {
 			blockAccessList = nil
 			header.BlockAccessListHash = &empty.BlockAccessListHash
 		} else {
-			blockAccessList, err = types.DecodeBlockAccessListBytes(*req.BlockAccessList)
+			blockAccessList, err = types.DecodeBlockAccessListBytes(req.BlockAccessList)
 			if err != nil {
-				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(*req.BlockAccessList))
+				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(req.BlockAccessList))
 				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList decode: %v", err)}
 			}
 			if err := blockAccessList.Validate(); err != nil {
 				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList validate: %v", err)}
 			}
-			hash := crypto.Keccak256Hash(*req.BlockAccessList)
+			hash := crypto.Keccak256Hash(req.BlockAccessList)
 			header.BlockAccessListHash = &hash
 		}
 		if req.SlotNumber != nil {
