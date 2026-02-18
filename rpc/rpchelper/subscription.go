@@ -17,7 +17,7 @@
 package rpchelper
 
 import (
-	sync "github.com/linkdata/deadlock"
+	"sync"
 )
 
 // a simple interface for subscriptions for rpc helper
