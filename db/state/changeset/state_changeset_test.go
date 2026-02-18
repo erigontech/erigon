@@ -114,8 +114,8 @@ func BenchmarkSerializeDiffSet(b *testing.B) {
 		key := fmt.Sprintf("key%08d_padding", i)
 		value := make([]byte, 32+i%64) // varying value sizes
 		d = append(d, kv.DomainEntryDiff{
-			Key:           key,
-			Value:         value,
+			Key:   key,
+			Value: value,
 		})
 	}
 

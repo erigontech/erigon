@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"crypto/rand"
 	"testing"
-
 )
 
 // TestWarmupCache_Basic tests basic put/get operations

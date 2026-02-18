@@ -229,7 +229,7 @@ type DeferredBranchUpdate struct {
 	depth int16
 
 	// Previous data from ctx.Branch (for merging)
-	prev     []byte
+	prev []byte
 	// Result after encoding (filled by parallel workers)
 	encoded BranchData
 }
