@@ -87,10 +87,31 @@ func newCanonical(t *testing.T, n int) *mock.MockSentry {
 	return m
 }
 
+// newCanonicalEthash creates a chain database using the ethash faker engine,
+// which accumulates real total difficulty. Used for TD-based fork choice tests.
+func newCanonicalEthash(t *testing.T, n int) *mock.MockSentry {
+	funds := big.NewInt(1 * common.Ether)
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	address := crypto.PubkeyToAddress(key.PublicKey)
+	gspec := &types.Genesis{
+		Config: libchain.TestChainConfig,
+		Alloc:  types.GenesisAlloc{address: {Balance: funds}},
+	}
+	m := mock.MockWithGenesisEngine(t, gspec, ethash.NewFaker())
+	if n == 0 {
+		return m
+	}
+	ch := makeBlockChain(m.Genesis, n, m, canonicalSeed)
+	if err := m.InsertChain(ch); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
 // Test fork of length N starting from block i
 func testFork(t *testing.T, m *mock.MockSentry, i, n int, comparator func(td1, td2 *big.Int)) {
 	// Copy old chain up to #i into a new db
-	canonicalMock := newCanonical(t, i)
+	canonicalMock := newCanonicalEthash(t, i)
 	var err error
 	ctx := context.Background()
 
@@ -203,7 +224,7 @@ func TestExtendCanonicalBlocks(t *testing.T) {
 	length := 5
 
 	// Make first chain starting from genesis
-	m := newCanonical(t, length)
+	m := newCanonicalEthash(t, length)
 
 	// Define the difficulty comparator
 	better := func(td1, td2 *big.Int) {
@@ -261,7 +282,7 @@ func testLongerFork(t *testing.T, full bool) {
 	length := 10
 
 	// Make first chain starting from genesis
-	m := newCanonical(t, length)
+	m := newCanonicalEthash(t, length)
 
 	// Define the difficulty comparator
 	better := func(td1, td2 *big.Int) {
