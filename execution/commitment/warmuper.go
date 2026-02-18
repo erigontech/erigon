@@ -286,7 +286,7 @@ func (w *Warmuper) Wait() error {
 
 	// Only close the channel once
 	close(w.work)
-	err := w.g.Wait()
+	w.g.Wait()
 
 	log.Debug(fmt.Sprintf("[%s][warmup] completed", w.logPrefix),
 		"keys", common.PrettyCounter(int(w.keysProcessed.Load())),
@@ -295,7 +295,7 @@ func (w *Warmuper) Wait() error {
 		"spent", time.Since(w.startTime),
 	)
 
-	return err
+	return nil
 }
 
 // Stats returns statistics about the warmup.
@@ -325,10 +325,12 @@ func (w *Warmuper) DrainPending() {
 }
 
 // WaitAndClose waits for all warmup work to complete and then closes the warmuper.
-func (w *Warmuper) WaitAndClose() error {
-	err := w.Wait()
+func (w *Warmuper) WaitAndClose() {
+	if w.closed.Swap(true) {
+		return // Already closed
+	}
+	w.Wait()
 	w.Close()
-	return err
 }
 
 // Close cancels all warmup work and releases resources.
