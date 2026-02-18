@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	ethereum "github.com/erigontech/erigon"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
@@ -91,7 +92,7 @@ func TestEngineApiExecBlockBatchWithLenLtMaxReorgDepthAtTipThenUnwindShouldSucce
 	logLvl := log.LvlDebug
 	receiver1 := common.HexToAddress("0x111")
 	receiver2 := common.HexToAddress("0x222")
-	sharedGenesis, coinbaseKey := DefaultEngineApiTesterGenesis(t)
+	sharedGenesis, coinbaseKey := blockgen.DefaultEngineApiTesterGenesis(t)
 	canonicalChain := make([]*MockClPayload, n)
 	eatCanonical := InitialiseEngineApiTester(t, EngineApiTesterInitArgs{
 		Logger:      testlog.Logger(t, logLvl),
@@ -169,7 +170,7 @@ func TestEngineApiExecBlockBatchWithLenLtMaxReorgDepthAtTipThenUnwindShouldSucce
 
 func TestEthGetLogsDoNotGetAffectedAfterNewPayloadOnSideChain(t *testing.T) {
 	logLvl := log.LvlDebug
-	sharedGenesis, coinbaseKey := DefaultEngineApiTesterGenesis(t)
+	sharedGenesis, coinbaseKey := blockgen.DefaultEngineApiTesterGenesis(t)
 	var b2Side *MockClPayload
 	eatSide := InitialiseEngineApiTester(t, EngineApiTesterInitArgs{
 		Logger:      testlog.Logger(t, logLvl),
@@ -238,7 +239,7 @@ func TestNewPayloadShouldReturnValidWhenSideChainGoingBackIsLtMaxReorgDepth(t *t
 	maxReorgDepth := uint64(96)
 	receiver1 := common.HexToAddress("0x111")
 	receiver2 := common.HexToAddress("0x222")
-	sharedGenesis, coinbaseKey := DefaultEngineApiTesterGenesis(t)
+	sharedGenesis, coinbaseKey := blockgen.DefaultEngineApiTesterGenesis(t)
 	// Generate a side chain which goes up to 1
 	var sideChain *MockClPayload
 	eatSide := InitialiseEngineApiTester(t, EngineApiTesterInitArgs{

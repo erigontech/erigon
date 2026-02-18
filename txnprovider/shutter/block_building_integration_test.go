@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common/testlog"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	executiontests "github.com/erigontech/erigon/execution/tests"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -215,7 +216,7 @@ type blockBuildingUniverse struct {
 func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingUniverse {
 	logger := testlog.Logger(t, log.LvlDebug)
 	dataDir := t.TempDir()
-	genesis, coinbasePrivKey := executiontests.DefaultEngineApiTesterGenesis(t)
+	genesis, coinbasePrivKey := blockgen.DefaultEngineApiTesterGenesis(t)
 	chainConfig := genesis.Config
 	chainConfig.ChainName = "shutter-devnet"
 	chainConfig.TerminalTotalDifficulty = big.NewInt(0)
