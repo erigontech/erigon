@@ -516,8 +516,6 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		if err != nil {
 			return err
 		}
-	} else {
-		// Look it up from the DB (bypass cache for correct step).
 	}
 	switch domain {
 	case kv.CodeDomain, kv.AccountsDomain, kv.StorageDomain, kv.CommitmentDomain:
@@ -555,7 +553,6 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		if err != nil {
 			return err
 		}
-	} else {
 	}
 
 	switch domain {
