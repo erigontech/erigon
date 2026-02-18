@@ -401,7 +401,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if err != nil {
 			return err
 		}
-		fmt.Printf("backend.New genesis config %+v\n", genesisConfig)
 
 		if genesisConfig != nil {
 			config.Genesis = genesisConfig
