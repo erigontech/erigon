@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package stagedsync
+package builderstages
 
 import (
 	"errors"
@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -51,22 +52,22 @@ import (
 	"github.com/erigontech/erigon/txnprovider"
 )
 
-type MiningExecCfg struct {
-	miningState MiningState
-	notifier    ChainEventNotifier
-	chainConfig *chain.Config
-	engine      rules.Engine
-	blockReader services.FullBlockReader
-	vmConfig    *vm.Config
-	tmpdir      string
-	interrupt   *atomic.Bool
-	payloadId   uint64
-	txnProvider txnprovider.TxnProvider
+type BuilderExecCfg struct {
+	builderState BuilderState
+	notifier     stagedsync.ChainEventNotifier
+	chainConfig  *chain.Config
+	engine       rules.Engine
+	blockReader  services.FullBlockReader
+	vmConfig     *vm.Config
+	tmpdir       string
+	interrupt    *atomic.Bool
+	payloadId    uint64
+	txnProvider  txnprovider.TxnProvider
 }
 
 func StageMiningExecCfg(
-	miningState MiningState,
-	notifier ChainEventNotifier,
+	miningState BuilderState,
+	notifier stagedsync.ChainEventNotifier,
 	chainConfig *chain.Config,
 	engine rules.Engine,
 	vmConfig *vm.Config,
@@ -75,30 +76,30 @@ func StageMiningExecCfg(
 	payloadId uint64,
 	txnProvider txnprovider.TxnProvider,
 	blockReader services.FullBlockReader,
-) MiningExecCfg {
-	return MiningExecCfg{
-		miningState: miningState,
-		notifier:    notifier,
-		chainConfig: chainConfig,
-		engine:      engine,
-		blockReader: blockReader,
-		vmConfig:    vmConfig,
-		tmpdir:      tmpdir,
-		interrupt:   interrupt,
-		payloadId:   payloadId,
-		txnProvider: txnProvider,
+) BuilderExecCfg {
+	return BuilderExecCfg{
+		builderState: miningState,
+		notifier:     notifier,
+		chainConfig:  chainConfig,
+		engine:       engine,
+		blockReader:  blockReader,
+		vmConfig:     vmConfig,
+		tmpdir:       tmpdir,
+		interrupt:    interrupt,
+		payloadId:    payloadId,
+		txnProvider:  txnProvider,
 	}
 }
 
-// SpawnMiningExecStage
+// SpawnBuilderExecStage
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg MiningExecCfg, sendersCfg SendersCfg, execCfg ExecuteBlockCfg, logger log.Logger, u Unwinder) (err error) {
+func SpawnBuilderExecStage(ctx context.Context, s *stagedsync.StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg BuilderExecCfg, sendersCfg stagedsync.SendersCfg, execCfg stagedsync.ExecuteBlockCfg, logger log.Logger, u stagedsync.Unwinder) (err error) {
 	cfg.vmConfig.NoReceipts = false
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 	logPrefix := s.LogPrefix()
-	current := cfg.miningState.MiningBlock
-	needBAL := execCfg.chainConfig.IsAmsterdam(current.Header.Time) || execCfg.experimentalBAL
+	current := cfg.builderState.BuiltBlock
+	needBAL := execCfg.ChainConfig().IsAmsterdam(current.Header.Time) || execCfg.IsExperimentalBAL()
 
 	stateReader := state.NewReaderV3(sd.AsGetter(tx))
 	ibs := state.New(stateReader)
@@ -115,13 +116,13 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 	//if cfg.chainConfig.Consensus == chain.CliqueConsensus {
 	//	execCfg.author = &cfg.miningState.MiningConfig.Etherbase
 	//}
-	execCfg.author = accounts.InternAddress(cfg.miningState.MiningConfig.Etherbase)
+	execCfg = execCfg.WithAuthor(accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase))
 
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
-		if execCfg.blockReader == nil {
+		if execCfg.BlockReader() == nil {
 			return rawdb.ReadHeader(tx, hash, number), nil
 		}
-		return execCfg.blockReader.Header(ctx, tx, hash, number)
+		return execCfg.BlockReader().Header(ctx, tx, hash, number)
 	}
 
 	mb := membatchwithdb.NewMemoryBatch(tx, cfg.tmpdir, logger)
@@ -132,19 +133,19 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 	}
 	defer simSd.Close()
 
-	chainReader := ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader, logger: logger}
+	chainReader := stagedsync.NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger)
 
 	txNum := sd.TxNum()
 
 	protocol.InitializeBlockExecution(cfg.engine, chainReader, current.Header, cfg.chainConfig, ibs, &state.NoopWriter{}, logger, nil)
 	if needBAL {
-		systemReads = mergeReadSets(systemReads, ibs.VersionedReads())
-		systemWrites = mergeVersionedWrites(systemWrites, ibs.VersionedWrites(false))
-		systemAccess = mergeAccessedAddresses(systemAccess, ibs.AccessedAddresses())
+		systemReads = stagedsync.MergeReadSets(systemReads, ibs.VersionedReads())
+		systemWrites = stagedsync.MergeVersionedWrites(systemWrites, ibs.VersionedWrites(false))
+		systemAccess = stagedsync.MergeAccessedAddresses(systemAccess, ibs.AccessedAddresses())
 		ibs.ResetVersionedIO()
 	}
 
-	coinbase := accounts.InternAddress(cfg.miningState.MiningConfig.Etherbase)
+	coinbase := accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase)
 
 	yielded := mapset.NewSet[[32]byte]()
 	simStateWriter := state.NewWriter(simSd.AsPutDel(tx), nil, txNum)
@@ -216,7 +217,7 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 	// process execv3 - when we remove that this becomes redundant
 	header := block.HeaderNoCopy()
 
-	if execCfg.chainConfig.IsPrague(header.Time) {
+	if execCfg.ChainConfig().IsPrague(header.Time) {
 		hash := common.Hash{}
 		if len(current.Requests) > 0 {
 			hash = *current.Requests.Hash()
@@ -226,16 +227,16 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 
 	blockHeight := block.NumberU64()
 	if needBAL {
-		systemReads = mergeReadSets(systemReads, ibs.VersionedReads())
-		systemWrites = mergeVersionedWrites(systemWrites, ibs.VersionedWrites(false))
-		systemAccess = mergeAccessedAddresses(systemAccess, ibs.AccessedAddresses())
+		systemReads = stagedsync.MergeReadSets(systemReads, ibs.VersionedReads())
+		systemWrites = stagedsync.MergeVersionedWrites(systemWrites, ibs.VersionedWrites(false))
+		systemAccess = stagedsync.MergeAccessedAddresses(systemAccess, ibs.AccessedAddresses())
 		ibs.ResetVersionedIO()
 
 		systemVersion := state.Version{BlockNum: blockHeight, TxIndex: -1}
 		balIO.RecordReads(systemVersion, systemReads)
 		balIO.RecordWrites(systemVersion, systemWrites)
 		balIO.RecordAccesses(systemVersion, systemAccess)
-		current.BlockAccessList = CreateBAL(blockHeight, balIO, execCfg.dirs.DataDir)
+		current.BlockAccessList = stagedsync.CreateBAL(blockHeight, balIO, execCfg.DirsDataDir())
 		// Note: This gets reset in MiningFinish - but we need it here to
 		// process execv3 - when we remove that this becomes redundant
 		hash := current.BlockAccessList.Hash()
@@ -243,7 +244,7 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 	} else {
 		// Note: This gets reset in MiningFinish - but we need it here to
 		// process execv3 - when we remove that this becomes redundant
-		if execCfg.chainConfig.IsAmsterdam(current.Header.Time) {
+		if execCfg.ChainConfig().IsAmsterdam(current.Header.Time) {
 			header.BlockAccessListHash = &empty.BlockAccessListHash
 		}
 	}
@@ -270,8 +271,8 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 		if err = stages.SaveStageProgress(rwTx, stages.Bodies, blockHeight); err != nil {
 			return err
 		}
-		senderS := &StageState{state: s.state, ID: stages.Senders, BlockNumber: blockHeight - 1}
-		if err = SpawnRecoverSendersStage(sendersCfg, senderS, nil, rwTx, blockHeight, ctx, logger); err != nil {
+		senderS := &stagedsync.StageState{State: s.State, ID: stages.Senders, BlockNumber: blockHeight - 1}
+		if err = stagedsync.SpawnRecoverSendersStage(sendersCfg, senderS, nil, rwTx, blockHeight, ctx, logger); err != nil {
 			return err
 		}
 		return nil
@@ -283,7 +284,7 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 	}
 
 	// This flag will skip checking the state root
-	execS := &StageState{state: s.state, ID: stages.Execution, BlockNumber: blockHeight - 1}
+	execS := &stagedsync.StageState{State: s.State, ID: stages.Execution, BlockNumber: blockHeight - 1}
 	forceParallel := dbg.Exec3Parallel /*|| cfg.chainConfig.IsAmsterdam(current.Header.Time)*/ // TODO Re-enable after bals testing
 	execTx := tx
 	execSd := sd
@@ -320,7 +321,7 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 		defer execCleanup()
 	}
 
-	if err = ExecV3(ctx, execS, u, execCfg, execSd, execTx, forceParallel, blockHeight, logger); err != nil {
+	if err = stagedsync.ExecV3(ctx, execS, u, execCfg, execSd, execTx, forceParallel, blockHeight, logger); err != nil {
 		logger.Error("cannot execute block execution", "err", err)
 		return err
 	}
@@ -339,7 +340,7 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 
 func getNextTransactions(
 	ctx context.Context,
-	cfg MiningExecCfg,
+	cfg BuilderExecCfg,
 	chainID *uint256.Int,
 	header *types.Header,
 	amount int,
@@ -349,13 +350,13 @@ func getNextTransactions(
 	simStateWriter state.StateWriter,
 	logger log.Logger,
 ) ([]types.Transaction, error) {
-	availableRlpSpace := cfg.miningState.MiningBlock.AvailableRlpSpace(cfg.chainConfig)
+	availableRlpSpace := cfg.builderState.BuiltBlock.AvailableRlpSpace(cfg.chainConfig)
 	remainingGas := header.GasLimit - header.GasUsed
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
 		maxBlobs := cfg.chainConfig.GetMaxBlobsPerBlock(header.Time)
-		if cfg.miningState.MiningConfig.MaxBlobsPerBlock != nil {
-			maxBlobs = min(maxBlobs, *cfg.miningState.MiningConfig.MaxBlobsPerBlock)
+		if cfg.builderState.BuilderConfig.MaxBlobsPerBlock != nil {
+			maxBlobs = min(maxBlobs, *cfg.builderState.BuilderConfig.MaxBlobsPerBlock)
 		}
 		remainingBlobGas = maxBlobs*params.GasPerBlob - *header.BlobGasUsed
 	}
@@ -513,7 +514,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 func addTransactionsToMiningBlock(
 	ctx context.Context,
 	logPrefix string,
-	current *MiningBlock,
+	current *BuiltBlock,
 	chainConfig *chain.Config,
 	vmConfig *vm.Config,
 	getHeader func(hash common.Hash, number uint64) (*types.Header, error),
@@ -554,7 +555,7 @@ func addTransactionsToMiningBlock(
 		ibs.ResetVersionedIO()
 	}
 
-	var miningCommitTx = func(txn types.Transaction, coinbase accounts.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
+	var builderCommitTx = func(txn types.Transaction, coinbase accounts.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *BuiltBlock) ([]*types.Log, error) {
 		ibs.SetTxContext(current.Header.Number.Uint64(), txnIdx)
 		gasSnap := gasPool.Gas()
 		blobGasSnap := gasPool.BlobGas()
@@ -665,7 +666,7 @@ LOOP:
 		}
 
 		// Start executing the transaction
-		logs, err := miningCommitTx(txn, coinbase, vmConfig, chainConfig, ibs, current)
+		logs, err := builderCommitTx(txn, coinbase, vmConfig, chainConfig, ibs, current)
 		if err == nil {
 			recordTxIO()
 		} else {
@@ -703,7 +704,7 @@ LOOP:
 
 }
 
-func NotifyPendingLogs(logPrefix string, notifier ChainEventNotifier, logs types.Logs, logger log.Logger) {
+func NotifyPendingLogs(logPrefix string, notifier stagedsync.ChainEventNotifier, logs types.Logs, logger log.Logger) {
 	if len(logs) == 0 {
 		return
 	}

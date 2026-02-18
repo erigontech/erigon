@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package stagedsync
+package builderstages
 
 import (
 	"fmt"
@@ -27,15 +27,16 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 )
 
-type MiningFinishCfg struct {
+type BuilderFinishCfg struct {
 	chainConfig           *chain.Config
 	engine                rules.Engine
 	sealCancel            chan struct{}
-	miningState           MiningState
+	miningState           BuilderState
 	blockReader           services.FullBlockReader
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore
 }
@@ -43,12 +44,12 @@ type MiningFinishCfg struct {
 func StageMiningFinishCfg(
 	chainConfig *chain.Config,
 	engine rules.Engine,
-	miningState MiningState,
+	miningState BuilderState,
 	sealCancel chan struct{},
 	blockReader services.FullBlockReader,
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore,
-) MiningFinishCfg {
-	return MiningFinishCfg{
+) BuilderFinishCfg {
+	return BuilderFinishCfg{
 		chainConfig:           chainConfig,
 		engine:                engine,
 		miningState:           miningState,
@@ -58,9 +59,9 @@ func StageMiningFinishCfg(
 	}
 }
 
-func SpawnMiningFinishStage(s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg MiningFinishCfg, quit <-chan struct{}, logger log.Logger) error {
+func SpawnBuilderFinishStage(s *stagedsync.StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg BuilderFinishCfg, quit <-chan struct{}, logger log.Logger) error {
 	logPrefix := s.LogPrefix()
-	current := cfg.miningState.MiningBlock
+	current := cfg.miningState.BuiltBlock
 
 	// Short circuit when receiving duplicate result caused by resubmitting.
 	//if w.chain.HasBlock(block.Hash(), block.NumberU64()) {
@@ -76,7 +77,7 @@ func SpawnMiningFinishStage(s *StageState, sd *execctx.SharedDomains, tx kv.Temp
 	if dbg.LogHashMismatchReason() {
 		ethutils.LogReceipts(log.LvlInfo, "Block built", current.Receipts, current.Txns, cfg.chainConfig, current.Header, logger)
 	}
-	*current = MiningBlock{} // hack to clean global data
+	*current = BuiltBlock{} // hack to clean global data
 
 	//sealHash := engine.SealHash(block.Header())
 	// Reject duplicate sealing work due to resubmitting.
@@ -91,7 +92,7 @@ func SpawnMiningFinishStage(s *StageState, sd *execctx.SharedDomains, tx kv.Temp
 	if block.NonceU64() != 0 {
 		// Note: To propose a new signer for Clique consensus, the block nonce should be set to 0xFFFFFFFFFFFFFFFF.
 		if cfg.engine.Type() != chain.CliqueRules {
-			cfg.miningState.MiningResultCh <- blockWithReceipts
+			cfg.miningState.BuilderResultCh <- blockWithReceipts
 			return nil
 		}
 	}
@@ -119,8 +120,8 @@ func SpawnMiningFinishStage(s *StageState, sd *execctx.SharedDomains, tx kv.Temp
 	default:
 		logger.Trace("No in-flight sealing task.")
 	}
-	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx, BlockReader: cfg.blockReader, Logger: logger}
-	if err := cfg.engine.Seal(chain, blockWithReceipts, cfg.miningState.MiningResultCh, cfg.sealCancel); err != nil {
+	chain := stagedsync.ChainReader{Cfg: cfg.chainConfig, Db: tx, BlockReader: cfg.blockReader, Logger: logger}
+	if err := cfg.engine.Seal(chain, blockWithReceipts, cfg.miningState.BuilderResultCh, cfg.sealCancel); err != nil {
 		logger.Warn("Block sealing failed", "err", err)
 	}
 

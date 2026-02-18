@@ -1518,7 +1518,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				// Merge any additional reads/writes produced during finalize (fee calc, post apply, etc)
 				if addReads != nil {
-					mergedReads := mergeReadSets(be.blockIO.ReadSet(txVersion.TxIndex), addReads)
+					mergedReads := MergeReadSets(be.blockIO.ReadSet(txVersion.TxIndex), addReads)
 					be.blockIO.RecordReads(txVersion, mergedReads)
 				}
 				if len(addWrites) > 0 {
@@ -1747,7 +1747,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	}
 }
 
-func mergeReadSets(a state.ReadSet, b state.ReadSet) state.ReadSet {
+func MergeReadSets(a state.ReadSet, b state.ReadSet) state.ReadSet {
 	if a == nil && b == nil {
 		return nil
 	}
@@ -1767,7 +1767,7 @@ func mergeReadSets(a state.ReadSet, b state.ReadSet) state.ReadSet {
 	return out
 }
 
-func mergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrites {
+func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrites {
 	if len(prev) == 0 {
 		return next
 	}
@@ -1789,7 +1789,7 @@ func mergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrite
 	return out
 }
 
-func mergeAccessedAddresses(dst, src map[accounts.Address]struct{}) map[accounts.Address]struct{} {
+func MergeAccessedAddresses(dst, src map[accounts.Address]struct{}) map[accounts.Address]struct{} {
 	if len(src) == 0 {
 		return dst
 	}
