@@ -127,7 +127,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(txs, true)
+	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 
 	agg.Close()
@@ -403,7 +403,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 		}
 	})
 
-	err = agg.BuildFiles(txs, true)
+	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 	require.Equal(t, 3, onChangeCalls)
 	require.Equal(t, 4, onDelCalls)
@@ -505,7 +505,7 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(maxTx, true)
+	err = agg.BuildFiles(maxTx)
 	require.NoError(t, err)
 
 	buildTx, err := db.BeginTemporalRw(context.Background())
@@ -614,7 +614,7 @@ func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
 	require.NoError(t, err)
 
 	//t.Logf("expected hash: %x", expectedHash)
-	err = agg.BuildFiles(stepSize*16, true)
+	err = agg.BuildFiles(stepSize * 16)
 	require.NoError(t, err)
 
 	err = rwTx.Commit()
@@ -705,7 +705,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(txs, true)
+	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 
 	rwTx, err = db.BeginTemporalRw(context.Background())
@@ -754,7 +754,7 @@ func TestAggregatorV3_BuildFiles_WithReorgDepth(t *testing.T) {
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
-	err = agg.BuildFiles(txnNums, true)
+	err = agg.BuildFiles(txnNums)
 	require.NoError(t, err)
 	// blocks up to 13 (incl) are outside the reorg depth, which adds to 13 txns, which is 6 steps
 	require.Equal(t, uint64(12), agg.EndTxNumMinimax())

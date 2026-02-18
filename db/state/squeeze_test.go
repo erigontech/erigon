@@ -43,7 +43,7 @@ func testDbAggregatorWithFiles(tb testing.TB, cfg *testAggConfig) (kv.TemporalRw
 	db, agg := testDbAggregatorWithNoFiles(tb, txCount, cfg)
 
 	// build files out of db
-	err := agg.BuildFiles(uint64(txCount), true)
+	err := agg.BuildFiles(uint64(txCount))
 	require.NoError(tb, err)
 	return db, agg
 }
@@ -402,7 +402,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(txs, true)
+	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 
 	agg.Close()

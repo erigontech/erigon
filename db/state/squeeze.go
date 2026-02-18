@@ -520,7 +520,10 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			return err
 		}
 
-		if err := a.BuildFiles(lastToTxNum, false); err != nil {
+		fromStep := kv.Step(a.EndTxNumMinimax() / a.StepSize())
+		toStep := kv.Step(lastToTxNum / a.StepSize())
+		logger.Info("[rebuild_commitment_history] build files", "fromStep", fromStep, "toStep", toStep, "lastToTxNum", lastToTxNum)
+		if err := a.BuildFiles2(ctx, fromStep, toStep, false); err != nil {
 			return err
 		}
 
@@ -534,9 +537,10 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		logger.Info("[rebuild_commitment_history] prune check",
 			"commitFilesEndTxNum", commitFilesEndTxNum, "lastToTxNum", lastToTxNum)
 		if commitFilesEndTxNum > 0 {
+			pruneTo := min(commitFilesEndTxNum, lastToTxNum)
 			pruneLogEvery := time.NewTicker(30 * time.Second)
-			step := kv.Step((commitFilesEndTxNum - 1) / a.StepSize())
-			_, pruneErr := aggTx.d[kv.CommitmentDomain].Prune(ctx, pruneRwTx, step, 0, commitFilesEndTxNum, math.MaxUint64, pruneLogEvery)
+			step := kv.Step((pruneTo - 1) / a.StepSize())
+			_, pruneErr := aggTx.d[kv.CommitmentDomain].Prune(ctx, pruneRwTx, step, 0, pruneTo, math.MaxUint64, pruneLogEvery)
 			pruneLogEvery.Stop()
 			if pruneErr != nil {
 				pruneRwTx.Rollback()
@@ -707,9 +711,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 
 	logger.Info("[rebuild_commitment_history] merging built files")
-	if err = a.BuildFiles(lastToTxNum, true); err != nil {
-		return nil, fmt.Errorf("[rebuild_commitment_history] final merge: %w", err)
-	}
+	<-a.BuildFilesInBackground(lastToTxNum)
 
 	// Squeeze pass: re-compress commitment files with ReplaceKeysInValues
 	if !squeeze && !statecfg.Schema.CommitmentDomain.ReplaceKeysInValues {

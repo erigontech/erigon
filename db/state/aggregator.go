@@ -780,8 +780,8 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 	return
 }
 
-func (a *Aggregator) BuildFiles(toTxNum uint64, doMerge bool) (err error) {
-	finished := a.BuildFilesInBackground(toTxNum, doMerge)
+func (a *Aggregator) BuildFiles(toTxNum uint64) (err error) {
+	finished := a.BuildFilesInBackground(toTxNum)
 	// If fin is already closed, nothing was scheduled — return immediately.
 	select {
 	case <-finished:
@@ -812,7 +812,7 @@ Loop:
 }
 
 // [from, to)
-func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step) error {
+func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step, doMerge bool) error {
 	if ok := a.buildingFiles.CompareAndSwap(false, true); !ok {
 		return nil
 	}
@@ -837,11 +837,13 @@ func (a *Aggregator) BuildFiles2(ctx context.Context, fromStep, toStep kv.Step) 
 			a.onFilesChange(nil)
 		}
 
-		go func() {
-			if err := a.MergeLoop(ctx); err != nil {
-				panic(err)
-			}
-		}()
+		if doMerge {
+			go func() {
+				if err := a.MergeLoop(ctx); err != nil {
+					panic(err)
+				}
+			}()
+		}
 	}()
 	return nil
 }
@@ -1622,7 +1624,7 @@ func (a *Aggregator) SetProduceMod(produce bool) {
 }
 
 // Returns channel which is closed when aggregation is done
-func (a *Aggregator) BuildFilesInBackground(txNum uint64, doMerge bool) chan struct{} {
+func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 	fin := make(chan struct{})
 
 	if !a.produce {
@@ -1631,12 +1633,6 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64, doMerge bool) chan str
 	}
 
 	needBuild := (txNum + 1) > a.visibleFilesMinimaxTxNum.Load()+a.stepSize
-	if !needBuild && !doMerge {
-		close(fin)
-		return fin
-	}
-
-	// merge-only shortcut: no step files to build, just kick off MergeLoop
 	if !needBuild {
 		a.wg.Add(1)
 		go func() {
@@ -1707,19 +1703,15 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64, doMerge bool) chan str
 			a.onFilesChange(nil)
 		}
 
-		if doMerge {
-			go func() {
-				defer close(fin)
-				if err := a.MergeLoop(a.ctx); err != nil {
-					if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
-						return
-					}
-					a.logger.Warn("[snapshots] merge", "err", err)
+		go func() {
+			defer close(fin)
+			if err := a.MergeLoop(a.ctx); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+					return
 				}
-			}()
-		} else {
-			close(fin)
-		}
+				a.logger.Warn("[snapshots] merge", "err", err)
+			}
+		}()
 	}()
 	return fin
 }
