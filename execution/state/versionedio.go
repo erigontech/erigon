@@ -841,8 +841,18 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 
 	for txIndex := -1; txIndex <= maxTxIndex; txIndex++ {
 		io.ReadSet(txIndex).Scan(func(vr *VersionedRead) bool {
-			if vr.Address.IsNil() || params.IsSystemAddress(vr.Address) {
+			if vr.Address.IsNil() {
 				return true
+			}
+			// Skip validation-only reads for non-existent accounts.
+			// These are recorded by versionedRead when the version map
+			// has no entry (MVReadResultNone) so that conflict detection
+			// works across transactions, but they should not appear in
+			// the block access list.
+			if vr.Path == state.AddressPath {
+				if val, ok := vr.Val.(*accounts.Account); ok && val == nil {
+					return true
+				}
 			}
 			account := ensureAccountState(ac, vr.Address)
 			account.updateRead(vr)
@@ -871,6 +881,13 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 	for _, account := range ac {
 		account.finalize()
 		account.changes.Normalize()
+		// The system address is touched during system calls (EIP-4788 beacon root)
+		// because it is msg.sender. Exclude it when it has no actual state changes,
+		// but keep it when a user tx sends real ETH to it (e.g. SELFDESTRUCT to
+		// the system address or a plain value transfer).
+		if isSystemBALAddress(account.changes.Address) && !hasAccountChanges(account.changes) {
+			continue
+		}
 		bal = append(bal, account.changes)
 	}
 
@@ -1000,6 +1017,13 @@ func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint16)
 	case BalancePath:
 		val, ok := vw.Val.(uint256.Int)
 		if !ok {
+			return
+		}
+		// Skip non-zero balance writes for selfdestructed accounts.
+		// Post-selfdestruct ETH (e.g. priority fee applied during finalize) must
+		// not appear in the BAL per EIP-7928 — only the zero-balance write from
+		// the selfdestruct itself belongs there.
+		if account.selfDestructed && !val.IsZero() {
 			return
 		}
 		// If we haven't seen a balance and the first write is zero, treat it as a touch only.
