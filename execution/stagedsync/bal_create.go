@@ -26,6 +26,16 @@ func CreateBAL(blockNum uint64, txIO *state.VersionedIO, dataDir string) types.B
 			if vr.Address.IsNil() {
 				return true
 			}
+			// Skip validation-only reads for non-existent accounts.
+			// These are recorded by versionedRead when the version map
+			// has no entry (MVReadResultNone) so that conflict detection
+			// works across transactions, but they should not appear in
+			// the block access list.
+			if vr.Path == state.AddressPath {
+				if val, ok := vr.Val.(*accounts.Account); ok && val == nil {
+					return true
+				}
+			}
 			account := ensureAccountState(ac, vr.Address)
 			updateAccountRead(account, vr)
 			return true
@@ -50,14 +60,15 @@ func CreateBAL(blockNum uint64, txIO *state.VersionedIO, dataDir string) types.B
 
 	bal := make([]*types.AccountChanges, 0, len(ac))
 	for _, account := range ac {
-		// The system address shows up as a touched address due to a balance check in IBS
-		// during a system call, however this should not be included in the BAL.
-		if isSystemBALAddress(account.changes.Address) {
-			continue
-		}
-
 		account.finalize()
 		normalizeAccountChanges(account.changes)
+		// The system address is touched during system calls (EIP-4788 beacon root)
+		// because it is msg.sender. Exclude it when it has no actual state changes,
+		// but keep it when a user tx sends real ETH to it (e.g. SELFDESTRUCT to
+		// the system address or a plain value transfer).
+		if isSystemBALAddress(account.changes.Address) && !hasAccountChanges(account.changes) {
+			continue
+		}
 		bal = append(bal, account.changes)
 	}
 
@@ -180,6 +191,11 @@ func updateAccountWrite(account *accountState, vw *state.VersionedWrite, accessI
 
 func isSystemBALAddress(addr accounts.Address) bool {
 	return addr == params.SystemAddress
+}
+
+func hasAccountChanges(ac *types.AccountChanges) bool {
+	return len(ac.StorageChanges) > 0 || len(ac.StorageReads) > 0 ||
+		len(ac.BalanceChanges) > 0 || len(ac.NonceChanges) > 0 || len(ac.CodeChanges) > 0
 }
 
 func hasStorageWrite(ac *types.AccountChanges, slot accounts.StorageKey) bool {
