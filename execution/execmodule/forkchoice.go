@@ -170,13 +170,19 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common
 }
 
 func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) (err error) {
-	if !e.semaphore.TryAcquire(1) {
-		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
+	// Wait up to 2 seconds for the semaphore instead of failing instantly.
+	// With parallel state flushing, the previous FcU's background commit may still
+	// hold the semaphore. Instant failure (TryAcquire) causes the CL to receive
+	// SYNCING status, which can stall finality on fast slot times (e.g. 4s devnets).
+	semaCtx, semaCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer semaCancel()
+	if err := e.semaphore.Acquire(semaCtx, 1); err != nil {
+		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy", "wait", "2s")
 		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
 			LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),
 			Status:          executionproto.ExecutionStatus_Busy,
 		}, false)
-		return fmt.Errorf("semaphore timeout")
+		return fmt.Errorf("semaphore timeout after 2s")
 	}
 	shouldReleaseSema := true
 	defer func() {

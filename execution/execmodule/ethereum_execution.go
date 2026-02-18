@@ -333,8 +333,13 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(sd *execctx.SharedDoma
 }
 
 func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *executionproto.ValidationRequest) (*executionproto.ValidationReceipt, error) {
-	if !e.semaphore.TryAcquire(1) {
-		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
+	// Wait up to 2 seconds for the semaphore instead of failing instantly.
+	// With parallel state flushing, the previous FcU's background commit may still
+	// hold the semaphore. Instant failure causes SYNCING responses to the CL.
+	semaCtx, semaCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer semaCancel()
+	if err := e.semaphore.Acquire(semaCtx, 1); err != nil {
+		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy", "wait", "2s")
 		return &executionproto.ValidationReceipt{
 			LatestValidHash:  gointerfaces.ConvertHashToH256(common.Hash{}),
 			ValidationStatus: executionproto.ExecutionStatus_Busy,
