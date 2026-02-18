@@ -433,6 +433,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 				Err:  fmt.Errorf("failed to get tx message: %w", err),
 			}
 		}
+		if txm == nil {
+			txm = &types.Message{}
+		}
 		if rw.evm.ProcessingHookSet.CompareAndSwap(false, true) {
 			rw.evm.ProcessingHook = arbos.NewTxProcessorIBS(rw.evm, state.NewArbitrum(rw.ibs), txm)
 		} else {
