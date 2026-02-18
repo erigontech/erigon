@@ -156,7 +156,7 @@ type changesetSwitcher interface {
 	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet)
 }
 
-func (sd *SharedDomains) Merge(other *SharedDomains, sdTxNum, otherTxNum uint64) error {
+func (sd *SharedDomains) Merge(sdTxNum uint64, other *SharedDomains, otherTxNum uint64) error {
 	if sdTxNum > otherTxNum {
 		return fmt.Errorf("can't merge backwards: txnum: %d > %d", sdTxNum, otherTxNum)
 	}
