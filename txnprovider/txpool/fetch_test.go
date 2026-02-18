@@ -23,6 +23,7 @@ import (
 	"io"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,6 +32,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/synctest"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/memdb"
@@ -43,35 +45,36 @@ import (
 
 func TestFetch(t *testing.T) {
 	t.Parallel()
-	ctx := t.Context()
+	synctest.Test(t, func(t *testing.T) {
+		ctx := t.Context()
 
-	ctrl := gomock.NewController(t)
-	remoteKvClient := remoteproto.NewMockKVClient(ctrl)
-	sentryServer := sentryproto.NewMockSentryServer(ctrl)
-	pool := NewMockPool(ctrl)
-	pool.EXPECT().Started().Return(true)
+		ctrl := gomock.NewController(t)
+		remoteKvClient := remoteproto.NewMockKVClient(ctrl)
+		sentryServer := sentryproto.NewMockSentryServer(ctrl)
+		pool := NewMockPool(ctrl)
+		pool.EXPECT().Started().Return(true)
 
-	m := NewMockSentry(ctx, sentryServer)
-	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
-	require.NoError(t, err)
-	var wg sync.WaitGroup
-	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, remoteKvClient, nil, u256.N1, log.New(), WithP2PFetcherWg(&wg))
-	m.StreamWg.Add(2)
-	fetch.ConnectSentries()
-	m.StreamWg.Wait()
-	// Send one transaction id
-	wg.Add(1)
-	errs := m.Send(&sentryproto.InboundMessage{
-		Id:     sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68,
-		Data:   decodeHex("e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328"),
-		PeerId: peerID,
-	})
-	for i, err := range errs {
-		if err != nil {
-			t.Errorf("sending new pool txn hashes 68 (%d): %v", i, err)
+		m := NewMockSentry(ctx, sentryServer)
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+		require.NoError(t, err)
+		fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, remoteKvClient, nil, u256.N1, log.New())
+		m.StreamWg.Add(2)
+		fetch.ConnectSentries()
+		synctest.Wait()
+		// Send one transaction id
+		errs := m.Send(&sentryproto.InboundMessage{
+			Id:     sentryproto.MessageId_NEW_POOLED_TRANSACTION_HASHES_68,
+			Data:   decodeHex("e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328"),
+			PeerId: peerID,
+		})
+		for i, err := range errs {
+			if err != nil {
+				t.Errorf("sending new pool txn hashes 68 (%d): %v", i, err)
+			}
 		}
-	}
-	wg.Wait()
+		time.Sleep(time.Second)
+		synctest.Wait()
+	})
 }
 
 func TestSendTxnPropagate(t *testing.T) {
