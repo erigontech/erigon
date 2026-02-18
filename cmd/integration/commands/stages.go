@@ -542,8 +542,10 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 		return err
 	}
 	defer domains.Close()
-	//txnUm := domains.TxNum()
-	blockNum := domains.BlockNum()
+	_, blockNum, err := domains.SeekCommitment(ctx, tx)
+	if err != nil {
+		return err
+	}
 
 	// stagedsync.SpawnStageSnapshots(s, ctx, rwTx, logger)
 	progress, err := stages.GetStageProgress(tx, stages.Snapshots)
@@ -869,7 +871,10 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		if err != nil {
 			panic(err)
 		}
-		execProgress = doms.BlockNum()
+		_, execProgress, err = doms.SeekCommitment(ctx, tx)
+		if err != nil {
+			panic(err)
+		}
 		doms.Close()
 	}
 	if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
