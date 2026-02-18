@@ -138,7 +138,6 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_and_state_access_same_account.json`)   // TODO fix: invalid state root hash
 	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_contract_cross_index.json`)            // TODO fix: invalid state root hash
 	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_withdrawal_and_value_transfer_same_address.json`) // TODO fix: invalid state root hash
-	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_create_selfdestruct_to_self_with_call.json`)      // TODO fix error: block access list mismatch
 	bt.skipLoad(`.*eip7928_block_level_access_lists/test_bal_7002_partial_sweep.json`)                         // TODO fix: invalid state root hash
 	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
