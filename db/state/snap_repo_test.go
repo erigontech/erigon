@@ -348,7 +348,7 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 	})
 	defer commitmentR.Close()
 
-	accountsR.integrity = NewDependencyIntegrityChecker(dirs, log.New())
+	accountsR.integrity = NewDependencyIntegrityChecker(log.New())
 	accountsR.integrity.AddDependency(FromDomain(kv.AccountsDomain), &DependentInfo{
 		entity: FromDomain(kv.CommitmentDomain),
 		//filesGetter: ,
