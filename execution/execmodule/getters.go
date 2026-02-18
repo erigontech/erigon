@@ -249,11 +249,15 @@ func (e *EthereumExecutionModule) GetPayloadBodiesByHash(ctx context.Context, re
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: ReadBlockAccessListBytes error %w", err)
 		}
+		var bal []byte
+		if len(balBytes) > 0 {
+			bal = bytes.Clone(balBytes)
+		}
 
 		bodies = append(bodies, &typesproto.ExecutionPayloadBody{
 			Transactions:    txs,
 			Withdrawals:     moduleutil.ConvertWithdrawalsToRpc(body.Withdrawals),
-			BlockAccessList: bytes.Clone(balBytes),
+			BlockAccessList: bal,
 		})
 	}
 
@@ -296,11 +300,15 @@ func (e *EthereumExecutionModule) GetPayloadBodiesByRange(ctx context.Context, r
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: ReadBlockAccessListBytes error %w", err)
 		}
+		var bal []byte
+		if len(balBytes) > 0 {
+			bal = bytes.Clone(balBytes)
+		}
 
 		bodies = append(bodies, &typesproto.ExecutionPayloadBody{
 			Transactions:    txs,
 			Withdrawals:     moduleutil.ConvertWithdrawalsToRpc(body.Withdrawals),
-			BlockAccessList: bytes.Clone(balBytes),
+			BlockAccessList: bal,
 		})
 	}
 
