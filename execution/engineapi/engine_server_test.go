@@ -275,7 +275,7 @@ func writeBlockAccessListBytes(t *testing.T, db kv.TemporalRwDB, blockHash commo
 }
 
 func TestGetPayloadBodiesByHashV2(t *testing.T) {
-	mockSentry, req := mock.MockWithTxPoolOsaka(t), require.New(t)
+	mockSentry, req := mock.MockWithTxPoolAllProtocolChanges(t), require.New(t)
 	oneBlockStep(mockSentry, req)
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
@@ -309,7 +309,7 @@ func TestGetPayloadBodiesByHashV2(t *testing.T) {
 }
 
 func TestGetPayloadBodiesByRangeV2(t *testing.T) {
-	mockSentry, req := mock.MockWithTxPoolOsaka(t), require.New(t)
+	mockSentry, req := mock.MockWithTxPoolAllProtocolChanges(t), require.New(t)
 	oneBlockSteps(mockSentry, req, 2)
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
