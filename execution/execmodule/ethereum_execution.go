@@ -321,7 +321,7 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(sd *execctx.SharedDoma
 }
 
 func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *executionproto.ValidationRequest) (*executionproto.ValidationReceipt, error) {
-	if !e.semaphore.TryAcquire(1) {
+	if !e.tryWaitForUnlock(ctx) {
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
 		return &executionproto.ValidationReceipt{
 			LatestValidHash:  gointerfaces.ConvertHashToH256(common.Hash{}),
@@ -493,7 +493,7 @@ func (e *EthereumExecutionModule) Ready(ctx context.Context, _ *emptypb.Empty) (
 		return &executionproto.ReadyResponse{Ready: false}, err
 	}
 
-	if !e.semaphore.TryAcquire(1) {
+	if !e.tryWaitForUnlock(ctx) {
 		e.logger.Trace("ethereumExecutionModule.Ready: ExecutionStatus_Busy")
 		return &executionproto.ReadyResponse{Ready: false}, nil
 	}

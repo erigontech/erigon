@@ -180,7 +180,7 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common
 }
 
 func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) (err error) {
-	if !e.semaphore.TryAcquire(1) {
+	if !e.tryWaitForUnlock(ctx) {
 		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
 		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
 			LatestValidHash: gointerfaces.ConvertHashToH256(common.Hash{}),

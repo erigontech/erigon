@@ -29,7 +29,7 @@ import (
 )
 
 func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executionproto.InsertBlocksRequest) (*executionproto.InsertionResult, error) {
-	if !e.semaphore.TryAcquire(1) {
+	if !e.tryWaitForUnlock(ctx) {
 		e.logger.Trace("ethereumExecutionModule.InsertBlocks: ExecutionStatus_Busy")
 		return &executionproto.InsertionResult{
 			Result: executionproto.ExecutionStatus_Busy,

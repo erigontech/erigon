@@ -55,7 +55,7 @@ func (e *EthereumExecutionModule) evictOldBuilders() {
 
 // Missing: NewPayload, AssembleBlock
 func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *executionproto.AssembleBlockRequest) (*executionproto.AssembleBlockResponse, error) {
-	if !e.semaphore.TryAcquire(1) {
+	if !e.tryWaitForUnlock(ctx) {
 		return &executionproto.AssembleBlockResponse{
 			Id:   0,
 			Busy: true,
@@ -121,7 +121,7 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 }
 
 func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error) {
-	if !e.semaphore.TryAcquire(1) {
+	if !e.tryWaitForUnlock(ctx) {
 		return &executionproto.GetAssembledBlockResponse{
 			Busy: true,
 		}, nil
