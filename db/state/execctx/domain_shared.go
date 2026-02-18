@@ -91,6 +91,7 @@ type SharedDomains struct {
 	logger log.Logger
 
 	txNum             uint64
+	currentStep       kv.Step
 	blockNum          atomic.Uint64
 	trace             bool //nolint
 	commitmentCapture bool
@@ -155,9 +156,9 @@ type changesetSwitcher interface {
 	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet)
 }
 
-func (sd *SharedDomains) Merge(other *SharedDomains) error {
-	if sd.txNum > other.txNum {
-		return fmt.Errorf("can't merge backwards: txnum: %d > %d", sd.txNum, other.txNum)
+func (sd *SharedDomains) Merge(sdTxNum uint64, other *SharedDomains, otherTxNum uint64) error {
+	if sdTxNum > otherTxNum {
+		return fmt.Errorf("can't merge backwards: txnum: %d > %d", sdTxNum, otherTxNum)
 	}
 
 	if err := sd.mem.Merge(other.mem); err != nil {
@@ -169,7 +170,8 @@ func (sd *SharedDomains) Merge(other *SharedDomains) error {
 		sd.sdCtx.SetPendingUpdate(otherUpd)
 	}
 
-	sd.txNum = other.txNum
+	sd.txNum = otherTxNum
+	sd.currentStep = kv.Step(otherTxNum / sd.stepSize)
 	sd.blockNum.Store(other.blockNum.Load())
 	return nil
 }
@@ -317,6 +319,7 @@ func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
 // Requires for sd.rwTx because of commitment evaluation in shared domains if stepSize is reached
 func (sd *SharedDomains) SetTxNum(txNum uint64) {
 	sd.txNum = txNum
+	sd.currentStep = kv.Step(txNum / sd.stepSize)
 }
 
 func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
@@ -411,7 +414,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		// files merge so this is not a problem in practice. file 0-1 will be non-deterministic
 		// but file 0-2 will be deterministic as it will include all entries from file 0-1 and so on.
 		if v, ok := sd.stateCache.Get(domain, k); ok {
-			return v, kv.Step(sd.txNum / sd.stepSize), nil
+			return v, sd.currentStep, nil
 		}
 	}
 
