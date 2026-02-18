@@ -162,6 +162,10 @@ func (evm *EVM) SetCallGasTemp(gas uint64) {
 	evm.callGasTemp = gas
 }
 
+func isSystemCall(caller accounts.Address) bool {
+	return caller == params.SystemAddress
+}
+
 // SetPrecompiles sets the precompiles for the EVM
 func (evm *EVM) SetPrecompiles(precompiles PrecompiledContracts) {
 	evm.precompiles = precompiles
@@ -206,13 +210,17 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	if depth > int(params.CallCreateDepth) {
 		return nil, gas, ErrDepth
 	}
+	syscall := isSystemCall(caller)
+
 	if typ == CALL || typ == CALLCODE {
 		// Fail if we're trying to transfer more than the available balance
 		canTransfer, err := evm.Context.CanTransfer(evm.intraBlockState, caller, value)
 		if err != nil {
 			return nil, 0, err
 		}
-		if !value.IsZero() && !canTransfer {
+
+		// Fail if we're trying to transfer more than the available balance.
+		if !syscall && !value.IsZero() && !canTransfer {
 			if !bailout {
 				return nil, gas, ErrInsufficientBalance
 			}
@@ -236,7 +244,12 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			}
 			evm.intraBlockState.CreateAccount(addr, false)
 		}
-		evm.Context.Transfer(evm.intraBlockState, caller, addr, value, bailout, evm.chainRules)
+		// Perform the value transfer only in non-syscall mode.
+		// Calling this is required even for zero-value transfers,
+		// to ensure the state clearing mechanism is applied.
+		if !syscall {
+			evm.Context.Transfer(evm.intraBlockState, caller, addr, value, bailout, evm.chainRules)
+		}
 	} else if typ == STATICCALL {
 		// We do an AddBalance of zero here, just in order to trigger a touch.
 		// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
