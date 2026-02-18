@@ -24,9 +24,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"strings"
-	"time"
-
 	"sync"
+	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 )
