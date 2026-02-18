@@ -343,6 +343,8 @@ func (ba BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *state
 
 	if ba.HasBAL() {
 		ba.BlockAccessList = ba.balIO.AsBlockAccessList()
+		balHash := ba.BlockAccessList.Hash()
+		ba.Header.BlockAccessListHash = &balHash
 	}
 
 	return block, nil

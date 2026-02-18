@@ -497,7 +497,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			var balBytes []byte
 			if config.IsAmsterdam(b.header.Time) {
 				bal = b.blockIO.AsBlockAccessList()
-				fmt.Printf("generated bal: %d: %s\n", b.header.Number.Uint64(), bal.DebugString())
 				balHash := bal.Hash()
 				b.header.BlockAccessListHash = &balHash
 				var encErr error

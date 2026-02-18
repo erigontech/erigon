@@ -20,7 +20,6 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common/dbg"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/services"
@@ -69,9 +68,9 @@ func SpawnMiningFinishStage(s *StageState, sd *execctx.SharedDomains, tx kv.Temp
 	//}
 
 	block := types.NewBlockForAsembling(blockAssembler.Header, blockAssembler.Txns, blockAssembler.Uncles, blockAssembler.Receipts, blockAssembler.Withdrawals)
-	if blockAssembler.BlockAccessList != nil {
+	if blockAssembler.HasBAL() {
 		if block.BlockAccessListHash() == nil {
-			hash := empty.BlockAccessListHash
+			hash := blockAssembler.BlockAccessList.Hash()
 			block.HeaderNoCopy().BlockAccessListHash = &hash
 		}
 	}

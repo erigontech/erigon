@@ -187,11 +187,15 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 	header := block.HeaderNoCopy()
 
 	if execCfg.chainConfig.IsPrague(header.Time) {
-		hash := common.Hash{}
-		if len(blockAssembler.Requests) > 0 {
-			hash = *blockAssembler.Requests.Hash()
-		}
-		header.RequestsHash = &hash
+		// Use the RequestsHash already computed by FinalizeBlockExecution (via FinalizeAndAssemble).
+		// For empty requests this is sha256("") not zero; overwriting with zero caused a mismatch
+		// when ExecV3 re-runs FinalizeAndAssemble during block verification.
+		header.RequestsHash = blockAssembler.Header.RequestsHash
+	}
+
+	if execCfg.chainConfig.IsAmsterdam(header.Time) {
+		balHash := blockAssembler.BlockAccessList.Hash()
+		header.BlockAccessListHash = &balHash
 	}
 
 	blockHeight := block.NumberU64()
