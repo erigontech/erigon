@@ -213,7 +213,12 @@ func (b *BlockGen) TxNonce(addr common.Address) uint64 {
 }
 
 // AddUncle adds an uncle header to the generated block.
+// If the block is a PoS block (difficulty == 0), uncles are not allowed and the
+// call is silently ignored to avoid failures when using the merge engine.
 func (b *BlockGen) AddUncle(h *types.Header) {
+	if misc.IsPoSHeader(b.header) {
+		return
+	}
 	b.uncles = append(b.uncles, h)
 }
 

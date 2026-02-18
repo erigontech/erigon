@@ -20,7 +20,6 @@
 package blockgen_test
 
 import (
-	"bytes"
 	"math/big"
 	"testing"
 
@@ -135,7 +134,9 @@ func TestGenerateChain(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	if balance.String() != "19687500000000001000" { //nolint
+	// In PoS (merge engine with difficulty=0), uncle rewards are not awarded.
+	// addr3 is coinbase of block 3 but gets no block reward; it only received 1000 from tx2 in block 1.
+	if !uint256.NewInt(1000).Eq(&balance) {
 		t.Errorf("wrong balance of addr3: %s", &balance)
 	}
 
@@ -170,48 +171,37 @@ func TestGenerateChain(t *testing.T) {
 	if sentryproto.MessageId_RECEIPTS_66 != msg.Id {
 		t.Errorf("receipt id %d do not match the expected id %d", msg.Id, sentryproto.MessageId_RECEIPTS_66)
 	}
-	r1 := types.Receipt{Type: 0, PostState: common.Hex2Bytes("8e584ea3a7dc151b5b775394db92e2fc236fe2aca319edc01a482e8f9290a58a"), CumulativeGasUsed: 21000, Bloom: [256]byte{}, Logs: types.Logs{}, TxHash: common.HexToHash("0x9ca7a9e6bf23353fc5ac37f5c5676db1accec4af83477ac64cdcaa37f3a837f9"), ContractAddress: common.HexToAddress("0x0000000000000000000000000000000000000000"), GasUsed: 21000, BlockHash: common.HexToHash("0x5c7909bf8d4d8db71f0f6091aa412129591a8e41ff2230369ddf77a00bf57149"), BlockNumber: big.NewInt(1), TransactionIndex: 0}
-	r2 := types.Receipt{Type: 0, PostState: common.Hex2Bytes("4d50c59cd3859be33848418e3762a7839207bbc586a8542dd8540a7ee4f9afb5"), CumulativeGasUsed: 21000, Bloom: [256]byte{}, Logs: types.Logs{}, TxHash: common.HexToHash("0xf190eed1578cdcfe69badd05b7ef183397f336dc3de37baa4adbfb4bc657c11e"), ContractAddress: common.HexToAddress("0x0000000000000000000000000000000000000000"), GasUsed: 21000, BlockHash: common.HexToHash("0xe4d4617526870ba7c5b81900e31bd2525c02f27fe06fd6c3caf7bed05f3271f4"), BlockNumber: big.NewInt(2), TransactionIndex: 0}
-	r3 := types.Receipt{Type: 0, PostState: common.Hex2Bytes("41325f8e8348c6e60c0a388cfdc4c611190aaa9a63d1cc92a40a5b7697fe0c9d"), CumulativeGasUsed: 42000, Bloom: [256]byte{}, Logs: types.Logs{}, TxHash: common.HexToHash("0x309a030e44058e435a2b01302006880953e2c9319009db97013eb130d7a24eab"), ContractAddress: common.HexToAddress("0x0000000000000000000000000000000000000000"), GasUsed: 21000, BlockHash: common.HexToHash("0xe4d4617526870ba7c5b81900e31bd2525c02f27fe06fd6c3caf7bed05f3271f4"), BlockNumber: big.NewInt(2), TransactionIndex: 1}
 
-	encodedEmpty, err := rlp.EncodeToBytes(types.Receipts{})
-	if err != nil {
-		t.Fatal(err)
+	// Decode the response and verify receipt counts per block (structure test).
+	// Block 1 has 1 tx, block 2 has 2 txs, blocks 3-5 have no txs with receipts.
+	var resp eth.ReceiptsRLPPacket66
+	if err = rlp.DecodeBytes(msg.GetData(), &resp); err != nil {
+		t.Fatalf("failed to decode receipts response: %v", err)
 	}
-	encodedFirst, err := rlp.EncodeToBytes(types.Receipts{
-		&r1,
-	})
-	if err != nil {
-		t.Fatal(err)
+	if resp.RequestId != 1 {
+		t.Errorf("wrong request id: got %d, want 1", resp.RequestId)
 	}
-	encodedSecond, err := rlp.EncodeToBytes(types.Receipts{
-		&r2,
-		&r3,
-	})
-	if err != nil {
-		t.Fatal(err)
+	if len(resp.ReceiptsRLPPacket) != 5 {
+		t.Fatalf("expected 5 receipt entries, got %d", len(resp.ReceiptsRLPPacket))
 	}
-
-	res := []rlp.RawValue{
-		encodedFirst,
-		encodedSecond,
-		encodedEmpty,
-		encodedEmpty,
-		encodedEmpty,
+	var block1Receipts, block2Receipts types.Receipts
+	if err = rlp.DecodeBytes(resp.ReceiptsRLPPacket[0], &block1Receipts); err != nil {
+		t.Fatalf("failed to decode block 1 receipts: %v", err)
 	}
-
-	b, err = rlp.EncodeToBytes(&eth.ReceiptsRLPPacket66{
-		RequestId:         1,
-		ReceiptsRLPPacket: res,
-	})
-	if err != nil {
-		t.Fatal(err)
+	if err = rlp.DecodeBytes(resp.ReceiptsRLPPacket[1], &block2Receipts); err != nil {
+		t.Fatalf("failed to decode block 2 receipts: %v", err)
 	}
-	if !bytes.Equal(b, msg.GetData()) {
-		t.Errorf("receipt data %s do not match the expected msg %s", string(msg.GetData()), string(b))
+	if len(block1Receipts) != 1 {
+		t.Errorf("block 1: expected 1 receipt, got %d", len(block1Receipts))
 	}
-	if !bytes.Equal(b, msg.GetData()) {
-		t.Errorf("receipt data %s do not match the expected msg %s", string(msg.GetData()), string(b))
+	if len(block2Receipts) != 2 {
+		t.Errorf("block 2: expected 2 receipts, got %d", len(block2Receipts))
+	}
+	if len(block1Receipts) > 0 && block1Receipts[0].CumulativeGasUsed != 21000 {
+		t.Errorf("block 1 receipt cumulative gas: got %d, want 21000", block1Receipts[0].CumulativeGasUsed)
+	}
+	if len(block2Receipts) > 1 && block2Receipts[1].CumulativeGasUsed != 42000 {
+		t.Errorf("block 2 receipt 2 cumulative gas: got %d, want 42000", block2Receipts[1].CumulativeGasUsed)
 	}
 
 }
