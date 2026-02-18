@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
@@ -145,8 +146,10 @@ func SaveChainConfigIfNeed(
 	for {
 		if err = coreDB.View(ctx, func(tx kv.Tx) error {
 			var genBlockNum uint64
-			if cc.IsArbitrum() {
+			if cc != nil && cc.IsArbitrum() {
 				genBlockNum = cc.ArbitrumChainParams.GenesisBlockNum
+			} else if g, _ := rawdb.ReadGenesis(tx); g != nil {
+				genBlockNum = g.Number
 			}
 			cc, err = chain.GetConfig(tx, nil, genBlockNum)
 			if err != nil {
