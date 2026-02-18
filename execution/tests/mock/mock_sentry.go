@@ -553,8 +553,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				builderstages.StageBuilderExecCfg(builderStatePos, nil /* notifier */, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, interrupt, param.PayloadId, mock.TxPool, mock.BlockReader),
 				builderstages.StageBuilderFinishCfg(mock.ChainConfig, mock.Engine, builderStatePos, miningCancel, mock.BlockReader, latestBlockBuiltStore),
 			),
-			stagedsync.MiningUnwindOrder,
-			stagedsync.MiningPruneOrder,
+			builderstages.BuilderUnwindOrder,
+			builderstages.BuilderPruneOrder,
 			logger,
 			stages.ModeBlockProduction,
 		)
@@ -656,8 +656,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			builderstages.StageBuilderExecCfg(miner, nil, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, mock.BlockReader),
 			builderstages.StageBuilderFinishCfg(mock.ChainConfig, mock.Engine, miner, miningCancel, mock.BlockReader, latestBlockBuiltStore),
 		),
-		stagedsync.MiningUnwindOrder,
-		stagedsync.MiningPruneOrder,
+		builderstages.BuilderUnwindOrder,
+		builderstages.BuilderPruneOrder,
 		logger,
 		stages.ModeBlockProduction,
 	)

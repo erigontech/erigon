@@ -31,6 +31,9 @@ var (
 	BuilderCreateBlock stages.SyncStage = "BuilderCreateBlock"
 	BuilderExecution   stages.SyncStage = "BuilderExecution"
 	BuilderFinish      stages.SyncStage = "BuilderFinish"
+
+	BuilderUnwindOrder = stagedsync.UnwindOrder{} // nothing to unwind in block building - because builder does not commit db changes
+	BuilderPruneOrder  = stagedsync.PruneOrder{}  // nothing to prune in block building - because builder does not commit db changes
 )
 
 func BuilderStages(

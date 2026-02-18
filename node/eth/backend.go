@@ -925,8 +925,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				builderstages.StageBuilderExecCfg(builderStatePos, backend.notifications.Events, backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, txnProvider, blockReader),
 				builderstages.StageBuilderFinishCfg(backend.chainConfig, backend.engine, builderStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
 			),
-			stagedsync.MiningUnwindOrder,
-			stagedsync.MiningPruneOrder,
+			builderstages.BuilderUnwindOrder,
+			builderstages.BuilderPruneOrder,
 			logger,
 			stages.ModeBlockProduction,
 		)
