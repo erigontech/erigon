@@ -130,7 +130,7 @@ func ExecV3(ctx context.Context,
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
 	hooks := cfg.vmConfig.Tracer
 	applyTx := rwTx
-	err := doms.SeekCommitment(ctx, applyTx)
+	_, _, err := doms.SeekCommitment(ctx, applyTx)
 	if err != nil {
 		return err
 	}
@@ -138,11 +138,13 @@ func ExecV3(ctx context.Context,
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if isApplyingBlocks {
 		if initialCycle {
-			agg.SetCollateAndBuildWorkers(2) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
+			agg.SetCollateAndBuildWorkers(dbg.CollateWorkers) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
 			agg.SetCompressWorkers(dbg.CompressWorkers)
+			agg.SetMergeWorkers(dbg.MergeWorkers) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
 		} else {
 			agg.SetCollateAndBuildWorkers(1)
 			agg.SetCompressWorkers(dbg.CompressWorkers)
+			agg.SetMergeWorkers(dbg.MergeWorkers) //TODO: Need always set to CollateWorkers=2 (on ChainTip too). But need more tests first
 		}
 	}
 
@@ -259,7 +261,12 @@ func ExecV3(ctx context.Context,
 			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
 		pe.lastCommittedTxNum.Store(doms.TxNum())
-		pe.lastCommittedBlockNum.Store(blockNum)
+		// blockNum is the next block to execute (from doms.BlockNum()), so the last
+		// committed block is blockNum-1. LogCommitments uses Add to accumulate deltas
+		// on top of this value, so initializing to blockNum would double-count.
+		if blockNum > 0 {
+			pe.lastCommittedBlockNum.Store(blockNum - 1)
+		}
 
 		defer func() {
 			pe.LogComplete(stepsInDb)

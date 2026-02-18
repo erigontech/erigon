@@ -359,30 +359,6 @@ func (ht *HistoryRoTx) staticFilesInRange(r HistoryRanges) (indexFiles, historyF
 	return
 }
 
-func mergeNumSeqs(preval, val []byte, preBaseNum, baseNum uint64, buf []byte, outBaseNum uint64) ([]byte, error) {
-	preSeq := multiencseq.ReadMultiEncSeq(preBaseNum, preval)
-	seq := multiencseq.ReadMultiEncSeq(baseNum, val)
-	preIt := preSeq.Iterator(0)
-	efIt := seq.Iterator(0)
-	newSeq := multiencseq.NewBuilder(outBaseNum, preSeq.Count()+seq.Count(), seq.Max())
-	for preIt.HasNext() {
-		v, err := preIt.Next()
-		if err != nil {
-			return nil, err
-		}
-		newSeq.AddOffset(v)
-	}
-	for efIt.HasNext() {
-		v, err := efIt.Next()
-		if err != nil {
-			return nil, err
-		}
-		newSeq.AddOffset(v)
-	}
-	newSeq.Build()
-	return newSeq.AppendBytes(buf), nil
-}
-
 type valueTransformer func(val []byte, startTxNum, endTxNum uint64) ([]byte, error)
 
 const DomainMinStepsToCompress = 16
@@ -655,13 +631,15 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
 	var keyBuf, valBuf []byte
 	var lastKey, lastVal []byte
+	preSeq, mergeSeq := &multiencseq.SequenceReader{}, &multiencseq.SequenceReader{}
+	preIt, mergeIt := &multiencseq.SequenceIterator{}, &multiencseq.SequenceIterator{}
 	for cp.Len() > 0 {
 		lastKey = append(lastKey[:0], cp[0].key...)
 		lastVal = append(lastVal[:0], cp[0].val...)
 
 		// Pre-rebase the first sequence
-		preSeq := multiencseq.ReadMultiEncSeq(cp[0].startTxNum, lastVal)
-		preIt := preSeq.Iterator(0)
+		preSeq.Reset(cp[0].startTxNum, lastVal)
+		preIt.Reset(preSeq, 0)
 		newSeq := multiencseq.NewBuilder(startTxNum, preSeq.Count(), preSeq.Max())
 		for preIt.HasNext() {
 			v, err := preIt.Next()
@@ -678,9 +656,13 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := heap.Pop(&cp).(*CursorItem)
 			if mergedOnce {
-				if lastVal, err = mergeNumSeqs(ci1.val, lastVal, ci1.startTxNum, startTxNum, nil, startTxNum); err != nil {
-					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.FilenameBase, err)
+				mergeSeq.Reset(ci1.startTxNum, ci1.val)
+				preSeq.Reset(startTxNum, lastVal)
+				merged, mergeErr := mergeSeq.Merge(preSeq, startTxNum, mergeIt, preIt)
+				if mergeErr != nil {
+					return nil, fmt.Errorf("merge %s inverted index: %w", iit.ii.FilenameBase, mergeErr)
 				}
+				lastVal = merged.AppendBytes(nil)
 			} else {
 				mergedOnce = true
 			}
@@ -707,7 +689,7 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 		}
 		valBuf = append(valBuf[:0], lastVal...)
 	}
-	if keyBuf != nil {
+	if keyBuf != nil { //nolint:govet
 		// fmt.Printf("Put %x->%x\n", keyBuf, valBuf)
 		if _, err = write.Write(keyBuf); err != nil {
 			return nil, err
@@ -837,14 +819,16 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
 		// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
 		var lastKey, valBuf, histKeyBuf []byte
+		seq := &multiencseq.SequenceReader{}
+		ss := &multiencseq.SequenceIterator{}
 		for cp.Len() > 0 {
 			lastKey = append(lastKey[:0], cp[0].key...)
 			// Advance all the items that have this key (including the top)
 			for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 				ci1 := heap.Pop(&cp).(*CursorItem)
 
-				seq := multiencseq.ReadMultiEncSeq(ci1.startTxNum, ci1.val)
-				ss := seq.Iterator(0)
+				seq.Reset(ci1.startTxNum, ci1.val)
+				ss.Reset(seq, 0)
 
 				for ss.HasNext() {
 					txNum, err := ss.Next()

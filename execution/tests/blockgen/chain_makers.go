@@ -399,8 +399,13 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		return nil, err
 	}
 	defer domains.Close()
+	latestTxNum, _, err := domains.SeekCommitment(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+
 	stateReader := state.NewReaderV3(domains.AsGetter(tx))
-	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
+	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, latestTxNum)
 
 	txNum, err := rawdbv3.TxNums.Max(ctx, tx, parent.NumberU64())
 	if err != nil {

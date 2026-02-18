@@ -78,6 +78,8 @@ var (
 	Exec3Parallel   = EnvBool("EXEC3_PARALLEL", true)
 	Exec3Workers    = EnvInt("EXEC3_WORKERS", (runtime.GOMAXPROCS(0)*10)/8)
 	CompressWorkers = EnvInt("COMPRESS_WORKERS", 1)
+	MergeWorkers    = EnvInt("MERGE_WORKERS", 1)
+	CollateWorkers  = EnvInt("COLLATE_WORKERS", 2)
 
 	TraceAccounts         = EnvStrings("TRACE_ACCOUNTS", ",", nil)
 	TraceStateKeys        = EnvStrings("TRACE_STATE_KEYS", ",", nil)
@@ -88,8 +90,8 @@ var (
 	TraceLogs             = EnvBool("TRACE_LOGS", false)
 	TraceGas              = EnvBool("TRACE_GAS", false)
 	TraceDynamicGas       = EnvBool("TRACE_DYNAMIC_GAS", false)
-	TraceBlockAccessLists = EnvBool("TRACE_BLOCK_ACCESS_LISTS", false)
 	TraceApply            = EnvBool("TRACE_APPLY", false)
+	TraceBlockAccessLists = EnvBool("TRACE_BLOCK_ACCESS_LISTS", false)
 	TraceBlocks           = EnvUints("TRACE_BLOCKS", ",", nil)
 	TraceTxIndexes        = EnvInts("TRACE_TXINDEXES", ",", nil)
 	TraceUnwinds          = EnvBool("TRACE_UNWINDS", false)
@@ -98,7 +100,7 @@ var (
 	BatchCommitments      = EnvBool("BATCH_COMMITMENTS", true)
 	CaplinEfficientReorg  = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies     = EnvBool("USE_TX_DEPENDENCIES", false)
-	UseStateCache         = EnvBool("USE_STATE_CACHE", false)
+	UseStateCache         = EnvBool("USE_STATE_CACHE", true)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)

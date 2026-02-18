@@ -36,6 +36,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
@@ -314,13 +315,19 @@ func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.Pr
 
 func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine rules.Engine, blockBufferSize int, withTxPool bool, opts ...Option) *MockSentry {
 	opt := applyOptions(opts)
-	tmpdir := os.TempDir()
+	tmpdir, err := os.MkdirTemp("", "mock-sentry-*")
+	if err != nil {
+		panic(err)
+	}
 	if tb != nil {
-		tmpdir = tb.TempDir()
+		// we can't use tb.TempDir() here becuase things like TestExecutionSpecBlockchain
+		// produces test names that cause 'file name too long' errors
+		tb.Cleanup(func() {
+			dir.RemoveAll(tmpdir)
+		})
 	}
 	ctrl := gomock.NewController(tb)
 	dirs := datadir.New(tmpdir)
-	var err error
 
 	cfg := ethconfig.Defaults
 	cfg.StateStream = true

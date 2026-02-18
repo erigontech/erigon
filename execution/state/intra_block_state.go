@@ -21,6 +21,7 @@
 package state
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
@@ -376,7 +377,14 @@ func (sdb *IntraBlockState) AddLog(log *types.Log) {
 	log.TxIndex = uint(sdb.txIndex)
 	log.Index = sdb.logSize
 	if dbg.TraceLogs && (sdb.trace || dbg.TraceAccount(accounts.InternAddress(log.Address).Handle())) {
-		fmt.Printf("%d (%d.%d) Log: Index:%d Account:%x Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, log.Index, log.Address, log.Data)
+		var topics string
+		for i := 0; i < 4 && i < len(log.Topics); i++ {
+			topics += "[" + hex.EncodeToString(log.Topics[i][:]) + "]"
+		}
+		if topics == "" {
+			topics = "[]"
+		}
+		fmt.Printf("%d (%d.%d) Log: Index:%d Account:%x Topics: %s Data:%x\n", sdb.blockNum, sdb.txIndex, sdb.version, log.Index, log.Address, topics, log.Data)
 	}
 	if sdb.tracingHooks != nil && sdb.tracingHooks.OnLog != nil {
 		sdb.tracingHooks.OnLog(log)
@@ -2180,8 +2188,13 @@ func (sdb *IntraBlockState) VersionedWrites(checkDirty bool) VersionedWrites {
 				}
 			}
 
-			// if an account has been destructed remove any additional
-			// writes apart from the zero balance to avoid ambiguity
+			// If an account was selfdestructed, strip all writes except
+			// SelfDestructPath itself (and any zero-balance BalancePath writes).
+			// Non-zero BalancePath writes after selfdestruct represent residual ETH
+			// (EIP-7708 case 2); these are carried via
+			// ExecutionResult.SelfDestructedWithBalance captured before SoftFinalise
+			// clears the journal, and must NOT appear here to avoid polluting the
+			// EIP-7928 block access list.
 			var appends = make(VersionedWrites, 0, len(vwrites))
 			var selfDestructed bool
 			for _, v := range vwrites {
@@ -2254,6 +2267,16 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 			case SelfDestructPath:
 				deleted := val.(bool)
 				if deleted {
+					// Ensure the state object exists before calling Selfdestruct.
+					// For newly-created accounts (e.g. coinbase born via CREATE in the
+					// same transaction, with no pre-block DB entry), getStateObject
+					// returns nil and Selfdestruct silently no-ops.  This matters for
+					// the EIP-7708 finalize IBS: without a stateObject, the account will
+					// not be marked as selfdestructed and GetRemovedAccountsWithBalance
+					// will miss it, omitting the residual-balance burn log.
+					if _, err := sdb.GetOrNewStateObject(addr); err != nil {
+						return err
+					}
 					if _, err := sdb.Selfdestruct(addr); err != nil {
 						return err
 					}

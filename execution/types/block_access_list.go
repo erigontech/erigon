@@ -1081,7 +1081,7 @@ func (bal BlockAccessList) DebugPrint(w io.Writer) {
 	}
 }
 
-func ConvertBlockAccessListFromTypesProto(protoList []*typesproto.BlockAccessListAccount) *hexutil.Bytes {
+func ConvertBlockAccessListFromTypesProto(protoList []*typesproto.BlockAccessListAccount) hexutil.Bytes {
 	if protoList == nil {
 		return nil
 	}
@@ -1147,8 +1147,7 @@ func ConvertBlockAccessListFromTypesProto(protoList []*typesproto.BlockAccessLis
 	if err != nil {
 		return nil
 	}
-	res := hexutil.Bytes(encoded)
-	return &res
+	return encoded
 }
 
 func ConvertBlockAccessListToTypesProto(bal BlockAccessList) []*typesproto.BlockAccessListAccount {
