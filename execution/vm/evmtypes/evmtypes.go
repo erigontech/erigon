@@ -77,6 +77,11 @@ type ExecutionResult struct {
 	FeeTipped            uint256.Int
 	FeeBurnt             uint256.Int
 	BurntContractAddress accounts.Address
+
+	// SelfDestructedWithBalance holds accounts that were selfdestructed during
+	// execution but received ETH after the SELFDESTRUCT opcode ran (EIP-7708).
+	// Captured before SoftFinalise clears the journal.
+	SelfDestructedWithBalance []AddressAndBalance
 }
 
 // Unwrap returns the internal evm error which allows us for further
