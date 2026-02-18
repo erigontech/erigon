@@ -367,16 +367,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			importFile := filepath.Join(dirs.ArbImport, "init.json")
 			if _, statErr := os.Stat(importFile); statErr == nil {
 				// Import data present — go through full genesis init
-				genesisSpec := config.Genesis
-				h, err := rawdb.ReadCanonicalHash(tx, config.Genesis.Number)
-				if err != nil {
-					return err
-				}
-				if h != (common.Hash{}) {
-					genesisSpec = nil
-				}
 				var genesisErr error
-				chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.OverrideOsakaTime, config.KeepStoredChainConfig, dirs, logger)
+				chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, config.Genesis, config.OverrideOsakaTime, config.KeepStoredChainConfig, dirs, logger)
 				if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 					return genesisErr
 				}
