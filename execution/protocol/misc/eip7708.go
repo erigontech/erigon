@@ -94,7 +94,18 @@ func LogSelfDestructedAccounts(ibs evmtypes.IntraBlockState, sender accounts.Add
 	}
 	// Emit SelfDestruct logs where accounts with non-empty balances have been deleted
 	// See case (2) in https://eips.ethereum.org/EIPS/eip-7708#selfdestruct-processing
-	removedWithBalance := ibs.GetRemovedAccountsWithBalance()
+	//
+	// Prefer the pre-computed list from execution time: in the parallel executor the
+	// IBS passed here is reconstructed from VersionedWrites and its journal is empty,
+	// so ibs.GetRemovedAccountsWithBalance() would return nothing.
+	// result.SelfDestructedWithBalance was captured before SoftFinalise cleared the
+	// journal in the original execution IBS.
+	var removedWithBalance []evmtypes.AddressAndBalance
+	if result != nil && result.SelfDestructedWithBalance != nil {
+		removedWithBalance = result.SelfDestructedWithBalance
+	} else {
+		removedWithBalance = ibs.GetRemovedAccountsWithBalance()
+	}
 	if removedWithBalance != nil {
 		sort.Slice(removedWithBalance, func(i, j int) bool {
 			return removedWithBalance[i].Address.Cmp(removedWithBalance[j].Address) < 0

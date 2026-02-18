@@ -108,15 +108,15 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 		// TODO fix -race issues with parallel exec
 		t.Skip("skipping from race tests until parallel exec flow is race free")
 	}
+
 	t.Parallel()
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	dir := filepath.Join(eestDir, "blockchain_tests_devnet")
 	bt := new(testMatcher)
 	// to run only tests for 1 eip do:
-	//bt.whitelist(`.*amsterdam/eip8024_dupn_swapn_exchange.*`)
+	// bt.whitelist(`.*eip7708_eth_transfer_logs/test_finalization_selfdestruct_logs.json`)
 	bt.whitelist(`.*amsterdam.*`)                                                                              // TODO run tests for older forks too once we fix amsterdam eips, for now focus only on amsterdam eips
-	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_finalization_selfdestruct_logs.json`)                        // TODO fix error: receiptHash mismatch
 	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_finalization_after_priority_fee.json`)          // TODO fix error: block access list mismatch
 	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_to_self_cross_tx_no_log.json`)                  // TODO fix error: block access list mismatch
 	bt.skipLoad(`.*eip7708_eth_transfer_logs/test_selfdestruct_same_tx_via_call.json`)                         // TODO fix error: block #1 insertion into chain failed
