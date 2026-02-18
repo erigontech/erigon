@@ -23,6 +23,7 @@ import (
 )
 
 type Hasher struct {
+	// Sha is a pooled Keccak state (arm64: fastkeccak/NEON, other arches: x/crypto/sha3 LegacyKeccak256).
 	Sha keccak.KeccakState
 }
 

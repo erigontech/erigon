@@ -14,15 +14,14 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
+//go:build !arm64
+
 package keccak
 
-import "hash"
+import "golang.org/x/crypto/sha3"
 
-// KeccakState wraps the Keccak hasher.
-// In addition to the usual hash methods, it also supports Read to get a variable amount of
-// data from the hash state. Read is faster than Sum because it doesn't copy the internal
-// state, but also modifies the internal state.
-type KeccakState interface {
-	hash.Hash
-	Read([]byte) (int, error)
+// NewFastKeccak returns the standard LegacyKeccak implementation on non-arm64 platforms.
+// This keeps amd64 behavior aligned with the existing sha3 implementation.
+func NewFastKeccak() KeccakState {
+	return sha3.NewLegacyKeccak256().(KeccakState)
 }
