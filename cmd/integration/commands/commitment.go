@@ -112,6 +112,7 @@ func init() {
 	withIntegrityChecks(cmdCommitmentRebuild)
 	withHeimdall(cmdCommitmentRebuild)
 	withChaosMonkey(cmdCommitmentRebuild)
+	withClearCommitment(cmdCommitmentRebuild)
 	commitmentCmd.AddCommand(cmdCommitmentRebuild)
 
 	// commitment print
@@ -273,7 +274,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	}
 	defer rwTx.Rollback()
 
-	{
+	if !clearCommitment {
 		domainProgress := rwTx.Debug().DomainProgress(kv.CommitmentDomain)
 		ok, err := br.TxnumReader().IsMaxTxNumPopulated(ctx, rwTx, domainProgress)
 		if err != nil {
@@ -290,7 +291,9 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	}
 
 	withHistory := false
-	if commitmentHistoryEnabled {
+	if commitmentHistoryEnabled && clearCommitment {
+		withHistory = true
+	} else if commitmentHistoryEnabled {
 		fmt.Print("commitment history is enabled. Rebuild with history? (y/n): ")
 		scanner := bufio.NewScanner(os.Stdin)
 		scanner.Scan()
@@ -314,6 +317,11 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	}
 	if err := rwTx.Commit(); err != nil {
 		return err
+	}
+
+	if clearCommitment {
+		log.Info("Commitment data removed from DB and state files deleted")
+		return nil
 	}
 
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
