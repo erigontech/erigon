@@ -24,9 +24,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"strings"
+	"sync"
 	"time"
-
-	sync "github.com/linkdata/deadlock"
 
 	"github.com/erigontech/erigon/common/log/v3"
 )
