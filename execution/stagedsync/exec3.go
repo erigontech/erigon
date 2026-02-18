@@ -590,8 +590,12 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			default:
 			}
 
-			canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
-			if err != nil {
+			var canonicalHash common.Hash
+			if err = tx.Apply(ctx, func(applyTx kv.Tx) error {
+				var e error
+				canonicalHash, e = rawdb.ReadCanonicalHash(applyTx, blockNum)
+				return e
+			}); err != nil {
 				return err
 			}
 			b, ok := exec.ReadBlockWithSendersFromGlobalReadAheader(canonicalHash)

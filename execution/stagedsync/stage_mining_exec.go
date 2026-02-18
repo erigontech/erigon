@@ -235,7 +235,7 @@ func SpawnMiningExecStage(ctx context.Context, s *StageState, sd *execctx.Shared
 
 	// This flag will skip checking the state root
 	execS := &StageState{state: s.state, ID: stages.Execution, BlockNumber: blockHeight - 1}
-	forceParallel := dbg.Exec3Parallel || cfg.chainConfig.IsAmsterdam(blockAssembler.Header.Time)
+	forceParallel := dbg.Exec3Parallel /*|| cfg.chainConfig.IsAmsterdam(blockAssembler.Header.Time)*/ // TODO Re-enable after bals testing
 	execTx := tx
 	execSd := sd
 	var execCleanup func()

@@ -238,17 +238,18 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 									if err != nil {
 										return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
 									}
-									dbBAL, err := types.DecodeBlockAccessListBytes(dbBALBytes)
-									if err != nil {
-										return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
-									}
-									if err = dbBAL.Validate(); err != nil {
-										return fmt.Errorf("block %d: db block access list is invalid: %w", applyResult.BlockNum, err)
-									}
-
-									if headerBALHash != dbBAL.Hash() {
-										log.Info(fmt.Sprintf("bal from block: %s", dbBAL.DebugString()))
-										return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, dbBAL.Hash(), headerBALHash)
+									if len(dbBALBytes) > 0 {
+										dbBAL, err := types.DecodeBlockAccessListBytes(dbBALBytes)
+										if err != nil {
+											return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
+										}
+										if err = dbBAL.Validate(); err != nil {
+											return fmt.Errorf("block %d: db block access list is invalid: %w", applyResult.BlockNum, err)
+										}
+										if headerBALHash != dbBAL.Hash() {
+											log.Info(fmt.Sprintf("bal from block: %s", dbBAL.DebugString()))
+											return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, dbBAL.Hash(), headerBALHash)
+										}
 									}
 									if headerBALHash != bal.Hash() {
 										log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))

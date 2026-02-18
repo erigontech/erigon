@@ -417,7 +417,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		domains.SetTxNum(txNum)
 	}
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
-		stateWriter state.StateWriter) (*types.Block, types.Receipts, error) {
+		stateWriter state.StateWriter) (*types.Block, types.Receipts, []byte, error) {
 		txNumIncrement()
 
 		var versionMap *state.VersionMap
@@ -459,7 +459,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		if b.engine != nil {
 			err := protocol.InitializeBlockExecution(b.engine, chainreader, b.header, config, ibs, nil, logger, nil)
 			if err != nil {
-				return nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
+				return nil, nil, nil, fmt.Errorf("call to InitializeBlockExecution: %w", err)
 			}
 		}
 		// Execute any user modifications to the block
@@ -475,51 +475,58 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			_, requests, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, chainreader, syscall, nil, logger)
 
 			if err != nil {
-				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
+				return nil, nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 
 			// Write state changes to db
 			blockContext := protocol.NewEVMBlockContext(b.header, protocol.GetHashFn(b.header, nil), b.engine, accounts.NilAddress, config)
 			if err := ibs.CommitBlock(blockContext.Rules(config), stateWriter); err != nil {
-				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
+				return nil, nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
 
 			if config.IsPrague(b.header.Time) {
 				b.header.RequestsHash = requests.Hash()
 				var beaconBlockRoot common.Hash
 				if _, err := rand.Read(beaconBlockRoot[:]); err != nil {
-					return nil, nil, fmt.Errorf("can't create beacon block root: %w", err)
+					return nil, nil, nil, fmt.Errorf("can't create beacon block root: %w", err)
 				}
 				b.header.ParentBeaconBlockRoot = &beaconBlockRoot
 			}
 
 			var bal types.BlockAccessList
+			var balBytes []byte
 			if config.IsAmsterdam(b.header.Time) {
 				bal = b.blockIO.AsBlockAccessList()
 				fmt.Printf("generated bal: %d: %s\n", b.header.Number.Uint64(), bal.DebugString())
 				balHash := bal.Hash()
 				b.header.BlockAccessListHash = &balHash
+				var encErr error
+				balBytes, encErr = types.EncodeBlockAccessListBytes(bal)
+				if encErr != nil {
+					return nil, nil, nil, fmt.Errorf("encode block access list: %w", encErr)
+				}
 			}
 
 			stateRoot, err := domains.ComputeCommitment(ctx, tx, true, b.header.Number.Uint64(), uint64(txNum), "", nil)
 			if err != nil {
-				return nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
+				return nil, nil, nil, fmt.Errorf("call to CalcTrieRoot: %w", err)
 			}
 			b.header.Root = common.BytesToHash(stateRoot)
 			// Recreating block to make sure Root makes it into the header
 			block := types.NewBlockForAsembling(b.header, b.txs, b.uncles, b.receipts, b.withdrawals)
-			return block, b.receipts, nil
+			return block, b.receipts, balBytes, nil
 		}
-		return nil, nil, errors.New("no engine to generate blocks")
+		return nil, nil, nil, errors.New("no engine to generate blocks")
 	}
 
+	blockAccessLists := make([][]byte, n)
 	for i := 0; i < n; i++ {
 		ibs := state.New(stateReader)
 		if dbg.TraceBlock(uint64(i)) {
 			ibs.SetTrace(true)
 			domains.SetTrace(true, false)
 		}
-		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter)
+		block, receipt, balBytes, err := genblock(i, parent, ibs, stateReader, stateWriter)
 		ibs.SetTrace(false)
 		domains.SetTrace(false, false)
 		if err != nil {
@@ -528,10 +535,11 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		headers[i] = block.Header()
 		blocks[i] = block
 		receipts[i] = receipt
+		blockAccessLists[i] = balBytes
 		parent = block
 	}
 
-	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
+	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, BlockAccessLists: blockAccessLists, TopBlock: blocks[n-1]}, nil
 }
 
 func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.IntraBlockState, engine rules.Engine) *types.Header {

@@ -849,7 +849,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 			// has no entry (MVReadResultNone) so that conflict detection
 			// works across transactions, but they should not appear in
 			// the block access list.
-			if vr.Path == state.AddressPath {
+			if vr.Path == AddressPath {
 				if val, ok := vr.Val.(*accounts.Account); ok && val == nil {
 					return true
 				}
@@ -899,11 +899,12 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 }
 
 type accountState struct {
-	changes      *types.AccountChanges
-	balance      *fieldTracker[uint256.Int]
-	nonce        *fieldTracker[uint64]
-	code         *fieldTracker[[]byte]
-	balanceValue *uint256.Int // tracks latest seen balance
+	changes        *types.AccountChanges
+	balance        *fieldTracker[uint256.Int]
+	nonce          *fieldTracker[uint64]
+	code           *fieldTracker[[]byte]
+	balanceValue   *uint256.Int // tracks latest seen balance
+	selfDestructed bool
 }
 
 // check pre- and post-values, add to BAL if different
@@ -1050,6 +1051,10 @@ func (account *accountState) updateWrite(vw *VersionedWrite, accessIndex uint16)
 		if val, ok := vw.Val.([]byte); ok {
 			account.code.recordWrite(accessIndex, val, bytes.Clone, bytes.Equal)
 		}
+	case SelfDestructPath:
+		if val, ok := vw.Val.(bool); ok && val {
+			account.selfDestructed = true
+		}
 	default:
 	}
 }
@@ -1121,6 +1126,15 @@ func removeStorageRead(ac *types.AccountChanges, slot accounts.StorageKey) {
 	} else {
 		ac.StorageReads = out
 	}
+}
+
+func isSystemBALAddress(addr accounts.Address) bool {
+	return params.IsSystemAddress(addr)
+}
+
+func hasAccountChanges(ac *types.AccountChanges) bool {
+	return len(ac.BalanceChanges) > 0 || len(ac.NonceChanges) > 0 ||
+		len(ac.CodeChanges) > 0 || len(ac.StorageChanges) > 0
 }
 
 type versionedReadSet struct {
