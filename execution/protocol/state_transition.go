@@ -792,7 +792,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	//fmt.Printf("tx from %x used gas: %d, initGas %d remain %d %s\n", st.msg.From(), st.gasUsed(), st.initialGas, st.gasRemaining, usedMultiGas)
 
 	st.evm.ProcessingHook.EndTxHook(st.gasRemaining, vmerr == nil)
-	topLvlDeployed := deployedContract.Value()
+	var topLvlDeployed common.Address
+	if deployedContract != nil && !deployedContract.IsNil() {
+		topLvlDeployed = deployedContract.Value()
+	}
 	result = &evmtypes.ExecutionResult{
 		GasUsed:             st.gasUsed(),
 		Err:                 vmerr,
