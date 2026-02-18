@@ -509,7 +509,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	// building and prunes the commitment domain DB entries that are now covered by files.
 	flushDomainsAndRebuild := func() error {
 		logger.Info("[rebuild_commitment_history] flushing", "block", blockFrom-1, "toTxNum", lastToTxNum,
-			"memBatchSize", datasize.ByteSize(domains.Size()).HR(), "root", hex.EncodeToString(rh))
+			"memBatchSize", common.ByteCount(domains.Size()), "root", hex.EncodeToString(rh))
 
 		if err := domains.Flush(ctx, rwTx); err != nil {
 			return err
@@ -614,7 +614,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				"blk/s", fmt.Sprintf("%.1f", blkPerSec),
 				"keys", common.PrettyCounter(totalKeysProcessed),
 				"root", hex.EncodeToString(rh),
-				"memBatch", datasize.ByteSize(domains.Size()).HR(),
+				"memBatch", common.ByteCount(domains.Size()),
 				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		default:
 		}
