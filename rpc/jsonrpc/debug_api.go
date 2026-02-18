@@ -664,7 +664,8 @@ type RecordingState struct {
 	// Read tracking (all accessed keys, including reads that hit the overlay)
 	AccessedAccounts map[common.Address]struct{}
 	AccessedStorage  map[common.Address]map[common.Hash]struct{}
-	AccessedCode     map[common.Address][]byte
+	AccessedCode     map[common.Address][]byte // all code seen during execution (overlay + inner)
+	PreStateCode     map[common.Address][]byte // code read from the inner reader (pre-block state only)
 
 	// In-memory state overlay (writes)
 	accountOverlay map[common.Address]*accounts.Account // non-nil = updated, entry present with nil value = deleted
@@ -689,6 +690,7 @@ func NewRecordingState(inner state.StateReader) *RecordingState {
 		AccessedAccounts: make(map[common.Address]struct{}),
 		AccessedStorage:  make(map[common.Address]map[common.Hash]struct{}),
 		AccessedCode:     make(map[common.Address][]byte),
+		PreStateCode:     make(map[common.Address][]byte),
 		accountOverlay:   make(map[common.Address]*accounts.Account),
 		storageOverlay:   make(map[common.Address]map[common.Hash]uint256.Int),
 		codeOverlay:      make(map[common.Address][]byte),
@@ -852,6 +854,9 @@ func (s *RecordingState) ReadAccountCode(address accounts.Address) ([]byte, erro
 	}
 	if len(code) > 0 {
 		s.AccessedCode[addr] = code
+		if _, already := s.PreStateCode[addr]; !already {
+			s.PreStateCode[addr] = code
+		}
 	}
 	if s.tracing(addr) {
 		fmt.Printf("[TRACE] ReadAccountCode %s -> inner len=%d\n", addr.Hex(), len(code))
@@ -1022,10 +1027,22 @@ func (s *RecordingState) GetModifiedKeys() ([]common.Address, map[common.Address
 	return addresses, storageKeys
 }
 
-// GetAccessedCode returns all accessed contract code
+// GetAccessedCode returns all code seen during execution (overlay + inner reads)
 func (s *RecordingState) GetAccessedCode() map[common.Address][]byte {
 	result := make(map[common.Address][]byte, len(s.AccessedCode))
 	for addr, code := range s.AccessedCode {
+		result[addr] = common.Copy(code)
+	}
+	return result
+}
+
+// GetPreStateCode returns code read from the inner reader only (pre-block state).
+// This is the code that existed at the START of the block, before any
+// transactions modified it. Used for witness trie generation where the
+// CodeHash must match the parent-state commitment.
+func (s *RecordingState) GetPreStateCode() map[common.Address][]byte {
+	result := make(map[common.Address][]byte, len(s.PreStateCode))
+	for addr, code := range s.PreStateCode {
 		result[addr] = common.Copy(code)
 	}
 	return result
@@ -1447,24 +1464,35 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		}
 	}
 
-	// Collect codes from both reads and writes
-	accessedCode := recordingState.GetAccessedCode()
+	// Collect code from the recording state:
+	// - preStateCode: code from the inner reader (pre-block state), for witness trie & result.Codes
+	// - modifiedCode: code written during execution (new deployments, EIP-7702), for touchAllKeys
+	//
+	// Only pre-state code goes into result.Codes. Created/modified code (contract
+	// deployments, EIP-7702 delegations) is derived by the stateless verifier
+	// during re-execution and doesn't need to be shipped in the witness.
+	preStateCode := recordingState.GetPreStateCode()
 	modifiedCode := recordingState.GetModifiedCode()
 
-	// Merge codes (deduplicated by address, prefer modified if both exist)
-	allCode := make(map[common.Address][]byte)
-	for addr, code := range accessedCode {
-		allCode[addr] = code
-	}
-	for addr, code := range modifiedCode {
-		allCode[addr] = code // Modified code takes precedence
+	// result.Codes: pre-state bytecodes the stateless verifier needs to execute calls
+	codesSeen := make(map[common.Hash]struct{})
+	for _, code := range preStateCode {
+		if len(code) > 0 {
+			h := crypto.Keccak256Hash(code)
+			if _, dup := codesSeen[h]; !dup {
+				result.Codes = append(result.Codes, code)
+				codesSeen[h] = struct{}{}
+			}
+		}
 	}
 
-	// Build codeReads map for witness generation (keyed by address hash)
+	// codeReads: pre-block-state code keyed by address hash, used by
+	// GenerateWitness to populate AccountNodes in the witness trie.
+	// Must contain the code that existed at the START of the block only,
+	// so that CodeHash matches the account in the parent-state commitment.
 	codeReads := make(map[common.Hash]witnesstypes.CodeWithHash)
-	for addr, code := range allCode {
+	for addr, code := range preStateCode {
 		if len(code) > 0 {
-			result.Codes = append(result.Codes, code)
 			codeHash := crypto.Keccak256Hash(code)
 			addrHash := crypto.Keccak256Hash(addr.Bytes())
 			codeReads[addrHash] = witnesstypes.CodeWithHash{
@@ -1507,7 +1535,18 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	// 	return nil, err
 	// }
 
-	if len(allAddresses)+len(allStorageKeys)+len(allCode) == 0 { // nothing touched, return empty witness
+	// allCodeAddrs: union of addresses with pre-state or modified code.
+	// The commitment needs to know about both existing code (pre-state reads)
+	// and newly created/modified code (e.g. contract deployments, EIP-7702 delegations).
+	allCodeAddrs := make(map[common.Address]struct{})
+	for addr := range preStateCode {
+		allCodeAddrs[addr] = struct{}{}
+	}
+	for addr := range modifiedCode {
+		allCodeAddrs[addr] = struct{}{}
+	}
+
+	if len(allAddresses)+len(allStorageKeys)+len(allCodeAddrs) == 0 { // nothing touched, return empty witness
 		return result, nil
 	}
 
@@ -1522,7 +1561,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 				sdCtx.TouchKey(kv.StorageDomain, storageKey, nil)
 			}
 		}
-		for addr := range allCode {
+		for addr := range allCodeAddrs {
 			sdCtx.TouchKey(kv.CodeDomain, string(addr.Bytes()), nil)
 		}
 	}
