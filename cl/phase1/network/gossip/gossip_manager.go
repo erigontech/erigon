@@ -101,7 +101,13 @@ func (g *GossipManager) Close() error {
 }
 
 func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], conditions ...ConditionFunc) pubsub.ValidatorEx {
-	return func(ctx context.Context, pid peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
+	return func(ctx context.Context, pid peer.ID, msg *pubsub.Message) (result pubsub.ValidationResult) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("[GossipManager] panic in validator, rejecting message", "err", r, "topic", msg.GetTopic())
+				result = pubsub.ValidationReject
+			}
+		}()
 		curVersion := g.beaconConfig.GetCurrentStateVersion(g.ethClock.GetCurrentEpoch())
 		// parse the topic and subnet
 		topic := msg.GetTopic()

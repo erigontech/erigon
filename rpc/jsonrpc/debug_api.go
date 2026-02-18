@@ -75,16 +75,18 @@ type PrivateDebugAPI interface {
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
 type DebugAPIImpl struct {
 	*BaseAPI
-	db     kv.TemporalRoDB
-	GasCap uint64
+	db                kv.TemporalRoDB
+	GasCap            uint64
+	gethCompatibility bool // Geth-compatible storage iteration order for debug_storageRangeAt
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(base *BaseAPI, db kv.TemporalRoDB, gascap uint64) *DebugAPIImpl {
+func NewPrivateDebugAPI(base *BaseAPI, db kv.TemporalRoDB, gascap uint64, gethCompatibility bool) *DebugAPIImpl {
 	return &DebugAPIImpl{
-		BaseAPI: base,
-		db:      db,
-		GasCap:  gascap,
+		BaseAPI:           base,
+		db:                db,
+		GasCap:            gascap,
+		gethCompatibility: gethCompatibility,
 	}
 }
 
@@ -115,7 +117,7 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	}
 
 	fromTxNum := minTxNum + txIndex + 1 //+1 for system txn in the beginning of block
-	return storageRangeAt(tx, contractAddress, keyStart, fromTxNum, maxResult)
+	return storageRangeAt(tx, contractAddress, keyStart, fromTxNum, maxResult, api.gethCompatibility)
 }
 
 // AccountRange implements debug_accountRange. Returns a range of accounts involved in the given block rangeb
