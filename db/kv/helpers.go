@@ -27,8 +27,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
-
 	"github.com/erigontech/erigon/common/hexutil"
 
 	"github.com/erigontech/erigon/common"
@@ -320,8 +318,5 @@ func (d *DomainDiff) GetDiffSet() (keysToValue []DomainEntryDiff) {
 	return d.prevValsSlice
 }
 func toStringZeroCopy(v []byte) string {
-	if len(v) == 0 {
-		return ""
-	}
-	return unsafe.String(&v[0], len(v))
+	return string(v)
 }

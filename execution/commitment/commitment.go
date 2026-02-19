@@ -302,7 +302,12 @@ func getDeferredUpdate(
 		bitset ^= bit
 	}
 
-	upd.prev = prev
+	// Copy prev to avoid holding a reference to the caller's buffer (e.g., from
+	// GetLatest on TemporalMemBatch) across the deferred processing pipeline.
+	// Without this copy, the backing array can become stale if the source is
+	// modified before the deferred update is processed, causing "bad pointer
+	// in Go heap" crashes during GC (#18304).
+	upd.prev = common.Copy(prev)
 	upd.prevStep = prevStep
 	upd.encoded = nil
 
@@ -2045,5 +2050,5 @@ func (u *Update) String() string {
 	return sb.String()
 }
 
-func toStringZeroCopy(v []byte) string { return unsafe.String(&v[0], len(v)) } //nolint
-func toBytesZeroCopy(s string) []byte  { return unsafe.Slice(unsafe.StringData(s), len(s)) }
+func toStringZeroCopy(v []byte) string { return string(v) } //nolint
+func toBytesZeroCopy(s string) []byte  { return []byte(s) }

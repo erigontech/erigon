@@ -23,7 +23,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unsafe"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -444,13 +443,10 @@ func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
 
 }
 func toStringZeroCopy(v []byte) string {
-	if len(v) == 0 {
-		return ""
-	}
-	return unsafe.String(&v[0], len(v))
+	return string(v)
 }
 
-func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
+func toBytesZeroCopy(s string) []byte { return []byte(s) }
 
 type DomainIOMetrics struct {
 	CacheReadCount    int64

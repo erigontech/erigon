@@ -23,7 +23,6 @@ import (
 	"maps"
 	"sort"
 	"sync"
-	"unsafe"
 
 	btree2 "github.com/tidwall/btree"
 
@@ -143,7 +142,13 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 		}
 	}
 
-	valWithStep := dataWithTxNum{data: val, txNum: txNum}
+	// Copy val to ensure TemporalMemBatch owns the data and it won't become
+	// stale if the caller reuses the buffer. This prevents "bad pointer in Go
+	// heap" crashes during GC when the original backing array is freed while
+	// this reference persists (see #18304).
+	valCopy := make([]byte, len(val))
+	copy(valCopy, val)
+	valWithStep := dataWithTxNum{data: valCopy, txNum: txNum}
 	putKeySize := 0
 	putValueSize := 0
 	if domain == kv.StorageDomain {
@@ -603,10 +608,7 @@ func AggTx(tx kv.Tx) *AggregatorRoTx {
 }
 
 func toStringZeroCopy(v []byte) string {
-	if len(v) == 0 {
-		return ""
-	}
-	return unsafe.String(&v[0], len(v))
+	return string(v)
 }
 
-func toBytesZeroCopy(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
+func toBytesZeroCopy(s string) []byte { return []byte(s) }
