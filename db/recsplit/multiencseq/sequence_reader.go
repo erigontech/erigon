@@ -115,7 +115,7 @@ func (s *SequenceReader) Count() uint64 {
 	panic(fmt.Sprintf("unknown sequence encoding: %d", s.currentEnc))
 }
 
-func (s *SequenceReader) Reset(baseNum uint64, raw []byte) *SequenceReader {
+func (s *SequenceReader) Reset(baseNum uint64, raw []byte) *SequenceReader { // no `return parameter` to avoid heap-allocation of `s` object
 	// plain elias fano (legacy)
 	if raw[0]&PlainEliasFanoMask == 0 {
 		s.currentEnc = PlainEliasFano

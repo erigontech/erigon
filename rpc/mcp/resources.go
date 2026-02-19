@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/mark3labs/mcp-go/mcp"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 // registerResources registers all MCP resources
