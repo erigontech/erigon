@@ -154,6 +154,34 @@ func updatedNibs(num uint16) string {
 	return strings.Join(nibbles, ",")
 }
 
+// hashes plainKey using keccakState and writes the hashed key nibbles to dest with respect to hashedKeyOffset.
+// Note that this function does not respect plainKey length so hashing it at once without splitting to account/storage part.
+func hashKey(keccak keccakState, plainKey []byte, dest []byte, hashedKeyOffset int16, hashBuf []byte) error {
+	_, _ = hashBuf[length.Hash-1], dest[length.Hash*2-1] // bounds checks elimination
+	keccak.Reset()
+	if _, err := keccak.Write(plainKey); err != nil {
+		return err
+	}
+	if _, err := keccak.Read(hashBuf); err != nil {
+		return err
+	}
+	hb := hashBuf[hashedKeyOffset/2:]
+	var k int
+	if hashedKeyOffset%2 == 1 { // write zero byte as compacted since hashedKeyOffset is odd
+		dest[0] = hb[0] & 0xf
+		k++
+		hb = hb[1:]
+	}
+	// write each byte as 2 hex nibbles
+	for _, c := range hb {
+		dest[k] = (c >> 4) & 0xf
+		k++
+		dest[k] = c & 0xf
+		k++
+	}
+	return nil
+}
+
 func PrefixStringToNibbles(hexStr string) ([]byte, error) {
 	nibbles := make([]byte, len(hexStr))
 
