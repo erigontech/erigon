@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-const semaphoreWaitTimeout = 2 * time.Second
+const semaphoreWaitTimeout = 1 * time.Second
 
 func (e *EthereumExecutionModule) tryWaitForUnlock(ctx context.Context) bool {
 	if ctx == nil {
