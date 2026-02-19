@@ -104,6 +104,7 @@ func SpawnBuilderExecStage(ctx context.Context, s *stagedsync.StageState, sd *ex
 	stateReader := state.NewReaderV3(sd.AsGetter(tx))
 	ibs := state.New(stateReader)
 	defer ibs.Release(false)
+	ibs.SetTxContext(current.Header.Number.Uint64(), -1)
 	var balIO *state.VersionedIO
 	var systemReads state.ReadSet
 	var systemWrites state.VersionedWrites
@@ -528,7 +529,7 @@ func addTransactionsToBlock(
 	logger log.Logger,
 ) (types.Logs, bool, error) {
 	header := current.Header
-	txnIdx := ibs.TxnIndex()
+	txnIdx := ibs.TxnIndex() + 1
 	gasPool := new(protocol.GasPool).AddGas(header.GasLimit - header.GasUsed)
 	if header.BlobGasUsed != nil {
 		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed)
