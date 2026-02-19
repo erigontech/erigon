@@ -14,26 +14,18 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package diagnostics
+package buildercfg
 
 import (
-	"net/http"
-
-	"github.com/erigontech/erigon/diagnostics/diaglib"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
-func SetupBodiesAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient) {
-	if metricsMux == nil {
-		return
-	}
-
-	metricsMux.HandleFunc("/bodies", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		writeBodies(w, diag)
-	})
-
-}
-
-func writeBodies(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
-	diag.BodiesInfoJson(w)
+// BuilderConfig is the configuration parameters of block building.
+type BuilderConfig struct {
+	EnabledPOS       bool
+	Etherbase        common.Address `toml:",omitempty"` // Public address for block building rewards
+	ExtraData        hexutil.Bytes  `toml:",omitempty"` // Block extra data set by the block builder
+	GasLimit         *uint64        // Target gas limit for built blocks
+	MaxBlobsPerBlock *uint64        // Cap the number of blob transactions included in a block
 }

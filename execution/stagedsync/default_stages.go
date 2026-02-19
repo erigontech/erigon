@@ -435,6 +435,3 @@ var PipelinePruneOrder = PruneOrder{
 	stages.BlockHashes,
 	stages.Snapshots,
 }
-
-var MiningUnwindOrder = UnwindOrder{} // nothing to unwind in mining - because mining does not commit db changes
-var MiningPruneOrder = PruneOrder{}   // nothing to unwind in mining - because mining does not commit db changes
