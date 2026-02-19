@@ -772,7 +772,7 @@ func (ms *MockSentry) EnableLogs() {
 func (ms *MockSentry) Cfg() ethconfig.Config { return ms.cfg }
 
 func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
-	wr := chainreader.NewChainReaderEth1(ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), uint64(time.Hour))
+	wr := chainreader.NewChainReaderEth1(ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), time.Hour)
 
 	streamCtx, cancel := context.WithCancel(ms.Ctx)
 	defer cancel()
