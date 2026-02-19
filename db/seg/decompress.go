@@ -559,7 +559,7 @@ type Getter struct {
 	posBitLen int       // cached posDict.bitLen, avoids pointer chain
 	posDict   *posTable // Huffman table for positions
 	posMask   uint16    // cached posDict.mask, avoids pointer chain
-	data      []byte    // compressed bitstream (ptr at 48, len at 56 = CL0)
+	data      []byte
 	//less hot fields
 	patternDict *patternTable
 	d           *Decompressor
