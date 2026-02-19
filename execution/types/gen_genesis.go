@@ -5,6 +5,7 @@ package types
 import (
 	"encoding/json"
 	"errors"
+	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -81,7 +82,7 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 		Timestamp             *math.HexOrDecimal64                        `json:"timestamp"`
 		ExtraData             *hexutil.Bytes                              `json:"extraData"`
 		GasLimit              *math.HexOrDecimal64                        `json:"gasLimit"   gencodec:"required"`
-		Difficulty            *uint256.Int                                `json:"difficulty" gencodec:"required"`
+		Difficulty            *math.HexOrDecimal256                       `json:"difficulty" gencodec:"required"`
 		Mixhash               *common.Hash                                `json:"mixHash"`
 		Coinbase              *common.Address                             `json:"coinbase"`
 		Alloc                 map[common.UnprefixedAddress]GenesisAccount `json:"alloc"`
@@ -89,7 +90,7 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 		Number                *math.HexOrDecimal64                        `json:"number"`
 		GasUsed               *math.HexOrDecimal64                        `json:"gasUsed"`
 		ParentHash            *common.Hash                                `json:"parentHash"`
-		BaseFee               *uint256.Int                                `json:"baseFeePerGas"`
+		BaseFee               *math.HexOrDecimal256                       `json:"baseFeePerGas"`
 		BlobGasUsed           *math.HexOrDecimal64                        `json:"blobGasUsed"`
 		ExcessBlobGas         *math.HexOrDecimal64                        `json:"excessBlobGas"`
 		ParentBeaconBlockRoot *common.Hash                                `json:"parentBeaconBlockRoot"`
@@ -120,7 +121,7 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 	if dec.Difficulty == nil {
 		return errors.New("missing required field 'difficulty' for Genesis")
 	}
-	g.Difficulty = dec.Difficulty
+	g.Difficulty = uint256.MustFromBig((*big.Int)(dec.Difficulty))
 	if dec.Mixhash != nil {
 		g.Mixhash = *dec.Mixhash
 	}
@@ -146,7 +147,7 @@ func (g *Genesis) UnmarshalJSON(input []byte) error {
 		g.ParentHash = *dec.ParentHash
 	}
 	if dec.BaseFee != nil {
-		g.BaseFee = dec.BaseFee
+		g.BaseFee = uint256.MustFromBig((*big.Int)(dec.BaseFee))
 	}
 	if dec.BlobGasUsed != nil {
 		g.BlobGasUsed = (*uint64)(dec.BlobGasUsed)

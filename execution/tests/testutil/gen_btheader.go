@@ -4,6 +4,7 @@ package testutil
 
 import (
 	"encoding/json"
+	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -22,7 +23,7 @@ func (b btHeader) MarshalJSON() ([]byte, error) {
 		Coinbase              common.Address
 		MixHash               common.Hash
 		Nonce                 types.BlockNonce
-		Number                *uint256.Int
+		Number                *math.HexOrDecimal256
 		Hash                  common.Hash
 		ParentHash            common.Hash
 		ReceiptTrie           common.Hash
@@ -30,11 +31,11 @@ func (b btHeader) MarshalJSON() ([]byte, error) {
 		TransactionsTrie      common.Hash
 		UncleHash             common.Hash
 		ExtraData             hexutil.Bytes
-		Difficulty            *uint256.Int
+		Difficulty            *math.HexOrDecimal256
 		GasLimit              math.HexOrDecimal64
 		GasUsed               math.HexOrDecimal64
 		Timestamp             math.HexOrDecimal64
-		BaseFeePerGas         *uint256.Int
+		BaseFeePerGas         *math.HexOrDecimal256
 		WithdrawalsRoot       *common.Hash
 		BlobGasUsed           *math.HexOrDecimal64
 		ExcessBlobGas         *math.HexOrDecimal64
@@ -48,7 +49,9 @@ func (b btHeader) MarshalJSON() ([]byte, error) {
 	enc.Coinbase = b.Coinbase
 	enc.MixHash = b.MixHash
 	enc.Nonce = b.Nonce
-	enc.Number = b.Number
+	if b.Number != nil {
+		enc.Number = (*math.HexOrDecimal256)(b.Number.ToBig())
+	}
 	enc.Hash = b.Hash
 	enc.ParentHash = b.ParentHash
 	enc.ReceiptTrie = b.ReceiptTrie
@@ -56,11 +59,15 @@ func (b btHeader) MarshalJSON() ([]byte, error) {
 	enc.TransactionsTrie = b.TransactionsTrie
 	enc.UncleHash = b.UncleHash
 	enc.ExtraData = b.ExtraData
-	enc.Difficulty = b.Difficulty
+	if b.Difficulty != nil {
+		enc.Difficulty = (*math.HexOrDecimal256)(b.Difficulty.ToBig())
+	}
 	enc.GasLimit = math.HexOrDecimal64(b.GasLimit)
 	enc.GasUsed = math.HexOrDecimal64(b.GasUsed)
 	enc.Timestamp = math.HexOrDecimal64(b.Timestamp)
-	enc.BaseFeePerGas = b.BaseFeePerGas
+	if b.BaseFeePerGas != nil {
+		enc.BaseFeePerGas = (*math.HexOrDecimal256)(b.BaseFeePerGas.ToBig())
+	}
 	enc.WithdrawalsRoot = b.WithdrawalsRoot
 	enc.BlobGasUsed = (*math.HexOrDecimal64)(b.BlobGasUsed)
 	enc.ExcessBlobGas = (*math.HexOrDecimal64)(b.ExcessBlobGas)
@@ -78,7 +85,7 @@ func (b *btHeader) UnmarshalJSON(input []byte) error {
 		Coinbase              *common.Address
 		MixHash               *common.Hash
 		Nonce                 *types.BlockNonce
-		Number                *uint256.Int
+		Number                *math.HexOrDecimal256
 		Hash                  *common.Hash
 		ParentHash            *common.Hash
 		ReceiptTrie           *common.Hash
@@ -86,11 +93,11 @@ func (b *btHeader) UnmarshalJSON(input []byte) error {
 		TransactionsTrie      *common.Hash
 		UncleHash             *common.Hash
 		ExtraData             *hexutil.Bytes
-		Difficulty            *uint256.Int
+		Difficulty            *math.HexOrDecimal256
 		GasLimit              *math.HexOrDecimal64
 		GasUsed               *math.HexOrDecimal64
 		Timestamp             *math.HexOrDecimal64
-		BaseFeePerGas         *uint256.Int
+		BaseFeePerGas         *math.HexOrDecimal256
 		WithdrawalsRoot       *common.Hash
 		BlobGasUsed           *math.HexOrDecimal64
 		ExcessBlobGas         *math.HexOrDecimal64
@@ -116,7 +123,7 @@ func (b *btHeader) UnmarshalJSON(input []byte) error {
 		b.Nonce = *dec.Nonce
 	}
 	if dec.Number != nil {
-		b.Number = dec.Number
+		b.Number = uint256.MustFromBig((*big.Int)(dec.Number))
 	}
 	if dec.Hash != nil {
 		b.Hash = *dec.Hash
@@ -140,7 +147,7 @@ func (b *btHeader) UnmarshalJSON(input []byte) error {
 		b.ExtraData = *dec.ExtraData
 	}
 	if dec.Difficulty != nil {
-		b.Difficulty = dec.Difficulty
+		b.Difficulty = uint256.MustFromBig((*big.Int)(dec.Difficulty))
 	}
 	if dec.GasLimit != nil {
 		b.GasLimit = uint64(*dec.GasLimit)
@@ -152,7 +159,7 @@ func (b *btHeader) UnmarshalJSON(input []byte) error {
 		b.Timestamp = uint64(*dec.Timestamp)
 	}
 	if dec.BaseFeePerGas != nil {
-		b.BaseFeePerGas = dec.BaseFeePerGas
+		b.BaseFeePerGas = uint256.MustFromBig((*big.Int)(dec.BaseFeePerGas))
 	}
 	if dec.WithdrawalsRoot != nil {
 		b.WithdrawalsRoot = dec.WithdrawalsRoot

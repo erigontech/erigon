@@ -105,7 +105,7 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 	if err != nil {
 		t.Errorf("error getting block number with pending tag: %s", err)
 	}
-	expectedNum := *uint256.NewInt(uint64(expected))
+	expectedNum := (*hexutil.Big)(uint256.NewInt(uint64(expected)).ToBig())
 	assert.Equal(t, expectedNum, b["number"])
 }
 
