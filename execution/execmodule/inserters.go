@@ -84,7 +84,17 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 			// Parent's total difficulty
 			parentTd, err = rawdb.ReadTd(tx, header.ParentHash, height-1)
 			if err != nil || parentTd == nil {
-				return nil, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, height-1, err)
+				// For PoS chains (TTD already passed), TD is constant at TTD for all blocks.
+				// This can happen if FillDBFromSnapshots has not yet committed its tx (startup race).
+				if e.config.TerminalTotalDifficultyPassed {
+					if e.config.TerminalTotalDifficulty != nil {
+						parentTd = new(big.Int).Set(e.config.TerminalTotalDifficulty)
+					} else {
+						parentTd = big.NewInt(0)
+					}
+				} else {
+					return nil, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, height-1, err)
+				}
 			}
 		} else {
 			parentTd = big.NewInt(0)
