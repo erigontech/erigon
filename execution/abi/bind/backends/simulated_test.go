@@ -634,8 +634,8 @@ func TestSimulatedBackend_HeaderByNumber(t *testing.T) {
 	}
 	if latestBlockHeader == nil {
 		t.Errorf("received a nil block header")
-	} else if latestBlockHeader.Number.Uint64() != uint64(0) {
-		t.Errorf("expected block header number 0, instead got %v", latestBlockHeader.Number.Uint64())
+	} else if !latestBlockHeader.Number.IsZero() {
+		t.Errorf("expected block header number 0, instead got %v", &latestBlockHeader.Number)
 	}
 
 	sim.Commit()
@@ -654,7 +654,7 @@ func TestSimulatedBackend_HeaderByNumber(t *testing.T) {
 		t.Errorf("block header and latest block header are not the same")
 	}
 	if blockHeader.Number.CmpUint64(1) != 0 {
-		t.Errorf("did not get blockheader for block 1. instead got block %d", blockHeader.Number.Uint64())
+		t.Errorf("did not get blockheader for block 1. instead got block %v", &blockHeader.Number)
 	}
 
 	block, err := sim.BlockByNumber(bgCtx, uint256.NewInt(1))
