@@ -285,7 +285,7 @@ func (ethash *Ethash) verifyHeader(chain rules.ChainHeaderReader, header, parent
 	// Verify the block's difficulty based on its timestamp and parent's difficulty
 	expected := ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number.Uint64(), parent.Hash(), parent.UncleHash, parent.AuRaStep)
 	if expected.Cmp(&header.Difficulty) != 0 {
-		return fmt.Errorf("invalid difficulty: have %v, want %v", header.Difficulty, expected)
+		return fmt.Errorf("invalid difficulty: have %v, want %v", header.Difficulty, &expected)
 	}
 	// Verify the engine specific seal securing the block
 	if seal {
@@ -308,14 +308,14 @@ func (ethash *Ethash) verifyHeader(chain rules.ChainHeaderReader, header, parent
 // CalcDifficulty is the difficulty adjustment algorithm. It returns
 // the difficulty that a new block should have when created at time
 // given the parent block's time and difficulty.
-func (ethash *Ethash) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, _, parentUncleHash common.Hash, _ uint64) *uint256.Int {
+func (ethash *Ethash) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, _, parentUncleHash common.Hash, _ uint64) uint256.Int {
 	return CalcDifficulty(chain.Config(), time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 }
 
 // CalcDifficulty is the difficulty adjustment algorithm. It returns
 // the difficulty that a new block should have when created at time
 // given the parent block's time and difficulty.
-func CalcDifficulty(config *chain.Config, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentUncleHash common.Hash) *uint256.Int {
+func CalcDifficulty(config *chain.Config, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentUncleHash common.Hash) uint256.Int {
 	next := parentNumber + 1
 	switch {
 	case config.IsGrayGlacier(next):
@@ -409,7 +409,7 @@ func (ethash *Ethash) Prepare(chain rules.ChainHeaderReader, header *types.Heade
 	if parent == nil {
 		return rules.ErrUnknownAncestor
 	}
-	header.Difficulty = *ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number.Uint64(), parent.Hash(), parent.UncleHash, parent.AuRaStep)
+	header.Difficulty = ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number.Uint64(), parent.Hash(), parent.UncleHash, parent.AuRaStep)
 	return nil
 }
 

@@ -71,7 +71,7 @@ func (test *DifficultyTest) Run(config *chain.Config) error {
 	if actual.Cmp(&exp) != 0 {
 		return fmt.Errorf("parent[time %v diff %v unclehash:%x] child[time %v number %v] diff %v != expected %v",
 			test.ParentTimestamp, test.ParentDifficulty, test.ParentUncles,
-			test.CurrentTimestamp, test.CurrentBlockNumber, actual, exp)
+			test.CurrentTimestamp, test.CurrentBlockNumber, &actual, &exp)
 	}
 	return nil
 }

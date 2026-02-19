@@ -1060,15 +1060,15 @@ func (c *Bor) IsProposer(header *types.Header) (bool, error) {
 // CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 // that a new block should have based on the previous blocks in the chain and the
 // current signer.
-func (c *Bor) CalcDifficulty(chain rules.ChainHeaderReader, _, _ uint64, _ uint256.Int, parentNumber uint64, parentHash, _ common.Hash, _ uint64) *uint256.Int {
+func (c *Bor) CalcDifficulty(chain rules.ChainHeaderReader, _, _ uint64, _ uint256.Int, parentNumber uint64, parentHash, _ common.Hash, _ uint64) uint256.Int {
 	signer := c.authorizedSigner.Load().signer
 
 	validatorSet, err := c.spanReader.Producers(context.Background(), parentNumber+1)
 	if err != nil {
-		return nil
+		return uint256.Int{}
 	}
 
-	return uint256.NewInt(validatorSet.SafeDifficulty(signer))
+	return *uint256.NewInt(validatorSet.SafeDifficulty(signer))
 }
 
 // SealHash returns the hash of a block prior to it being sealed.

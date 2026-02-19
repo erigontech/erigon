@@ -126,5 +126,6 @@ func calcDifficulty(config *chain.Config, number, currentTime, parentTime uint64
 		Time:       parentTime,
 	}
 	parent.Number.SetUint64(number - 1)
-	return ethash.CalcDifficulty(config, currentTime, parent.Time, parent.Difficulty, number-1, parent.UncleHash)
+	diff := ethash.CalcDifficulty(config, currentTime, parent.Time, parent.Difficulty, number-1, parent.UncleHash)
+	return &diff
 }

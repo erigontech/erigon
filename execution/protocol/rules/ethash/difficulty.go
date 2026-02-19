@@ -43,7 +43,7 @@ const (
 // calcDifficultyFrontier is the difficulty adjustment algorithm. It returns the
 // difficulty that a new block should have when created at time given the parent
 // block's time and difficulty. The calculation uses the Frontier rules.
-func calcDifficultyFrontier(time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64) *uint256.Int {
+func calcDifficultyFrontier(time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64) uint256.Int {
 	/*
 		Algorithm
 		block_diff = pdiff + pdiff / 2048 * (1 if time - ptime < 13 else -1) + int(2^((num // 100000) - 2))
@@ -76,13 +76,13 @@ func calcDifficultyFrontier(time, parentTime uint64, parentDifficulty uint256.In
 		expDiff.Lsh(expDiff, uint(periodCount-2)) // expdiff: 2 ^ (periodCount -2)
 		pDiff.Add(pDiff, expDiff)
 	}
-	return pDiff
+	return *pDiff
 }
 
 // calcDifficultyHomestead is the difficulty adjustment algorithm. It returns
 // the difficulty that a new block should have when created at time given the
 // parent block's time and difficulty. The calculation uses the Homestead rules.
-func calcDifficultyHomestead(time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64) *uint256.Int {
+func calcDifficultyHomestead(time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64) uint256.Int {
 	/*
 		https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2.md
 		Algorithm:
@@ -128,17 +128,17 @@ func calcDifficultyHomestead(time, parentTime uint64, parentDifficulty uint256.I
 		expFactor := adjust.Lsh(adjust.SetOne(), uint(periodCount-2))
 		pDiff.Add(pDiff, expFactor)
 	}
-	return pDiff
+	return *pDiff
 }
 
 // makeDifficultyCalculator creates a difficultyCalculator with the given bomb-delay.
 // the difficulty is calculated with Byzantium rules, which differs from Homestead in
 // how uncles affect the calculation
-func makeDifficultyCalculator(bombDelay uint64) func(time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentUncleHash common.Hash) *uint256.Int {
+func makeDifficultyCalculator(bombDelay uint64) func(time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentUncleHash common.Hash) uint256.Int {
 	// Note, the calculations below looks at the parent number, which is 1 below
 	// the block number. Thus we remove one from the delay given
 	bombDelayFromParent := bombDelay - 1
-	return func(time, parentTime uint64, pDiff uint256.Int, pNum uint64, parentUncleHash common.Hash) *uint256.Int {
+	return func(time, parentTime uint64, pDiff uint256.Int, pNum uint64, parentUncleHash common.Hash) uint256.Int {
 		/*
 			https://github.com/ethereum/EIPs/issues/100
 			pDiff = parent.difficulty
@@ -186,6 +186,6 @@ func makeDifficultyCalculator(bombDelay uint64) func(time, parentTime uint64, pa
 				y.Add(z, y)
 			}
 		}
-		return y
+		return *y
 	}
 }

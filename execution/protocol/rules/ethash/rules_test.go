@@ -86,7 +86,7 @@ func TestCalcDifficulty(t *testing.T) {
 			empty.UncleHash,
 		)
 		if diff.Cmp(&test.CurrentDifficulty) != 0 {
-			t.Error(name, "failed. Expected", test.CurrentDifficulty, "and calculated", diff)
+			t.Error(name, "failed. Expected", &test.CurrentDifficulty, "and calculated", &diff)
 		}
 	}
 }

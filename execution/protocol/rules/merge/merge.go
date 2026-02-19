@@ -270,15 +270,15 @@ func (s *Merge) SealHash(header *types.Header) (hash common.Hash) {
 	return s.eth1Engine.SealHash(header)
 }
 
-func (s *Merge) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *uint256.Int {
+func (s *Merge) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) uint256.Int {
 	reached, err := IsTTDReached(chain, parentHash, parentNumber)
 	if err != nil {
-		return nil
+		return *ProofOfStakeDifficulty
 	}
 	if !reached {
 		return s.eth1Engine.CalcDifficulty(chain, time, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash, parentAuRaStep)
 	}
-	return ProofOfStakeDifficulty
+	return *ProofOfStakeDifficulty
 }
 
 func (c *Merge) TxDependencies(h *types.Header) [][]int {

@@ -224,7 +224,7 @@ func (b *BlockGen) OffsetTime(seconds int64) {
 		panic("block time out of range")
 	}
 	chainreader := &FakeChainReader{Cfg: b.config}
-	b.header.Difficulty = *b.engine.CalcDifficulty(
+	b.header.Difficulty = b.engine.CalcDifficulty(
 		chainreader,
 		b.header.Time,
 		parent.Time(),
@@ -452,16 +452,14 @@ func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.Intra
 
 	header := builder.MakeEmptyHeader(parent.Header(), chain.Config(), time, nil)
 	header.Coinbase = parent.Coinbase()
-	if diff := engine.CalcDifficulty(chain, time,
+	header.Difficulty = engine.CalcDifficulty(chain, time,
 		time-10,
 		parent.Difficulty(),
 		parent.NumberU64(),
 		parent.Hash(),
 		parent.UncleHash(),
 		parent.Header().AuRaStep,
-	); diff != nil {
-		header.Difficulty = *diff
-	}
+	)
 
 	return header
 }

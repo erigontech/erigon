@@ -552,8 +552,8 @@ func (c *AuRa) verifyFamily(chain rules.ChainHeaderReader, e *NonTransactionalEp
 	*/
 	if header.Number.Uint64() >= c.cfg.ValidateScoreTransition {
 		expectedDifficulty := calculateScore(parentStep, step, emptyStepLen)
-		if header.Difficulty.Cmp(expectedDifficulty) != 0 {
-			return fmt.Errorf("invlid difficulty: expect=%s, found=%v\n", expectedDifficulty, header.Difficulty)
+		if header.Difficulty.Cmp(&expectedDifficulty) != 0 {
+			return fmt.Errorf("invlid difficulty: expect=%s, found=%v\n", &expectedDifficulty, header.Difficulty)
 		}
 	}
 	return nil
@@ -996,7 +996,7 @@ func (c *AuRa) epochSet(chain rules.ChainHeaderReader, e *NonTransactionalEpochR
 	return finalityChecker.signers, epochTransitionNumber, nil
 }
 
-func (c *AuRa) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentStep uint64) *uint256.Int {
+func (c *AuRa) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentStep uint64) uint256.Int {
 	currentStep := c.step.inner.inner.Load()
 	currentEmptyStepsLen := 0
 	return calculateScore(parentStep, currentStep, uint64(currentEmptyStepsLen))
@@ -1005,13 +1005,13 @@ func (c *AuRa) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime ui
 // calculateScore - analog of PoW difficulty:
 //
 //	sqrt(U256::max_value()) + parent_step - current_step + current_empty_steps
-func calculateScore(parentStep, currentStep, currentEmptySteps uint64) *uint256.Int {
+func calculateScore(parentStep, currentStep, currentEmptySteps uint64) uint256.Int {
 	maxU128 := uint256.NewInt(0).SetAllOne()
 	maxU128 = maxU128.Rsh(maxU128, 128)
 	res := maxU128.Add(maxU128, uint256.NewInt(parentStep))
 	res = res.Sub(res, uint256.NewInt(currentStep))
 	res = res.Add(res, uint256.NewInt(currentEmptySteps))
-	return res
+	return *res
 }
 
 func (c *AuRa) SealHash(header *types.Header) common.Hash {

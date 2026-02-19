@@ -482,15 +482,15 @@ func (c *Clique) Seal(chain rules.ChainHeaderReader, blockWithReceipts *types.Bl
 // that a new block should have:
 // * DIFF_NOTURN(2) if BLOCK_NUMBER % SIGNER_COUNT != SIGNER_INDEX
 // * DIFF_INTURN(1) if BLOCK_NUMBER % SIGNER_COUNT == SIGNER_INDEX
-func (c *Clique) CalcDifficulty(chain rules.ChainHeaderReader, _, _ uint64, _ uint256.Int, parentNumber uint64, parentHash, _ common.Hash, _ uint64) *uint256.Int {
+func (c *Clique) CalcDifficulty(chain rules.ChainHeaderReader, _, _ uint64, _ uint256.Int, parentNumber uint64, parentHash, _ common.Hash, _ uint64) uint256.Int {
 	snap, err := c.Snapshot(chain, parentNumber, parentHash, nil)
 	if err != nil {
-		return nil
+		return uint256.Int{}
 	}
 	c.lock.RLock()
 	signer := c.signer
 	c.lock.RUnlock()
-	return uint256.NewInt(calcDifficulty(snap, signer))
+	return *uint256.NewInt(calcDifficulty(snap, signer))
 }
 
 func calcDifficulty(snap *Snapshot, signer common.Address) uint64 {
