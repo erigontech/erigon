@@ -538,7 +538,6 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 type RPCTransaction struct {
 	BlockHash            *common.Hash               `json:"blockHash"`
 	BlockNumber          *hexutil.Big               `json:"blockNumber"`
-	BlockTimestamp       *hexutil.Uint64            `json:"blockTimestamp"`
 	From                 common.Address             `json:"from"`
 	Gas                  hexutil.Uint64             `json:"gas"`
 	GasPrice             *hexutil.Big               `json:"gasPrice,omitempty"`
@@ -564,7 +563,7 @@ type RPCTransaction struct {
 
 // NewRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
-func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime uint64, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
+func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
 	// Determine the signer. For replay-protected transactions, use the most permissive
 	// signer, because we assume that signers are backwards-compatible with old
 	// transactions. For non-protected transactions, the homestead signer is used
@@ -637,7 +636,6 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
-		result.BlockTimestamp = (*hexutil.Uint64)(&blockTime)
 		result.TransactionIndex = (*hexutil.Uint64)(&index)
 	}
 	return result
@@ -683,5 +681,5 @@ func NewRPCBorTransaction(opaqueTxn types.Transaction, txHash common.Hash, block
 
 // newRPCTransactionFromBlockAndTxGivenIndex returns a transaction that will serialize to the RPC representation.
 func newRPCTransactionFromBlockAndTxGivenIndex(b *types.Block, txn types.Transaction, index uint64) *RPCTransaction {
-	return NewRPCTransaction(txn, b.Hash(), b.Time(), b.NumberU64(), index, b.BaseFee())
+	return NewRPCTransaction(txn, b.Hash(), b.NumberU64(), index, b.BaseFee())
 }
