@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package stagedsync
+package builderstages
 
 import (
 	"math/big"
@@ -28,14 +28,14 @@ import (
 )
 
 // Reported in https://audits.sherlock.xyz/contests/1140/voting/70
-func TestMiningBlock_AvailableRlpSpace_BugReproduction(t *testing.T) {
+func TestBuiltBlock_AvailableRlpSpace_BugReproduction(t *testing.T) {
 	// Simulate post-Osaka scenario: block number < timestamp, but timestamp > Osaka activation
 	header := &types.Header{
 		Number: big.NewInt(27500000), // Block number (smaller than Osaka timestamp)
 		Time:   1764800001,           // Timestamp (greater than Osaka activation time)
 	}
 
-	mb := &MiningBlock{
+	mb := &BuiltBlock{
 		Header:      header,
 		Uncles:      []*types.Header{},
 		Withdrawals: nil,

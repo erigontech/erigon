@@ -233,18 +233,8 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
 		return err
 	}
-	if tx.To == nil {
-		b[0] = 128
-	} else {
-		b[0] = 128 + 20
-	}
-	if _, err := w.Write(b[:1]); err != nil {
+	if err := rlp.EncodeOptionalAddress(tx.To, w, b); err != nil {
 		return err
-	}
-	if tx.To != nil {
-		if _, err := w.Write(tx.To[:]); err != nil {
-			return err
-		}
 	}
 	if err := rlp.EncodeUint256(*tx.Value, w, b); err != nil {
 		return err
