@@ -115,7 +115,7 @@ func CalcBaseFee(config *chain.Config, parent *types.Header) *uint256.Int {
 	)
 	// If the parent gasUsed is the same as the target, the baseFee remains unchanged.
 	if parent.GasUsed == parentGasTarget {
-		return parent.BaseFee
+		return new(uint256.Int).Set(parent.BaseFee)
 	}
 	if parent.GasUsed > parentGasTarget {
 		// If the parent block used more gas than its target, the baseFee should increase.
