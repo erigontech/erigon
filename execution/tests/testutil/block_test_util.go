@@ -384,14 +384,20 @@ func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
 	return validBlocks, nil
 }
 
-// equalPtr reports whether two optional pointer values are equal.
+// equalPtr reports whether two optional pointers point to equal values.
 func equalPtr[T comparable](a, b *T) bool {
-	return (a == nil) == (b == nil) && (a == nil || *a == *b)
+	if a == nil {
+		return b == nil
+	}
+	return b != nil && *a == *b
 }
 
-// equalBigInt reports whether two optional *big.Int values are equal.
-func equalBigInt(a, b *big.Int) bool {
-	return (a == nil) == (b == nil) && (a == nil || a.Cmp(b) == 0)
+// equalPtrBigInt reports whether two optional *big.Int pointers point to equal values.
+func equalPtrBigInt(a, b *big.Int) bool {
+	if a == nil {
+		return b == nil
+	}
+	return b != nil && a.Cmp(b) == 0
 }
 
 func validateHeader(h *btHeader, h2 *types.Header) error {
@@ -446,7 +452,7 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if h.Timestamp != h2.Time {
 		return fmt.Errorf("timestamp: want: %v have: %v", h.Timestamp, h2.Time)
 	}
-	if !equalBigInt(h.BaseFeePerGas, h2.BaseFee) {
+	if !equalPtrBigInt(h.BaseFeePerGas, h2.BaseFee) {
 		return fmt.Errorf("baseFeePerGas: want: %v have: %v", h.BaseFeePerGas, h2.BaseFee)
 	}
 	if !equalPtr(h.WithdrawalsRoot, h2.WithdrawalsHash) {
