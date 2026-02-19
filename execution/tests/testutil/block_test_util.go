@@ -358,30 +358,38 @@ func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
 				return nil, fmt.Errorf("block #%v insertion into chain failed: %w", cb.Number(), err1)
 			}
 		} else if b.BlockHeader == nil {
-			roTx, err := m.DB.BeginRo(m.Ctx)
-			if err != nil {
-				return nil, err
-			}
-			defer roTx.Rollback()
-			canonical, _, cErr := bt.br.CanonicalHash(context.Background(), roTx, cb.NumberU64())
+			canon, cErr := bt.isCanonical(m, cb)
 			if cErr != nil {
 				return nil, cErr
 			}
-			if canonical == cb.Hash() {
+			if canon {
 				return nil, fmt.Errorf("block (index %d) insertion should have failed due to: %v", bi, b.ExpectException)
 			}
-			roTx.Rollback()
 		}
 		if b.BlockHeader == nil {
 			continue
 		}
 		// validate RLP decoding by checking all values against test file JSON
-		if err = validateHeader(b.BlockHeader, cb.Header()); err != nil {
+		if err = validateHeader(b.BlockHeader, cb.HeaderNoCopy()); err != nil {
 			return nil, fmt.Errorf("deserialised block header validation failed: %w", err)
 		}
 		validBlocks = append(validBlocks, b)
 	}
 	return validBlocks, nil
+}
+
+// isCanonical reports whether block is the canonical block at its height.
+func (bt *BlockTest) isCanonical(m *mock.MockSentry, block *types.Block) (bool, error) {
+	roTx, err := m.DB.BeginRo(m.Ctx)
+	if err != nil {
+		return false, err
+	}
+	defer roTx.Rollback()
+	canonical, _, err := bt.br.CanonicalHash(context.Background(), roTx, block.NumberU64())
+	if err != nil {
+		return false, err
+	}
+	return canonical == block.Hash(), nil
 }
 
 // equalPtr reports whether two optional pointers point to equal values.
@@ -528,7 +536,7 @@ func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m 
 	// all blocks have been processed by BlockChain, as they may not
 	// be part of the longest chain until last block is imported.
 	for b, _ := m.BlockReader.CurrentBlock(tx); b != nil && b.NumberU64() != 0; {
-		if err := validateHeader(bmap[b.Hash()].BlockHeader, b.Header()); err != nil {
+		if err := validateHeader(bmap[b.Hash()].BlockHeader, b.HeaderNoCopy()); err != nil {
 			return fmt.Errorf("imported block header validation failed: %w", err)
 		}
 		number := rawdb.ReadHeaderNumber(tx, b.ParentHash())
