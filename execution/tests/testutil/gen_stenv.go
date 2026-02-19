@@ -5,6 +5,7 @@ package testutil
 import (
 	"encoding/json"
 	"errors"
+	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -18,22 +19,28 @@ var _ = (*stEnvMarshaling)(nil)
 func (s stEnv) MarshalJSON() ([]byte, error) {
 	type stEnv struct {
 		Coinbase      common.UnprefixedAddress `json:"currentCoinbase"   gencodec:"required"`
-		Difficulty    *uint256.Int             `json:"currentDifficulty" gencodec:"required"`
-		Random        *uint256.Int             `json:"currentRandom"     gencodec:"optional"`
+		Difficulty    *math.HexOrDecimal256    `json:"currentDifficulty" gencodec:"required"`
+		Random        *math.HexOrDecimal256    `json:"currentRandom"     gencodec:"optional"`
 		GasLimit      math.HexOrDecimal64      `json:"currentGasLimit"   gencodec:"required"`
 		Number        math.HexOrDecimal64      `json:"currentNumber"     gencodec:"required"`
 		Timestamp     math.HexOrDecimal64      `json:"currentTimestamp"  gencodec:"required"`
-		BaseFee       *uint256.Int             `json:"currentBaseFee"    gencodec:"optional"`
+		BaseFee       *math.HexOrDecimal256    `json:"currentBaseFee"    gencodec:"optional"`
 		ExcessBlobGas *math.HexOrDecimal64     `json:"currentExcessBlobGas" gencodec:"optional"`
 	}
 	var enc stEnv
 	enc.Coinbase = common.UnprefixedAddress(s.Coinbase)
-	enc.Difficulty = s.Difficulty
-	enc.Random = s.Random
+	if s.Difficulty != nil {
+		enc.Difficulty = (*math.HexOrDecimal256)(s.Difficulty.ToBig())
+	}
+	if s.Random != nil {
+		enc.Random = (*math.HexOrDecimal256)(s.Random.ToBig())
+	}
 	enc.GasLimit = math.HexOrDecimal64(s.GasLimit)
 	enc.Number = math.HexOrDecimal64(s.Number)
 	enc.Timestamp = math.HexOrDecimal64(s.Timestamp)
-	enc.BaseFee = s.BaseFee
+	if s.BaseFee != nil {
+		enc.BaseFee = (*math.HexOrDecimal256)(s.BaseFee.ToBig())
+	}
 	enc.ExcessBlobGas = (*math.HexOrDecimal64)(s.ExcessBlobGas)
 	return json.Marshal(&enc)
 }
@@ -42,12 +49,12 @@ func (s stEnv) MarshalJSON() ([]byte, error) {
 func (s *stEnv) UnmarshalJSON(input []byte) error {
 	type stEnv struct {
 		Coinbase      *common.UnprefixedAddress `json:"currentCoinbase"   gencodec:"required"`
-		Difficulty    *uint256.Int              `json:"currentDifficulty" gencodec:"required"`
-		Random        *uint256.Int              `json:"currentRandom"     gencodec:"optional"`
+		Difficulty    *math.HexOrDecimal256     `json:"currentDifficulty" gencodec:"required"`
+		Random        *math.HexOrDecimal256     `json:"currentRandom"     gencodec:"optional"`
 		GasLimit      *math.HexOrDecimal64      `json:"currentGasLimit"   gencodec:"required"`
 		Number        *math.HexOrDecimal64      `json:"currentNumber"     gencodec:"required"`
 		Timestamp     *math.HexOrDecimal64      `json:"currentTimestamp"  gencodec:"required"`
-		BaseFee       *uint256.Int              `json:"currentBaseFee"    gencodec:"optional"`
+		BaseFee       *math.HexOrDecimal256     `json:"currentBaseFee"    gencodec:"optional"`
 		ExcessBlobGas *math.HexOrDecimal64      `json:"currentExcessBlobGas" gencodec:"optional"`
 	}
 	var dec stEnv
@@ -61,9 +68,9 @@ func (s *stEnv) UnmarshalJSON(input []byte) error {
 	if dec.Difficulty == nil {
 		return errors.New("missing required field 'currentDifficulty' for stEnv")
 	}
-	s.Difficulty = dec.Difficulty
+	s.Difficulty = uint256.MustFromBig((*big.Int)(dec.Difficulty))
 	if dec.Random != nil {
-		s.Random = dec.Random
+		s.Random = uint256.MustFromBig((*big.Int)(dec.Random))
 	}
 	if dec.GasLimit == nil {
 		return errors.New("missing required field 'currentGasLimit' for stEnv")
@@ -78,7 +85,7 @@ func (s *stEnv) UnmarshalJSON(input []byte) error {
 	}
 	s.Timestamp = uint64(*dec.Timestamp)
 	if dec.BaseFee != nil {
-		s.BaseFee = dec.BaseFee
+		s.BaseFee = uint256.MustFromBig((*big.Int)(dec.BaseFee))
 	}
 	if dec.ExcessBlobGas != nil {
 		s.ExcessBlobGas = (*uint64)(dec.ExcessBlobGas)
