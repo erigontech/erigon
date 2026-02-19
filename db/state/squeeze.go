@@ -516,14 +516,14 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		}
 		domains.Close()
 
-		if err := rwTx.Commit(); err != nil {
+		if err = rwTx.Commit(); err != nil {
 			return err
 		}
 
 		fromStep := kv.Step(a.EndTxNumMinimax() / a.StepSize())
 		toStep := kv.Step(lastToTxNum / a.StepSize())
 		logger.Info("[rebuild_commitment_history] build files", "fromStep", fromStep, "toStep", toStep, "lastToTxNum", lastToTxNum)
-		if err := a.BuildFiles2(ctx, fromStep, toStep, false); err != nil {
+		if err = a.BuildFiles2(ctx, fromStep, toStep, false); err != nil {
 			return err
 		}
 
@@ -648,11 +648,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 						}
 					}
 				}
-				if domains.Size() > uint64(batchSize) {
-					if err := flushDomainsAndRebuild(); err != nil {
-						return err
-					}
-				}
 				// Set correct state reader and clear stale warmup cache before TouchKey calls begin.
 				toTxNum := batch.TxNum(blockNum)
 				domains.SetBlockNum(blockNum)
@@ -693,7 +688,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 		blockFrom = batchEnd + 1
 
-		if blocksProcessed >= flushEveryBlocks || blockFrom > blockTo {
+		if blocksProcessed >= flushEveryBlocks || blockFrom > blockTo || domains.Size() > uint64(batchSize) {
 			if err := flushDomainsAndRebuild(); err != nil {
 				return nil, err
 			}
