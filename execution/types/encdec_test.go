@@ -159,6 +159,10 @@ func (tr *TRand) RandHeaderReflectAllFields(skipFields ...string) *Header {
 			field.Set(reflect.ValueOf(BlockNonce(tr.RandBytes(8))))
 		case reflect.TypeFor[*big.Int]():
 			field.Set(reflect.ValueOf(tr.RandBig()))
+		case reflect.TypeFor[uint256.Int]():
+			field.Set(reflect.ValueOf(*tr.RandUint256()))
+		case reflect.TypeFor[*uint256.Int]():
+			field.Set(reflect.ValueOf(tr.RandUint256()))
 		case reflect.TypeFor[uint64]():
 			field.Set(reflect.ValueOf(*tr.RandUint64()))
 		case reflect.TypeFor[*uint64]():
