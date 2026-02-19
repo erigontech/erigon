@@ -148,11 +148,10 @@ func (logs Logs) Filter(addrMap map[common.Address]struct{}, topics [][]common.H
 		}
 		if found {
 			o = append(o, v)
-		}
-
-		logCount += 1
-		if maxLogs != 0 && logCount >= maxLogs {
-			break
+			logCount += 1
+			if maxLogs != 0 && logCount >= maxLogs {
+				break
+			}
 		}
 	}
 	return o
@@ -172,6 +171,10 @@ func (logs Logs) ContainingTopics(addrMap map[common.Address]struct{}, topicsMap
 		//topicsMap len zero match any topics
 		if len(topicsMap) == 0 {
 			o = append(o, v)
+			logCount += 1
+			if maxLogs != 0 && logCount >= maxLogs {
+				break
+			}
 		} else {
 			for i := range v.Topics {
 				//Contain any topics that matched
@@ -181,11 +184,11 @@ func (logs Logs) ContainingTopics(addrMap map[common.Address]struct{}, topicsMap
 			}
 			if found {
 				o = append(o, v)
+				logCount += 1
+				if maxLogs != 0 && logCount >= maxLogs {
+					break
+				}
 			}
-		}
-		logCount += 1
-		if maxLogs != 0 && logCount >= maxLogs {
-			break
 		}
 	}
 	return o
