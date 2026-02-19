@@ -275,7 +275,7 @@ func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int) {
 	select {
 	case w.work <- warmupWorkItem{hashedKey: hashedKey, startDepth: startDepth}:
 	case <-w.ctx.Done():
-	default: // drop if workers are busy; warmup is best-effort
+	default: // non-blocking
 	}
 }
 
