@@ -310,6 +310,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			}
 			hash := crypto.Keccak256Hash(req.BlockAccessList)
 			header.BlockAccessListHash = &hash
+			blockAccessListBytes = req.BlockAccessList
 		}
 		if req.SlotNumber != nil {
 			slotNumber := uint64(*req.SlotNumber)
