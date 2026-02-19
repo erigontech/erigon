@@ -77,7 +77,7 @@ func NewEngineBlockDownloader(
 		panic(fmt.Errorf("failed to create badHeaders cache: %w", err))
 	}
 	// the block downloader has fcuTimeout=0 to avoid having to deal with async fcu
-	chainRW := chainreader.NewChainReaderEth1(config, executionClient, 0)
+	chainRW := chainreader.NewChainReaderEth1(config, executionClient, 0 /* fcuTimeout */)
 	return &EngineBlockDownloader{
 		backgroundCtx: ctx,
 		db:            db,
