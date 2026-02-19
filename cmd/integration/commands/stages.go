@@ -930,6 +930,14 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		doms.ClearRam(true)
 		return nil
 	}
+	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
+	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
+	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+	agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
+	agg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
+	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	agg.PeriodicalyPrintProcessSet(ctx)
+	agg.LockWorkersEditing()
 
 	for {
 		if err := stagedsync.SpawnExecuteBlocksStage(s, sync, doms, tx, block, ctx, cfg, logger); err != nil {
