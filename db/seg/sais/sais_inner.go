@@ -8,6 +8,11 @@
 
 package sais
 
+import (
+	"bytes"
+	"unsafe"
+)
+
 func sais_32(text []int32, textMax int, sa, tmp []int32) {
 	if len(sa) != len(text) || len(tmp) < textMax {
 		panic("sais: misuse of sais_32")
@@ -227,12 +232,10 @@ func assignID_32(text []int32, sa []int32, numLMS int) int {
 		}
 		{
 			n := int(n)
-			this := text[j:][:n]
-			last := text[lastPos:][:n]
-			for i := 0; i < n; i++ {
-				if this[i] != last[i] {
-					goto New
-				}
+			this := unsafe.Slice((*byte)(unsafe.Pointer(&text[j])), n*4)
+			last := unsafe.Slice((*byte)(unsafe.Pointer(&text[lastPos])), n*4)
+			if !bytes.Equal(this, last) {
+				goto New
 			}
 			goto Same
 		}
