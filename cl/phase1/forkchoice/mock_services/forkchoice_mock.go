@@ -65,6 +65,7 @@ type ForkChoiceStorageMock struct {
 	LCUpdates                 map[uint64]*cltypes.LightClientUpdate
 	SyncContributionPool      sync_contribution_pool.SyncContributionPool
 	Headers                   map[common.Hash]*cltypes.BeaconBlockHeader
+	Blocks                    map[common.Hash]*cltypes.SignedBeaconBlock
 	GetBeaconCommitteeMock    func(slot, committeeIndex uint64) ([]uint64, error)
 
 	Pool pool.OperationsPool
@@ -193,6 +194,7 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		LightClientBootstraps:     make(map[common.Hash]*cltypes.LightClientBootstrap),
 		LCUpdates:                 make(map[uint64]*cltypes.LightClientUpdate),
 		Headers:                   make(map[common.Hash]*cltypes.BeaconBlockHeader),
+		Blocks:                    make(map[common.Hash]*cltypes.SignedBeaconBlock),
 		GetBeaconCommitteeMock:    nil,
 		Eth1Hashes:                make(map[common.Hash]common.Hash),
 		SyncContributionPool:      makeSyncContributionPoolMock(t),
@@ -372,6 +374,12 @@ func (f *ForkChoiceStorageMock) GetHeader(
 	blockRoot common.Hash,
 ) (*cltypes.BeaconBlockHeader, bool) {
 	return f.Headers[blockRoot], f.Headers[blockRoot] != nil
+}
+
+func (f *ForkChoiceStorageMock) GetBlock(
+	blockRoot common.Hash,
+) (*cltypes.SignedBeaconBlock, bool) {
+	return f.Blocks[blockRoot], f.Blocks[blockRoot] != nil
 }
 
 func (f *ForkChoiceStorageMock) GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
