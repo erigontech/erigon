@@ -555,6 +555,10 @@ func (f *ForkChoiceStore) GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlock
 	return f.forkGraph.GetHeader(blockRoot)
 }
 
+func (f *ForkChoiceStore) GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	return f.forkGraph.GetBlock(blockRoot)
+}
+
 func (f *ForkChoiceStore) GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
 	return f.forkGraph.GetBalances(blockRoot)
 }
