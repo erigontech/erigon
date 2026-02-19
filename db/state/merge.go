@@ -25,7 +25,6 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/tidwall/btree"
 
@@ -776,12 +775,6 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 			comp.DisableFsync()
 		}
 
-		var tAdd, tCompress, tIndex time.Time
-		defer func() {
-			log.Debug("[merge] timings", "name", path.Base(datPath), "tAdd", time.Since(tAdd), "tCompress", time.Since(tCompress), "tIndex", time.Since(tIndex))
-		}()
-		tAdd = time.Now()
-
 		pagedWr := ht.dataWriter(comp)
 		p := ps.AddNew(path.Base(datPath), 1)
 		defer ps.Delete(p)
@@ -867,7 +860,6 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 				}
 			}
 		}
-		tCompress = time.Now()
 		if err := pagedWr.Compress(); err != nil {
 			return nil, nil, err
 		}
@@ -878,7 +870,6 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 		ps.Delete(p)
 
-		tIndex = time.Now()
 		if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
 			return nil, nil, err
 		}
