@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
@@ -36,6 +37,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
@@ -54,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/builder/builderstages"
 	"github.com/erigontech/erigon/execution/chain"
 	enginehelpers "github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/execmodule"
@@ -306,13 +309,19 @@ func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.Pr
 
 func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine rules.Engine, blockBufferSize int, withTxPool bool, opts ...Option) *MockSentry {
 	opt := applyOptions(opts)
-	tmpdir := os.TempDir()
+	tmpdir, err := os.MkdirTemp("", "mock-sentry-*")
+	if err != nil {
+		panic(err)
+	}
 	if tb != nil {
-		tmpdir = tb.TempDir()
+		// we can't use tb.TempDir() here becuase things like TestExecutionSpecBlockchain
+		// produces test names that cause 'file name too long' errors
+		tb.Cleanup(func() {
+			dir.RemoveAll(tmpdir)
+		})
 	}
 	ctrl := gomock.NewController(tb)
 	dirs := datadir.New(tmpdir)
-	var err error
 
 	cfg := ethconfig.Defaults
 	cfg.StateStream = true
@@ -506,7 +515,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	snapDownloader := mockDownloader(ctrl, mock.Dirs.Snap)
 
-	miningConfig := cfg.Miner
+	miningConfig := cfg.Builder
 	miningConfig.Etherbase = mock.Address
 	miningCancel := make(chan struct{})
 	go func() {
@@ -516,13 +525,13 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	// proof-of-stake block building
 	assembleBlockPOS := func(param *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
-		miningStatePos := stagedsync.NewMiningState(&cfg.Miner)
-		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
+		builderStatePos := builderstages.NewBuilderState(&cfg.Builder)
+		builderStatePos.BuilderConfig.Etherbase = param.SuggestedFeeRecipient
 		proposingSync := stagedsync.New(
 			cfg.Sync,
-			stagedsync.MiningStages(
+			builderstages.BuilderStages(
 				mock.Ctx,
-				stagedsync.StageMiningCreateBlockCfg(miningStatePos, mock.ChainConfig, mock.Engine, param, mock.BlockReader),
+				builderstages.StageBuilderCreateBlockCfg(builderStatePos, mock.ChainConfig, mock.Engine, param, mock.BlockReader),
 				stagedsync.StageExecuteBlocksCfg(
 					mock.DB,
 					prune,
@@ -542,11 +551,11 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 					false, /*experimentalBAL*/
 				),
 				stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd),
-				stagedsync.StageMiningExecCfg(miningStatePos, nil /* notifier */, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, interrupt, param.PayloadId, mock.TxPool, mock.BlockReader),
-				stagedsync.StageMiningFinishCfg(mock.ChainConfig, mock.Engine, miningStatePos, miningCancel, mock.BlockReader, latestBlockBuiltStore),
+				builderstages.StageBuilderExecCfg(builderStatePos, nil /* notifier */, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, interrupt, param.PayloadId, mock.TxPool, mock.BlockReader),
+				builderstages.StageBuilderFinishCfg(mock.ChainConfig, mock.Engine, builderStatePos, miningCancel, mock.BlockReader, latestBlockBuiltStore),
 			),
-			stagedsync.MiningUnwindOrder,
-			stagedsync.MiningPruneOrder,
+			builderstages.BuilderUnwindOrder,
+			builderstages.BuilderPruneOrder,
 			logger,
 			stages.ModeBlockProduction,
 		)
@@ -554,7 +563,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		if err := stageloop.MiningStep(ctx, mock.DB, proposingSync, tmpdir, logger); err != nil {
 			return nil, err
 		}
-		block := <-miningStatePos.MiningResultCh
+		block := <-builderStatePos.BuilderResultCh
 		return block, nil
 	}
 
@@ -617,14 +626,15 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	mock.sentriesClient.Hd.StartPoSDownloader(mock.Ctx, sendHeaderRequest, penalize)
 
 	// pow mining
-	miner := stagedsync.NewMiningState(&miningConfig)
+	// TODO(yperbasis) remove pow mining
+	miner := builderstages.NewBuilderState(&miningConfig)
 	mock.PendingBlocks = miner.PendingResultCh
-	mock.MinedBlocks = miner.MiningResultCh
+	mock.MinedBlocks = miner.BuilderResultCh
 	mock.MiningSync = stagedsync.New(
 		cfg.Sync,
-		stagedsync.MiningStages(
+		builderstages.BuilderStages(
 			mock.Ctx,
-			stagedsync.StageMiningCreateBlockCfg(miner, mock.ChainConfig, mock.Engine, nil, mock.BlockReader),
+			builderstages.StageBuilderCreateBlockCfg(miner, mock.ChainConfig, mock.Engine, nil, mock.BlockReader),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
 				prune,
@@ -644,11 +654,11 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 				/*experimentalBAL*/ false,
 			),
 			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd),
-			stagedsync.StageMiningExecCfg(miner, nil, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, mock.BlockReader),
-			stagedsync.StageMiningFinishCfg(mock.ChainConfig, mock.Engine, miner, miningCancel, mock.BlockReader, latestBlockBuiltStore),
+			builderstages.StageBuilderExecCfg(miner, nil, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, mock.BlockReader),
+			builderstages.StageBuilderFinishCfg(mock.ChainConfig, mock.Engine, miner, miningCancel, mock.BlockReader, latestBlockBuiltStore),
 		),
-		stagedsync.MiningUnwindOrder,
-		stagedsync.MiningPruneOrder,
+		builderstages.BuilderUnwindOrder,
+		builderstages.BuilderPruneOrder,
 		logger,
 		stages.ModeBlockProduction,
 	)
@@ -721,15 +731,17 @@ func MockWithTxPoolCancun(t *testing.T) *MockSentry {
 	funds := big.NewInt(1 * common.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := chain.AllProtocolChanges
 
+	var chainConfig chain.Config
+	err := copier.CopyWithOption(&chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true})
+	require.NoError(t, err)
 	// disable post-cancun forks
 	chainConfig.PragueTime = nil
 	chainConfig.OsakaTime = nil
 	chainConfig.AmsterdamTime = nil
 
 	gspec := &types.Genesis{
-		Config: chainConfig,
+		Config: &chainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 		},
@@ -738,12 +750,11 @@ func MockWithTxPoolCancun(t *testing.T) *MockSentry {
 	return MockWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true)
 }
 
-func MockWithTxPoolOsaka(t *testing.T) *MockSentry {
+func MockWithTxPoolAllProtocolChanges(t *testing.T) *MockSentry {
 	funds := big.NewInt(1 * common.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 	chainConfig := chain.AllProtocolChanges
-	chainConfig.OsakaTime = big.NewInt(0)
 	gspec := &types.Genesis{
 		Config: chainConfig,
 		Alloc: types.GenesisAlloc{
@@ -761,7 +772,7 @@ func (ms *MockSentry) EnableLogs() {
 func (ms *MockSentry) Cfg() ethconfig.Config { return ms.cfg }
 
 func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
-	wr := chainreader.NewChainReaderEth1(ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), uint64(time.Hour))
+	wr := chainreader.NewChainReaderEth1(ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), time.Hour)
 
 	streamCtx, cancel := context.WithCancel(ms.Ctx)
 	defer cancel()

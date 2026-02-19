@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
@@ -46,13 +47,18 @@ import (
 )
 
 // Do 1 step to start txPool
-func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions) {
-	chain, err := blockgen.GenerateChain(mockSentry.ChainConfig, mockSentry.Genesis, mockSentry.Engine, mockSentry.DB, 1 /*number of blocks:*/, func(i int, b *blockgen.BlockGen) {
+func oneBlockSteps(mockSentry *mock.MockSentry, require *require.Assertions, blocks int) {
+	chain, err := blockgen.GenerateChain(mockSentry.ChainConfig, mockSentry.Genesis, mockSentry.Engine, mockSentry.DB, blocks, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	require.NoError(err)
 	err = mockSentry.InsertChain(chain)
 	require.NoError(err)
+}
+
+// Do 1 step to start txPool
+func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions) {
+	oneBlockSteps(mockSentry, require, 1)
 }
 
 func newBaseApiForTest(m *mock.MockSentry) *jsonrpc.BaseAPI {
@@ -127,7 +133,7 @@ func TestGetBlobsV1(t *testing.T) {
 
 func TestGetBlobsV2(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
-	mockSentry, require := mock.MockWithTxPoolOsaka(t), require.New(t)
+	mockSentry, require := mock.MockWithTxPoolAllProtocolChanges(t), require.New(t)
 	oneBlockStep(mockSentry, require)
 
 	wrappedTxn := types.MakeV1WrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
@@ -187,7 +193,7 @@ func TestGetBlobsV2(t *testing.T) {
 
 func TestGetBlobsV3(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
-	mockSentry, require := mock.MockWithTxPoolOsaka(t), require.New(t)
+	mockSentry, require := mock.MockWithTxPoolAllProtocolChanges(t), require.New(t)
 	oneBlockStep(mockSentry, require)
 
 	wrappedTxn := types.MakeV1WrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
@@ -246,4 +252,102 @@ func TestGetBlobsV3(t *testing.T) {
 		require.Equal(blobsResp[0].CellProofs[i], hexutil.Bytes(wrappedTxn.Proofs[i][:]))
 		require.Equal(blobsResp[1].CellProofs[i], hexutil.Bytes(wrappedTxn.Proofs[i+128][:]))
 	}
+}
+
+func canonicalHashAt(t *testing.T, db kv.TemporalRoDB, blockNum uint64) common.Hash {
+	t.Helper()
+	var hash common.Hash
+	err := db.View(context.Background(), func(tx kv.Tx) error {
+		var err error
+		hash, err = rawdb.ReadCanonicalHash(tx, blockNum)
+		return err
+	})
+	require.NoError(t, err)
+	return hash
+}
+
+func writeBlockAccessListBytes(t *testing.T, db kv.TemporalRwDB, blockHash common.Hash, blockNum uint64, balBytes []byte) {
+	t.Helper()
+	err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		return rawdb.WriteBlockAccessListBytes(tx, blockHash, blockNum, balBytes)
+	})
+	require.NoError(t, err)
+}
+
+func TestGetPayloadBodiesByHashV2(t *testing.T) {
+	mockSentry, req := mock.MockWithTxPoolAllProtocolChanges(t), require.New(t)
+	oneBlockStep(mockSentry, req)
+
+	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
+	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
+
+	const blockNum = 1
+	blockHash := canonicalHashAt(t, mockSentry.DB, blockNum)
+	req.NotEqual(common.Hash{}, blockHash)
+
+	ctx := context.Background()
+
+	// BAL should be null when not available
+	bodies, err := engineServer.GetPayloadBodiesByHashV2(ctx, []common.Hash{blockHash})
+	req.NoError(err)
+	req.Len(bodies, 1)
+	req.NotNil(bodies[0])
+	req.Nil(bodies[0].BlockAccessList)
+
+	balBytes, err := types.EncodeBlockAccessListBytes(nil)
+	req.NoError(err)
+	writeBlockAccessListBytes(t, mockSentry.DB, blockHash, blockNum, balBytes)
+
+	bodies, err = engineServer.GetPayloadBodiesByHashV2(ctx, []common.Hash{blockHash})
+	req.NoError(err)
+	req.Len(bodies, 1)
+	req.NotNil(bodies[0])
+	req.NotNil(bodies[0].BlockAccessList)
+	req.Equal(hexutil.Bytes(balBytes), bodies[0].BlockAccessList)
+}
+
+func TestGetPayloadBodiesByRangeV2(t *testing.T) {
+	mockSentry, req := mock.MockWithTxPoolAllProtocolChanges(t), require.New(t)
+	oneBlockSteps(mockSentry, req, 2)
+
+	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
+	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
+	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
+
+	const (
+		start = 1
+		count = 2
+	)
+	blockHash1 := canonicalHashAt(t, mockSentry.DB, start)
+	blockHash2 := canonicalHashAt(t, mockSentry.DB, start+1)
+	req.NotEqual(common.Hash{}, blockHash1)
+	req.NotEqual(common.Hash{}, blockHash2)
+
+	ctx := context.Background()
+
+	// BAL should be null when not available
+	bodies, err := engineServer.GetPayloadBodiesByRangeV2(ctx, start, count)
+	req.NoError(err)
+	req.Len(bodies, 2)
+	req.NotNil(bodies[0])
+	req.NotNil(bodies[1])
+	req.Nil(bodies[0].BlockAccessList)
+	req.Nil(bodies[1].BlockAccessList)
+
+	balBytes1, err := types.EncodeBlockAccessListBytes(nil)
+	req.NoError(err)
+	balBytes2 := []byte{0x01, 0x02, 0x03}
+	writeBlockAccessListBytes(t, mockSentry.DB, blockHash1, start, balBytes1)
+	writeBlockAccessListBytes(t, mockSentry.DB, blockHash2, start+1, balBytes2)
+
+	bodies, err = engineServer.GetPayloadBodiesByRangeV2(ctx, start, count)
+	req.NoError(err)
+	req.Len(bodies, 2)
+	req.NotNil(bodies[0])
+	req.NotNil(bodies[1])
+	req.NotNil(bodies[0].BlockAccessList)
+	req.NotNil(bodies[1].BlockAccessList)
+	req.Equal(hexutil.Bytes(balBytes1), bodies[0].BlockAccessList)
+	req.Equal(hexutil.Bytes(balBytes2), bodies[1].BlockAccessList)
 }

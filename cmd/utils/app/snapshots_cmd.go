@@ -232,7 +232,8 @@ var snapshotCommand = cli.Command{
 			Description: "Search for a key in a btree index",
 		},
 		{
-			Name: "rm-all-state-snapshots",
+			Name:    "rm-all-state-snapshots",
+			Aliases: []string{"rm-all-state"},
 			Action: func(cliCtx *cli.Context) error {
 				dirs, l, err := datadir.New(cliCtx.String(utils.DataDirFlag.Name)).MustFlock()
 				if err != nil {
@@ -1435,10 +1436,14 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 		if err != nil {
 			return fmt.Errorf("failed to read PersistReceipts config: %w", err)
 		}
+		log.Warn("This installation doesn't persist receipts cache; ignoring .rcache checks")
+
 		commitmentHistory, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
 		if err != nil {
 			return fmt.Errorf("failed to read CommitmentHistory config: %w", err)
 		}
+		log.Warn("This installation doesn't persist commitment history; ignoring commitment history checks")
+
 		return nil
 	}); err != nil {
 		return err
@@ -1506,6 +1511,11 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 			return fmt.Errorf("failed to replace version file %s: %w", res.Name(), err)
 		}
 		for snapType := kv.Domain(0); snapType < kv.DomainLen; snapType++ {
+			// skip rcache check if this datadir doesn't produce it
+			if snapType == kv.RCacheDomain && !persistReceiptCache {
+				continue
+			}
+
 			schemaVersionMinSup := statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV.MinSupported
 			expectedFileName := strings.Replace(accName, "accounts", snapType.String(), 1)
 			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, expectedFileName), schemaVersionMinSup); err != nil {

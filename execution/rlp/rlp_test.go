@@ -208,3 +208,12 @@ func BenchmarkHashing(b *testing.B) {
 		b.Fatalf("hash wrong, got %x exp %x", got, exp)
 	}
 }
+
+func BenchmarkBlockEncoding(b *testing.B) {
+	block := getBlock(b, 200, 2, 50, "", log.Root())
+	for b.Loop() {
+		if _, err := rlp.EncodeToBytes(block); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

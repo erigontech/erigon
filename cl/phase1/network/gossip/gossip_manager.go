@@ -102,14 +102,9 @@ func (g *GossipManager) Close() error {
 
 func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], conditions ...ConditionFunc) pubsub.ValidatorEx {
 	return func(ctx context.Context, pid peer.ID, msg *pubsub.Message) (result pubsub.ValidationResult) {
-		// Recover from any panics during gossip message processing (e.g., malformed SSZ payloads).
-		// This prevents a single malformed gossip message from crashing the entire erigon process.
 		defer func() {
 			if r := recover(); r != nil {
-				topic := msg.GetTopic()
-				name := extractTopicName(topic)
-				log.Warn("[GossipManager] recovered from panic during message processing", "topic", name, "peer", pid, "panic", r)
-				g.stats.addReject(name)
+				log.Error("[GossipManager] panic in validator, rejecting message", "err", r, "topic", msg.GetTopic())
 				result = pubsub.ValidationReject
 			}
 		}()

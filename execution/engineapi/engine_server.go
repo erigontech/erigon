@@ -99,7 +99,7 @@ func NewEngineServer(
 	fcuTimeout time.Duration,
 	maxReorgDepth uint64,
 ) *EngineServer {
-	chainRW := chainreader.NewChainReaderEth1(config, executionService, uint64(fcuTimeout.Milliseconds()))
+	chainRW := chainreader.NewChainReaderEth1(config, executionService, fcuTimeout)
 	srv := &EngineServer{
 		logger:            logger,
 		config:            config,
@@ -287,19 +287,19 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		if req.BlockAccessList == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
-		if len(*req.BlockAccessList) == 0 {
+		if len(req.BlockAccessList) == 0 {
 			blockAccessList = nil
 			header.BlockAccessListHash = &empty.BlockAccessListHash
 		} else {
-			blockAccessList, err = types.DecodeBlockAccessListBytes(*req.BlockAccessList)
+			blockAccessList, err = types.DecodeBlockAccessListBytes(req.BlockAccessList)
 			if err != nil {
-				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(*req.BlockAccessList))
+				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(req.BlockAccessList))
 				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList decode: %v", err)}
 			}
 			if err := blockAccessList.Validate(); err != nil {
 				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList validate: %v", err)}
 			}
-			hash := crypto.Keccak256Hash(*req.BlockAccessList)
+			hash := crypto.Keccak256Hash(req.BlockAccessList)
 			header.BlockAccessListHash = &hash
 		}
 		if req.SlotNumber != nil {

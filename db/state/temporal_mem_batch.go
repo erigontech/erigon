@@ -149,7 +149,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Get(key); ok {
 			sd.storage.Set(key, append(old, valWithStep))
-			putValueSize += len(val) - len(old[len(old)-1].data)
+			putValueSize += len(val)
 		} else {
 			sd.storage.Set(key, []dataWithTxNum{valWithStep})
 			putKeySize += len(key)
@@ -161,7 +161,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	}
 
 	if old, ok := sd.domains[domain][key]; ok {
-		putValueSize += len(val) - len(old[len(old)-1].data)
+		putValueSize += len(val)
 		sd.domains[domain][key] = append(old, valWithStep)
 	} else {
 		sd.domains[domain][key] = []dataWithTxNum{valWithStep}
