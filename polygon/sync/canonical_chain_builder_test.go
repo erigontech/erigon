@@ -43,9 +43,7 @@ func (v *mockHeaderValidator) ValidateHeader(_ context.Context, _ *types.Header,
 func (v *mockHeaderValidator) UpdateLatestVerifiedHeader(header *types.Header) {}
 
 func makeRoot() *types.Header {
-	return &types.Header{
-		Number: *uint256.NewInt(0),
-	}
+	return &types.Header{}
 }
 
 func makeCCB(root *types.Header) *CanonicalChainBuilder {

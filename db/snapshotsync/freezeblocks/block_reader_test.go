@@ -24,8 +24,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -104,9 +102,7 @@ func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	genesisHeader := &types.Header{
-		Number: *uint256.NewInt(0),
-	}
+	genesisHeader := &types.Header{}
 	genesisHash = genesisHeader.Hash()
 	err = rawdb.WriteHeader(rwTx, genesisHeader)
 	require.NoError(t, err)

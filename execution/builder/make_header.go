@@ -20,8 +20,6 @@
 package builder
 
 import (
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -32,7 +30,7 @@ func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp 
 	header := types.NewEmptyHeaderForAssembling()
 	header.Root = parent.Root
 	header.ParentHash = parent.Hash()
-	header.Number = *new(uint256.Int).AddUint64(&parent.Number, 1)
+	header.Number.AddUint64(&parent.Number, 1)
 	header.Time = timestamp
 
 	parentGasLimit := parent.GasLimit
