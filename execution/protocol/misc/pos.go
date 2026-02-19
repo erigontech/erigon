@@ -17,18 +17,12 @@
 package misc
 
 import (
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
-)
-
-// Constants for The Merge as specified by EIP-3675: Upgrade consensus to Proof-of-Stake
-var (
-	ProofOfStakeDifficulty = common.Num0 // PoS block's difficulty is always 0
 )
 
 // IsPoSHeader reports the header belongs to the PoS-stage with some special fields.
 // This function is not suitable for a part of APIs like Prepare or CalcDifficulty
 // because the header difficulty is not set yet.
 func IsPoSHeader(header *types.Header) bool {
-	return header.Difficulty.Cmp(ProofOfStakeDifficulty) == 0
+	return header.Difficulty.IsZero()
 }
