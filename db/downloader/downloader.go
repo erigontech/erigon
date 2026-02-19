@@ -925,7 +925,19 @@ func (d *Downloader) addPreverifiedSnapshotForDownload(
 	defer d.lock.Unlock()
 	t, ok, err := d.getExistingSnapshotTorrent(name, infoHash)
 	if err != nil {
-		return
+		if ok {
+			// Torrent exists by name but with a different infohash. This can happen on restart
+			// when a previously downloaded snapshot has been recompressed and the preverified
+			// manifest updated. Keep the existing torrent and log a warning instead of failing.
+			d.log(log.LvlWarn, "snapshot already loaded with different infohash, keeping existing",
+				"name", name,
+				"requested", infoHash.HexString(),
+				"existing", t.InfoHash().HexString(),
+			)
+			err = nil
+		} else {
+			return
+		}
 	}
 	// We can invalidate data if a torrent isn't yet loaded.
 	if !ok {
