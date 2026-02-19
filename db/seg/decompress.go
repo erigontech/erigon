@@ -553,13 +553,12 @@ func (d *Decompressor) MadvWillNeed() *Decompressor {
 // Getter represent "reader" or "iterator" that can move across the data of the decompressor
 // The full state of the getter can be captured by saving dataP, and dataBit
 type Getter struct {
-	dataP     uint64    // u64-typed len(data) to reduce amount of type-casting
-	dataLen   uint64    // len(data), precomputed
-	dataBit   int       // bit offset within current byte (0-7)
-	posBitLen int       // cached posDict.bitLen, avoids pointer chain
-	posDict   *posTable // Huffman table for positions
-	posMask   uint16    // cached posDict.mask, avoids pointer chain
-	data      []byte
+	dataP   uint64    // current byte offset in data
+	dataLen uint64    // u64-typed len(data) to reduce amount of type-casting
+	dataBit int       // bit offset within current byte (0-7)
+	posDict *posTable // Huffman table for positions
+	posMask uint16    // pre-computed posDict.mask, avoids pointer chain
+	data    []byte
 	//less hot fields
 	patternDict *patternTable
 	d           *Decompressor
@@ -590,7 +589,7 @@ func (g *Getter) nextPosClean() uint64 {
 // It is structured to be inlinable: the subtable (deep-tree) case is pushed
 // into a separate //go:noinline helper so this function stays small.
 func (g *Getter) nextPos() uint64 {
-	if g.posBitLen == 0 {
+	if g.posDict.bitLen == 0 {
 		return uint64(g.posDict.entries[0].pos)
 	}
 	dataP := g.dataP
@@ -697,7 +696,6 @@ func (d *Decompressor) MakeGetter() *Getter {
 		fName:       d.FileName(),
 	}
 	if d.posDict != nil {
-		g.posBitLen = d.posDict.bitLen
 		g.posMask = d.posDict.mask
 	}
 	return g
