@@ -9,6 +9,8 @@
 
 package sais
 
+import "bytes"
+
 // copy of stdlib `index/suffixarray` SA-IS implementation
 // because Go's stdlib doesn't provide enough low-level api to call necessary funcs
 // also for Erigon - it's important to keep control on files reproducibility
@@ -265,17 +267,10 @@ func assignID_8_32(text []byte, sa []int32, numLMS int) int {
 		if uint32(n) >= uint32(len(text)) {
 			goto Same
 		}
-		{
-			n := int(n)
-			this := text[j:][:n]
-			last := text[lastPos:][:n]
-			for i := 0; i < n; i++ {
-				if this[i] != last[i] {
-					goto New
-				}
-			}
-			goto Same
+		if !bytes.Equal(text[j:][:n], text[lastPos:][:n]) {
+			goto New
 		}
+		goto Same
 	New:
 		id++
 		lastPos = j
