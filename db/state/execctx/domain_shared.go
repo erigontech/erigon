@@ -100,6 +100,11 @@ type SharedDomains struct {
 
 	// stateCache is an optional cache for state data (accounts, storage, code)
 	stateCache *cache.StateCache
+
+	// readAsOfTxNum when non-zero causes GetLatest to use GetAsOf for reads that
+	// would otherwise go to frozen files. This is needed when the commitment state
+	// is behind the domain files' end (e.g. with --experimental.commitment-history).
+	readAsOfTxNum uint64
 }
 
 func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*SharedDomains, error) {
@@ -418,6 +423,24 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
+	// When the commitment is behind the domain files' end (e.g. with
+	// --experimental.commitment-history), use GetAsOf to read the correct
+	// historical state at the commitment point instead of stale future-state
+	// from frozen domain files.
+	if sd.readAsOfTxNum > 0 && domain != kv.CommitmentDomain {
+		v, ok, err := tx.GetAsOf(domain, k, sd.readAsOfTxNum)
+		if err != nil {
+			return nil, 0, fmt.Errorf("storage %x GetAsOf(%d) error: %w", k, sd.readAsOfTxNum, err)
+		}
+		if !ok {
+			return nil, 0, nil
+		}
+		if sd.stateCache != nil {
+			sd.stateCache.Put(domain, k, v)
+		}
+		return v, 0, nil
+	}
+
 	type MeteredGetter interface {
 		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
 	}
@@ -651,7 +674,36 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 	}
 	sd.SetBlockNum(blockNum)
 	sd.SetTxNum(txNum)
+
+	// When commitment history is enabled, the commitment state may be at an earlier
+	// txNum than the accounts/storage/code domain files. In this case, GetLatest would
+	// return stale future-state from frozen domain files. We must use GetAsOf to read
+	// the correct historical state at the commitment point.
+	if txNum > 0 {
+		accountsEndTxNum := tx.StepsInFiles(kv.AccountsDomain)
+		if accountsEndTxNum > 0 {
+			accountsMaxTxNum := uint64((accountsEndTxNum+1)*kv.Step(sd.stepSize)) - 1
+			if txNum < accountsMaxTxNum {
+				sd.readAsOfTxNum = txNum + 1 // GetAsOf uses exclusive upper bound
+				sd.logger.Info("[SharedDomains] commitment behind domain end, using historical reads",
+					"commitmentTxNum", txNum, "commitmentBlock", blockNum,
+					"accountsMaxTxNum", accountsMaxTxNum, "readAsOfTxNum", sd.readAsOfTxNum)
+			}
+		}
+	}
+
 	return txNum, blockNum, nil
+}
+
+// SetReadAsOfTxNum sets the historical read txNum. When non-zero, GetLatest uses
+// GetAsOf to read domain values at the specified txNum instead of the latest.
+func (sd *SharedDomains) SetReadAsOfTxNum(txNum uint64) {
+	sd.readAsOfTxNum = txNum
+}
+
+// ReadAsOfTxNum returns the current historical read limit, or 0 if reads use latest.
+func (sd *SharedDomains) ReadAsOfTxNum() uint64 {
+	return sd.readAsOfTxNum
 }
 
 // ComputeCommitment evaluates commitment for gathered updates.

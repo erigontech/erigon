@@ -588,6 +588,11 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			lastFrozenTxNum = uint64((lastFrozenStep+1)*kv.Step(te.doms.StepSize())) - 1
 		}
 
+		// When commitment is behind domain end, limit HistoryExecution to the commitment point
+		if te.doms.ReadAsOfTxNum() > 0 && initialTxNum < lastFrozenTxNum {
+			lastFrozenTxNum = initialTxNum
+		}
+
 		for blockNum := startBlockNum; blockNum <= maxBlockNum; blockNum++ {
 			select {
 			case readAhead <- blockNum:

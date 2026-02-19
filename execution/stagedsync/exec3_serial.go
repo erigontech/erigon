@@ -63,6 +63,18 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		lastFrozenTxNum = uint64((lastFrozenStep+1)*kv.Step(se.doms.StepSize())) - 1
 	}
 
+	// When commitment is behind the domain files' end (e.g. with --experimental.commitment-history),
+	// we must NOT use HistoryExecution for blocks after the commitment point. Those blocks need
+	// full execution with state writes so the DB state catches up to the domain end.
+	if se.doms.ReadAsOfTxNum() > 0 && initialTxNum < lastFrozenTxNum {
+		// The commitment is at initialTxNum, but domain files go to lastFrozenTxNum.
+		// Only use HistoryExecution for blocks up to the commitment point.
+		lastFrozenTxNum = initialTxNum
+		log.Info(fmt.Sprintf("[%s] commitment behind domain end, limiting HistoryExecution",
+			execStage.LogPrefix()), "commitmentTxNum", initialTxNum, "domainEndTxNum",
+			uint64((lastFrozenStep+1)*kv.Step(se.doms.StepSize()))-1)
+	}
+
 	toBlockNum := maxBlockNum
 	if blockLimit > 0 {
 		toBlockNum = min(maxBlockNum, blockNum+blockLimit-1)
