@@ -22,8 +22,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
@@ -45,7 +43,7 @@ type ExecutionPayload struct {
 	GasUsed         hexutil.Uint64      `json:"gasUsed"       gencodec:"required"`
 	Timestamp       hexutil.Uint64      `json:"timestamp"     gencodec:"required"`
 	ExtraData       hexutil.Bytes       `json:"extraData"     gencodec:"required"`
-	BaseFeePerGas   *uint256.Int        `json:"baseFeePerGas" gencodec:"required"`
+	BaseFeePerGas   *hexutil.Big        `json:"baseFeePerGas" gencodec:"required"`
 	BlockHash       common.Hash         `json:"blockHash"     gencodec:"required"`
 	Transactions    []hexutil.Bytes     `json:"transactions"  gencodec:"required"`
 	Withdrawals     []*types.Withdrawal `json:"withdrawals"`
@@ -200,7 +198,7 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 		GasUsed:       hexutil.Uint64(header.GasUsed),
 		Timestamp:     hexutil.Uint64(header.Timestamp),
 		ExtraData:     header.ExtraData,
-		BaseFeePerGas: baseFee,
+		BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
 		BlockHash:     gointerfaces.ConvertH256ToHash(header.BlockHash),
 		Transactions:  transactions,
 	}
@@ -242,7 +240,7 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 		GasUsed:       hexutil.Uint64(payload.GasUsed),
 		Timestamp:     hexutil.Uint64(payload.Timestamp),
 		ExtraData:     payload.ExtraData,
-		BaseFeePerGas: baseFee,
+		BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
 		BlockHash:     gointerfaces.ConvertH256ToHash(payload.BlockHash),
 		Transactions:  transactions,
 	}

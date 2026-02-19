@@ -119,7 +119,7 @@ func (cc *ExecutionClientRpc) NewPayload(
 		BlockHash:    payload.BlockHash,
 	}
 
-	request.BaseFeePerGas = baseFee
+	request.BaseFeePerGas = (*hexutil.Big)(baseFee.ToBig())
 	payloadBody := payload.Body()
 	// Setup transactionbody
 	request.Withdrawals = payloadBody.Withdrawals

@@ -98,7 +98,7 @@ func MarshalReceipt(
 	} else {
 		baseFee := header.BaseFee
 		gasPrice := new(uint256.Int).Add(baseFee, txn.GetEffectiveGasTip(baseFee))
-		fields["effectiveGasPrice"] = gasPrice
+		fields["effectiveGasPrice"] = (*hexutil.Big)(gasPrice.ToBig())
 	}
 
 	// Assign status if postState is empty.

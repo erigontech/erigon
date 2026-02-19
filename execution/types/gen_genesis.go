@@ -24,7 +24,7 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 		Timestamp             math.HexOrDecimal64                         `json:"timestamp"`
 		ExtraData             hexutil.Bytes                               `json:"extraData"`
 		GasLimit              math.HexOrDecimal64                         `json:"gasLimit"   gencodec:"required"`
-		Difficulty            *uint256.Int                                `json:"difficulty" gencodec:"required"`
+		Difficulty            *math.HexOrDecimal256                       `json:"difficulty" gencodec:"required"`
 		Mixhash               common.Hash                                 `json:"mixHash"`
 		Coinbase              common.Address                              `json:"coinbase"`
 		Alloc                 map[common.UnprefixedAddress]GenesisAccount `json:"alloc"`
@@ -32,7 +32,7 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 		Number                math.HexOrDecimal64                         `json:"number"`
 		GasUsed               math.HexOrDecimal64                         `json:"gasUsed"`
 		ParentHash            common.Hash                                 `json:"parentHash"`
-		BaseFee               *uint256.Int                                `json:"baseFeePerGas"`
+		BaseFee               *math.HexOrDecimal256                       `json:"baseFeePerGas"`
 		BlobGasUsed           *math.HexOrDecimal64                        `json:"blobGasUsed"`
 		ExcessBlobGas         *math.HexOrDecimal64                        `json:"excessBlobGas"`
 		ParentBeaconBlockRoot *common.Hash                                `json:"parentBeaconBlockRoot"`
@@ -46,7 +46,9 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 	enc.Timestamp = math.HexOrDecimal64(g.Timestamp)
 	enc.ExtraData = g.ExtraData
 	enc.GasLimit = math.HexOrDecimal64(g.GasLimit)
-	enc.Difficulty = g.Difficulty
+	if g.Difficulty != nil {
+		enc.Difficulty = (*math.HexOrDecimal256)(g.Difficulty.ToBig())
+	}
 	enc.Mixhash = g.Mixhash
 	enc.Coinbase = g.Coinbase
 	if g.Alloc != nil {
@@ -59,7 +61,9 @@ func (g Genesis) MarshalJSON() ([]byte, error) {
 	enc.Number = math.HexOrDecimal64(g.Number)
 	enc.GasUsed = math.HexOrDecimal64(g.GasUsed)
 	enc.ParentHash = g.ParentHash
-	enc.BaseFee = g.BaseFee
+	if g.BaseFee != nil {
+		enc.BaseFee = (*math.HexOrDecimal256)(g.BaseFee.ToBig())
+	}
 	enc.BlobGasUsed = (*math.HexOrDecimal64)(g.BlobGasUsed)
 	enc.ExcessBlobGas = (*math.HexOrDecimal64)(g.ExcessBlobGas)
 	enc.ParentBeaconBlockRoot = g.ParentBeaconBlockRoot
