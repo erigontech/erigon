@@ -97,7 +97,7 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			log.Warn("[rpc] txn not found", "blockNum", blockNum, "txIndex", txIndex)
 			continue
 		}
-		rpcTx := ethapi.NewRPCTransaction(txn, block.Hash(), block.Time(), blockNum, uint64(txIndex), block.BaseFee())
+		rpcTx := ethapi.NewRPCTransaction(txn, block.Hash(), blockNum, uint64(txIndex), block.BaseFee())
 		txs = append(txs, rpcTx)
 
 		receipt, err := api.receiptsGenerator.GetReceipt(ctx, chainConfig, tx, block.HeaderNoCopy(), txn, txIndex, txNum, nil)
