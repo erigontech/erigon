@@ -101,7 +101,7 @@ func NewEngineServer(
 	fcuTimeout time.Duration,
 	maxReorgDepth uint64,
 ) *EngineServer {
-	chainRW := chainreader.NewChainReaderEth1(config, executionService, uint64(fcuTimeout.Milliseconds()))
+	chainRW := chainreader.NewChainReaderEth1(config, executionService, fcuTimeout)
 	srv := &EngineServer{
 		logger:            logger,
 		config:            config,
