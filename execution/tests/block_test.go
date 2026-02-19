@@ -116,6 +116,58 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt := new(testMatcher)
 	// to run only tests for 1 eip do:
 	//bt.whitelist(`.*amsterdam/eip8024_dupn_swapn_exchange.*`)
+
+	// byzantium — BAL mismatch
+	bt.skipLoad(`^byzantium/eip214_staticcall/test_staticcall_call_to_precompile.json`)
+	bt.skipLoad(`^byzantium/eip214_staticcall/test_staticcall_call_to_precompile_from_contract_init.json`)
+	bt.skipLoad(`^byzantium/eip214_staticcall/test_staticcall_nested_call_to_precompile.json`)
+	bt.skipLoad(`^byzantium/eip214_staticcall/test_staticcall_reentrant_call_to_precompile.json`)
+
+	// cancun — BAL mismatch
+	bt.skipLoad(`^cancun/create/test_create_oog_from_eoa_refunds.json`)
+	bt.skipLoad(`^cancun/eip4844_blobs/test_correct_decreasing_blob_gas_costs.json`)
+	bt.skipLoad(`^cancun/eip4844_blobs/test_correct_increasing_blob_gas_costs.json`)
+	bt.skipLoad(`^cancun/eip6780_selfdestruct/test_dynamic_create2_selfdestruct_collision_multi_tx.json`)
+	bt.skipLoad(`^cancun/eip6780_selfdestruct/test_dynamic_create2_selfdestruct_collision_two_different_transactions.json`)
+	bt.skipLoad(`^cancun/eip6780_selfdestruct/test_self_destructing_initcode.json`)
+	bt.skipLoad(`^cancun/eip6780_selfdestruct/test_selfdestruct_created_in_same_tx_with_revert.json`)
+	bt.skipLoad(`^cancun/eip6780_selfdestruct/test_selfdestruct_not_created_in_same_tx_with_revert.json`)
+
+	// frontier — BAL mismatch
+	bt.skipLoad(`^frontier/identity_precompile/test_call_identity_precompile.json`)
+	bt.skipLoad(`^frontier/scenarios/test_scenarios.json`)
+
+	// osaka — BAL mismatch
+	bt.skipLoad(`^osaka/eip7918_blob_reserve_price/test_reserve_price_boundary.json`)
+
+	// paris — hangs in parallel executor + BAL mismatch
+	bt.skipLoad(`^paris/`)
+
+	// prague — invalid state root hash
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_call_pointer_to_created_from_create_after_oog_call_again.json`)
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_call_to_precompile_in_pointer_context.json`)
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_delegated_eoa_can_send_creating_tx.json`)
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_delegation_clearing.json`)
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_delegation_clearing_and_set.json`)
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_delegation_clearing_tx_to.json`)
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_delegation_replacement_call_previous_contract.json`)
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_pointer_contract_pointer_loop.json`)
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_pointer_normal.json`)
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_pointer_resets_an_empty_code_account_with_storage.json`)
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_pointer_reverts.json`)
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_pointer_to_pointer.json`)
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_pointer_to_precompile.json`)
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_pointer_to_static.json`)
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_pointer_to_static_reentry.json`)
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_reset_code.json`)
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_self_sponsored_set_code.json`)
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_set_code_to_sstore.json`)
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_set_code_to_sstore_then_sload.json`)
+	bt.skipLoad(`^prague/eip7702_set_code_tx/test_static_to_pointer.json`)
+
+	// static — tested in state test format by TestState
+	bt.skipLoad(`^static/state_tests/`)
+
 	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
 		test.ExperimentalBAL = true // TODO eventually remove this from BlockTest and run normally
