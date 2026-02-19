@@ -883,7 +883,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 		in.Close()
 		return true, err
 	}
-	a.IntegrateMergedDirtyFiles(outs, in)
+	a.IntegrateMergedDirtyFiles(in)
 	a.cleanAfterMerge(in)
 	return true, nil
 }
@@ -1532,7 +1532,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	return mf, err
 }
 
-func (a *Aggregator) IntegrateMergedDirtyFiles(outs *SelectedStaticFiles, in *MergedFilesV3) {
+func (a *Aggregator) IntegrateMergedDirtyFiles(in *MergedFilesV3) {
 	defer a.onFilesChange(in.FilePaths(a.dirs.Snap))
 
 	a.dirtyFilesLock.Lock()
@@ -1551,8 +1551,6 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(outs *SelectedStaticFiles, in *Me
 		}
 		ii.integrateMergedDirtyFiles(in.iis[id])
 	}
-
-	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 }
 
 func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
@@ -1611,6 +1609,8 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 			ii.cleanAfterMerge(in.iis[id], dryRun)
 		}
 	}
+
+	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 }
 
 // KeepRecentTxnsOfHistoriesWithDisabledSnapshots limits amount of recent transactions protected from prune in domains history.
@@ -1674,7 +1674,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 			lastIdInDB(a.db, a.d[kv.AccountsDomain]),
 			lastIdInDB(a.db, a.d[kv.CodeDomain]),
 			lastIdInDB(a.db, a.d[kv.StorageDomain]),
-			lastIdInDBNoHistory(a.db, a.d[kv.CommitmentDomain]))
+			lastIdInDB(a.db, a.d[kv.CommitmentDomain]))
 		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB)
 
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
@@ -2021,24 +2021,17 @@ func (at *AggregatorRoTx) Close() {
 	}
 }
 
-// Inverted index tables only
 func lastIdInDB(db kv.RoDB, domain *Domain) (lstInDb kv.Step) {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		lstInDb = domain.maxStepInDB(tx)
-		return nil
-	}); err != nil {
-		log.Warn("[snapshots] lastIdInDB", "err", err)
-	}
-	return lstInDb
-}
+		if domain.HistoryDisabled {
+			lstInDb = domain.maxStepInDBNoHistory(tx)
+		} else {
 
-func lastIdInDBNoHistory(db kv.RoDB, domain *Domain) (lstInDb kv.Step) {
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		//lstInDb = domain.maxStepInDB(tx)
-		lstInDb = domain.maxStepInDBNoHistory(tx)
+			lstInDb = domain.maxStepInDB(tx)
+		}
 		return nil
 	}); err != nil {
-		log.Warn("[snapshots] lastIdInDB", "err", err)
+		log.Warn("[snapshots] lastIdInDB", "history", domain.HistoryDisabled, "err", err)
 	}
 	return lstInDb
 }
