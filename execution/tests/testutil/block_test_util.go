@@ -27,7 +27,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"reflect"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -365,30 +364,54 @@ func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
 				return nil, fmt.Errorf("block #%v insertion into chain failed: %w", cb.Number(), err1)
 			}
 		} else if b.BlockHeader == nil {
-			roTx, err := m.DB.BeginRo(m.Ctx)
+			isCanonical, err := bt.isCanonical(m, cb)
 			if err != nil {
 				return nil, err
 			}
-			defer roTx.Rollback()
-			canonical, _, cErr := bt.br.CanonicalHash(context.Background(), roTx, cb.NumberU64())
-			if cErr != nil {
-				return nil, cErr
-			}
-			if canonical == cb.Hash() {
+			if isCanonical {
 				return nil, fmt.Errorf("block (index %d) insertion should have failed due to: %v", bi, b.ExpectException)
 			}
-			roTx.Rollback()
 		}
 		if b.BlockHeader == nil {
 			continue
 		}
 		// validate RLP decoding by checking all values against test file JSON
-		if err = validateHeader(b.BlockHeader, cb.Header()); err != nil {
+		if err = validateHeader(b.BlockHeader, cb.HeaderNoCopy()); err != nil {
 			return nil, fmt.Errorf("deserialised block header validation failed: %w", err)
 		}
 		validBlocks = append(validBlocks, b)
 	}
 	return validBlocks, nil
+}
+
+// isCanonical reports whether block is the canonical block at its height.
+func (bt *BlockTest) isCanonical(m *mock.MockSentry, block *types.Block) (bool, error) {
+	roTx, err := m.DB.BeginRo(m.Ctx)
+	if err != nil {
+		return false, err
+	}
+	defer roTx.Rollback()
+	canonical, _, err := bt.br.CanonicalHash(context.Background(), roTx, block.NumberU64())
+	if err != nil {
+		return false, err
+	}
+	return canonical == block.Hash(), nil
+}
+
+// equalPtr reports whether two optional pointers point to equal values.
+func equalPtr[T comparable](a, b *T) bool {
+	if a == nil {
+		return b == nil
+	}
+	return b != nil && *a == *b
+}
+
+// equalPtrBigInt reports whether two optional *big.Int pointers point to equal values.
+func equalPtrBigInt(a, b *big.Int) bool {
+	if a == nil {
+		return b == nil
+	}
+	return b != nil && a.Cmp(b) == 0
 }
 
 func validateHeader(h *btHeader, h2 *types.Header) error {
@@ -443,28 +466,28 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if h.Timestamp != h2.Time {
 		return fmt.Errorf("timestamp: want: %v have: %v", h.Timestamp, h2.Time)
 	}
-	if !reflect.DeepEqual(h.BaseFeePerGas, h2.BaseFee) {
+	if !equalPtrBigInt(h.BaseFeePerGas, h2.BaseFee) {
 		return fmt.Errorf("baseFeePerGas: want: %v have: %v", h.BaseFeePerGas, h2.BaseFee)
 	}
-	if !reflect.DeepEqual(h.WithdrawalsRoot, h2.WithdrawalsHash) {
+	if !equalPtr(h.WithdrawalsRoot, h2.WithdrawalsHash) {
 		return fmt.Errorf("withdrawalsRoot: want: %v have: %v", h.WithdrawalsRoot, h2.WithdrawalsHash)
 	}
-	if !reflect.DeepEqual(h.BlobGasUsed, h2.BlobGasUsed) {
+	if !equalPtr(h.BlobGasUsed, h2.BlobGasUsed) {
 		return fmt.Errorf("blobGasUsed: want: %v have: %v", h.BlobGasUsed, h2.BlobGasUsed)
 	}
-	if !reflect.DeepEqual(h.ExcessBlobGas, h2.ExcessBlobGas) {
+	if !equalPtr(h.ExcessBlobGas, h2.ExcessBlobGas) {
 		return fmt.Errorf("excessBlobGas: want: %v have: %v", h.ExcessBlobGas, h2.ExcessBlobGas)
 	}
-	if !reflect.DeepEqual(h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot) {
+	if !equalPtr(h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot) {
 		return fmt.Errorf("parentBeaconBlockRoot: want: %v have: %v", h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot)
 	}
-	if !reflect.DeepEqual(h.RequestsHash, h2.RequestsHash) {
+	if !equalPtr(h.RequestsHash, h2.RequestsHash) {
 		return fmt.Errorf("requestsHash: want: %v have: %v", h.RequestsHash, h2.RequestsHash)
 	}
-	if !reflect.DeepEqual(h.BlockAccessListHash, h2.BlockAccessListHash) {
+	if !equalPtr(h.BlockAccessListHash, h2.BlockAccessListHash) {
 		return fmt.Errorf("blockAccessListHash: want: %v have: %v", h.BlockAccessListHash, h2.BlockAccessListHash)
 	}
-	if !reflect.DeepEqual(h.SlotNumber, h2.SlotNumber) {
+	if !equalPtr(h.SlotNumber, h2.SlotNumber) {
 		return fmt.Errorf("slotNumber: want: %v have: %v", h.SlotNumber, h2.SlotNumber)
 	}
 	return nil
@@ -519,7 +542,7 @@ func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m 
 	// all blocks have been processed by BlockChain, as they may not
 	// be part of the longest chain until last block is imported.
 	for b, _ := m.BlockReader.CurrentBlock(tx); b != nil && b.NumberU64() != 0; {
-		if err := validateHeader(bmap[b.Hash()].BlockHeader, b.Header()); err != nil {
+		if err := validateHeader(bmap[b.Hash()].BlockHeader, b.HeaderNoCopy()); err != nil {
 			return fmt.Errorf("imported block header validation failed: %w", err)
 		}
 		number := rawdb.ReadHeaderNumber(tx, b.ParentHash())
