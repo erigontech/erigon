@@ -358,11 +358,11 @@ func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
 				return nil, fmt.Errorf("block #%v insertion into chain failed: %w", cb.Number(), err1)
 			}
 		} else if b.BlockHeader == nil {
-			canon, cErr := bt.isCanonical(m, cb)
-			if cErr != nil {
-				return nil, cErr
+			isCanonical, err := bt.isCanonical(m, cb)
+			if err != nil {
+				return nil, err
 			}
-			if canon {
+			if isCanonical {
 				return nil, fmt.Errorf("block (index %d) insertion should have failed due to: %v", bi, b.ExpectException)
 			}
 		}
