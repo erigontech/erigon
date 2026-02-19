@@ -831,9 +831,9 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 			IsEIP7623:          isEIP7623,
 			IsAATxn:            isAATxn,
 		})
-		intrinsicGas := intrinsicGasResult.Gas
-		if isEIP7623 && intrinsicGasResult.FloorGas7623 > intrinsicGas {
-			intrinsicGas = intrinsicGasResult.FloorGas7623
+		intrinsicGas := intrinsicGasResult.RegularGas
+		if isEIP7623 && intrinsicGasResult.FloorGasCost > intrinsicGas {
+			intrinsicGas = intrinsicGasResult.FloorGasCost
 		}
 		if intrinsicGas > availableGas {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
@@ -995,9 +995,9 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		IsEIP7623:          isPrague,
 		IsAATxn:            isAATxn,
 	})
-	gas := intrinsicGasResult.Gas
-	if isPrague && intrinsicGasResult.FloorGas7623 > gas {
-		gas = intrinsicGasResult.FloorGas7623
+	gas := intrinsicGasResult.RegularGas
+	if isPrague && intrinsicGasResult.FloorGasCost > gas {
+		gas = intrinsicGasResult.FloorGasCost
 	}
 
 	if txn.Traced {

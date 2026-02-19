@@ -545,7 +545,7 @@ func (tx *AccountAbstractionTransaction) PreTransactionGasCost(rules *chain.Rule
 		return 0, errors.New("overflow")
 	}
 
-	return intrinsicGasResult.Gas, nil
+	return intrinsicGasResult.RegularGas, nil
 }
 
 func (tx *AccountAbstractionTransaction) DeployerFrame(rules *chain.Rules, hasEIP3860 bool) *Message {

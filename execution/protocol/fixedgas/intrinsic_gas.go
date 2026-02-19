@@ -39,8 +39,8 @@ type IntrinsicGasCalcArgs struct {
 }
 
 type IntrinsicGasCalcResult struct {
-	Gas          uint64
-	FloorGas7623 uint64
+	RegularGas   uint64
+	FloorGasCost uint64
 }
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
@@ -64,13 +64,13 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	dataLen := uint64(len(args.Data))
 	// Set the starting gas for the raw transaction
 	if args.IsContractCreation && args.IsEIP2 {
-		result.Gas = params.TxGasContractCreation
+		result.RegularGas = params.TxGasContractCreation
 	} else if args.IsAATxn {
-		result.Gas = params.TxAAGas
+		result.RegularGas = params.TxAAGas
 	} else {
-		result.Gas = params.TxGas
+		result.RegularGas = params.TxGas
 	}
-	result.FloorGas7623 = params.TxGas
+	result.FloorGasCost = params.TxGas
 	// Bump the required gas by the amount of transactional data
 	if dataLen > 0 {
 		// Zero and non-zero bytes are priced differently
@@ -85,7 +85,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
-		result.Gas, overflow = math.SafeAdd(result.Gas, product)
+		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
@@ -96,7 +96,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
-		result.Gas, overflow = math.SafeAdd(result.Gas, product)
+		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
@@ -107,7 +107,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 			if overflow {
 				return IntrinsicGasCalcResult{}, true
 			}
-			result.Gas, overflow = math.SafeAdd(result.Gas, product)
+			result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
 			if overflow {
 				return IntrinsicGasCalcResult{}, true
 			}
@@ -119,7 +119,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 			if overflow {
 				return IntrinsicGasCalcResult{}, true
 			}
-			result.FloorGas7623, overflow = math.SafeAdd(result.FloorGas7623, dataGas)
+			result.FloorGasCost, overflow = math.SafeAdd(result.FloorGasCost, dataGas)
 			if overflow {
 				return IntrinsicGasCalcResult{}, true
 			}
@@ -130,7 +130,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
-		result.Gas, overflow = math.SafeAdd(result.Gas, product)
+		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
@@ -139,7 +139,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
-		result.Gas, overflow = math.SafeAdd(result.Gas, product)
+		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
 		if overflow {
 			return IntrinsicGasCalcResult{}, true
 		}
@@ -151,7 +151,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		return IntrinsicGasCalcResult{}, true
 	}
 
-	result.Gas, overflow = math.SafeAdd(result.Gas, product)
+	result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
 	if overflow {
 		return IntrinsicGasCalcResult{}, true
 	}

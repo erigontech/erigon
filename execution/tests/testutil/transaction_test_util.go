@@ -91,9 +91,9 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 			IsEIP3860:          rules.IsShanghai,
 			IsEIP7623:          rules.IsPrague,
 		})
-		requiredGas := intrinsicGasResult.Gas
-		if rules.IsPrague && intrinsicGasResult.FloorGas7623 > requiredGas {
-			requiredGas = intrinsicGasResult.FloorGas7623
+		requiredGas := intrinsicGasResult.RegularGas
+		if rules.IsPrague && intrinsicGasResult.FloorGasCost > requiredGas {
+			requiredGas = intrinsicGasResult.FloorGasCost
 		}
 		if overflow {
 			return nil, nil, 0, protocol.ErrGasUintOverflow

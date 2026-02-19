@@ -506,8 +506,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
-	if st.gasRemaining < intrinsicGasResult.Gas || st.gasRemaining < intrinsicGasResult.FloorGas7623 {
-		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, max(intrinsicGasResult.Gas, intrinsicGasResult.FloorGas7623))
+	if st.gasRemaining < intrinsicGasResult.RegularGas || st.gasRemaining < intrinsicGasResult.FloorGasCost {
+		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost))
 	}
 
 	verifiedAuthorities, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
@@ -516,9 +516,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	}
 
 	if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
-		t.OnGasChange(st.gasRemaining, st.gasRemaining-intrinsicGasResult.Gas, tracing.GasChangeTxIntrinsicGas)
+		t.OnGasChange(st.gasRemaining, st.gasRemaining-intrinsicGasResult.RegularGas, tracing.GasChangeTxIntrinsicGas)
 	}
-	st.gasRemaining -= intrinsicGasResult.Gas
+	st.gasRemaining -= intrinsicGasResult.RegularGas
 
 	var bailout bool
 	// Gas bailout (for trace_call) should only be applied if there is not sufficient balance to perform value transfer
@@ -568,18 +568,18 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		refund := min(gasUsed/refundQuotient, st.state.GetRefund())
 		gasUsed = gasUsed - refund
 		if rules.IsPrague {
-			gasUsed = max(intrinsicGasResult.FloorGas7623, gasUsed)
+			gasUsed = max(intrinsicGasResult.FloorGasCost, gasUsed)
 		}
 		if rules.IsAmsterdam {
 			// EIP-7778: Block Gas Accounting without Refunds
-			st.blockGasUsed = max(intrinsicGasResult.FloorGas7623, st.blockGasUsed)
+			st.blockGasUsed = max(intrinsicGasResult.FloorGasCost, st.blockGasUsed)
 		} else {
 			st.blockGasUsed = gasUsed
 		}
 		st.gasRemaining = st.initialGas - gasUsed
 		st.refundGas()
 	} else if rules.IsPrague {
-		st.blockGasUsed = max(intrinsicGasResult.FloorGas7623, st.gasUsed())
+		st.blockGasUsed = max(intrinsicGasResult.FloorGasCost, st.gasUsed())
 		st.gasRemaining = st.initialGas - st.blockGasUsed
 	} else {
 		st.blockGasUsed = st.gasUsed()

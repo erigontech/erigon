@@ -89,8 +89,8 @@ func TestShanghaiIntrinsicGas(t *testing.T) {
 			if overflow {
 				t.Errorf("expected success but got uint overflow")
 			}
-			if result.Gas != c.expected {
-				t.Errorf("expected %v but got %v", c.expected, result.Gas)
+			if result.RegularGas != c.expected {
+				t.Errorf("expected %v but got %v", c.expected, result.RegularGas)
 			}
 		})
 	}
@@ -105,6 +105,6 @@ func TestZeroDataIntrinsicGas(t *testing.T) {
 		IsEIP7623: true,
 	})
 	assert.False(overflow)
-	assert.Equal(params.TxGas, result.Gas)
-	assert.Equal(params.TxGas, result.FloorGas7623)
+	assert.Equal(params.TxGas, result.RegularGas)
+	assert.Equal(params.TxGas, result.FloorGasCost)
 }
