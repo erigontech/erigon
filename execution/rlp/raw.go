@@ -142,7 +142,9 @@ func SplitList(b []byte) (content, rest []byte, err error) {
 	return content, rest, nil
 }
 
-// CountValues counts the number of encoded values in b.
+// CountValues returns the number of encoded values in b.
+// If an error is encountered while parsing, the count
+// includes the item that caused the error.
 func CountValues(b []byte) (int, error) {
 	i := 0
 	for ; len(b) > 0; i++ {

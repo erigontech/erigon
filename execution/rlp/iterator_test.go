@@ -117,7 +117,7 @@ func FuzzIteratorCount(f *testing.F) {
 	f.Fuzz(func(t *testing.T, in []byte) {
 		it, err := NewListIterator(in)
 		if err != nil {
-			t.Fatal(err)
+			return
 		}
 		count := it.Count()
 		i := 0
