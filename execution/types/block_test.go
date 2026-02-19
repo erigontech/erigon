@@ -331,8 +331,8 @@ func makeBenchBlock() *Block {
 		uncles   = make([]*Header, 3)
 	)
 	header := &Header{
-		Difficulty: *uint256.NewInt(285311670611),
-		Number:     *uint256.NewInt(0x200),
+		Difficulty: *uint256.NewInt(285311670611), // 11^11
+		Number:     *uint256.NewInt(0x200),        // 2^9
 		GasLimit:   12345678,
 		GasUsed:    1476322,
 		Time:       9876543,
@@ -352,8 +352,8 @@ func makeBenchBlock() *Block {
 	}
 	for i := range uncles {
 		uncles[i] = &Header{
-			Difficulty: *uint256.NewInt(285311670611),
-			Number:     *uint256.NewInt(0x200),
+			Difficulty: *uint256.NewInt(285311670611), // 11^11
+			Number:     *uint256.NewInt(0x200),        // 2^9
 			GasLimit:   12345678,
 			GasUsed:    1476322,
 			Time:       9876543,

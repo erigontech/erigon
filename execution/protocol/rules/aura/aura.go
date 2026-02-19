@@ -552,7 +552,7 @@ func (c *AuRa) verifyFamily(chain rules.ChainHeaderReader, e *NonTransactionalEp
 	*/
 	if header.Number.Uint64() >= c.cfg.ValidateScoreTransition {
 		expectedDifficulty := calculateScore(parentStep, step, emptyStepLen)
-		if header.Difficulty.Cmp(&expectedDifficulty) != 0 {
+		if !header.Difficulty.Eq(&expectedDifficulty) {
 			return fmt.Errorf("invalid difficulty: expect=%s, found=%s", &expectedDifficulty, &header.Difficulty)
 		}
 	}

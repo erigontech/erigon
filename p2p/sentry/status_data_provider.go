@@ -198,13 +198,11 @@ func (s *StatusDataProvider) ReadChainHeadFromSnapshots(ctx context.Context, min
 		return ChainHead{}, fmt.Errorf("failed reading snapshot header %d: %w", latest, err)
 	}
 
-	td256 := header.Difficulty
-
 	return ChainHead{
 		HeadHeight:    header.Number.Uint64(),
 		HeadTime:      header.Time,
 		HeadHash:      header.Hash(),
 		MinimumHeight: minimumBlock,
-		HeadTd:        &td256,
+		HeadTd:        &header.Difficulty,
 	}, nil
 }

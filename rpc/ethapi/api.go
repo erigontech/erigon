@@ -424,8 +424,8 @@ func FormatLogs(logs []logger.StructLog) []StructLogRes {
 }
 
 // RPCMarshalHeader converts the given header to the RPC output .
-func RPCMarshalHeader(head *types.Header) map[string]interface{} {
-	result := map[string]interface{}{
+func RPCMarshalHeader(head *types.Header) map[string]any {
+	result := map[string]any{
 		"number":           (*hexutil.Big)(head.Number.ToBig()),
 		"hash":             head.Hash(),
 		"parentHash":       head.ParentHash,

@@ -406,21 +406,6 @@ func equalPtr[T comparable](a, b *T) bool {
 	return b != nil && *a == *b
 }
 
-// equalPtrBigInt reports whether two optional *big.Int pointers point to equal values.
-func equalPtrBigInt(a, b *big.Int) bool {
-	if a == nil {
-		return b == nil
-	}
-	return b != nil && a.Cmp(b) == 0
-}
-
-func equalPtrUint256(a, b *uint256.Int) bool {
-	if a == nil {
-		return b == nil
-	}
-	return b != nil && a.Cmp(b) == 0
-}
-
 func validateHeader(h *btHeader, h2 *types.Header) error {
 	if h == nil {
 		return errors.New("validateHeader: h == nil")
@@ -441,7 +426,7 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 		return fmt.Errorf("nonce: want: %x have: %x", h.Nonce, h2.Nonce)
 	}
 	if h.Number.Cmp(&h2.Number) != 0 {
-		return fmt.Errorf("number: want: %s have: %s", &h.Number, &h2.Number)
+		return fmt.Errorf("number: want: %s have: %s", h.Number, h2.Number)
 	}
 	if h.ParentHash != h2.ParentHash {
 		return fmt.Errorf("parent hash: want: %x have: %x", h.ParentHash, h2.ParentHash)
@@ -473,7 +458,7 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if h.Timestamp != h2.Time {
 		return fmt.Errorf("timestamp: want: %v have: %v", h.Timestamp, h2.Time)
 	}
-	if !equalPtrUint256(h.BaseFeePerGas, h2.BaseFee) {
+	if !equalPtr(h.BaseFeePerGas, h2.BaseFee) {
 		return fmt.Errorf("baseFeePerGas: want: %v have: %v", h.BaseFeePerGas, h2.BaseFee)
 	}
 	if !equalPtr(h.WithdrawalsRoot, h2.WithdrawalsHash) {
