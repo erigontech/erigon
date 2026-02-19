@@ -21,37 +21,15 @@ import (
 	"time"
 )
 
-const (
-	semaphoreWaitTimeout  = 2 * time.Second
-	semaphoreWaitInterval = 10 * time.Millisecond
-)
+const semaphoreWaitTimeout = 2 * time.Second
 
 func (e *EthereumExecutionModule) tryWaitForUnlock(ctx context.Context) bool {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if ctx.Err() != nil {
-		return false
-	}
-	if e.semaphore.TryAcquire(1) {
-		return true
-	}
 
-	timer := time.NewTimer(semaphoreWaitTimeout)
-	ticker := time.NewTicker(semaphoreWaitInterval)
-	defer timer.Stop()
-	defer ticker.Stop()
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, semaphoreWaitTimeout)
+	defer cancel()
 
-	for {
-		select {
-		case <-ctx.Done():
-			return false
-		case <-timer.C:
-			return false
-		case <-ticker.C:
-			if e.semaphore.TryAcquire(1) {
-				return true
-			}
-		}
-	}
+	return e.semaphore.Acquire(ctxWithTimeout, 1) == nil
 }
