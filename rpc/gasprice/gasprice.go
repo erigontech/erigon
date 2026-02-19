@@ -110,7 +110,6 @@ func NewOracle(backend OracleBackend, params gaspricecfg.Config, cache Cache, lo
 	}
 }
 
-
 // SuggestTipCap returns a TipCap so that newly created transaction can
 // have a very high chance to be included in the following blocks.
 // NODE: if caller wants legacy txn SuggestedPrice, we need to add
