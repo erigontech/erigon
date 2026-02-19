@@ -1551,8 +1551,6 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(in *MergedFilesV3) {
 		}
 		ii.integrateMergedDirtyFiles(in.iis[id])
 	}
-
-	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 }
 
 func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
