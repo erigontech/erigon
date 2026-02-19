@@ -425,7 +425,7 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if h.Nonce != h2.Nonce {
 		return fmt.Errorf("nonce: want: %x have: %x", h.Nonce, h2.Nonce)
 	}
-	if h.Number.Cmp(&h2.Number) != 0 {
+	if !h.Number.Eq(&h2.Number) {
 		return fmt.Errorf("number: want: %s have: %s", h.Number, &h2.Number)
 	}
 	if h.ParentHash != h2.ParentHash {
@@ -446,7 +446,7 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if !bytes.Equal(h.ExtraData, h2.Extra) {
 		return fmt.Errorf("extra data: want: %x have: %x", h.ExtraData, h2.Extra)
 	}
-	if h.Difficulty.Cmp(&h2.Difficulty) != 0 {
+	if !h.Difficulty.Eq(&h2.Difficulty) {
 		return fmt.Errorf("difficulty: want: %v have: %v", h.Difficulty, h2.Difficulty)
 	}
 	if h.GasLimit != h2.GasLimit {
