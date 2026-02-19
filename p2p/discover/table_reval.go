@@ -56,7 +56,13 @@ func (tr *tableRevalidation) init(cfg *Config) {
 
 // nodeAdded is called when the table receives a new node.
 func (tr *tableRevalidation) nodeAdded(tab *Table, n *tableNode) {
-	tr.fast.push(n, tab.cfg.Clock.Now(), &tab.rand)
+	// Nodes that are already validated live don't need fast revalidation.
+	// Place them on the slow list to avoid unnecessary ping traffic.
+	if n.isValidatedLive {
+		tr.slow.push(n, tab.cfg.Clock.Now(), &tab.rand)
+	} else {
+		tr.fast.push(n, tab.cfg.Clock.Now(), &tab.rand)
+	}
 }
 
 // nodeRemoved is called when a node was removed from the table.

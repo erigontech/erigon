@@ -1205,7 +1205,7 @@ func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio
 
 const blockBufferSize = 128
 
-func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.MiningConfig, logger log.Logger) (
+func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.BuilderConfig, logger log.Logger) (
 	services.BlockRetire, rules.Engine, *vm.Config, *stagedsync.Sync,
 ) {
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
@@ -1239,8 +1239,8 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, miningConfig *buildercfg.M
 	cfg.BatchSize = batchSize
 	cfg.TxPool.Disable = true
 	cfg.Genesis = genesis
-	if miningConfig != nil {
-		cfg.Miner = *miningConfig
+	if builderConfig != nil {
+		cfg.Builder = *builderConfig
 	}
 	cfg.Dirs = dirs
 	dbReadConcurrency := runtime.GOMAXPROCS(-1) * 16
@@ -1326,7 +1326,7 @@ func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.R
 			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger, poshttp.WithApiVersioner(ctx))
 			bridgeClient = bridge.NewHttpClient(config.HeimdallURL, logger, poshttp.WithApiVersioner(ctx))
 		} else {
-			heimdallClient = heimdall.NewIdleClient(config.Miner)
+			heimdallClient = heimdall.NewIdleClient(config.Builder)
 			bridgeClient = bridge.NewIdleClient()
 		}
 		borConfig := rulesConfig.(*borcfg.BorConfig)
