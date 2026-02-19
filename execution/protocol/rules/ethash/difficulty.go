@@ -40,10 +40,10 @@ const (
 	difficultyBoundDivisor = 11
 )
 
-// CalcDifficultyFrontierU256 is the difficulty adjustment algorithm. It returns the
+// calcDifficultyFrontier is the difficulty adjustment algorithm. It returns the
 // difficulty that a new block should have when created at time given the parent
 // block's time and difficulty. The calculation uses the Frontier rules.
-func CalcDifficultyFrontierU256(time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64) *uint256.Int {
+func calcDifficultyFrontier(time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64) *uint256.Int {
 	/*
 		Algorithm
 		block_diff = pdiff + pdiff / 2048 * (1 if time - ptime < 13 else -1) + int(2^((num // 100000) - 2))
@@ -79,10 +79,10 @@ func CalcDifficultyFrontierU256(time, parentTime uint64, parentDifficulty uint25
 	return pDiff
 }
 
-// CalcDifficultyHomesteadU256 is the difficulty adjustment algorithm. It returns
+// calcDifficultyHomestead is the difficulty adjustment algorithm. It returns
 // the difficulty that a new block should have when created at time given the
 // parent block's time and difficulty. The calculation uses the Homestead rules.
-func CalcDifficultyHomesteadU256(time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64) *uint256.Int {
+func calcDifficultyHomestead(time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64) *uint256.Int {
 	/*
 		https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2.md
 		Algorithm:

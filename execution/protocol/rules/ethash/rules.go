@@ -331,9 +331,9 @@ func CalcDifficulty(config *chain.Config, time, parentTime uint64, parentDifficu
 	case config.IsByzantium(next):
 		return calcDifficultyByzantium(time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 	case config.IsHomestead(next):
-		return CalcDifficultyHomesteadU256(time, parentTime, parentDifficulty, parentNumber)
+		return calcDifficultyHomestead(time, parentTime, parentDifficulty, parentNumber)
 	default:
-		return CalcDifficultyFrontierU256(time, parentTime, parentDifficulty, parentNumber)
+		return calcDifficultyFrontier(time, parentTime, parentDifficulty, parentNumber)
 	}
 }
 
