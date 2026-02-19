@@ -553,7 +553,7 @@ func (d *Decompressor) MadvWillNeed() *Decompressor {
 // Getter represent "reader" or "iterator" that can move across the data of the decompressor
 // The full state of the getter can be captured by saving dataP, and dataBit
 type Getter struct {
-	dataP     uint64    // current byte offset in data
+	dataP     uint64    // u64-typed len(data) to reduce amount of type-casting
 	dataLen   uint64    // len(data), precomputed
 	dataBit   int       // bit offset within current byte (0-7)
 	posBitLen int       // cached posDict.bitLen, avoids pointer chain
