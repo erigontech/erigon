@@ -14,32 +14,18 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package diagnostics
+package stagedsync
 
 import (
-	"encoding/json"
-	"net/http"
-
-	"github.com/erigontech/erigon/cmd/erigon/node"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
-func SetupNodeInfoAccess(metricsMux *http.ServeMux, node *node.ErigonNode) {
-	if metricsMux == nil {
-		return
-	}
-
-	metricsMux.HandleFunc("/nodeinfo", func(w http.ResponseWriter, r *http.Request) {
-		writeNodeInfo(w, node)
-	})
-}
-
-func writeNodeInfo(w http.ResponseWriter, node *node.ErigonNode) {
-	reply, err := node.Backend().NodesInfo(0)
-
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	json.NewEncoder(w).Encode(reply)
+type ChainEventNotifier interface {
+	OnNewHeader(newHeadersRlp [][]byte)
+	OnNewPendingLogs(types.Logs)
+	OnLogs([]*remoteproto.SubscribeLogsReply)
+	HasLogSubscriptions() bool
+	OnReceipts([]*remoteproto.SubscribeReceiptsReply)
+	HasReceiptSubscriptions() bool
 }

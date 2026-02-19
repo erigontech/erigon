@@ -133,7 +133,7 @@ func TestGetBlobsV1(t *testing.T) {
 
 func TestGetBlobsV2(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
-	mockSentry, require := mock.MockWithTxPoolOsaka(t), require.New(t)
+	mockSentry, require := mock.MockWithTxPoolAllProtocolChanges(t), require.New(t)
 	oneBlockStep(mockSentry, require)
 
 	wrappedTxn := types.MakeV1WrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
@@ -193,7 +193,7 @@ func TestGetBlobsV2(t *testing.T) {
 
 func TestGetBlobsV3(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
-	mockSentry, require := mock.MockWithTxPoolOsaka(t), require.New(t)
+	mockSentry, require := mock.MockWithTxPoolAllProtocolChanges(t), require.New(t)
 	oneBlockStep(mockSentry, require)
 
 	wrappedTxn := types.MakeV1WrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
@@ -275,7 +275,7 @@ func writeBlockAccessListBytes(t *testing.T, db kv.TemporalRwDB, blockHash commo
 }
 
 func TestGetPayloadBodiesByHashV2(t *testing.T) {
-	mockSentry, req := mock.MockWithTxPoolOsaka(t), require.New(t)
+	mockSentry, req := mock.MockWithTxPoolAllProtocolChanges(t), require.New(t)
 	oneBlockStep(mockSentry, req)
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
@@ -308,7 +308,7 @@ func TestGetPayloadBodiesByHashV2(t *testing.T) {
 }
 
 func TestGetPayloadBodiesByRangeV2(t *testing.T) {
-	mockSentry, req := mock.MockWithTxPoolOsaka(t), require.New(t)
+	mockSentry, req := mock.MockWithTxPoolAllProtocolChanges(t), require.New(t)
 	oneBlockSteps(mockSentry, req, 2)
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)

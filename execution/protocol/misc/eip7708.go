@@ -92,26 +92,49 @@ func LogSelfDestructedAccounts(ibs evmtypes.IntraBlockState, sender accounts.Add
 	if !rules.IsAmsterdam {
 		return
 	}
-	// Emit SelfDestruct logs where accounts with non-empty balances have been deleted
-	// See case (2) in https://eips.ethereum.org/EIPS/eip-7708#selfdestruct-processing
+	// Emit burn logs for selfdestructed accounts that hold a positive balance at
+	// finalization time (EIP-7708 case 2: funded after selfdestruct).
 	//
-	// Prefer the pre-computed list from execution time: in the parallel executor the
-	// IBS passed here is reconstructed from VersionedWrites and its journal is empty,
-	// so ibs.GetRemovedAccountsWithBalance() would return nothing.
-	// result.SelfDestructedWithBalance was captured before SoftFinalise cleared the
-	// journal in the original execution IBS.
-	var removedWithBalance []evmtypes.AddressAndBalance
-	if result != nil && result.SelfDestructedWithBalance != nil {
-		removedWithBalance = result.SelfDestructedWithBalance
-	} else {
-		removedWithBalance = ibs.GetRemovedAccountsWithBalance()
-	}
-	if removedWithBalance != nil {
-		sort.Slice(removedWithBalance, func(i, j int) bool {
-			return removedWithBalance[i].Address.Cmp(removedWithBalance[j].Address) < 0
-		})
-		for _, sd := range removedWithBalance {
-			ibs.AddLog(EthSelfDestructLog(sd.Address, sd.Balance))
+	// Two sources of residual balance must be combined:
+	//
+	//  1. result.SelfDestructedWithBalance — execution-time residuals captured
+	//     before SoftFinalise cleared the journal.  In the parallel executor the
+	//     IBS passed here is a fresh IBS reconstructed from VersionedWrites; its
+	//     journal cannot see these because non-zero balance writes are stripped from
+	//     VersionedWrites (to avoid polluting the EIP-7928 block access list).
+	//
+	//  2. ibs.GetRemovedAccountsWithBalance() — balances added to selfdestructed
+	//     accounts during finalization (e.g. priority fee credited to a coinbase
+	//     that selfdestructed within its own transaction).
+	//
+	// Union the two sets and sum amounts per address so that a single burn log
+	// covers the total residual (execution residual + finalization additions).
+	combined := make(map[common.Address]uint256.Int)
+	if result != nil {
+		for _, ab := range result.SelfDestructedWithBalance {
+			combined[ab.Address] = ab.Balance
 		}
+	}
+	finalizeList := ibs.GetRemovedAccountsWithBalance()
+	for _, ab := range finalizeList {
+		if existing, ok := combined[ab.Address]; ok {
+			combined[ab.Address] = *new(uint256.Int).Add(&existing, &ab.Balance)
+		} else {
+			combined[ab.Address] = ab.Balance
+		}
+	}
+	if len(combined) == 0 {
+		return
+	}
+	addrs := make([]common.Address, 0, len(combined))
+	for addr := range combined {
+		addrs = append(addrs, addr)
+	}
+	sort.Slice(addrs, func(i, j int) bool {
+		return addrs[i].Cmp(addrs[j]) < 0
+	})
+	for _, addr := range addrs {
+		bal := combined[addr]
+		ibs.AddLog(EthSelfDestructLog(addr, bal))
 	}
 }
