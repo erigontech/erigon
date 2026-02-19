@@ -441,7 +441,7 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 		return fmt.Errorf("nonce: want: %x have: %x", h.Nonce, h2.Nonce)
 	}
 	if h.Number.Cmp(&h2.Number) != 0 {
-		return fmt.Errorf("number: want: %v have: %v", h.Number, h2.Number)
+		return fmt.Errorf("number: want: %s have: %s", &h.Number, &h2.Number)
 	}
 	if h.ParentHash != h2.ParentHash {
 		return fmt.Errorf("parent hash: want: %x have: %x", h.ParentHash, h2.ParentHash)

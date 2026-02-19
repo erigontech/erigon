@@ -654,7 +654,7 @@ func TestSimulatedBackend_HeaderByNumber(t *testing.T) {
 		t.Errorf("block header and latest block header are not the same")
 	}
 	if blockHeader.Number.CmpUint64(1) != 0 {
-		t.Errorf("did not get blockheader for block 1. instead got block %v", blockHeader.Number)
+		t.Errorf("did not get blockheader for block 1. instead got block %d", blockHeader.Number.Uint64())
 	}
 
 	block, err := sim.BlockByNumber(bgCtx, uint256.NewInt(1))
