@@ -770,7 +770,7 @@ func (ms *ExecModuleTester) EnableLogs() {
 func (ms *ExecModuleTester) Cfg() ethconfig.Config { return ms.cfg }
 
 func (ms *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
-	wr := chainreader.NewChainReaderEth1(ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), uint64(time.Hour))
+	wr := chainreader.NewChainReaderEth1(ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), time.Hour)
 
 	streamCtx, cancel := context.WithCancel(ms.Ctx)
 	defer cancel()
