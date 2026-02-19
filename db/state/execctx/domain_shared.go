@@ -336,23 +336,14 @@ func (sd *SharedDomains) SetTrace(b, capture bool) []string {
 	return sd.sdCtx.GetCapture(true)
 }
 
+// latestLocked is a local interface for TemporalMemBatch implementations that
+// support lock-free GetLatest (caller already holds the read lock).
+type latestLocked interface {
+	GetLatestLocked(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool)
+}
+
 func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
-	var firstKey, firstVal []byte
-	var hasPrefix bool
-	err := sd.IteratePrefix(domain, prefix, roTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
-		// we need to do this to ensure the value has not been unwound
-		if lv, _, ok := sd.mem.GetLatest(domain, k); ok {
-			v = lv
-		}
-		if len(v) > 0 {
-			firstKey = common.Copy(k)
-			firstVal = common.Copy(v)
-			hasPrefix = true
-			return false, nil // do not continue, end on first occurrence
-		}
-		return true, nil
-	})
-	return firstKey, firstVal, hasPrefix, err
+	return sd.mem.HasPrefix(domain, prefix, roTx)
 }
 
 func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {

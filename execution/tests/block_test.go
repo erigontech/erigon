@@ -140,8 +140,8 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	// osaka — BAL mismatch
 	bt.skipLoad(`^osaka/eip7918_blob_reserve_price/test_reserve_price_boundary.json`)
 
-	// paris — hangs in parallel executor + BAL mismatch
-	bt.skipLoad(`^paris/`)
+	// paris — BAL mismatch
+	bt.skipLoad(`^paris/security/test_tx_selfdestruct_balance_bug.json`)
 
 	// prague — invalid state root hash
 	bt.skipLoad(`^prague/eip7702_set_code_tx/test_call_pointer_to_created_from_create_after_oog_call_again.json`)
