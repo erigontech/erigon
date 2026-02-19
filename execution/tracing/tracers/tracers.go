@@ -23,7 +23,8 @@ package tracers
 import (
 	"encoding/json"
 	"errors"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -35,7 +36,7 @@ type Context struct {
 	BlockHash   common.Hash // Hash of the block the txn is contained within (zero if dangling txn or call)
 	TxIndex     int         // Index of the transaction within a block (zero if dangling txn or call)
 	TxHash      common.Hash // Hash of the transaction being traced (zero if dangling call)
-	BlockNumber *big.Int    // Number of the block (nil if dangling txn or call)
+	BlockNumber *uint256.Int // Number of the block (nil if dangling txn or call)
 }
 
 // Tracer interface extends vm.EVMLogger and additionally
