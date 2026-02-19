@@ -674,25 +674,32 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 	}
 	sd.SetBlockNum(blockNum)
 	sd.SetTxNum(txNum)
-
-	// When commitment history is enabled, the commitment state may be at an earlier
-	// txNum than the accounts/storage/code domain files. In this case, GetLatest would
-	// return stale future-state from frozen domain files. We must use GetAsOf to read
-	// the correct historical state at the commitment point.
-	if txNum > 0 {
-		accountsEndTxNum := tx.StepsInFiles(kv.AccountsDomain)
-		if accountsEndTxNum > 0 {
-			accountsMaxTxNum := uint64((accountsEndTxNum+1)*kv.Step(sd.stepSize)) - 1
-			if txNum < accountsMaxTxNum {
-				sd.readAsOfTxNum = txNum + 1 // GetAsOf uses exclusive upper bound
-				sd.logger.Info("[SharedDomains] commitment behind domain end, using historical reads",
-					"commitmentTxNum", txNum, "commitmentBlock", blockNum,
-					"accountsMaxTxNum", accountsMaxTxNum, "readAsOfTxNum", sd.readAsOfTxNum)
-			}
-		}
-	}
-
 	return txNum, blockNum, nil
+}
+
+// EnableHistoricalReadsIfNeeded checks whether the commitment state is behind the
+// domain files' end (e.g. with --experimental.commitment-history). When true, it
+// enables GetAsOf reads so that state lookups return the correct historical values
+// at the commitment point rather than stale future-state from frozen domain files.
+//
+// This MUST only be called from the block execution startup path (not from RPC
+// handlers or other code that creates SharedDomains for historical queries).
+func (sd *SharedDomains) EnableHistoricalReadsIfNeeded(tx kv.TemporalTx) {
+	txNum := sd.TxNum()
+	if txNum == 0 {
+		return
+	}
+	accountsEndTxNum := tx.StepsInFiles(kv.AccountsDomain)
+	if accountsEndTxNum == 0 {
+		return
+	}
+	accountsMaxTxNum := uint64((accountsEndTxNum+1)*kv.Step(sd.stepSize)) - 1
+	if txNum < accountsMaxTxNum {
+		sd.readAsOfTxNum = txNum + 1 // GetAsOf uses exclusive upper bound
+		sd.logger.Info("[SharedDomains] commitment behind domain end, using historical reads",
+			"commitmentTxNum", txNum, "commitmentBlock", sd.BlockNum(),
+			"accountsMaxTxNum", accountsMaxTxNum, "readAsOfTxNum", sd.readAsOfTxNum)
+	}
 }
 
 // SetReadAsOfTxNum sets the historical read txNum. When non-zero, GetLatest uses

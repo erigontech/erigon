@@ -134,6 +134,10 @@ func ExecV3(ctx context.Context,
 	if err != nil {
 		return err
 	}
+	// Enable historical reads if commitment is behind domain files' end (e.g. --experimental.commitment-history).
+	// Must be called here (execution startup path) and NOT in SeekCommitment itself, because SeekCommitment
+	// is also called by RPC handlers that need latest-state reads, not historical reads.
+	doms.EnableHistoricalReadsIfNeeded(applyTx)
 
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if isApplyingBlocks {
