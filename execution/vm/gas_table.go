@@ -102,6 +102,9 @@ var (
 )
 
 func gasSStore(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	if evm.readOnly {
+		return 0, ErrWriteProtection
+	}
 	value, x := callContext.Stack.Back(1), callContext.Stack.Back(0)
 	key := accounts.InternKey(x.Bytes32())
 	current, _ := evm.IntraBlockState().GetState(callContext.Address(), key)
@@ -183,6 +186,9 @@ func gasSStore(evm *EVM, callContext *CallContext, availableGas uint64, memorySi
 //     2.2.2.1. If original value is 0, add SSTORE_SET_GAS - SLOAD_GAS to refund counter.
 //     2.2.2.2. Otherwise, add SSTORE_RESET_GAS - SLOAD_GAS gas to refund counter.
 func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	if evm.readOnly {
+		return 0, ErrWriteProtection
+	}
 	// If we fail the minimum gas availability invariant, fail (0)
 	if callContext.gas <= params.SstoreSentryGasEIP2200 {
 		return 0, errors.New("not enough gas for reentrancy sentry")
@@ -393,6 +399,10 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas uint64, m
 	memoryGas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return 0, transfersValue, err
+	}
+
+	if evm.readOnly && transfersValue {
+		return 0, false, ErrWriteProtection
 	}
 
 	var overflow bool
@@ -629,6 +639,10 @@ func statelessGasStaticCall(evm *EVM, callContext *CallContext, availableGas uin
 }
 
 func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas uint64, memorySize uint64) (uint64, error) {
+	if evm.readOnly {
+		return 0, ErrWriteProtection
+	}
+
 	var gas uint64
 	// TangerineWhistle (EIP150) gas reprice fork:
 	if evm.ChainRules().IsTangerineWhistle {
