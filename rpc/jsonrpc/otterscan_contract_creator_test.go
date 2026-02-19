@@ -19,9 +19,10 @@ package jsonrpc
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
-	"github.com/stretchr/testify/require"
 )
 
 func TestGetContractCreator(t *testing.T) {

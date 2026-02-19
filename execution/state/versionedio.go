@@ -222,7 +222,7 @@ func (vr *versionedStateReader) TracePrefix() string {
 
 func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: AddressPath}]; ok && r.Val != nil {
-		if account, ok := r.Val.(*accounts.Account); ok {
+		if account, ok := r.Val.(*accounts.Account); ok && account != nil {
 			updated := vr.applyVersionedUpdates(address, *account)
 			return &updated, nil
 		}
@@ -566,6 +566,19 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		}
 
 		if readStorage == nil {
+			// Record AddressPath reads so that ValidateVersion can detect
+			// when a prior transaction later creates this account.
+			// For example, if Tx1 looks up an account that Tx0 has not yet
+			// created, we must record the "nothing here" read so that once
+			// Tx0 creates the account, validation invalidates Tx1.
+			if !commited && path == AddressPath {
+				vr.Source = StorageRead
+				vr.Val = defaultV
+				if s.versionedReads == nil {
+					s.versionedReads = ReadSet{}
+				}
+				s.versionedReads.Set(vr)
+			}
 			return defaultV, UnknownSource, UnknownVersion, nil
 		}
 
