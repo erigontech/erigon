@@ -818,9 +818,22 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 		// this stage
 		isAATxn := mt.TxnSlot.Type == types.AccountAbstractionTxType
 		authorizationLen := uint64(len(mt.TxnSlot.AuthAndNonces))
-		intrinsicGas, floorGas, _ := fixedgas.CalcIntrinsicGas(uint64(mt.TxnSlot.DataLen), uint64(mt.TxnSlot.DataNonZeroLen), authorizationLen, uint64(mt.TxnSlot.AccessListAddrCount), uint64(mt.TxnSlot.AccessListStorCount), mt.TxnSlot.Creation, true, true, isEIP3860, isEIP7623, isAATxn)
-		if isEIP7623 && floorGas > intrinsicGas {
-			intrinsicGas = floorGas
+		intrinsicGasResult, _ := fixedgas.CalcIntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
+			Data:               make([]byte, mt.TxnSlot.DataLen),
+			DataNonZeroLen:     uint64(mt.TxnSlot.DataNonZeroLen),
+			AuthorizationsLen:  authorizationLen,
+			AccessListLen:      uint64(mt.TxnSlot.AccessListAddrCount),
+			StorageKeysLen:     uint64(mt.TxnSlot.AccessListStorCount),
+			IsContractCreation: mt.TxnSlot.Creation,
+			IsEIP2:             true,
+			IsEIP2028:          true,
+			IsEIP3860:          isEIP3860,
+			IsEIP7623:          isEIP7623,
+			IsAATxn:            isAATxn,
+		})
+		intrinsicGas := intrinsicGasResult.Gas
+		if isEIP7623 && intrinsicGasResult.FloorGas7623 > intrinsicGas {
+			intrinsicGas = intrinsicGasResult.FloorGas7623
 		}
 		if intrinsicGas > availableGas {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
@@ -969,9 +982,22 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	}
 
 	isAATxn := txn.Type == types.AccountAbstractionTxType
-	gas, floorGas, overflow := fixedgas.CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), uint64(authorizationLen), uint64(txn.AccessListAddrCount), uint64(txn.AccessListStorCount), txn.Creation, true, true, isEIP3860, isPrague, isAATxn)
-	if isPrague && floorGas > gas {
-		gas = floorGas
+	intrinsicGasResult, overflow := fixedgas.CalcIntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
+		Data:               make([]byte, txn.DataLen),
+		DataNonZeroLen:     uint64(txn.DataNonZeroLen),
+		AuthorizationsLen:  uint64(authorizationLen),
+		AccessListLen:      uint64(txn.AccessListAddrCount),
+		StorageKeysLen:     uint64(txn.AccessListStorCount),
+		IsContractCreation: txn.Creation,
+		IsEIP2:             true,
+		IsEIP2028:          true,
+		IsEIP3860:          isEIP3860,
+		IsEIP7623:          isPrague,
+		IsAATxn:            isAATxn,
+	})
+	gas := intrinsicGasResult.Gas
+	if isPrague && intrinsicGasResult.FloorGas7623 > gas {
+		gas = intrinsicGasResult.FloorGas7623
 	}
 
 	if txn.Traced {
