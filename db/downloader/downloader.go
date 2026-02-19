@@ -925,6 +925,18 @@ func (d *Downloader) addPreverifiedSnapshotForDownload(
 	defer d.lock.Unlock()
 	t, ok, err := d.getExistingSnapshotTorrent(name, infoHash)
 	if err != nil {
+		// If the snapshot is already loaded with a different infohash (e.g. file was rebuilt by
+		// background recsplit between restarts), skip the preverified download and keep using the
+		// existing local torrent. This is not an error - the local file is valid.
+		if existingT, nameOk := d.torrentsByName[name]; nameOk && existingT.InfoHash() != infoHash {
+			d.log(log.LvlWarn, "snapshot already loaded with different infohash, keeping existing",
+				"name", name,
+				"existing_infohash", existingT.InfoHash().HexString(),
+				"preverified_infohash", infoHash.HexString())
+			t = existingT
+			err = nil
+			return
+		}
 		return
 	}
 	// We can invalidate data if a torrent isn't yet loaded.
