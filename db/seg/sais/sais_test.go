@@ -77,14 +77,32 @@ func TestSaisEdgeCases(t *testing.T) {
 	assert.Equal(t, expected, sa)
 }
 
+// loremWords are short tokens that repeat heavily, mimicking real-world
+// compressed data (RLP fields, repeated addresses, etc.).
+var loremWords = []string{
+	"lorem", "ipsum", "dolor", "sit", "amet", "consectetur",
+	"adipiscing", "elit", "sed", "do", "eiusmod", "tempor",
+	"incididunt", "ut", "labore", "et", "dolore", "magna", "aliqua",
+}
+
+func makeLoremData(size int) []byte {
+	data := make([]byte, 0, size)
+	i := 0
+	for len(data) < size {
+		w := loremWords[i%len(loremWords)]
+		data = append(data, w...)
+		data = append(data, ' ')
+		i++
+	}
+	return data[:size]
+}
+
 func BenchmarkSais(b *testing.B) {
 	for _, size := range []int{16 * 1024 * 1024} {
 		b.Run(fmt.Sprintf("%d", size), func(b *testing.B) {
-			rng := rand.New(rand.NewSource(0))
-			data := make([]byte, size)
-			rng.Read(data)
-			sa := make([]int32, size)
-			b.SetBytes(int64(size))
+			data := makeLoremData(size)
+			sa := make([]int32, len(data))
+			b.SetBytes(int64(len(data)))
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
