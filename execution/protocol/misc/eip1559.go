@@ -136,7 +136,7 @@ func CalcBaseFee(config *chain.Config, parent *types.Header) *uint256.Int {
 
 		x, overflow := x.SubOverflow(parent.BaseFee, baseFeeDelta)
 		if overflow {
-			return common.Num0
+			return new(uint256.Int)
 		}
 		return x
 	}
