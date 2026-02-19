@@ -88,7 +88,7 @@ var (
 	testOrphanedChain *blockgen.ChainPack
 )
 
-func CreateTestSentry(t *testing.T) (*mock.MockSentry, *blockgen.ChainPack, []*blockgen.ChainPack) {
+func genTestChainOnce(t *testing.T) {
 	testChainOnce.Do(func() {
 		addresses := makeTestAddresses()
 		gspec := &types.Genesis{
@@ -116,6 +116,10 @@ func CreateTestSentry(t *testing.T) (*mock.MockSentry, *blockgen.ChainPack, []*b
 			t.Fatalf("rpcdaemontest: failed to generate chain: %v", err)
 		}
 	})
+}
+
+func CreateTestSentry(t *testing.T) (*mock.MockSentry, *blockgen.ChainPack, []*blockgen.ChainPack) {
+	genTestChainOnce(t)
 
 	addresses := makeTestAddresses()
 	gspec := &types.Genesis{
