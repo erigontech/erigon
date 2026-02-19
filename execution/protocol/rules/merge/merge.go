@@ -274,7 +274,8 @@ func (s *Merge) SealHash(header *types.Header) (hash common.Hash) {
 func (s *Merge) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *big.Int {
 	reached, err := IsTTDReached(chain, parentHash, parentNumber)
 	if err != nil {
-		return nil
+		log.Warn("CalcDifficulty", "err", err)
+		return ProofOfStakeDifficulty
 	}
 	if !reached {
 		return s.eth1Engine.CalcDifficulty(chain, time, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash, parentAuRaStep)

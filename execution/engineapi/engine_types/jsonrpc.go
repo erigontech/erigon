@@ -21,9 +21,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
@@ -323,4 +326,67 @@ func ConvertPayloadId(payloadId uint64) *hexutil.Bytes {
 	binary.BigEndian.PutUint64(encodedPayloadId, payloadId)
 	ret := hexutil.Bytes(encodedPayloadId)
 	return &ret
+}
+
+func ExecutionPayloadToBlock(payload *typesproto.ExecutionPayload, parentBeaconBlockRoot *common.Hash) (*types.Block, error) {
+	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(payload.LogsBloom)
+	baseFee := gointerfaces.ConvertH256ToUint256Int(payload.BaseFeePerGas).ToBig()
+
+	txRaw := make([][]byte, len(payload.Transactions))
+	for i, tx := range payload.Transactions {
+		txRaw[i] = tx
+	}
+
+	header := types.Header{
+		ParentHash:  gointerfaces.ConvertH256ToHash(payload.ParentHash),
+		Coinbase:    gointerfaces.ConvertH160toAddress(payload.Coinbase),
+		Root:        gointerfaces.ConvertH256ToHash(payload.StateRoot),
+		ReceiptHash: gointerfaces.ConvertH256ToHash(payload.ReceiptRoot),
+		Bloom:       bloom,
+		MixDigest:   gointerfaces.ConvertH256ToHash(payload.PrevRandao),
+		Number:      new(big.Int).SetUint64(payload.BlockNumber),
+		GasLimit:    payload.GasLimit,
+		GasUsed:     payload.GasUsed,
+		Time:        payload.Timestamp,
+		Extra:       payload.ExtraData,
+		BaseFee:     baseFee,
+		TxHash:      types.DeriveSha(types.BinaryTransactions(txRaw)),
+		UncleHash:   empty.UncleHash,
+		Difficulty:  merge.ProofOfStakeDifficulty,
+		Nonce:       merge.ProofOfStakeNonce,
+	}
+
+	var withdrawals types.Withdrawals
+	if payload.Version >= 2 {
+		withdrawals = ConvertWithdrawalsFromRpc(payload.Withdrawals)
+	}
+	if withdrawals != nil {
+		wh := types.DeriveSha(withdrawals)
+		header.WithdrawalsHash = &wh
+	}
+
+	if payload.Version >= 3 {
+		header.BlobGasUsed = payload.BlobGasUsed
+		header.ExcessBlobGas = payload.ExcessBlobGas
+		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
+	}
+
+	if payload.Version >= 4 {
+		if payload.BlockAccessListHash != nil {
+			h := common.Hash(gointerfaces.ConvertH256ToHash(payload.BlockAccessListHash))
+			header.BlockAccessListHash = &h
+		}
+		if payload.SlotNumber != nil {
+			sn := *payload.SlotNumber
+			header.SlotNumber = &sn
+		}
+	}
+
+	transactions, err := types.DecodeTransactions(txRaw)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode transactions: %w", err)
+	}
+
+	blockHash := gointerfaces.ConvertH256ToHash(payload.BlockHash)
+	return types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals), nil
 }

@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	eth1utils "github.com/erigontech/erigon/execution/execmodule/moduleutil"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -235,11 +236,13 @@ func TestAssembleBlock(t *testing.T) {
 		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(parentBeaconBlockRoot),
 	})
 	require.NoError(t, err)
-	block, err := getAssembledBlock(ctx, exec, payloadId)
+	blockData, err := getAssembledBlock(ctx, exec, payloadId)
 	require.NoError(t, err)
-	require.Equal(t, uint64(2), block.NumberU64())
-	require.Len(t, block.Transactions(), 2)
+	require.Equal(t, uint64(2), blockData.ExecutionPayload.BlockNumber)
+	require.Len(t, blockData.ExecutionPayload.Transactions, 2)
 
+	block, err := engine_types.ExecutionPayloadToBlock(blockData.ExecutionPayload, &parentBeaconBlockRoot)
+	require.NoError(t, err)
 	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
 	require.NoError(t, err)
 }
@@ -283,11 +286,13 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 	addTwoTxnsToPool(ctx, 3, t, m, txpool, baseFee)
 
 	// The block should have all four transactions
-	block, err := getAssembledBlock(ctx, exec, payloadId)
+	blockData, err := getAssembledBlock(ctx, exec, payloadId)
 	require.NoError(t, err)
-	require.Equal(t, uint64(2), block.NumberU64())
-	require.Len(t, block.Transactions(), 4)
+	require.Equal(t, uint64(2), blockData.ExecutionPayload.BlockNumber)
+	require.Len(t, blockData.ExecutionPayload.Transactions, 4)
 
+	block, err := engine_types.ExecutionPayloadToBlock(blockData.ExecutionPayload, &parentBeaconBlockRoot)
+	require.NoError(t, err)
 	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
 	require.NoError(t, err)
 }
@@ -297,41 +302,41 @@ func insertBlocks(ctx context.Context, exec *execmodule.EthereumExecutionModule,
 	for i, b := range blocks {
 		rpcBlocks[i] = eth1utils.ConvertBlockToRPC(b)
 	}
-	return retryBusy(ctx, func() (*executionproto.InsertionResult, bool, error) {
+	return retryBusy(ctx, func() (*executionproto.InsertionResult, executionproto.ExecutionStatus, error) {
 		r, err := exec.InsertBlocks(ctx, &executionproto.InsertBlocksRequest{
 			Blocks: rpcBlocks,
 		})
 		if err != nil {
-			return nil, false, err
+			return nil, 0, err
 		}
-		return r, r.Result == executionproto.ExecutionStatus_Busy, nil
+		return r, r.Result, nil
 	})
 }
 
 func validateChain(ctx context.Context, exec *execmodule.EthereumExecutionModule, h *types.Header) (*executionproto.ValidationReceipt, error) {
-	return retryBusy(ctx, func() (*executionproto.ValidationReceipt, bool, error) {
+	return retryBusy(ctx, func() (*executionproto.ValidationReceipt, executionproto.ExecutionStatus, error) {
 		r, err := exec.ValidateChain(ctx, &executionproto.ValidationRequest{
 			Hash:   gointerfaces.ConvertHashToH256(h.Hash()),
 			Number: h.Number.Uint64(),
 		})
 		if err != nil {
-			return nil, false, err
+			return nil, 0, err
 		}
-		return r, r.ValidationStatus == executionproto.ExecutionStatus_Busy, nil
+		return r, r.ValidationStatus, nil
 	})
 }
 
 func updateForkChoice(ctx context.Context, exec *execmodule.EthereumExecutionModule, h *types.Header) (*executionproto.ForkChoiceReceipt, error) {
-	return retryBusy(ctx, func() (*executionproto.ForkChoiceReceipt, bool, error) {
+	return retryBusy(ctx, func() (*executionproto.ForkChoiceReceipt, executionproto.ExecutionStatus, error) {
 		r, err := exec.UpdateForkChoice(ctx, &executionproto.ForkChoice{
 			HeadBlockHash:      gointerfaces.ConvertHashToH256(h.Hash()),
 			SafeBlockHash:      gointerfaces.ConvertHashToH256(common.Hash{}),
 			FinalizedBlockHash: gointerfaces.ConvertHashToH256(common.Hash{}),
 		})
 		if err != nil {
-			return nil, false, err
+			return nil, 0, err
 		}
-		return r, r.Status == executionproto.ExecutionStatus_Busy, nil
+		return r, r.Status, nil
 	})
 }
 
@@ -364,26 +369,32 @@ func insertValidateAndUfc1By1(ctx context.Context, exec *execmodule.EthereumExec
 }
 
 func assembleBlock(ctx context.Context, exec *execmodule.EthereumExecutionModule, req *executionproto.AssembleBlockRequest) (uint64, error) {
-	return retryBusy(ctx, func() (uint64, bool, error) {
+	return retryBusy(ctx, func() (uint64, executionproto.ExecutionStatus, error) {
 		r, err := exec.AssembleBlock(ctx, req)
 		if err != nil {
-			return 0, false, err
+			return 0, 0, err
 		}
-		return r.Id, r.Busy, nil
+		if r.Busy {
+			return 0, executionproto.ExecutionStatus_Busy, nil
+		}
+		return r.Id, executionproto.ExecutionStatus_Success, nil
 	})
 }
 
-func getAssembledBlock(ctx context.Context, exe *execmodule.EthereumExecutionModule, payloadId uint64) (*types.Block, error) {
-	return retryBusy(ctx, func() (*types.Block, bool, error) {
-		br, busy, err := exe.GetAssembledBlockWithReceipts(payloadId)
+func getAssembledBlock(ctx context.Context, exe *execmodule.EthereumExecutionModule, payloadId uint64) (*executionproto.AssembledBlockData, error) {
+	return retryBusy(ctx, func() (*executionproto.AssembledBlockData, executionproto.ExecutionStatus, error) {
+		br, err := exe.GetAssembledBlock(ctx, &executionproto.GetAssembledBlockRequest{Id: payloadId})
 		if err != nil {
-			return nil, false, err
+			return nil, 0, err
 		}
-		return br.Block, busy, nil
+		if br.Busy {
+			return nil, executionproto.ExecutionStatus_Busy, nil
+		}
+		return br.Data, executionproto.ExecutionStatus_Success, nil
 	})
 }
 
-func retryBusy[T any](ctx context.Context, f func() (T, bool, error)) (T, error) {
+func retryBusy[T any](ctx context.Context, f func() (T, executionproto.ExecutionStatus, error)) (T, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	var b backoff.BackOff
@@ -391,11 +402,11 @@ func retryBusy[T any](ctx context.Context, f func() (T, bool, error)) (T, error)
 	b = backoff.WithContext(b, ctx)
 	return backoff.RetryWithData(
 		func() (T, error) {
-			r, busy, err := f()
+			r, s, err := f()
 			if err != nil {
 				return generics.Zero[T](), backoff.Permanent(err) // no retries
 			}
-			if busy {
+			if s == executionproto.ExecutionStatus_Busy {
 				return generics.Zero[T](), errors.New("retrying busy")
 			}
 			return r, nil
