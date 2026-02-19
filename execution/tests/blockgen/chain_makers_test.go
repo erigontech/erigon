@@ -61,7 +61,7 @@ func TestGenerateChain(t *testing.T) {
 	// Ensure that key1 has some funds in the genesis block.
 	gspec := &types.Genesis{
 		Config:     &chain.Config{HomesteadBlock: new(big.Int), ChainID: big.NewInt(1)},
-		Difficulty: big.NewInt(0),
+		Difficulty: uint256.NewInt(0),
 		Alloc:      types.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
 	}
 	m := mock.MockWithGenesis(t, gspec, key1)

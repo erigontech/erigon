@@ -620,7 +620,7 @@ func TestEncodeBigIntBufferOverflowPrevention(t *testing.T) {
 	// Covers an EncodeBigInt() panic that can happen if a malicious peer sends a header with a big.Int with a 32-byte value
 	// Create a 249-bit base fee value (32 bytes in big-endian)
 	// This is the minimum bit length that requires 32 bytes of storage
-	maliciousBaseFee := new(big.Int).Lsh(big.NewInt(1), 248) // 2^248, BitLen() = 249
+	maliciousBaseFee := new(uint256.Int).Lsh(uint256.NewInt(1), 248) // 2^248, BitLen() = 249
 	// Create a header with the malicious difficulty
 	header := &Header{
 		ParentHash:  common.Hash{},
@@ -631,7 +631,7 @@ func TestEncodeBigIntBufferOverflowPrevention(t *testing.T) {
 		ReceiptHash: common.Hash{},
 		Bloom:       Bloom{},
 		BaseFee:     maliciousBaseFee,
-		Number:      big.NewInt(1),
+		Number:      *uint256.NewInt(1),
 		GasLimit:    8000000,
 		GasUsed:     0,
 		Time:        1234567890,

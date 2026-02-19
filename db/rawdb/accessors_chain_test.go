@@ -995,7 +995,7 @@ func TestBlockAccessListStorage(t *testing.T) {
 	defer tx.Rollback()
 
 	block := types.NewBlockWithHeader(&types.Header{
-		Number:      big.NewInt(1),
+		Number:      *uint256.NewInt(1),
 		Extra:       []byte("test block"),
 		UncleHash:   empty.UncleHash,
 		TxHash:      empty.RootHash,

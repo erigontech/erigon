@@ -252,7 +252,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		Coinbase:    accounts.InternAddress(test.Context.Miner),
 		BlockNumber: uint64(test.Context.Number),
 		Time:        uint64(test.Context.Time),
-		Difficulty:  (*big.Int)(test.Context.Difficulty),
+		Difficulty:  *test.Context.Difficulty,
 		GasLimit:    uint64(test.Context.GasLimit),
 	}
 	rules := context.Rules(test.Genesis.Config)
