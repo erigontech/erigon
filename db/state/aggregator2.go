@@ -11,6 +11,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -45,7 +46,7 @@ func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 }
 
 func NewTest(dirs datadir.Dirs) AggOpts { //nolint:gocritic
-	return New(dirs).DisableFsync().GenSaltIfNeed(true).ReorgBlockDepth(0)
+	return New(dirs).DisableFsync().GenSaltIfNeed(true).ReorgBlockDepth(0).StepsInFrozenFile(config3.DefaultStepsInFrozenFile)
 }
 
 func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) { //nolint:gocritic
@@ -66,40 +67,18 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 		return nil, err
 	}
 
-	// Read DB settings from erigondb.toml first; it assumes default or legacy settings if not present; then
-	// allow override from opts
-	if err := a.reloadErigonDBSettings(); err != nil {
-		return nil, err
-	}
-	if opts.stepSize != 0 {
-		a.stepSize = opts.stepSize
-	}
-	if opts.stepsInFrozenFile != 0 {
-		a.stepsInFrozenFile = opts.stepsInFrozenFile
-	}
+	a.stepSize = opts.stepSize
+	a.stepsInFrozenFile = opts.stepsInFrozenFile
 
 	a.disableHistory = opts.disableHistory
-	if err := statecfg.AdjustReceiptCurrentVersionIfNeeded(opts.dirs, opts.logger); err != nil {
-		return nil, err
-	}
-	if err := statecfg.Configure(statecfg.Schema, a, opts.dirs, salt, opts.logger); err != nil {
-		return nil, err
-	}
+	a.disableFsync = opts.disableFsync
 
-	func() {
-		a.dirtyFilesLock.Lock()
-		defer a.dirtyFilesLock.Unlock()
-		a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
-	}()
+	// Save salt and schema for ReloadErigonDBSettings() to use when propagating stepSize changes
+	a.savedSalt = salt
+	a.savedSchema = opts.schema
 
-	if opts.disableFsync {
-		//TODO: maybe move it to some kind of config?
-		for _, d := range a.d {
-			d.DisableFsync()
-		}
-		for _, ii := range a.iis {
-			ii.DisableFsync()
-		}
+	if err := a.ConfigureDomains(); err != nil {
+		return nil, err
 	}
 
 	return a, nil
@@ -130,6 +109,13 @@ func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; re
 func (opts AggOpts) DisableHistory() AggOpts      { opts.disableHistory = true; return opts } //nolint:gocritic
 func (opts AggOpts) SanityOldNaming() AggOpts { //nolint:gocritic
 	opts.sanityOldNaming = true
+	return opts
+}
+
+// WithErigonDBSettings assigns pre-resolved DB settings (stepSize, stepsInFrozenFile).
+func (opts AggOpts) WithErigonDBSettings(s *ErigonDBSettings) AggOpts { //nolint:gocritic
+	opts.stepSize = s.StepSize
+	opts.stepsInFrozenFile = s.StepsInFrozenFile
 	return opts
 }
 
