@@ -63,11 +63,7 @@ jobs:
           else
             echo "Found Erigon process dedicated to db maintenance, PID: $ERIGON_PID"
             python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-sync/run_and_chase_tip.py \
-              --build-dir=${{ github.workspace }}/build/bin \
-              --data-dir=$ERIGON_REFERENCE_DATA_DIR \
               --total-time=$TOTAL_TIME_SECONDS \
-              --chain=$CHAIN \
-              --node-type=minimal_node \
               --stop-erigon=False \
               --erigon-pid=$ERIGON_PID
           fi
