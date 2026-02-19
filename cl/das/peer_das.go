@@ -16,6 +16,7 @@ import (
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	gossipmgr "github.com/erigontech/erigon/cl/phase1/network/gossip"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -23,9 +24,26 @@ import (
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/p2p/enode"
 )
+
+// BlockGetter is an interface for getting blocks by root.
+// Used to avoid import cycle with forkchoice package.
+// [New in Gloas:EIP7732]
+type BlockGetter interface {
+	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
+}
+
+// gloasBlockData holds only the fields needed from a block for GLOAS sidecar verification.
+// This is much smaller than caching the full SignedBeaconBlock (~1KB vs ~100KB-2MB).
+// [New in Gloas:EIP7732]
+type gloasBlockData struct {
+	BlobKzgCommitments      *solid.ListSSZ[*cltypes.KZGCommitment]
+	SignedBeaconBlockHeader *cltypes.SignedBeaconBlockHeader
+}
 
 //go:generate mockgen -typed=true -destination=mock_services/peer_das_mock.go -package=mock_services . PeerDas
 type PeerDas interface {
@@ -40,6 +58,7 @@ type PeerDas interface {
 	IsArchivedMode() bool
 	StateReader() peerdasstate.PeerDasStateReader
 	SyncColumnDataLater(block *cltypes.SignedBeaconBlock) error
+	SetForkChoice(forkChoice BlockGetter) // [New in Gloas:EIP7732]
 }
 
 var (
@@ -62,6 +81,12 @@ type peerdas struct {
 	recoveringMutex   sync.Mutex
 	isRecovering      map[common.Hash]bool
 	blocksToCheckSync sync.Map // blockRoot -> blindedBlock
+
+	// [New in Gloas:EIP7732] For fetching blocks to get kzg_commitments
+	forkChoice      BlockGetter
+	blockReader     freezeblocks.BeaconSnapshotReader
+	indiciesDB      kv.RoDB
+	gloasDataCache  *lru.Cache[common.Hash, *gloasBlockData] // cache for GLOAS block data (~1KB per entry)
 }
 
 func NewPeerDas(
@@ -76,8 +101,11 @@ func NewPeerDas(
 	ethClock eth_clock.EthereumClock,
 	peerDasState *peerdasstate.PeerDasState,
 	gossipManager gossipmgr.Gossip,
+	blockReader freezeblocks.BeaconSnapshotReader, // [New in Gloas:EIP7732]
+	indiciesDB kv.RoDB, // [New in Gloas:EIP7732]
 ) PeerDas {
 	kzg.InitKZGCtx()
+	gloasDataCache, _ := lru.New[common.Hash, *gloasBlockData]("gloasDataCache", 128)
 	p := &peerdas{
 		state:             peerDasState,
 		nodeID:            nodeID,
@@ -94,6 +122,10 @@ func NewPeerDas(
 		recoveringMutex:   sync.Mutex{},
 		isRecovering:      make(map[common.Hash]bool),
 		blocksToCheckSync: sync.Map{},
+
+		blockReader:    blockReader,
+		indiciesDB:     indiciesDB,
+		gloasDataCache: gloasDataCache,
 	}
 	p.resubscribeGossip()
 	for range numOfBlobRecoveryWorkers {
@@ -105,6 +137,101 @@ func NewPeerDas(
 
 func (d *peerdas) StateReader() peerdasstate.PeerDasStateReader {
 	return d.state
+}
+
+// SetForkChoice sets the fork choice storage reader.
+// This is called after forkChoice is initialized to avoid circular dependency.
+// [New in Gloas:EIP7732]
+func (d *peerdas) SetForkChoice(forkChoice BlockGetter) {
+	d.forkChoice = forkChoice
+}
+
+// getGloasData retrieves the GLOAS block data (kzg_commitments and SignedBlockHeader) for sidecar verification.
+// Uses LRU cache (~1KB per entry), tries forkChoice first (recent blocks), then falls back to blockReader (historical blocks).
+// [New in Gloas:EIP7732]
+func (d *peerdas) getGloasData(blockRoot common.Hash) (*gloasBlockData, error) {
+	// Check cache first
+	if data, ok := d.gloasDataCache.Get(blockRoot); ok {
+		return data, nil
+	}
+
+	// Try forkChoice first (in-memory recent blocks)
+	if d.forkChoice != nil {
+		if block, ok := d.forkChoice.GetBlock(blockRoot); ok {
+			data := d.extractGloasData(block)
+			if data != nil {
+				d.gloasDataCache.Add(blockRoot, data)
+			}
+			return data, nil
+		}
+	}
+
+	// Fall back to blockReader for historical blocks
+	if d.blockReader != nil && d.indiciesDB != nil {
+		tx, err := d.indiciesDB.BeginRo(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+
+		block, err := d.blockReader.ReadBlockByRoot(context.Background(), tx, blockRoot)
+		if err != nil {
+			return nil, err
+		}
+		if block != nil {
+			data := d.extractGloasData(block)
+			if data != nil {
+				d.gloasDataCache.Add(blockRoot, data)
+			}
+			return data, nil
+		}
+	}
+
+	return nil, errors.New("block not found for GLOAS")
+}
+
+// extractGloasData extracts the needed fields from a SignedBeaconBlock for GLOAS.
+// [New in Gloas:EIP7732]
+func (d *peerdas) extractGloasData(block *cltypes.SignedBeaconBlock) *gloasBlockData {
+	if block == nil {
+		return nil
+	}
+	bid := block.Block.Body.SignedExecutionPayloadBid
+	if bid == nil || bid.Message == nil {
+		return nil
+	}
+	return &gloasBlockData{
+		BlobKzgCommitments:      &bid.Message.BlobKzgCommitments,
+		SignedBeaconBlockHeader: block.SignedBeaconBlockHeader(),
+	}
+}
+
+// getKzgCommitmentsForGloas retrieves kzg_commitments for GLOAS sidecar verification.
+// For GLOAS, kzg_commitments come from block.body.signed_execution_payload_bid.message.blob_kzg_commitments.
+// [New in Gloas:EIP7732]
+func (d *peerdas) getKzgCommitmentsForGloas(slot uint64, blockRoot common.Hash) (*solid.ListSSZ[*cltypes.KZGCommitment], error) {
+	data, err := d.getGloasData(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	if data == nil || data.BlobKzgCommitments == nil {
+		return nil, errors.New("kzg_commitments not found in block for GLOAS")
+	}
+	return data.BlobKzgCommitments, nil
+}
+
+// getSignedBlockHeaderForGloas retrieves SignedBlockHeader for GLOAS blob recovery.
+// For GLOAS, SignedBlockHeader is not in the sidecar, so we get it from the block.
+// [New in Gloas:EIP7732]
+func (d *peerdas) getSignedBlockHeaderForGloas(blockRoot common.Hash) (*cltypes.SignedBeaconBlockHeader, error) {
+	data, err := d.getGloasData(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	if data == nil || data.SignedBeaconBlockHeader == nil {
+		return nil, errors.New("SignedBlockHeader not found in block for GLOAS")
+	}
+	return data.SignedBeaconBlockHeader, nil
 }
 
 func (d *peerdas) IsBlobAlreadyRecovered(blockRoot common.Hash) bool {
@@ -239,6 +366,24 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			return
 		}
 
+		// [Modified in Gloas:EIP7732] For GLOAS, kzg_commitments and SignedBlockHeader come from block
+		epoch := slot / d.beaconConfig.SlotsPerEpoch
+		isGloas := d.beaconConfig.GetCurrentStateVersion(epoch) >= clparams.GloasVersion
+		var kzgCommitmentsFromBlock *solid.ListSSZ[*cltypes.KZGCommitment]
+		var signedBlockHeaderFromBlock *cltypes.SignedBeaconBlockHeader
+		if isGloas {
+			kzgCommitmentsFromBlock, err = d.getKzgCommitmentsForGloas(slot, blockRoot)
+			if err != nil {
+				log.Warn("[blobsRecover] failed to get kzg commitments for GLOAS", "err", err, "slot", slot, "blockRoot", blockRoot)
+				return
+			}
+			signedBlockHeaderFromBlock, err = d.getSignedBlockHeaderForGloas(blockRoot)
+			if err != nil {
+				log.Warn("[blobsRecover] failed to get signed block header for GLOAS", "err", err, "slot", slot, "blockRoot", blockRoot)
+				return
+			}
+		}
+
 		// Recover the matrix from the column sidecars
 		matrixEntries := []cltypes.MatrixEntry{}
 		var anyColumnSidecar *cltypes.DataColumnSidecar
@@ -299,7 +444,12 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				}
 			}
 			// kzg commitment
-			copy(kzgCommitment[:], anyColumnSidecar.KzgCommitments.Get(blobIndex)[:])
+			// [Modified in Gloas:EIP7732] Use kzg_commitments from block for GLOAS
+			if isGloas {
+				copy(kzgCommitment[:], kzgCommitmentsFromBlock.Get(blobIndex)[:])
+			} else {
+				copy(kzgCommitment[:], anyColumnSidecar.KzgCommitments.Get(blobIndex)[:])
+			}
 			// kzg proof
 			ckzgBlob := goethkzg.Blob(blob)
 			proof, err := kzg.Ctx().ComputeBlobKZGProof(&ckzgBlob, goethkzg.KZGCommitment(kzgCommitment), 0 /* numGoRoutines */)
@@ -308,12 +458,19 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				return
 			}
 			copy(kzgProof[:], proof[:])
+			// [Modified in Gloas:EIP7732] Use SignedBlockHeader from block for GLOAS
+			var signedBlockHeader *cltypes.SignedBeaconBlockHeader
+			if isGloas {
+				signedBlockHeader = signedBlockHeaderFromBlock
+			} else {
+				signedBlockHeader = anyColumnSidecar.SignedBlockHeader
+			}
 			blobSidecar := cltypes.NewBlobSidecar(
 				uint64(blobIndex),
 				&blob,
 				kzgCommitment,
 				kzgProof,
-				anyColumnSidecar.SignedBlockHeader,
+				signedBlockHeader,
 				inclusionProof)
 			blobSidecars = append(blobSidecars, blobSidecar)
 			commitment := cltypes.KZGCommitment(kzgCommitment)
@@ -321,14 +478,17 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		}
 		timeRecoverBlobs := time.Since(beginRecoverBlobs)
 		// inclusion proof
-		for i := range len(blobSidecars) {
-			branchProof := blobCommitments.ElementProof(i)
-			p := blobSidecars[i].CommitmentInclusionProof
-			for index := range branchProof {
-				p.Set(index, branchProof[index])
-			}
-			for index := range anyColumnSidecar.KzgCommitmentsInclusionProof.Length() {
-				p.Set(index+len(branchProof), anyColumnSidecar.KzgCommitmentsInclusionProof.Get(index))
+		// [Modified in Gloas:EIP7732] GLOAS sidecars don't have KzgCommitmentsInclusionProof
+		if !isGloas {
+			for i := range len(blobSidecars) {
+				branchProof := blobCommitments.ElementProof(i)
+				p := blobSidecars[i].CommitmentInclusionProof
+				for index := range branchProof {
+					p.Set(index, branchProof[index])
+				}
+				for index := range anyColumnSidecar.KzgCommitmentsInclusionProof.Length() {
+					p.Set(index+len(branchProof), anyColumnSidecar.KzgCommitmentsInclusionProof.Get(index))
+				}
 			}
 		}
 		// Save blobs
@@ -368,8 +528,11 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 				sidecar := cltypes.NewDataColumnSidecar()
 				sidecar.Index = columnIndex
 				sidecar.SignedBlockHeader = anyColumnSidecar.SignedBlockHeader
-				sidecar.KzgCommitmentsInclusionProof = anyColumnSidecar.KzgCommitmentsInclusionProof
-				sidecar.KzgCommitments = anyColumnSidecar.KzgCommitments
+				// [Modified in Gloas:EIP7732] GLOAS sidecars don't have KzgCommitmentsInclusionProof and KzgCommitments
+				if !isGloas {
+					sidecar.KzgCommitmentsInclusionProof = anyColumnSidecar.KzgCommitmentsInclusionProof
+					sidecar.KzgCommitments = anyColumnSidecar.KzgCommitments
+				}
 				for i := range blobSize {
 					// cell
 					sidecar.Column.Append(&blobMatrix[i][columnIndex].Cell)
@@ -377,17 +540,29 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 					sidecar.KzgProofs.Append(&blobMatrix[i][columnIndex].KzgProof)
 				}
 				// verify the sidecar
-				if !VerifyDataColumnSidecar(sidecar) {
-					log.Warn("[blobsRecover] failed to verify column sidecar", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
-					continue
-				}
-				if !VerifyDataColumnSidecarInclusionProof(sidecar) {
-					log.Warn("[blobsRecover] failed to verify column sidecar inclusion proof", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
-					continue
-				}
-				if !VerifyDataColumnSidecarKZGProofs(sidecar) {
-					log.Warn("[blobsRecover] failed to verify column sidecar kzg proofs", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
-					continue
+				// [Modified in Gloas:EIP7732] Version-aware verification
+				if isGloas {
+					if !VerifyDataColumnSidecarWithCommitments(sidecar, kzgCommitmentsFromBlock) {
+						log.Warn("[blobsRecover] failed to verify column sidecar (GLOAS)", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+						continue
+					}
+					if !VerifyDataColumnSidecarKZGProofsWithCommitments(sidecar, kzgCommitmentsFromBlock) {
+						log.Warn("[blobsRecover] failed to verify column sidecar kzg proofs (GLOAS)", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+						continue
+					}
+				} else {
+					if !VerifyDataColumnSidecar(sidecar) {
+						log.Warn("[blobsRecover] failed to verify column sidecar", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+						continue
+					}
+					if !VerifyDataColumnSidecarInclusionProof(sidecar) {
+						log.Warn("[blobsRecover] failed to verify column sidecar inclusion proof", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+						continue
+					}
+					if !VerifyDataColumnSidecarKZGProofs(sidecar) {
+						log.Warn("[blobsRecover] failed to verify column sidecar kzg proofs", "slot", slot, "blockRoot", blockRoot, "column", columnIndex)
+						continue
+					}
 				}
 				// save the sidecar to the column storage
 				if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(columnIndex), sidecar); err != nil {
@@ -657,13 +832,28 @@ mainloop:
 				wg.Add(1)
 				go func(sidecar *cltypes.DataColumnSidecar) {
 					defer wg.Done()
-					blockRoot, err := sidecar.SignedBlockHeader.Header.HashSSZ()
-					if err != nil {
-						log.Debug("failed to get block root", "err", err)
-						d.rpc.BanPeer(result.pid)
-						return
+					// [Modified in Gloas:EIP7732] Get slot first, then use epoch-based version detection
+					var slot uint64
+					if sidecar.SignedBlockHeader != nil && sidecar.SignedBlockHeader.Header != nil {
+						slot = sidecar.SignedBlockHeader.Header.Slot
+					} else {
+						slot = sidecar.Slot
 					}
-					slot := sidecar.SignedBlockHeader.Header.Slot
+					epoch := slot / d.beaconConfig.SlotsPerEpoch
+					isGloasSidecar := d.beaconConfig.GetCurrentStateVersion(epoch) >= clparams.GloasVersion
+
+					var blockRoot common.Hash
+					if isGloasSidecar {
+						blockRoot = sidecar.BeaconBlockRoot
+					} else {
+						var err error
+						blockRoot, err = sidecar.SignedBlockHeader.Header.HashSSZ()
+						if err != nil {
+							log.Debug("failed to get block root", "err", err)
+							d.rpc.BanPeer(result.pid)
+							return
+						}
+					}
 					defer func() {
 						// check if need to schedule recover whenever we download a column sidecar
 						if needToRecoverBlobs &&
@@ -675,7 +865,7 @@ mainloop:
 
 					columnIndex := sidecar.Index
 					columnData := sidecar
-					exist, err := d.columnStorage.ColumnSidecarExists(ctx, sidecar.SignedBlockHeader.Header.Slot, blockRoot, int64(columnIndex))
+					exist, err := d.columnStorage.ColumnSidecarExists(ctx, slot, blockRoot, int64(columnIndex))
 					if err != nil {
 						log.Debug("failed to check if column sidecar exists", "err", err)
 						d.rpc.BanPeer(result.pid)
@@ -692,20 +882,41 @@ mainloop:
 						return
 					}
 
-					if !VerifyDataColumnSidecar(sidecar) {
-						log.Debug("failed to verify column sidecar", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-						d.rpc.BanPeer(result.pid)
-						return
-					}
-					if !VerifyDataColumnSidecarInclusionProof(sidecar) {
-						log.Debug("failed to verify column sidecar inclusion proof", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-						d.rpc.BanPeer(result.pid)
-						return
-					}
-					if !VerifyDataColumnSidecarKZGProofs(sidecar) {
-						log.Debug("failed to verify column sidecar kzg proofs", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
-						d.rpc.BanPeer(result.pid)
-						return
+					// [Modified in Gloas:EIP7732] Version-aware verification
+					if isGloasSidecar {
+						// GLOAS: kzg_commitments come from block
+						kzgCommitments, err := d.getKzgCommitmentsForGloas(slot, blockRoot)
+						if err != nil {
+							log.Debug("failed to get kzg commitments for GLOAS", "err", err, "blockRoot", blockRoot)
+							return
+						}
+						if !VerifyDataColumnSidecarWithCommitments(sidecar, kzgCommitments) {
+							log.Debug("failed to verify column sidecar (GLOAS)", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
+							d.rpc.BanPeer(result.pid)
+							return
+						}
+						if !VerifyDataColumnSidecarKZGProofsWithCommitments(sidecar, kzgCommitments) {
+							log.Debug("failed to verify column sidecar kzg proofs (GLOAS)", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
+							d.rpc.BanPeer(result.pid)
+							return
+						}
+					} else {
+						// Fulu: kzg_commitments are in the sidecar
+						if !VerifyDataColumnSidecar(sidecar) {
+							log.Debug("failed to verify column sidecar", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
+							d.rpc.BanPeer(result.pid)
+							return
+						}
+						if !VerifyDataColumnSidecarInclusionProof(sidecar) {
+							log.Debug("failed to verify column sidecar inclusion proof", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
+							d.rpc.BanPeer(result.pid)
+							return
+						}
+						if !VerifyDataColumnSidecarKZGProofs(sidecar) {
+							log.Debug("failed to verify column sidecar kzg proofs", "blockRoot", blockRoot, "columnIndex", sidecar.Index)
+							d.rpc.BanPeer(result.pid)
+							return
+						}
 					}
 					// save the sidecar to the column storage
 					if err := d.columnStorage.WriteColumnSidecars(ctx, blockRoot, int64(columnIndex), columnData); err != nil {

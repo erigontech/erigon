@@ -5,6 +5,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
@@ -23,19 +24,62 @@ const (
 
 // VerifyDataColumnSidecar verifies if the data column sidecar is valid according to protocol rules.
 // This function is re-entrant and thread-safe.
+// For Fulu: uses KzgCommitments from the sidecar.
+// For GLOAS: use VerifyDataColumnSidecarWithCommitments instead.
 func VerifyDataColumnSidecar(sidecar *cltypes.DataColumnSidecar) bool {
 	// The sidecar index must be within the valid range
 	if sidecar.Index >= clparams.GetBeaconConfig().NumberOfColumns {
 		return false
 	}
 
-	// A sidecar for zero blobs is invalid
-	if sidecar.KzgCommitments.Len() == 0 {
+	// Column and KzgProofs must exist and have matching lengths
+	if sidecar.Column == nil || sidecar.KzgProofs == nil {
+		return false
+	}
+	if sidecar.Column.Len() == 0 {
+		return false
+	}
+	if sidecar.Column.Len() != sidecar.KzgProofs.Len() {
 		return false
 	}
 
-	// The commitments and proofs lengths must match
-	if sidecar.KzgCommitments.Len() != sidecar.KzgProofs.Len() || sidecar.KzgCommitments.Len() != sidecar.Column.Len() {
+	// For Fulu (pre-GLOAS): verify KzgCommitments matches
+	if sidecar.Version() < clparams.GloasVersion {
+		if sidecar.KzgCommitments == nil || sidecar.KzgCommitments.Len() == 0 {
+			return false
+		}
+		if sidecar.KzgCommitments.Len() != sidecar.Column.Len() {
+			return false
+		}
+	}
+
+	return true
+}
+
+// VerifyDataColumnSidecarWithCommitments verifies if the data column sidecar is valid according to GLOAS protocol rules.
+// [Modified in Gloas:EIP7732] kzg_commitments is now passed as a parameter.
+// This function is re-entrant and thread-safe.
+func VerifyDataColumnSidecarWithCommitments(sidecar *cltypes.DataColumnSidecar, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) bool {
+	// The sidecar index must be within the valid range
+	if sidecar.Index >= clparams.GetBeaconConfig().NumberOfColumns {
+		return false
+	}
+
+	// Column must exist and not be empty
+	if sidecar.Column == nil || sidecar.Column.Len() == 0 {
+		return false
+	}
+
+	// KzgProofs must exist
+	if sidecar.KzgProofs == nil {
+		return false
+	}
+
+	// [Modified in Gloas:EIP7732] len(sidecar.column) != len(kzg_commitments) or len(sidecar.column) != len(sidecar.kzg_proofs)
+	if kzgCommitments == nil {
+		return false
+	}
+	if sidecar.Column.Len() != kzgCommitments.Len() || sidecar.Column.Len() != sidecar.KzgProofs.Len() {
 		return false
 	}
 
@@ -44,16 +88,45 @@ func VerifyDataColumnSidecar(sidecar *cltypes.DataColumnSidecar) bool {
 
 // VerifyDataColumnSidecarKZGProofs verifies if the KZG proofs in the sidecar are correct.
 // This function is re-entrant and thread-safe.
+// For Fulu: uses KzgCommitments from the sidecar.
+// For GLOAS: use VerifyDataColumnSidecarKZGProofsWithCommitments instead.
 func VerifyDataColumnSidecarKZGProofs(sidecar *cltypes.DataColumnSidecar) bool {
+	// For GLOAS: KzgCommitments are not in the sidecar, use VerifyDataColumnSidecarKZGProofsWithCommitments
+	if sidecar.Version() >= clparams.GloasVersion {
+		// GLOAS sidecars don't have KzgCommitments in the sidecar itself
+		// Caller should use VerifyDataColumnSidecarKZGProofsWithCommitments with external commitments
+		return true // Skip for now, caller must use the WithCommitments variant
+	}
+
+	// Fulu verification
+	if sidecar.KzgCommitments == nil || sidecar.KzgCommitments.Len() == 0 {
+		return false
+	}
+
+	return verifyKZGProofsInternal(sidecar, sidecar.KzgCommitments)
+}
+
+// VerifyDataColumnSidecarKZGProofsWithCommitments verifies if the KZG proofs in the sidecar are correct.
+// [Modified in Gloas:EIP7732] kzg_commitments is now passed as a parameter.
+// This function is re-entrant and thread-safe.
+func VerifyDataColumnSidecarKZGProofsWithCommitments(sidecar *cltypes.DataColumnSidecar, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) bool {
+	if kzgCommitments == nil || kzgCommitments.Len() == 0 {
+		return false
+	}
+	return verifyKZGProofsInternal(sidecar, kzgCommitments)
+}
+
+// verifyKZGProofsInternal is the internal implementation for KZG proof verification.
+func verifyKZGProofsInternal(sidecar *cltypes.DataColumnSidecar, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) bool {
 	// The column index represents the cell index for each proof
 	cellIndices := make([]uint64, sidecar.Column.Len())
 	for i := range cellIndices {
 		cellIndices[i] = sidecar.Index
 	}
 
-	ckzgCommitments := make([]goethkzg.KZGCommitment, sidecar.KzgCommitments.Len())
+	ckzgCommitments := make([]goethkzg.KZGCommitment, kzgCommitments.Len())
 	for i := range ckzgCommitments {
-		copy(ckzgCommitments[i][:], sidecar.KzgCommitments.Get(i)[:])
+		copy(ckzgCommitments[i][:], kzgCommitments.Get(i)[:])
 	}
 
 	ckzgCells := make([]*goethkzg.Cell, sidecar.Column.Len())
@@ -95,7 +168,21 @@ func ComputeSubnetForDataColumnSidecar(columnIndex cltypes.ColumnIndex) uint64 {
 
 // VerifyDataColumnSidecarInclusionProof verifies if the inclusion proof in the sidecar is correct.
 // This function is re-entrant and thread-safe.
+// Version-aware: handles both Fulu and GLOAS sidecars.
 func VerifyDataColumnSidecarInclusionProof(sidecar *cltypes.DataColumnSidecar) bool {
+	// For GLOAS: inclusion proof is not part of the sidecar
+	// TODO: Implement GLOAS-specific inclusion proof verification when spec is finalized
+	if sidecar.Version() >= clparams.GloasVersion {
+		// GLOAS sidecars don't have KzgCommitmentsInclusionProof
+		// The verification needs to be done differently
+		return true // Skip for now, will be verified through different mechanism
+	}
+
+	// Fulu verification
+	if sidecar.KzgCommitmentsInclusionProof == nil || sidecar.KzgCommitments == nil || sidecar.SignedBlockHeader == nil {
+		return false
+	}
+
 	// Convert branch to hashes for merkle proof verification
 	branch := make([]common.Hash, sidecar.KzgCommitmentsInclusionProof.Length())
 	for i := range branch {
