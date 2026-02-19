@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package mock
+package execmoduletester
 
 import (
 	"context"
@@ -95,14 +95,12 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
-const MockInsertAsInitialCycle = false
-
 type StateChangesClient interface {
 	StateChanges(ctx context.Context, in *remoteproto.StateChangeRequest, opts ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error)
 }
 
-// MockSentry is a Network Interface mock. So, unit-tests can test many Erigon's components - but without net-interaction
-type MockSentry struct {
+// ExecModuleTester aims to construct all parts necessary to test the PoS GRPC API of our EthereumExecModule.
+type ExecModuleTester struct {
 	sentryproto.UnimplementedSentryServer
 	Ctx                  context.Context
 	Log                  log.Logger
@@ -149,7 +147,7 @@ type MockSentry struct {
 	bgComponentsEg errgroup.Group
 }
 
-func (ms *MockSentry) Close() {
+func (ms *ExecModuleTester) Close() {
 	ms.cancel()
 	if ms.Engine != nil {
 		ms.Engine.Close()
@@ -166,7 +164,7 @@ func (ms *MockSentry) Close() {
 }
 
 // Stream returns stream, waiting if necessary
-func (ms *MockSentry) Send(req *sentryproto.InboundMessage) (errs []error) {
+func (ms *ExecModuleTester) Send(req *sentryproto.InboundMessage) (errs []error) {
 	ms.StreamWg.Wait()
 	for _, stream := range ms.streams[req.Id] {
 		if err := stream.Send(req); err != nil {
@@ -176,53 +174,53 @@ func (ms *MockSentry) Send(req *sentryproto.InboundMessage) (errs []error) {
 	return errs
 }
 
-func (ms *MockSentry) SetStatus(context.Context, *sentryproto.StatusData) (*sentryproto.SetStatusReply, error) {
+func (ms *ExecModuleTester) SetStatus(context.Context, *sentryproto.StatusData) (*sentryproto.SetStatusReply, error) {
 	return &sentryproto.SetStatusReply{}, nil
 }
 
-func (ms *MockSentry) PenalizePeer(context.Context, *sentryproto.PenalizePeerRequest) (*emptypb.Empty, error) {
+func (ms *ExecModuleTester) PenalizePeer(context.Context, *sentryproto.PenalizePeerRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
 
-func (ms *MockSentry) SetPeerMinimumBlock(context.Context, *sentryproto.SetPeerMinimumBlockRequest) (*emptypb.Empty, error) {
+func (ms *ExecModuleTester) SetPeerMinimumBlock(context.Context, *sentryproto.SetPeerMinimumBlockRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
 
-func (ms *MockSentry) SetPeerLatestBlock(context.Context, *sentryproto.SetPeerLatestBlockRequest) (*emptypb.Empty, error) {
+func (ms *ExecModuleTester) SetPeerLatestBlock(context.Context, *sentryproto.SetPeerLatestBlockRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
 
-func (ms *MockSentry) SetPeerBlockRange(context.Context, *sentryproto.SetPeerBlockRangeRequest) (*emptypb.Empty, error) {
+func (ms *ExecModuleTester) SetPeerBlockRange(context.Context, *sentryproto.SetPeerBlockRangeRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
 
-func (ms *MockSentry) HandShake(ctx context.Context, in *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
+func (ms *ExecModuleTester) HandShake(ctx context.Context, in *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
 	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH69}, nil
 }
-func (ms *MockSentry) SendMessageByMinBlock(_ context.Context, r *sentryproto.SendMessageByMinBlockRequest) (*sentryproto.SentPeers, error) {
+func (ms *ExecModuleTester) SendMessageByMinBlock(_ context.Context, r *sentryproto.SendMessageByMinBlockRequest) (*sentryproto.SentPeers, error) {
 	ms.sentMessages = append(ms.sentMessages, r.Data)
 	return nil, nil
 }
-func (ms *MockSentry) SendMessageById(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
+func (ms *ExecModuleTester) SendMessageById(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
 	ms.sentMessages = append(ms.sentMessages, r.Data)
 	return nil, nil
 }
-func (ms *MockSentry) SendMessageToRandomPeers(_ context.Context, r *sentryproto.SendMessageToRandomPeersRequest) (*sentryproto.SentPeers, error) {
+func (ms *ExecModuleTester) SendMessageToRandomPeers(_ context.Context, r *sentryproto.SendMessageToRandomPeersRequest) (*sentryproto.SentPeers, error) {
 	ms.sentMessages = append(ms.sentMessages, r.Data)
 	return nil, nil
 }
-func (ms *MockSentry) SendMessageToAll(_ context.Context, r *sentryproto.OutboundMessageData) (*sentryproto.SentPeers, error) {
+func (ms *ExecModuleTester) SendMessageToAll(_ context.Context, r *sentryproto.OutboundMessageData) (*sentryproto.SentPeers, error) {
 	ms.sentMessages = append(ms.sentMessages, r)
 	return nil, nil
 }
-func (ms *MockSentry) SentMessage(i int) (*sentryproto.OutboundMessageData, error) {
+func (ms *ExecModuleTester) SentMessage(i int) (*sentryproto.OutboundMessageData, error) {
 	if i < 0 || i >= len(ms.sentMessages) {
 		return nil, fmt.Errorf("no sent message for index %d found", i)
 	}
 	return ms.sentMessages[i], nil
 }
 
-func (ms *MockSentry) Messages(req *sentryproto.MessagesRequest, stream sentryproto.Sentry_MessagesServer) error {
+func (ms *ExecModuleTester) Messages(req *sentryproto.MessagesRequest, stream sentryproto.Sentry_MessagesServer) error {
 	if ms.streams == nil {
 		ms.streams = map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer{}
 	}
@@ -239,20 +237,20 @@ func (ms *MockSentry) Messages(req *sentryproto.MessagesRequest, stream sentrypr
 	}
 }
 
-func (ms *MockSentry) Peers(context.Context, *emptypb.Empty) (*sentryproto.PeersReply, error) {
+func (ms *ExecModuleTester) Peers(context.Context, *emptypb.Empty) (*sentryproto.PeersReply, error) {
 	return &sentryproto.PeersReply{}, nil
 }
-func (ms *MockSentry) PeerCount(context.Context, *sentryproto.PeerCountRequest) (*sentryproto.PeerCountReply, error) {
+func (ms *ExecModuleTester) PeerCount(context.Context, *sentryproto.PeerCountRequest) (*sentryproto.PeerCountReply, error) {
 	return &sentryproto.PeerCountReply{Count: 0}, nil
 }
-func (ms *MockSentry) PeerById(context.Context, *sentryproto.PeerByIdRequest) (*sentryproto.PeerByIdReply, error) {
+func (ms *ExecModuleTester) PeerById(context.Context, *sentryproto.PeerByIdRequest) (*sentryproto.PeerByIdReply, error) {
 	return &sentryproto.PeerByIdReply{}, nil
 }
-func (ms *MockSentry) PeerEvents(req *sentryproto.PeerEventsRequest, server sentryproto.Sentry_PeerEventsServer) error {
+func (ms *ExecModuleTester) PeerEvents(req *sentryproto.PeerEventsRequest, server sentryproto.Sentry_PeerEventsServer) error {
 	return nil
 }
 
-func (ms *MockSentry) NodeInfo(context.Context, *emptypb.Empty) (*typesproto.NodeInfoReply, error) {
+func (ms *ExecModuleTester) NodeInfo(context.Context, *emptypb.Empty) (*typesproto.NodeInfoReply, error) {
 	return nil, nil
 }
 
@@ -285,16 +283,16 @@ func applyOptions(opts []Option) options {
 	return opt
 }
 
-func MockWithGenesis(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, opts ...Option) *MockSentry {
-	return MockWithGenesisPruneMode(tb, gspec, key, blockBufferSize, prune.MockMode, opts...)
+func NewWithGenesis(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, opts ...Option) *ExecModuleTester {
+	return NewWithGenesisPruneMode(tb, gspec, key, blockBufferSize, prune.MockMode, opts...)
 }
 
-func MockWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine rules.Engine, opts ...Option) *MockSentry {
+func NewWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine rules.Engine, opts ...Option) *ExecModuleTester {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	return MockWithEverything(tb, gspec, key, prune.MockMode, engine, blockBufferSize, false, opts...)
+	return NewWithEverything(tb, gspec, key, prune.MockMode, engine, blockBufferSize, false, opts...)
 }
 
-func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, blockBufferSize int, prune prune.Mode, opts ...Option) *MockSentry {
+func NewWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, blockBufferSize int, prune prune.Mode, opts ...Option) *ExecModuleTester {
 	var engine rules.Engine
 
 	switch {
@@ -304,10 +302,10 @@ func MockWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.Pr
 		engine = ethash.NewFaker()
 	}
 
-	return MockWithEverything(tb, gspec, key, prune, engine, blockBufferSize, false, opts...)
+	return NewWithEverything(tb, gspec, key, prune, engine, blockBufferSize, false, opts...)
 }
 
-func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine rules.Engine, blockBufferSize int, withTxPool bool, opts ...Option) *MockSentry {
+func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine rules.Engine, blockBufferSize int, withTxPool bool, opts ...Option) *ExecModuleTester {
 	opt := applyOptions(opts)
 	tmpdir, err := os.MkdirTemp("", "mock-sentry-*")
 	if err != nil {
@@ -368,7 +366,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 
 	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 
-	mock := &MockSentry{
+	mock := &ExecModuleTester{
 		Ctx: ctx, cancel: ctxCancel, DB: db,
 		tb:                 tb,
 		Log:                logger,
@@ -697,8 +695,8 @@ func mockDownloader(ctrl *gomock.Controller, snapRoot string) downloader.Client 
 	return downloader.NewRpcClient(snapDownloader, snapRoot)
 }
 
-// Mock is convenience function to create a mock with some pre-set values
-func Mock(tb testing.TB) *MockSentry {
+// New is convenience function to create an ExecModuleTester with some pre-set values
+func New(tb testing.TB) *ExecModuleTester {
 	funds := big.NewInt(1 * common.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
@@ -709,10 +707,10 @@ func Mock(tb testing.TB) *MockSentry {
 			address: {Balance: funds},
 		},
 	}
-	return MockWithGenesis(tb, gspec, key)
+	return NewWithGenesis(tb, gspec, key)
 }
 
-func MockWithTxPool(t *testing.T) *MockSentry {
+func NewWithTxPool(t *testing.T) *ExecModuleTester {
 	funds := big.NewInt(1 * common.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
@@ -724,10 +722,10 @@ func MockWithTxPool(t *testing.T) *MockSentry {
 		},
 	}
 
-	return MockWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true)
+	return NewWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true)
 }
 
-func MockWithTxPoolCancun(t *testing.T) *MockSentry {
+func NewWithTxPoolCancun(t *testing.T) *ExecModuleTester {
 	funds := big.NewInt(1 * common.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
@@ -747,10 +745,10 @@ func MockWithTxPoolCancun(t *testing.T) *MockSentry {
 		},
 	}
 
-	return MockWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true)
+	return NewWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true)
 }
 
-func MockWithTxPoolAllProtocolChanges(t *testing.T) *MockSentry {
+func NewWithTxPoolAllProtocolChanges(t *testing.T) *ExecModuleTester {
 	funds := big.NewInt(1 * common.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
@@ -762,16 +760,16 @@ func MockWithTxPoolAllProtocolChanges(t *testing.T) *MockSentry {
 		},
 	}
 
-	return MockWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true)
+	return NewWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true)
 }
 
-func (ms *MockSentry) EnableLogs() {
+func (ms *ExecModuleTester) EnableLogs() {
 	ms.Log.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 }
 
-func (ms *MockSentry) Cfg() ethconfig.Config { return ms.cfg }
+func (ms *ExecModuleTester) Cfg() ethconfig.Config { return ms.cfg }
 
-func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
+func (ms *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 	wr := chainreader.NewChainReaderEth1(ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), uint64(time.Hour))
 
 	streamCtx, cancel := context.WithCancel(ms.Ctx)
@@ -850,7 +848,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 	return nil
 }
 
-func (ms *MockSentry) InsertChain(chain *blockgen.ChainPack) error {
+func (ms *ExecModuleTester) InsertChain(chain *blockgen.ChainPack) error {
 	if err := ms.insertPoSBlocks(chain); err != nil {
 		return err
 	}
@@ -879,11 +877,11 @@ func (ms *MockSentry) InsertChain(chain *blockgen.ChainPack) error {
 	return nil
 }
 
-func (ms *MockSentry) HeaderDownload() *headerdownload.HeaderDownload {
+func (ms *ExecModuleTester) HeaderDownload() *headerdownload.HeaderDownload {
 	return ms.sentriesClient.Hd
 }
 
-func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.TemporalTx) state.StateReader {
+func (ms *ExecModuleTester) NewHistoryStateReader(blockNum uint64, tx kv.TemporalTx) state.StateReader {
 	r, err := rpchelper.CreateHistoryStateReader(context.Background(), tx, blockNum, 0, ms.BlockReader.TxnumReader())
 	if err != nil {
 		panic(err)
@@ -891,15 +889,15 @@ func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.TemporalTx) s
 	return r
 }
 
-func (ms *MockSentry) NewStateReader(tx kv.TemporalGetter) state.StateReader {
+func (ms *ExecModuleTester) NewStateReader(tx kv.TemporalGetter) state.StateReader {
 	return state.NewReaderV3(tx)
 }
 
-func (ms *MockSentry) BlocksIO() (services.FullBlockReader, *blockio.BlockWriter) {
+func (ms *ExecModuleTester) BlocksIO() (services.FullBlockReader, *blockio.BlockWriter) {
 	return ms.BlockReader, blockio.NewBlockWriter()
 }
 
-func (ms *MockSentry) Current(tx kv.Tx) *types.Block {
+func (ms *ExecModuleTester) Current(tx kv.Tx) *types.Block {
 	if tx != nil {
 		b, err := ms.BlockReader.CurrentBlock(tx)
 		if err != nil {
