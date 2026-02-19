@@ -138,7 +138,7 @@ var (
 		"enr:-LK4QA8FfhaAjlb_BXsXxSfiysR7R52Nhi9JBt4F8SPssu8hdE1BXQQEtVDC3qStCW60LSO7hEsVHv5zm8_6Vnjhcn0Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpC1MD8qAAAAAP__________gmlkgnY0gmlwhAN4aBKJc2VjcDI1NmsxoQJerDhsJ-KxZ8sHySMOCmTO6sHM3iCFQ6VMvLTe948MyYN0Y3CCI4yDdWRwgiOM",
 		"enr:-LK4QKWrXTpV9T78hNG6s8AM6IO4XH9kFT91uZtFg1GcsJ6dKovDOr1jtAAFPnS2lvNltkOGA9k29BUN7lFh_sjuc9QBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpC1MD8qAAAAAP__________gmlkgnY0gmlwhANAdd-Jc2VjcDI1NmsxoQLQa6ai7y9PMN5hpLe5HmiJSlYzMuzP7ZhwRiwHvqNXdoN0Y3CCI4yDdWRwgiOM",
 	}
-	SepoliaBootstrapNodes = append(MainnetBootstrapNodes,
+	SepoliaBootstrapNodes = []string{
 		"enr:-Iq4QMCTfIMXnow27baRUb35Q8iiFHSIDBJh6hQM5Axohhf4b6Kr_cOCu0htQ5WvVqKvFgY28893DHAg8gnBAXsAVqmGAX53x8JggmlkgnY0gmlwhLKAlv6Jc2VjcDI1NmsxoQK6S-Cii_KmfFdUJL2TANL3ksaKUnNXvTCv1tLwXs0QgIN1ZHCCIyk",
 		"enr:-KG4QE5OIg5ThTjkzrlVF32WT_-XT14WeJtIz2zoTqLLjQhYAmJlnk4ItSoH41_2x0RX0wTFIe5GgjRzU2u7Q1fN4vADhGV0aDKQqP7o7pAAAHAyAAAAAAAAAIJpZIJ2NIJpcISlFsStiXNlY3AyNTZrMaEC-Rrd_bBZwhKpXzFCrStKp1q_HmGOewxY3KwM8ofAj_ODdGNwgiMog3VkcIIjKA",
 		"enr:-L64QC9Hhov4DhQ7mRukTOz4_jHm4DHlGL726NWH4ojH1wFgEwSin_6H95Gs6nW2fktTWbPachHJ6rUFu0iJNgA0SB2CARqHYXR0bmV0c4j__________4RldGgykDb6UBOQAABx__________-CaWSCdjSCaXCEA-2vzolzZWNwMjU2azGhA17lsUg60R776rauYMdrAz383UUgESoaHEzMkvm4K6k6iHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
@@ -151,9 +151,9 @@ var (
 		"enr:-Ku4QHRyRwEPT7s0XLYzJ_EeeWvZTXBQb4UCGy1F_3m-YtCNTtDlGsCMr4UTgo4uR89pv11uM-xq4w6GKfKhqU31hTgCh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCo_ujukAAAaf__________gmlkgnY0gmlwhIrFM7WJc2VjcDI1NmsxoQI4diTwChN3zAAkarf7smOHCdFb1q3DSwdiQ_Lc_FdzFIN1ZHCCIy0",
 		"enr:-Ku4QOkvvf0u5Hg4-HhY-SJmEyft77G5h3rUM8VF_e-Hag5cAma3jtmFoX4WElLAqdILCA-UWFRN1ZCDJJVuEHrFeLkDh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCo_ujukAAAaf__________gmlkgnY0gmlwhJK-AWeJc2VjcDI1NmsxoQLFcT5VE_NMiIC8Ll7GypWDnQ4UEmuzD7hF_Hf4veDJwIN1ZHCCIy0",
 		"enr:-Ku4QH6tYsHKITYeHUu5kdfXgEZWI18EWk_2RtGOn1jBPlx2UlS_uF3Pm5Dx7tnjOvla_zs-wwlPgjnEOcQDWXey51QCh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCo_ujukAAAaf__________gmlkgnY0gmlwhIs7Mc6Jc2VjcDI1NmsxoQIET4Mlv9YzhrYhX_H9D7aWMemUrvki6W4J2Qo0YmFMp4N1ZHCCIy0",
-		"enr:-Ku4QDmz-4c1InchGitsgNk4qzorWMiFUoaPJT4G0IiF8r2UaevrekND1o7fdoftNucirj7sFFTTn2-JdC2Ej0p1Mn8Ch2F0dG5ldHOIAAAAAAAAAACEZXRoMpCo_ujukAAAaf__________gmlkgnY0gmlwhKpA-liJc2VjcDI1NmsxoQMpHP5U1DK8O_JQU6FadmWbE42qEdcGlllR8HcSkkfWq4N1ZHCCIy0")
-
-	GnosisBootstrapNodes = append(MainnetBootstrapNodes, []string{
+		"enr:-Ku4QDmz-4c1InchGitsgNk4qzorWMiFUoaPJT4G0IiF8r2UaevrekND1o7fdoftNucirj7sFFTTn2-JdC2Ej0p1Mn8Ch2F0dG5ldHOIAAAAAAAAAACEZXRoMpCo_ujukAAAaf__________gmlkgnY0gmlwhKpA-liJc2VjcDI1NmsxoQMpHP5U1DK8O_JQU6FadmWbE42qEdcGlllR8HcSkkfWq4N1ZHCCIy0",
+	}
+	GnosisBootstrapNodes = []string{
 		"enr:-Ly4QIAhiTHk6JdVhCdiLwT83wAolUFo5J4nI5HrF7-zJO_QEw3cmEGxC1jvqNNUN64Vu-xxqDKSM528vKRNCehZAfEBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhEFtZ5SJc2VjcDI1NmsxoQJwgL5C-30E8RJmW8gCb7sfwWvvfre7wGcCeV4X1G2wJYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 		"enr:-Ly4QDhEjlkf8fwO5uWAadexy88GXZneTuUCIPHhv98v8ZfXMtC0S1S_8soiT0CMEgoeLe9Db01dtkFQUnA9YcnYC_8Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhEFtZ5WJc2VjcDI1NmsxoQMRSho89q2GKx_l2FZhR1RmnSiQr6o_9hfXfQUuW6bjMohzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 		"enr:-Ly4QLKgv5M2D4DYJgo6s4NG_K4zu4sk5HOLCfGCdtgoezsbfRbfGpQ4iSd31M88ec3DHA5FWVbkgIas9EaJeXia0nwBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhI1eYRaJc2VjcDI1NmsxoQLpK_A47iNBkVjka9Mde1F-Kie-R0sq97MCNKCxt2HwOIhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
@@ -161,19 +161,13 @@ var (
 		"enr:-Ly4QCD5D99p36WafgTSxB6kY7D2V1ca71C49J4VWI2c8UZCCPYBvNRWiv0-HxOcbpuUdwPVhyWQCYm1yq2ZH0ukCbQBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhI1eYVSJc2VjcDI1NmsxoQJJMSV8iSZ8zvkgbi8cjIGEUVJeekLqT0LQha_co-siT4hzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 		"enr:-KK4QKXJq1QOVWuJAGige4uaT8LRPQGCVRf3lH3pxjaVScMRUfFW1eiiaz8RwOAYvw33D4EX-uASGJ5QVqVCqwccxa-Bi4RldGgykCGm-DYDAABk__________-CaWSCdjSCaXCEM0QnzolzZWNwMjU2azGhAhNvrRkpuK4MWTf3WqiOXSOePL8Zc-wKVpZ9FQx_BDadg3RjcIIjKIN1ZHCCIyg",
 		"enr:-LO4QO87Rn2ejN3SZdXkx7kv8m11EZ3KWWqoIN5oXwQ7iXR9CVGd1dmSyWxOL1PGsdIqeMf66OZj4QGEJckSi6okCdWBpIdhdHRuZXRziAAAAABgAAAAhGV0aDKQPr_UhAQAAGT__________4JpZIJ2NIJpcIQj0iX1iXNlY3AyNTZrMaEDd-_eqFlWWJrUfEp8RhKT9NxdYaZoLHvsp3bbejPyOoeDdGNwgiMog3VkcIIjKA",
-		"enr:-LK4QIJUAxX9uNgW4ACkq8AixjnSTcs9sClbEtWRq9F8Uy9OEExsr4ecpBTYpxX66cMk6pUHejCSX3wZkK2pOCCHWHEBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpA-v9SEBAAAZP__________gmlkgnY0gmlwhCPSnDuJc2VjcDI1NmsxoQNuaAjFE-ANkH3pbeBdPiEIwjR5kxFuKaBWxHkqFuPz5IN0Y3CCIyiDdWRwgiMo"}...)
-	ChiadoBootstrapNodes = append(MainnetBootstrapNodes, []string{
-		"enr:-L64QOijsdi9aVIawMb5h5PWueaPM9Ai6P17GNPFlHzz7MGJQ8tFMdYrEx8WQitNKLG924g2Q9cCdzg54M0UtKa3QIKCMxaHYXR0bmV0c4j__________4RldGgykDE2cEMCAABv__________-CaWSCdjSCaXCEi5AaWYlzZWNwMjU2azGhA8CjTkD4m1s8FbKCN18LgqlYcE65jrT148vFtwd9U62SiHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
-		"enr:-L64QKYKGQj5ybkfBxyFU5IEVzP7oJkGHJlie4W8BCGAYEi4P0mmMksaasiYF789mVW_AxYVNVFUjg9CyzmdvpyWQ1KCMlmHYXR0bmV0c4j__________4RldGgykDE2cEMCAABv__________-CaWSCdjSCaXCEi5CtNolzZWNwMjU2azGhAuA7BAwIijy1z81AO9nz_MOukA1ER68rGA67PYQ5pF1qiHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
-		"enr:-Ly4QJJUnV9BxP_rw2Bv7E9iyw4sYS2b4OQZIf4Mu_cA6FljJvOeSTQiCUpbZhZjR4R0VseBhdTzrLrlHrAuu_OeZqgJh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQGnOJc2VjcDI1NmsxoQPT_u3IjDtB2r-nveH5DhUmlM8F2IgLyxhmwmqW4L5k3ohzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
-		"enr:-MK4QCkOyqOTPX1_-F-5XVFjPclDUc0fj3EeR8FJ5-hZjv6ARuGlFspM0DtioHn1r6YPUXkOg2g3x6EbeeKdsrvVBYmGAYQKrixeh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQGlWJc2VjcDI1NmsxoQKdW3-DgLExBkpLGMRtuM88wW_gZkC7Yeg0stYDTrlynYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
-		"enr:-Ly4QLYLNqrjvSxD3lpAPBUNlxa6cIbe79JqLZLFcZZjWoCjZcw-85agLUErHiygG2weRSCLnd5V460qTbLbwJQsfZkoh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhKq7mu-Jc2VjcDI1NmsxoQP900YAYa9kdvzlSKGjVo-F3XVzATjOYp3BsjLjSophO4hzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
-		"enr:-Ly4QCGeYvTCNOGKi0mKRUd45rLj96b4pH98qG7B9TCUGXGpHZALtaL2-XfjASQyhbCqENccI4PGXVqYTIehNT9KJMQgh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQrVSJc2VjcDI1NmsxoQP9iDchx2PGl3JyJ29B9fhLCvVMN6n23pPAIIeFV-sHOIhzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
-		"enr:-Ly4QAtr21x5Ps7HYhdZkIBRBgcBkvlIfEel1YNjtFWf4cV3au2LgBGICz9PtEs9-p2HUl_eME8m1WImxTxSB3AkCMwBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANHhOeJc2VjcDI1NmsxoQNLp1QPV8-pyMCohOtj6xGtSBM_GtVTqzlbvNsCF4ezkYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
-		"enr:-Ly4QLgn8Bx6faigkKUGZQvd1HDToV2FAxZIiENK-lczruzQb90qJK-4E65ADly0s4__dQOW7IkLMW7ZAyJy2vtiLy8Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANFIw2Jc2VjcDI1NmsxoQMa-fWEy9UJHfOl_lix3wdY5qust78sHAqZnWwEiyqKgYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
-		"enr:-KG4QF7z4LUdMfgwvh-fS-MDv_1hPSUCqGfyOWGLNJuoBHKFAMSHz8geQn8v3qDDbuSQKud3WIAjKqR4gqJoLBUEJ08ZhGV0aDKQDc1ElgAAAG___________4JpZIJ2NIJpcIQjzq5ciXNlY3AyNTZrMaECt7YO363pV54d3QdgnluL5kxzhCR_k0yM9C-G6bqMGoKDdGNwgiMog3VkcIIjKA",
-		"enr:-LK4QCUTEmZrT1AgCKdyVgwnHL5J0VSoxsyjruAtwo-owBTBVEOyAnQRVNXlcW5aL-ycntk5oHDrKCR-DXZAlUAKpjEBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCdM7Z1BAAAb___________gmlkgnY0gmlwhCPSfheJc2VjcDI1NmsxoQNpdf8U9pzsU9m6Hzgd1rmTI-On-QImJnkZBGqDp4org4N0Y3CCIyiDdWRwgiMo",
-	}...)
+		"enr:-LK4QIJUAxX9uNgW4ACkq8AixjnSTcs9sClbEtWRq9F8Uy9OEExsr4ecpBTYpxX66cMk6pUHejCSX3wZkK2pOCCHWHEBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpA-v9SEBAAAZP__________gmlkgnY0gmlwhCPSnDuJc2VjcDI1NmsxoQNuaAjFE-ANkH3pbeBdPiEIwjR5kxFuKaBWxHkqFuPz5IN0Y3CCIyiDdWRwgiMo",
+	}
+	ChiadoBootstrapNodes = []string{
+		"enr:-LG4QMFq8SbY6bah7uUaC_tqv0p3z2v01mhoiTxqNAYuXD9uRQ31iftwjwHkU7xjLs2GZU_Gy---HC6Ow3ezxNhSH0UCg2V0aMvKhFDTnXuEZG4OTIRldGgykJ0ztnX_______________-CaWSCdjSCaXCEOYD8e4lzZWNwMjU2azGhAvzFf5X-nJT-XcAh9WiQcow3U4xQbTa9zLgAw7F3KLmMg3RjcIJ2X4N1ZHCCdl8",
+		"enr:-LG4QPJwqCehYsNwk1o7X1klrAB2sdveN0ExSN5cCgLA-r_wEP_jZaOzweZctGNctqg-xL741J-i78Elmx8lHX2iK-kCg2V0aMvKhFDTnXuEZG4OTIRldGgykJ0ztnX_______________-CaWSCdjSCaXCENieUYolzZWNwMjU2azGhA_dbrqWKyfZg4kXgHRAMSdRFnq2rOmLmAHL2tsx-kLvRg3RjcIJ2X4N1ZHCCdl8",
+		"enr:-Le4QAbc1ed8LNw6rAkyiWEdSIaeNGh0HdGivJkndykFlAznHKLX-rTswkHe2epyBO_569hM_4YohAgaHFpJFSF9llEDh2F0dG5ldHOI__________-DY2djBIRldGgykP8Vq-EFAABv__________-CaWSCdjSCaXCEM_9KZYlzZWNwMjU2azGhAmmnHVdNFq8KVuX7eJhsu3q04S1L5GmS0MBG3MaToTQ_g3RjcIIjLYN1ZHCCIy0",
+	}
 	HoodiBootstrapNodes = []string{
 		"enr:-Mq4QLkmuSwbGBUph1r7iHopzRpdqE-gcm5LNZfcE-6T37OCZbRHi22bXZkaqnZ6XdIyEDTelnkmMEQB8w6NbnJUt9GGAZWaowaYh2F0dG5ldHOIABgAAAAAAACEZXRoMpDS8Zl_YAAJEAAIAAAAAAAAgmlkgnY0gmlwhNEmfKCEcXVpY4IyyIlzZWNwMjU2azGhA0hGa4jZJZYQAS-z6ZFK-m4GCFnWS8wfjO0bpSQn6hyEiHN5bmNuZXRzAIN0Y3CCIyiDdWRwgiMo",
 		"enr:-Ku4QLVumWTwyOUVS4ajqq8ZuZz2ik6t3Gtq0Ozxqecj0qNZWpMnudcvTs-4jrlwYRQMQwBS8Pvtmu4ZPP2Lx3i2t7YBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpBd9cEGEAAJEP__________gmlkgnY0gmlwhNEmfKCJc2VjcDI1NmsxoQLdRlI8aCa_ELwTJhVN8k7km7IDc3pYu-FMYBs5_FiigIN1ZHCCIyk",
@@ -181,6 +175,11 @@ var (
 		"enr:-Ku4QIC89sMC0o-irosD4_23lJJ4qCGOvdUz7SmoShWx0k6AaxCFTKviEHa-sa7-EzsiXpDp0qP0xzX6nKdXJX3X-IQBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpBd9cEGEAAJEP__________gmlkgnY0gmlwhIbRilSJc2VjcDI1NmsxoQK_m0f1DzDc9Cjrspm36zuRa7072HSiMGYWLsKiVSbP34N1ZHCCIyk",
 		"enr:-Ku4QNkWjw5tNzo8DtWqKm7CnDdIq_y7xppD6c1EZSwjB8rMOkSFA1wJPLoKrq5UvA7wcxIotH6Usx3PAugEN2JMncIBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpBd9cEGEAAJEP__________gmlkgnY0gmlwhIbHuBeJc2VjcDI1NmsxoQP3FwrhFYB60djwRjAoOjttq6du94DtkQuaN99wvgqaIYN1ZHCCIyk",
 		"enr:-OS4QMJGE13xEROqvKN1xnnt7U-noc51VXyM6wFMuL9LMhQDfo1p1dF_zFdS4OsnXz_vIYk-nQWnqJMWRDKvkSK6_CwDh2F0dG5ldHOIAAAAADAAAACGY2xpZW502IpMaWdodGhvdXNljDcuMC4wLWJldGEuM4RldGgykNLxmX9gAAkQAAgAAAAAAACCaWSCdjSCaXCEhse4F4RxdWljgiMqiXNlY3AyNTZrMaECef77P8k5l3PC_raLw42OAzdXfxeQ-58BJriNaqiRGJSIc3luY25ldHMAg3RjcIIjKIN1ZHCCIyg",
+	}
+	BloatnetBootstrapNodes = []string{
+		"enr:-Iq4QO5d3m9DzBlj1PLCovLotwN8b9mFp_MrCx-KiNjzltphcYYT7oeD-VU7qyuNJd50X3wlJwjd6C989B3DkVcQ3tiGAZfpKz9kgmlkgnY0gmlwhJ20DuWJc2VjcDI1NmsxoQJJ3h8aUO3GJHv-bdvHtsQZ2OEisutelYfGjXO4lSg8BYN1ZHCCIzI",
+		"enr:-LK4QAtyVYCHLTOF1iJ8TK84phLbeuUt42ub5x9OODjTbvnwHS96e6NFlpappH6eeUcyiVmS98usL3cwHUb8F1Y3NTwIh2F0dG5ldHOIAACAAQAAAACEZXRoMpBAw1JZYIAnZP__________gmlkgnY0gmlwhJ20DuWJc2VjcDI1NmsxoQJMpOlHHZBgztApCE2mE4_MZRqgAi2Y81u446NOF7RE04N0Y3CCIyiDdWRwgiMo",
+		"enr:-Mq4QNiucamyTUE9hnWkibGb5BgmKQkEBTkzhLCZJa0SpH6IOLWx4Bkx0E-xzVea9A0-cmtBbk3Sz416oVN8tCq1IMGGAZfpPPVeh2F0dG5ldHOIAAADAAAAAACEZXRoMpBAw1JZcAAAAP__________gmlkgnY0gmlwhJ20DuGEcXVpY4IyyIlzZWNwMjU2azGhA7HMxNX8T5X4lwmmbnuglDAgSHvAw_XSIEu4sf0I4gdYiHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
 	}
 )
 
@@ -314,14 +313,35 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		MinimumPeersInSubnetSearch:      20,
 		BootNodes:                       HoodiBootstrapNodes,
 	},
+
+	chainspec.BloatnetNetworkID: { // Bloatnet - uses mainnet config
+		GossipMaxSize:                   10485760,
+		GossipMaxSizeBellatrix:          15728640,
+		MaxChunkSize:                    MaxChunkSize,
+		AttestationSubnetCount:          64,
+		AttestationPropagationSlotRange: 32,
+		AttestationSubnetPrefixBits:     6,
+		TtfbTimeout:                     ConfigDurationSec(ReqTimeout),
+		RespTimeout:                     ConfigDurationSec(RespTimeout),
+		MaximumGossipClockDisparity:     ConfigDurationMSec(500 * time.Millisecond),
+		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
+		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		Eth2key:                         "eth2",
+		AttSubnetKey:                    "attnets",
+		SyncCommsSubnetKey:              "syncnets",
+		CgcKey:                          "cgc",
+		NfdKey:                          "nfd",
+		MinimumPeersInSubnetSearch:      20,
+		BootNodes:                       BloatnetBootstrapNodes,
+	},
 }
 
 // Trusted checkpoint sync endpoints: https://eth-clients.github.io/checkpoint-sync-endpoints/
 var CheckpointSyncEndpoints = map[NetworkType][]string{
 	chainspec.MainnetChainID: {
 		"https://sync.invis.tools/eth/v2/debug/beacon/states/finalized",
+		"https://sync-mainnet.beaconcha.in/eth/v2/debug/beacon/states/finalized",
 		"https://mainnet-checkpoint-sync.attestant.io/eth/v2/debug/beacon/states/finalized",
-		//"https://mainnet.checkpoint.sigp.io/eth/v2/debug/beacon/states/finalized",
 		"https://mainnet-checkpoint-sync.stakely.io/eth/v2/debug/beacon/states/finalized",
 		"https://checkpointz.pietjepuk.net/eth/v2/debug/beacon/states/finalized",
 	},
@@ -340,6 +360,9 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 	chainspec.HoodiChainID: {
 		"https://checkpoint-sync.hoodi.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 		"https://hoodi-checkpoint-sync.attestant.io/eth/v2/debug/beacon/states/finalized",
+	},
+	chainspec.BloatnetNetworkID: {
+		"https://checkpoint-sync.perf-devnet-2.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 	},
 }
 
@@ -1077,6 +1100,63 @@ func hoodiConfig() BeaconChainConfig {
 
 }
 
+func bloatnetConfig() BeaconChainConfig {
+	cfg := MainnetBeaconConfig
+	cfg.ConfigName = "testnet"
+	cfg.MinGenesisActiveValidatorCount = 500
+	cfg.MinGenesisTime = 1751967000 // 2025-Jul-08 09:30:00 AM UTC
+	cfg.GenesisForkVersion = 0x10802764
+	cfg.GenesisDelay = 60
+
+	// Time parameters
+	cfg.SecondsPerSlot = 12
+	cfg.SecondsPerETH1Block = 12
+	cfg.Eth1FollowDistance = 2048
+	cfg.MinValidatorWithdrawabilityDelay = 2
+	cfg.ShardCommitteePeriod = 256
+
+	// Validator cycle
+	cfg.InactivityScoreBias = 4
+	cfg.InactivityScoreRecoveryRate = 16
+	cfg.EjectionBalance = 16000000000
+	cfg.MinPerEpochChurnLimit = 4
+	cfg.ChurnLimitQuotient = 128
+	cfg.MaxPerEpochActivationChurnLimit = 8
+
+	// Forking - all forks at epoch 0 except Fulu
+	cfg.AltairForkEpoch = 0
+	cfg.AltairForkVersion = 0x20802764
+	cfg.BellatrixForkEpoch = 0
+	cfg.BellatrixForkVersion = 0x30802764
+	cfg.CapellaForkEpoch = 0
+	cfg.CapellaForkVersion = 0x40802764
+	cfg.DenebForkEpoch = 0
+	cfg.DenebForkVersion = 0x50802764
+	cfg.ElectraForkEpoch = 0
+	cfg.ElectraForkVersion = 0x60802764
+	cfg.FuluForkEpoch = math.MaxUint64
+	cfg.FuluForkVersion = 0x70000000
+	cfg.TerminalTotalDifficulty = "58750000000000000000000"
+	cfg.TerminalBlockHash = [32]byte{}
+	cfg.TerminalBlockHashActivationEpoch = math.MaxUint64
+
+	// Deposit contract (same as mainnet)
+	cfg.DepositContractAddress = "0x00000000219ab540356cBB839Cbe05303d7705Fa"
+	cfg.DepositChainID = chainspec.MainnetChainID
+	cfg.DepositNetworkID = chainspec.MainnetChainID
+
+	// Blob parameters
+	cfg.MaxBlobsPerBlock = 6
+	cfg.MaxBlobsPerBlockElectra = 9
+	cfg.BlobSidecarSubnetCountElectra = 9
+
+	// Clear BlobSchedule since Fulu/Osaka is disabled on bloatnet
+	cfg.BlobSchedule = []BlobParameters{}
+
+	cfg.InitializeForkSchedule()
+	return cfg
+}
+
 func gnosisConfig() BeaconChainConfig {
 	cfg := MainnetBeaconConfig
 	cfg.PresetBase = "gnosis"
@@ -1230,11 +1310,12 @@ func (b *BeaconChainConfig) GetPenaltyQuotient(version StateVersion) uint64 {
 
 // Beacon configs
 var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChainConfig{
-	chainspec.MainnetChainID: mainnetConfig(),
-	chainspec.SepoliaChainID: sepoliaConfig(),
-	chainspec.HoodiChainID:   hoodiConfig(),
-	chainspec.GnosisChainID:  gnosisConfig(),
-	chainspec.ChiadoChainID:  chiadoConfig(),
+	chainspec.MainnetChainID:    mainnetConfig(),
+	chainspec.SepoliaChainID:    sepoliaConfig(),
+	chainspec.HoodiChainID:      hoodiConfig(),
+	chainspec.GnosisChainID:     gnosisConfig(),
+	chainspec.ChiadoChainID:     chiadoConfig(),
+	chainspec.BloatnetNetworkID: bloatnetConfig(),
 }
 
 // Eth1DataVotesLength returns the maximum length of the votes on the Eth1 data,
@@ -1361,6 +1442,10 @@ func GetConfigsByNetworkName(net string) (*NetworkConfig, *BeaconChainConfig, Ne
 	case networkname.Hoodi:
 		networkCfg, beaconCfg := GetConfigsByNetwork(chainspec.HoodiChainID)
 		return networkCfg, beaconCfg, chainspec.HoodiChainID, nil
+	case networkname.Bloatnet:
+		// Bloatnet uses mainnet CL config but on isolated network
+		networkCfg, beaconCfg := GetConfigsByNetwork(chainspec.MainnetChainID)
+		return networkCfg, beaconCfg, chainspec.MainnetChainID, nil
 	default:
 		return nil, nil, chainspec.MainnetChainID, errors.New("chain not found")
 	}
@@ -1415,12 +1500,17 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 }
 
 // Check if chain with a specific ID is supported or not
-func EmbeddedSupported(id uint64) bool {
-	return id == chainspec.MainnetChainID ||
-		id == chainspec.SepoliaChainID ||
-		id == chainspec.GnosisChainID ||
-		id == chainspec.ChiadoChainID ||
-		id == chainspec.HoodiChainID
+//
+// note: the following code uses chainID constants because they are usually the same as the network ID,
+// but the context of usage is they are checked against network ID. Shadowforks like bloatnet make
+// this evident (same chainID as mainnet, but different network ID))
+func EmbeddedSupported(networkId uint64) bool {
+	return networkId == chainspec.MainnetChainID ||
+		networkId == chainspec.SepoliaChainID ||
+		networkId == chainspec.GnosisChainID ||
+		networkId == chainspec.ChiadoChainID ||
+		networkId == chainspec.HoodiChainID ||
+		networkId == chainspec.BloatnetNetworkID
 }
 
 func SupportBackfilling(networkId uint64) bool {
@@ -1428,7 +1518,8 @@ func SupportBackfilling(networkId uint64) bool {
 		networkId == chainspec.SepoliaChainID ||
 		networkId == chainspec.GnosisChainID ||
 		networkId == chainspec.ChiadoChainID ||
-		networkId == chainspec.HoodiChainID
+		networkId == chainspec.HoodiChainID ||
+		networkId == chainspec.BloatnetNetworkID
 }
 
 func EpochToPaths(slot uint64, config *BeaconChainConfig, suffix string) (string, string) {

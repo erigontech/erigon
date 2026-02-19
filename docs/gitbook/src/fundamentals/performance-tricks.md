@@ -1,5 +1,9 @@
 ---
 description: 'Optimizing Erigon Performance: Sync Speed, Cloud Drives, and Memory Tuning'
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/fundamentals/performance-tricks
 ---
 
 # Performance Tricks

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -81,67 +82,65 @@ func makeTestAddresses() testAddresses {
 	}
 }
 
-func CreateTestSentry(t *testing.T) (*mock.MockSentry, *blockgen.ChainPack, []*blockgen.ChainPack) {
-	addresses := makeTestAddresses()
-	var (
-		key      = addresses.key
-		address  = addresses.address
-		address1 = addresses.address1
-		address2 = addresses.address2
-	)
+var (
+	testChainOnce     sync.Once
+	testChain         *blockgen.ChainPack
+	testOrphanedChain *blockgen.ChainPack
+)
 
-	var (
-		gspec = &types.Genesis{
+func genTestChainOnce(t *testing.T) {
+	testChainOnce.Do(func() {
+		addresses := makeTestAddresses()
+		gspec := &types.Genesis{
 			Config: chain.TestChainConfig,
 			Alloc: types.GenesisAlloc{
-				address:  {Balance: big.NewInt(9000000000000000000)},
-				address1: {Balance: big.NewInt(200000000000000000)},
-				address2: {Balance: big.NewInt(300000000000000000)},
+				addresses.address:  {Balance: big.NewInt(9000000000000000000)},
+				addresses.address1: {Balance: big.NewInt(200000000000000000)},
+				addresses.address2: {Balance: big.NewInt(300000000000000000)},
 			},
 			GasLimit: 10000000,
 		}
-	)
-	m := mock.MockWithGenesis(t, gspec, key, false)
 
-	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+		m := mock.MockWithGenesis(t, gspec, addresses.key) // use it only to generate chain blocks, don't cache it
+		defer m.Close()
+		contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+		defer contractBackend.Close()
 
-	// Generate empty chain to have some orphaned blocks for tests
-	orphanedChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *blockgen.BlockGen) {
+		var err error
+		testOrphanedChain, err = blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *blockgen.BlockGen) {})
+		if err != nil {
+			t.Fatalf("rpcdaemontest: failed to generate orphaned chain: %v", err)
+		}
+		testChain, err = generateChain(&addresses, m.ChainConfig, m.Genesis, m.Engine, m.DB, contractBackend)
+		if err != nil {
+			t.Fatalf("rpcdaemontest: failed to generate chain: %v", err)
+		}
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	chain, err := getChainInstance(&addresses, m.ChainConfig, m.Genesis, m.Engine, m.DB, contractBackend)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err = m.InsertChain(orphanedChain); err != nil {
-		t.Fatal(err)
-	}
-	if err = m.InsertChain(chain); err != nil {
-		t.Fatal(err)
-	}
-
-	return m, chain, []*blockgen.ChainPack{orphanedChain}
 }
 
-var chainInstance *blockgen.ChainPack
+func CreateTestSentry(t *testing.T) (*mock.MockSentry, *blockgen.ChainPack, []*blockgen.ChainPack) {
+	genTestChainOnce(t)
 
-func getChainInstance(
-	addresses *testAddresses,
-	config *chain.Config,
-	parent *types.Block,
-	engine rules.Engine,
-	db kv.TemporalRwDB,
-	contractBackend *backends.SimulatedBackend,
-) (*blockgen.ChainPack, error) {
-	var err error
-	if chainInstance == nil {
-		chainInstance, err = generateChain(addresses, config, parent, engine, db, contractBackend)
+	addresses := makeTestAddresses()
+	gspec := &types.Genesis{
+		Config: chain.TestChainConfig,
+		Alloc: types.GenesisAlloc{
+			addresses.address:  {Balance: big.NewInt(9000000000000000000)},
+			addresses.address1: {Balance: big.NewInt(200000000000000000)},
+			addresses.address2: {Balance: big.NewInt(300000000000000000)},
+		},
+		GasLimit: 10000000,
 	}
-	return chainInstance.Copy(), err
+	m := mock.MockWithGenesis(t, gspec, addresses.key)
+
+	if err := m.InsertChain(testOrphanedChain); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.InsertChain(testChain); err != nil {
+		t.Fatal(err)
+	}
+
+	return m, testChain, []*blockgen.ChainPack{testOrphanedChain}
 }
 
 func generateChain(
@@ -431,7 +430,7 @@ func CreateTestSentryForTraces(t *testing.T) *mock.MockSentry {
 			},
 		}
 	)
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AAAA
@@ -489,9 +488,10 @@ func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 	if l := len(initCode); l > 32 {
 		t.Fatalf("init code is too long for a pushx, need a more elaborate deployer")
 	}
-	bbCode := []byte{
+	bbCode := make([]byte, 0, 1+len(initCode)+12)
+	bbCode = append(bbCode,
 		// Push initcode onto stack
-		byte(vm.PUSH1) + byte(len(initCode)-1)}
+		byte(vm.PUSH1)+byte(len(initCode)-1))
 	bbCode = append(bbCode, initCode...)
 	bbCode = append(bbCode, []byte{
 		byte(vm.PUSH1), 0x0, // memory start on stack
@@ -530,7 +530,7 @@ func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 			},
 		},
 	}
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it

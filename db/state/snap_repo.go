@@ -75,7 +75,7 @@ func (f *SnapshotRepo) OpenFolder() error {
 
 	f.closeWhatNotInList(files)
 	f.loadDirtyFiles(files)
-	if err := f.openDirtyFiles(); err != nil {
+	if err := f.openDirtyFiles(files); err != nil {
 		return fmt.Errorf("SnapshotRepo(%s).openFolder: %w", f.schema.DataTag(), err)
 	}
 	return nil
@@ -354,16 +354,18 @@ func (f *SnapshotRepo) FilesWithMissedAccessors() *MissedFilesMap {
 
 // private methods
 
-func (f *SnapshotRepo) openDirtyFiles() error {
+func (f *SnapshotRepo) openDirtyFiles(dirEntries []string) error {
 	invalidFilesMu := sync.Mutex{}
 	invalidFileItems := make([]*FilesItem, 0)
 	p := f.schema
+	dir := f.schema.DataDirectory()
 	f.dirtyFiles.Walk(func(items []*FilesItem) bool {
 		for _, item := range items {
 			if item.decompressor == nil {
 				fPathGen, _ := p.DataFile(version.V1_0, RootNum(item.startTxNum), RootNum(item.endTxNum))
 				fPathMask, _ := version.ReplaceVersionWithMask(fPathGen)
-				fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+				_, fNameMask := filepath.Split(fPathMask)
+				fPath, _, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, dir)
 				if err != nil || !ok {
 					_, fName := filepath.Split(fPath)
 					if err == nil {

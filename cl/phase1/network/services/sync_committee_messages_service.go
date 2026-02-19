@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 type seenSyncCommitteeMessage struct {
@@ -77,16 +78,24 @@ func NewSyncCommitteeMessagesService(
 	}
 }
 
+func (s *syncCommitteeMessagesService) Names() []string {
+	names := make([]string, 0, s.beaconChainCfg.SyncCommitteeSubnetCount)
+	for i := 0; i < int(s.beaconChainCfg.SyncCommitteeSubnetCount); i++ {
+		names = append(names, gossip.TopicNameSyncCommittee(i))
+	}
+	return names
+}
+
 func (s *syncCommitteeMessagesService) IsMyGossipMessage(name string) bool {
 	return gossip.IsTopicSyncCommittee(name)
 }
 
-func (s *syncCommitteeMessagesService) DecodeGossipMessage(data *sentinelproto.GossipData, version clparams.StateVersion) (*SyncCommitteeMessageForGossip, error) {
+func (s *syncCommitteeMessagesService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*SyncCommitteeMessageForGossip, error) {
 	obj := &SyncCommitteeMessageForGossip{
-		Receiver:             copyOfPeerData(data),
+		Receiver:             &sentinelproto.Peer{Pid: pid.String()},
 		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{},
 	}
-	if err := obj.SyncCommitteeMessage.DecodeSSZ(data.Data, int(version)); err != nil {
+	if err := obj.SyncCommitteeMessage.DecodeSSZ(data, int(version)); err != nil {
 		return nil, err
 	}
 	return obj, nil
@@ -120,7 +129,7 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 		// [IGNORE] There has been no other valid sync committee message for the declared slot for the validator referenced by sync_committee_message.validator_index.
 
 		if _, ok := s.seenSyncCommitteeMessages.Load(seenSyncCommitteeMessageIdentifier); ok {
-			return ErrIgnore
+			return nil
 		}
 		// [REJECT] The signature is valid for the message beacon_block_root for the validator referenced by validator_index
 		signature, signingRoot, pubKey, err := verifySyncCommitteeMessageSignature(headState, msg.SyncCommitteeMessage)
@@ -158,7 +167,7 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 		// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
 		// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
 		// gossip ourselves or ban the peer which sent that particular invalid signature.
-		return ErrIgnore
+		return nil
 	})
 }
 
@@ -167,7 +176,7 @@ func (s *syncCommitteeMessagesService) cleanupOldSyncCommitteeMessages() {
 	headSlot := s.syncedDataManager.HeadSlot()
 
 	entriesToRemove := []seenSyncCommitteeMessage{}
-	s.seenSyncCommitteeMessages.Range(func(key, value interface{}) bool {
+	s.seenSyncCommitteeMessages.Range(func(key, value any) bool {
 		k := key.(seenSyncCommitteeMessage)
 		if headSlot > k.slot+1 {
 			entriesToRemove = append(entriesToRemove, k)

@@ -4,6 +4,7 @@ package ethconfig
 
 import (
 	"math/big"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -29,7 +30,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		EthDiscoveryURLs                    []string
 		Prune                               prune.Mode
 		BatchSize                           datasize.ByteSize
-		ImportMode                          bool
 		BadBlockHash                        common.Hash
 		Snapshot                            BlocksFreezing
 		Downloader                          *downloadercfg.Cfg
@@ -37,7 +37,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Dirs                                datadir.Dirs
 		ExternalSnapshotDownloaderAddr      string
 		Whitelist                           map[uint64]common.Hash `toml:"-"`
-		Miner                               buildercfg.MiningConfig
+		Builder                             buildercfg.BuilderConfig
 		Ethash                              ethashcfg.Config
 		Clique                              chainspec.ConsensusSnapshotConfig
 		Aura                                chain.AuRaConfig
@@ -47,11 +47,13 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		RPCGasCap                           uint64  `toml:",omitempty"`
 		RPCTxFeeCap                         float64 `toml:",omitempty"`
 		StateStream                         bool
+		ExperimentalBAL                     bool
 		HeimdallURL                         string
 		WithoutHeimdall                     bool
 		Ethstats                            string
 		InternalCL                          bool
 		OverrideOsakaTime                   *big.Int `toml:",omitempty"`
+		OverrideAmsterdamTime               *big.Int `toml:",omitempty"`
 		KeepStoredChainConfig               bool
 		SilkwormExecution                   bool
 		SilkwormRpcDaemon                   bool
@@ -68,6 +70,10 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		PolygonPosSingleSlotFinality        bool
 		PolygonPosSingleSlotFinalityBlockAt uint64
 		AllowAA                             bool
+		FcuTimeout                          time.Duration
+		FcuBackgroundPrune                  bool
+		FcuBackgroundCommit                 bool
+		MCPAddress                          string
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
@@ -75,7 +81,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.EthDiscoveryURLs = c.EthDiscoveryURLs
 	enc.Prune = c.Prune
 	enc.BatchSize = c.BatchSize
-	enc.ImportMode = c.ImportMode
 	enc.BadBlockHash = c.BadBlockHash
 	enc.Snapshot = c.Snapshot
 	enc.Downloader = c.Downloader
@@ -83,7 +88,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.Dirs = c.Dirs
 	enc.ExternalSnapshotDownloaderAddr = c.ExternalSnapshotDownloaderAddr
 	enc.Whitelist = c.Whitelist
-	enc.Miner = c.Miner
+	enc.Builder = c.Builder
 	enc.Ethash = c.Ethash
 	enc.Clique = c.Clique
 	enc.Aura = c.Aura
@@ -93,11 +98,13 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.RPCGasCap = c.RPCGasCap
 	enc.RPCTxFeeCap = c.RPCTxFeeCap
 	enc.StateStream = c.StateStream
+	enc.ExperimentalBAL = c.ExperimentalBAL
 	enc.HeimdallURL = c.HeimdallURL
 	enc.WithoutHeimdall = c.WithoutHeimdall
 	enc.Ethstats = c.Ethstats
 	enc.InternalCL = c.InternalCL
 	enc.OverrideOsakaTime = c.OverrideOsakaTime
+	enc.OverrideAmsterdamTime = c.OverrideAmsterdamTime
 	enc.KeepStoredChainConfig = c.KeepStoredChainConfig
 	enc.SilkwormExecution = c.SilkwormExecution
 	enc.SilkwormRpcDaemon = c.SilkwormRpcDaemon
@@ -114,6 +121,10 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.PolygonPosSingleSlotFinality = c.PolygonPosSingleSlotFinality
 	enc.PolygonPosSingleSlotFinalityBlockAt = c.PolygonPosSingleSlotFinalityBlockAt
 	enc.AllowAA = c.AllowAA
+	enc.FcuTimeout = c.FcuTimeout
+	enc.FcuBackgroundPrune = c.FcuBackgroundPrune
+	enc.FcuBackgroundCommit = c.FcuBackgroundCommit
+	enc.MCPAddress = c.MCPAddress
 	return &enc, nil
 }
 
@@ -125,7 +136,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		EthDiscoveryURLs                    []string
 		Prune                               *prune.Mode
 		BatchSize                           *datasize.ByteSize
-		ImportMode                          *bool
 		BadBlockHash                        *common.Hash
 		Snapshot                            *BlocksFreezing
 		Downloader                          *downloadercfg.Cfg
@@ -133,7 +143,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Dirs                                *datadir.Dirs
 		ExternalSnapshotDownloaderAddr      *string
 		Whitelist                           map[uint64]common.Hash `toml:"-"`
-		Miner                               *buildercfg.MiningConfig
+		Builder                             *buildercfg.BuilderConfig
 		Ethash                              *ethashcfg.Config
 		Clique                              *chainspec.ConsensusSnapshotConfig
 		Aura                                *chain.AuRaConfig
@@ -149,6 +159,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Ethstats                            *string
 		InternalCL                          *bool
 		OverrideOsakaTime                   *big.Int `toml:",omitempty"`
+		OverrideAmsterdamTime               *big.Int `toml:",omitempty"`
 		KeepStoredChainConfig               *bool
 		SilkwormExecution                   *bool
 		SilkwormRpcDaemon                   *bool
@@ -165,6 +176,10 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		PolygonPosSingleSlotFinality        *bool
 		PolygonPosSingleSlotFinalityBlockAt *uint64
 		AllowAA                             *bool
+		FcuTimeout                          *time.Duration
+		FcuBackgroundPrune                  *bool
+		FcuBackgroundCommit                 *bool
+		MCPAddress                          *string
 	}
 	var dec Config
 	if err := unmarshal(&dec); err != nil {
@@ -184,9 +199,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.BatchSize != nil {
 		c.BatchSize = *dec.BatchSize
-	}
-	if dec.ImportMode != nil {
-		c.ImportMode = *dec.ImportMode
 	}
 	if dec.BadBlockHash != nil {
 		c.BadBlockHash = *dec.BadBlockHash
@@ -209,8 +221,8 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.Whitelist != nil {
 		c.Whitelist = dec.Whitelist
 	}
-	if dec.Miner != nil {
-		c.Miner = *dec.Miner
+	if dec.Builder != nil {
+		c.Builder = *dec.Builder
 	}
 	if dec.Ethash != nil {
 		c.Ethash = *dec.Ethash
@@ -256,6 +268,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.OverrideOsakaTime != nil {
 		c.OverrideOsakaTime = dec.OverrideOsakaTime
+	}
+	if dec.OverrideAmsterdamTime != nil {
+		c.OverrideAmsterdamTime = dec.OverrideAmsterdamTime
 	}
 	if dec.KeepStoredChainConfig != nil {
 		c.KeepStoredChainConfig = *dec.KeepStoredChainConfig
@@ -304,6 +319,18 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.AllowAA != nil {
 		c.AllowAA = *dec.AllowAA
+	}
+	if dec.FcuTimeout != nil {
+		c.FcuTimeout = *dec.FcuTimeout
+	}
+	if dec.FcuBackgroundPrune != nil {
+		c.FcuBackgroundPrune = *dec.FcuBackgroundPrune
+	}
+	if dec.FcuBackgroundCommit != nil {
+		c.FcuBackgroundCommit = *dec.FcuBackgroundCommit
+	}
+	if dec.MCPAddress != nil {
+		c.MCPAddress = *dec.MCPAddress
 	}
 	return nil
 }

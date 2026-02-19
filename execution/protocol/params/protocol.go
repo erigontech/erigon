@@ -214,6 +214,9 @@ const (
 var DelegatedDesignationPrefix = []byte{0xef, 0x01, 0x00}
 var DelegatedCodeHash = common.HexToHash("0xeadcdba66a79ab5dce91622d1d75c8cff5cff0b96944c3bf1072cd08ce018329")
 
+// SystemAddress is where the system-transaction is sent from as per EIP-4788
+var SystemAddress = accounts.InternAddress(common.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe"))
+
 // EIP-4788: Beacon block root in the EVM
 var BeaconRootsAddress = accounts.InternAddress(common.HexToAddress("0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02"))
 
@@ -223,7 +226,7 @@ var HistoryStorageAddress = accounts.InternAddress(common.HexToAddress("0x0000F9
 // EIP-7002: Execution layer triggerable withdrawals
 var WithdrawalRequestAddress = accounts.InternAddress(common.HexToAddress("0x00000961Ef480Eb55e80D19ad83579A64c007002"))
 
-// EIP-7251
+// EIP-7251: Increase the MAX_EFFECTIVE_BALANCE
 var ConsolidationRequestAddress = accounts.InternAddress(common.HexToAddress("0x0000BBdDc7CE488642fb579F8B00f3a590007251"))
 
 // Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations

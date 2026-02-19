@@ -20,6 +20,8 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
@@ -131,5 +133,6 @@ func TestNullParentBeaconBlockRootDoesNotPanic(t *testing.T) {
 	var tracer tracing.Hooks                  // don't care
 	var eth1Engine rules.Engine
 	mergeEngine := New(eth1Engine)
-	mergeEngine.Initialize(chainConfig, chainReader, header, &intraBlockState, systemCallCustom, logger, &tracer)
+	err := mergeEngine.Initialize(chainConfig, chainReader, header, &intraBlockState, systemCallCustom, logger, &tracer)
+	assert.NoError(t, err)
 }

@@ -73,6 +73,10 @@ func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) *MemoryM
 	}
 }
 
+func (m *MemoryMutation) UnderlyingTx() kv.TemporalTx {
+	return m.db
+}
+
 func (m *MemoryMutation) UpdateTxn(tx kv.TemporalTx) {
 	m.db = tx
 	m.statelessCursors = nil
@@ -787,10 +791,6 @@ func (m *MemoryMutation) UnmarkedRw(id kv.ForkableId) kv.UnmarkedRwTx {
 
 func (m *MemoryMutation) PruneSmallBatches(ctx context.Context, timeout time.Duration) (haveMore bool, err error) {
 	return m.db.(kv.TemporalRwTx).PruneSmallBatches(ctx, timeout)
-}
-
-func (m *MemoryMutation) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error {
-	return m.db.(kv.TemporalRwTx).GreedyPruneHistory(ctx, domain)
 }
 
 func (m *MemoryMutation) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {

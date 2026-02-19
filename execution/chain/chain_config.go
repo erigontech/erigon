@@ -21,11 +21,13 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/generics"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -71,11 +73,11 @@ type Config struct {
 	MergeHeight                   *big.Int `json:"mergeBlock,omitempty"`                    // The Merge block number
 
 	// Mainnet fork scheduling switched from block numbers to timestamps after The Merge
-	ShanghaiTime    *big.Int `json:"shanghaiTime,omitempty"`
-	CancunTime      *big.Int `json:"cancunTime,omitempty"`
-	PragueTime      *big.Int `json:"pragueTime,omitempty"`
-	OsakaTime       *big.Int `json:"osakaTime,omitempty"`
-	GlamsterdamTime *big.Int `json:"glamsterdamTime,omitempty"`
+	ShanghaiTime  *big.Int `json:"shanghaiTime,omitempty"`
+	CancunTime    *big.Int `json:"cancunTime,omitempty"`
+	PragueTime    *big.Int `json:"pragueTime,omitempty"`
+	OsakaTime     *big.Int `json:"osakaTime,omitempty"`
+	AmsterdamTime *big.Int `json:"amsterdamTime,omitempty"`
 
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
 	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
@@ -87,6 +89,10 @@ type Config struct {
 	Bpo5Time              *big.Int                      `json:"bpo5Time,omitempty"`
 	parseBlobScheduleOnce sync.Once                     `copier:"-"`
 	parsedBlobSchedule    map[uint64]*params.BlobConfig
+
+	// Balancer fork (Gnosis Chain). See https://hackmd.io/@filoozom/rycoQITlWl
+	BalancerTime            *big.Int                         `json:"balancerTime,omitempty"`
+	BalancerRewriteBytecode map[common.Address]hexutil.Bytes `json:"balancerRewriteBytecode,omitempty"`
 
 	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
 	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
@@ -166,7 +172,8 @@ var (
 		ShanghaiTime:                  big.NewInt(0),
 		CancunTime:                    big.NewInt(0),
 		PragueTime:                    big.NewInt(0),
-		GlamsterdamTime:               big.NewInt(0),
+		OsakaTime:                     big.NewInt(0),
+		AmsterdamTime:                 big.NewInt(0),
 		DepositContract:               common.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"),
 		Ethash:                        new(EthashConfig),
 	}
@@ -190,11 +197,8 @@ type BorConfig interface {
 	CalculateCoinbase(number uint64) accounts.Address
 }
 
-func timestampToTime(unixTime *big.Int) *time.Time {
-	if unixTime == nil {
-		return nil
-	}
-	t := time.Unix(unixTime.Int64(), 0).UTC()
+func timestampToTime(unixSec int64) *time.Time {
+	t := time.Unix(unixSec, 0).UTC()
 	return &t
 }
 
@@ -213,20 +217,43 @@ func (c *Config) String() string {
 		)
 	}
 
-	return fmt.Sprintf("{ChainID: %v, Terminal Total Difficulty: %v, Shapella: %v, Dencun: %v, Pectra: %v, Fusaka: %v, BPO1: %v, BPO2: %v, BPO3: %v, BPO4: %v, BPO5: %v, Engine: %v}",
-		c.ChainID,
-		c.TerminalTotalDifficulty,
-		timestampToTime(c.ShanghaiTime),
-		timestampToTime(c.CancunTime),
-		timestampToTime(c.PragueTime),
-		timestampToTime(c.OsakaTime),
-		timestampToTime(c.Bpo1Time),
-		timestampToTime(c.Bpo2Time),
-		timestampToTime(c.Bpo3Time),
-		timestampToTime(c.Bpo4Time),
-		timestampToTime(c.Bpo5Time),
-		engine,
-	)
+	var b strings.Builder
+	fmt.Fprintf(&b, "{ChainID: %v, Terminal Total Difficulty: %v", c.ChainID, c.TerminalTotalDifficulty)
+	if c.ShanghaiTime != nil {
+		fmt.Fprintf(&b, ", Shapella: %v", timestampToTime(c.ShanghaiTime.Int64()))
+	}
+	if c.CancunTime != nil {
+		fmt.Fprintf(&b, ", Dencun: %v", timestampToTime(c.CancunTime.Int64()))
+	}
+	if c.PragueTime != nil {
+		fmt.Fprintf(&b, ", Pectra: %v", timestampToTime(c.PragueTime.Int64()))
+	}
+	if c.OsakaTime != nil {
+		fmt.Fprintf(&b, ", Fusaka: %v", timestampToTime(c.OsakaTime.Int64()))
+	}
+	if c.Bpo1Time != nil {
+		fmt.Fprintf(&b, ", BPO1: %v", timestampToTime(c.Bpo1Time.Int64()))
+	}
+	if c.Bpo2Time != nil {
+		fmt.Fprintf(&b, ", BPO2: %v", timestampToTime(c.Bpo2Time.Int64()))
+	}
+	if c.Bpo3Time != nil {
+		fmt.Fprintf(&b, ", BPO3: %v", timestampToTime(c.Bpo3Time.Int64()))
+	}
+	if c.Bpo4Time != nil {
+		fmt.Fprintf(&b, ", BPO4: %v", timestampToTime(c.Bpo4Time.Int64()))
+	}
+	if c.Bpo5Time != nil {
+		fmt.Fprintf(&b, ", BPO5: %v", timestampToTime(c.Bpo5Time.Int64()))
+	}
+	if c.BalancerTime != nil {
+		fmt.Fprintf(&b, ", Balancer: %v", timestampToTime(c.BalancerTime.Int64()))
+	}
+	if c.AmsterdamTime != nil {
+		fmt.Fprintf(&b, ", Glamsterdam: %v", timestampToTime(c.AmsterdamTime.Int64()))
+	}
+	fmt.Fprintf(&b, ", Engine: %v}", engine)
+	return b.String()
 }
 
 func (c *Config) getEngine() string {
@@ -339,9 +366,9 @@ func (c *Config) IsCancun(time uint64) bool {
 	return isForked(c.CancunTime, time)
 }
 
-// IsGlamsterdam returns whether time is either equal to the Glamsterdam fork time or greater.
-func (c *Config) IsGlamsterdam(time uint64) bool {
-	return isForked(c.GlamsterdamTime, time)
+// IsAmsterdam returns whether time is either equal to the Amsterdam fork time or greater.
+func (c *Config) IsAmsterdam(time uint64) bool {
+	return isForked(c.AmsterdamTime, time)
 }
 
 // IsPrague returns whether time is either equal to the Prague fork time or greater.
@@ -372,9 +399,7 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 	c.parseBlobScheduleOnce.Do(func() {
 		// Populate with default values
-		c.parsedBlobSchedule = map[uint64]*params.BlobConfig{
-			0: nil,
-		}
+		c.parsedBlobSchedule = make(map[uint64]*params.BlobConfig)
 		if c.CancunTime != nil {
 			c.parsedBlobSchedule[c.CancunTime.Uint64()] = &params.DefaultCancunBlobConfig
 		}
@@ -394,6 +419,10 @@ func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 		val, ok = c.BlobSchedule["osaka"]
 		if ok && c.OsakaTime != nil {
 			c.parsedBlobSchedule[c.OsakaTime.Uint64()] = val
+		}
+		val, ok = c.BlobSchedule["gloas"]
+		if ok && c.AmsterdamTime != nil {
+			c.parsedBlobSchedule[c.AmsterdamTime.Uint64()] = val
 		}
 		val, ok = c.BlobSchedule["bpo1"]
 		if ok && c.Bpo1Time != nil {
@@ -677,7 +706,7 @@ func (c *CliqueConfig) String() string {
 // For blocks 0–4 an empty string will be returned.
 func ConfigValueLookup[T any](field map[uint64]T, number uint64) T {
 	keys := common.SortedKeys(field)
-	if number < keys[0] {
+	if len(keys) == 0 || number < keys[0] {
 		return generics.Zero[T]()
 	}
 	for i := 0; i < len(keys)-1; i++ {
@@ -699,7 +728,7 @@ type Rules struct {
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun, IsNapoli, IsBhilai                      bool
-	IsPrague, IsOsaka, IsGlamsterdam                  bool
+	IsPrague, IsOsaka, IsAmsterdam                    bool
 	IsAura                                            bool
 }
 

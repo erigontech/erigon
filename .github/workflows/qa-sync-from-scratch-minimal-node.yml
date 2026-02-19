@@ -75,7 +75,7 @@ jobs:
 
       - name: Upload Downloader Torrent Client Status
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: torrent-client-status-${{ env.CHAIN }}
           path: torrent-client-status.txt
@@ -97,7 +97,7 @@ jobs:
 
       - name: Upload test results
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: test-results-${{ env.CHAIN }}
           path: |
@@ -106,14 +106,14 @@ jobs:
 
       - name: Upload metric plots
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: metric-plots-${{ env.CHAIN }}
           path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
 
       - name: Upload FD Leak Analysis
         if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: fd-leak-analysis-${{ env.CHAIN }}
           path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md

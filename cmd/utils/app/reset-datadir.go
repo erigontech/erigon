@@ -3,25 +3,23 @@ package app
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
-	"path/filepath"
-	"strings"
 
 	g "github.com/anacrolix/generics"
-	"github.com/anacrolix/torrent/metainfo"
 	"github.com/urfave/cli/v2"
 
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/dir"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/datadir/reset"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/execution/chain"
+
+	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/snapcfg"
 )
 
 var (
@@ -91,15 +89,15 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 		return fmt.Errorf("failed to lock data dir %v: %w", dirs.DataDir, err)
 	}
 	defer unlock()
-	err = snapcfg.LoadRemotePreverified(cliCtx.Context)
+
+	err = snapcfg.LoadPreverified(cliCtx.Context, PreverifiedFlag.Get(cliCtx), &dirs)
 	if err != nil {
-		// TODO: Check if we should continue? What if we ask for a git revision and
-		// can't get it? What about a branch? Can we reset to the embedded snapshot hashes?
-		return fmt.Errorf("loading remote preverified snapshots: %w", err)
+		return
 	}
+
 	cfg, known := snapcfg.KnownCfg(chainName)
 	if !known {
-		// Wtf does this even mean?
+		// Wtf does this even imply?
 		return fmt.Errorf("config for chain %v is not known", chainName)
 	}
 	// Should we check cfg.Local? We could be resetting to the preverified.toml...?
@@ -108,61 +106,41 @@ func resetCliAction(cliCtx *cli.Context) (err error) {
 		"len", len(cfg.Preverified.Items),
 		"chain", chainName,
 	)
-	removeFunc := func(path string) error {
-		logger.Debug("Removing snapshot dir file", "path", path)
-		return dir.RemoveFile(filepath.Join(dirs.Snap, path))
-	}
+
 	if dryRun {
-		removeFunc = dryRunRemove
+		log.Warn("Resetting datadir in dry run mode. Files that would be removed will be printed to stdout.")
 	}
-	reset := reset{
-		removeUnknown: removeLocal,
-		logger:        logger,
+
+	// Here we intended to have a list of os.Root to restrict deletions. Instead, for now you should
+	// do a dry run, and make sure to use good permissioning.
+	//datadirOsRoot, err := os.OpenRoot(dirs.DataDir)
+	//if err != nil {
+	//	return fmt.Errorf("opening datadir: %w", err)
+	//}
+
+	r := reset.Reset{
+		Dirs:                 &dirs,
+		RemoveUnknown:        removeLocal,
+		Logger:               logger,
+		PreverifiedSnapshots: cfg.Preverified.Items,
+		RemoveFunc: func(osName reset.OsFilePath) error {
+			if dryRun {
+				println(osName)
+				return nil
+			}
+			logger.Debug("Removing datadir file", "name", osName)
+			//return datadirOsRoot.Remove(string(osName))
+			return dir.RemoveFile(string(osName))
+		},
 	}
-	logger.Info("Resetting snapshots directory", "path", dirs.Snap)
-	err = reset.walkSnapshots(dirs.Snap, cfg.Preverified.Items, removeFunc)
+	err = r.Run()
 	if err != nil {
-		err = fmt.Errorf("walking snapshots: %w", err)
 		return
 	}
-	logger.Info("Files NOT removed from snapshots directory",
-		"torrents", reset.stats.retained.torrentFiles,
-		"data", reset.stats.retained.dataFiles)
-	logger.Info("Files removed from snapshots directory",
-		"torrents", reset.stats.removed.torrentFiles,
-		"data", reset.stats.removed.dataFiles)
-	// Remove chaindata last, so that the config is available if there's an error.
-	if removeLocal {
-		for _, extraDir := range []string{
-			dbcfg.HeimdallDB,
-			dbcfg.PolygonBridgeDB,
-		} {
-			extraFullPath := filepath.Join(dirs.DataDir, extraDir)
-			err = dir.RemoveAll(extraFullPath)
-			if err != nil {
-				return fmt.Errorf("removing extra dir %q: %w", extraDir, err)
-			}
-		}
-		logger.Info("Removing chaindata dir", "path", dirs.Chaindata)
-		if !dryRun {
-			err = dir.RemoveAll(dirs.Chaindata)
-		}
-		if err != nil {
-			err = fmt.Errorf("removing chaindata dir: %w", err)
-			return
-		}
+	if !dryRun {
+		logger.Info("Reset complete. Start Erigon as usual, missing files will be downloaded.")
 	}
-	err = removeFunc(datadir.PreverifiedFileName)
-	if err == nil {
-		logger.Info("Removed snapshots lock file", "path", datadir.PreverifiedFileName)
-	} else {
-		if !errors.Is(err, fs.ErrNotExist) {
-			err = fmt.Errorf("removing snapshot lock file: %w", err)
-			return
-		}
-	}
-	logger.Info("Reset complete. Start Erigon as usual, missing files will be downloaded.")
-	return nil
+	return
 }
 
 func getChainNameFromChainData(cliCtx *cli.Context, logger log.Logger, chainDataDir string) (_ g.Option[string], err error) {
@@ -202,117 +180,4 @@ func getChainNameFromChainData(cliCtx *cli.Context, logger log.Logger, chainData
 		return
 	}
 	return g.Some(chainCfg.ChainName), nil
-}
-
-func dryRunRemove(path string) error {
-	return nil
-}
-
-type resetStats struct {
-	torrentFiles int
-	dataFiles    int
-	unknownFiles int
-}
-
-type reset struct {
-	logger        log.Logger
-	removeUnknown bool
-	stats         struct {
-		removed  resetStats
-		retained resetStats
-	}
-}
-
-type resetItemInfo struct {
-	path          string
-	realFilePath  func() string
-	hash          g.Option[string]
-	isTorrent     bool
-	inPreverified bool
-}
-
-// Walks the given snapshots directory, removing files that are not in the preverified set.
-func (me *reset) walkSnapshots(
-	// Could almost pass fs.FS here except metainfo.LoadFromFile expects a string filepath.
-	snapDir string,
-	preverified snapcfg.PreverifiedItems,
-	// path is the relative path to the walk root. Called for each file that should be removed.
-	// Error is passed back to the walk function.
-	remove func(path string) error,
-) error {
-	return fs.WalkDir(
-		os.DirFS(snapDir),
-		".",
-		func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				// Our job is to remove anything that shouldn't be here... so if we can't read a dir
-				// we are in trouble.
-				return fmt.Errorf("error walking path %v: %w", path, err)
-			}
-			if d.IsDir() {
-				return nil
-			}
-			if path == datadir.PreverifiedFileName {
-				return nil
-			}
-			// Shouldn't be necessary with fs package.
-			slashPath := filepath.ToSlash(path)
-			itemName, _ := strings.CutSuffix(slashPath, ".part")
-			itemName, isTorrent := strings.CutSuffix(itemName, ".torrent")
-			item, ok := preverified.Get(itemName)
-			doRemove := me.decideRemove(resetItemInfo{
-				path:          path,
-				realFilePath:  func() string { return filepath.Join(snapDir, path) },
-				hash:          func() g.Option[string] { return g.OptionFromTuple(item.Hash, ok) }(),
-				isTorrent:     isTorrent,
-				inPreverified: ok,
-			})
-			stats := &me.stats.retained
-			if doRemove {
-				stats = &me.stats.removed
-				err = remove(path)
-				if err != nil {
-					return fmt.Errorf("removing file %v: %w", path, err)
-				}
-			}
-			if isTorrent {
-				stats.torrentFiles++
-			} else {
-				stats.dataFiles++
-			}
-			return nil
-		},
-	)
-}
-
-// Decides whether to remove a file, and logs the reasoning.
-func (me *reset) decideRemove(file resetItemInfo) bool {
-	logger := me.logger
-	path := file.path
-	if !file.inPreverified {
-		logger.Debug("file NOT in preverified list", "path", path)
-		return me.removeUnknown
-	}
-	if file.isTorrent {
-		mi, err := metainfo.LoadFromFile(file.realFilePath())
-		if err != nil {
-			logger.Error("error loading metainfo file", "path", path, "err", err)
-			return true
-		}
-		expectedHash := file.hash.Unwrap()
-		if mi.HashInfoBytes().String() == expectedHash {
-			logger.Debug("torrent file matches preverified hash", "path", path)
-			return false
-		} else {
-			logger.Debug("torrent file infohash does NOT match preverified",
-				"path", path,
-				"expected", expectedHash,
-				"actual", mi.HashInfoBytes())
-			return true
-		}
-	} else {
-		// No checks required. Downloader will clobber it into shape after reset on next run.
-		logger.Debug("data file is in preverified", "path", path)
-		return false
-	}
 }

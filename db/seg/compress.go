@@ -77,6 +77,14 @@ type Cfg struct {
 
 	// arbitrary bytes set by user at start of the file
 	ExpectMetadata bool
+
+	// number of values on compressed page. if > 0 then page level compression is enabled
+	ValuesOnCompressedPage int
+}
+
+func (c Cfg) WithValuesOnCompressedPage(n int) Cfg {
+	c.ValuesOnCompressedPage = n
+	return c
 }
 
 var DefaultCfg = Cfg{
@@ -123,7 +131,10 @@ type Compressor struct {
 	logger           log.Logger
 	noFsync          bool // fsync is enabled by default, but tests can manually disable
 
-	metadata []byte
+	version             uint8
+	featureFlagBitmask  FeatureFlagBitmask
+	compPageValuesCount uint8
+	metadata            []byte
 }
 
 func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
@@ -144,14 +155,14 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 	suffixCollectors := make([]*etl.Collector, workers)
 	for i := 0; i < workers; i++ {
 		collector := etl.NewCollectorWithAllocator(logPrefix+"_dict", tmpDir, etl.SmallSortableBuffers, logger) //nolint:gocritic
-		collector.SortAndFlushInBackground(true)
+		collector.SortAndFlushInBackground(false)
 		collector.LogLvl(lvl)
 
 		suffixCollectors[i] = collector
 		go extractPatternsInSuperstrings(ctx, superstrings, collector, cfg, wg, logger)
 	}
 	_, outputFileName := filepath.Split(outputFile)
-	return &Compressor{
+	cc := &Compressor{
 		Cfg:              cfg,
 		uncompressedFile: uncompressedFile,
 		outputFile:       outputFile,
@@ -164,7 +175,15 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cf
 		lvl:              lvl,
 		wg:               wg,
 		logger:           logger,
-	}, nil
+		version:          FileCompressionFormatV1,
+	}
+
+	if cfg.ValuesOnCompressedPage > 0 {
+		cc.featureFlagBitmask.Set(PageLevelCompressionEnabled)
+		cc.compPageValuesCount = uint8(cfg.ValuesOnCompressedPage)
+	}
+
+	return cc, nil
 }
 
 func (c *Compressor) Close() {
@@ -175,9 +194,10 @@ func (c *Compressor) Close() {
 	c.suffixCollectors = nil
 }
 
-func (c *Compressor) SetTrace(trace bool) { c.trace = trace }
-func (c *Compressor) FileName() string    { return c.outputFileName }
-func (c *Compressor) WorkersAmount() int  { return c.Workers }
+func (c *Compressor) SetTrace(trace bool)            { c.trace = trace }
+func (c *Compressor) FileName() string               { return c.outputFileName }
+func (c *Compressor) WorkersAmount() int             { return c.Workers }
+func (c *Compressor) GetValuesOnCompressedPage() int { return int(c.ValuesOnCompressedPage) }
 func (c *Compressor) SetMetadata(metadata []byte) {
 	if !c.ExpectMetadata {
 		panic("metadata not expected in compressor")
@@ -276,6 +296,19 @@ func (c *Compressor) Compress() error {
 	tmpFileName := cf.Name()
 	defer dir.RemoveFile(tmpFileName)
 	defer cf.Close()
+
+	if c.version == FileCompressionFormatV1 {
+		if _, err := cf.Write([]byte{c.version, byte(c.featureFlagBitmask)}); err != nil {
+			return err
+		}
+
+		if c.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
+			if _, err := cf.Write([]byte{c.compPageValuesCount}); err != nil {
+				return err
+			}
+		}
+	}
+
 	if c.ExpectMetadata {
 		dataLen := uint32(len(c.metadata))
 		var dataLenB [4]byte
@@ -367,11 +400,11 @@ func (db *DictionaryBuilder) Swap(i, j int) {
 }
 func (db *DictionaryBuilder) Sort() { slices.SortFunc(db.items, dictionaryBuilderCmp) }
 
-func (db *DictionaryBuilder) Push(x interface{}) {
+func (db *DictionaryBuilder) Push(x any) {
 	db.items = append(db.items, x.(*Pattern))
 }
 
-func (db *DictionaryBuilder) Pop() interface{} {
+func (db *DictionaryBuilder) Pop() any {
 	old := db.items
 	n := len(old)
 	x := old[n-1]
@@ -541,11 +574,11 @@ func (ph *PatternHeap) Swap(i, j int) {
 	(*ph)[i], (*ph)[j] = (*ph)[j], (*ph)[i]
 }
 
-func (ph *PatternHeap) Push(x interface{}) {
+func (ph *PatternHeap) Push(x any) {
 	*ph = append(*ph, x.(*PatternHuff))
 }
 
-func (ph *PatternHeap) Pop() interface{} {
+func (ph *PatternHeap) Pop() any {
 	old := *ph
 	n := len(old)
 	x := old[n-1]
@@ -652,11 +685,11 @@ func (ph *PositionHeap) Swap(i, j int) {
 	(*ph)[i], (*ph)[j] = (*ph)[j], (*ph)[i]
 }
 
-func (ph *PositionHeap) Push(x interface{}) {
+func (ph *PositionHeap) Push(x any) {
 	*ph = append(*ph, x.(*PositionHuff))
 }
 
-func (ph *PositionHeap) Pop() interface{} {
+func (ph *PositionHeap) Pop() any {
 	old := *ph
 	n := len(old)
 	x := old[n-1]
@@ -854,6 +887,8 @@ func Ratio(f1, f2 string) (CompressionRatio, error) {
 }
 
 // RawWordsFile - .idt file format - simple format for temporary data store
+// PerfCritical: Used to speedup foreground processes by moving heavy compression to background
+// or outside of critical sections (e.g., outside of database.RoTx)
 type RawWordsFile struct {
 	f        *os.File
 	w        *bufio.Writer
@@ -882,8 +917,12 @@ func (f *RawWordsFile) Flush() error {
 	return f.w.Flush()
 }
 func (f *RawWordsFile) Close() {
-	f.w.Flush()
-	f.f.Close()
+	if f.w != nil {
+		f.w.Flush()
+		f.f.Close()
+		f.w = nil
+		f.f = nil
+	}
 }
 func (f *RawWordsFile) CloseAndRemove() {
 	f.Close()

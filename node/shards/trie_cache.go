@@ -154,26 +154,6 @@ func (shi *StorageHashItem) CopyValueFrom(item CacheItem) {
 	shi.hasHash = other.hasHash
 }
 
-// UnprocessedHeap is a priority queue of items that were modified after the last recalculation of the merkle tree
-type UnprocessedHeap struct {
-	items []CacheItem
-}
-
-func (uh UnprocessedHeap) Len() int           { return len(uh.items) }
-func (uh UnprocessedHeap) Less(i, j int) bool { return uh.items[i].Less(uh.items[j]) }
-func (uh UnprocessedHeap) Swap(i, j int)      { uh.items[i], uh.items[j] = uh.items[j], uh.items[i] }
-func (uh *UnprocessedHeap) Push(x interface{}) {
-	// Push and Pop use pointer receivers because they modify the slice's length,
-	// not just its contents.
-	uh.items = append(uh.items, x.(CacheItem))
-}
-
-func (uh *UnprocessedHeap) Pop() interface{} {
-	cacheItem := uh.items[len(uh.items)-1]
-	uh.items = uh.items[:len(uh.items)-1]
-	return cacheItem
-}
-
 func (ai *AccountItem) HasPrefix(prefix CacheItem) bool {
 	switch i := prefix.(type) {
 	case *AccountItem:

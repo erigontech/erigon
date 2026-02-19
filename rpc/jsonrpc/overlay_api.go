@@ -132,6 +132,10 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, err
 	}
 
+	if block == nil {
+		return nil, fmt.Errorf("block not found: %d", blockNum)
+	}
+
 	// -1 is a default value for transaction index.
 	// If it's -1, we will try to replay every single transaction in that block
 	transactionIndex := -1
@@ -143,10 +147,15 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	}
 
 	if transactionIndex == -1 {
-		return nil, errors.New("could not find txn hash")
+		return nil, fmt.Errorf("could not find txn hash")
 	}
 
 	replayTransactions = block.Transactions()[:transactionIndex]
+
+	err = rpchelper.CheckBlockExecuted(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
 
 	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
@@ -282,6 +291,11 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 		return nil, err
 	}
 
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, begin)
+	if err != nil {
+		return nil, err
+	}
+
 	numBlocks := end - begin + 1
 	var (
 		results = make([]*blockReplayResult, numBlocks)
@@ -316,7 +330,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 				statedb := state.New(stateReader)
 
 				if stateOverride != nil {
-					err = stateOverride.Override(statedb)
+					err = stateOverride.Override(statedb, nil, rules)
 					if err != nil {
 						results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
 						continue

@@ -43,7 +43,9 @@ var DefaultFlags = []cli.Flag{
 	&PruneBlocksDistanceFlag,
 	&PruneModeFlag,
 	&utils.KeepExecutionProofsFlag,
-
+	&utils.FcuTimeoutFlag,
+	&utils.FcuBackgroundPruneFlag,
+	&utils.FcuBackgroundCommitFlag,
 	&BatchSizeFlag,
 	&BodyCacheLimitFlag,
 	&DatabaseVerbosityFlag,
@@ -83,13 +85,16 @@ var DefaultFlags = []cli.Flag{
 	&utils.DBReadConcurrencyFlag,
 	&utils.RpcAccessListFlag,
 	&utils.RpcTraceCompatFlag,
+	&utils.RpcGethCompatFlag,
 	&utils.RpcGasCapFlag,
+	&utils.RpcBlockRangeLimit,
 	&utils.RpcBatchLimit,
 	&utils.RpcReturnDataLimit,
 	&utils.AllowUnprotectedTxs,
 	&utils.RPCGlobalTxFeeCapFlag,
 	&utils.TxpoolApiAddrFlag,
 	&utils.TraceMaxtracesFlag,
+	&utils.AlwaysGenerateChangesetsFlag,
 
 	&HTTPReadTimeoutFlag,
 	&HTTPWriteTimeoutFlag,
@@ -118,7 +123,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.TorrentPortFlag,
 	&utils.TorrentMaxPeersFlag,
 	&utils.TorrentConnsPerFileFlag,
-	&utils.TorrentDownloadSlotsFlag,
+	&utils.TorrentDownloadSlotsFlag, // Deprecated (v3.0) - kept for backward compatibility, no effect
 	&utils.TorrentStaticPeersFlag,
 	&utils.TorrentDisableTrackers,
 	&utils.TorrentUploadRateFlag,
@@ -130,6 +135,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.P2pProtocolAllowedPorts,
 	&utils.NATFlag,
 	&utils.NoDiscoverFlag,
+	&utils.DiscoveryV4Flag,
 	&utils.DiscoveryV5Flag,
 	&utils.NetrestrictFlag,
 	&utils.NodeKeyFileFlag,
@@ -158,6 +164,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.MinerGasLimitFlag,
 	&utils.MinerEtherbaseFlag,
 	&utils.MinerExtraDataFlag,
+	&utils.BuilderMaxBlobsFlag,
 	&utils.SentryAddrFlag,
 	&utils.SentryLogPeerInfoFlag,
 	&utils.DownloaderAddrFlag,
@@ -174,6 +181,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.AAFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverrideOsakaFlag,
+	&utils.OverrideAmsterdamFlag,
 	&utils.KeepStoredChainConfigFlag,
 
 	&utils.CaplinDiscoveryAddrFlag,
@@ -232,6 +240,8 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.TrustedSetupFile,
 	&utils.RPCSlowFlag,
+	&utils.RpcTxSyncDefaultTimeoutFlag,
+	&utils.RpcTxSyncMaxTimeoutFlag,
 
 	&utils.TxPoolGossipDisableFlag,
 	&SyncLoopBlockLimitFlag,
@@ -252,6 +262,6 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.ExperimentalConcurrentCommitmentFlag,
 
-	&utils.ErigonDBStepSizeFlag,
-	&utils.ErigonDBStepsInFrozenFileFlag,
+	&utils.MCPAddrFlag,
+	&utils.MCPPortFlag,
 }

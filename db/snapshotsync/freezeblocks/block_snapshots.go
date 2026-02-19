@@ -29,6 +29,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/erigon/db/downloader"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
@@ -268,7 +269,13 @@ func (br *BlockRetire) dbHasEnoughDataForBlocksRetire(ctx context.Context) (bool
 	return !haveGap, nil
 }
 
-func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) (bool, error) {
+func (br *BlockRetire) retireBlocks(
+	ctx context.Context,
+	minBlockNum uint64,
+	maxBlockNum uint64,
+	lvl log.Lvl,
+	seeder downloader.SeederClient,
+) (bool, error) {
 	select {
 	case <-ctx.Done():
 		return false, ctx.Err()
@@ -302,11 +309,15 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 		}
 	}
 
-	merged, err := br.MergeBlocks(ctx, lvl, seedNewSnapshots, onDelete)
+	merged, err := br.MergeBlocks(ctx, lvl, seeder)
 	return ok || merged, err
 }
 
-func (br *BlockRetire) MergeBlocks(ctx context.Context, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) (merged bool, err error) {
+func (br *BlockRetire) MergeBlocks(
+	ctx context.Context,
+	lvl log.Lvl,
+	seeder downloader.SeederClient,
+) (merged bool, err error) {
 	notifier, logger, _, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers.Load()
 	snapshots := br.snapshots()
 
@@ -320,31 +331,25 @@ func (br *BlockRetire) MergeBlocks(ctx context.Context, lvl log.Lvl, seedNewSnap
 		return false, nil
 	}
 	merged = true
-	onMerge := func(r snapshotsync.Range) error {
+	onMerge := func(mergedFileNames []string) error {
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
 		}
 
-		if seedNewSnapshots != nil {
-			downloadRequest := []services.DownloadRequest{{Path: "", TorrentHash: ""}}
-			if err := seedNewSnapshots(downloadRequest); err != nil {
-				return err
-			}
-		}
-		return nil
+		return seeder.Seed(ctx, mergedFileNames)
 	}
-	if err = merger.Merge(ctx, &snapshots.RoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete); err != nil {
+	if err = merger.Merge(ctx, &snapshots.RoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, seeder.Delete); err != nil {
 		return false, err
 	}
 
 	// remove old garbage files
-	if err = snapshots.RemoveOverlaps(onDelete); err != nil {
+	if err = snapshots.RemoveOverlaps(func(l []string) error {
+		return seeder.Delete(ctx, l)
+	}); err != nil {
 		return false, err
 	}
 	return
 }
-
-var ErrNothingToPrune = errors.New("nothing to prune")
 
 var mxPruneTookBor = metrics.GetOrCreateSummary(`prune_seconds{type="bor"}`)
 
@@ -407,8 +412,7 @@ func (br *BlockRetire) RetireBlocksInBackground(
 	minBlockNum,
 	maxBlockNum uint64,
 	lvl log.Lvl,
-	seedNewSnapshots func(downloadRequest []services.DownloadRequest) error,
-	onDeleteSnapshots func(l []string) error,
+	seeder downloader.SeederClient,
 	onFinishRetire func() error,
 	onDone func(),
 ) bool {
@@ -433,14 +437,14 @@ func (br *BlockRetire) RetireBlocksInBackground(
 			defer br.snBuildAllowed.Release(1)
 		}
 
-		err := br.RetireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots, onFinishRetire)
+		err := br.RetireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seeder, onFinishRetire)
 		if errors.Is(err, heimdall.ErrHeimdallDataIsNotReady) {
 			br.borDataNotReadyBefore = time.Now().Add(BorDataNotReadyTimeout)
 			br.logger.Debug("[snapshots] bor data is not ready to be retired", "nextAttemptAt", br.borDataNotReadyBefore)
 			return
 		}
 		if err != nil {
-			br.logger.Warn("[snapshots] retire blocks", "err", err)
+			br.logger.Error("[snapshots] retire blocks", "err", err)
 			return
 		}
 	}()
@@ -453,8 +457,7 @@ func (br *BlockRetire) RetireBlocks(
 	requestedMinBlockNum uint64,
 	requestedMaxBlockNum uint64,
 	lvl log.Lvl,
-	seedNewSnapshots func(downloadRequest []services.DownloadRequest) error,
-	onDeleteSnapshots func(l []string) error,
+	seeder downloader.SeederClient,
 	onFinish func() error,
 ) error {
 	if requestedMaxBlockNum > br.maxScheduledBlock.Load() {
@@ -478,7 +481,7 @@ func (br *BlockRetire) RetireBlocks(
 		var okBor bool
 		for {
 			minBlockNum := max(br.blockReader.FrozenBlocks(), requestedMinBlockNum)
-			okBor, err = br.retireBorBlocks(ctx, requestedMinBlockNum, minBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+			okBor, err = br.retireBorBlocks(ctx, requestedMinBlockNum, minBlockNum, lvl, seeder)
 			if err != nil {
 				return err
 			}
@@ -493,14 +496,14 @@ func (br *BlockRetire) RetireBlocks(
 		var ok, okBor bool
 		minBlockNum := max(br.blockReader.FrozenBlocks(), requestedMinBlockNum)
 		maxBlockNum := br.maxScheduledBlock.Load()
-		ok, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+		ok, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seeder)
 		if err != nil {
 			return err
 		}
 
 		if includeBor {
 			minBorBlockNum := max(br.blockReader.FrozenBorBlocks(true), requestedMinBlockNum)
-			okBor, err = br.retireBorBlocks(ctx, minBorBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+			okBor, err = br.retireBorBlocks(ctx, minBorBlockNum, maxBlockNum, lvl, seeder)
 			if err != nil {
 				return err
 			}

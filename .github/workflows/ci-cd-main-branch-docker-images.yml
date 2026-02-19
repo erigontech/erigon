@@ -20,7 +20,7 @@ on:
         required: false
         type: string
         default: ''
-        description: 'The branch to checkout and build artifacts from (in case of manual run). Default is "" .'
+        description: 'The branch to checkout and build artifacts from (in case of manual run). Important: the Docker image tag is generated automatically from the branch name by removing everything before the last slash. For example, for the branch "feature/user/my-cool-change", the tag will be "my-cool-change". Default is "" .'
 
 jobs:
 
@@ -144,13 +144,27 @@ jobs:
           TAG_KEY: ${{ steps.def_docker_vars.outputs.tag_name }}
           KEEP_IMAGES: ${{ steps.def_docker_vars.outputs.keep_images }}
         run: |
+          HTTP_RESP=$(curl -s -o ./resp1 -w "%{http_code}" \
+            -X POST -H "Content-Type: application/json" \
+            -d '{
+                  "identifier": "'"${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}"'",
+                  "secret": "'"${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}"'"
+                }' \
+            https://hub.docker.com/v2/auth/token/)
+
+          if [ "$HTTP_RESP" -ne "200" ]; then
+            echo ERROR: HTTP response $HTTP_RESP from https://hub.docker.com/v2/auth/token/
+          fi
+
+          DOCKER_JWT=$(jq -r .access_token ./resp1)
+          rm -f ./resp1
           echo The following docker images have been published:
           echo "${{ env.DOCKERHUB_REPOSITORY }}:${{ env.BUILD_VERSION_LATEST }}"
           echo "${{ steps.def_docker_vars.outputs.keep_images > 0 && format('{0}:{1} ',env.DOCKER_URL,env.BUILD_VERSION) || '' }} (empty, if keep_images is 0)"
           echo
           echo "Cleanup old docker images matching pattern tag ~= ${{ env.TAG_KEY }}-XXXXXXX (where XXXXXXX is a short Commit IDs)"
           echo "Only last $KEEP_IMAGES images will be kept."
-          curl_cmd="curl -s -H \"Authorization: JWT ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}\" "
+          curl_cmd="curl -s -H \"Authorization: Bearer ${DOCKER_JWT}\" "
           dockerhub_url='https://hub.docker.com/v2/namespaces/erigontech/repositories/erigon'
           ## getting all pages in a loop from dockerhub and grepping required tag from the list of tags:
           my_list () {
@@ -171,7 +185,7 @@ jobs:
               current_image=$(echo $line | sed -e 's/^\(${{ env.TAG_KEY }}-.\{7\}\) .*/\1/')
               output_code=$(curl --write-out %{http_code} --output curl-output.log \
                     -s -X DELETE -H "Accept: application/json" \
-                    -H "Authorization: JWT ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}" \
+                    -H "Authorization: Bearer ${DOCKER_JWT}" \
                     https://hub.docker.com/v2/repositories/erigontech/erigon/tags/${current_image} )
               if [ $output_code -ne 204 ]; then
                 echo "ERROR: failed to remove docker image erigon:${current_image}"

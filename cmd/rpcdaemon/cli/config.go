@@ -46,7 +46,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -131,6 +130,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.DebugSingleRequest, utils.HTTPDebugSingleFlag.Name, false, utils.HTTPDebugSingleFlag.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.DBReadConcurrency, utils.DBReadConcurrencyFlag.Name, utils.DBReadConcurrencyFlag.Value, utils.DBReadConcurrencyFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&cfg.TraceCompatibility, "trace.compat", false, "Bug for bug compatibility with OE for trace_ routines")
+	rootCmd.PersistentFlags().BoolVar(&cfg.GethCompatibility, "rpc.gethcompat", false, "Enables Geth-compatible storage iteration order for debug_storageRangeAt (sorted by keccak256 hash). Disabled by default for performance.")
 	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "", "txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)")
 
 	rootCmd.PersistentFlags().StringVar(&stateCacheStr, "state.cache", "0MB", "Amount of data to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. Defaults to 0MB RAM")
@@ -177,15 +177,15 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().IntVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersMaxTxs, "rpc.subscription.filters.maxtxs", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTxs, "Maximum number of transactions to store per subscription.")
 	rootCmd.PersistentFlags().IntVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersMaxAddresses, "rpc.subscription.filters.maxaddresses", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxAddresses, "Maximum number of addresses per subscription to filter logs by.")
 	rootCmd.PersistentFlags().IntVar(&cfg.RpcFiltersConfig.RpcSubscriptionFiltersMaxTopics, "rpc.subscription.filters.maxtopics", rpchelper.DefaultFiltersConfig.RpcSubscriptionFiltersMaxTopics, "Maximum number of topics per subscription to filter logs by.")
+	rootCmd.PersistentFlags().IntVar(&cfg.RangeLimit, utils.RpcBlockRangeLimit.Name, utils.RpcBlockRangeLimit.Value, utils.RpcBlockRangeLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.BatchLimit, utils.RpcBatchLimit.Name, utils.RpcBatchLimit.Value, utils.RpcBatchLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.ReturnDataLimit, utils.RpcReturnDataLimit.Name, utils.RpcReturnDataLimit.Value, utils.RpcReturnDataLimit.Usage)
 	rootCmd.PersistentFlags().BoolVar(&cfg.AllowUnprotectedTxs, utils.AllowUnprotectedTxs.Name, utils.AllowUnprotectedTxs.Value, utils.AllowUnprotectedTxs.Usage)
 	rootCmd.PersistentFlags().Uint64Var(&cfg.OtsMaxPageSize, utils.OtsSearchMaxCapFlag.Name, utils.OtsSearchMaxCapFlag.Value, utils.OtsSearchMaxCapFlag.Usage)
 	rootCmd.PersistentFlags().DurationVar(&cfg.RPCSlowLogThreshold, utils.RPCSlowFlag.Name, utils.RPCSlowFlag.Value, utils.RPCSlowFlag.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.WebsocketSubscribeLogsChannelSize, utils.WSSubscribeLogsChannelSize.Name, utils.WSSubscribeLogsChannelSize.Value, utils.WSSubscribeLogsChannelSize.Usage)
-
-	rootCmd.PersistentFlags().Uint64Var(&cfg.ErigonDBStepSize, utils.ErigonDBStepSizeFlag.Name, utils.ErigonDBStepSizeFlag.Value, utils.ErigonDBStepSizeFlag.Usage)
-	rootCmd.PersistentFlags().Uint64Var(&cfg.ErigonDBStepsInFrozenFile, utils.ErigonDBStepsInFrozenFileFlag.Name, utils.ErigonDBStepsInFrozenFileFlag.Value, utils.ErigonDBStepsInFrozenFileFlag.Usage)
+	rootCmd.PersistentFlags().DurationVar(&cfg.RpcTxSyncDefaultTimeout, utils.RpcTxSyncDefaultTimeoutFlag.Name, utils.RpcTxSyncDefaultTimeoutFlag.Value, utils.RpcTxSyncDefaultTimeoutFlag.Usage)
+	rootCmd.PersistentFlags().DurationVar(&cfg.RpcTxSyncMaxTimeout, utils.RpcTxSyncMaxTimeoutFlag.Name, utils.RpcTxSyncMaxTimeoutFlag.Value, utils.RpcTxSyncMaxTimeoutFlag.Usage)
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
@@ -320,7 +320,13 @@ func EmbeddedServices(ctx context.Context,
 		// ... adding back in place to see about the above statement
 		stateCache = kvcache.New(stateCacheCfg)
 	} else {
-		stateCache = kvcache.NewDummy()
+		if stateCacheCfg.LocalCache != nil {
+			// this attaches the rpc layer to the local
+			// execution caches if they are availible
+			stateCache = stateCacheCfg.LocalCache
+		} else {
+			stateCache = kvcache.NewDummy()
+		}
 	}
 
 	subscribeToStateChangesLoop(ctx, stateDiffClient, stateCache)
@@ -427,24 +433,13 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, cfg.Dirs.DataDir, true, roTxLimit), allBorSnapshots)
 		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(cfg.Dirs.DataDir, logger, true, roTxLimit), allBorSnapshots, cc.Bor)
 		blockReader = freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
-		txNumsReader := blockReader.TxnumReader(ctx)
+		txNumsReader := blockReader.TxnumReader()
 
 		if err := dbstate.CheckSnapshotsCompatibility(cfg.Dirs); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
 
-		if cfg.ErigonDBStepSize == config3.DefaultStepSize {
-			logger.Info("Using default step size", "size", cfg.ErigonDBStepSize)
-		} else {
-			logger.Warn("OVERRIDING STEP SIZE; if you did this on purpose, you can safely ignore this warning, otherwise that may lead to a non functioning node", "size", cfg.ErigonDBStepSize, "default", config3.DefaultStepSize)
-		}
-		if cfg.ErigonDBStepsInFrozenFile == config3.DefaultStepsInFrozenFile {
-			logger.Info("Using default number of steps in frozen files", "steps", cfg.ErigonDBStepsInFrozenFile)
-		} else {
-			logger.Warn("OVERRIDING NUMBER OF STEPS IN FROZEN FILES; if you did this on purpose, you can safely ignore this warning, otherwise that may lead to a non functioning node", "steps", cfg.ErigonDBStepsInFrozenFile, "default", config3.DefaultStepsInFrozenFile)
-		}
-
-		agg, err := dbstate.New(cfg.Dirs).Logger(logger).StepSize(cfg.ErigonDBStepSize).StepsInFrozenFile(cfg.ErigonDBStepsInFrozenFile).Open(ctx, rawDB)
+		agg, err := dbstate.New(cfg.Dirs).Logger(logger).Open(ctx, rawDB)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}
@@ -470,7 +465,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				aggTx := agg.BeginFilesRo()
 				defer aggTx.Close()
 				stats.LogStats(aggTx, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-					histBlockNumProgress, _, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
+					histBlockNumProgress, _, err := txNumsReader.FindBlockNum(ctx, tx, endTxNumMinimax)
 					return histBlockNumProgress, err
 				})
 				return nil
@@ -504,7 +499,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 						ac := agg.BeginFilesRo()
 						defer ac.Close()
 						stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
-							histBlockNumProgress, _, err := txNumsReader.FindBlockNum(tx, endTxNumMinimax)
+							histBlockNumProgress, _, err := txNumsReader.FindBlockNum(ctx, tx, endTxNumMinimax)
 							return histBlockNumProgress, err
 						})
 						return nil
@@ -716,7 +711,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		return fmt.Errorf("could not start register RPC apis: %w", err)
 	}
 
-	info := []interface{}{
+	info := []any{
 		"grpc", cfg.GRPCServerEnabled,
 		"http", cfg.HttpServerEnabled,
 		"ws", cfg.WebsocketEnabled,
@@ -971,7 +966,7 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 		return nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
 	}
 
-	engineInfo := []interface{}{"url", engineAddr}
+	engineInfo := []any{"url", engineAddr}
 	logger.Info("HTTP endpoint opened for Engine API", engineInfo...)
 
 	return engineListener, engineSrv, engineAddr.String(), nil
@@ -1082,12 +1077,11 @@ func (e *remoteRulesEngine) Close() error {
 	return e.engine.Close()
 }
 
-func (e *remoteRulesEngine) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
+func (e *remoteRulesEngine) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) error {
 	if err := e.validateEngineReady(); err != nil {
-		panic(err)
+		return err
 	}
-
-	e.engine.Initialize(config, chain, header, state, syscall, logger, tracer)
+	return e.engine.Initialize(config, chain, header, state, syscall, logger, tracer)
 }
 
 func (e *remoteRulesEngine) GetTransferFunc() evmtypes.TransferFunc {
@@ -1118,7 +1112,7 @@ func (e *remoteRulesEngine) Prepare(_ rules.ChainHeaderReader, _ *types.Header, 
 	panic("remoteRulesEngine.Prepare not supported")
 }
 
-func (e *remoteRulesEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ rules.ChainReader, _ rules.SystemCall, skipReceiptsEval bool, _ log.Logger) (types.FlatRequests, error) {
+func (e *remoteRulesEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ rules.ChainReader, _ rules.SystemCall, skipReceiptsEval bool, _ log.Logger) (types.FlatRequests, error) {
 	panic("remoteRulesEngine.Finalize not supported")
 }
 

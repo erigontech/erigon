@@ -19,12 +19,27 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        chain: [ sepolia, hoodi, chiado ]  # Chain name as specified on the erigon command line
+        include:
+          - chain: mainnet   # Chain name as specified on the erigon command line
+            tracking_time_seconds: 7200
+            total_time_seconds: 82800  # 23 hours (1h buffer before job timeout)
+          - chain: gnosis
+            tracking_time_seconds: 7200
+            total_time_seconds: 64800  # 18 hours
+          - chain: sepolia
+            tracking_time_seconds: 7200
+            total_time_seconds: 36000  # 10 hours
+          - chain: hoodi
+            tracking_time_seconds: 7200
+            total_time_seconds: 21600  # 6 hours
+          - chain: chiado
+            tracking_time_seconds: 7200
+            total_time_seconds: 18000  # 5 hours
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
-      TRACKING_TIME_SECONDS: 7200 # 2 hours
-      TOTAL_TIME_SECONDS: 43200 # 12 hours
+      TRACKING_TIME_SECONDS: ${{ matrix.tracking_time_seconds || 7200 }} # default 2 hours
+      TOTAL_TIME_SECONDS: ${{ matrix.total_time_seconds || 43200 }} # 12 hours
       CHAIN: ${{ matrix.chain }}
       ERIGON_ASSERT: true
 
@@ -50,17 +65,17 @@ jobs:
       id: test_step
       run: |
         set +e # Disable exit on error
-             
+
         # Run Erigon, wait sync and check ability to maintain sync
         python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/run_and_check_tip_tracking.py \
           ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $TRACKING_TIME_SECONDS $TOTAL_TIME_SECONDS Erigon3 $CHAIN
-        
+
         # Capture monitoring script exit status
         test_exit_status=$?
-        
+
         # Save the subsection reached status
         echo "test_executed=true" >> "$GITHUB_OUTPUT"
-        
+
         # Check test runner script exit status
         if [ $test_exit_status -eq 0 ]; then
           echo "Tests completed successfully"
@@ -75,7 +90,7 @@ jobs:
 
     - name: Upload Downloader Torrent Client Status
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: torrent-client-status-${{ env.CHAIN }}
         path: torrent-client-status.txt
@@ -97,7 +112,7 @@ jobs:
 
     - name: Upload test results
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: test-results-${{ env.CHAIN }}
         path: |
@@ -106,14 +121,14 @@ jobs:
 
     - name: Upload metric plots
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: metric-plots-${{ env.CHAIN }}
         path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
 
     - name: Upload FD Leak Analysis
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: fd-leak-analysis-${{ env.CHAIN }}
         path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md
@@ -127,4 +142,3 @@ jobs:
       if: always()
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
-

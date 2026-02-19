@@ -17,6 +17,8 @@
 package builder
 
 import (
+	"slices"
+
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
@@ -40,10 +42,5 @@ func IsLocalBlock(engine rules.Engine, etherbase accounts.Address, txPoolLocals 
 	}
 	// Check whether the given address is specified by `txpool.local`
 	// CLI flag.
-	for _, account := range txPoolLocals {
-		if account == author {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(txPoolLocals, author)
 }

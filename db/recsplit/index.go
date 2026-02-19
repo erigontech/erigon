@@ -158,7 +158,7 @@ func OpenIndex(indexFilePath string) (idx *Index, err error) {
 	//}
 
 	idx.readers = &sync.Pool{
-		New: func() interface{} {
+		New: func() any {
 			return NewIndexReader(idx)
 		},
 	}

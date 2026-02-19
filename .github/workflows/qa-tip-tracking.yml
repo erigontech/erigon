@@ -17,7 +17,7 @@ jobs:
     runs-on: [self-hosted, qa, Ethereum, tip-tracking]
     timeout-minutes: 1300 # 21.66667 hours
     env:
-      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3.2/datadir
+      ERIGON_REFERENCE_DATA_DIR: /opt/erigon-versions/reference-version-3.3/datadir
       ERIGON_TESTBED_DATA_DIR: /opt/erigon-testbed/datadir
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       TRACKING_TIME_SECONDS: 7200 # 2 hours
@@ -115,7 +115,7 @@ jobs:
 
     - name: Upload Downloader Torrent Client Status
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: torrent-client-status-${{ env.CHAIN }}
         path: torrent-client-status.txt
@@ -143,28 +143,28 @@ jobs:
 
     - name: Upload test results
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: test-results
         path: ${{ github.workspace }}/result-${{ env.CHAIN }}.json
 
     - name: Upload erigon logs
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: erigon-logs
         path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
     - name: Upload metric plots
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: metric-plots
         path: ${{ github.workspace }}/metrics-${{ env.CHAIN }}-plots*
 
     - name: Upload FD Leak Analysis
       if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v6
       with:
         name: fd-leak-analysis
         path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md

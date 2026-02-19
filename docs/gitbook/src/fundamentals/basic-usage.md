@@ -1,5 +1,8 @@
 ---
 description: Command Line Usage and Basic Erigon Configuration
+metaLinks:
+  alternates:
+    - https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/fundamentals/basic-usage
 ---
 
 # Basic Usage
@@ -16,7 +19,7 @@ erigon [options]
 {% endtab %}
 
 {% tab title="Docker" %}
-* You can use Docker Compose like in this [example](../easy-nodes/how-to-run-an-ethereum-node/#id-2.-configure-and-launch-erigon)
+* You can use Docker Compose like in this [example](../get-started/easy-nodes/how-to-run-an-ethereum-node/#id-2.-configure-and-launch-erigon)
 *   Alternatively you can use the Docker syntax, for example:
 
     `docker run -it erigontech/erigon:v3.2.2 [options]`
@@ -98,8 +101,8 @@ To stop the Erigon node you can use the `CTRL+C` command.
 
 Additional flags can be added to configure the node with several options.
 
-{% content-ref url="configuring-erigon.md" %}
-[configuring-erigon.md](configuring-erigon.md)
+{% content-ref url="configuring-erigon/" %}
+[configuring-erigon](configuring-erigon/)
 {% endcontent-ref %}
 
 ## Help

@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func TestRecentLogs(t *testing.T) {
+func TestRecentReceipts(t *testing.T) {
 	t.Parallel()
 	t.Run("Evict", func(t *testing.T) {
 		e := NewRecentLogs(3)

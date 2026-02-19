@@ -98,6 +98,14 @@ func (c *Clique) verifyHeader(chain rules.ChainHeaderReader, header *types.Heade
 		return rules.ErrUnexpectedRequests
 	}
 
+	if header.SlotNumber != nil {
+		return rules.ErrUnexpectedSlotNumber
+	}
+
+	if header.BlockAccessListHash != nil {
+		return rules.ErrUnexpectedBlockAccessListHash
+	}
+
 	// All basic checks passed, verify cascading fields
 	return c.verifyCascadingFields(chain, header, parents)
 }

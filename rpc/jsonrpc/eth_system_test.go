@@ -32,13 +32,11 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func TestGasPrice(t *testing.T) {
@@ -64,7 +62,7 @@ func TestGasPrice(t *testing.T) {
 		t.Run(testCase.description, func(t *testing.T) {
 			m := createGasPriceTestKV(t, testCase.chainSize)
 			defer m.DB.Close()
-			eth := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000000, ethconfig.Defaults.RPCTxFeeCap, 100_000, false, 100_000, 128, log.New())
+			eth := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
 			ctx := context.Background()
 			result, err := eth.GasPrice(ctx)
@@ -175,9 +173,9 @@ func TestEthConfig(t *testing.T) {
 			var genesis types.Genesis
 			err = json.Unmarshal(genesisBytes, &genesis)
 			require.NoError(t, err)
-			m := mock.MockWithGenesis(t, &genesis, key, false)
+			m := mock.MockWithGenesis(t, &genesis, key)
 			defer m.Close()
-			eth := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, 5000, ethconfig.Defaults.RPCTxFeeCap, 10_000, false, 10_000, 128, log.New())
+			eth := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 			if test.head != nil {
 				tx, err := m.DB.BeginTemporalRw(ctx)
 				require.NoError(t, err)
@@ -214,7 +212,7 @@ func createGasPriceTestKV(t *testing.T, chainSize int) *mock.MockSentry {
 		}
 		signer = types.LatestSigner(gspec.Config)
 	)
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 
 	// Generate testing blocks
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {

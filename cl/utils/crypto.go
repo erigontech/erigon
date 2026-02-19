@@ -25,7 +25,7 @@ import (
 type HashFunc func(data []byte, extras ...[]byte) [32]byte
 
 var hasherPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return sha256.New()
 	},
 }

@@ -358,7 +358,7 @@ func (e *RevertError) ErrorCode() int {
 }
 
 // ErrorData returns the hex encoded revert reason.
-func (e *RevertError) ErrorData() interface{} {
+func (e *RevertError) ErrorData() any {
 	return e.reason
 }
 
@@ -462,6 +462,12 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 	if head.RequestsHash != nil {
 		result["requestsHash"] = head.RequestsHash
 	}
+	if head.BlockAccessListHash != nil {
+		result["blockAccessListHash"] = head.BlockAccessListHash
+	}
+	if head.SlotNumber != nil {
+		result["slotNumber"] = (*hexutil.Uint64)(head.SlotNumber)
+	}
 
 	// For Gnosis only
 	if head.AuRaSeal != nil {
@@ -475,28 +481,28 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 // RPCMarshalBlock converts the given block to the RPC output which depends on fullTx. If inclTx is true transactions are
 // returned. When fullTx is true the returned block contains full transaction details, otherwise it will only contain
 // transaction hashes.
-func RPCMarshalBlockDeprecated(block *types.Block, inclTx bool, fullTx bool) (map[string]interface{}, error) {
+func RPCMarshalBlockDeprecated(block *types.Block, inclTx bool, fullTx bool) (map[string]any, error) {
 	return RPCMarshalBlockExDeprecated(block, inclTx, fullTx, nil, common.Hash{})
 }
 
-func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash common.Hash) (map[string]interface{}, error) {
+func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash common.Hash) (map[string]any, error) {
 	fields := RPCMarshalHeader(block.Header())
 	fields["size"] = hexutil.Uint64(block.Size())
 	if _, ok := fields["transactions"]; !ok {
-		fields["transactions"] = make([]interface{}, 0)
+		fields["transactions"] = make([]any, 0)
 	}
 
 	if inclTx {
-		formatTx := func(tx types.Transaction, index int) (interface{}, error) {
+		formatTx := func(tx types.Transaction, index int) (any, error) {
 			return tx.Hash(), nil
 		}
 		if fullTx {
-			formatTx = func(tx types.Transaction, index int) (interface{}, error) {
+			formatTx = func(tx types.Transaction, index int) (any, error) {
 				return newRPCTransactionFromBlockAndTxGivenIndex(block, tx, uint64(index)), nil
 			}
 		}
 		txs := block.Transactions()
-		transactions := make([]interface{}, len(txs), len(txs)+1)
+		transactions := make([]any, len(txs), len(txs)+1)
 		var err error
 		for i, txn := range txs {
 			if transactions[i], err = formatTx(txn, i); err != nil {
@@ -532,6 +538,7 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 type RPCTransaction struct {
 	BlockHash            *common.Hash               `json:"blockHash"`
 	BlockNumber          *hexutil.Big               `json:"blockNumber"`
+	BlockTimestamp       *hexutil.Uint64            `json:"blockTimestamp"`
 	From                 common.Address             `json:"from"`
 	Gas                  hexutil.Uint64             `json:"gas"`
 	GasPrice             *hexutil.Big               `json:"gasPrice,omitempty"`
@@ -557,7 +564,7 @@ type RPCTransaction struct {
 
 // NewRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
-func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64, baseFee *uint256.Int) *RPCTransaction {
+func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime uint64, blockNumber uint64, index uint64, baseFee *uint256.Int) *RPCTransaction {
 	// Determine the signer. For replay-protected transactions, use the most permissive
 	// signer, because we assume that signers are backwards-compatible with old
 	// transactions. For non-protected transactions, the homestead signer is used
@@ -630,6 +637,7 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockNumber
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
+		result.BlockTimestamp = (*hexutil.Uint64)(&blockTime)
 		result.TransactionIndex = (*hexutil.Uint64)(&index)
 	}
 	return result
@@ -674,5 +682,5 @@ func NewRPCBorTransaction(opaqueTxn types.Transaction, txHash common.Hash, block
 
 // newRPCTransactionFromBlockAndTxGivenIndex returns a transaction that will serialize to the RPC representation.
 func newRPCTransactionFromBlockAndTxGivenIndex(b *types.Block, txn types.Transaction, index uint64) *RPCTransaction {
-	return NewRPCTransaction(txn, b.Hash(), b.NumberU64(), index, b.BaseFee())
+	return NewRPCTransaction(txn, b.Hash(), b.Time(), b.NumberU64(), index, b.BaseFee())
 }

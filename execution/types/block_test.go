@@ -96,7 +96,7 @@ func TestTxDependencyBlockDecoding(t *testing.T) {
 	if err := rlp.DecodeBytes(blockEnc, &block); err != nil {
 		t.Fatal("decode error: ", err)
 	}
-	check := func(f string, got, want interface{}) {
+	check := func(f string, got, want any) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s mismatch: got %v, want %v", f, got, want)
 		}
@@ -132,7 +132,7 @@ func TestBlockEncoding(t *testing.T) {
 		t.Fatal("decode error: ", err)
 	}
 
-	check := func(f string, got, want interface{}) {
+	check := func(f string, got, want any) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s mismatch: got %v, want %v", f, got, want)
 		}
@@ -169,7 +169,7 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 		t.Fatal("decode error: ", err)
 	}
 
-	check := func(f string, got, want interface{}) {
+	check := func(f string, got, want any) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s mismatch: got %v, want %v", f, got, want)
 		}
@@ -237,7 +237,7 @@ func TestEIP2718BlockEncoding(t *testing.T) {
 		t.Fatal("decode error: ", err)
 	}
 
-	check := func(f string, got, want interface{}) {
+	check := func(f string, got, want any) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s mismatch: got %v, want %v", f, got, want)
 		}
@@ -441,7 +441,7 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 	if rawBody.Uncles[1].GasLimit != 100 {
 		t.Fatal("expected gas limit of 2nd uncle to be 100")
 	}
-	if string(resultJson) != string(expectedJson) {
+	if !bytes.Equal(resultJson, expectedJson) {
 		t.Fatalf("encoded and decoded json do not match, got\n%s\nwant\n%s", resultJson, expectedJson)
 	}
 }
@@ -614,4 +614,31 @@ func TestCopyHeader(t *testing.T) {
 		h2 := CopyHeader(h1)
 		require.Equal(t, h1, h2)
 	}
+}
+
+func TestEncodeBigIntBufferOverflowPrevention(t *testing.T) {
+	// Covers an EncodeBigInt() panic that can happen if a malicious peer sends a header with a big.Int with a 32-byte value
+	// Create a 249-bit base fee value (32 bytes in big-endian)
+	// This is the minimum bit length that requires 32 bytes of storage
+	maliciousBaseFee := new(big.Int).Lsh(big.NewInt(1), 248) // 2^248, BitLen() = 249
+	// Create a header with the malicious difficulty
+	header := &Header{
+		ParentHash:  common.Hash{},
+		UncleHash:   common.Hash{},
+		Coinbase:    common.Address{},
+		Root:        common.Hash{},
+		TxHash:      common.Hash{},
+		ReceiptHash: common.Hash{},
+		Bloom:       Bloom{},
+		BaseFee:     maliciousBaseFee,
+		Number:      big.NewInt(1),
+		GasLimit:    8000000,
+		GasUsed:     0,
+		Time:        1234567890,
+		Extra:       []byte{},
+		MixDigest:   common.Hash{},
+		Nonce:       BlockNonce{},
+	}
+	// Calling Hash() will trigger Header.EncodeRLP() -> EncodeBigInt() -> panic
+	_ = header.Hash()
 }

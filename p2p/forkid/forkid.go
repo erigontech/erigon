@@ -115,7 +115,7 @@ func forkIsTimeBased(fork uint64) bool {
 }
 
 func newFilter(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) Filter {
-	var forks []uint64
+	forks := make([]uint64, 0, len(heightForks)+len(timeForks))
 	forks = append(forks, heightForks...)
 	forks = append(forks, timeForks...)
 

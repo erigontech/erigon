@@ -182,7 +182,7 @@ func (l *ListSSZ[T]) Cut(length int) {
 }
 
 func (l *ListSSZ[T]) ElementProof(i int) [][32]byte {
-	leaves := make([]interface{}, l.limit)
+	leaves := make([]any, l.limit)
 	for i := range leaves {
 		leaves[i] = make([]byte, 32)
 	}

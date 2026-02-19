@@ -17,10 +17,11 @@
 package aura
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"math"
-	"sort"
+	"slices"
 	"strings"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -219,9 +220,9 @@ type Multi struct {
 	parent func(common.Hash) *types.Header
 }
 
-func (s *Multi) Less(i, j int) bool { return s.sorted[i].num < s.sorted[j].num }
-func (s *Multi) Len() int           { return len(s.sorted) }
-func (s *Multi) Swap(i, j int)      { s.sorted[i], s.sorted[j] = s.sorted[j], s.sorted[i] }
+func (s *Multi) Sort() {
+	slices.SortFunc(s.sorted, func(a, b MultiItem) int { return cmp.Compare(a.num, b.num) })
+}
 
 func NewMulti(m map[uint64]ValidatorSet) *Multi {
 	if _, ok := m[0]; !ok {
@@ -234,7 +235,7 @@ func NewMulti(m map[uint64]ValidatorSet) *Multi {
 		i++
 	}
 	multi := &Multi{sorted: list}
-	sort.Sort(multi)
+	multi.Sort()
 	return multi
 }
 

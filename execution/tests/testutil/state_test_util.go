@@ -55,7 +55,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -106,6 +105,7 @@ type stTransaction struct {
 	Data                 []string                  `json:"data"`
 	Value                []string                  `json:"value"`
 	AccessLists          []*types.AccessList       `json:"accessLists,omitempty"`
+	BlobVersionedHashes  []common.Hash             `json:"blobVersionedHashes,omitempty"`
 	BlobGasFeeCap        *math.HexOrDecimal256     `json:"maxFeePerBlobGas,omitempty"`
 	Authorizations       []types.JsonAuthorization `json:"authorizationList,omitempty"`
 }
@@ -162,7 +162,11 @@ func GetChainConfig(forkString string) (baseConfig *chain.Config, eips []int, er
 
 // Subtests returns all valid subtests of the test.
 func (t *StateTest) Subtests() []StateSubtest {
-	var sub []StateSubtest
+	totalCount := 0
+	for _, pss := range t.Json.Post {
+		totalCount += len(pss)
+	}
+	sub := make([]StateSubtest, 0, totalCount)
 	for fork, pss := range t.Json.Post {
 		for i := range pss {
 			sub = append(sub, StateSubtest{fork, i})
@@ -196,7 +200,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
-	block, _, err := genesiswrite.GenesisToBlock(tb, t.genesis(config), dirs, log.Root())
+	block, _, err := genesiswrite.GenesisToBlock(nil, t.genesis(config), dirs, log.Root())
 	if err != nil {
 		return nil, common.Hash{}, 0, testforks.UnsupportedForkError{Name: subtest.Fork}
 	}
@@ -233,16 +237,6 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	msg, err := toMessage(t.Json.Tx, post, baseFee)
 	if err != nil {
 		return nil, common.Hash{}, 0, err
-	}
-	if len(post.Tx) != 0 {
-		txn, err := types.UnmarshalTransactionFromBinary(post.Tx, false /* blobTxnsAreWrappedWithBlobs */)
-		if err != nil {
-			return nil, common.Hash{}, 0, err
-		}
-		msg, err = txn.AsMessage(*types.MakeSigner(config, 0, 0), baseFee, (&evmtypes.BlockContext{}).Rules(config))
-		if err != nil {
-			return nil, common.Hash{}, 0, err
-		}
 	}
 
 	// Prepare the EVM.
@@ -281,7 +275,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	res, err := protocol.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */, nil /* engine */)
 	gasUsed := uint64(0)
 	if res != nil {
-		gasUsed = res.GasUsed
+		gasUsed = res.ReceiptGasUsed
 	}
 	if err != nil {
 		statedb.RevertToSnapshot(snapshot, err)
@@ -301,7 +295,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	var root common.Hash
 	rootBytes, err := domains.ComputeCommitment(context2.Background(), tx, true, blockNum, txNum, "", nil)
 	if err != nil {
-		return statedb, root, res.GasUsed, fmt.Errorf("ComputeCommitment: %w", err)
+		return statedb, root, res.ReceiptGasUsed, fmt.Errorf("ComputeCommitment: %w", err)
 	}
 	return statedb, common.BytesToHash(rootBytes), gasUsed, nil
 }
@@ -335,6 +329,10 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 		return nil, err
 	}
 	defer domains.Close()
+	latestTxNum, latestBlockNum, err := domains.SeekCommitment(context.Background(), tx)
+	if err != nil {
+		return nil, err
+	}
 
 	w := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), blockNr-1)
 
@@ -346,7 +344,7 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 		return nil, err
 	}
 
-	_, err = domains.ComputeCommitment(context.Background(), tx, true, domains.BlockNum(), domains.TxNum(), "flush-commitment", nil)
+	_, err = domains.ComputeCommitment(context.Background(), tx, true, latestBlockNum, latestTxNum, "flush-commitment", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -369,7 +367,7 @@ func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
 	}
 }
 
-func rlpHash(x interface{}) (h common.Hash) {
+func rlpHash(x any) (h common.Hash) {
 	hw := sha3.NewLegacyKeccak256()
 	if err := rlp.Encode(hw, x); err != nil {
 		panic(err)
@@ -503,6 +501,11 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 			}
 		}
 		msg.SetAuthorizations(authorizations)
+	}
+
+	// Add blob versioned hashes if present.
+	if len(tx.BlobVersionedHashes) > 0 {
+		msg.SetBlobVersionedHashes(tx.BlobVersionedHashes)
 	}
 
 	return msg, nil

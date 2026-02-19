@@ -13,7 +13,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func convertDataToStringP(abstractMap map[string]interface{}, field string) *string {
+func convertDataToStringP(abstractMap map[string]any, field string) *string {
 	var result string
 
 	switch v := abstractMap[field].(type) {
@@ -60,7 +60,7 @@ func convertDataToStringP(abstractMap map[string]interface{}, field string) *str
 	return &result
 }
 
-func convertDataToIntP(abstractMap map[string]interface{}, field string) *int {
+func convertDataToIntP(abstractMap map[string]any, field string) *int {
 	var result int
 
 	switch v := abstractMap[field].(type) {
@@ -88,7 +88,7 @@ func convertDataToIntP(abstractMap map[string]interface{}, field string) *int {
 	return &result
 }
 
-func convertDataToUint64P(abstractMap map[string]interface{}, field string) *uint64 {
+func convertDataToUint64P(abstractMap map[string]any, field string) *uint64 {
 	var result uint64
 
 	switch v := abstractMap[field].(type) {

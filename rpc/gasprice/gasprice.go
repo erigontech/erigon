@@ -22,6 +22,7 @@ package gasprice
 import (
 	"container/heap"
 	"context"
+	"sort"
 
 	"github.com/holiman/uint256"
 
@@ -40,6 +41,7 @@ type OracleBackend interface {
 	HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error)
 	BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error)
 	ChainConfig() *chain.Config
+	GetLatestBlockNumber() (uint64, error)
 
 	GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error)
 	PendingBlockAndReceipts() (*types.Block, types.Receipts)
@@ -54,8 +56,6 @@ type Cache interface {
 // blocks. Suitable for both light and full clients.
 type Oracle struct {
 	backend     OracleBackend
-	lastHead    common.Hash
-	lastPrice   *uint256.Int
 	maxPrice    *uint256.Int
 	ignorePrice *uint256.Int
 	cache       Cache
@@ -99,7 +99,6 @@ func NewOracle(backend OracleBackend, params gaspricecfg.Config, cache Cache, lo
 
 	return &Oracle{
 		backend:          backend,
-		lastPrice:        params.Default,
 		maxPrice:         maxPrice,
 		ignorePrice:      ignorePrice,
 		checkBlocks:      blocks,
@@ -110,6 +109,7 @@ func NewOracle(backend OracleBackend, params gaspricecfg.Config, cache Cache, lo
 		log:              log,
 	}
 }
+
 
 // SuggestTipCap returns a TipCap so that newly created transaction can
 // have a very high chance to be included in the following blocks.
@@ -137,27 +137,20 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 	}
 
 	number := head.Number.Uint64()
-	txPrices := make(sortingHeap, 0, sampleNumber*oracle.checkBlocks)
+	var txPrices sortingHeap
 	for txPrices.Len() < sampleNumber*oracle.checkBlocks && number > 0 {
-		err := oracle.getBlockPrices(ctx, number, sampleNumber, oracle.ignorePrice, &txPrices)
-		if err != nil {
+		if err := oracle.getBlockPrices(ctx, number, sampleNumber, oracle.ignorePrice, &txPrices); err != nil {
 			return latestPrice, err
 		}
 		number--
 	}
 	price := latestPrice
 	if txPrices.Len() > 0 {
-		// Item with this position needs to be extracted from the sorting heap
-		// so we pop all the items before it
-		percentilePosition := (txPrices.Len() - 1) * oracle.percentile / 100
-		for i := 0; i < percentilePosition; i++ {
-			heap.Pop(&txPrices)
-		}
+		sort.Sort(txPrices)
+		index := (txPrices.Len() - 1) * oracle.percentile / 100
+		price = txPrices[index]
 	}
-	if txPrices.Len() > 0 {
-		// Don't need to pop it, just take from the top of the heap
-		price = txPrices[0]
-	}
+
 	if price.Cmp(oracle.maxPrice) > 0 {
 		price = new(uint256.Int).Set(oracle.maxPrice)
 	}
@@ -191,7 +184,7 @@ func (t transactionsByGasPrice) Less(i, j int) bool {
 }
 
 // Push (part of heap.Interface) places a new link onto the end of queue
-func (t *transactionsByGasPrice) Push(x interface{}) {
+func (t *transactionsByGasPrice) Push(x any) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
 	l, ok := x.(types.Transaction)
@@ -202,7 +195,7 @@ func (t *transactionsByGasPrice) Push(x interface{}) {
 }
 
 // Pop (part of heap.Interface) removes the first link from the queue
-func (t *transactionsByGasPrice) Pop() interface{} {
+func (t *transactionsByGasPrice) Pop() any {
 	old := t.txs
 	n := len(old)
 	x := old[n-1]
@@ -243,7 +236,7 @@ func (oracle *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit
 		}
 		sender, _ := tx.GetSender()
 		if sender.Value() != block.Coinbase() {
-			heap.Push(s, tip)
+			heap.Push(s, new(uint256.Int).Set(tip))
 			count = count + 1
 		}
 	}
@@ -257,7 +250,7 @@ func (s sortingHeap) Less(i, j int) bool { return s[i].Lt(s[j]) }
 func (s sortingHeap) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 // Push (part of heap.Interface) places a new link onto the end of queue
-func (s *sortingHeap) Push(x interface{}) {
+func (s *sortingHeap) Push(x any) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
 	l := x.(*uint256.Int)
@@ -265,7 +258,7 @@ func (s *sortingHeap) Push(x interface{}) {
 }
 
 // Pop (part of heap.Interface) removes the first link from the queue
-func (s *sortingHeap) Pop() interface{} {
+func (s *sortingHeap) Pop() any {
 	old := *s
 	n := len(old)
 	x := old[n-1]

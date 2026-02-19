@@ -680,35 +680,6 @@ func newRandBlobTx() *BlobTx {
 	return stx
 }
 
-func printSTX(stx *BlobTx) {
-	fmt.Println("--BlobTx")
-	fmt.Printf("ChainID: %v\n", stx.ChainID)
-	fmt.Printf("Nonce: %v\n", stx.Nonce)
-	fmt.Printf("MaxPriorityFeePerGas: %v\n", stx.TipCap)
-	fmt.Printf("MaxFeePerGas: %v\n", stx.FeeCap)
-	fmt.Printf("Gas: %v\n", stx.GasLimit)
-	fmt.Printf("To: %v\n", stx.To)
-	fmt.Printf("Value: %v\n", stx.Value)
-	fmt.Printf("Data: %v\n", stx.Data)
-	fmt.Printf("AccessList: %v\n", stx.AccessList)
-	fmt.Printf("MaxFeePerBlobGas: %v\n", stx.MaxFeePerBlobGas)
-	fmt.Printf("BlobVersionedHashes: %v\n", stx.BlobVersionedHashes)
-	fmt.Printf("V: %v\n", stx.V)
-	fmt.Printf("R: %v\n", stx.R)
-	fmt.Printf("S: %v\n", stx.S)
-	fmt.Println("-----")
-	fmt.Println()
-}
-
-func printSTXW(txw *BlobTxWrapper) {
-	fmt.Println("--BlobTxWrapper")
-	printSTX(&txw.Tx)
-	fmt.Printf("Commitments LEN: %v\n", txw.Commitments)
-	fmt.Printf("Proofs LEN: %v\n", txw.Proofs)
-	fmt.Println("-----")
-	fmt.Println()
-}
-
 func randByte() byte {
 	return byte(rand.Intn(256))
 }

@@ -52,7 +52,6 @@ import (
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/vm/runtime"
 )
@@ -267,7 +266,6 @@ func runCmd(ctx *cli.Context) error {
 	if tracer != nil {
 		runtimeConfig.EVMConfig.Tracer = tracer.Hooks
 	}
-	runtimeConfig.EVMConfig.JumpDestCache = vm.NewJumpDestCache(16)
 
 	if cpuProfilePath := ctx.String(CPUProfileFlag.Name); cpuProfilePath != "" {
 		f, err := os.Create(cpuProfilePath)

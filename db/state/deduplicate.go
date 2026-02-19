@@ -36,9 +36,13 @@ import (
 // This function is supposed to be used only as part of the snapshot tooling
 // to help rebuilding existing snapshots. It should not be used for for
 // background merging process because it is not memory-efficient
-func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, historyFiles []*FilesItem, r HistoryRanges, ps *background.ProgressSet, opts OverrideCompactOpts) error {
+func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, historyFiles []*FilesItem, r HistoryRanges, ps *background.ProgressSet) error {
 	if !r.any() {
 		return nil
+	}
+
+	if len(indexFiles) > 1 || len(historyFiles) > 1 {
+		return fmt.Errorf("wrong deduplication interval from %d to %d", r.history.from, r.history.to)
 	}
 
 	var decomp *seg.Decompressor
@@ -52,11 +56,7 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 		return fmt.Errorf("deduo %s history compressor: %w", ht.h.FilenameBase, err)
 	}
 
-	pagedWr := ht.datarWriter(comp, ht.h.HistoryValuesOnCompressedPage)
-
-	if opts.HistoryValuesOnCompressedPage != nil {
-		pagedWr = ht.datarWriter(comp, *opts.HistoryValuesOnCompressedPage)
-	}
+	pagedWr := ht.dataWriter(comp)
 
 	var cp CursorHeap
 	heap.Init(&cp)
@@ -72,7 +72,13 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 			var g2 *seg.PagedReader
 			for _, hi := range historyFiles { // full-scan, because it's ok to have different amount files. by unclean-shutdown.
 				if hi.startTxNum == item.startTxNum && hi.endTxNum == item.endTxNum {
-					g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), ht.h.HistoryValuesOnCompressedPage, true)
+					compressedPageValuesCount := hi.decompressor.CompressedPageValuesCount()
+
+					if hi.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+						compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
+					}
+
+					g2 = seg.NewPagedReader(ht.dataReader(hi.decompressor), compressedPageValuesCount, true)
 					break
 				}
 			}
@@ -83,7 +89,7 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 			val, _ := g.Next(nil)
 			heap.Push(&cp, &CursorItem{
 				t:          FILE_CURSOR,
-				idx:        g,
+				kvReader:   g,
 				hist:       g2,
 				key:        key,
 				val:        val,
@@ -111,22 +117,32 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 			ss := seq.Iterator(0)
 
 			var dedupVal *[]byte
+			var histKeyBuf []byte
 			var prevTxNum uint64
 
 			for ss.HasNext() {
 				txNum, err := ss.Next()
 				if err != nil {
-					panic(fmt.Sprintf("failed to extract txNum from ef. File: %s Key: %x", ci1.idx.FileName(), ci1.key))
+					panic(fmt.Sprintf("failed to extract txNum from ef. File: %s Key: %x", ci1.kvReader.FileName(), ci1.key))
 				}
 
 				if !ci1.hist.HasNext() {
 					panic(fmt.Errorf("assert: no value??? %s, txNum=%d, count=%d, lastKey=%x, ci1.key=%x", ci1.hist.FileName(), txNum, count, lastKey, ci1.key))
 				}
 
-				var k, v []byte
-				k, v, valBuf, _ = ci1.hist.Next2(valBuf[:0])
+				v, _ := ci1.hist.Next(valBuf[:0])
 
-				if dedupVal != nil && bytes.Equal(*dedupVal, v) {
+				// if dedupVal == nil -> we can not insert to the page because next val can be duplicate --> remember the value and decide next iter
+				if dedupVal == nil {
+					dd := bytes.Clone(v) // i am not sure if there is a way to avoid extra copy here
+					dedupVal = &dd
+					prevTxNum = txNum
+
+					continue
+				}
+
+				// if dedupVal is the same as current --> can not insert to the page bacause next val can be duplicate as well --> mark prev tx as duplicate
+				if bytes.Equal(*dedupVal, v) {
 					if dedupKeyEFs[string(ci1.key)] == nil {
 						dedupKeyEFs[string(ci1.key)] = make(map[uint64]struct{})
 					}
@@ -137,19 +153,29 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 					continue
 				}
 
+				histKeyBuf = historyKey(prevTxNum, ci1.key, histKeyBuf)
+
+				if err = pagedWr.Add(histKeyBuf, *dedupVal); err != nil {
+					return err
+				}
+
 				dd := bytes.Clone(v) // i am not sure if there is a way to avoid extra copy here
 				dedupVal = &dd
 				prevTxNum = txNum
+			}
 
-				if err = pagedWr.Add(k, v); err != nil {
+			if dedupVal != nil {
+				histKeyBuf = historyKey(prevTxNum, ci1.key, histKeyBuf)
+
+				if err = pagedWr.Add(histKeyBuf, *dedupVal); err != nil {
 					return err
 				}
 			}
 
 			// fmt.Printf("fput '%x'->%x\n", lastKey, ci1.val)
-			if ci1.idx.HasNext() {
-				ci1.key, _ = ci1.idx.Next(ci1.key[:0])
-				ci1.val, _ = ci1.idx.Next(ci1.val[:0])
+			if ci1.kvReader.HasNext() {
+				ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
+				ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])
 				heap.Push(&cp, ci1)
 			}
 		}
@@ -170,7 +196,7 @@ func (ht *HistoryRoTx) deduplicateFiles(ctx context.Context, indexFiles, history
 		return err
 	}
 
-	if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps, opts); err != nil {
+	if err = ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
 		return err
 	}
 
@@ -200,16 +226,12 @@ func (iit *InvertedIndexRoTx) deduplicateFiles(ctx context.Context, files []*Fil
 
 	var outItem *FilesItem
 	var comp *seg.Compressor
-	var decomp *seg.Decompressor
 	var err error
 	var closeItem = true
 	defer func() {
 		if closeItem {
 			if comp != nil {
 				comp.Close()
-			}
-			if decomp != nil {
-				decomp.Close()
 			}
 			if outItem != nil {
 				outItem.closeFilesAndRemove()
@@ -245,7 +267,7 @@ func (iit *InvertedIndexRoTx) deduplicateFiles(ctx context.Context, files []*Fil
 			//fmt.Printf("heap push %s [%d] %x\n", item.decompressor.FilePath(), item.endTxNum, key)
 			heap.Push(&cp, &CursorItem{
 				t:          FILE_CURSOR,
-				idx:        g,
+				kvReader:   g,
 				key:        key,
 				val:        val,
 				startTxNum: item.startTxNum,
@@ -312,9 +334,9 @@ func (iit *InvertedIndexRoTx) deduplicateFiles(ctx context.Context, files []*Fil
 				mergedOnce = true
 			}
 			// fmt.Printf("multi-way %s [%d] %x\n", ii.KeysTable, ci1.endTxNum, ci1.key)
-			if ci1.idx.HasNext() {
-				ci1.key, _ = ci1.idx.Next(ci1.key[:0])
-				ci1.val, _ = ci1.idx.Next(ci1.val[:0])
+			if ci1.kvReader.HasNext() {
+				ci1.key, _ = ci1.kvReader.Next(ci1.key[:0])
+				ci1.val, _ = ci1.kvReader.Next(ci1.val[:0])
 				// fmt.Printf("heap next push %s [%d] %x\n", ii.KeysTable, ci1.endTxNum, ci1.key)
 				heap.Push(&cp, ci1)
 			}

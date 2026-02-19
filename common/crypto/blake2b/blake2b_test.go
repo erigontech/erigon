@@ -285,7 +285,7 @@ func TestSelfTest(t *testing.T) {
 			md := computeHash(msg[:msgLength], hashSize)
 			h.Write(md)
 
-			generateSequence(key[:], uint32(hashSize)) // keyed hash
+			generateSequence(key, uint32(hashSize)) // keyed hash
 			md = computeMAC(msg[:msgLength], hashSize, key[:hashSize])
 			h.Write(md)
 		}
@@ -316,7 +316,7 @@ func benchmarkSum(b *testing.B, size int, sse4, avx, avx2 bool) {
 	data := make([]byte, size)
 	b.SetBytes(int64(size))
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		Sum512(data)
 	}
 }
@@ -333,7 +333,7 @@ func benchmarkWrite(b *testing.B, size int, sse4, avx, avx2 bool) {
 	h, _ := New512(nil)
 	b.SetBytes(int64(size))
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		h.Write(data)
 	}
 }

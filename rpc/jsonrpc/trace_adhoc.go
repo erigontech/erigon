@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -89,10 +90,10 @@ type TraceCallResult struct {
 
 // StateDiffAccount is the part of `trace_call` response that is under "stateDiff" tag
 type StateDiffAccount struct {
-	Balance interface{}                            `json:"balance"` // Can be either string "=" or mapping "*" => {"from": "hex", "to": "hex"}
-	Code    interface{}                            `json:"code"`
-	Nonce   interface{}                            `json:"nonce"`
-	Storage map[common.Hash]map[string]interface{} `json:"storage"`
+	Balance any                            `json:"balance"` // Can be either string "=" or mapping "*" => {"from": "hex", "to": "hex"}
+	Code    any                            `json:"code"`
+	Nonce   any                            `json:"nonce"`
+	Storage map[common.Hash]map[string]any `json:"storage"`
 }
 
 type StateDiffBalance struct {
@@ -399,7 +400,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		copy(trResult.Address[:], toVal[:])
 		trace.Result = trResult
 	} else {
-		trace.Result = &TraceResult{}
+		trace.Result = &TraceResult{GasUsed: (*hexutil.Big)(big.NewInt(0))}
 		trace.Type = CALL
 	}
 	if deep {
@@ -694,21 +695,21 @@ type StateDiff struct {
 
 func (sd *StateDiff) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
 	if _, ok := sd.sdMap[address]; !ok {
-		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
+		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]any)}
 	}
 	return nil
 }
 
 func (sd *StateDiff) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
 	if _, ok := sd.sdMap[address]; !ok {
-		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
+		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]any)}
 	}
 	return nil
 }
 
 func (sd *StateDiff) DeleteAccount(address accounts.Address, original *accounts.Account) error {
 	if _, ok := sd.sdMap[address]; !ok {
-		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
+		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]any)}
 	}
 	return nil
 }
@@ -719,10 +720,10 @@ func (sd *StateDiff) WriteAccountStorage(address accounts.Address, incarnation u
 	}
 	accountDiff := sd.sdMap[address]
 	if accountDiff == nil {
-		accountDiff = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
+		accountDiff = &StateDiffAccount{Storage: make(map[common.Hash]map[string]any)}
 		sd.sdMap[address] = accountDiff
 	}
-	m := make(map[string]interface{})
+	m := make(map[string]any)
 	m["*"] = &StateDiffStorage{From: common.BytesToHash(original.Bytes()), To: common.BytesToHash(value.Bytes())}
 	accountDiff.Storage[key.Value()] = m
 	return nil
@@ -730,7 +731,7 @@ func (sd *StateDiff) WriteAccountStorage(address accounts.Address, incarnation u
 
 func (sd *StateDiff) CreateContract(address accounts.Address) error {
 	if _, ok := sd.sdMap[address]; !ok {
-		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
+		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]any)}
 	}
 	return nil
 }
@@ -913,12 +914,17 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		isBorStateSyncTxn = true
 	}
 
-	header, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNum), tx)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
-	txNumMin, err := api._txNumReader.Min(tx, blockNum)
+	header, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNum), tx)
+	if err != nil {
+		return nil, err
+	}
+
+	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -984,6 +990,11 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	}
 
 	blockNumber, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1058,12 +1069,17 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		blockNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
 
-	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, *blockNrOrHash, tx, api._blockReader, api.filters)
+	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, *blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
 
-	header, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNumber), tx)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	header, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNumber), tx)
 	if err != nil {
 		return nil, err
 	}
@@ -1071,7 +1087,12 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, *blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1114,7 +1135,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 	ot.compat = api.compatibility
-	if traceTypeTrace || traceTypeVmTrace {
+	if traceTypeTrace || traceTypeVmTrace || traceTypeStateDiff {
 		ot.r = traceResult
 		ot.traceAddr = []int{}
 	}
@@ -1161,7 +1182,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 	if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-		ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.GasUsed}, nil)
+		ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
 	}
 	traceResult.Output = common.Copy(execResult.ReturnData)
 	if traceTypeStateDiff {
@@ -1237,12 +1258,17 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		var num = rpc.LatestBlockNumber
 		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
-	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, tx, api._blockReader, api.filters)
+	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, err
 	}
 
-	parentHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(blockNumber), tx)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	parentHeader, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNumber), tx)
 	if err != nil {
 		return nil, err
 	}
@@ -1266,7 +1292,12 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		}
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, *parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1305,7 +1336,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	}
 	noop := state.NewNoopWriter()
 
-	parentHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(parentBlockNumber), dbtx)
+	parentHeader, err := api.headerByNumber(ctx, rpc.BlockNumber(parentBlockNumber), dbtx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1393,13 +1424,15 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			blockCtx.MaxGasLimit = true
 		}
 
-		// Clone the state cache before applying the changes for diff after transaction execution, clone is discarded
+		// Reset and clone only needed when stateDiff is requested:
+		// stateDiff requires per-tx isolation to compute before/after state.
+		// For trace/vmTrace only, skip Reset to match whole-block replay semantics (issue #12607).
 		var cloneReader state.StateReader
 		var sd *StateDiff
 		if traceTypeStateDiff {
+			ibs.Reset()
 			cloneCache := stateCache.Clone()
 			cloneReader = state.NewCachedReader(stateReader, cloneCache)
-			//cloneReader = stateReader
 			if isHistoricalStateReader {
 				historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
 			}
@@ -1408,7 +1441,6 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			sd = &StateDiff{sdMap: sdMap}
 		}
 
-		ibs.Reset()
 		var finalizeTxStateWriter state.StateWriter
 		if sd != nil {
 			finalizeTxStateWriter = sd
@@ -1461,7 +1493,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		}
 
 		if tracer != nil && tracer.Hooks.OnTxEnd != nil {
-			tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.GasUsed}, nil)
+			tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
 		}
 
 		chainRules := blockCtx.Rules(chainConfig)
@@ -1478,15 +1510,16 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 					return nil, nil, err
 				}
 			}
-			if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
-				return nil, nil, err
-			}
 		} else {
 			if !txFinalized {
 				if err = ibs.FinalizeTx(chainRules, noop); err != nil {
 					return nil, nil, err
 				}
 			}
+		}
+		if traceTypeStateDiff {
+			// CommitBlock after each tx to flush ibs changes into stateCache,
+			// so the next tx's cloneReader captures the correct "before" state
 			if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
 				return nil, nil, err
 			}
@@ -1522,7 +1555,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	}
 	noop := state.NewNoopWriter()
 
-	parentHeader, err := api.headerByRPCNumber(ctx, rpc.BlockNumber(parentBlockNumber), dbtx)
+	parentHeader, err := api.headerByNumber(ctx, rpc.BlockNumber(parentBlockNumber), dbtx)
 	if err != nil {
 		return nil, err
 	}
@@ -1701,7 +1734,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 }
 
 // RawTransaction implements trace_rawTransaction.
-func (api *TraceAPIImpl) RawTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) ([]interface{}, error) {
-	var stub []interface{}
+func (api *TraceAPIImpl) RawTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) ([]any, error) {
+	var stub []any
 	return stub, fmt.Errorf(NotImplemented, "trace_rawTransaction")
 }

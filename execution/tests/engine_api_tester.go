@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
@@ -124,6 +123,7 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 	httpConfig := httpcfg.HttpCfg{
 		Enabled:                  true,
 		HttpServerEnabled:        true,
+		WebsocketEnabled:         true,
 		HttpListenAddress:        "127.0.0.1",
 		HttpPort:                 jsonRpcPort,
 		API:                      []string{"eth"},
@@ -132,6 +132,10 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 		JWTSecretPath:            path.Join(args.DataDir, "jwt.hex"),
 		ReturnDataLimit:          100_000,
 		EvmCallTimeout:           rpccfg.DefaultEvmCallTimeout,
+		AuthRpcTimeouts:          rpccfg.DefaultHTTPTimeouts,
+		HTTPTimeouts:             rpccfg.DefaultHTTPTimeouts,
+		RpcTxSyncDefaultTimeout:  rpccfg.DefaultRpcTxSyncDefaultTimeout,
+		RpcTxSyncMaxTimeout:      rpccfg.DefaultRpcTxSyncMaxTimeout,
 	}
 
 	nodeKeyConfig := p2p.NodeKeyConfig{}
@@ -162,12 +166,10 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 			NoDownloader: true,
 		},
 		TxPool: txPoolConfig,
-		Miner: buildercfg.MiningConfig{
+		Builder: buildercfg.BuilderConfig{
 			EnabledPOS: true,
 		},
-		KeepStoredChainConfig:     true,
-		ErigonDBStepSize:          config3.DefaultStepSize,
-		ErigonDBStepsInFrozenFile: config3.DefaultStepsInFrozenFile,
+		KeepStoredChainConfig: true,
 	}
 	if args.EthConfigTweaker != nil {
 		args.EthConfigTweaker(&ethConfig)
@@ -207,28 +209,37 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 	rpcApiClient := requests.NewRequestGenerator(rpcDaemonHttpUrl, logger)
 	contractBackend := contracts.NewJsonRpcBackend(rpcDaemonHttpUrl, logger)
 	//goland:noinspection HttpUrlsUsage
-	engineApiUrl := fmt.Sprintf("http://%s:%d", httpConfig.AuthRpcHTTPListenAddress, httpConfig.AuthRpcPort)
-	engineApiClient, err := engineapi.DialJsonRpcClient(
-		engineApiUrl,
-		jwtSecret,
-		logger,
+	engineApiClientOpts := []engineapi.JsonRpcClientOption{
 		// requests should not take more than 5 secs in a test env, yet we can spam frequently
-		engineapi.WithJsonRpcClientRetryBackOff(50*time.Millisecond),
+		engineapi.WithJsonRpcClientRetryBackOff(50 * time.Millisecond),
 		engineapi.WithJsonRpcClientMaxRetries(100),
 		engineapi.WithRetryableErrCheckers(
 			engineapi.ErrContainsRetryableErrChecker("connection refused"),
 			// below happened on win CI
 			engineapi.ErrContainsRetryableErrChecker("No connection could be made because the target machine actively refused it"),
 		),
+	}
+	if args.EngineApiClientTimeout != nil {
+		engineApiClientOpts = append(engineApiClientOpts, engineapi.WithJsonRpcClientTimeout(*args.EngineApiClientTimeout))
+	}
+	engineApiUrl := fmt.Sprintf("http://%s:%d", httpConfig.AuthRpcHTTPListenAddress, httpConfig.AuthRpcPort)
+	engineApiClient, err := engineapi.DialJsonRpcClient(
+		engineApiUrl,
+		jwtSecret,
+		logger,
+		engineApiClientOpts...,
 	)
 	require.NoError(t, err)
 	var mockCl *MockCl
 	if args.MockClState != nil {
-		mockCl = NewMockCl(logger, engineApiClient, genesisBlock, WithMockClState(args.MockClState))
+		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock, WithMockClState(args.MockClState))
 	} else {
-		mockCl = NewMockCl(logger, engineApiClient, genesisBlock)
+		mockCl = NewMockCl(ctx, logger, engineApiClient, ethBackend.StateDiffClient(), genesisBlock)
 	}
-	_, err = mockCl.BuildCanonicalBlock(ctx) // build 1 empty block before proceeding to properly initialise everything
+	if !args.NoEmptyBlock1 {
+		// build 1 empty block before proceeding to properly initialise everything
+		_, err = mockCl.BuildCanonicalBlock(ctx)
+	}
 	require.NoError(t, err)
 	return EngineApiTester{
 		GenesisBlock:         genesisBlock,
@@ -246,12 +257,14 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 }
 
 type EngineApiTesterInitArgs struct {
-	Logger           log.Logger
-	DataDir          string
-	Genesis          *types.Genesis
-	CoinbaseKey      *ecdsa.PrivateKey
-	EthConfigTweaker func(*ethconfig.Config)
-	MockClState      *MockClState
+	Logger                 log.Logger
+	DataDir                string
+	Genesis                *types.Genesis
+	CoinbaseKey            *ecdsa.PrivateKey
+	EthConfigTweaker       func(*ethconfig.Config)
+	MockClState            *MockClState
+	NoEmptyBlock1          bool
+	EngineApiClientTimeout *time.Duration
 }
 
 type EngineApiTester struct {

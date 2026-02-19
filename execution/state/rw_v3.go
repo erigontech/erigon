@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
@@ -41,6 +42,7 @@ type StateV3 struct {
 	domains *execctx.SharedDomains
 	logger  log.Logger
 	syncCfg ethconfig.Sync
+	txNum   uint64
 	trace   bool
 }
 
@@ -182,6 +184,7 @@ func (rs *StateV3) Domains() *execctx.SharedDomains {
 }
 
 func (rs *StateV3) SetTxNum(blockNum, txNum uint64) {
+	rs.txNum = txNum
 	rs.domains.SetTxNum(txNum)
 	rs.domains.SetBlockNum(blockNum)
 }
@@ -193,6 +196,7 @@ func (rs *StateV3) ApplyTxState(ctx context.Context,
 	accountUpdates StateUpdates,
 	balanceIncreases map[accounts.Address]uint256.Int,
 	receipt *types.Receipt,
+	cummulativeBlobGas uint64,
 	logs []*types.Log,
 	traceFroms map[accounts.Address]struct{},
 	traceTos map[accounts.Address]struct{},
@@ -208,7 +212,7 @@ func (rs *StateV3) ApplyTxState(ctx context.Context,
 		return fmt.Errorf("StateV3.ApplyState: %w", err)
 	}
 
-	if err := rs.applyLogsAndTraces4(roTx, txNum, receipt, logs, traceFroms, traceTos); err != nil {
+	if err := rs.applyLogsAndTraces4(roTx, txNum, receipt, cummulativeBlobGas, logs, traceFroms, traceTos, historyExecution); err != nil {
 		return fmt.Errorf("StateV3.ApplyLogsAndTraces: %w", err)
 	}
 
@@ -225,7 +229,7 @@ func (rs *StateV3) ApplyTxState(ctx context.Context,
 	return nil
 }
 
-func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, logs []*types.Log, traceFroms map[accounts.Address]struct{}, traceTos map[accounts.Address]struct{}) error {
+func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, cummulativeBlobGas uint64, logs []*types.Log, traceFroms map[accounts.Address]struct{}, traceTos map[accounts.Address]struct{}, historyExecution bool) error {
 	domains := rs.domains
 	for addr := range traceFroms {
 		addrValue := addr.Value()
@@ -252,6 +256,18 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 		}
 	}
 
+	if receipt != nil {
+		if !historyExecution {
+			blockLogIndex := receipt.FirstLogIndexWithinBlock
+			if !rawtemporaldb.ReceiptStoresFirstLogIdx(tx) {
+				blockLogIndex += uint32(len(receipt.Logs))
+			}
+			if err := rawtemporaldb.AppendReceipt(rs.domains.AsPutDel(tx), blockLogIndex, receipt.CumulativeGasUsed, cummulativeBlobGas, txNum); err != nil {
+				return err
+			}
+		}
+	}
+
 	if rs.syncCfg.PersistReceiptsCacheV2 {
 		if err := rawdb.WriteReceiptCacheV2(rs.domains.AsPutDel(tx), receipt, txNum); err != nil {
 			return err
@@ -261,11 +277,25 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 	return nil
 }
 
-func (rs *StateV3) SizeEstimate() (r uint64) {
-	if rs.domains != nil {
-		r += rs.domains.SizeEstimate()
+// SizeEstimateBeforeCommitment - including esitmation of future ComputeCommitment on current state changes
+func (rs *StateV3) SizeEstimateBeforeCommitment() uint64 {
+	if rs.domains == nil {
+		return 0
 	}
-	return r
+	sz := rs.domains.Size()
+	sz *= 2 // to cover data-structures overhead: map, btree, etc... and GC overhead (clean happening periodically)
+	sz *= 2 // for Commitment calculation when batch is full
+	return sz
+}
+
+// SizeEstimateAfterCommitment - not including any additional estimations. Use it after ComputeCommitment calc - to see
+func (rs *StateV3) SizeEstimateAfterCommitment() uint64 {
+	if rs.domains == nil {
+		return 0
+	}
+	sz := rs.domains.Size()
+	sz *= 2 // to cover data-structures overhead: map, btree, etc... and GC overhead (clean happening periodically)
+	return sz
 }
 
 type storageItem struct {
@@ -410,11 +440,7 @@ func NewBufferedWriter(rs *StateV3Buffered, accumulator *shards.Accumulator) *Bu
 	}
 }
 
-func (w *BufferedWriter) SetTxNum(ctx context.Context, txNum uint64) {
-	w.txNum = txNum
-	w.rs.domains.SetTxNum(txNum)
-}
-func (w *BufferedWriter) SetTx(tx kv.Tx) {}
+func (w *BufferedWriter) SetTx(tx kv.TemporalTx) {}
 
 func (w *BufferedWriter) WriteSet() StateUpdates {
 	return w.writeSet
@@ -584,7 +610,8 @@ func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator, txNum uint
 	}
 }
 
-func (w *Writer) SetTxNum(v uint64) { w.txNum = v }
+func (w *Writer) SetTxNum(v uint64)              { w.txNum = v }
+func (w *Writer) SetPutDel(tx kv.TemporalPutDel) { w.tx = tx }
 
 func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return nil, nil, nil, nil
@@ -707,8 +734,9 @@ func NewReaderV3(getter kv.TemporalGetter) *ReaderV3 {
 	}
 }
 
-func (r *ReaderV3) DiscardReadList()      {}
-func (r *ReaderV3) SetTxNum(txNum uint64) { r.txNum = txNum }
+func (r *ReaderV3) DiscardReadList()                   {}
+func (r *ReaderV3) SetTxNum(txNum uint64)              { r.txNum = txNum }
+func (r *ReaderV3) SetGetter(getter kv.TemporalGetter) { r.getter = getter }
 
 func (r *ReaderV3) SetTrace(trace bool, tracePrefix string) {
 	r.trace = trace
@@ -718,10 +746,23 @@ func (r *ReaderV3) SetTrace(trace bool, tracePrefix string) {
 	r.tracePrefix = tracePrefix
 }
 
+func (r *ReaderV3) Trace() bool {
+	return r.trace
+}
+
+func (r *ReaderV3) TracePrefix() string {
+	return r.tracePrefix
+}
+
 func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
 	var value common.Address
 	if !address.IsNil() {
 		value = address.Value()
+	}
+	// this is an optimization, but also checks the account is checked in the domain
+	// for being deleted on unwind before we try to access the storage
+	if enc, _, err := r.getter.GetLatest(kv.AccountsDomain, value[:]); len(enc) == 0 {
+		return false, err
 	}
 	_, _, hasStorage, err := r.getter.HasPrefix(kv.StorageDomain, value[:])
 	return hasStorage, err
@@ -787,9 +828,9 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 
 	if r.trace {
 		if enc == nil {
-			fmt.Printf("%sReadAccountStorage [%x %x] => [empty], txNum: %d\n", r.tracePrefix, address, key, r.txNum)
+			fmt.Printf("%sReadAccountStorage [%x %x] => [empty], txNum: %d, stack: %s\n", r.tracePrefix, address, key, r.txNum, dbg.Stack())
 		} else {
-			fmt.Printf("%sReadAccountStorage [%x %x] => [%x], txNum: %d\n", r.tracePrefix, address, key, &res, r.txNum)
+			fmt.Printf("%sReadAccountStorage [%x %x] => [%x], txNum: %d, stack: %s\n", r.tracePrefix, address, key, &res, r.txNum, dbg.Stack())
 		}
 	}
 
@@ -807,7 +848,7 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	}
 	if r.trace {
 		lenc, cs := printCode(enc)
-		fmt.Printf("%sReadAccountCode [%x] =>  [%d:%s], txNum: %d\n", r.tracePrefix, address, lenc, cs, r.txNum)
+		fmt.Printf("%sReadAccountCode [%x] =>  [%d:%s], txNum: %d, stack: %s\n", r.tracePrefix, address, lenc, cs, r.txNum, dbg.Stack())
 	}
 	return enc, nil
 }
@@ -823,7 +864,7 @@ func (r *ReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	}
 	size := len(enc)
 	if r.trace {
-		fmt.Printf("%sReadAccountCodeSize [%x] => [%d], txNum: %d\n", r.tracePrefix, address, size, r.txNum)
+		fmt.Printf("%sReadAccountCodeSize [%x] => [%d], txNum: %d\n", r.tracePrefix, addressValue, size, r.txNum)
 	}
 	return size, nil
 }
@@ -833,16 +874,54 @@ func (r *ReaderV3) ReadAccountIncarnation(address accounts.Address) (uint64, err
 }
 
 type bufferedReader struct {
-	reader        *ReaderV3
+	reader        StateReader
 	bufferedState *StateV3Buffered
 }
 
-func NewBufferedReader(bufferedState *StateV3Buffered, reader *ReaderV3) StateReader {
-	return &bufferedReader{reader: reader, bufferedState: bufferedState}
+type latestBufferedReader struct {
+	bufferedReader
+}
+
+func (r *latestBufferedReader) SetGetter(getter kv.TemporalGetter) {
+	r.reader.(interface{ SetGetter(kv.TemporalGetter) }).SetGetter(getter)
+}
+
+type historicBufferedReader struct {
+	bufferedReader
+}
+
+func (r *historicBufferedReader) SetTx(tx kv.TemporalTx) {
+	r.reader.(interface{ SetTx(kv.TemporalTx) }).SetTx(tx)
+}
+
+func NewBufferedReader(bufferedState *StateV3Buffered, reader StateReader) StateReader {
+	type latest interface {
+		SetGetter(kv.TemporalGetter)
+	}
+
+	type historic interface {
+		SetTx(kv.TemporalTx)
+	}
+	switch reader.(type) {
+	case latest:
+		return &latestBufferedReader{bufferedReader{reader: reader, bufferedState: bufferedState}}
+	case historic:
+		return &historicBufferedReader{bufferedReader{reader: reader, bufferedState: bufferedState}}
+	default:
+		return &bufferedReader{reader: reader, bufferedState: bufferedState}
+	}
 }
 
 func (r *bufferedReader) SetTrace(trace bool, tracePrefix string) {
 	r.reader.SetTrace(trace, tracePrefix)
+}
+
+func (r *bufferedReader) Trace() bool {
+	return r.reader.Trace()
+}
+
+func (r *bufferedReader) TracePrefix() string {
+	return r.reader.TracePrefix()
 }
 
 func (r *bufferedReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
@@ -856,13 +935,13 @@ func (r *bufferedReader) ReadAccountData(address accounts.Address) (*accounts.Ac
 
 	if data != nil {
 		if data == &deleted {
-			if r.reader.trace {
-				fmt.Printf("%sReadAccountData (buf)[%x] => [empty]\n", r.reader.tracePrefix, address)
+			if r.reader.Trace() {
+				fmt.Printf("%sReadAccountData (buf)[%x] => [empty]\n", r.reader.TracePrefix(), address)
 			}
 			return nil, nil
 		}
-		if r.reader.trace {
-			fmt.Printf("%sReadAccountData (buf)[%x] => [nonce: %d, balance: %d, codeHash: %x]\n", r.reader.tracePrefix, address, data.Nonce, &data.Balance, data.CodeHash)
+		if r.reader.Trace() {
+			fmt.Printf("%sReadAccountData (buf)[%x] => [nonce: %d, balance: %d, codeHash: %x]\n", r.reader.TracePrefix(), address, data.Nonce, &data.Balance, data.CodeHash)
 		}
 
 		result := *data
@@ -898,8 +977,8 @@ func (r *bufferedReader) ReadAccountStorage(address accounts.Address, key accoun
 
 	if ok {
 		if so.data == &deleted {
-			if r.reader.trace {
-				fmt.Printf("%sReadAccountStorage (buf)[%x %x] => [empty]\n", r.reader.tracePrefix, address, key)
+			if r.reader.Trace() {
+				fmt.Printf("%sReadAccountStorage (buf)[%x %x] => [empty]\n", r.reader.TracePrefix(), address, key)
 			}
 			r.bufferedState.accountsMutex.RUnlock()
 			return uint256.Int{}, false, nil
@@ -909,8 +988,8 @@ func (r *bufferedReader) ReadAccountStorage(address accounts.Address, key accoun
 			item, ok := so.storage.Get(storageItem{key: key})
 
 			if ok {
-				if r.reader.trace {
-					fmt.Printf("%sReadAccountStorage (buf)[%x %x] => [%x]\n", r.reader.tracePrefix, address, key, &item.value)
+				if r.reader.Trace() {
+					fmt.Printf("%sReadAccountStorage (buf)[%x %x] => [%x]\n", r.reader.TracePrefix(), address, key, &item.value)
 				}
 				r.bufferedState.accountsMutex.RUnlock()
 				return item.value, true, nil
@@ -1006,14 +1085,6 @@ func (r *bufferedReader) ReadAccountIncarnation(address accounts.Address) (uint6
 	}
 
 	return r.reader.ReadAccountIncarnation(address)
-}
-
-func (r *bufferedReader) SetGetter(getter kv.TemporalGetter) {
-	r.reader.getter = getter
-}
-
-func (r *bufferedReader) DiscardReadList() {
-	r.reader.DiscardReadList()
 }
 
 type ReadLists map[string]*execctx.KvList

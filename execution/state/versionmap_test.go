@@ -16,7 +16,7 @@ var randomness = rand.Intn(10) + 10
 
 // create test data for a given txIdx and incarnation
 func valueFor(txIdx, inc int) []byte {
-	return []byte(fmt.Sprintf("%ver:%ver:%ver", txIdx*5, txIdx+inc, inc*5))
+	return fmt.Appendf(nil, "%ver:%ver:%ver", txIdx*5, txIdx+inc, inc*5)
 }
 
 func getAddress(i int) accounts.Address {
@@ -72,32 +72,27 @@ func TestFlushMVWrite(t *testing.T) {
 		Path:    AddressPath,
 		Version: Version{0, 0, 0, 1},
 		Val:     valueFor(0, 1),
-	})
-	wd = append(wd, &VersionedWrite{
+	}, &VersionedWrite{
 		Address: ap1,
 		Path:    AddressPath,
 		Version: Version{0, 0, 0, 2},
 		Val:     valueFor(0, 2),
-	})
-	wd = append(wd, &VersionedWrite{
+	}, &VersionedWrite{
 		Address: ap2,
 		Path:    AddressPath,
 		Version: Version{0, 0, 1, 1},
 		Val:     valueFor(1, 1),
-	})
-	wd = append(wd, &VersionedWrite{
+	}, &VersionedWrite{
 		Address: ap2,
 		Path:    AddressPath,
 		Version: Version{0, 0, 1, 2},
 		Val:     valueFor(1, 2),
-	})
-	wd = append(wd, &VersionedWrite{
+	}, &VersionedWrite{
 		Address: ap1,
 		Path:    AddressPath,
 		Version: Version{0, 0, 2, 1},
 		Val:     valueFor(2, 1),
-	})
-	wd = append(wd, &VersionedWrite{
+	}, &VersionedWrite{
 		Address: ap1,
 		Path:    AddressPath,
 		Version: Version{0, 0, 2, 2},

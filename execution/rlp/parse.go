@@ -21,8 +21,6 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
-
-	"github.com/erigontech/erigon/common"
 )
 
 var (
@@ -31,12 +29,10 @@ var (
 	ErrDecode = fmt.Errorf("%w decode", ErrBase)
 )
 
-func IsRLPError(err error) bool { return errors.Is(err, ErrBase) }
-
 // BeInt parses Big Endian representation of an integer from given payload at given position
 func BeInt(payload []byte, pos, length int) (int, error) {
 	var r int
-	if pos+length >= len(payload) {
+	if pos+length > len(payload) {
 		return 0, fmt.Errorf("%w: unexpected end of payload", ErrParse)
 	}
 	if length > 0 && payload[pos] == 0 {
@@ -212,20 +208,6 @@ func ParseU256(payload []byte, pos int, x *uint256.Int) (int, error) {
 	}
 	x.SetBytes(payload[dataPos : dataPos+dataLen])
 	return dataPos + dataLen, nil
-}
-
-func U256Len(z *uint256.Int) int {
-	if z == nil {
-		return 1
-	}
-	nBits := z.BitLen()
-	if nBits == 0 {
-		return 1
-	}
-	if nBits <= 7 {
-		return 1
-	}
-	return 1 + common.BitLenToByteLen(nBits)
 }
 
 func ParseHash(payload []byte, pos int, hashbuf []byte) (int, error) {

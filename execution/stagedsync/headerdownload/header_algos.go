@@ -35,13 +35,13 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/metrics"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/metrics"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/dataflow"
@@ -1296,18 +1296,11 @@ func (hd *HeaderDownload) AddHeadersFromSnapshot(tx kv.Tx, r services.FullBlockR
 		if header == nil {
 			continue
 		}
-		v, err := rlp.EncodeToBytes(header)
-		if err != nil {
-			return err
-		}
 		h := ChainSegmentHeader{
-			HeaderRaw: v,
-			Header:    header,
-			Hash:      header.Hash(),
-			Number:    header.Number.Uint64(),
+			Hash:   header.Hash(),
+			Number: header.Number.Uint64(),
 		}
-		link := hd.addHeaderAsLink(h, true /* persisted */)
-		link.verified = true
+		hd.addHeaderAsLink(h, true /* persisted */)
 	}
 	if hd.highestInDb < n {
 		hd.highestInDb = n

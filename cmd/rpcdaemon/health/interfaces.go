@@ -29,6 +29,6 @@ type NetAPI interface {
 }
 
 type EthAPI interface {
-	GetBlockByNumber(_ context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error)
-	Syncing(ctx context.Context) (interface{}, error)
+	GetBlockByNumber(_ context.Context, number rpc.BlockNumber, fullTx bool) (map[string]any, error)
+	Syncing(ctx context.Context) (any, error)
 }

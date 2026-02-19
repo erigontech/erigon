@@ -34,23 +34,25 @@ import (
 
 // ExecutionPayload represents an execution payload (aka block)
 type ExecutionPayload struct {
-	ParentHash    common.Hash         `json:"parentHash"    gencodec:"required"`
-	FeeRecipient  common.Address      `json:"feeRecipient"  gencodec:"required"`
-	StateRoot     common.Hash         `json:"stateRoot"     gencodec:"required"`
-	ReceiptsRoot  common.Hash         `json:"receiptsRoot"  gencodec:"required"`
-	LogsBloom     hexutil.Bytes       `json:"logsBloom"     gencodec:"required"`
-	PrevRandao    common.Hash         `json:"prevRandao"    gencodec:"required"`
-	BlockNumber   hexutil.Uint64      `json:"blockNumber"   gencodec:"required"`
-	GasLimit      hexutil.Uint64      `json:"gasLimit"      gencodec:"required"`
-	GasUsed       hexutil.Uint64      `json:"gasUsed"       gencodec:"required"`
-	Timestamp     hexutil.Uint64      `json:"timestamp"     gencodec:"required"`
-	ExtraData     hexutil.Bytes       `json:"extraData"     gencodec:"required"`
-	BaseFeePerGas *uint256.Int        `json:"baseFeePerGas" gencodec:"required"`
-	BlockHash     common.Hash         `json:"blockHash"     gencodec:"required"`
-	Transactions  []hexutil.Bytes     `json:"transactions"  gencodec:"required"`
-	Withdrawals   []*types.Withdrawal `json:"withdrawals"`
-	BlobGasUsed   *hexutil.Uint64     `json:"blobGasUsed"`
-	ExcessBlobGas *hexutil.Uint64     `json:"excessBlobGas"`
+	ParentHash      common.Hash         `json:"parentHash"    gencodec:"required"`
+	FeeRecipient    common.Address      `json:"feeRecipient"  gencodec:"required"`
+	StateRoot       common.Hash         `json:"stateRoot"     gencodec:"required"`
+	ReceiptsRoot    common.Hash         `json:"receiptsRoot"  gencodec:"required"`
+	LogsBloom       hexutil.Bytes       `json:"logsBloom"     gencodec:"required"`
+	PrevRandao      common.Hash         `json:"prevRandao"    gencodec:"required"`
+	BlockNumber     hexutil.Uint64      `json:"blockNumber"   gencodec:"required"`
+	GasLimit        hexutil.Uint64      `json:"gasLimit"      gencodec:"required"`
+	GasUsed         hexutil.Uint64      `json:"gasUsed"       gencodec:"required"`
+	Timestamp       hexutil.Uint64      `json:"timestamp"     gencodec:"required"`
+	ExtraData       hexutil.Bytes       `json:"extraData"     gencodec:"required"`
+	BaseFeePerGas   *uint256.Int        `json:"baseFeePerGas" gencodec:"required"`
+	BlockHash       common.Hash         `json:"blockHash"     gencodec:"required"`
+	Transactions    []hexutil.Bytes     `json:"transactions"  gencodec:"required"`
+	Withdrawals     []*types.Withdrawal `json:"withdrawals"`
+	BlobGasUsed     *hexutil.Uint64     `json:"blobGasUsed"`
+	ExcessBlobGas   *hexutil.Uint64     `json:"excessBlobGas"`
+	SlotNumber      *hexutil.Uint64     `json:"slotNumber"`
+	BlockAccessList hexutil.Bytes       `json:"blockAccessList"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -67,6 +69,7 @@ type PayloadAttributes struct {
 	SuggestedFeeRecipient common.Address      `json:"suggestedFeeRecipient" gencodec:"required"`
 	Withdrawals           []*types.Withdrawal `json:"withdrawals"`
 	ParentBeaconBlockRoot *common.Hash        `json:"parentBeaconBlockRoot"`
+	SlotNumber            *hexutil.Uint64     `json:"slotNumber"`
 }
 
 // TransitionConfiguration represents the correct configurations of the CL and the EL
@@ -91,7 +94,7 @@ type BlobAndProofV1 struct {
 	Proof hexutil.Bytes `json:"proof" gencodec:"required"`
 }
 
-// BlobAndProofV2 holds one item for engine_getBlobsV2
+// BlobAndProofV2 holds one item for engine_getBlobsV2/engine_getBlobsV3
 type BlobAndProofV2 struct {
 	Blob       hexutil.Bytes   `json:"blob" gencodec:"required"`
 	CellProofs []hexutil.Bytes `json:"proofs" gencodec:"required"`
@@ -100,6 +103,12 @@ type BlobAndProofV2 struct {
 type ExecutionPayloadBody struct {
 	Transactions []hexutil.Bytes     `json:"transactions" gencodec:"required"`
 	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
+}
+
+type ExecutionPayloadBodyV2 struct {
+	Transactions    []hexutil.Bytes     `json:"transactions" gencodec:"required"`
+	Withdrawals     []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
+	BlockAccessList hexutil.Bytes       `json:"blockAccessList"`
 }
 
 type PayloadStatus struct {
@@ -204,6 +213,10 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 		excessBlobGas := *header.ExcessBlobGas
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
 	}
+	if header.SlotNumber != nil {
+		slotNumber := *header.SlotNumber
+		res.SlotNumber = (*hexutil.Uint64)(&slotNumber)
+	}
 	return res
 }
 
@@ -241,6 +254,15 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 		res.BlobGasUsed = (*hexutil.Uint64)(&blobGasUsed)
 		excessBlobGas := *payload.ExcessBlobGas
 		res.ExcessBlobGas = (*hexutil.Uint64)(&excessBlobGas)
+	}
+	if payload.Version >= 4 {
+		if payload.SlotNumber != nil {
+			slotNumber := *payload.SlotNumber
+			res.SlotNumber = (*hexutil.Uint64)(&slotNumber)
+		}
+		if blockAccessList := types.ConvertBlockAccessListFromTypesProto(payload.BlockAccessList); blockAccessList != nil {
+			res.BlockAccessList = blockAccessList
+		}
 	}
 	return res
 }

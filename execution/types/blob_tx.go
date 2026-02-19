@@ -114,7 +114,7 @@ func (stx *BlobTx) Hash() common.Hash {
 	if hash := stx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(BlobTxType, []interface{}{
+	hash := prefixedRlpHash(BlobTxType, []any{
 		stx.ChainID,
 		stx.Nonce,
 		stx.TipCap,
@@ -132,21 +132,35 @@ func (stx *BlobTx) Hash() common.Hash {
 	return hash
 }
 
+type blobTxSigHash struct {
+	ChainID    *big.Int
+	Nonce      uint64
+	GasTipCap  *uint256.Int
+	GasFeeCap  *uint256.Int
+	Gas        uint64
+	To         *common.Address
+	Value      *uint256.Int
+	Data       []byte
+	AccessList AccessList
+	BlobFeeCap *uint256.Int
+	BlobHashes []common.Hash
+}
+
 func (stx *BlobTx) SigningHash(chainID *big.Int) common.Hash {
 	return prefixedRlpHash(
 		BlobTxType,
-		[]interface{}{
-			chainID,
-			stx.Nonce,
-			stx.TipCap,
-			stx.FeeCap,
-			stx.GasLimit,
-			stx.To,
-			stx.Value,
-			stx.Data,
-			stx.AccessList,
-			stx.MaxFeePerBlobGas,
-			stx.BlobVersionedHashes,
+		&blobTxSigHash{
+			ChainID:    chainID,
+			Nonce:      stx.Nonce,
+			GasTipCap:  stx.TipCap,
+			GasFeeCap:  stx.FeeCap,
+			Gas:        stx.GasLimit,
+			To:         stx.To,
+			Value:      stx.Value,
+			Data:       stx.Data,
+			AccessList: stx.AccessList,
+			BlobFeeCap: stx.MaxFeePerBlobGas,
+			BlobHashes: stx.BlobVersionedHashes,
 		})
 }
 
@@ -174,16 +188,14 @@ func (stx *BlobTx) copy() *BlobTx {
 }
 
 func (stx *BlobTx) EncodingSize() int {
-	payloadSize, _, _, _, _ := stx.payloadSize()
+	payloadSize, _, _ := stx.payloadSize()
 	// Add envelope size and type size
 	return 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 }
 
-func (stx *BlobTx) payloadSize() (payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) {
-	payloadSize, nonceLen, gasLen, accessListLen = stx.DynamicFeeTransaction.payloadSize()
-	// size of MaxFeePerBlobGas
-	payloadSize++
-	payloadSize += rlp.Uint256LenExcludingHead(*stx.MaxFeePerBlobGas)
+func (stx *BlobTx) payloadSize() (payloadSize, accessListLen, blobHashesLen int) {
+	payloadSize, accessListLen = stx.DynamicFeeTransaction.payloadSize()
+	payloadSize += rlp.Uint256Len(*stx.MaxFeePerBlobGas)
 	// size of BlobVersionedHashes
 	blobHashesLen = blobVersionedHashesSize(stx.BlobVersionedHashes)
 	payloadSize += rlp.ListPrefixLen(blobHashesLen) + blobHashesLen
@@ -203,7 +215,7 @@ func encodeBlobVersionedHashes(hashes []common.Hash, w io.Writer, b []byte) erro
 	return nil
 }
 
-func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) error {
+func (stx *BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, accessListLen, blobHashesLen int) error {
 	// prefix
 	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -283,7 +295,7 @@ func (stx *BlobTx) EncodeRLP(w io.Writer) error {
 	if stx.To == nil {
 		return ErrNilToFieldTx
 	}
-	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize()
+	payloadSize, accessListLen, blobHashesLen := stx.payloadSize()
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
 	b := newEncodingBuf()
@@ -297,7 +309,7 @@ func (stx *BlobTx) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := stx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen); err != nil {
+	if err := stx.encodePayload(w, b[:], payloadSize, accessListLen, blobHashesLen); err != nil {
 		return err
 	}
 	return nil
@@ -307,7 +319,7 @@ func (stx *BlobTx) MarshalBinary(w io.Writer) error {
 	if stx.To == nil {
 		return ErrNilToFieldTx
 	}
-	payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen := stx.payloadSize()
+	payloadSize, accessListLen, blobHashesLen := stx.payloadSize()
 	b := newEncodingBuf()
 	defer pooledBuf.Put(b)
 	// encode TxType
@@ -315,7 +327,7 @@ func (stx *BlobTx) MarshalBinary(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := stx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen); err != nil {
+	if err := stx.encodePayload(w, b[:], payloadSize, accessListLen, blobHashesLen); err != nil {
 		return err
 	}
 	return nil

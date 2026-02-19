@@ -377,7 +377,7 @@ func (s *DirtySegment) FilePaths(basePath string) (relativePaths []string) {
 }
 
 func (s *DirtySegment) FileInfo(dir string) snaptype.FileInfo {
-	return s.Type().FileInfo(dir, s.from, s.to)
+	return s.Type().FileInfoByMask(dir, s.from, s.to)
 }
 
 func (s *DirtySegment) GetRange() (from, to uint64) { return s.from, s.to }
@@ -434,13 +434,13 @@ func (s *DirtySegment) closeAndRemoveFiles() {
 	}
 }
 
-func (s *DirtySegment) OpenIdxIfNeed(dir string, optimistic bool) (err error) {
+func (s *DirtySegment) OpenIdxIfNeed(dir string, optimistic bool, dirEntries []string) (err error) {
 	if len(s.Type().IdxFileNames(s.from, s.to)) == 0 {
 		return nil
 	}
 
 	if s.refcount.Load() == 0 {
-		err = s.openIdx(dir)
+		err = s.openIdx(dir, dirEntries)
 
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
@@ -456,7 +456,7 @@ func (s *DirtySegment) OpenIdxIfNeed(dir string, optimistic bool) (err error) {
 	return nil
 }
 
-func (s *DirtySegment) openIdx(dir string) (err error) {
+func (s *DirtySegment) openIdx(dir string, dirEntries []string) (err error) {
 	if s.Decompressor == nil {
 		return nil
 	}
@@ -469,11 +469,18 @@ func (s *DirtySegment) openIdx(dir string) (err error) {
 		if s.indexes[i] != nil {
 			continue
 		}
-		fPathMask, err := version.ReplaceVersionWithMask(filepath.Join(dir, fileName))
+		fPathMask, err := version.ReplaceVersionWithMask(fileName)
 		if err != nil {
 			return fmt.Errorf("[open index] can't replace with mask in file %s: %w", fileName, err)
 		}
-		fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+
+		var fPath string
+		var ok bool
+		if dirEntries != nil {
+			fPath, _, ok, err = version.MatchVersionedFile(fPathMask, dirEntries, dir)
+		} else {
+			fPath, _, ok, err = version.FindFilesWithVersionsByPattern(filepath.Join(dir, fPathMask))
+		}
 		if err != nil {
 			return fmt.Errorf("%w, fileName: %s", err, fileName)
 		}
@@ -1082,6 +1089,21 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 
 	snConfig, _ := snapcfg.KnownCfg(s.cfg.ChainName)
 
+	// Read full directory listing once for efficient index file lookups
+	var dirEntries []string
+	if open {
+		entries, err := os.ReadDir(s.dir)
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("read dir %s: %w", s.dir, err)
+		}
+		dirEntries = make([]string, 0, len(entries))
+		for _, e := range entries {
+			if !e.IsDir() {
+				dirEntries = append(dirEntries, e.Name())
+			}
+		}
+	}
+
 	for _, fName := range fileNames {
 		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
 		if !ok || isState || snaptype.IsTorrentPartial(f.Ext) {
@@ -1142,7 +1164,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 
 		if open {
 			wg.Go(func() error {
-				if err := sn.OpenIdxIfNeed(s.dir, optimistic); err != nil {
+				if err := sn.OpenIdxIfNeed(s.dir, optimistic, dirEntries); err != nil {
 					return err
 				}
 				return nil
@@ -1335,10 +1357,10 @@ type snapshotNotifier interface {
 }
 
 func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, notifier snapshotNotifier, dirs datadir.Dirs, cc *chain.Config, logger log.Logger) error {
-	if s.IndicesMax() >= s.SegmentsMax() {
-		return nil
-	}
 	if !s.Cfg().ProduceE2 && s.IndicesMax() == 0 {
+		if s.SegmentsMax() == 0 {
+			return nil
+		}
 		return errors.New("please remove --snap.stop, erigon can't work without creating basic indices")
 	}
 	if !s.Cfg().ProduceE2 {
@@ -1347,18 +1369,20 @@ func (s *RoSnapshots) BuildMissedIndices(ctx context.Context, logPrefix string, 
 	if !s.SegmentsReady() {
 		return errors.New("not all snapshot segments are available")
 	}
-	s.LogStat("missed-idx")
 
 	// wait for Downloader service to download all expected snapshots
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err := s.buildMissedIndices(logPrefix, ctx, dirs, cc, indexWorkers, logger); err != nil {
+	newIdxBuilt, err := s.buildMissedIndices(logPrefix, ctx, dirs, cc, indexWorkers, logger)
+	if err != nil {
 		return fmt.Errorf("can't build missed indices: %w", err)
 	}
 
-	if err := s.OpenFolder(); err != nil {
-		return err
+	if newIdxBuilt {
+		if err := s.OpenFolder(); err != nil {
+			return err
+		}
+		s.LogStat("missed-idx:open")
 	}
-	s.LogStat("missed-idx:open")
 	if notifier != nil {
 		notifier.OnNewSnapshot()
 	}
@@ -1418,13 +1442,13 @@ func (s *RoSnapshots) Delete(fileNames ...string) error {
 	return nil
 }
 
-func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) error {
+func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) (newIdxBuilt bool, err error) {
 	if s == nil {
-		return nil
+		return
 	}
 
-	if _, err := snaptype.GetIndexSalt(dirs.Snap, logger); err != nil {
-		return err
+	if _, err = snaptype.GetIndexSalt(dirs.Snap, logger); err != nil {
+		return
 	}
 
 	dir, tmpDir := dirs.Snap, dirs.Tmp
@@ -1462,11 +1486,12 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 	for _, t := range s.enums {
 		s.dirty[t].Walk(func(segs []*DirtySegment) bool {
 			for _, segment := range segs {
-				info := segment.FileInfo(dir)
-
-				if t.HasIndexFiles(info, logger) {
+				if segment.IsIndexed() {
 					continue
 				}
+				info := segment.FileInfo(dir)
+
+				newIdxBuilt = true
 
 				segment.closeIdx()
 
@@ -1507,12 +1532,12 @@ func (s *RoSnapshots) buildMissedIndices(logPrefix string, ctx context.Context, 
 	// Block main thread
 	select {
 	case <-finish:
-		if err := g.Wait(); err != nil {
-			return err
+		if err = g.Wait(); err != nil {
+			return
 		}
-		return ie
+		return newIdxBuilt, ie
 	case <-ctx.Done():
-		return ctx.Err()
+		return newIdxBuilt, ctx.Err()
 	}
 }
 
@@ -1695,10 +1720,10 @@ func SegmentsCaplin(dir string) (res []snaptype.FileInfo, missingSnapshots []Ran
 		var l, lSidecars []snaptype.FileInfo
 		var m []Range
 		for _, f := range list {
-			if f.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && f.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
+			if f.Type != nil && f.Type.Enum() != snaptype.CaplinEnums.BeaconBlocks && f.Type.Enum() != snaptype.CaplinEnums.BlobSidecars {
 				continue
 			}
-			if f.Type.Enum() == snaptype.CaplinEnums.BlobSidecars {
+			if f.Type != nil && f.Type.Enum() == snaptype.CaplinEnums.BlobSidecars {
 				lSidecars = append(lSidecars, f) // blobs are an exception
 				continue
 			}

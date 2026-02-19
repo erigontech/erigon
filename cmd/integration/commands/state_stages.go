@@ -77,8 +77,8 @@ Examples:
 		}
 		ethConfig.Genesis = spec.Genesis
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
-		miningConfig := buildercfg.MiningConfig{}
-		utils.SetupMinerCobra(cmd, &miningConfig)
+		builderConfig := buildercfg.BuilderConfig{}
+		utils.SetupMinerCobra(cmd, &builderConfig)
 		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -86,7 +86,7 @@ Examples:
 		}
 		defer db.Close()
 
-		if err := syncBySmallSteps(db, miningConfig, ctx, logger); err != nil {
+		if err := syncBySmallSteps(db, builderConfig, ctx, logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -153,13 +153,13 @@ func init() {
 	rootCmd.AddCommand(loopExecCmd)
 }
 
-func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, ctx context.Context, logger1 log.Logger) error {
+func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig, ctx context.Context, logger1 log.Logger) error {
 	dirs := datadir.New(datadirCli)
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return err
 	}
 
-	_, engine, vmConfig, stateStages := newSync(ctx, db, &miningConfig, logger1)
+	_, engine, vmConfig, stateStages := newSync(ctx, db, &builderConfig, logger1)
 	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
 
 	tx, err := db.BeginTemporalRw(ctx)
@@ -278,7 +278,7 @@ func syncBySmallSteps(db kv.TemporalRwDB, miningConfig buildercfg.MiningConfig, 
 		stateStages.MockExecFunc(stages.Execution, execUntilFunc(execToBlock))
 		_ = stateStages.SetCurrentStage(stages.Execution)
 		for more := true; more; {
-			if more, err = stateStages.Run(db, sd, tx, false /* firstCycle */, false); err != nil {
+			if more, err = stateStages.Run(sd, tx, false /* firstCycle */, false); err != nil {
 				return err
 			}
 
@@ -393,12 +393,18 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 		default:
 		}
 
+		sd, err := execctx.NewSharedDomains(ctx, tx, logger)
+		if err != nil {
+			return err
+		}
+		defer sd.Close()
 		_ = sync.SetCurrentStage(stages.Execution)
 		t := time.Now()
-		if _, err = sync.Run(db, nil, tx, initialCycle, false); err != nil {
+		if _, err = sync.Run(sd, tx, initialCycle, false); err != nil {
 			return err
 		}
 		logger.Info("[Integration] ", "loop time", time.Since(t))
+		sd.Close()
 		tx.Rollback()
 		tx, err = db.BeginTemporalRw(ctx)
 		if err != nil {

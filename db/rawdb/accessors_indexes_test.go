@@ -84,7 +84,7 @@ func TestLookupStorage(t *testing.T) {
 			if err := rawdb.WriteSenders(tx, block.Hash(), block.NumberU64(), block.Body().SendersFromTxs()); err != nil {
 				t.Fatal(err)
 			}
-			txNumMin, err := rawdbv3.TxNums.Min(tx, block.NumberU64())
+			txNumMin, err := rawdbv3.TxNums.Min(context.Background(), tx, block.NumberU64())
 			if err != nil {
 				t.Fatal(err)
 			}

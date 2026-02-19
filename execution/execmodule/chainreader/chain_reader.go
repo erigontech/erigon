@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -250,6 +251,50 @@ func (c ChainReaderWriterEth1) GetBodiesByRange(ctx context.Context, start, coun
 	return ret, nil
 }
 
+func (c ChainReaderWriterEth1) GetPayloadBodiesByHash(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+	grpcHashes := make([]*typesproto.H256, len(hashes))
+	for i := range grpcHashes {
+		grpcHashes[i] = gointerfaces.ConvertHashToH256(hashes[i])
+	}
+	resp, err := c.executionModule.GetPayloadBodiesByHash(ctx, &executionproto.GetPayloadBodiesByHashRequest{
+		Hashes: grpcHashes,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return convertPayloadBodiesFromRpc(resp.Bodies), nil
+}
+
+func (c ChainReaderWriterEth1) GetPayloadBodiesByRange(ctx context.Context, start, count uint64) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+	resp, err := c.executionModule.GetPayloadBodiesByRange(ctx, &executionproto.GetPayloadBodiesByRangeRequest{
+		Start: start,
+		Count: count,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return convertPayloadBodiesFromRpc(resp.Bodies), nil
+}
+
+func convertPayloadBodiesFromRpc(bodies []*typesproto.ExecutionPayloadBody) []*engine_types.ExecutionPayloadBodyV2 {
+	result := make([]*engine_types.ExecutionPayloadBodyV2, len(bodies))
+	for i, body := range bodies {
+		if body == nil {
+			continue
+		}
+		txs := make([]hexutil.Bytes, len(body.Transactions))
+		for j, tx := range body.Transactions {
+			txs[j] = tx
+		}
+		result[i] = &engine_types.ExecutionPayloadBodyV2{
+			Transactions:    txs,
+			Withdrawals:     moduleutil.ConvertWithdrawalsFromRpc(body.Withdrawals),
+			BlockAccessList: body.BlockAccessList,
+		}
+	}
+	return result
+}
+
 func (c ChainReaderWriterEth1) Ready(ctx context.Context) (bool, error) {
 	resp, err := c.executionModule.Ready(ctx, &emptypb.Empty{})
 	if err != nil {
@@ -289,8 +334,13 @@ func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool) 
 }
 
 func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks []*types.Block) error {
+	return c.InsertBlocksAndWaitWithAccessLists(ctx, blocks, nil)
+}
+
+func (c ChainReaderWriterEth1) InsertBlocksAndWaitWithAccessLists(ctx context.Context, blocks []*types.Block, accessLists []*executionproto.BlockAccessListEntry) error {
 	request := &executionproto.InsertBlocksRequest{
-		Blocks: moduleutil.ConvertBlocksToRPC(blocks),
+		Blocks:           moduleutil.ConvertBlocksToRPC(blocks),
+		BlockAccessLists: accessLists,
 	}
 	response, err := c.executionModule.InsertBlocks(ctx, request)
 	if err != nil {
@@ -317,8 +367,13 @@ func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks [
 }
 
 func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
+	return c.InsertBlocksWithAccessLists(ctx, blocks, nil)
+}
+
+func (c ChainReaderWriterEth1) InsertBlocksWithAccessLists(ctx context.Context, blocks []*types.Block, accessLists []*executionproto.BlockAccessListEntry) error {
 	request := &executionproto.InsertBlocksRequest{
-		Blocks: moduleutil.ConvertBlocksToRPC(blocks),
+		Blocks:           moduleutil.ConvertBlocksToRPC(blocks),
+		BlockAccessLists: accessLists,
 	}
 	response, err := c.executionModule.InsertBlocks(ctx, request)
 	if err != nil {
@@ -454,7 +509,7 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block,
 		BlockHash:     blockHash,
 		BaseFeePerGas: gointerfaces.ConvertH256ToHash(payloadRpc.BaseFeePerGas),
 	}
-	copy(block.BaseFeePerGas[:], utils.ReverseOfByteSlice(block.BaseFeePerGas[:])) // reverse the byte slice
+	utils.ReverseBytes(&block.BaseFeePerGas)
 	if payloadRpc.ExcessBlobGas != nil {
 		block.ExcessBlobGas = *payloadRpc.ExcessBlobGas
 	}

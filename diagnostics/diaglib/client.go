@@ -137,7 +137,6 @@ func (d *DiagnosticClient) Setup() {
 	d.setupHeadersDiagnostics(rootCtx)
 	d.setupBodiesDiagnostics(rootCtx)
 	d.setupResourcesUsageDiagnostics(rootCtx)
-	d.setupSpeedtestDiagnostics(rootCtx)
 
 	d.setupTxPoolDiagnostics(rootCtx)
 
@@ -167,7 +166,7 @@ func (d *DiagnosticClient) SaveData() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	var funcs []func(tx kv.RwTx) error
+	funcs := make([]func(tx kv.RwTx) error, 0, 3)
 	funcs = append(funcs, SnapshotDownloadUpdater(d.syncStats.SnapshotDownload), StagesListUpdater(d.syncStages), SnapshotIndexingUpdater(d.syncStats.SnapshotIndexing))
 
 	err := d.db.Update(d.ctx, func(tx kv.RwTx) error {

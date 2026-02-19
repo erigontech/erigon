@@ -89,7 +89,7 @@ func (ms *MockState) Account(plainKey []byte) (*Update, error) {
 	if ms.concurrent.Load() {
 		ms.mu.Lock()
 	}
-	exBytes, ok := ms.sm[string(plainKey[:])]
+	exBytes, ok := ms.sm[string(plainKey)]
 	if ms.concurrent.Load() {
 		ms.mu.Unlock()
 	}
@@ -125,7 +125,7 @@ func (ms *MockState) Storage(plainKey []byte) (*Update, error) {
 	if ms.concurrent.Load() {
 		ms.mu.Lock()
 	}
-	exBytes, ok := ms.sm[string(plainKey[:])]
+	exBytes, ok := ms.sm[string(plainKey)]
 	if ms.concurrent.Load() {
 		ms.mu.Unlock()
 	}
@@ -159,6 +159,8 @@ func (ms *MockState) Storage(plainKey []byte) (*Update, error) {
 	}
 	return &ex, nil
 }
+
+func (ms *MockState) TxNum() uint64 { return 0 }
 
 // / called sequentially outside of the trie so no need to protect
 func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) error {
@@ -399,7 +401,7 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 		key := preimages[hashedKey]
 		key2 := preimages2[hashedKey]
 		plainKey := make([]byte, len(key)+len(key2))
-		copy(plainKey[:], key)
+		copy(plainKey, key)
 		if key2 != nil {
 			copy(plainKey[len(key):], key2)
 		}

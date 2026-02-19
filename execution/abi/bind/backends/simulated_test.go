@@ -135,10 +135,6 @@ func TestNewSimulatedBackend(t *testing.T) {
 	if sim.m.ChainConfig != chain.TestChainConfig {
 		t.Errorf("expected sim config to equal chain.TestChainConfig, got %v", sim.m.ChainConfig)
 	}
-
-	if sim.m.ChainConfig != chain.TestChainConfig {
-		t.Errorf("expected sim blockchain config to equal chain.TestChainConfig, got %v", sim.m.ChainConfig)
-	}
 	tx, err1 := sim.DB().BeginTemporalRo(context.Background())
 	if err1 != nil {
 		t.Errorf("TestNewSimulatedBackend create tx: %v", err1)
@@ -451,7 +447,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 		message     ethereum.CallMsg
 		expect      uint64
 		expectError error
-		expectData  interface{}
+		expectData  any
 	}{
 		{"plain transfer(valid)", ethereum.CallMsg{
 			From:     addr,
@@ -1067,7 +1063,7 @@ func TestSimulatedBackend_CallContractRevert(t *testing.T) {
 		t.Errorf("could not deploy contract: %v", err)
 	}
 
-	inputs := make(map[string]interface{}, 3)
+	inputs := make(map[string]any, 3)
 	inputs["revertASM"] = nil
 	inputs["revertNoString"] = ""
 	inputs["revertString"] = "some error"

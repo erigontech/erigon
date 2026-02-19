@@ -38,10 +38,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 )
 
-const (
-	forkchoiceTimeoutMillis = 5000
-)
-
 type Status int
 
 const (
@@ -80,6 +76,8 @@ func NewEngineBlockDownloader(
 	if err != nil {
 		panic(fmt.Errorf("failed to create badHeaders cache: %w", err))
 	}
+	// the block downloader has fcuTimeout=0 to avoid having to deal with async fcu
+	chainRW := chainreader.NewChainReaderEth1(config, executionClient, 0 /* fcuTimeout */)
 	return &EngineBlockDownloader{
 		backgroundCtx: ctx,
 		db:            db,
@@ -87,7 +85,7 @@ func NewEngineBlockDownloader(
 		syncCfg:       syncCfg,
 		logger:        logger,
 		blockReader:   blockReader,
-		chainRW:       chainreader.NewChainReaderEth1(config, executionClient, forkchoiceTimeoutMillis),
+		chainRW:       chainRW,
 		bbd:           bbd,
 		badHeaders:    badHeaders,
 	}
@@ -196,7 +194,7 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 	var blocks []*types.Block
 	var insertedBlocksWithoutExec int
 	for blocks, err = feed.Next(ctx); err == nil && len(blocks) > 0; blocks, err = feed.Next(ctx) {
-		progressLogArgs := []interface{}{
+		progressLogArgs := []any{
 			"from", blocks[0].NumberU64(),
 			"fromHash", blocks[0].Hash(),
 			"to", blocks[len(blocks)-1].NumberU64(),

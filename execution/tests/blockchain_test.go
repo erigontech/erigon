@@ -21,7 +21,6 @@ package executiontests
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"maps"
 	"math"
@@ -35,11 +34,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/bitmapdb"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	libchain "github.com/erigontech/erigon/execution/chain"
@@ -393,7 +390,10 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 
 	m.ReceiveWg.Wait()
 
-	msg := m.SentMessage(0)
+	msg, err := m.SentMessage(0)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	require.Equal(sentryproto.MessageId_RECEIPTS_66, msg.Id)
 
@@ -455,8 +455,8 @@ func TestChainTxReorgs(t *testing.T) {
 		signer = types.LatestSigner(gspec.Config)
 	)
 
-	m := mock.MockWithGenesis(t, gspec, key1, false)
-	m2 := mock.MockWithGenesis(t, gspec, key1, false)
+	m := mock.MockWithGenesis(t, gspec, key1)
+	m2 := mock.MockWithGenesis(t, gspec, key1)
 	defer m2.DB.Close()
 
 	// Create two transactions shared between the chains:
@@ -657,7 +657,7 @@ func TestEIP155Transition(t *testing.T) {
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 
 	chain, chainErr := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *blockgen.BlockGen) {
 		var (
@@ -776,7 +776,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
-	m := mock.MockWithGenesisPruneMode(t, gspec, key, 128, pm, false)
+	m := mock.MockWithGenesisPruneMode(t, gspec, key, 128, pm)
 
 	head := uint64(4)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, int(head), func(i int, block *blockgen.BlockGen) {
@@ -832,46 +832,28 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	if m.HistoryV3 {
-		//TODO: e3 not implemented Prune feature yet
-		/*
-			if pm.History.Enabled() {
-				it, err := tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, 0, int(pm.History.PruneTo(head)), order.Asc, -1)
-				require.NoError(err)
-				count, err := iter.CountKV(it)
-				require.NoError(err)
-				require.Zero(count)
-
-				it, err = tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, int(pm.History.PruneTo(head)), -1, order.Asc, -1)
-				require.NoError(err)
-				count, err = iter.CountKV(it)
-				require.NoError(err)
-				require.Equal(3, count)
-			} else {
-				it, err := tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, 0, -1, order.Asc, -1)
-				require.NoError(err)
-				count, err := iter.CountKV(it)
-				require.NoError(err)
-				require.Equal(3, count)
-			}
-		*/
-	} else {
+	//TODO: e3 not implemented Prune feature yet
+	/*
 		if pm.History.Enabled() {
-			afterPrune := uint64(0)
-			err := tx.ForEach(kv.E2AccountsHistory, nil, func(k, _ []byte) error {
-				n := binary.BigEndian.Uint64(k[length.Addr:])
-				require.Greater(n, pm.History.PruneTo(head))
-				afterPrune++
-				return nil
-			})
-			require.Positive(afterPrune)
+			it, err := tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, 0, int(pm.History.PruneTo(head)), order.Asc, -1)
 			require.NoError(err)
+			count, err := iter.CountKV(it)
+			require.NoError(err)
+			require.Zero(count)
+
+			it, err = tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, int(pm.History.PruneTo(head)), -1, order.Asc, -1)
+			require.NoError(err)
+			count, err = iter.CountKV(it)
+			require.NoError(err)
+			require.Equal(3, count)
 		} else {
-			found, err := bitmapdb.Get64(tx, kv.E2AccountsHistory, address[:], 0, 1024)
+			it, err := tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, 0, -1, order.Asc, -1)
 			require.NoError(err)
-			require.Equal(uint64(0), found.Minimum())
+			count, err := iter.CountKV(it)
+			require.NoError(err)
+			require.Equal(3, count)
 		}
-	}
+	*/
 
 	if pm.History.Enabled() {
 		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 1)
@@ -973,7 +955,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 			Alloc: types.GenesisAlloc{address: {Balance: funds}},
 		}
 	)
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *blockgen.BlockGen) {
 		var (
@@ -1067,7 +1049,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 			Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 		}
 	)
-	m := mock.MockWithGenesis(t, gspec, bankKey, false)
+	m := mock.MockWithGenesis(t, gspec, bankKey)
 
 	var theAddr common.Address
 
@@ -1383,7 +1365,7 @@ func TestDeleteCreateRevert(t *testing.T) {
 			},
 		}
 	)
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -1490,7 +1472,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 			},
 		},
 	}
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
@@ -1612,7 +1594,7 @@ func TestCVE2020_26265(t *testing.T) {
 			},
 		},
 	}
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -1683,7 +1665,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 			},
 		},
 	}
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -1815,7 +1797,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 			},
 		},
 	}
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 	var nonce uint64
 
 	type expectation struct {
@@ -2012,7 +1994,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 			},
 		},
 	}
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 	nonce := uint64(0)
 
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, b *blockgen.BlockGen) {
@@ -2098,7 +2080,7 @@ func TestEIP2718Transition(t *testing.T) {
 			},
 		}
 	)
-	m := mock.MockWithGenesis(t, gspec, key, false)
+	m := mock.MockWithGenesis(t, gspec, key)
 
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
@@ -2194,7 +2176,7 @@ func TestEIP1559Transition(t *testing.T) {
 		}
 		signer = types.LatestSigner(gspec.Config)
 	)
-	m := mock.MockWithGenesis(t, gspec, key1, false)
+	m := mock.MockWithGenesis(t, gspec, key1)
 
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 501, func(i int, b *blockgen.BlockGen) {
 		if i == 500 {

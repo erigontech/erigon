@@ -15,7 +15,7 @@ import (
 )
 
 func segInfo(cliCtx *cli.Context) error {
-	logger, _, _, _, err := debug.Setup(cliCtx, true /* root logger */)
+	logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
 	if err != nil {
 		return err
 	}

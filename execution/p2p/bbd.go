@@ -296,7 +296,7 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 			)
 		}
 
-		progressLogArgs := []interface{}{
+		progressLogArgs := []any{
 			"num", parentNum,
 			"hash", parentHash,
 			"amount", amount,
@@ -391,7 +391,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocks(
 		return err
 	}
 	if len(headers) == 0 {
-		return feed.consumeData(ctx, nil)
+		return nil
 	}
 	// make sure to download blocks for the remaining incomplete header batch after the etl collector has been loaded
 	return bbd.downloadBlocksForHeaders(ctx, headers, peers, config, logProgressTicker, feed)
@@ -415,7 +415,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	}
 	batchSize := (len(headers) + len(availablePeers) - 1) / len(availablePeers)
 	batchesCount := (len(headers) + batchSize - 1) / batchSize
-	progressLogArgs := []interface{}{
+	progressLogArgs := []any{
 		"fromNum", headers[0].Number.Uint64(),
 		"fromHash", headers[0].Hash(),
 		"toNum", headers[len(headers)-1].Number.Uint64(),

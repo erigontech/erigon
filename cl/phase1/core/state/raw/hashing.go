@@ -69,7 +69,7 @@ func (b *BeaconState) CurrentSyncCommitteeBranch() ([][32]byte, error) {
 		leafSize = StateLeafSizeFulu
 	}
 
-	schema := []interface{}{}
+	schema := []any{}
 	for i := 0; i < leafSize*32; i += 32 {
 		schema = append(schema, b.leaves[i:i+32])
 	}
@@ -92,7 +92,7 @@ func (b *BeaconState) NextSyncCommitteeBranch() ([][32]byte, error) {
 		leafSize = StateLeafSizeFulu
 	}
 
-	schema := []interface{}{}
+	schema := []any{}
 	for i := 0; i < leafSize*32; i += 32 {
 		schema = append(schema, b.leaves[i:i+32])
 	}
@@ -114,7 +114,7 @@ func (b *BeaconState) FinalityRootBranch() ([][32]byte, error) {
 		leafSize = StateLeafSizeFulu
 	}
 
-	schema := []interface{}{}
+	schema := []any{}
 	for i := 0; i < leafSize*32; i += 32 {
 		schema = append(schema, b.leaves[i:i+32])
 	}

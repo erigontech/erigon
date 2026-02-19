@@ -84,15 +84,24 @@ fi
 
 # Remove the local results directory if any
 cd "$WORKSPACE/rpc-tests/integration"
-rm -rf ./"$CHAIN"/results/
+rm -rf ./"$CHAIN"/results/*
+mkdir -p ./"$CHAIN"/results
+
+# Determine the output log path
+if [ -n "$RESULT_DIR" ]; then
+  mkdir -p "$RESULT_DIR"
+  LOG_FILE="$RESULT_DIR/output.log"
+else
+  LOG_FILE="$WORKSPACE/rpc-tests/integration/$CHAIN/results/output.log"
+fi
 
 # Run the RPC integration tests
 set +e # Disable exit on error for test run
 
 retries=0
 while true; do
-   python3 ./run_tests.py --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail --json-diff $OPTIONAL_FLAGS --exclude-api-list "$DISABLED_TESTS"
-   RUN_TESTS_EXIT_CODE=$?
+   python3 ./run_tests.py --blockchain "$CHAIN" --port 8545 --engine-port 8545 --continue --display-only-fail --json-diff $OPTIONAL_FLAGS --exclude-api-list "$DISABLED_TESTS" | tee "$LOG_FILE"
+   RUN_TESTS_EXIT_CODE=${PIPESTATUS[0]}
 
    if [ "$RUN_TESTS_EXIT_CODE" -eq 0 ]; then
         break

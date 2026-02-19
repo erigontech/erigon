@@ -137,7 +137,7 @@ func (r *TxResult) CreateNextReceipt(prev *types.Receipt) (*types.Receipt, error
 		}
 	}
 
-	cumulativeGasUsed += r.ExecutionResult.GasUsed
+	cumulativeGasUsed += r.ExecutionResult.ReceiptGasUsed
 
 	var err error
 	r.Receipt, err = r.CreateReceipt(txIndex, cumulativeGasUsed, firstLogIndex)
@@ -157,7 +157,7 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 		BlockHash:                r.BlockHash(),
 		TransactionIndex:         uint(txIndex),
 		Type:                     r.TxType(),
-		GasUsed:                  r.ExecutionResult.GasUsed,
+		GasUsed:                  r.ExecutionResult.ReceiptGasUsed,
 		CumulativeGasUsed:        cumulativeGasUsed,
 		TxHash:                   r.TxHash(),
 		Logs:                     r.Logs,
@@ -483,8 +483,10 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			ret, err := protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config())
 			return ret, err
 		}
-		engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
-		result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
+		result.Err = engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
+		if result.Err == nil {
+			result.Err = ibs.FinalizeTx(rules, state.NewNoopWriter())
+		}
 	case txTask.IsBlockEnd():
 		if txTask.BlockNumber() == 0 {
 			break
@@ -547,6 +549,13 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}()
 
 		if result.Err == nil {
+			// Capture residual-balance selfdestructs before SoftFinalise clears the
+			// journal.  These are accounts selfdestructed in this tx that also received
+			// ETH after the SELFDESTRUCT opcode (EIP-7708 case 2).  SoftFinalise calls
+			// clearJournalAndRefund, so GetRemovedAccountsWithBalance returns nothing
+			// afterwards.
+			result.ExecutionResult.SelfDestructedWithBalance = ibs.GetRemovedAccountsWithBalance()
+
 			// TODO these can be removed - use result instead
 			// Update the state with pending changes
 			ibs.SoftFinalise()
@@ -558,10 +567,6 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if result.Err == nil {
 		txTask.BalanceIncreaseSet = ibs.BalanceIncreaseSet()
-		for addr, bal := range txTask.BalanceIncreaseSet {
-			fmt.Printf("BalanceIncreaseSet [%x]=>[%d]\n", addr, &bal)
-		}
-
 		if err = ibs.MakeWriteSet(rules, stateWriter); err != nil {
 			panic(err)
 		}
@@ -638,7 +643,8 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 		return &result
 	}
 
-	result.ExecutionResult.GasUsed = gasUsed
+	result.ExecutionResult.ReceiptGasUsed = gasUsed
+	result.ExecutionResult.BlockGasUsed = gasUsed
 	// Update the state with pending changes
 	ibs.SoftFinalise()
 	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())

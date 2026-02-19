@@ -29,9 +29,11 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
 
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
@@ -92,10 +94,18 @@ type SimulatedBackend struct {
 }
 
 func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
+	if !dbg.Exec3Parallel && config.AmsterdamTime != nil {
+		// Amsterdam required parallel processing
+		// - remove this once all tests pass with parallel as default
+		var copy chain.Config
+		copier.Copy(&copy, config)
+		config.AmsterdamTime = nil
+		config = &copy
+	}
 	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	engine := ethash.NewFaker()
 	//SimulatedBackend - it's remote blockchain node. This is reason why it has own `MockSentry` and own `DB` (even if external unit-test have one already)
-	m := mock.MockWithGenesisEngine(t, &genesis, engine, false)
+	m := mock.MockWithGenesisEngine(t, &genesis, engine)
 
 	backend := &SimulatedBackend{
 		m:            m,
@@ -545,7 +555,7 @@ func (e *revertError) ErrorCode() int {
 }
 
 // ErrorData returns the hex encoded revert reason.
-func (e *revertError) ErrorData() interface{} {
+func (e *revertError) ErrorData() any {
 	return e.reason
 }
 
@@ -774,15 +784,17 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 
 	b.pendingState.SetTxContext(b.pendingBlock.NumberU64(), len(b.pendingBlock.Transactions()))
 	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
-	if _, _, err := protocol.ApplyTransaction(
+	gasUsed := protocol.NewGasUsed(b.pendingHeader, 0)
+	if _, err := protocol.ApplyTransaction(
 		b.m.ChainConfig, protocol.GetHashFn(b.pendingHeader, b.getHeader), b.m.Engine,
 		accounts.InternAddress(b.pendingHeader.Coinbase), b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, txn,
-		&b.pendingHeader.GasUsed, b.pendingHeader.BlobGasUsed,
+		gasUsed,
 		vm.Config{}); err != nil {
 		return err
 	}
+	protocol.SetGasUsed(b.pendingHeader, gasUsed)
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
 	chain, err := blockgen.GenerateChain(b.m.ChainConfig, b.prependBlock, b.m.Engine, b.m.DB, 1, func(number int, block *blockgen.BlockGen) {
 		for _, txn := range b.pendingBlock.Transactions() {

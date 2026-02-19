@@ -556,7 +556,7 @@ package commitment
 //	var compactLen int
 //	var ni int
 //	var compact0 byte
-//	if hasTerm(key) {
+//	if HasTerm(key) {
 //		compactLen = (len(key)-1)/2 + 1
 //		if len(key)&1 == 0 {
 //			compact0 = 48 + key[0] // Odd (1<<4) + first nibble
@@ -591,7 +591,7 @@ package commitment
 //	var compactLen int
 //	var ni int
 //	var compact0 byte
-//	if hasTerm(key) {
+//	if HasTerm(key) {
 //		compactLen = (len(key)-1)/2 + 1
 //		if len(key)&1 == 0 {
 //			compact0 = 0x30 + key[0] // Odd: (3<<4) + first nibble

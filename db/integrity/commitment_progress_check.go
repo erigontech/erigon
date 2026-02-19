@@ -18,8 +18,8 @@ func CheckStateProgress(ctx context.Context, db kv.TemporalRoDB, blockReader ser
 
 	stateFileProgress := tx.Debug().DomainFiles(kv.CommitmentDomain).EndRootNum()
 
-	txnumReader := blockReader.TxnumReader(ctx)
-	blockFileProgress, err := txnumReader.Max(tx, blockReader.FrozenBlocks())
+	txnumReader := blockReader.TxnumReader()
+	blockFileProgress, err := txnumReader.Max(ctx, tx, blockReader.FrozenBlocks())
 	if err != nil {
 		return err
 	}

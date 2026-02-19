@@ -3,22 +3,71 @@ name: Test Hive
 on:
   push:
     branches:
-        - main
-        - 'release/**'
+      - main
+      - 'release/**'
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+      - performance
+      - performance-stable
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
   schedule:
     - cron: "0 05 * * *" # daily at 5 am UTC
   workflow_dispatch:
 
-  
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('push-{0}-{1}', github.run_id, github.run_attempt) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test-hive:
-    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
+    runs-on:
+      group: hive
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sim: engine
+            sim-limit: exchange-capabilities
+            max-allowed-failures: 0
+          - sim: engine
+            sim-limit: withdrawals
+            max-allowed-failures: 0
+          - sim: engine
+            sim-limit: cancun
+            # 2 failures (not due to us, but due to Hive/Geth secondary client)
+            # will remove once resolved by STEEL team (these 2 tests are failing on all clients)
+            # see https://discord.com/channels/1359927674746835211/1410592782258540565/1462699469824065560
+            max-allowed-failures: 2
+          - sim: engine
+            sim-limit: api
+            max-allowed-failures: 0
+          - sim: engine
+            sim-limit: auth
+            max-allowed-failures: 0
+          - sim: rpc
+            sim-limit: compat
+            max-allowed-failures: 23
     steps:
+      - name: Checkout Erigon go.mod
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: go.mod
+          sparse-checkout-cone-mode: false
+          path: erigon-src
+
       - name: Checkout Hive
         uses: actions/checkout@v6
         with:
           repository: ethereum/hive
-          # ref: master
+          # version hive and update periodically/on-demand to prevent upstream changes in Hive affecting us with red CI
+          ref: 0ee187ce394720a5902c135324ac7de4240cbb37
           path: hive
 
       - name: Setup go env and cache
@@ -43,14 +92,20 @@ jobs:
       # Targetting the clients/erigon/Dockerfile.git in the Hive director - 
       # this builds the container from github and uses it for tests
       - name: Get dependencies and build hive
+        env:
+          SOURCE_REPO: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
         run: |
           cd hive
           go get . >> buildlogs.log
           rm clients/erigon/Dockerfile
           mv clients/erigon/Dockerfile.git clients/erigon/Dockerfile
-          branch_name=$(echo ${GITHUB_REF#refs/heads/}  | sed 's/[&/\]/\\&/g')
-          echo Building Hive with Erigon branch - $branch_name
+          branch_name=$(echo ${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}} | sed 's/[&/\]/\\&/g')
+          echo Building Hive with Erigon repo - ${SOURCE_REPO}, branch - $branch_name
+          sed -i "s|^ARG github=erigontech/erigon$|ARG github=${SOURCE_REPO}|" clients/erigon/Dockerfile
           sed -i "s/^ARG tag=main$/ARG tag=${branch_name}/" clients/erigon/Dockerfile
+          go_version=$(go mod edit -json ../erigon-src/go.mod | jq -r .Go)
+          echo "Patching builder Go version to ${go_version}"
+          sed -i "s|golang:[0-9.]*-alpine|golang:${go_version}-alpine|" clients/erigon/Dockerfile
           go build . >> buildlogs.log
       # Depends on the last line of hive output that prints the number of suites, tests and failed
       # Currently, we fail even if suites and tests are too few, indicating the tests did not run
@@ -68,7 +123,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}-${2}"
             echo -e "\n"
-            ./hive -docker.auth --sim ethereum/"${1}" --sim.limit="${2}" --client erigon 2>&1 | tee output.log || {
+            ./hive -docker.auth --sim ethereum/"${1}" --sim.limit="${2}" --sim.parallelism=8 --client erigon 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
@@ -99,20 +154,13 @@ jobs:
               exit 1
             fi
           }
-          run_suite engine exchange-capabilities 0
-          run_suite engine withdrawals 0
-          run_suite engine cancun 0
-          run_suite engine api 0
-          # 3 failures out of 8 tests at time of writing
-          run_suite engine auth 3
-          # 8 failures out of 194 tests, see https://github.com/ethereum/hive/pull/1355
-          run_suite rpc compat 8
+          run_suite ${{ matrix.sim }} ${{ matrix.sim-limit }} ${{ matrix.max-allowed-failures }}
         continue-on-error: true
 
       - name: Upload output log
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
-          name: hive-workspace-log
+          name: hive-workspace-log-${{ matrix.sim }}-${{ matrix.sim-limit }}
           path: hive/workspace/logs
         continue-on-error: true
 

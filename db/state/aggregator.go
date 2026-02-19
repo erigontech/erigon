@@ -33,6 +33,8 @@ import (
 
 	rand2 "golang.org/x/exp/rand"
 
+	"github.com/erigontech/erigon/db/kv/prune"
+
 	"github.com/RoaringBitmap/roaring/v2/roaring64"
 	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -52,7 +54,6 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
-	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -71,8 +72,9 @@ type Aggregator struct {
 	snapshotBuildSema        *semaphore.Weighted
 
 	disableHistory         bool
-	collateAndBuildWorkers int // minimize amount of background workers by default
-	mergeWorkers           int // usually 1
+	collateAndBuildWorkers int  // minimize amount of background workers by default
+	mergeWorkers           int  // usually 1
+	lockWorkersEditing     bool // allow changing #workers for merge/collate/build
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
@@ -99,7 +101,7 @@ type Aggregator struct {
 	checker *DependencyIntegrityChecker
 }
 
-func newAggregator(ctx context.Context, dirs datadir.Dirs, stepSize, stepsInFrozenFile, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
+func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint64, db kv.RoDB, logger log.Logger) (*Aggregator, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	return &Aggregator{
 		ctx:                    ctx,
@@ -107,8 +109,6 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, stepSize, stepsInFroz
 		onFilesChange:          func(frozenFileNames []string) {},
 		onFilesDelete:          func(frozenFileNames []string) {},
 		dirs:                   dirs,
-		stepSize:               stepSize,
-		stepsInFrozenFile:      stepsInFrozenFile,
 		reorgBlockDepth:        reorgBlockDepth,
 		db:                     db,
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
@@ -245,6 +245,16 @@ func (a *Aggregator) reloadSalt() error {
 	return nil
 }
 
+func (a *Aggregator) reloadErigonDBSettings() error {
+	settings, err := CreateOrReadErigonDBSettings(a.dirs, a.logger)
+	if err != nil {
+		return err
+	}
+	a.stepSize = settings.StepSize
+	a.stepsInFrozenFile = settings.StepsInFrozenFile
+	return nil
+}
+
 func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv.Domain) {
 	dd := a.d[dependent]
 	if dd.Disable || a.d[dependency].Disable {
@@ -322,7 +332,6 @@ func (a *Aggregator) OpenFolder() error {
 	return nil
 }
 
-// TODO: convert this func to `map` or struct instead of 4 return params
 func scanDirs(dirs datadir.Dirs) (r *ScanDirsResult, err error) {
 	r = &ScanDirsResult{}
 	r.iiFiles, err = filesFromDir(dirs.SnapIdx)
@@ -337,13 +346,18 @@ func scanDirs(dirs datadir.Dirs) (r *ScanDirsResult, err error) {
 	if err != nil {
 		return
 	}
+	r.accessorFiles, err = filesFromDir(dirs.SnapAccessors)
+	if err != nil {
+		return
+	}
 	return r, nil
 }
 
 type ScanDirsResult struct {
-	domainFiles  []string
-	historyFiles []string
-	iiFiles      []string
+	domainFiles   []string
+	historyFiles  []string
+	iiFiles       []string
+	accessorFiles []string
 }
 
 func (a *Aggregator) openFolder() error {
@@ -433,10 +447,23 @@ func (a *Aggregator) closeDirtyFiles() {
 	wg.Wait()
 }
 
-func (a *Aggregator) EnableDomain(domain kv.Domain)   { a.d[domain].Disable = false }
-func (a *Aggregator) SetCollateAndBuildWorkers(i int) { a.collateAndBuildWorkers = i }
-func (a *Aggregator) SetMergeWorkers(i int)           { a.mergeWorkers = i }
+func (a *Aggregator) EnableDomain(domain kv.Domain) { a.d[domain].Disable = false }
+func (a *Aggregator) SetCollateAndBuildWorkers(i int) {
+	if a.lockWorkersEditing {
+		return
+	}
+	a.collateAndBuildWorkers = i
+}
+func (a *Aggregator) SetMergeWorkers(i int) {
+	if a.lockWorkersEditing {
+		return
+	}
+	a.mergeWorkers = i
+}
 func (a *Aggregator) SetCompressWorkers(i int) {
+	if a.lockWorkersEditing {
+		return
+	}
 	for _, d := range a.d {
 		d.CompressCfg.Workers = i
 		if d.History != nil {
@@ -448,6 +475,8 @@ func (a *Aggregator) SetCompressWorkers(i int) {
 		ii.CompressorCfg.Workers = i
 	}
 }
+func (a *Aggregator) LockWorkersEditing()   { a.lockWorkersEditing = true }
+func (a *Aggregator) UnlockWorkersEditing() { a.lockWorkersEditing = false }
 
 func (a *Aggregator) HasBackgroundFilesBuild2() bool {
 	return a.buildingFiles.Load() || a.mergingFiles.Load()
@@ -542,7 +571,6 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 			case <-logEvery.C:
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
-				sendDiagnostics(startIndexingTime, ps.DiagnosticsData(), m.Alloc, m.Sys)
 				a.logger.Info("[snapshots] Indexing", "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			}
 		}
@@ -575,22 +603,6 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int) erro
 		return err
 	}
 	return nil
-}
-
-func sendDiagnostics(startIndexingTime time.Time, indexPercent map[string]int, alloc uint64, sys uint64) {
-	segmentsStats := make([]diaglib.SnapshotSegmentIndexingStatistics, 0, len(indexPercent))
-	for k, v := range indexPercent {
-		segmentsStats = append(segmentsStats, diaglib.SnapshotSegmentIndexingStatistics{
-			SegmentName: k,
-			Percent:     v,
-			Alloc:       alloc,
-			Sys:         sys,
-		})
-	}
-	diaglib.Send(diaglib.SnapshotIndexingStatistics{
-		Segments:    segmentsStats,
-		TimeElapsed: time.Since(startIndexingTime).Round(time.Second).Seconds(),
-	})
 }
 
 type AggV3Collation struct {
@@ -760,7 +772,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	}
 	mxStepTook.ObserveDuration(stepStartedAt)
 	a.IntegrateDirtyFiles(static, txFrom, txTo)
-	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt))
+	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt), "workers", a.collateAndBuildWorkers)
 
 	return nil
 }
@@ -770,7 +782,7 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 		return 0, 0, 0, true, nil
 	}
 	err = a.db.View(ctx, func(tx kv.Tx) error {
-		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(tx, lastTxNumOfStep(step, a.stepSize))
+		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, lastTxNumOfStep(step, a.stepSize))
 		if err != nil {
 			return err
 		}
@@ -995,7 +1007,7 @@ func (at *AggregatorRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
 		}
 	}
 	for _, ii := range at.iis {
-		if ii.CanPrune(tx) {
+		if ii.CanPrune(tx, untilTx) {
 			return true
 		}
 	}
@@ -1030,27 +1042,26 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 	defer aggLogEvery.Stop()
 
 	fullStat := newAggregatorPruneStat()
+	ctxWithTO, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	for {
-		if sptx, ok := tx.(kv.HasSpaceDirty); ok && !furiousPrune && !aggressivePrune {
-			spaceDirty, _, err := sptx.SpaceDirty()
-			if err != nil {
-				return false, err
-			}
-			if spaceDirty > uint64(statecfg.MaxNonFuriousDirtySpacePerTx) {
-				return false, nil
-			}
-		}
 		iterationStarted := time.Now()
 		// `context.Background()` is important here!
 		//     it allows keep DB consistent - prune all keys-related data or noting
 		//     can't interrupt by ctrl+c and leave dirt in DB
-		stat, err := at.prune(context.Background(), tx, pruneLimit, furiousPrune || aggressivePrune, aggLogEvery)
+		stat, err := at.prune(ctxWithTO, tx, pruneLimit /*pruneLimit*/, furiousPrune || aggressivePrune, aggLogEvery)
 		if err != nil {
-			at.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
+			if errors.Is(err, context.DeadlineExceeded) {
+				at.a.logger.Debug("[snapshots] PruneSmallBatches timeout", "err", err)
+				fullStat.Accumulate(stat)
+				return true, nil
+			}
+			at.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err, "is deadline?", errors.Is(err, context.DeadlineExceeded))
 			return false, err
 		}
 		if stat == nil || stat.PrunedNothing() {
+			at.a.logger.Debug("[snapshots] PruneSmallBatches nilled or nothing")
 			if !fullStat.PrunedNothing() {
 				at.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fullStat.String())
 			}
@@ -1070,7 +1081,11 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 
 		select {
 		case <-localTimeout.C: //must be first to improve responsivness
+			at.a.logger.Debug("[snapshots] PruneSmallBatches local timeout", "timeout", timeout.String())
 			return true, nil
+		case <-ctx.Done():
+			at.a.logger.Debug("[snapshots] PruneSmallBatches bad timeout", "err", err)
+			return false, ctx.Err()
 		case <-logEvery.C:
 			if furiousPrune {
 				at.a.logger.Info("[prune] state",
@@ -1089,9 +1104,6 @@ func (at *AggregatorRoTx) PruneSmallBatches(ctx context.Context, timeout time.Du
 					//"pruned", fullStat.String(),
 				)
 			}
-
-		case <-ctx.Done():
-			return false, ctx.Err()
 		default:
 		}
 	}
@@ -1105,7 +1117,11 @@ func (at *AggregatorRoTx) stepsRangeInDBAsStr(tx kv.Tx) string {
 	}
 	for _, iit := range at.iis {
 		a1, a2 := iit.stepsRangeInDB(tx)
-		steps = append(steps, fmt.Sprintf("%s:%.1f", iit.ii.FilenameBase, a2-a1))
+		valPruneFinished := "prune finished"
+		if v, _ := GetPruneValProgress(tx, []byte(iit.ii.ValuesTable)); v.ValueProgress != prune.Done || v.KeyProgress != prune.Done {
+			valPruneFinished = "prune in progress"
+		}
+		steps = append(steps, fmt.Sprintf("%s:%.1f %s", iit.ii.FilenameBase, a2-a1, valPruneFinished))
 	}
 	return strings.Join(steps, ", ")
 }
@@ -1148,7 +1164,7 @@ func (as *AggregatorPruneStat) String() string {
 	for _, d := range names {
 		v, ok := as.Domains[d]
 		if ok && v != nil && !v.PrunedNothing() {
-			sb.WriteString(fmt.Sprintf("%s| %s; ", d, v.String()))
+			sb.WriteString(fmt.Sprintf("%s| %s %s; ", d, v.String(), v.Progress.String()))
 		}
 	}
 	names = names[:0]
@@ -1187,33 +1203,6 @@ func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
 	}
 }
 
-// temporal function to prune history straight after commitment is done - reduce history size in db until we build
-// pruning in background. This helps on chain-tip performance (while full pruning is not available we can prune at least commit)
-func (at *AggregatorRoTx) GreedyPruneHistory(ctx context.Context, domain kv.Domain, tx kv.RwTx) error {
-	cd := at.d[domain]
-	if cd.ht.h.HistoryDisabled {
-		return nil
-	}
-
-	txFrom := uint64(0)
-	canHist, txTo := cd.ht.canPruneUntil(tx, math.MaxUint64)
-	if dbg.NoPrune() || !canHist {
-		return nil
-	}
-
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	defer mxPruneTookAgg.ObserveDuration(time.Now())
-
-	stat, err := cd.ht.Prune(ctx, tx, txFrom, txTo, math.MaxUint64, false, logEvery)
-	if err != nil {
-		return err
-	}
-
-	at.a.logger.Info("commitment history backpressure pruning", "pruned", stat.String())
-	return nil
-}
-
 func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, aggressiveMode bool, logEvery *time.Ticker) (*AggregatorPruneStat, error) {
 	if !aggressiveMode {
 		defer mxPruneTookAgg.ObserveDuration(time.Now())
@@ -1244,8 +1233,30 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 	//	/*"stepsLimit", limit/at.a.stepSize,*/ "stepsRangeInDB", at.a.stepsRangeInDBAsStr(tx))
 	aggStat := newAggregatorPruneStat()
 	for id, d := range at.d {
+		//if _, ok := invalidateOnce[fmt.Sprintf("domain%s", d.d.ValuesTable)]; !ok {
+		//	if true { //d.d.Name != kv.CommitmentDomain {
+		//		err := InvalidatePruneProgress(tx, d.d.ValuesTable)
+		//		if err != nil {
+		//			d.d.logger.Error("invalidate prune progress", "err", err)
+		//			return nil, err
+		//		}
+		//		invalidateOnce[fmt.Sprintf("domain%s", d.d.ValuesTable)] = 1
+		//		err = InvalidatePruneProgress(tx, d.ht.h.ValuesTable)
+		//		if err != nil {
+		//			d.d.logger.Error("invalidate prune progress", "err", err)
+		//			return nil, err
+		//		}
+		//		invalidateOnce[fmt.Sprintf("history%s", d.ht.h.ValuesTable)] = 1
+		//		d.d.logger.Info("invalidated d&h prune progress", "name", d.name)
+		//	}
+		//}
 		var err error
-		aggStat.Domains[at.d[id].d.FilenameBase], err = d.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery)
+		select {
+		case <-ctx.Done():
+			return aggStat, ctx.Err()
+		default:
+		}
+		aggStat.Domains[at.d[id].d.FilenameBase], err = d.Prune(context.Background(), tx, step, txFrom, txTo, limit, logEvery)
 		if err != nil {
 			return aggStat, err
 		}
@@ -1253,7 +1264,22 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 
 	stats := make([]*InvertedIndexPruneStat, len(at.a.iis))
 	for iikey := range at.a.iis {
-		stat, err := at.iis[iikey].Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil)
+		select {
+		case <-ctx.Done():
+			return aggStat, ctx.Err()
+		default:
+		}
+		//if _, ok := invalidateOnce[fmt.Sprintf("ii%s", at.iis[iikey].ii.ValuesTable)]; !ok {
+		//	err := InvalidatePruneProgress(tx, at.iis[iikey].ii.ValuesTable)
+		//	if err != nil {
+		//		at.iis[iikey].ii.logger.Error("invalidate prune progress", "err", err)
+		//		return nil, err
+		//	}
+		//	invalidateOnce[fmt.Sprintf("ii%s", at.iis[iikey].ii.ValuesTable)] = 1
+		//	at.iis[iikey].ii.logger.Info("invalidated ii prune progress", "name", at.iis[iikey].ii.Name)
+		//}
+		stat, err := at.iis[iikey].TableScanningPrune(context.Background(), tx, txFrom, txTo, limit, logEvery, false, nil,
+			nil, nil, prune.DefaultStorageMode)
 		if err != nil {
 			return nil, err
 		}
@@ -1811,6 +1837,12 @@ func (at *AggregatorRoTx) DebugRangeLatest(tx kv.Tx, domain kv.Domain, from, to 
 	return at.d[domain].DebugRangeLatest(tx, from, to, limit)
 }
 
+// DebugRangeLatestFromFiles iterates over keys in .kv snapshot files only,
+// ignoring keys in MDBX database.
+func (at *AggregatorRoTx) DebugRangeLatestFromFiles(domain kv.Domain, from, to []byte, limit int) (stream.KV, error) {
+	return at.d[domain].DebugRangeLatestFromFiles(from, to, limit)
+}
+
 func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
 	v, ok, err = at.d[name].GetAsOf(k, ts, tx)
 	if name == kv.CommitmentDomain && !ok {
@@ -1837,7 +1869,7 @@ func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, maxSte
 		return nil, kv.Step(0), false, err
 	}
 	if ok && step <= maxStep {
-		if metrics != nil {
+		if metrics != nil && dbg.KVReadLevelledMetrics {
 			metrics.UpdateDbReads(domain, start)
 		}
 		return v, step, true, nil
@@ -1847,7 +1879,7 @@ func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, maxSte
 	if !found {
 		return nil, kv.Step(0), false, err
 	}
-	if metrics != nil {
+	if metrics != nil && dbg.KVReadLevelledMetrics {
 		metrics.UpdateFileReads(domain, start)
 	}
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
@@ -1866,6 +1898,13 @@ func (at *AggregatorRoTx) DebugGetLatestFromFiles(domain kv.Domain, k []byte, ma
 	return
 }
 
+func (at *AggregatorRoTx) DebugTraceKey(ctx context.Context, domain kv.Domain, key []byte, fromTxNum uint64, toTxNum uint64, tx kv.Tx) (stream.U64V, error) {
+	if at.d[domain].d.HistoryDisabled {
+		return nil, fmt.Errorf("domain %s has history disabled; can't do TraceKey", domain)
+	}
+	return at.d[domain].TraceKey(ctx, key, fromTxNum, toTxNum, tx)
+}
+
 func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -1877,7 +1916,7 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 		}
 	}
 	for _, ii := range at.iis {
-		if err := ii.unwind(ctx, tx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, nil); err != nil {
+		if err := ii.unwind(ctx, tx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true); err != nil {
 			return err
 		}
 	}

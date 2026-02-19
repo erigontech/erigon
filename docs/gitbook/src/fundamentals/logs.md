@@ -1,15 +1,18 @@
 ---
 description: Erigon's logging framework
+metaLinks:
+  alternates:
+    - https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/fundamentals/logs
 ---
 
 # Logs
 
 Erigon features a sophisticated logging framework that offers detailed visibility into the synchronization process and operational status. This system provides comprehensive, structured logs suitable for both human operators and automated monitoring, while maintaining high performance.
 
-The modular, staged approach to logging allows for granular control over verbosity, which is crucial for precise debugging and flexible deployment across various environments.&#x20;
+The modular, staged approach to logging allows for granular control over verbosity, which is crucial for precise debugging and flexible deployment across various environments.
 
 {% hint style="success" %}
-Erigon offers a `--metrics` flag for using prometheus/grafana monitoring, see [Creating a Dashboard](../fundamentals/creating-a-dashboard.md/).
+Erigon offers a `--metrics` flag for using prometheus/grafana monitoring, see [Creating a Dashboard](creating-a-dashboard.md).
 {% endhint %}
 
 ## Logging Framework Architecture

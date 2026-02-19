@@ -294,7 +294,7 @@ func (c *SentryMessagesStreamC) Recv() (*sentryproto.InboundMessage, error) {
 
 func (c *SentryMessagesStreamC) Context() context.Context { return c.ctx }
 
-func (c *SentryMessagesStreamC) RecvMsg(anyMessage interface{}) error {
+func (c *SentryMessagesStreamC) RecvMsg(anyMessage any) error {
 	m, err := c.Recv()
 	if err != nil {
 		return err
@@ -367,7 +367,7 @@ func (c *SentryPeersStreamC) Recv() (*sentryproto.PeerEvent, error) {
 
 func (c *SentryPeersStreamC) Context() context.Context { return c.ctx }
 
-func (c *SentryPeersStreamC) RecvMsg(anyMessage interface{}) error {
+func (c *SentryPeersStreamC) RecvMsg(anyMessage any) error {
 	m, err := c.Recv()
 	if err != nil {
 		return err

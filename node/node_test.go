@@ -369,7 +369,7 @@ func TestLifecycleTerminationGuarantee(t *testing.T) {
 
 	// Start the protocol stack, and ensure that a failing shut down terminates all
 	// Start the stack and make sure all is online
-	if err1 := stack.Start(); err != nil {
+	if err1 := stack.Start(); err1 != nil {
 		t.Fatalf("failed to start protocol stack: %v", err1)
 	}
 	for id := range lifecycles {
@@ -400,13 +400,4 @@ func TestLifecycleTerminationGuarantee(t *testing.T) {
 		delete(started, id)
 		delete(stopped, id)
 	}
-}
-
-func containsProtocol(stackProtocols []p2p.Protocol, protocol p2p.Protocol) bool {
-	for _, a := range stackProtocols {
-		if reflect.DeepEqual(a, protocol) {
-			return true
-		}
-	}
-	return false
 }

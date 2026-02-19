@@ -190,12 +190,12 @@ func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock rpc.Block
 		}
 	}
 	if pendingBlock == nil {
-		// if pending block is not fetched then we retrieve the head header to get the head block number
-		if latestHeader, err := oracle.backend.HeaderByNumber(ctx, rpc.LatestBlockNumber); err == nil {
-			headBlock = rpc.BlockNumber(latestHeader.Number.Uint64())
-		} else {
+		// if pending block is not fetched then we retrieve the head block number
+		headBlockNumber, err := oracle.backend.GetLatestBlockNumber()
+		if err != nil {
 			return nil, nil, 0, 0, err
 		}
+		headBlock = rpc.BlockNumber(headBlockNumber)
 	}
 	if lastBlock == rpc.LatestBlockNumber {
 		lastBlock = headBlock

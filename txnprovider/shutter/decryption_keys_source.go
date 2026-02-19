@@ -29,6 +29,7 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"golang.org/x/sync/errgroup"
@@ -136,10 +137,11 @@ func (dks *PubSubDecryptionKeysSource) Run(ctx context.Context) error {
 	})
 
 	eg.Go(func() error {
-		select {
-		case <-ctx.Done(): // to keep the host and topic alive until Run's ctx is cancelled
-			return ctx.Err()
+		err := dks.reconnectBootstrapNodes(ctx, p2pHost)
+		if err != nil {
+			return fmt.Errorf("reconnect bootstrap nodes failure: %w", err)
 		}
+		return nil
 	})
 
 	return eg.Wait()
@@ -162,11 +164,9 @@ func (dks *PubSubDecryptionKeysSource) Subscribe(ctx context.Context) (Decryptio
 		return nil, err
 	}
 	go func() {
-		select {
-		case <-ctx.Done():
-			dks.logger.Debug("cancelling pubsub decryption keys subscription")
-			sub.Cancel()
-		}
+		<-ctx.Done()
+		dks.logger.Debug("cancelling pubsub decryption keys subscription")
+		sub.Cancel()
 	}()
 	return sub, nil
 }
@@ -194,6 +194,7 @@ func (dks *PubSubDecryptionKeysSource) initP2pHost() (host.Host, error) {
 		return nil, err
 	}
 
+	p2pHost.Network().Notify(&peerNotifiee{logger: dks.logger})
 	dks.logger.Info("shutter p2p host initialised", "addr", listenAddr, "id", p2pHost.ID())
 	return p2pHost, nil
 }
@@ -331,6 +332,34 @@ func (dks *PubSubDecryptionKeysSource) peerInfoLoop(ctx context.Context, pubSub 
 	}
 }
 
+func (dks *PubSubDecryptionKeysSource) reconnectBootstrapNodes(ctx context.Context, host host.Host) error {
+	bootstrapNodes, err := dks.config.BootstrapNodesAddrInfo()
+	if err != nil {
+		return err
+	}
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			for _, node := range bootstrapNodes {
+				connectedness := host.Network().Connectedness(node.ID)
+				if connectedness != network.Connected {
+					dks.logger.Warn("lost connection to shutter bootstrap node, reconnecting", "node", node, "connectedness", connectedness)
+					err := host.Connect(ctx, node)
+					if err != nil {
+						dks.logger.Warn("failed to reconnect to bootstrap node", "node", node, "err", err)
+					} else {
+						dks.logger.Info("reconnected to shutter bootstrap node", "node", node)
+					}
+				}
+			}
+		}
+	}
+}
+
 func decryptionKeysTopicScoreParams() *pubsub.TopicScoreParams {
 	// NOTE: this is taken from
 	// https://github.com/shutter-network/rolling-shutter/blob/main/rolling-shutter/p2p/params.go#L100
@@ -357,4 +386,24 @@ func decryptionKeysTopicScoreParams() *pubsub.TopicScoreParams {
 		InvalidMessageDeliveriesWeight:  -99,
 		InvalidMessageDeliveriesDecay:   0.9994,
 	}
+}
+
+type peerNotifiee struct {
+	logger log.Logger
+}
+
+func (n *peerNotifiee) Listen(network.Network, multiaddr.Multiaddr) {
+	// no-op
+}
+
+func (n *peerNotifiee) ListenClose(network.Network, multiaddr.Multiaddr) {
+	// no-op
+}
+
+func (n *peerNotifiee) Connected(_ network.Network, conn network.Conn) {
+	n.logger.Debug("shutter peer connected", "peer", conn.RemotePeer(), "addr", conn.RemoteMultiaddr())
+}
+
+func (n *peerNotifiee) Disconnected(_ network.Network, conn network.Conn) {
+	n.logger.Debug("shutter peer disconnected", "peer", conn.RemotePeer(), "addr", conn.RemoteMultiaddr())
 }

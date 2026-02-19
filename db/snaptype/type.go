@@ -159,17 +159,24 @@ var CaplinIndexes = struct {
 
 func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
 	dir := info.Dir()
-	segment, err := seg.NewDecompressor(info.Path)
+	// segment, err := seg.NewDecompressor(info.Path)
 
-	if err != nil {
+	// if err != nil {
+	// 	return false
+	// }
+
+	// defer segment.Close()
+
+	// Let's actually
+	if _, err := os.Stat(info.Path); err != nil {
+		logger.Debug("[ind] HasFile: seg file didn't found", "path", info.Path, "dir", dir, "err", err)
 		return false
 	}
-
-	defer segment.Close()
 
 	fNameMask := IdxFileMask(info.From, info.To, i.Name)
 	fPath, fileVer, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(dir, fNameMask))
 	if err != nil {
+		logger.Debug("[ind] HasFile: files by pattern didn't found", "f", fNameMask, "dir", dir, "err", err)
 		return false
 	}
 
@@ -191,6 +198,7 @@ func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
 	idx, err := recsplit.OpenIndex(fPath)
 
 	if err != nil {
+		logger.Debug("[ind] HasFile: opening index", "path", fPath, "err", err)
 		return false
 	}
 
@@ -286,7 +294,7 @@ func (s SnapType) FileInfo(dir string, from uint64, to uint64) FileInfo {
 }
 
 func (s SnapType) FileInfoByMask(dir string, from uint64, to uint64) FileInfo {
-	fName, _, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(dir, s.FileName(s.versions.Current, from, to)))
+	fName, _, ok, err := version.FindFilesWithVersionsByPattern(filepath.Join(dir, s.FileMask(from, to)))
 	if err != nil {
 		log.Debug("[snaptype] file mask error", "err", err, "fName", s.FileName(s.versions.Current, from, to))
 		return FileInfo{}
@@ -444,7 +452,7 @@ func ParseEnum(s string) (Enum, bool) {
 	switch s {
 	case "beaconblocks":
 		return CaplinEnums.BeaconBlocks, true
-	case "blobsidecars":
+	case "blobsidecars", "blocksidecars":
 		return CaplinEnums.BlobSidecars, true
 	default:
 		if t, ok := namedTypes[s]; ok {
@@ -558,7 +566,7 @@ func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.Rec
 		p.Total.Store(uint64(d.Count()))
 	}
 	cfg.KeyCount = d.Count()
-	cfg.IndexFile = info.Type.IdxFileName(info.Version, info.From, info.To, info.Type.Indexes()...)
+	cfg.IndexFile = filepath.Join(info.Dir(), IdxFileName(info.Version, info.From, info.To, info.CaplinTypeString))
 	rs, err := recsplit.NewRecSplit(cfg, logger)
 	if err != nil {
 		return err

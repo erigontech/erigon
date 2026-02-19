@@ -801,7 +801,7 @@ func TestDB_Batch_Panic(t *testing.T) {
 
 	var sentinel int
 	var bork = &sentinel
-	var problem interface{}
+	var problem any
 	var err error
 
 	// Execute a function inside a batch that panics.
@@ -933,7 +933,7 @@ func BenchmarkDB_BeginRO(b *testing.B) {
 	db := _db.(*MdbxKV)
 
 	b.ResetTimer()
-	for i := 1; i <= b.N; i++ {
+	for b.Loop() {
 		tx, _ := db.BeginRo(context.Background())
 		tx.Rollback()
 	}
@@ -956,7 +956,7 @@ func BenchmarkDB_Get(b *testing.B) {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		key := u64tob(uint64(1))
 		b.ResetTimer()
-		for i := 1; i <= b.N; i++ {
+		for b.Loop() {
 			v, err := tx.GetOne(table, key)
 			if err != nil {
 				return err
@@ -977,17 +977,20 @@ func BenchmarkDB_Put(b *testing.B) {
 	db := _db.(*MdbxKV)
 
 	// Ensure data is correct.
+	keys := make([][]byte, b.N)
+	for i := 1; i <= b.N; i++ {
+		keys[i-1] = u64tob(uint64(i))
+	}
+
+	b.ResetTimer()
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-		keys := make([][]byte, b.N)
-		for i := 1; i <= b.N; i++ {
-			keys[i-1] = u64tob(uint64(i))
-		}
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			err := tx.Put(table, keys[i], keys[i])
+		var idx int
+		for b.Loop() {
+			err := tx.Put(table, keys[idx%len(keys)], keys[idx%len(keys)])
 			if err != nil {
 				return err
 			}
+			idx++
 		}
 		return nil
 	}); err != nil {
@@ -1030,7 +1033,7 @@ func BenchmarkDB_Delete(b *testing.B) {
 	}
 
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-		for i := 0; i < b.N; i++ {
+		for i := 0; i < len(keys); i++ {
 			err := tx.Put(table, keys[i], keys[i])
 			if err != nil {
 				return err
@@ -1042,13 +1045,15 @@ func BenchmarkDB_Delete(b *testing.B) {
 	}
 
 	// Ensure data is correct.
+	b.ResetTimer()
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			err := tx.Delete(table, keys[i])
+		var idx int
+		for b.Loop() {
+			err := tx.Delete(table, keys[idx%len(keys)])
 			if err != nil {
 				return err
 			}
+			idx++
 		}
 		return nil
 	}); err != nil {
@@ -1113,6 +1118,7 @@ func BenchmarkDB_ResetSequence(b *testing.B) {
 
 	tx, err := _db.BeginRw(ctx)
 	require.NoError(b, err)
+	defer tx.Rollback()
 
 	for i := 0; b.Loop(); i++ {
 		err = tx.ResetSequence(table, uint64(i))
@@ -1120,7 +1126,6 @@ func BenchmarkDB_ResetSequence(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
-	tx.Rollback()
 }
 
 func TestMdbxWithSyncBytes(t *testing.T) {

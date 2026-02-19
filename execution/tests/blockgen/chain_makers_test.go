@@ -20,7 +20,7 @@
 package blockgen_test
 
 import (
-	"fmt"
+	"bytes"
 	"math/big"
 	"testing"
 
@@ -60,10 +60,11 @@ func TestGenerateChain(t *testing.T) {
 
 	// Ensure that key1 has some funds in the genesis block.
 	gspec := &types.Genesis{
-		Config: &chain.Config{HomesteadBlock: new(big.Int), ChainID: big.NewInt(1)},
-		Alloc:  types.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
+		Config:     &chain.Config{HomesteadBlock: new(big.Int), ChainID: big.NewInt(1)},
+		Difficulty: big.NewInt(0),
+		Alloc:      types.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
 	}
-	m := mock.MockWithGenesis(t, gspec, key1, false)
+	m := mock.MockWithGenesis(t, gspec, key1)
 
 	// This call generates a chain of 5 blocks. The function runs for
 	// each block and adds different features to gen based on the
@@ -97,19 +98,17 @@ func TestGenerateChain(t *testing.T) {
 		}
 	})
 	if err != nil {
-		fmt.Printf("generate chain: %v\n", err)
+		t.Errorf("generate chain: %v\n", err)
 	}
 
 	// Import the chain. This runs all block validation rules.
 	if err := m.InsertChain(chain); err != nil {
-		fmt.Printf("insert error%v\n", err)
-		return
+		t.Errorf("insert error%v\n", err)
 	}
 
 	tx, err := m.DB.BeginTemporalRw(m.Ctx)
 	if err != nil {
-		fmt.Printf("beginro error: %v\n", err)
-		return
+		t.Errorf("beginro error%v\n", err)
 	}
 	defer tx.Rollback()
 
@@ -163,7 +162,10 @@ func TestGenerateChain(t *testing.T) {
 
 	m.ReceiveWg.Wait()
 
-	msg := m.SentMessage(0)
+	msg, err := m.SentMessage(0)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if sentryproto.MessageId_RECEIPTS_66 != msg.Id {
 		t.Errorf("receipt id %d do not match the expected id %d", msg.Id, sentryproto.MessageId_RECEIPTS_66)
@@ -205,10 +207,10 @@ func TestGenerateChain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(b) != string(msg.GetData()) {
+	if !bytes.Equal(b, msg.GetData()) {
 		t.Errorf("receipt data %s do not match the expected msg %s", string(msg.GetData()), string(b))
 	}
-	if string(b) != string(msg.GetData()) {
+	if !bytes.Equal(b, msg.GetData()) {
 		t.Errorf("receipt data %s do not match the expected msg %s", string(msg.GetData()), string(b))
 	}
 

@@ -33,7 +33,6 @@ import (
 // These objects are stored in the main account trie.
 // DESCRIBED: docs/programmers_guide/guide.md#ethereum-state
 type Account struct {
-	Initialised     bool
 	Nonce           uint64
 	Balance         uint256.Int
 	Root            common.Hash // merkle root of the storage trie
@@ -81,17 +80,8 @@ func (a *Account) EncodingLengthForStorage() uint {
 }
 
 func (a *Account) EncodingLengthForHashing() uint {
-	balanceBytes := 0
-	if !a.Balance.LtUint64(128) {
-		balanceBytes = a.Balance.ByteLen()
-	}
-
-	nonceBytes := rlp.IntLenExcludingHead(a.Nonce)
-
-	structLength := balanceBytes + nonceBytes + 2
-
+	structLength := rlp.Uint256Len(a.Balance) + rlp.U64Len(a.Nonce)
 	structLength += 66 // Two 32-byte arrays + 2 prefixes
-
 	return uint(rlp.ListPrefixLen(structLength) + structLength)
 }
 
@@ -171,7 +161,7 @@ func decodeLengthForHashing(buffer []byte, pos int) (length int, structure bool,
 }
 
 var rlpEncodingBufPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		buf := make([]byte, 0, 128)
 		return &buf
 	},
@@ -201,13 +191,14 @@ func (a *Account) RLP() []byte {
 	return accRlp
 }
 
+// TODO(yperbasis): simplify
 func (a *Account) EncodeForHashing(buffer []byte) {
 	balanceBytes := 0
 	if !a.Balance.LtUint64(128) {
 		balanceBytes = a.Balance.ByteLen()
 	}
 
-	nonceBytes := rlp.IntLenExcludingHead(a.Nonce)
+	nonceBytes := rlp.U64Len(a.Nonce) - 1
 
 	var structLength = uint(balanceBytes + nonceBytes + 2)
 	structLength += 66 // Two 32-byte arrays + 2 prefixes
@@ -266,7 +257,6 @@ func (a *Account) EncodeForHashing(buffer []byte) {
 
 // Copy makes `a` a full, independent (meaning that if the `image` changes in any way, it does not affect `a`) copy of the account `image`.
 func (a *Account) Copy(image *Account) {
-	a.Initialised = image.Initialised
 	a.Nonce = image.Nonce
 	a.Balance.Set(&image.Balance)
 	copy(a.Root[:], image.Root[:])
@@ -292,7 +282,6 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 		)
 	}
 
-	a.Initialised = true
 	a.Nonce = 0
 	a.Balance.Clear()
 	a.Root = empty.RootHash
@@ -448,7 +437,6 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 }
 
 func (a *Account) Reset() {
-	a.Initialised = true
 	a.Nonce = 0
 	a.Incarnation = 0
 	a.Balance.Clear()

@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestWriteRawTransactions(t *testing.T) {
@@ -746,7 +747,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	br := m.BlockReader
-	txNumReader := br.TxnumReader(context.Background())
+	txNumReader := br.TxnumReader()
 	require := require.New(t)
 	ctx := m.Ctx
 
@@ -807,7 +808,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 		require.NoError(err)
 		defer sd.Close()
-		base, err := txNumReader.Min(tx, 1)
+		base, err := txNumReader.Min(context.Background(), tx, 1)
 		require.NoError(err)
 		// Insert the receipt slice into the database and check presence
 		txNum = base
@@ -873,9 +874,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 		Amount:    1001,
 	}
 
-	withdrawals := make([]*types.Withdrawal, 0)
-	withdrawals = append(withdrawals, &w)
-	withdrawals = append(withdrawals, &w2)
+	withdrawals := []*types.Withdrawal{&w, &w2}
 
 	// Create a test block to move around the database and make sure it's really new
 	block := types.NewBlockWithHeader(&types.Header{
@@ -896,7 +895,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	}
 
 	// Write withdrawals to block
-	wBlock := types.NewBlockFromStorage(block.Hash(), block.Header(), block.Transactions(), block.Uncles(), withdrawals, nil)
+	wBlock := types.NewBlockFromStorage(block.Hash(), block.Header(), block.Transactions(), block.Uncles(), withdrawals)
 	if err := rawdb.WriteHeader(tx, wBlock.HeaderNoCopy()); err != nil {
 		t.Fatalf("Could not write body: %v", err)
 	}
@@ -988,6 +987,56 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	require.Equal(1, deleted)
 	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
 	require.Nil(entry)
+}
+
+func TestBlockAccessListStorage(t *testing.T) {
+	t.Parallel()
+	_, tx := memdb.NewTestTx(t)
+	defer tx.Rollback()
+
+	block := types.NewBlockWithHeader(&types.Header{
+		Number:      big.NewInt(1),
+		Extra:       []byte("test block"),
+		UncleHash:   empty.UncleHash,
+		TxHash:      empty.RootHash,
+		ReceiptHash: empty.RootHash,
+	})
+
+	data, err := rawdb.ReadBlockAccessListBytes(tx, block.Hash(), block.NumberU64())
+	require.NoError(t, err)
+	require.Empty(t, data)
+
+	nonEmpty := types.BlockAccessList{
+		{
+			Address: accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa")),
+		},
+	}
+	nonEmptyBytes, err := types.EncodeBlockAccessListBytes(nonEmpty)
+	require.NoError(t, err)
+	require.NoError(t, rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), nonEmptyBytes))
+
+	data, err = rawdb.ReadBlockAccessListBytes(tx, block.Hash(), block.NumberU64())
+	require.NoError(t, err)
+	require.Equal(t, nonEmptyBytes, data)
+
+	decoded, err := types.DecodeBlockAccessListBytes(data)
+	require.NoError(t, err)
+	require.NoError(t, decoded.Validate())
+	require.Equal(t, nonEmpty.Hash(), decoded.Hash())
+
+	emptyBytes, err := types.EncodeBlockAccessListBytes(nil)
+	require.NoError(t, err)
+	require.NoError(t, rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), emptyBytes))
+
+	data, err = rawdb.ReadBlockAccessListBytes(tx, block.Hash(), block.NumberU64())
+	require.NoError(t, err)
+	require.Equal(t, emptyBytes, data)
+
+	decoded, err = types.DecodeBlockAccessListBytes(data)
+	require.NoError(t, err)
+	require.Nil(t, decoded)
+	require.NoError(t, decoded.Validate())
+	require.Equal(t, empty.BlockAccessListHash, decoded.Hash())
 }
 
 // Tests pre-shanghai body to make sure withdrawals doesn't panic

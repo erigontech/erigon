@@ -19,6 +19,14 @@ jobs:
   test-hive-eest:
     runs-on:
       group: hive
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sim: consume-engine
+            sim-limit: ""
+          - sim: consume-rlp
+            sim-limit: ".*eip2930_access_list.*" # all tests take too long
     steps:
       - name: Clean docker system
         run: |
@@ -35,6 +43,13 @@ jobs:
           fi
           echo "Pruning docker system..."
           docker system prune -af --volumes
+      - name: Checkout Erigon go.mod
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: go.mod
+          sparse-checkout-cone-mode: false
+          path: erigon-src
+
       - name: Checkout Hive
         uses: actions/checkout@v6
         with:
@@ -71,8 +86,10 @@ jobs:
           mv clients/erigon/Dockerfile.git clients/erigon/Dockerfile
           branch_name=$(echo ${GITHUB_REF#refs/heads/}  | sed 's/[&/\]/\\&/g')
           echo Building Hive with Erigon branch - $branch_name
-          sed -i "s/^ARG github=ledgerwatch\/erigon$/ARG github=erigontech\/erigon/" clients/erigon/Dockerfile
           sed -i "s/^ARG tag=main$/ARG tag=${branch_name}/" clients/erigon/Dockerfile
+          go_version=$(go mod edit -json ../erigon-src/go.mod | jq -r .Go)
+          echo "Patching builder Go version to ${go_version}"
+          sed -i "s|golang:[0-9.]*-alpine|golang:${go_version}-alpine|" clients/erigon/Dockerfile
           go build . >> buildlogs.log
       # Depends on the last line of hive output that prints the number of suites, tests and failed
       # Currently, we fail even if suites and tests are too few, indicating the tests did not run
@@ -85,7 +102,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive --sim 'ethereum/eels/consume-engine' --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${{ env.EEST_VERSION }}/fixtures_develop.tar.gz 2>&1 | tee output.log || {
+            ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${{ env.EEST_VERSION }}/fixtures_develop.tar.gz 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
@@ -115,12 +132,12 @@ jobs:
               exit 1
             fi
           }
-          run_suite eels/consume-engine
+          run_suite ${{ matrix.sim }} ${{ matrix.sim-limit }}
         continue-on-error: true
       - name: Upload output log
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
-          name: hive-workspace-log
+          name: hive-workspace-log-${{ matrix.sim }}
           path: hive/workspace/logs
       - name: Test Results
         run: |

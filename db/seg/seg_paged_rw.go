@@ -227,8 +227,12 @@ func (g *PagedReader) Skip() (uint64, int) {
 	return offset, len(v)
 }
 
-func NewPagedWriter(parent CompressorI, pageSize int, compressionEnabled bool) *PagedWriter {
-	return &PagedWriter{parent: parent, pageSize: pageSize, compressionEnabled: compressionEnabled}
+func NewPagedWriter(parent CompressorI, compressionEnabled bool) *PagedWriter {
+	return &PagedWriter{
+		parent:             parent,
+		pageSize:           parent.GetValuesOnCompressedPage(),
+		compressionEnabled: compressionEnabled,
+	}
 }
 
 type CompressorI interface {
@@ -238,6 +242,7 @@ type CompressorI interface {
 	Count() int
 	FileName() string
 	SetMetadata(data []byte)
+	GetValuesOnCompressedPage() int
 }
 type PagedWriter struct {
 	parent             CompressorI
@@ -252,30 +257,52 @@ type PagedWriter struct {
 }
 
 func (c *PagedWriter) Empty() bool { return c.pairs == 0 }
-func (c *PagedWriter) Close()      { c.parent.Close() }
+func (c *PagedWriter) Close() {
+	c.parent.Close()
+}
 func (c *PagedWriter) Compress() error {
+	// Flush any remaining unwritten page data
 	if err := c.Flush(); err != nil {
 		return err
 	}
 	return c.parent.Compress()
 }
+
 func (c *PagedWriter) Count() int {
 	if c.pageSize <= 1 {
 		return c.parent.Count()
 	}
 	return c.pairs * 2
 }
+
 func (c *PagedWriter) FileName() string { return c.parent.FileName() }
 
 func (c *PagedWriter) writePage() error {
-	bts, ok := c.bytes()
+	// When page-level compression is enabled, defer compression to Compress() method
+	if !c.compressionEnabled {
+		bts, ok := c.bytes()
+		c.resetPage()
+		if !ok {
+			return nil
+		}
+		_, err := c.parent.Write(bts)
+		return err
+	}
+
+	uncompressedPage, ok := c.bytesUncompressed()
 	c.resetPage()
 	if !ok {
 		return nil
 	}
-	_, err := c.parent.Write(bts)
-	return err
+
+	var compressedPage []byte
+	c.compressionBuf, compressedPage = compress.EncodeZstdIfNeed(c.compressionBuf[:0], uncompressedPage, c.compressionEnabled)
+	if _, err := c.parent.Write(compressedPage); err != nil {
+		return err
+	}
+	return nil
 }
+
 func (c *PagedWriter) Add(k, v []byte) (err error) {
 	if c.pageSize <= 1 {
 		_, err = c.parent.Write(v)
@@ -306,11 +333,10 @@ func (c *PagedWriter) Flush() error {
 	return c.writePage()
 }
 
-func (c *PagedWriter) bytes() (wholePage []byte, notEmpty bool) {
+func (c *PagedWriter) bytesUncompressed() (wholePage []byte, notEmpty bool) {
 	if len(c.kLengths) == 0 {
 		return nil, false
 	}
-	//TODO: alignment,compress+alignment
 
 	c.keys = append(c.keys, c.vals...)
 	keysAndVals := c.keys
@@ -329,8 +355,17 @@ func (c *PagedWriter) bytes() (wholePage []byte, notEmpty bool) {
 	}
 
 	wholePage = append(wholePage, keysAndVals...)
-	c.compressionBuf, wholePage = compress.EncodeZstdIfNeed(c.compressionBuf[:0], wholePage, c.compressionEnabled)
 
+	return wholePage, true
+}
+
+func (c *PagedWriter) bytes() (wholePage []byte, notEmpty bool) {
+	//TODO: alignment,compress+alignment
+	wholePage, notEmpty = c.bytesUncompressed()
+	if !notEmpty {
+		return nil, false
+	}
+	c.compressionBuf, wholePage = compress.EncodeZstdIfNeed(c.compressionBuf[:0], wholePage, c.compressionEnabled)
 	return wholePage, true
 }
 

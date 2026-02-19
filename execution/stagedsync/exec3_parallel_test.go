@@ -189,7 +189,7 @@ func (t *testExecTask) Sender() accounts.Address {
 }
 
 func (t *testExecTask) Hash() common.Hash {
-	return common.BytesToHash([]byte(fmt.Sprintf("%d", t.TxIndex)))
+	return common.BytesToHash(fmt.Appendf(nil, "%d", t.TxIndex))
 }
 
 func (t *testExecTask) Dependencies() []int {
@@ -519,8 +519,9 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 		workerCount: runtime.NumCPU() - 1,
 	}
 
-	executorContext, executorCancel := pe.run(context.Background())
+	executorContext, executorCancel, err := pe.run(context.Background())
 
+	assert.NoError(t, err, "error occur during parallel init")
 	assert.NoError(t, executorContext.Err(), "error occur during parallel init")
 
 	defer executorCancel()
@@ -637,9 +638,9 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 		workerCount: runtime.NumCPU() - 1,
 	}
 
-	_, executorCancel := pe.run(context.Background())
-
+	_, executorCancel, err := pe.run(context.Background())
 	defer executorCancel()
+	assert.NoError(t, err, "error occur during parallel init")
 
 	res, err := executeParallelWithCheck(t, pe, tasks, true, validation, false)
 

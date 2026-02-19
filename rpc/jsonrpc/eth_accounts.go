@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 
@@ -40,7 +39,23 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 		return nil, fmt.Errorf("getBalance cannot open tx: %w", err1)
 	}
 	defer tx.Rollback()
-	reader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+
+	blockNumber, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +90,22 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 		return nil, fmt.Errorf("getTransactionCount cannot open tx: %w", err1)
 	}
 	defer tx.Rollback()
-	reader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+
+	blockNumber, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +124,22 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 		return nil, fmt.Errorf("getCode cannot open tx: %w", err1)
 	}
 	defer tx.Rollback()
-	reader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	blockNumber, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -118,10 +163,10 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	// Waiting for a spec, we choose the latter because it's more general, but we check that the length is not greater than 64 hex-digits.
 	indexBytes, err := hexutil.FromHexWithValidation(index)
 	if err != nil {
-		return "", errors.New("unable to decode storage key: " + hexutil.ErrHexStringInvalid.Error())
+		return "", &rpc.InvalidParamsError{Message: "unable to decode storage key: " + hexutil.ErrHexStringInvalid.Error()}
 	}
 	if len(indexBytes) > 32 {
-		return "", hexutil.ErrTooBigHexString
+		return "", &rpc.InvalidParamsError{Message: hexutil.ErrTooBigHexString.Error()}
 	}
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -129,7 +174,23 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	}
 	defer tx.Rollback()
 
-	reader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	blockNrOrHash.RequireCanonical = true
+	blockNumber, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
+	}
+
+	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	if err != nil {
+		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
+	}
+
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
 	}
@@ -156,7 +217,22 @@ func (api *APIImpl) Exist(ctx context.Context, address common.Address, blockNrOr
 	}
 	defer tx.Rollback()
 
-	reader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	blockNumber, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return false, err
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return false, err
+	}
+
+	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	if err != nil {
+		return false, err
+	}
+
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return false, err
 	}

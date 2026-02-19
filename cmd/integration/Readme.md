@@ -130,7 +130,7 @@ integration stage_exec
 ## How to re-gen CommitmentDomain
 
 ```sh
-integration commitment_rebuild
+integration commitment rebuild
 ```
 
 ## How to re-generate optional Domain/Index
@@ -154,7 +154,7 @@ erigon snapshots integrity --datadir /erigon-data/ --check=BorCheckpoints
 ## See tables size
 
 ```sh
-./build/bin/mdbx_stat -efa  ~/data/chiado33_full/chaindata | awk '
+./build/bin/mdbx_stat -efa  /erigon-data/mainnet_archive/chaindata/ | awk '
     BEGIN { pagesize = 4096 }
     /^  Pagesize:/ { pagesize = $2 }
     /^Status of/ { table = $3 }

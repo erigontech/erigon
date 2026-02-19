@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"math/big"
 	"slices"
-	"sort"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -84,16 +83,16 @@ func (e *GenesisMismatchError) Error() string {
 //
 // The returned chain configuration is never nil.
 func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
-	return CommitGenesisBlockWithOverride(db, genesis, nil, false, dirs, logger)
+	return CommitGenesisBlockWithOverride(db, genesis, nil, nil, false, dirs, logger)
 }
 
-func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overrideOsakaTime *big.Int, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, overrideOsakaTime, overrideAmsterdamTime *big.Int, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-	c, b, err := WriteGenesisBlock(tx, genesis, overrideOsakaTime, keepStoredChainConfig, dirs, logger)
+	c, b, err := WriteGenesisBlock(tx, genesis, overrideOsakaTime, overrideAmsterdamTime, keepStoredChainConfig, dirs, logger)
 	if err != nil {
 		return c, b, err
 	}
@@ -115,7 +114,7 @@ func configOrDefault(g *types.Genesis, genesisHash common.Hash) *chain.Config {
 	return spec.Config
 }
 
-func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *big.Int, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime, overrideAmsterdamTime *big.Int, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	if err := rawdb.WriteGenesisIfNotExist(tx, genesis); err != nil {
 		return nil, nil, err
 	}
@@ -133,6 +132,9 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideOsakaTime *bi
 	applyOverrides := func(config *chain.Config) {
 		if overrideOsakaTime != nil {
 			config.OsakaTime = overrideOsakaTime
+		}
+		if overrideAmsterdamTime != nil {
+			config.AmsterdamTime = overrideAmsterdamTime
 		}
 	}
 
@@ -338,10 +340,20 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	}
 	defer sd.Close()
 
-	blockNum := uint64(0)
-	txNum := uint64(1) //2 system txs in begin/end of block. Attribute state-writes to first, consensus state-changes to second
+	rh, ibs, err := ComputeGenesisCommitment(ctx, g, tx, sd, head)
+	if err != nil {
+		return nil, nil, err
+	}
 
-	//r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
+	head.Root = common.BytesToHash(rh)
+
+	return types.NewBlock(head, nil, nil, nil, withdrawals), ibs, nil
+}
+
+func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.TemporalTx, sd *execctx.SharedDomains, head *types.Header) ([]byte, *state.IntraBlockState, error) {
+	blockNum := uint64(0)
+	txNum := uint64(1) // 2 system txs in begin/end of block. Attribute state-writes to first, consensus state-changes to second
+
 	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 
 	statedb := state.NewWithVersionMap(r, &state.VersionMap{})
@@ -356,7 +368,10 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	}
 	// See https://github.com/NethermindEth/nethermind/blob/master/src/Nethermind/Nethermind.Consensus.AuRa/InitializationSteps/LoadGenesisBlockAuRa.cs
 	if hasConstructorAllocation && g.Config.Aura != nil {
-		statedb.CreateAccount(accounts.ZeroAddress, false)
+		err := statedb.CreateAccount(accounts.ZeroAddress, false)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	addrs := sortedAllocAddresses(g.Alloc)
@@ -368,37 +383,50 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 			panic("overflow at genesis allocs")
 		}
 		address := accounts.InternAddress(addr)
-		statedb.AddBalance(address, *balance, tracing.BalanceIncreaseGenesisBalance)
-		statedb.SetCode(address, account.Code)
-		statedb.SetNonce(address, account.Nonce)
+		err := statedb.AddBalance(address, *balance, tracing.BalanceIncreaseGenesisBalance)
+		if err != nil {
+			return nil, nil, err
+		}
+		err = statedb.SetCode(address, account.Code)
+		if err != nil {
+			return nil, nil, err
+		}
+		err = statedb.SetNonce(address, account.Nonce)
+		if err != nil {
+			return nil, nil, err
+		}
 		var slotVal uint256.Int
 		for key, value := range account.Storage {
 			slotVal.SetBytes(value.Bytes())
-			statedb.SetState(address, accounts.InternKey(key), slotVal)
+			err = statedb.SetState(address, accounts.InternKey(key), slotVal)
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 
 		if len(account.Constructor) > 0 {
-			if _, err = protocol.SysCreate(address, account.Constructor, g.Config, statedb, head); err != nil {
+			if _, err := protocol.SysCreate(address, account.Constructor, g.Config, statedb, head); err != nil {
 				return nil, nil, err
 			}
 		}
 
 		if len(account.Code) > 0 || len(account.Storage) > 0 || len(account.Constructor) > 0 {
-			statedb.SetIncarnation(address, state.FirstContractIncarnation)
+			err = statedb.SetIncarnation(address, state.FirstContractIncarnation)
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 	}
-	if err = statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
+	if err := statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
 		return nil, nil, err
 	}
 
-	rh, err := sd.ComputeCommitment(context.Background(), tx, true, blockNum, txNum, "genesis", nil)
+	rh, err := sd.ComputeCommitment(ctx, tx, true, blockNum, txNum, "genesis", nil)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	head.Root = common.BytesToHash(rh)
-
-	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
+	return rh, statedb, nil
 }
 
 // GenesisWithoutStateToBlock creates the genesis block, assuming an empty state.
@@ -470,11 +498,14 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		}
 	}
 
-	if g.Config != nil && g.Config.IsGlamsterdam(g.Timestamp) {
+	if g.Config != nil && g.Config.IsAmsterdam(g.Timestamp) {
 		if g.BlockAccessListHash != nil {
 			head.BlockAccessListHash = g.BlockAccessListHash
 		} else {
 			head.BlockAccessListHash = &empty.BlockAccessListHash
+		}
+		if g.SlotNumber != nil {
+			head.SlotNumber = g.SlotNumber
 		}
 	}
 
@@ -495,8 +526,8 @@ func sortedAllocAddresses(m types.GenesisAlloc) []common.Address {
 		addrs = append(addrs, addr)
 	}
 
-	sort.Slice(addrs, func(i, j int) bool {
-		return bytes.Compare(addrs[i][:], addrs[j][:]) < 0
+	slices.SortFunc(addrs, func(a, b common.Address) int {
+		return bytes.Compare(a[:], b[:])
 	})
 	return addrs
 }

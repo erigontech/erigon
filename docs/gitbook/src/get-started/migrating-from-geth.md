@@ -2,6 +2,10 @@
 description: >-
   How to perform a smooth and quick transition from Geth or another Execution
   Layer (Nethermind, Reth, Besu) to Erigon.
+metaLinks:
+  alternates:
+    - >-
+      https://app.gitbook.com/s/3DGBf2RdbfoitX1XMgq0/get-started/migrating-from-geth
 ---
 
 # Migrating from Geth
@@ -47,7 +51,7 @@ This path offers the simplest validator configuration by using Erigon's embedded
       --port: 30304 \
       --p2p.allowed-ports: 30310, 30311, 30312, 30313, 30314, 30315, 30316
     ```
-3. **Synchronization**: Start syncing Erigon. Monitor the sync status using the `eth_syncing` JSON-[RPC method](../interacting-with-erigon/README.md) or a health check.
+3. **Synchronization**: Start syncing Erigon. Monitor the sync status using the `eth_syncing` JSON-[RPC method](../interacting-with-erigon/) or a health check.
 4. **Validator Swap**: Once Erigon is fully synced, shut down Geth and the external CL client.
 5. **Reconfiguration and Restart**:
    * To restart Erigon, there's no need to specify `--port` or `--P2P.allowed-ports`. Refer to this [guide](../fundamentals/caplin.md) for additional Erigon + Caplin configuration recommendations.
@@ -128,4 +132,4 @@ This path retains your existing **external Consensus Layer (CL)** client (e.g., 
 
 ***
 
-See [Basic Usage](../fundamentals/basic-usage.md) and [Configuring Erigon](../fundamentals/configuring-erigon.md) for more details on available options.
+See [Basic Usage](../fundamentals/basic-usage.md) and [Configuring Erigon](../fundamentals/configuring-erigon/) for more details on available options.

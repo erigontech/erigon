@@ -57,7 +57,7 @@ func TestEmptyBlock(t *testing.T) {
 	auraDB := memdb.NewTestDB(t, dbcfg.ChainDB)
 	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
 	require.NoError(err)
-	m := mock.MockWithGenesisEngine(t, genesis, engine, false)
+	m := mock.MockWithGenesisEngine(t, genesis, engine)
 
 	time := uint64(1539016985)
 	header := builder.MakeEmptyHeader(genesisBlock.Header(), chainConfig, time, nil)
@@ -95,7 +95,7 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 	auraDB := memdb.NewTestDB(t, dbcfg.ChainDB)
 	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
 	require.NoError(err)
-	m := mock.MockWithGenesisEngine(t, genesis, engine, false)
+	m := mock.MockWithGenesisEngine(t, genesis, engine)
 
 	difficulty := uint256.MustFromDecimal("340282366920938463463374607431768211454")
 	//Populate a sample valid header for a Pre-merge block
@@ -126,19 +126,13 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 		fakeVal, err := fakeAbi.Pack("", big.NewInt(12500000))
 		return fakeVal, err
 	}
-	require.NotPanics(func() {
-		m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, validPreMergeHeader, nil, syscallCustom, nil, nil)
-	})
+	require.NoError(m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, validPreMergeHeader, nil, syscallCustom, nil, nil))
 
 	invalidPreMergeHeader := validPreMergeHeader
 	invalidPreMergeHeader.GasLimit = 12_123456 //a different, wrong gasLimit
-	require.Panics(func() {
-		m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, invalidPreMergeHeader, nil, syscallCustom, nil, nil)
-	})
+	require.Error(m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, invalidPreMergeHeader, nil, syscallCustom, nil, nil))
 
 	invalidPostMergeHeader := invalidPreMergeHeader
 	invalidPostMergeHeader.Difficulty.Clear() //zero difficulty detected as PoS
-	require.NotPanics(func() {
-		m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, invalidPostMergeHeader, nil, syscallCustom, nil, nil)
-	})
+	require.NoError(m.Engine.Initialize(chainConfig, &blockgen.FakeChainReader{}, invalidPostMergeHeader, nil, syscallCustom, nil, nil))
 }

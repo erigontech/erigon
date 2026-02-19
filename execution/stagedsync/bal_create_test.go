@@ -8,6 +8,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -65,9 +66,9 @@ func TestCreateBALOrdering(t *testing.T) {
 
 	accountB := bal[1]
 
-	// Storage reads should be sorted and deduplicated.
-	if len(accountB.StorageReads) != 2 || accountB.StorageReads[0] != slot1 || accountB.StorageReads[1] != slot2 {
-		t.Fatalf("unexpected storage reads ordering: %+v", accountB.StorageReads)
+	// Storage reads are only recorded for slots without writes.
+	if len(accountB.StorageReads) != 0 {
+		t.Fatalf("unexpected storage reads: %+v", accountB.StorageReads)
 	}
 
 	// Storage slots should be sorted lexicographically.
@@ -81,7 +82,11 @@ func TestCreateBALOrdering(t *testing.T) {
 
 	slot1Changes := accountB.StorageChanges[0].Changes
 	if len(slot1Changes) != 1 || slot1Changes[0].Index != 2 || slot1Changes[0].Value.Uint64() != 5 {
-		t.Fatalf("unexpected slot1 change: %+v", slot1Changes)
+		changes := make([]types.StorageChange, len(slot1Changes))
+		for i, change := range slot1Changes {
+			changes[i] = *change
+		}
+		t.Fatalf("unexpected slot1 change: %+v", changes)
 	}
 
 	slot2Changes := accountB.StorageChanges[1].Changes
@@ -121,6 +126,7 @@ func addStorageWrite(writeSets map[int]state.VersionedWrites, txIdx int, addr ac
 		Address: addr,
 		Path:    state.StoragePath,
 		Key:     slot,
+		Version: state.Version{TxIndex: txIdx},
 		Val:     *uint256.NewInt(value),
 	})
 }
@@ -129,6 +135,7 @@ func addBalanceWrite(writeSets map[int]state.VersionedWrites, txIdx int, addr ac
 	writeSets[txIdx] = append(writeSets[txIdx], &state.VersionedWrite{
 		Address: addr,
 		Path:    state.BalancePath,
+		Version: state.Version{TxIndex: txIdx},
 		Val:     *uint256.NewInt(value),
 	})
 }

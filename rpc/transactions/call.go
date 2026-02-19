@@ -25,7 +25,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -155,23 +154,24 @@ func DoCall(
 	if blockOverrides != nil {
 		blockOverrides.Override(&blockCtx)
 	}
-	// Override the fields of specified contracts before execution.
-	if stateOverrides != nil {
-		if err := stateOverrides.OverrideAndCommit(state, blockCtx.Rules(chainConfig)); err != nil {
-			return nil, err
-		}
-	}
-
 	txCtx := protocol.NewEVMTxContext(msg)
-
 	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
-
 	// Wait for the context to be done and cancel the evm. Even if the
 	// EVM has finished, cancelling may be done (repeatedly)
 	go func() {
 		<-ctx.Done()
 		evm.Cancel()
 	}()
+
+	// Override the fields of specified contracts before execution.
+	if stateOverrides != nil {
+		rules := blockCtx.Rules(chainConfig)
+		precompiles := vm.ActivePrecompiledContracts(rules)
+		if err := stateOverrides.Override(state, precompiles, blockCtx.Rules(chainConfig)); err != nil {
+			return nil, err
+		}
+		evm.SetPrecompiles(precompiles)
+	}
 
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	result, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
@@ -264,9 +264,11 @@ func (r *ReusableCaller) DoCallWithNewGas(
 	txCtx := protocol.NewEVMTxContext(r.message)
 	ibs := state.New(r.stateReader)
 	if r.stateOverrides != nil {
-		if err := r.stateOverrides.OverrideAndCommit(ibs, r.rules); err != nil {
+		precompiles := vm.ActivePrecompiledContracts(r.rules)
+		if err := r.stateOverrides.Override(ibs, precompiles, r.rules); err != nil {
 			return nil, err
 		}
+		r.evm.SetPrecompiles(precompiles)
 	}
 	r.evm.Reset(txCtx, ibs)
 
@@ -278,9 +280,6 @@ func (r *ReusableCaller) DoCallWithNewGas(
 
 	gp := new(protocol.GasPool).AddGas(r.message.Gas()).AddBlobGas(r.message.BlobGas())
 
-	dbg.TraceInstructions = true
-	dbg.TraceTransactionIO = true
-	r.evm.IntraBlockState().SetTrace(true)
 	result, err := protocol.ApplyMessage(r.evm, r.message, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		return nil, err

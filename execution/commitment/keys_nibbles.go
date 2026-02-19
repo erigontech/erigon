@@ -3,6 +3,7 @@ package commitment
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	ecrypto "github.com/erigontech/erigon/common/crypto"
@@ -45,11 +46,11 @@ func KeyToNibblizedHash(key []byte) []byte {
 	return nibblized
 }
 
-// hexNibblesToCompactBytes Converts slice of hex nibbles into regular bytes form, combining two nibbles into one byte.
-func hexNibblesToCompactBytes(key []byte) []byte {
+// HexNibblesToCompactBytes Converts slice of hex nibbles into regular bytes form, combining two nibbles into one byte.
+func HexNibblesToCompactBytes(key []byte) []byte {
 	var compactZeroByte byte
 	keyLen := len(key)
-	if hasTerm(key) { // trim terminator if needed
+	if HasTerm(key) { // trim terminator if needed
 		keyLen--
 		compactZeroByte = 0x20
 	}
@@ -102,8 +103,8 @@ func uncompactNibbles(key []byte) []byte {
 	return buf
 }
 
-// hasTerm returns whether a hex nibble key has the terminator flag.
-func hasTerm(s []byte) bool {
+// HasTerm returns whether a hex nibble key has the terminator flag.
+func HasTerm(s []byte) bool {
 	return len(s) > 0 && s[len(s)-1] == terminatorHexByte
 }
 
@@ -164,19 +165,33 @@ func hashKey(keccak keccakState, plainKey []byte, dest []byte, hashedKeyOffset i
 	if _, err := keccak.Read(hashBuf); err != nil {
 		return err
 	}
-	hashBuf = hashBuf[hashedKeyOffset/2:]
+	hb := hashBuf[hashedKeyOffset/2:]
 	var k int
 	if hashedKeyOffset%2 == 1 { // write zero byte as compacted since hashedKeyOffset is odd
-		dest[0] = hashBuf[0] & 0xf
+		dest[0] = hb[0] & 0xf
 		k++
-		hashBuf = hashBuf[1:]
+		hb = hb[1:]
 	}
 	// write each byte as 2 hex nibbles
-	for _, c := range hashBuf {
+	for _, c := range hb {
 		dest[k] = (c >> 4) & 0xf
 		k++
 		dest[k] = c & 0xf
 		k++
 	}
 	return nil
+}
+
+func PrefixStringToNibbles(hexStr string) ([]byte, error) {
+	nibbles := make([]byte, len(hexStr))
+
+	for i, char := range hexStr {
+		nibble, err := strconv.ParseUint(string(char), 16, 8)
+		if err != nil {
+			return nil, err
+		}
+		nibbles[i] = byte(nibble)
+	}
+
+	return nibbles, nil
 }

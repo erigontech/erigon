@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
@@ -364,7 +365,8 @@ func (c *Clique) Prepare(chain rules.ChainHeaderReader, header *types.Header, st
 }
 
 func (c *Clique) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) {
+	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) error {
+	return nil
 }
 
 func (c *Clique) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall rules.SystemCall,
@@ -375,7 +377,7 @@ func (c *Clique) CalculateRewards(config *chain.Config, header *types.Header, un
 // Finalize implements rules.Engine, ensuring no uncles are set, nor block
 // rewards given.
 func (c *Clique) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
+	uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.FlatRequests, error) {
 	return nil, nil
@@ -569,7 +571,7 @@ func CliqueRLP(header *types.Header) []byte {
 }
 
 func encodeSigHeader(w io.Writer, header *types.Header) {
-	enc := []interface{}{
+	enc := []any{
 		header.ParentHash,
 		header.UncleHash,
 		header.Coinbase,
@@ -639,7 +641,7 @@ func (c *Clique) snapshots(latest uint64, total int) ([]*Snapshot, error) {
 }
 
 func (c *Clique) GetTransferFunc() evmtypes.TransferFunc {
-	return rules.Transfer
+	return misc.Transfer
 }
 
 func (c *Clique) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {

@@ -33,6 +33,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -65,6 +66,9 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.Fu
 	}
 	var integrityErr error
 	for i, file := range files {
+		if !strings.HasSuffix(file.Fullpath(), ".kv") {
+			continue
+		}
 		recompute := !onlyRecomputeLastFile || i == len(files)-1
 		err = checkCommitmentRootInFile(ctx, db, br, file, recompute, logger)
 		if err != nil {
@@ -152,12 +156,12 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br se
 	if txNum < startTxNum {
 		return info, fmt.Errorf("%w: commitment root txNum is lt startTxNum: %d < %d", ErrIntegrity, txNum, startTxNum)
 	}
-	txNumReader := br.TxnumReader(ctx)
-	blockMinTxNum, err := txNumReader.Min(tx, blockNum)
+	txNumReader := br.TxnumReader()
+	blockMinTxNum, err := txNumReader.Min(ctx, tx, blockNum)
 	if err != nil {
 		return info, err
 	}
-	blockMaxTxNum, err := txNumReader.Max(tx, blockNum)
+	blockMaxTxNum, err := txNumReader.Max(ctx, tx, blockNum)
 	if err != nil {
 		return info, err
 	}
@@ -200,20 +204,20 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 	}
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentCtx().SetLimitedHistoryStateReader(tx, maxTxNum) // to use tx.Debug().GetLatestFromFiles with maxTxNum
-	err = sd.SeekCommitment(ctx, tx)                                 // seek commitment again to use the new state reader instead
+	latestTxNum, _, err := sd.SeekCommitment(ctx, tx)                // seek commitment again to use the new state reader instead
 	if err != nil {
 		return nil, err
 	}
-	if sd.TxNum() > maxTxNum {
-		return nil, fmt.Errorf("%w: commitment root sd txNum should is gt maxTxNum: %d > %d", ErrIntegrity, sd.TxNum(), maxTxNum)
+	if latestTxNum > maxTxNum {
+		return nil, fmt.Errorf("%w: commitment root sd txNum should is gt maxTxNum: %d > %d", ErrIntegrity, latestTxNum, maxTxNum)
 	}
-	if sd.TxNum() > info.blockMaxTxNum {
-		return nil, fmt.Errorf("%w: commitment root sd txNum should is gt blockMaxTxNum: %d > %d", ErrIntegrity, sd.TxNum(), info.blockMaxTxNum)
+	if latestTxNum > info.blockMaxTxNum {
+		return nil, fmt.Errorf("%w: commitment root sd txNum should is gt blockMaxTxNum: %d > %d", ErrIntegrity, latestTxNum, info.blockMaxTxNum)
 	}
-	if sd.TxNum() < info.blockMinTxNum {
-		return nil, fmt.Errorf("%w: commitment root sd txNum should is lt blockMinTxNum: %d < %d", ErrIntegrity, sd.TxNum(), info.blockMinTxNum)
+	if latestTxNum < info.blockMinTxNum {
+		return nil, fmt.Errorf("%w: commitment root sd txNum should is lt blockMinTxNum: %d < %d", ErrIntegrity, latestTxNum, info.blockMinTxNum)
 	}
-	if sd.TxNum() == 0 {
+	if latestTxNum == 0 {
 		return nil, fmt.Errorf("%w: commitment root sd txNum should not be zero", ErrIntegrity)
 	}
 	if info.PartialBlock() {
@@ -240,7 +244,7 @@ func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *
 		return err
 	}
 	logger.Info("recomputing commitment root after", "touches", touches, "file", filepath.Base(f.Fullpath()))
-	recomputedBytes, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, sd.BlockNum(), sd.TxNum(), "integrity", nil)
+	recomputedBytes, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, sd.BlockNum(), sd.TxNum(), "integrity", nil /* commitProgress */)
 	if err != nil {
 		return err
 	}
@@ -280,7 +284,6 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 	if dbg.EnvBool("CHECK_COMMITMENT_KVS_DEREF_SEQUENTIAL", false) {
 		eg.SetLimit(1)
 	}
-	var integrityErr error
 	var branchKeys, referencedAccounts, plainAccounts, referencedStorages, plainStorages atomic.Uint64
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".kv") {
@@ -316,7 +319,7 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 		"referencedStorages", referencedStorages.Load(),
 		"plainStorages", plainStorages.Load(),
 	)
-	return integrityErr
+	return nil
 }
 
 type derefCounts struct {
@@ -580,7 +583,6 @@ func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 	} else {
 		eg.SetLimit(dbg.EnvInt("CHECK_COMMITMENT_HIST_VAL_WORKERS", 8))
 	}
-	var integrityErr error
 	var totalVals atomic.Uint64
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".v") {
@@ -611,7 +613,7 @@ func CheckCommitmentHistVal(ctx context.Context, db kv.TemporalRoDB, br services
 	total := totalVals.Load()
 	rate := float64(total) / dur.Seconds()
 	logger.Info("checked commitment history vals", "dur", time.Since(start), "files", len(files), "vals", total, "vals/s", rate)
-	return integrityErr
+	return nil
 }
 
 func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.FullBlockReader, file state.VisibleFile, failFast bool, logger log.Logger) (uint64, error) {
@@ -640,7 +642,7 @@ func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.F
 		"bucketStart", bucketStart,
 		"bucketEnd", bucketEnd,
 	)
-	txNumReader := br.TxnumReader(ctx)
+	txNumReader := br.TxnumReader()
 	it, err := tx.HistoryRange(kv.CommitmentDomain, int(bucketStart), int(bucketEnd), order.Asc, -1)
 	if err != nil {
 		return 0, err
@@ -667,9 +669,9 @@ func checkCommitmentHistVal(ctx context.Context, tx kv.TemporalTx, br services.F
 		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
 			rootHashBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(v)
 			if err != nil {
-				return 0, err
+				return 0, fmt.Errorf("issue extracting state root value in %s for [%d,%d) tx nums: %w", fileName, bucketStart, bucketEnd, err)
 			}
-			maxTxNum, err := txNumReader.Max(tx, blockNum)
+			maxTxNum, err := txNumReader.Max(ctx, tx, blockNum)
 			if err != nil {
 				return 0, err
 			}
@@ -730,12 +732,12 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if err != nil {
 		return err
 	}
-	txNumsReader := br.TxnumReader(ctx)
-	minTxNum, err := txNumsReader.Min(tx, blockNum)
+	txNumsReader := br.TxnumReader()
+	minTxNum, err := txNumsReader.Min(ctx, tx, blockNum)
 	if err != nil {
 		return err
 	}
-	maxTxNum, err := txNumsReader.Max(tx, blockNum)
+	maxTxNum, err := txNumsReader.Max(ctx, tx, blockNum)
 	if err != nil {
 		return err
 	}
@@ -746,15 +748,16 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	}
 	sd.GetCommitmentCtx().SetHistoryStateReader(tx, toTxNum)
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
-	err = sd.SeekCommitment(ctx, tx) // seek commitment again with new history state reader
+	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
+	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx) // seek commitment again with new history state reader
 	if err != nil {
 		return err
 	}
-	if sd.BlockNum() != blockNum {
-		return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d", sd.BlockNum(), blockNum)
+	if latestBlockNum != blockNum {
+		return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d", latestBlockNum, blockNum)
 	}
-	if sd.TxNum() != maxTxNum {
-		return fmt.Errorf("commitment state txNum doesn't match maxTxNum: %d != %d", sd.TxNum(), maxTxNum)
+	if latestTxNum != maxTxNum {
+		return fmt.Errorf("commitment state txNum doesn't match maxTxNum: %d != %d", latestTxNum, maxTxNum)
 	}
 	logger.Info("commitment recalc info", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
 	touchLoggingVisitor := func(k []byte) {
@@ -805,11 +808,22 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 		return fmt.Errorf("invalid blk range: %d >= %d", from, to)
 	}
 	start := time.Now()
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(estimate.AlmostAllCPUs())
 	for blockNum := from; blockNum < to; blockNum++ {
-		err := CheckCommitmentHistAtBlk(ctx, db, br, blockNum, logger)
-		if err != nil {
-			return err
-		}
+		blockNum := blockNum
+		g.Go(func() error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if err := CheckCommitmentHistAtBlk(ctx, db, br, blockNum, logger); err != nil {
+				return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
+			}
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return err
 	}
 	dur := time.Since(start)
 	blks := to - from

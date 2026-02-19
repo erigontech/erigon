@@ -118,7 +118,9 @@ func ResetSenders(ctx context.Context, tx kv.RwTx) error {
 }
 
 func ResetExec(ctx context.Context, db kv.TemporalRwDB) (err error) {
-	cleanupList := make([]string, 0)
+	domainTablesCount := len(db.Debug().DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain))
+	invertedIdxTablesCount := len(db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx))
+	cleanupList := make([]string, 0, len(stateBuckets)+len(stateHistoryBuckets)+domainTablesCount+invertedIdxTablesCount)
 	cleanupList = append(cleanupList, stateBuckets...)
 	cleanupList = append(cleanupList, stateHistoryBuckets...)
 	cleanupList = append(cleanupList, db.Debug().DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain)...)
@@ -227,7 +229,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 		case stages.Headers:
 			h2n := etl.NewCollector(logPrefix, dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/2), logger)
 			defer h2n.Close()
-			h2n.SortAndFlushInBackground(true)
+			h2n.SortAndFlushInBackground(false)
 			h2n.LogLvl(log.LvlDebug)
 
 			// fill some small tables from snapshots, in future we may store this data in snapshots also, but

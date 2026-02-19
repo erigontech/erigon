@@ -43,6 +43,7 @@ import (
 
 func TestFetch(t *testing.T) {
 	ctx := t.Context()
+	t.Parallel()
 
 	ctrl := gomock.NewController(t)
 	remoteKvClient := remoteproto.NewMockKVClient(ctrl)
@@ -137,7 +138,7 @@ func TestSendTxnPropagate(t *testing.T) {
 		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		list := make(Hashes, p2pTxPacketLimit*3)
 		for i := 0; i < len(list); i += 32 {
-			b := []byte(fmt.Sprintf("%x", i))
+			b := fmt.Appendf(nil, "%x", i)
 			copy(list[i:i+32], b)
 		}
 		send.BroadcastPooledTxns(testRlps(len(list)/32), 100)
@@ -235,6 +236,7 @@ func decodeHex(in string) []byte {
 }
 
 func TestOnNewBlock(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	_, db := memdb.NewTestDB(t, dbcfg.ChainDB), memdb.NewTestDB(t, dbcfg.TxPoolDB)
 	ctrl := gomock.NewController(t)

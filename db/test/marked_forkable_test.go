@@ -106,8 +106,8 @@ func TestMarked_PutToDb(t *testing.T) {
 	ma_tx := ma.BeginTemporalTx()
 	defer ma_tx.Close()
 	rwtx, err := db.BeginRw(context.Background())
-	defer rwtx.Rollback()
 	require.NoError(t, err)
+	defer rwtx.Rollback()
 
 	num := Num(1)
 	hash := common.HexToHash("0x1234").Bytes()
@@ -147,8 +147,8 @@ func TestPrune(t *testing.T) {
 			ma_tx := ma.BeginTemporalTx()
 			defer ma_tx.Close()
 			rwtx, err := db.BeginRw(ctx)
-			defer rwtx.Rollback()
 			require.NoError(t, err)
+			defer rwtx.Rollback()
 
 			buffer := &bytes.Buffer{}
 
@@ -193,8 +193,8 @@ func TestPrune(t *testing.T) {
 			defer ma_tx.Close()
 
 			rwtx, err = db.BeginRw(ctx)
-			defer rwtx.Rollback()
 			require.NoError(t, err)
+			defer rwtx.Rollback()
 
 			stat, err := ma_tx.Prune(ctx, pruneTo, 1000, nil, rwtx)
 			require.NoError(t, err)
@@ -235,8 +235,8 @@ func TestBuildFiles_Marked(t *testing.T) {
 	ma_tx := ma.BeginTemporalTx()
 	defer ma_tx.Close()
 	rwtx, err := db.BeginRw(ctx)
-	defer rwtx.Rollback()
 	require.NoError(t, err)
+	defer rwtx.Rollback()
 	cfg := state.Registry.SnapshotConfig(headerId)
 	entries_count := cfg.MinimumSize + cfg.SafetyMargin + /** in db **/ 2
 	buffer := &bytes.Buffer{}
@@ -284,8 +284,8 @@ func TestBuildFiles_Marked(t *testing.T) {
 	defer ma_tx.Close()
 
 	rwtx, err = db.BeginRw(ctx)
-	defer rwtx.Rollback()
 	require.NoError(t, err)
+	defer rwtx.Rollback()
 
 	firstRootNumNotInSnap := ma_tx.DebugFiles().VisibleFilesMaxRootNum()
 	stat, err := ma_tx.Prune(ctx, firstRootNumNotInSnap, 1000, nil, rwtx)

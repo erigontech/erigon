@@ -23,9 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
-	"strconv"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -53,49 +51,22 @@ type patternTable struct {
 }
 
 func newPatternTable(bitLen int) *patternTable {
-	pt := &patternTable{
-		bitLen: bitLen,
+	return &patternTable{
+		bitLen:   bitLen,
+		patterns: make([]*codeword, 1<<bitLen),
 	}
-	if bitLen <= condensePatternTableBitThreshold {
-		pt.patterns = make([]*codeword, 1<<pt.bitLen)
-	}
-	return pt
 }
 
 func (pt *patternTable) insertWord(cw *codeword) {
-	if pt.bitLen <= condensePatternTableBitThreshold {
-		codeStep := uint16(1) << uint16(cw.len)
-		codeFrom, codeTo := cw.code, cw.code+codeStep
-		if pt.bitLen != int(cw.len) && cw.len > 0 {
-			codeTo = codeFrom | (uint16(1) << pt.bitLen)
-		}
-
-		for c := codeFrom; c < codeTo; c += codeStep {
-			pt.patterns[c] = cw
-		}
-		return
+	codeStep := uint16(1) << uint16(cw.len)
+	codeFrom, codeTo := cw.code, cw.code+codeStep
+	if pt.bitLen != int(cw.len) && cw.len > 0 {
+		codeTo = codeFrom | (uint16(1) << pt.bitLen)
 	}
 
-	pt.patterns = append(pt.patterns, cw)
-}
-
-func (pt *patternTable) condensedTableSearch(code uint16) *codeword {
-	if pt.bitLen <= condensePatternTableBitThreshold {
-		return pt.patterns[code]
+	for c := codeFrom; c < codeTo; c += codeStep {
+		pt.patterns[c] = cw
 	}
-	for _, cur := range pt.patterns {
-		if cur.code == code {
-			return cur
-		}
-		d := code - cur.code
-		if d&1 != 0 {
-			continue
-		}
-		if checkDistance(int(cur.len), int(d)) {
-			return cur
-		}
-	}
-	return nil
 }
 
 type posTable struct {
@@ -121,19 +92,22 @@ func (e ErrCompressedFileCorrupted) Is(err error) bool {
 
 // Decompressor provides access to the superstrings in a file produced by a compressor
 type Decompressor struct {
-	f               *os.File
-	mmapHandle2     *[mmap.MaxMapSize]byte // mmap handle for windows (this is used to close mmap)
-	dict            *patternTable
-	posDict         *posTable
-	mmapHandle1     []byte // mmap handle for unix (this is used to close mmap)
-	data            []byte // slice of correct size for the decompressor to work with
-	wordsStart      uint64 // Offset of whether the superstrings actually start
-	size            int64
-	modTime         time.Time
-	wordsCount      uint64
-	emptyWordsCount uint64
-	hasMetadata     bool
-	metadata        []byte
+	f                   *os.File
+	mmapHandle2         *[mmap.MaxMapSize]byte // mmap handle for windows (this is used to close mmap)
+	dict                *patternTable
+	posDict             *posTable
+	mmapHandle1         []byte // mmap handle for unix (this is used to close mmap)
+	data                []byte // slice of correct size for the decompressor to work with
+	wordsStart          uint64 // Offset of whether the superstrings actually start
+	size                int64
+	modTime             time.Time
+	wordsCount          uint64
+	emptyWordsCount     uint64
+	hasMetadata         bool
+	metadata            []byte
+	version             uint8
+	featureFlagBitmask  FeatureFlagBitmask
+	compPageValuesCount uint8
 
 	serializedDictSize uint64
 	lenDictSize        uint64 // huffman encoded lengths
@@ -152,35 +126,6 @@ const (
 
 	compressedMinSize = 32
 )
-
-// Tables with bitlen greater than threshold will be condensed.
-// Condensing reduces size of decompression table but leads to slower reads.
-// To disable condesning at all set to 9 (we don't use tables larger than 2^9)
-// To enable condensing for tables of size larger 64 = 6
-// for all tables                                    = 0
-// There is no sense to condense tables of size [1 - 64] in terms of performance
-//
-// Should be set before calling NewDecompression.
-var condensePatternTableBitThreshold = 9
-
-func init() {
-	v, _ := os.LookupEnv("DECOMPRESS_CONDENSITY")
-	if v != "" {
-		i, err := strconv.Atoi(v)
-		if err != nil {
-			panic(err)
-		}
-		if i < 3 || i > 9 {
-			panic("DECOMPRESS_CONDENSITY: only numbers in range 3-9 are acceptable ")
-		}
-		condensePatternTableBitThreshold = i
-		fmt.Printf("set DECOMPRESS_CONDENSITY to %d\n", i)
-	}
-}
-
-func SetDecompressionTableCondensity(fromBitSize int) {
-	condensePatternTableBitThreshold = fromBitSize
-}
 
 func NewDecompressor(compressedFilePath string) (*Decompressor, error) {
 	return NewDecompressorWithMetadata(compressedFilePath, false)
@@ -230,6 +175,21 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 	// read patterns from file
 	d.data = d.mmapHandle1[:d.size]
 	defer d.MadvNormal().DisableReadAhead() //speedup opening on slow drives
+
+	d.version = d.data[0]
+
+	if d.version == FileCompressionFormatV1 {
+		// 1st byte: version,
+		// 2nd byte: defines how exactly the file is compressed
+		// 3rd byte (otional): exists if PageLevelCompressionEnabled flag is enabled, and defines number of values on compressed page
+		d.featureFlagBitmask = FeatureFlagBitmask(d.data[1])
+		d.data = d.data[2:]
+	}
+
+	if d.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
+		d.compPageValuesCount = d.data[0]
+		d.data = d.data[1:]
+	}
 
 	if hasMetadata {
 		metadataLen := binary.BigEndian.Uint32(d.data[:4])
@@ -362,10 +322,11 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 	}
 	d.wordsStart = pos + dictSize
 
-	if d.Count() == 0 && dictSize == 0 && d.size > compressedMinSize {
+	if d.Count() == 0 && dictSize == 0 && d.size > d.calcCompressedMinSize() {
 		return nil, &ErrCompressedFileCorrupted{
 			FileName: fName, Reason: fmt.Sprintf("size %v but no words in it", datasize.ByteSize(d.size).HR())}
 	}
+
 	validationPassed = true
 	return d, nil
 }
@@ -466,10 +427,12 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 func (d *Decompressor) DataHandle() unsafe.Pointer {
 	return unsafe.Pointer(&d.data[0])
 }
-func (d *Decompressor) SerializedDictSize() uint64 { return d.serializedDictSize }
-func (d *Decompressor) SerializedLenSize() uint64  { return d.lenDictSize }
-func (d *Decompressor) DictWords() int             { return d.dictWords }
-func (d *Decompressor) DictLens() int              { return d.dictLens }
+func (d *Decompressor) SerializedDictSize() uint64      { return d.serializedDictSize }
+func (d *Decompressor) SerializedLenSize() uint64       { return d.lenDictSize }
+func (d *Decompressor) DictWords() int                  { return d.dictWords }
+func (d *Decompressor) DictLens() int                   { return d.dictLens }
+func (d *Decompressor) CompressedPageValuesCount() int  { return int(d.compPageValuesCount) }
+func (d *Decompressor) CompressionFormatVersion() uint8 { return d.version }
 
 func (d *Decompressor) Size() int64 {
 	return d.size
@@ -602,87 +565,78 @@ func (g *Getter) Count() int          { return g.d.Count() }
 func (g *Getter) FileName() string    { return g.fName }
 func (g *Getter) GetMetadata() []byte { return g.d.GetMetadata() }
 
-func (g *Getter) nextPos(clean bool) (pos uint64) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			panic(fmt.Sprintf("nextPos fails: file: %s, %s, %s", g.fName, rec, dbg.Stack()))
-		}
-	}()
+func (g *Getter) nextPos(clean bool) uint64 {
 	if clean && g.dataBit > 0 {
 		g.dataP++
 		g.dataBit = 0
 	}
-	table, dataLen, data := g.posDict, len(g.data), g.data
+	table := g.posDict
 	if table.bitLen == 0 {
 		return table.pos[0]
 	}
-	for l := byte(0); l == 0; {
-		code := uint16(data[g.dataP]) >> g.dataBit
-		if 8-g.dataBit < table.bitLen && int(g.dataP)+1 < dataLen {
-			code |= uint16(data[g.dataP+1]) << (8 - g.dataBit)
+	data := g.data
+	dataP := g.dataP
+	dataBit := g.dataBit
+	dataLen := uint64(len(data))
+	// Precompute mask for the first table (hot path optimization)
+	mask := uint16(1)<<table.bitLen - 1
+	for {
+		// Read up to 16 bits starting at dataP, shifted by dataBit
+		code := uint16(data[dataP]) >> dataBit
+		if 8-dataBit < table.bitLen && dataP+1 < dataLen {
+			code |= uint16(data[dataP+1]) << (8 - dataBit)
 		}
-		code &= (uint16(1) << table.bitLen) - 1
-		l = table.lens[code]
+		code &= mask
+		l := int(table.lens[code])
 		if l == 0 {
 			table = table.ptrs[code]
-			g.dataBit += 9
+			dataBit += 9
+			dataP += uint64(dataBit >> 3)
+			dataBit &= 7
+			mask = uint16(1)<<table.bitLen - 1
 		} else {
-			g.dataBit += int(l)
-			pos = table.pos[code]
+			dataBit += l
+			dataP += uint64(dataBit >> 3)
+			g.dataP = dataP
+			g.dataBit = dataBit & 7
+			return table.pos[code]
 		}
-		g.dataP += uint64(g.dataBit / 8)
-		g.dataBit %= 8
 	}
-	return pos
 }
 
 func (g *Getter) nextPattern() []byte {
 	table := g.patternDict
-
 	if table.bitLen == 0 {
 		return table.patterns[0].pattern
 	}
 
-	var l byte
-	var pattern []byte
-	for l == 0 {
-		code := uint16(g.data[g.dataP]) >> g.dataBit
-		if 8-g.dataBit < table.bitLen && int(g.dataP)+1 < len(g.data) {
-			code |= uint16(g.data[g.dataP+1]) << (8 - g.dataBit)
+	data := g.data
+	dataP := g.dataP
+	dataBit := g.dataBit
+	dataLen := uint64(len(data))
+
+	for {
+		code := uint16(data[dataP]) >> dataBit
+		if 8-dataBit < table.bitLen && dataP+1 < dataLen {
+			code |= uint16(data[dataP+1]) << (8 - dataBit)
 		}
 		code &= (uint16(1) << table.bitLen) - 1
 
-		cw := table.condensedTableSearch(code)
-		l = cw.len
-		if l == 0 {
+		cw := table.patterns[code]
+		if cw.len == 0 {
 			table = cw.ptr
-			g.dataBit += 9
+			dataBit += 9
 		} else {
-			g.dataBit += int(l)
-			pattern = cw.pattern
+			dataBit += int(cw.len)
 		}
-		g.dataP += uint64(g.dataBit / 8)
-		g.dataBit %= 8
-	}
-	return pattern
-}
-
-var condensedWordDistances = buildCondensedWordDistances()
-
-func checkDistance(power int, d int) bool {
-	return slices.Contains(condensedWordDistances[power], d)
-}
-
-func buildCondensedWordDistances() [][]int {
-	dist2 := make([][]int, 10)
-	for i := 1; i <= 9; i++ {
-		dl := make([]int, 0)
-		for j := 1 << i; j < 512; j += 1 << i {
-			dl = append(dl, j)
+		dataP += uint64(dataBit >> 3)
+		dataBit &= 7
+		if cw.len != 0 {
+			g.dataP = dataP
+			g.dataBit = dataBit
+			return cw.pattern
 		}
-		dist2[i] = dl
 	}
-	return dist2
 }
 
 func (g *Getter) Size() int {
@@ -871,21 +825,12 @@ func (g *Getter) SkipUncompressed() (uint64, int) {
 // MatchPrefix only checks if the word at the current offset has a buf prefix. Does not move offset to the next word.
 func (g *Getter) MatchPrefix(prefix []byte) bool {
 	savePos := g.dataP
-	defer func() {
-		g.dataP, g.dataBit = savePos, 0
-	}()
 
 	wordLen := g.nextPos(true /* clean */)
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
 	prefixLen := len(prefix)
 	if wordLen == 0 || int(wordLen) < prefixLen {
-		if g.dataBit > 0 {
-			g.dataP++
-			g.dataBit = 0
-		}
-		if prefixLen != 0 {
-			g.dataP, g.dataBit = savePos, 0
-		}
+		g.dataP, g.dataBit = savePos, 0
 		return prefixLen == int(wordLen)
 	}
 
@@ -903,6 +848,7 @@ func (g *Getter) MatchPrefix(prefix []byte) bool {
 		}
 		if bufPos < prefixLen {
 			if !bytes.Equal(prefix[bufPos:bufPos+comparisonLen], pattern[:comparisonLen]) {
+				g.dataP, g.dataBit = savePos, 0
 				return false
 			}
 		}
@@ -929,6 +875,7 @@ func (g *Getter) MatchPrefix(prefix []byte) bool {
 				comparisonLen = int(dif)
 			}
 			if !bytes.Equal(prefix[lastUncovered:lastUncovered+comparisonLen], g.data[postLoopPos:postLoopPos+uint64(comparisonLen)]) {
+				g.dataP, g.dataBit = savePos, 0
 				return false
 			}
 			postLoopPos += dif
@@ -944,9 +891,11 @@ func (g *Getter) MatchPrefix(prefix []byte) bool {
 			comparisonLen = int(dif)
 		}
 		if !bytes.Equal(prefix[lastUncovered:lastUncovered+comparisonLen], g.data[postLoopPos:postLoopPos+uint64(comparisonLen)]) {
+			g.dataP, g.dataBit = savePos, 0
 			return false
 		}
 	}
+	g.dataP, g.dataBit = savePos, 0
 	return true
 }
 
@@ -1077,4 +1026,16 @@ func (g *Getter) BinarySearch(seek []byte, count int, getOffset func(i uint64) (
 		return 0, false
 	}
 	return foundOffset, true
+}
+
+func (d *Decompressor) calcCompressedMinSize() int64 {
+	if d.version == FileCompressionFormatV0 {
+		return compressedMinSize
+	}
+
+	if d.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
+		return compressedMinSize + 3 // 2 bytes always are used for bitmask and version + 1 optional for page level compression if enabled
+	}
+
+	return compressedMinSize + 2
 }

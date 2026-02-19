@@ -52,7 +52,7 @@ func (overrides *BlockOverrides) Override(context *evmtypes.BlockContext) error 
 	}
 
 	if overrides.GasLimit != nil {
-		context.Time = overrides.GasLimit.Uint64()
+		context.GasLimit = overrides.GasLimit.Uint64()
 	}
 
 	if overrides.FeeRecipient != nil {
