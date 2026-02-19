@@ -242,7 +242,14 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		dictPos += uint64(ns)
 		l, n := binary.Uvarint(data[dictPos:])
 		dictPos += uint64(n)
-		patterns = append(patterns, data[dictPos:dictPos+l])
+		// Copy pattern data from mmap'd memory to Go heap.
+		// Patterns are stored in codeword structs on the Go heap, and the GC
+		// will scan their data pointers. If those pointers reference mmap'd
+		// memory (which on some platforms overlaps with Go's heap address
+		// range), the GC may crash with "found bad pointer in Go heap".
+		pat := make([]byte, l)
+		copy(pat, data[dictPos:dictPos+l])
+		patterns = append(patterns, pat)
 		//fmt.Printf("depth = %d, pattern = [%x]\n", depth, data[dictPos:dictPos+l])
 		dictPos += l
 	}
