@@ -131,10 +131,10 @@ func CalcDifficultyHomesteadU256(time, parentTime uint64, parentDifficulty uint2
 	return pDiff
 }
 
-// MakeDifficultyCalculatorU256 creates a difficultyCalculator with the given bomb-delay.
+// makeDifficultyCalculator creates a difficultyCalculator with the given bomb-delay.
 // the difficulty is calculated with Byzantium rules, which differs from Homestead in
 // how uncles affect the calculation
-func MakeDifficultyCalculatorU256(bombDelay uint64) func(time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentUncleHash common.Hash) *uint256.Int {
+func makeDifficultyCalculator(bombDelay uint64) func(time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentUncleHash common.Hash) *uint256.Int {
 	// Note, the calculations below looks at the parent number, which is 1 below
 	// the block number. Thus we remove one from the delay given
 	bombDelayFromParent := bombDelay - 1
