@@ -470,8 +470,12 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				if errors.Is(err, rules.ErrInvalidBlock) {
 					unwindReason = BadBlock(txTask.Header.Hash(), err)
 				}
-				if err := se.u.UnwindTo(txTask.BlockNumber()-1, unwindReason, se.applyTx); err != nil {
-					return false, err
+				if unwindErr := se.u.UnwindTo(txTask.BlockNumber()-1, unwindReason, se.applyTx); unwindErr != nil {
+					// Log the unwind error but preserve the original execution error for better debugging.
+					// This commonly happens at frozen block boundaries where unwind is not possible
+					// (e.g., when no changesets exist and commitment is at the current block).
+					se.logger.Warn(fmt.Sprintf("[%s] failed to set unwind point after execution error", se.logPrefix),
+						"block", txTask.BlockNumber(), "unwindErr", unwindErr)
 				}
 			}
 
