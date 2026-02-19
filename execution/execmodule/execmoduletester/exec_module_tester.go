@@ -147,26 +147,26 @@ type ExecModuleTester struct {
 	bgComponentsEg errgroup.Group
 }
 
-func (ms *ExecModuleTester) Close() {
-	ms.cancel()
-	if ms.Engine != nil {
-		ms.Engine.Close()
+func (emt *ExecModuleTester) Close() {
+	emt.cancel()
+	if emt.Engine != nil {
+		emt.Engine.Close()
 	}
-	if ms.BlockSnapshots != nil {
-		ms.BlockSnapshots.Close()
+	if emt.BlockSnapshots != nil {
+		emt.BlockSnapshots.Close()
 	}
-	if ms.DB != nil {
-		ms.DB.Close()
+	if emt.DB != nil {
+		emt.DB.Close()
 	}
-	if err := ms.bgComponentsEg.Wait(); err != nil {
-		require.Equal(ms.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
+	if err := emt.bgComponentsEg.Wait(); err != nil {
+		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
 	}
 }
 
 // Stream returns stream, waiting if necessary
-func (ms *ExecModuleTester) Send(req *sentryproto.InboundMessage) (errs []error) {
-	ms.StreamWg.Wait()
-	for _, stream := range ms.streams[req.Id] {
+func (emt *ExecModuleTester) Send(req *sentryproto.InboundMessage) (errs []error) {
+	emt.StreamWg.Wait()
+	for _, stream := range emt.streams[req.Id] {
 		if err := stream.Send(req); err != nil {
 			errs = append(errs, err)
 		}
@@ -174,83 +174,83 @@ func (ms *ExecModuleTester) Send(req *sentryproto.InboundMessage) (errs []error)
 	return errs
 }
 
-func (ms *ExecModuleTester) SetStatus(context.Context, *sentryproto.StatusData) (*sentryproto.SetStatusReply, error) {
+func (emt *ExecModuleTester) SetStatus(context.Context, *sentryproto.StatusData) (*sentryproto.SetStatusReply, error) {
 	return &sentryproto.SetStatusReply{}, nil
 }
 
-func (ms *ExecModuleTester) PenalizePeer(context.Context, *sentryproto.PenalizePeerRequest) (*emptypb.Empty, error) {
+func (emt *ExecModuleTester) PenalizePeer(context.Context, *sentryproto.PenalizePeerRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
 
-func (ms *ExecModuleTester) SetPeerMinimumBlock(context.Context, *sentryproto.SetPeerMinimumBlockRequest) (*emptypb.Empty, error) {
+func (emt *ExecModuleTester) SetPeerMinimumBlock(context.Context, *sentryproto.SetPeerMinimumBlockRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
 
-func (ms *ExecModuleTester) SetPeerLatestBlock(context.Context, *sentryproto.SetPeerLatestBlockRequest) (*emptypb.Empty, error) {
+func (emt *ExecModuleTester) SetPeerLatestBlock(context.Context, *sentryproto.SetPeerLatestBlockRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
 
-func (ms *ExecModuleTester) SetPeerBlockRange(context.Context, *sentryproto.SetPeerBlockRangeRequest) (*emptypb.Empty, error) {
+func (emt *ExecModuleTester) SetPeerBlockRange(context.Context, *sentryproto.SetPeerBlockRangeRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
 
-func (ms *ExecModuleTester) HandShake(ctx context.Context, in *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
+func (emt *ExecModuleTester) HandShake(ctx context.Context, in *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
 	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH69}, nil
 }
-func (ms *ExecModuleTester) SendMessageByMinBlock(_ context.Context, r *sentryproto.SendMessageByMinBlockRequest) (*sentryproto.SentPeers, error) {
-	ms.sentMessages = append(ms.sentMessages, r.Data)
+func (emt *ExecModuleTester) SendMessageByMinBlock(_ context.Context, r *sentryproto.SendMessageByMinBlockRequest) (*sentryproto.SentPeers, error) {
+	emt.sentMessages = append(emt.sentMessages, r.Data)
 	return nil, nil
 }
-func (ms *ExecModuleTester) SendMessageById(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
-	ms.sentMessages = append(ms.sentMessages, r.Data)
+func (emt *ExecModuleTester) SendMessageById(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
+	emt.sentMessages = append(emt.sentMessages, r.Data)
 	return nil, nil
 }
-func (ms *ExecModuleTester) SendMessageToRandomPeers(_ context.Context, r *sentryproto.SendMessageToRandomPeersRequest) (*sentryproto.SentPeers, error) {
-	ms.sentMessages = append(ms.sentMessages, r.Data)
+func (emt *ExecModuleTester) SendMessageToRandomPeers(_ context.Context, r *sentryproto.SendMessageToRandomPeersRequest) (*sentryproto.SentPeers, error) {
+	emt.sentMessages = append(emt.sentMessages, r.Data)
 	return nil, nil
 }
-func (ms *ExecModuleTester) SendMessageToAll(_ context.Context, r *sentryproto.OutboundMessageData) (*sentryproto.SentPeers, error) {
-	ms.sentMessages = append(ms.sentMessages, r)
+func (emt *ExecModuleTester) SendMessageToAll(_ context.Context, r *sentryproto.OutboundMessageData) (*sentryproto.SentPeers, error) {
+	emt.sentMessages = append(emt.sentMessages, r)
 	return nil, nil
 }
-func (ms *ExecModuleTester) SentMessage(i int) (*sentryproto.OutboundMessageData, error) {
-	if i < 0 || i >= len(ms.sentMessages) {
+func (emt *ExecModuleTester) SentMessage(i int) (*sentryproto.OutboundMessageData, error) {
+	if i < 0 || i >= len(emt.sentMessages) {
 		return nil, fmt.Errorf("no sent message for index %d found", i)
 	}
-	return ms.sentMessages[i], nil
+	return emt.sentMessages[i], nil
 }
 
-func (ms *ExecModuleTester) Messages(req *sentryproto.MessagesRequest, stream sentryproto.Sentry_MessagesServer) error {
-	if ms.streams == nil {
-		ms.streams = map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer{}
+func (emt *ExecModuleTester) Messages(req *sentryproto.MessagesRequest, stream sentryproto.Sentry_MessagesServer) error {
+	if emt.streams == nil {
+		emt.streams = map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer{}
 	}
 
 	for _, id := range req.Ids {
-		ms.streams[id] = append(ms.streams[id], stream)
+		emt.streams[id] = append(emt.streams[id], stream)
 	}
-	ms.StreamWg.Done()
+	emt.StreamWg.Done()
 	select {
-	case <-ms.Ctx.Done():
+	case <-emt.Ctx.Done():
 		return nil
 	case <-stream.Context().Done():
 		return nil
 	}
 }
 
-func (ms *ExecModuleTester) Peers(context.Context, *emptypb.Empty) (*sentryproto.PeersReply, error) {
+func (emt *ExecModuleTester) Peers(context.Context, *emptypb.Empty) (*sentryproto.PeersReply, error) {
 	return &sentryproto.PeersReply{}, nil
 }
-func (ms *ExecModuleTester) PeerCount(context.Context, *sentryproto.PeerCountRequest) (*sentryproto.PeerCountReply, error) {
+func (emt *ExecModuleTester) PeerCount(context.Context, *sentryproto.PeerCountRequest) (*sentryproto.PeerCountReply, error) {
 	return &sentryproto.PeerCountReply{Count: 0}, nil
 }
-func (ms *ExecModuleTester) PeerById(context.Context, *sentryproto.PeerByIdRequest) (*sentryproto.PeerByIdReply, error) {
+func (emt *ExecModuleTester) PeerById(context.Context, *sentryproto.PeerByIdRequest) (*sentryproto.PeerByIdReply, error) {
 	return &sentryproto.PeerByIdReply{}, nil
 }
-func (ms *ExecModuleTester) PeerEvents(req *sentryproto.PeerEventsRequest, server sentryproto.Sentry_PeerEventsServer) error {
+func (emt *ExecModuleTester) PeerEvents(req *sentryproto.PeerEventsRequest, server sentryproto.Sentry_PeerEventsServer) error {
 	return nil
 }
 
-func (ms *ExecModuleTester) NodeInfo(context.Context, *emptypb.Empty) (*typesproto.NodeInfoReply, error) {
+func (emt *ExecModuleTester) NodeInfo(context.Context, *emptypb.Empty) (*typesproto.NodeInfoReply, error) {
 	return nil, nil
 }
 
@@ -763,18 +763,18 @@ func NewWithTxPoolAllProtocolChanges(t *testing.T) *ExecModuleTester {
 	return NewWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true)
 }
 
-func (ms *ExecModuleTester) EnableLogs() {
-	ms.Log.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+func (emt *ExecModuleTester) EnableLogs() {
+	emt.Log.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 }
 
-func (ms *ExecModuleTester) Cfg() ethconfig.Config { return ms.cfg }
+func (emt *ExecModuleTester) Cfg() ethconfig.Config { return emt.cfg }
 
-func (ms *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
-	wr := chainreader.NewChainReaderEth1(ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), time.Hour)
+func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
+	wr := chainreader.NewChainReaderEth1(emt.ChainConfig, direct.NewExecutionClientDirect(emt.Eth1ExecutionService), time.Hour)
 
-	streamCtx, cancel := context.WithCancel(ms.Ctx)
+	streamCtx, cancel := context.WithCancel(emt.Ctx)
 	defer cancel()
-	stream, err := ms.stateChangesClient.StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: false, WithTransactions: false}, grpc.WaitForReady(true))
+	stream, err := emt.stateChangesClient.StateChanges(streamCtx, &remoteproto.StateChangeRequest{WithStorage: false, WithTransactions: false}, grpc.WaitForReady(true))
 	if err != nil {
 		return err
 	}
@@ -799,13 +799,13 @@ func (ms *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 			})
 		}
 	}
-	if err := wr.InsertBlocksAndWaitWithAccessLists(ms.Ctx, chain.Blocks, balEntries); err != nil {
+	if err := wr.InsertBlocksAndWaitWithAccessLists(emt.Ctx, chain.Blocks, balEntries); err != nil {
 		return err
 	}
 
 	tipHash := chain.TopBlock.Hash()
 
-	status, verr, _, err := wr.UpdateForkChoice(ms.Ctx, tipHash, tipHash, tipHash)
+	status, verr, _, err := wr.UpdateForkChoice(emt.Ctx, tipHash, tipHash, tipHash)
 	if err != nil {
 		return err
 	}
@@ -825,7 +825,7 @@ func (ms *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 	for len(insertedBlocks) > 0 {
 		req, err := stream.Recv()
 		if err != nil {
-			if ms.Ctx.Err() != nil {
+			if emt.Ctx.Err() != nil {
 				return nil
 			}
 			if streamCtx.Err() != nil {
@@ -848,11 +848,11 @@ func (ms *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
 	return nil
 }
 
-func (ms *ExecModuleTester) InsertChain(chain *blockgen.ChainPack) error {
-	if err := ms.insertPoSBlocks(chain); err != nil {
+func (emt *ExecModuleTester) InsertChain(chain *blockgen.ChainPack) error {
+	if err := emt.insertPoSBlocks(chain); err != nil {
 		return err
 	}
-	roTx, err := ms.DB.BeginRo(ms.Ctx)
+	roTx, err := emt.DB.BeginRo(emt.Ctx)
 	if err != nil {
 		return err
 	}
@@ -871,46 +871,46 @@ func (ms *ExecModuleTester) InsertChain(chain *blockgen.ChainPack) error {
 	if rawdb.ReadHeadBlockHash(roTx) != chain.TopBlock.Hash() {
 		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
-	if ms.sentriesClient.Hd.IsBadHeader(chain.TopBlock.Hash()) {
+	if emt.sentriesClient.Hd.IsBadHeader(chain.TopBlock.Hash()) {
 		return fmt.Errorf("block %d %x was invalid", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
 	return nil
 }
 
-func (ms *ExecModuleTester) HeaderDownload() *headerdownload.HeaderDownload {
-	return ms.sentriesClient.Hd
+func (emt *ExecModuleTester) HeaderDownload() *headerdownload.HeaderDownload {
+	return emt.sentriesClient.Hd
 }
 
-func (ms *ExecModuleTester) NewHistoryStateReader(blockNum uint64, tx kv.TemporalTx) state.StateReader {
-	r, err := rpchelper.CreateHistoryStateReader(context.Background(), tx, blockNum, 0, ms.BlockReader.TxnumReader())
+func (emt *ExecModuleTester) NewHistoryStateReader(blockNum uint64, tx kv.TemporalTx) state.StateReader {
+	r, err := rpchelper.CreateHistoryStateReader(context.Background(), tx, blockNum, 0, emt.BlockReader.TxnumReader())
 	if err != nil {
 		panic(err)
 	}
 	return r
 }
 
-func (ms *ExecModuleTester) NewStateReader(tx kv.TemporalGetter) state.StateReader {
+func (emt *ExecModuleTester) NewStateReader(tx kv.TemporalGetter) state.StateReader {
 	return state.NewReaderV3(tx)
 }
 
-func (ms *ExecModuleTester) BlocksIO() (services.FullBlockReader, *blockio.BlockWriter) {
-	return ms.BlockReader, blockio.NewBlockWriter()
+func (emt *ExecModuleTester) BlocksIO() (services.FullBlockReader, *blockio.BlockWriter) {
+	return emt.BlockReader, blockio.NewBlockWriter()
 }
 
-func (ms *ExecModuleTester) Current(tx kv.Tx) *types.Block {
+func (emt *ExecModuleTester) Current(tx kv.Tx) *types.Block {
 	if tx != nil {
-		b, err := ms.BlockReader.CurrentBlock(tx)
+		b, err := emt.BlockReader.CurrentBlock(tx)
 		if err != nil {
 			panic(err)
 		}
 		return b
 	}
-	tx, err := ms.DB.BeginRo(context.Background())
+	tx, err := emt.DB.BeginRo(context.Background())
 	if err != nil {
 		panic(err)
 	}
 	defer tx.Rollback()
-	b, err := ms.BlockReader.CurrentBlock(tx)
+	b, err := emt.BlockReader.CurrentBlock(tx)
 	if err != nil {
 		panic(err)
 	}
