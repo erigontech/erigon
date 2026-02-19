@@ -439,7 +439,11 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
 
-		agg, err := dbstate.New(cfg.Dirs).Logger(logger).Open(ctx, rawDB)
+		erigonDBSettings, err := dbstate.ResolveErigonDBSettings(cfg.Dirs, logger, false)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
+		}
+		agg, err := dbstate.New(cfg.Dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, rawDB)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, fmt.Errorf("create aggregator: %w", err)
 		}

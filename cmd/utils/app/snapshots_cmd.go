@@ -2736,7 +2736,11 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *state.Aggregator {
-	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).Open(ctx, chainDB)
+	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		panic(err)
+	}
+	agg, err := state.New(dirs).SanityOldNaming().Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, chainDB)
 	if err != nil {
 		panic(err)
 	}

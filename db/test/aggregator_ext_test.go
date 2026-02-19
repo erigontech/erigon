@@ -140,7 +140,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	newDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
 	t.Cleanup(newDb.Close)
 
-	newAgg := state.New(agg.Dirs()).StepSize(stepSize).MustOpen(ctx, newDb)
+	newAgg := state.New(agg.Dirs()).StepSize(stepSize).StepsInFrozenFile(config3.DefaultStepsInFrozenFile).MustOpen(ctx, newDb)
 	require.NoError(t, newAgg.OpenFolder())
 
 	db, _ = temporal.New(newDb, newAgg)

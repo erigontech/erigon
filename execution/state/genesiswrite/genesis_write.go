@@ -315,7 +315,11 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 	genesisTmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(tb, dirs.Tmp).MapSize(2 * datasize.TB).GrowthStep(1 * datasize.MB).MustOpen()
 	defer genesisTmpDB.Close()
 
-	agg, err := dbstate.New(dirs).Logger(logger).Open(ctx, genesisTmpDB)
+	erigonDBSettings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, genesisTmpDB)
 	if err != nil {
 		return nil, nil, err
 	}

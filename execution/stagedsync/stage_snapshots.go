@@ -190,6 +190,12 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
+	// Reload erigondb settings: the downloader should have provided the real erigondb.toml
+	// during header-chain phase, which may have a different stepSize than the default.
+	if err := agg.ReloadErigonDBSettings(cfg.snapshotDownloader == nil); err != nil {
+		return err
+	}
+
 	// Erigon can start on datadir with broken files `transactions.seg` files and Downloader will
 	// fix them, but only if Erigon call `.Add()` for broken files. But `headerchain` feature
 	// calling `.Add()` only for header/body files (not for `transactions.seg`) and `.OpenFolder()` will fail

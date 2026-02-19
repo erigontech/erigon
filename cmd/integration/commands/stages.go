@@ -1126,7 +1126,11 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 		blockReader := freezeblocks.NewBlockReader(_allSnapshotsSingleton, _allBorSnapshotsSingleton)
 		txNums := blockReader.TxnumReader()
 
-		_aggSingleton = dbstate.New(dirs).Logger(logger).MustOpen(ctx, db)
+		var erigonDBSettings *dbstate.ErigonDBSettings
+		if erigonDBSettings, err = dbstate.ResolveErigonDBSettings(dirs, logger, false); err != nil {
+			return
+		}
+		_aggSingleton = dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).MustOpen(ctx, db)
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
 

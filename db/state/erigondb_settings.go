@@ -88,3 +88,77 @@ func CreateOrReadErigonDBSettings(dirs datadir.Dirs, logger log.Logger) (*Erigon
 	logger.Info("erigondb settings", "step_size", settings.StepSize, "steps_in_frozen_file", settings.StepsInFrozenFile)
 	return &settings, nil
 }
+
+// ResolveErigonDBSettings determines the active ErigonDB settings:
+//  1. Legacy datadir (no erigondb.toml, preverified.toml present): writes legacy settings
+//     to erigondb.toml and returns them.
+//  2. erigondb.toml exists: reads and returns it.
+//  3. Fresh datadir (neither file present): returns default settings without writing,
+//     so the downloader can provide the real erigondb.toml during header-chain phase.
+func ResolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader bool) (*ErigonDBSettings, error) {
+	settingsExists, err := dir.FileExist(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE))
+	if err != nil {
+		return nil, err
+	}
+
+	preverifiedExists, err := dir.FileExist(filepath.Join(dirs.Snap, datadir.PreverifiedFileName))
+	if err != nil {
+		return nil, err
+	}
+
+	// Legacy datadir (Erigon <= 3.3): write legacy settings so erigondb.toml exists on disk.
+	if !settingsExists && preverifiedExists {
+		settings := ErigonDBSettings{
+			StepSize:          config3.LegacyStepSize,
+			StepsInFrozenFile: config3.LegacyStepsInFrozenFile,
+		}
+		logger.Info("Creating erigondb.toml with LEGACY settings",
+			"step_size", settings.StepSize, "steps_in_frozen_file", settings.StepsInFrozenFile)
+		settingsBytes, err := toml.Marshal(&settings)
+		if err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE), settingsBytes, 0644); err != nil {
+			return nil, err
+		}
+		return &settings, nil
+	}
+
+	// Read from erigondb.toml.
+	if settingsExists {
+		logger.Info("Reading DB settings from existing erigondb.toml")
+		settingsBytes, err := os.ReadFile(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE))
+		if err != nil {
+			return nil, err
+		}
+		var settings ErigonDBSettings
+		if err := toml.Unmarshal(settingsBytes, &settings); err != nil {
+			return nil, err
+		}
+		logger.Info("erigondb settings", "step_size", settings.StepSize, "steps_in_frozen_file", settings.StepsInFrozenFile)
+		return &settings, nil
+	}
+
+	// Fresh datadir, no preverified.toml: use default settings.
+	settings := ErigonDBSettings{
+		StepSize:          config3.DefaultStepSize,
+		StepsInFrozenFile: config3.DefaultStepsInFrozenFile,
+	}
+	if noDownloader {
+		// No downloader to provide the real file — write defaults to disk now.
+		logger.Info("Initializing erigondb.toml with DEFAULT settings (nodownloader)",
+			"step_size", settings.StepSize, "steps_in_frozen_file", settings.StepsInFrozenFile)
+		settingsBytes, err := toml.Marshal(&settings)
+		if err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE), settingsBytes, 0644); err != nil {
+			return nil, err
+		}
+	} else {
+		// Downloader will provide the real erigondb.toml during header-chain phase.
+		logger.Info("erigondb.toml not found, using defaults (downloader will provide real settings)",
+			"step_size", settings.StepSize, "steps_in_frozen_file", settings.StepsInFrozenFile)
+	}
+	return &settings, nil
+}

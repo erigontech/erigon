@@ -130,6 +130,11 @@ func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize, stepsInFrozenFile uint64
 	return &ii, nil
 }
 
+func (ii *InvertedIndex) setStepSize(stepSize, stepsInFrozenFile uint64) {
+	ii.stepSize = stepSize
+	ii.stepsInFrozenFile = stepsInFrozenFile
+}
+
 func (ii *InvertedIndex) efAccessorNewFilePath(fromStep, toStep kv.Step) string {
 	if fromStep == toStep {
 		panic(fmt.Sprintf("assert: fromStep(%d) == toStep(%d)", fromStep, toStep))

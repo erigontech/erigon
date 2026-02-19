@@ -1395,7 +1395,11 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 
-	agg, err := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).Open(ctx, db)
+	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, snConfig.Snapshot.NoDownloader)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, err
+	}
+	agg, err := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).WithErigonDBSettings(erigonDBSettings).Open(ctx, db)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}

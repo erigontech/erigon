@@ -145,7 +145,11 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	ac := agg.BeginFilesRo()
 	defer ac.Close()
 
-	aggOld, err := state.New(dirsOld).Logger(logger).Open(ctx, db)
+	erigonDBSettingsOld, err := state.ResolveErigonDBSettings(dirsOld, logger, false)
+	if err != nil {
+		panic(err)
+	}
+	aggOld, err := state.New(dirsOld).Logger(logger).WithErigonDBSettings(erigonDBSettingsOld).Open(ctx, db)
 	if err != nil {
 		panic(err)
 	}
@@ -187,7 +191,11 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	agg := state.New(dirs).Logger(logger).MustOpen(ctx, db)
+	erigonDBSettings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+	if err != nil {
+		return err
+	}
+	agg := state.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).MustOpen(ctx, db)
 	defer agg.Close()
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 
