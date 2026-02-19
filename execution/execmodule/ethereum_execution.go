@@ -196,6 +196,7 @@ type EthereumExecutionModule struct {
 
 	fcuBackgroundPrune      bool
 	fcuBackgroundCommit     bool
+	backgroundPostFcuErr    chan error // receives error (or nil) when background post-forkchoice completes
 	onlySnapDownloadOnStart bool
 	// metrics for average mgas/sec
 	avgMgasSec float64
@@ -250,6 +251,10 @@ func NewEthereumExecutionModule(ctx context.Context, blockReader services.FullBl
 		stateCache.execModule = em
 	}
 	return em
+}
+
+func (e *EthereumExecutionModule) BackgroundPostFcuErr() <-chan error {
+	return e.backgroundPostFcuErr
 }
 
 func (e *EthereumExecutionModule) getHeader(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Header, error) {

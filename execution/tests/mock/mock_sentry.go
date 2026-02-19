@@ -772,7 +772,7 @@ func (ms *MockSentry) EnableLogs() {
 func (ms *MockSentry) Cfg() ethconfig.Config { return ms.cfg }
 
 func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
-	wr := chainreader.NewChainReaderEth1(ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), uint64(time.Hour))
+	wr := chainreader.NewChainReaderEth1(ms.ChainConfig, direct.NewExecutionClientDirect(ms.Eth1ExecutionService), uint64((10 * time.Second).Milliseconds()))
 
 	streamCtx, cancel := context.WithCancel(ms.Ctx)
 	defer cancel()
@@ -807,9 +807,21 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 
 	tipHash := chain.TopBlock.Hash()
 
-	status, verr, _, err := wr.UpdateForkChoice(ms.Ctx, tipHash, tipHash, tipHash)
-	if err != nil {
-		return err
+	var status executionproto.ExecutionStatus
+	var verr *string
+	for {
+		status, verr, _, err = wr.UpdateForkChoice(ms.Ctx, tipHash, tipHash, tipHash)
+		if err != nil {
+			return err
+		}
+		if status != executionproto.ExecutionStatus_Busy {
+			break
+		}
+		select {
+		case <-time.After(100 * time.Millisecond):
+		case <-ms.Ctx.Done():
+			return ms.Ctx.Err()
+		}
 	}
 
 	if status != executionproto.ExecutionStatus_Success {
@@ -822,6 +834,20 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 	// UpdateForkChoice calls commit asyncronously so we need to
 	// wait for confimation that the headers are processed before
 	// returning to the caller
+
+	// Watch for background post-forkchoice errors. If the background goroutine
+	// fails before sending notifications, cancel the stream so we don't hang.
+	bgPostFcuErr := ms.Eth1ExecutionService.BackgroundPostFcuErr()
+	go func() {
+		select {
+		case err := <-bgPostFcuErr:
+			if err != nil {
+				cancel() // background goroutine failed, unblock stream.Recv()
+			}
+		case <-streamCtx.Done():
+		}
+	}()
+
 	lastSeenBlock := chain.Headers[0].Number.Uint64()
 
 	for len(insertedBlocks) > 0 {

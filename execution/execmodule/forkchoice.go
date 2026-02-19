@@ -583,11 +583,16 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	backgroundPostForkChoice := e.fcuBackgroundCommit || e.fcuBackgroundPrune
 	if backgroundPostForkChoice {
 		shouldReleaseSema = false // pass on the semaphore to background goroutine
+		e.backgroundPostFcuErr = make(chan error, 1)
 		go func() {
 			defer e.semaphore.Release(1)
 			err := e.runPostForkchoice(currentContext, finishProgressBefore, isSynced, initialCycle)
 			if err != nil && !errors.Is(err, context.Canceled) {
 				e.logger.Error("Error running background post forkchoice", "err", err)
+			}
+			select {
+			case e.backgroundPostFcuErr <- err:
+			default:
 			}
 		}()
 	}
