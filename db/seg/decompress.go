@@ -69,11 +69,21 @@ func (pt *patternTable) insertWord(cw *codeword) {
 	}
 }
 
+// posEntry is one slot in a Huffman position table.
+// bits==0 signals a subtable pointer (see posTable.ptrs); otherwise bits is
+// the number of Huffman code bits consumed and pos is the decoded position.
+// pos fits in uint32 because positions are bounded by the word length.
+type posEntry struct {
+	pos  uint32
+	bits uint8
+	// 3 bytes padding (auto-inserted by Go, total size = 8 bytes)
+}
+
 type posTable struct {
-	packed []uint64 // pos<<8 | len; len==0 means subtable (see ptrs)
-	ptrs   []*posTable
-	bitLen int
-	mask   uint16 // precomputed (1<<bitLen)-1
+	entries []posEntry
+	ptrs    []*posTable
+	bitLen  int
+	mask    uint16 // precomputed (1<<bitLen)-1
 }
 
 type ErrCompressedFileCorrupted struct {
@@ -311,10 +321,10 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		//fmt.Printf("pos maxDepth=%d\n", tree.maxDepth)
 		tableSize := 1 << bitLen
 		d.posDict = &posTable{
-			bitLen: bitLen,
-			mask:   uint16(1)<<bitLen - 1,
-			packed: make([]uint64, tableSize),
-			ptrs:   make([]*posTable, tableSize),
+			bitLen:  bitLen,
+			mask:    uint16(1)<<bitLen - 1,
+			entries: make([]posEntry, tableSize),
+			ptrs:    make([]*posTable, tableSize),
 		}
 		if _, err = buildPosTable(posDepths, poss, d.posDict, 0, 0, 0, posMaxDepth); err != nil {
 			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: err.Error()}
@@ -378,16 +388,16 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 	if depth == depths[0] {
 		p := poss[0]
 		//fmt.Printf("depth=%d, maxDepth=%d, code=[%b], codeLen=%d, pos=%d\n", depth, maxDepth, code, bits, p)
-		pack := (p << 8) | uint64(bits)
+		entry := posEntry{pos: uint32(p), bits: uint8(bits)}
 		if table.bitLen == bits {
-			table.packed[code] = pack
+			table.entries[code] = entry
 			table.ptrs[code] = nil
 		} else {
 			codeStep := uint16(1) << bits
 			codeFrom := code
 			codeTo := code | (uint16(1) << table.bitLen)
 			for c := codeFrom; c < codeTo; c += codeStep {
-				table.packed[c] = pack
+				table.entries[c] = entry
 				table.ptrs[c] = nil
 			}
 		}
@@ -402,12 +412,12 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 		}
 		tableSize := 1 << bitLen
 		newTable := &posTable{
-			bitLen: bitLen,
-			mask:   uint16(1)<<bitLen - 1,
-			packed: make([]uint64, tableSize),
-			ptrs:   make([]*posTable, tableSize),
+			bitLen:  bitLen,
+			mask:    uint16(1)<<bitLen - 1,
+			entries: make([]posEntry, tableSize),
+			ptrs:    make([]*posTable, tableSize),
 		}
-		table.packed[code] = 0 // len==0 signals subtable
+		table.entries[code] = posEntry{} // bits==0 signals subtable
 		table.ptrs[code] = newTable
 		return buildPosTable(depths, poss, newTable, 0, 0, depth, maxDepth)
 	}
@@ -542,22 +552,19 @@ func (d *Decompressor) MadvWillNeed() *Decompressor {
 
 // Getter represent "reader" or "iterator" that can move across the data of the decompressor
 // The full state of the getter can be captured by saving dataP, and dataBit
-//
-// Field ordering is deliberate: dataP/dataLen/dataBit/posBitLen/posDict/posMask/data
-// all fit in the first 64-byte cache line so nextPos() only touches one cache line of g.
 type Getter struct {
-	dataP     uint64    // offset 0:  HOT - current byte offset in data
-	dataLen   uint64    // offset 8:  HOT - len(data), precomputed
-	dataBit   int       // offset 16: HOT - bit offset within current byte (0-7)
-	posBitLen int       // offset 24: HOT - cached posDict.bitLen, avoids pointer chain
-	posDict   *posTable // offset 32: HOT - Huffman table for positions
-	posMask   uint16    // offset 40: HOT - cached posDict.mask, avoids pointer chain
-	// 6 bytes padding here (auto-inserted by Go)
-	data        []byte        // offset 48: HOT - compressed bitstream (ptr at 48, len at 56 = CL0)
-	patternDict *patternTable // offset 72 (CL1)
-	d           *Decompressor // offset 80 (CL1)
-	fName       string        // offset 88 (CL1)
-	trace       bool          // offset 104 (CL1)
+	dataP     uint64    // current byte offset in data
+	dataLen   uint64    // len(data), precomputed
+	dataBit   int       // bit offset within current byte (0-7)
+	posBitLen int       // cached posDict.bitLen, avoids pointer chain
+	posDict   *posTable // Huffman table for positions
+	posMask   uint16    // cached posDict.mask, avoids pointer chain
+	data      []byte    // compressed bitstream (ptr at 48, len at 56 = CL0)
+	//less hot fields
+	patternDict *patternTable
+	d           *Decompressor
+	fName       string
+	trace       bool
 }
 
 func (g *Getter) MadvNormal() MadvDisabler {
@@ -584,7 +591,7 @@ func (g *Getter) nextPosClean() uint64 {
 // into a separate //go:noinline helper so this function stays small.
 func (g *Getter) nextPos() uint64 {
 	if g.posBitLen == 0 {
-		return g.posDict.packed[0] >> 8
+		return uint64(g.posDict.entries[0].pos)
 	}
 	dataP := g.dataP
 	dataBit := g.dataBit
@@ -594,8 +601,8 @@ func (g *Getter) nextPos() uint64 {
 		code |= uint16(data[dataP+1]) << (8 - dataBit)
 	}
 	code &= g.posMask
-	packed := g.posDict.packed[code]
-	l := int(packed & 0xFF)
+	entry := g.posDict.entries[code]
+	l := int(entry.bits)
 	if l == 0 {
 		return g.nextPosSubtable(g.posDict, code)
 	}
@@ -603,7 +610,7 @@ func (g *Getter) nextPos() uint64 {
 	dataP += uint64(dataBit >> 3)
 	g.dataP = dataP
 	g.dataBit = dataBit & 7
-	return packed >> 8
+	return uint64(entry.pos)
 }
 
 // nextPosSubtable handles the uncommon case where the initial table lookup
@@ -612,7 +619,6 @@ func (g *Getter) nextPos() uint64 {
 //go:noinline
 func (g *Getter) nextPosSubtable(table *posTable, code uint16) uint64 {
 	data := g.data
-	dataLen := g.dataLen
 	dataP := g.dataP
 	dataBit := g.dataBit
 	for {
@@ -621,18 +627,17 @@ func (g *Getter) nextPosSubtable(table *posTable, code uint16) uint64 {
 		dataP += uint64(dataBit >> 3)
 		dataBit &= 7
 		code = uint16(data[dataP]) >> dataBit
-		if dataP+1 < dataLen {
+		if dataP+1 < g.dataLen {
 			code |= uint16(data[dataP+1]) << (8 - dataBit)
 		}
 		code &= table.mask
-		packed := table.packed[code]
-		l := int(packed & 0xFF)
-		if l != 0 {
-			dataBit += l
+		entry := table.entries[code]
+		if entry.bits != 0 {
+			dataBit += int(entry.bits)
 			dataP += uint64(dataBit >> 3)
 			g.dataP = dataP
 			g.dataBit = dataBit & 7
-			return packed >> 8
+			return uint64(entry.pos)
 		}
 	}
 }
@@ -646,11 +651,10 @@ func (g *Getter) nextPattern() []byte {
 	data := g.data
 	dataP := g.dataP
 	dataBit := g.dataBit
-	dataLen := g.dataLen
 
 	for {
 		code := uint16(data[dataP]) >> dataBit
-		if dataP+1 < dataLen {
+		if dataP+1 < g.dataLen {
 			code |= uint16(data[dataP+1]) << (8 - dataBit)
 		}
 		code &= (uint16(1) << table.bitLen) - 1
