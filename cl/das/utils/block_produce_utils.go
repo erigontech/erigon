@@ -6,6 +6,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
 
@@ -76,19 +77,42 @@ func GetDataColumnSidecars(
 	return sidecars, nil
 }
 
-// GetDataColumnSidecarsFromBlock assembles sidecars that can be distributed to peers given a signed block
-// and the cells/proofs associated with each blob in the block.
-func GetDataColumnSidecarsFromBlock(signedBlock *cltypes.SignedBeaconBlock, cellsAndKZGProofs []CellsAndKZGProofs) ([]*cltypes.DataColumnSidecar, error) {
-	kzgCommitments := signedBlock.Block.Body.BlobKzgCommitments
-	signedBlockHeader := signedBlock.SignedBeaconBlockHeader()
-	proofBytes, err := signedBlock.Block.Body.KzgCommitmentsInclusionProof()
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate KZG commitments inclusion proof: %v", err)
-	}
-	kzgCommitmentsInclusionProof := solid.NewHashVector(cltypes.KzgCommitmentsInclusionProofDepth)
-	for i, h := range proofBytes {
-		kzgCommitmentsInclusionProof.Set(i, h)
+// [New in Gloas:EIP7732] GetDataColumnSidecarsGloas assembles GLOAS-style sidecars with Slot and BeaconBlockRoot
+// instead of SignedBlockHeader, KzgCommitments, and KzgCommitmentsInclusionProof.
+// Note: In GLOAS, kzg_commitments are no longer stored in the sidecar structure.
+func GetDataColumnSidecarsGloas(
+	slot uint64,
+	beaconBlockRoot common.Hash,
+	cellsAndKZGProofs []CellsAndKZGProofs,
+) ([]*cltypes.DataColumnSidecar, error) {
+	cfg := clparams.GetBeaconConfig()
+	sidecars := make([]*cltypes.DataColumnSidecar, cfg.NumberOfColumns)
+
+	// Initialize sidecars for each column
+	for columnIndex := uint64(0); columnIndex < cfg.NumberOfColumns; columnIndex++ {
+		columnCells := solid.NewStaticListSSZ[*cltypes.Cell](int(cfg.MaxBlobCommittmentsPerBlock), cltypes.BytesPerCell)
+		columnProofs := solid.NewStaticListSSZ[*cltypes.KZGProof](int(cfg.MaxBlobCommittmentsPerBlock), 48)
+
+		// For each blob, extract the cell and proof for this column
+		for blobIndex := range cellsAndKZGProofs {
+			cell := &cltypes.Cell{}
+			copy(cell[:], cellsAndKZGProofs[blobIndex].Blobs[columnIndex][:])
+			columnCells.Append(cell)
+
+			proof := &cltypes.KZGProof{}
+			copy(proof[:], cellsAndKZGProofs[blobIndex].Proofs[columnIndex][:])
+			columnProofs.Append(proof)
+		}
+
+		sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)
+		sidecar.Index = columnIndex
+		sidecar.Column = columnCells
+		sidecar.KzgProofs = columnProofs
+		sidecar.Slot = slot
+		sidecar.BeaconBlockRoot = beaconBlockRoot
+		sidecars[columnIndex] = sidecar
 	}
 
-	return GetDataColumnSidecars(signedBlockHeader, kzgCommitments, kzgCommitmentsInclusionProof, cellsAndKZGProofs)
+	return sidecars, nil
 }
+

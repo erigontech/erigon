@@ -14,6 +14,7 @@ import (
 	reflect "reflect"
 
 	cltypes "github.com/erigontech/erigon/cl/cltypes"
+	das "github.com/erigontech/erigon/cl/das"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	common "github.com/erigontech/erigon/common"
 	gomock "go.uber.org/mock/gomock"
@@ -306,6 +307,42 @@ func (c *MockPeerDasPruneCall) Do(f func(uint64) error) *MockPeerDasPruneCall {
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockPeerDasPruneCall) DoAndReturn(f func(uint64) error) *MockPeerDasPruneCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// SetForkChoice mocks base method.
+func (m *MockPeerDas) SetForkChoice(forkChoice das.BlockGetter) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetForkChoice", forkChoice)
+}
+
+// SetForkChoice indicates an expected call of SetForkChoice.
+func (mr *MockPeerDasMockRecorder) SetForkChoice(forkChoice any) *MockPeerDasSetForkChoiceCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetForkChoice", reflect.TypeOf((*MockPeerDas)(nil).SetForkChoice), forkChoice)
+	return &MockPeerDasSetForkChoiceCall{Call: call}
+}
+
+// MockPeerDasSetForkChoiceCall wrap *gomock.Call
+type MockPeerDasSetForkChoiceCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPeerDasSetForkChoiceCall) Return() *MockPeerDasSetForkChoiceCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPeerDasSetForkChoiceCall) Do(f func(das.BlockGetter)) *MockPeerDasSetForkChoiceCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPeerDasSetForkChoiceCall) DoAndReturn(f func(das.BlockGetter)) *MockPeerDasSetForkChoiceCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
