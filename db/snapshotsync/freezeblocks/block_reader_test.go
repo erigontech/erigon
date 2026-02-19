@@ -168,6 +168,7 @@ func TestCanonicalHashCache_DBHit(t *testing.T) {
 	// Write a canonical hash to the DB
 	rwTx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
+	defer rwTx.Rollback()
 	header := &types.Header{Number: common.Big0}
 	expectedHash := header.Hash()
 	require.NoError(t, rawdb.WriteCanonicalHash(rwTx, expectedHash, 0))
@@ -232,6 +233,7 @@ func TestCanonicalHashCache_MultipleBlocks(t *testing.T) {
 	// Write multiple canonical hashes
 	rwTx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
+	defer rwTx.Rollback()
 
 	hashes := make([]common.Hash, 5)
 	for i := uint64(0); i < 5; i++ {
