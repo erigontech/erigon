@@ -100,8 +100,11 @@ func CreateTestSentry(t *testing.T) (*mock.MockSentry, *blockgen.ChainPack, []*b
 			},
 			GasLimit: 10000000,
 		}
-		m := mock.MockWithGenesis(t, gspec, addresses.key)
+
+		m := mock.MockWithGenesis(t, gspec, addresses.key) // use it only to generate chain blocks, don't cache it
+		defer m.Close()
 		contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+		defer contractBackend.Close()
 
 		var err error
 		testOrphanedChain, err = blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *blockgen.BlockGen) {})
