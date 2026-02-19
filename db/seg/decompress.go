@@ -624,7 +624,6 @@ func (g *Getter) nextPattern() []byte {
 
 	for {
 		code := uint16(data[dataP]) >> dataBit
-		//TODO: 1st expression can be dropped
 		if 8-dataBit < table.bitLen && dataP+1 < g.dataLen {
 			code |= uint16(data[dataP+1]) << (8 - dataBit)
 		}
