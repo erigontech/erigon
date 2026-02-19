@@ -24,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/execmodule/moduleutil"
@@ -51,6 +52,26 @@ func (e *EthereumExecutionModule) evictOldBuilders() {
 	for i := 0; i <= len(e.builders)-engine_helpers.MaxBuilders; i++ {
 		delete(e.builders, ids[i])
 	}
+}
+
+// slotDuration infers the actual slot duration by comparing the requested block
+// timestamp against the parent block's timestamp.  It falls back to the
+// chain-configured SecondsPerSlot() when the parent header cannot be found.
+func (e *EthereumExecutionModule) slotDuration(ctx context.Context, parentHash common.Hash, timestamp uint64) uint64 {
+	defaultDuration := e.config.SecondsPerSlot()
+	if err := e.db.View(ctx, func(tx kv.Tx) error {
+		parentHeader, err := e.blockReader.HeaderByHash(ctx, tx, parentHash)
+		if err != nil || parentHeader == nil {
+			return nil
+		}
+		if timestamp > parentHeader.Time {
+			defaultDuration = timestamp - parentHeader.Time
+		}
+		return nil
+	}); err != nil {
+		e.logger.Warn("Failed to look up parent header for slot duration", "err", err)
+	}
+	return defaultDuration
 }
 
 // Missing: NewPayload, AssembleBlock
@@ -99,7 +120,15 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 	param.PayloadId = e.nextPayloadId
 	e.lastParameters = &param
 
-	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, &param, e.config.SecondsPerSlot()/4)
+	// Compute the max block-builder wall time from the actual slot duration so
+	// that Erigon works correctly with any seconds_per_slot value (including
+	// short-slot CI test networks).  We use slotDuration/4 with a floor of 1s
+	// to always leave the majority of the slot for network propagation.
+	maxBuildTimeSecs := e.slotDuration(ctx, param.ParentHash, param.Timestamp) / 4
+	if maxBuildTimeSecs < 1 {
+		maxBuildTimeSecs = 1
+	}
+	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, &param, maxBuildTimeSecs)
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
 
 	return &executionproto.AssembleBlockResponse{
