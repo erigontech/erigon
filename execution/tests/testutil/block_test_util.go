@@ -27,7 +27,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"reflect"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -385,6 +384,16 @@ func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
 	return validBlocks, nil
 }
 
+// equalPtr reports whether two optional pointer values are equal.
+func equalPtr[T comparable](a, b *T) bool {
+	return (a == nil) == (b == nil) && (a == nil || *a == *b)
+}
+
+// equalBigInt reports whether two optional *big.Int values are equal.
+func equalBigInt(a, b *big.Int) bool {
+	return (a == nil) == (b == nil) && (a == nil || a.Cmp(b) == 0)
+}
+
 func validateHeader(h *btHeader, h2 *types.Header) error {
 	if h == nil {
 		return errors.New("validateHeader: h == nil")
@@ -437,28 +446,28 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if h.Timestamp != h2.Time {
 		return fmt.Errorf("timestamp: want: %v have: %v", h.Timestamp, h2.Time)
 	}
-	if !reflect.DeepEqual(h.BaseFeePerGas, h2.BaseFee) {
+	if !equalBigInt(h.BaseFeePerGas, h2.BaseFee) {
 		return fmt.Errorf("baseFeePerGas: want: %v have: %v", h.BaseFeePerGas, h2.BaseFee)
 	}
-	if !reflect.DeepEqual(h.WithdrawalsRoot, h2.WithdrawalsHash) {
+	if !equalPtr(h.WithdrawalsRoot, h2.WithdrawalsHash) {
 		return fmt.Errorf("withdrawalsRoot: want: %v have: %v", h.WithdrawalsRoot, h2.WithdrawalsHash)
 	}
-	if !reflect.DeepEqual(h.BlobGasUsed, h2.BlobGasUsed) {
+	if !equalPtr(h.BlobGasUsed, h2.BlobGasUsed) {
 		return fmt.Errorf("blobGasUsed: want: %v have: %v", h.BlobGasUsed, h2.BlobGasUsed)
 	}
-	if !reflect.DeepEqual(h.ExcessBlobGas, h2.ExcessBlobGas) {
+	if !equalPtr(h.ExcessBlobGas, h2.ExcessBlobGas) {
 		return fmt.Errorf("excessBlobGas: want: %v have: %v", h.ExcessBlobGas, h2.ExcessBlobGas)
 	}
-	if !reflect.DeepEqual(h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot) {
+	if !equalPtr(h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot) {
 		return fmt.Errorf("parentBeaconBlockRoot: want: %v have: %v", h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot)
 	}
-	if !reflect.DeepEqual(h.RequestsHash, h2.RequestsHash) {
+	if !equalPtr(h.RequestsHash, h2.RequestsHash) {
 		return fmt.Errorf("requestsHash: want: %v have: %v", h.RequestsHash, h2.RequestsHash)
 	}
-	if !reflect.DeepEqual(h.BlockAccessListHash, h2.BlockAccessListHash) {
+	if !equalPtr(h.BlockAccessListHash, h2.BlockAccessListHash) {
 		return fmt.Errorf("blockAccessListHash: want: %v have: %v", h.BlockAccessListHash, h2.BlockAccessListHash)
 	}
-	if !reflect.DeepEqual(h.SlotNumber, h2.SlotNumber) {
+	if !equalPtr(h.SlotNumber, h2.SlotNumber) {
 		return fmt.Errorf("slotNumber: want: %v have: %v", h.SlotNumber, h2.SlotNumber)
 	}
 	return nil
