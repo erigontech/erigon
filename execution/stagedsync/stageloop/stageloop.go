@@ -234,13 +234,16 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 	defer dbg.RecoverPanicIntoError(logger, &err)
 	hasMore := true
 	for hasMore {
+		// Capture notification context from inside the TX so we can fire after commit.
+		var finishProgressBefore uint64
+		var isSynced bool
 		err = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 			if err != nil {
 				return err
 			}
 			defer sd.Close()
-			hasMore, err = stageLoopIteration(ctx, sd, tx, sync, initialCycle, firstCycle, logger, blockReader, hook)
+			hasMore, finishProgressBefore, isSynced, err = stageLoopIteration(ctx, sd, tx, sync, initialCycle, firstCycle, logger, blockReader, hook)
 			if err != nil {
 				return err
 			}
@@ -249,19 +252,30 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 		if err != nil {
 			return err
 		}
+		// Send notifications AFTER the transaction commits so that RPC readers
+		// opening a new read-TX will already see the new head block, preventing
+		// the "request beyond head block" race on newHeads subscriptions.
+		if hook != nil {
+			if err = db.View(ctx, func(tx kv.Tx) error {
+				return hook.AfterRun(tx, finishProgressBefore, isSynced)
+			}); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
 
-func stageLoopIteration(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (hasMore bool, err error) {
-	finishProgressBefore, headersProgressBefore, gasUsed, err := stagesHeadersAndFinish(tx)
+func stageLoopIteration(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (hasMore bool, finishProgressBefore uint64, isSynced bool, err error) {
+	var headersProgressBefore, gasUsed uint64
+	finishProgressBefore, headersProgressBefore, gasUsed, err = stagesHeadersAndFinish(tx)
 	if err != nil {
-		return false, err
+		return false, 0, false, err
 	}
 	// Sync from scratch must be able Commit partial progress
 	// In all other cases - process blocks batch in 1 RwTx
 	// 2 corner-cases: when sync with --snapshots=false and when executed only blocks from snapshots (in this case all stages progress is equal and > 0, but node is not synced)
-	isSynced := finishProgressBefore > 0 && finishProgressBefore > blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
+	isSynced = finishProgressBefore > 0 && finishProgressBefore > blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
 	// Main steps:
 	// - process new blocks
 	// - commit(no_sync). NoSync - making data available for readers as-soon-as-possible. Can
@@ -269,17 +283,13 @@ func stageLoopIteration(ctx context.Context, sd *execctx.SharedDomains, tx kv.Te
 	// - Send Notifications: about new blocks, new receipts, state changes, etc...
 	// - Prune(limited time)+Commit(sync). Write to disk happening here.
 	if err = hook.BeforeRun(tx, isSynced); err != nil {
-		return false, err
+		return false, 0, false, err
 	}
 	hasMore, err = sync.Run(sd, tx, initialCycle, firstCycle)
 	if err != nil {
-		return false, err
+		return false, 0, false, err
 	}
 	logCtx := sync.PrintTimings()
-	// -- send notifications START
-	if err = hook.AfterRun(tx, finishProgressBefore, isSynced); err != nil {
-		return false, err
-	}
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	if gasUsed > 0 {
@@ -305,13 +315,12 @@ func stageLoopIteration(ctx context.Context, sd *execctx.SharedDomains, tx kv.Te
 	}
 	logCtx = append(logCtx, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	logger.Info("Timings", logCtx...)
-	// -- send notifications END
 	// -- Prune+commit(sync)
 	err = sync.RunPrune(ctx, tx, initialCycle, 0)
 	if err != nil {
-		return false, err
+		return false, 0, false, err
 	}
-	return hasMore, nil
+	return hasMore, finishProgressBefore, isSynced, nil
 }
 
 func stagesHeadersAndFinish(tx kv.Tx) (head, fin uint64, gasUsed uint64, err error) {
