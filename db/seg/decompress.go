@@ -713,7 +713,7 @@ func (g *Getter) Reset(offset uint64) {
 }
 
 func (g *Getter) HasNext() bool {
-	return g.dataP < uint64(len(g.data))
+	return g.dataP < g.dataLen
 }
 
 // Next extracts a compressed word from current offset in the file
