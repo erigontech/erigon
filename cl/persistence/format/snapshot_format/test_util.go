@@ -35,5 +35,9 @@ func (t *MockBlockReader) Transactions(number uint64, hash common.Hash) (*solid.
 	return t.Block.Transactions, nil
 }
 
+func (t *MockBlockReader) BlockAccessList(number uint64, hash common.Hash) (*cltypes.BlockAccessList, error) {
+	return t.Block.BlockAccessList, nil
+}
+
 func (t *MockBlockReader) SetBeaconChainConfig(*clparams.BeaconChainConfig) {
 }

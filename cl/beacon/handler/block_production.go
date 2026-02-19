@@ -791,6 +791,7 @@ func (a *ApiHandler) produceBeaconBody(
 					},
 				)
 				executionPayload.Transactions = payload.Transactions
+				executionPayload.BlockAccessList = payload.BlockAccessList.Copy()
 				return
 			}
 		}

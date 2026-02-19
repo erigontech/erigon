@@ -59,7 +59,7 @@ func (b *BeaconState) baseOffsetSSZ() uint32 {
 	case clparams.FuluVersion:
 		return 2736653
 	case clparams.GloasVersion:
-		return 2736653
+		return 2736685
 	default:
 		// ?????
 		panic("tf is that")

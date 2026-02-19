@@ -444,32 +444,59 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block,
 	bundle := engine_types.ConvertBlobsFromRpc(resp.Data.BlobsBundle)
 	blockValue := gointerfaces.ConvertH256ToUint256Int(resp.Data.BlockValue).ToBig()
 	payloadRpc := resp.Data.ExecutionPayload
+	version := clparams.BellatrixVersion
+	switch payloadRpc.Version {
+	case 1:
+		version = clparams.BellatrixVersion
+	case 2:
+		version = clparams.CapellaVersion
+	case 3:
+		version = clparams.DenebVersion
+	case 4:
+		version = clparams.FuluVersion
+	case 5:
+		version = clparams.GloasVersion
+	default:
+		// Fallback for older payloads that may omit version.
+		if payloadRpc.BlobGasUsed != nil || payloadRpc.ExcessBlobGas != nil {
+			version = clparams.DenebVersion
+		}
+		if payloadRpc.BlockAccessList != nil {
+			version = clparams.GloasVersion
+		}
+	}
 
 	extraData := solid.NewExtraData()
 	extraData.SetBytes(payloadRpc.ExtraData)
 	blockHash := gointerfaces.ConvertH256ToHash(payloadRpc.BlockHash)
-	block := &cltypes.Eth1Block{
-		ParentHash:    gointerfaces.ConvertH256ToHash(payloadRpc.ParentHash),
-		FeeRecipient:  gointerfaces.ConvertH160toAddress(payloadRpc.Coinbase),
-		StateRoot:     gointerfaces.ConvertH256ToHash(payloadRpc.StateRoot),
-		ReceiptsRoot:  gointerfaces.ConvertH256ToHash(payloadRpc.ReceiptRoot),
-		LogsBloom:     gointerfaces.ConvertH2048ToBloom(payloadRpc.LogsBloom),
-		BlockNumber:   payloadRpc.BlockNumber,
-		GasLimit:      payloadRpc.GasLimit,
-		GasUsed:       payloadRpc.GasUsed,
-		Time:          payloadRpc.Timestamp,
-		Extra:         extraData,
-		PrevRandao:    gointerfaces.ConvertH256ToHash(payloadRpc.PrevRandao),
-		Transactions:  solid.NewTransactionsSSZFromTransactions(payloadRpc.Transactions),
-		BlockHash:     blockHash,
-		BaseFeePerGas: gointerfaces.ConvertH256ToHash(payloadRpc.BaseFeePerGas),
-	}
+	block := cltypes.NewEth1Block(version, &clparams.MainnetBeaconConfig)
+	block.ParentHash = gointerfaces.ConvertH256ToHash(payloadRpc.ParentHash)
+	block.FeeRecipient = gointerfaces.ConvertH160toAddress(payloadRpc.Coinbase)
+	block.StateRoot = gointerfaces.ConvertH256ToHash(payloadRpc.StateRoot)
+	block.ReceiptsRoot = gointerfaces.ConvertH256ToHash(payloadRpc.ReceiptRoot)
+	block.LogsBloom = gointerfaces.ConvertH2048ToBloom(payloadRpc.LogsBloom)
+	block.BlockNumber = payloadRpc.BlockNumber
+	block.GasLimit = payloadRpc.GasLimit
+	block.GasUsed = payloadRpc.GasUsed
+	block.Time = payloadRpc.Timestamp
+	block.Extra = extraData
+	block.PrevRandao = gointerfaces.ConvertH256ToHash(payloadRpc.PrevRandao)
+	block.Transactions = solid.NewTransactionsSSZFromTransactions(payloadRpc.Transactions)
+	block.BlockHash = blockHash
+	block.BaseFeePerGas = gointerfaces.ConvertH256ToHash(payloadRpc.BaseFeePerGas)
 	utils.ReverseBytes(&block.BaseFeePerGas)
 	if payloadRpc.ExcessBlobGas != nil {
 		block.ExcessBlobGas = *payloadRpc.ExcessBlobGas
 	}
 	if payloadRpc.BlobGasUsed != nil {
 		block.BlobGasUsed = *payloadRpc.BlobGasUsed
+	}
+	if block.BlockAccessList != nil {
+		if bal := types.ConvertBlockAccessListFromTypesProto(payloadRpc.BlockAccessList); bal != nil {
+			if err := block.BlockAccessList.SetBytes(*bal); err != nil {
+				return nil, nil, nil, nil, err
+			}
+		}
 	}
 
 	// change the limit later

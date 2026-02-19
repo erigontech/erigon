@@ -85,7 +85,7 @@ func (b *SignedBlindedBeaconBlock) Unblind(blockPayload *Eth1Block) (*SignedBeac
 		return nil, fmt.Errorf("root mismatch: %s != %s", blindedRoot, payloadRoot)
 	}
 
-	signedBeaconBlock := b.Full(blockPayload.Transactions, blockPayload.Withdrawals)
+	signedBeaconBlock := b.Full(blockPayload.Transactions, blockPayload.Withdrawals, blockPayload.BlockAccessList)
 	return signedBeaconBlock, nil
 }
 
@@ -112,10 +112,14 @@ func (b *SignedBlindedBeaconBlock) Version() clparams.StateVersion {
 	return b.Block.Body.Version
 }
 
-func (b *SignedBlindedBeaconBlock) Full(txs *solid.TransactionsSSZ, withdrawals *solid.ListSSZ[*Withdrawal]) *SignedBeaconBlock {
+func (b *SignedBlindedBeaconBlock) Full(
+	txs *solid.TransactionsSSZ,
+	withdrawals *solid.ListSSZ[*Withdrawal],
+	blockAccessList *BlockAccessList,
+) *SignedBeaconBlock {
 	return &SignedBeaconBlock{
 		Signature: b.Signature,
-		Block:     b.Block.Full(txs, withdrawals),
+		Block:     b.Block.Full(txs, withdrawals, blockAccessList),
 	}
 }
 
@@ -134,13 +138,17 @@ func NewBlindedBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clpara
 	}
 }
 
-func (b *BlindedBeaconBlock) Full(txs *solid.TransactionsSSZ, withdrawals *solid.ListSSZ[*Withdrawal]) *BeaconBlock {
+func (b *BlindedBeaconBlock) Full(
+	txs *solid.TransactionsSSZ,
+	withdrawals *solid.ListSSZ[*Withdrawal],
+	blockAccessList *BlockAccessList,
+) *BeaconBlock {
 	return &BeaconBlock{
 		Slot:          b.Slot,
 		ProposerIndex: b.ProposerIndex,
 		ParentRoot:    b.ParentRoot,
 		StateRoot:     b.StateRoot,
-		Body:          b.Body.Full(txs, withdrawals),
+		Body:          b.Body.Full(txs, withdrawals, blockAccessList),
 	}
 }
 
@@ -392,28 +400,33 @@ func (b *BlindedBeaconBody) SetExecutionRequests(requests *ExecutionRequests) *B
 	return b
 }
 
-func (b *BlindedBeaconBody) Full(txs *solid.TransactionsSSZ, withdrawals *solid.ListSSZ[*Withdrawal]) *BeaconBody {
+func (b *BlindedBeaconBody) Full(
+	txs *solid.TransactionsSSZ,
+	withdrawals *solid.ListSSZ[*Withdrawal],
+	blockAccessList *BlockAccessList,
+) *BeaconBody {
 	// Recover the execution payload
 	executionPayload := &Eth1Block{
-		ParentHash:    b.ExecutionPayload.ParentHash,
-		BlockNumber:   b.ExecutionPayload.BlockNumber,
-		StateRoot:     b.ExecutionPayload.StateRoot,
-		Time:          b.ExecutionPayload.Time,
-		GasLimit:      b.ExecutionPayload.GasLimit,
-		GasUsed:       b.ExecutionPayload.GasUsed,
-		Extra:         b.ExecutionPayload.Extra,
-		ReceiptsRoot:  b.ExecutionPayload.ReceiptsRoot,
-		LogsBloom:     b.ExecutionPayload.LogsBloom,
-		BaseFeePerGas: b.ExecutionPayload.BaseFeePerGas,
-		BlockHash:     b.ExecutionPayload.BlockHash,
-		BlobGasUsed:   b.ExecutionPayload.BlobGasUsed,
-		ExcessBlobGas: b.ExecutionPayload.ExcessBlobGas,
-		FeeRecipient:  b.ExecutionPayload.FeeRecipient,
-		PrevRandao:    b.ExecutionPayload.PrevRandao,
-		Transactions:  txs,
-		Withdrawals:   withdrawals,
-		version:       b.ExecutionPayload.version,
-		beaconCfg:     b.beaconCfg,
+		ParentHash:      b.ExecutionPayload.ParentHash,
+		BlockNumber:     b.ExecutionPayload.BlockNumber,
+		StateRoot:       b.ExecutionPayload.StateRoot,
+		Time:            b.ExecutionPayload.Time,
+		GasLimit:        b.ExecutionPayload.GasLimit,
+		GasUsed:         b.ExecutionPayload.GasUsed,
+		Extra:           b.ExecutionPayload.Extra,
+		ReceiptsRoot:    b.ExecutionPayload.ReceiptsRoot,
+		LogsBloom:       b.ExecutionPayload.LogsBloom,
+		BaseFeePerGas:   b.ExecutionPayload.BaseFeePerGas,
+		BlockHash:       b.ExecutionPayload.BlockHash,
+		BlobGasUsed:     b.ExecutionPayload.BlobGasUsed,
+		ExcessBlobGas:   b.ExecutionPayload.ExcessBlobGas,
+		FeeRecipient:    b.ExecutionPayload.FeeRecipient,
+		PrevRandao:      b.ExecutionPayload.PrevRandao,
+		Transactions:    txs,
+		Withdrawals:     withdrawals,
+		BlockAccessList: blockAccessList,
+		version:         b.ExecutionPayload.version,
+		beaconCfg:       b.beaconCfg,
 	}
 
 	return &BeaconBody{

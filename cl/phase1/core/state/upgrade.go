@@ -290,6 +290,7 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 	// Update the payload header.
 	header := b.LatestExecutionPayloadHeader()
 	header.SetVersion(clparams.GloasVersion)
+	header.BlockAccessListRoot = common.Hash{}
 	b.SetLatestExecutionPayloadHeader(header)
 	// Update the state root cache
 	b.SetVersion(clparams.GloasVersion)

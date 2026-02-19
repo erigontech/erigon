@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -124,4 +125,22 @@ func (r *ExecutionSnapshotReader) Withdrawals(number uint64, hash common.Hash) (
 		})
 	}
 	return ret, nil
+}
+
+func (r *ExecutionSnapshotReader) BlockAccessList(number uint64, hash common.Hash) (*cltypes.BlockAccessList, error) {
+	tx, err := r.db.BeginRo(r.ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	data, err := rawdb.ReadBlockAccessListBytes(tx, hash, number)
+	if err != nil {
+		return nil, err
+	}
+	bal := cltypes.NewBlockAccessList(r.beaconCfg.MaxBytesPerTransaction)
+	if err := bal.SetBytes(data); err != nil {
+		return nil, err
+	}
+	return bal, nil
 }

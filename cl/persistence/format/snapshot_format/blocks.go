@@ -31,6 +31,7 @@ import (
 type ExecutionBlockReaderByNumber interface {
 	Transactions(number uint64, hash common.Hash) (*solid.TransactionsSSZ, error)
 	Withdrawals(number uint64, hash common.Hash) (*solid.ListSSZ[*cltypes.Withdrawal], error)
+	BlockAccessList(number uint64, hash common.Hash) (*cltypes.BlockAccessList, error)
 	SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig)
 }
 
@@ -112,7 +113,7 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 	}
 	// No execution data for pre-altair blocks
 	if v <= clparams.AltairVersion {
-		return blindedBlock.Full(nil, nil), nil
+		return blindedBlock.Full(nil, nil, nil), nil
 	}
 	blockNumber := blindedBlock.Block.Body.ExecutionPayload.BlockNumber
 	blockHash := blindedBlock.Block.Body.ExecutionPayload.BlockHash
@@ -124,7 +125,14 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 	if err != nil {
 		return nil, err
 	}
-	return blindedBlock.Full(txs, ws), nil
+	var blockAccessList *cltypes.BlockAccessList
+	if v >= clparams.GloasVersion {
+		blockAccessList, err = executionReader.BlockAccessList(blockNumber, blockHash)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return blindedBlock.Full(txs, ws, blockAccessList), nil
 }
 
 // ReadBlockHeaderFromSnapshotWithExecutionData reads the beacon block header and the EL block number and block hash.

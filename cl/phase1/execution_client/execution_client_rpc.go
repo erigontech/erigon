@@ -134,6 +134,13 @@ func (cc *ExecutionClientRpc) NewPayload(
 		*request.BlobGasUsed = hexutil.Uint64(payload.BlobGasUsed)
 		*request.ExcessBlobGas = hexutil.Uint64(payload.ExcessBlobGas)
 	}
+	if payload.Version() >= clparams.GloasVersion {
+		var blockAccessList hexutil.Bytes
+		if payload.BlockAccessList != nil {
+			blockAccessList = payload.BlockAccessList.Bytes()
+		}
+		request.BlockAccessList = &blockAccessList
+	}
 
 	payloadStatus := &engine_types.PayloadStatus{} // As it is done in the rpcdaemon
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", engineMethod)

@@ -58,6 +58,8 @@ func TestBeaconBody(t *testing.T) {
 	}, []types.Transaction{types.NewTransaction(1, [20]byte{}, uint256.NewInt(1), 5, uint256.NewInt(2), nil)}, nil, nil, types.Withdrawals{&types.Withdrawal{
 		Index: 69,
 	}})
+	executionPayload, err := NewEth1BlockFromHeaderAndBody(block.Header(), block.RawBody(), &clparams.MainnetBeaconConfig, nil)
+	require.NoError(t, err)
 
 	// Test BeaconBody
 	body := &BeaconBody{
@@ -70,7 +72,7 @@ func TestBeaconBody(t *testing.T) {
 		Deposits:           deposits,
 		VoluntaryExits:     voluntaryExits,
 		SyncAggregate:      syncAggregate,
-		ExecutionPayload:   NewEth1BlockFromHeaderAndBody(block.Header(), block.RawBody(), &clparams.MainnetBeaconConfig),
+		ExecutionPayload:   executionPayload,
 		ExecutionChanges:   executionChanges,
 		BlobKzgCommitments: blobKzgCommitments,
 		Version:            version,
@@ -78,7 +80,7 @@ func TestBeaconBody(t *testing.T) {
 	}
 
 	// Test EncodeSSZ and DecodeSSZ
-	_, err := body.EncodeSSZ(nil)
+	_, err = body.EncodeSSZ(nil)
 	require.NoError(t, err)
 	assert.Error(t, body.DecodeSSZ([]byte{1}, int(version)))
 
@@ -95,7 +97,7 @@ func TestBeaconBody(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, common.HexToHash("918d1ee08d700e422fcce6319cd7509b951d3ebfb1a05291aab9466b7e9826fc"), common.Hash(root2))
 
-	block2 := blinded.Full(body.ExecutionPayload.Transactions, body.ExecutionPayload.Withdrawals)
+	block2 := blinded.Full(body.ExecutionPayload.Transactions, body.ExecutionPayload.Withdrawals, body.ExecutionPayload.BlockAccessList)
 	assert.Equal(t, block2.ExecutionPayload.version, body.ExecutionPayload.version)
 	root3, err := block2.HashSSZ()
 	require.NoError(t, err)
