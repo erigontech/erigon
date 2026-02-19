@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"context"
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -106,7 +105,8 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 	if err != nil {
 		t.Errorf("error getting block number with pending tag: %s", err)
 	}
-	assert.Equal(t, (*hexutil.Big)(big.NewInt(int64(expected))), b["number"])
+	expectedNum := *uint256.NewInt(uint64(expected))
+	assert.Equal(t, expectedNum, b["number"])
 }
 
 func TestGetBlockByNumber_WithFinalizedTag_NoFinalizedBlockInDb(t *testing.T) {
