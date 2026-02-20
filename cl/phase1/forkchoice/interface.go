@@ -100,7 +100,9 @@ type ForkChoiceStorageWriter interface {
 		checkDataAvaibility bool,
 	) error
 	// [New in Gloas:EIP7732] OnExecutionPayload processes an execution payload envelope from the builder.
-	OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
+	// checkBlobData: verify blob data availability via PeerDAS
+	// validatePayload: call engine.NewPayload() to validate with EL
+	OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error
 	AddPreverifiedBlobSidecar(blobSidecar *cltypes.BlobSidecar) error
 	OnTick(time uint64)
 	SetSynced(synced bool)
