@@ -158,8 +158,9 @@ func (r splitStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([
 	return r.plainStateReader.Read(d, plainKey, stepSize)
 }
 
-func (r splitStateReader) Clone(tx kv.TemporalTx) StateReader {
-	return NewCommitmentSplitStateReader(r.commitmentReader.Clone(tx), r.plainStateReader.Clone(tx), r.withHistory)
+func (r splitStateReader) Clone(kv.TemporalTx) StateReader {
+	// Do *NOT* propagate kv.TemporalTx because each reader may need its own
+	return NewCommitmentSplitStateReader(r.commitmentReader, r.plainStateReader, r.withHistory)
 }
 
 func NewCommitmentSplitStateReader(commitmentReader StateReader, plainStateReader StateReader, withHistory bool) StateReader {
