@@ -4,6 +4,7 @@ run-name: Build release ${{ inputs.release_version}} from branch ${{ inputs.chec
 env:
   APPLICATION: "erigon"
   APPLICATION_VERSION: "Erigon3"
+  PRUNE_MODE: "full_node"
   TEST_TRACKING_TIME_SECONDS: 7200 # 2 hours
   TEST_TOTAL_TIME_SECONDS: 432000   # 5 days
   TEST_CHAIN: "mainnet"
@@ -274,7 +275,7 @@ jobs:
           # Run Erigon, wait sync and check ability to maintain sync
           python3 qa-tests/tip-tracking/run_and_check_tip_tracking.py \
             ${GITHUB_WORKSPACE}/${{ env.APPLICATION }}_${RELEASE_VERSION}_${{ matrix.artifact }} \
-              ${RUNNER_WORKSPACE}/erigon-data ${{ env.TEST_TRACKING_TIME_SECONDS }} ${{ env.TEST_TOTAL_TIME_SECONDS }} ${{ env.APPLICATION_VERSION }} ${{ env.TEST_CHAIN }}
+              ${RUNNER_WORKSPACE}/erigon-data ${{ env.TEST_TRACKING_TIME_SECONDS }} ${{ env.TEST_TOTAL_TIME_SECONDS }} ${{ env.APPLICATION_VERSION }} ${{ env.TEST_CHAIN }} ${{ env.PRUNE_MODE }}
           # Capture monitoring script exit status
           test_exit_status=$?
           # Save the subsection reached status
