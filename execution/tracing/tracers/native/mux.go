@@ -24,6 +24,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -75,6 +76,8 @@ func newMuxTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, e
 			OnCodeChange:    t.OnCodeChange,
 			OnStorageChange: t.OnStorageChange,
 			OnLog:           t.OnLog,
+
+			CaptureArbitrumTransfer: t.CaptureArbitrumTransfer,
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
@@ -173,6 +176,38 @@ func (t *muxTracer) OnLog(log *types.Log) {
 	for _, t := range t.tracers {
 		if t.OnLog != nil {
 			t.OnLog(log)
+		}
+	}
+}
+
+func (t *muxTracer) CaptureArbitrumStorageGet(key common.Hash, depth int, before bool) {
+	for _, t := range t.tracers {
+		if t.CaptureArbitrumStorageGet != nil {
+			t.CaptureArbitrumStorageGet(key, depth, before)
+		}
+	}
+}
+
+func (t *muxTracer) CaptureArbitrumStorageSet(key, value common.Hash, depth int, before bool) {
+	for _, t := range t.tracers {
+		if t.CaptureArbitrumStorageSet != nil {
+			t.CaptureArbitrumStorageSet(key, value, depth, before)
+		}
+	}
+}
+
+func (t *muxTracer) CaptureArbitrumTransfer(from, to *common.Address, value *uint256.Int, before bool, reason string) {
+	for _, t := range t.tracers {
+		if t.CaptureArbitrumTransfer != nil {
+			t.CaptureArbitrumTransfer(from, to, value, before, reason)
+		}
+	}
+}
+
+func (t *muxTracer) CaptureStylusHostio(name string, args, outs []byte, startInk, endInk uint64) {
+	for _, t := range t.tracers {
+		if t.CaptureStylusHostio != nil {
+			t.CaptureStylusHostio(name, args, outs, startInk, endInk)
 		}
 	}
 }

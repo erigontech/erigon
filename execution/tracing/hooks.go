@@ -65,6 +65,8 @@ type VMContext struct {
 	IntraBlockState IntraBlockState
 
 	TxHash common.Hash
+
+	ArbOSVersion uint64 // arbitrum
 }
 
 // BlockEvent is emitted upon tracing an incoming block.
@@ -160,6 +162,13 @@ type (
 
 	// LogHook is called when a log is emitted.
 	LogHook = func(log *types.Log)
+
+	// Arbitrum specific hooks
+	CaptureArbitrumTransferHook   = func(from, to *common.Address, value *uint256.Int, before bool, reason string)
+	CaptureArbitrumStorageGetHook = func(key common.Hash, depth int, before bool)
+	CaptureArbitrumStorageSetHook = func(key, value common.Hash, depth int, before bool)
+
+	CaptureStylusHostioHook = func(name string, args, outs []byte, startInk, endInk uint64)
 )
 
 type Hooks struct {
@@ -185,6 +194,13 @@ type Hooks struct {
 	OnStorageChange StorageChangeHook
 	OnLog           LogHook
 	Flush           func(tx types.Transaction)
+
+	// Arbitrum specifics: transfer and storage access tracers
+	CaptureArbitrumTransfer   CaptureArbitrumTransferHook
+	CaptureArbitrumStorageGet CaptureArbitrumStorageGetHook
+	CaptureArbitrumStorageSet CaptureArbitrumStorageSetHook
+	// Arbitrum Stylus specific
+	CaptureStylusHostio CaptureStylusHostioHook
 }
 
 // BalanceChangeReason is used to indicate the reason for a balance change, useful
@@ -237,6 +253,75 @@ const (
 	// Note it doesn't account for a self-destruct which appoints itself as recipient.
 	BalanceDecreaseSelfdestructBurn BalanceChangeReason = 14
 )
+
+// Arbitrum specific
+const (
+	// Its like BalanceIncrease but marks address as escrow and prohibit it's deletion after SpuriousDragon
+	BalanceIncreaseEscrow BalanceChangeReason = 15
+
+	BalanceChangeDuringEVMExecution BalanceChangeReason = 128 + iota
+	BalanceIncreaseDeposit
+	BalanceDecreaseWithdrawToL1
+	BalanceIncreaseL1PosterFee
+	BalanceIncreaseInfraFee
+	BalanceIncreaseNetworkFee
+	BalanceChangeTransferInfraRefund
+	BalanceChangeTransferNetworkRefund
+	BalanceIncreasePrepaid
+	BalanceDecreaseUndoRefund
+	BalanceChangeEscrowTransfer
+	BalanceChangeTransferBatchposterReward
+	BalanceChangeTransferBatchposterRefund
+	BalanceChangeTransferRetryableExcessRefund
+	// Stylus
+	BalanceChangeTransferActivationFee
+	BalanceChangeTransferActivationReimburse
+	// Native token minting and burning
+	BalanceIncreaseMintNativeToken
+	BalanceDecreaseBurnNativeToken
+)
+
+func (b BalanceChangeReason) Str() string {
+	switch b {
+	case BalanceIncreaseRewardTransactionFee:
+		return "tip"
+	case BalanceDecreaseGasBuy:
+		return "feePayment"
+	case BalanceIncreaseGasReturn:
+		return "gasRefund"
+	case BalanceChangeTransfer:
+		return "transfer via a call"
+	case BalanceDecreaseSelfdestruct:
+		return "selfDestruct"
+	case BalanceChangeDuringEVMExecution:
+		return "during evm execution"
+	case BalanceIncreaseDeposit:
+		return "deposit"
+	case BalanceDecreaseWithdrawToL1:
+		return "withdraw"
+	case BalanceIncreaseL1PosterFee, BalanceIncreaseInfraFee, BalanceIncreaseNetworkFee:
+		return "feeCollection"
+	case BalanceIncreasePrepaid:
+		return "prepaid"
+	case BalanceDecreaseUndoRefund:
+		return "undoRefund"
+	case BalanceChangeEscrowTransfer:
+		return "escrow"
+	case BalanceChangeTransferInfraRefund, BalanceChangeTransferNetworkRefund, BalanceChangeTransferRetryableExcessRefund:
+		return "refund"
+	case BalanceChangeTransferBatchposterReward:
+		return "batchPosterReward"
+	case BalanceChangeTransferBatchposterRefund:
+		return "batchPosterRefund"
+	// Stylus
+	case BalanceChangeTransferActivationFee:
+		return "activate"
+	case BalanceChangeTransferActivationReimburse:
+		return "reimburse"
+	default:
+		return "unspecified"
+	}
+}
 
 // GasChangeReason is used to indicate the reason for a gas change, useful
 // for tracing and reporting.
@@ -296,6 +381,15 @@ const (
 	GasChangeCallFailedExecution GasChangeReason = 14
 	// GasChangeDelegatedDesignation is the amount of gas that will be charged for resolution of delegated designation.
 	GasChangeDelegatedDesignation GasChangeReason = 15
+	// GasChangeWitnessContractCreation flags the event of adding to the witness during the contract creation finalization step.
+	GasChangeWitnessContractCreation GasChangeReason = 16
+	// GasChangeWitnessCodeChunk flags the event of adding one or more contract code chunks to the witness.
+	GasChangeWitnessCodeChunk GasChangeReason = 17
+	// GasChangeWitnessContractCollisionCheck flags the event of adding to the witness when checking for contract address collision.
+	GasChangeWitnessContractCollisionCheck GasChangeReason = 18
+	// GasChangeTxDataFloor is the amount of extra gas the transaction has to pay to reach the minimum gas requirement for the
+	// transaction data. This change will always be a negative change.
+	GasChangeTxDataFloor GasChangeReason = 19
 
 	// GasChangeIgnored is a special value that can be used to indicate that the gas change should be ignored as
 	// it will be "manually" tracked by a direct emit of the gas change event.

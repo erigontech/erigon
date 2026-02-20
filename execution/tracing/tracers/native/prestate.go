@@ -164,7 +164,7 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 		addr := accounts.InternAddress(stackData[stackLen-1].Bytes20())
 		t.lookupAccount(addr)
 		if op == vm.SELFDESTRUCT {
-			if t.env.ChainConfig.IsCancun(t.env.Time) {
+			if t.env.ChainConfig.IsCancun(t.env.Time, 0) {
 				// EIP-6780: Post Dancum/Cancun only delete if created in same transaction
 				if t.created[caller] {
 					t.deleted[caller] = true
@@ -179,7 +179,7 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 		addr := accounts.InternAddress(stackData[stackLen-2].Bytes20())
 		t.lookupAccount(addr)
 		// Lookup the delegation target
-		if t.env.ChainConfig.IsPrague(t.env.Time) {
+		if t.env.ChainConfig.IsPrague(t.env.Time, 0) {
 			code, _ := t.env.IntraBlockState.GetCode(addr)
 			if target, ok := types.ParseDelegation(code); ok {
 				t.lookupAccount(target)
@@ -219,7 +219,7 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 		t.to = accounts.InternAddress(*tx.GetTo())
 		t.create = false
 		// Lookup the delegation target
-		if t.env.ChainConfig.IsPrague(t.env.Time) {
+		if t.env.ChainConfig.IsPrague(t.env.Time, 0) {
 			code, _ := t.env.IntraBlockState.GetCode(t.to)
 			if target, ok := types.ParseDelegation(code); ok {
 				t.lookupAccount(target)

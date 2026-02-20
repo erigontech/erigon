@@ -52,6 +52,9 @@ type callLog struct {
 }
 
 type callFrame struct {
+	BeforeEVMTransfers *[]arbitrumTransfer `json:"beforeEVMTransfers,omitempty"`
+	AfterEVMTransfers  *[]arbitrumTransfer `json:"afterEVMTransfers,omitempty"`
+
 	Type     vm.OpCode      `json:"-"`
 	From     common.Address `json:"from"`
 	Gas      uint64         `json:"gas"`
@@ -108,6 +111,10 @@ type callFrameMarshaling struct {
 }
 
 type callTracer struct {
+	// Arbitrum: capture transfers occurring outside of evm execution
+	beforeEVMTransfers []arbitrumTransfer
+	afterEVMTransfers  []arbitrumTransfer
+
 	callstack   []callFrame
 	config      callTracerConfig
 	gasLimit    uint64
@@ -142,14 +149,19 @@ func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, 
 	}
 	// First callframe contains txn context info
 	// and is populated on start and end.
-	t := &callTracer{callstack: make([]callFrame, 0, 1), config: config}
+	t := &callTracer{
+		beforeEVMTransfers: []arbitrumTransfer{},
+		afterEVMTransfers:  []arbitrumTransfer{},
+		callstack:          make([]callFrame, 0, 1),
+		config:             config}
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnTxStart: t.OnTxStart,
-			OnTxEnd:   t.OnTxEnd,
-			OnEnter:   t.OnEnter,
-			OnExit:    t.OnExit,
-			OnLog:     t.OnLog,
+			OnTxStart:               t.OnTxStart,
+			OnTxEnd:                 t.OnTxEnd,
+			OnEnter:                 t.OnEnter,
+			OnExit:                  t.OnExit,
+			OnLog:                   t.OnLog,
+			CaptureArbitrumTransfer: t.CaptureArbitrumTransfer,
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
@@ -329,7 +341,13 @@ func (t *callTracer) GetResult() (json.RawMessage, error) {
 	if len(t.callstack) != 1 {
 		return nil, errors.New("incorrect number of top-level calls")
 	}
-	res, err := json.Marshal(t.callstack[0])
+
+	call := t.callstack[0]
+	call.BeforeEVMTransfers = &t.beforeEVMTransfers
+	call.AfterEVMTransfers = &t.afterEVMTransfers
+
+	res, err := json.Marshal(call)
+
 	if err != nil {
 		return nil, err
 	}

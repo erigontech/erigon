@@ -235,8 +235,9 @@ func (t *jsTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from 
 	db := &dbObj{ibs: env.IntraBlockState, vm: t.vm, toBig: t.toBig, toBuf: t.toBuf, fromBuf: t.fromBuf}
 	t.dbValue = db.setupObject()
 	blockContext := evmtypes.BlockContext{
-		BlockNumber: env.BlockNumber,
-		Time:        env.Time,
+		BlockNumber:  env.BlockNumber,
+		Time:         env.Time,
+		ArbOSVersion: env.ArbOSVersion,
 	}
 	rules := blockContext.Rules(env.ChainConfig)
 	t.activePrecompiles = vm.ActivePrecompiles(rules)

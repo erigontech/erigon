@@ -62,6 +62,10 @@ Hence, we cannot make the map in init, but must make it upon first use.
 */
 var ctors map[string]ctorFn
 
+func RegisterExternal(name string, ctor ctorFn) {
+	register(name, ctor)
+}
+
 // register is used by native tracers to register their presence.
 func register(name string, ctor ctorFn) {
 	if ctors == nil {
