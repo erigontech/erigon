@@ -92,6 +92,9 @@ type EVM struct {
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
+
+	ProcessingHookSet atomic.Bool
+	ProcessingHook    TxProcessingHook
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -99,7 +102,16 @@ type EVM struct {
 func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
 	if vmConfig.NoBaseFee {
 		if txCtx.GasPrice.IsZero() {
+			if chainConfig.IsArbitrum() {
+				blockCtx.BaseFeeInBlock = new(uint256.Int)
+				if !blockCtx.BaseFee.IsZero() {
+					blockCtx.BaseFeeInBlock.Set(&blockCtx.BaseFee)
+				}
+			}
 			blockCtx.BaseFee = uint256.Int{}
+		}
+		if chainConfig.IsArbitrum() && txCtx.BlobFee.IsZero() {
+			blockCtx.BlobBaseFee = uint256.Int{}
 		}
 	}
 	evm := &EVM{
@@ -111,6 +123,8 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 		chainRules:      blockCtx.Rules(chainConfig),
 	}
 	evm.jt = jumpTable(evm.chainRules, vmConfig)
+
+	evm.ProcessingHook = DefaultTxProcessor{evm: evm}
 
 	return evm
 }
@@ -247,7 +261,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 
 	// It is allowed to call precompiles, even via delegatecall
 	if isPrecompile {
-		ret, gas, err = RunPrecompiledContract(p, input, gas, evm.Config().Tracer)
+		ret, gas, _, err = RunPrecompiledContract(p, input, gas, evm.Config().Tracer, nil)
 	} else if len(code) == 0 {
 		// If the account has no code, we can abort here
 		// The depth-check is already done, and precompiles handled above
@@ -263,19 +277,21 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		var contract Contract
 		if typ == CALLCODE {
 			contract = Contract{
-				caller:   caller,
-				addr:     caller,
-				value:    value,
-				Code:     code,
-				CodeHash: codeHash,
+				caller:             caller,
+				addr:               caller,
+				value:              value,
+				Code:               code,
+				CodeHash:           codeHash,
+				DelegateOrCallcode: true,
 			}
 		} else if typ == DELEGATECALL {
 			contract = Contract{
-				caller:   callerAddress,
-				addr:     caller,
-				value:    value,
-				Code:     code,
-				CodeHash: codeHash,
+				caller:             callerAddress,
+				addr:               caller,
+				value:              value,
+				Code:               code,
+				CodeHash:           codeHash,
+				DelegateOrCallcode: true,
 			}
 		} else {
 			contract = Contract{
@@ -479,6 +495,10 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	// Reject code starting with 0xEF if EIP-3541 is enabled.
 	if err == nil && evm.chainRules.IsLondon && len(ret) >= 1 && ret[0] == 0xEF {
 		err = ErrInvalidCode
+
+		if evm.chainRules.IsStylus && state.IsStylusProgram(ret) {
+			err = nil
+		}
 	}
 	// If the contract creation ran successfully and no errors were returned,
 	// calculate the gas required to store the code. If the code could not
@@ -502,7 +522,7 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 	// above, we revert to the snapshot and consume any gas remaining. Additionally,
 	// when we're in Homestead, this also counts for code storage gas errors.
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
-		evm.intraBlockState.RevertToSnapshot(snapshot, nil)
+		evm.intraBlockState.RevertToSnapshot(snapshot, err)
 		if err != ErrExecutionReverted {
 			gasRemaining, _ = useGas(gasRemaining, gasRemaining, evm.Config().Tracer, tracing.GasChangeCallFailedExecution)
 		}
@@ -579,6 +599,8 @@ func (evm *EVM) GetVMContext() *tracing.VMContext {
 		ChainConfig:     evm.ChainConfig(),
 		IntraBlockState: evm.IntraBlockState(),
 		TxHash:          evm.TxHash,
+
+		ArbOSVersion: evm.Context.ArbOSVersion,
 	}
 }
 

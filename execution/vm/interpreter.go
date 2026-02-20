@@ -48,6 +48,8 @@ type Config struct {
 	RestoreState  bool // Revert all changes made to the state (useful for constant system calls)
 
 	ExtraEips []int // Additional EIPS that are to be enabled
+
+	ExposeMultiGas bool
 }
 
 func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {

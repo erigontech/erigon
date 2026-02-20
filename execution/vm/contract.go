@@ -53,6 +53,10 @@ type Contract struct {
 	CodeHash accounts.CodeHash
 
 	value uint256.Int
+
+	DelegateOrCallcode bool
+	IsDeployment       bool
+	IsSystemCall       bool
 }
 
 // around 64MB cache in the worst case.
@@ -136,4 +140,8 @@ func (c *Contract) Address() accounts.Address {
 // Value returns the contract's value (sent to it from it's caller)
 func (c *Contract) Value() uint256.Int {
 	return c.value
+}
+
+func (c *Contract) IsDelegateOrCallcode() bool {
+	return c.DelegateOrCallcode
 }

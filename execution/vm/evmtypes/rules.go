@@ -17,36 +17,10 @@
 package evmtypes
 
 import (
-	"math/big"
-
 	"github.com/erigontech/erigon/execution/chain"
 )
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
 func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
-	chainID := c.ChainID
-	if chainID == nil {
-		chainID = new(big.Int)
-	}
-
-	return &chain.Rules{
-		ChainID:            new(big.Int).Set(chainID),
-		IsHomestead:        c.IsHomestead(bc.BlockNumber),
-		IsTangerineWhistle: c.IsTangerineWhistle(bc.BlockNumber),
-		IsSpuriousDragon:   c.IsSpuriousDragon(bc.BlockNumber),
-		IsByzantium:        c.IsByzantium(bc.BlockNumber),
-		IsConstantinople:   c.IsConstantinople(bc.BlockNumber),
-		IsPetersburg:       c.IsPetersburg(bc.BlockNumber),
-		IsIstanbul:         c.IsIstanbul(bc.BlockNumber),
-		IsBerlin:           c.IsBerlin(bc.BlockNumber),
-		IsLondon:           c.IsLondon(bc.BlockNumber),
-		IsShanghai:         c.IsShanghai(bc.Time) || c.IsAgra(bc.BlockNumber),
-		IsCancun:           c.IsCancun(bc.Time),
-		IsNapoli:           c.IsNapoli(bc.BlockNumber),
-		IsBhilai:           c.IsBhilai(bc.BlockNumber),
-		IsPrague:           c.IsPrague(bc.Time) || c.IsBhilai(bc.BlockNumber),
-		IsOsaka:            c.IsOsaka(bc.Time),
-		IsAmsterdam:        c.IsAmsterdam(bc.Time),
-		IsAura:             c.Aura != nil,
-	}
+	return c.MakeRules(bc.BlockNumber, bc.Time, bc.ArbOSVersion)
 }

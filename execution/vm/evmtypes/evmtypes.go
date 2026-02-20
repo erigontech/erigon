@@ -19,6 +19,7 @@ package evmtypes
 import (
 	"math/big"
 
+	"github.com/erigontech/erigon/arb/multigas"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -41,16 +42,20 @@ type BlockContext struct {
 	PostApplyMessage PostApplyMessageFunc
 
 	// Block information
-	Coinbase    accounts.Address // Provides information for COINBASE
-	GasLimit    uint64           // Provides information for GASLIMIT
-	MaxGasLimit bool             // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
-	BlockNumber uint64           // Provides information for NUMBER
-	Time        uint64           // Provides information for TIME
-	Difficulty  *big.Int         // Provides information for DIFFICULTY
-	BaseFee     uint256.Int      // Provides information for BASEFEE
-	PrevRanDao  *common.Hash     // Provides information for PREVRANDAO
-	BlobBaseFee uint256.Int      // Provides information for BLOBBASEFEE
-	SlotNumber  uint64           // Provides information for SLOTNUM
+	Coinbase     accounts.Address // Provides information for COINBASE
+	GasLimit     uint64           // Provides information for GASLIMIT
+	MaxGasLimit  bool             // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
+	BlockGasUsed uint64
+	BlockNumber  uint64       // Provides information for NUMBER
+	Time         uint64       // Provides information for TIME
+	Difficulty   *big.Int     // Provides information for DIFFICULTY
+	BaseFee      uint256.Int  // Provides information for BASEFEE
+	PrevRanDao   *common.Hash // Provides information for PREVRANDAO
+	BlobBaseFee  uint256.Int  // Provides information for BLOBBASEFEE
+	SlotNumber   uint64       // Provides information for SLOTNUM
+
+	ArbOSVersion   uint64
+	BaseFeeInBlock *uint256.Int
 }
 
 // TxContext provides the EVM with information about a transaction.
@@ -82,6 +87,10 @@ type ExecutionResult struct {
 	// execution but received ETH after the SELFDESTRUCT opcode ran (EIP-7708).
 	// Captured before SoftFinalise clears the journal.
 	SelfDestructedWithBalance []AddressAndBalance
+
+	ScheduledTxes    types.Transactions
+	TopLevelDeployed *common.Address
+	UsedMultiGas     multigas.MultiGas
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -147,4 +156,50 @@ type IntraBlockState interface {
 	BlockNumber() uint64
 	TxIndex() int
 	Incarnation() int
+
+	CreateAccount(accounts.Address, bool) error
+
+	RemoveEscrowProtection(addr accounts.Address)
+	ExpectBalanceBurn(amount *uint256.Int)
+	ExpectBalanceMint(amount *uint256.Int)
+
+	GetNonce(accounts.Address) (uint64, error)
+	SetNonce(accounts.Address, uint64) error
+
+	GetCodeHash(accounts.Address) (accounts.CodeHash, error)
+	GetCode(accounts.Address) ([]byte, error)
+	SetCode(accounts.Address, []byte) error
+	GetCodeSize(accounts.Address) (int, error)
+
+	ResolveCodeHash(accounts.Address) (accounts.CodeHash, error)
+	ResolveCode(accounts.Address) ([]byte, error)
+	GetDelegatedDesignation(accounts.Address) (accounts.Address, bool, error)
+
+	AddRefund(uint64)
+	GetRefund() uint64
+	SubRefund(gas uint64) error
+
+	GetCommittedState(accounts.Address, accounts.StorageKey) (uint256.Int, error)
+	GetState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error)
+	SetState(accounts.Address, accounts.StorageKey, uint256.Int) error
+
+	GetTransientState(addr accounts.Address, key accounts.StorageKey) uint256.Int
+	SetTransientState(addr accounts.Address, key accounts.StorageKey, value uint256.Int)
+
+	Selfdestruct(accounts.Address) (bool, error)
+	HasSelfdestructed(accounts.Address) (bool, error)
+
+	Exist(accounts.Address) (bool, error)
+	Empty(accounts.Address) (bool, error)
+
+	Prepare(rules *chain.Rules, sender, coinbase accounts.Address, dst accounts.Address,
+		precompiles []accounts.Address, list types.AccessList, authorities []accounts.Address) error
+
+	AddressInAccessList(addr accounts.Address) bool
+	AddAddressToAccessList(addr accounts.Address) (addrMod bool)
+	AddSlotToAccessList(addr accounts.Address, slot accounts.StorageKey) (addrMod, slotMod bool)
+	SlotInAccessList(addr accounts.Address, slot accounts.StorageKey) (addressPresent, slotPresent bool)
+
+	RevertToSnapshot(int, error)
+	PushSnapshot() int
 }

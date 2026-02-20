@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -653,7 +654,8 @@ func opExtCodeHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 }
 
 func opGasprice(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.push(evm.GasPrice)
+	gasPrice := evm.ProcessingHook.GasPriceOp(evm)
+	scope.Stack.push(*gasPrice)
 	return pc, nil, nil
 }
 
@@ -666,14 +668,17 @@ func opBlockhash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 		return pc, nil, nil
 	}
 	var upper, lower uint64
-	upper = evm.Context.BlockNumber
+	upper, err := evm.ProcessingHook.L1BlockNumber(evm.Context)
+	if err != nil {
+		return pc, nil, err
+	}
 	if upper <= params.BlockHashOldWindow {
 		lower = 0
 	} else {
 		lower = upper - params.BlockHashOldWindow
 	}
 	if arg64 >= lower && arg64 < upper {
-		hash, err := evm.Context.GetHash(arg64)
+		hash, err := evm.ProcessingHook.L1BlockHash(evm.Context, arg64)
 		if err != nil {
 			arg.Clear()
 			return pc, nil, err
@@ -708,7 +713,11 @@ func opTimestamp(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 }
 
 func opNumber(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	v := new(uint256.Int).SetUint64(evm.Context.BlockNumber)
+	bnum, err := evm.ProcessingHook.L1BlockNumber(evm.Context)
+	if err != nil {
+		return pc, nil, err
+	}
+	v := uint256.NewInt(bnum)
 	scope.Stack.push(*v)
 	return pc, nil, nil
 }
@@ -1278,6 +1287,9 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		return pc, nil, err
 	}
 
+	if beneficiaryAddr == scope.Contract.Address() {
+		evm.IntraBlockState().ExpectBalanceBurn(&balance)
+	}
 	ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
 	ibs.Selfdestruct(self)
 	tracer := evm.Config().Tracer
@@ -1293,6 +1305,16 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if evm.readOnly {
 		return pc, nil, ErrWriteProtection
+	}
+	if evm.chainRules.IsStylus {
+		actingAddress := scope.Contract.Address()
+		code, err := evm.intraBlockState.GetCode(actingAddress)
+		if err != nil {
+			return pc, nil, err
+		}
+		if state.IsStylusProgram(code) {
+			return pc, nil, ErrExecutionReverted
+		}
 	}
 	beneficiary := scope.Stack.pop()
 	self := scope.Contract.Address()
@@ -1318,6 +1340,11 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 	} else if self != beneficiaryAddr { // Contract already exists, only do transfer if beneficiary is not self.
 		ibs.SubBalance(self, balance, tracing.BalanceDecreaseSelfdestruct)
 		ibs.AddBalance(beneficiaryAddr, balance, tracing.BalanceIncreaseSelfdestruct)
+	}
+	if evm.chainConfig.IsArbitrum() && beneficiaryAddr == scope.Contract.Address() {
+		if b, err := evm.IntraBlockState().GetBalance(scope.Contract.Address()); err == nil && b.Sign() == 0 {
+			evm.IntraBlockState().ExpectBalanceBurn(&balance)
+		}
 	}
 	if evm.ChainRules().IsAmsterdam && !balance.IsZero() { // EIP-7708
 		if self != beneficiaryAddr {

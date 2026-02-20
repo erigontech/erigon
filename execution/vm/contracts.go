@@ -35,6 +35,7 @@ import (
 	patched_big "github.com/ethereum/go-bigmodexpfix/src/math/big"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/arb/multigas"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/bitutil"
 	"github.com/erigontech/erigon/common/crypto"
@@ -69,6 +70,15 @@ func ActivePrecompiledContracts(chainRules *chain.Rules) PrecompiledContracts {
 }
 
 func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
+	if chainRules.IsArbitrum {
+		if chainRules.IsDia {
+			return PrecompiledContractsStartingFromArbOS50
+		}
+		if chainRules.IsStylus {
+			return PrecompiledContractsStartingFromArbOS30
+		}
+		return PrecompiledContractsBeforeArbOS30
+	}
 	switch {
 	case chainRules.IsOsaka:
 		return PrecompiledContractsOsaka
@@ -272,6 +282,16 @@ func init() {
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
+	if rules.IsArbitrum {
+		if rules.IsDia {
+			return PrecompiledAddressesStartingFromArbOS50
+		}
+		if rules.IsStylus {
+			return PrecompiledAddressesStartingFromArbOS30
+		}
+		return PrecompiledAddressesBeforeArbOS30
+	}
+
 	switch {
 	case rules.IsOsaka:
 		return PrecompiledAddressesOsaka
@@ -299,20 +319,26 @@ func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
 // - the returned bytes,
 // - the _remaining_ gas,
 // - any error that occurred
-func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64, tracer *tracing.Hooks,
-) (ret []byte, remainingGas uint64, err error) {
+func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64, logger *tracing.Hooks, advancedInfo *AdvancedPrecompileCall) (ret []byte, remainingGas uint64, usedMultiGas multigas.MultiGas, err error) {
+	advanced, isAdvanced := p.(AdvancedPrecompile)
+	if isAdvanced {
+		return advanced.RunAdvanced(input, suppliedGas, advancedInfo)
+	}
+	precompileArbosAware, isPrecompileArbosAware := p.(ArbosAwarePrecompile)
+	if isPrecompileArbosAware && advancedInfo != nil {
+		precompileArbosAware.SetArbosVersion(advancedInfo.Evm.Context.ArbOSVersion)
+	}
 	gasCost := p.RequiredGas(input)
 	if suppliedGas < gasCost {
-		return nil, 0, ErrOutOfGas
+		return nil, 0, multigas.ComputationGas(suppliedGas), ErrOutOfGas
 	}
-
-	if tracer != nil && tracer.OnGasChange != nil {
-		tracer.OnGasChange(suppliedGas, suppliedGas-gasCost, tracing.GasChangeCallPrecompiledContract)
+	if logger != nil && logger.OnGasChange != nil {
+		logger.OnGasChange(suppliedGas, suppliedGas-gasCost, tracing.GasChangeCallPrecompiledContract)
 	}
 
 	suppliedGas -= gasCost
 	output, err := p.Run(input)
-	return output, suppliedGas, err
+	return output, suppliedGas, multigas.ComputationGas(gasCost), err
 }
 
 // ECRECOVER implemented as a native contract.
