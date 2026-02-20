@@ -115,11 +115,10 @@ func (s *SimpleSequence) reverseSearch(seek uint64) (int, bool) {
 		return 0, false
 	}
 
-	// c >= 2, Get(0) <= seek < Get(c-1); answer is in [0, c-2]
-	idx := sort.Search(int(c-1), func(i int) bool {
-		return s.Get(c-uint64(i)-2) <= seek
+	idx := sort.Search(int(c), func(i int) bool {
+		return s.Get(uint64(i)) > seek
 	})
-	return int(c) - idx - 2, true
+	return idx - 1, true
 }
 
 func (s *SimpleSequence) Seek(seek uint64) (uint64, bool) {
