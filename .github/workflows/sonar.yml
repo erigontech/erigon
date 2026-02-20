@@ -1,0 +1,70 @@
+name: SonarCloud
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+    paths-ignore:
+      - 'dashboards/**'
+      - '**/*.md'
+      - '.github/workflows/**'
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+    paths-ignore:
+      - 'dashboards/**'
+      - '**/*.md'
+      - '.github/workflows/**'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  sonar:
+    env:
+      gocache_tag: coverage
+    concurrency:
+      group: >-
+        ${{
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
+          format('{0}-{1}', github.workflow, github.run_id) ||
+          format('{0}-{1}', github.workflow, github.ref)
+        }}
+      cancel-in-progress: true
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          lfs: true
+
+      - uses: ./.github/actions/setup-erigon
+        id: erigon
+
+      - uses: ./.github/actions/restore-build-cache
+        with:
+          buildtag: ${{ env.gocache_tag }}
+          build: ${{ steps.erigon.outputs.build }}
+          goversion: ${{ steps.erigon.outputs.goversion }}
+
+      - name: Run tests with coverage
+        env:
+          SKIP_FLAKY_TESTS: 'true'
+        run: GOGC=80 make test-sonar-coverage
+
+      - name: SonarCloud scan
+        uses: SonarSource/sonarqube-scan-action@v7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - uses: ./.github/actions/save-build-cache
+        if: always()
+        with:
+          buildtag: ${{ env.gocache_tag }}
+          build: ${{ steps.erigon.outputs.build }}
+          goversion: ${{ steps.erigon.outputs.goversion }}

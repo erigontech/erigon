@@ -8,7 +8,12 @@ on:
   pull_request:
     branches:
       - 'release/**'
+      - 'main'
   workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   # 
@@ -35,6 +40,8 @@ jobs:
               - '**/.github/workflows/backups-dashboards.yml'
   tests-linux:
     needs: source-of-changes
+    env:
+      gocache_tag: race
     timeout-minutes: 90
     concurrency:
       # concurrency group: there can be at most one running and one pending job in a 
@@ -67,47 +74,57 @@ jobs:
           set +x
           echo "This workflow is being executed by this runner: $RUNNER_NAME"
           
-      - name: "Checkout code with submodules and large files (lfs)"
+      - name: Checkout code
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/checkout@v6
         with:
           fetch-depth: 1
-          submodules: recursive
-          lfs: true
+        env:
+          GIT_LFS_SKIP_SMUDGE: 1
 
-      - name: Cleanup space
+      - name: Clone submodules
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        run: time git submodule update --init --recursive --depth 1
+
+      - name: Pull LFS objects (only files needed by tests)
+        if: needs.source-of-changes.outputs.changed_files != 'true'
         run: |
-          rm -fr /opt/az \
-                 /opt/microsoft \
-                 /usr/share/dotnet \
-                 /usr/share/miniconda \
-                 /usr/share/swift
+          time git lfs pull --include='execution/tests/test-corners/**'
+          cd execution/tests/execution-spec-tests
+          time git lfs pull --include='blockchain_tests/frontier/scenarios/*.json,blockchain_tests/osaka/eip7934_block_rlp_limit/*.json,blockchain_tests/static/state_tests/stPreCompiledContracts/*.json,blockchain_tests/static/state_tests/stStackTests/*.json,state_tests/static/state_tests/stStackTests/*.json'
+
+      - name: Set variables
+        id: vars
+        run: echo "buildtag=race-${{ matrix.test-group }}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Go environment
         if: needs.source-of-changes.outputs.changed_files != 'true'
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.25'
-          cache: true
-          
-      - name: Install dependencies on Linux
+        uses: ./.github/actions/setup-erigon
+        id: erigon
+
+      - uses: ./.github/actions/restore-build-cache
         if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: sudo apt update -y && sudo apt install -y build-essential
-        
+        with:
+          buildtag: ${{ steps.vars.outputs.buildtag }}
+          build: ${{ steps.erigon.outputs.build }}
+          goversion: ${{ steps.erigon.outputs.goversion }}
+
       - name: Run ${{ matrix.test-group }} tests on ${{ matrix.os }}
         env:
           SKIP_FLAKY_TESTS: 'true'
           GODEBUG: cgocheck=0
           GOTRACEBACK: 1
-          GOEXPERIMENT: synctest
           GOGC: 80
           CGO_CFLAGS: -D__BLST_PORTABLE__
         if: needs.source-of-changes.outputs.changed_files != 'true'
         run: |
+          run_tests() {
+            go test -race "$@" 2>&1 | ./tools/filter-test-output
+          }
           case "${{ matrix.test-group }}" in
             execution-tests)
               # execution/tests/... contains the heaviest test suites (~32 min)
-              go test -race -timeout 60m ./execution/tests/...
+              run_tests -timeout 60m ./execution/tests/...
               ;;
             execution-other)
               # All execution subdirectories except execution/tests
@@ -116,16 +133,16 @@ jobs:
                 if [ -d "$d" ]; then
                   TEST_PACKAGES=$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' "./$d/..." 2>/dev/null)
                   if [ -n "$TEST_PACKAGES" ]; then
-                    go test -race -timeout 30m "./$d/..."
+                    run_tests -timeout 30m "./$d/..."
                   fi
                 fi
               done
               ;;
             consensus)
-              go test -race -timeout 60m ./cl/...
+              run_tests -timeout 60m ./cl/...
               ;;
             core-rpc)
-              go test -race -timeout 30m ./db/... ./node/... ./txnprovider/... ./p2p/... ./rpc/...
+              run_tests -timeout 30m ./db/... ./node/... ./txnprovider/... ./p2p/... ./rpc/...
               ;;
             other)
               DIRS=$(ls -d -- */ | grep -vE '^(execution|cl|p2p|rpc|db|node|txnprovider|dashboards)/$' | sed 's/\/$//')
@@ -133,7 +150,7 @@ jobs:
                 if [ -d "$d" ]; then
                   TEST_PACKAGES=$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' "./$d/...")
                   if [ -n "$TEST_PACKAGES" ]; then
-                    go test -race -timeout 30m "./$d/..."
+                    run_tests -timeout 30m "./$d/..."
                   fi
                 fi
               done
@@ -144,6 +161,13 @@ jobs:
               exit 1
               ;;
           esac
+
+      - uses: ./.github/actions/save-build-cache
+        if: always() && needs.source-of-changes.outputs.changed_files != 'true'
+        with:
+          buildtag: ${{ steps.vars.outputs.buildtag }}
+          build: ${{ steps.erigon.outputs.build }}
+          goversion: ${{ steps.erigon.outputs.goversion }}
 
       - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
         if: needs.source-of-changes.outputs.changed_files == 'true'

@@ -14,8 +14,12 @@ on:
       - synchronize
       - ready_for_review
   schedule:
-    - cron: '20 16 * * *' # daily at 16:20 UTC
+    - cron: '20 16 * * *' # daily at 16:20 UTC 😙🤌
   workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   # 
@@ -23,6 +27,7 @@ jobs:
   # NOTE: this logic is needed because the simple 'paths-ignore:' doesn't work since this workflow is set as a mandatory/required check for this repo
   # - '**/.github/workflows/**' is currently commented to avoid unintended freeze in case of concurrent changes outside the excluded paths (further development will be done in due course)
   # 
+  # TODO: This shouldn't be needed if caching works properly.
   source-of-changes:
     runs-on: ubuntu-latest
     outputs:
@@ -41,15 +46,17 @@ jobs:
               # - '**/.github/workflows/**'
               - '**/.github/workflows/backups-dashboards.yml'
 
-  tests-mac-linux:
+  tests:
     needs: source-of-changes
+    env:
+      gocache_tag: plain
     concurrency:
-      # concurrency group: there can be at most one running and one pending job in a 
-      # concurrency group at any time. So for commits on main/release, we use different 
+      # concurrency group: there can be at most one running and one pending job in a
+      # concurrency group at any time. So for commits on main/release, we use different
       # concurrency group per commit; for other branches, we use a branch-level CG.
       group: >-
         ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
+          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
           format('{0}-{1}-{2}', github.workflow, matrix.os, github.run_id) ||
           format('{0}-{1}-{2}', github.workflow, matrix.os, github.ref)
         }}
@@ -59,105 +66,67 @@ jobs:
         os:
           - ubuntu-24.04
           - macos-15
+          - windows-2025
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: Cleanup space on Linux runner
-        if: runner.os == 'Linux' && needs.source-of-changes.outputs.changed_files != 'true'
-        run: |
-          rm -fr /opt/az \
-                 /opt/microsoft \
-                 /usr/share/dotnet \
-                 /usr/share/miniconda \
-                 /usr/share/swift
+      - name: Configure Pagefile
+        if: runner.os == 'Windows'
+        uses: al-cheb/configure-pagefile-action@v1.5
+        with:
+          minimum-size: 8GB
+          disk-root: "C:"
 
       - name: Declare runners
         if: needs.source-of-changes.outputs.changed_files != 'true'
         run: |
           set +x
           echo "This workflow is being executed by this runner: $RUNNER_NAME"
-          
-      - name: "Checkout code and submodules with large files (lfs)"
+
+      - name: Checkout code
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/checkout@v6
         with:
-          submodules: recursive
-          lfs: true
-        
+          fetch-depth: 0
+          filter: blob:none
+        env:
+          GIT_LFS_SKIP_SMUDGE: 1
+
+      - name: Clone submodules
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        run: time git submodule update --init --recursive --depth 1
+
+      - name: Pull LFS objects (only files needed by tests)
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        run: |
+          time git lfs pull --include='execution/tests/test-corners/**'
+          cd execution/tests/execution-spec-tests
+          time git lfs pull --include='blockchain_tests/frontier/scenarios/*.json,blockchain_tests/osaka/eip7934_block_rlp_limit/*.json,blockchain_tests/static/state_tests/stPreCompiledContracts/*.json,blockchain_tests/static/state_tests/stStackTests/*.json,state_tests/static/state_tests/stStackTests/*.json'
+
       - name: Setup Go environment
         if: needs.source-of-changes.outputs.changed_files != 'true'
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.25'
-          cache: true
+        uses: ./.github/actions/setup-erigon
+        id: erigon
 
-      - name: Install dependencies on Linux
-        if: runner.os == 'Linux' && needs.source-of-changes.outputs.changed_files != 'true'
-        run: sudo apt update -y && sudo apt install -y build-essential
-        
+      - uses: ./.github/actions/restore-build-cache
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        with:
+          buildtag: ${{ env.gocache_tag }}
+          build: ${{ steps.erigon.outputs.build }}
+          goversion: ${{ steps.erigon.outputs.goversion }}
+
       - name: Run all tests on ${{ matrix.os }}
+        if: needs.source-of-changes.outputs.changed_files != 'true'
         env:
           SKIP_FLAKY_TESTS: 'true'
-        if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: GOGC=80 make test-all
-
-      - name: SonarCloud scan in case OS Linux and changed_files is not true
-        if: runner.os == 'Linux' && needs.source-of-changes.outputs.changed_files != 'true'
-        uses: SonarSource/sonarqube-scan-action@v7
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        continue-on-error: true
-
-      - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
-        if: needs.source-of-changes.outputs.changed_files == 'true'
-        run: echo "This check does not make sense for changes within out-of-scope directories"
-
-
-  tests-windows:
-    needs: source-of-changes
-    concurrency:
-      group: >-
-        ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && 
-          format('{0}-{1}-{2}', github.workflow, matrix.os, github.run_id) ||
-          format('{0}-{1}-{2}', github.workflow, matrix.os, github.ref)
-        }}
-      cancel-in-progress: true
-    strategy:
-      matrix:
-        os: [ windows-2025 ]
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - name: Configure Pagefile
-        uses: al-cheb/configure-pagefile-action@v1.5
-        with:
-          minimum-size: 8GB
-          disk-root: "C:"
-
-      - name: "Checkout code with submodules and large files (lfs) on ${{ matrix.os }}"
-        if: needs.source-of-changes.outputs.changed_files != 'true'
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 1
-          submodules: recursive
-          lfs: true
-
-      - name: Setup Go environment on ${{ matrix.os }}
-        if: needs.source-of-changes.outputs.changed_files != 'true'
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.25'
-          cache: true
-
-      - name: Install make
-        run: choco install make -y
-
-      - name: Run all tests on ${{ matrix.os }}
-        if: needs.source-of-changes.outputs.changed_files != 'true'
-        shell: bash
         run: make test-all
+
+      - uses: ./.github/actions/save-build-cache
+        if: always() && needs.source-of-changes.outputs.changed_files != 'true'
+        with:
+          buildtag: ${{ env.gocache_tag }}
+          build: ${{ steps.erigon.outputs.build }}
+          goversion: ${{ steps.erigon.outputs.goversion }}
 
       - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
         if: needs.source-of-changes.outputs.changed_files == 'true'

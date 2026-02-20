@@ -1,51 +1,79 @@
 name: Lint
 on:
-  push:
-    branches:
-      - main
-      - 'release/**'
   pull_request:
     branches:
       - main
       - 'release/**'
       - performance
       - performance-stable
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
-  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   lint:
-    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
+    env:
+      gocache_tag: plain
     concurrency:
-      group: >-
-        ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
-          format('{0}-{1}', github.workflow, github.run_id) ||
-          format('{0}-{1}', github.workflow, github.ref)
-        }}
+      group: ${{ format('{0}-{1}', github.workflow, github.ref) }}
       cancel-in-progress: true
 
     steps:
-      - name: Cleanup space
-        run: |
-          rm -fr /opt/az \
-                 /opt/microsoft \
-                 /usr/share/dotnet \
-                 /usr/share/miniconda \
-                 /usr/share/swift
-
-      - run: df -h
-
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 0
-      - uses: actions/setup-go@v6
-        with:
-          go-version: '1.25'
+          fetch-depth: 1
+          filter: blob:none
 
-      - run: make lint
+      - uses: ./.github/actions/setup-erigon
+        id: erigon
+        with:
+          modcache: false
+
+      - name: Restore Go module cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.erigon.outputs.modcache }}/cache/download
+          # We can never know ahead of time what to match against
+          key: gomodcache-lint-${{ runner.os }}-${{ hashFiles('go.sum') }}-alwaysmiss
+          # We can use a regular build to bootstrap here, we only add some extra metadata
+          restore-keys: |
+            gomodcache-lint-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            gomodcache-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+
+      - uses: ./.github/actions/restore-build-cache
+        with:
+          buildtag: ${{ env.gocache_tag }}
+          build: ${{ steps.erigon.outputs.build }}
+          goversion: ${{ steps.erigon.outputs.goversion }}
+
+      - name: Restore golangci-lint cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-${{ runner.os }}-${{ hashFiles('go.mod') }}
+          restore-keys: golangci-lint-${{ runner.os }}-
+
+      - run: make lintci
+
+      - uses: ./.github/actions/save-build-cache
+        if: always()
+        with:
+          buildtag: ${{ env.gocache_tag }}
+          build: ${{ steps.erigon.outputs.build }}
+          goversion: ${{ steps.erigon.outputs.goversion }}
+
+      - uses: ./.github/actions/save-mod-cache
+        if: always()
+        with:
+          modcache: ${{ steps.erigon.outputs.modcache }}
+          prefix: modcache-lint
+
+      - name: Save golangci-lint cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-${{ runner.os }}-${{ hashFiles('go.mod') }}

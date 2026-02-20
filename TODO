@@ -1,0 +1,2 @@
+- Set installing Linux build essentials to default off, to find out which workflows actually need it.
+- Work out which files actually affect hive tests. Probably do the same for the RPC tests.

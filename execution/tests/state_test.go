@@ -24,12 +24,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"testing"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -49,7 +51,12 @@ func TestStateCornerCases(t *testing.T) {
 
 	st := new(testMatcher)
 
-	dirs := datadir.New(t.TempDir())
+	tmpDir, err := os.MkdirTemp("", "erigon-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { dir.RemoveAll(tmpDir) })
+	dirs := datadir.New(tmpDir)
 	db := temporaltest.NewTestDB(t, dirs)
 	testDir := path.Join(cornersDir, "state")
 	st.walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
@@ -90,7 +97,7 @@ func TestState(t *testing.T) {
 	st := new(testMatcher)
 	// Corresponds to GeneralStateTests from ethereum/tests:
 	// see https://github.com/ethereum/execution-spec-tests/releases/tag/v5.0.0
-	dir := filepath.Join(eestDir, "state_tests", "static", "state_tests")
+	testDir := filepath.Join(eestDir, "state_tests", "static", "state_tests")
 
 	// Slow tests
 	st.slow(`^stPreCompiledContracts/precompsEIP2929Cancun`)
@@ -98,9 +105,14 @@ func TestState(t *testing.T) {
 	// Very slow tests
 	st.skipLoad(`^stTimeConsuming/`)
 
-	dirs := datadir.New(t.TempDir())
+	tmpDir, err := os.MkdirTemp("", "erigon-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { dir.RemoveAll(tmpDir) })
+	dirs := datadir.New(tmpDir)
 	db := temporaltest.NewTestDB(t, dirs)
-	st.walk(t, dir, func(t *testing.T, name string, test *testutil.StateTest) {
+	st.walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
 		for _, subtest := range test.Subtests() {
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {

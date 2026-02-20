@@ -1,0 +1,113 @@
+name: Setup Erigon environment
+description: Install Go, restore/save module cache
+
+inputs:
+  cleanup-space:
+    description: "Remove large pre-installed packages to free disk space (Linux only)"
+    required: false
+    default: 'false'
+  modcache:
+    description: "Use the default mod cache handling"
+    required: false
+    default: 'true'
+
+outputs:
+  goversion:
+    description: "Full Go version string (e.g. go1.25.7)"
+    value: ${{ steps.go-env.outputs.goversion }}
+  build:
+    description: "GOCACHE path"
+    value: ${{ steps.go-env.outputs.build }}
+  modcache:
+    description: "GOMODCACHE path"
+    value: ${{ steps.go-env.outputs.modcache }}
+
+runs:
+  using: composite
+  steps:
+    # Frees 20-30GB but takes ~30s. Only enable for workflows that hit the
+    # disk ceiling. If space is tight, first check whether caches have blown
+    # out in size before turning this on.
+    - name: Cleanup space
+      if: ${{ inputs.cleanup-space == 'true' && runner.os == 'Linux' }}
+      shell: bash
+      run: |
+        rm -fr /opt/az \
+               /opt/microsoft \
+               /usr/share/dotnet \
+               /usr/share/miniconda \
+               /usr/share/swift
+
+    - name: "Use D: drive for temp files on Windows"
+      if: ${{ runner.os == 'Windows' }}
+      shell: bash
+      run: |
+        mkdir -p D:/tmp
+        echo "TEMP=D:/tmp" >> "$GITHUB_ENV"
+        echo "TMP=D:/tmp" >> "$GITHUB_ENV"
+        echo "TMPDIR=D:/tmp" >> "$GITHUB_ENV"
+
+    - name: Normalize file and directory mtimes for Go test caching
+      shell: bash
+      run: |
+        # Go's test cache keys include stat metadata (mtime+size) for every file and
+        # directory accessed during test execution. Tests that use filepath.WalkDir to
+        # discover fixture files (e.g. execution/tests) cause Go to stat directories
+        # too, not just files. git ls-files only lists tracked files, not directories,
+        # so we use find instead to normalize both in a single walk. Touching untracked
+        # files is harmless since tests don't access them.
+        find . -name .git -prune -o -print0 | TZ=UTC xargs -0 touch -t 200902132331.30
+
+    - name: Get Go minor version from go.mod
+      id: goversion
+      shell: bash
+      run: |
+        minor=$(sed -n 's/^go \([0-9]*\.[0-9]*\).*/\1/p' go.mod)
+        echo "version=${minor}.x" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/setup-go@v6
+      with:
+        go-version: ${{ steps.goversion.outputs.version }}
+        # We have our own caching to optimize testing.
+        cache: false
+
+    # TODO: Make this optional, it's possibly not needed for lints and a few other quick things.
+    - name: Install dependencies on Linux
+      if: ${{ runner.os == 'Linux' }}
+      shell: bash
+      # Can't suppress "Reading database... from apt-get install. Also it's very slow...
+      run: sudo apt-get update -qq && sudo apt-get install -qq -y build-essential 2>/dev/null
+
+    - name: Install make on Windows
+      if: ${{ runner.os == 'Windows' }}
+      shell: bash
+      run: choco install make -y --no-progress
+
+    - name: Get Go environment paths
+      id: go-env
+      shell: bash
+      run: |
+        echo "goversion=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+        echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+        echo "modcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+
+    # Note we only cache $(go env GOMODCACHE)/cache/download, the rest is derived from that part. We don't use this for lint, because it fetches extra metadata.
+
+    - name: Restore Go module cache
+      if: ${{ inputs.modcache == 'true' }}
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.go-env.outputs.modcache }}/cache/download
+        key: gomodcache-${{ runner.os }}-${{ hashFiles('go.sum') }}-invalid
+        restore-keys: gomodcache-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+
+    - name: Download Go modules
+      if: ${{ inputs.modcache == 'true' }}
+      shell: bash
+      # -x because it doesn't log what it's doing otherwise, unlike if a download occurs during another tool call.
+      run: time go mod download
+
+    - uses: ./.github/actions/save-mod-cache
+      if: ${{ always() && inputs.modcache == 'true' }}
+      with:
+        modcache: ${{ steps.go-env.outputs.modcache }}

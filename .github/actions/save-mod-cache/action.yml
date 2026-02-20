@@ -1,0 +1,34 @@
+name: Save Go module cache
+description: Hash and save the Go module download cache
+
+inputs:
+  modcache:
+    description: "Path to the Go module download cache"
+    required: true
+  prefix:
+    description: "The prefix to the save key"
+    required: false
+    default: gomodcache
+
+runs:
+  using: composite
+  steps:
+    - name: Show module cache size
+      if: ${{ always() }}
+      shell: bash
+      run: du -hs '${{ inputs.modcache }}' '${{ inputs.modcache }}/cache/download' || true
+
+    - name: Hash module cache contents
+      id: mod-hash
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        hash=$(cd '${{ inputs.modcache }}/cache/download' && find . -type d -name '*@*' | sort | sha256sum | cut -d' ' -f1)
+        echo "hash=$hash" >> "$GITHUB_OUTPUT"
+
+    - name: Save Go module cache
+      if: ${{ always() }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ inputs.modcache }}/cache/download
+        key: ${{ inputs.prefix }}-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ steps.mod-hash.outputs.hash }}
