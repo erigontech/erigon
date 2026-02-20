@@ -288,7 +288,7 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, storage *DomainRoTx, mergedAccount, mergedStorage *FilesItem) (valueTransformer, error) {
 	var keyBuf [60]byte // 52b key and 8b for inverted step
 	var err error
-	shortened := make([]byte, 16)
+	shortened := make([]byte, 8)
 
 	hadToLookupStorage := mergedStorage == nil
 	if mergedStorage == nil {
