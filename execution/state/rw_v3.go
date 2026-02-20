@@ -59,7 +59,7 @@ func (rs *StateV3) SetTrace(trace bool) {
 	rs.trace = trace
 }
 
-func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stateUpdates StateUpdates, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules) error {
+func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stateUpdates StateUpdates, balanceIncreases map[accounts.Address]BalanceIncreaseEntry, rules *chain.Rules) error {
 	domains := rs.domains
 	if stateUpdates.BTreeG != nil {
 		var err error
@@ -162,14 +162,18 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 				return err
 			}
 		}
-		acc.Balance.Add(&acc.Balance, &increase)
-		if emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
+		acc.Balance.Add(&acc.Balance, &increase.Amount)
+		if !increase.IsEscrow && emptyRemoval && acc.Nonce == 0 && acc.Balance.IsZero() && acc.IsEmptyCodeHash() {
+			log.Warn("escrow protection deleted", "address", addr)
 			addrValue := addr.Value()
 			if err := domains.DomainDel(kv.AccountsDomain, roTx, addrValue[:], txNum, enc0, step0); err != nil {
 				return err
 			}
 		} else {
 			enc1 := accounts.SerialiseV3(&acc)
+			if increase.IsEscrow {
+				log.Warn("escrow protected", "address", addr)
+			}
 			addrValue := addr.Value()
 			if err := domains.DomainPut(kv.AccountsDomain, roTx, addrValue[:], enc1, txNum, enc0, step0); err != nil {
 				return err
@@ -194,7 +198,7 @@ func (rs *StateV3) ApplyTxState(ctx context.Context,
 	blockNum uint64,
 	txNum uint64,
 	accountUpdates StateUpdates,
-	balanceIncreases map[accounts.Address]uint256.Int,
+	balanceIncreases map[accounts.Address]BalanceIncreaseEntry,
 	receipt *types.Receipt,
 	cummulativeBlobGas uint64,
 	logs []*types.Log,

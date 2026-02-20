@@ -375,7 +375,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				txNumIncrement()
 			},
 		}
-		if chainreader.Config().IsShanghai(parent.Time()) {
+		if chainreader.Config().IsShanghai(parent.Time(), 0) {
 			b.withdrawals = []*types.Withdrawal{}
 		}
 		b.header = makeHeader(chainreader, parent, ibs, b.engine)

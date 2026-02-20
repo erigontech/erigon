@@ -218,7 +218,7 @@ func SpawnBuilderExecStage(ctx context.Context, s *stagedsync.StageState, sd *ex
 	// process execv3 - when we remove that this becomes redundant
 	header := block.HeaderNoCopy()
 
-	if execCfg.ChainConfig().IsPrague(header.Time) {
+	if execCfg.ChainConfig().IsPrague(header.Time, 0) {
 		hash := common.Hash{}
 		if len(current.Requests) > 0 {
 			hash = *current.Requests.Hash()
@@ -355,7 +355,7 @@ func getNextTransactions(
 	remainingGas := header.GasLimit - header.GasUsed
 	remainingBlobGas := uint64(0)
 	if header.BlobGasUsed != nil {
-		maxBlobs := cfg.chainConfig.GetMaxBlobsPerBlock(header.Time)
+		maxBlobs := cfg.chainConfig.GetMaxBlobsPerBlock(header.Time, 0)
 		if cfg.builderState.BuilderConfig.MaxBlobsPerBlock != nil {
 			maxBlobs = min(maxBlobs, *cfg.builderState.BuilderConfig.MaxBlobsPerBlock)
 		}
@@ -439,7 +439,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		// Make sure the sender is an EOA (EIP-3607)
 		if !account.IsEmptyCodeHash() && transaction.Type() != types.AccountAbstractionTxType {
 			isEoaCodeAllowed := false
-			if config.IsPrague(header.Time) || config.IsBhilai(header.Number.Uint64()) {
+			if config.IsPrague(header.Time, 0) || config.IsBhilai(header.Number.Uint64()) {
 				code, err := simStateReader.ReadAccountCode(senderAddress)
 				if err != nil {
 					return nil, err
@@ -532,7 +532,7 @@ func addTransactionsToBlock(
 	txnIdx := ibs.TxnIndex() + 1
 	gasPool := new(protocol.GasPool).AddGas(header.GasLimit - header.GasUsed)
 	if header.BlobGasUsed != nil {
-		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time) - *header.BlobGasUsed)
+		gasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time, 0) - *header.BlobGasUsed)
 	}
 	signer := types.MakeSigner(chainConfig, header.Number.Uint64(), header.Time)
 

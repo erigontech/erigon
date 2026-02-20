@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 
 	"github.com/holiman/uint256"
@@ -200,7 +201,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 
 	// compute blob fee for eip-4844 data blobs if any
 	blobGasVal := uint256.Int{}
-	if st.evm.ChainRules().IsCancun {
+	if st.evm.ChainRules().IsCancun && !st.evm.ChainRules().IsArbitrum {
 		blobGasVal, overflow = u256.MulOverflow(st.evm.Context.BlobBaseFee, u256.U64(st.msg.BlobGas()))
 		if overflow {
 			return fmt.Errorf("%w: overflow converting blob gas: %v", ErrInsufficientFunds, &blobGasVal)
@@ -222,7 +223,8 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 			if overflow {
 				return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From())
 			}
-			if st.evm.ChainRules().IsCancun {
+			isCancun := st.evm.ChainRules().IsCancun
+			if isCancun {
 				maxBlobFee, overflow := u256.MulOverflow(*st.msg.MaxFeePerBlobGas(), u256.U64(st.msg.BlobGas()))
 				if overflow {
 					return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From())
@@ -253,6 +255,15 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 
 	if st.evm.Config().Tracer != nil && st.evm.Config().Tracer.OnGasChange != nil {
 		st.evm.Config().Tracer.OnGasChange(0, st.msg.Gas(), tracing.GasChangeTxInitialBalance)
+	}
+
+	if tracer := st.evm.Config().Tracer; tracer != nil && tracer.CaptureArbitrumTransfer != nil {
+		fromAddr := st.msg.From().Value()
+		tracer.CaptureArbitrumTransfer(&fromAddr, nil, &gasVal, true, "feePayment")
+	}
+
+	if st.gasRemaining > math.MaxUint64-st.msg.Gas() {
+		return fmt.Errorf("gasRemaining overflow in buyGas: gasRemaining=%d, msg.Gas()=%d", st.gasRemaining, st.msg.Gas())
 	}
 
 	st.gasRemaining += st.msg.Gas()
@@ -330,7 +341,12 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			}
 		}
 	}
-	if st.msg.BlobGas() > 0 && rules.IsCancun {
+	isCancun := rules.IsCancun
+	if st.evm.ChainConfig().IsArbitrum() {
+		isCancun = false
+	}
+
+	if st.msg.BlobGas() > 0 && isCancun {
 		blobGasPrice := st.evm.Context.BlobBaseFee
 		maxFeePerBlobGas := st.msg.MaxFeePerBlobGas()
 		if !st.evm.Config().NoBaseFee && blobGasPrice.Cmp(maxFeePerBlobGas) > 0 {
@@ -340,7 +356,8 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	}
 
 	// EIP-7825: Transaction Gas Limit Cap
-	if st.msg.CheckGas() && rules.IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
+	if !rules.IsArbitrum &&
+		st.msg.CheckGas() && rules.IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
 		return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, st.msg.Gas())
 	}
 
@@ -360,6 +377,9 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	}
 
 	msg := st.msg
+	if st.gasRemaining > math.MaxUint64-st.msg.Gas() {
+		return nil, fmt.Errorf("gasRemaining overflow in ApplyFrame: gasRemaining=%d, msg.Gas()=%d", st.gasRemaining, st.msg.Gas())
+	}
 	st.gasRemaining += st.msg.Gas()
 	st.initialGas = st.msg.Gas()
 	sender := msg.From()

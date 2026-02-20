@@ -166,10 +166,10 @@ func (e *EngineServer) Start(
 }
 
 func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.Withdrawals) error {
-	if !s.config.IsShanghai(time) && withdrawals != nil {
+	if !s.config.IsShanghai(time, 0) && withdrawals != nil {
 		return &rpc.InvalidParamsError{Message: "withdrawals before Shanghai"}
 	}
-	if s.config.IsShanghai(time) && withdrawals == nil {
+	if s.config.IsShanghai(time, 0) && withdrawals == nil {
 		return &rpc.InvalidParamsError{Message: "missing withdrawals list"}
 	}
 	return nil
@@ -312,10 +312,10 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 	log.Debug(fmt.Sprintf("bal from header: %s", blockAccessList.DebugString()))
 
-	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
-		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) ||
-		(!s.config.IsPrague(header.Time) && version >= clparams.ElectraVersion) ||
-		(s.config.IsPrague(header.Time) && version < clparams.ElectraVersion) || // osaka has no new newPayload method
+	if (!s.config.IsCancun(header.Time, 0) && version >= clparams.DenebVersion) ||
+		(s.config.IsCancun(header.Time, 0) && version < clparams.DenebVersion) ||
+		(!s.config.IsPrague(header.Time, 0) && version >= clparams.ElectraVersion) ||
+		(s.config.IsPrague(header.Time, 0) && version < clparams.ElectraVersion) || // osaka has no new newPayload method
 		(!s.config.IsAmsterdam(header.Time) && version >= clparams.GloasVersion) ||
 		(s.config.IsAmsterdam(header.Time) && version < clparams.GloasVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
@@ -356,7 +356,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	if version >= clparams.DenebVersion {
-		err := misc.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(header.Time), s.config.GetMaxBlobsPerBlock(header.Time), expectedBlobHashes, &transactions)
+		err := misc.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(header.Time, 0), s.config.GetMaxBlobsPerBlock(header.Time, 0), expectedBlobHashes, &transactions)
 		if errors.Is(err, misc.ErrNilBlobHashes) {
 			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
 		}
@@ -593,12 +593,12 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	}
 
 	ts := data.ExecutionPayload.Timestamp
-	if (!s.config.IsCancun(ts) && version >= clparams.DenebVersion) ||
-		(s.config.IsCancun(ts) && version < clparams.DenebVersion) ||
-		(!s.config.IsPrague(ts) && version >= clparams.ElectraVersion) ||
-		(s.config.IsPrague(ts) && version < clparams.ElectraVersion) ||
-		(!s.config.IsOsaka(ts) && version >= clparams.FuluVersion) ||
-		(s.config.IsOsaka(ts) && version < clparams.FuluVersion) ||
+	if (!s.config.IsCancun(ts, 0) && version >= clparams.DenebVersion) ||
+		(s.config.IsCancun(ts, 0) && version < clparams.DenebVersion) ||
+		(!s.config.IsPrague(ts, 0) && version >= clparams.ElectraVersion) ||
+		(s.config.IsPrague(ts, 0) && version < clparams.ElectraVersion) ||
+		(!s.config.IsOsaka(0, ts, 0) && version >= clparams.FuluVersion) ||
+		(s.config.IsOsaka(0, ts, 0) && version < clparams.FuluVersion) ||
 		(!s.config.IsAmsterdam(ts) && version >= clparams.GloasVersion) ||
 		(s.config.IsAmsterdam(ts) && version < clparams.GloasVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
@@ -689,10 +689,10 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 
 	timestamp := uint64(payloadAttributes.Timestamp)
-	if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 before cancun
+	if !s.config.IsCancun(timestamp, 0) && version >= clparams.DenebVersion { // V3 before cancun
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
-	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
+	if s.config.IsCancun(timestamp, 0) && version < clparams.DenebVersion { // Not V3 after cancun
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 

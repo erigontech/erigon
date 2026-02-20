@@ -21,6 +21,7 @@
 package state
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -32,10 +33,12 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -50,6 +53,9 @@ var _ evmtypes.IntraBlockState = new(IntraBlockState) // compile-time interface-
 type revision struct {
 	id           int
 	journalIndex int
+
+	// Arbitrum: track the total balance change across all accounts
+	unexpectedBalanceDelta *uint256.Int
 }
 
 type revisions struct {
@@ -60,7 +66,7 @@ type revisions struct {
 func (r *revisions) snapshot(journal *journal) int {
 	id := r.nextId
 	r.nextId++
-	r.valid = append(r.valid, revision{id, journal.length()})
+	r.valid = append(r.valid, revision{id: id, journalIndex: journal.length()})
 	return id
 }
 
@@ -93,7 +99,7 @@ func (r *revisions) put() *revisions {
 	return nil
 }
 
-func (r *revisions) revertToSnapshot(revid int) int {
+func (r *revisions) revertToSnapshot(revid int) (int, *uint256.Int) {
 	// Find the snapshot in the stack of valid snapshots.
 	idx := sort.Search(len(r.valid), func(i int) bool {
 		return r.valid[i].id >= revid
@@ -110,7 +116,7 @@ func (r *revisions) revertToSnapshot(revid int) int {
 	if r.nextId == snapshot.id+1 {
 		r.nextId = snapshot.id
 	}
-	return snapshot.journalIndex
+	return snapshot.journalIndex, snapshot.unexpectedBalanceDelta
 }
 
 var revisionsPool = sync.Pool{
@@ -125,6 +131,7 @@ type BalanceIncrease struct {
 	increase    uint256.Int
 	transferred bool // Set to true when the corresponding stateObject is created and balance increase is transferred to the stateObject
 	count       int  // Number of increases - this needs tracking for proper reversion
+	isEscrow    bool // Arbitrum: true if increase related to escrow account
 }
 
 type accessOptions struct {
@@ -136,6 +143,8 @@ type accessOptions struct {
 // NOT THREAD SAFE!
 type IntraBlockState struct {
 	stateReader StateReader
+
+	arbExtraData *ArbitrumExtraData
 
 	// This map holds 'live' objects, which will get modified while processing a state transition.
 	stateObjects      map[accounts.Address]*stateObject
@@ -181,6 +190,9 @@ type IntraBlockState struct {
 	codeReadCount       int64
 	version             int
 	dep                 int
+
+	// Arbitrum stylus
+	wasmDB wasmdb.WasmIface
 }
 
 // Create a new state from a given trie
@@ -200,6 +212,14 @@ func New(stateReader StateReader) *IntraBlockState {
 		txIndex:           0,
 		trace:             false,
 		dep:               UnknownDep,
+		arbExtraData: &ArbitrumExtraData{
+			unexpectedBalanceDelta: uint256.NewInt(0),
+			userWasms:              UserWasms{},
+			openWasmPages:          0,
+			everWasmPages:          0,
+			activatedWasms:         make(map[common.Hash]ActivatedWasm),
+			recentWasms:            RecentWasms{},
+		},
 	}
 }
 
@@ -817,6 +837,17 @@ func (sdb *IntraBlockState) ReadVersion(addr accounts.Address, path AccountPath,
 	return sdb.versionMap.Read(addr, path, key, txIdx)
 }
 
+func (sdb *IntraBlockState) RemoveEscrowProtection(addr accounts.Address) {
+	bi, ok := sdb.balanceInc[addr]
+	if ok {
+		if sdb.trace {
+			fmt.Printf("RemoveEscrowProtection %x, isEscrow=%v\n", addr, bi.isEscrow)
+		}
+		bi.isEscrow = false
+		sdb.balanceInc[addr] = bi
+	}
+}
+
 // AddBalance adds amount to the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
@@ -831,7 +862,11 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 			bi, ok := sdb.balanceInc[addr]
 			if !ok {
 				bi = &BalanceIncrease{}
+				bi.isEscrow = reason == tracing.BalanceIncreaseEscrow
 				sdb.balanceInc[addr] = bi
+			}
+			if sdb.trace && bi.isEscrow {
+				fmt.Printf("protected escrow %x\n", addr)
 			}
 
 			if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
@@ -859,6 +894,8 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 
 				sdb.tracingHooks.OnBalanceChange(addr, *prev, *(new(uint256.Int).Add(prev, &amount)), reason)
 			}
+
+			sdb.arbExtraData.unexpectedBalanceDelta.Add(sdb.arbExtraData.unexpectedBalanceDelta, &amount)
 
 			bi.increase = u256.Add(bi.increase, amount)
 			bi.count++
@@ -889,6 +926,18 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 		return nil
 	}
 
+	if isEscrow := reason == tracing.BalanceIncreaseEscrow; isEscrow && sdb.balanceInc != nil {
+		bi, ok := sdb.balanceInc[addr]
+		if !ok {
+			bi = &BalanceIncrease{isEscrow: isEscrow}
+		}
+		bi.isEscrow = isEscrow
+		sdb.balanceInc[addr] = bi
+		if sdb.trace && bi.isEscrow {
+			fmt.Printf("protected escrow %x\n", addr)
+		}
+	}
+
 	prev, wasCommited, _ := sdb.getBalance(addr)
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
@@ -910,6 +959,8 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 	if err != nil {
 		return err
 	}
+	sdb.arbExtraData.unexpectedBalanceDelta.Add(sdb.arbExtraData.unexpectedBalanceDelta, &amount)
+
 	stateObject.SetBalance(update, wasCommited, reason)
 	versionWritten(sdb, addr, BalancePath, accounts.NilKey, update)
 	return nil
@@ -1078,6 +1129,7 @@ func (sdb *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int
 	if err != nil {
 		return err
 	}
+	sdb.arbExtraData.unexpectedBalanceDelta.Sub(sdb.arbExtraData.unexpectedBalanceDelta, &amount)
 	update := u256.Sub(prev, amount)
 	stateObject.SetBalance(update, wasCommited, reason)
 	if sdb.versionMap != nil {
@@ -1096,6 +1148,13 @@ func (sdb *IntraBlockState) SetBalance(addr accounts.Address, amount uint256.Int
 	if err != nil {
 		return err
 	}
+
+	if sdb.arbExtraData != nil {
+		prevBalance := stateObject.Balance()
+		sdb.arbExtraData.unexpectedBalanceDelta.Add(sdb.arbExtraData.unexpectedBalanceDelta, &amount)
+		sdb.arbExtraData.unexpectedBalanceDelta.Sub(sdb.arbExtraData.unexpectedBalanceDelta, &prevBalance)
+	}
+
 	stateObject.SetBalance(amount, !sdb.hasWrite(addr, BalancePath, accounts.NilKey), reason)
 	versionWritten(sdb, addr, BalancePath, accounts.NilKey, stateObject.Balance())
 	return nil
@@ -1305,11 +1364,23 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 		wasCommited: !sdb.hasWrite(addr, SelfDestructPath, accounts.NilKey),
 	})
 
-	if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
-		sdb.tracingHooks.OnBalanceChange(addr, prevBalance, zeroBalance, tracing.BalanceDecreaseSelfdestruct)
+	if sdb.tracingHooks != nil {
+		if sdb.tracingHooks.OnBalanceChange != nil && !prevBalance.IsZero() {
+			sdb.tracingHooks.OnBalanceChange(addr, prevBalance, zeroBalance, tracing.BalanceDecreaseSelfdestruct)
+		}
+		if sdb.tracingHooks.CaptureArbitrumTransfer != nil {
+			fromAddr := addr.Value()
+			sdb.tracingHooks.CaptureArbitrumTransfer(&fromAddr, nil, &prevBalance, false, "selfDestruct")
+		}
 	}
 
 	stateObject.markSelfdestructed()
+	sdb.arbExtraData.unexpectedBalanceDelta.Sub(sdb.arbExtraData.unexpectedBalanceDelta, &stateObject.data.Balance)
+	if bi, exist := sdb.balanceInc[addr]; exist && bi.isEscrow {
+		fmt.Printf("ESCROW unprotected by selfdestruct %x\n", addr)
+		bi.isEscrow = false
+	}
+
 	stateObject.createdContract = false
 	stateObject.data.Balance.Clear()
 
@@ -1630,7 +1701,11 @@ func (sdb *IntraBlockState) PushSnapshot() int {
 	if sdb.revisions == nil {
 		sdb.revisions = revisionsPool.Get().(*revisions)
 	}
-	return sdb.revisions.snapshot(sdb.journal)
+	id := sdb.revisions.snapshot(sdb.journal)
+	if sdb.arbExtraData != nil && sdb.arbExtraData.unexpectedBalanceDelta != nil {
+		sdb.revisions.valid[len(sdb.revisions.valid)-1].unexpectedBalanceDelta = sdb.arbExtraData.unexpectedBalanceDelta.Clone()
+	}
+	return id
 }
 
 func (sdb *IntraBlockState) PopSnapshot(snapshot int) {
@@ -1653,7 +1728,13 @@ func (sdb *IntraBlockState) RevertToSnapshot(revid int, err error) {
 		}
 	}
 
-	snapshot := sdb.revisions.revertToSnapshot(revid)
+	snapshot, arbDelta := sdb.revisions.revertToSnapshot(revid)
+	if sdb.arbExtraData != nil && arbDelta != nil {
+		if sdb.arbExtraData.unexpectedBalanceDelta == nil {
+			sdb.arbExtraData.unexpectedBalanceDelta = uint256.NewInt(0)
+		}
+		sdb.arbExtraData.unexpectedBalanceDelta.Set(arbDelta)
+	}
 	// Replay the journal to undo changes and remove invalidated snapshots
 	sdb.journal.revert(sdb, snapshot)
 
@@ -1809,14 +1890,44 @@ func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 			sdb.getStateObject(addr, true)
 		}
 	}
+
+	if sdb.wasmDB != nil && sdb.arbExtraData != nil {
+		if db := sdb.wasmDB.WasmStore(); db != nil && len(sdb.arbExtraData.activatedWasms) > 0 {
+			if err := db.Update(context.TODO(), func(tx kv.RwTx) error {
+				for moduleHash, asmMap := range sdb.arbExtraData.activatedWasms {
+					wasmdb.WriteActivation(tx, moduleHash, asmMap)
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+			sdb.arbExtraData.activatedWasms = make(map[common.Hash]ActivatedWasm)
+		}
+		sdb.arbExtraData.unexpectedBalanceDelta.Clear()
+	}
 	return sdb.MakeWriteSet(chainRules, stateWriter)
 }
 
-func (sdb *IntraBlockState) BalanceIncreaseSet() map[accounts.Address]uint256.Int {
-	s := make(map[accounts.Address]uint256.Int, len(sdb.balanceInc))
+type BalanceIncreaseEntry struct {
+	Amount   uint256.Int
+	IsEscrow bool
+}
+
+func (sdb *IntraBlockState) BalanceIncreaseSet() map[accounts.Address]BalanceIncreaseEntry {
+	s := make(map[accounts.Address]BalanceIncreaseEntry, len(sdb.balanceInc))
 	for addr, bi := range sdb.balanceInc {
+		if bi.isEscrow {
+			s[addr] = BalanceIncreaseEntry{
+				Amount:   uint256.Int{},
+				IsEscrow: bi.isEscrow,
+			}
+		}
+
 		if !bi.transferred {
-			s[addr] = bi.increase
+			s[addr] = BalanceIncreaseEntry{
+				Amount:   bi.increase,
+				IsEscrow: bi.isEscrow,
+			}
 		}
 	}
 	return s
@@ -1897,6 +2008,18 @@ func (sdb *IntraBlockState) SetTxContext(bn uint64, ti int) {
 	*/
 	sdb.txIndex = ti
 	sdb.blockNum = bn
+
+	if sdb.arbExtraData == nil {
+		sdb.arbExtraData = &ArbitrumExtraData{
+			unexpectedBalanceDelta: new(uint256.Int),
+			userWasms:              map[common.Hash]ActivatedWasm{},
+			activatedWasms:         map[common.Hash]ActivatedWasm{},
+			recentWasms:            NewRecentWasms(),
+		}
+	} else {
+		sdb.arbExtraData.openWasmPages = 0
+		sdb.arbExtraData.everWasmPages = 0
+	}
 }
 
 // no not lock

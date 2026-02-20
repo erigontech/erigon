@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/arb/osver"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -83,12 +84,19 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 
 	var transferFunc evmtypes.TransferFunc
 	var postApplyMessageFunc evmtypes.PostApplyMessageFunc
-	if engine != nil {
+	if engine != nil && !config.IsArbitrum() {
 		transferFunc = engine.GetTransferFunc()
 		postApplyMessageFunc = engine.GetPostApplyMessageFunc()
 	} else {
 		transferFunc = misc.Transfer
-		postApplyMessageFunc = misc.LogSelfDestructedAccounts
+		postApplyMessageFunc = nil
+	}
+
+	// For Arbitrum networks with ArbOS > 0, use difficulty as prevRandao
+	arbOsVersion := types.DeserializeHeaderExtraInformation(header).ArbOSFormatVersion
+	if arbOsVersion > osver.ArbosVersion_0 {
+		difficultyHash := common.BigToHash(header.Difficulty)
+		prevRandDao = &difficultyHash
 	}
 
 	var slotNumber uint64
@@ -106,8 +114,11 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 		Time:             header.Time,
 		BaseFee:          baseFee,
 		GasLimit:         header.GasLimit,
+		BlockGasUsed:     header.GasUsed,
 		PrevRanDao:       prevRandDao,
 		BlobBaseFee:      blobBaseFee,
+		BaseFeeInBlock:   new(uint256.Int).Set(&baseFee),
+		ArbOSVersion:     arbOsVersion,
 		SlotNumber:       slotNumber,
 	}
 	if header.Difficulty != nil {
@@ -118,11 +129,15 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) (comm
 
 // NewEVMTxContext creates a new transaction context for a single transaction.
 func NewEVMTxContext(msg Message) evmtypes.TxContext {
-	return evmtypes.TxContext{
+	etx := evmtypes.TxContext{
 		Origin:     msg.From(),
 		GasPrice:   *msg.GasPrice(),
 		BlobHashes: msg.BlobHashes(),
 	}
+	if mf := msg.MaxFeePerBlobGas(); mf != nil {
+		etx.BlobFee = *mf
+	}
+	return etx
 }
 
 // GetHashFn returns a GetHashFunc which retrieves header hashes by number

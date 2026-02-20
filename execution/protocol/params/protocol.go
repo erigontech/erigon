@@ -63,6 +63,10 @@ const (
 	NetSstoreResetRefund      uint64 = 4800  // Once per SSTORE operation for resetting to the original non-zero value
 	NetSstoreResetClearRefund uint64 = 19800 // Once per SSTORE operation for resetting to the original zero value
 
+	LogTopicBytes          uint64 = 32                               // 32 bytes per topic represents the hash size that gets stored in history.
+	LogTopicHistoryGas     uint64 = LogDataGas * LogTopicBytes       // History growth gas per topic
+	LogTopicComputationGas uint64 = LogTopicGas - LogTopicHistoryGas // Computation gas per topic
+
 	SstoreSentryGasEIP2200            uint64 = 2300  // Minimum gas required to be present for an SSTORE call, not consumed
 	SstoreSetGasEIP2200               uint64 = 20000 // Once per SSTORE operation from clean zero to non-zero
 	SstoreResetGasEIP2200             uint64 = 5000  // Once per SSTORE operation from clean non-zero to something else

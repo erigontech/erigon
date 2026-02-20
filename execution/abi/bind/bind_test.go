@@ -1157,7 +1157,7 @@ var bindTests = []struct {
 			}
 
 			//quick check to see if contents were copied
-			// (See accounts/abi/unpack_test.go for more extensive testing)
+			// (See execution/abi/unpack_test.go for more extensive testing)
 			if retrievedArr[4][3][2] != testArr[4][3][2] {
 				t.Fatalf("Retrieved value does not match expected value! got: %d, expected: %d. %v", retrievedArr[4][3][2], testArr[4][3][2], err)
 			}
@@ -1809,8 +1809,8 @@ var bindTests = []struct {
 		`
 			"math/big"
 
-			"github.com/ethereum/go-ethereum/accounts/abi/bind"
-			"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
+			"github.com/ethereum/go-ethereum/execution/abi/bind"
+			"github.com/ethereum/go-ethereum/execution/abi/bind/backends"
 			"github.com/ethereum/go-ethereum/core"
 			"github.com/ethereum/go-ethereum/crypto"
 			"github.com/ethereum/go-ethereum/node/ethconfig"
@@ -1879,8 +1879,8 @@ var bindTests = []struct {
 		`
 			"math/big"
 	
-			"github.com/ethereum/go-ethereum/accounts/abi/bind"
-			"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
+			"github.com/ethereum/go-ethereum/execution/abi/bind"
+			"github.com/ethereum/go-ethereum/execution/abi/bind/backends"
 			"github.com/ethereum/go-ethereum/core"
 			"github.com/ethereum/go-ethereum/crypto"
 			"github.com/ethereum/go-ethereum/node/ethconfig"
@@ -1931,8 +1931,8 @@ var bindTests = []struct {
 		imports: `
 			"math/big"
 
-			"github.com/ethereum/go-ethereum/accounts/abi/bind"
-			"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
+			"github.com/ethereum/go-ethereum/execution/abi/bind"
+			"github.com/ethereum/go-ethereum/execution/abi/bind/backends"
 			"github.com/ethereum/go-ethereum/core"
 			"github.com/ethereum/go-ethereum/crypto"
 			"github.com/ethereum/go-ethereum/node/ethconfig"
@@ -1979,8 +1979,8 @@ var bindTests = []struct {
 		imports: `
 			"math/big"
 
-			"github.com/ethereum/go-ethereum/accounts/abi/bind"
-			"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
+			"github.com/ethereum/go-ethereum/execution/abi/bind"
+			"github.com/ethereum/go-ethereum/execution/abi/bind/backends"
 			"github.com/ethereum/go-ethereum/core"
 			"github.com/ethereum/go-ethereum/crypto"
 			"github.com/ethereum/go-ethereum/node/ethconfig"
@@ -2019,8 +2019,8 @@ var bindTests = []struct {
 		imports: `
 			"math/big"
 
-			"github.com/ethereum/go-ethereum/accounts/abi/bind"
-			"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
+			"github.com/ethereum/go-ethereum/execution/abi/bind"
+			"github.com/ethereum/go-ethereum/execution/abi/bind/backends"
 			"github.com/ethereum/go-ethereum/core"
 			"github.com/ethereum/go-ethereum/crypto"
 			"github.com/ethereum/go-ethereum/node/ethconfig"

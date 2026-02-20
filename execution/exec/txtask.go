@@ -25,8 +25,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -213,7 +211,7 @@ type TxTask struct {
 	Withdrawals        types.Withdrawals
 	EvmBlockContext    evmtypes.BlockContext
 	HistoryExecution   bool // use history reader for that txn instead of state reader
-	BalanceIncreaseSet map[accounts.Address]uint256.Int
+	BalanceIncreaseSet map[accounts.Address]state.BalanceIncreaseEntry
 
 	Incarnation           int
 	Tracer                *calltracer.CallTracer

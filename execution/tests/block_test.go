@@ -95,6 +95,28 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 	})
 }
 
+func TestArbitrumExecutionSpecBlockchain(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+
+	bt := new(testMatcher)
+
+	dir := filepath.Join(".", "arb-execution-spec-tests", "blockchain_tests")
+	//checkStateRoot := true
+
+	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
+		if err := bt.checkFailure(t, test.Run(t)); err != nil {
+			t.Error(err)
+		}
+	})
+
+}
+
 // Only runs EEST tests for current devnet - can "skip" on off-seasons
 func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	const offSeason = false

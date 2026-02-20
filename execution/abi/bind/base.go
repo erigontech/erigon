@@ -24,6 +24,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
+	"sync"
 
 	"github.com/holiman/uint256"
 
@@ -44,6 +46,8 @@ type CallOpts struct {
 	From        common.Address  // Optional the sender address, otherwise the first account is used
 	BlockNumber *big.Int        // Optional the block number on which the call should be performed
 	Context     context.Context // Network context to support cancellation and timeouts (nil = no timeout)
+
+	BlockHash common.Hash // Arbitrum; Optional the block hash on which the call should be performed
 }
 
 // TransactOpts is the collection of authorization data required to create a
@@ -58,6 +62,13 @@ type TransactOpts struct {
 	GasLimit uint64   // Gas limit to set for the transaction execution (0 = estimate)
 
 	Context context.Context // Network context to support cancellation and timeouts (nil = no timeout)
+
+	// Arbitrum specific fields
+	GasTipCap *big.Int // Gas priority fee cap to use for the 1559 transaction execution (nil = gas price oracle)
+	GasMargin uint64   // Arbitrum: adjusts gas estimate by this many basis points (0 = no adjustment)
+	GasFeeCap *big.Int // Gas fee cap to use for the 1559 transaction execution (nil = gas price oracle)
+	NoSend    bool     // Do all transact steps but do not send the transaction
+
 }
 
 // FilterOpts is the collection of options to fine tune filtering for events
@@ -75,6 +86,32 @@ type WatchOpts struct {
 	Start   *uint64         // Start of the queried range (nil = latest)
 	Context context.Context // Network context to support cancellation and timeouts (nil = no timeout)
 }
+
+// Arbitrum
+// MetaData collects all metadata for a bound contract.
+type MetaData struct {
+	mu   sync.Mutex
+	Sigs map[string]string
+	Bin  string
+	ABI  string
+	ab   *abi.ABI
+}
+
+func (m *MetaData) GetAbi() (*abi.ABI, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ab != nil {
+		return m.ab, nil
+	}
+	if parsed, err := abi.JSON(strings.NewReader(m.ABI)); err != nil {
+		return nil, err
+	} else {
+		m.ab = &parsed
+	}
+	return m.ab, nil
+}
+
+// End of Arbitrum
 
 // BoundContract is the base wrapper object that reflects a contract on the
 // Ethereum network. It contains a collection of methods that are used by the
@@ -240,6 +277,27 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, i
 	if overflow {
 		return nil, errors.New("gasPriceBig higher than 2^256-1")
 	}
+
+	// // Estimate TipCap  Arbitrum
+	// gasTipCap := opts.GasTipCap
+	// if gasTipCap == nil {
+	// 	tip, err := c.transactor.SuggestGasTipCap(ensureContext(opts.Context))
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	gasTipCap = tip
+	// }
+	// // Estimate FeeCap
+	// gasFeeCap := opts.GasFeeCap
+	// if gasFeeCap == nil {
+	// 	gasFeeCap = new(big.Int).Add(
+	// 		gasTipCap,
+	// 		new(big.Int).Mul(head.BaseFee, big.NewInt(basefeeWiggleMultiplier)),
+	// 	)
+	// }
+	// if gasFeeCap.Cmp(gasTipCap) < 0 {
+	// 	return nil, fmt.Errorf("maxFeePerGas (%v) < maxPriorityFeePerGas (%v)", gasFeeCap, gasTipCap)
+	// }
 	gasLimit := opts.GasLimit
 	if gasLimit == 0 {
 		// Gas estimation cannot succeed without code for method invocations
@@ -255,6 +313,12 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, i
 		gasLimit, err = c.transactor.EstimateGas(ensureContext(opts.Context), msg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to estimate gas needed: %w", err)
+		}
+
+		// Arbitrum: adjust the estimate
+		adjustedLimit := gasLimit * (10000 + opts.GasMargin) / 10000
+		if adjustedLimit > gasLimit {
+			gasLimit = adjustedLimit
 		}
 	}
 	// Create the transaction, sign it and schedule it for execution

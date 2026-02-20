@@ -164,6 +164,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	log.Info("[OtterSync] Starting Ottersync")
 	log.Info(snapshotsync.GreatOtterBanner)
 
+	defer log.Info("[OtterSync] Ottersync finished")
+
 	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "Download header-chain"})
 	agg := cfg.db.(*temporal.DB).Agg().(*state.Aggregator)
 	// Download only the snapshots that are for the header chain.
@@ -292,6 +294,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "Fill DB"})
+	log.Warn("[OtterSync] Filling database from snapshots. This may take a while...", "frozen_blocks", frozenBlocks)
 	if err := rawdbreset.FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, logger); err != nil {
 		return fmt.Errorf("FillDBFromSnapshots: %w", err)
 	}
