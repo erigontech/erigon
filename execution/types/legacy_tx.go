@@ -43,6 +43,22 @@ type CommonTx struct {
 	V, R, S  uint256.Int     // signature values
 }
 
+// withoutCaches returns a copy of CommonTx with the TransactionMisc caches (hash, from) cleared.
+// Use this in constructors when building a new transaction from an existing one, to avoid
+// copying sync/atomic fields that must not be shared between two objects.
+func (ct *CommonTx) withoutCaches() CommonTx {
+	return CommonTx{
+		Nonce:    ct.Nonce,
+		GasLimit: ct.GasLimit,
+		To:       ct.To,
+		Value:    ct.Value,
+		Data:     ct.Data,
+		V:        ct.V,
+		R:        ct.R,
+		S:        ct.S,
+	}
+}
+
 func (ct *CommonTx) GetNonce() uint64 {
 	return ct.Nonce
 }

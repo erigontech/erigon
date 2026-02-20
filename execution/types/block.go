@@ -1468,8 +1468,7 @@ func CopyTxs(in Transactions) Transactions {
 		if txWrapper, ok := txn.(*BlobTxWrapper); ok {
 			blobTx := out[i].(*BlobTx)
 			out[i] = &BlobTxWrapper{
-				// it's ok to copy here - because it's constructor of object - no parallel access yet
-				Tx:          *blobTx, //nolint
+				Tx:          blobTx.copyWithoutCaches(),
 				Commitments: txWrapper.Commitments.copy(),
 				Blobs:       txWrapper.Blobs.copy(),
 				Proofs:      txWrapper.Proofs.copy(),

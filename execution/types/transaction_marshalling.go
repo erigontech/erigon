@@ -612,8 +612,7 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	}
 
 	btx := BlobTxWrapper{
-		// it's ok to copy here - because it's constructor of object - no parallel access yet
-		Tx:          tx, //nolint
+		Tx:          tx.copyWithoutCaches(),
 		Commitments: dec.Commitments,
 		Blobs:       dec.Blobs,
 		Proofs:      dec.Proofs,

@@ -236,13 +236,13 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 	switch txType {
 	case LegacyTxType:
 		return &LegacyTx{
-			CommonTx: commonTx, //nolint
+			CommonTx: commonTx.withoutCaches(),
 			GasPrice: uint256.NewInt(*tr.RandUint64()),
 		}
 	case AccessListTxType:
 		return &AccessListTx{
 			LegacyTx: LegacyTx{
-				CommonTx: commonTx, //nolint
+				CommonTx: commonTx.withoutCaches(),
 				GasPrice: uint256.NewInt(*tr.RandUint64()),
 			},
 			ChainID:    uint256.NewInt(*tr.RandUint64()),
@@ -250,7 +250,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 		}
 	case DynamicFeeTxType:
 		return &DynamicFeeTransaction{
-			CommonTx:   commonTx, //nolint
+			CommonTx:   commonTx.withoutCaches(),
 			ChainID:    uint256.NewInt(*tr.RandUint64()),
 			TipCap:     uint256.NewInt(*tr.RandUint64()),
 			FeeCap:     uint256.NewInt(*tr.RandUint64()),
@@ -260,7 +260,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 		r := *tr.RandUint64()
 		return &BlobTx{
 			DynamicFeeTransaction: DynamicFeeTransaction{
-				CommonTx:   commonTx, //nolint
+				CommonTx:   commonTx.withoutCaches(),
 				ChainID:    uint256.NewInt(*tr.RandUint64()),
 				TipCap:     uint256.NewInt(*tr.RandUint64()),
 				FeeCap:     uint256.NewInt(*tr.RandUint64()),
@@ -272,7 +272,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 	case SetCodeTxType:
 		return &SetCodeTransaction{
 			DynamicFeeTransaction: DynamicFeeTransaction{
-				CommonTx:   commonTx, //nolint
+				CommonTx:   commonTx.withoutCaches(),
 				ChainID:    uint256.NewInt(*tr.RandUint64()),
 				TipCap:     uint256.NewInt(*tr.RandUint64()),
 				FeeCap:     uint256.NewInt(*tr.RandUint64()),
