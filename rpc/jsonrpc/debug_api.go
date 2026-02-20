@@ -106,12 +106,22 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 		return StorageRangeResult{}, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, *number)
+	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, *number)
+	if err != nil {
+		return StorageRangeResult{}, err
+	}
+	if !ok || canonicalHash != blockHash {
+		return StorageRangeResult{}, fmt.Errorf("hash %x is not currently canonical", blockHash)
+	}
+
+	blockNumber := *number
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
 
-	minTxNum, err := api._txNumReader.Min(ctx, tx, *number)
+	minTxNum, err := api._txNumReader.Min(ctx, tx, blockNumber)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -188,15 +198,12 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 			blockNumber = uint64(number)
 		}
 
-	} else if hash, ok := blockNrOrHash.Hash(); ok {
-		header, err1 := api.headerByHash(ctx, hash, tx)
-		if err1 != nil {
-			return state.IteratorDump{}, err1
+	} else if _, ok := blockNrOrHash.Hash(); ok {
+		bn, _, _, err2 := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+		if err2 != nil {
+			return state.IteratorDump{}, err2
 		}
-		if header == nil {
-			return state.IteratorDump{}, fmt.Errorf("header %s not found", hash.Hex())
-		}
-		blockNumber = header.Number.Uint64()
+		blockNumber = bn
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
