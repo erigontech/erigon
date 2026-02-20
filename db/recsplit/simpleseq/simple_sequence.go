@@ -69,18 +69,16 @@ func (s *SimpleSequence) AppendBytes(buf []byte) []byte {
 	return append(buf, s.raw...)
 }
 
-func (s *SimpleSequence) search(v uint64) (idx int, ok bool) {
+func (s *SimpleSequence) search(v uint64) (int, bool) {
 	c := s.Count()
-	if v <= s.Min() { // fast-path for 1-st element hit
-		return 0, true
-	}
-	if c == 1 { // if len=1 then nothing left to search
-		return 0, false
-	}
-	idx = sort.Search(int(c), func(i int) bool {
+	idx := sort.Search(int(c), func(i int) bool {
 		return s.Get(uint64(i)) >= v
 	})
-	return idx, idx < int(c)
+
+	if idx >= int(c) {
+		return 0, false
+	}
+	return idx, true
 }
 
 func (s *SimpleSequence) reverseSearch(v uint64) (int, bool) {
