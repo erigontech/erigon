@@ -152,6 +152,12 @@ type ForkChoiceStore struct {
 	payloadDataAvailabilityVote sync.Map // map[common.Hash][clparams.PtcSize]bool
 	// [New in Gloas:EIP7732] Indexed weight store for optimized weight calculation
 	indexedWeightStore *indexedWeightStore
+	// [New in Gloas:EIP7732] Envelopes waiting for their corresponding block to arrive.
+	// In GLOAS, BeaconBlock and ExecutionPayloadEnvelope are gossiped separately.
+	// Due to network timing, the envelope may arrive before its corresponding block.
+	// When this happens, OnExecutionPayload queues the envelope here (keyed by beacon_block_root).
+	// Later, when OnBlock processes the block, it checks this cache and processes any pending envelope.
+	pendingEnvelopes *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
 }
 
 type childrens struct {
@@ -247,6 +253,12 @@ func NewForkChoiceStore(
 		return nil, err
 	}
 
+	// [New in Gloas:EIP7732] LRU cache for pending envelopes waiting for their block
+	pendingEnvelopes, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	if err != nil {
+		return nil, err
+	}
+
 	publicKeysRegistry.ResetAnchor(anchorState)
 	participation.Add(state.Epoch(anchorState.BeaconState), anchorState.CurrentEpochParticipation().Copy())
 
@@ -288,6 +300,7 @@ func NewForkChoiceStore(
 		pendingDeposits:          pendingDeposits,
 		partialWithdrawals:       partialWithdrawals,
 		proposerLookahead:        proposerLookahead,
+		pendingEnvelopes:         pendingEnvelopes,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
 	f.finalizedCheckpoint.Store(anchorCheckpoint)
