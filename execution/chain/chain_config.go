@@ -25,6 +25,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/arb/chain/types"
+	"github.com/erigontech/erigon/arb/osver"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -116,6 +118,8 @@ type Config struct {
 
 	// Account Abstraction
 	AllowAA bool
+
+	ArbitrumChainParams types.ArbitrumChainParams `json:"arbitrum,omitempty"`
 }
 
 var (
@@ -325,6 +329,9 @@ func (c *Config) IsBerlin(num uint64) bool {
 
 // IsLondon returns whether num is either equal to the London fork block or greater.
 func (c *Config) IsLondon(num uint64) bool {
+	if c.IsArbitrum() {
+		return isBlockForked(new(big.Int).SetUint64(c.ArbitrumChainParams.GenesisBlockNum), big.NewInt(int64(num)))
+	}
 	return isForked(c.LondonBlock, num)
 }
 
@@ -339,7 +346,10 @@ func (c *Config) IsGrayGlacier(num uint64) bool {
 }
 
 // IsShanghai returns whether time is either equal to the Shanghai fork time or greater.
-func (c *Config) IsShanghai(time uint64) bool {
+func (c *Config) IsShanghai(time uint64, currentArbosVersion uint64) bool {
+	if c.IsArbitrum() {
+		return currentArbosVersion >= osver.ArbosVersion_11
+	}
 	return isForked(c.ShanghaiTime, time)
 }
 
@@ -362,7 +372,10 @@ func (c *Config) IsBhilai(num uint64) bool {
 }
 
 // IsCancun returns whether time is either equal to the Cancun fork time or greater.
-func (c *Config) IsCancun(time uint64) bool {
+func (c *Config) IsCancun(time, currentArbosVersion uint64) bool {
+	if c.IsArbitrum() {
+		return currentArbosVersion >= osver.ArbosVersion_20
+	}
 	return isForked(c.CancunTime, time)
 }
 
@@ -372,13 +385,19 @@ func (c *Config) IsAmsterdam(time uint64) bool {
 }
 
 // IsPrague returns whether time is either equal to the Prague fork time or greater.
-func (c *Config) IsPrague(time uint64) bool {
+func (c *Config) IsPrague(time uint64, currentArbosVersion uint64) bool {
+	if c.IsArbitrum() {
+		return currentArbosVersion >= osver.ArbosVersion_40
+	}
 	return isForked(c.PragueTime, time)
 }
 
 // IsOsaka returns whether time is either equal to the Osaka fork time or greater.
-func (c *Config) IsOsaka(time uint64) bool {
-	return isForked(c.OsakaTime, time)
+func (c *Config) IsOsaka(num, time, currentArbosVersion uint64) bool {
+	if c.IsArbitrum() {
+		return currentArbosVersion >= osver.ArbosVersion_50
+	}
+	return c.IsLondon(num) && isForked(c.OsakaTime, time)
 }
 
 func (c *Config) GetBurntContract(num uint64) accounts.Address {
@@ -396,7 +415,7 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 	return 1 // MIN_BLOB_GASPRICE (EIP-4844)
 }
 
-func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
+func (c *Config) GetBlobConfig(time uint64, currentArbosVer uint64) *params.BlobConfig {
 	c.parseBlobScheduleOnce.Do(func() {
 		// Populate with default values
 		c.parsedBlobSchedule = make(map[uint64]*params.BlobConfig)
@@ -404,7 +423,9 @@ func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 			c.parsedBlobSchedule[c.CancunTime.Uint64()] = &params.DefaultCancunBlobConfig
 		}
 		if c.PragueTime != nil {
-			c.parsedBlobSchedule[c.PragueTime.Uint64()] = &params.DefaultPragueBlobConfig
+			if c.IsPrague(time, currentArbosVer) {
+				c.parsedBlobSchedule[c.PragueTime.Uint64()] = &params.DefaultPragueBlobConfig
+			}
 		}
 
 		// Override with supplied values
@@ -449,33 +470,34 @@ func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
 	return ConfigValueLookup(c.parsedBlobSchedule, time)
 }
 
-func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
-	if blobConfig := c.GetBlobConfig(time); blobConfig != nil {
+func (c *Config) GetMaxBlobsPerBlock(time uint64, currentArbosVer uint64) uint64 {
+	if blobConfig := c.GetBlobConfig(time, currentArbosVer); blobConfig != nil {
 		return blobConfig.Max
 	}
 	return 0
 }
 
-func (c *Config) GetMaxBlobGasPerBlock(time uint64) uint64 {
-	return c.GetMaxBlobsPerBlock(time) * params.GasPerBlob
+func (c *Config) GetMaxBlobGasPerBlock(time uint64, currentArbosVer uint64) uint64 {
+	return c.GetMaxBlobsPerBlock(time, currentArbosVer) * params.GasPerBlob
 }
 
-func (c *Config) GetTargetBlobsPerBlock(time uint64) uint64 {
-	if blobConfig := c.GetBlobConfig(time); blobConfig != nil {
+func (c *Config) GetTargetBlobsPerBlock(time uint64, currentArbosVer uint64) uint64 {
+	if blobConfig := c.GetBlobConfig(time, currentArbosVer); blobConfig != nil {
 		return blobConfig.Target
 	}
 	return 0
 }
 
-func (c *Config) GetBlobGasPriceUpdateFraction(time uint64) uint64 {
-	if blobConfig := c.GetBlobConfig(time); blobConfig != nil {
+func (c *Config) GetBlobGasPriceUpdateFraction(time uint64, currentArbosVer uint64) uint64 {
+	if blobConfig := c.GetBlobConfig(time, currentArbosVer); blobConfig != nil {
 		return blobConfig.BaseFeeUpdateFraction
 	}
 	return 0
 }
 
 func (c *Config) GetMaxRlpBlockSize(time uint64) int {
-	if c.IsOsaka(time) {
+	// TODO arbitrum fields
+	if c.IsOsaka(0, time, 0) {
 		return params.MaxRlpBlockSize
 	}
 	return math.MaxInt
@@ -493,10 +515,10 @@ func (c *Config) SecondsPerSlot() uint64 {
 
 func (c *Config) SystemContracts(time uint64) map[string]accounts.Address {
 	contracts := map[string]accounts.Address{}
-	if c.IsCancun(time) {
+	if c.IsCancun(time, 0 /* currentArbosVersion */) {
 		contracts["BEACON_ROOTS_ADDRESS"] = params.BeaconRootsAddress
 	}
-	if c.IsPrague(time) {
+	if c.IsPrague(time, 0 /* currentArbosVersion */) {
 		contracts["CONSOLIDATION_REQUEST_PREDEPLOY_ADDRESS"] = params.ConsolidationRequestAddress
 		contracts["DEPOSIT_CONTRACT_ADDRESS"] = accounts.InternAddress(c.DepositContract)
 		contracts["HISTORY_STORAGE_ADDRESS"] = params.HistoryStorageAddress
@@ -730,6 +752,8 @@ type Rules struct {
 	IsCancun, IsNapoli, IsBhilai                      bool
 	IsPrague, IsOsaka, IsAmsterdam                    bool
 	IsAura                                            bool
+	IsArbitrum, IsStylus, IsDia                       bool
+	ArbOSVersion                                      uint64
 }
 
 // isForked returns whether a fork scheduled at block s is active at the given head block.
@@ -742,4 +766,153 @@ func isForked(s *big.Int, head uint64) bool {
 
 func (c *Config) IsPreMerge(blockNumber uint64) bool {
 	return c.MergeHeight != nil && blockNumber < c.MergeHeight.Uint64()
+}
+
+func (c *Config) IsArbitrum() bool {
+	return c.ArbitrumChainParams.EnableArbOS
+}
+
+func (c *Config) IsArbitrumNitro(num *big.Int) bool {
+	return c.IsArbitrum() && isBlockForked(new(big.Int).SetUint64(c.ArbitrumChainParams.GenesisBlockNum), num)
+}
+
+// isBlockForked returns whether a fork scheduled at block s is active at the
+// given head block.
+func isBlockForked(s, head *big.Int) bool {
+	if s == nil || head == nil {
+		return false
+	}
+	return s.Cmp(head) <= 0
+}
+
+func (c *Config) MaxCodeSize() uint64 {
+	if c.ArbitrumChainParams.MaxCodeSize == 0 {
+		return 24576
+	}
+	return c.ArbitrumChainParams.MaxCodeSize
+}
+
+func (c *Config) MaxInitCodeSize() uint64 {
+	if c.ArbitrumChainParams.MaxInitCodeSize == 0 {
+		return c.MaxCodeSize() * 2
+	}
+	return c.ArbitrumChainParams.MaxInitCodeSize
+}
+
+func (c *Config) DebugMode() bool {
+	return c.ArbitrumChainParams.AllowDebugPrecompiles
+}
+
+func newBlockCompatError(what string, storedblock, newblock *big.Int) *ConfigCompatError {
+	var rew *big.Int
+	switch {
+	case storedblock == nil:
+		rew = newblock
+	case newblock == nil || storedblock.Cmp(newblock) < 0:
+		rew = storedblock
+	default:
+		rew = newblock
+	}
+	err := &ConfigCompatError{
+		What:         what,
+		StoredConfig: storedblock,
+		NewConfig:    newblock,
+		RewindTo:     0,
+	}
+	if rew != nil && rew.Sign() > 0 {
+		err.RewindTo = rew.Uint64() - 1
+	}
+	return err
+}
+
+func (c *Config) checkArbitrumCompatible(newcfg *Config, head *big.Int) *ConfigCompatError {
+	if c.IsArbitrum() != newcfg.IsArbitrum() {
+		return newBlockCompatError("isArbitrum", common.Big0, common.Big0)
+	}
+	if !c.IsArbitrum() {
+		return nil
+	}
+	cArb := &c.ArbitrumChainParams
+	newArb := &newcfg.ArbitrumChainParams
+	if cArb.GenesisBlockNum != newArb.GenesisBlockNum {
+		return newBlockCompatError("genesisblocknum", new(big.Int).SetUint64(cArb.GenesisBlockNum), new(big.Int).SetUint64(newArb.GenesisBlockNum))
+	}
+	return nil
+}
+
+// MakeRules ensures c's ChainID is not nil and returns a new Rules instance
+func (c *Config) MakeRules(num uint64, time, currentArbosVersion uint64) *Rules {
+	chainID := c.ChainID
+	if chainID == nil {
+		chainID = new(big.Int)
+	}
+
+	return &Rules{
+		ChainID:            new(big.Int).Set(chainID),
+		IsHomestead:        c.IsHomestead(num),
+		IsTangerineWhistle: c.IsTangerineWhistle(num),
+		IsSpuriousDragon:   c.IsSpuriousDragon(num),
+		IsByzantium:        c.IsByzantium(num),
+		IsConstantinople:   c.IsConstantinople(num),
+		IsPetersburg:       c.IsPetersburg(num),
+		IsIstanbul:         c.IsIstanbul(num),
+		IsBerlin:           c.IsBerlin(num),
+		IsLondon:           c.IsLondon(num),
+		IsShanghai:         c.IsShanghai(time, currentArbosVersion) || c.IsAgra(num),
+		IsCancun:           c.IsCancun(time, currentArbosVersion),
+		IsNapoli:           c.IsNapoli(num),
+		IsBhilai:           c.IsBhilai(num),
+		IsPrague:           c.IsPrague(time, currentArbosVersion) || c.IsBhilai(num),
+		IsOsaka:            c.IsOsaka(num, time, currentArbosVersion),
+		IsAmsterdam:        c.IsAmsterdam(time),
+		IsAura:             c.Aura != nil,
+		ArbOSVersion:       currentArbosVersion,
+		IsArbitrum:         c.IsArbitrum(),
+		IsStylus:           c.IsArbitrum() && currentArbosVersion >= osver.ArbosVersion_Stylus,
+		IsDia:              c.IsArbitrum() && currentArbosVersion >= osver.ArbosVersion_50,
+	}
+}
+
+// DefaultCacheConfigWithScheme returns a deep copied default cache config with
+// a provided trie node scheme.
+func DefaultCacheConfigWithScheme(scheme string) *CacheConfig {
+	config := *defaultCacheConfig
+	config.StateScheme = scheme
+	return &config
+}
+
+var defaultCacheConfig = &CacheConfig{
+	TriesInMemory:                      128,
+	TrieRetention:                      30 * time.Minute,
+	MaxNumberOfBlocksToSkipStateSaving: 0,
+	MaxAmountOfGasToSkipStateSaving:    0,
+
+	TrieCleanLimit: 256,
+	TrieDirtyLimit: 256,
+	TrieTimeLimit:  5 * time.Minute,
+	SnapshotLimit:  256,
+	SnapshotWait:   true,
+}
+
+type CacheConfig struct {
+	TrieCleanLimit      int
+	TrieCleanNoPrefetch bool
+	TrieDirtyLimit      int
+	TrieDirtyDisabled   bool
+	TrieTimeLimit       time.Duration
+	SnapshotLimit       int
+	Preimages           bool
+	StateHistory        uint64
+	StateScheme         string
+
+	SnapshotRestoreMaxGas uint64
+
+	TriesInMemory uint64
+	TrieRetention time.Duration
+
+	MaxNumberOfBlocksToSkipStateSaving uint32
+	MaxAmountOfGasToSkipStateSaving    uint64
+
+	SnapshotNoBuild bool
+	SnapshotWait    bool
 }
