@@ -191,6 +191,9 @@ func TestCreateGas(t *testing.T) {
 				return nil
 			},
 		}
+		//
+		// TODO revis BlockContext and add test for eip8037?
+		//
 		_ = s.CommitBlock(vmctx.Rules(chain.TestChainConfig), stateWriter)
 		config := vm.Config{}
 		if tt.eip3860 {

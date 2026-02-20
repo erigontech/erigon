@@ -31,7 +31,6 @@ func NewEnv(cfg *Config) *vm.EVM {
 		Origin:   cfg.Origin,
 		GasPrice: cfg.GasPrice,
 	}
-
 	blockContext := evmtypes.BlockContext{
 		CanTransfer: protocol.CanTransfer,
 		Transfer:    misc.Transfer,
@@ -43,6 +42,8 @@ func NewEnv(cfg *Config) *vm.EVM {
 		GasLimit:    cfg.GasLimit,
 		BaseFee:     cfg.BaseFee,
 	}
-
+	if cfg.ChainConfig.IsAmsterdam(cfg.Time.Uint64()) {
+		blockContext.CostPerStateByte = misc.CostPerStateByte(cfg.GasLimit)
+	}
 	return vm.NewEVM(blockContext, txContext, cfg.State, cfg.ChainConfig, cfg.EVMConfig)
 }

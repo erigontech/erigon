@@ -40,6 +40,7 @@ type operation struct {
 	execute     executionFunc
 	constantGas uint64
 	dynamicGas  gasFunc
+	stateGas    gasFunc
 	// maxStack specifies the max length the stack can have for this operation
 	// to not overflow the stack.
 	maxStack int

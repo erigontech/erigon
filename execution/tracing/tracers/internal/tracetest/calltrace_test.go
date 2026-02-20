@@ -151,6 +151,9 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 				context.BaseFee = *baseFee
 			}
 			rules := context.Rules(test.Genesis.Config)
+			if rules.IsAmsterdam {
+				context.CostPerStateByte = misc.CostPerStateByte(uint64(test.Context.GasLimit))
+			}
 
 			m := mock.Mock(t)
 			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
@@ -254,6 +257,9 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		GasLimit:    uint64(test.Context.GasLimit),
 	}
 	rules := context.Rules(test.Genesis.Config)
+	if rules.IsAmsterdam {
+		context.CostPerStateByte = misc.CostPerStateByte(uint64(test.Context.GasLimit))
+	}
 	msg, err := tx.AsMessage(*signer, nil, rules)
 	if err != nil {
 		b.Fatalf("failed to prepare transaction for tracing: %v", err)

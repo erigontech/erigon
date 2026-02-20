@@ -410,6 +410,9 @@ func TestOeTracer(t *testing.T) {
 				context.BaseFee = *baseFee
 			}
 			rules := context.Rules(test.Genesis.Config)
+			if rules.IsAmsterdam {
+				context.CostPerStateByte = misc.CostPerStateByte(uint64(test.Context.GasLimit))
+			}
 
 			m := mock.Mock(t)
 			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
