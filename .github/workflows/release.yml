@@ -4,6 +4,7 @@ run-name: Build release ${{ inputs.release_version}} from branch ${{ inputs.chec
 env:
   APPLICATION: "erigon"
   APPLICATION_VERSION: "Erigon3"
+  PRUNE_MODE: "full_node"
   TEST_TRACKING_TIME_SECONDS: 7200 # 2 hours
   TEST_TOTAL_TIME_SECONDS: 432000   # 5 days
   TEST_CHAIN: "mainnet"
@@ -44,6 +45,11 @@ on:
         type: boolean
         default: false
         description: 'Skip tests during release build (not recommended)'
+      disable_version_check:
+        required: false
+        type: boolean
+        default: false
+        description: 'Skip validation that db/version/app.go Major.Minor.Micro matches release_version.'
 
 jobs:
 
@@ -102,6 +108,30 @@ jobs:
           echo "id=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           echo "short_commit_id=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
           echo "parsed_version=$(echo ${RELEASE_VERSION} | sed -e 's/^v//g')" >> $GITHUB_OUTPUT
+
+      - name: Validate release version against db/version/app.go
+        if: ${{ ! inputs.disable_version_check }}
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          cd erigon
+          APP_VERSION=$(awk '
+            /Major\s*=/{major=$3}
+            /Minor\s*=/{minor=$3}
+            /Micro\s*=/{micro=$3}
+            END{printf "%s.%s.%s", major, minor, micro}
+          ' db/version/app.go)
+          INPUT_VERSION=$(echo "${RELEASE_VERSION}" | sed -e 's/^v//')
+
+          echo "Version from db/version/app.go: ${APP_VERSION}"
+          echo "Version from workflow input: ${INPUT_VERSION} (raw: ${RELEASE_VERSION})"
+
+          if [ "${APP_VERSION}" != "${INPUT_VERSION}" ]; then
+            echo "ERROR: release_version (${RELEASE_VERSION}) does not match db/version/app.go version (${APP_VERSION})."
+            exit 1
+          fi
+
+          echo "OK: release_version matches db/version/app.go."
 
       - name: Login to Docker Hub
         uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567  ## v3.3.0
@@ -274,7 +304,7 @@ jobs:
           # Run Erigon, wait sync and check ability to maintain sync
           python3 qa-tests/tip-tracking/run_and_check_tip_tracking.py \
             ${GITHUB_WORKSPACE}/${{ env.APPLICATION }}_${RELEASE_VERSION}_${{ matrix.artifact }} \
-              ${RUNNER_WORKSPACE}/erigon-data ${{ env.TEST_TRACKING_TIME_SECONDS }} ${{ env.TEST_TOTAL_TIME_SECONDS }} ${{ env.APPLICATION_VERSION }} ${{ env.TEST_CHAIN }}
+              ${RUNNER_WORKSPACE}/erigon-data ${{ env.TEST_TRACKING_TIME_SECONDS }} ${{ env.TEST_TOTAL_TIME_SECONDS }} ${{ env.APPLICATION_VERSION }} ${{ env.TEST_CHAIN }} ${{ env.PRUNE_MODE }}
           # Capture monitoring script exit status
           test_exit_status=$?
           # Save the subsection reached status

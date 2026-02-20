@@ -39,7 +39,8 @@ func setupTestDB(t *testing.T) kv.RwDB {
 func TestWriteBlockRoot(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	tx, _ := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	// Mock a block
@@ -72,7 +73,8 @@ func TestWriteBlockRoot(t *testing.T) {
 func TestReadParentBlockRoot(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	tx, _ := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	mockParentRoot := common.Hash{1}
@@ -96,7 +98,8 @@ func TestReadParentBlockRoot(t *testing.T) {
 func TestTruncateCanonicalChain(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	tx, _ := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	mockParentRoot := common.Hash{1}
@@ -126,7 +129,8 @@ func TestTruncateCanonicalChain(t *testing.T) {
 func TestReadBeaconBlockHeader(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	tx, _ := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	mockParentRoot := common.Hash{1}
@@ -162,7 +166,8 @@ func TestReadBeaconBlockHeader(t *testing.T) {
 func TestWriteExecutionBlockNumber(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	tx, _ := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	tHash := common.HexToHash("0x2")
@@ -179,7 +184,8 @@ func TestWriteExecutionBlockNumber(t *testing.T) {
 func TestWriteExecutionBlockHash(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	tx, _ := db.BeginRw(context.Background())
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
 	defer tx.Rollback()
 
 	tHash := common.HexToHash("0x2")

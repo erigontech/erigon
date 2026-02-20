@@ -55,8 +55,6 @@ import (
 	"github.com/erigontech/erigon/node/shards"
 )
 
-const maxBlocksLookBehind = 32
-
 var ErrMissingChainSegment = errors.New("missing chain segment")
 
 func makeErrMissingChainSegment(blockHash common.Hash) error {
@@ -97,7 +95,7 @@ func GetBlockHashFromMissingSegmentError(err error) (common.Hash, bool) {
 }
 
 type Cache struct {
-	execModule *EthereumExecutionModule
+	execModule *ExecModule
 }
 
 var _ kvcache.Cache = (*Cache)(nil)         // compile-time interface check
@@ -165,8 +163,7 @@ func (c *CacheView) HasStorage(address common.Address) (bool, error) {
 	return hasStorage, err
 }
 
-// EthereumExecutionModule describes ethereum execution logic and indexing.
-type EthereumExecutionModule struct {
+type ExecModule struct {
 	bacgroundCtx context.Context
 	// Snapshots + MDBX
 	blockReader services.FullBlockReader
@@ -211,21 +208,29 @@ type EthereumExecutionModule struct {
 	executionproto.UnimplementedExecutionServer
 }
 
-func NewEthereumExecutionModule(ctx context.Context, blockReader services.FullBlockReader, db kv.TemporalRwDB,
-	executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
-	config *chain.Config, builderFunc builder.BlockBuilderFunc,
-	hook *stageloop.Hook, accumulator *shards.Accumulator,
+func NewExecModule(
+	ctx context.Context,
+	blockReader services.FullBlockReader,
+	db kv.TemporalRwDB,
+	executionPipeline *stagedsync.Sync,
+	forkValidator *engine_helpers.ForkValidator,
+	config *chain.Config,
+	builderFunc builder.BlockBuilderFunc,
+	hook *stageloop.Hook,
+	accumulator *shards.Accumulator,
 	recentReceipts *shards.RecentReceipts,
-	stateCache *Cache, stateChangeConsumer shards.StateChangeConsumer,
-	logger log.Logger, engine rules.Engine,
+	stateCache *Cache,
+	stateChangeConsumer shards.StateChangeConsumer,
+	logger log.Logger,
+	engine rules.Engine,
 	syncCfg ethconfig.Sync,
 	fcuBackgroundPrune bool,
 	fcuBackgroundCommit bool,
 	onlySnapDownloadOnStart bool,
-) *EthereumExecutionModule {
+) *ExecModule {
 	domainCache := cache.NewDefaultStateCache()
 
-	em := &EthereumExecutionModule{
+	em := &ExecModule{
 		blockReader:             blockReader,
 		db:                      db,
 		executionPipeline:       executionPipeline,
@@ -254,7 +259,7 @@ func NewEthereumExecutionModule(ctx context.Context, blockReader services.FullBl
 	return em
 }
 
-func (e *EthereumExecutionModule) getHeader(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Header, error) {
+func (e *ExecModule) getHeader(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Header, error) {
 	if e.blockReader == nil {
 		return rawdb.ReadHeader(tx, blockHash, blockNumber), nil
 	}
@@ -262,12 +267,12 @@ func (e *EthereumExecutionModule) getHeader(ctx context.Context, tx kv.Tx, block
 	return e.blockReader.Header(ctx, tx, blockHash, blockNumber)
 }
 
-func (e *EthereumExecutionModule) getTD(_ context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*big.Int, error) {
+func (e *ExecModule) getTD(_ context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*big.Int, error) {
 	return rawdb.ReadTd(tx, blockHash, blockNumber)
 
 }
 
-func (e *EthereumExecutionModule) getBody(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Body, error) {
+func (e *ExecModule) getBody(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Body, error) {
 	if e.blockReader == nil {
 		body, _, _ := rawdb.ReadBody(tx, blockHash, blockNumber)
 		return body, nil
@@ -275,7 +280,7 @@ func (e *EthereumExecutionModule) getBody(ctx context.Context, tx kv.Tx, blockHa
 	return e.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
 }
 
-func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber uint64) (common.Hash, error) {
+func (e *ExecModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber uint64) (common.Hash, error) {
 	var canonical common.Hash
 	var err error
 	if e.blockReader == nil {
@@ -297,7 +302,7 @@ func (e *EthereumExecutionModule) canonicalHash(ctx context.Context, tx kv.Tx, b
 	return canonical, nil
 }
 
-func (e *EthereumExecutionModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header) error {
+func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header) error {
 	currentHeader := header
 	for isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()); !isCanonical && err == nil; isCanonical, err = e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash()) {
 		parentBlockHash, parentBlockNum := currentHeader.ParentHash, currentHeader.Number.Uint64()-1
@@ -334,7 +339,7 @@ func (e *EthereumExecutionModule) unwindToCommonCanonical(sd *execctx.SharedDoma
 	return nil
 }
 
-func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *executionproto.ValidationRequest) (*executionproto.ValidationReceipt, error) {
+func (e *ExecModule) ValidateChain(ctx context.Context, req *executionproto.ValidationRequest) (*executionproto.ValidationReceipt, error) {
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
 		return &executionproto.ValidationReceipt{
@@ -378,7 +383,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		}, nil
 	}
 
-	if math.AbsoluteDifference(*currentBlockNumber, req.Number) >= maxBlocksLookBehind {
+	if math.AbsoluteDifference(*currentBlockNumber, req.Number) >= e.syncCfg.MaxReorgDepth {
 		return &executionproto.ValidationReceipt{
 			ValidationStatus: executionproto.ExecutionStatus_TooFarAway,
 			LatestValidHash:  gointerfaces.ConvertHashToH256(common.Hash{}),
@@ -449,7 +454,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	return validationReceipt, tx.Commit()
 }
 
-func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash) error {
+func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash) error {
 	tip, err := e.blockReader.HeaderNumber(ctx, tx, headHash)
 	if err != nil {
 		return err
@@ -478,7 +483,7 @@ func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx,
 	return nil
 }
 
-func (e *EthereumExecutionModule) Start(ctx context.Context, hook *stageloop.Hook) {
+func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
@@ -494,7 +499,7 @@ func (e *EthereumExecutionModule) Start(ctx context.Context, hook *stageloop.Hoo
 	}
 }
 
-func (e *EthereumExecutionModule) Ready(ctx context.Context, _ *emptypb.Empty) (*executionproto.ReadyResponse, error) {
+func (e *ExecModule) Ready(ctx context.Context, _ *emptypb.Empty) (*executionproto.ReadyResponse, error) {
 
 	// setup a timeout for the context to avoid waiting indefinitely
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Second)
@@ -516,7 +521,7 @@ func (e *EthereumExecutionModule) Ready(ctx context.Context, _ *emptypb.Empty) (
 	return &executionproto.ReadyResponse{Ready: true}, nil
 }
 
-func (e *EthereumExecutionModule) HasBlock(ctx context.Context, in *executionproto.GetSegmentRequest) (*executionproto.HasBlockResponse, error) {
+func (e *ExecModule) HasBlock(ctx context.Context, in *executionproto.GetSegmentRequest) (*executionproto.HasBlockResponse, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err

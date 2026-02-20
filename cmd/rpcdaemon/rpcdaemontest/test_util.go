@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -39,10 +40,10 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -81,67 +82,65 @@ func makeTestAddresses() testAddresses {
 	}
 }
 
-func CreateTestSentry(t *testing.T) (*mock.MockSentry, *blockgen.ChainPack, []*blockgen.ChainPack) {
-	addresses := makeTestAddresses()
-	var (
-		key      = addresses.key
-		address  = addresses.address
-		address1 = addresses.address1
-		address2 = addresses.address2
-	)
+var (
+	testChainOnce     sync.Once
+	testChain         *blockgen.ChainPack
+	testOrphanedChain *blockgen.ChainPack
+)
 
-	var (
-		gspec = &types.Genesis{
+func genTestChainOnce(t *testing.T) {
+	testChainOnce.Do(func() {
+		addresses := makeTestAddresses()
+		gspec := &types.Genesis{
 			Config: chain.TestChainConfig,
 			Alloc: types.GenesisAlloc{
-				address:  {Balance: big.NewInt(9000000000000000000)},
-				address1: {Balance: big.NewInt(200000000000000000)},
-				address2: {Balance: big.NewInt(300000000000000000)},
+				addresses.address:  {Balance: big.NewInt(9000000000000000000)},
+				addresses.address1: {Balance: big.NewInt(200000000000000000)},
+				addresses.address2: {Balance: big.NewInt(300000000000000000)},
 			},
 			GasLimit: 10000000,
 		}
-	)
-	m := mock.MockWithGenesis(t, gspec, key)
 
-	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+		m := execmoduletester.NewWithGenesis(t, gspec, addresses.key) // use it only to generate chain blocks, don't cache it
+		defer m.Close()
+		contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+		defer contractBackend.Close()
 
-	// Generate empty chain to have some orphaned blocks for tests
-	orphanedChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *blockgen.BlockGen) {
+		var err error
+		testOrphanedChain, err = blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *blockgen.BlockGen) {})
+		if err != nil {
+			t.Fatalf("rpcdaemontest: failed to generate orphaned chain: %v", err)
+		}
+		testChain, err = generateChain(&addresses, m.ChainConfig, m.Genesis, m.Engine, m.DB, contractBackend)
+		if err != nil {
+			t.Fatalf("rpcdaemontest: failed to generate chain: %v", err)
+		}
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	chain, err := getChainInstance(&addresses, m.ChainConfig, m.Genesis, m.Engine, m.DB, contractBackend)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err = m.InsertChain(orphanedChain); err != nil {
-		t.Fatal(err)
-	}
-	if err = m.InsertChain(chain); err != nil {
-		t.Fatal(err)
-	}
-
-	return m, chain, []*blockgen.ChainPack{orphanedChain}
 }
 
-var chainInstance *blockgen.ChainPack
+func CreateTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, []*blockgen.ChainPack) {
+	genTestChainOnce(t)
 
-func getChainInstance(
-	addresses *testAddresses,
-	config *chain.Config,
-	parent *types.Block,
-	engine rules.Engine,
-	db kv.TemporalRwDB,
-	contractBackend *backends.SimulatedBackend,
-) (*blockgen.ChainPack, error) {
-	var err error
-	if chainInstance == nil {
-		chainInstance, err = generateChain(addresses, config, parent, engine, db, contractBackend)
+	addresses := makeTestAddresses()
+	gspec := &types.Genesis{
+		Config: chain.TestChainConfig,
+		Alloc: types.GenesisAlloc{
+			addresses.address:  {Balance: big.NewInt(9000000000000000000)},
+			addresses.address1: {Balance: big.NewInt(200000000000000000)},
+			addresses.address2: {Balance: big.NewInt(300000000000000000)},
+		},
+		GasLimit: 10000000,
 	}
-	return chainInstance.Copy(), err
+	m := execmoduletester.NewWithGenesis(t, gspec, addresses.key)
+
+	if err := m.InsertChain(testOrphanedChain); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.InsertChain(testChain); err != nil {
+		t.Fatal(err)
+	}
+
+	return m, testChain, []*blockgen.ChainPack{testOrphanedChain}
 }
 
 func generateChain(
@@ -299,7 +298,7 @@ type IsMiningMock struct{}
 
 func (*IsMiningMock) IsMining() bool { return false }
 
-func CreateTestGrpcConn(t *testing.T, m *mock.MockSentry) (context.Context, *grpc.ClientConn) { //nolint
+func CreateTestGrpcConn(t *testing.T, m *execmoduletester.ExecModuleTester) (context.Context, *grpc.ClientConn) { //nolint
 	ctx, cancel := context.WithCancel(context.Background())
 
 	apis := m.Engine.APIs(nil)
@@ -339,7 +338,7 @@ func CreateTestGrpcConn(t *testing.T, m *mock.MockSentry) (context.Context, *grp
 	return ctx, conn
 }
 
-func CreateTestSentryForTraces(t *testing.T) *mock.MockSentry {
+func CreateTestExecModuleForTraces(t *testing.T) *execmoduletester.ExecModuleTester {
 	var (
 		a0 = common.HexToAddress("0x00000000000000000000000000000000000000ff")
 		a1 = common.HexToAddress("0x00000000000000000000000000000000000001ff")
@@ -431,7 +430,7 @@ func CreateTestSentryForTraces(t *testing.T) *mock.MockSentry {
 			},
 		}
 	)
-	m := mock.MockWithGenesis(t, gspec, key)
+	m := execmoduletester.NewWithGenesis(t, gspec, key)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AAAA
@@ -449,7 +448,7 @@ func CreateTestSentryForTraces(t *testing.T) *mock.MockSentry {
 	return m
 }
 
-func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
+func CreateTestSentryForTracesCollision(t *testing.T) *execmoduletester.ExecModuleTester {
 	var (
 		// Generate a canonical chain to act as the main dataset
 		// A sender who makes transactions, has some funds
@@ -531,7 +530,7 @@ func CreateTestSentryForTracesCollision(t *testing.T) *mock.MockSentry {
 			},
 		},
 	}
-	m := mock.MockWithGenesis(t, gspec, key)
+	m := execmoduletester.NewWithGenesis(t, gspec, key)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
