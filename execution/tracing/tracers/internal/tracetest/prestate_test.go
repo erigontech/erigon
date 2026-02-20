@@ -32,9 +32,9 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	debugtracer "github.com/erigontech/erigon/execution/tracing/tracers/debug"
@@ -120,7 +120,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			if rules.IsAmsterdam {
 				context.CostPerStateByte = misc.CostPerStateByte(uint64(test.Context.GasLimit))
 			}
-			m := mock.Mock(t)
+			m := execmoduletester.New(t)
 			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
