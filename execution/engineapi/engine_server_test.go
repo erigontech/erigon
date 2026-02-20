@@ -289,15 +289,18 @@ func TestGetPayloadBodiesByHashV2(t *testing.T) {
 
 	ctx := context.Background()
 
-	// BAL should be null when not available
+	// Amsterdam-enabled chains always have a BAL (even if empty) written by GenerateChain
+	emptyBAL, err := types.EncodeBlockAccessListBytes(nil)
+	req.NoError(err)
+
 	bodies, err := engineServer.GetPayloadBodiesByHashV2(ctx, []common.Hash{blockHash})
 	req.NoError(err)
 	req.Len(bodies, 1)
 	req.NotNil(bodies[0])
-	req.Nil(bodies[0].BlockAccessList)
+	req.Equal(hexutil.Bytes(emptyBAL), bodies[0].BlockAccessList)
 
-	balBytes, err := types.EncodeBlockAccessListBytes(nil)
-	req.NoError(err)
+	// Overwrite with a non-empty BAL and verify it's returned
+	balBytes := []byte{0x01, 0x02, 0x03}
 	writeBlockAccessListBytes(t, mockSentry.DB, blockHash, blockNum, balBytes)
 
 	bodies, err = engineServer.GetPayloadBodiesByHashV2(ctx, []common.Hash{blockHash})
@@ -328,18 +331,21 @@ func TestGetPayloadBodiesByRangeV2(t *testing.T) {
 
 	ctx := context.Background()
 
-	// BAL should be null when not available
+	// Amsterdam-enabled chains always have a BAL (even if empty) written by GenerateChain
+	emptyBAL, err := types.EncodeBlockAccessListBytes(nil)
+	req.NoError(err)
+
 	bodies, err := engineServer.GetPayloadBodiesByRangeV2(ctx, start, count)
 	req.NoError(err)
 	req.Len(bodies, 2)
 	req.NotNil(bodies[0])
 	req.NotNil(bodies[1])
-	req.Nil(bodies[0].BlockAccessList)
-	req.Nil(bodies[1].BlockAccessList)
+	req.Equal(hexutil.Bytes(emptyBAL), bodies[0].BlockAccessList)
+	req.Equal(hexutil.Bytes(emptyBAL), bodies[1].BlockAccessList)
 
-	balBytes1, err := types.EncodeBlockAccessListBytes(nil)
-	req.NoError(err)
-	balBytes2 := []byte{0x01, 0x02, 0x03}
+	// Overwrite with non-empty BALs and verify they're returned
+	balBytes1 := []byte{0x01, 0x02, 0x03}
+	balBytes2 := []byte{0x04, 0x05, 0x06}
 	writeBlockAccessListBytes(t, mockSentry.DB, blockHash1, start, balBytes1)
 	writeBlockAccessListBytes(t, mockSentry.DB, blockHash2, start+1, balBytes2)
 
