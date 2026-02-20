@@ -32,12 +32,12 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/freeport"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/common/testlog"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
-	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/rpc/requests"
@@ -234,9 +234,9 @@ func initBlockBuildingUniverse(ctx context.Context, t *testing.T) blockBuildingU
 		CoinbaseKey: coinbasePrivKey,
 	})
 	// prepare shutter config for the next engine api tester
-	shutterPort, err := testutil.NextFreePort()
+	shutterPort, err := freeport.NextFreePort()
 	require.NoError(t, err)
-	decryptionKeySenderPort, err := testutil.NextFreePort()
+	decryptionKeySenderPort, err := freeport.NextFreePort()
 	require.NoError(t, err)
 	decryptionKeySenderPrivKey, err := crypto.GenerateKey()
 	require.NoError(t, err)

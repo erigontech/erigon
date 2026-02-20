@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/freeport"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
@@ -44,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
-	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/direct"
@@ -112,11 +112,11 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 	logger := args.Logger
 	dirs := datadir.New(args.DataDir)
 	genesis := args.Genesis
-	sentryPort, err := testutil.NextFreePort()
+	sentryPort, err := freeport.NextFreePort()
 	require.NoError(t, err)
-	engineApiPort, err := testutil.NextFreePort()
+	engineApiPort, err := freeport.NextFreePort()
 	require.NoError(t, err)
-	jsonRpcPort, err := testutil.NextFreePort()
+	jsonRpcPort, err := freeport.NextFreePort()
 	require.NoError(t, err)
 	logger.Debug("[engine-api-tester] selected ports", "sentry", sentryPort, "engineApi", engineApiPort, "jsonRpc", jsonRpcPort)
 
