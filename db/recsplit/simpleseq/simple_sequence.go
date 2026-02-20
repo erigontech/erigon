@@ -93,9 +93,8 @@ func (s *SimpleSequence) search(seek uint64) (int, bool) {
 		return 0, false
 	}
 
-	// c >= 2, Get(0) < seek <= Get(c-1); answer is in [1, c-1]
-	idx := 1 + sort.Search(int(c-1), func(i int) bool {
-		return s.Get(uint64(i+1)) >= seek
+	idx := sort.Search(int(c), func(i int) bool {
+		return s.Get(uint64(i)) >= seek
 	})
 	return idx, true
 }
