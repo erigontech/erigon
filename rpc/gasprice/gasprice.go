@@ -136,7 +136,7 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 	}
 
 	number := head.Number.Uint64()
-	var txPrices []*uint256.Int
+	txPrices := make([]*uint256.Int, 0, sampleNumber*oracle.checkBlocks)
 	for len(txPrices) < sampleNumber*oracle.checkBlocks && number > 0 {
 		if err := oracle.getBlockPrices(ctx, number, sampleNumber, oracle.ignorePrice, &txPrices); err != nil {
 			return latestPrice, err
@@ -208,7 +208,7 @@ func (t *transactionsByGasPrice) Pop() any {
 // itself(it doesn't make any sense to include this kind of transaction prices for sampling),
 // nil gasprice is returned.
 func (oracle *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit int,
-	ignoreUnder *uint256.Int, s *[]*uint256.Int) error {
+	ignoreUnder *uint256.Int, out *[]*uint256.Int) error {
 	block, err := oracle.backend.BlockByNumber(ctx, rpc.BlockNumber(blockNum))
 	if err != nil {
 		oracle.log.Error("getBlockPrices", "err", err)
@@ -235,7 +235,7 @@ func (oracle *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit
 		}
 		sender, _ := tx.GetSender()
 		if sender.Value() != block.Coinbase() {
-			*s = append(*s, new(uint256.Int).Set(tip))
+			*out = append(*out, tip)
 			count = count + 1
 		}
 	}
