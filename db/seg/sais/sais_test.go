@@ -129,36 +129,31 @@ func TestExpand8_32BStrictlyDecreasing(t *testing.T) {
 
 	for _, text := range inputs {
 		n := len(text)
-		freq := make([]int32, 256)
-		bucket := make([]int32, 256)
 
-		// Count character frequencies.
-		for _, c := range text {
-			freq[c]++
-		}
+		// Get the full suffix array via Sais so we can extract sorted LMS positions.
+		fullSA := make([]int32, n)
+		require.NoError(t, Sais(text, fullSA))
 
-		// Build max-bucket positions (end of each bucket, exclusive).
-		var sum int32
-		for i := range bucket {
-			sum += freq[i]
-			bucket[i] = sum
-		}
-
-		// Collect LMS positions using the standard SAIS classification.
-		// A position i is LMS if text[i] is S-type and text[i-1] is L-type.
-		isS := make([]bool, n+1)
-		isS[n] = true // sentinel is S-type
-		for i := n - 1; i >= 1; i-- {
-			if text[i] < text[i-1] {
-				isS[i] = true
-			} else if text[i] == text[i-1] {
-				isS[i] = isS[i+1]
+		// Identify LMS positions using the same sliding-window rule as placeLMS_8_32.
+		// Position i+1 is LMS when text[i] > text[i+1] and text[i+1..] < text[i+2..].
+		isLMS := make([]bool, n)
+		c0, c1, isTypeS := byte(0), byte(0), false
+		for i := n - 1; i >= 0; i-- {
+			c0, c1 = text[i], c0
+			if c0 < c1 {
+				isTypeS = true
+			} else if c0 > c1 && isTypeS {
+				isTypeS = false
+				isLMS[i+1] = true
 			}
 		}
+
+		// Extract LMS positions in suffix-sorted order by scanning the full SA.
+		// expand_8_32 expects sa[0..numLMS-1] in ascending suffix-sorted order.
 		var lms []int32
-		for i := 1; i < n; i++ {
-			if isS[i] && !isS[i-1] {
-				lms = append(lms, int32(i))
+		for _, pos := range fullSA {
+			if isLMS[pos] {
+				lms = append(lms, pos)
 			}
 		}
 		numLMS := len(lms)
@@ -166,12 +161,18 @@ func TestExpand8_32BStrictlyDecreasing(t *testing.T) {
 			continue // nothing to verify
 		}
 
-		// Pack LMS positions into the front of sa (as expand_8_32 expects).
+		// Count character frequencies.
+		freq := make([]int32, 256)
+		for _, c := range text {
+			freq[c]++
+		}
+
+		// Pack suffix-sorted LMS positions into the front of sa (as expand_8_32 expects).
 		sa := make([]int32, n)
 		copy(sa, lms)
 
 		// Simulate expand_8_32 and record b values in order.
-		bSeq := simulateExpand8_32(text, freq, bucket, sa, numLMS)
+		bSeq := simulateExpand8_32(text, freq, sa, numLMS)
 
 		// The b values must be strictly decreasing.
 		for i := 1; i < len(bSeq); i++ {
@@ -185,7 +186,7 @@ func TestExpand8_32BStrictlyDecreasing(t *testing.T) {
 
 // simulateExpand8_32 mirrors the logic of expand_8_32 and returns the sequence
 // of b values (bucket write positions) in the order they are computed.
-func simulateExpand8_32(text []byte, freq, bucketIn, sa []int32, numLMS int) []int32 {
+func simulateExpand8_32(text []byte, freq []int32, sa []int32, numLMS int) []int32 {
 	// Rebuild bucket (max) from freq — same as bucketMax_8_32 does.
 	bucket := make([]int32, 256)
 	var sum int32
