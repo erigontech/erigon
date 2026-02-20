@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
@@ -741,7 +742,8 @@ func MockWithTxPoolCancun(t *testing.T) *MockSentry {
 	funds := big.NewInt(1 * common.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := chain.AllProtocolChanges
+	var chainConfig chain.Config
+	require.NoError(t, copier.CopyWithOption(&chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
 
 	// disable post-cancun forks
 	chainConfig.PragueTime = nil
@@ -749,7 +751,7 @@ func MockWithTxPoolCancun(t *testing.T) *MockSentry {
 	chainConfig.AmsterdamTime = nil
 
 	gspec := &types.Genesis{
-		Config: chainConfig,
+		Config: &chainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 		},
@@ -762,10 +764,11 @@ func MockWithTxPoolOsaka(t *testing.T) *MockSentry {
 	funds := big.NewInt(1 * common.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := chain.AllProtocolChanges
+	var chainConfig chain.Config
+	require.NoError(t, copier.CopyWithOption(&chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
 	chainConfig.OsakaTime = big.NewInt(0)
 	gspec := &types.Genesis{
-		Config: chainConfig,
+		Config: &chainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 		},
