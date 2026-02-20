@@ -83,29 +83,46 @@ func (s *SimpleSequence) search(v uint64) (int, bool) {
 	//   - 10% return "not found"
 	//   - 5% other lengths
 	//
-	// As a result: check first element before max, reuse max value in scan.
+	// Fast-path ordering: check first element (handles 85%), then last element
+	// for "not found" (handles most of the 10%), then fall through to sort.Search.
 
 	c := s.Count()
-	idx := sort.Search(int(c), func(i int) bool {
-		return s.Get(uint64(i)) >= v
-	})
-
-	if idx >= int(c) {
+	if c == 0 {
 		return 0, false
 	}
+	if v <= s.Min() {
+		return 0, true
+	}
+	if v > s.Max() {
+		return 0, false
+	}
+
+	// c >= 2, Get(0) < v <= Get(c-1); answer is in [1, c-1]
+	idx := 1 + sort.Search(int(c-1), func(i int) bool {
+		return s.Get(uint64(i+1)) >= v
+	})
 	return idx, true
 }
 
 func (s *SimpleSequence) reverseSearch(v uint64) (int, bool) {
+	// Find the rightmost index where Get(i) <= v.
 	c := s.Count()
-	idx := sort.Search(int(c), func(i int) bool {
-		return s.Get(c-uint64(i)-1) <= v
-	})
-
-	if idx >= int(c) {
+	if c == 0 {
 		return 0, false
 	}
-	return int(c) - idx - 1, true
+
+	if v < s.Get(0) {
+		return 0, false
+	}
+	if v >= s.Get(c-1) {
+		return int(c) - 1, true
+	}
+
+	// c >= 2, Get(0) <= v < Get(c-1); answer is in [0, c-2]
+	idx := sort.Search(int(c-1), func(i int) bool {
+		return s.Get(c-uint64(i)-2) <= v
+	})
+	return int(c) - idx - 2, true
 }
 
 func (s *SimpleSequence) Seek(v uint64) (uint64, bool) {
