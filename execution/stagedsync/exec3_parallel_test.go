@@ -604,6 +604,7 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 
 	dirs := datadir.New(t.TempDir())
 	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	defer rawDb.Close()
 	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(context.Background(), rawDb)
 	assert.NoError(t, err)
 	defer agg.Close()

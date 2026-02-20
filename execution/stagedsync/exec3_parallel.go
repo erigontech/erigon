@@ -1483,7 +1483,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				txResult := be.results[tx]
 
 				if err := be.gasPool.SubGas(txResult.ExecutionResult.BlockGasUsed); err != nil {
-					return nil, err
+					return nil, fmt.Errorf("%w, block=%d: block gas used overflow", rules.ErrInvalidBlock, be.blockNum)
 				}
 
 				txTask := be.tasks[tx].Task
@@ -1491,7 +1491,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if txTask.Tx() != nil {
 					blobGasUsed := txTask.Tx().GetBlobGas()
 					if err := be.gasPool.SubBlobGas(blobGasUsed); err != nil {
-						return nil, err
+						return nil, fmt.Errorf("%w, block=%d blob gas used overflow: %w", rules.ErrInvalidBlock, be.blockNum, err)
 					}
 					be.blobGasUsed += blobGasUsed
 				}

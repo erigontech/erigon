@@ -24,7 +24,6 @@ import (
 	"math"
 	"math/big"
 	"os"
-	"path/filepath"
 
 	"github.com/holiman/uint256"
 
@@ -174,8 +173,11 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 
 	externalState := cfg.State != nil
 	if !externalState {
-		tmp := filepath.Join(os.TempDir(), "create-vm")
-		defer dir.RemoveAll(tmp) //nolint
+		tmp, err := os.MkdirTemp("", "erigon-create-vm-*")
+		if err != nil {
+			return nil, [20]byte{}, 0, err
+		}
+		defer dir.RemoveAll(tmp)
 
 		dirs := datadir.New(tmp)
 		db := temporaltest.NewTestDB(nil, dirs)

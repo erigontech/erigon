@@ -24,6 +24,7 @@ snooper_enabled: false
 assertoor_params:
   run_stability_check: true
   run_block_proposal_check: true
+  image: ethpandaops/assertoor:v0.0.17
   tests:
     - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/main/.github/workflows/kurtosis/deposit-request.io
     - file: https://raw.githubusercontent.com/erigontech/erigon/refs/heads/main/.github/workflows/kurtosis/el-triggered-consolidations-test.io
