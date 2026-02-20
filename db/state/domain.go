@@ -1260,6 +1260,9 @@ func (d *Domain) integrateDirtyFiles(sf StaticFiles, txNumFrom, txNumTo uint64) 
 	if txNumFrom == txNumTo {
 		panic(fmt.Sprintf("assert: txNumFrom(%d) == txNumTo(%d)", txNumFrom, txNumTo))
 	}
+	if sf.valuesDecomp == nil {
+		return // build was skipped for this domain — don't overwrite existing dirty files
+	}
 
 	d.History.integrateDirtyFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
