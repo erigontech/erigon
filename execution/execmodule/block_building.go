@@ -68,6 +68,7 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 		PrevRandao:            gointerfaces.ConvertH256ToHash(req.PrevRandao),
 		SuggestedFeeRecipient: gointerfaces.ConvertH160toAddress(req.SuggestedFeeRecipient),
 		Withdrawals:           moduleutil.ConvertWithdrawalsFromRpc(req.Withdrawals),
+		SlotNumber:            req.SlotNumber,
 	}
 
 	if err := e.checkWithdrawalsPresence(param.Timestamp, param.Withdrawals); err != nil {
@@ -98,7 +99,7 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 	param.PayloadId = e.nextPayloadId
 	e.lastParameters = &param
 
-	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, &param, e.config.SecondsPerSlot())
+	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, &param, e.config.SecondsPerSlot()/4)
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
 
 	return &executionproto.AssembleBlockResponse{
@@ -120,26 +121,36 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 	return blockValue
 }
 
-func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error) {
+func (e *EthereumExecutionModule) GetAssembledBlockWithReceipts(payloadId uint64) (block *types.BlockWithReceipts, busy bool, err error) {
 	if !e.semaphore.TryAcquire(1) {
+		return nil, true, nil
+	}
+	defer e.semaphore.Release(1)
+	builder, ok := e.builders[payloadId]
+	if !ok {
+		return nil, false, nil
+	}
+	blockWithReceipts, err := builder.Stop()
+	return blockWithReceipts, false, err
+}
+
+func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error) {
+	blockWithReceipts, busy, err := e.GetAssembledBlockWithReceipts(req.Id)
+	if err != nil {
+		e.logger.Error("Failed to build PoS block", "err", err)
+		return nil, err
+	}
+	if busy {
 		return &executionproto.GetAssembledBlockResponse{
 			Busy: true,
 		}, nil
 	}
-	defer e.semaphore.Release(1)
-	payloadId := req.Id
-	builder, ok := e.builders[payloadId]
-	if !ok {
+	if blockWithReceipts == nil {
 		return &executionproto.GetAssembledBlockResponse{
 			Busy: false,
 		}, nil
 	}
 
-	blockWithReceipts, err := builder.Stop()
-	if err != nil {
-		e.logger.Error("Failed to build PoS block", "err", err)
-		return nil, err
-	}
 	block := blockWithReceipts.Block
 	header := block.Header()
 
@@ -167,6 +178,7 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
 		BlockHash:     gointerfaces.ConvertHashToH256(block.Hash()),
 		Transactions:  encodedTransactions,
+		SlotNumber:    header.SlotNumber,
 	}
 	if block.Withdrawals() != nil {
 		payload.Version = 2

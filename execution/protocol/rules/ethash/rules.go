@@ -262,6 +262,14 @@ func VerifyHeaderBasics(chain rules.ChainHeaderReader, header, parent *types.Hea
 		return rules.ErrUnexpectedRequests
 	}
 
+	if header.SlotNumber != nil {
+		return rules.ErrUnexpectedSlotNumber
+	}
+
+	if header.BlockAccessListHash != nil {
+		return rules.ErrUnexpectedBlockAccessListHash
+	}
+
 	// If all checks passed, validate any special fields for hard forks
 	if err := misc.VerifyDAOHeaderExtraData(chain.Config(), header); err != nil {
 		return err
@@ -287,6 +295,15 @@ func (ethash *Ethash) verifyHeader(chain rules.ChainHeaderReader, header, parent
 			return err
 		}
 	}
+
+	if header.SlotNumber != nil {
+		return rules.ErrUnexpectedSlotNumber
+	}
+
+	if header.BlockAccessListHash != nil {
+		return rules.ErrUnexpectedBlockAccessListHash
+	}
+
 	return nil
 }
 

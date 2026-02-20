@@ -63,7 +63,7 @@ func (s *SimpleSequence) AddOffset(offset uint64) {
 	s.pos++
 }
 
-func (s *SimpleSequence) Reset(baseNum uint64, raw []byte) {
+func (s *SimpleSequence) Reset(baseNum uint64, raw []byte) { // no `return parameter` to avoid heap-allocation of `s` object
 	s.baseNum = baseNum
 	s.raw = raw
 	s.pos = len(raw) / 4
@@ -135,6 +135,11 @@ type SimpleSequenceIterator struct {
 	pos int
 }
 
+func (it *SimpleSequenceIterator) Reset(seq *SimpleSequence) {
+	it.seq = seq
+	it.pos = 0
+}
+
 func (it *SimpleSequenceIterator) Next() (uint64, error) {
 	if !it.HasNext() {
 		return 0, stream.ErrIteratorExhausted
@@ -166,6 +171,11 @@ func (it *SimpleSequenceIterator) Seek(v uint64) {
 type ReverseSimpleSequenceIterator struct {
 	seq *SimpleSequence
 	pos int
+}
+
+func (it *ReverseSimpleSequenceIterator) Reset(seq *SimpleSequence) {
+	it.seq = seq
+	it.pos = int(seq.Count()) - 1
 }
 
 func (it *ReverseSimpleSequenceIterator) Next() (uint64, error) {

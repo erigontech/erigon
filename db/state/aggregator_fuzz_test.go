@@ -143,13 +143,13 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 		require.NoError(t, err)
 		require.NotNil(t, v, "key %x not found", commKey1)
 
-		require.Equal(t, maxWrite, binary.BigEndian.Uint64(v[:]))
+		require.Equal(t, maxWrite, binary.BigEndian.Uint64(v))
 
 		v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2)
 		require.NoError(t, err)
 		require.NotNil(t, v, "key %x not found", commKey2)
 
-		require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
+		require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v))
 	})
 
 }

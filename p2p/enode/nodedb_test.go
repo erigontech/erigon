@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -33,6 +32,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -74,7 +74,7 @@ func BenchmarkNodeDBGeometry(b *testing.B) {
 		var i int
 		for b.Loop() {
 			i++
-			tx, _ := db.BeginRw(context.Background())
+			tx, _ := db.BeginRw(context.Background()) //nolint:gocritic
 
 			v := vals[i%len(vals)]
 			v[0]++ // modify value a bit on every update
@@ -85,7 +85,7 @@ func BenchmarkNodeDBGeometry(b *testing.B) {
 		}
 		b.ReportMetric(float64(worst.Milliseconds()), "ms_worst")
 		db.Close()
-		os.RemoveAll(db.Path())
+		dir.RemoveFile(db.Path())
 	}
 
 	b.Run("20kb", func(b *testing.B) {

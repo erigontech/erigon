@@ -98,7 +98,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 			Incarnation: 0,
 		}
 		buf := accounts.SerialiseV3(&acc)
-		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf[:], txNum, nil, 0)
+		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil, 0)
 		require.NoError(t, err)
 
 		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil, 0)
@@ -153,9 +153,8 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer newDoms.Close()
 
-	err = newDoms.SeekCommitment(ctx, tx)
+	latestTx, _, err := newDoms.SeekCommitment(ctx, tx)
 	require.NoError(t, err)
-	latestTx := newDoms.TxNum()
 	t.Logf("seek to latest_tx=%d", latestTx)
 
 	miss := uint64(0)
@@ -216,7 +215,8 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		err = tx.Commit()
 		require.NoError(t, err)
 
-		tx, err = db.BeginTemporalRw(context.Background())
+		// TODO: either make the lint rule smarter about closures, or use db.View/db.Update here
+		tx, err = db.BeginTemporalRw(context.Background()) //nolint:gocritic
 		require.NoError(t, err)
 
 		domains, err = execctx.NewSharedDomains(context.Background(), tx, log.New())
@@ -432,11 +432,11 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commKey1)
 	require.NoError(t, err)
-	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v[:]))
+	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v))
 
 	v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2)
 	require.NoError(t, err)
-	require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
+	require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v))
 }
 
 func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
