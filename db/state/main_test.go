@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/erigontech/erigon/common/dir"
 )
 
 func TestMain(m *testing.M) {
@@ -34,7 +36,7 @@ func setupRAMTmpdir() func() {
 			os.Setenv("TMPDIR", dir)
 			fmt.Fprintf(os.Stderr, "test tmpdir: %s (tmpfs)\n", dir)
 			return func() {
-				os.RemoveAll(dir)
+				dir.RemoveAll(dir)
 			}
 		}
 	}
@@ -69,7 +71,7 @@ func setupDarwinRAMDisk() func() {
 	exec.Command("diskutil", "unmount", device).Run()
 	if out, err := exec.Command("diskutil", "mount", "-mountPoint", mountPoint, device).CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "ramdisk mount failed: %s\n", out)
-		os.RemoveAll(mountPoint)
+		dir.RemoveAll(mountPoint)
 		exec.Command("hdiutil", "detach", device).Run()
 		return noop
 	}
@@ -80,6 +82,6 @@ func setupDarwinRAMDisk() func() {
 	return func() {
 		exec.Command("diskutil", "unmount", mountPoint).Run()
 		exec.Command("hdiutil", "detach", device).Run()
-		os.RemoveAll(mountPoint)
+		dir.RemoveAll(mountPoint)
 	}
 }
