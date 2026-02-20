@@ -176,7 +176,7 @@ var (
 func LogHashMismatchReason() bool {
 	logHashMismatchReasonOnce.Do(func() {
 		v, _ := envLookup("LOG_HASH_MISMATCH_REASON")
-		if v == "true" {
+		if strings.EqualFold(v, "true") {
 			logHashMismatchReason = true
 			log.Info("[Experiment]", "LOG_HASH_MISMATCH_REASON", logHashMismatchReason)
 		}
