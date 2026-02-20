@@ -175,7 +175,11 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
+	return sd.getLatest(domain, key)
+}
 
+// getLatest is the lock-free version of GetLatest. Caller must hold latestStateLock.
+func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
 	var unwoundLatest = func(domain kv.Domain, key string) (v []byte, step kv.Step, ok bool) {
 		if sd.unwindChangeset != nil {
 			if values := sd.unwindChangeset[domain]; values != nil {
@@ -292,6 +296,37 @@ func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx 
 	}
 
 	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, ramIter, it, roTx)
+}
+
+// HasPrefix checks if there is at least one non-empty value with the given prefix.
+// It acquires latestStateLock.RLock once and uses the lock-free getLatest within the
+// iteration callback to avoid a deadlock (IteratePrefix holds RLock, GetLatest would
+// try to acquire RLock again, which deadlocks when a writer is pending).
+func (sd *TemporalMemBatch) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
+	sd.latestStateLock.RLock()
+	defer sd.latestStateLock.RUnlock()
+
+	var ramIter btree2.MapIter[string, []dataWithTxNum]
+	if domain == kv.StorageDomain {
+		ramIter = sd.storage.Iter()
+	}
+
+	var firstKey, firstVal []byte
+	var hasPrefix bool
+	err := AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, ramIter, func(k []byte, v []byte, step kv.Step) (bool, error) {
+		// Use lock-free getLatest since we already hold RLock
+		if lv, _, ok := sd.getLatest(domain, k); ok {
+			v = lv
+		}
+		if len(v) > 0 {
+			firstKey = common.Copy(k)
+			firstVal = common.Copy(v)
+			hasPrefix = true
+			return false, nil // do not continue, end on first occurrence
+		}
+		return true, nil
+	}, roTx)
+	return firstKey, firstVal, hasPrefix, err
 }
 
 func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSet) {
