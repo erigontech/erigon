@@ -81,10 +81,10 @@ type patternArena struct {
 	slotIdx   int
 }
 
-func (a *patternArena) allocCW(code uint16, pattern word, l byte, ptr *patternTable) *codeword {
+func (a *patternArena) allocCW(code uint16, pattern word, codeLen byte, ptr *patternTable) *codeword {
 	cw := &a.codewords[a.cwIdx]
 	a.cwIdx++
-	cw.code, cw.pattern, cw.len, cw.ptr = code, pattern, l, ptr
+	cw.code, cw.pattern, cw.len, cw.ptr = code, pattern, codeLen, ptr
 	return cw
 }
 
@@ -96,32 +96,6 @@ func (a *patternArena) allocTable(bitLen int) *patternTable {
 	t.patterns = a.slots[a.slotIdx : a.slotIdx+sz]
 	a.slotIdx += sz
 	return t
-}
-
-// countPatternArena mirrors buildCondensedPatternTable to count, without allocating,
-// the exact number of sub-tables, total slots, and codewords needed.
-// Returns (patternsConsumed, extraSlots, numSubTables, numCW).
-func countPatternArena(depths []uint64, bits int, depth, maxDepth uint64) (consumed, extraSlots, numSubTables, numCW int) {
-	if len(depths) == 0 {
-		return
-	}
-	if depth == depths[0] {
-		return 1, 0, 0, 1
-	}
-	if bits == 9 {
-		subBitLen := int(maxDepth)
-		if subBitLen > 9 {
-			subBitLen = 9
-		}
-		c, s, nt, ncw := countPatternArena(depths, 0, depth, maxDepth)
-		return c, s + (1 << subBitLen), nt + 1, ncw + 1
-	}
-	if maxDepth == 0 {
-		return
-	}
-	c0, s0, nt0, ncw0 := countPatternArena(depths, bits+1, depth+1, maxDepth-1)
-	c1, s1, nt1, ncw1 := countPatternArena(depths[c0:], bits+1, depth+1, maxDepth-1)
-	return c0 + c1, s0 + s1, nt0 + nt1, ncw0 + ncw1
 }
 
 // posArena pre-allocates all storage for a decompressor's Huffman position table,
@@ -147,9 +121,12 @@ func (a *posArena) allocTable(bitLen int) *posTable {
 	return t
 }
 
-// countPosArena mirrors buildPosTable to count the exact sizes needed without allocating.
+// countHuffmanArena mirrors the recursive build logic to count, without allocating,
+// the exact number of sub-tables and total slots needed for either a pattern or
+// position Huffman table. Both tables share the same tree structure.
 // Returns (patternsConsumed, extraSlots, numSubTables).
-func countPosArena(depths []uint64, bits int, depth, maxDepth uint64) (consumed, extraSlots, numSubTables int) {
+// For pattern tables: numCW = len(patterns) + numSubTables (terminals + routing nodes).
+func countHuffmanArena(depths []uint64, bits int, depth, maxDepth uint64) (consumed, extraSlots, numSubTables int) {
 	if len(depths) == 0 {
 		return
 	}
@@ -157,18 +134,14 @@ func countPosArena(depths []uint64, bits int, depth, maxDepth uint64) (consumed,
 		return 1, 0, 0
 	}
 	if bits == 9 {
-		subBitLen := int(maxDepth)
-		if subBitLen > 9 {
-			subBitLen = 9
-		}
-		c, s, nt := countPosArena(depths, 0, depth, maxDepth)
-		return c, s + (1 << subBitLen), nt + 1
+		c, s, nt := countHuffmanArena(depths, 0, depth, maxDepth)
+		return c, s + (1 << min(int(maxDepth), 9)), nt + 1
 	}
 	if maxDepth == 0 {
 		return
 	}
-	c0, s0, nt0 := countPosArena(depths, bits+1, depth+1, maxDepth-1)
-	c1, s1, nt1 := countPosArena(depths[c0:], bits+1, depth+1, maxDepth-1)
+	c0, s0, nt0 := countHuffmanArena(depths, bits+1, depth+1, maxDepth-1)
+	c1, s1, nt1 := countHuffmanArena(depths[c0:], bits+1, depth+1, maxDepth-1)
 	return c0 + c1, s0 + s1, nt0 + nt1
 }
 
@@ -355,9 +328,9 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		}
 		// Pre-count exact arena sizes, then build with a single set of large allocations
 		// instead of O(N) individual ones — reduces GC pressure when many files are open.
-		_, extraSlots, numSubTables, numCW := countPatternArena(depths, 0, 0, patternMaxDepth)
+		_, extraSlots, numSubTables := countHuffmanArena(depths, 0, 0, patternMaxDepth)
 		d.patArena = &patternArena{
-			codewords: make([]codeword, numCW),
+			codewords: make([]codeword, len(patterns)+numSubTables), // terminals + routing nodes
 			tables:    make([]patternTable, 1+numSubTables),
 			slots:     make([]*codeword, (1<<bitLen)+extraSlots),
 		}
@@ -414,7 +387,7 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 			bitLen = int(posMaxDepth)
 		}
 		// Pre-count exact arena sizes, then build with a single set of large allocations.
-		_, extraSlots, numSubTables := countPosArena(posDepths, 0, 0, posMaxDepth)
+		_, extraSlots, numSubTables := countHuffmanArena(posDepths, 0, 0, posMaxDepth)
 		totalSlots := (1 << bitLen) + extraSlots
 		d.posArena = &posArena{
 			tables:  make([]posTable, 1+numSubTables),
