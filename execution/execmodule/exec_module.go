@@ -163,7 +163,6 @@ func (c *CacheView) HasStorage(address common.Address) (bool, error) {
 	return hasStorage, err
 }
 
-// ExecModule describes ethereum execution logic and indexing.
 type ExecModule struct {
 	bacgroundCtx context.Context
 	// Snapshots + MDBX
