@@ -99,7 +99,8 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, req *executionproto.Asse
 	param.PayloadId = e.nextPayloadId
 	e.lastParameters = &param
 
-	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, &param, e.config.SecondsPerSlot())
+	maxBuildTimeSecs := max(e.config.SecondsPerSlot()/3, 1)
+	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, &param, maxBuildTimeSecs)
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
 
 	return &executionproto.AssembleBlockResponse{
