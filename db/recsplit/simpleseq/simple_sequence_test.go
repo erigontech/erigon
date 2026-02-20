@@ -284,6 +284,33 @@ func TestSimpleSequence(t *testing.T) {
 	})
 }
 
+func TestReadSimpleSequence(t *testing.T) {
+	// Build a sequence via NewSimpleSequence, serialize it, then deserialize via
+	// ReadSimpleSequence (which goes through Reset). Regression test for a bug
+	// where Reset did not update the cached `count` field, causing Count()==0 on
+	// deserialized sequences.
+	orig := NewSimpleSequence(1000, 4)
+	orig.AddOffset(1001)
+	orig.AddOffset(1007)
+	orig.AddOffset(1015)
+	orig.AddOffset(1027)
+
+	raw := orig.AppendBytes(nil)
+	s := ReadSimpleSequence(1000, raw)
+
+	require.Equal(t, uint64(4), s.Count())
+	require.Equal(t, uint64(1001), s.Min())
+	require.Equal(t, uint64(1027), s.Max())
+
+	v, found := s.Seek(1007)
+	require.True(t, found)
+	require.Equal(t, uint64(1007), v)
+
+	v, found = s.Seek(9999)
+	require.False(t, found)
+	require.Equal(t, uint64(0), v)
+}
+
 func makeSequence(n int) *SimpleSequence {
 	base := uint64(1_000_000)
 	s := NewSimpleSequence(base, uint64(n))
@@ -294,7 +321,7 @@ func makeSequence(n int) *SimpleSequence {
 }
 
 func BenchmarkSimpleSequenceSeek(b *testing.B) {
-	for _, size := range []int{4, 16} {
+	for _, size := range []int{1, 2, 4, 16} {
 		s := makeSequence(size)
 		minV := s.Min()
 		maxV := s.Max()
