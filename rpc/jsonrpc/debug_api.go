@@ -98,23 +98,14 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	}
 	defer tx.Rollback()
 
-	number, err := api._blockReader.HeaderNumber(ctx, tx, blockHash)
+	blockNrOrHash := rpc.BlockNumberOrHashWithHash(blockHash, true)
+	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return StorageRangeResult{}, nil
+		}
 		return StorageRangeResult{}, err
 	}
-	if number == nil {
-		return StorageRangeResult{}, nil
-	}
-
-	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, *number)
-	if err != nil {
-		return StorageRangeResult{}, err
-	}
-	if !ok || canonicalHash != blockHash {
-		return StorageRangeResult{}, fmt.Errorf("hash %x is not currently canonical", blockHash)
-	}
-
-	blockNumber := *number
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
 	if err != nil {
