@@ -582,14 +582,29 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 	backgroundPostForkChoice := e.fcuBackgroundCommit || e.fcuBackgroundPrune
 	if backgroundPostForkChoice {
-		shouldReleaseSema = false // pass on the semaphore to background goroutine
-		go func() {
-			defer e.semaphore.Release(1)
-			err := e.runPostForkchoice(currentContext, finishProgressBefore, isSynced, initialCycle)
-			if err != nil && !errors.Is(err, context.Canceled) {
-				e.logger.Error("Error running background post forkchoice", "err", err)
-			}
-		}()
+		if e.fcuBackgroundCommit {
+			// When background commit is enabled, we must hold the semaphore until the commit
+			// is done, because the SharedDomains (currentContext) is shared state.
+			shouldReleaseSema = false
+			go func() {
+				defer e.semaphore.Release(1)
+				err := e.runPostForkchoice(currentContext, finishProgressBefore, isSynced, initialCycle)
+				if err != nil && !errors.Is(err, context.Canceled) {
+					e.logger.Error("Error running background post forkchoice", "err", err)
+				}
+			}()
+		} else {
+			// When only background prune is enabled (the default), the commit has already
+			// completed synchronously above, so the semaphore can be released immediately.
+			// Pruning uses its own DB transaction and does not access shared state, so it
+			// is safe to run concurrently with the next FCU.
+			go func() {
+				err := e.runPostForkchoice(currentContext, finishProgressBefore, isSynced, initialCycle)
+				if err != nil && !errors.Is(err, context.Canceled) {
+					e.logger.Error("Error running background post forkchoice", "err", err)
+				}
+			}()
+		}
 	}
 
 	return sendForkchoiceReceiptWithoutWaiting(outcomeCh, &executionproto.ForkChoiceReceipt{
