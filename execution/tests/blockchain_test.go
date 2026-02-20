@@ -33,6 +33,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
@@ -343,7 +344,7 @@ func testReorgShort(t *testing.T) {
 func testReorg(t *testing.T, first, second []int64, td int64) {
 	require := require.New(t)
 	// Create a pristine chain and database
-	m := newCanonical(t, 0)
+	m := newCanonicalEthash(t, 0)
 	// Insert one chain first, then the other
 	firstChain, err := blockgen.GenerateChain(m.ChainConfig, m.Current(nil), m.Engine, m.DB, len(first), func(i int, b *blockgen.BlockGen) {
 		b.OffsetTime(first[i])
@@ -1146,7 +1147,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 
 	t.Parallel()
 	// Generate a canonical chain to act as the main dataset
-	m, m2 := mock.Mock(t), mock.Mock(t)
+	m, m2 := newCanonicalEthash(t, 0), newCanonicalEthash(t, 0)
 
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64, func(i int, b *blockgen.BlockGen) { b.SetCoinbase(common.Address{1}) })
 	if err != nil {
@@ -1276,7 +1277,7 @@ func TestLowDiffLongChain(t *testing.T) {
 
 	t.Parallel()
 	// Generate a canonical chain to act as the main dataset
-	m := mock.Mock(t)
+	m := newCanonicalEthash(t, 0)
 
 	// We must use a pretty long chain to ensure that the fork doesn't overtake us
 	// until after at least 128 blocks post tip
@@ -1301,7 +1302,7 @@ func TestLowDiffLongChain(t *testing.T) {
 	}
 
 	// Import the canonical chain
-	m2 := mock.Mock(t)
+	m2 := newCanonicalEthash(t, 0)
 
 	if err := m2.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert into chain: %v", err)
@@ -1737,7 +1738,6 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-
 	t.Parallel()
 	var (
 		// Generate a canonical chain to act as the main dataset
