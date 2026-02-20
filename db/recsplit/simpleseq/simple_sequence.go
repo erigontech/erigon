@@ -81,29 +81,27 @@ func (s *SimpleSequence) search(seek uint64) (idx int, ok bool) {
 	//   - 85% return idx=0 (first element)
 	//   - 10% return "not found"
 	//   - 5% other lengths
-	c := s.Count()
 	if seek <= s.Min() { // fast-path for 1-st element hit
 		return 0, true
 	}
-	if c == 1 { // if len=1 then nothing left to search
+	if s.count == 1 { // if len=1 then nothing left to search
 		return 0, false
 	}
-	idx = sort.Search(int(c), func(i int) bool {
+	idx = sort.Search(int(s.count), func(i int) bool {
 		return s.Get(uint64(i)) >= seek
 	})
-	return idx, idx < int(c)
+	return idx, idx < int(s.count)
 }
 
 func (s *SimpleSequence) reverseSearch(seek uint64) (idx int, ok bool) {
-	c := s.Count()
 	if seek >= s.Max() { // fast-path for last element hit
-		idx = int(c) - 1
+		idx = int(s.count) - 1
 		return idx, true
 	}
-	if c == 1 { // if len=1 then nothing left to search
+	if s.count == 1 { // if len=1 then nothing left to search
 		return 0, false
 	}
-	idx = sort.Search(int(c), func(i int) bool {
+	idx = sort.Search(int(s.count), func(i int) bool {
 		return s.Get(uint64(i)) > seek
 	}) - 1
 	if idx < 0 {
