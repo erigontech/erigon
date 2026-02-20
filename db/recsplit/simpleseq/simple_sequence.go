@@ -103,23 +103,23 @@ func (s *SimpleSequence) search(seek uint64) (int, bool) {
 	return idx, true
 }
 
-func (s *SimpleSequence) reverseSearch(v uint64) (int, bool) {
-	// Find the rightmost index where Get(i) <= v.
+func (s *SimpleSequence) reverseSearch(seek uint64) (int, bool) {
+	// Find the rightmost index where Get(i) <= seek.
 	c := s.Count()
 	if c == 0 {
 		return 0, false
 	}
 
-	if v < s.Min() {
+	if seek < s.Min() {
 		return 0, false
 	}
-	if v >= s.Max() {
+	if seek >= s.Max() {
 		return int(c) - 1, true
 	}
 
-	// c >= 2, Get(0) <= v < Get(c-1); answer is in [0, c-2]
+	// c >= 2, Get(0) <= seek < Get(c-1); answer is in [0, c-2]
 	idx := sort.Search(int(c-1), func(i int) bool {
-		return s.Get(c-uint64(i)-2) <= v
+		return s.Get(c-uint64(i)-2) <= seek
 	})
 	return int(c) - idx - 2, true
 }
