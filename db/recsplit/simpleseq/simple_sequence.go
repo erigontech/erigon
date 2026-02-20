@@ -96,9 +96,14 @@ func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
 	if s.isCount1() {
 		return 0, 0, false
 	}
-	if seek > s.Max() {
+	v = s.Max()
+	if seek > v {
 		return 0, 0, false
 	}
+	if seek == v {
+		return len(s.raw) / 4, v, true
+	}
+
 	for i := 4; i < len(s.raw); i += 4 {
 		v = s.baseNum + uint64(binary.BigEndian.Uint32(s.raw[i:]))
 		if v >= seek {
