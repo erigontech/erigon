@@ -104,6 +104,10 @@ func updateAccountRead(account *accountState, vr *state.VersionedRead) {
 		if hasStorageWrite(account.changes, vr.Key) {
 			return
 		}
+		// Track the initial storage value so we can detect no-op writes later.
+		if val, ok := vr.Val.(uint256.Int); ok {
+			account.setStorageValue(vr.Key, val)
+		}
 		account.changes.StorageReads = append(account.changes.StorageReads, vr.Key)
 	case state.BalancePath:
 		if val, ok := vr.Val.(uint256.Int); ok {
@@ -157,6 +161,14 @@ func ensureAccountState(accounts map[accounts.Address]*accountState, addr accoun
 func updateAccountWrite(account *accountState, vw *state.VersionedWrite, accessIndex uint16) {
 	switch vw.Path {
 	case state.StoragePath:
+		val := vw.Val.(uint256.Int)
+		// Skip no-op writes: if the write value matches the initial read value
+		// and there is no prior write to this slot, keep it as a read.
+		if !hasStorageWrite(account.changes, vw.Key) {
+			if prev, ok := account.getStorageValue(vw.Key); ok && prev.Eq(&val) {
+				return
+			}
+		}
 		addStorageUpdate(account.changes, vw, accessIndex)
 	case state.SelfDestructPath:
 		if deleted, ok := vw.Val.(bool); ok {
@@ -246,8 +258,9 @@ type accountState struct {
 	balance        *fieldTracker[uint256.Int]
 	nonce          *fieldTracker[uint64]
 	code           *fieldTracker[[]byte]
-	balanceValue   *uint256.Int // tracks latest seen balance
-	selfDestructed bool         // true once SelfDestructPath=true is seen for this account
+	balanceValue   *uint256.Int                        // tracks latest seen balance
+	storageValues  map[accounts.StorageKey]uint256.Int // tracks initial seen value per storage slot
+	selfDestructed bool                                // true once SelfDestructPath=true is seen for this account
 }
 
 // check pre- and post-values, add to BAL if different
@@ -427,6 +440,23 @@ func (a *accountState) setBalanceValue(v uint256.Int) {
 		a.balanceValue = &uint256.Int{}
 	}
 	*a.balanceValue = v
+}
+
+func (a *accountState) setStorageValue(key accounts.StorageKey, v uint256.Int) {
+	if a.storageValues == nil {
+		a.storageValues = make(map[accounts.StorageKey]uint256.Int)
+	}
+	if _, ok := a.storageValues[key]; !ok {
+		a.storageValues[key] = v
+	}
+}
+
+func (a *accountState) getStorageValue(key accounts.StorageKey) (uint256.Int, bool) {
+	if a.storageValues == nil {
+		return uint256.Int{}, false
+	}
+	v, ok := a.storageValues[key]
+	return v, ok
 }
 
 // writeBALToFile writes the Block Access List to a text file for debugging/analysis

@@ -117,20 +117,10 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	// to run only tests for 1 eip do:
 	//bt.whitelist(`.*amsterdam/eip8024_dupn_swapn_exchange.*`)
 
-	// amsterdam — BAL mismatch (EIP-7702 delegation)
-	bt.skipLoad(`^amsterdam/eip7928_block_level_access_lists/test_bal_7702_delegation_clear.json`)
-
-	// cancun — BAL mismatch
-	bt.skipLoad(`^cancun/create/test_create_oog_from_eoa_refunds.json`)
+	// cancun — BAL mismatch (execution differences: selfdestruct initcode, blob gas)
 	bt.skipLoad(`^cancun/eip4844_blobs/test_correct_decreasing_blob_gas_costs.json`)
 	bt.skipLoad(`^cancun/eip4844_blobs/test_correct_increasing_blob_gas_costs.json`)
 	bt.skipLoad(`^cancun/eip6780_selfdestruct/test_self_destructing_initcode.json`)
-	bt.skipLoad(`^cancun/eip6780_selfdestruct/test_selfdestruct_created_in_same_tx_with_revert.json`)
-	bt.skipLoad(`^cancun/eip6780_selfdestruct/test_selfdestruct_not_created_in_same_tx_with_revert.json`)
-
-	// frontier — BAL mismatch
-	bt.skipLoad(`^frontier/identity_precompile/test_call_identity_precompile.json`)
-	bt.skipLoad(`^frontier/scenarios/test_scenarios.json`)
 
 	// osaka — BAL mismatch (blob reserve price)
 	bt.skipLoad(`^osaka/eip7918_blob_reserve_price/test_reserve_price_boundary.json`)
