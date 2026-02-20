@@ -300,11 +300,7 @@ func recurse_32(sa, oldTmp []int32, numLMS, maxID int) {
 		tmp = saTmp
 	}
 	if len(tmp) < numLMS {
-		n := maxID
-		if n < numLMS/2 {
-			n = numLMS / 2
-		}
-		tmp = make([]int32, n)
+		tmp = make([]int32, max(maxID, numLMS/2))
 	}
 
 	clear(dst)
