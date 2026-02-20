@@ -28,8 +28,7 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
-
-	"github.com/erigontech/erigon/db/version"
+	"time"
 
 	"github.com/spaolacci/murmur3"
 
@@ -42,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano16"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/db/version"
 )
 
 var ErrCollision = errors.New("duplicate key")
@@ -130,6 +130,7 @@ type RecSplit struct {
 	logger             log.Logger
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
+	timings Timings
 
 	unaryBuf []uint64 // `recsplit` func returning `unary` array. re-using it between buckets
 }
@@ -152,6 +153,14 @@ type RecSplitArgs struct {
 	LeafSize   uint16
 
 	NoFsync bool // fsync is enabled by default, but tests can manually disable
+}
+
+type Timings struct {
+	Enabled    bool
+	AddStart   time.Time
+	AddTook    time.Duration
+	BuildStart time.Time
+	BuildTook  time.Duration
 }
 
 // DefaultLeafSize - LeafSize=8 and BucketSize=100, use about 1.8 bits per key. Increasing the leaf and bucket
@@ -754,6 +763,12 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.keysAdded != rs.keyExpectedCount {
 		return fmt.Errorf("rs %s expected keys %d, got %d", rs.fileName, rs.keyExpectedCount, rs.keysAdded)
 	}
+	if rs.timings.Enabled {
+		rs.timings.AddTook = time.Since(rs.timings.AddStart) // assume Adding data into compressor complete
+		rs.timings.BuildStart = time.Now()
+		defer func() { rs.timings.BuildTook = time.Since(rs.timings.BuildStart) }()
+	}
+
 	var err error
 	if rs.indexF, err = dir.CreateTemp(rs.filePath); err != nil {
 		return fmt.Errorf("create index file %s: %w", rs.filePath, err)
@@ -930,7 +945,12 @@ func (rs *RecSplit) flushExistenceFilter() error {
 	return nil
 }
 
-func (rs *RecSplit) DisableFsync() { rs.noFsync = true }
+func (rs *RecSplit) DisableFsync()    { rs.noFsync = true }
+func (rs *RecSplit) Timings() Timings { return rs.timings }
+
+func (rs *RecSplit) CollectTimings() {
+	rs.timings.Enabled, rs.timings.AddStart = true, time.Now() // assume Adding data into compressor starting
+}
 
 // Fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
 // To achieve it: write to .tmp file then `rename` when file is ready.

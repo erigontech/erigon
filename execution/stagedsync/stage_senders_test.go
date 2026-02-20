@@ -30,9 +30,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -40,7 +40,7 @@ import (
 func TestSenders(t *testing.T) {
 	require := require.New(t)
 
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	db := m.DB
 	tx, err := db.BeginRw(m.Ctx)
 	require.NoError(err)
