@@ -82,16 +82,15 @@ func (s *SimpleSequence) search(v uint64) (int, bool) {
 	//   - 85% return idx=0 (first element)
 	//   - 10% return "not found"
 	//   - 5% other lengths
-	//
-	// Fast-path ordering: check first element (handles 85%), then last element
-	// for "not found" (handles most of the 10%), then fall through to sort.Search.
-
 	c := s.Count()
 	if c == 0 {
 		return 0, false
 	}
 	if v <= s.Min() {
 		return 0, true
+	}
+	if s.isCount1() {
+		return 0, false
 	}
 	if v > s.Max() {
 		return 0, false
