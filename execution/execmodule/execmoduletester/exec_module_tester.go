@@ -102,34 +102,34 @@ type StateChangesClient interface {
 // ExecModuleTester aims to construct all parts necessary to test the PoS GRPC API of our EthereumExecModule.
 type ExecModuleTester struct {
 	sentryproto.UnimplementedSentryServer
-	Ctx                  context.Context
-	Log                  log.Logger
-	tb                   testing.TB
-	cancel               context.CancelFunc
-	DB                   kv.TemporalRwDB
-	Dirs                 datadir.Dirs
-	Engine               rules.Engine
-	ChainConfig          *chain.Config
-	Sync                 *stagedsync.Sync
-	MiningSync           *stagedsync.Sync
-	PendingBlocks        chan *types.Block
-	MinedBlocks          chan *types.BlockWithReceipts
-	sentriesClient       *sentry_multi_client.MultiClient
-	Key                  *ecdsa.PrivateKey
-	Genesis              *types.Block
-	SentryClient         direct.SentryClient
-	PeerId               *typesproto.H512
-	streams              map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer
-	sentMessages         []*sentryproto.OutboundMessageData
-	StreamWg             sync.WaitGroup
-	ReceiveWg            sync.WaitGroup
-	Address              common.Address
-	ForkValidator        *enginehelpers.ForkValidator
-	Eth1ExecutionService *execmodule.EthereumExecutionModule
-	StateCache           *execmodule.Cache
-	retirementStart      chan bool
-	retirementDone       chan struct{}
-	retirementWg         sync.WaitGroup
+	Ctx             context.Context
+	Log             log.Logger
+	tb              testing.TB
+	cancel          context.CancelFunc
+	DB              kv.TemporalRwDB
+	Dirs            datadir.Dirs
+	Engine          rules.Engine
+	ChainConfig     *chain.Config
+	Sync            *stagedsync.Sync
+	MiningSync      *stagedsync.Sync
+	PendingBlocks   chan *types.Block
+	MinedBlocks     chan *types.BlockWithReceipts
+	sentriesClient  *sentry_multi_client.MultiClient
+	Key             *ecdsa.PrivateKey
+	Genesis         *types.Block
+	SentryClient    direct.SentryClient
+	PeerId          *typesproto.H512
+	streams         map[sentryproto.MessageId][]sentryproto.Sentry_MessagesServer
+	sentMessages    []*sentryproto.OutboundMessageData
+	StreamWg        sync.WaitGroup
+	ReceiveWg       sync.WaitGroup
+	Address         common.Address
+	ForkValidator   *enginehelpers.ForkValidator
+	ExecModule      *execmodule.ExecModule
+	StateCache      *execmodule.Cache
+	retirementStart chan bool
+	retirementDone  chan struct{}
+	retirementWg    sync.WaitGroup
 
 	Notifications      *shards.Notifications
 	stateChangesClient StateChangesClient
@@ -619,7 +619,26 @@ func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKe
 	mock.StateCache = &execmodule.Cache{}
 	onlySnapDownloadOnStart := cfg.Genesis.Config.Bor != nil
 
-	mock.Eth1ExecutionService = execmodule.NewEthereumExecutionModule(ctx, mock.BlockReader, mock.DB, mock.posStagedSync, forkValidator, mock.ChainConfig, assembleBlockPOS, hook, mock.Notifications.Accumulator, mock.Notifications.RecentReceipts, mock.StateCache, mock.Notifications.StateChangesConsumer, logger, engine, cfg.Sync, cfg.FcuBackgroundPrune, cfg.FcuBackgroundCommit, onlySnapDownloadOnStart)
+	mock.ExecModule = execmodule.NewExecModule(
+		ctx,
+		mock.BlockReader,
+		mock.DB,
+		mock.posStagedSync,
+		forkValidator,
+		mock.ChainConfig,
+		assembleBlockPOS,
+		hook,
+		mock.Notifications.Accumulator,
+		mock.Notifications.RecentReceipts,
+		mock.StateCache,
+		mock.Notifications.StateChangesConsumer,
+		logger,
+		engine,
+		cfg.Sync,
+		cfg.FcuBackgroundPrune,
+		cfg.FcuBackgroundCommit,
+		onlySnapDownloadOnStart,
+	)
 
 	mock.sentriesClient.Hd.StartPoSDownloader(mock.Ctx, sendHeaderRequest, penalize)
 
@@ -770,7 +789,7 @@ func (emt *ExecModuleTester) EnableLogs() {
 func (emt *ExecModuleTester) Cfg() ethconfig.Config { return emt.cfg }
 
 func (emt *ExecModuleTester) insertPoSBlocks(chain *blockgen.ChainPack) error {
-	wr := chainreader.NewChainReaderEth1(emt.ChainConfig, direct.NewExecutionClientDirect(emt.Eth1ExecutionService), time.Hour)
+	wr := chainreader.NewChainReaderEth1(emt.ChainConfig, direct.NewExecutionClientDirect(emt.ExecModule), time.Hour)
 
 	streamCtx, cancel := context.WithCancel(emt.Ctx)
 	defer cancel()
