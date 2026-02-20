@@ -43,6 +43,22 @@ type CommonTx struct {
 	V, R, S  uint256.Int     // signature values
 }
 
+// withoutCaches returns a copy of CommonTx with the TransactionMisc caches (hash, from) cleared.
+// Use this in constructors when building a new transaction from an existing one, to avoid
+// copying sync/atomic fields that must not be shared between two objects.
+func (ct *CommonTx) withoutCaches() CommonTx {
+	return CommonTx{
+		Nonce:    ct.Nonce,
+		GasLimit: ct.GasLimit,
+		To:       ct.To,
+		Value:    ct.Value,
+		Data:     ct.Data,
+		V:        ct.V,
+		R:        ct.R,
+		S:        ct.S,
+	}
+}
+
 func (ct *CommonTx) GetNonce() uint64 {
 	return ct.Nonce
 }
@@ -233,18 +249,8 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 	if err := rlp.EncodeInt(tx.GasLimit, w, b); err != nil {
 		return err
 	}
-	if tx.To == nil {
-		b[0] = 128
-	} else {
-		b[0] = 128 + 20
-	}
-	if _, err := w.Write(b[:1]); err != nil {
+	if err := rlp.EncodeOptionalAddress(tx.To, w, b); err != nil {
 		return err
-	}
-	if tx.To != nil {
-		if _, err := w.Write(tx.To[:]); err != nil {
-			return err
-		}
 	}
 	if err := rlp.EncodeUint256(*tx.Value, w, b); err != nil {
 		return err

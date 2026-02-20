@@ -41,6 +41,22 @@ type BlobTx struct {
 
 func (stx *BlobTx) Type() byte { return BlobTxType }
 
+// copyWithoutCaches returns a copy of BlobTx with the TransactionMisc caches cleared.
+// Use in constructors when wrapping an existing BlobTx to avoid copying sync/atomic fields.
+func (stx *BlobTx) copyWithoutCaches() BlobTx {
+	return BlobTx{
+		DynamicFeeTransaction: DynamicFeeTransaction{
+			CommonTx:   stx.CommonTx.withoutCaches(),
+			ChainID:    stx.ChainID,
+			TipCap:     stx.TipCap,
+			FeeCap:     stx.FeeCap,
+			AccessList: stx.AccessList,
+		},
+		MaxFeePerBlobGas:    stx.MaxFeePerBlobGas,
+		BlobVersionedHashes: stx.BlobVersionedHashes,
+	}
+}
+
 func (stx *BlobTx) GetBlobHashes() []common.Hash {
 	return stx.BlobVersionedHashes
 }
