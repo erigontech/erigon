@@ -141,6 +141,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	t.Cleanup(newDb.Close)
 
 	newAgg := state.New(agg.Dirs()).StepSize(stepSize).MustOpen(ctx, newDb)
+	t.Cleanup(newAgg.Close)
 	require.NoError(t, newAgg.OpenFolder())
 
 	db, _ = temporal.New(newDb, newAgg)
