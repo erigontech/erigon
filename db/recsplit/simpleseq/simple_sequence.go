@@ -104,10 +104,7 @@ func (s *SimpleSequence) reverseSearch(seek uint64) (idx int, ok bool) {
 	idx = sort.Search(int(s.count), func(i int) bool {
 		return s.Get(uint64(i)) > seek
 	}) - 1
-	if idx < 0 {
-		return 0, false
-	}
-	return idx, true
+	return idx, idx >= 0
 }
 
 func (s *SimpleSequence) Seek(v uint64) (uint64, bool) {
