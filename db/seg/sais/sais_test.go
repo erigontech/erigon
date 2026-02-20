@@ -168,9 +168,7 @@ func TestExpand8_32BStrictlyDecreasing(t *testing.T) {
 
 		// Pack LMS positions into the front of sa (as expand_8_32 expects).
 		sa := make([]int32, n)
-		for i, v := range lms {
-			sa[i] = v
-		}
+		copy(sa, lms)
 
 		// Simulate expand_8_32 and record b values in order.
 		bSeq := simulateExpand8_32(text, freq, bucket, sa, numLMS)
