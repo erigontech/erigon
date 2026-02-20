@@ -172,7 +172,7 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, txNum u
 		txNum:    txNum,
 	}
 	if sdc.stateReader != nil {
-		mainTtx.stateReader = sdc.stateReader.Clone()
+		mainTtx.stateReader = sdc.stateReader.Clone(tx, sdc.sharedDomains.AsGetter(tx))
 	} else {
 		mainTtx.stateReader = NewLatestStateReader(sdc.sharedDomains.AsGetter(tx))
 	}
@@ -335,7 +335,7 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 			txNum:    txNum,
 		}
 		if sdc.stateReader != nil {
-			warmupCtx.stateReader = sdc.stateReader.Clone()
+			warmupCtx.stateReader = sdc.stateReader.Clone(roTx, sdc.sharedDomains.AsGetter(roTx))
 		} else {
 			warmupCtx.stateReader = NewLatestStateReader(sdc.sharedDomains.AsGetter(roTx))
 		}

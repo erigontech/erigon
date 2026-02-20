@@ -60,6 +60,6 @@ func (b backtestStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64)
 	return b.plainStateReader.Read(d, plainKey, stepSize)
 }
 
-func (b backtestStateReader) Clone() commitmentdb.StateReader {
-	return newBacktestStateReader(b.tx, b.commitmentAsOf, b.plainStateAsOf)
+func (b backtestStateReader) Clone(tx kv.TemporalTx, _ kv.TemporalGetter) commitmentdb.StateReader {
+	return newBacktestStateReader(tx, b.commitmentAsOf, b.plainStateAsOf)
 }
