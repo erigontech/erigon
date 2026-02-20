@@ -59,30 +59,30 @@ func BenchmarkDecompressNextHeap(b *testing.B) {
 }
 
 func BenchmarkDecompressSkip(b *testing.B) {
-	d := prepareDict(b, 1, 1_000)
+	d := prepareDict(b, 1, 1_000_000)
 	defer d.Close()
 
 	b.Run("skip", func(b *testing.B) {
 		b.ReportAllocs()
 		g := d.MakeGetter()
 		for b.Loop() {
-			_, _ = g.Skip()
-			if !g.HasNext() {
-				g.Reset(0)
+			g.Reset(0)
+			for g.HasNext() {
+				_, _ = g.Skip()
 			}
 		}
 	})
 
-	b.Run("matchcmp_non_existing_key", func(b *testing.B) {
-		b.ReportAllocs()
-		g := d.MakeGetter()
-		for b.Loop() {
-			_ = g.MatchCmp([]byte("longlongword"))
-			if !g.HasNext() {
-				g.Reset(0)
-			}
-		}
-	})
+	//b.Run("matchcmp_non_existing_key", func(b *testing.B) {
+	//	b.ReportAllocs()
+	//	g := d.MakeGetter()
+	//	for b.Loop() {
+	//		_ = g.MatchCmp([]byte("longlongword"))
+	//		if !g.HasNext() {
+	//			g.Reset(0)
+	//		}
+	//	}
+	//})
 }
 
 func BenchmarkDecompressTorrent(t *testing.B) {
