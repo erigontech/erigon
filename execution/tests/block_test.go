@@ -117,14 +117,6 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	// to run only tests for 1 eip do:
 	//bt.whitelist(`.*amsterdam/eip8024_dupn_swapn_exchange.*`)
 
-	// cancun — BAL mismatch (execution differences: selfdestruct initcode, blob gas)
-	bt.skipLoad(`^cancun/eip4844_blobs/test_correct_decreasing_blob_gas_costs.json`)
-	bt.skipLoad(`^cancun/eip4844_blobs/test_correct_increasing_blob_gas_costs.json`)
-	bt.skipLoad(`^cancun/eip6780_selfdestruct/test_self_destructing_initcode.json`)
-
-	// osaka — BAL mismatch (blob reserve price)
-	bt.skipLoad(`^osaka/eip7918_blob_reserve_price/test_reserve_price_boundary.json`)
-
 	// prague — invalid state root hash
 	bt.skipLoad(`^prague/eip7702_set_code_tx/test_call_pointer_to_created_from_create_after_oog_call_again.json`)
 	bt.skipLoad(`^prague/eip7702_set_code_tx/test_call_to_precompile_in_pointer_context.json`)
