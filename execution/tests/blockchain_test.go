@@ -279,7 +279,12 @@ func testLongerFork(t *testing.T, full bool) {
 }
 
 // Tests that chains missing links do not get accepted by the processor.
-func TestBrokenBlockChain(t *testing.T) { testBrokenChain(t) }
+func TestBrokenBlockChain(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	testBrokenChain(t)
+}
 
 func testBrokenChain(t *testing.T) {
 	t.Parallel()
@@ -296,7 +301,9 @@ func testBrokenChain(t *testing.T) {
 }
 
 // Tests that reorganising a long chain after a short one overwrites the canonical numbers and links in the database.
-func TestReorgLongBlocks(t *testing.T) { testReorgLong(t) }
+func TestReorgLongBlocks(t *testing.T) {
+	testReorgLong(t)
+}
 
 func testReorgLong(t *testing.T) {
 	t.Parallel()
@@ -304,7 +311,12 @@ func testReorgLong(t *testing.T) {
 }
 
 // Tests that reorganising a short chain after a long one overwrites the canonical numbers and links in the database.
-func TestReorgShortBlocks(t *testing.T) { testReorgShort(t) }
+func TestReorgShortBlocks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	testReorgShort(t)
+}
 
 func testReorgShort(t *testing.T) {
 	t.Parallel()
@@ -602,6 +614,9 @@ func readReceipt(db kv.TemporalTx, txHash common.Hash, m *execmoduletester.ExecM
 
 // Tests if the canonical block can be fetched from the database during chain insertion.
 func TestCanonicalBlockRetrieval(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	m := newCanonical(t, 0)
 
@@ -643,6 +658,9 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 }
 
 func TestEIP155Transition(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	// Configure and generate a sample block chai
 
@@ -937,6 +955,9 @@ func runPermutation(t *testing.T, testFunc func(*testing.T, prune.Mode) error, c
 }
 
 func TestEIP161AccountRemoval(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	// Configure and generate a sample block chain
 	var (
@@ -1034,6 +1055,9 @@ func TestEIP161AccountRemoval(t *testing.T) {
 }
 
 func TestDoubleAccountRemoval(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	var (
 		signer      = types.LatestSignerForChainID(nil)

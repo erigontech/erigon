@@ -81,6 +81,9 @@ func newEthApiForTest(base *jsonrpc.BaseAPI, db kv.TemporalRoDB, txPool txpoolpr
 }
 
 func TestGetBlobsV1(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	buf := bytes.NewBuffer(nil)
 	mockSentry, require := execmoduletester.NewWithTxPoolCancun(t), require.New(t)
 	oneBlockStep(mockSentry, require)

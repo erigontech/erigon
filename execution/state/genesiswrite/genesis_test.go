@@ -79,6 +79,9 @@ func TestGenesisBlockHashes(t *testing.T) {
 }
 
 func TestGenesisBlockRoots(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	require := require.New(t)
 
@@ -110,6 +113,9 @@ func TestGenesisBlockRoots(t *testing.T) {
 }
 
 func TestCommitGenesisIdempotency(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	logger := log.New()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
@@ -190,6 +196,9 @@ func TestDecodeBalance0(t *testing.T) {
 }
 
 func TestSetupGenesis(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	var (
 		customghash = common.HexToHash("0x89c99d90b79719238d2645c7642f2c9295246e80775b38cfd162b696817fbd50")

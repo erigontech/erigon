@@ -30,6 +30,9 @@ import (
 )
 
 func TestStateLogger(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	cases := []struct {

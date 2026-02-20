@@ -569,6 +569,9 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 }
 
 func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	stepSize := uint64(5)
@@ -722,6 +725,9 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 }
 
 func TestAggregatorV3_BuildFiles_WithReorgDepth(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	ctx := t.Context()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
