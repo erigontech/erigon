@@ -483,6 +483,12 @@ func (b *BlindedBeaconBody) GetVoluntaryExits() *solid.ListSSZ[*SignedVoluntaryE
 }
 
 func (b *BlindedBeaconBody) GetBlobKzgCommitments() *solid.ListSSZ[*KZGCommitment] {
+	// [Modified in Gloas:EIP7732] BlindedBeaconBody does not support GLOAS
+	// In GLOAS, blob_kzg_commitments are in signed_execution_payload_bid.message,
+	// which is not available in blinded blocks
+	if b.Version >= clparams.GloasVersion {
+		return nil
+	}
 	return b.BlobKzgCommitments
 }
 
