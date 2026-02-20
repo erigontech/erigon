@@ -92,15 +92,14 @@ func (s *SimpleSequence) search(seek uint64) (int, bool) {
 	if s.isCount1() {
 		return 0, false
 	}
-	if seek > s.Max() {
-		return 0, false
-	}
-
-	// c >= 2, Get(0) < seek <= Get(c-1); answer is in [1, c-1]
-	idx := 1 + sort.Search(int(c-1), func(i int) bool {
+	// c >= 2, Get(0) < seek; answer is in [1, c-1] if it exists
+	i := sort.Search(int(c-1), func(i int) bool {
 		return s.Get(uint64(i+1)) >= seek
 	})
-	return idx, true
+	if i == int(c-1) {
+		return 0, false
+	}
+	return 1 + i, true
 }
 
 func (s *SimpleSequence) reverseSearch(seek uint64) (int, bool) {
