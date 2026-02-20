@@ -69,60 +69,28 @@ func (s *SimpleSequence) AppendBytes(buf []byte) []byte {
 	return append(buf, s.raw...)
 }
 
-func (s *SimpleSequence) search(seek uint64) (int, bool) {
-	// Real data lengths:
-	//   - 70% len=1
-	//   - 15% len=2
-	//   - ...
-	//
-	// Real data return `idx`:
-	//   - 85% return idx=0 (first element)
-	//   - 10% return "not found"
-	//   - 5% other lengths
+func (s *SimpleSequence) search(v uint64) (int, bool) {
 	c := s.Count()
-	if c == 0 {
-		return 0, false
-	}
-	if seek <= s.Min() { // fast-path for 1-st element hit
-		return 0, true
-	}
-	if c == 1 { // if len=1 then nothing left to search
-		return 0, false
-	}
-	if seek > s.Max() { // fast-path for search-miss
-		return 0, false
-	}
-
 	idx := sort.Search(int(c), func(i int) bool {
-		return s.Get(uint64(i)) >= seek
+		return s.Get(uint64(i)) >= v
 	})
-	return idx, true
+	return idx, idx < int(c)
 }
 
-func (s *SimpleSequence) reverseSearch(seek uint64) (int, bool) {
-	// Find the rightmost index where Get(i) <= seek.
+func (s *SimpleSequence) reverseSearch(v uint64) (int, bool) {
 	c := s.Count()
-	if c == 0 {
-		return 0, false
-	}
-	if seek >= s.Max() { // fast-path for 1-st element hit
-		return int(c) - 1, true
-	}
-	if c == 1 { // if len=1 then nothing left to search
-		return 0, false
-	}
-	if seek < s.Min() { // fast-path for search-miss
-		return 0, false
-	}
-
 	idx := sort.Search(int(c), func(i int) bool {
-		return s.Get(uint64(i)) > seek
+		return s.Get(c-uint64(i)-1) <= v
 	})
-	return idx - 1, true
+
+	if idx >= int(c) {
+		return 0, false
+	}
+	return int(c) - idx - 1, true
 }
 
-func (s *SimpleSequence) Seek(seek uint64) (uint64, bool) {
-	idx, found := s.search(seek)
+func (s *SimpleSequence) Seek(v uint64) (uint64, bool) {
+	idx, found := s.search(v)
 	if !found {
 		return 0, false
 	}
