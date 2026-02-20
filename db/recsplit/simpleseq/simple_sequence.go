@@ -42,17 +42,20 @@ func (s *SimpleSequence) Get(i uint64) uint64 {
 }
 
 func (s *SimpleSequence) Min() uint64 {
-	return s.Get(0)
+	return s.baseNum + uint64(binary.BigEndian.Uint32(s.raw))
 }
 
 func (s *SimpleSequence) Max() uint64 {
-	delta := binary.BigEndian.Uint32(s.raw[len(s.raw)-4:])
-	return s.baseNum + uint64(delta)
+	return s.baseNum + uint64(binary.BigEndian.Uint32(s.raw[len(s.raw)-4:]))
 }
 
 func (s *SimpleSequence) Count() uint64 {
 	return uint64(len(s.raw) / 4)
 }
+func (s *SimpleSequence) Empty() bool { return len(s.raw) == 0 }
+
+// isCount1 - sequence has only 1 element
+func (s *SimpleSequence) isCount1() bool { return len(s.raw) == 4 }
 
 func (s *SimpleSequence) AddOffset(offset uint64) {
 	binary.BigEndian.PutUint32(s.raw[s.pos*4:], uint32(offset-s.baseNum))
@@ -70,6 +73,18 @@ func (s *SimpleSequence) AppendBytes(buf []byte) []byte {
 }
 
 func (s *SimpleSequence) search(v uint64) (int, bool) {
+	// Real data lengths:
+	//   - 70% len=1
+	//   - 15% len=2
+	//   - ...
+	//
+	// Real data return `idx`:
+	//   - 85% return idx=0 (first element)
+	//   - 10% return "not found"
+	//   - 5% other lengths
+	//
+	// As a result: check first element before max, reuse max value in scan.
+
 	c := s.Count()
 	idx := sort.Search(int(c), func(i int) bool {
 		return s.Get(uint64(i)) >= v
