@@ -2622,9 +2622,9 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 
 		lf := domainRoTx.dataReader(lastFile.decompressor)
 
-		shortenedKey, found := domainRoTx.findShortenedKey([]byte(key), lf, lastFile)
+		shortenedKeyOffset, found := domainRoTx.findShortenedKey([]byte(key), lf, lastFile)
 		require.Truef(t, found, "key %d/%d %x file %d %d %s", ki, len(data), []byte(key), lastFile.startTxNum, lastFile.endTxNum, lastFile.decompressor.FileName())
-		require.NotNil(t, shortenedKey)
+		require.NotZero(t, shortenedKeyOffset)
 		ki++
 	}
 }

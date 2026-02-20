@@ -530,8 +530,7 @@ type DomainRoTx struct {
 	btReaders   []*BtIndex
 	mapReaders  []*recsplit.IndexReader
 
-	comBuf       []byte
-	refKeyEncBuf []byte // scratch buffer for EncodeReferenceKey
+	comBuf []byte
 
 	valsC      kv.Cursor
 	valCViewID uint64 // to make sure that valsC reading from the same view with given kv.Tx
