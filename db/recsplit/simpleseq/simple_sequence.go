@@ -95,17 +95,18 @@ func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
 		return 0, 0, false
 	}
 	// Read max once; reuse it to avoid re-reading the last element in the loop.
-	if seek > s.Max() {
+	maxV := s.Max()
+	if seek > maxV {
 		return 0, 0, false
 	}
-	seekDelta := uint32(seek - s.baseNum)
-	for i := 0; i < len(s.raw); i += 4 {
-		delta := binary.BigEndian.Uint32(s.raw[i:])
-		if delta >= seekDelta {
-			return i / 4, s.baseNum + uint64(delta), true
+	for i := 4; i < len(s.raw)-4; i += 4 {
+		v = s.baseNum + uint64(binary.BigEndian.Uint32(s.raw[i:]))
+		if v >= seek {
+			return i / 4, v, true
 		}
 	}
-	return 0, 0, false
+	// Last element is guaranteed to satisfy v >= seek (seek <= maxV).
+	return len(s.raw)/4 - 1, maxV, true
 }
 
 func (s *SimpleSequence) reverseSearch(seek uint64) (idx int, v uint64, ok bool) {
