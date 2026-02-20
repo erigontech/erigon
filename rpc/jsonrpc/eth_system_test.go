@@ -34,8 +34,8 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -173,7 +173,7 @@ func TestEthConfig(t *testing.T) {
 			var genesis types.Genesis
 			err = json.Unmarshal(genesisBytes, &genesis)
 			require.NoError(t, err)
-			m := mock.MockWithGenesis(t, &genesis, key)
+			m := execmoduletester.NewWithGenesis(t, &genesis, key)
 			defer m.Close()
 			eth := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 			if test.head != nil {
@@ -202,7 +202,7 @@ func TestEthConfig(t *testing.T) {
 	}
 }
 
-func createGasPriceTestKV(t *testing.T, chainSize int) *mock.MockSentry {
+func createGasPriceTestKV(t *testing.T, chainSize int) *execmoduletester.ExecModuleTester {
 	var (
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr   = crypto.PubkeyToAddress(key.PublicKey)
@@ -212,7 +212,7 @@ func createGasPriceTestKV(t *testing.T, chainSize int) *mock.MockSentry {
 		}
 		signer = types.LatestSigner(gspec.Config)
 	)
-	m := mock.MockWithGenesis(t, gspec, key)
+	m := execmoduletester.NewWithGenesis(t, gspec, key)
 
 	// Generate testing blocks
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {

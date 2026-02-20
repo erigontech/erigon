@@ -33,9 +33,9 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -101,7 +101,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Balance: big.NewInt(500000000000000),
 	}
 
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	tx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()

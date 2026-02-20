@@ -32,10 +32,10 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
@@ -346,8 +346,8 @@ func TestGetBlockReceipts(t *testing.T) {
 
 // newTestBackend creates a chain with a number of explicitly defined blocks and
 // wraps it into a mock backend.
-func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.BlockGen)) *mock.MockSentry {
-	m := mock.MockWithGenesis(t, &types.Genesis{
+func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.BlockGen)) *execmoduletester.ExecModuleTester {
+	m := execmoduletester.NewWithGenesis(t, &types.Genesis{
 		Config: chain.TestChainConfig,
 		Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
 	}, testKey)

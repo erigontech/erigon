@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -51,7 +52,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -75,7 +75,7 @@ var (
 // ChainReader, ChainStateReader, ContractBackend, ContractCaller, ContractFilterer, ContractTransactor,
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
-	m         *mock.MockSentry
+	m         *execmoduletester.ExecModuleTester
 	getHeader func(hash common.Hash, number uint64) (*types.Header, error)
 
 	mu              sync.Mutex
@@ -105,7 +105,7 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	engine := ethash.NewFaker()
 	//SimulatedBackend - it's remote blockchain node. This is reason why it has own `MockSentry` and own `DB` (even if external unit-test have one already)
-	m := mock.MockWithGenesisEngine(t, &genesis, engine)
+	m := execmoduletester.NewWithGenesisEngine(t, &genesis, engine)
 
 	backend := &SimulatedBackend{
 		m:            m,

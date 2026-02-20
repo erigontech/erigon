@@ -316,10 +316,8 @@ func (txw *BlobTxWrapper) WithSignature(signer Signer, sig []byte) (Transaction,
 	if err != nil {
 		return nil, err
 	}
-	//goland:noinspection GoVetCopyLock
 	blobTxnWrapper := &BlobTxWrapper{
-		// it's ok to copy here - because it's constructor of object - no parallel access yet
-		Tx:             *signedCopy.(*BlobTx), //nolint
+		Tx:             signedCopy.(*BlobTx).copyData(),
 		WrapperVersion: txw.WrapperVersion,
 		Blobs:          make(Blobs, len(txw.Blobs)),
 		Commitments:    make(BlobKzgs, len(txw.Commitments)),
