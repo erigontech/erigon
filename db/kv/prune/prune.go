@@ -383,8 +383,8 @@ func TableScanningPrune(
 
 		select {
 		case <-logEvery.C:
-			if len(txNumBytes) >= 8 {
-				txNum = binary.BigEndian.Uint64(txNumBytes)
+			if val != nil && len(txNumBytes) >= 8 {
+				txNum = txNumGetter(val, txNumBytes)
 			}
 			logger.Info("[snapshots] prune index", "name", filenameBase, "pruned tx", stat.PruneCountTx,
 				"pruned values", stat.PruneCountValues,
