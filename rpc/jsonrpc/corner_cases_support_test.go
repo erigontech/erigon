@@ -31,7 +31,7 @@ import (
 // see https://github.com/erigontech/erigon/issues/1645
 func TestNotFoundMustReturnNil(t *testing.T) {
 	assertions := require.New(t)
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	ctx := context.Background()
 
@@ -76,7 +76,7 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 // see https://github.com/erigontech/erigon/issues/18225
 func TestNotFoundMustReturnError(t *testing.T) {
 	assertions := require.New(t)
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	ctx := context.Background()
 

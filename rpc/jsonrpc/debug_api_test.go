@@ -72,7 +72,7 @@ var debugTraceTransactionNoRefundTests = []struct {
 }
 
 func TestTraceBlockByNumber(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0)
 	ethApi := newEthApiForTest(baseApi, m.DB, nil, nil)
@@ -125,7 +125,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 }
 
 func TestTraceBlockByHash(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ethApi := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, false)
 	for _, tt := range debugTraceTransactionTests {
@@ -157,7 +157,7 @@ func TestTraceBlockByHash(t *testing.T) {
 }
 
 func TestTraceTransaction(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, false)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
@@ -186,7 +186,7 @@ func TestTraceTransaction(t *testing.T) {
 }
 
 func TestTraceTransactionNoRefund(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, false)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
@@ -216,7 +216,7 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 }
 
 func TestStorageRangeAt(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, false)
 	t.Run("invalid addr", func(t *testing.T) {
 		var block4 *types.Block
@@ -310,7 +310,7 @@ func TestStorageRangeAt(t *testing.T) {
 }
 
 func TestStorageRangeAtGethCompat(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, true) // gethCompatibility=true
 	t.Run("block latest, addr 1", func(t *testing.T) {
 		var latestBlock *types.Block
@@ -369,7 +369,7 @@ func TestStorageRangeAtGethCompat(t *testing.T) {
 }
 
 func TestAccountRange(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, false)
 
 	t.Run("valid account", func(t *testing.T) {
@@ -428,7 +428,7 @@ func TestAccountRange(t *testing.T) {
 }
 
 func TestGetModifiedAccountsByNumber(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, false)
 
 	t.Run("correct input", func(t *testing.T) {
@@ -474,7 +474,7 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 }
 
 func TestMapTxNum2BlockNum(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	if !m.HistoryV3 {
 		t.Skip()
 	}
@@ -527,7 +527,7 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 }
 
 func TestAccountAt(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 0, false)
 
 	var blockHash0, blockHash1, blockHash3, blockHash10, blockHash12 common.Hash
@@ -590,7 +590,7 @@ func TestAccountAt(t *testing.T) {
 }
 
 func TestGetBadBlocks(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 5000000, false)
 	ctx := context.Background()
 
@@ -663,7 +663,7 @@ func TestGetBadBlocks(t *testing.T) {
 }
 
 func TestGetRawTransaction(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, 5000000, false)
 	ctx := context.Background()
 

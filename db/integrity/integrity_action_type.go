@@ -33,6 +33,7 @@ const (
 	CommitmentKvi      Check = "CommitmentKvi"
 	CommitmentKvDeref  Check = "CommitmentKvDeref"
 	CommitmentHistVal  Check = "CommitmentHistVal"
+	StateVerify        Check = "StateVerify"
 	StateProgress      Check = "StateProgress" // state files is not ahead of blocks files
 	Publishable        Check = "Publishable"
 )
@@ -40,7 +41,7 @@ const (
 var AllChecks = []Check{
 	Blocks, HeaderNoGaps, BlocksTxnID, InvertedIndex, StateProgress, Publishable, HistoryNoSystemTxs,
 	BorEvents, BorSpans, BorCheckpoints, ReceiptsNoDups, RCacheNoDups, CommitmentRoot,
-	CommitmentKvi, CommitmentKvDeref,
+	CommitmentKvi, CommitmentKvDeref, StateVerify,
 }
 
 var NonDefaultChecks = []Check{CommitmentHistVal}
