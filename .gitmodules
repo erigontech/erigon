@@ -7,3 +7,6 @@
 [submodule "node/interfaces"]
 	path = node/interfaces
 	url = https://github.com/erigontech/interfaces
+[submodule "execution/tests/arb-execution-spec-tests"]
+	path = execution/tests/arb-execution-spec-tests
+	url = https://github.com/erigontech/arbitrum-eest-fixtures

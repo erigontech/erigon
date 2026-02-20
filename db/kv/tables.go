@@ -268,6 +268,13 @@ const (
 	//Diagnostics tables
 	DiagSystemInfo = "DiagSystemInfo"
 	DiagSyncStages = "DiagSyncStages"
+
+	ArbOSUtilsBucket        = "arbOSUtils" // arbitrum os utils bucket
+	ArbNodeBucket           = "arbNode"    // arbitrum node bucket
+	ArbNodeTxStreamBucket   = "arbNodeTXstream"
+	ArbWasmPrefixBucket     = "arbWasm"         // arbitrum wasm store prefix; wasm version
+	ArbWasmActivationBucket = "wasmActivation"  // arbitrum bucket for wasm activations
+	ArbInboxTrackerBucket   = "arbInboxTracker" // arbitrum bucket to keep inbox messages and meta
 )
 
 // Keys
@@ -380,6 +387,12 @@ var ChaindataTables = []string{
 	TblTracesFromIdx,
 	TblTracesToKeys,
 	TblTracesToIdx,
+
+	ArbOSUtilsBucket,
+	ArbNodeBucket,
+	ArbNodeTxStreamBucket,
+	ArbWasmPrefixBucket,
+	ArbWasmActivationBucket,
 
 	TblPruningProgress,
 	TblPruningValsProg,
@@ -556,6 +569,22 @@ var ChaindataTablesCfg = TableCfg{
 	TblTracesFromIdx:  {Flags: DupSort},
 	TblTracesToKeys:   {Flags: DupSort},
 	TblTracesToIdx:    {Flags: DupSort},
+
+	ArbWasmPrefixBucket:     {},
+	ArbOSUtilsBucket:        {},
+	ArbWasmActivationBucket: {},
+	ArbNodeBucket:           {},
+	ArbInboxTrackerBucket:   {},
+	ArbNodeTxStreamBucket:   {},
+}
+
+var ArbitrumTablesCfg = TableCfg{
+	ArbWasmPrefixBucket:     {},
+	ArbOSUtilsBucket:        {},
+	ArbWasmActivationBucket: {},
+	ArbNodeBucket:           {},
+	ArbInboxTrackerBucket:   {},
+	ArbNodeTxStreamBucket:   {},
 }
 
 var AuRaTablesCfg = TableCfg{
@@ -591,7 +620,7 @@ var PolygonBridgeTablesCfg = TableCfg{}
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
-	case dbcfg.ChainDB, dbcfg.TemporaryDB, dbcfg.CaplinDB: //TODO: move caplindb tables to own table config
+	case dbcfg.ChainDB, dbcfg.TemporaryDB, dbcfg.CaplinDB, dbcfg.ArbitrumDB, dbcfg.ArbClassicDB, dbcfg.ArbWasmDB, dbcfg.ArbStreamerDB: //TODO: move caplindb tables to own table config
 		return ChaindataTablesCfg
 	case dbcfg.TxPoolDB:
 		return TxpoolTablesCfg

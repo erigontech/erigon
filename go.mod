@@ -4,12 +4,14 @@ go 1.25.0
 
 toolchain go1.25.7
 
+replace github.com/erigontech/nitro-erigon => ../
+
 replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.9
 
 replace github.com/holiman/uint256 => github.com/erigontech/uint256 v0.0.0-20260128213548-c9ef4c05bfe3
 
 require (
-	github.com/erigontech/erigon-snapshot v1.3.1-0.20260210221902-e495954c7e78
+	github.com/erigontech/erigon-snapshot v1.3.1-0.20260217175839-1cc563c62611
 	github.com/erigontech/erigonwatch v0.0.0-20240718131902-b6576bde1116
 	github.com/erigontech/mdbx-go v0.39.12
 	github.com/erigontech/secp256k1 v1.2.1-0.20260218182123-377cc1bd6410
@@ -42,7 +44,7 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0
-	github.com/dop251/goja v0.0.0-20230605162241-28ee0ee714f3
+	github.com/dop251/goja v0.0.0-20230806174421-c933cf95e127
 	github.com/edsrzf/mmap-go v1.2.0
 	github.com/elastic/go-freelru v0.16.0
 	github.com/ethereum/go-bigmodexpfix v0.0.0-20250911101455-f9e208c548ab
@@ -220,6 +222,7 @@ require (
 	github.com/ebitengine/purego v0.9.1 // indirect
 	github.com/elastic/gosigar v0.14.3 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
+	github.com/erigontech/nitro-erigon v0.0.0-00010101000000-000000000000 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/ettle/strcase v0.2.0 // indirect
 	github.com/fatih/color v1.18.0 // indirect
@@ -331,10 +334,10 @@ require (
 	github.com/mikioh/tcpinfo v0.0.0-20190314235526-30a79bb1804b // indirect
 	github.com/mikioh/tcpopt v0.0.0-20190314235656-172688c1accc // indirect
 	github.com/minio/sha256-simd v1.0.1 // indirect
-	github.com/mitchellh/copystructure v1.0.0 // indirect
+	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
-	github.com/mitchellh/reflectwalk v1.0.0 // indirect
+	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/moby/sys/userns v0.1.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
@@ -464,6 +467,7 @@ require (
 	golang.org/x/exp/typeparams v0.0.0-20251125195548-87e1e737ad39 // indirect
 	golang.org/x/mod v0.33.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260209163413-e7419c687ee4 // indirect
+	google.golang.org/genproto v0.0.0-20250218202821-56aae31c358a // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20251202230838-ff82c1b0f217 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217 // indirect
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.6.0 // indirect
@@ -473,7 +477,7 @@ require (
 	modernc.org/libc v1.66.7 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.21.1 // indirect
+	modernc.org/sqlite v1.38.0 // indirect
 	mvdan.cc/gofumpt v0.9.2 // indirect
 	mvdan.cc/unparam v0.0.0-20251027182757-5beb8c8f8f15 // indirect
 	zombiezen.com/go/sqlite v0.13.1 // indirect

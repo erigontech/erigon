@@ -22,6 +22,7 @@ docs/readthedocs/build
 .#*
 *#
 *~
+go.work.sum
 .project
 .settings
 
@@ -71,8 +72,6 @@ __pycache__
 
 libmdbx/build/*
 tests/testdata/*
-
-go.work*
 
 docker-compose.*.yml
 .env
