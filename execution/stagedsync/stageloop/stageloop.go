@@ -234,13 +234,20 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 	defer dbg.RecoverPanicIntoError(logger, &err)
 	hasMore := true
 	for hasMore {
+		// Capture finishProgressBefore and isSynced so we can send notifications
+		// after the write transaction commits (fix for race condition in newHeads
+		// subscription: the RPC daemon must see the new head before the event fires).
+		var (
+			finishProgressBefore uint64
+			isSynced             bool
+		)
 		err = db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 			if err != nil {
 				return err
 			}
 			defer sd.Close()
-			hasMore, err = stageLoopIteration(ctx, sd, tx, sync, initialCycle, firstCycle, logger, blockReader, hook)
+			hasMore, finishProgressBefore, isSynced, err = stageLoopIteration(ctx, sd, tx, sync, initialCycle, firstCycle, logger, blockReader, hook)
 			if err != nil {
 				return err
 			}
@@ -249,19 +256,32 @@ func StageLoopIteration(ctx context.Context, db kv.TemporalRwDB, sync *stagedsyn
 		if err != nil {
 			return err
 		}
+		// Send notifications AFTER the write transaction has been committed so that
+		// RPC readers opening a new read-tx will already see the new canonical head.
+		// This eliminates the "request beyond head block" race that occurred when
+		// newHeads subscribers immediately called eth_feeHistory / eth_getBlockByNumber
+		// with the advertised block number (see github.com/erigontech/erigon/issues/18138).
+		if hook != nil {
+			if viewErr := db.View(ctx, func(tx kv.Tx) error {
+				return hook.AfterRun(tx, finishProgressBefore, isSynced)
+			}); viewErr != nil {
+				logger.Warn("Failed to send post-commit RPC notifications", "err", viewErr)
+			}
+		}
 	}
 	return nil
 }
 
-func stageLoopIteration(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (hasMore bool, err error) {
-	finishProgressBefore, headersProgressBefore, gasUsed, err := stagesHeadersAndFinish(tx)
+func stageLoopIteration(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, sync *stagedsync.Sync, initialCycle, firstCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (hasMore bool, finishProgressBefore uint64, isSynced bool, err error) {
+	var headersProgressBefore, gasUsed uint64
+	finishProgressBefore, headersProgressBefore, gasUsed, err = stagesHeadersAndFinish(tx)
 	if err != nil {
-		return false, err
+		return false, 0, false, err
 	}
 	// Sync from scratch must be able Commit partial progress
 	// In all other cases - process blocks batch in 1 RwTx
 	// 2 corner-cases: when sync with --snapshots=false and when executed only blocks from snapshots (in this case all stages progress is equal and > 0, but node is not synced)
-	isSynced := finishProgressBefore > 0 && finishProgressBefore > blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
+	isSynced = finishProgressBefore > 0 && finishProgressBefore > blockReader.FrozenBlocks() && finishProgressBefore == headersProgressBefore
 	// Main steps:
 	// - process new blocks
 	// - commit(no_sync). NoSync - making data available for readers as-soon-as-possible. Can
@@ -269,17 +289,17 @@ func stageLoopIteration(ctx context.Context, sd *execctx.SharedDomains, tx kv.Te
 	// - Send Notifications: about new blocks, new receipts, state changes, etc...
 	// - Prune(limited time)+Commit(sync). Write to disk happening here.
 	if err = hook.BeforeRun(tx, isSynced); err != nil {
-		return false, err
+		return false, finishProgressBefore, isSynced, err
 	}
 	hasMore, err = sync.Run(sd, tx, initialCycle, firstCycle)
 	if err != nil {
-		return false, err
+		return false, finishProgressBefore, isSynced, err
 	}
 	logCtx := sync.PrintTimings()
-	// -- send notifications START
-	if err = hook.AfterRun(tx, finishProgressBefore, isSynced); err != nil {
-		return false, err
-	}
+	// NOTE: AfterRun (which fires newHeads/newLogs notifications) is intentionally
+	// NOT called here. It is called by StageLoopIteration after UpdateTemporal
+	// commits the write transaction, so that RPC readers see the new canonical head
+	// before the subscription event is delivered. See issue #18138.
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	if gasUsed > 0 {
@@ -309,9 +329,9 @@ func stageLoopIteration(ctx context.Context, sd *execctx.SharedDomains, tx kv.Te
 	// -- Prune+commit(sync)
 	err = sync.RunPrune(ctx, tx, initialCycle, 0)
 	if err != nil {
-		return false, err
+		return false, finishProgressBefore, isSynced, err
 	}
-	return hasMore, nil
+	return hasMore, finishProgressBefore, isSynced, nil
 }
 
 func stagesHeadersAndFinish(tx kv.Tx) (head, fin uint64, gasUsed uint64, err error) {
