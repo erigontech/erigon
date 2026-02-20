@@ -67,6 +67,7 @@ func (s *SimpleSequence) Reset(baseNum uint64, raw []byte) { // no `return param
 	s.baseNum = baseNum
 	s.raw = raw
 	s.pos = len(raw) / 4
+	s.count = uint64(len(raw) / 4)
 }
 
 func (s *SimpleSequence) AppendBytes(buf []byte) []byte {
