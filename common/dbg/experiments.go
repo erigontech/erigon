@@ -81,7 +81,6 @@ var (
 	ExecTerseLoggerLevel = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
 
 	CompressWorkers = EnvInt("COMPRESS_WORKERS", 1)
-	CompressWorkers = EnvInt("COMPRESS_WORKERS", 1)
 	MergeWorkers    = EnvInt("MERGE_WORKERS", 1)
 	CollateWorkers  = EnvInt("COLLATE_WORKERS", 2)
 
