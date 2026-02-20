@@ -79,18 +79,34 @@ func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
 	//   - 10% return "not found"
 	//   - 5% other lengths
 	//
-	// As a result: early-check for `max` + full-scan search instead of `sort.Search`
+	// As a result: check first element before max, reuse max value in scan.
 
-	if len(s.raw) == 0 || seek > s.Max() {
+	if len(s.raw) == 0 {
 		return 0, 0, false
 	}
-	for i := 0; i < len(s.raw); i += 4 {
+	// Fast path: 85% of real data returns idx=0. Check first element before
+	// reading max, saving one memory read on the dominant path.
+	v = s.baseNum + uint64(binary.BigEndian.Uint32(s.raw))
+	if v >= seek {
+		return 0, v, true
+	}
+	// Single-element sequence: first element didn't match, nothing else to check.
+	if len(s.raw) == 4 {
+		return 0, 0, false
+	}
+	// Read max once; reuse it to avoid re-reading the last element in the loop.
+	maxV := s.Max()
+	if seek > maxV {
+		return 0, 0, false
+	}
+	for i := 4; i < len(s.raw)-4; i += 4 {
 		v = s.baseNum + uint64(binary.BigEndian.Uint32(s.raw[i:]))
 		if v >= seek {
 			return i / 4, v, true
 		}
 	}
-	return 0, 0, false
+	// Last element is guaranteed to satisfy v >= seek (seek <= maxV).
+	return len(s.raw)/4 - 1, maxV, true
 }
 
 func (s *SimpleSequence) reverseSearch(seek uint64) (idx int, v uint64, ok bool) {

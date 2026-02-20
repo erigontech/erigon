@@ -294,7 +294,7 @@ func makeSequence(n int) *SimpleSequence {
 }
 
 func BenchmarkSimpleSequenceSeek(b *testing.B) {
-	for _, size := range []int{4, 16} {
+	for _, size := range []int{1, 2, 4, 16} {
 		s := makeSequence(size)
 		minV := s.Min()
 		maxV := s.Max()
