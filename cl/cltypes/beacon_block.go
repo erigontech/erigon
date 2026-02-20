@@ -40,6 +40,12 @@ var (
 	_ ssz2.SizedObjectSSZ = (*DenebSignedBeaconBlock)(nil)
 )
 
+// ErrGloasCannotBlind is returned when Blinded() is called on a GLOAS block.
+// In GLOAS (EIP-7732/ePBS), the execution payload is delivered via a separate
+// SignedExecutionPayloadEnvelope, so the blinded block concept doesn't apply.
+// Callers should check the block version before calling Blinded() or handle this error.
+var ErrGloasCannotBlind = errors.New("blinded beacon block not supported for GLOAS blocks")
+
 const (
 	MaxAttesterSlashings         = 2
 	MaxProposerSlashings         = 16
@@ -127,6 +133,25 @@ func (b *SignedBeaconBlock) HashSSZ() ([32]byte, error) {
 
 func (b *SignedBeaconBlock) Static() bool {
 	return false
+}
+
+// GetSlot returns the slot of the inner block.
+// Implements ColumnSyncableSignedBlock interface.
+func (b *SignedBeaconBlock) GetSlot() uint64 {
+	return b.Block.Slot
+}
+
+// BlockHashSSZ returns the hash of the inner block (not the signed block).
+// Implements ColumnSyncableSignedBlock interface.
+func (b *SignedBeaconBlock) BlockHashSSZ() ([32]byte, error) {
+	return b.Block.HashSSZ()
+}
+
+// GetBlobKzgCommitments returns blob KZG commitments from the block body.
+// Implements ColumnSyncableSignedBlock interface.
+// [Modified in Gloas:EIP7732] For GLOAS, commitments are in SignedExecutionPayloadBid.
+func (b *SignedBeaconBlock) GetBlobKzgCommitments() *solid.ListSSZ[*KZGCommitment] {
+	return b.Block.Body.GetBlobKzgCommitments()
 }
 
 // Definition of BeaconBlock
@@ -398,7 +423,7 @@ func (b *BeaconBody) Blinded() (*BlindedBeaconBody, error) {
 	// [Modified in Gloas:EIP7732] Blinded concept not applicable to GLOAS blocks
 	// In GLOAS, execution payload is delivered via SignedExecutionPayloadEnvelope
 	if b.Version >= clparams.GloasVersion {
-		return nil, errors.New("blinded beacon body not supported for GLOAS blocks")
+		return nil, ErrGloasCannotBlind
 	}
 
 	header, err := b.ExecutionPayload.PayloadHeader()
