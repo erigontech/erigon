@@ -135,10 +135,10 @@ func DecodeReferenceKey(from []byte) uint64 {
 }
 
 func EncodeReferenceKey(buf []byte, offset uint64) []byte {
-	if len(buf) == 0 {
+	if cap(buf) == 0 {
 		buf = make([]byte, 0, 8)
 	}
-	return binary.AppendUvarint(buf, offset)
+	return binary.AppendUvarint(buf[:0], offset)
 }
 
 // Finds shorter replacement for full key in given file item. filesItem -- result of merging of multiple files.
@@ -185,7 +185,8 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 
 			return nil, false
 		}
-		return EncodeReferenceKey(nil, offset), true
+		dt.refKeyEncBuf = EncodeReferenceKey(dt.refKeyEncBuf[:0], offset)
+		return dt.refKeyEncBuf, true
 	}
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
 		if item.bindex == nil {
@@ -199,7 +200,8 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 		if !ok {
 			return nil, false
 		}
-		return EncodeReferenceKey(nil, offsetInFile), true
+		dt.refKeyEncBuf = EncodeReferenceKey(dt.refKeyEncBuf[:0], offsetInFile)
+		return dt.refKeyEncBuf, true
 	}
 	return nil, false
 }
