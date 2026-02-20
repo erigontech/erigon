@@ -163,12 +163,12 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 			CodeHash: accounts.EmptyCodeHash,
 		}
 		buf := accounts.SerialiseV3(&acc)
-		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil, 0)
+		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil)
 		require.NoError(t, err)
 
 		storageKey := append(common.Copy(addr), loc...)
 		storageVal := []byte{addr[0], loc[0]}
-		err = domains.DomainPut(kv.StorageDomain, tx, storageKey, storageVal, txNum, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, tx, storageKey, storageVal, txNum, nil)
 		require.NoError(t, err)
 
 		// Save one entry from step 1 (txNum 100-199) for re-writing in step range 2.
@@ -200,18 +200,18 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 			CodeHash: accounts.EmptyCodeHash,
 		}
 		buf := accounts.SerialiseV3(&acc)
-		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil, 0)
+		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil)
 		require.NoError(t, err)
 
 		storageKey := append(common.Copy(addr), loc...)
-		err = domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{addr[0], loc[0]}, txNum, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{addr[0], loc[0]}, txNum, nil)
 		require.NoError(t, err)
 
 		// At txNum=250, re-write the saved entry with the SAME value (no-op).
 		if txNum == 250 {
-			err = domains.DomainPut(kv.AccountsDomain, tx, noopAddr, noopAccBuf, txNum, nil, 0)
+			err = domains.DomainPut(kv.AccountsDomain, tx, noopAddr, noopAccBuf, txNum, nil)
 			require.NoError(t, err)
-			err = domains.DomainPut(kv.StorageDomain, tx, noopStorageKey, noopStorageVal, txNum, nil, 0)
+			err = domains.DomainPut(kv.StorageDomain, tx, noopStorageKey, noopStorageVal, txNum, nil)
 			require.NoError(t, err)
 		}
 
