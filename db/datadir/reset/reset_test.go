@@ -193,6 +193,7 @@ func withOsRoot(t *testing.T, with func(root *os.Root)) {
 	dir := t.TempDir()
 	osRoot, err := os.OpenRoot(dir)
 	qt.Assert(t, qt.IsNil(err))
+	defer osRoot.Close()
 	t.Log("rootfs is at", osRoot.Name())
 	defer func() {
 		if t.Failed() {
@@ -402,6 +403,7 @@ func makeTestingReset(
 		var err error
 		removeRoot, err = osRoot.OpenRoot(jailPath)
 		qt.Assert(t, qt.IsNil(err))
+		t.Cleanup(func() { removeRoot.Close() })
 		osRootPath = osRootPath.Join(OsFilePath(jailPath))
 	}
 
