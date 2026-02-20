@@ -278,8 +278,8 @@ func (dt *DomainRoTx) lookupByShortenedKey(shortKey []byte, getter *seg.Reader) 
 		return nil, false
 	}
 
-	fullKey, _ = getter.Next(fullKey[:0])
-	return fullKey, true
+	dt.lookupFullKey, _ = getter.Next(dt.lookupFullKey[:0])
+	return dt.lookupFullKey, true
 }
 
 // commitmentValTransform parses the value of the commitment record to extract references
