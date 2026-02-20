@@ -345,8 +345,9 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 		if len(fuluBlocks) > 0 {
 			peerDas := b.peerDasGetter.GetPeerDas()
 			for _, block := range fuluBlocks {
-				if err := peerDas.DownloadColumnsAndRecoverBlobs(b.ctx, []*cltypes.SignedBlindedBeaconBlock{block}); err != nil {
-					b.logger.Warn("[BlobHistoryDownloader] Error recovering blobs from block", "err", err, "slot", block.Block.Slot)
+				// [Modified in Gloas:EIP7732] Use ColumnSyncableSignedBlock interface
+				if err := peerDas.DownloadColumnsAndRecoverBlobs(b.ctx, []cltypes.ColumnSyncableSignedBlock{block}); err != nil {
+					b.logger.Warn("[BlobHistoryDownloader] Error recovering blobs from block", "err", err, "slot", block.GetSlot())
 				}
 			}
 		}
