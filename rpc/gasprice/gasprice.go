@@ -136,17 +136,17 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 	}
 
 	number := head.Number.Uint64()
-	var txPrices sortingHeap
-	for txPrices.Len() < sampleNumber*oracle.checkBlocks && number > 0 {
+	var txPrices []*uint256.Int
+	for len(txPrices) < sampleNumber*oracle.checkBlocks && number > 0 {
 		if err := oracle.getBlockPrices(ctx, number, sampleNumber, oracle.ignorePrice, &txPrices); err != nil {
 			return latestPrice, err
 		}
 		number--
 	}
 	price := latestPrice
-	if txPrices.Len() > 0 {
-		sort.Sort(txPrices)
-		index := (txPrices.Len() - 1) * oracle.percentile / 100
+	if len(txPrices) > 0 {
+		sort.Slice(txPrices, func(i, j int) bool { return txPrices[i].Lt(txPrices[j]) })
+		index := (len(txPrices) - 1) * oracle.percentile / 100
 		price = txPrices[index]
 	}
 
@@ -208,7 +208,7 @@ func (t *transactionsByGasPrice) Pop() any {
 // itself(it doesn't make any sense to include this kind of transaction prices for sampling),
 // nil gasprice is returned.
 func (oracle *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit int,
-	ignoreUnder *uint256.Int, s *sortingHeap) error {
+	ignoreUnder *uint256.Int, s *[]*uint256.Int) error {
 	block, err := oracle.backend.BlockByNumber(ctx, rpc.BlockNumber(blockNum))
 	if err != nil {
 		oracle.log.Error("getBlockPrices", "err", err)
@@ -235,35 +235,11 @@ func (oracle *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit
 		}
 		sender, _ := tx.GetSender()
 		if sender.Value() != block.Coinbase() {
-			heap.Push(s, new(uint256.Int).Set(tip))
+			*s = append(*s, new(uint256.Int).Set(tip))
 			count = count + 1
 		}
 	}
 	return nil
-}
-
-type sortingHeap []*uint256.Int
-
-func (s sortingHeap) Len() int           { return len(s) }
-func (s sortingHeap) Less(i, j int) bool { return s[i].Lt(s[j]) }
-func (s sortingHeap) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
-
-// Push (part of heap.Interface) places a new link onto the end of queue
-func (s *sortingHeap) Push(x any) {
-	// Push and Pop use pointer receivers because they modify the slice's length,
-	// not just its contents.
-	l := x.(*uint256.Int)
-	*s = append(*s, l)
-}
-
-// Pop (part of heap.Interface) removes the first link from the queue
-func (s *sortingHeap) Pop() any {
-	old := *s
-	n := len(old)
-	x := old[n-1]
-	old[n-1] = nil // avoid memory leak
-	*s = old[0 : n-1]
-	return x
 }
 
 // setBorDefaultGpoIgnorePrice enforces gpo IgnorePrice to be equal to BorDefaultGpoIgnorePrice (25gwei by default)

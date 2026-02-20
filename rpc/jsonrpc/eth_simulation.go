@@ -243,10 +243,10 @@ func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]Simulate
 		if blockNumber <= prevNumber {
 			return nil, invalidBlockNumberError(fmt.Sprintf("block numbers must be in order: %d <= %d", blockNumber, prevNumber))
 		}
-		diff := blockNumber - prevNumber
 		if total := blockNumber - s.base.Number.Uint64(); total > maxSimulateBlocks {
 			return nil, clientLimitExceededError(fmt.Sprintf("too many blocks: %d > %d", total, maxSimulateBlocks))
 		}
+		diff := blockNumber - prevNumber
 		if diff > 1 {
 			// Fill the gap with empty blocks.
 			gap := diff - 1
