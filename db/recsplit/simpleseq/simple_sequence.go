@@ -71,6 +71,12 @@ func (s *SimpleSequence) AppendBytes(buf []byte) []byte {
 
 func (s *SimpleSequence) search(v uint64) (idx int, ok bool) {
 	c := s.Count()
+	if v <= s.Min() { // fast-path for 1-st element hit
+		return 0, true
+	}
+	if c == 1 { // if len=1 then nothing left to search
+		return 0, false
+	}
 	idx = sort.Search(int(c), func(i int) bool {
 		return s.Get(uint64(i)) >= v
 	})
