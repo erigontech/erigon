@@ -100,7 +100,7 @@ func TestGetBlobsV1(t *testing.T) {
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log)
 	api := newEthApiForTest(newBaseApiForTest(mockSentry), mockSentry.DB, txPool)
 
-	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
+	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
 	fcuTimeout := ethconfig.Defaults.FcuTimeout
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
@@ -151,7 +151,7 @@ func TestGetBlobsV2(t *testing.T) {
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log)
 	api := newEthApiForTest(newBaseApiForTest(mockSentry), mockSentry.DB, txPool)
 
-	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
+	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
 	fcuTimeout := ethconfig.Defaults.FcuTimeout
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
@@ -211,7 +211,7 @@ func TestGetBlobsV3(t *testing.T) {
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log)
 	api := newEthApiForTest(newBaseApiForTest(mockSentry), mockSentry.DB, txPool)
 
-	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
+	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
 	fcuTimeout := ethconfig.Defaults.FcuTimeout
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
@@ -278,7 +278,7 @@ func TestGetPayloadBodiesByHashV2(t *testing.T) {
 	mockSentry, req := execmoduletester.NewWithTxPoolAllProtocolChanges(t), require.New(t)
 	oneBlockStep(mockSentry, req)
 
-	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
+	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
 	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
 
@@ -311,7 +311,7 @@ func TestGetPayloadBodiesByRangeV2(t *testing.T) {
 	mockSentry, req := execmoduletester.NewWithTxPoolAllProtocolChanges(t), require.New(t)
 	oneBlockSteps(mockSentry, req, 2)
 
-	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
+	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
 	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
 
