@@ -125,7 +125,7 @@ func placeLMS_8_32(text []byte, sa, freq, bucket []int32) int {
 	bucket = bucket[:256]
 
 	c0, c1, isTypeS := byte(0), byte(0), false
-	for i := len(text) - 1; i >= 0; i-- {
+	for i := int32(len(text) - 1); i >= 0; i-- {
 		c0, c1 = text[i], c0
 		if c0 < c1 {
 			isTypeS = true
@@ -134,7 +134,7 @@ func placeLMS_8_32(text []byte, sa, freq, bucket []int32) int {
 
 			b := bucket[c1] - 1
 			bucket[c1] = b
-			sa[b] = int32(i + 1)
+			sa[b] = i + 1
 			lastB = b
 			numLMS++
 		}
