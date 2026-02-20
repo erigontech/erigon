@@ -113,6 +113,7 @@ func init() {
 	withHeimdall(cmdCommitmentRebuild)
 	withChaosMonkey(cmdCommitmentRebuild)
 	withClearCommitment(cmdCommitmentRebuild)
+	withResume(cmdCommitmentRebuild)
 	commitmentCmd.AddCommand(cmdCommitmentRebuild)
 
 	// commitment print
@@ -260,6 +261,10 @@ var cmdCommitmentRebuild = &cobra.Command{
 }
 
 func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	if clearCommitment && resume {
+		return errors.New("--clear-commitment and --resume are mutually exclusive")
+	}
+
 	dirs := datadir.New(datadirCli)
 	if reset {
 		return rawdbreset.Reset(ctx, db, stages.Execution)
@@ -301,22 +306,26 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		withHistory = resp == "y" || resp == "yes"
 	}
 
-	// remove all existing state commitment snapshots
-	// when not rebuilding with history, only delete domain files (preserve existing history/index)
-	if err := app.DeleteStateSnapshots(dirs, false, true, false, "0-999999", !withHistory, kv.CommitmentDomain.String()); err != nil {
-		return err
-	}
-
-	log.Info("Clearing commitment-related DB tables to rebuild on clean data...")
-	sconf := statecfg.Schema.CommitmentDomain
-	for _, tn := range sconf.Tables() {
-		log.Info("Clearing", "table", tn)
-		if err := rwTx.ClearTable(tn); err != nil {
-			return fmt.Errorf("failed to clear table %s: %w", tn, err)
+	if !resume {
+		// remove all existing state commitment snapshots
+		// when not rebuilding with history, only delete domain files (preserve existing history/index)
+		if err := app.DeleteStateSnapshots(dirs, false, true, false, "0-999999", !withHistory, kv.CommitmentDomain.String()); err != nil {
+			return err
 		}
-	}
-	if err := rwTx.Commit(); err != nil {
-		return err
+
+		log.Info("Clearing commitment-related DB tables to rebuild on clean data...")
+		sconf := statecfg.Schema.CommitmentDomain
+		for _, tn := range sconf.Tables() {
+			log.Info("Clearing", "table", tn)
+			if err := rwTx.ClearTable(tn); err != nil {
+				return fmt.Errorf("failed to clear table %s: %w", tn, err)
+			}
+		}
+		if err := rwTx.Commit(); err != nil {
+			return err
+		}
+	} else {
+		rwTx.Rollback()
 	}
 
 	if clearCommitment {

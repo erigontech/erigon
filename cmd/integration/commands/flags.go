@@ -50,6 +50,7 @@ var (
 
 	chainTipMode    bool
 	clearCommitment bool
+	resume          bool
 	syncCfg         = ethconfig.Defaults.Sync
 )
 
@@ -116,6 +117,10 @@ func withSqueeze(cmd *cobra.Command) {
 
 func withClearCommitment(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&clearCommitment, "clear-commitment", false, "remove commitment data from DB and delete state files, then exit without rebuilding")
+}
+
+func withResume(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&resume, "resume", false, "resume a previously interrupted commitment rebuild")
 }
 
 func withBucket(cmd *cobra.Command) {

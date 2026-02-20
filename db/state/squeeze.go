@@ -467,19 +467,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		}
 	}
 
-	blockFrom, blockTo := uint64(0), execProgress
-	{
-		startFromTxNum, err := txNumsReader.Min(ctx, rwTx, blockFrom)
-		if err != nil {
-			return nil, err
-		}
-		endToTxNum, err := txNumsReader.Max(ctx, rwTx, blockTo)
-		if err != nil {
-			return nil, err
-		}
-		logger.Info("[rebuild_commitment_history] starting", "blockFrom", blockFrom, "blockTo", blockTo,
-			"txNumFrom", startFromTxNum, "txNumTo", endToTxNum, "batchSize", batchSize.HR())
-	}
+	blockTo := execProgress
+
 	start := time.Now()
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -495,6 +484,26 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	domains.EnableTrieWarmup(true)
 	domains.EnableWarmupCache(true)
 
+	blockFrom := domains.BlockNum()
+	if blockFrom > 0 {
+		blockFrom++ // SeekCommitment returns last committed block; start from next
+	}
+	{
+		startFromTxNum, err := txNumsReader.Min(ctx, rwTx, blockFrom)
+		if err != nil {
+			return nil, err
+		}
+		endToTxNum, err := txNumsReader.Max(ctx, rwTx, blockTo)
+		if err != nil {
+			return nil, err
+		}
+		logger.Info("[rebuild_commitment_history] starting", "blockFrom", blockFrom, "blockTo", blockTo,
+			"txNumFrom", startFromTxNum, "txNumTo", endToTxNum, "batchSize", batchSize.HR())
+	}
+
+	// flushEveryBlocks is separate from batchBlockCount because empty blocks produce no ETL
+	// keys — without an independent flush counter, progress is never committed during long
+	// stretches of empty blocks.
 	batchBlockCount := dbg.EnvInt("ERIGON_REBUILD_BATCH_BLOCKS", 5000)
 
 	var totalKeysProcessed uint64
