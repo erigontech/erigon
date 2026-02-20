@@ -92,17 +92,22 @@ func (s *SimpleSequence) search(seek uint64) (idx int, ok bool) {
 	return idx, idx < int(c)
 }
 
-func (s *SimpleSequence) reverseSearch(seek uint64) (idx int, v uint64, ok bool) {
-	if s.Empty() || seek < s.Min() {
-		return 0, 0, false
+func (s *SimpleSequence) reverseSearch(seek uint64) (idx int, ok bool) {
+	c := s.Count()
+	if seek >= s.Max() { // fast-path for last element hit
+		idx = int(c) - 1
+		return idx, true
 	}
-	for i := len(s.raw) - 4; i >= 0; i -= 4 {
-		v = s.baseNum + uint64(binary.BigEndian.Uint32(s.raw[i:]))
-		if v <= seek {
-			return i / 4, v, true
-		}
+	if c == 1 { // if len=1 then nothing left to search
+		return 0, false
 	}
-	return 0, 0, false
+	idx = sort.Search(int(c), func(i int) bool {
+		return s.Get(uint64(i)) > seek
+	}) - 1
+	if idx < 0 {
+		return 0, false
+	}
+	return idx, true
 }
 
 func (s *SimpleSequence) Seek(v uint64) (uint64, bool) {
@@ -184,7 +189,7 @@ func (it *ReverseSimpleSequenceIterator) Close() {
 }
 
 func (it *ReverseSimpleSequenceIterator) Seek(v uint64) {
-	idx, _, found := it.seq.reverseSearch(v)
+	idx, found := it.seq.reverseSearch(v)
 	if !found {
 		it.pos = -1
 		return
