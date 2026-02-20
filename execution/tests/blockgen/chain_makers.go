@@ -128,6 +128,12 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	if b.gasPool == nil {
 		b.SetCoinbase(common.Address{})
 	}
+	// Clear any stale versioned reads/writes accumulated between transactions
+	// (e.g. from TxNonce calls in the gen callback). These reads were recorded
+	// with the previous tx's txIndex and must not pollute the next tx's read set.
+	if b.ibs.IsVersioned() {
+		b.ibs.ResetVersionedIO()
+	}
 	txVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: len(b.txs)}
 	b.ibs.SetTxContext(txVersion.BlockNum, txVersion.TxIndex)
 	gasUsed := protocol.NewGasUsed(b.header, b.receipts.CumulativeGasUsed())
@@ -198,6 +204,12 @@ func (b *BlockGen) AddUncheckedReceipt(receipt *types.Receipt) {
 // TxNonce returns the next valid transaction nonce for the
 // account at addr. It panics if the account does not exist.
 func (b *BlockGen) TxNonce(addr common.Address) uint64 {
+	// When using a versionMap we must read with the "next tx" txIndex so that
+	// versionedRead's floor(txIdx-1) sees all previously completed txs' writes.
+	// Without this, reads use the previous tx's txIndex and miss its nonce write.
+	if b.versionMap != nil {
+		b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
+	}
 	exist, err := b.ibs.Exist(accounts.InternAddress(addr))
 	if err != nil {
 		panic(fmt.Sprintf("can't get account: %s", err))
@@ -473,6 +485,14 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		}
 		txNumIncrement()
 		if b.engine != nil {
+			// When versionMap is active (parallel exec mode), advance IBS txIndex to the
+			// end-of-block position so FinalizeAndAssemble (e.g. Ethash block reward via
+			// AddBalance) reads from the latest tx writes in the versionMap.
+			// Without this, versionedRead uses floor(txIdx-1) with the last real tx's index,
+			// missing that tx's own writes.
+			if b.versionMap != nil {
+				b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
+			}
 			// Finalize and seal the block
 			syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 				return protocol.SysCallContract(contract, data, config, ibs, b.header, b.engine, false /* constCall */, vm.Config{})
