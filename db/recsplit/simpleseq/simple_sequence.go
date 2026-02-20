@@ -41,17 +41,20 @@ func (s *SimpleSequence) Get(i uint64) uint64 {
 }
 
 func (s *SimpleSequence) Min() uint64 {
-	return s.Get(0)
+	return s.baseNum + uint64(binary.BigEndian.Uint32(s.raw))
 }
 
 func (s *SimpleSequence) Max() uint64 {
-	delta := binary.BigEndian.Uint32(s.raw[len(s.raw)-4:])
-	return s.baseNum + uint64(delta)
+	return s.baseNum + uint64(binary.BigEndian.Uint32(s.raw[len(s.raw)-4:]))
 }
 
 func (s *SimpleSequence) Count() uint64 {
 	return uint64(len(s.raw) / 4)
 }
+func (s *SimpleSequence) Empty() bool { return len(s.raw) == 0 }
+
+// isCount1 - sequence has only 1 element
+func (s *SimpleSequence) isCount1() bool { return len(s.raw) == 4 }
 
 func (s *SimpleSequence) AddOffset(offset uint64) {
 	binary.BigEndian.PutUint32(s.raw[s.pos*4:], uint32(offset-s.baseNum))
@@ -81,36 +84,32 @@ func (s *SimpleSequence) search(seek uint64) (idx int, v uint64, ok bool) {
 	//
 	// As a result: check first element before max, reuse max value in scan.
 
-	if len(s.raw) == 0 {
+	if s.Empty() {
 		return 0, 0, false
 	}
 	// Fast path: 85% of real data returns idx=0. Check first element before
 	// reading max, saving one memory read on the dominant path.
-	v = s.baseNum + uint64(binary.BigEndian.Uint32(s.raw))
-	if v >= seek {
+	if v = s.Min(); v >= seek {
 		return 0, v, true
 	}
 	// Single-element sequence: first element didn't match, nothing else to check.
-	if len(s.raw) == 4 {
+	if s.isCount1() {
 		return 0, 0, false
 	}
-	// Read max once; reuse it to avoid re-reading the last element in the loop.
-	maxV := s.Max()
-	if seek > maxV {
+	if seek > s.Max() {
 		return 0, 0, false
 	}
-	for i := 4; i < len(s.raw)-4; i += 4 {
+	for i := 4; i < len(s.raw); i += 4 {
 		v = s.baseNum + uint64(binary.BigEndian.Uint32(s.raw[i:]))
 		if v >= seek {
 			return i / 4, v, true
 		}
 	}
-	// Last element is guaranteed to satisfy v >= seek (seek <= maxV).
-	return len(s.raw)/4 - 1, maxV, true
+	return 0, 0, false
 }
 
 func (s *SimpleSequence) reverseSearch(seek uint64) (idx int, v uint64, ok bool) {
-	if len(s.raw) == 0 || seek < s.Min() {
+	if s.Empty() || seek < s.Min() {
 		return 0, 0, false
 	}
 	for i := len(s.raw) - 4; i >= 0; i -= 4 {
