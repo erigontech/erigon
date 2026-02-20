@@ -221,8 +221,9 @@ func TestLoadECDSA(t *testing.T) {
 		},
 	}
 
+	tempdir := t.TempDir()
 	for _, test := range tests {
-		f, err := os.CreateTemp("", "loadecdsa_test.*.txt")
+		f, err := os.CreateTemp(tempdir, "loadecdsa_test.*.txt")
 		if err != nil {
 			t.Fatal(err)
 		}
