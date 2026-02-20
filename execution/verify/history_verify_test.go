@@ -14,8 +14,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/verify"
 )
@@ -41,7 +41,7 @@ func TestHistoryVerification_SimpleBlocks(t *testing.T) {
 		},
 	}
 
-	m := mock.MockWithGenesis(t, gspec, key, mock.WithStepSize(stepSize))
+	m := execmoduletester.NewWithGenesis(t, gspec, key, execmoduletester.WithStepSize(stepSize))
 	ctx := context.Background()
 	logger := log.New()
 
@@ -120,7 +120,7 @@ func TestHistoryVerification_WithUserTransactions(t *testing.T) {
 		},
 	}
 
-	m := mock.MockWithGenesis(t, gspec, key, mock.WithStepSize(stepSize))
+	m := execmoduletester.NewWithGenesis(t, gspec, key, execmoduletester.WithStepSize(stepSize))
 	ctx := context.Background()
 	logger := log.New()
 	signer := types.LatestSignerForChainID(chainConfig.ChainID)
