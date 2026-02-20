@@ -36,10 +36,10 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -69,7 +69,7 @@ func TestCreate2Revive(t *testing.T) {
 		signer = types.LatestSignerForChainID(nil)
 	)
 
-	m := mock.MockWithGenesis(t, gspec, key)
+	m := execmoduletester.NewWithGenesis(t, gspec, key)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
@@ -252,7 +252,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		}
 		signer = types.LatestSignerForChainID(nil)
 	)
-	m := mock.MockWithGenesis(t, gspec, key)
+	m := execmoduletester.NewWithGenesis(t, gspec, key)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
@@ -516,7 +516,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		}
 	)
 
-	m := mock.MockWithGenesis(t, gspec, key)
+	m := execmoduletester.NewWithGenesis(t, gspec, key)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
@@ -676,7 +676,7 @@ func TestReorgOverStateChange(t *testing.T) {
 		}
 	)
 
-	m := mock.MockWithGenesis(t, gspec, key)
+	m := execmoduletester.NewWithGenesis(t, gspec, key)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
@@ -842,7 +842,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		}
 	)
 
-	m := mock.MockWithGenesis(t, gspec, key)
+	m := execmoduletester.NewWithGenesis(t, gspec, key)
 
 	var err error
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -983,7 +983,7 @@ func TestEip2200Gas(t *testing.T) {
 		}
 	)
 
-	m := mock.MockWithGenesis(t, gspec, key)
+	m := execmoduletester.NewWithGenesis(t, gspec, key)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
@@ -1084,7 +1084,7 @@ func TestWrongIncarnation(t *testing.T) {
 		}
 	)
 
-	m := mock.MockWithGenesis(t, gspec, key)
+	m := execmoduletester.NewWithGenesis(t, gspec, key)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
@@ -1211,7 +1211,7 @@ func TestWrongIncarnation2(t *testing.T) {
 
 	knownContractAddress := common.HexToAddress("0xdb7d6ab1f17c6b31909ae466702703daef9269cf")
 
-	m := mock.MockWithGenesis(t, gspec, key)
+	m := execmoduletester.NewWithGenesis(t, gspec, key)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
@@ -1487,7 +1487,7 @@ func TestRecreateAndRewind(t *testing.T) {
 		}
 	)
 
-	m := mock.MockWithGenesis(t, gspec, key)
+	m := execmoduletester.NewWithGenesis(t, gspec, key)
 	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
 	require.NoError(t, err)
@@ -1702,7 +1702,7 @@ func TestTxLookupUnwind(t *testing.T) {
 		signer = types.LatestSignerForChainID(nil)
 	)
 
-	m := mock.MockWithGenesis(t, gspec, key)
+	m := execmoduletester.NewWithGenesis(t, gspec, key)
 	chain1, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 		var e error

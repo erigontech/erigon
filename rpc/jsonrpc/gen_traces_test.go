@@ -44,7 +44,7 @@ Testing tracing RPC API by generating patters of contracts invoking one another 
 */
 
 func TestGeneratedDebugApi(t *testing.T) {
-	m := rpcdaemontest.CreateTestSentryForTraces(t)
+	m := rpcdaemontest.CreateTestExecModuleForTraces(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0)
 	api := NewPrivateDebugAPI(baseApi, m.DB, 0, false)
@@ -131,7 +131,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 }
 
 func TestGeneratedTraceApi(t *testing.T) {
-	m := rpcdaemontest.CreateTestSentryForTraces(t)
+	m := rpcdaemontest.CreateTestExecModuleForTraces(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0)
 	api := NewTraceAPI(baseApi, m.DB, &httpcfg.HttpCfg{})

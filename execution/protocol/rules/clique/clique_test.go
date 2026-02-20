@@ -34,10 +34,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/rawdb"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/clique"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -64,7 +64,7 @@ func TestReimportMirroredState(t *testing.T) {
 		Config: chainspec.AllCliqueProtocolChanges,
 	}
 	copy(genspec.ExtraData[clique.ExtraVanity:], addr[:])
-	m := mock.MockWithGenesisEngine(t, genspec, engine)
+	m := execmoduletester.NewWithGenesisEngine(t, genspec, engine)
 
 	// Generate a batch of blocks, each properly signed
 	getHeader := func(hash common.Hash, number uint64) (h *types.Header, err error) {

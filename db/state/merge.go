@@ -511,6 +511,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			return nil, nil, nil, err
 		}
 	}
+
 	if err = kvWriter.Compress(); err != nil {
 		return nil, nil, nil, err
 	}
@@ -773,6 +774,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		if ht.h.noFsync {
 			comp.DisableFsync()
 		}
+
 		pagedWr := ht.dataWriter(comp)
 		p := ps.AddNew(path.Base(datPath), 1)
 		defer ps.Delete(p)
