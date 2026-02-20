@@ -39,10 +39,10 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -217,11 +217,11 @@ func (bt *BlockTest) Run(t *testing.T) error {
 		return testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
-	var mOpts []mock.Option
+	var mOpts []execmoduletester.Option
 	if bt.ExperimentalBAL {
-		mOpts = append(mOpts, mock.WithExperimentalBAL())
+		mOpts = append(mOpts, execmoduletester.WithExperimentalBAL())
 	}
-	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, mOpts...)
+	m := execmoduletester.NewWithGenesisEngine(t, bt.genesis(config), engine, mOpts...)
 
 	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root
@@ -262,7 +262,7 @@ func (bt *BlockTest) RunCLI() error {
 		return testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
-	m := mock.MockWithGenesisEngine(nil, bt.genesis(config), engine)
+	m := execmoduletester.NewWithGenesisEngine(nil, bt.genesis(config), engine)
 	defer m.DB.Close()
 
 	bt.br = m.BlockReader
@@ -333,7 +333,7 @@ See https://github.com/ethereum/tests/wiki/Blockchain-Tests-II
 	expected we are expected to ignore it and continue processing and then validate the
 	post state.
 */
-func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
+func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlock, error) {
 	validBlocks := make([]btBlock, 0)
 	// insert the test blocks, which will execute all transaction
 	for bi, b := range bt.json.Blocks {
@@ -385,7 +385,7 @@ func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
 }
 
 // isCanonical reports whether block is the canonical block at its height.
-func (bt *BlockTest) isCanonical(m *mock.MockSentry, block *types.Block) (bool, error) {
+func (bt *BlockTest) isCanonical(m *execmoduletester.ExecModuleTester, block *types.Block) (bool, error) {
 	roTx, err := m.DB.BeginRo(m.Ctx)
 	if err != nil {
 		return false, err
@@ -530,7 +530,7 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 	return nil
 }
 
-func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m *mock.MockSentry) error {
+func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m *execmoduletester.ExecModuleTester) error {
 	// to get constant lookup when verifying block headers by hash (some tests have many blocks)
 	bmap := make(map[common.Hash]btBlock, len(bt.json.Blocks))
 	for _, b := range validBlocks {
