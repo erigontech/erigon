@@ -50,13 +50,6 @@ type patternTable struct {
 	bitLen   int // Number of bits to lookup in the table
 }
 
-func newPatternTable(bitLen int) *patternTable {
-	return &patternTable{
-		bitLen:   bitLen,
-		patterns: make([]*codeword, 1<<bitLen),
-	}
-}
-
 func (pt *patternTable) insertWord(cw *codeword) {
 	codeStep := uint16(1) << uint16(cw.len)
 	codeFrom, codeTo := cw.code, cw.code+codeStep
@@ -74,6 +67,109 @@ type posTable struct {
 	lens   []byte
 	ptrs   []*posTable
 	bitLen int
+}
+
+// patternArena pre-allocates all storage for a decompressor's Huffman pattern table,
+// consolidating O(N) individual heap allocations into 3 large slabs.
+// This reduces GC pressure when many decompressors are open simultaneously.
+type patternArena struct {
+	codewords []codeword
+	tables    []patternTable
+	slots     []*codeword // backing store for all patternTable.patterns slices
+	cwIdx     int
+	tableIdx  int
+	slotIdx   int
+}
+
+func (a *patternArena) allocCW(code uint16, pattern word, l byte, ptr *patternTable) *codeword {
+	cw := &a.codewords[a.cwIdx]
+	a.cwIdx++
+	cw.code, cw.pattern, cw.len, cw.ptr = code, pattern, l, ptr
+	return cw
+}
+
+func (a *patternArena) allocTable(bitLen int) *patternTable {
+	sz := 1 << bitLen
+	t := &a.tables[a.tableIdx]
+	a.tableIdx++
+	t.bitLen = bitLen
+	t.patterns = a.slots[a.slotIdx : a.slotIdx+sz]
+	a.slotIdx += sz
+	return t
+}
+
+// countPatternArena mirrors buildCondensedPatternTable to count, without allocating,
+// the exact number of sub-tables, total slots, and codewords needed.
+// Returns (patternsConsumed, extraSlots, numSubTables, numCW).
+func countPatternArena(depths []uint64, bits int, depth, maxDepth uint64) (consumed, extraSlots, numSubTables, numCW int) {
+	if len(depths) == 0 {
+		return
+	}
+	if depth == depths[0] {
+		return 1, 0, 0, 1
+	}
+	if bits == 9 {
+		subBitLen := int(maxDepth)
+		if subBitLen > 9 {
+			subBitLen = 9
+		}
+		c, s, nt, ncw := countPatternArena(depths, 0, depth, maxDepth)
+		return c, s + (1 << subBitLen), nt + 1, ncw + 1
+	}
+	if maxDepth == 0 {
+		return
+	}
+	c0, s0, nt0, ncw0 := countPatternArena(depths, bits+1, depth+1, maxDepth-1)
+	c1, s1, nt1, ncw1 := countPatternArena(depths[c0:], bits+1, depth+1, maxDepth-1)
+	return c0 + c1, s0 + s1, nt0 + nt1, ncw0 + ncw1
+}
+
+// posArena pre-allocates all storage for a decompressor's Huffman position table,
+// consolidating O(N) individual heap allocations into 4 large slabs.
+type posArena struct {
+	tables   []posTable
+	posArr   []uint64
+	lensArr  []byte
+	ptrsArr  []*posTable
+	tableIdx int
+	slotIdx  int
+}
+
+func (a *posArena) allocTable(bitLen int) *posTable {
+	sz := 1 << bitLen
+	t := &a.tables[a.tableIdx]
+	a.tableIdx++
+	t.bitLen = bitLen
+	t.pos = a.posArr[a.slotIdx : a.slotIdx+sz]
+	t.lens = a.lensArr[a.slotIdx : a.slotIdx+sz]
+	t.ptrs = a.ptrsArr[a.slotIdx : a.slotIdx+sz]
+	a.slotIdx += sz
+	return t
+}
+
+// countPosArena mirrors buildPosTable to count the exact sizes needed without allocating.
+// Returns (patternsConsumed, extraSlots, numSubTables).
+func countPosArena(depths []uint64, bits int, depth, maxDepth uint64) (consumed, extraSlots, numSubTables int) {
+	if len(depths) == 0 {
+		return
+	}
+	if depth == depths[0] {
+		return 1, 0, 0
+	}
+	if bits == 9 {
+		subBitLen := int(maxDepth)
+		if subBitLen > 9 {
+			subBitLen = 9
+		}
+		c, s, nt := countPosArena(depths, 0, depth, maxDepth)
+		return c, s + (1 << subBitLen), nt + 1
+	}
+	if maxDepth == 0 {
+		return
+	}
+	c0, s0, nt0 := countPosArena(depths, bits+1, depth+1, maxDepth-1)
+	c1, s1, nt1 := countPosArena(depths[c0:], bits+1, depth+1, maxDepth-1)
+	return c0 + c1, s0 + s1, nt0 + nt1
 }
 
 type ErrCompressedFileCorrupted struct {
@@ -96,9 +192,11 @@ type Decompressor struct {
 	mmapHandle2         *[mmap.MaxMapSize]byte // mmap handle for windows (this is used to close mmap)
 	dict                *patternTable
 	posDict             *posTable
-	mmapHandle1         []byte // mmap handle for unix (this is used to close mmap)
-	data                []byte // slice of correct size for the decompressor to work with
-	wordsStart          uint64 // Offset of whether the superstrings actually start
+	patArena            *patternArena // arena keeping all pattern table allocations alive
+	posArena            *posArena     // arena keeping all position table allocations alive
+	mmapHandle1         []byte        // mmap handle for unix (this is used to close mmap)
+	data                []byte        // slice of correct size for the decompressor to work with
+	wordsStart          uint64        // Offset of whether the superstrings actually start
 	size                int64
 	modTime             time.Time
 	wordsCount          uint64
@@ -255,9 +353,16 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		} else {
 			bitLen = int(patternMaxDepth)
 		}
-		// fmt.Printf("pattern maxDepth=%d\n", tree.maxDepth)
-		d.dict = newPatternTable(bitLen)
-		if _, err = buildCondensedPatternTable(d.dict, depths, patterns, 0, 0, 0, patternMaxDepth); err != nil {
+		// Pre-count exact arena sizes, then build with a single set of large allocations
+		// instead of O(N) individual ones — reduces GC pressure when many files are open.
+		_, extraSlots, numSubTables, numCW := countPatternArena(depths, 0, 0, patternMaxDepth)
+		d.patArena = &patternArena{
+			codewords: make([]codeword, numCW),
+			tables:    make([]patternTable, 1+numSubTables),
+			slots:     make([]*codeword, (1<<bitLen)+extraSlots),
+		}
+		d.dict = d.patArena.allocTable(bitLen)
+		if _, err = buildCondensedPatternTable(d.dict, depths, patterns, 0, 0, 0, patternMaxDepth, d.patArena); err != nil {
 			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: err.Error()}
 		}
 	}
@@ -308,15 +413,17 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		} else {
 			bitLen = int(posMaxDepth)
 		}
-		//fmt.Printf("pos maxDepth=%d\n", tree.maxDepth)
-		tableSize := 1 << bitLen
-		d.posDict = &posTable{
-			bitLen: bitLen,
-			pos:    make([]uint64, tableSize),
-			lens:   make([]byte, tableSize),
-			ptrs:   make([]*posTable, tableSize),
+		// Pre-count exact arena sizes, then build with a single set of large allocations.
+		_, extraSlots, numSubTables := countPosArena(posDepths, 0, 0, posMaxDepth)
+		totalSlots := (1 << bitLen) + extraSlots
+		d.posArena = &posArena{
+			tables:  make([]posTable, 1+numSubTables),
+			posArr:  make([]uint64, totalSlots),
+			lensArr: make([]byte, totalSlots),
+			ptrsArr: make([]*posTable, totalSlots),
 		}
-		if _, err = buildPosTable(posDepths, poss, d.posDict, 0, 0, 0, posMaxDepth); err != nil {
+		d.posDict = d.posArena.allocTable(bitLen)
+		if _, err = buildPosTable(posDepths, poss, d.posDict, 0, 0, 0, posMaxDepth, d.posArena); err != nil {
 			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: err.Error()}
 		}
 	}
@@ -331,7 +438,7 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 	return d, nil
 }
 
-func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [][]byte, code uint16, bits int, depth uint64, maxDepth uint64) (int, error) {
+func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [][]byte, code uint16, bits int, depth uint64, maxDepth uint64, arena *patternArena) (int, error) {
 	if maxDepth > maxAllowedDepth {
 		return 0, fmt.Errorf("buildCondensedPatternTable: maxDepth=%d is too deep", maxDepth)
 	}
@@ -340,9 +447,8 @@ func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [
 		return 0, nil
 	}
 	if depth == depths[0] {
-		pattern := word(patterns[0])
 		//fmt.Printf("depth=%d, maxDepth=%d, code=[%b], codeLen=%d, pattern=[%x]\n", depth, maxDepth, code, bits, pattern)
-		cw := &codeword{code: code, pattern: pattern, len: byte(bits), ptr: nil}
+		cw := arena.allocCW(code, word(patterns[0]), byte(bits), nil)
 		table.insertWord(cw)
 		return 1, nil
 	}
@@ -353,22 +459,23 @@ func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [
 		} else {
 			bitLen = int(maxDepth)
 		}
-		cw := &codeword{code: code, pattern: nil, len: byte(0), ptr: newPatternTable(bitLen)}
+		subTable := arena.allocTable(bitLen)
+		cw := arena.allocCW(code, nil, 0, subTable)
 		table.insertWord(cw)
-		return buildCondensedPatternTable(cw.ptr, depths, patterns, 0, 0, depth, maxDepth)
+		return buildCondensedPatternTable(subTable, depths, patterns, 0, 0, depth, maxDepth, arena)
 	}
 	if maxDepth == 0 {
 		return 0, errors.New("buildCondensedPatternTable: maxDepth reached zero")
 	}
-	b0, err := buildCondensedPatternTable(table, depths, patterns, code, bits+1, depth+1, maxDepth-1)
+	b0, err := buildCondensedPatternTable(table, depths, patterns, code, bits+1, depth+1, maxDepth-1, arena)
 	if err != nil {
 		return 0, err
 	}
-	b1, err := buildCondensedPatternTable(table, depths[b0:], patterns[b0:], (uint16(1)<<bits)|code, bits+1, depth+1, maxDepth-1)
+	b1, err := buildCondensedPatternTable(table, depths[b0:], patterns[b0:], (uint16(1)<<bits)|code, bits+1, depth+1, maxDepth-1, arena)
 	return b0 + b1, err
 }
 
-func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16, bits int, depth uint64, maxDepth uint64) (int, error) {
+func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16, bits int, depth uint64, maxDepth uint64, arena *posArena) (int, error) {
 	if maxDepth > maxAllowedDepth {
 		return 0, fmt.Errorf("buildPosTable: maxDepth=%d is too deep", maxDepth)
 	}
@@ -401,26 +508,20 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 		} else {
 			bitLen = int(maxDepth)
 		}
-		tableSize := 1 << bitLen
-		newTable := &posTable{
-			bitLen: bitLen,
-			pos:    make([]uint64, tableSize),
-			lens:   make([]byte, tableSize),
-			ptrs:   make([]*posTable, tableSize),
-		}
+		newTable := arena.allocTable(bitLen)
 		table.pos[code] = 0
 		table.lens[code] = byte(0)
 		table.ptrs[code] = newTable
-		return buildPosTable(depths, poss, newTable, 0, 0, depth, maxDepth)
+		return buildPosTable(depths, poss, newTable, 0, 0, depth, maxDepth, arena)
 	}
 	if maxDepth == 0 {
 		return 0, errors.New("buildPosTable: maxDepth reached zero")
 	}
-	b0, err := buildPosTable(depths, poss, table, code, bits+1, depth+1, maxDepth-1)
+	b0, err := buildPosTable(depths, poss, table, code, bits+1, depth+1, maxDepth-1, arena)
 	if err != nil {
 		return 0, err
 	}
-	b1, err := buildPosTable(depths[b0:], poss[b0:], table, (uint16(1)<<bits)|code, bits+1, depth+1, maxDepth-1)
+	b1, err := buildPosTable(depths[b0:], poss[b0:], table, (uint16(1)<<bits)|code, bits+1, depth+1, maxDepth-1, arena)
 	return b0 + b1, err
 }
 
@@ -478,6 +579,8 @@ func (d *Decompressor) Close() {
 	d.data = nil
 	d.posDict = nil
 	d.dict = nil
+	d.patArena = nil
+	d.posArena = nil
 }
 
 func (d *Decompressor) FilePath() string { return d.filePath }
