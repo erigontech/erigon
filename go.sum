@@ -352,6 +352,8 @@ github.com/erigontech/secp256k1 v1.2.1-0.20260218182123-377cc1bd6410 h1:5YD7JJ5P
 github.com/erigontech/secp256k1 v1.2.1-0.20260218182123-377cc1bd6410/go.mod h1:CnigLRUsfobnTYoUzwdT/De67fw9OhTA0KTkxa+svik=
 github.com/erigontech/silkworm-go v0.24.0 h1:fFe74CjQM5LI7ouMYjmqfFaqIFzQTpMrt+ls+a5PxpE=
 github.com/erigontech/silkworm-go v0.24.0/go.mod h1:O50ux0apICEVEGyRWiE488K8qz8lc3PA/SXbQQAc8SU=
+github.com/erigontech/torrent v1.61.1-0.20260220162608-6a4c394c09a3 h1:lTsYoSP3RpXJnivn4OU4kNWRRtgC0D4/lSLTGEpulHM=
+github.com/erigontech/torrent v1.61.1-0.20260220162608-6a4c394c09a3/go.mod h1:99HuZswKVFJaolion++ekIiF52WDiEtQJqqib4IPdZc=
 github.com/erigontech/uint256 v0.0.0-20260128213548-c9ef4c05bfe3 h1:E5PV7YXmws6zaTwp/Rf4tWoaTgBNuvrS4rMCeL61dY4=
 github.com/erigontech/uint256 v0.0.0-20260128213548-c9ef4c05bfe3/go.mod h1:EOMSn4q6Nyt9P6efbI3bueV4e1b3dGlUCXeiRV4ng7E=
 github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f h1:Y/CXytFA4m6baUTXGLOoWe4PQhGxaX0KpnayAqC48p4=
