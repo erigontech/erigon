@@ -170,9 +170,9 @@ func NewCommitmentSplitStateReader(commitmentReader StateReader, plainStateReade
 	}
 }
 
-func NewCommitmentReplayStateReader(tx kv.TemporalTx, sd sd, plainStateAsOf uint64) StateReader {
+func NewCommitmentReplayStateReader(ttx, tx kv.TemporalTx, tsd sd, plainStateAsOf uint64) StateReader {
 	// Claim that during replay we do not operate on history, so we can temporarily save commitment state
-	return NewCommitmentSplitStateReader(NewLatestStateReader(tx, sd), NewHistoryStateReader(tx, plainStateAsOf), false)
+	return NewCommitmentSplitStateReader(NewLatestStateReader(ttx, tsd), NewHistoryStateReader(tx, plainStateAsOf), false)
 }
 
 // A history reader that reads:

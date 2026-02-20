@@ -657,7 +657,7 @@ func (m *loaderMutex[K]) unlock(mu *sync.Mutex, key K) {
 
 func (g *Generator) computeCommitmentFromStateHistory(ctx context.Context, tx kv.TemporalTx, blockNum uint64, txNum uint64) ([]byte, error) {
 	receiptComputeCommitment := func(ctx context.Context, ttx kv.TemporalTx, tsd *execctx.SharedDomains) ([]byte, error) {
-		tsd.GetCommitmentCtx().SetStateReader(commitmentdb.NewCommitmentReplayStateReader(tx, tsd, txNum+1))
+		tsd.GetCommitmentCtx().SetStateReader(commitmentdb.NewCommitmentReplayStateReader(ttx, tx, tsd, txNum+1))
 		minTxNum, err := g.txNumReader.Min(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err
