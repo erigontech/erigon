@@ -174,6 +174,9 @@ func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comp
 }
 
 func TestLastBlock(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	m := newCanonical(t, 0)
 	var err error
@@ -279,7 +282,12 @@ func testLongerFork(t *testing.T, full bool) {
 }
 
 // Tests that chains missing links do not get accepted by the processor.
-func TestBrokenBlockChain(t *testing.T) { testBrokenChain(t) }
+func TestBrokenBlockChain(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	testBrokenChain(t)
+}
 
 func testBrokenChain(t *testing.T) {
 	t.Parallel()
@@ -297,6 +305,9 @@ func testBrokenChain(t *testing.T) {
 
 // Tests that reorganising a long chain after a short one overwrites the canonical numbers and links in the database.
 func TestReorgLongBlocks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	testReorgLong(t)
 }
 
@@ -609,6 +620,9 @@ func readReceipt(db kv.TemporalTx, txHash common.Hash, m *execmoduletester.ExecM
 
 // Tests if the canonical block can be fetched from the database during chain insertion.
 func TestCanonicalBlockRetrieval(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	m := newCanonical(t, 0)
 
@@ -650,6 +664,9 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 }
 
 func TestEIP155Transition(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	// Configure and generate a sample block chai
 
@@ -944,6 +961,9 @@ func runPermutation(t *testing.T, testFunc func(*testing.T, prune.Mode) error, c
 }
 
 func TestEIP161AccountRemoval(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	// Configure and generate a sample block chain
 	var (
@@ -1041,6 +1061,9 @@ func TestEIP161AccountRemoval(t *testing.T) {
 }
 
 func TestDoubleAccountRemoval(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	var (
 		signer      = types.LatestSignerForChainID(nil)
@@ -1332,6 +1355,9 @@ func TestLowDiffLongChain(t *testing.T) {
 // each transaction, so this works ok. The rework accumulated writes in memory
 // first, but the journal wiped the entire state object on create-revert.
 func TestDeleteCreateRevert(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	var (
 		aa = common.HexToAddress("0x000000000000000000000000000000000000aaaa")
@@ -1401,6 +1427,9 @@ func TestDeleteCreateRevert(t *testing.T) {
 // Expected outcome is that _all_ slots are cleared from A, due to the selfdestruct,
 // and then the new slots exist
 func TestDeleteRecreateSlots(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	var (
 		// Generate a canonical chain to act as the main dataset
@@ -1533,6 +1562,9 @@ func TestDeleteRecreateSlots(t *testing.T) {
 }
 
 func TestCVE2020_26265(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	var (
 		// Generate a canonical chain to act as the main dataset
@@ -1641,6 +1673,9 @@ func TestCVE2020_26265(t *testing.T) {
 // regular value-transfer
 // Expected outcome is that _all_ slots are cleared from A
 func TestDeleteRecreateAccount(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	var (
 		// Generate a canonical chain to act as the main dataset
@@ -1939,6 +1974,9 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 // We need to either roll back the snapDestructs, or not place it into snapDestructs
 // in the first place.
 func TestInitThenFailCreateContract(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	var (
 		// Generate a canonical chain to act as the main dataset
@@ -2058,6 +2096,9 @@ func TestInitThenFailCreateContract(t *testing.T) {
 // checking that the gas usage of a hot SLOAD and a cold SLOAD are calculated
 // correctly.
 func TestEIP2718Transition(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	var (
 		aa = common.HexToAddress("0x000000000000000000000000000000000000aaaa")

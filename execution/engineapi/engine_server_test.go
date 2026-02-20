@@ -135,6 +135,9 @@ func TestGetBlobsV1(t *testing.T) {
 }
 
 func TestGetBlobsV2(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	buf := bytes.NewBuffer(nil)
 	mockSentry, require := execmoduletester.NewWithTxPoolAllProtocolChanges(t), require.New(t)
 	oneBlockStep(mockSentry, require)
@@ -195,6 +198,9 @@ func TestGetBlobsV2(t *testing.T) {
 }
 
 func TestGetBlobsV3(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	buf := bytes.NewBuffer(nil)
 	mockSentry, require := execmoduletester.NewWithTxPoolAllProtocolChanges(t), require.New(t)
 	oneBlockStep(mockSentry, require)

@@ -30,6 +30,9 @@ import (
 )
 
 func TestLegacyBlockchain(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	defer log.Root().SetHandler(log.Root().GetHandler())

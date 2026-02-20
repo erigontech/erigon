@@ -28,6 +28,9 @@ import (
 )
 
 func TestTransaction(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	txt := new(testMatcher)

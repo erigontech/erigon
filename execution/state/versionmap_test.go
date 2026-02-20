@@ -305,6 +305,9 @@ func TestTimeComplexity(t *testing.T) {
 }
 
 func TestWriteTimeSameLocationDifferentTxnIdx(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	mvh1 := NewVersionMap(nil)

@@ -29,6 +29,9 @@ import (
 // 4. merge files
 
 func TestOpenFolder_AccountsDomain(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	name, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -79,6 +82,9 @@ func TestOpenFolder_AccountsDomain(t *testing.T) {
 }
 
 func TestOpenFolder_CodeII(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	name, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
@@ -129,6 +135,9 @@ func TestOpenFolder_CodeII(t *testing.T) {
 }
 
 func TestIntegrateDirtyFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	// setup account
 	// add a dirty file
 	// check presence of dirty file
@@ -173,6 +182,9 @@ func TestIntegrateDirtyFile(t *testing.T) {
 }
 
 func TestCloseFilesAfterRootNum(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	// setup account
 	// set various root numbers and check if the right files are closed
 	dirs := datadir.New(t.TempDir())
@@ -226,6 +238,9 @@ func TestCloseFilesAfterRootNum(t *testing.T) {
 }
 
 func TestMergeRangeSnapRepo(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	dirs := datadir.New(t.TempDir())
 	ver := version.V1_0_standart
 	_, repo := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {

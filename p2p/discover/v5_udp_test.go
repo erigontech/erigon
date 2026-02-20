@@ -734,6 +734,9 @@ func TestUDPv5_lookupDistances(t *testing.T) {
 
 // This test checks that lookup works.
 func TestUDPv5_lookup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	test := newUDPV5Test(t)
 

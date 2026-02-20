@@ -44,6 +44,9 @@ import (
 )
 
 func TestSnapshotRandom(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	config := &quick.Config{MaxCount: 10}
 	ts := &snapshotTest{}

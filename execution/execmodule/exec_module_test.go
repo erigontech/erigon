@@ -236,6 +236,9 @@ func TestAssembleBlock(t *testing.T) {
 }
 
 func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	ctx := t.Context()
 	m := execmoduletester.NewWithTxPoolAllProtocolChanges(t)
