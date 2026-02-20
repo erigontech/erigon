@@ -583,11 +583,7 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 					return nil
 				}); err != nil && !errors.Is(err, context.Canceled) {
 					txnType, _ := PeekTransactionType(change.Txs[i])
-					if errors.Is(err, ErrRlpTooBig) {
-						f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "txnType", txnType, "index", i, "err", err)
-					} else {
-						f.logger.Warn("[txpool.fetch] stream.Recv", "dir", change.Direction, "txnType", txnType, "index", i, "err", err)
-					}
+					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "txnType", txnType, "index", i, "err", err)
 					continue // 1 txn handling error must not stop batch processing
 				}
 			}
