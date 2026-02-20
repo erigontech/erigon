@@ -1468,7 +1468,7 @@ func CopyTxs(in Transactions) Transactions {
 		if txWrapper, ok := txn.(*BlobTxWrapper); ok {
 			blobTx := out[i].(*BlobTx)
 			out[i] = &BlobTxWrapper{
-				Tx:          blobTx.copyWithoutCaches(),
+				Tx:          blobTx.copyData(),
 				Commitments: txWrapper.Commitments.copy(),
 				Blobs:       txWrapper.Blobs.copy(),
 				Proofs:      txWrapper.Proofs.copy(),

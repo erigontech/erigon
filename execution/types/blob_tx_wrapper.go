@@ -317,7 +317,7 @@ func (txw *BlobTxWrapper) WithSignature(signer Signer, sig []byte) (Transaction,
 		return nil, err
 	}
 	blobTxnWrapper := &BlobTxWrapper{
-		Tx:             signedCopy.(*BlobTx).copyWithoutCaches(),
+		Tx:             signedCopy.(*BlobTx).copyData(),
 		WrapperVersion: txw.WrapperVersion,
 		Blobs:          make(Blobs, len(txw.Blobs)),
 		Commitments:    make(BlobKzgs, len(txw.Commitments)),
