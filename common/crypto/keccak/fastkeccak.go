@@ -19,7 +19,7 @@ package keccak
 import (
 	"hash"
 
-	keccak "github.com/Giulio2002/fastkeccak"
+	keccak "github.com/erigontech/fastkeccak"
 )
 
 // KeccakState wraps the keccak hasher (backed by fastkeccak). In addition to the usual hash methods, it also supports

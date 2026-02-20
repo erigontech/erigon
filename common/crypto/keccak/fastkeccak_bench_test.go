@@ -21,7 +21,7 @@ import (
 
 	"golang.org/x/crypto/sha3"
 
-	keccak "github.com/Giulio2002/fastkeccak"
+	keccak "github.com/erigontech/fastkeccak"
 
 	cryptokeccak "github.com/erigontech/erigon/common/crypto/keccak"
 )

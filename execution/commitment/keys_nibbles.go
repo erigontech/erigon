@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	keccak "github.com/Giulio2002/fastkeccak"
+	keccak "github.com/erigontech/fastkeccak"
 
 	cryptokeccak "github.com/erigontech/erigon/common/crypto/keccak"
 	"github.com/erigontech/erigon/common/length"
