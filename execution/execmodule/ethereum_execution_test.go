@@ -38,10 +38,10 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	eth1utils "github.com/erigontech/erigon/execution/execmodule/moduleutil"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
@@ -66,7 +66,7 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 		},
 	}
 	stepSize := uint64(5) // 2 for block 0 (0,1) and 3 for block 1 (2,3,4)
-	m := mock.MockWithGenesis(t, genesis, privKey, mock.WithStepSize(stepSize))
+	m := execmoduletester.NewWithGenesis(t, genesis, privKey, execmoduletester.WithStepSize(stepSize))
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(0, senderAddr, uint256.NewInt(0), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
@@ -135,7 +135,7 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 			senderAddr2: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := mock.MockWithGenesis(t, genesis, privKey)
+	m := execmoduletester.NewWithGenesis(t, genesis, privKey)
 	longerFork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
@@ -176,7 +176,7 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 	require.NoError(t, err)
 }
 
-func addTwoTxnsToPool(ctx context.Context, startingNonce uint64, t *testing.T, m *mock.MockSentry, txpool txpoolproto.TxpoolServer, baseFee uint64) {
+func addTwoTxnsToPool(ctx context.Context, startingNonce uint64, t *testing.T, m *execmoduletester.ExecModuleTester, txpool txpoolproto.TxpoolServer, baseFee uint64) {
 	tx2, err := types.SignTx(types.NewTransaction(startingNonce, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(baseFee), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 	require.NoError(t, err)
 	tx3, err := types.SignTx(types.NewTransaction(startingNonce+1, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(baseFee), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
@@ -208,7 +208,7 @@ func TestAssembleBlock(t *testing.T) {
 	}
 	t.Parallel()
 	ctx := t.Context()
-	m := mock.MockWithTxPoolAllProtocolChanges(t)
+	m := execmoduletester.NewWithTxPoolAllProtocolChanges(t)
 	exec := m.Eth1ExecutionService
 	txpool := m.TxPoolGrpcServer
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
@@ -250,7 +250,7 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 	}
 	t.Parallel()
 	ctx := t.Context()
-	m := mock.MockWithTxPoolAllProtocolChanges(t)
+	m := execmoduletester.NewWithTxPoolAllProtocolChanges(t)
 	exec := m.Eth1ExecutionService
 	txpool := m.TxPoolGrpcServer
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {

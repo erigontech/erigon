@@ -1185,6 +1185,9 @@ func (ii *InvertedIndex) integrateDirtyFiles(sf InvertedFiles, txNumFrom, txNumT
 	if txNumFrom == txNumTo {
 		panic(fmt.Sprintf("assert: txNumFrom(%d) == txNumTo(%d)", txNumFrom, txNumTo))
 	}
+	if sf.decomp == nil {
+		return // build was skipped — don't overwrite existing dirty files
+	}
 	fi := newFilesItem(txNumFrom, txNumTo, ii.stepSize, ii.stepsInFrozenFile)
 	fi.decompressor = sf.decomp
 	fi.index = sf.index

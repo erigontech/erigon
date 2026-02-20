@@ -33,11 +33,11 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/rules/aura"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -56,7 +56,7 @@ func TestEmptyBlock(t *testing.T) {
 	auraDB := memdb.NewTestDB(t, dbcfg.ChainDB)
 	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
 	require.NoError(err)
-	m := mock.MockWithGenesisEngine(t, genesis, engine)
+	m := execmoduletester.NewWithGenesisEngine(t, genesis, engine)
 
 	time := uint64(1539016985)
 	header := builder.MakeEmptyHeader(genesisBlock.Header(), chainConfig, time, nil)
@@ -94,7 +94,7 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 	auraDB := memdb.NewTestDB(t, dbcfg.ChainDB)
 	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
 	require.NoError(err)
-	m := mock.MockWithGenesisEngine(t, genesis, engine)
+	m := execmoduletester.NewWithGenesisEngine(t, genesis, engine)
 
 	difficlty, _ := new(big.Int).SetString("340282366920938463463374607431768211454", 10)
 	//Populate a sample valid header for a Pre-merge block
