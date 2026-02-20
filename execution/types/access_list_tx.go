@@ -187,8 +187,8 @@ func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
 // transactions, it returns the type and payload.
 func (tx *AccessListTx) MarshalBinary(w io.Writer) error {
 	payloadSize, accessListLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = AccessListTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -262,8 +262,8 @@ func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	payloadSize, accessListLen := tx.payloadSize()
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
@@ -437,7 +437,7 @@ func (tx *AccessListTx) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(AccessListTxType, []any{
+	hash := PrefixedRlpHash(AccessListTxType, []any{
 		tx.ChainID,
 		tx.Nonce,
 		tx.GasPrice,
@@ -464,7 +464,7 @@ type accessListTxSigHash struct {
 }
 
 func (tx *AccessListTx) SigningHash(chainID *big.Int) common.Hash {
-	return prefixedRlpHash(
+	return PrefixedRlpHash(
 		AccessListTxType,
 		&accessListTxSigHash{
 			ChainID:    chainID,
@@ -478,6 +478,10 @@ func (tx *AccessListTx) SigningHash(chainID *big.Int) common.Hash {
 		})
 }
 
+func (tx *AccessListTx) MarshalBinaryForHashing(w io.Writer) error {
+	return tx.MarshalBinary(w)
+}
+
 func (tx *AccessListTx) Type() byte { return AccessListTxType }
 
 func (tx *AccessListTx) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
@@ -488,7 +492,7 @@ func (tx *AccessListTx) GetChainID() *uint256.Int {
 	return tx.ChainID
 }
 
-func (tx *AccessListTx) cachedSender() (sender accounts.Address, ok bool) {
+func (tx *AccessListTx) CachedSender() (sender accounts.Address, ok bool) {
 	s := tx.from
 	if s.IsNil() {
 		return sender, false

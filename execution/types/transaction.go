@@ -30,6 +30,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/protolambda/ztyp/codec"
 
+	"github.com/erigontech/erigon/arb/ethdb/wasmdb"
 	"github.com/erigontech/erigon/common"
 	libcrypto "github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -56,7 +57,37 @@ const (
 	BlobTxType
 	SetCodeTxType
 	AccountAbstractionTxType
+
+	// Arbitrum transaction types
+	ArbitrumDepositTxType         byte = 0x64
+	ArbitrumUnsignedTxType        byte = 0x65
+	ArbitrumContractTxType        byte = 0x66
+	ArbitrumRetryTxType           byte = 0x68
+	ArbitrumSubmitRetryableTxType byte = 0x69
+	ArbitrumInternalTxType        byte = 0x6A
+	ArbitrumLegacyTxType          byte = 0x78
 )
+
+type constructTxnFunc = func() Transaction
+
+var externalTxnTypes map[byte]constructTxnFunc
+
+func RegisterTransaction(txnType byte, creator constructTxnFunc) {
+	if externalTxnTypes == nil {
+		externalTxnTypes = make(map[byte]constructTxnFunc)
+	}
+	externalTxnTypes[txnType] = creator
+}
+
+func CreateTransactioByType(txnType byte) Transaction {
+	if externalTxnTypes == nil {
+		externalTxnTypes = make(map[byte]constructTxnFunc)
+	}
+	if ctor, ok := externalTxnTypes[txnType]; ok {
+		return ctor()
+	}
+	return nil
+}
 
 // Transaction is an Ethereum transaction.
 type Transaction interface {
@@ -92,11 +123,18 @@ type Transaction interface {
 	// signing method. The cache is invalidated if the cached signer does
 	// not match the signer used in the current call.
 	Sender(Signer) (accounts.Address, error)
-	cachedSender() (accounts.Address, bool)
+	CachedSender() (accounts.Address, bool)
 	GetSender() (accounts.Address, bool)
 	SetSender(accounts.Address)
 	IsContractDeploy() bool
 	Unwrap() Transaction // If this is a network wrapper, returns the unwrapped txn. Otherwise returns itself.
+
+	IsTimeBoosted() *bool
+	SetTimeboosted(val *bool)
+}
+
+type TransactionForHashMarshaller interface {
+	MarshalBinaryForHashing(w io.Writer) error
 }
 
 // TransactionMisc is collection of miscellaneous fields for transaction that is supposed to be embedded into concrete
@@ -218,6 +256,20 @@ func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs boo
 		t = &SetCodeTransaction{}
 	case AccountAbstractionTxType:
 		t = &AccountAbstractionTransaction{}
+	case ArbitrumDepositTxType:
+		t = &ArbitrumDepositTx{}
+	case ArbitrumUnsignedTxType:
+		t = &ArbitrumUnsignedTx{}
+	case ArbitrumContractTxType:
+		t = &ArbitrumContractTx{}
+	case ArbitrumRetryTxType:
+		t = &ArbitrumRetryTx{}
+	case ArbitrumSubmitRetryableTxType:
+		t = &ArbitrumSubmitRetryableTx{}
+	case ArbitrumInternalTxType:
+		t = &ArbitrumInternalTx{}
+	case ArbitrumLegacyTxType:
+		t = &ArbitrumLegacyTxData{}
 	default:
 		if data[0] >= 0x80 {
 			// txn is type legacy which is RLP encoded
@@ -296,13 +348,13 @@ func TypedTransactionMarshalledAsRlpString(data []byte) bool {
 	return len(data) > 0 && 0x80 <= data[0] && data[0] < 0xc0
 }
 
-func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeProtected bool) error {
-	if isProtectedV(v) && !maybeProtected {
+func SanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeProtected bool) error {
+	if IsProtectedV(v) && !maybeProtected {
 		return ErrUnexpectedProtection
 	}
 
 	var plainV byte
-	if isProtectedV(v) {
+	if IsProtectedV(v) {
 		chainID := DeriveChainId(v).Uint64()
 		plainV = byte(v.Uint64() - 35 - 2*chainID)
 	} else if maybeProtected {
@@ -322,7 +374,7 @@ func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeP
 	return nil
 }
 
-func isProtectedV(V *uint256.Int) bool {
+func IsProtectedV(V *uint256.Int) bool {
 	if V.BitLen() <= 8 {
 		v := V.Uint64()
 		return v != 27 && v != 28 && v != 1 && v != 0
@@ -341,7 +393,14 @@ func (s Transactions) Len() int { return len(s) }
 // because we assume that *Transaction will only ever contain valid txs that were either
 // constructed by decoding or via public API in this package.
 func (s Transactions) EncodeIndex(i int, w *bytes.Buffer) {
-	if err := s[i].MarshalBinary(w); err != nil {
+	var err error
+	switch tm := s[i].(type) {
+	case TransactionForHashMarshaller:
+		err = tm.MarshalBinaryForHashing(w)
+	default:
+		err = s[i].MarshalBinary(w)
+	}
+	if err != nil {
 		panic(err)
 	}
 }
@@ -395,7 +454,19 @@ type Message struct {
 	isFree           bool
 	blobHashes       []common.Hash
 	authorizations   []Authorization
+
+	// Arbitrum
+	SkipAccountChecks bool
+	SkipL1Charging    bool
+	TxRunMode         MessageRunMode
+	TxRunContext      *MessageRunContext
+	Tx                Transaction
+	EffectiveGas      uint64
 }
+
+func (m *Message) SetGasPrice(f *uint256.Int) { m.gasPrice.Set(f) }
+func (m *Message) SetFeeCap(f *uint256.Int)   { m.feeCap.Set(f) }
+func (m *Message) SetTip(f *uint256.Int)      { m.tipCap.Set(f) }
 
 func NewMessage(from accounts.Address, to accounts.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
 	gasPrice *uint256.Int, feeCap, tipCap *uint256.Int, data []byte, accessList AccessList, checkNonce bool,
@@ -413,6 +484,8 @@ func NewMessage(from accounts.Address, to accounts.Address, nonce uint64, amount
 		checkTransaction: checkTransaction,
 		checkGas:         checkGas,
 		isFree:           isFree,
+
+		TxRunContext: NewMessageCommitContext([]wasmdb.WasmTarget{wasmdb.LocalTarget()}),
 	}
 	if gasPrice != nil {
 		m.gasPrice.Set(gasPrice)
@@ -462,6 +535,22 @@ func (m *Message) IsFree() bool { return m.isFree }
 func (m *Message) SetIsFree(isFree bool) {
 	m.isFree = isFree
 }
+
+func (msg *Message) SetTo(addr *common.Address) {
+	if addr == nil {
+		msg.to = accounts.NilAddress
+	} else {
+		msg.to = accounts.InternAddress(*addr)
+	}
+}
+func (msg *Message) SetFrom(addr *common.Address)           { msg.from = accounts.InternAddress(*addr) }
+func (msg *Message) SetNonce(val uint64)                    { msg.nonce = val }
+func (msg *Message) SetAmount(f *uint256.Int)               { msg.amount.Set(f) }
+func (msg *Message) SetGasLimit(val uint64)                 { msg.gasLimit = val }
+func (msg *Message) SetData(data []byte)                    { msg.data = data }
+func (msg *Message) SetAccessList(accessList AccessList)    { msg.accessList = accessList }
+func (msg *Message) SetSkipAccountCheck(skipCheck bool)     { msg.SkipAccountChecks = skipCheck }
+func (msg *Message) SetBlobHashes(blobHashes []common.Hash) { msg.blobHashes = blobHashes }
 
 func (m *Message) ChangeGas(globalGasCap, desiredGas uint64) {
 	gas := globalGasCap

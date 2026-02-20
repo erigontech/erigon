@@ -39,6 +39,8 @@ type DynamicFeeTransaction struct {
 	TipCap     *uint256.Int
 	FeeCap     *uint256.Int
 	AccessList AccessList
+
+	Timeboosted *bool
 }
 
 func (tx *DynamicFeeTransaction) GetFeeCap() *uint256.Int { return tx.FeeCap }
@@ -63,6 +65,14 @@ func (tx *DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint2
 
 func (tx *DynamicFeeTransaction) Unwrap() Transaction {
 	return tx
+}
+
+func (tx *DynamicFeeTransaction) IsTimeBoosted() *bool {
+	return tx.Timeboosted
+}
+
+func (tx *DynamicFeeTransaction) SetTimeboosted(val *bool) {
+	tx.Timeboosted = val
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
@@ -94,6 +104,10 @@ func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 	}
 	if tx.FeeCap != nil {
 		cpy.FeeCap.Set(tx.FeeCap)
+	}
+	if tx.Timeboosted != nil {
+		val := *tx.Timeboosted
+		cpy.Timeboosted = &val
 	}
 	cpy.V.Set(&tx.V)
 	cpy.R.Set(&tx.R)
@@ -159,8 +173,8 @@ func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Trans
 // transactions, it returns the type and payload.
 func (tx *DynamicFeeTransaction) MarshalBinary(w io.Writer) error {
 	payloadSize, accessListLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = DynamicFeeTxType
 	if _, err := w.Write(b[:1]); err != nil {
@@ -236,8 +250,8 @@ func (tx *DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, accessListLen := tx.payloadSize()
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
@@ -363,7 +377,7 @@ func (tx *DynamicFeeTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(DynamicFeeTxType, []any{
+	hash := PrefixedRlpHash(DynamicFeeTxType, []any{
 		tx.ChainID,
 		tx.Nonce,
 		tx.TipCap,
@@ -392,7 +406,7 @@ type dynamicFeeTxSigHash struct {
 }
 
 func (tx *DynamicFeeTransaction) SigningHash(chainID *big.Int) common.Hash {
-	return prefixedRlpHash(
+	return PrefixedRlpHash(
 		DynamicFeeTxType,
 		&dynamicFeeTxSigHash{
 			ChainID:    chainID,
@@ -418,7 +432,7 @@ func (tx *DynamicFeeTransaction) GetChainID() *uint256.Int {
 	return tx.ChainID
 }
 
-func (tx *DynamicFeeTransaction) cachedSender() (sender accounts.Address, ok bool) {
+func (tx *DynamicFeeTransaction) CachedSender() (sender accounts.Address, ok bool) {
 	s := tx.from
 	if s.IsNil() {
 		return sender, false

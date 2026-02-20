@@ -216,6 +216,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 	} else {
 		txType = _type
 	}
+
 	var to *common.Address
 	if tr.RandIntInRange(0, 10)%2 == 0 {
 		_to := tr.RandAddress()
@@ -242,19 +243,21 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 	case AccessListTxType:
 		return &AccessListTx{
 			LegacyTx: LegacyTx{
-				CommonTx: commonTx, //nolint
-				GasPrice: uint256.NewInt(*tr.RandUint64()),
+				CommonTx:    commonTx, //nolint
+				GasPrice:    uint256.NewInt(*tr.RandUint64()),
+				Timeboosted: boolPtr(tr.RandBoolean()),
 			},
 			ChainID:    uint256.NewInt(*tr.RandUint64()),
 			AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
 		}
 	case DynamicFeeTxType:
 		return &DynamicFeeTransaction{
-			CommonTx:   commonTx, //nolint
-			ChainID:    uint256.NewInt(*tr.RandUint64()),
-			TipCap:     uint256.NewInt(*tr.RandUint64()),
-			FeeCap:     uint256.NewInt(*tr.RandUint64()),
-			AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
+			CommonTx:    commonTx, //nolint
+			ChainID:     uint256.NewInt(*tr.RandUint64()),
+			TipCap:      uint256.NewInt(*tr.RandUint64()),
+			FeeCap:      uint256.NewInt(*tr.RandUint64()),
+			AccessList:  tr.RandAccessList(tr.RandIntInRange(1, 5)),
+			Timeboosted: boolPtr(tr.RandBoolean()),
 		}
 	case BlobTxType:
 		r := *tr.RandUint64()
@@ -550,6 +553,7 @@ func TestTransactionEncodeDecodeRLP(t *testing.T) {
 
 		dec, err := DecodeRLPTransaction(s, false)
 		if err != nil {
+
 			t.Errorf("error: DecodeRLPTransaction: %v", err)
 		}
 		compareTransactions(t, enc, dec)

@@ -81,7 +81,7 @@ type ErigonLogs []*ErigonLog
 // RPCLog Extends `types.Log` and add BlockTimestamp field
 type RPCLog struct {
 	Log
-	BlockTimestamp uint64 `json:"blockTimestamp" codec:"-"`
+	BlockTimestamp uint64 `json:"-" codec:"-"` // omit this field while arbitrum has not yet inherited this change from geth
 }
 
 type RPCLogs []*RPCLog

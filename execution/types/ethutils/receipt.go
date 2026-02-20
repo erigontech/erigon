@@ -54,8 +54,8 @@ func MarshalReceipt(
 
 	var from accounts.Address
 	if signed {
-		signer := types.LatestSignerForChainID(chainId)
-		from, _ = txn.Sender(*signer)
+		signer := types.NewArbitrumSigner(*types.LatestSignerForChainID(chainId))
+		from, _ = signer.Sender(txn)
 	}
 
 	var logsToMarshal any
@@ -129,6 +129,33 @@ func MarshalReceipt(
 		}
 	}
 
+	// Set arbitrum related fields
+	if chainConfig.IsArbitrum() {
+		fields["gasUsedForL1"] = hexutil.Uint64(receipt.GasUsedForL1)
+
+		if chainConfig.IsArbitrumNitro(header.Number) {
+			fields["effectiveGasPrice"] = hexutil.Uint64(header.BaseFee.Uint64())
+			fields["l1BlockNumber"] = hexutil.Uint64(types.DeserializeHeaderExtraInformation(header).L1BlockNumber)
+			fields["timeboosted"] = txn.IsTimeBoosted()
+		} else {
+			arbTx, ok := txn.(*types.ArbitrumLegacyTxData)
+			if !ok {
+				log.Error("Expected transaction to contain arbitrum data", "txHash", txn.Hash())
+			} else {
+				fields["effectiveGasPrice"] = hexutil.Uint64(arbTx.EffectiveGasPrice)
+				fields["l1BlockNumber"] = hexutil.Uint64(arbTx.L1BlockNumber)
+			}
+		}
+
+		// For ArbitrumSubmitRetryableTx we have to take the effective gas used from txn itself and correct cumulativeGasUsed
+		if arbitrumTx, ok := txn.(*types.ArbitrumSubmitRetryableTx); ok {
+			// Find the cumulative gas used by subtracting the gas used from receipt
+			cumulativeGasUSed := receipt.CumulativeGasUsed - receipt.GasUsed
+			fields["effectiveGasPrice"] = hexutil.Uint64(cumulativeGasUSed + arbitrumTx.EffectiveGasUsed)
+			// gasUsed is what transaction keeps
+			fields["gasUsed"] = hexutil.Uint64(arbitrumTx.EffectiveGasUsed)
+		}
+	}
 	return fields
 }
 

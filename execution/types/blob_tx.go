@@ -92,7 +92,7 @@ func (stx *BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*M
 	return &msg, nil
 }
 
-func (stx *BlobTx) cachedSender() (sender accounts.Address, ok bool) {
+func (stx *BlobTx) CachedSender() (sender accounts.Address, ok bool) {
 	s := stx.from
 	if s.IsNil() {
 		return sender, false
@@ -117,7 +117,7 @@ func (stx *BlobTx) Hash() common.Hash {
 	if hash := stx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(BlobTxType, []any{
+	hash := PrefixedRlpHash(BlobTxType, []any{
 		stx.ChainID,
 		stx.Nonce,
 		stx.TipCap,
@@ -150,7 +150,7 @@ type blobTxSigHash struct {
 }
 
 func (stx *BlobTx) SigningHash(chainID *big.Int) common.Hash {
-	return prefixedRlpHash(
+	return PrefixedRlpHash(
 		BlobTxType,
 		&blobTxSigHash{
 			ChainID:    chainID,
@@ -301,8 +301,8 @@ func (stx *BlobTx) EncodeRLP(w io.Writer) error {
 	payloadSize, accessListLen, blobHashesLen := stx.payloadSize()
 	// size of struct prefix and TxType
 	envelopeSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// envelope
 	if err := rlp.EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
 		return err
@@ -323,8 +323,8 @@ func (stx *BlobTx) MarshalBinary(w io.Writer) error {
 		return ErrNilToFieldTx
 	}
 	payloadSize, accessListLen, blobHashesLen := stx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = BlobTxType
 	if _, err := w.Write(b[:1]); err != nil {

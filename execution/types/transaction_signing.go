@@ -52,7 +52,7 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 		}
 		signer.unprotected = true
 		switch {
-		case config.IsPrague(blockTime):
+		case config.IsPrague(blockTime, 0):
 			signer.protected = true
 			signer.accessList = true
 			signer.dynamicFee = true
@@ -68,7 +68,7 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 			signer.setCode = true
 			signer.chainID.Set(&chainId)
 			signer.chainIDMul.Lsh(&chainId, 1) // ×2
-		case config.IsCancun(blockTime):
+		case config.IsCancun(blockTime, 0):
 			// All transaction types are still supported
 			signer.protected = true
 			signer.accessList = true

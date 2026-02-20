@@ -77,7 +77,7 @@ func (tx *AccountAbstractionTransaction) Sender(signer Signer) (accounts.Address
 	return tx.SenderAddress, nil
 }
 
-func (tx *AccountAbstractionTransaction) cachedSender() (accounts.Address, bool) {
+func (tx *AccountAbstractionTransaction) CachedSender() (accounts.Address, bool) {
 	return tx.SenderAddress, true
 }
 
@@ -94,6 +94,13 @@ func (tx *AccountAbstractionTransaction) IsContractDeploy() bool {
 
 func (tx *AccountAbstractionTransaction) Unwrap() Transaction {
 	return tx
+}
+
+func (tx *AccountAbstractionTransaction) IsTimeBoosted() *bool {
+	return nil
+}
+
+func (tx *AccountAbstractionTransaction) SetTimeboosted(_ *bool) {
 }
 
 func (tx *AccountAbstractionTransaction) GetChainID() *uint256.Int {
@@ -180,7 +187,7 @@ func (tx *AccountAbstractionTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash
 	}
-	hash := prefixedRlpHash(AccountAbstractionTxType, []any{
+	hash := PrefixedRlpHash(AccountAbstractionTxType, []any{
 		tx.ChainID,
 		tx.NonceKey, tx.Nonce,
 		tx.SenderAddress, tx.SenderValidationData,
@@ -200,7 +207,7 @@ func (tx *AccountAbstractionTransaction) Hash() common.Hash {
 }
 
 func (tx *AccountAbstractionTransaction) SigningHash(chainID *big.Int) common.Hash {
-	hash := prefixedRlpHash(AccountAbstractionTxType, []any{
+	hash := PrefixedRlpHash(AccountAbstractionTxType, []any{
 		chainID,
 		tx.NonceKey, tx.Nonce,
 		tx.SenderAddress, tx.SenderValidationData,
@@ -273,8 +280,8 @@ func (tx *AccountAbstractionTransaction) EncodingSize() int {
 func (tx *AccountAbstractionTransaction) EncodeRLP(w io.Writer) error {
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
 	envelopSize := 1 + rlp.ListPrefixLen(payloadSize) + payloadSize
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode envelope size
 	if err := rlp.EncodeStringSizePrefix(envelopSize, w, b[:]); err != nil {
 		return err
@@ -509,8 +516,8 @@ func (tx *AccountAbstractionTransaction) DecodeRLP(s *rlp.Stream) error {
 
 func (tx *AccountAbstractionTransaction) MarshalBinary(w io.Writer) error {
 	payloadSize, accessListLen, authorizationsLen := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = AccountAbstractionTxType
 	if _, err := w.Write(b[:1]); err != nil {

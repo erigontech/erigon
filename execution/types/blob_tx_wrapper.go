@@ -351,7 +351,7 @@ func (txw *BlobTxWrapper) RawSignatureValues() (*uint256.Int, *uint256.Int, *uin
 	return txw.Tx.RawSignatureValues()
 }
 
-func (txw *BlobTxWrapper) cachedSender() (accounts.Address, bool) { return txw.Tx.cachedSender() }
+func (txw *BlobTxWrapper) CachedSender() (accounts.Address, bool) { return txw.Tx.CachedSender() }
 
 func (txw *BlobTxWrapper) Sender(s Signer) (accounts.Address, error) { return txw.Tx.Sender(s) }
 
@@ -362,6 +362,14 @@ func (txw *BlobTxWrapper) SetSender(address accounts.Address) { txw.Tx.SetSender
 func (txw *BlobTxWrapper) IsContractDeploy() bool { return txw.Tx.IsContractDeploy() }
 
 func (txw *BlobTxWrapper) Unwrap() Transaction { return &txw.Tx }
+
+func (txw *BlobTxWrapper) IsTimeBoosted() *bool {
+	return txw.Tx.IsTimeBoosted()
+}
+
+func (txw *BlobTxWrapper) SetTimeboosted(val *bool) {
+	txw.Tx.SetTimeboosted(val)
+}
 
 func (txw *BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
@@ -418,8 +426,8 @@ func (txw *BlobTxWrapper) payloadSize() (payloadSize int) {
 	return
 }
 func (txw *BlobTxWrapper) MarshalBinaryWrapped(w io.Writer) error {
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	// encode TxType
 	b[0] = BlobTxType
 	if _, err := w.Write(b[:1]); err != nil {

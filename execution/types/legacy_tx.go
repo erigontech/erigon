@@ -95,6 +95,8 @@ func (ct *CommonTx) GetBlobHashes() []common.Hash {
 type LegacyTx struct {
 	CommonTx
 	GasPrice *uint256.Int // wei per gas
+
+	Timeboosted *bool
 }
 
 func (tx *LegacyTx) GetTipCap() *uint256.Int { return tx.GasPrice }
@@ -125,11 +127,19 @@ func (tx *LegacyTx) GetAuthorizations() []Authorization {
 }
 
 func (tx *LegacyTx) Protected() bool {
-	return isProtectedV(&tx.V)
+	return IsProtectedV(&tx.V)
 }
 
 func (tx *LegacyTx) Unwrap() Transaction {
 	return tx
+}
+
+func (tx *LegacyTx) IsTimeBoosted() *bool {
+	return tx.Timeboosted
+}
+
+func (tx *LegacyTx) SetTimeboosted(val *bool) {
+	tx.Timeboosted = val
 }
 
 // NewTransaction creates an unsigned legacy transaction.
@@ -177,6 +187,10 @@ func (tx *LegacyTx) copy() *LegacyTx {
 		},
 		GasPrice: new(uint256.Int),
 	}
+	if tx.Timeboosted != nil {
+		val := *tx.Timeboosted
+		cpy.Timeboosted = &val
+	}
 	if tx.Value != nil {
 		cpy.Value.Set(tx.Value)
 	}
@@ -211,8 +225,8 @@ func (tx *LegacyTx) payloadSize() (payloadSize int) {
 
 func (tx *LegacyTx) MarshalBinary(w io.Writer) error {
 	payloadSize := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	if err := tx.encodePayload(w, b[:], payloadSize); err != nil {
 		return err
 	}
@@ -257,8 +271,8 @@ func (tx *LegacyTx) encodePayload(w io.Writer, b []byte, payloadSize int) error 
 
 func (tx *LegacyTx) EncodeRLP(w io.Writer) error {
 	payloadSize := tx.payloadSize()
-	b := newEncodingBuf()
-	defer pooledBuf.Put(b)
+	b := NewEncodingBuf()
+	defer PooledBuf.Put(b)
 	if err := tx.encodePayload(w, b[:], payloadSize); err != nil {
 		return err
 	}
@@ -420,7 +434,7 @@ func (tx *LegacyTx) GetChainID() *uint256.Int {
 	return DeriveChainId(&tx.V)
 }
 
-func (tx *LegacyTx) cachedSender() (sender accounts.Address, ok bool) {
+func (tx *LegacyTx) CachedSender() (sender accounts.Address, ok bool) {
 	s := tx.from
 	if s.IsNil() {
 		return sender, false

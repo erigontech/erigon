@@ -69,6 +69,9 @@ type Receipt struct {
 	GasUsed         uint64         `json:"gasUsed" gencodec:"required"`
 	BlobGasUsed     uint64         `json:"blobGasUsed,omitempty"`
 
+	GasUsedForL1      uint64   `json:"gasUsedForL1"`      // Arbitrum L1 specific field, different from GasUsed (?)
+	EffectiveGasPrice *big.Int `json:"effectiveGasPrice"` // Arbitrum required, but tag omitted for backwards compatibility
+
 	// Inclusion information: These fields provide information about the inclusion of the
 	// transaction corresponding to this receipt.
 	BlockHash        common.Hash `json:"blockHash,omitempty"`
@@ -76,6 +79,10 @@ type Receipt struct {
 	TransactionIndex uint        `json:"transactionIndex"`
 
 	FirstLogIndexWithinBlock uint32 `json:"-"` // field which used to store in db and re-calc
+}
+
+func (r *Receipt) GasUsedForL2() uint64 {
+	return r.GasUsed - r.GasUsedForL1
 }
 
 type receiptMarshaling struct {
@@ -140,8 +147,8 @@ func (r Receipt) EncodeRLP(w io.Writer) error {
 	if r.Type == LegacyTxType {
 		return rlp.Encode(w, data)
 	}
-	buf := encodeBufferPool.Get().(*bytes.Buffer)
-	defer encodeBufferPool.Put(buf)
+	buf := EncodeBufferPool.Get().(*bytes.Buffer)
+	defer EncodeBufferPool.Put(buf)
 	buf.Reset()
 	if err := r.encodeTyped(data, buf); err != nil {
 		return err
@@ -156,8 +163,8 @@ func (r Receipt) EncodeRLP69(w io.Writer) error {
 	if r.Type == LegacyTxType {
 		return rlp.Encode(w, data)
 	}
-	buf := encodeBufferPool.Get().(*bytes.Buffer)
-	defer encodeBufferPool.Put(buf)
+	buf := EncodeBufferPool.Get().(*bytes.Buffer)
+	defer EncodeBufferPool.Put(buf)
 	buf.Reset()
 	if err := r.encodeTyped69(data, buf); err != nil {
 		return err
@@ -545,7 +552,7 @@ func (rs Receipts) EncodeRLP69(w io.Writer) error {
 func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash common.Hash, blockNum uint64, txn Transaction, prevCumulativeGasUsed uint64) error {
 	logIndex := r.FirstLogIndexWithinBlock // logIdx is unique within the block and starts from 0
 
-	sender, ok := txn.cachedSender()
+	sender, ok := txn.CachedSender()
 	if !ok {
 		return errors.New("tx must have cached sender")
 	}
