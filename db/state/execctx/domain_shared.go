@@ -408,10 +408,17 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
-	// Always go to DB/files for the correct (value, step) pair.
-	// The stateCache only stores values without step, so we cannot return
-	// step from cache (the old code returned sd.txNum/sd.stepSize which is
-	// the CURRENT step, not when the key was last written — see #19240).
+	// stateCache holds in-flight values from previous transactions in the same batch
+	// that haven't been flushed to DB yet. Early return keeps correctness AND performance.
+	// We return step=0 (unknown) because the cache doesn't store the step at which a key
+	// was last written — and prevStep has been removed from DomainPut (see #19240), so
+	// callers no longer require an accurate step from this path.
+	if sd.stateCache != nil {
+		if v, ok := sd.stateCache.Get(domain, k); ok {
+			return v, 0, nil
+		}
+	}
+
 	type MeteredGetter interface {
 		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *changeset.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
 	}
@@ -425,14 +432,9 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
-	// Use cached value if available (more up-to-date than DB within current batch),
-	// but keep DB step which is correct for DomainDiff tracking.
+	// Populate state cache on successful storage read
 	if sd.stateCache != nil {
-		if cachedV, ok := sd.stateCache.Get(domain, k); ok {
-			v = cachedV
-		} else {
-			sd.stateCache.Put(domain, k, v)
-		}
+		sd.stateCache.Put(domain, k, v)
 	}
 
 	return v, step, nil
