@@ -427,7 +427,7 @@ func (d *Downloader) snapshotDataLooksComplete(info *metainfo.Info) bool {
 // Log the names of torrents missing metainfo. We can pass a level in to scale the urgency of the
 // situation.
 func (d *Downloader) logNoMetadata(lvl log.Lvl, torrents []snapshot) {
-	var noMetadata []string
+	noMetadata := make([]string, 0, len(torrents))
 
 	for _, ps := range torrents {
 		t, ok := d.torrentClient.Torrent(ps.InfoHash)
@@ -1074,7 +1074,7 @@ func (d *Downloader) fetchMetainfoFromWebseeds(ctx context.Context, name string,
 		buf.Reset()
 		var mi metainfo.MetaInfo
 		var w io.Writer = &buf
-		mi, err = GetMetainfoFromWebseed(ctx, base, base, d.metainfoHttpClient, w)
+		mi, err = GetMetainfoFromWebseed(ctx, base, name, d.metainfoHttpClient, w)
 		if err != nil {
 			d.log(log.LvlDebug, "error fetching metainfo from webseed", "err", err, "name", name, "webseed", base)
 			// Whither error?

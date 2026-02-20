@@ -25,11 +25,15 @@ import (
 	"math/rand"
 	"net"
 	"reflect"
+	"slices"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mclock"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 	"github.com/erigontech/erigon/p2p/netutil"
@@ -51,136 +55,109 @@ func TestTable_pingReplace(t *testing.T) {
 }
 
 func testPingReplace(t *testing.T, newNodeIsResponding, lastInBucketIsResponding bool) {
+	simclock := new(mclock.Simulated)
 	transport := newPingRecorder()
-	tmpDir := t.TempDir()
-	tab, db := newTestTable(transport, tmpDir, log.Root())
+	tab, db := newTestTable(transport, Config{
+		Clock: simclock,
+		Log:   testlog.Logger(t, log.LvlTrace),
+	})
 	defer db.Close()
 	defer tab.close()
 
 	<-tab.initDone
 
 	// Fill up the sender's bucket.
-	pingKey, _ := crypto.HexToECDSA("45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8")
-	pingSender := wrapNode(enode.NewV4(&pingKey.PublicKey, net.IP{127, 0, 0, 1}, 99, 99))
-	last := fillBucket(tab, pingSender)
+	replacementNodeKey, _ := crypto.HexToECDSA("45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8")
+	replacementNode := enode.NewV4(&replacementNodeKey.PublicKey, net.IP{127, 0, 0, 1}, 99, 99)
+	last := fillBucket(tab, replacementNode.ID())
+	tab.mutex.Lock()
+	nodeEvents := newNodeEventRecorder(128)
+	tab.nodeAddedHook = nodeEvents.nodeAdded
+	tab.nodeRemovedHook = nodeEvents.nodeRemoved
+	tab.mutex.Unlock()
 
-	// Add the sender as if it just pinged us. Revalidate should replace the last node in
-	// its bucket if it is unresponsive. Revalidate again to ensure that
+	// The revalidation process should replace
+	// this node in the bucket if it is unresponsive.
 	transport.dead[last.ID()] = !lastInBucketIsResponding
-	transport.dead[pingSender.ID()] = !newNodeIsResponding
-	tab.addSeenNode(pingSender)
-	tab.doRevalidate(make(chan struct{}, 1))
-	tab.doRevalidate(make(chan struct{}, 1))
+	transport.dead[replacementNode.ID()] = !newNodeIsResponding
 
-	if !transport.pinged[last.ID()] {
-		// Oldest node in bucket is pinged to see whether it is still alive.
-		t.Error("table did not ping last node in bucket")
+	// Add replacement node to table.
+	tab.addFoundNode(replacementNode, false)
+
+	t.Log("last:", last.ID())
+	t.Log("replacement:", replacementNode.ID())
+
+	// Wait until the last node was pinged.
+	waitForRevalidationPing(t, transport, tab, last.ID())
+
+	if !lastInBucketIsResponding {
+		if !nodeEvents.waitNodeAbsent(last.ID(), 2*time.Second) {
+			t.Error("last node was not removed")
+		}
+		if !nodeEvents.waitNodePresent(replacementNode.ID(), 2*time.Second) {
+			t.Error("replacement node was not added")
+		}
+
+		// If a replacement is expected, we also need to wait until the replacement node
+		// was pinged and added/removed.
+		waitForRevalidationPing(t, transport, tab, replacementNode.ID())
+		if !newNodeIsResponding {
+			if !nodeEvents.waitNodeAbsent(replacementNode.ID(), 2*time.Second) {
+				t.Error("replacement node was not removed")
+			}
+		}
 	}
 
+	// Check bucket content.
 	tab.mutex.Lock()
 	defer tab.mutex.Unlock()
 	wantSize := bucketSize
 	if !lastInBucketIsResponding && !newNodeIsResponding {
 		wantSize--
 	}
-	if l := len(tab.bucket(pingSender.ID()).entries); l != wantSize {
-		t.Errorf("wrong bucket size after bond: got %d, want %d", l, wantSize)
+	bucket := tab.bucket(replacementNode.ID())
+	if l := len(bucket.entries); l != wantSize {
+		t.Errorf("wrong bucket size after revalidation: got %d, want %d", l, wantSize)
 	}
-	if found := contains(tab.bucket(pingSender.ID()).entries, last.ID()); found != lastInBucketIsResponding {
-		t.Errorf("last entry found: %t, want: %t", found, lastInBucketIsResponding)
+	if ok := containsID(bucket.entries, last.ID()); ok != lastInBucketIsResponding {
+		t.Errorf("revalidated node found: %t, want: %t", ok, lastInBucketIsResponding)
 	}
 	wantNewEntry := newNodeIsResponding && !lastInBucketIsResponding
-	if found := contains(tab.bucket(pingSender.ID()).entries, pingSender.ID()); found != wantNewEntry {
-		t.Errorf("new entry found: %t, want: %t", found, wantNewEntry)
+	if ok := containsID(bucket.entries, replacementNode.ID()); ok != wantNewEntry {
+		t.Errorf("replacement node found: %t, want: %t", ok, wantNewEntry)
 	}
 }
 
-func testTableBumpNoDuplicatesRun(t *testing.T, bucketCountGen byte, bumpCountGen byte, randGen *rand.Rand) bool {
-	generateBucketNodes := func(bucketCountGen byte) []*node {
-		bucketCount := bucketCountGen % (bucketSize + 1) // [0...bucketSize]
-		nodes := make([]*node, bucketCount)
-		for i := range nodes {
-			nodes[i] = nodeAtDistance(enode.ID{}, 200, intIP(200))
+// waitForRevalidationPing waits until a PING message is sent to a node with the given id.
+func waitForRevalidationPing(t *testing.T, transport *pingRecorder, tab *Table, id enode.ID) *enode.Node {
+	t.Helper()
+
+	simclock := tab.cfg.Clock.(*mclock.Simulated)
+	maxAttempts := tab.len() * 8
+	for i := 0; i < maxAttempts; i++ {
+		simclock.Run(tab.cfg.PingInterval * slowRevalidationFactor)
+		p := transport.waitPing(2 * time.Second)
+		if p == nil {
+			continue
 		}
-		return nodes
-	}
-
-	generateRandomBumpPositions := func(bumpCountGen byte, bucketCount int, randGen *rand.Rand) []int {
-		bumpCount := bumpCountGen % 100
-		bumps := make([]int, bumpCount)
-		for i := range bumps {
-			bumps[i] = randGen.Intn(bucketCount)
+		if id == (enode.ID{}) || p.ID() == id {
+			return p
 		}
-		return bumps
 	}
-
-	nodes := generateBucketNodes(bucketCountGen)
-	if len(nodes) == 0 {
-		return true
-	}
-	bumps := generateRandomBumpPositions(bumpCountGen, len(nodes), randGen)
-
-	if len(bumps) > 0 {
-		tmpDir := t.TempDir()
-		tab, db := newTestTable(newPingRecorder(), tmpDir, log.Root())
-		defer db.Close()
-		defer tab.close()
-
-		b := &bucket{entries: make([]*node, len(nodes))}
-		copy(b.entries, nodes)
-
-		for i, pos := range bumps {
-			tab.bumpInBucket(b, b.entries[pos])
-			if hasDuplicates(b.entries) {
-				t.Logf("bucket has duplicates after %d/%d bumps:", i+1, len(bumps))
-				for _, n := range b.entries {
-					t.Logf("  %p", n)
-				}
-				return false
-			}
-		}
-		checkIPLimitInvariant(t, tab)
-		return true
-	}
-	return true
-}
-
-func TestTable_bumpNoDuplicates_examples(t *testing.T) {
-	t.Parallel()
-
-	randGen := rand.New(rand.NewSource(time.Now().Unix()))
-
-	t.Run("n1b1", func(t *testing.T) {
-		testTableBumpNoDuplicatesRun(t, 1, 1, randGen)
-	})
-	t.Run("n1b5", func(t *testing.T) {
-		testTableBumpNoDuplicatesRun(t, 1, 5, randGen)
-	})
-	t.Run("n5b1", func(t *testing.T) {
-		testTableBumpNoDuplicatesRun(t, 5, 1, randGen)
-	})
-	t.Run("n5b10", func(t *testing.T) {
-		testTableBumpNoDuplicatesRun(t, 5, 10, randGen)
-	})
-	t.Run("n16b10", func(t *testing.T) {
-		testTableBumpNoDuplicatesRun(t, 16, 10, randGen)
-	})
-	t.Run("n16b90", func(t *testing.T) {
-		testTableBumpNoDuplicatesRun(t, 16, 90, randGen)
-	})
+	t.Fatalf("Table did not ping node %v (%d attempts)", id, maxAttempts)
+	return nil
 }
 
 // This checks that the table-wide IP limit is applied correctly.
 func TestTable_IPLimit(t *testing.T) {
 	transport := newPingRecorder()
-	tmpDir := t.TempDir()
-	tab, db := newTestTable(transport, tmpDir, log.Root())
+	tab, db := newTestTable(transport, Config{})
 	defer db.Close()
 	defer tab.close()
 
 	for i := 0; i < tableIPLimit+1; i++ {
 		n := nodeAtDistance(tab.self().ID(), i, net.IP{172, 0, 1, byte(i)})
-		tab.addSeenNode(n)
+		tab.addFoundNode(n, false)
 	}
 	if tab.len() > tableIPLimit {
 		t.Errorf("too many nodes in table")
@@ -191,15 +168,14 @@ func TestTable_IPLimit(t *testing.T) {
 // This checks that the per-bucket IP limit is applied correctly.
 func TestTable_BucketIPLimit(t *testing.T) {
 	transport := newPingRecorder()
-	tmpDir := t.TempDir()
-	tab, db := newTestTable(transport, tmpDir, log.Root())
+	tab, db := newTestTable(transport, Config{})
 	defer db.Close()
 	defer tab.close()
 
 	d := 3
 	for i := 0; i < bucketIPLimit+1; i++ {
 		n := nodeAtDistance(tab.self().ID(), d, net.IP{172, 0, 1, byte(i)})
-		tab.addSeenNode(n)
+		tab.addFoundNode(n, false)
 	}
 	if tab.len() > bucketIPLimit {
 		t.Errorf("too many nodes in table")
@@ -215,7 +191,7 @@ func checkIPLimitInvariant(t *testing.T, tab *Table) {
 	tabset := netutil.DistinctNetSet{Subnet: tableSubnet, Limit: tableIPLimit}
 	for _, b := range tab.buckets {
 		for _, n := range b.entries {
-			tabset.Add(n.IP())
+			tabset.AddAddr(n.IPAddr())
 		}
 	}
 	if tabset.String() != tab.ips.String() {
@@ -223,36 +199,31 @@ func checkIPLimitInvariant(t *testing.T, tab *Table) {
 	}
 }
 
-func testTableFindNodeByIDRun(t *testing.T, nodesCountGen uint16, resultsCountGen byte, rand *rand.Rand) bool {
-	if !t.Skipped() {
+func TestTable_findnodeByID(t *testing.T) {
+	t.Parallel()
+
+	test := func(test *closeTest) bool {
 		// for any node table, Target and N
 		transport := newPingRecorder()
-		tmpDir := t.TempDir()
-		tab, db := newTestTable(transport, tmpDir, log.Root())
+		tab, db := newTestTable(transport, Config{})
 		defer db.Close()
 		defer tab.close()
-
-		nodesCount := int(nodesCountGen) % (bucketSize*nBuckets + 1)
-		testNodes := generateNodes(rand, nodesCount)
-		fillTable(tab, testNodes)
-
-		target := enode.ID{}
-		resultsCount := int(resultsCountGen) % (bucketSize + 1)
+		fillTable(tab, test.All, true)
 
 		// check that closest(Target, N) returns nodes
-		result := tab.findnodeByID(target, resultsCount, false).entries
+		result := tab.findnodeByID(test.Target, test.N, false).entries
 		if hasDuplicates(result) {
 			t.Errorf("result contains duplicates")
 			return false
 		}
-		if !sortedByDistanceTo(target, result) {
+		if !sortedByDistanceTo(test.Target, result) {
 			t.Errorf("result is not sorted by distance to target")
 			return false
 		}
 
 		// check that the number of results is min(N, tablen)
-		wantN := resultsCount
-		if tlen := tab.len(); tlen < resultsCount {
+		wantN := test.N
+		if tlen := tab.len(); tlen < test.N {
 			wantN = tlen
 		}
 		if len(result) != wantN {
@@ -265,13 +236,13 @@ func testTableFindNodeByIDRun(t *testing.T, nodesCountGen uint16, resultsCountGe
 		// check that the result nodes have minimum distance to target.
 		for _, b := range tab.buckets {
 			for _, n := range b.entries {
-				if contains(result, n.ID()) {
+				if containsID(result, n.ID()) {
 					continue // don't run the check below for nodes in result
 				}
 				farthestResult := result[len(result)-1].ID()
-				if enode.DistCmp(target, n.ID(), farthestResult) < 0 {
+				if enode.DistCmp(test.Target, n.ID(), farthestResult) < 0 {
 					t.Errorf("table contains node that is closer to target but it's not in result")
-					t.Logf("  Target:          %v", target)
+					t.Logf("  Target:          %v", test.Target)
 					t.Logf("  Farthest Result: %v", farthestResult)
 					t.Logf("  ID:              %v", n.ID())
 					return false
@@ -280,127 +251,35 @@ func testTableFindNodeByIDRun(t *testing.T, nodesCountGen uint16, resultsCountGe
 		}
 		return true
 	}
-	return true
-}
-
-func TestTable_findNodeByID_examples(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
+	if err := quick.Check(test, quickcfg()); err != nil {
+		t.Error(err)
 	}
-
-	t.Parallel()
-
-	randGen := rand.New(rand.NewSource(time.Now().Unix()))
-
-	t.Run("n0r1", func(t *testing.T) {
-		testTableFindNodeByIDRun(t, 0, 1, randGen)
-	})
-	t.Run("n1r1", func(t *testing.T) {
-		testTableFindNodeByIDRun(t, 1, 1, randGen)
-	})
-	t.Run("n16r1", func(t *testing.T) {
-		testTableFindNodeByIDRun(t, bucketSize, 1, randGen)
-	})
-	t.Run("nMr1", func(t *testing.T) {
-		testTableFindNodeByIDRun(t, uint16(bucketSize*nBuckets), 1, randGen)
-	})
-	t.Run("n0r2", func(t *testing.T) {
-		testTableFindNodeByIDRun(t, 0, 2, randGen)
-	})
-	t.Run("n1r2", func(t *testing.T) {
-		testTableFindNodeByIDRun(t, 1, 2, randGen)
-	})
-	t.Run("n16r2", func(t *testing.T) {
-		testTableFindNodeByIDRun(t, bucketSize, 2, randGen)
-	})
-	t.Run("nMr2", func(t *testing.T) {
-		testTableFindNodeByIDRun(t, uint16(bucketSize*nBuckets), 2, randGen)
-	})
-	t.Run("n0rM", func(t *testing.T) {
-		testTableFindNodeByIDRun(t, 0, bucketSize, randGen)
-	})
-	t.Run("n1rM", func(t *testing.T) {
-		testTableFindNodeByIDRun(t, 1, bucketSize, randGen)
-	})
-	t.Run("n16rM", func(t *testing.T) {
-		testTableFindNodeByIDRun(t, bucketSize, bucketSize, randGen)
-	})
-	t.Run("nMrM", func(t *testing.T) {
-		testTableFindNodeByIDRun(t, uint16(bucketSize*nBuckets), bucketSize, randGen)
-	})
 }
 
-func testTableReadRandomNodesGetAllRun(t *testing.T, nodesCountGen uint16, rand *rand.Rand) bool {
-	nodesCount := nodesCountGen % 1000
-	if nodesCount > 0 {
-		buf := make([]*enode.Node, nodesCount)
-		transport := newPingRecorder()
-		tmpDir := t.TempDir()
-		tab, db := newTestTable(transport, tmpDir, log.Root())
-		defer db.Close()
-		defer tab.close()
-		<-tab.initDone
+type closeTest struct {
+	Self   enode.ID
+	Target enode.ID
+	All    []*enode.Node
+	N      int
+}
 
-		for i := 0; i < len(buf); i++ {
-			ld := rand.Intn(len(tab.buckets))
-			fillTable(tab, []*node{nodeAtDistance(tab.self().ID(), ld, intIP(ld))})
-		}
-		gotN := tab.ReadRandomNodes(buf)
-		if gotN != tab.len() {
-			t.Errorf("wrong number of nodes, got %d, want %d", gotN, tab.len())
-			return false
-		}
-		if hasDuplicates(wrapNodes(buf[:gotN])) {
-			t.Errorf("result contains duplicates")
-			return false
-		}
-		return true
+func (*closeTest) Generate(rand *rand.Rand, size int) reflect.Value {
+	t := &closeTest{
+		Self:   gen(enode.ID{}, rand).(enode.ID),
+		Target: gen(enode.ID{}, rand).(enode.ID),
+		N:      rand.Intn(bucketSize),
 	}
-	return true
-}
-
-func TestTable_ReadRandomNodesGetAll_examples(t *testing.T) {
-	t.Parallel()
-
-	randGen := rand.New(rand.NewSource(time.Now().Unix()))
-
-	t.Run("n1", func(t *testing.T) {
-		testTableReadRandomNodesGetAllRun(t, 1, randGen)
-	})
-	t.Run("n2", func(t *testing.T) {
-		testTableReadRandomNodesGetAllRun(t, 2, randGen)
-	})
-	t.Run("n20", func(t *testing.T) {
-		testTableReadRandomNodesGetAllRun(t, 20, randGen)
-	})
-	t.Run("n200", func(t *testing.T) {
-		testTableReadRandomNodesGetAllRun(t, 200, randGen)
-	})
-}
-
-func generateNodes(rand *rand.Rand, count int) []*node {
-	nodes := make([]*node, 0, count)
-	for i := 0; i < count; i++ {
-		nodes = append(nodes, generateNode(rand))
+	for _, id := range gen([]enode.ID{}, rand).([]enode.ID) {
+		r := new(enr.Record)
+		r.Set(enr.IPv4Addr(netutil.RandomAddr(rand, true)))
+		n := enode.SignNull(r, id)
+		t.All = append(t.All, n)
 	}
-	return nodes
+	return reflect.ValueOf(t)
 }
 
-func generateNode(rand *rand.Rand) *node {
-	var id enode.ID
-	rand.Read(id[:])
-
-	r := new(enr.Record)
-	r.Set(enr.IP(genIP(rand)))
-
-	n := wrapNode(enode.SignNull(r, id))
-	n.livenessChecks = 1
-	return n
-}
-
-func TestTable_addVerifiedNode(t *testing.T) {
-	tmpDir := t.TempDir()
-	tab, db := newTestTable(newPingRecorder(), tmpDir, log.Root())
+func TestTable_addInboundNode(t *testing.T) {
+	tab, db := newTestTable(newPingRecorder(), Config{})
 	<-tab.initDone
 	defer db.Close()
 	defer tab.close()
@@ -408,32 +287,29 @@ func TestTable_addVerifiedNode(t *testing.T) {
 	// Insert two nodes.
 	n1 := nodeAtDistance(tab.self().ID(), 256, net.IP{88, 77, 66, 1})
 	n2 := nodeAtDistance(tab.self().ID(), 256, net.IP{88, 77, 66, 2})
-	tab.addSeenNode(n1)
-	tab.addSeenNode(n2)
+	tab.addFoundNode(n1, false)
+	tab.addFoundNode(n2, false)
+	checkBucketContent(t, tab, []*enode.Node{n1, n2})
 
-	// Verify bucket content:
-	bcontent := []*node{n1, n2}
-	if !reflect.DeepEqual(tab.bucket(n1.ID()).entries, bcontent) {
-		t.Fatalf("wrong bucket content: %v", tab.bucket(n1.ID()).entries)
-	}
-
-	// Add a changed version of n2.
+	// Add a changed version of n2. The bucket should be updated.
 	newrec := n2.Record()
 	newrec.Set(enr.IP{99, 99, 99, 99})
-	newn2 := wrapNode(enode.SignNull(newrec, n2.ID()))
-	tab.addVerifiedNode(newn2)
+	n2v2 := enode.SignNull(newrec, n2.ID())
+	tab.addInboundNode(n2v2)
+	checkBucketContent(t, tab, []*enode.Node{n1, n2v2})
 
-	// Check that bucket is updated correctly.
-	newBcontent := []*node{newn2, n1}
-	if !reflect.DeepEqual(tab.bucket(n1.ID()).entries, newBcontent) {
-		t.Fatalf("wrong bucket content after update: %v", tab.bucket(n1.ID()).entries)
-	}
-	checkIPLimitInvariant(t, tab)
+	// Try updating n2 without sequence number change. The update is accepted
+	// because it's inbound.
+	newrec = n2.Record()
+	newrec.Set(enr.IP{100, 100, 100, 100})
+	newrec.SetSeq(n2.Seq())
+	n2v3 := enode.SignNull(newrec, n2.ID())
+	tab.addInboundNode(n2v3)
+	checkBucketContent(t, tab, []*enode.Node{n1, n2v3})
 }
 
-func TestTable_addSeenNode(t *testing.T) {
-	tmpDir := t.TempDir()
-	tab, db := newTestTable(newPingRecorder(), tmpDir, log.Root())
+func TestTable_addFoundNode(t *testing.T) {
+	tab, db := newTestTable(newPingRecorder(), Config{})
 	<-tab.initDone
 	defer db.Close()
 	defer tab.close()
@@ -441,25 +317,86 @@ func TestTable_addSeenNode(t *testing.T) {
 	// Insert two nodes.
 	n1 := nodeAtDistance(tab.self().ID(), 256, net.IP{88, 77, 66, 1})
 	n2 := nodeAtDistance(tab.self().ID(), 256, net.IP{88, 77, 66, 2})
-	tab.addSeenNode(n1)
-	tab.addSeenNode(n2)
+	tab.addFoundNode(n1, false)
+	tab.addFoundNode(n2, false)
+	checkBucketContent(t, tab, []*enode.Node{n1, n2})
 
-	// Verify bucket content:
-	bcontent := []*node{n1, n2}
-	if !reflect.DeepEqual(tab.bucket(n1.ID()).entries, bcontent) {
-		t.Fatalf("wrong bucket content: %v", tab.bucket(n1.ID()).entries)
-	}
-
-	// Add a changed version of n2.
+	// Add a changed version of n2. The bucket should be updated.
 	newrec := n2.Record()
 	newrec.Set(enr.IP{99, 99, 99, 99})
-	newn2 := wrapNode(enode.SignNull(newrec, n2.ID()))
-	tab.addSeenNode(newn2)
+	n2v2 := enode.SignNull(newrec, n2.ID())
+	tab.addFoundNode(n2v2, false)
+	checkBucketContent(t, tab, []*enode.Node{n1, n2v2})
 
-	// Check that bucket content is unchanged.
-	if !reflect.DeepEqual(tab.bucket(n1.ID()).entries, bcontent) {
-		t.Fatalf("wrong bucket content after update: %v", tab.bucket(n1.ID()).entries)
+	// Try updating n2 without a sequence number change.
+	// The update should not be accepted.
+	newrec = n2.Record()
+	newrec.Set(enr.IP{100, 100, 100, 100})
+	newrec.SetSeq(n2.Seq())
+	n2v3 := enode.SignNull(newrec, n2.ID())
+	tab.addFoundNode(n2v3, false)
+	checkBucketContent(t, tab, []*enode.Node{n1, n2v2})
+}
+
+// This test checks that discv4 nodes can update their own endpoint via PING.
+func TestTable_addInboundNodeUpdateV4Accept(t *testing.T) {
+	tab, db := newTestTable(newPingRecorder(), Config{})
+	<-tab.initDone
+	defer db.Close()
+	defer tab.close()
+
+	// Add a v4 node.
+	key, _ := crypto.HexToECDSA("dd3757a8075e88d0f2b1431e7d3c5b1562e1c0aab9643707e8cbfcc8dae5cfe3")
+	n1 := enode.NewV4(&key.PublicKey, net.IP{88, 77, 66, 1}, 9000, 9000)
+	tab.addInboundNode(n1)
+	checkBucketContent(t, tab, []*enode.Node{n1})
+
+	// Add an updated version with changed IP.
+	// The update will be accepted because it is inbound.
+	n1v2 := enode.NewV4(&key.PublicKey, net.IP{99, 99, 99, 99}, 9000, 9000)
+	tab.addInboundNode(n1v2)
+	checkBucketContent(t, tab, []*enode.Node{n1v2})
+}
+
+// This test checks that discv4 node entries will NOT be updated when a
+// changed record is found.
+func TestTable_addFoundNodeV4UpdateReject(t *testing.T) {
+	tab, db := newTestTable(newPingRecorder(), Config{})
+	<-tab.initDone
+	defer db.Close()
+	defer tab.close()
+
+	// Add a v4 node.
+	key, _ := crypto.HexToECDSA("dd3757a8075e88d0f2b1431e7d3c5b1562e1c0aab9643707e8cbfcc8dae5cfe3")
+	n1 := enode.NewV4(&key.PublicKey, net.IP{88, 77, 66, 1}, 9000, 9000)
+	tab.addFoundNode(n1, false)
+	checkBucketContent(t, tab, []*enode.Node{n1})
+
+	// Add an updated version with changed IP.
+	// The update won't be accepted because it isn't inbound.
+	n1v2 := enode.NewV4(&key.PublicKey, net.IP{99, 99, 99, 99}, 9000, 9000)
+	tab.addFoundNode(n1v2, false)
+	checkBucketContent(t, tab, []*enode.Node{n1})
+}
+
+func checkBucketContent(t *testing.T, tab *Table, nodes []*enode.Node) {
+	t.Helper()
+
+	b := tab.bucket(nodes[0].ID())
+	if reflect.DeepEqual(unwrapNodes(b.entries), nodes) {
+		return
 	}
+	t.Log("wrong bucket content. have nodes:")
+	for _, n := range b.entries {
+		t.Logf("  %v (seq=%v, ip=%v)", n.ID(), n.Seq(), n.IPAddr())
+	}
+	t.Log("want nodes:")
+	for _, n := range nodes {
+		t.Logf("  %v (seq=%v, ip=%v)", n.ID(), n.Seq(), n.IPAddr())
+	}
+	t.FailNow()
+
+	// Also check IP limits.
 	checkIPLimitInvariant(t, tab)
 }
 
@@ -467,8 +404,10 @@ func TestTable_addSeenNode(t *testing.T) {
 // announces a new sequence number, the new record should be pulled.
 func TestTable_revalidateSyncRecord(t *testing.T) {
 	transport := newPingRecorder()
-	tmpDir := t.TempDir()
-	tab, db := newTestTable(transport, tmpDir, log.Root())
+	tab, db := newTestTable(transport, Config{
+		Clock: new(mclock.Simulated),
+		Log:   testlog.Logger(t, log.LvlTrace),
+	})
 	<-tab.initDone
 	defer db.Close()
 	defer tab.close()
@@ -477,25 +416,81 @@ func TestTable_revalidateSyncRecord(t *testing.T) {
 	var r enr.Record
 	r.Set(enr.IP(net.IP{127, 0, 0, 1}))
 	id := enode.ID{1}
-	n1 := wrapNode(enode.SignNull(&r, id))
-	tab.addSeenNode(n1)
+	n1 := enode.SignNull(&r, id)
+	tab.addFoundNode(n1, false)
 
 	// Update the node record.
 	r.Set(enr.WithEntry("foo", "bar"))
 	n2 := enode.SignNull(&r, id)
 	transport.updateRecord(n2)
 
-	tab.doRevalidate(make(chan struct{}, 1))
+	// Wait for revalidation. We wait for the node to be revalidated two times
+	// in order to synchronize with the update in the table.
+	waitForRevalidationPing(t, transport, tab, n2.ID())
+	waitForRevalidationPing(t, transport, tab, n2.ID())
+
 	intable := tab.getNode(id)
 	if !reflect.DeepEqual(intable, n2) {
 		t.Fatalf("table contains old record with seq %d, want seq %d", intable.Seq(), n2.Seq())
 	}
 }
 
-func genIP(rand *rand.Rand) net.IP {
-	ip := make(net.IP, 4)
-	rand.Read(ip)
-	return ip
+func TestNodesPush(t *testing.T) {
+	var target enode.ID
+	n1 := nodeAtDistance(target, 255, intIP(1))
+	n2 := nodeAtDistance(target, 254, intIP(2))
+	n3 := nodeAtDistance(target, 253, intIP(3))
+	perm := [][]*enode.Node{
+		{n3, n2, n1},
+		{n3, n1, n2},
+		{n2, n3, n1},
+		{n2, n1, n3},
+		{n1, n3, n2},
+		{n1, n2, n3},
+	}
+
+	// Insert all permutations into lists with size limit 3.
+	for _, nodes := range perm {
+		list := nodesByDistance{target: target}
+		for _, n := range nodes {
+			list.push(n, 3)
+		}
+		if !slices.EqualFunc(list.entries, perm[0], nodeIDEqual) {
+			t.Fatal("not equal")
+		}
+	}
+
+	// Insert all permutations into lists with size limit 2.
+	for _, nodes := range perm {
+		list := nodesByDistance{target: target}
+		for _, n := range nodes {
+			list.push(n, 2)
+		}
+		if !slices.EqualFunc(list.entries, perm[0][:2], nodeIDEqual) {
+			t.Fatal("not equal")
+		}
+	}
+}
+
+func nodeIDEqual[N nodeType](n1, n2 N) bool {
+	return n1.ID() == n2.ID()
+}
+
+// gen wraps quick.Value so it's easier to use.
+// it generates a random value of the given value's type.
+func gen(typ interface{}, rand *rand.Rand) interface{} {
+	v, ok := quick.Value(reflect.TypeOf(typ), rand)
+	if !ok {
+		panic(fmt.Sprintf("couldn't generate random value of type %T", typ))
+	}
+	return v.Interface()
+}
+
+func quickcfg() *quick.Config {
+	return &quick.Config{
+		MaxCount: 500,
+		Rand:     rand.New(rand.NewSource(time.Now().Unix())),
+	}
 }
 
 func newkey() *ecdsa.PrivateKey {
@@ -504,100 +499,4 @@ func newkey() *ecdsa.PrivateKey {
 		panic("couldn't generate key: " + err.Error())
 	}
 	return key
-}
-
-func Benchmark_findnodeByID(b *testing.B) {
-	benchmarks := []struct {
-		name       string
-		tableSize  int
-		nresults   int
-		preferLive bool
-		liveRatio  float64
-	}{
-		{"SmallTable_5Results_NoPreferLive", 50, 5, false, 0.0},
-		{"SmallTable_16Results_NoPreferLive", 50, 16, false, 0.0},
-		{"SmallTable_5Results_PreferLive_AllLive", 50, 5, true, 1.0},
-		{"SmallTable_16Results_PreferLive_AllLive", 50, 16, true, 1.0},
-		{"SmallTable_5Results_PreferLive_HalfLive", 50, 5, true, 0.5},
-		{"SmallTable_16Results_PreferLive_HalfLive", 50, 16, true, 0.5},
-		{"MediumTable_5Results_NoPreferLive", 200, 5, false, 0.0},
-		{"MediumTable_16Results_NoPreferLive", 200, 16, false, 0.0},
-		{"MediumTable_5Results_PreferLive_AllLive", 200, 5, true, 1.0},
-		{"MediumTable_16Results_PreferLive_AllLive", 200, 16, true, 1.0},
-		{"MediumTable_5Results_PreferLive_HalfLive", 200, 5, true, 0.5},
-		{"MediumTable_16Results_PreferLive_HalfLive", 200, 16, true, 0.5},
-		{"LargeTable_5Results_NoPreferLive", 500, 5, false, 0.0},
-		{"LargeTable_16Results_NoPreferLive", 500, 16, false, 0.0},
-		{"LargeTable_5Results_PreferLive_AllLive", 500, 5, true, 1.0},
-		{"LargeTable_16Results_PreferLive_AllLive", 500, 16, true, 1.0},
-		{"LargeTable_5Results_PreferLive_HalfLive", 500, 5, true, 0.5},
-		{"LargeTable_16Results_PreferLive_HalfLive", 500, 16, true, 0.5},
-		{"FullTable_5Results_NoPreferLive", nBuckets * bucketSize, 5, false, 0.0},
-		{"FullTable_16Results_NoPreferLive", nBuckets * bucketSize, 16, false, 0.0},
-		{"FullTable_5Results_PreferLive_AllLive", nBuckets * bucketSize, 5, true, 1.0},
-		{"FullTable_16Results_PreferLive_AllLive", nBuckets * bucketSize, 16, true, 1.0},
-	}
-
-	for _, bm := range benchmarks {
-		b.Run(bm.name, func(b *testing.B) {
-			transport := newPingRecorder()
-			tmpDir := b.TempDir()
-			tab, db := newTestTable(transport, tmpDir, log.Root())
-			defer db.Close()
-			defer tab.close()
-
-			<-tab.initDone
-
-			nodes := generateTestNodes(bm.tableSize, tab.self().ID())
-			fillTable(tab, nodes)
-
-			if bm.preferLive && bm.liveRatio > 0 {
-				setNodesLive(tab, nodes, bm.liveRatio)
-			}
-
-			target := generateRandomID()
-
-			b.ResetTimer()
-			b.ReportAllocs()
-			for b.Loop() {
-				_ = tab.findnodeByID(target, bm.nresults, bm.preferLive)
-			}
-			b.StopTimer()
-		})
-	}
-}
-
-func generateTestNodes(count int, baseID enode.ID) []*node {
-	nodes := make([]*node, count)
-	for i := 0; i < count; i++ {
-		var r enr.Record
-		r.Set(enr.IP(net.IP{10, 0, byte(i >> 8), byte(i & 0xFF)}))
-		// Generate nodes at various distances
-		distance := i % 256
-		nodeID := idAtDistance(baseID, distance)
-		nodes[i] = wrapNode(enode.SignNull(&r, nodeID))
-	}
-	return nodes
-}
-
-func setNodesLive(tab *Table, nodes []*node, liveRatio float64) {
-	tab.mutex.Lock()
-	defer tab.mutex.Unlock()
-
-	liveCount := int(float64(len(nodes)) * liveRatio)
-	for i := 0; i < liveCount && i < len(nodes); i++ {
-		b := tab.bucket(nodes[i].ID())
-		for _, n := range b.entries {
-			if n.ID() == nodes[i].ID() {
-				n.livenessChecks = 1
-				break
-			}
-		}
-	}
-}
-
-func generateRandomID() enode.ID {
-	var id enode.ID
-	rand.Read(id[:])
-	return id
 }

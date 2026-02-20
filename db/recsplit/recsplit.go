@@ -28,8 +28,7 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
-
-	"github.com/erigontech/erigon/db/version"
+	"time"
 
 	"github.com/spaolacci/murmur3"
 
@@ -42,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano16"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
+	"github.com/erigontech/erigon/db/version"
 )
 
 var ErrCollision = errors.New("duplicate key")
@@ -130,6 +130,7 @@ type RecSplit struct {
 	logger             log.Logger
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
+	timings Timings
 
 	unaryBuf []uint64 // `recsplit` func returning `unary` array. re-using it between buckets
 }
@@ -152,6 +153,14 @@ type RecSplitArgs struct {
 	LeafSize   uint16
 
 	NoFsync bool // fsync is enabled by default, but tests can manually disable
+}
+
+type Timings struct {
+	Enabled    bool
+	AddStart   time.Time
+	AddTook    time.Duration
+	BuildStart time.Time
+	BuildTook  time.Duration
 }
 
 // DefaultLeafSize - LeafSize=8 and BucketSize=100, use about 1.8 bits per key. Increasing the leaf and bucket
@@ -595,14 +604,17 @@ func findBijection(bucket []uint64, salt uint64) uint64 {
 		var mask0, mask1, mask2, mask3, mask4, mask5, mask6, mask7 uint32
 		for i := uint16(0); i < m; i++ {
 			key := bucket[i]
-			mask0 |= uint32(1) << remap16(remix(key+salt), m)
-			mask1 |= uint32(1) << remap16(remix(key+salt+1), m)
-			mask2 |= uint32(1) << remap16(remix(key+salt+2), m)
-			mask3 |= uint32(1) << remap16(remix(key+salt+3), m)
-			mask4 |= uint32(1) << remap16(remix(key+salt+4), m)
-			mask5 |= uint32(1) << remap16(remix(key+salt+5), m)
-			mask6 |= uint32(1) << remap16(remix(key+salt+6), m)
-			mask7 |= uint32(1) << remap16(remix(key+salt+7), m)
+			// adding `& 31` - it doesn't have runtime overhead, but it tells for compiler that shift can't overflow
+			// and compiler generating less assembly checks: ~10% perf.
+			// it's safe because: len(bucket) <= leafSize <= 24
+			mask0 |= uint32(1) << remap16(remix(key+salt), m&31)
+			mask1 |= uint32(1) << remap16(remix(key+salt+1), m&31)
+			mask2 |= uint32(1) << remap16(remix(key+salt+2), m&31)
+			mask3 |= uint32(1) << remap16(remix(key+salt+3), m&31)
+			mask4 |= uint32(1) << remap16(remix(key+salt+4), m&31)
+			mask5 |= uint32(1) << remap16(remix(key+salt+5), m&31)
+			mask6 |= uint32(1) << remap16(remix(key+salt+6), m&31)
+			mask7 |= uint32(1) << remap16(remix(key+salt+7), m&31)
 		}
 		if mask0 == fullMask {
 			return salt
@@ -751,6 +763,12 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.keysAdded != rs.keyExpectedCount {
 		return fmt.Errorf("rs %s expected keys %d, got %d", rs.fileName, rs.keyExpectedCount, rs.keysAdded)
 	}
+	if rs.timings.Enabled {
+		rs.timings.AddTook = time.Since(rs.timings.AddStart) // assume Adding data into compressor complete
+		rs.timings.BuildStart = time.Now()
+		defer func() { rs.timings.BuildTook = time.Since(rs.timings.BuildStart) }()
+	}
+
 	var err error
 	if rs.indexF, err = dir.CreateTemp(rs.filePath); err != nil {
 		return fmt.Errorf("create index file %s: %w", rs.filePath, err)
@@ -927,7 +945,12 @@ func (rs *RecSplit) flushExistenceFilter() error {
 	return nil
 }
 
-func (rs *RecSplit) DisableFsync() { rs.noFsync = true }
+func (rs *RecSplit) DisableFsync()    { rs.noFsync = true }
+func (rs *RecSplit) Timings() Timings { return rs.timings }
+
+func (rs *RecSplit) CollectTimings() {
+	rs.timings.Enabled, rs.timings.AddStart = true, time.Now() // assume Adding data into compressor starting
+}
 
 // Fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
 // To achieve it: write to .tmp file then `rename` when file is ready.

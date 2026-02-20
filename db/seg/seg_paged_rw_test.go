@@ -42,7 +42,7 @@ func prepareLoremDictOnPagedWriter(t *testing.T, pageSize int, pageCompression b
 	require.NoError(err)
 	defer c.Close()
 
-	p := NewPagedWriter(NewWriter(c, CompressNone), pageCompression, tmpDir)
+	p := NewPagedWriter(NewWriter(c, CompressNone), pageCompression)
 	for k, w := range loremStrings {
 		key := fmt.Sprintf("key %d", k)
 		val := fmt.Sprintf("%s %d", w, k)
@@ -117,7 +117,7 @@ func (w *multyBytesWriter) GetValuesOnCompressedPage() int { return w.pageSize }
 func TestPage(t *testing.T) {
 	sampling := 2
 	buf, require := &multyBytesWriter{pageSize: sampling}, require.New(t)
-	w := NewPagedWriter(buf, false, t.TempDir())
+	w := NewPagedWriter(buf, false)
 	for i := 0; i < sampling+1; i++ {
 		k, v := fmt.Sprintf("k %d", i), fmt.Sprintf("v %d", i)
 		require.NoError(w.Add([]byte(k), []byte(v)))
@@ -173,7 +173,7 @@ func TestPagedReaderWithCompression(t *testing.T) {
 
 func BenchmarkName(b *testing.B) {
 	buf := &multyBytesWriter{pageSize: 16}
-	w := NewPagedWriter(buf, false, "")
+	w := NewPagedWriter(buf, false)
 	for i := 0; i < 16; i++ {
 		w.Add([]byte{byte(i)}, []byte{10 + byte(i)})
 	}

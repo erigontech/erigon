@@ -27,8 +27,6 @@ import (
 	"strings"
 	"time"
 
-	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/prune"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -40,7 +38,9 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/bitmapdb"
+	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
@@ -277,6 +277,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	rs.LogLvl(log.LvlTrace)
 
 	seq := &multiencseq.SequenceReader{}
+	it := &multiencseq.SequenceIterator{}
 
 	i := 0
 	for {
@@ -292,7 +293,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 			// fmt.Printf("ef key %x\n", keyBuf)
 
 			seq.Reset(efBaseTxNum, valBuf)
-			it := seq.Iterator(0)
+			it.Reset(seq, 0)
 			for it.HasNext() {
 				txNum, err := it.Next()
 				if err != nil {
@@ -853,6 +854,9 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 	if txNumFrom == txNumTo {
 		panic(fmt.Sprintf("assert: txNumFrom(%d) == txNumTo(%d)", txNumFrom, txNumTo))
 	}
+	if sf.historyDecomp == nil {
+		return // build was skipped — don't overwrite existing dirty files
+	}
 
 	h.InvertedIndex.integrateDirtyFiles(InvertedFiles{
 		decomp:    sf.efHistoryDecomp,
@@ -876,7 +880,7 @@ func (h *History) dataWriter(f *seg.Compressor) *seg.PagedWriter {
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
 	}
-	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0, h.dirs.Tmp)
+	return seg.NewPagedWriter(seg.NewWriter(f, h.Compression), f.GetValuesOnCompressedPage() > 0)
 }
 func (ht *HistoryRoTx) dataReader(f *seg.Decompressor) *seg.Reader { return ht.h.dataReader(f) }
 func (ht *HistoryRoTx) dataWriter(f *seg.Compressor) *seg.PagedWriter {
@@ -1480,6 +1484,27 @@ func (ht *HistoryRoTx) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit 
 		return nil, err
 	}
 	return stream.UnionKV(itOnFiles, itOnDB, limit), nil
+}
+
+// HistoryKeyTxNumRange returns (key, txNum) pairs for every txNum at which a key changed in [fromTxNum, toTxNum).
+// Output is sorted by key ASC. Duplicates across files are not deduplicated.
+func (ht *HistoryRoTx) HistoryKeyTxNumRange(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.KU64, error) {
+	if asc == order.Desc {
+		panic("not supported yet")
+	}
+	itOnFiles, err := ht.iterateKeyTxNumFrozen(fromTxNum, toTxNum, asc, limit)
+	if err != nil {
+		return nil, err
+	}
+	dbFrom := fromTxNum
+	if len(ht.iit.files) > 0 {
+		dbFrom = max(fromTxNum, int(ht.iit.files.EndTxNum()))
+	}
+	itOnDB, err := ht.iterateKeyTxNumRecent(dbFrom, toTxNum, asc, limit, roTx)
+	if err != nil {
+		return nil, err
+	}
+	return stream.MultisetKU64(itOnFiles, itOnDB, limit), nil
 }
 
 func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, dumpTo func(key []byte, txNum uint64, val []byte)) error {

@@ -343,8 +343,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addrA),
 		Data:    v,
-	})
-	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+	}, &remoteproto.AccountChange{
 		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addrB),
 		Data:    v,
@@ -924,8 +923,8 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			t.Cleanup(cancel)
 			tx, err := coreDB.BeginTemporalRw(ctx)
-			defer tx.Rollback()
 			asrt.NoError(err)
+			defer tx.Rollback()
 			sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 			asrt.NoError(err)
 			defer sd.Close()
@@ -1048,8 +1047,8 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	require.NoError(t, err)
 	pool.blockGasLimit.Store(30_000_000)
 	tx, err := coreDB.BeginTemporalRw(ctx)
-	defer tx.Rollback()
 	require.NoError(t, err)
+	defer tx.Rollback()
 	sd, err := execctx.NewSharedDomains(ctx, tx.(kv.TemporalTx), logger)
 	require.NoError(t, err)
 	defer sd.Close()
@@ -1086,6 +1085,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 
 // Blob gas price bump + other requirements to replace existing txns in the pool
 func TestBlobTxnReplacement(t *testing.T) {
+	t.Parallel()
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 5)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
@@ -1305,7 +1305,7 @@ func makeWrappedBlobTxnRlpWithCellProofs(t *testing.T, chainID *uint256.Int, blo
 		require.NoError(err)
 
 		copy(wrapper.Commitments[i][:], commitment[:])
-		for _, proof := range cellProofs {
+		for _, proof := range &cellProofs {
 			var proofBytes types.KZGProof
 			copy(proofBytes[:], proof[:])
 			wrapper.Proofs = append(wrapper.Proofs, proofBytes)
