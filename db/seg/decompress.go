@@ -556,8 +556,8 @@ type Getter struct {
 	dataP   uint64    // current byte offset in data
 	dataLen uint64    // u64-typed len(data) to reduce amount of type-casting
 	dataBit int       // bit offset within current byte (0-7)
+	posMask uint16    // cached posDict.mask, avoids pointer chain
 	posDict *posTable // Huffman table for positions
-	posMask uint16    // pre-computed posDict.mask, avoids pointer chain
 	data    []byte
 	//less hot fields
 	patternDict *patternTable
