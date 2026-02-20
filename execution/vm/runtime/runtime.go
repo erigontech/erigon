@@ -25,7 +25,6 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/holiman/uint256"
 
@@ -93,9 +92,6 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Difficulty == nil {
 		cfg.Difficulty = new(uint256.Int)
-	}
-	if cfg.Time == 0 {
-		cfg.Time = uint64(time.Now().Unix())
 	}
 	if cfg.GasLimit == 0 {
 		cfg.GasLimit = math.MaxUint64
