@@ -1081,6 +1081,7 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 	t.Cleanup(db.Close)
 
 	agg := NewTest(dirs).Logger(logger).StepSize(1).MustOpen(t.Context(), db)
+	t.Cleanup(agg.Close)
 	setup := func() (account *Domain) {
 		agg.RegisterDomain(statecfg.Schema.GetDomainCfg(kv.AccountsDomain), nil, dirs, logger)
 		domain := agg.d[kv.AccountsDomain]
