@@ -312,7 +312,6 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 			case "y", "yes":
 				withHistory = true
 			case "n", "no":
-				// withHistory stays false
 			default:
 				return fmt.Errorf("invalid response %q: expected yes or no", resp)
 			}
