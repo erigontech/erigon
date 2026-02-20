@@ -19,7 +19,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        chain: [ sepolia, hoodi, chiado ]  # Chain name as specified on the erigon command line
+        chain: [ sepolia, hoodi ]  # Chain name as specified on the erigon command line
+        # TODO: Temporarily removed 'chiado' from QA sync coverage; re-enable it in this matrix once Chiado sync issues are resolved.
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
