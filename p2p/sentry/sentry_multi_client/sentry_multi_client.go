@@ -251,7 +251,13 @@ func NewMultiClient(
 			return nil, fmt.Errorf("recovery from DB failed: %w", err)
 		}
 	} else {
-		hd = &headerdownload.HeaderDownload{}
+		hd = headerdownload.NewHeaderDownload(
+			0, /* anchorLimit */
+			0, /* linkLimit */
+			nil,
+			nil,
+			nil,
+		)
 	}
 
 	// body downloader

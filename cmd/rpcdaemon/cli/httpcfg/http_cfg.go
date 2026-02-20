@@ -101,11 +101,14 @@ type HttpCfg struct {
 	LogDirPath      string
 
 	BatchLimit                  int  // Maximum number of requests in a batch
+	BatchResponseMaxSize        int  // Maximum response size for a JSON-RPC batch measured in bytes
 	ReturnDataLimit             int  // Maximum number of bytes returned from calls (like eth_call)
 	AllowUnprotectedTxs         bool // Whether to allow non EIP-155 protected transactions  txs over RPC
 	MaxGetProofRewindBlockCount int  //Max GetProof rewind block count
 	// Ots API
 	OtsMaxPageSize uint64
+
+	IsArbitrum bool
 
 	RPCSlowLogThreshold time.Duration
 

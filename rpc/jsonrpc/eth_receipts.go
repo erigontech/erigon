@@ -594,8 +594,11 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	if err != nil {
 		return nil, err
 	}
-
-	return ethutils.MarshalReceipt(receipt, txn, chainConfig, header, txnHash, true, true), nil
+	withBlockTimestamp := true
+	if chainConfig.IsArbitrum() {
+		withBlockTimestamp = false
+	}
+	return ethutils.MarshalReceipt(receipt, txn, chainConfig, header, txnHash, true, withBlockTimestamp), nil
 }
 
 // GetBlockReceipts - receipts for individual block
@@ -636,7 +639,11 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	result := make([]map[string]any, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		result = append(result, ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, true))
+		withBlockTimestamp := true
+		if chainConfig.IsArbitrum() {
+			withBlockTimestamp = false
+		}
+		result = append(result, ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, withBlockTimestamp))
 	}
 
 	if chainConfig.Bor != nil {

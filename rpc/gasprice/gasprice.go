@@ -328,3 +328,8 @@ func setBorDefaultGpoIgnorePrice(chainConfig *chain.Config, gasPriceConfig gaspr
 		gasPriceConfig.IgnorePrice = gaspricecfg.BorDefaultGpoIgnorePrice
 	}
 }
+
+// Arbitrum
+// EstimateGasErrorRatio is the amount of overestimation eth_estimateGas is
+// allowed to produce in order to speed up calculations.
+const EstimateGasErrorRatio = 0.015

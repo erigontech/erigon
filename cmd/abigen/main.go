@@ -102,18 +102,6 @@ func abigen(c *cli.Context) error {
 	if c.String(pkgFlag.Name) == "" {
 		utils.Fatalf("No destination package specified (--pkg)")
 	}
-	var lang bind.Lang
-	switch c.String(langFlag.Name) {
-	case "go":
-		lang = bind.LangGo
-	case "java":
-		lang = bind.LangJava
-	case "objc":
-		lang = bind.LangObjC
-		utils.Fatalf("Objc binding generation is uncompleted")
-	default:
-		utils.Fatalf("Unsupported destination language \"%s\" (--lang)", c.String(langFlag.Name))
-	}
 	// If the entire solidity code was specified, build and bind based on that
 	var (
 		abis    []string
@@ -206,7 +194,7 @@ func abigen(c *cli.Context) error {
 		}
 	}
 	// Generate the contract binding
-	code, err := bind.Bind(types, abis, bins, sigs, c.String(pkgFlag.Name), lang, libs, aliases)
+	code, err := bind.Bind(types, abis, bins, sigs, c.String(pkgFlag.Name), bind.LangGo, libs, aliases)
 	if err != nil {
 		utils.Fatalf("Failed to generate ABI binding: %v", err)
 	}

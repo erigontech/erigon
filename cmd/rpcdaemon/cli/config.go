@@ -419,6 +419,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, nil, errors.New("chain config not found in db. Need start erigon at least once on this db")
 		}
 		cfg.Snap.ChainName = cc.ChainName
+		cfg.IsArbitrum = cc.IsArbitrum()
 		// Configure sapshots
 		cfg.Sync, err = features.EnableSyncCfg(rawDB, cfg.Sync)
 		if err != nil {

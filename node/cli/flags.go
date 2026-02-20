@@ -74,6 +74,37 @@ var (
 		Value: kv.ReadersLimit - 128,
 	}
 
+	L2RPCAddrFlag = cli.StringFlag{
+		Name:  "l2rpc",
+		Usage: "address of Arbitrum L2 rpc server to get blocks and transactions from",
+		Value: "",
+	}
+	L2RPCReceiptAddrFlag = cli.StringFlag{
+		Name:  "l2rpc.receipt",
+		Usage: "address of Arbitrum L2 rpc server to fetch receipts from (if different from l2rpc)",
+		Value: "",
+	}
+	L2RPCBlockRPSFlag = cli.IntFlag{
+		Name:  "l2rpc.block.rps.limit",
+		Usage: "requests per second limit for block fetching from L2 RPC",
+		Value: 5000,
+	}
+	L2RPCBlockBurstFlag = cli.IntFlag{
+		Name:  "l2rpc.block.rps.burst",
+		Usage: "burst limit for block fetching from L2 RPC",
+		Value: 5,
+	}
+	L2RPCReceiptRPSFlag = cli.IntFlag{
+		Name:  "l2rpc.receipt.rps.limit",
+		Usage: "requests per second limit for receipt fetching from L2 RPC",
+		Value: 590,
+	}
+	L2RPCReceiptBurstFlag = cli.IntFlag{
+		Name:  "l2rpc.receipt.rps.burst",
+		Usage: "burst limit for receipt fetching from L2 RPC",
+		Value: 3,
+	}
+
 	PruneModeFlag = cli.StringFlag{
 		Name: "prune.mode",
 		Usage: `Choose a pruning preset to run onto. Available values: "full", "archive", "minimal", "blocks".
@@ -240,6 +271,8 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	}
 	_ = chainId
 
+	applyL2RPCFlagsFromCli(ctx, cfg)
+
 	blockDistance := ctx.Uint64(PruneBlocksDistanceFlag.Name)
 	distance := ctx.Uint64(PruneDistanceFlag.Name)
 
@@ -346,6 +379,8 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	}
 
 	cfg.Prune = mode
+
+	applyL2RPCFlagsFromCobra(f, cfg)
 
 	if v := f.String(BatchSizeFlag.Name, BatchSizeFlag.Value, BatchSizeFlag.Usage); v != nil {
 		err := cfg.BatchSize.UnmarshalText([]byte(*v))
@@ -548,4 +583,67 @@ func setPrivateApi(ctx *cli.Context, cfg *nodecfg.Config) {
 		cfg.TLSCACert = ctx.String(TLSCACertFlag.Name)
 	}
 	cfg.HealthCheck = ctx.Bool(HealthCheckFlag.Name)
+}
+
+func applyL2RPCFlagsFromCli(ctx *cli.Context, cfg *ethconfig.Config) {
+	cfg.L2RPC.Addr = ctx.String(L2RPCAddrFlag.Name)
+	if cfg.L2RPC.Addr != "" {
+		log.Info("[Arbitrum] Using L2 RPC server to fetch blocks", "address", cfg.L2RPC.Addr)
+	}
+
+	cfg.L2RPC.ReceiptAddr = ctx.String(L2RPCReceiptAddrFlag.Name)
+	if cfg.L2RPC.ReceiptAddr == "" {
+		cfg.L2RPC.ReceiptAddr = cfg.L2RPC.Addr
+	}
+	if cfg.L2RPC.ReceiptAddr != "" {
+		log.Info("[Arbitrum] Using L2 RPC server to fetch receipts", "address", cfg.L2RPC.ReceiptAddr)
+	}
+
+	cfg.L2RPC.BlockRPS = ctx.Int(L2RPCBlockRPSFlag.Name)
+	cfg.L2RPC.BlockBurst = ctx.Int(L2RPCBlockBurstFlag.Name)
+	cfg.L2RPC.ReceiptRPS = ctx.Int(L2RPCReceiptRPSFlag.Name)
+	cfg.L2RPC.ReceiptBurst = ctx.Int(L2RPCReceiptBurstFlag.Name)
+}
+
+func applyL2RPCFlagsFromCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
+	if flg := f.Lookup(L2RPCAddrFlag.Name); flg != nil {
+		cfg.L2RPC.Addr = flg.Value.String()
+	}
+	if cfg.L2RPC.Addr != "" {
+		log.Info("[Arbitrum] Using L2 RPC server to fetch blocks", "address", cfg.L2RPC.Addr)
+	}
+
+	if flg := f.Lookup(L2RPCReceiptAddrFlag.Name); flg != nil {
+		cfg.L2RPC.ReceiptAddr = flg.Value.String()
+	}
+	if cfg.L2RPC.ReceiptAddr == "" {
+		cfg.L2RPC.ReceiptAddr = cfg.L2RPC.Addr
+	}
+	if cfg.L2RPC.ReceiptAddr != "" {
+		log.Info("[Arbitrum] Using L2 RPC server to fetch receipts", "address", cfg.L2RPC.ReceiptAddr)
+	}
+
+	if v, err := f.GetInt(L2RPCBlockRPSFlag.Name); err == nil {
+		cfg.L2RPC.BlockRPS = v
+	} else {
+		cfg.L2RPC.BlockRPS = L2RPCBlockRPSFlag.Value
+	}
+
+	if v, err := f.GetInt(L2RPCBlockBurstFlag.Name); err == nil {
+		cfg.L2RPC.BlockBurst = v
+	} else {
+		cfg.L2RPC.BlockBurst = L2RPCBlockBurstFlag.Value
+	}
+
+	if v, err := f.GetInt(L2RPCReceiptRPSFlag.Name); err == nil {
+		cfg.L2RPC.ReceiptRPS = v
+	} else {
+		cfg.L2RPC.ReceiptRPS = L2RPCReceiptRPSFlag.Value
+	}
+
+	if v, err := f.GetInt(L2RPCReceiptBurstFlag.Name); err == nil {
+		cfg.L2RPC.ReceiptBurst = v
+	} else {
+		cfg.L2RPC.ReceiptBurst = L2RPCReceiptBurstFlag.Value
+	}
 }

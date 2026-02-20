@@ -546,6 +546,12 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 }
 
 func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.StateChangeBatch) error {
+	if tp, ok := f.pool.(*TxPool); ok {
+		// Arbitrum does not support state changes by txpool - transactions are delivered by streamer
+		if tp.chainConfig.IsArbitrum() {
+			return nil
+		}
+	}
 	var unwindTxns, unwindBlobTxns, minedTxns TxnSlots
 	for _, change := range req.ChangeBatch {
 		if change.Direction == remoteproto.Direction_FORWARD {

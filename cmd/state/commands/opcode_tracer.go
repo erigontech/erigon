@@ -732,7 +732,7 @@ func runBlock(engine rules.Engine, ibs *state.IntraBlockState, txnWriter state.S
 	chainConfig *chain2.Config, getHeader func(hash common.Hash, number uint64) (*types.Header, error), block *types.Block, vmConfig vm.Config, trace bool, logger log.Logger) (types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
-	gp := new(protocol.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
+	gp := new(protocol.GasPool).AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time, 0))
 	gasUsed := new(protocol.GasUsed)
 	var receipts types.Receipts
 	protocol.InitializeBlockExecution(engine, nil, header, chainConfig, ibs, nil, logger, nil)

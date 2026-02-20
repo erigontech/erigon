@@ -54,6 +54,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 	if err != nil {
 		return nil, err
 	}
+	// For Nitro it should return here as arbitrum chain does not have uncles
 	if block == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
@@ -90,6 +91,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 	if err != nil {
 		return nil, err
 	}
+	// For Nitro it should return here as arbitrum chain does not have uncles
 	if block == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
@@ -100,6 +102,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 		log.Trace("Requested uncle not found", "number", block.Number(), "hash", hash, "index", index)
 		return nil, nil
 	}
+
 	uncle := types.NewBlockWithHeader(uncles[index])
 
 	return ethapi.RPCMarshalBlock(uncle, false, false, additionalFields)

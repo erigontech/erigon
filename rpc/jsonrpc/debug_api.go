@@ -550,7 +550,6 @@ func (api *DebugAPIImpl) GetBadBlocks(ctx context.Context) ([]map[string]any, er
 		// Return empty array if no bad blocks found to align with other clients and spec
 		return []map[string]any{}, err
 	}
-
 	results := make([]map[string]any, 0, len(blocks))
 	for _, block := range blocks {
 		var blockRlp string

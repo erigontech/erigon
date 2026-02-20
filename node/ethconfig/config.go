@@ -240,6 +240,9 @@ type Config struct {
 	// No heimdall service
 	WithoutHeimdall bool
 
+	// L2 RPC configuration for fetching blocks/receipts from a remote L2 node
+	L2RPC L2RPCConfig
+
 	// Ethstats service
 	Ethstats string
 	// Consensus layer
@@ -278,6 +281,15 @@ type Config struct {
 	FcuBackgroundCommit bool
 
 	MCPAddress string
+}
+
+type L2RPCConfig struct {
+	Addr         string // L2 RPC server address to fetch blocks and transactions
+	ReceiptAddr  string // L2 RPC server address for fetching receipts (defaults to Addr if empty)
+	BlockRPS     int    // requests per second limit for block fetching
+	BlockBurst   int    // burst limit (max concurrent requests) for block fetching
+	ReceiptRPS   int    // requests per second limit for receipt fetching
+	ReceiptBurst int    // burst limit (max concurrent requests) for receipt fetching
 }
 
 type Sync struct {

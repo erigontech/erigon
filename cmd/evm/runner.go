@@ -323,8 +323,9 @@ func runCmd(ctx *cli.Context) error {
 		rules := &chain.Rules{}
 		if chainConfig != nil {
 			blockContext := evmtypes.BlockContext{
-				BlockNumber: runtimeConfig.BlockNumber.Uint64(),
-				Time:        runtimeConfig.Time.Uint64(),
+				BlockNumber:  runtimeConfig.BlockNumber.Uint64(),
+				Time:         runtimeConfig.Time.Uint64(),
+				ArbOSVersion: 0,
 			}
 			rules = blockContext.Rules(chainConfig)
 		}

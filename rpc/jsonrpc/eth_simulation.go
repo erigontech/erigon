@@ -296,11 +296,11 @@ func (s *simulator) makeHeaders(blocks []SimulatedBlock) ([]*types.Header, error
 		overrides := block.BlockOverrides
 
 		var withdrawalsHash *common.Hash
-		if s.chainConfig.IsShanghai((uint64)(*overrides.Timestamp)) {
+		if s.chainConfig.IsShanghai((uint64)(*overrides.Timestamp), 0) {
 			withdrawalsHash = &empty.WithdrawalsHash
 		}
 		var parentBeaconRoot *common.Hash
-		if s.chainConfig.IsCancun((uint64)(*overrides.Timestamp)) {
+		if s.chainConfig.IsCancun((uint64)(*overrides.Timestamp), 0) {
 			parentBeaconRoot = &common.Hash{}
 			if overrides.BeaconRoot != nil {
 				parentBeaconRoot = overrides.BeaconRoot
@@ -480,9 +480,9 @@ func (s *simulator) simulateBlock(
 			}
 		}
 	}
-	if s.chainConfig.IsCancun(header.Time) {
+	if s.chainConfig.IsCancun(header.Time, 0) {
 		var excess uint64
-		if s.chainConfig.IsCancun(parent.Time) {
+		if s.chainConfig.IsCancun(parent.Time, 0) {
 			excess = misc.CalcExcessBlobGas(s.chainConfig, parent, header.Time)
 		}
 		header.ExcessBlobGas = &excess
@@ -581,12 +581,12 @@ func (s *simulator) simulateBlock(
 		}
 	}
 	header.GasUsed = cumulativeGasUsed
-	if s.chainConfig.IsCancun(header.Time) {
+	if s.chainConfig.IsCancun(header.Time, 0) {
 		header.BlobGasUsed = &cumulativeBlobGasUsed
 	}
 
 	var withdrawals types.Withdrawals
-	if s.chainConfig.IsShanghai(header.Time) {
+	if s.chainConfig.IsShanghai(header.Time, 0) {
 		withdrawals = types.Withdrawals{}
 	}
 	systemCall := func(contract accounts.Address, data []byte) ([]byte, error) {
