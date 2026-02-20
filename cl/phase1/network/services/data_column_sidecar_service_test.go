@@ -492,6 +492,7 @@ func createMockGloasBlock(slot uint64, blockRoot common.Hash) *cltypes.SignedBea
 		Block: &cltypes.BeaconBlock{
 			Slot: slot,
 			Body: &cltypes.BeaconBody{
+				Version: clparams.GloasVersion, // Required for GetBlobKzgCommitments() to work correctly
 				SignedExecutionPayloadBid: &cltypes.SignedExecutionPayloadBid{
 					Message: &cltypes.ExecutionPayloadBid{
 						BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](4, 48),

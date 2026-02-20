@@ -119,6 +119,26 @@ func (b *SignedBlindedBeaconBlock) Full(txs *solid.TransactionsSSZ, withdrawals 
 	}
 }
 
+// GetSlot returns the slot of the inner block.
+// Implements ColumnSyncableSignedBlock interface.
+func (b *SignedBlindedBeaconBlock) GetSlot() uint64 {
+	return b.Block.Slot
+}
+
+// BlockHashSSZ returns the hash of the inner block (not the signed block).
+// Implements ColumnSyncableSignedBlock interface.
+func (b *SignedBlindedBeaconBlock) BlockHashSSZ() ([32]byte, error) {
+	return b.Block.HashSSZ()
+}
+
+// GetBlobKzgCommitments returns blob KZG commitments from the block body.
+// Implements ColumnSyncableSignedBlock interface.
+// Note: BlindedBeaconBlock cannot exist for GLOAS (Blinded() returns error),
+// so this always returns the pre-GLOAS commitments.
+func (b *SignedBlindedBeaconBlock) GetBlobKzgCommitments() *solid.ListSSZ[*KZGCommitment] {
+	return b.Block.Body.GetBlobKzgCommitments()
+}
+
 // Definitions of BlindedBeaconBlock
 type BlindedBeaconBlock struct {
 	Slot          uint64             `json:"slot,string"`

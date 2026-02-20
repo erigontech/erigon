@@ -47,8 +47,10 @@ type gloasBlockData struct {
 
 //go:generate mockgen -typed=true -destination=mock_services/peer_das_mock.go -package=mock_services . PeerDas
 type PeerDas interface {
-	DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBlindedBeaconBlock) error
-	DownloadOnlyCustodyColumns(ctx context.Context, blocks []*cltypes.SignedBlindedBeaconBlock) error
+	// [Modified in Gloas:EIP7732] Changed from []*SignedBlindedBeaconBlock to []ColumnSyncableSignedBlock
+	// to support both pre-GLOAS (blinded) and GLOAS (non-blinded) blocks
+	DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error
+	DownloadOnlyCustodyColumns(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error
 	IsDataAvailable(slot uint64, blockRoot common.Hash) (bool, error)
 	Prune(keepSlotDistance uint64) error
 	UpdateValidatorsCustody(cgc uint64)
@@ -80,7 +82,7 @@ type peerdas struct {
 
 	recoveringMutex   sync.Mutex
 	isRecovering      map[common.Hash]bool
-	blocksToCheckSync sync.Map // blockRoot -> blindedBlock
+	blocksToCheckSync sync.Map // blockRoot -> ColumnSyncableSignedBlock (SignedBeaconBlock or SignedBlindedBeaconBlock)
 
 	// [New in Gloas:EIP7732] For fetching blocks to get kzg_commitments
 	forkChoice      BlockGetter
@@ -648,7 +650,7 @@ var (
 )
 
 // DownloadMissingColumns downloads the missing columns for the given blocks but not recover the blobs
-func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []*cltypes.SignedBlindedBeaconBlock) error {
+func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error {
 	custodyColumns, err := d.state.GetMyCustodyColumns()
 	if err != nil {
 		return err
@@ -673,23 +675,24 @@ func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []*clty
 	return nil
 }
 
-func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBlindedBeaconBlock) error {
+func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error {
 	// filter out blocks that don't need to be processed
-	blocksToProcess := []*cltypes.SignedBlindedBeaconBlock{}
+	blocksToProcess := []cltypes.ColumnSyncableSignedBlock{}
 	for _, block := range blocks {
+		kzgCommitments := block.GetBlobKzgCommitments()
 		if block.Version() < clparams.FuluVersion ||
-			block.Block.Body.BlobKzgCommitments == nil ||
-			block.Block.Body.BlobKzgCommitments.Len() == 0 {
+			kzgCommitments == nil ||
+			kzgCommitments.Len() == 0 {
 			continue
 		}
-		root, err := block.Block.HashSSZ()
+		root, err := block.BlockHashSSZ()
 		if err != nil {
 			log.Warn("failed to get block root", "err", err)
 			continue
 		}
 
-		if d.IsColumnOverHalf(block.Block.Slot, root) || d.IsBlobAlreadyRecovered(root) {
-			if err := d.TryScheduleRecover(block.Block.Slot, root); err != nil {
+		if d.IsColumnOverHalf(block.GetSlot(), root) || d.IsBlobAlreadyRecovered(root) {
+			if err := d.TryScheduleRecover(block.GetSlot(), root); err != nil {
 				log.Debug("failed to schedule recover", "err", err)
 			}
 			continue
@@ -705,7 +708,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*
 	defer func() {
 		slots := make([]uint64, 0, len(blocks))
 		for _, block := range blocks {
-			slots = append(slots, block.Block.Slot)
+			slots = append(slots, block.GetSlot())
 		}
 		log.Debug("DownloadColumnsAndRecoverBlobs", "elapsed time", time.Since(begin), "slots", slots)
 	}()
@@ -950,30 +953,32 @@ type downloadRequest struct {
 	downloadTable map[downloadTableEntry]map[uint64]bool
 }
 
+// [Modified in Gloas:EIP7732] Changed from []*SignedBlindedBeaconBlock to []ColumnSyncableSignedBlock
 func initializeDownloadRequest(
-	blocks []*cltypes.SignedBlindedBeaconBlock,
+	blocks []cltypes.ColumnSyncableSignedBlock,
 	beaconConfig *clparams.BeaconChainConfig,
 	columnStorage blob_storage.DataColumnStorage,
 	expectedColumns map[cltypes.CustodyIndex]bool,
 ) (*downloadRequest, error) {
 	downloadTable := make(map[downloadTableEntry]map[uint64]bool)
-	blockRootToBeaconBlock := make(map[common.Hash]*cltypes.SignedBlindedBeaconBlock)
+	blockRootToBeaconBlock := make(map[common.Hash]cltypes.ColumnSyncableSignedBlock)
 	for _, block := range blocks {
 		if block.Version() < clparams.FuluVersion {
 			continue
 		}
-		if block.Block.Body.BlobKzgCommitments == nil || block.Block.Body.BlobKzgCommitments.Len() == 0 {
+		kzgCommitments := block.GetBlobKzgCommitments()
+		if kzgCommitments == nil || kzgCommitments.Len() == 0 {
 			continue
 		}
 
-		blockRoot, err := block.Block.HashSSZ()
+		blockRoot, err := block.BlockHashSSZ()
 		if err != nil {
 			return nil, err
 		}
 		blockRootToBeaconBlock[blockRoot] = block
 
 		// get the existing columns from the column storage
-		existingColumns, err := columnStorage.GetSavedColumnIndex(context.Background(), block.Block.Slot, blockRoot)
+		existingColumns, err := columnStorage.GetSavedColumnIndex(context.Background(), block.GetSlot(), blockRoot)
 		if err != nil {
 			return nil, err
 		}
@@ -984,7 +989,7 @@ func initializeDownloadRequest(
 
 		if _, ok := downloadTable[downloadTableEntry{
 			blockRoot: blockRoot,
-			slot:      block.Block.Slot,
+			slot:      block.GetSlot(),
 		}]; !ok {
 			table := make(map[uint64]bool)
 			for column := range expectedColumns {
@@ -995,7 +1000,7 @@ func initializeDownloadRequest(
 			if len(table) > 0 {
 				downloadTable[downloadTableEntry{
 					blockRoot: blockRoot,
-					slot:      block.Block.Slot,
+					slot:      block.GetSlot(),
 				}] = table
 			}
 		}
@@ -1068,18 +1073,19 @@ func (d *peerdas) SyncColumnDataLater(block *cltypes.SignedBeaconBlock) error {
 	if block.Version() < clparams.FuluVersion {
 		return nil
 	}
-	if block.Block.Body.BlobKzgCommitments == nil || block.Block.Body.BlobKzgCommitments.Len() == 0 {
+	// [Modified in Gloas:EIP7732] Use GetBlobKzgCommitments() which is version-aware
+	// For GLOAS, commitments are in SignedExecutionPayloadBid.Message
+	kzgCommitments := block.GetBlobKzgCommitments()
+	if kzgCommitments == nil || kzgCommitments.Len() == 0 {
 		return nil
 	}
-	blockRoot, err := block.Block.HashSSZ()
+	blockRoot, err := block.BlockHashSSZ()
 	if err != nil {
 		return err
 	}
-	blindedBlock, err := block.Blinded()
-	if err != nil {
-		return err
-	}
-	d.blocksToCheckSync.Store(common.Hash(blockRoot), blindedBlock)
+	// [Modified in Gloas:EIP7732] Store SignedBeaconBlock directly via ColumnSyncableSignedBlock interface
+	// instead of calling Blinded() which fails for GLOAS blocks
+	d.blocksToCheckSync.Store(common.Hash(blockRoot), block)
 	return nil
 }
 
@@ -1102,21 +1108,22 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 				}
 			}
 
-			blocks := []*cltypes.SignedBlindedBeaconBlock{}
+			// [Modified in Gloas:EIP7732] Use ColumnSyncableSignedBlock interface
+			blocks := []cltypes.ColumnSyncableSignedBlock{}
 			roots := []common.Hash{}
 			d.blocksToCheckSync.Range(func(key, value any) bool {
 				root := key.(common.Hash)
-				block := value.(*cltypes.SignedBlindedBeaconBlock)
+				block := value.(cltypes.ColumnSyncableSignedBlock)
 				curSlot := d.ethClock.GetCurrentSlot()
-				if curSlot-block.Block.Slot < 5 { // wait slow data from peers
+				if curSlot-block.GetSlot() < 5 { // wait slow data from peers
 					// skip blocks that are too close to the current slot
 					return true
 				}
-				available, err := d.IsDataAvailable(block.Block.Slot, root)
+				available, err := d.IsDataAvailable(block.GetSlot(), root)
 				if err != nil {
 					log.Warn("failed to check if data is available", "err", err)
 				} else if available {
-					log.Trace("[syncColumnDataWorker] column data is already available, removing from sync queue", "slot", block.Block.Slot, "blockRoot", root)
+					log.Trace("[syncColumnDataWorker] column data is already available, removing from sync queue", "slot", block.GetSlot(), "blockRoot", root)
 					d.blocksToCheckSync.Delete(root)
 				} else {
 					blocks = append(blocks, block)
@@ -1141,7 +1148,7 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 			}
 			for i, root := range roots {
 				d.blocksToCheckSync.Delete(root)
-				log.Debug("[syncColumnDataWorker] column data is synced, removing from sync queue", "slot", blocks[i].Block.Slot, "blockRoot", root)
+				log.Debug("[syncColumnDataWorker] column data is synced, removing from sync queue", "slot", blocks[i].GetSlot(), "blockRoot", root)
 			}
 		}
 	}
