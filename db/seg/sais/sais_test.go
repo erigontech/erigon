@@ -162,9 +162,7 @@ func TestExpand8_32BStrictlyDecreasing(t *testing.T) {
 
 			// Pack LMS positions into front of sa, as the real algorithm does.
 			sa := make([]int32, n)
-			for i, v := range lms {
-				sa[i] = v
-			}
+			copy(sa, lms)
 
 			// perBucketB maps character → ordered list of b values produced for it.
 			perBucketB := collectExpand8_32BValues(text, sa, numLMS)
