@@ -518,47 +518,120 @@ func (rs *RecSplit) recsplitCurrentBucket() error {
 
 // findSplit finds a salt value such that keys in bucket are evenly distributed
 // into fanout partitions of size unit each (based on remap16(remix(key+salt), m) / unit).
+// Uses 8-way salt parallelism with 8 independent count arrays carved from the
+// count slice (which must have len >= 8*fanout).
 func findSplit(bucket []uint64, salt uint64, fanout, unit uint16, count []uint16) uint64 {
 	m := uint16(len(bucket))
+	c0 := count[0*fanout : 1*fanout : 1*fanout]
+	c1 := count[1*fanout : 2*fanout : 2*fanout]
+	c2 := count[2*fanout : 3*fanout : 3*fanout]
+	c3 := count[3*fanout : 4*fanout : 4*fanout]
+	c4 := count[4*fanout : 5*fanout : 5*fanout]
+	c5 := count[5*fanout : 6*fanout : 6*fanout]
+	c6 := count[6*fanout : 7*fanout : 7*fanout]
+	c7 := count[7*fanout : 8*fanout : 8*fanout]
 	for {
-		for i := uint16(0); i < fanout-1; i++ {
-			count[i] = 0
-		}
-		var fail bool
+		clear(count[:8*fanout])
 		for i := uint16(0); i < m; i++ {
-			count[remap16(remix(bucket[i]+salt), m)/unit]++
+			key := bucket[i]
+			c0[remap16(remix(key+salt), m)/unit]++
+			c1[remap16(remix(key+salt+1), m)/unit]++
+			c2[remap16(remix(key+salt+2), m)/unit]++
+			c3[remap16(remix(key+salt+3), m)/unit]++
+			c4[remap16(remix(key+salt+4), m)/unit]++
+			c5[remap16(remix(key+salt+5), m)/unit]++
+			c6[remap16(remix(key+salt+6), m)/unit]++
+			c7[remap16(remix(key+salt+7), m)/unit]++
 		}
+		// Branchless validation: XOR each count with expected value,
+		// OR-accumulate to detect any mismatch.
+		var bad0, bad1, bad2, bad3, bad4, bad5, bad6, bad7 uint16
 		for i := uint16(0); i < fanout-1; i++ {
-			fail = fail || (count[i] != unit)
+			bad0 |= c0[i] ^ unit
+			bad1 |= c1[i] ^ unit
+			bad2 |= c2[i] ^ unit
+			bad3 |= c3[i] ^ unit
+			bad4 |= c4[i] ^ unit
+			bad5 |= c5[i] ^ unit
+			bad6 |= c6[i] ^ unit
+			bad7 |= c7[i] ^ unit
 		}
-		if !fail {
+		if bad0 == 0 {
 			return salt
 		}
-		salt++
+		if bad1 == 0 {
+			return salt + 1
+		}
+		if bad2 == 0 {
+			return salt + 2
+		}
+		if bad3 == 0 {
+			return salt + 3
+		}
+		if bad4 == 0 {
+			return salt + 4
+		}
+		if bad5 == 0 {
+			return salt + 5
+		}
+		if bad6 == 0 {
+			return salt + 6
+		}
+		if bad7 == 0 {
+			return salt + 7
+		}
+		salt += 8
 	}
 }
 
 // findBijection finds a salt value such that all keys in bucket hash to distinct
 // positions in [0, m).
+// Uses 8-way salt parallelism with branchless OR-accumulate
+// to exploit CPU instruction-level parallelism and avoid branch mispredictions.
 func findBijection(bucket []uint64, salt uint64) uint64 {
 	m := uint16(len(bucket))
-	// No need to build aggregation levels - just find bijection
-	var mask uint32
+	fullMask := uint32((1 << m) - 1)
 	for {
-		mask = 0
-		var fail bool
-		for i := uint16(0); !fail && i < m; i++ {
-			bit := uint32(1) << remap16(remix(bucket[i]+salt), m)
-			if mask&bit != 0 {
-				fail = true
-			} else {
-				mask |= bit
-			}
+		var mask0, mask1, mask2, mask3, mask4, mask5, mask6, mask7 uint32
+		for i := uint16(0); i < m; i++ {
+			key := bucket[i]
+			// adding `& 31` - it doesn't have runtime overhead, but it tells for compiler that shift can't overflow
+			// and compiler generating less assembly checks: ~10% perf.
+			// it's safe because: len(bucket) <= leafSize <= 24
+			mask0 |= uint32(1) << remap16(remix(key+salt), m&31)
+			mask1 |= uint32(1) << remap16(remix(key+salt+1), m&31)
+			mask2 |= uint32(1) << remap16(remix(key+salt+2), m&31)
+			mask3 |= uint32(1) << remap16(remix(key+salt+3), m&31)
+			mask4 |= uint32(1) << remap16(remix(key+salt+4), m&31)
+			mask5 |= uint32(1) << remap16(remix(key+salt+5), m&31)
+			mask6 |= uint32(1) << remap16(remix(key+salt+6), m&31)
+			mask7 |= uint32(1) << remap16(remix(key+salt+7), m&31)
 		}
-		if !fail {
+		if mask0 == fullMask {
 			return salt
 		}
-		salt++
+		if mask1 == fullMask {
+			return salt + 1
+		}
+		if mask2 == fullMask {
+			return salt + 2
+		}
+		if mask3 == fullMask {
+			return salt + 3
+		}
+		if mask4 == fullMask {
+			return salt + 4
+		}
+		if mask5 == fullMask {
+			return salt + 5
+		}
+		if mask6 == fullMask {
+			return salt + 6
+		}
+		if mask7 == fullMask {
+			return salt + 7
+		}
+		salt += 8
 	}
 }
 

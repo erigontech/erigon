@@ -98,6 +98,11 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, err
 	}
 
+	err = rpchelper.CheckBlockExecuted(tx, header.Number.Uint64())
+	if err != nil {
+		return nil, err
+	}
+
 	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
@@ -168,6 +173,11 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	blockNum := *(header.Number)
 
 	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNum.Uint64())
+	if err != nil {
+		return 0, err
+	}
+
+	err = rpchelper.CheckBlockExecuted(dbtx, header.Number.Uint64())
 	if err != nil {
 		return 0, err
 	}
@@ -450,7 +460,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 
 		sdCtx.SetHistoryStateReader(roTx, lastTxnInBlock)
 		//domains.SetTrace(true)
-		if err := domains.SeekCommitment(context.Background(), roTx); err != nil {
+		if _, _, err := domains.SeekCommitment(context.Background(), roTx); err != nil {
 			return nil, err
 		}
 		domains.SetTrace(false, false)
@@ -847,6 +857,11 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	} else {
 
 		err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber+1)
+		if err != nil {
+			return nil, err
+		}
+
+		err = rpchelper.CheckBlockExecuted(tx, header.Number.Uint64())
 		if err != nil {
 			return nil, err
 		}

@@ -23,7 +23,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
-	"sort"
 	"testing"
 
 	"github.com/jinzhu/copier"
@@ -61,11 +60,11 @@ func newTesterAccountPool() *testerAccountPool {
 // checkpoint creates a Clique checkpoint signer section from the provided list
 // of authorized signers and embeds it into the provided header.
 func (ap *testerAccountPool) checkpoint(header *types.Header, signers []string) {
-	auths := make([]common.Address, len(signers))
+	auths := make(common.Addresses, len(signers))
 	for i, signer := range signers {
 		auths[i] = ap.address(signer)
 	}
-	sort.Sort(clique.SignersAscending(auths))
+	auths.Sort()
 	for i, auth := range auths {
 		copy(header.Extra[clique.ExtraVanity+i*length.Addr:], auth.Bytes())
 	}

@@ -6,6 +6,7 @@ import (
 	"path"
 	"testing"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -212,5 +213,5 @@ func touchFiles(t *testing.T, dirs datadir.Dirs, ranges []snapRange) {
 func delFile(t *testing.T, folder string, filename string) {
 	t.Helper()
 	fullpath := path.Join(folder, filename)
-	require.NoError(t, os.Remove(fullpath))
+	require.NoError(t, dir.RemoveFile(fullpath))
 }

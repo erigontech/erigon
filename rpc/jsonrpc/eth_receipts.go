@@ -22,6 +22,8 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring/v2"
+
+	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 
 	"github.com/erigontech/erigon/common"
@@ -218,6 +220,25 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	return rpcLogs, nil
 }
 
+// receiptsAvailable corner cases:
+//   - `--persist.receipts`: means all receipts available (even in `--prune.mode=minimal` mode)
+//   - `--prune.mode=minimal` (and `full`) can serve receipts as much as "state history" available (by re-executing blocks)
+//
+// returns `state.PrunedError` if not available for given `fromTxNum`
+func assertReceiptsAvailable(fromTxNum uint64, tx kv.TemporalTx) error {
+	persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
+	if err != nil {
+		return err
+	}
+	if persistReceipts {
+		return nil
+	}
+	if minTxNum := state.StateHistoryStartTxNum(tx); fromTxNum < minTxNum {
+		return fmt.Errorf("%w: from tx: %d, min tx: %d", state.PrunedError, fromTxNum, minTxNum)
+	}
+	return nil
+}
+
 func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, asc order.By) (out stream.U64, err error) {
 	//[from,to)
 	var fromTxNum, toTxNum uint64
@@ -226,8 +247,8 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 		if err != nil {
 			return out, err
 		}
-		if minTxNum := state.StateHistoryStartTxNum(tx); fromTxNum < minTxNum {
-			return out, fmt.Errorf("%w: from tx: %d, min tx: %d", state.PrunedError, fromTxNum, minTxNum)
+		if err := assertReceiptsAvailable(fromTxNum, tx); err != nil {
+			return out, err
 		}
 	}
 
@@ -571,7 +592,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 
 	receipt, err := api.getReceipt(ctx, chainConfig, tx, header, txn, txnIndex, txNum, postState)
 	if err != nil {
-		return nil, fmt.Errorf("getReceipt error: %w", err)
+		return nil, err
 	}
 
 	return ethutils.MarshalReceipt(receipt, txn, chainConfig, header, txnHash, true, true), nil
@@ -584,7 +605,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
+	blockNum, blockHash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645
@@ -610,7 +631,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	}
 	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
-		return nil, fmt.Errorf("getReceipts error: %w", err)
+		return nil, err
 	}
 	result := make([]map[string]any, 0, len(receipts))
 	for _, receipt := range receipts {

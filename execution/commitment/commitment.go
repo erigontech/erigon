@@ -316,6 +316,22 @@ func putDeferredUpdate(upd *DeferredBranchUpdate) {
 	}
 }
 
+// PendingCommitmentUpdate stores deferred branch updates for a specific block.
+// Used by the commitment context to defer branch update application until a later flush.
+type PendingCommitmentUpdate struct {
+	BlockNum uint64
+	TxNum    uint64
+	Deferred []*DeferredBranchUpdate
+}
+
+// Clear returns all deferred updates to the pool and nils the slice.
+func (p *PendingCommitmentUpdate) Clear() {
+	for _, upd := range p.Deferred {
+		putDeferredUpdate(upd)
+	}
+	p.Deferred = nil
+}
+
 type BranchEncoder struct {
 	buf       *bytes.Buffer
 	bitmapBuf [binary.MaxVarintLen64]byte
@@ -403,18 +419,34 @@ func encodeDeferredUpdate(
 	return nil
 }
 
-// ApplyDeferredUpdates computes cell hashes and encodes branch updates in parallel, then writes them.
-// The putBranch function must be thread-safe for concurrent writes.
+// ApplyDeferredUpdates encodes branch updates concurrently and writes them.
 func (be *BranchEncoder) ApplyDeferredUpdates(
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error,
 ) error {
+	written, err := ApplyDeferredBranchUpdates(be.deferred, numWorkers, putBranch)
+	if err != nil {
+		return err
+	}
+	if be.metrics != nil {
+		be.metrics.updateBranch.Add(uint64(written))
+	}
+	return nil
+}
+
+// ApplyDeferredBranchUpdates encodes deferred branch updates concurrently and writes them.
+// Returns the number of updates successfully written.
+func ApplyDeferredBranchUpdates(
+	deferred []*DeferredBranchUpdate,
+	numWorkers int,
+	putBranch func(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error,
+) (int, error) {
 	start := time.Now()
 	defer func() {
-		log.Debug("ApplyDeferredUpdates completed", "updates", len(be.deferred), "took", time.Since(start))
+		log.Debug("ApplyDeferredBranchUpdates completed", "updates", len(deferred), "took", time.Since(start))
 	}()
-	if len(be.deferred) == 0 {
-		return nil
+	if len(deferred) == 0 {
+		return 0, nil
 	}
 	if numWorkers <= 1 {
 		numWorkers = 1
@@ -452,7 +484,7 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 
 	// Send work in background
 	go func() {
-		for _, upd := range be.deferred {
+		for _, upd := range deferred {
 			workCh <- upd
 		}
 		close(workCh)
@@ -482,15 +514,7 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 		written++
 	}
 
-	if firstErr != nil {
-		return firstErr
-	}
-
-	if be.metrics != nil {
-		be.metrics.updateBranch.Add(uint64(written))
-	}
-
-	return nil
+	return written, firstErr
 }
 
 func (be *BranchEncoder) setMetrics(metrics *Metrics) {
@@ -555,7 +579,7 @@ func (be *BranchEncoder) CollectUpdate(
 	return lastNibble, nil
 }
 
-const maxDeferredUpdates = 15_000
+const maxDeferredUpdates = 50_000
 
 // CollectDeferredUpdate stores a branch update job for later parallel processing.
 // Unlike CollectUpdate, this does NOT call computeCellHash or EncodeBranch - it copies the cells
@@ -1115,6 +1139,7 @@ func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccakState) erro
 	if len(uncompactedBranchKey) > 128 {
 		return fmt.Errorf("branch key too long: %d", len(branchKey))
 	}
+	var hashBuf common.Hash
 	depth := int16(len(uncompactedBranchKey))
 	for _, c := range row {
 		if c == nil {
@@ -1123,7 +1148,7 @@ func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccakState) erro
 		if c.accountAddrLen == 0 && c.storageAddrLen == 0 {
 			continue
 		}
-		err := c.deriveHashedKeys(depth, keccak, length.Addr)
+		err := c.deriveHashedKeys(depth, keccak, length.Addr, hashBuf[:])
 		if err != nil {
 			return err
 		}

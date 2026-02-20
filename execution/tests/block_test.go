@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
@@ -96,21 +97,29 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 
 // Only runs EEST tests for current devnet - can "skip" on off-seasons
 func TestExecutionSpecBlockchainDevnet(t *testing.T) {
-	t.Skip("Osaka is already covered by TestExecutionSpecBlockchain")
-
+	const offSeason = false
+	if offSeason {
+		t.Skip("devnet off-season")
+	}
 	if testing.Short() {
 		t.Skip()
 	}
-	t.Parallel()
+	if race.Enabled {
+		// TODO fix -race issues with parallel exec
+		t.Skip("skipping from race tests until parallel exec flow is race free")
+	}
 
+	t.Parallel()
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-
-	bt := new(testMatcher)
 	dir := filepath.Join(eestDir, "blockchain_tests_devnet")
-
+	bt := new(testMatcher)
+	// to run only tests for 1 eip do:
+	//bt.whitelist(`.*amsterdam/eip8024_dupn_swapn_exchange.*`)
+	bt.whitelist(`.*amsterdam.*`) // TODO run tests for older forks too once we fix amsterdam eips, for now focus only on amsterdam eips
 	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
+		test.ExperimentalBAL = true // TODO eventually remove this from BlockTest and run normally
 		if err := bt.checkFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
 		}

@@ -380,7 +380,7 @@ Set-ExecutionPolicy RemoteSigned
 
 This section outlines how to compile the Erigon client and its associated modules directly from the source code on a Windows environment. Compiling from source ensures you are running the latest version and gives you control over the final binaries. All successfully compiled binaries will be placed in the `.\build\bin\` subfolder of your Erigon directory.
 
-Open a terminal (PowerShell or the Git Bash shell that comes with Git for Windows) and change to the Erigon directory:
+Open Git Bash (the shell that comes with Git for Windows) and change to the Erigon directory:
 
 ```bash
 cd erigon

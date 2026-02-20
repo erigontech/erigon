@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -215,7 +216,10 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 						if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
 							bal := CreateBAL(applyResult.BlockNum, applyResult.TxIO, pe.cfg.dirs.DataDir)
-							log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash(), "valid", bal.Validate() == nil)
+							if err := bal.Validate(); err != nil {
+								return fmt.Errorf("block %d: invalid computed block access list: %w", applyResult.BlockNum, err)
+							}
+							log.Debug("bal", "blockNum", applyResult.BlockNum, "hash", bal.Hash())
 							if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) {
 								if lastHeader.BlockAccessListHash == nil {
 									if pe.isBlockProduction {
@@ -227,9 +231,21 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 								}
 								headerBALHash := *lastHeader.BlockAccessListHash
 								if !pe.isBlockProduction {
-									if headerBALHash != b.BlockAccessList().Hash() {
-										log.Info(fmt.Sprintf("bal from block: %s", b.BlockAccessList().DebugString()))
-										return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, b.BlockAccessList().Hash(), headerBALHash)
+									dbBALBytes, err := rawdb.ReadBlockAccessListBytes(rwTx, applyResult.BlockHash, applyResult.BlockNum)
+									if err != nil {
+										return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
+									}
+									dbBAL, err := types.DecodeBlockAccessListBytes(dbBALBytes)
+									if err != nil {
+										return fmt.Errorf("block %d: read stored block access list: %w", applyResult.BlockNum, err)
+									}
+									if err = dbBAL.Validate(); err != nil {
+										return fmt.Errorf("block %d: db block access list is invalid: %w", applyResult.BlockNum, err)
+									}
+
+									if headerBALHash != dbBAL.Hash() {
+										log.Info(fmt.Sprintf("bal from block: %s", dbBAL.DebugString()))
+										return fmt.Errorf("block %d: invalid block access list, hash mismatch: got %s expected %s", applyResult.BlockNum, dbBAL.Hash(), headerBALHash)
 									}
 									if headerBALHash != bal.Hash() {
 										log.Info(fmt.Sprintf("computed bal: %s", bal.DebugString()))
@@ -328,8 +344,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 											if !hasLoggedCommittments.Load() || time.Since(lastCommitedLog) > logInterval/20 {
 												hasLoggedCommittments.Store(true)
 												pe.LogCommitments(commitStart,
-													uint64(uncommittedBlocks), uncommittedTransactions,
-													uint64(uncommittedGas), stepsInDb, lastProgress)
+													uint64(uncommittedBlocks)-prevCommitedBlocks,
+													uncommittedTransactions-prevCommittedTransactions,
+													uint64(uncommittedGas)-prevCommitedGas, stepsInDb, lastProgress)
 											}
 											return
 										}
@@ -446,7 +463,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	}
 
 	if !hasLoggedCommittments.Load() && !commitStart.IsZero() {
-		pe.LogCommitments(commitStart, pe.txExecutor.lastCommittedBlockNum.Load(), uncommittedTransactions, uint64(uncommittedGas), stepsInDb, lastProgress)
+		pe.LogCommitments(commitStart, 0, 0, 0, stepsInDb, lastProgress)
 	}
 
 	if execErr != nil {
@@ -622,7 +639,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 							reader = state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
 						}
 						ibs := state.New(state.NewBufferedReader(pe.rs, reader))
-						defer ibs.Release(true)
 						ibs.SetVersion(finalVersion.Incarnation)
 						localVersionMap := state.NewVersionMap(nil)
 						ibs.SetVersionMap(localVersionMap)
@@ -1501,7 +1517,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 				// Merge any additional reads/writes produced during finalize (fee calc, post apply, etc)
 				if addReads != nil {
-					mergedReads := mergeReadSets(be.blockIO.ReadSet(txVersion.TxIndex), addReads)
+					mergedReads := MergeReadSets(be.blockIO.ReadSet(txVersion.TxIndex), addReads)
 					be.blockIO.RecordReads(txVersion, mergedReads)
 				}
 				if len(addWrites) > 0 {
@@ -1730,7 +1746,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	}
 }
 
-func mergeReadSets(a state.ReadSet, b state.ReadSet) state.ReadSet {
+func MergeReadSets(a state.ReadSet, b state.ReadSet) state.ReadSet {
 	if a == nil && b == nil {
 		return nil
 	}
@@ -1750,7 +1766,7 @@ func mergeReadSets(a state.ReadSet, b state.ReadSet) state.ReadSet {
 	return out
 }
 
-func mergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrites {
+func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrites {
 	if len(prev) == 0 {
 		return next
 	}
@@ -1772,7 +1788,7 @@ func mergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrite
 	return out
 }
 
-func mergeAccessedAddresses(dst, src map[accounts.Address]struct{}) map[accounts.Address]struct{} {
+func MergeAccessedAddresses(dst, src map[accounts.Address]struct{}) map[accounts.Address]struct{} {
 	if len(src) == 0 {
 		return dst
 	}
