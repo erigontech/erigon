@@ -320,7 +320,7 @@ eest-hive:
 define run-kurtosis-assertoor
 	docker build -t test/erigon:current . ; \
 	kurtosis enclave rm -f makefile-kurtosis-testnet ; \
-	kurtosis run --enclave makefile-kurtosis-testnet github.com/ethpandaops/ethereum-package --args-file $(1) ; \
+	kurtosis run --enclave makefile-kurtosis-testnet github.com/ethpandaops/ethereum-package@5.0.1 --args-file $(1) ; \
 	printf "\nTo view logs: \nkurtosis service logs makefile-kurtosis-testnet el-1-erigon-lighthouse\n"
 endef
 
