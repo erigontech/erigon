@@ -225,7 +225,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 //   - `--prune.mode=minimal` (and `full`) can serve receipts as much as "state history" available (by re-executing blocks)
 //
 // returns `state.PrunedError` if not available for given `fromTxNum`
-func assertReceiptsAvailable(fromTxNum uint64, tx kv.TemporalTx) error {
+func assertReceiptsAvailable(ctx context.Context, txNumsReader rawdbv3.TxNumsReader, begin uint64, fromTxNum uint64, tx kv.TemporalTx) error {
 	persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
 	if err != nil {
 		return err
@@ -234,7 +234,8 @@ func assertReceiptsAvailable(fromTxNum uint64, tx kv.TemporalTx) error {
 		return nil
 	}
 	if minTxNum := state.StateHistoryStartTxNum(tx); fromTxNum < minTxNum {
-		return fmt.Errorf("%w: from tx: %d, min tx: %d", state.PrunedError, fromTxNum, minTxNum)
+		firstAvailBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, minTxNum)
+		return fmt.Errorf("%w: requested block %d, history is available from block %d", state.PrunedError, begin, firstAvailBlock)
 	}
 	return nil
 }
@@ -247,7 +248,7 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 		if err != nil {
 			return out, err
 		}
-		if err := assertReceiptsAvailable(fromTxNum, tx); err != nil {
+		if err := assertReceiptsAvailable(context.Background(), txNumsReader, begin, fromTxNum, tx); err != nil {
 			return out, err
 		}
 	}

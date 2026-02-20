@@ -35,9 +35,9 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
@@ -48,7 +48,7 @@ import (
 )
 
 func TestEmptyQuery(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
@@ -64,7 +64,7 @@ func TestEmptyQuery(t *testing.T) {
 	}
 }
 func TestCoinbaseBalance(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
@@ -94,7 +94,7 @@ func internedAddress(addr string) accounts.Address {
 }
 
 func TestSwapBalance(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
@@ -179,7 +179,7 @@ func TestSwapBalance(t *testing.T) {
 }
 
 func TestCorrectStateDiff(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
@@ -311,7 +311,7 @@ func TestCorrectStateDiff(t *testing.T) {
 }
 
 func TestReplayTransaction(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	var txnHash common.Hash
 	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
@@ -338,7 +338,7 @@ func TestReplayTransaction(t *testing.T) {
 }
 
 func TestReplayBlockTransactions(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 
 	// Call GetTransactionReceipt for transaction which is not in the database
@@ -411,7 +411,7 @@ func TestOeTracer(t *testing.T) {
 			}
 			rules := context.Rules(test.Genesis.Config)
 
-			m := mock.Mock(t)
+			m := execmoduletester.New(t)
 			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()

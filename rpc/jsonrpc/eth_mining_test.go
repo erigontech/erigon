@@ -25,9 +25,9 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -35,8 +35,8 @@ import (
 )
 
 func TestPendingBlock(t *testing.T) {
-	m := mock.Mock(t)
-	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mock.Mock(t))
+	m := execmoduletester.New(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, execmoduletester.New(t))
 	mining := txpoolproto.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
@@ -61,7 +61,7 @@ func TestPendingBlock(t *testing.T) {
 }
 
 func TestPendingLogs(t *testing.T) {
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	mining := txpoolproto.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log)

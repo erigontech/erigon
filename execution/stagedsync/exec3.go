@@ -275,7 +275,7 @@ func ExecV3(ctx context.Context,
 		}()
 
 		lastHeader, applyTx, execErr = pe.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,
-			initialTxNum, inputTxNum, initialCycle, applyTx, accumulator, readAhead, logEvery)
+			initialTxNum, inputTxNum, initialCycle, applyTx, stepsInDb, accumulator, readAhead, logEvery)
 
 		lastCommittedBlockNum = pe.lastCommittedBlockNum.Load()
 		lastCommittedTxNum = pe.lastCommittedTxNum.Load()

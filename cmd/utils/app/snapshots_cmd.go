@@ -76,10 +76,12 @@ import (
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/verify"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/ethconfig/features"
 	"github.com/erigontech/erigon/node/logging"
+	"github.com/erigontech/erigon/node/rulesconfig"
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 )
@@ -436,6 +438,51 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&cli.Uint64Flag{Name: "from", Usage: "block number from which to start verifying", Required: true},
 				&cli.Uint64Flag{Name: "to", Usage: "block number up to which to verify (exclusive)", Required: true},
+			}),
+		},
+		{
+			Name:        "verify-state",
+			Description: "verify correspondence between state snapshots (accounts, storage) and commitment snapshots",
+			Action: func(cliCtx *cli.Context) error {
+				logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
+				if err != nil {
+					panic(fmt.Errorf("verify-state: could not setup logger: %w", err))
+				}
+				err = doVerifyState(cliCtx, logger)
+				if err != nil {
+					log.Error("[verify-state] failure", "err", err)
+					return err
+				}
+				log.Info("[verify-state] success")
+				return nil
+			},
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "from-step", Value: 0, Usage: "skip files before given step"},
+				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "stop after first problem or print WARN and continue"},
+			}),
+		},
+		{
+			Name:        "verify-history",
+			Description: "verify history snapshots by re-executing blocks and comparing state changes",
+			Action: func(cliCtx *cli.Context) error {
+				logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
+				if err != nil {
+					panic(fmt.Errorf("verify-history: could not setup logger: %w", err))
+				}
+				err = doVerifyHistory(cliCtx, logger)
+				if err != nil {
+					log.Error("[verify-history] failure", "err", err)
+					return err
+				}
+				log.Info("[verify-history] success")
+				return nil
+			},
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+				&cli.Uint64Flag{Name: "from-step", Value: 0, Usage: "skip files before given step"},
+				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "stop after first problem or print WARN and continue"},
+				&cli.IntFlag{Name: "workers", Value: 0, Usage: "number of parallel workers (0 = NumCPU/2)"},
 			}),
 		},
 		{
@@ -1189,6 +1236,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 			if err := integrity.CheckCommitmentHistVal(ctx, db, blockReader, failFast, logger); err != nil {
 				return err
 			}
+		case integrity.StateVerify:
+			if err := integrity.CheckStateVerify(ctx, db, failFast, fromStep, logger); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("unknown check: %s", chk)
 		}
@@ -1249,6 +1300,129 @@ func doCheckCommitmentHistAtBlkRange(cliCtx *cli.Context, logger log.Logger) err
 	from := cliCtx.Uint64("from")
 	to := cliCtx.Uint64("to")
 	return integrity.CheckCommitmentHistAtBlkRange(ctx, db, blockReader, from, to, logger)
+}
+
+func doVerifyState(cliCtx *cli.Context, logger log.Logger) error {
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+
+	// Open MDBX without Accede so it creates the DB if needed (memState-only setups have no chaindata).
+	const ThreadsLimit = 9_000
+	limiterB := semaphore.NewWeighted(ThreadsLimit)
+	chainDB := mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).RoTxsLimiter(limiterB).MustOpen()
+	defer chainDB.Close()
+
+	agg := openAgg(ctx, dirs, chainDB, logger)
+	defer agg.Close()
+	defer agg.MadvNormal().DisableReadAhead()
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	failFast := cliCtx.Bool("failFast")
+	fromStep := cliCtx.Uint64("from-step")
+	return integrity.CheckStateVerify(ctx, db, failFast, fromStep, logger)
+}
+
+func doVerifyHistory(cliCtx *cli.Context, logger log.Logger) error {
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+
+	const ThreadsLimit = 9_000
+	limiterB := semaphore.NewWeighted(ThreadsLimit)
+	chainDB := mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).RoTxsLimiter(limiterB).MustOpen()
+	defer chainDB.Close()
+
+	chainConfig := fromdb.ChainConfig(chainDB)
+
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
+	snaps, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return fmt.Errorf("verify-history: open snaps: %w", err)
+	}
+	defer clean()
+
+	blockReader := freezeblocks.NewBlockReader(snaps.BlockSnaps, snaps.BorSnaps)
+
+	agg := snaps.Aggregator
+	db, err := temporal.New(chainDB, agg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	engine := rulesconfig.CreateRulesEngineBareBones(ctx, chainConfig, logger)
+
+	failFast := cliCtx.Bool("failFast")
+	fromStep := cliCtx.Uint64("from-step")
+	workers := cliCtx.Int("workers")
+	if workers <= 0 {
+		workers = runtime.NumCPU() / 2
+		if workers < 1 {
+			workers = 1
+		}
+	}
+
+	verifier := verify.NewHistoryVerifier(blockReader, chainConfig, engine, workers, logger)
+	stepSize := agg.StepSize()
+
+	// Iterate domain files to find history ranges to verify.
+	// We use AccountsDomain files as the canonical list of step ranges,
+	// but verify all domains (accounts, storage, code) for each range.
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	aggTx := state.AggTx(tx)
+	files := aggTx.Files(kv.AccountsDomain)
+
+	// Collect file ranges to verify.
+	type fileRange struct {
+		step       uint64
+		startTxNum uint64
+		endTxNum   uint64
+	}
+	var ranges []fileRange
+	for _, file := range files {
+		if !strings.HasSuffix(file.Fullpath(), ".kv") {
+			continue
+		}
+		startTxNum := file.StartRootNum()
+		fileStep := startTxNum / stepSize
+		if fileStep < fromStep {
+			continue
+		}
+		// Skip base file — it covers the full history from genesis.
+		if startTxNum == 0 {
+			continue
+		}
+		ranges = append(ranges, fileRange{
+			step:       fileStep,
+			startTxNum: startTxNum,
+			endTxNum:   file.EndRootNum(),
+		})
+	}
+
+	logger.Info("[verify-history] starting verification",
+		"files", len(ranges), "workers", workers)
+
+	var integrityErr error
+	for _, r := range ranges {
+		logger.Info("[verify-history] verifying file range",
+			"step", r.step, "startTxNum", r.startTxNum, "endTxNum", r.endTxNum)
+
+		err := verifier(ctx, db, r.startTxNum, r.endTxNum)
+		if err != nil {
+			if failFast {
+				return err
+			}
+			logger.Warn("[verify-history] file failed", "step", r.step, "err", err)
+			integrityErr = err
+		}
+	}
+	return integrityErr
 }
 
 func CheckBorChain(chainName string) bool {
