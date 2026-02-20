@@ -295,15 +295,21 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		return err
 	}
 
+	if resume && !commitmentHistoryEnabled {
+		return errors.New("--resume requires commitment history to be enabled")
+	}
+
 	withHistory := false
-	if commitmentHistoryEnabled && (clearCommitment || resume) {
-		withHistory = true
-	} else if commitmentHistoryEnabled {
-		fmt.Print("commitment history is enabled. Rebuild with history? (y/n): ")
-		scanner := bufio.NewScanner(os.Stdin)
-		scanner.Scan()
-		resp := strings.ToLower(strings.TrimSpace(scanner.Text()))
-		withHistory = resp == "y" || resp == "yes"
+	if commitmentHistoryEnabled {
+		if clearCommitment || resume {
+			withHistory = true
+		} else {
+			fmt.Print("commitment history is enabled. Rebuild with history? (y/n): ")
+			scanner := bufio.NewScanner(os.Stdin)
+			scanner.Scan()
+			resp := strings.ToLower(strings.TrimSpace(scanner.Text()))
+			withHistory = resp == "y" || resp == "yes"
+		}
 	}
 
 	if !resume {
