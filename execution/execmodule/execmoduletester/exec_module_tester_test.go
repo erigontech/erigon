@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package mock_test
+package execmoduletester_test
 
 import (
 	"testing"
@@ -22,13 +22,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 )
 
 func TestInsertChain(t *testing.T) {
 	t.Parallel()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 100, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
@@ -39,7 +39,7 @@ func TestInsertChain(t *testing.T) {
 
 func TestReorgsWithInsertChain(t *testing.T) {
 	t.Parallel()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})

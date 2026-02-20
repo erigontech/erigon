@@ -106,7 +106,7 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	}
 	if race.Enabled {
 		// TODO fix -race issues with parallel exec
-		t.Skip("skipping from race tests until parallel exec flow is race free")
+		//		t.Skip("skipping from race tests until parallel exec flow is race free")
 	}
 
 	t.Parallel()
