@@ -304,7 +304,7 @@ func (f *ForkChoiceStorageMock) OnBlock(
 	return nil
 }
 
-func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
 	return nil
 }
 
