@@ -25,9 +25,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/headerdownload"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -44,7 +44,7 @@ func TestSideChainInsert(t *testing.T) {
 			address: {Balance: funds},
 		},
 	}
-	m := mock.MockWithGenesis(t, gspec, key)
+	m := execmoduletester.NewWithGenesis(t, gspec, key)
 	db := m.DB
 	genesis := m.Genesis
 	tx, err := db.BeginRw(context.Background())
