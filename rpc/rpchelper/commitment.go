@@ -36,49 +36,6 @@ import (
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 )
 
-// splitStateReader implements commitmentdb.StateReader using (potentially) different state readers for commitment
-// data and account/storage/code data.
-type splitStateReader struct {
-	commitmentReader commitmentdb.StateReader
-	plainStateReader commitmentdb.StateReader
-	withHistory      bool
-}
-
-var _ commitmentdb.StateReader = (*splitStateReader)(nil)
-
-func (r splitStateReader) WithHistory() bool {
-	return r.withHistory
-}
-
-func (r splitStateReader) CheckDataAvailable(_ kv.Domain, _ kv.Step) error {
-	return nil
-}
-
-func (r splitStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
-	if d == kv.CommitmentDomain {
-		return r.commitmentReader.Read(d, plainKey, stepSize)
-	}
-	return r.plainStateReader.Read(d, plainKey, stepSize)
-}
-
-func (r splitStateReader) Clone(kv.TemporalTx) commitmentdb.StateReader {
-	// Do *NOT* propagate kv.TemporalTx because each reader may need its own
-	return NewCommitmentSplitStateReader(r.commitmentReader, r.plainStateReader, r.withHistory)
-}
-
-func NewCommitmentSplitStateReader(commitmentReader commitmentdb.StateReader, plainStateReader commitmentdb.StateReader, withHistory bool) commitmentdb.StateReader {
-	return splitStateReader{
-		commitmentReader: commitmentReader,
-		plainStateReader: plainStateReader,
-		withHistory:      withHistory,
-	}
-}
-
-func NewCommitmentReplayStateReader(ttx, tx kv.TemporalTx, tsd *execctx.SharedDomains, plainStateAsOf uint64) commitmentdb.StateReader {
-	// Claim that during replay we do not operate on history, so we can temporarily save commitment state
-	return NewCommitmentSplitStateReader(commitmentdb.NewLatestStateReader(ttx, tsd), commitmentdb.NewHistoryStateReader(tx, plainStateAsOf), false)
-}
-
 type CommitmentReplay struct {
 	dirs        datadir.Dirs
 	txNumReader rawdbv3.TxNumsReader
@@ -158,7 +115,7 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 		if err != nil {
 			return nil, err
 		}
-		tsd.GetCommitmentCtx().SetStateReader(NewCommitmentReplayStateReader(ttx, tx, tsd, maxTxNum+1))
+		tsd.GetCommitmentCtx().SetStateReader(commitmentdb.NewCommitmentReplayStateReader(ttx, tx, tsd, maxTxNum+1))
 		r.logger.Debug("Touch historical keys", "fromTxNum", minTxNum, "toTxNum", maxTxNum+1)
 		_, _, err = tsd.TouchChangedKeysFromHistory(tx, minTxNum, maxTxNum+1)
 		if err != nil {
