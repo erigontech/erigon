@@ -72,7 +72,7 @@ func (s *SimpleSequence) AppendBytes(buf []byte) []byte {
 	return append(buf, s.raw...)
 }
 
-func (s *SimpleSequence) search(v uint64) (int, bool) {
+func (s *SimpleSequence) search(seek uint64) (int, bool) {
 	// Real data lengths:
 	//   - 70% len=1
 	//   - 15% len=2
@@ -86,19 +86,19 @@ func (s *SimpleSequence) search(v uint64) (int, bool) {
 	if c == 0 {
 		return 0, false
 	}
-	if v <= s.Min() {
+	if seek <= s.Min() {
 		return 0, true
 	}
 	if s.isCount1() {
 		return 0, false
 	}
-	if v > s.Max() {
+	if seek > s.Max() {
 		return 0, false
 	}
 
-	// c >= 2, Get(0) < v <= Get(c-1); answer is in [1, c-1]
+	// c >= 2, Get(0) < seek <= Get(c-1); answer is in [1, c-1]
 	idx := 1 + sort.Search(int(c-1), func(i int) bool {
-		return s.Get(uint64(i+1)) >= v
+		return s.Get(uint64(i+1)) >= seek
 	})
 	return idx, true
 }
@@ -124,8 +124,8 @@ func (s *SimpleSequence) reverseSearch(v uint64) (int, bool) {
 	return int(c) - idx - 2, true
 }
 
-func (s *SimpleSequence) Seek(v uint64) (uint64, bool) {
-	idx, found := s.search(v)
+func (s *SimpleSequence) Seek(seek uint64) (uint64, bool) {
+	idx, found := s.search(seek)
 	if !found {
 		return 0, false
 	}
