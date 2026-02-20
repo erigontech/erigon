@@ -81,11 +81,11 @@ func checksum(file string) uint32 {
 	return hasher.Sum32()
 }
 
-func prepareDict(t *testing.T, multiplier int, keys int) *Decompressor {
+func prepareDict(t testing.TB, multiplier int, keys int) *Decompressor {
 	return prepareDictMetadata(t, multiplier, false, nil, keys)
 }
 
-func prepareDictMetadata(t *testing.T, multiplier int, hasMetadata bool, metadata []byte, keys int) *Decompressor {
+func prepareDictMetadata(t testing.TB, multiplier int, hasMetadata bool, metadata []byte, keys int) *Decompressor {
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()

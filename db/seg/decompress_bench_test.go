@@ -25,8 +25,7 @@ import (
 )
 
 func BenchmarkDecompressNextBuf(b *testing.B) {
-	t := new(testing.T)
-	d := prepareDict(t, 1, 1_000)
+	d := prepareDict(b, 1, 1_000)
 	defer d.Close()
 	b.ReportAllocs()
 	var k []byte
@@ -43,8 +42,7 @@ func BenchmarkDecompressNextBuf(b *testing.B) {
 }
 
 func BenchmarkDecompressNextHeap(b *testing.B) {
-	t := new(testing.T)
-	d := prepareDict(t, 1, 1_000)
+	d := prepareDict(b, 1, 1_000)
 	defer d.Close()
 
 	b.ReportAllocs()
@@ -61,8 +59,7 @@ func BenchmarkDecompressNextHeap(b *testing.B) {
 }
 
 func BenchmarkDecompressSkip(b *testing.B) {
-	t := new(testing.T)
-	d := prepareDict(t, 1, 1_000)
+	d := prepareDict(b, 1, 1_000)
 	defer d.Close()
 
 	b.Run("skip", func(b *testing.B) {
