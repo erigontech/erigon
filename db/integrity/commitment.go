@@ -753,7 +753,12 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	if err != nil {
 		return err
 	}
-	sd.GetCommitmentCtx().SetHistoryStateReader(tx, toTxNum)
+	// commitment branch data  view: as of beginning of the block
+	commitmentReader := commitmentdb.NewHistoryStateReader(tx, minTxNum)
+	// plain state (accounts+ storage) data view: as of end of block
+	plainStateReader := commitmentdb.NewHistoryStateReader(tx, toTxNum)
+	splitStateReader := commitmentdb.NewCommitmentSplitStateReader(commitmentReader, plainStateReader /* withHistory */, true)
+	sd.GetCommitmentCtx().SetStateReader(splitStateReader)
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
 	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx) // seek commitment again with new history state reader
