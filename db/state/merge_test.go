@@ -19,7 +19,6 @@ package state
 import (
 	"context"
 	"fmt"
-	"os"
 	"slices"
 	"testing"
 
@@ -830,7 +829,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		cfg := statecfg.Schema.GetDomainCfg(dom)
 
 		salt := uint32(1)
-		dirs := datadir.New(os.TempDir())
+		dirs := datadir.New(t.TempDir())
 		cfg.Hist.IiCfg.Name = kv.InvertedIdx(0)
 		cfg.Hist.IiCfg.FileVersion = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
 
