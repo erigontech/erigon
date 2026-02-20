@@ -76,7 +76,6 @@ type EngineServer struct {
 	caplin           bool // we need to send errors for caplin.
 	executionService executionproto.ExecutionClient
 	txpool           txpoolproto.TxpoolClient // needed for getBlobs
-	db               kv.TemporalRoDB
 
 	chainRW chainreader.ChainReaderWriterEth1
 	lock    sync.Mutex
@@ -100,7 +99,7 @@ func NewEngineServer(
 	fcuTimeout time.Duration,
 	maxReorgDepth uint64,
 ) *EngineServer {
-	chainRW := chainreader.NewChainReaderEth1(config, executionService, uint64(fcuTimeout.Milliseconds()))
+	chainRW := chainreader.NewChainReaderEth1(config, executionService, fcuTimeout)
 	srv := &EngineServer{
 		logger:            logger,
 		config:            config,
@@ -131,8 +130,6 @@ func (e *EngineServer) Start(
 	eth rpchelper.ApiBackend,
 	mining txpoolproto.MiningClient,
 ) error {
-	e.db = db
-
 	var eg errgroup.Group
 	if !e.caplin {
 		eg.Go(func() error {

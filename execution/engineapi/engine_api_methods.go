@@ -19,14 +19,15 @@ package engineapi
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/rpc"
 )
 
 var ourCapabilities = []string{
@@ -186,42 +187,11 @@ func (e *EngineServer) GetPayloadBodiesByHashV1(ctx context.Context, hashes []co
 // including blockAccessList sidecars from DB.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadbodiesbyhashv2
 func (e *EngineServer) GetPayloadBodiesByHashV2(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
-	bodies, err := e.getPayloadBodiesByHash(ctx, hashes)
-	if err != nil {
-		return nil, err
+	if len(hashes) > 1024 {
+		return nil, &engine_helpers.TooLargeRequestErr
 	}
-
-	bodyHashes := make([]common.Hash, len(bodies))
-	bodyNumbers := make([]*uint64, len(bodies))
-	for i := range bodies {
-		if i >= len(hashes) {
-			break
-		}
-		bodyHashes[i] = hashes[i]
-		number, err := e.chainRW.HeaderNumber(ctx, hashes[i])
-		if err != nil {
-			return nil, err
-		}
-		bodyNumbers[i] = number
-	}
-
-	blockAccessLists, err := e.readBlockAccessLists(ctx, bodyHashes, bodyNumbers)
-	if err != nil {
-		return nil, err
-	}
-
-	resp := make([]*engine_types.ExecutionPayloadBodyV2, len(bodies))
-	for i := range bodies {
-		if bodies[i] == nil {
-			continue
-		}
-		resp[i] = &engine_types.ExecutionPayloadBodyV2{
-			Transactions:    bodies[i].Transactions,
-			Withdrawals:     bodies[i].Withdrawals,
-			BlockAccessList: blockAccessLists[i],
-		}
-	}
-	return resp, nil
+	e.engineLogSpamer.RecordRequest()
+	return e.chainRW.GetPayloadBodiesByHash(ctx, hashes)
 }
 
 // Returns an ordered (as per canonical chain) array of execution payload bodies, with corresponding execution block numbers from "start", up to "count"
@@ -234,67 +204,13 @@ func (e *EngineServer) GetPayloadBodiesByRangeV1(ctx context.Context, start, cou
 // including blockAccessList sidecars from DB.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadbodiesbyrangev2
 func (e *EngineServer) GetPayloadBodiesByRangeV2(ctx context.Context, start, count hexutil.Uint64) ([]*engine_types.ExecutionPayloadBodyV2, error) {
-	bodies, err := e.getPayloadBodiesByRange(ctx, uint64(start), uint64(count))
-	if err != nil {
-		return nil, err
+	if uint64(start) == 0 || uint64(count) == 0 {
+		return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid start or count, start: %v count: %v", start, count)}
 	}
-
-	bodyHashes := make([]common.Hash, len(bodies))
-	bodyNumbers := make([]*uint64, len(bodies))
-	for i := range bodies {
-		blockNumber := uint64(start) + uint64(i)
-		header := e.chainRW.GetHeaderByNumber(ctx, blockNumber)
-		if header == nil {
-			continue
-		}
-		bodyHashes[i] = header.Hash()
-		number := blockNumber
-		bodyNumbers[i] = &number
+	if uint64(count) > 1024 {
+		return nil, &engine_helpers.TooLargeRequestErr
 	}
-
-	blockAccessLists, err := e.readBlockAccessLists(ctx, bodyHashes, bodyNumbers)
-	if err != nil {
-		return nil, err
-	}
-
-	resp := make([]*engine_types.ExecutionPayloadBodyV2, len(bodies))
-	for i := range bodies {
-		if bodies[i] == nil {
-			continue
-		}
-		resp[i] = &engine_types.ExecutionPayloadBodyV2{
-			Transactions:    bodies[i].Transactions,
-			Withdrawals:     bodies[i].Withdrawals,
-			BlockAccessList: blockAccessLists[i],
-		}
-	}
-	return resp, nil
-}
-
-func (e *EngineServer) readBlockAccessLists(ctx context.Context, hashes []common.Hash, numbers []*uint64) ([]hexutil.Bytes, error) {
-	resp := make([]hexutil.Bytes, len(hashes))
-	if e.db == nil {
-		return resp, nil
-	}
-	if err := e.db.View(ctx, func(tx kv.Tx) error {
-		for i := range hashes {
-			if numbers[i] == nil {
-				continue
-			}
-			balBytes, err := rawdb.ReadBlockAccessListBytes(tx, hashes[i], *numbers[i])
-			if err != nil {
-				return err
-			}
-			if len(balBytes) == 0 {
-				continue
-			}
-			resp[i] = append([]byte(nil), balBytes...)
-		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	return resp, nil
+	return e.chainRW.GetPayloadBodiesByRange(ctx, uint64(start), uint64(count))
 }
 
 // Returns the node's code and commit details in a slice

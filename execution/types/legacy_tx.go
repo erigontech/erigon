@@ -43,10 +43,11 @@ type CommonTx struct {
 	V, R, S  uint256.Int     // signature values
 }
 
-// withoutCaches returns a copy of CommonTx with the TransactionMisc caches (hash, from) cleared.
-// Use this in constructors when building a new transaction from an existing one, to avoid
-// copying sync/atomic fields that must not be shared between two objects.
-func (ct *CommonTx) withoutCaches() CommonTx {
+// copyData returns a copy of CommonTx where the TransactionMisc cache fields
+// (hash, from) are not copied directly but rebuilt field-by-field, avoiding
+// go vet copylocks warnings on the embedded sync/atomic.Pointer.
+// The caches will be recomputed on demand if needed (both are deterministic).
+func (ct *CommonTx) copyData() CommonTx {
 	return CommonTx{
 		Nonce:    ct.Nonce,
 		GasLimit: ct.GasLimit,

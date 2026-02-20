@@ -21,8 +21,8 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 )
 
-// MiningConfig is the configuration parameters of block building.
-type MiningConfig struct {
+// BuilderConfig is the configuration parameters of block building.
+type BuilderConfig struct {
 	EnabledPOS       bool
 	Etherbase        common.Address `toml:",omitempty"` // Public address for block building rewards
 	ExtraData        hexutil.Bytes  `toml:",omitempty"` // Block extra data set by the block builder

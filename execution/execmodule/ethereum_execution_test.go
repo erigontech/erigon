@@ -38,10 +38,10 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	eth1utils "github.com/erigontech/erigon/execution/execmodule/moduleutil"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
@@ -66,7 +66,7 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 		},
 	}
 	stepSize := uint64(5) // 2 for block 0 (0,1) and 3 for block 1 (2,3,4)
-	m := mock.MockWithGenesis(t, genesis, privKey, mock.WithStepSize(stepSize))
+	m := execmoduletester.NewWithGenesis(t, genesis, privKey, execmoduletester.WithStepSize(stepSize))
 	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(0, senderAddr, uint256.NewInt(0), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
@@ -79,7 +79,7 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, chainPack.Blocks, 1)
 	exec := m.Eth1ExecutionService
-	insertRes, err := insertBlocks(ctx, exec, chainPack)
+	insertRes, err := insertBlocks(ctx, exec, chainPack.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, executionproto.ExecutionStatus_Success, insertRes.Result)
 	validationReceipt, err := validateChain(ctx, exec, chainPack.Blocks[0].Header())
@@ -135,7 +135,7 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 			senderAddr2: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := mock.MockWithGenesis(t, genesis, privKey)
+	m := execmoduletester.NewWithGenesis(t, genesis, privKey)
 	longerFork, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
@@ -168,35 +168,18 @@ func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeig
 		b.AddTx(tx)
 	})
 	require.NoError(t, err)
-	err = insertValidateAndUfc1By1(t.Context(), m.Eth1ExecutionService, longerFork)
+	err = insertValidateAndUfc1By1(t.Context(), m.Eth1ExecutionService, longerFork.Blocks)
 	require.NoError(t, err)
-	err = insertValidateAndUfc1By1(t.Context(), m.Eth1ExecutionService, shorterFork)
+	err = insertValidateAndUfc1By1(t.Context(), m.Eth1ExecutionService, shorterFork.Blocks)
 	require.NoError(t, err)
-	err = insertValidateAndUfc1By1(t.Context(), m.Eth1ExecutionService, longerFork2)
+	err = insertValidateAndUfc1By1(t.Context(), m.Eth1ExecutionService, longerFork2.Blocks)
 	require.NoError(t, err)
 }
 
-func TestAssembleBlock(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping test in short mode")
-	}
-	t.Parallel()
-	ctx := t.Context()
-	m := mock.MockWithTxPoolOsaka(t)
-	exec := m.Eth1ExecutionService
-	txpool := m.TxPoolGrpcServer
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
-		// In block 1, addr1 sends addr2 some ether.
-		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
-		require.NoError(t, err)
-		gen.AddTx(tx)
-	})
+func addTwoTxnsToPool(ctx context.Context, startingNonce uint64, t *testing.T, m *execmoduletester.ExecModuleTester, txpool txpoolproto.TxpoolServer, baseFee uint64) {
+	tx2, err := types.SignTx(types.NewTransaction(startingNonce, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(baseFee), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 	require.NoError(t, err)
-	err = m.InsertChain(chainPack)
-	require.NoError(t, err)
-	tx2, err := types.SignTx(types.NewTransaction(1, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(chainPack.TopBlock.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
-	require.NoError(t, err)
-	tx3, err := types.SignTx(types.NewTransaction(2, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(chainPack.TopBlock.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+	tx3, err := types.SignTx(types.NewTransaction(startingNonce+1, common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(baseFee), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 	require.NoError(t, err)
 	rlpTxs := make([][]byte, 2)
 	for i, tx := range []types.Transaction{tx2, tx3} {
@@ -217,6 +200,28 @@ func TestAssembleBlock(t *testing.T) {
 	for _, res := range r.Imported {
 		require.Equal(t, txpoolproto.ImportResult_SUCCESS, res)
 	}
+}
+
+func TestAssembleBlock(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test in short mode")
+	}
+	t.Parallel()
+	ctx := t.Context()
+	m := execmoduletester.NewWithTxPoolAllProtocolChanges(t)
+	exec := m.Eth1ExecutionService
+	txpool := m.TxPoolGrpcServer
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+		// In block 1, addr1 sends addr2 some ether.
+		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(t, err)
+		gen.AddTx(tx)
+	})
+	require.NoError(t, err)
+	err = m.InsertChain(chainPack)
+	require.NoError(t, err)
+	baseFee := chainPack.TopBlock.BaseFee().Uint64()
+	addTwoTxnsToPool(ctx, 1, t, m, txpool, baseFee)
 
 	var parentBeaconBlockRoot common.Hash
 	_, err = rand.Read(parentBeaconBlockRoot[:])
@@ -230,64 +235,115 @@ func TestAssembleBlock(t *testing.T) {
 		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(parentBeaconBlockRoot),
 	})
 	require.NoError(t, err)
-	blockData, err := getAssembledBlock(ctx, exec, payloadId)
+	block, err := getAssembledBlock(ctx, exec, payloadId)
 	require.NoError(t, err)
-	require.Equal(t, uint64(2), blockData.ExecutionPayload.BlockNumber)
-	require.Len(t, blockData.ExecutionPayload.Transactions, 2)
+	require.Equal(t, uint64(2), block.NumberU64())
+	require.Len(t, block.Transactions(), 2)
+
+	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	require.NoError(t, err)
 }
 
-func insertBlocks(ctx context.Context, exec *execmodule.EthereumExecutionModule, chainPack *blockgen.ChainPack) (*executionproto.InsertionResult, error) {
-	blocks := make([]*executionproto.Block, len(chainPack.Blocks))
-	for i, b := range chainPack.Blocks {
-		blocks[i] = eth1utils.ConvertBlockToRPC(b)
+func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test in short mode")
 	}
-	return retryBusy(ctx, func() (*executionproto.InsertionResult, executionproto.ExecutionStatus, error) {
+	t.Parallel()
+	ctx := t.Context()
+	m := execmoduletester.NewWithTxPoolAllProtocolChanges(t)
+	exec := m.Eth1ExecutionService
+	txpool := m.TxPoolGrpcServer
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+		// In block 1, addr1 sends addr2 some ether.
+		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(t, err)
+		gen.AddTx(tx)
+	})
+	require.NoError(t, err)
+	err = m.InsertChain(chainPack)
+	require.NoError(t, err)
+	baseFee := chainPack.TopBlock.BaseFee().Uint64()
+	addTwoTxnsToPool(ctx, 1, t, m, txpool, baseFee)
+
+	var parentBeaconBlockRoot common.Hash
+	_, err = rand.Read(parentBeaconBlockRoot[:])
+	require.NoError(t, err)
+	payloadId, err := assembleBlock(ctx, exec, &executionproto.AssembleBlockRequest{
+		ParentHash:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Hash()),
+		Timestamp:             chainPack.TopBlock.Header().Time + 1,
+		PrevRandao:            gointerfaces.ConvertHashToH256(chainPack.TopBlock.Header().MixDigest),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(common.Address{1}),
+		Withdrawals:           make([]*typesproto.Withdrawal, 0),
+		ParentBeaconBlockRoot: gointerfaces.ConvertHashToH256(parentBeaconBlockRoot),
+	})
+	require.NoError(t, err)
+
+	// Add new transactions with a delay
+	time.Sleep(300 * time.Millisecond)
+	addTwoTxnsToPool(ctx, 3, t, m, txpool, baseFee)
+
+	// The block should have all four transactions
+	block, err := getAssembledBlock(ctx, exec, payloadId)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), block.NumberU64())
+	require.Len(t, block.Transactions(), 4)
+
+	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
+	require.NoError(t, err)
+}
+
+func insertBlocks(ctx context.Context, exec *execmodule.EthereumExecutionModule, blocks []*types.Block) (*executionproto.InsertionResult, error) {
+	rpcBlocks := make([]*executionproto.Block, len(blocks))
+	for i, b := range blocks {
+		rpcBlocks[i] = eth1utils.ConvertBlockToRPC(b)
+	}
+	return retryBusy(ctx, func() (*executionproto.InsertionResult, bool, error) {
 		r, err := exec.InsertBlocks(ctx, &executionproto.InsertBlocksRequest{
-			Blocks: blocks,
+			Blocks: rpcBlocks,
 		})
 		if err != nil {
-			return nil, 0, err
+			return nil, false, err
 		}
-		return r, r.Result, nil
+		return r, r.Result == executionproto.ExecutionStatus_Busy, nil
 	})
 }
 
 func validateChain(ctx context.Context, exec *execmodule.EthereumExecutionModule, h *types.Header) (*executionproto.ValidationReceipt, error) {
-	return retryBusy(ctx, func() (*executionproto.ValidationReceipt, executionproto.ExecutionStatus, error) {
+	return retryBusy(ctx, func() (*executionproto.ValidationReceipt, bool, error) {
 		r, err := exec.ValidateChain(ctx, &executionproto.ValidationRequest{
 			Hash:   gointerfaces.ConvertHashToH256(h.Hash()),
 			Number: h.Number.Uint64(),
 		})
 		if err != nil {
-			return nil, 0, err
+			return nil, false, err
 		}
-		return r, r.ValidationStatus, nil
+		return r, r.ValidationStatus == executionproto.ExecutionStatus_Busy, nil
 	})
 }
 
 func updateForkChoice(ctx context.Context, exec *execmodule.EthereumExecutionModule, h *types.Header) (*executionproto.ForkChoiceReceipt, error) {
-	return retryBusy(ctx, func() (*executionproto.ForkChoiceReceipt, executionproto.ExecutionStatus, error) {
+	return retryBusy(ctx, func() (*executionproto.ForkChoiceReceipt, bool, error) {
 		r, err := exec.UpdateForkChoice(ctx, &executionproto.ForkChoice{
 			HeadBlockHash:      gointerfaces.ConvertHashToH256(h.Hash()),
 			SafeBlockHash:      gointerfaces.ConvertHashToH256(common.Hash{}),
 			FinalizedBlockHash: gointerfaces.ConvertHashToH256(common.Hash{}),
 		})
 		if err != nil {
-			return nil, 0, err
+			return nil, false, err
 		}
-		return r, r.Status, nil
+		return r, r.Status == executionproto.ExecutionStatus_Busy, nil
 	})
 }
 
-func insertValidateAndUfc1By1(ctx context.Context, exec *execmodule.EthereumExecutionModule, chainPack *blockgen.ChainPack) error {
-	ir, err := insertBlocks(ctx, exec, chainPack)
+func insertValidateAndUfc1By1(ctx context.Context, exec *execmodule.EthereumExecutionModule, blocks []*types.Block) error {
+	ir, err := insertBlocks(ctx, exec, blocks)
 	if err != nil {
 		return err
 	}
 	if ir.Result != executionproto.ExecutionStatus_Success {
 		return fmt.Errorf("unexpected insertBlocks status: %s", ir.Result)
 	}
-	for _, b := range chainPack.Blocks {
+	for _, b := range blocks {
 		h := b.Header()
 		vr, err := validateChain(ctx, exec, h)
 		if err != nil {
@@ -308,32 +364,26 @@ func insertValidateAndUfc1By1(ctx context.Context, exec *execmodule.EthereumExec
 }
 
 func assembleBlock(ctx context.Context, exec *execmodule.EthereumExecutionModule, req *executionproto.AssembleBlockRequest) (uint64, error) {
-	return retryBusy(ctx, func() (uint64, executionproto.ExecutionStatus, error) {
+	return retryBusy(ctx, func() (uint64, bool, error) {
 		r, err := exec.AssembleBlock(ctx, req)
 		if err != nil {
-			return 0, 0, err
+			return 0, false, err
 		}
-		if r.Busy {
-			return 0, executionproto.ExecutionStatus_Busy, nil
-		}
-		return r.Id, executionproto.ExecutionStatus_Success, nil
+		return r.Id, r.Busy, nil
 	})
 }
 
-func getAssembledBlock(ctx context.Context, exe *execmodule.EthereumExecutionModule, payloadId uint64) (*executionproto.AssembledBlockData, error) {
-	return retryBusy(ctx, func() (*executionproto.AssembledBlockData, executionproto.ExecutionStatus, error) {
-		br, err := exe.GetAssembledBlock(ctx, &executionproto.GetAssembledBlockRequest{Id: payloadId})
+func getAssembledBlock(ctx context.Context, exe *execmodule.EthereumExecutionModule, payloadId uint64) (*types.Block, error) {
+	return retryBusy(ctx, func() (*types.Block, bool, error) {
+		br, busy, err := exe.GetAssembledBlockWithReceipts(payloadId)
 		if err != nil {
-			return nil, 0, err
+			return nil, false, err
 		}
-		if br.Busy {
-			return nil, executionproto.ExecutionStatus_Busy, nil
-		}
-		return br.Data, executionproto.ExecutionStatus_Success, nil
+		return br.Block, busy, nil
 	})
 }
 
-func retryBusy[T any](ctx context.Context, f func() (T, executionproto.ExecutionStatus, error)) (T, error) {
+func retryBusy[T any](ctx context.Context, f func() (T, bool, error)) (T, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	var b backoff.BackOff
@@ -341,11 +391,11 @@ func retryBusy[T any](ctx context.Context, f func() (T, executionproto.Execution
 	b = backoff.WithContext(b, ctx)
 	return backoff.RetryWithData(
 		func() (T, error) {
-			r, s, err := f()
+			r, busy, err := f()
 			if err != nil {
 				return generics.Zero[T](), backoff.Permanent(err) // no retries
 			}
-			if s == executionproto.ExecutionStatus_Busy {
+			if busy {
 				return generics.Zero[T](), errors.New("retrying busy")
 			}
 			return r, nil

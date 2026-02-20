@@ -208,8 +208,8 @@ type Config struct {
 	// Whitelist of required block number -> hash values to accept
 	Whitelist map[uint64]common.Hash `toml:"-"`
 
-	// Mining options
-	Miner buildercfg.MiningConfig
+	// Block builder options
+	Builder buildercfg.BuilderConfig
 
 	// Ethash options
 	Ethash ethashcfg.Config
