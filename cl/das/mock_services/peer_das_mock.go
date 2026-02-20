@@ -45,7 +45,7 @@ func (m *MockPeerDas) EXPECT() *MockPeerDasMockRecorder {
 }
 
 // DownloadColumnsAndRecoverBlobs mocks base method.
-func (m *MockPeerDas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []*cltypes.SignedBlindedBeaconBlock) error {
+func (m *MockPeerDas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "DownloadColumnsAndRecoverBlobs", ctx, blocks)
 	ret0, _ := ret[0].(error)
@@ -71,19 +71,19 @@ func (c *MockPeerDasDownloadColumnsAndRecoverBlobsCall) Return(arg0 error) *Mock
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPeerDasDownloadColumnsAndRecoverBlobsCall) Do(f func(context.Context, []*cltypes.SignedBlindedBeaconBlock) error) *MockPeerDasDownloadColumnsAndRecoverBlobsCall {
+func (c *MockPeerDasDownloadColumnsAndRecoverBlobsCall) Do(f func(context.Context, []cltypes.ColumnSyncableSignedBlock) error) *MockPeerDasDownloadColumnsAndRecoverBlobsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPeerDasDownloadColumnsAndRecoverBlobsCall) DoAndReturn(f func(context.Context, []*cltypes.SignedBlindedBeaconBlock) error) *MockPeerDasDownloadColumnsAndRecoverBlobsCall {
+func (c *MockPeerDasDownloadColumnsAndRecoverBlobsCall) DoAndReturn(f func(context.Context, []cltypes.ColumnSyncableSignedBlock) error) *MockPeerDasDownloadColumnsAndRecoverBlobsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // DownloadOnlyCustodyColumns mocks base method.
-func (m *MockPeerDas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []*cltypes.SignedBlindedBeaconBlock) error {
+func (m *MockPeerDas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "DownloadOnlyCustodyColumns", ctx, blocks)
 	ret0, _ := ret[0].(error)
@@ -109,13 +109,13 @@ func (c *MockPeerDasDownloadOnlyCustodyColumnsCall) Return(arg0 error) *MockPeer
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPeerDasDownloadOnlyCustodyColumnsCall) Do(f func(context.Context, []*cltypes.SignedBlindedBeaconBlock) error) *MockPeerDasDownloadOnlyCustodyColumnsCall {
+func (c *MockPeerDasDownloadOnlyCustodyColumnsCall) Do(f func(context.Context, []cltypes.ColumnSyncableSignedBlock) error) *MockPeerDasDownloadOnlyCustodyColumnsCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPeerDasDownloadOnlyCustodyColumnsCall) DoAndReturn(f func(context.Context, []*cltypes.SignedBlindedBeaconBlock) error) *MockPeerDasDownloadOnlyCustodyColumnsCall {
+func (c *MockPeerDasDownloadOnlyCustodyColumnsCall) DoAndReturn(f func(context.Context, []cltypes.ColumnSyncableSignedBlock) error) *MockPeerDasDownloadOnlyCustodyColumnsCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
