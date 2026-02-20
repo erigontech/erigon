@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/execution/tests/mock"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -56,7 +56,7 @@ func TestLookupStorage(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			m := mock.Mock(t)
+			m := execmoduletester.New(t)
 			br := m.BlockReader
 			tx, err := m.DB.BeginRw(m.Ctx)
 			require.NoError(t, err)
