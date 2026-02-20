@@ -1139,6 +1139,7 @@ func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccak.KeccakStat
 	if len(uncompactedBranchKey) > 128 {
 		return fmt.Errorf("branch key too long: %d", len(branchKey))
 	}
+	var hashBuf common.Hash
 	depth := int16(len(uncompactedBranchKey))
 	for _, c := range row {
 		if c == nil {
@@ -1147,7 +1148,7 @@ func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccak.KeccakStat
 		if c.accountAddrLen == 0 && c.storageAddrLen == 0 {
 			continue
 		}
-		err := c.deriveHashedKeys(depth, keccak, length.Addr)
+		err := c.deriveHashedKeys(depth, keccak, length.Addr, hashBuf[:])
 		if err != nil {
 			return err
 		}

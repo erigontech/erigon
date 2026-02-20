@@ -165,7 +165,7 @@ func (w *Warmuper) Start() {
 	}
 
 	w.startTime = time.Now()
-	w.work = make(chan warmupWorkItem, 50_000)
+	w.work = make(chan warmupWorkItem, w.numWorkers*64)
 	w.g, w.ctx = errgroup.WithContext(w.ctx)
 
 	for i := 0; i < w.numWorkers; i++ {
@@ -275,6 +275,7 @@ func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int) {
 	select {
 	case w.work <- warmupWorkItem{hashedKey: hashedKey, startDepth: startDepth}:
 	case <-w.ctx.Done():
+	default: // non-blocking
 	}
 }
 

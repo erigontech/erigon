@@ -3,8 +3,9 @@ package commitment
 import (
 	"testing"
 
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 // 20 bytes account key -> 32 bytes keccak -> 64 bytes nibblelized

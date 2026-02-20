@@ -166,7 +166,7 @@ func InitialiseEngineApiTester(t *testing.T, args EngineApiTesterInitArgs) Engin
 			NoDownloader: true,
 		},
 		TxPool: txPoolConfig,
-		Miner: buildercfg.MiningConfig{
+		Builder: buildercfg.BuilderConfig{
 			EnabledPOS: true,
 		},
 		KeepStoredChainConfig: true,

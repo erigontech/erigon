@@ -171,15 +171,15 @@ func hashKey(keccak cryptokeccak.KeccakState, plainKey []byte, dest []byte, hash
 	if _, err := keccak.Read(hashBuf); err != nil {
 		return err
 	}
-	hashBuf = hashBuf[hashedKeyOffset/2:]
+	hb := hashBuf[hashedKeyOffset/2:]
 	var k int
 	if hashedKeyOffset%2 == 1 { // write zero byte as compacted since hashedKeyOffset is odd
-		dest[0] = hashBuf[0] & 0xf
+		dest[0] = hb[0] & 0xf
 		k++
-		hashBuf = hashBuf[1:]
+		hb = hb[1:]
 	}
 	// write each byte as 2 hex nibbles
-	for _, c := range hashBuf {
+	for _, c := range hb {
 		dest[k] = (c >> 4) & 0xf
 		k++
 		dest[k] = c & 0xf

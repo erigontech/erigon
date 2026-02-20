@@ -26,6 +26,16 @@ func CreateBAL(blockNum uint64, txIO *state.VersionedIO, dataDir string) types.B
 			if vr.Address.IsNil() {
 				return true
 			}
+			// Skip validation-only reads for non-existent accounts.
+			// These are recorded by versionedRead when the version map
+			// has no entry (MVReadResultNone) so that conflict detection
+			// works across transactions, but they should not appear in
+			// the block access list.
+			if vr.Path == state.AddressPath {
+				if val, ok := vr.Val.(*accounts.Account); ok && val == nil {
+					return true
+				}
+			}
 			account := ensureAccountState(ac, vr.Address)
 			updateAccountRead(account, vr)
 			return true
