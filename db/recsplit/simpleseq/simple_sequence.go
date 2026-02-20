@@ -17,6 +17,7 @@ type SimpleSequence struct {
 	baseNum uint64
 	raw     []byte
 	pos     int
+	count   uint64 //u64-typed pre-calculated `len(raw)/4`
 }
 
 func NewSimpleSequence(baseNum uint64, count uint64) *SimpleSequence {
@@ -24,6 +25,7 @@ func NewSimpleSequence(baseNum uint64, count uint64) *SimpleSequence {
 		baseNum: baseNum,
 		raw:     make([]byte, count*4),
 		pos:     0,
+		count:   count,
 	}
 }
 
@@ -50,7 +52,7 @@ func (s *SimpleSequence) Max() uint64 {
 }
 
 func (s *SimpleSequence) Count() uint64 {
-	return uint64(len(s.raw) / 4)
+	return s.count
 }
 func (s *SimpleSequence) Empty() bool { return len(s.raw) == 0 }
 
