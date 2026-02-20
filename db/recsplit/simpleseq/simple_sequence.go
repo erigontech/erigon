@@ -111,10 +111,10 @@ func (s *SimpleSequence) reverseSearch(v uint64) (int, bool) {
 		return 0, false
 	}
 
-	if v < s.Get(0) {
+	if v < s.Min() {
 		return 0, false
 	}
-	if v >= s.Get(c-1) {
+	if v >= s.Max() {
 		return int(c) - 1, true
 	}
 
