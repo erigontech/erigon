@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 type Opt func(bt *Backtester)
@@ -206,7 +207,10 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	if bt.paraTrie {
 		sd.EnableParaTrieDB(bt.db)
 	}
-	sd.GetCommitmentCtx().SetStateReader(newBacktestStateReader(tx, fromTxNum, toTxNum))
+	// A history reader that reads:
+	//   - commitment data as-of the beginning of the block
+	//   - account/storage/code data as-of the end of the block
+	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewSplitHistoryReader(tx, fromTxNum, toTxNum))
 	sd.GetCommitmentCtx().SetTrace(bt.logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentCtx().EnableCsvMetrics(deriveBlockMetricsFilePrefix(blockOutputDir))
 	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx)

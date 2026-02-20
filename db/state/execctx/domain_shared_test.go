@@ -844,7 +844,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		require.Equal(t, 1, storageChanges)
 
 		// compute the commitment trie root in sd2 reading state for touched keys from db1
-		sd2.GetCommitmentContext().SetStateReader(commitmentdb.NewLatestStateReader(sd1.AsGetter(db1RoTx)))
+		sd2.GetCommitmentContext().SetStateReader(commitmentdb.NewLatestStateReader(db1RoTx, sd2))
 		rootHash, err := sd2.ComputeCommitment(ctx, roTx2, false, blockNum, toTxNum, "", nil)
 		if err != nil {
 			return

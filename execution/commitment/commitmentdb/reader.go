@@ -10,15 +10,16 @@ type StateReader interface {
 	WithHistory() bool
 	CheckDataAvailable(d kv.Domain, step kv.Step) error
 	Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error)
-	Clone(tx kv.TemporalTx, getter kv.TemporalGetter) StateReader
+	Clone(tx kv.TemporalTx) StateReader
 }
 
 type LatestStateReader struct {
-	getter kv.TemporalGetter
+	sharedDomains sd
+	getter        kv.TemporalGetter
 }
 
-func NewLatestStateReader(tx kv.TemporalGetter) *LatestStateReader {
-	return &LatestStateReader{getter: tx}
+func NewLatestStateReader(tx kv.TemporalTx, sd sd) *LatestStateReader {
+	return &LatestStateReader{sharedDomains: sd, getter: sd.AsGetter(tx)}
 }
 
 func (r *LatestStateReader) WithHistory() bool {
@@ -41,8 +42,8 @@ func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) 
 	return enc, step, nil
 }
 
-func (r *LatestStateReader) Clone(_ kv.TemporalTx, getter kv.TemporalGetter) StateReader {
-	return NewLatestStateReader(getter)
+func (r *LatestStateReader) Clone(tx kv.TemporalTx) StateReader {
+	return NewLatestStateReader(tx, r.sharedDomains)
 }
 
 // HistoryStateReader reads *full* historical state at specified txNum.
@@ -75,7 +76,7 @@ func (r *HistoryStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64)
 	return enc, kv.Step(r.limitReadAsOfTxNum / stepSize), nil
 }
 
-func (r *HistoryStateReader) Clone(tx kv.TemporalTx, _ kv.TemporalGetter) StateReader {
+func (r *HistoryStateReader) Clone(tx kv.TemporalTx) StateReader {
 	return NewHistoryStateReader(tx, r.limitReadAsOfTxNum)
 }
 
@@ -83,16 +84,18 @@ func (r *HistoryStateReader) Clone(tx kv.TemporalTx, _ kv.TemporalGetter) StateR
 // `limitReadAsOfTxNum` here is used for unusual operation: "hide recent .kv files and read the latest state from files".
 type LimitedHistoryStateReader struct {
 	HistoryStateReader
-	getter kv.TemporalGetter
+	sharedDomains sd
+	getter        kv.TemporalGetter
 }
 
-func NewLimitedHistoryStateReader(roTx kv.TemporalTx, getter kv.TemporalGetter, limitReadAsOfTxNum uint64) *LimitedHistoryStateReader {
+func NewLimitedHistoryStateReader(roTx kv.TemporalTx, sd sd, limitReadAsOfTxNum uint64) *LimitedHistoryStateReader {
 	return &LimitedHistoryStateReader{
 		HistoryStateReader: HistoryStateReader{
 			roTx:               roTx,
 			limitReadAsOfTxNum: limitReadAsOfTxNum,
 		},
-		getter: getter,
+		sharedDomains: sd,
+		getter:        sd.AsGetter(roTx),
 	}
 }
 
@@ -126,8 +129,8 @@ func (r *LimitedHistoryStateReader) Read(d kv.Domain, plainKey []byte, stepSize 
 	return enc, step, nil
 }
 
-func (r *LimitedHistoryStateReader) Clone(tx kv.TemporalTx, getter kv.TemporalGetter) StateReader {
-	return NewLimitedHistoryStateReader(tx, getter, r.limitReadAsOfTxNum)
+func (r *LimitedHistoryStateReader) Clone(tx kv.TemporalTx) StateReader {
+	return NewLimitedHistoryStateReader(tx, r.sharedDomains, r.limitReadAsOfTxNum)
 }
 
 // splitStateReader implements commitmentdb.StateReader using (potentially) different state readers for commitment
@@ -155,8 +158,8 @@ func (r splitStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([
 	return r.plainStateReader.Read(d, plainKey, stepSize)
 }
 
-func (r splitStateReader) Clone(tx kv.TemporalTx, getter kv.TemporalGetter) StateReader {
-	return NewCommitmentSplitStateReader(r.commitmentReader.Clone(tx, getter), r.plainStateReader.Clone(tx, getter), r.withHistory)
+func (r splitStateReader) Clone(tx kv.TemporalTx) StateReader {
+	return NewCommitmentSplitStateReader(r.commitmentReader.Clone(tx), r.plainStateReader.Clone(tx), r.withHistory)
 }
 
 func NewCommitmentSplitStateReader(commitmentReader StateReader, plainStateReader StateReader, withHistory bool) StateReader {
@@ -167,7 +170,18 @@ func NewCommitmentSplitStateReader(commitmentReader StateReader, plainStateReade
 	}
 }
 
-func NewCommitmentReplayStateReader(tx kv.TemporalTx, getter kv.TemporalGetter, plainStateAsOf uint64) StateReader {
+func NewCommitmentReplayStateReader(tx kv.TemporalTx, sd sd, plainStateAsOf uint64) StateReader {
 	// Claim that during replay we do not operate on history, so we can temporarily save commitment state
-	return NewCommitmentSplitStateReader(NewLatestStateReader(getter), NewHistoryStateReader(tx, plainStateAsOf), false)
+	return NewCommitmentSplitStateReader(NewLatestStateReader(tx, sd), NewHistoryStateReader(tx, plainStateAsOf), false)
+}
+
+// A history reader that reads:
+//   - commitment data as-of  commitmentAsOf txnum
+//   - account/storage/code data as-of plainsStateAsOf txnum
+func NewSplitHistoryReader(tx kv.TemporalTx, commitmentAsOf uint64, plainStateAsOf uint64) StateReader {
+	return splitStateReader{
+		commitmentReader: NewHistoryStateReader(tx, commitmentAsOf),
+		plainStateReader: NewHistoryStateReader(tx, plainStateAsOf),
+		withHistory:      true, // we lie, it is without history so we can exercise SharedDomain's in-memory DomainPut(kv.CommitmmentDomain)
+	}
 }

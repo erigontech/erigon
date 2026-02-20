@@ -115,7 +115,7 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 		if err != nil {
 			return nil, err
 		}
-		tsd.GetCommitmentCtx().SetStateReader(commitmentdb.NewCommitmentReplayStateReader(tx, tsd.AsGetter(ttx), maxTxNum+1))
+		tsd.GetCommitmentCtx().SetStateReader(commitmentdb.NewCommitmentReplayStateReader(ttx, tsd, maxTxNum+1))
 		r.logger.Debug("Touch historical keys", "fromTxNum", minTxNum, "toTxNum", maxTxNum+1)
 		_, _, err = tsd.TouchChangedKeysFromHistory(tx, minTxNum, maxTxNum+1)
 		if err != nil {

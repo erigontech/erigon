@@ -139,7 +139,7 @@ func (sdc *SharedDomainsCommitmentContext) SetHistoryStateReader(roTx kv.Tempora
 
 // SetLimitedHistoryStateReader sets the state reader to read *limited* (i.e. *without-recent-files*) historical state at specified txNum.
 func (sdc *SharedDomainsCommitmentContext) SetLimitedHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
-	sdc.SetStateReader(NewLimitedHistoryStateReader(roTx, sdc.sharedDomains.AsGetter(roTx), limitReadAsOfTxNum))
+	sdc.SetStateReader(NewLimitedHistoryStateReader(roTx, sdc.sharedDomains, limitReadAsOfTxNum))
 }
 
 func (sdc *SharedDomainsCommitmentContext) SetTrace(trace bool) {
@@ -172,9 +172,9 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, txNum u
 		txNum:    txNum,
 	}
 	if sdc.stateReader != nil {
-		mainTtx.stateReader = sdc.stateReader.Clone(tx, sdc.sharedDomains.AsGetter(tx))
+		mainTtx.stateReader = sdc.stateReader.Clone(tx)
 	} else {
-		mainTtx.stateReader = NewLatestStateReader(sdc.sharedDomains.AsGetter(tx))
+		mainTtx.stateReader = NewLatestStateReader(tx, sdc.sharedDomains)
 	}
 	sdc.patriciaTrie.ResetContext(mainTtx)
 	return mainTtx
@@ -335,9 +335,9 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 			txNum:    txNum,
 		}
 		if sdc.stateReader != nil {
-			warmupCtx.stateReader = sdc.stateReader.Clone(roTx, sdc.sharedDomains.AsGetter(roTx))
+			warmupCtx.stateReader = sdc.stateReader.Clone(roTx)
 		} else {
-			warmupCtx.stateReader = NewLatestStateReader(sdc.sharedDomains.AsGetter(roTx))
+			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains)
 		}
 		cleanup := func() {
 			roTx.Rollback()
