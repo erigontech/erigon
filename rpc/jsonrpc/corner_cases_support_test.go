@@ -30,9 +30,6 @@ import (
 // TestNotFoundMustReturnNil - next methods - when record not found in db - must return nil instead of error
 // see https://github.com/erigontech/erigon/issues/1645
 func TestNotFoundMustReturnNil(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	assertions := require.New(t)
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)

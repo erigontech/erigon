@@ -485,9 +485,6 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 }
 
 func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(context.Background())

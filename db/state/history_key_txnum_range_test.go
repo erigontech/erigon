@@ -202,9 +202,6 @@ func TestHistoryKeyTxNumRange_EdgeCases(t *testing.T) {
 }
 
 func TestHistoryKeyTxNumRange_DBOnly(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	t.Parallel()
 
 	logger := log.New()

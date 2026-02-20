@@ -1530,9 +1530,6 @@ func TestBlobSlots(t *testing.T) {
 }
 
 func TestWrappedSixBlobTxnExceedsRlpLimit(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	require := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

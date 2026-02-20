@@ -791,9 +791,6 @@ func TestShortUnwrap(t *testing.T) {
 }
 
 func TestV1BlobTxnUnwrap(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	blobTxRlp, _ := MakeV1WrappedBlobTxnRlp()
 	shortRlp, err := UnwrapTxPlayloadRlp(blobTxRlp)
 	if err != nil {

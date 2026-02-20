@@ -93,10 +93,6 @@ func TestEliasFanoSeekBoundaries(t *testing.T) {
 }
 
 func TestEliasFanoSeek(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	count := uint64(100_000)
 	maxOffset := (count - 1) * 123
 	ef := NewEliasFano(count, maxOffset)

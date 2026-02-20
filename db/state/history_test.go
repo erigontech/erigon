@@ -499,9 +499,6 @@ func TestHistoryAsOfWithPrune(t *testing.T) {
 }
 
 func TestHistoryCanPrune(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	t.Parallel()
 
 	logger := log.New()

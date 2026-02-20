@@ -569,9 +569,6 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 }
 
 func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
 	t.Parallel()
 
 	stepSize := uint64(5)
