@@ -41,8 +41,21 @@ func CreateBAL(blockNum uint64, txIO *state.VersionedIO, dataDir string) types.B
 			return true
 		})
 
-		for _, vw := range txIO.WriteSet(txIndex) {
-			if vw.Address.IsNil() {
+		writes := txIO.WriteSet(txIndex)
+		// First pass: apply SelfDestructPath writes so the selfDestructed flag
+		// is up-to-date before balance/nonce/code writes are processed.
+		// The write slice order is non-deterministic, and a SelfDestructPath=false
+		// (un-selfdestruct in a later tx) may appear after BalancePath in the slice.
+		for _, vw := range writes {
+			if vw.Address.IsNil() || vw.Path != state.SelfDestructPath {
+				continue
+			}
+			account := ensureAccountState(ac, vw.Address)
+			updateAccountWrite(account, vw, blockAccessIndex(vw.Version.TxIndex))
+		}
+		// Second pass: process all other write paths.
+		for _, vw := range writes {
+			if vw.Address.IsNil() || vw.Path == state.SelfDestructPath {
 				continue
 			}
 			account := ensureAccountState(ac, vw.Address)
@@ -146,8 +159,8 @@ func updateAccountWrite(account *accountState, vw *state.VersionedWrite, accessI
 	case state.StoragePath:
 		addStorageUpdate(account.changes, vw, accessIndex)
 	case state.SelfDestructPath:
-		if deleted, ok := vw.Val.(bool); ok && deleted {
-			account.selfDestructed = true
+		if deleted, ok := vw.Val.(bool); ok {
+			account.selfDestructed = deleted
 		}
 	case state.BalancePath:
 		val, ok := vw.Val.(uint256.Int)
