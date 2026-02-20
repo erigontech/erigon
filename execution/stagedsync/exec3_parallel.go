@@ -178,7 +178,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 				case *txResult:
 					uncommittedGas += applyResult.blockGasUsed
 					uncommittedTransactions++
-					pe.rs.SetTxNum(applyResult.blockNum, applyResult.txNum)
 					if dbg.TraceApply && dbg.TraceBlock(applyResult.blockNum) {
 						pe.rs.SetTrace(true)
 						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, applyResult.stateUpdates.UpdateCount())
@@ -272,8 +271,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 					if applyResult.BlockNum > lastBlockResult.BlockNum {
 						uncommittedBlocks++
-						pe.doms.SetTxNum(applyResult.lastTxNum)
-						pe.doms.SetBlockNum(applyResult.BlockNum)
 						lastBlockResult = *applyResult
 					}
 
