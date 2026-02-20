@@ -626,7 +626,7 @@ func (g *Getter) nextPosSubtable(table *posTable, code uint16) uint64 {
 		dataP += uint64(dataBit >> 3)
 		dataBit &= 7
 		code = uint16(data[dataP]) >> dataBit
-		if dataP+1 < g.dataLen {
+		if 8-dataBit < table.bitLen && dataP+1 < g.dataLen {
 			code |= uint16(data[dataP+1]) << (8 - dataBit)
 		}
 		code &= table.mask
@@ -653,7 +653,7 @@ func (g *Getter) nextPattern() []byte {
 
 	for {
 		code := uint16(data[dataP]) >> dataBit
-		if dataP+1 < g.dataLen {
+		if 8-dataBit < table.bitLen && dataP+1 < g.dataLen {
 			code |= uint16(data[dataP+1]) << (8 - dataBit)
 		}
 		code &= (uint16(1) << table.bitLen) - 1
