@@ -614,8 +614,12 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			go warmTxsHashes(b)
 
 			var dbBAL types.BlockAccessList
-			data, err := rawdb.ReadBlockAccessListBytes(tx, b.Hash(), blockNum)
-			if err != nil {
+			var data []byte
+			if err = tx.Apply(ctx, func(applyTx kv.Tx) error {
+				var e error
+				data, e = rawdb.ReadBlockAccessListBytes(applyTx, b.Hash(), blockNum)
+				return e
+			}); err != nil {
 				return err
 			}
 			if len(data) > 0 {
