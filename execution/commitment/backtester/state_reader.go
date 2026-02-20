@@ -27,6 +27,7 @@ var _ commitmentdb.StateReader = (*backtestStateReader)(nil)
 //   - read commitment data as-of the beginning of the block
 //   - read account/storage/code data as-of the end of the block
 type backtestStateReader struct {
+	tx               kv.TemporalTx
 	commitmentReader commitmentdb.StateReader
 	plainStateReader commitmentdb.StateReader
 	commitmentAsOf   uint64
@@ -35,6 +36,7 @@ type backtestStateReader struct {
 
 func newBacktestStateReader(tx kv.TemporalTx, commitmentAsOf uint64, plainStateAsOf uint64) backtestStateReader {
 	return backtestStateReader{
+		tx:               tx,
 		commitmentReader: commitmentdb.NewHistoryStateReader(tx, commitmentAsOf),
 		plainStateReader: commitmentdb.NewHistoryStateReader(tx, plainStateAsOf),
 		commitmentAsOf:   commitmentAsOf,
@@ -58,6 +60,6 @@ func (b backtestStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64)
 	return b.plainStateReader.Read(d, plainKey, stepSize)
 }
 
-func (b backtestStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
-	return newBacktestStateReader(tx, b.commitmentAsOf, b.plainStateAsOf)
+func (b backtestStateReader) Clone() commitmentdb.StateReader {
+	return newBacktestStateReader(b.tx, b.commitmentAsOf, b.plainStateAsOf)
 }

@@ -139,7 +139,7 @@ func (sdc *SharedDomainsCommitmentContext) SetHistoryStateReader(roTx kv.Tempora
 
 // SetLimitedHistoryStateReader sets the state reader to read *limited* (i.e. *without-recent-files*) historical state at specified txNum.
 func (sdc *SharedDomainsCommitmentContext) SetLimitedHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
-	sdc.SetStateReader(NewLimitedHistoryStateReader(roTx, sdc.sharedDomains, limitReadAsOfTxNum))
+	sdc.SetStateReader(NewLimitedHistoryStateReader(roTx, sdc.sharedDomains.AsGetter(roTx), limitReadAsOfTxNum))
 }
 
 func (sdc *SharedDomainsCommitmentContext) SetTrace(trace bool) {
@@ -172,9 +172,9 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, txNum u
 		txNum:    txNum,
 	}
 	if sdc.stateReader != nil {
-		mainTtx.stateReader = sdc.stateReader.Clone(tx)
+		mainTtx.stateReader = sdc.stateReader.Clone()
 	} else {
-		mainTtx.stateReader = NewLatestStateReader(tx, sdc.sharedDomains)
+		mainTtx.stateReader = NewLatestStateReader(sdc.sharedDomains.AsGetter(tx))
 	}
 	sdc.patriciaTrie.ResetContext(mainTtx)
 	return mainTtx
@@ -312,7 +312,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	sdc.justRestored.Store(false)
 
 	if saveState {
-		if err = sdc.encodeAndStoreCommitmentState(trieContext, blockNum, txNum, rootHash); err != nil {
+		if err = sdc.encodeAndStoreCommitmentState(trieContext, blockNum, txNum); err != nil {
 			return nil, err
 		}
 	}
@@ -335,9 +335,9 @@ func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Contex
 			txNum:    txNum,
 		}
 		if sdc.stateReader != nil {
-			warmupCtx.stateReader = sdc.stateReader.Clone(roTx)
+			warmupCtx.stateReader = sdc.stateReader.Clone()
 		} else {
-			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains)
+			warmupCtx.stateReader = NewLatestStateReader(sdc.sharedDomains.AsGetter(roTx))
 		}
 		cleanup := func() {
 			roTx.Rollback()
@@ -470,7 +470,7 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 }
 
 // encodes current trie state and saves it in SharedDomains
-func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieContext *TrieContext, blockNum, txNum uint64, rootHash []byte) error {
+func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieContext *TrieContext, blockNum, txNum uint64) error {
 	if trieContext == nil {
 		return errors.New("store commitment state: AggregatorContext is not initialized")
 	}

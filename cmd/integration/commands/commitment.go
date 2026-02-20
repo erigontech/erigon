@@ -200,7 +200,7 @@ Examples:
 		// Use LatestStateReader to read from the commitment domain.
 		// This is the same approach used by commitmentdb.TrieContext.Branch internally:
 		// TrieContext.Branch -> TrieContext.readDomain -> StateReader.Read
-		commitmentReader := commitmentdb.NewLatestStateReader(tx, sd)
+		commitmentReader := commitmentdb.NewLatestStateReader(sd.AsGetter(tx))
 
 		if err := readBranch(commitmentReader, prefix, logger); err != nil {
 			logger.Error("Failed to read branch", "error", err)
@@ -523,7 +523,7 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 			return fmt.Errorf("failed to create shared domains: %w", err)
 		}
 		defer sd.Close()
-		commitmentReader = commitmentdb.NewLatestStateReader(tx, sd)
+		commitmentReader = commitmentdb.NewLatestStateReader(sd.AsGetter(tx))
 	}
 	durations := make([]time.Duration, len(keys))
 	var totalSize int64

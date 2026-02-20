@@ -851,12 +851,12 @@ func clientLimitExceededError(message string) error {
 
 func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, limitReadAsOfTxNum uint64) commitmentdb.StateReader {
 	// Commitment values are read from history, whereas account/storage/code values are read from latest state
-	return commitmentdb.NewCommitmentSplitStateReader(commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum), commitmentdb.NewLatestStateReader(roTx, sd), true)
+	return commitmentdb.NewCommitmentSplitStateReader(commitmentdb.NewHistoryStateReader(roTx, limitReadAsOfTxNum), commitmentdb.NewLatestStateReader(sd.AsGetter(roTx)), true)
 }
 
-func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomains) commitmentdb.StateReader {
+func newSimulateStateReader(commitmentGetter, plainstateGetter kv.TemporalGetter) commitmentdb.StateReader {
 	// Both commitment and account/storage/code values are read from latest state *but* on different SharedDomains instances
-	return commitmentdb.NewCommitmentSplitStateReader(commitmentdb.NewLatestStateReader(ttx, tsd), commitmentdb.NewLatestStateReader(tx, sd), false)
+	return commitmentdb.NewCommitmentSplitStateReader(commitmentdb.NewLatestStateReader(commitmentGetter), commitmentdb.NewLatestStateReader(plainstateGetter), false)
 }
 
 // computeCommitmentFromStateHistory calculates the commitment root for simulated block from state history
@@ -874,7 +874,9 @@ func (s *simulator) computeCommitmentFromStateHistory(
 	// - touch the keys registered by diffTrackingWriter during IntraBlockState flush
 	simBlockComputeCommitment := func(ctx context.Context, ttx kv.TemporalTx, tsd *execctx.SharedDomains) ([]byte, error) {
 		simBlockNum := baseBlockNum + 1
-		tsd.GetCommitmentCtx().SetStateReader(newSimulateStateReader(ttx, tx, tsd, sd))
+		commitmentGetter := tsd.AsGetter(ttx)
+		plainStateGetter := sd.AsGetter(tx)
+		tsd.GetCommitmentCtx().SetStateReader(newSimulateStateReader(commitmentGetter, plainStateGetter))
 		storageFullKey := make([]byte, length.Addr+length.Hash)
 		for address, locations := range touched {
 			addressKey := address.Value().Bytes()
