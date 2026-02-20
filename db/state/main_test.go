@@ -29,14 +29,14 @@ func setupRAMTmpdir() func() {
 	case "linux":
 		// /dev/shm is tmpfs on most Linux distros
 		if info, err := os.Stat("/dev/shm"); err == nil && info.IsDir() {
-			dir, err := os.MkdirTemp("/dev/shm", "erigon-test-*")
+			tmpDir, err := os.MkdirTemp("/dev/shm", "erigon-test-*")
 			if err != nil {
 				return noop
 			}
-			os.Setenv("TMPDIR", dir)
-			fmt.Fprintf(os.Stderr, "test tmpdir: %s (tmpfs)\n", dir)
+			os.Setenv("TMPDIR", tmpDir)
+			fmt.Fprintf(os.Stderr, "test tmpdir: %s (tmpfs)\n", tmpDir)
 			return func() {
-				dir.RemoveAll(dir)
+				dir.RemoveAll(tmpDir)
 			}
 		}
 	}
