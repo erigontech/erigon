@@ -54,9 +54,6 @@ func (s *SimpleSequence) Count() uint64 {
 }
 func (s *SimpleSequence) Empty() bool { return len(s.raw) == 0 }
 
-// isCount1 - sequence has only 1 element
-func (s *SimpleSequence) isCount1() bool { return len(s.raw) == 4 }
-
 func (s *SimpleSequence) AddOffset(offset uint64) {
 	binary.BigEndian.PutUint32(s.raw[s.pos*4:], uint32(offset-s.baseNum))
 	s.pos++
@@ -86,13 +83,13 @@ func (s *SimpleSequence) search(seek uint64) (int, bool) {
 	if c == 0 {
 		return 0, false
 	}
-	if seek <= s.Min() {
+	if seek <= s.Min() { // fast-path for 1-st element hit
 		return 0, true
 	}
-	if s.isCount1() {
+	if c == 1 { // if len=1 then nothing left to search
 		return 0, false
 	}
-	if seek > s.Max() {
+	if seek > s.Max() { // fast-path for search-miss
 		return 0, false
 	}
 
@@ -109,12 +106,14 @@ func (s *SimpleSequence) reverseSearch(seek uint64) (int, bool) {
 	if c == 0 {
 		return 0, false
 	}
-
-	if seek < s.Min() {
+	if seek >= s.Max() { // fast-path for 1-st element hit
+		return int(c) - 1, true
+	}
+	if c == 1 { // if len=1 then nothing left to search
 		return 0, false
 	}
-	if seek >= s.Max() {
-		return int(c) - 1, true
+	if seek < s.Min() { // fast-path for search-miss
+		return 0, false
 	}
 
 	// c >= 2, Get(0) <= seek < Get(c-1); answer is in [0, c-2]
