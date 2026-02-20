@@ -95,8 +95,7 @@ func (s *SimpleSequence) search(seek uint64) (idx int, ok bool) {
 
 func (s *SimpleSequence) reverseSearch(seek uint64) (idx int, ok bool) {
 	if seek >= s.Max() { // fast-path for last element hit
-		idx = int(s.count) - 1
-		return idx, true
+		return int(s.count) - 1, true
 	}
 	if s.count == 1 { // if len=1 then nothing left to search
 		return 0, false
