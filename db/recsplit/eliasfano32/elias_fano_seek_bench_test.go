@@ -17,6 +17,7 @@
 package eliasfano32
 
 import (
+	"fmt"
 	"math/rand/v2"
 	"testing"
 )
@@ -146,7 +147,8 @@ func BenchmarkSeek(b *testing.B) {
 	}
 }
 
-// TestSeekCorrectness verifies Seek returns correct results across stride patterns.
+// TestSeekCorrectness verifies Seek returns correct results across stride patterns
+// and prints the upper() call count distribution (run with -v).
 func TestSeekCorrectness(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -168,6 +170,7 @@ func TestSeekCorrectness(t *testing.T) {
 			ef := buildEF(count, tc.stride)
 			maxOffset := (count - 1) * tc.stride
 
+			SearchForwardStats.Reset()
 			rng := rand.New(rand.NewPCG(42, 0))
 			const seeks = 100_000
 			notFound := 0
@@ -182,7 +185,8 @@ func TestSeekCorrectness(t *testing.T) {
 					t.Errorf("Seek(%d) returned %d < v", v, got)
 				}
 			}
-			t.Logf("seeks=%d  notFound=%d", seeks, notFound)
+
+			t.Logf("notFound=%d\n%s", notFound, SearchForwardStats.String())
 		})
 	}
 }

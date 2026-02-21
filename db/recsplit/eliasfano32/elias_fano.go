@@ -23,6 +23,7 @@ import (
 	"math"
 	"math/bits"
 	"sort"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -45,6 +46,52 @@ const (
 	qPerSuperQ uint64 = superQ / q       // 64
 	superQSize uint64 = 1 + qPerSuperQ/2 // 1 + 64/2 = 33
 )
+
+// searchForwardStatsT collects per-call metrics for searchForward.
+//
+// UpperCalls[n] = number of Seeks that called upper() exactly n times (n in 1..4).
+// UpperCalls[5] = Seeks that hit the fallback binary search (5+ upper() calls).
+// UpperBitsWordsSum = sum of len(ef.upperBits) across all Seeks; divide by call count
+// and 4096 to get average array size in 4096-word (32 KiB) chunks.
+//
+// Reset() before a workload, then call String() or read fields directly.
+type searchForwardStatsT struct {
+	UpperCalls        [6]atomic.Int64
+	UpperBitsWordsSum atomic.Int64 // sum of len(ef.upperBits) per seek
+}
+
+func (s *searchForwardStatsT) Reset() {
+	for i := range s.UpperCalls {
+		s.UpperCalls[i].Store(0)
+	}
+	s.UpperBitsWordsSum.Store(0)
+}
+
+func (s *searchForwardStatsT) String() string {
+	total := int64(0)
+	for i := range s.UpperCalls {
+		total += s.UpperCalls[i].Load()
+	}
+	if total == 0 {
+		return "SearchForwardStats: no calls recorded"
+	}
+	out := fmt.Sprintf("SearchForwardStats: calls=%d  avgUpperBitsWords/4096=%.1f\n",
+		total, float64(s.UpperBitsWordsSum.Load())/float64(total)/4096)
+	for i, cnt := range s.UpperCalls {
+		v := cnt.Load()
+		if v == 0 {
+			continue
+		}
+		label := fmt.Sprintf("upper_calls=%d", i)
+		if i == len(s.UpperCalls)-1 {
+			label = "upper_calls=fallback(5+)"
+		}
+		out += fmt.Sprintf("  %s: %d (%.1f%%)\n", label, v, float64(v)/float64(total)*100)
+	}
+	return out
+}
+
+var SearchForwardStats searchForwardStatsT
 
 // EliasFano can be used to encode one monotone sequence
 type EliasFano struct {
@@ -254,6 +301,8 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 	lo, hiB := uint64(0), ef.count
 	loVal := ef.upper(lo) // touches start of ef.jump[]/ef.upperBits[] — often warm after first call
 	hiVal := maxHi        // upper(ef.count) by construction; no extra mmap read
+	upperCalls := 1       // counted the upper(lo) call above
+	SearchForwardStats.UpperBitsWordsSum.Add(int64(len(ef.upperBits)))
 
 	const maxIter = 4
 	for i := 0; i < maxIter && lo < hiB; i++ {
@@ -269,6 +318,7 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 			mid = hiB - 1
 		}
 		midVal := ef.upper(mid)
+		upperCalls++
 		if midVal < hi {
 			lo = mid + 1
 			loVal = midVal // lower bound: actual upper(lo) >= midVal
@@ -279,11 +329,18 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 	}
 	// Fallback: binary search in remaining [lo, hiB] range.
 	// For smooth data the loop above converges; this handles adversarial cases.
-	if lo < hiB && loVal < hi {
+	usedFallback := lo < hiB && loVal < hi
+	if usedFallback {
 		i := sort.Search(int(hiB+1-lo), func(i int) bool {
+			upperCalls++
 			return ef.upper(lo+uint64(i)) >= hi
 		})
 		lo += uint64(i)
+	}
+	if usedFallback || upperCalls >= len(SearchForwardStats.UpperCalls) {
+		SearchForwardStats.UpperCalls[len(SearchForwardStats.UpperCalls)-1].Add(1)
+	} else {
+		SearchForwardStats.UpperCalls[upperCalls].Add(1)
 	}
 
 	for j := lo; j <= ef.count; j++ {
