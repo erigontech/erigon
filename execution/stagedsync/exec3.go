@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -62,10 +61,13 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms
 
 	inputTxNum = doms.TxNum()
 
-	if nothing, err := nothingToExec(applyTx, txNumsReader, inputTxNum); err != nil {
+	lastBlockNum, lastTxNum, err := txNumsReader.Last(applyTx)
+	if err != nil {
 		return 0, 0, 0, 0, err
-	} else if nothing {
-		return 0, 0, 0, 0, err
+	}
+	if lastTxNum == inputTxNum {
+		// nothing to exec - return last committed block so caller can sync stage progress
+		return 0, 0, 0, lastBlockNum, nil
 	}
 
 	maxTxNum, err = txNumsReader.Max(ctx, applyTx, maxBlockNum)
@@ -106,14 +108,6 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms
 	//fmt.Printf("[commitment] found domain.txn %d, inputTxn %d, offset %d. DB found block %d {%d, %d}\n", doms.TxNum(), inputTxNum, offsetFromBlockBeginning, blockNum, _min, _max)
 	doms.SetTxNum(inputTxNum)
 	return inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, nil
-}
-
-func nothingToExec(applyTx kv.Tx, txNumsReader rawdbv3.TxNumsReader, inputTxNum uint64) (bool, error) {
-	_, lastTxNum, err := txNumsReader.Last(applyTx)
-	if err != nil {
-		return false, err
-	}
-	return lastTxNum == inputTxNum, nil
 }
 
 func ExecV3(ctx context.Context,
