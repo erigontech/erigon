@@ -724,7 +724,7 @@ func newRandBlobWrapper() *BlobTxWrapper {
 	btxw := newRandBlobTx()
 	l := len(btxw.BlobVersionedHashes)
 	return &BlobTxWrapper{
-		Tx:          *btxw, //nolint
+		Tx:          btxw.copyData(),
 		Commitments: newRandCommitments(l),
 		Blobs:       newRandBlobs(l),
 		Proofs:      newRandProofs(l),
