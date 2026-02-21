@@ -27,7 +27,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/go-test/deep"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -475,8 +474,7 @@ func TestAuRaHeaderEncoding(t *testing.T) {
 	var decoded Header
 	require.NoError(t, rlp.DecodeBytes(encoded, &decoded))
 
-	deep.CompareUnexportedFields = true
-	require.Nil(t, deep.Equal(&header, &decoded))
+	require.Equal(t, &header, &decoded)
 }
 
 func TestWithdrawalsEncoding(t *testing.T) {

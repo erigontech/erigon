@@ -19,7 +19,6 @@ package moduleutil
 import (
 	"testing"
 
-	"github.com/go-test/deep"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -99,8 +98,7 @@ func TestBlockRpcConversion(t *testing.T) {
 		panic(err)
 	}
 
-	deep.CompareUnexportedFields = true
-	require.Nil(deep.Equal(testBlock.HeaderNoCopy(), roundTripHeader))
+	require.Equal(testBlock.HeaderNoCopy(), roundTripHeader)
 
 	// body conversions
 	rpcBlock := ConvertBlockToRPC(testBlock)
@@ -112,7 +110,7 @@ func TestBlockRpcConversion(t *testing.T) {
 	require.NotEmpty(testBlockRaw.Transactions)
 	require.NotEmpty(testBlockRaw.Uncles)
 	require.NotEmpty(testBlockRaw.Withdrawals)
-	require.Nil(deep.Equal(testBlockRaw, roundTripBody))
+	require.Equal(testBlockRaw, roundTripBody)
 }
 
 func TestBigIntConversion(t *testing.T) {
