@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -826,6 +827,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 			if err := CheckCommitmentHistAtBlk(ctx, db, br, blockNum, logger); err != nil {
 				return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
 			}
+			log.Info("[dbg] stat", "eliasfano32.SearchForwardStats", eliasfano32.SearchForwardStats.String())
 			return nil
 		})
 	}
