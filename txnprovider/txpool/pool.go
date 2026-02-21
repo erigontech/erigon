@@ -466,7 +466,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 
 	var announcements Announcements
 	announcements, err = p.addTxnsOnNewBlock(block, cacheView, stateChanges, p.senders, unwindTxns, /* newTxns */
-		pendingBaseFee, stateChanges.BlockGasLimit, p.logger)
+		minedTxns.Txns, pendingBaseFee, stateChanges.BlockGasLimit, p.logger)
 	if err != nil {
 		return err
 	}
@@ -1489,7 +1489,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 
 // TODO: Looks like a copy of the above
 func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges *remoteproto.StateChangeBatch,
-	senders *sendersBatch, newTxns TxnSlots, pendingBaseFee uint64, blockGasLimit uint64, logger log.Logger) (Announcements, error) {
+	senders *sendersBatch, newTxns TxnSlots, minedTxns []*TxnSlot, pendingBaseFee uint64, blockGasLimit uint64, logger log.Logger) (Announcements, error) {
 	if assert.Enable {
 		for _, txn := range newTxns.Txns {
 			if txn.SenderID == 0 {
@@ -1537,10 +1537,37 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 		}
 	}
 
+	// For every mined transaction we KNOW the sender's on-chain nonce is at least
+	// tx.Nonce+1, regardless of whether the sender appears in the EVM state-diff batch.
+	// On some networks (e.g. Gnosis Chain / AuRa) system transactions, reward
+	// transactions, or txns mined by other validators may never show up in stateChanges,
+	// so the kvcache nonce for those senders stays stale. We track the minimum guaranteed
+	// on-chain nonce directly from the mined transaction list and use it as a lower-bound
+	// when calling onSenderStateChange, ensuring stale pending txns (nonce < on-chain
+	// nonce) are evicted even when the kvcache is not updated for that sender.
+	minedSenderMinNonce := make(map[uint64]uint64, len(minedTxns))
+	for _, txn := range minedTxns {
+		if txn.SenderID == 0 {
+			continue
+		}
+		// tx.Nonce is the nonce that was just mined; the next expected nonce is Nonce+1.
+		minNonce := txn.Nonce + 1
+		if cur, ok := minedSenderMinNonce[txn.SenderID]; !ok || minNonce > cur {
+			minedSenderMinNonce[txn.SenderID] = minNonce
+		}
+		sendersWithChangedState[txn.SenderID] = struct{}{}
+	}
+
 	for senderID := range sendersWithChangedState {
 		nonce, balance, err := senders.info(cacheView, senderID)
 		if err != nil {
 			return announcements, err
+		}
+		// Use the higher of the kvcache nonce and the nonce implied by mined txns.
+		// This handles the case where the kvcache was not updated for this sender
+		// because they didn't appear in the EVM state-diff batch.
+		if minNonce, ok := minedSenderMinNonce[senderID]; ok && minNonce > nonce {
+			nonce = minNonce
 		}
 		p.onSenderStateChange(senderID, nonce, balance, blockGasLimit, logger)
 	}
