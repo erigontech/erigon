@@ -23,7 +23,6 @@ import (
 	"math"
 	"math/bits"
 	"sort"
-	"sync/atomic"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -31,69 +30,6 @@ import (
 	"github.com/erigontech/erigon/common/bitutil"
 	"github.com/erigontech/erigon/db/kv/stream"
 )
-
-// SearchForwardStats collects runtime statistics for searchForward.
-// Always active (atomic ops). Call SearchForwardStats.Reset() to clear.
-// Invariant: Calls == FoundZero + FoundMax + NotFoundEarly + NotFoundLate + sum(ScanLen[*])
-var SearchForwardStats searchForwardStats
-
-type searchForwardStats struct {
-	Calls         atomic.Uint64 // total calls
-	FoundZero     atomic.Uint64 // v==0: returned Min() without binary search
-	FoundMax      atomic.Uint64 // v==_max: returned Max() without binary search
-	NotFoundEarly atomic.Uint64 // v>_max: rejected before binary search
-	NotFoundLate  atomic.Uint64 // scan exhausted after binary search (should be impossible in practice)
-	GetCalls      atomic.Uint64 // total get()/Get2() inner-loop restarts in linear scan
-
-	// ScanLen[k]: searches that reached binary search and found answer at offset k.
-	// ScanLen[0]: first candidate was the answer.
-	// ScanLen[9]: 10th candidate or beyond.
-	// Invariant: sum(ScanLen[*]) == Calls - FoundZero - FoundMax - NotFoundEarly - NotFoundLate
-	ScanLen [10]atomic.Uint64
-}
-
-func (s *searchForwardStats) Reset() {
-	s.Calls.Store(0)
-	s.FoundZero.Store(0)
-	s.FoundMax.Store(0)
-	s.NotFoundEarly.Store(0)
-	s.NotFoundLate.Store(0)
-	s.GetCalls.Store(0)
-	for i := range s.ScanLen {
-		s.ScanLen[i].Store(0)
-	}
-}
-
-func (s *searchForwardStats) String() string {
-	calls := s.Calls.Load()
-	if calls == 0 {
-		return "searchForward: no calls"
-	}
-	foundZero := s.FoundZero.Load()
-	foundMax := s.FoundMax.Load()
-	notFoundEarly := s.NotFoundEarly.Load()
-	notFoundLate := s.NotFoundLate.Load()
-	getCalls := s.GetCalls.Load()
-	searched := calls - foundZero - foundMax - notFoundEarly - notFoundLate
-	pct := func(n uint64) float64 { return float64(n) / float64(calls) * 100 }
-	out := fmt.Sprintf("searchForward: calls=%d foundZero=%d(%.1f%%) foundMax=%d(%.1f%%) notFoundEarly=%d(%.1f%%) notFoundLate=%d(%.1f%%) searched=%d avgRestarts=%.3f scanLen:[",
-		calls, foundZero, pct(foundZero), foundMax, pct(foundMax),
-		notFoundEarly, pct(notFoundEarly), notFoundLate, pct(notFoundLate),
-		searched, float64(getCalls)/float64(max(searched, 1)))
-	for k := range s.ScanLen {
-		if k > 0 {
-			out += " "
-		}
-		v := s.ScanLen[k].Load()
-		label := fmt.Sprintf("%d", k)
-		if k == len(s.ScanLen)-1 {
-			label = fmt.Sprintf("%d+", k)
-		}
-		out += fmt.Sprintf("%s=%.1f%%", label, float64(v)/float64(max(searched, 1))*100)
-	}
-	out += "]"
-	return out
-}
 
 // EliasFano algo overview https://www.antoniomallia.it/sorted-integers-compression-with-elias-fano-encoding.html
 // P. Elias. Efficient storage and retrieval by content and address of static files. J. ACM, 21(2):246–260, 1974.
@@ -297,19 +233,15 @@ func Seek(data []byte, n uint64) (uint64, bool) {
 }
 
 func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok bool) {
-	SearchForwardStats.Calls.Add(1)
 	if v == 0 {
-		SearchForwardStats.FoundZero.Add(1)
 		return ef.Min(), 0, true
 	}
-	// TODO: large EF on mmap can be cold and calling `Max` in the begin of `Seek` can be a mistake (PageFault at the end). But need careful test in another ticket
+	// Max() reads ef.maxOffset - a struct field copied at parse time, not mmap'd data. No page fault risk.
 	_max := ef.Max()
 	if v == _max {
-		SearchForwardStats.FoundMax.Add(1)
 		return _max, ef.count, true
 	}
-	if v > _max {
-		SearchForwardStats.NotFoundEarly.Add(1)
+	if v > _max { // ~3% search-miss on mainnet (up to 15% at certain block ranges)
 		return 0, 0, false
 	}
 
@@ -317,37 +249,12 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 	i := sort.Search(int(ef.count+1), func(i int) bool {
 		return ef.upper(uint64(i)) >= hi
 	})
-	j := uint64(i)
-	// Get2 checks two candidates with a single inner-loop restart in get().
-	// Covers the common case (scan length 1-2) with half the restarts.
-	if j < ef.count {
-		val, valNext := ef.Get2(j)
-		if val >= v {
-			SearchForwardStats.ScanLen[0].Add(1)
-			SearchForwardStats.GetCalls.Add(1)
-			return val, j, true
-		}
-		if valNext >= v {
-			SearchForwardStats.ScanLen[1].Add(1)
-			SearchForwardStats.GetCalls.Add(1)
-			return valNext, j + 1, true
-		}
-		j += 2
-	}
-	for ; j <= ef.count; j++ {
+	for j := uint64(i); j <= ef.count; j++ {
 		val, _, _, _, _ := ef.get(j)
-		scanLen := j - uint64(i)
 		if val >= v {
-			idx := scanLen
-			if idx >= uint64(len(SearchForwardStats.ScanLen)) {
-				idx = uint64(len(SearchForwardStats.ScanLen)) - 1
-			}
-			SearchForwardStats.ScanLen[idx].Add(1)
-			SearchForwardStats.GetCalls.Add(scanLen)
 			return val, j, true
 		}
 	}
-	SearchForwardStats.NotFoundLate.Add(1)
 	return 0, 0, false
 }
 func (ef *EliasFano) searchReverse(v uint64) (nextV uint64, nextI uint64, ok bool) {
