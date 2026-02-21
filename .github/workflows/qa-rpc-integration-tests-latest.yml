@@ -67,6 +67,7 @@ jobs:
               --stop-erigon=False \
               --erigon-pid=$ERIGON_PID
           fi
+
       - name: Pause the Erigon instance dedicated to db maintenance
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
@@ -107,9 +108,6 @@ jobs:
           # Capture monitoring script exit status
           test_exit_status=$?
           
-          # Save the subsection reached status
-          echo "test_executed=true" >> $GITHUB_OUTPUT
-          
           # Check test runner script exit status
           if [ $test_exit_status -eq 0 ]; then
              echo "Tip-chasing completed successfully"
@@ -119,6 +117,13 @@ jobs:
              echo "TEST_RESULT=failure" >> "$GITHUB_OUTPUT"
              exit 1
           fi
+
+      - name: Upload pre-test logs on failure
+        if: failure() && steps.pre_test_step.outcome == 'failure'
+        uses: actions/upload-artifact@v6
+        with:
+          name: pre-test-logs
+          path: ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
       - name: Run RPC Integration Tests
         id: test_step
