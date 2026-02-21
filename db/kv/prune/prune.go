@@ -383,7 +383,7 @@ func TableScanningPrune(
 
 		select {
 		case <-logEvery.C:
-			if val != nil && len(txNumBytes) >= 8 {
+			if len(txNumBytes) >= 8 {
 				txNum = txNumGetter(val, txNumBytes)
 			}
 			logger.Info("[snapshots] prune index", "name", filenameBase, "pruned tx", stat.PruneCountTx,
