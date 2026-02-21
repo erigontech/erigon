@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -56,31 +55,34 @@ import (
 //  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
 //  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
 func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms *execctx.SharedDomains, maxBlockNum uint64) (
-	inputTxNum uint64, maxTxNum uint64, offsetFromBlockBeginning uint64, err error) {
+	inputTxNum uint64, maxTxNum uint64, offsetFromBlockBeginning uint64, blockNum uint64, err error) {
 
 	txNumsReader := cfg.blockReader.TxnumReader()
 
 	inputTxNum = doms.TxNum()
 
-	if nothing, err := nothingToExec(applyTx, txNumsReader, inputTxNum); err != nil {
-		return 0, 0, 0, err
-	} else if nothing {
-		return 0, 0, 0, err
+	lastBlockNum, lastTxNum, err := txNumsReader.Last(applyTx)
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	if lastTxNum == inputTxNum {
+		// nothing to exec - return last committed block so caller can sync stage progress
+		return 0, 0, 0, lastBlockNum, nil
 	}
 
 	maxTxNum, err = txNumsReader.Max(ctx, applyTx, maxBlockNum)
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, 0, err
 	}
 
 	blockNum, ok, err := txNumsReader.FindBlockNum(ctx, applyTx, doms.TxNum())
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, 0, err
 	}
 	if !ok {
 		lb, lt, _ := txNumsReader.Last(applyTx)
 		fb, ft, _ := txNumsReader.First(applyTx)
-		return 0, 0, 0, fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d; in db: (%d-%d, %d-%d)", inputTxNum, fb, lb, ft, lt)
+		return 0, 0, 0, 0, fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d; in db: (%d-%d, %d-%d)", inputTxNum, fb, lb, ft, lt)
 	}
 	{
 		max, _ := txNumsReader.Max(ctx, applyTx, blockNum)
@@ -91,7 +93,7 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms
 
 	min, err := txNumsReader.Min(ctx, applyTx, blockNum)
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, 0, err
 	}
 
 	if doms.TxNum() > min {
@@ -104,17 +106,8 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms
 
 	//_max, _ := txNumsReader.Max(applyTx, blockNum)
 	//fmt.Printf("[commitment] found domain.txn %d, inputTxn %d, offset %d. DB found block %d {%d, %d}\n", doms.TxNum(), inputTxNum, offsetFromBlockBeginning, blockNum, _min, _max)
-	doms.SetBlockNum(blockNum)
 	doms.SetTxNum(inputTxNum)
-	return inputTxNum, maxTxNum, offsetFromBlockBeginning, nil
-}
-
-func nothingToExec(applyTx kv.Tx, txNumsReader rawdbv3.TxNumsReader, inputTxNum uint64) (bool, error) {
-	_, lastTxNum, err := txNumsReader.Last(applyTx)
-	if err != nil {
-		return false, err
-	}
-	return lastTxNum == inputTxNum, nil
+	return inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, nil
 }
 
 func ExecV3(ctx context.Context,
@@ -130,7 +123,7 @@ func ExecV3(ctx context.Context,
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
 	hooks := cfg.vmConfig.Tracer
 	applyTx := rwTx
-	_, _, err := doms.SeekCommitment(ctx, applyTx)
+	initialTxNum, blockNum, err := doms.SeekCommitment(ctx, applyTx)
 	if err != nil {
 		return err
 	}
@@ -148,11 +141,6 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
-	var (
-		blockNum     = doms.BlockNum()
-		initialTxNum = doms.TxNum()
-	)
-
 	if maxBlockNum < blockNum {
 		return nil
 	}
@@ -167,7 +155,7 @@ func ExecV3(ctx context.Context,
 		maxTxNum                 uint64
 	)
 
-	if inputTxNum, maxTxNum, offsetFromBlockBeginning, err = restoreTxNum(ctx, &cfg, applyTx, doms, maxBlockNum); err != nil {
+	if inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, err = restoreTxNum(ctx, &cfg, applyTx, doms, maxBlockNum); err != nil {
 		return err
 	}
 
@@ -199,7 +187,6 @@ func ExecV3(ctx context.Context,
 	defer resetDomainGauges(ctx)
 
 	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
-	blockNum = doms.BlockNum()
 
 	if maxBlockNum < blockNum {
 		return nil
@@ -560,7 +547,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 }
 
 func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult) error {
-	inputTxNum, _, offsetFromBlockBeginning, err := restoreTxNum(ctx, &te.cfg, tx, te.doms, maxBlockNum)
+	inputTxNum, _, offsetFromBlockBeginning, _, err := restoreTxNum(ctx, &te.cfg, tx, te.doms, maxBlockNum)
 
 	if err != nil {
 		return err
@@ -827,10 +814,6 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 
 	if dbg.DiscardCommitment() {
 		return true, times, nil
-	}
-
-	if doms.BlockNum() != header.Number.Uint64() {
-		panic(fmt.Errorf("%d != %d", doms.BlockNum(), header.Number.Uint64()))
 	}
 
 	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix(), nil)
