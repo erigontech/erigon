@@ -301,38 +301,38 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 		return ef.upper(uint64(i)) >= hi
 	})
 
-	SearchForwardStats.Calls.Add(1)
+	//SearchForwardStats.Calls.Add(1)
 	j := uint64(i)
 	// Get2 checks two candidates with a single inner-loop restart in get().
 	// Covers the common case (scan length 1-2) with half the restarts.
 	if j < ef.count {
 		val, valNext := ef.Get2(j)
 		if val >= v {
-			SearchForwardStats.ScanLen[0].Add(1)
-			SearchForwardStats.GetCalls.Add(1)
+			//SearchForwardStats.ScanLen[0].Add(1)
+			//SearchForwardStats.GetCalls.Add(1)
 			return val, j, true
 		}
 		if valNext >= v {
-			SearchForwardStats.ScanLen[1].Add(1)
-			SearchForwardStats.GetCalls.Add(1)
+			//SearchForwardStats.ScanLen[1].Add(1)
+			//SearchForwardStats.GetCalls.Add(1)
 			return valNext, j + 1, true
 		}
 		j += 2
 	}
 	for ; j <= ef.count; j++ {
 		val, _, _, _, _ := ef.get(j)
-		scanLen := j - uint64(i)
+		//scanLen := j - uint64(i)
 		if val >= v {
-			idx := scanLen
-			if idx >= uint64(len(SearchForwardStats.ScanLen)) {
-				idx = uint64(len(SearchForwardStats.ScanLen)) - 1
-			}
-			SearchForwardStats.ScanLen[idx].Add(1)
-			SearchForwardStats.GetCalls.Add(scanLen)
+			//idx := scanLen
+			//if idx >= uint64(len(SearchForwardStats.ScanLen)) {
+			//	idx = uint64(len(SearchForwardStats.ScanLen)) - 1
+			//}
+			//SearchForwardStats.ScanLen[idx].Add(1)
+			//SearchForwardStats.GetCalls.Add(scanLen)
 			return val, j, true
 		}
 	}
-	SearchForwardStats.NotFound.Add(1)
+	//SearchForwardStats.NotFound.Add(1)
 	return 0, 0, false
 }
 
