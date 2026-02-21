@@ -212,6 +212,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	commit := func(txn uint64) error {
 		err = domains.Flush(ctx, tx)
 		require.NoError(t, err)
+		domains.Close()
 
 		err = tx.Commit()
 		require.NoError(t, err)
@@ -273,6 +274,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, prev, step)
 		require.NoError(t, err)
 	}
+	domains.Close()
 
 	err = tx.Commit()
 
