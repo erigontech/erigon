@@ -230,7 +230,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	defer domains.Close()
 	writer = state2.NewWriter(domains.AsPutDel(tx), nil, txNum)
 
-	txToStart := domains.TxNum()
+	txToStart, _, err := domains.SeekCommitment(ctx, tx)
+	require.NoError(t, err)
 
 	rh, err = domains.ComputeCommitment(ctx, tx, false, blockNum, txNum, "", nil)
 	require.NoError(t, err)
@@ -393,7 +394,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 		writer := state2.NewWriter(domains.AsPutDel(tx), nil, txNum)
 
-		txToStart := domains.TxNum()
+		txToStart, _, err := domains.SeekCommitment(ctx, tx)
+		require.NoError(t, err)
 		require.EqualValues(t, 0, txToStart)
 		txToStart = testStartedFromTxNum
 

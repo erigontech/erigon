@@ -270,7 +270,8 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	txNum := domains.TxNum()
+	txNum, _, err := domains.SeekCommitment(ctx, rwTx)
+	require.NoError(t, err)
 	for accs := 0; accs < noaccounts; accs++ {
 		k0[0] = byte(accs)
 		pv, step, err := domains.GetLatest(kv.AccountsDomain, rwTx, k0)
