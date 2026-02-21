@@ -234,9 +234,8 @@ func Seek(data []byte, n uint64) (uint64, bool) {
 
 func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok bool) {
 	if v == 0 {
-		return ef.Min(), 0, true
+		return ef.Min(), 0, true // .Max() touching `mmap`
 	}
-	// Max() reads ef.maxOffset - a struct field copied at parse time, not mmap'd data. No page fault risk.
 	_max := ef.Max()
 	if v == _max {
 		return _max, ef.count, true
@@ -259,10 +258,13 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 }
 func (ef *EliasFano) searchReverse(v uint64) (nextV uint64, nextI uint64, ok bool) {
 	if v == 0 {
-		return 0, 0, ef.Min() == 0
+		return 0, 0, ef.Min() == 0 // .Max() touching `mmap`
 	}
-	_max := ef.Max()
-	if v >= _max {
+	_max := ef.Max() // .Max() doesn't touch `mmap`
+	if v == _max {
+		return _max, ef.count, true
+	}
+	if v > _max { // reverse: v beyond range still returns max (not a miss)
 		return _max, ef.count, true
 	}
 
