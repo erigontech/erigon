@@ -120,36 +120,29 @@ func BenchmarkSeek(b *testing.B) {
 
 		b.Run(tc.name+"/exact", func(b *testing.B) {
 			b.ReportAllocs()
-			SearchForwardStats.Reset()
 			n := 0
 			for b.Loop() {
 				_, _ = ef.Seek(exactTargets[n%count])
 				n++
 			}
-			b.ReportMetric(float64(SearchForwardStats.GetCalls.Load())/float64(b.N), "restarts/op")
 		})
 
 		b.Run(tc.name+"/between", func(b *testing.B) {
 			b.ReportAllocs()
-			SearchForwardStats.Reset()
 			n := 0
 			for b.Loop() {
 				_, _ = ef.Seek(betweenTargets[n%count])
 				n++
 			}
-			b.ReportMetric(float64(SearchForwardStats.GetCalls.Load())/float64(b.N), "restarts/op")
 		})
 
 		b.Run(tc.name+"/random", func(b *testing.B) {
 			b.ReportAllocs()
-			SearchForwardStats.Reset()
 			n := 0
 			for b.Loop() {
 				_, _ = ef.Seek(targets[n%count])
 				n++
 			}
-			b.ReportMetric(float64(SearchForwardStats.GetCalls.Load())/float64(b.N), "restarts/op")
-			b.ReportMetric(float64(SearchForwardStats.NotFound.Load())/float64(b.N)*100, "%notfound")
 		})
 	}
 }
