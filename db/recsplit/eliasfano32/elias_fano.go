@@ -245,10 +245,48 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 	}
 
 	hi := v >> ef.l
-	i := sort.Search(int(ef.count+1), func(i int) bool {
-		return ef.upper(uint64(i)) >= hi
-	})
-	for j := uint64(i); j <= ef.count; j++ {
+	maxHi := ef.maxOffset >> ef.l
+
+	// Interpolation search on the upper-bits index.
+	// For smooth sequences (block numbers, tx indices) this converges in 2–3 upper() calls
+	// vs sort.Search's log2(count)≈20 calls, each potentially faulting a different mmap page.
+	// Invariant: upper(j) < hi for all j < lo; upper(hiB) >= hi.
+	lo, hiB := uint64(0), ef.count
+	loVal := ef.upper(lo) // touches start of ef.jump[]/ef.upperBits[] — often warm after first call
+	hiVal := maxHi        // upper(ef.count) by construction; no extra mmap read
+
+	const maxIter = 4
+	for i := 0; i < maxIter && lo < hiB; i++ {
+		if loVal >= hi {
+			break
+		}
+		// spread > 0: loVal < hi <= hiVal, so hiVal-loVal >= hi-loVal >= 1
+		spread := hiVal - loVal
+		mid := lo + uint64(float64(hi-loVal)/float64(spread)*float64(hiB-lo))
+		if mid <= lo {
+			mid = lo + 1
+		} else if mid >= hiB {
+			mid = hiB - 1
+		}
+		midVal := ef.upper(mid)
+		if midVal < hi {
+			lo = mid + 1
+			loVal = midVal // lower bound: actual upper(lo) >= midVal
+		} else {
+			hiB = mid
+			hiVal = midVal
+		}
+	}
+	// Fallback: binary search in remaining [lo, hiB] range.
+	// For smooth data the loop above converges; this handles adversarial cases.
+	if lo < hiB && loVal < hi {
+		i := sort.Search(int(hiB+1-lo), func(i int) bool {
+			return ef.upper(lo+uint64(i)) >= hi
+		})
+		lo += uint64(i)
+	}
+
+	for j := lo; j <= ef.count; j++ {
 		val, _, _, _, _ := ef.get(j)
 		if val >= v {
 			return val, j, true

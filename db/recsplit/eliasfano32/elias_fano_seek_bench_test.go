@@ -17,7 +17,6 @@
 package eliasfano32
 
 import (
-	"fmt"
 	"math/rand/v2"
 	"testing"
 )
@@ -120,44 +119,35 @@ func BenchmarkSeek(b *testing.B) {
 
 		b.Run(tc.name+"/exact", func(b *testing.B) {
 			b.ReportAllocs()
-			SearchForwardStats.Reset()
 			n := 0
 			for b.Loop() {
 				_, _ = ef.Seek(exactTargets[n%count])
 				n++
 			}
-			b.ReportMetric(float64(SearchForwardStats.GetCalls.Load())/float64(b.N), "restarts/op")
 		})
 
 		b.Run(tc.name+"/between", func(b *testing.B) {
 			b.ReportAllocs()
-			SearchForwardStats.Reset()
 			n := 0
 			for b.Loop() {
 				_, _ = ef.Seek(betweenTargets[n%count])
 				n++
 			}
-			b.ReportMetric(float64(SearchForwardStats.GetCalls.Load())/float64(b.N), "restarts/op")
 		})
 
 		b.Run(tc.name+"/random", func(b *testing.B) {
 			b.ReportAllocs()
-			SearchForwardStats.Reset()
 			n := 0
 			for b.Loop() {
 				_, _ = ef.Seek(targets[n%count])
 				n++
 			}
-			b.ReportMetric(float64(SearchForwardStats.GetCalls.Load())/float64(b.N), "restarts/op")
-			b.ReportMetric(float64(SearchForwardStats.NotFound.Load())/float64(b.N)*100, "%notfound")
 		})
 	}
 }
 
-// TestSearchForwardStats runs a workload and prints the scan-length histogram.
-// Run with -v to see the output. Useful for understanding real-world distributions
-// before running on actual mmap'd files.
-func TestSearchForwardStats(t *testing.T) {
+// TestSeekCorrectness verifies Seek returns correct results across stride patterns.
+func TestSeekCorrectness(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
@@ -178,29 +168,21 @@ func TestSearchForwardStats(t *testing.T) {
 			ef := buildEF(count, tc.stride)
 			maxOffset := (count - 1) * tc.stride
 
-			SearchForwardStats.Reset()
 			rng := rand.New(rand.NewPCG(42, 0))
 			const seeks = 100_000
+			notFound := 0
 			for range seeks {
 				v := uint64(rng.Int64N(int64(maxOffset + 1)))
-				ef.Seek(v)
-			}
-
-			calls := SearchForwardStats.Calls.Load()
-			notFound := SearchForwardStats.NotFound.Load()
-			getCalls := SearchForwardStats.GetCalls.Load()
-			t.Logf("seeks=%d  calls=%d  notFound=%d  avgRestarts=%.3f",
-				seeks, calls, notFound, float64(getCalls)/float64(calls))
-			t.Logf("scan-length histogram (offset from binary-search result):")
-			for k := range SearchForwardStats.ScanLen {
-				v := SearchForwardStats.ScanLen[k].Load()
-				label := fmt.Sprintf("[%d]", k)
-				if k == len(SearchForwardStats.ScanLen)-1 {
-					label = fmt.Sprintf("[%d+]", k)
+				got, ok := ef.Seek(v)
+				if !ok {
+					notFound++
+					continue
 				}
-				pct := float64(v) / float64(calls) * 100
-				t.Logf("  ScanLen%s = %d  (%.1f%%)", label, v, pct)
+				if got < v {
+					t.Errorf("Seek(%d) returned %d < v", v, got)
+				}
 			}
+			t.Logf("seeks=%d  notFound=%d", seeks, notFound)
 		})
 	}
 }
