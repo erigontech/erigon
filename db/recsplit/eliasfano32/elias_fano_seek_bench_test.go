@@ -129,17 +129,13 @@ func BenchmarkSeekPool(b *testing.B) {
 
 	rng := rand.New(rand.NewPCG(1, 2))
 
-	efs := make([]*EliasFano, numEFs)
-	for i := range efs {
-		count := uint64(rng.IntN(7)) + 2 // 2–8 elements → 1–3 word upperBits
-		start := uint64(rng.Int64N(globalMax - int64(count)*stride + 1))
-		ef := NewEliasFano(count, start+(count-1)*stride)
-		for j := uint64(0); j < count; j++ {
-			ef.AddOffset(start + j*stride)
-		}
-		ef.Build()
-		efs[i] = ef
+	count := uint64(rng.IntN(7)) + 2 // 2–8 elements → 1–3 word upperBits
+	start := uint64(rng.Int64N(globalMax - int64(count)*stride + 1))
+	ef := NewEliasFano(count, start+(count-1)*stride)
+	for j := uint64(0); j < count; j++ {
+		ef.AddOffset(start + j*stride)
 	}
+	ef.Build()
 
 	targets := make([]uint64, numEFs)
 	for i := range targets {
@@ -150,7 +146,7 @@ func BenchmarkSeekPool(b *testing.B) {
 	b.ReportAllocs()
 	n := 0
 	for b.Loop() {
-		_, _ = efs[n%numEFs].Seek(targets[n%numEFs])
+		_, _ = ef.Seek(targets[n%numEFs])
 		n++
 	}
 }
