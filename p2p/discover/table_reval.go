@@ -56,7 +56,13 @@ func (tr *tableRevalidation) init(cfg *Config) {
 
 // nodeAdded is called when the table receives a new node.
 func (tr *tableRevalidation) nodeAdded(tab *Table, n *tableNode) {
-	tr.fast.push(n, tab.cfg.Clock.Now(), &tab.rand)
+	// Nodes that are already validated live don't need fast revalidation.
+	// Place them on the slow list to avoid unnecessary ping traffic.
+	if n.isValidatedLive {
+		tr.slow.push(n, tab.cfg.Clock.Now(), &tab.rand)
+	} else {
+		tr.fast.push(n, tab.cfg.Clock.Now(), &tab.rand)
+	}
 }
 
 // nodeRemoved is called when a node was removed from the table.
@@ -218,7 +224,13 @@ func (list *revalidationList) get(rand randomSource, exclude map[enode.ID]struct
 }
 
 func (list *revalidationList) schedule(now mclock.AbsTime, rand randomSource) {
-	list.nextTime = now.Add(time.Duration(rand.Int63n(int64(list.interval))))
+	// Schedule in the range (interval/2, interval] to ensure revalidation never
+	// fires immediately (rand.Int63n can return 0). Using interval-half as the
+	// jitter range naturally handles both even and odd intervals: for even
+	// intervals interval-half==half, for odd intervals interval-half==half+1,
+	// so the full upper half of the interval is always covered.
+	half := list.interval / 2
+	list.nextTime = now.Add(half + time.Duration(rand.Int63n(int64(list.interval-half))+1))
 }
 
 func (list *revalidationList) push(n *tableNode, now mclock.AbsTime, rand randomSource) {

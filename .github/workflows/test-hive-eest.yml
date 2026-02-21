@@ -135,11 +135,14 @@ jobs:
           run_suite ${{ matrix.sim }} ${{ matrix.sim-limit }}
         continue-on-error: true
       - name: Upload output log
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: hive-workspace-log-${{ matrix.sim }}
           path: hive/workspace/logs
+          if-no-files-found: ignore
       - name: Test Results
+        if: always()
         run: |
           cat hive/result.log
           if grep -q "failed" hive/failed.log; then

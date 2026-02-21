@@ -1104,11 +1104,12 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 	dom.Close()
 }
 
-func emptyTestDomain(aggStep uint64) *Domain {
+func emptyTestDomain(t testing.TB, aggStep uint64) *Domain {
+	t.Helper()
 	cfg := statecfg.Schema.AccountsDomain
 
 	salt := uint32(1)
-	dirs := datadir2.New(os.TempDir())
+	dirs := datadir2.New(t.TempDir())
 	cfg.Hist.IiCfg.Name = kv.InvertedIdx(0)
 	cfg.Hist.IiCfg.FileVersion = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
 	cfg.Hist.IiCfg.Accessors = statecfg.AccessorHashMap
@@ -1125,7 +1126,7 @@ func emptyTestDomain(aggStep uint64) *Domain {
 func TestScanStaticFilesD(t *testing.T) {
 	t.Parallel()
 
-	d := emptyTestDomain(1)
+	d := emptyTestDomain(t, 1)
 
 	files := []string{
 		"v1.0-accounts.0-1.kv",
@@ -3007,4 +3008,104 @@ func TestDomain_DebugRangeLatestFromFiles(t *testing.T) {
 
 	// Verify keys are in ascending order
 	order.Asc.AssertList(filesOnlyKeys)
+}
+
+// BuildFilesInBackground skips a domain (step already exists in files), the
+// zero-value StaticFiles must not replace the good entry.
+func TestDomain_IntegrateDirtyFilesNilGuard(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	logger := log.New()
+	db, d := testDbAndDomain(t, logger) // stepSize=16, accounts domain
+	ctx := context.Background()
+
+	// -- write data spanning steps 0 and 1 (txNums 1..32) --
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	domainRoTx := d.BeginFilesRo()
+	defer domainRoTx.Close()
+	writer := domainRoTx.NewWriter()
+	defer writer.Close()
+
+	var (
+		k1 = []byte("key1")
+		k2 = []byte("key2")
+		v1 = []byte("value1.1")
+		v2 = []byte("value2.1")
+		p1 []byte
+		p2 []byte
+	)
+
+	err = writer.PutWithPrev(k1, v1, 2, p1, 0)
+	require.NoError(t, err)
+	err = writer.PutWithPrev(k2, v2, 3, p2, 0)
+	require.NoError(t, err)
+
+	p1, p2 = v1, v2
+	v1, v2 = []byte("value1.2"), []byte("value2.2")
+
+	err = writer.PutWithPrev(k1, v1, 6, p1, 0)
+	require.NoError(t, err)
+	_ = p2
+	_ = v2
+
+	// write into step 1 so the domain has data beyond step 0
+	p1, v1 = v1, []byte("value1.3")
+	err = writer.PutWithPrev(k1, v1, d.stepSize+2, p1, 0)
+	require.NoError(t, err)
+
+	err = writer.Flush(ctx, tx)
+	require.NoError(t, err)
+	domainRoTx.Close()
+
+	// -- collate + build step 0 --
+	c, err := d.collate(ctx, 0, 0, d.stepSize, tx)
+	require.NoError(t, err)
+
+	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
+	require.NoError(t, err)
+	defer sf.CleanupOnError()
+	c.Close()
+
+	require.NotNil(t, sf.valuesDecomp, "buildFiles must produce a non-nil decompressor")
+
+	// -- integrate the good files --
+	d.integrateDirtyFiles(sf, 0, d.stepSize)
+
+	// verify the dirty file has a non-nil decompressor
+	var foundGood *FilesItem
+	d.dirtyFiles.Walk(func(items []*FilesItem) bool {
+		for _, item := range items {
+			if item.startTxNum == 0 && item.endTxNum == d.stepSize {
+				foundGood = item
+				return false
+			}
+		}
+		return true
+	})
+	require.NotNil(t, foundGood, "dirty file for step 0 must exist")
+	require.NotNil(t, foundGood.decompressor, "dirty file must have non-nil decompressor")
+
+	// -- simulate the second BuildFilesInBackground that skipped this domain --
+	// A zero-value StaticFiles (all nil) must NOT overwrite the good entry.
+	d.integrateDirtyFiles(StaticFiles{}, 0, d.stepSize)
+
+	// regression check: dirty file must still have its non-nil decompressor
+	var foundAfter *FilesItem
+	d.dirtyFiles.Walk(func(items []*FilesItem) bool {
+		for _, item := range items {
+			if item.startTxNum == 0 && item.endTxNum == d.stepSize {
+				foundAfter = item
+				return false
+			}
+		}
+		return true
+	})
+	require.NotNil(t, foundAfter, "dirty file for step 0 must still exist after nil StaticFiles")
+	require.NotNil(t, foundAfter.decompressor, "dirty file decompressor must not be overwritten by nil StaticFiles")
 }

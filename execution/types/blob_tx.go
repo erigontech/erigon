@@ -41,6 +41,23 @@ type BlobTx struct {
 
 func (stx *BlobTx) Type() byte { return BlobTxType }
 
+// copyData returns a copy of BlobTx where the TransactionMisc cache fields
+// (hash, from) are not copied directly but rebuilt field-by-field, avoiding
+// go vet copylocks warnings on the embedded sync/atomic.Pointer.
+func (stx *BlobTx) copyData() BlobTx {
+	return BlobTx{
+		DynamicFeeTransaction: DynamicFeeTransaction{
+			CommonTx:   stx.CommonTx.copyData(),
+			ChainID:    stx.ChainID,
+			TipCap:     stx.TipCap,
+			FeeCap:     stx.FeeCap,
+			AccessList: stx.AccessList,
+		},
+		MaxFeePerBlobGas:    stx.MaxFeePerBlobGas,
+		BlobVersionedHashes: stx.BlobVersionedHashes,
+	}
+}
+
 func (stx *BlobTx) GetBlobHashes() []common.Hash {
 	return stx.BlobVersionedHashes
 }

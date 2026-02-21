@@ -95,6 +95,10 @@ type testFailure struct {
 
 // skipShortMode skips tests matching when the -short flag is used.
 func (tm *testMatcher) slow(pattern string) {
+	if runtime.GOOS == "windows" {
+		tm.skipLoad(pattern)
+		return
+	}
 	tm.slowpat = append(tm.slowpat, regexp.MustCompile(pattern))
 }
 

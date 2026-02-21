@@ -19,14 +19,13 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"fmt"
 	"io"
 	"math/big"
 	"math/rand"
 	"testing"
 	"time"
-
-	"crypto/ecdsa"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -44,9 +43,9 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -57,9 +56,9 @@ import (
 )
 
 func TestEstimateGas(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, mock.Mock(t))
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, execmoduletester.New(t))
 	mining := txpoolproto.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log)
 	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
@@ -74,13 +73,13 @@ func TestEstimateGas(t *testing.T) {
 }
 
 func TestEthCallNonCanonical(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := newEthApiForTest(newBaseApiWithFiltersForTest(nil, stateCache, m), m.DB, nil, nil)
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(common.HexToHash("0x3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b"), true)
-	var blockNumberOrHashRef *rpc.BlockNumberOrHash = &blockNumberOrHash
+	var blockNumberOrHashRef = &blockNumberOrHash
 
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
@@ -104,7 +103,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	callDataBytes := hexutil.Bytes(callData)
 
 	blockNumberOrHash := rpc.BlockNumberOrHashWithNumber(ethCallBlockNumber)
-	var blockNumberOrHashRef *rpc.BlockNumberOrHash = &blockNumberOrHash
+	var blockNumberOrHashRef = &blockNumberOrHash
 
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &bankAddress,
@@ -269,7 +268,7 @@ func TestGetProof(t *testing.T) {
 
 func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	ctx := context.Background()
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	tx, err := m.DB.BeginTemporalRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -304,7 +303,7 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 
 func TestGetBlockByTimestampOldestTime(t *testing.T) {
 	ctx := context.Background()
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	tx, err := m.DB.BeginTemporalRo(ctx)
 	if err != nil {
 		t.Errorf("failed at beginning tx")
@@ -342,7 +341,7 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 
 func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	ctx := context.Background()
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	tx, err := m.DB.BeginTemporalRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -378,7 +377,7 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 
 func TestGetBlockByTimeMiddle(t *testing.T) {
 	ctx := context.Background()
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	tx, err := m.DB.BeginTemporalRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -425,7 +424,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 
 func TestGetBlockByTimestamp(t *testing.T) {
 	ctx := context.Background()
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	tx, err := m.DB.BeginTemporalRo(ctx)
 	if err != nil {
 		t.Errorf("fail at beginning tx")
@@ -555,7 +554,7 @@ func generatePseudoRandomECDSAKeyPairs(rand io.Reader, n int) ([]*ecdsa.PrivateK
 	return privateKeys, publicKeys, nil
 }
 
-func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, common.Address, common.Address) {
+func chainWithDeployedContract(t *testing.T) (*execmoduletester.ExecModuleTester, common.Address, common.Address, common.Address) {
 	var (
 		seed            = int64(12345)
 		rng             = rand.New(rand.NewSource(seed)) // rng for filler accounts
@@ -577,7 +576,7 @@ func chainWithDeployedContract(t *testing.T) (*mock.MockSentry, common.Address, 
 	_, fillerPublicKeys, err := generatePseudoRandomECDSAKeyPairs(rng, nFillerAccounts)
 	require.NoError(t, err)
 
-	m := mock.MockWithGenesis(t, gspec, bankKey)
+	m := execmoduletester.NewWithGenesis(t, gspec, bankKey)
 	db := m.DB
 
 	var contractAddr common.Address

@@ -162,7 +162,7 @@ Loop:
 			if err := s.Update(tx, startProgress); err != nil {
 				return err
 			}
-			s.state.posTransition = &startProgress
+			s.State.posTransition = &startProgress
 			break
 		}
 
@@ -298,8 +298,8 @@ Loop:
 	}
 	// We do not print the following line if the stage was interrupted
 
-	if s.state.posTransition != nil {
-		logger.Info(fmt.Sprintf("[%s] Transitioned to POS", logPrefix), "block", *s.state.posTransition)
+	if s.State.posTransition != nil {
+		logger.Info(fmt.Sprintf("[%s] Transitioned to POS", logPrefix), "block", *s.State.posTransition)
 	} else {
 		headers := headerInserter.GetHighest() - startProgress
 		secs := time.Since(startTime).Seconds()

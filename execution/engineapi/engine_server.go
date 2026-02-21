@@ -76,7 +76,6 @@ type EngineServer struct {
 	caplin           bool // we need to send errors for caplin.
 	executionService executionproto.ExecutionClient
 	txpool           txpoolproto.TxpoolClient // needed for getBlobs
-	db               kv.TemporalRoDB
 
 	chainRW chainreader.ChainReaderWriterEth1
 	lock    sync.Mutex
@@ -100,7 +99,7 @@ func NewEngineServer(
 	fcuTimeout time.Duration,
 	maxReorgDepth uint64,
 ) *EngineServer {
-	chainRW := chainreader.NewChainReaderEth1(config, executionService, uint64(fcuTimeout.Milliseconds()))
+	chainRW := chainreader.NewChainReaderEth1(config, executionService, fcuTimeout)
 	srv := &EngineServer{
 		logger:            logger,
 		config:            config,
@@ -131,8 +130,6 @@ func (e *EngineServer) Start(
 	eth rpchelper.ApiBackend,
 	mining txpoolproto.MiningClient,
 ) error {
-	e.db = db
-
 	var eg errgroup.Group
 	if !e.caplin {
 		eg.Go(func() error {
@@ -297,13 +294,20 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			blockAccessList, err = types.DecodeBlockAccessListBytes(req.BlockAccessList)
 			if err != nil {
 				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(req.BlockAccessList))
-				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList decode: %v", err)}
+				return &engine_types.PayloadStatus{
+					Status:          engine_types.InvalidStatus,
+					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list decode: %v", err)),
+				}, nil
 			}
 			if err := blockAccessList.Validate(); err != nil {
-				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList validate: %v", err)}
+				return &engine_types.PayloadStatus{
+					Status:          engine_types.InvalidStatus,
+					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list validate: %v", err)),
+				}, nil
 			}
 			hash := crypto.Keccak256Hash(req.BlockAccessList)
 			header.BlockAccessListHash = &hash
+			blockAccessListBytes = req.BlockAccessList
 		}
 		if req.SlotNumber != nil {
 			slotNumber := uint64(*req.SlotNumber)
