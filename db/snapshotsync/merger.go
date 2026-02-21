@@ -58,9 +58,10 @@ func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toM
 			break
 		}
 	}
-	slices.SortFunc(toMerge, func(i, j Range) int { return cmp.Compare(i.From(), j.From()) })
+	slices.SortFunc(toMerge, fileInfCmp)
 	return toMerge
 }
+func fileInfCmp(i, j Range) int { return cmp.Compare(i.From(), j.From()) }
 
 func (m *Merger) filesByRange(v *View, from, to uint64) (map[snaptype.Enum][]*DirtySegment, error) {
 	toMerge := map[snaptype.Enum][]*DirtySegment{}

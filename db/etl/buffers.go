@@ -179,15 +179,14 @@ func (b *sortableBuffer) Reset() {
 	b.size = 0
 }
 func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
+func (b *sortableBuffer) cmp(x, y entryLoc) int {
+	return bytes.Compare(b.data[x.offset:x.offset+x.keyLen], b.data[y.offset:y.offset+y.keyLen])
+}
 func (b *sortableBuffer) Sort() {
-	data := b.data
-	cmp := func(a, b entryLoc) int {
-		return bytes.Compare(data[a.offset:a.offset+a.keyLen], data[b.offset:b.offset+b.keyLen])
-	}
-	if slices.IsSortedFunc(b.entries, cmp) {
+	if slices.IsSortedFunc(b.entries, b.cmp) {
 		return
 	}
-	slices.SortStableFunc(b.entries, cmp) // Stable: this buffer type can have duplicate keys and must preserve their insertion order
+	slices.SortStableFunc(b.entries, b.cmp) // Stable: this buffer type can have duplicate keys and must preserve their insertion order
 }
 
 func (b *sortableBuffer) CheckFlushSize() bool {
