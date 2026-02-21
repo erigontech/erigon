@@ -109,7 +109,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		if (txNum+1)%stepSize == 0 {
 			trieState, err := hph.EncodeCurrentState(nil)
 			require.NoError(t, err)
-			cs := commitmentdb.NewCommitmentState(domains.TxNum(), 0, trieState)
+			cs := commitmentdb.NewCommitmentState(txNum, 0, trieState)
 			encodedState, err := cs.Encode()
 			require.NoError(t, err)
 			err = domains.DomainPut(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState, encodedState, txNum, nil, 0)
