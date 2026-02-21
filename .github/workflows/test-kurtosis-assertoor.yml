@@ -16,14 +16,22 @@ on:
   workflow_dispatch:
 
 jobs:
-  assertoor_regular_test:
+  assertoor_test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: regular
+            package_args: .github/workflows/kurtosis/regular-assertoor.io
+          - suite: pectra
+            package_args: .github/workflows/kurtosis/pectra.io
     concurrency:
       group: >-
         ${{
           (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
-          format('{0}-{1}-{2}', github.workflow, 'regular', github.run_id) ||
-          format('{0}-{1}-{2}', github.workflow, 'regular', github.ref)
+          format('{0}-{1}-{2}', github.workflow, matrix.suite, github.run_id) ||
+          format('{0}-{1}-{2}', github.workflow, matrix.suite, github.ref)
         }}
       cancel-in-progress: true
 
@@ -48,52 +56,11 @@ jobs:
         run: |
           docker build -t test/erigon:current .
 
-      - name: Run regular Kurtosis + assertoor tests
+      - name: Run ${{ matrix.suite }} Kurtosis + assertoor tests
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
-            enclave_name: "kurtosis-run1-${{ github.run_id }}"
-            ethereum_package_args: ".github/workflows/kurtosis/regular-assertoor.io"
-            ethereum_package_branch: "5.0.1"
-            kurtosis_extra_args: --verbosity detailed --cli-log-level trace
-            persistent_logs: "true"
-
-  assertoor_pectra_test:
-    runs-on: ubuntu-latest
-    concurrency:
-      group: >-
-        ${{
-          (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) &&
-          format('{0}-{1}-{2}', github.workflow, 'pectra', github.run_id) ||
-          format('{0}-{1}-{2}', github.workflow, 'pectra', github.ref)
-        }}
-      cancel-in-progress: true
-
-    steps:
-      - name: Fast checkout git repository
-        uses: actions/checkout@v6
-
-      - name: Conditional Docker Login
-        # Only login if we can. Workflow works without it but we want to avoid
-        # rate limiting by Docker Hub when possible. External repos don't
-        # have access to our Docker secrets.
-        if: |
-          github.repository == 'erigontech/erigon' &&
-          github.actor != 'dependabot[bot]' &&
-          (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork)
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
-          password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
-
-      - name: Docker build current branch
-        run: |
-          docker build -t test/erigon:current .
-
-      - name: Run Pectra Kurtosis + assertoor tests
-        uses: ethpandaops/kurtosis-assertoor-github-action@v1
-        with:
-            enclave_name: "kurtosis-run2-${{ github.run_id }}"
-            ethereum_package_args: ".github/workflows/kurtosis/pectra.io"
+            enclave_name: "kurtosis-${{ matrix.suite }}-${{ github.run_id }}"
+            ethereum_package_args: "${{ matrix.package_args }}"
             ethereum_package_branch: "5.0.1"
             kurtosis_extra_args: --verbosity detailed --cli-log-level trace
             persistent_logs: "true"
