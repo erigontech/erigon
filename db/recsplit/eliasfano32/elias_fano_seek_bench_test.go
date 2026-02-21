@@ -76,11 +76,12 @@ func BenchmarkGet(b *testing.B) {
 	}
 }
 
-// BenchmarkSeek measures Seek (searchForward) on a large sequence.
-// Three seek patterns:
-//   - exact:    seek to a value that exists in the sequence
-//   - between:  seek to a value between two sequence elements (finds next)
-//   - random:   seek to a uniformly random value in [0, maxOffset]
+// BenchmarkSeek measures Seek on a single large EF with uniform-random targets.
+// This does NOT reflect real-world usage (see BenchmarkSeekPool) because:
+//   - real EFs are mostly tiny (83% have 1–3 word upperBits = 8–24 bytes)
+//   - real seeks are not uniform: 63% hit the fast-lane (upper(0) >= hi) on mainnet
+//
+// Use this benchmark only to measure raw binary-search cost on large EFs.
 func BenchmarkSeek(b *testing.B) {
 	const count = 1_000_000
 
@@ -98,44 +99,12 @@ func BenchmarkSeek(b *testing.B) {
 		ef := buildEF(count, tc.stride)
 		maxOffset := (count - 1) * tc.stride
 
-		// precompute seek targets so loop body is just the Seek call
 		targets := make([]uint64, count)
 		for i := range targets {
 			targets[i] = uint64(rand.Int64N(int64(maxOffset + 1)))
 		}
-		exactTargets := make([]uint64, count)
-		for i := range exactTargets {
-			exactTargets[i] = uint64(rand.Int64N(int64(count))) * tc.stride
-		}
-		betweenTargets := make([]uint64, count)
-		for i := range betweenTargets {
-			// value that falls between two sequence elements (only meaningful when stride > 1)
-			base := uint64(rand.Int64N(int64(count-1))) * tc.stride
-			betweenTargets[i] = base + tc.stride/2 + 1
-			if tc.stride == 1 {
-				betweenTargets[i] = base // stride=1: no gap, use exact
-			}
-		}
 
-		b.Run(tc.name+"/exact", func(b *testing.B) {
-			b.ReportAllocs()
-			n := 0
-			for b.Loop() {
-				_, _ = ef.Seek(exactTargets[n%count])
-				n++
-			}
-		})
-
-		b.Run(tc.name+"/between", func(b *testing.B) {
-			b.ReportAllocs()
-			n := 0
-			for b.Loop() {
-				_, _ = ef.Seek(betweenTargets[n%count])
-				n++
-			}
-		})
-
-		b.Run(tc.name+"/random", func(b *testing.B) {
+		b.Run(tc.name, func(b *testing.B) {
 			b.ReportAllocs()
 			n := 0
 			for b.Loop() {
@@ -146,44 +115,42 @@ func BenchmarkSeek(b *testing.B) {
 	}
 }
 
-// TestSeekCorrectness verifies Seek returns correct results across stride patterns.
-func TestSeekCorrectness(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
+// BenchmarkSeekPool models real mainnet seek patterns:
+//   - a pool of many small EFs placed at random offsets in a large global range
+//     (matching the real distribution: 83% of EFs have 1–3 word upperBits = 8–24 bytes)
+//   - seek targets uniform over the global range, so many seeks land before the first
+//     element of the chosen EF, exercising the fast-lane path (upper(0) >= hi)
+func BenchmarkSeekPool(b *testing.B) {
+	const (
+		numEFs    = 100_000
+		globalMax = 1 << 25 // 33M — representative global value range
+		stride    = 1000
+	)
+
+	rng := rand.New(rand.NewPCG(1, 2))
+
+	efs := make([]*EliasFano, numEFs)
+	for i := range efs {
+		count := uint64(rng.IntN(7)) + 2 // 2–8 elements → 1–3 word upperBits
+		start := uint64(rng.Int64N(globalMax - int64(count)*stride + 1))
+		ef := NewEliasFano(count, start+(count-1)*stride)
+		for j := uint64(0); j < count; j++ {
+			ef.AddOffset(start + j*stride)
+		}
+		ef.Build()
+		efs[i] = ef
 	}
 
-	cases := []struct {
-		name   string
-		stride uint64
-	}{
-		{"stride1_l0", 1},
-		{"stride123_l6", 123},
-		{"stride1000_l9", 1000},
+	targets := make([]uint64, numEFs)
+	for i := range targets {
+		targets[i] = uint64(rng.Int64N(globalMax + 1))
 	}
 
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			const count = 1_000_000
-			ef := buildEF(count, tc.stride)
-			maxOffset := (count - 1) * tc.stride
-
-			rng := rand.New(rand.NewPCG(42, 0))
-			const seeks = 100_000
-			notFound := 0
-			for range seeks {
-				v := uint64(rng.Int64N(int64(maxOffset + 1)))
-				got, ok := ef.Seek(v)
-				if !ok {
-					notFound++
-					continue
-				}
-				if got < v {
-					t.Errorf("Seek(%d) returned %d < v", v, got)
-				}
-			}
-
-			t.Logf("notFound=%d", notFound)
-		})
+	b.ResetTimer()
+	b.ReportAllocs()
+	n := 0
+	for b.Loop() {
+		_, _ = efs[n%numEFs].Seek(targets[n%numEFs])
+		n++
 	}
 }
