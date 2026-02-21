@@ -245,15 +245,14 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 	}
 
 	hi := v >> ef.l
-	// Probe position 0 before falling back to binary search.
-	// Real-data profiling (mainnet 9M blocks) shows:
+	lo := uint64(0)
+
+	// Real-data (eth-mainnet):
 	//   - 80% of seeks are on tiny EFs: 35% upperBits=8bytes, 45% upperBits=8-24bytes ( 1–3 words = 8–24 bytes, fits in one cache line)
 	//   - 63% have upper(0) >= hi
-	//   sort.Search always starts at count/2 and takes log2(count) steps to reach 0;
-	//   probing position 0 first avoids that cost for the dominant case.
 	found := ef.upper(0) >= hi // fast-lane
-	lo := uint64(0)
 	if !found {
+		// interpolation-sort showed good results, but keeping `sort.Sort` for simplicity now
 		i := sort.Search(int(ef.count), func(i int) bool {
 			return ef.upper(uint64(i+1)) >= hi
 		})

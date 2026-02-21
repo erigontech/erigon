@@ -555,6 +555,9 @@ func BenchmarkEF(b *testing.B) {
 		}
 	})
 	b.Run("reverse seek to value 1_230", func(b *testing.B) {
+		it := ef.ReverseIterator()
+		it.Seek(1_230)
+
 		for b.Loop() {
 			it := ef.ReverseIterator()
 			it.Seek(1_230)
