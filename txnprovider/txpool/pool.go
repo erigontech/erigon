@@ -467,7 +467,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 
 	var announcements Announcements
 	announcements, err = p.addTxnsOnNewBlock(block, cacheView, stateChanges, p.senders, unwindTxns, /* newTxns */
-		pendingBaseFee, stateChanges.BlockGasLimit, p.logger)
+		minedTxns, pendingBaseFee, stateChanges.BlockGasLimit, p.logger)
 	if err != nil {
 		return err
 	}
@@ -1549,7 +1549,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 
 // TODO: Looks like a copy of the above
 func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges *remoteproto.StateChangeBatch,
-	senders *sendersBatch, newTxns TxnSlots, pendingBaseFee uint64, blockGasLimit uint64, logger log.Logger) (Announcements, error) {
+	senders *sendersBatch, newTxns TxnSlots, minedTxns TxnSlots, pendingBaseFee uint64, blockGasLimit uint64, logger log.Logger) (Announcements, error) {
 	if assert.Enable {
 		for _, txn := range newTxns.Txns {
 			if txn.SenderID == 0 {
@@ -1579,6 +1579,26 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 		}
 		sendersWithChangedState[mt.TxnSlot.SenderID] = struct{}{}
 	}
+
+	// Build a map of the minimum nonce that each sender must have on-chain, derived from
+	// mined transactions. For a sender whose tx at nonce N was mined, the on-chain nonce is
+	// at least N+1. This is used to floor the nonce read from the kvcache, which may be stale
+	// on AuRa/Gnosis Chain where system transactions can advance nonces without appearing in
+	// the state-diff batch (the root cause of empty-block production on Erigon 3.3.x).
+	minedSenderMinNonce := make(map[uint64]uint64, len(minedTxns.Txns))
+	for _, txn := range minedTxns.Txns {
+		if txn.SenderID == 0 {
+			continue
+		}
+		minNonce := txn.Nonce + 1 // nonce N mined → on-chain nonce is at least N+1
+		if existing, ok := minedSenderMinNonce[txn.SenderID]; !ok || minNonce > existing {
+			minedSenderMinNonce[txn.SenderID] = minNonce
+		}
+		// Always add mined-tx senders to the changed-state set so that onSenderStateChange
+		// is called for them even if they did not appear in the EVM state-diff batch.
+		sendersWithChangedState[txn.SenderID] = struct{}{}
+	}
+
 	// add senders changed in state to `sendersWithChangedState` list
 	for _, changesList := range stateChanges.ChangeBatch {
 		for _, change := range changesList.Changes {
@@ -1601,6 +1621,12 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 		nonce, balance, err := senders.info(cacheView, senderID)
 		if err != nil {
 			return announcements, err
+		}
+		// Use max(kvcache_nonce, minedSenderMinNonce) so that stale pending txns are evicted
+		// even when the kvcache hasn't been updated for this sender yet (e.g. AuRa system txns
+		// that don't produce an UPSERT state-change entry for the sender).
+		if minNonce, ok := minedSenderMinNonce[senderID]; ok && minNonce > nonce {
+			nonce = minNonce
 		}
 		p.onSenderStateChange(senderID, nonce, balance, blockGasLimit, logger)
 	}
@@ -1980,12 +2006,22 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 	cumulativeRequiredBalance := uint256.NewInt(0)
 	minFeeCap := uint256.NewInt(0).SetAllOne()
 	minTip := uint64(math.MaxUint64)
-	var toDel []*metaTxn // can't delete items while iterate them
+	var toDel []*metaTxn                       // can't delete items while iterate them
+	var toDelReasons []txpoolcfg.DiscardReason // parallel reasons slice for toDel
 
 	p.all.ascend(senderID, func(mt *metaTxn) bool {
 		deleteAndContinueReasonLog := ""
+		discardReason := txpoolcfg.NonceTooLow
 		if senderNonce > mt.TxnSlot.Nonce {
 			deleteAndContinueReasonLog = "low nonce"
+		} else if p.cfg.MaxNonceGap > 0 && mt.TxnSlot.Nonce > noGapsNonce && mt.TxnSlot.Nonce-noGapsNonce > p.cfg.MaxNonceGap {
+			// Evict "zombie" queued transactions whose nonce is so far ahead of the sender's
+			// on-chain nonce (accounting for any consecutive txns already in the pool) that they
+			// can practically never become pending. This prevents unbounded pool bloat from accounts
+			// that submitted transactions with impossibly large nonce gaps (e.g. nonce 144968 when
+			// on-chain nonce is 6398). The gap threshold is configurable via MaxNonceGap (default 64).
+			deleteAndContinueReasonLog = "nonce gap too large"
+			discardReason = txpoolcfg.NonceTooDistant
 		} else if mt.TxnSlot.Nonce != noGapsNonce && mt.TxnSlot.Type == BlobTxnType { // Discard nonce-gapped blob txns
 			deleteAndContinueReasonLog = "nonce-gapped blob txn"
 		}
@@ -2023,6 +2059,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 				//already removed
 			}
 			toDel = append(toDel, mt)
+			toDelReasons = append(toDelReasons, discardReason)
 			return true
 		}
 
@@ -2091,8 +2128,8 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		return true
 	})
 
-	for _, mt := range toDel {
-		p.discardLocked(mt, txpoolcfg.NonceTooLow)
+	for i, mt := range toDel {
+		p.discardLocked(mt, toDelReasons[i])
 	}
 
 	logger.Trace("[txpool] onSenderStateChange", "sender", senderID, "count", p.all.count(senderID), "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
