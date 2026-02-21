@@ -51,20 +51,22 @@ const (
 //
 // UpperCalls[n] = number of Seeks that called upper() exactly n times (n in 1..4).
 // UpperCalls[5] = Seeks that hit the fallback binary search (5+ upper() calls).
-// UpperBitsWordsSum = sum of len(ef.upperBits) across all Seeks; divide by call count
-// and 4096 to get average array size in 4096-word (32 KiB) chunks.
+// UpperBitsSizeBuckets[k] = seeks on EFs whose len(upperBits) is in [2^(k-1), 2^k).
+// Bucket 0 = empty array; last bucket = 2^16+ words (clamped).
 //
 // Reset() before a workload, then call String() or read fields directly.
 type searchForwardStatsT struct {
-	UpperCalls        [6]atomic.Int64
-	UpperBitsWordsSum atomic.Int64 // sum of len(ef.upperBits) per seek
+	UpperCalls           [6]atomic.Int64
+	UpperBitsSizeBuckets [17]atomic.Int64 // log2(len(upperBits)) histogram
 }
 
 func (s *searchForwardStatsT) Reset() {
 	for i := range s.UpperCalls {
 		s.UpperCalls[i].Store(0)
 	}
-	s.UpperBitsWordsSum.Store(0)
+	for i := range s.UpperBitsSizeBuckets {
+		s.UpperBitsSizeBuckets[i].Store(0)
+	}
 }
 
 func (s *searchForwardStatsT) String() string {
@@ -75,18 +77,37 @@ func (s *searchForwardStatsT) String() string {
 	if total == 0 {
 		return "SearchForwardStats: no calls recorded"
 	}
-	out := fmt.Sprintf("SearchForwardStats: calls=%d  avgUpperBitsWords/4096=%.1f\n",
-		total, float64(s.UpperBitsWordsSum.Load())/float64(total)/4096)
+	out := fmt.Sprintf("SearchForwardStats: calls=%d\n", total)
+
+	out += "  upperBits size (words):\n"
+	for k := range s.UpperBitsSizeBuckets {
+		v := s.UpperBitsSizeBuckets[k].Load()
+		if v == 0 {
+			continue
+		}
+		var label string
+		switch k {
+		case 0:
+			label = "0"
+		case len(s.UpperBitsSizeBuckets) - 1:
+			label = fmt.Sprintf(">=%d", 1<<(k-1))
+		default:
+			label = fmt.Sprintf("%d-%d", 1<<(k-1), (1<<k)-1)
+		}
+		out += fmt.Sprintf("    [%s]: %d (%.1f%%)\n", label, v, float64(v)/float64(total)*100)
+	}
+
+	out += "  upper() calls per seek:\n"
 	for i, cnt := range s.UpperCalls {
 		v := cnt.Load()
 		if v == 0 {
 			continue
 		}
-		label := fmt.Sprintf("upper_calls=%d", i)
+		label := fmt.Sprintf("%d", i)
 		if i == len(s.UpperCalls)-1 {
-			label = "upper_calls=fallback(5+)"
+			label = "fallback(5+)"
 		}
-		out += fmt.Sprintf("  %s: %d (%.1f%%)\n", label, v, float64(v)/float64(total)*100)
+		out += fmt.Sprintf("    [%s]: %d (%.1f%%)\n", label, v, float64(v)/float64(total)*100)
 	}
 	return out
 }
@@ -302,7 +323,11 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 	loVal := ef.upper(lo) // touches start of ef.jump[]/ef.upperBits[] — often warm after first call
 	hiVal := maxHi        // upper(ef.count) by construction; no extra mmap read
 	upperCalls := 1       // counted the upper(lo) call above
-	SearchForwardStats.UpperBitsWordsSum.Add(int64(len(ef.upperBits)))
+	k := bits.Len(uint(len(ef.upperBits)))
+	if k >= len(SearchForwardStats.UpperBitsSizeBuckets) {
+		k = len(SearchForwardStats.UpperBitsSizeBuckets) - 1
+	}
+	SearchForwardStats.UpperBitsSizeBuckets[k].Add(1)
 
 	const maxIter = 4
 	for i := 0; i < maxIter && lo < hiB; i++ {
