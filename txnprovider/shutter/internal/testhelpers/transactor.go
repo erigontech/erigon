@@ -25,7 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/abi/bind"
-	executiontests "github.com/erigontech/erigon/execution/tests"
+	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/txnprovider/shutter"
@@ -34,13 +34,13 @@ import (
 )
 
 type EncryptedTransactor struct {
-	base             executiontests.Transactor
+	base             engineapitester.Transactor
 	encryptorPrivKey *ecdsa.PrivateKey
 	sequencer        *shuttercontracts.Sequencer
 }
 
 func NewEncryptedTransactor(
-	base executiontests.Transactor,
+	base engineapitester.Transactor,
 	encryptorPrivKey *ecdsa.PrivateKey,
 	sequencerAddr string,
 	cb bind.ContractBackend,
