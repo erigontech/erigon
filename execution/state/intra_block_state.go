@@ -1622,7 +1622,7 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 				return err
 			}
 
-			// Reuse the cached stateObject directly `previous` so that (a) selfdestructed=true is captured, 
+			// Reuse the cached stateObject directly `previous` so that (a) selfdestructed=true is captured,
 			// (b) the accumulated incarnation is used for the new object's PrevIncarnation (important when the
 			// account was created and destroyed multiple times within the same block), and
 			// (c) after a REVERT CommitBlock can still emit DeleteAccount for it.
@@ -1683,7 +1683,7 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 			}
 		}
 	}
-	// Writer.DeleteAccount stores the selfdestructed incarnation in rs.selfdestructedByTx.  
+	// Writer.DeleteAccount stores the selfdestructed incarnation in rs.selfdestructedByTx.
 	// Recover it here so that CreateAccount in the next tx computes newInc = prevInc+1 correctly.
 	if sdb.versionMap == nil && previous == nil {
 		type deletedIncReader interface {
@@ -2377,7 +2377,7 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 					// SelfDestructPath=false indicates account resurrection in this block.
 					// The worker IBS set createdContract=true (ensuring CreateContract is called
 					// during commit to clear old storage), but that flag is not a versioned write
-					// path and is lost in the finalize IBS.  
+					// path and is lost in the finalize IBS.
 					so, err := sdb.GetOrNewStateObject(addr)
 					if err != nil {
 						return err

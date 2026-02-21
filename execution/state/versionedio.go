@@ -458,7 +458,7 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 	} else if res := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex); res.Status() == MVReadResultDone && res.value.(bool) {
 		if path != CodePath {
 			if commited {
-				// If a prior tx selfdestructed this account, so all storage slots are zero — return the 
+				// If a prior tx selfdestructed this account, so all storage slots are zero — return the
 				// default regardless of the current tx's local writes (which are part of the current tx's
 				// uncommitted changes, not the committed state).
 				return defaultV, MapRead, Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, nil
