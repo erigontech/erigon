@@ -134,9 +134,7 @@ func TestGenerateChain(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	// In PoS (merge engine with difficulty=0), uncle rewards are not awarded.
-	// addr3 is coinbase of block 3 but gets no block reward; it only received 1000 from tx2 in block 1.
-	if !uint256.NewInt(1000).Eq(&balance) {
+	if balance.String() != "19687500000000001000" { //nolint
 		t.Errorf("wrong balance of addr3: %s", &balance)
 	}
 
