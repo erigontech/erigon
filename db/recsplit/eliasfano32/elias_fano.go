@@ -23,6 +23,7 @@ import (
 	"math"
 	"math/bits"
 	"sort"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -30,6 +31,31 @@ import (
 	"github.com/erigontech/erigon/common/bitutil"
 	"github.com/erigontech/erigon/db/kv/stream"
 )
+
+// SearchForwardStats collects runtime statistics for searchForward.
+// Always active (atomic ops). Call SearchForwardStats.Reset() to clear.
+var SearchForwardStats searchForwardStats
+
+type searchForwardStats struct {
+	Calls    atomic.Uint64
+	NotFound atomic.Uint64
+	GetCalls atomic.Uint64 // total get()/Get2() inner-loop restarts in linear scan
+
+	// ScanLen[k] = searches where element at offset k from binary-search result was the answer.
+	// ScanLen[0]: first candidate was the answer (best case, no scan needed).
+	// ScanLen[1]: second candidate (covered by Get2 with no extra restart).
+	// ScanLen[9]: 10th candidate or beyond.
+	ScanLen [10]atomic.Uint64
+}
+
+func (s *searchForwardStats) Reset() {
+	s.Calls.Store(0)
+	s.NotFound.Store(0)
+	s.GetCalls.Store(0)
+	for i := range s.ScanLen {
+		s.ScanLen[i].Store(0)
+	}
+}
 
 // EliasFano algo overview https://www.antoniomallia.it/sorted-integers-compression-with-elias-fano-encoding.html
 // P. Elias. Efficient storage and retrieval by content and address of static files. J. ACM, 21(2):246–260, 1974.
@@ -249,12 +275,39 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 	i := sort.Search(int(ef.count+1), func(i int) bool {
 		return ef.upper(uint64(i)) >= hi
 	})
-	for j := uint64(i); j <= ef.count; j++ {
-		val, _, _, _, _ := ef.get(j)
+
+	SearchForwardStats.Calls.Add(1)
+	j := uint64(i)
+	// Get2 checks two candidates with a single inner-loop restart in get().
+	// Covers the common case (scan length 1-2) with half the restarts.
+	if j < ef.count {
+		val, valNext := ef.Get2(j)
 		if val >= v {
+			SearchForwardStats.ScanLen[0].Add(1)
+			SearchForwardStats.GetCalls.Add(1)
+			return val, j, true
+		}
+		if valNext >= v {
+			SearchForwardStats.ScanLen[1].Add(1)
+			SearchForwardStats.GetCalls.Add(1)
+			return valNext, j + 1, true
+		}
+		j += 2
+	}
+	for ; j <= ef.count; j++ {
+		val, _, _, _, _ := ef.get(j)
+		scanLen := j - uint64(i)
+		if val >= v {
+			idx := scanLen
+			if idx >= uint64(len(SearchForwardStats.ScanLen)) {
+				idx = uint64(len(SearchForwardStats.ScanLen)) - 1
+			}
+			SearchForwardStats.ScanLen[idx].Add(1)
+			SearchForwardStats.GetCalls.Add(scanLen)
 			return val, j, true
 		}
 	}
+	SearchForwardStats.NotFound.Add(1)
 	return 0, 0, false
 }
 
