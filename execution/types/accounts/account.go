@@ -50,6 +50,10 @@ const (
 	MimetypeTextPlain         = "text/plain"
 )
 
+// EmptyCodeHash is the known hash of empty EVM bytecode (keccak256(nil)).
+// It equals empty.CodeHash and is exported here for convenience.
+var EmptyCodeHash = empty.CodeHash
+
 // NewAccount creates a new account w/o code nor storage.
 func NewAccount() Account {
 	return Account{

@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/execution/types/accounts"
+	accpkg "github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -234,8 +234,8 @@ func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (uint64, ui
 	if len(encoded) == 0 {
 		return 0, uint256.Int{}, nil
 	}
-	acc := accounts.Account{}
-	err = accounts.DeserialiseV3(&acc, encoded)
+	acc := accpkg.Account{}
+	err = accpkg.DeserialiseV3(&acc, encoded)
 	if err != nil {
 		return 0, uint256.Int{}, err
 	}
