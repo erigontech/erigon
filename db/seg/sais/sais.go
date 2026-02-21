@@ -9,6 +9,8 @@
 
 package sais
 
+import "bytes"
+
 // copy of stdlib `index/suffixarray` SA-IS implementation
 // because Go's stdlib doesn't provide enough low-level api to call necessary funcs
 // also for Erigon - it's important to keep control on files reproducibility
@@ -123,7 +125,7 @@ func placeLMS_8_32(text []byte, sa, freq, bucket []int32) int {
 	bucket = bucket[:256]
 
 	c0, c1, isTypeS := byte(0), byte(0), false
-	for i := len(text) - 1; i >= 0; i-- {
+	for i := int32(len(text) - 1); i >= 0; i-- {
 		c0, c1 = text[i], c0
 		if c0 < c1 {
 			isTypeS = true
@@ -132,7 +134,7 @@ func placeLMS_8_32(text []byte, sa, freq, bucket []int32) int {
 
 			b := bucket[c1] - 1
 			bucket[c1] = b
-			sa[b] = int32(i + 1)
+			sa[b] = i + 1
 			lastB = b
 			numLMS++
 		}
@@ -265,17 +267,10 @@ func assignID_8_32(text []byte, sa []int32, numLMS int) int {
 		if uint32(n) >= uint32(len(text)) {
 			goto Same
 		}
-		{
-			n := int(n)
-			this := text[j:][:n]
-			last := text[lastPos:][:n]
-			for i := 0; i < n; i++ {
-				if this[i] != last[i] {
-					goto New
-				}
-			}
-			goto Same
+		if !bytes.Equal(text[j:][:n], text[lastPos:][:n]) {
+			goto New
 		}
+		goto Same
 	New:
 		id++
 		lastPos = j
@@ -305,11 +300,7 @@ func recurse_32(sa, oldTmp []int32, numLMS, maxID int) {
 		tmp = saTmp
 	}
 	if len(tmp) < numLMS {
-		n := maxID
-		if n < numLMS/2 {
-			n = numLMS / 2
-		}
-		tmp = make([]int32, n)
+		tmp = make([]int32, max(maxID, numLMS/2))
 	}
 
 	clear(dst)

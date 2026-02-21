@@ -42,6 +42,9 @@ import (
 )
 
 func TestFetch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	ctx := t.Context()
 	t.Parallel()
 

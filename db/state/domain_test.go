@@ -2671,10 +2671,16 @@ func TestCanBuild(t *testing.T) {
 }
 
 func TestTraceKey_SmallVals(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	testTraceKey(t, false)
 }
 
 func TestTraceKey_LargeVals(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	testTraceKey(t, true)
 }
 

@@ -658,7 +658,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	inMemoryExecution := func(sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {
 		terseLogger := log.New()
-		terseLogger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
+		terseLogger.SetHandler(log.LvlFilterHandler(log.Lvl(dbg.ExecTerseLoggerLevel), log.StderrHandler))
 		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
 		stateSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient,
 			dirs, notifications, blockReader, blockWriter, backend.silkworm, terseLogger)
