@@ -726,7 +726,7 @@ func TestLessConflictsWithMetadata(t *testing.T) {
 }
 
 func TestZeroTx(t *testing.T) {
-	if testing.Short() || runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" {
 		t.Skip()
 	}
 	//t.Parallel()
@@ -750,7 +750,7 @@ func TestZeroTx(t *testing.T) {
 }
 
 func TestAlternatingTx(t *testing.T) {
-	if testing.Short() || runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" {
 		t.Skip()
 	}
 	//t.Parallel()
@@ -777,7 +777,7 @@ func TestAlternatingTx(t *testing.T) {
 }
 
 func TestAlternatingTxWithMetadata(t *testing.T) {
-	if testing.Short() || runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" {
 		t.Skip()
 	}
 	//t.Parallel()

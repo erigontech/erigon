@@ -35,6 +35,9 @@ import (
 )
 
 func TestPendingBlock(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	m := execmoduletester.New(t)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, execmoduletester.New(t))
 	mining := txpoolproto.NewMiningClient(conn)

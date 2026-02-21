@@ -655,6 +655,9 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 }
 
 func TestReorgOverStateChange(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	// Configure and generate a sample block chain
 	var (
@@ -960,6 +963,9 @@ func TestReproduceCrash(t *testing.T) {
 }
 
 func TestEip2200Gas(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	// Configure and generate a sample block chain
 	var (
@@ -1065,6 +1071,9 @@ func TestEip2200Gas(t *testing.T) {
 
 // Create contract, drop trie, reload trie from disk and add block with contract call
 func TestWrongIncarnation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	// Configure and generate a sample block chain
 	var (
@@ -1681,6 +1690,9 @@ func TestRecreateAndRewind(t *testing.T) {
 
 }
 func TestTxLookupUnwind(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")

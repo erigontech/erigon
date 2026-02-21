@@ -533,10 +533,6 @@ func TestInvIndexCollationBuild(t *testing.T) {
 }
 
 func TestInvIndexAfterPrune(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	t.Parallel()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
