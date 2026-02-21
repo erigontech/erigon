@@ -375,7 +375,7 @@ func TestDump(t *testing.T) {
 	txNum, _, err := domains.SeekCommitment(t.Context(), tx)
 	require.NoError(t, err)
 
-	err := rawdbv3.TxNums.Append(tx, 1, 1)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
 	st := New(NewReaderV3(domains.AsGetter(tx)))
