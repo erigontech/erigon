@@ -50,8 +50,6 @@ type dataWithTxNum struct {
 type TemporalMemBatch struct {
 	stepSize uint64
 
-	getCacheSize int
-
 	latestStateLock sync.RWMutex
 	domains         [kv.DomainLen]map[string][]dataWithTxNum
 	storage         *btree2.Map[string, []dataWithTxNum] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
@@ -252,7 +250,7 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 	return nil, false, nil
 }
 
-func (sd *TemporalMemBatch) SizeEstimate() uint64 {
+func (sd *TemporalMemBatch) Size() uint64 {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 	return uint64(sd.metrics.CachePutSize)
@@ -389,9 +387,6 @@ func (sd *TemporalMemBatch) Close() {
 		for _, d := range ds {
 			d.Close()
 		}
-	}
-	for _, iiWriter := range sd.iiWriters {
-		iiWriter.close()
 	}
 	for _, iiWriter := range sd.iiWriters {
 		iiWriter.close()

@@ -304,7 +304,7 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 }
 
 func (sd *SharedDomains) Size() uint64 {
-	return sd.mem.SizeEstimate()
+	return sd.mem.Size()
 }
 
 const CodeSizeTableFake = "CodeSize"
