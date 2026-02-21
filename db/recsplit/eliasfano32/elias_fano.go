@@ -61,6 +61,7 @@ const (
 type searchForwardStatsT struct {
 	UpperCalls           [6]atomic.Int64
 	UpperBitsSizeBuckets [17]atomic.Int64 // log2(len(upperBits)) histogram
+	FastEarlyGetCalls    atomic.Int64     // total .get() calls made in fast-early seeks
 }
 
 func (s *searchForwardStatsT) Reset() {
@@ -70,6 +71,7 @@ func (s *searchForwardStatsT) Reset() {
 	for i := range s.UpperBitsSizeBuckets {
 		s.UpperBitsSizeBuckets[i].Store(0)
 	}
+	s.FastEarlyGetCalls.Store(0)
 }
 
 func (s *searchForwardStatsT) String() string {
@@ -105,7 +107,12 @@ func (s *searchForwardStatsT) String() string {
 	fastLate2 := s.UpperCalls[3].Load()
 	fastLate3 := s.UpperCalls[4].Load()
 	slow := s.UpperCalls[len(s.UpperCalls)-1].Load()
-	out += fmt.Sprintf("  fast-early  (upper(0)>=hi): %d (%.1f%%)\n", fastEarly, float64(fastEarly)/float64(total)*100)
+	feGetCalls := s.FastEarlyGetCalls.Load()
+	avgFeGet := float64(0)
+	if fastEarly > 0 {
+		avgFeGet = float64(feGetCalls) / float64(fastEarly)
+	}
+	out += fmt.Sprintf("  fast-early  (upper(0)>=hi): %d (%.1f%%), avg .get/seek=%.2f\n", fastEarly, float64(fastEarly)/float64(total)*100, avgFeGet)
 	out += fmt.Sprintf("  fast-late1  (upper(1)>=hi): %d (%.1f%%)\n", fastLate1, float64(fastLate1)/float64(total)*100)
 	out += fmt.Sprintf("  fast-late2  (upper(2)>=hi): %d (%.1f%%)\n", fastLate2, float64(fastLate2)/float64(total)*100)
 	out += fmt.Sprintf("  fast-late3  (upper(3)>=hi): %d (%.1f%%)\n", fastLate3, float64(fastLate3)/float64(total)*100)
@@ -330,9 +337,11 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 	//   sort.Search always starts at count/2 and takes log2(count) steps to reach 0;
 	//   probing the first few positions avoids that cost for the dominant cases.
 	lo := uint64(0)
+	fastEarlyPath := false
 	firstUpper := ef.upper(0)
 	if firstUpper >= hi {
 		SearchForwardStats.UpperCalls[1].Add(1)
+		fastEarlyPath = true
 	} else if ef.count > 0 && ef.upper(1) >= hi {
 		SearchForwardStats.UpperCalls[2].Add(1)
 		lo = 1
@@ -353,6 +362,9 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 	for j := lo; j <= ef.count; j++ {
 		val, _, _, _, _ := ef.get(j)
 		if val >= v {
+			if fastEarlyPath {
+				SearchForwardStats.FastEarlyGetCalls.Add(int64(j + 1))
+			}
 			return val, j, true
 		}
 	}
