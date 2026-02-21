@@ -68,27 +68,51 @@ done
 echo "Hardlinking immutable files..."
 rsync "${RSYNC_LINK_OPTS[@]}" "$source_abs/" "$destination_abs/"
 
-# Second pass: copy mutable files (without --link-dest to force real copy)
+# Second pass: copy mutable files using reflinks (CoW clones) where supported
 echo "Copying mutable files..."
-RSYNC_COPY_OPTS=(
-    -a
-)
 
-# Exclude destination if it's a subdirectory of source
-if [ -n "$dest_rel" ]; then
-    RSYNC_COPY_OPTS+=(--exclude="$dest_rel")
+# Test if reflinks work from source to destination (requires same filesystem + CoW support)
+_test_src="$source_abs/.reflink_test_$$"
+_test_dst="$destination_abs/.reflink_test_$$"
+_cp_clone=""
+touch "$_test_src" 2>/dev/null && {
+    case "$(uname -s)" in
+        Darwin) cp -c "$_test_src" "$_test_dst" 2>/dev/null && _cp_clone="cp -c" ;;
+        *)      cp --reflink=always "$_test_src" "$_test_dst" 2>/dev/null && _cp_clone="cp --reflink=always" ;;
+    esac
+    rm -f "$_test_src" "$_test_dst"
+}
+
+if [ -n "$_cp_clone" ]; then
+    echo "  Using reflinks ($_cp_clone)"
+    for f in "${MUTABLE_FILES[@]}"; do
+        if [ -n "$dest_rel" ]; then
+            find "$source_abs" -path "$source_abs/$dest_rel" -prune -o -name "$f" -type f -print0
+        else
+            find "$source_abs" -name "$f" -type f -print0
+        fi | while IFS= read -r -d '' src_file; do
+            rel="${src_file#$source_abs/}"
+            mkdir -p "$(dirname "$destination_abs/$rel")"
+            $_cp_clone "$src_file" "$destination_abs/$rel" 2>/dev/null || \
+                [ -f "$destination_abs/$rel" ] || \
+                { echo "Error: failed to clone $rel" >&2; exit 1; }
+        done
+    done
+else
+    # Fall back to rsync when reflinks are not supported
+    RSYNC_COPY_OPTS=(-a)
+    if [ -n "$dest_rel" ]; then
+        RSYNC_COPY_OPTS+=(--exclude="$dest_rel")
+    fi
+    INCLUDE_PATTERNS=()
+    for f in "${MUTABLE_FILES[@]}"; do
+        INCLUDE_PATTERNS+=(--include="$f")
+    done
+    rsync "${RSYNC_COPY_OPTS[@]}" \
+        --include='*/' \
+        "${INCLUDE_PATTERNS[@]}" \
+        --exclude='*' \
+        "$source_abs/" "$destination_abs/"
 fi
-
-# Build include patterns for mutable files only
-INCLUDE_PATTERNS=()
-for f in "${MUTABLE_FILES[@]}"; do
-    INCLUDE_PATTERNS+=(--include="$f")
-done
-
-rsync "${RSYNC_COPY_OPTS[@]}" \
-    --include='*/' \
-    "${INCLUDE_PATTERNS[@]}" \
-    --exclude='*' \
-    "$source_abs/" "$destination_abs/"
 
 echo "Mirror complete!"

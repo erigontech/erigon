@@ -70,6 +70,13 @@ func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
 		return action(context)
 	}
 
+	app.Before = func(c *cli.Context) error {
+		var cancel context.CancelFunc
+		c.Context, cancel = context.WithCancel(c.Context)
+		go debug.ListenSignals(cancel, log.Root())
+		return nil
+	}
+
 	app.Flags = appFlags(cliFlags)
 
 	app.After = func(ctx *cli.Context) error {

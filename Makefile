@@ -1,10 +1,15 @@
-SHELL := /bin/bash
+ifeq ($(OS),Windows_NT)
+  SHELL := bash
+else
+  SHELL := /bin/bash
+endif
 
 GO ?= go # if using docker, should not need to be installed/linked
 GOAMD64_VERSION ?= v2 # See https://go.dev/wiki/MinimumRequirements#microarchitecture-support
 GOBINREL := build/bin
 export GOBIN := $(CURDIR)/$(GOBINREL)
 GOARCH ?= $(shell go env GOHOSTARCH)
+GOEXE := $(shell $(GO) env GOEXE 2>/dev/null)
 UNAME := $(shell uname) # Supported: Darwin, Linux
 DOCKER := $(shell command -v docker 2> /dev/null)
 DOCKER_BINARIES ?= "erigon"
@@ -63,7 +68,7 @@ endif
 
 BUILD_TAGS =
 
-ifneq ($(shell "$(CURDIR)/node/silkworm/silkworm_compat_check.sh"),)
+ifneq ($(shell $(CURDIR)/node/silkworm/silkworm_compat_check.sh),)
 	BUILD_TAGS := $(BUILD_TAGS),nosilkworm
 endif
 
@@ -157,7 +162,7 @@ dbg:
 
 .PHONY: %.cmd
 # Deferred (=) because $* isn't defined until the rule is executed.
-%.cmd: override OUTPUT = $(GOBIN)/$*$(CMD_BUILD_SUFFIX)
+%.cmd: override OUTPUT = $(GOBIN)/$*$(GOEXE)
 %.cmd:
 	@echo Building '$(OUTPUT)'
 	cd ./cmd/$* && $(GOBUILD) -o $(OUTPUT)
@@ -168,7 +173,7 @@ geth: erigon
 
 ## erigon:                            build erigon
 erigon: go-version erigon.cmd
-	@rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
+	@rm -f $(GOBIN)/tg$(GOEXE) # Remove old binary to prevent confusion where users still use it because of the scripts
 
 COMMANDS += capcli
 COMMANDS += downloader
@@ -193,6 +198,10 @@ all: erigon $(COMMANDS)
 
 ## db-tools:                          build db tools
 db-tools:
+ifeq ($(GOEXE),.exe)
+	@echo "db-tools is not supported on Windows. Use WSL or Docker."
+	@exit 1
+else
 	@echo "Building db-tools"
 
 	go mod vendor
@@ -201,6 +210,7 @@ db-tools:
 	cd vendor/github.com/erigontech/mdbx-go/libmdbx && cp mdbx_chk $(GOBIN) && cp mdbx_copy $(GOBIN) && cp mdbx_dump $(GOBIN) && cp mdbx_drop $(GOBIN) && cp mdbx_load $(GOBIN) && cp mdbx_stat $(GOBIN)
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
+endif
 
 test-filtered:
 	(set -o pipefail && $(GOTEST) | tee run.log | (grep -v -e '^=== CONT ' -e '^=== RUN ' -e '^=== PAUSE ' -e '^PASS' -e '--- PASS:' || true))
@@ -241,7 +251,7 @@ eest-bal:
 	)
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,".*amsterdam.*",--sim.buildarg branch=hive --sim.buildarg branch=tests-bal@v2.0.0 --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/bal%40v2.0.0/fixtures_bal.tar.gz)
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,".*amsterdam.*",--sim.buildarg branch=hive --sim.buildarg branch=tests-bal@v5.1.0 --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/bal%40v5.1.0/fixtures_bal.tar.gz)
 
 # Define the run_suite function
 define run_suite
@@ -310,7 +320,7 @@ eest-hive:
 define run-kurtosis-assertoor
 	docker build -t test/erigon:current . ; \
 	kurtosis enclave rm -f makefile-kurtosis-testnet ; \
-	kurtosis run --enclave makefile-kurtosis-testnet github.com/ethpandaops/ethereum-package --args-file $(1) ; \
+	kurtosis run --enclave makefile-kurtosis-testnet github.com/ethpandaops/ethereum-package@5.0.1 --args-file $(1) ; \
 	printf "\nTo view logs: \nkurtosis service logs makefile-kurtosis-testnet el-1-erigon-lighthouse\n"
 endef
 
@@ -334,10 +344,6 @@ kurtosis-cleanup:
 	@kurtosis enclave ls
 	@echo "-----------------------------------\n"
 	kurtosis enclave rm -f makefile-kurtosis-testnet
-
-## lint-deps:                         install lint dependencies
-lint-deps:
-	@./tools/golangci_lint.sh --install-deps
 
 ## lintci:                            run golangci-lint linters
 lintci:

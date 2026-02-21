@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -90,6 +91,7 @@ type SharedDomains struct {
 	logger log.Logger
 
 	txNum             uint64
+	currentStep       kv.Step
 	blockNum          atomic.Uint64
 	trace             bool //nolint
 	commitmentCapture bool
@@ -117,7 +119,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) 
 
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tv, tx.Debug().Dirs().Tmp)
 
-	if err := sd.SeekCommitment(ctx, tx); err != nil {
+	if _, _, err := sd.SeekCommitment(ctx, tx); err != nil {
 		return sd, err
 	}
 
@@ -145,17 +147,78 @@ func (sd *SharedDomains) AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel {
 	return &temporalPutDel{sd, tx}
 }
 
-func (sd *SharedDomains) Merge(other *SharedDomains) error {
-	if sd.txNum > other.txNum {
-		return fmt.Errorf("can't merge backwards: txnum: %d > %d", sd.txNum, other.txNum)
+// changesetSwitcher is implemented by TemporalMemBatch to get/set changesets for deferred writes.
+type changesetSwitcher interface {
+	// GetChangesetByBlockNum returns the changeset for a given block number and
+	// the block hash it is keyed under.
+	GetChangesetByBlockNum(blockNumber uint64) (common.Hash, *changeset.StateChangeSet)
+	SetChangesetAccumulator(acc *changeset.StateChangeSet)
+	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet)
+}
+
+func (sd *SharedDomains) Merge(sdTxNum uint64, other *SharedDomains, otherTxNum uint64) error {
+	if sdTxNum > otherTxNum {
+		return fmt.Errorf("can't merge backwards: txnum: %d > %d", sdTxNum, otherTxNum)
 	}
 
 	if err := sd.mem.Merge(other.mem); err != nil {
 		return err
 	}
 
-	sd.txNum = other.txNum
+	// Transfer pending commitment update from other to sd (other's mem is invalidated after merge)
+	if otherUpd := other.sdCtx.TakePendingUpdate(); otherUpd != nil {
+		sd.sdCtx.SetPendingUpdate(otherUpd)
+	}
+
+	sd.txNum = otherTxNum
+	sd.currentStep = kv.Step(otherTxNum / sd.stepSize)
 	sd.blockNum.Store(other.blockNum.Load())
+	return nil
+}
+
+// ResetPendingUpdates clears all pending commitment updates.
+func (sd *SharedDomains) ResetPendingUpdates() {
+	if sd != nil && sd.sdCtx != nil {
+		sd.sdCtx.ResetPendingUpdates()
+	}
+}
+
+// FlushPendingUpdates applies the pending deferred commitment update.
+// It sets the corresponding block's changeset as the accumulator
+// so writes go directly to the correct changeset.
+func (sd *SharedDomains) FlushPendingUpdates(ctx context.Context, tx kv.TemporalTx) error {
+	upd := sd.sdCtx.TakePendingUpdate()
+	if upd == nil {
+		return nil
+	}
+	defer upd.Clear()
+
+	putBranch := func(prefix, data, prevData []byte, prevStep kv.Step) error {
+		return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData, prevStep)
+	}
+
+	switcher, ok := sd.mem.(changesetSwitcher)
+	if !ok {
+		_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch)
+		return err
+	}
+
+	blockHash, cs := switcher.GetChangesetByBlockNum(upd.BlockNum)
+	if cs != nil {
+		switcher.SetChangesetAccumulator(cs)
+	}
+
+	if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
+		if cs != nil {
+			switcher.SetChangesetAccumulator(nil)
+		}
+		return err
+	}
+
+	if cs != nil {
+		switcher.SavePastChangesetAccumulator(blockHash, upd.BlockNum, cs)
+		switcher.SetChangesetAccumulator(nil)
+	}
 	return nil
 }
 
@@ -256,6 +319,7 @@ func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
 // Requires for sd.rwTx because of commitment evaluation in shared domains if stepSize is reached
 func (sd *SharedDomains) SetTxNum(txNum uint64) {
 	sd.txNum = txNum
+	sd.currentStep = kv.Step(txNum / sd.stepSize)
 }
 
 func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
@@ -302,6 +366,7 @@ func (sd *SharedDomains) Close() {
 
 	sd.SetBlockNum(0)
 	sd.SetTxNum(0)
+	sd.ResetPendingUpdates()
 
 	//sd.walLock.Lock()
 	//defer sd.walLock.Unlock()
@@ -349,7 +414,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		// files merge so this is not a problem in practice. file 0-1 will be non-deterministic
 		// but file 0-2 will be deterministic as it will include all entries from file 0-1 and so on.
 		if v, ok := sd.stateCache.Get(domain, k); ok {
-			return v, kv.Step(sd.txNum / sd.stepSize), nil
+			return v, sd.currentStep, nil
 		}
 	}
 
@@ -457,11 +522,11 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		}
 	}
 	switch domain {
-	case kv.CodeDomain, kv.AccountsDomain, kv.StorageDomain:
+	case kv.CodeDomain, kv.AccountsDomain, kv.StorageDomain, kv.CommitmentDomain:
 		if bytes.Equal(prevVal, v) {
 			return nil
 		}
-	case kv.RCacheDomain, kv.CommitmentDomain:
+	case kv.RCacheDomain:
 		//noop
 	default:
 		if bytes.Equal(prevVal, v) {
@@ -579,12 +644,14 @@ func (sd *SharedDomains) GetCommitmentContext() *commitmentdb.SharedDomainsCommi
 }
 
 // SeekCommitment lookups latest available commitment and sets it as current
-func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (err error) {
-	_, _, _, err = sd.sdCtx.SeekCommitment(ctx, tx)
+func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (txNum, blockNum uint64, err error) {
+	txNum, blockNum, err = sd.sdCtx.SeekCommitment(ctx, tx)
 	if err != nil {
-		return err
+		return 0, 0, err
 	}
-	return nil
+	sd.SetBlockNum(blockNum)
+	sd.SetTxNum(txNum)
+	return txNum, blockNum, nil
 }
 
 // ComputeCommitment evaluates commitment for gathered updates.
@@ -605,6 +672,13 @@ func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
 
 func (sd *SharedDomains) EnableWarmupCache(enable bool) {
 	sd.sdCtx.EnableWarmupCache(enable)
+}
+
+// SetDeferCommitmentUpdates enables or disables deferred commitment updates.
+// When enabled, commitment branch updates are stored in the commitment context
+// instead of being applied inline, and must be flushed later via FlushPendingUpdates.
+func (sd *SharedDomains) SetDeferCommitmentUpdates(defer_ bool) {
+	sd.sdCtx.SetDeferCommitmentUpdates(defer_)
 }
 
 // TouchChangedKeysFromHistory touches the changed keys in the commitment trie by reading the historical updates.

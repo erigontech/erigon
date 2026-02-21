@@ -161,6 +161,17 @@ func (s *CaplinSnapshots) OpenList(fileNames []string, optimistic bool) error {
 	defer s.dirtyLock.Unlock()
 
 	s.closeWhatNotInList(fileNames)
+
+	// Get idx files for efficient index file lookups
+	idxFiles, err := snaptype.IdxFiles(s.dir)
+	if err != nil {
+		return fmt.Errorf("read idx files %s: %w", s.dir, err)
+	}
+	dirEntries := make([]string, 0, len(idxFiles))
+	for _, f := range idxFiles {
+		dirEntries = append(dirEntries, f.Name())
+	}
+
 	var segmentsMax uint64
 	var segmentsMaxSet bool
 Loop:
@@ -215,7 +226,7 @@ Loop:
 				// then make segment available even if index open may fail
 				s.dirty[snaptype.BeaconBlocks.Enum()].Set(sn)
 			}
-			if err := sn.OpenIdxIfNeed(s.dir, optimistic); err != nil {
+			if err := sn.OpenIdxIfNeed(s.dir, optimistic, dirEntries); err != nil {
 				return err
 			}
 			// Only bob sidecars count for progression
@@ -271,7 +282,7 @@ Loop:
 				// then make segment available even if index open may fail
 				s.dirty[snaptype.BlobSidecars.Enum()].Set(sn)
 			}
-			if err := sn.OpenIdxIfNeed(s.dir, optimistic); err != nil {
+			if err := sn.OpenIdxIfNeed(s.dir, optimistic, dirEntries); err != nil {
 				return err
 			}
 		}

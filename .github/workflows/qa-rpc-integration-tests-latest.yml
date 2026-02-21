@@ -55,6 +55,18 @@ jobs:
           make erigon integration
         working-directory: ${{ github.workspace }}
 
+      - name: Wait for current Erigon instance to reach the tip
+        run: |
+          ERIGON_PID=$(pgrep -x erigon | head -1)
+          if [ -z "$ERIGON_PID" ]; then
+            echo "Could not find running Erigon process dedicated to db maintenance"
+          else
+            echo "Found Erigon process dedicated to db maintenance, PID: $ERIGON_PID"
+            python3 $ERIGON_QA_PATH/test_system/qa-tests/tip-sync/run_and_chase_tip.py \
+              --total-time=$TOTAL_TIME_SECONDS \
+              --stop-erigon=False \
+              --erigon-pid=$ERIGON_PID
+          fi
       - name: Pause the Erigon instance dedicated to db maintenance
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
@@ -78,7 +90,7 @@ jobs:
           echo "Running migrations on datadir..."
           ./integration run_migrations --datadir $ERIGON_TESTBED_DATA_DIR --chain $CHAIN
 
-      - name: Run Erigon version and wait for sync
+      - name: Run Erigon and wait for sync
         id: pre_test_step
         run: |
           set +e # Disable exit on error
@@ -179,7 +191,7 @@ jobs:
           fi
 
       - name: Upload test results
-        if: steps.test_step.outputs.test_executed == 'true'
+        if: always() && steps.test_step.outputs.test_executed == 'true'
         uses: actions/upload-artifact@v6
         with:
           name: test-results
@@ -188,7 +200,7 @@ jobs:
             ${{ env.ERIGON_TESTBED_DATA_DIR }}/logs/
 
       - name: Save test results
-        if: steps.test_step.outputs.test_executed == 'true'
+        if: always() && steps.test_step.outputs.test_executed == 'true'
         working-directory: ${{ github.workspace }}
         env:
           TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}

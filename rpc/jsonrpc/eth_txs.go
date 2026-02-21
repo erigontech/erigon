@@ -86,6 +86,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		}
 
 		blockHash := header.Hash()
+		blockTime := header.Time
 
 		// Add GasPrice for the DynamicFeeTransaction
 		var baseFee *big.Int
@@ -110,7 +111,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			return nil, err
 		}
 
-		return ethapi.NewRPCTransaction(txn, blockHash, blockNum, txnIndex, baseFee), nil
+		return ethapi.NewRPCTransaction(txn, blockHash, blockTime, blockNum, txnIndex, baseFee), nil
 	}
 
 	curHeader := rawdb.ReadCurrentHeader(tx)
@@ -250,7 +251,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		return ethapi.NewRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), chainConfig.ChainID), nil
 	}
 
-	return ethapi.NewRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
+	return ethapi.NewRPCTransaction(txs[txIndex], block.Hash(), block.Time(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
 }
 
 // GetRawTransactionByBlockHashAndIndex returns the bytes of the transaction for the given block hash and index.
@@ -340,7 +341,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return ethapi.NewRPCBorTransaction(borTx, derivedBorTxHash, hash, blockNum, uint64(txIndex), chainConfig.ChainID), nil
 	}
 
-	return ethapi.NewRPCTransaction(txs[txIndex], hash, blockNum, uint64(txIndex), block.BaseFee()), nil
+	return ethapi.NewRPCTransaction(txs[txIndex], hash, block.Time(), blockNum, uint64(txIndex), block.BaseFee()), nil
 }
 
 // GetRawTransactionByBlockNumberAndIndex returns the bytes of the transaction for the given block number and index.

@@ -129,7 +129,7 @@ func (m *Merger) mergeSubSegment(
 		if err = buildIdx(ctx, sn, indexBuilder, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
 			return
 		}
-		err = newDirtySegment.openIdx(snapDir)
+		err = newDirtySegment.openIdx(snapDir, nil)
 		if err != nil {
 			return
 		}

@@ -513,6 +513,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 			return 0, fmt.Errorf("%w: authorizations len: %s", ErrParseTxn, err) //nolint
 		}
 		authPos := dataPos
+		var hashBuf [32]byte
 		for authPos < dataPos+dataLen {
 			var authLen int
 			authPos, authLen, err = rlp.ParseList(payload, authPos)
@@ -547,7 +548,7 @@ func (ctx *TxnParseContext) parseTransactionBody(payload []byte, pos, p0 int, sl
 			}
 			auth.R, auth.S = sig.R, sig.S
 
-			authority, err := auth.RecoverSigner(bytes.NewBuffer(nil), make([]byte, 32))
+			authority, err := auth.RecoverSigner(bytes.NewBuffer(nil), hashBuf[:])
 			if err != nil {
 				return 0, fmt.Errorf("%w: recover authorization signer: %s stack: %s", ErrParseTxn, err, dbg.Stack()) //nolint
 			}

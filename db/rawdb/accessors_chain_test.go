@@ -40,9 +40,10 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestWriteRawTransactions(t *testing.T) {
@@ -321,7 +322,7 @@ func TestWriteRawTransactions_UniqueKeys(t *testing.T) {
 // Tests block header storage and retrieval operations.
 func TestHeaderStorage(t *testing.T) {
 	t.Parallel()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -362,7 +363,7 @@ func TestHeaderStorage(t *testing.T) {
 // Tests block body storage and retrieval operations.
 func TestBodyStorage(t *testing.T) {
 	t.Parallel()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -431,7 +432,7 @@ func TestBodyStorage(t *testing.T) {
 // Tests block storage and retrieval operations.
 func TestBlockStorage(t *testing.T) {
 	t.Parallel()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	require := require.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(err)
@@ -549,7 +550,7 @@ func TestBlockStorage(t *testing.T) {
 // Tests that partial block contents don't get reassembled into full blocks.
 func TestPartialBlockStorage(t *testing.T) {
 	t.Parallel()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -596,7 +597,7 @@ func TestPartialBlockStorage(t *testing.T) {
 // Tests block total difficulty storage and retrieval operations.
 func TestTdStorage(t *testing.T) {
 	t.Parallel()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -641,7 +642,7 @@ func TestTdStorage(t *testing.T) {
 // Tests that canonical numbers can be mapped to hashes and retrieved.
 func TestCanonicalMappingStorage(t *testing.T) {
 	t.Parallel()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -715,7 +716,7 @@ func TestHeadStorage2(t *testing.T) {
 // Tests that head headers and head blocks can be assigned, individually.
 func TestHeadStorage(t *testing.T) {
 	t.Parallel()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	m.DB.(state.HasAgg).Agg().(*state.Aggregator).EnableDomain(kv.RCacheDomain)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
@@ -740,7 +741,7 @@ func TestHeadStorage(t *testing.T) {
 // Tests that receipts associated with a single block can be stored and retrieved.
 func TestBlockReceiptStorage(t *testing.T) {
 	t.Parallel()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	m.DB.(state.HasAgg).Agg().(*state.Aggregator).EnableDomain(kv.RCacheDomain)
 	tx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
@@ -850,7 +851,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 // Tests block storage and retrieval operations with withdrawals.
 func TestBlockWithdrawalsStorage(t *testing.T) {
 	t.Parallel()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	require := require.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(err)
@@ -873,9 +874,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 		Amount:    1001,
 	}
 
-	withdrawals := make([]*types.Withdrawal, 0)
-	withdrawals = append(withdrawals, &w)
-	withdrawals = append(withdrawals, &w2)
+	withdrawals := []*types.Withdrawal{&w, &w2}
 
 	// Create a test block to move around the database and make sure it's really new
 	block := types.NewBlockWithHeader(&types.Header{
@@ -896,7 +895,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	}
 
 	// Write withdrawals to block
-	wBlock := types.NewBlockFromStorage(block.Hash(), block.Header(), block.Transactions(), block.Uncles(), withdrawals, nil)
+	wBlock := types.NewBlockFromStorage(block.Hash(), block.Header(), block.Transactions(), block.Uncles(), withdrawals)
 	if err := rawdb.WriteHeader(tx, wBlock.HeaderNoCopy()); err != nil {
 		t.Fatalf("Could not write body: %v", err)
 	}
@@ -990,6 +989,56 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	require.Nil(entry)
 }
 
+func TestBlockAccessListStorage(t *testing.T) {
+	t.Parallel()
+	_, tx := memdb.NewTestTx(t)
+	defer tx.Rollback()
+
+	block := types.NewBlockWithHeader(&types.Header{
+		Number:      big.NewInt(1),
+		Extra:       []byte("test block"),
+		UncleHash:   empty.UncleHash,
+		TxHash:      empty.RootHash,
+		ReceiptHash: empty.RootHash,
+	})
+
+	data, err := rawdb.ReadBlockAccessListBytes(tx, block.Hash(), block.NumberU64())
+	require.NoError(t, err)
+	require.Empty(t, data)
+
+	nonEmpty := types.BlockAccessList{
+		{
+			Address: accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa")),
+		},
+	}
+	nonEmptyBytes, err := types.EncodeBlockAccessListBytes(nonEmpty)
+	require.NoError(t, err)
+	require.NoError(t, rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), nonEmptyBytes))
+
+	data, err = rawdb.ReadBlockAccessListBytes(tx, block.Hash(), block.NumberU64())
+	require.NoError(t, err)
+	require.Equal(t, nonEmptyBytes, data)
+
+	decoded, err := types.DecodeBlockAccessListBytes(data)
+	require.NoError(t, err)
+	require.NoError(t, decoded.Validate())
+	require.Equal(t, nonEmpty.Hash(), decoded.Hash())
+
+	emptyBytes, err := types.EncodeBlockAccessListBytes(nil)
+	require.NoError(t, err)
+	require.NoError(t, rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), emptyBytes))
+
+	data, err = rawdb.ReadBlockAccessListBytes(tx, block.Hash(), block.NumberU64())
+	require.NoError(t, err)
+	require.Equal(t, emptyBytes, data)
+
+	decoded, err = types.DecodeBlockAccessListBytes(data)
+	require.NoError(t, err)
+	require.Nil(t, decoded)
+	require.NoError(t, decoded.Validate())
+	require.Equal(t, empty.BlockAccessListHash, decoded.Hash())
+}
+
 // Tests pre-shanghai body to make sure withdrawals doesn't panic
 func TestPreShanghaiBodyNoPanicOnWithdrawals(t *testing.T) {
 	t.Parallel()
@@ -1054,7 +1103,7 @@ func TestShanghaiBodyForStorageNoWithdrawals(t *testing.T) {
 
 func TestBadBlocks(t *testing.T) {
 	t.Parallel()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()

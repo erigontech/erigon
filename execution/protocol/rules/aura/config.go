@@ -18,8 +18,9 @@
 package aura
 
 import (
+	"cmp"
 	"errors"
-	"sort"
+	"slices"
 
 	"github.com/holiman/uint256"
 
@@ -75,9 +76,9 @@ type BlockRewardContract struct {
 
 type BlockRewardContractList []BlockRewardContract
 
-func (r BlockRewardContractList) Less(i, j int) bool { return r[i].blockNum < r[j].blockNum }
-func (r BlockRewardContractList) Len() int           { return len(r) }
-func (r BlockRewardContractList) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
+func (r BlockRewardContractList) Sort() {
+	slices.SortFunc(r, func(a, b BlockRewardContract) int { return cmp.Compare(a.blockNum, b.blockNum) })
+}
 
 type BlockReward struct {
 	blockNum uint64
@@ -86,9 +87,9 @@ type BlockReward struct {
 
 type BlockRewardList []BlockReward
 
-func (r BlockRewardList) Less(i, j int) bool { return r[i].blockNum < r[j].blockNum }
-func (r BlockRewardList) Len() int           { return len(r) }
-func (r BlockRewardList) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
+func (r BlockRewardList) Sort() {
+	slices.SortFunc(r, func(a, b BlockReward) int { return cmp.Compare(a.blockNum, b.blockNum) })
+}
 
 func NewBlockRewardContract(address common.Address) *BlockRewardContract {
 	return &BlockRewardContract{address: address}
@@ -158,7 +159,7 @@ func FromJson(jsonParams *chain.AuRaConfig) (AuthorityRoundParams, error) {
 	for blockNum, address := range jsonParams.BlockRewardContractTransitions {
 		params.BlockRewardContractTransitions = append(params.BlockRewardContractTransitions, BlockRewardContract{blockNum: uint64(blockNum), address: address})
 	}
-	sort.Sort(params.BlockRewardContractTransitions)
+	params.BlockRewardContractTransitions.Sort()
 	if jsonParams.BlockRewardContractAddress != nil {
 		transitionBlockNum := uint64(0)
 		if jsonParams.BlockRewardContractTransition != nil {
@@ -194,7 +195,7 @@ func FromJson(jsonParams *chain.AuRaConfig) (AuthorityRoundParams, error) {
 			params.BlockReward = append(params.BlockReward, BlockReward{blockNum: 0, amount: uint256.NewInt(*jsonParams.BlockReward)})
 		}
 	}
-	sort.Sort(params.BlockReward)
+	params.BlockReward.Sort()
 
 	params.RewriteBytecode = make(map[uint64]map[common.Address][]byte, len(jsonParams.RewriteBytecode))
 	for block, overrides := range jsonParams.RewriteBytecode {

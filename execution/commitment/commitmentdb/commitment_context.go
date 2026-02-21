@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync/atomic"
 	"time"
 
@@ -178,6 +179,12 @@ type SharedDomainsCommitmentContext struct {
 	stateReader   StateReader
 	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
 	trieWarmup    bool            // toggle for parallel trie warmup of MDBX page cache during commitment
+
+	// deferCommitmentUpdates when true, deferred branch updates are stored as a pending update
+	// instead of being applied inline after Process(). Used during fork validation.
+	deferCommitmentUpdates bool
+	// pendingUpdate stores a single deferred branch update to be flushed at the next ComputeCommitment call.
+	pendingUpdate *commitment.PendingCommitmentUpdate
 }
 
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
@@ -200,6 +207,56 @@ func (sdc *SharedDomainsCommitmentContext) SetDeferBranchUpdates(deferBranchUpda
 	if sdc.patriciaTrie.Variant() == commitment.VariantHexPatriciaTrie {
 		sdc.patriciaTrie.(*commitment.HexPatriciaHashed).SetDeferBranchUpdates(deferBranchUpdates)
 	}
+}
+
+// SetDeferCommitmentUpdates enables or disables deferred commitment updates.
+// When enabled, branch updates from Process() are stored as a pending update
+// instead of being applied inline. Used during fork validation where the update is
+// flushed later via FlushPendingUpdate.
+func (sdc *SharedDomainsCommitmentContext) SetDeferCommitmentUpdates(defer_ bool) {
+	sdc.deferCommitmentUpdates = defer_
+}
+
+// TakePendingUpdate returns the pending update and clears the field.
+// Caller takes ownership of the returned value.
+func (sdc *SharedDomainsCommitmentContext) TakePendingUpdate() *commitment.PendingCommitmentUpdate {
+	upd := sdc.pendingUpdate
+	sdc.pendingUpdate = nil
+	return upd
+}
+
+// SetPendingUpdate sets the pending update (used during Merge to transfer from another context).
+func (sdc *SharedDomainsCommitmentContext) SetPendingUpdate(upd *commitment.PendingCommitmentUpdate) {
+	sdc.pendingUpdate = upd
+}
+
+// ResetPendingUpdates clears the pending update, returning deferred updates to the pool.
+func (sdc *SharedDomainsCommitmentContext) ResetPendingUpdates() {
+	if sdc.pendingUpdate != nil {
+		sdc.pendingUpdate.Clear()
+		sdc.pendingUpdate = nil
+	}
+}
+
+// HasPendingUpdate returns true if there is a pending update to flush.
+func (sdc *SharedDomainsCommitmentContext) HasPendingUpdate() bool {
+	return sdc.pendingUpdate != nil
+}
+
+// flushPendingUpdate applies the pending commitment update using the given putter.
+// The update is written with its original TxNum. Called at the start of ComputeCommitment
+// to ensure the previously deferred update is applied before processing new ones.
+func (sdc *SharedDomainsCommitmentContext) flushPendingUpdate(putter kv.TemporalPutDel) error {
+	upd := sdc.pendingUpdate
+	putBranch := func(prefix, data, prevData []byte, prevStep kv.Step) error {
+		return putter.DomainPut(kv.CommitmentDomain, prefix, data, upd.TxNum, prevData, prevStep)
+	}
+	if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
+		return err
+	}
+	upd.Clear()
+	sdc.pendingUpdate = nil
+	return nil
 }
 
 // SetHistoryStateReader sets the state reader to read *full* historical state at specified txNum.
@@ -234,12 +291,12 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, trieVariant 
 	return ctx
 }
 
-func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx) *TrieContext {
+func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, txNum uint64) *TrieContext {
 	mainTtx := &TrieContext{
 		getter:   sdc.sharedDomains.AsGetter(tx),
 		putter:   sdc.sharedDomains.AsPutDel(tx),
 		stepSize: sdc.sharedDomains.StepSize(),
-		txNum:    sdc.sharedDomains.TxNum(),
+		txNum:    txNum,
 	}
 	if sdc.stateReader != nil {
 		mainTtx.stateReader = sdc.stateReader.Clone(tx)
@@ -335,23 +392,50 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}
 	}
 
-	trieContext := sdc.trieContext(tx)
+	trieContext := sdc.trieContext(tx, txNum)
 
 	var warmupConfig commitment.WarmupConfig
 	if sdc.paraTrieDB != nil {
 		warmupConfig = commitment.WarmupConfig{
 			Enabled:    sdc.trieWarmup,
-			CtxFactory: sdc.trieContextFactory(ctx, sdc.paraTrieDB),
+			CtxFactory: sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum),
 			NumWorkers: 16,
 			MaxDepth:   commitment.WarmupMaxDepth,
 			LogPrefix:  logPrefix,
 		}
 	}
 
+	// Flush pending commitment update before processing new ones.
+	if sdc.pendingUpdate != nil {
+		if err = sdc.flushPendingUpdate(trieContext.putter); err != nil {
+			return nil, err
+		}
+	}
+
+	// When deferring commitment updates, tell Process() to leave deferred updates
+	// on the branch encoder instead of applying inline — we'll take them after.
+	if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok && sdc.deferCommitmentUpdates {
+		hph.SetLeaveDeferredForCaller(true)
+		defer hph.SetLeaveDeferredForCaller(false)
+	}
+
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, commitProgress, warmupConfig)
 	if err != nil {
 		return nil, err
 	}
+
+	// Handle deferred branch updates left by Process() on the branch encoder.
+	if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok && hph.HasPendingDeferredUpdates() {
+		// Store deferred updates for later flushing (fork validation path).
+		// This path is reached only when deferCommitmentUpdates is true because
+		// Process() applies inline by default.
+		sdc.pendingUpdate = &commitment.PendingCommitmentUpdate{
+			BlockNum: blockNum,
+			TxNum:    txNum,
+			Deferred: hph.TakeDeferredUpdates(),
+		}
+	}
+
 	sdc.justRestored.Store(false)
 
 	if saveState {
@@ -363,10 +447,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	return rootHash, err
 }
 
-func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Context, db kv.TemporalRoDB) commitment.TrieContextFactory {
+func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Context, db kv.TemporalRoDB, txNum uint64) commitment.TrieContextFactory {
 	// avoid races like this
 	stepSize := sdc.sharedDomains.StepSize()
-	txNum := sdc.sharedDomains.TxNum()
 	return func() (commitment.PatriciaContext, func()) {
 		roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		if err != nil {
@@ -466,38 +549,36 @@ func (sdc *SharedDomainsCommitmentContext) enableConcurrentCommitmentIfPossible(
 
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
-func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (blockNum, txNum uint64, ok bool, err error) {
-	trieContext := sdc.trieContext(tx)
+func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (txNum, blockNum uint64, err error) {
+	trieContext := sdc.trieContext(tx, 0) // txNum not yet known; trieContext only used for reading here
 
 	_, _, state, err := sdc.LatestCommitmentState(trieContext)
 	if err != nil {
-		return 0, 0, false, err
+		return 0, 0, err
 	}
 	if state != nil {
 		blockNum, txNum, err = sdc.restorePatriciaState(state)
 		if err != nil {
-			return 0, 0, false, err
+			return 0, 0, err
 		}
 		if blockNum > 0 {
 			lastBn, _, err := rawdbv3.TxNums.Last(tx)
 			if err != nil {
-				return 0, 0, false, err
+				return 0, 0, err
 			}
 			if lastBn < blockNum {
-				return 0, 0, false, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d", ErrBehindCommitment, lastBn, blockNum)
+				return 0, 0, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d", ErrBehindCommitment, lastBn, blockNum)
 			}
 		}
-		sdc.sharedDomains.SetBlockNum(blockNum)
-		sdc.sharedDomains.SetTxNum(txNum)
 		if err = sdc.enableConcurrentCommitmentIfPossible(); err != nil {
-			return 0, 0, false, err
+			return 0, 0, err
 		}
-		return blockNum, txNum, true, nil
+		return txNum, blockNum, nil
 	}
 	// handle case when we have no commitment, but have executed blocks
 	bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution"))
 	if err != nil {
-		return 0, 0, false, err
+		return 0, 0, err
 	}
 	if len(bnBytes) == 8 {
 		blockNum = binary.BigEndian.Uint64(bnBytes)
@@ -506,31 +587,13 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 			txNum, err = rawdbv3.TxNums.Max(ctx, tx, blockNum)
 		}
 		if err != nil {
-			return 0, 0, false, err
+			return 0, 0, err
 		}
 	}
-	sdc.sharedDomains.SetBlockNum(blockNum)
-	sdc.sharedDomains.SetTxNum(txNum)
-	if blockNum == 0 && txNum == 0 {
-		return 0, 0, true, nil
-	}
-	//
-	//newRh, err := sdc.rebuildCommitment(ctx, tx, blockNum, txNum)
-	//if err != nil {
-	//	return 0, 0, false, err
-	//}
-	//if bytes.Equal(newRh, empty.RootHash.Bytes()) {
-	//	sdc.sharedDomains.SetBlockNum(0)
-	//	sdc.sharedDomains.SetTxNum(0)
-	//	return 0, 0, false, err
-	//}
-	//if sdc.trace {
-	//	fmt.Printf("rebuilt commitment %x bn=%d txn=%d\n", newRh, blockNum, txNum)
-	//}
 	if err = sdc.enableConcurrentCommitmentIfPossible(); err != nil {
-		return 0, 0, false, err
+		return 0, 0, err
 	}
-	return blockNum, txNum, true, nil
+	return txNum, blockNum, nil
 }
 
 // encodes current trie state and saves it in SharedDomains

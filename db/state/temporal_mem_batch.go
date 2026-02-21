@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"maps"
 	"sort"
 	"sync"
 	"unsafe"
@@ -148,7 +149,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Get(key); ok {
 			sd.storage.Set(key, append(old, valWithStep))
-			putValueSize += len(val) - len(old[len(old)-1].data)
+			putValueSize += len(val)
 		} else {
 			sd.storage.Set(key, []dataWithTxNum{valWithStep})
 			putKeySize += len(key)
@@ -160,7 +161,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	}
 
 	if old, ok := sd.domains[domain][key]; ok {
-		putValueSize += len(val) - len(old[len(old)-1].data)
+		putValueSize += len(val)
 		sd.domains[domain][key] = append(old, valWithStep)
 	} else {
 		sd.domains[domain][key] = []dataWithTxNum{valWithStep}
@@ -313,6 +314,18 @@ func (sd *TemporalMemBatch) SavePastChangesetAccumulator(blockHash common.Hash, 
 	sd.pastChangesAccumulator[toStringZeroCopy(key)] = acc
 }
 
+// GetChangesetByBlockNum returns the changeset for a given block number and its block hash.
+func (sd *TemporalMemBatch) GetChangesetByBlockNum(blockNumber uint64) (common.Hash, *changeset.StateChangeSet) {
+	for key, cs := range sd.pastChangesAccumulator {
+		keyBytes := toBytesZeroCopy(key)
+		if binary.BigEndian.Uint64(keyBytes[:8]) == blockNumber {
+			blockHash := common.BytesToHash(keyBytes[8:])
+			return blockHash, cs
+		}
+	}
+	return common.Hash{}, nil
+}
+
 func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumber uint64) ([kv.DomainLen][]kv.DomainEntryDiff, bool, error) {
 	var key [40]byte
 	binary.BigEndian.PutUint64(key[:8], blockNumber)
@@ -402,9 +415,7 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 
 	for domain, otherEntries := range other.domains {
 		entries := sd.domains[domain]
-		for key, value := range otherEntries {
-			entries[key] = value
-		}
+		maps.Copy(entries, otherEntries)
 	}
 
 	other.storage.Scan(func(key string, value []dataWithTxNum) bool {

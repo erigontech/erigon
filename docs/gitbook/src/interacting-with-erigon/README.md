@@ -26,7 +26,7 @@ The Erigon RPC Service, managed by Erigon's modular [RPC daemon](../fundamentals
 * [`internal`](internal.md): Erigon specific API for development and debugging purposes.
 * [`gRPC`](grpc.md): API for lower-level data access.
 
-For a complete reference on the standard Ethereum JSON-RPC methods, especially those in the `eth`, `net`, and `web3` namespaces, it is recommended to consult the general documentation on [ethereum.org's JSON-RPC API page](https://ethereum.org/en/developers/docs/apis/json-rpc/). Additionally, for the formal specification of the `debug`, `engine`, and `eth` namespaces, including unique, detailed descriptions for methods like `eth_getProof` and `eth_simulateV1`, refer to the [Execution APIs documentation](https://ethereum.github.io/execution-apis/api-documentation/).
+For a complete reference on the standard Ethereum JSON-RPC methods, especially those in the `eth`, `net`, and `web3` namespaces, it is recommended to consult the general documentation on [ethereum.org's JSON-RPC API page](https://ethereum.org/en/developers/docs/apis/json-rpc/). Additionally, for the formal specification of the `debug`, `engine`, and `eth` namespaces, including unique, detailed descriptions for methods like `eth_getProof` and `eth_simulateV1`, refer to the [Execution APIs documentation](https://ethereum.github.io/execution-apis).
 
 {% embed url="https://ethereum.org/en/developers/docs/apis/json-rpc/" %}
 
@@ -115,13 +115,37 @@ erigon --http --ws --http.api eth,net,debug,trace
 
 IPC is a simpler transport protocol for use in local environments where the node and the client exist on the same machine.
 
-The IPC transport can be enabled using `--socket.enabled` and configured with `--socket.url`:
+**Note:** IPC is only available through the separate `rpcdaemon` process, not the main `erigon` binary. Erigon uses a modular architecture where RPC functionality is handled by a standalone daemon.
+
+#### Enabling IPC with rpcdaemon
+
+First, start Erigon with the private API enabled:
 
 ```bash
-erigon --socket.enabled --socket.url unix:///var/run/erigon.ipc
+erigon --private.api.addr=localhost:9090
 ```
 
-On Linux and macOS, Erigon uses UNIX sockets. On Windows, IPC is provided using named pipes. The socket inherits the namespaces from `--http.api`.
+Then, in a separate terminal, start rpcdaemon with IPC enabled:
+
+```bash
+rpcdaemon --socket.enabled --socket.url unix:///var/run/erigon.ipc
+```
+
+On Linux and macOS, Erigon uses UNIX sockets. On Windows, IPC is provided using named pipes. 
+
+The socket inherits the API namespaces from the `--http.api` flag passed to `rpcdaemon`:
+
+```bash
+rpcdaemon --socket.enabled \
+          --socket.url unix:///var/run/erigon.ipc \
+          --http.api eth,net,web3,debug,trace
+```
+
+You can also use TCP sockets:
+
+```bash
+rpcdaemon --socket.enabled --socket.url tcp://127.0.0.1:8546
+```
 
 ### gRPC
 

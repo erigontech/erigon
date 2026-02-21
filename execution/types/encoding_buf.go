@@ -18,7 +18,7 @@ package types
 
 import "sync"
 
-type encodingBuf [33]byte
+type encodingBuf [32]byte
 
 var pooledBuf = sync.Pool{
 	New: func() any { return new(encodingBuf) },
@@ -26,6 +26,6 @@ var pooledBuf = sync.Pool{
 
 func newEncodingBuf() *encodingBuf {
 	b := pooledBuf.Get().(*encodingBuf)
-	*b = [33]byte{} // reset, do we need to?
+	*b = [32]byte{} // reset, do we need to?
 	return b
 }

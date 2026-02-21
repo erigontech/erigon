@@ -36,11 +36,11 @@ import (
 )
 
 // unable to decode supplied params, or an invalid number of parameters
-type nonCanonocalHashError struct{ hash common.Hash }
+type nonCanonicalHashError struct{ hash common.Hash }
 
-func (e nonCanonocalHashError) ErrorCode() int { return -32603 }
+func (e nonCanonicalHashError) ErrorCode() int { return -32603 }
 
-func (e nonCanonocalHashError) Error() string {
+func (e nonCanonicalHashError) Error() string {
 	return fmt.Sprintf("hash %x is not currently canonical", e.hash)
 }
 
@@ -50,6 +50,19 @@ type BlockNotFoundErr struct {
 
 func (e BlockNotFoundErr) Error() string {
 	return fmt.Sprintf("block %x not found", e.Hash)
+}
+
+func CheckBlockExecuted(tx kv.Tx, blockNumber uint64) error {
+	lastExecutedBlock, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+
+	if blockNumber > lastExecutedBlock {
+		return fmt.Errorf("block %d is not executed (last executed: %d)", blockNumber, lastExecutedBlock)
+	}
+
+	return nil
 }
 
 func GetBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br services.FullBlockReader, filters *Filters) (uint64, common.Hash, bool, error) {
@@ -130,7 +143,7 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 			return 0, common.Hash{}, false, false, err
 		}
 		if requireCanonical && (!ok || ch != hash) {
-			return 0, common.Hash{}, false, false, nonCanonocalHashError{hash}
+			return 0, common.Hash{}, false, false, nonCanonicalHashError{hash}
 		}
 	}
 	return blockNumber, hash, blockNumber == plainStateBlockNumber, true, nil
@@ -165,8 +178,8 @@ func CreateHistoryStateReader(ctx context.Context, tx kv.TemporalTx, blockNumber
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
 	if minHistoryTxNum := state.StateHistoryStartTxNum(tx); txNum < minHistoryTxNum {
-		bn, _, _ := txNumsReader.FindBlockNum(ctx, tx, minHistoryTxNum)
-		return nil, fmt.Errorf("%w: block tx: %d, min tx: %d last state history bn: %d", state.PrunedError, txNum, minHistoryTxNum, bn)
+		firstAvailBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, minHistoryTxNum)
+		return nil, fmt.Errorf("%w: requested block %d, history is available from block %d", state.PrunedError, blockNumber, firstAvailBlock)
 	}
 	return state.NewHistoryReaderV3(tx, txNum), nil
 }
@@ -195,7 +208,6 @@ type asOfView interface {
 
 func CreateHistoryCachedStateReader(ctx context.Context, cache kvcache.CacheView, tx kv.TemporalTx, blockNumber uint64, txnIndex int, txNumsReader rawdbv3.TxNumsReader) (state.StateReader, error) {
 	asOfView, ok := cache.(asOfView)
-
 	if !ok {
 		return nil, fmt.Errorf("%T does not implement GetAsOf at: %s", cache, dbg.Stack())
 	}

@@ -509,7 +509,7 @@ func BenchmarkDb_BeginFiles_Throughput(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		//foo := 0
 		for pb.Next() {
-			tx, err := db.BeginRo(ctx)
+			tx, err := db.BeginRo(ctx) //nolint:gocritic
 			if err != nil {
 				b.Fatalf("%v", err)
 			}
@@ -552,7 +552,7 @@ func BenchmarkDb_BeginFiles_Throughput_IO(b *testing.B) {
 	b.SetParallelism(*parallel) // p * maxprocs
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			tx, err := db.BeginRo(ctx)
+			tx, err := db.BeginRo(ctx) //nolint:gocritic
 			if err != nil {
 				b.Fatalf("%v", err)
 			}
@@ -604,11 +604,12 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	if keyCount > 1000 { // windows CI can't handle much small parallel disk flush
 		bufSize = 1 * datasize.MB
 	}
-	collector := etl.NewCollector(state.BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(bufSize), logger)
+	collector := etl.NewCollector(state.BtreeLogPrefix+" genCompress", tmp, etl.NewSortableBuffer(bufSize), logger)
+	defer collector.Close()
 
 	for i := 0; i < keyCount; i++ {
 		key := make([]byte, keySize)
-		n, err := rnd.Read(key[:])
+		n, err := rnd.Read(key)
 		require.Equal(tb, keySize, n)
 		binary.BigEndian.PutUint64(key[keySize-8:], uint64(i))
 		require.NoError(tb, err)
@@ -647,7 +648,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 
 	IndexFile := filepath.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
 	r := seg.NewReader(decomp.MakeGetter(), compressFlags)
-	err = state.BuildBtreeIndexWithDecompressor(IndexFile, r, ps, tb.TempDir(), 777, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
+	err = state.BuildBtreeIndexWithDecompressor(IndexFile, r, ps, tmp, 777, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
 	require.NoError(tb, err)
 
 	return compPath

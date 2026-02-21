@@ -23,7 +23,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
-	"sort"
 	"testing"
 
 	"github.com/jinzhu/copier"
@@ -38,10 +37,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/rules/clique"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -61,11 +60,11 @@ func newTesterAccountPool() *testerAccountPool {
 // checkpoint creates a Clique checkpoint signer section from the provided list
 // of authorized signers and embeds it into the provided header.
 func (ap *testerAccountPool) checkpoint(header *types.Header, signers []string) {
-	auths := make([]common.Address, len(signers))
+	auths := make(common.Addresses, len(signers))
 	for i, signer := range signers {
 		auths[i] = ap.address(signer)
 	}
-	sort.Sort(clique.SignersAscending(auths))
+	auths.Sort()
 	for i, auth := range auths {
 		copy(header.Extra[clique.ExtraVanity+i*length.Addr:], auth.Bytes())
 	}
@@ -438,7 +437,7 @@ func TestClique(t *testing.T) {
 			engine := clique.New(&config, chainspec.CliqueSnapshot, cliqueDB, log.New())
 			engine.FakeDiff = true
 			// Create a pristine blockchain with the genesis injected
-			m := mock.MockWithGenesisEngine(t, genesis, engine)
+			m := execmoduletester.NewWithGenesisEngine(t, genesis, engine)
 
 			chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, len(tt.votes), func(j int, gen *blockgen.BlockGen) {
 				// Cast the vote contained in this block

@@ -67,6 +67,16 @@ func (it *listIterator) Value() []byte {
 	return it.next
 }
 
+// Count returns how many elements are left in the iterator.
+// This operation runs in O(n) time and may produce an inaccurate
+// result if the underlying list encoding is malformed.
+// The value returned is guaranteed to be an upper limit on the
+// number of items that the iterator can still traverse.
+func (it *listIterator) Count() int {
+	count, _ := CountValues(it.data)
+	return count
+}
+
 func (it *listIterator) Err() error {
 	return it.err
 }
