@@ -333,8 +333,6 @@ func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKe
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
 	cfg.Genesis = gspec
 	cfg.Prune = prune
-	cfg.FcuBackgroundCommit = true
-	cfg.FcuBackgroundPrune = true
 	cfg.ExperimentalBAL = opt.experimentalBAL
 
 	logLvl := log.LvlError
