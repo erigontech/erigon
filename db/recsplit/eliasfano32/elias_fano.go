@@ -279,10 +279,16 @@ func (ef *EliasFano) searchReverse(v uint64) (nextV uint64, nextI uint64, ok boo
 	}
 
 	hi := v >> ef.l
-	i := sort.Search(int(ef.count+1), func(i int) bool {
-		return ef.upper(ef.count-uint64(i)) <= hi
-	})
-	for j := uint64(i); j <= ef.count; j++ {
+	lo := uint64(0)
+
+	found := ef.upper(ef.count) <= hi // fast-lane. 60% hit-rate
+	if !found {
+		i := sort.Search(int(ef.count+1), func(i int) bool {
+			return ef.upper(ef.count-uint64(i)) <= hi
+		})
+		lo = uint64(i)
+	}
+	for j := lo; j <= ef.count; j++ {
 		idx := ef.count - j
 		val, _, _, _, _ := ef.get(idx)
 		if val <= v {
