@@ -23,7 +23,6 @@ import (
 	"math"
 	"math/bits"
 	"sort"
-	"sync/atomic"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
@@ -46,81 +45,6 @@ const (
 	qPerSuperQ uint64 = superQ / q       // 64
 	superQSize uint64 = 1 + qPerSuperQ/2 // 1 + 64/2 = 33
 )
-
-// searchForwardStatsT collects per-call metrics for searchForward.
-//
-// UpperCalls[1]    = fast-early:  upper(0) >= hi, no binary search.
-// UpperCalls[2]    = fast-late1:  upper(1) >= hi, start linear scan from 1.
-// UpperCalls[3]    = fast-late2:  upper(2) >= hi, start linear scan from 2.
-// UpperCalls[4]    = fast-late3:  upper(3) >= hi, start linear scan from 3.
-// UpperCalls[last] = slow-path:   fell through to sort.Search.
-// UpperBitsSizeBuckets[k] = seeks on EFs whose len(upperBits) is in [2^(k-1), 2^k).
-// Bucket 0 = empty array; last bucket = 2^16+ words (clamped).
-//
-// Reset() before a workload, then call String() or read fields directly.
-type searchForwardStatsT struct {
-	UpperCalls           [6]atomic.Int64
-	UpperBitsSizeBuckets [17]atomic.Int64 // log2(len(upperBits)) histogram
-	FastEarlyGetCalls    atomic.Int64     // total .get() calls made in fast-early seeks
-}
-
-func (s *searchForwardStatsT) Reset() {
-	for i := range s.UpperCalls {
-		s.UpperCalls[i].Store(0)
-	}
-	for i := range s.UpperBitsSizeBuckets {
-		s.UpperBitsSizeBuckets[i].Store(0)
-	}
-	s.FastEarlyGetCalls.Store(0)
-}
-
-func (s *searchForwardStatsT) String() string {
-	total := int64(0)
-	for i := range s.UpperCalls {
-		total += s.UpperCalls[i].Load()
-	}
-	if total == 0 {
-		return "SearchForwardStats: no calls recorded"
-	}
-	out := fmt.Sprintf("SearchForwardStats: calls=%d\n", total)
-
-	out += "  upperBits size (words):\n"
-	for k := range s.UpperBitsSizeBuckets {
-		v := s.UpperBitsSizeBuckets[k].Load()
-		if v == 0 {
-			continue
-		}
-		var label string
-		switch k {
-		case 0:
-			label = "0"
-		case len(s.UpperBitsSizeBuckets) - 1:
-			label = fmt.Sprintf(">=%d", 1<<(k-1))
-		default:
-			label = fmt.Sprintf("%d-%d", 1<<(k-1), (1<<k)-1)
-		}
-		out += fmt.Sprintf("    [%s]: %d (%.1f%%)\n", label, v, float64(v)/float64(total)*100)
-	}
-
-	fastEarly := s.UpperCalls[1].Load()
-	fastLate1 := s.UpperCalls[2].Load()
-	fastLate2 := s.UpperCalls[3].Load()
-	fastLate3 := s.UpperCalls[4].Load()
-	slow := s.UpperCalls[len(s.UpperCalls)-1].Load()
-	feGetCalls := s.FastEarlyGetCalls.Load()
-	avgFeGet := float64(0)
-	if fastEarly > 0 {
-		avgFeGet = float64(feGetCalls) / float64(fastEarly)
-	}
-	out += fmt.Sprintf("  fast-early  (upper(0)>=hi): %d (%.1f%%), avg .get/seek=%.2f\n", fastEarly, float64(fastEarly)/float64(total)*100, avgFeGet)
-	out += fmt.Sprintf("  fast-late1  (upper(1)>=hi): %d (%.1f%%)\n", fastLate1, float64(fastLate1)/float64(total)*100)
-	out += fmt.Sprintf("  fast-late2  (upper(2)>=hi): %d (%.1f%%)\n", fastLate2, float64(fastLate2)/float64(total)*100)
-	out += fmt.Sprintf("  fast-late3  (upper(3)>=hi): %d (%.1f%%)\n", fastLate3, float64(fastLate3)/float64(total)*100)
-	out += fmt.Sprintf("  slow-path   (sort.Search):  %d (%.1f%%)\n", slow, float64(slow)/float64(total)*100)
-	return out
-}
-
-var SearchForwardStats searchForwardStatsT
 
 // EliasFano can be used to encode one monotone sequence
 type EliasFano struct {
@@ -310,7 +234,7 @@ func Seek(data []byte, n uint64) (uint64, bool) {
 
 func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok bool) {
 	if v == 0 {
-		return ef.Min(), 0, true // .Max() touching `mmap`
+		return ef.Min(), 0, true // .Min() touching `mmap`
 	}
 	_max := ef.Max()
 	if v == _max {
@@ -321,50 +245,23 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 	}
 
 	hi := v >> ef.l
-
-	k := bits.Len(uint(len(ef.upperBits)))
-	if k >= len(SearchForwardStats.UpperBitsSizeBuckets) {
-		k = len(SearchForwardStats.UpperBitsSizeBuckets) - 1
-	}
-	SearchForwardStats.UpperBitsSizeBuckets[k].Add(1)
-
-	// Probe positions 0–3 before falling back to binary search.
+	// Probe position 0 before falling back to binary search.
 	// Real-data profiling (mainnet 9M blocks) shows:
-	//   - 83% of seeks are on tiny EFs (upperBits 1–3 words, fits in one cache line)
-	//   - 64% have upper(0) >= hi (fast-early): target is at or before element 0
-	//   - upper(0) loads the cache line; for 2–3 word EFs (47.7% of seeks), upper(1),
-	//     upper(2), upper(3) all hit the same line so probing them costs only CPU cycles.
+	//   - 80% of seeks are on tiny EFs: 35% upperBits=8bytes, 45% upperBits=8-24bytes ( 1–3 words = 8–24 bytes, fits in one cache line)
+	//   - 63% have upper(0) >= hi
 	//   sort.Search always starts at count/2 and takes log2(count) steps to reach 0;
-	//   probing the first few positions avoids that cost for the dominant cases.
+	//   probing position 0 first avoids that cost for the dominant case.
+	found := ef.upper(0) >= hi // fast-lane
 	lo := uint64(0)
-	fastEarlyPath := false
-	firstUpper := ef.upper(0)
-	if firstUpper >= hi {
-		SearchForwardStats.UpperCalls[1].Add(1)
-		fastEarlyPath = true
-	} else if ef.count > 0 && ef.upper(1) >= hi {
-		SearchForwardStats.UpperCalls[2].Add(1)
-		lo = 1
-	} else if ef.count > 1 && ef.upper(2) >= hi {
-		SearchForwardStats.UpperCalls[3].Add(1)
-		lo = 2
-	} else if ef.count > 2 && ef.upper(3) >= hi {
-		SearchForwardStats.UpperCalls[4].Add(1)
-		lo = 3
-	} else {
-		SearchForwardStats.UpperCalls[len(SearchForwardStats.UpperCalls)-1].Add(1)
-		i := sort.Search(int(ef.count)-3, func(i int) bool {
-			return ef.upper(uint64(i+4)) >= hi
+	if !found {
+		i := sort.Search(int(ef.count), func(i int) bool {
+			return ef.upper(uint64(i+1)) >= hi
 		})
-		lo = uint64(i + 4)
+		lo = uint64(i + 1)
 	}
-
 	for j := lo; j <= ef.count; j++ {
 		val, _, _, _, _ := ef.get(j)
 		if val >= v {
-			if fastEarlyPath {
-				SearchForwardStats.FastEarlyGetCalls.Add(int64(j + 1))
-			}
 			return val, j, true
 		}
 	}

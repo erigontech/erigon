@@ -146,8 +146,7 @@ func BenchmarkSeek(b *testing.B) {
 	}
 }
 
-// TestSeekCorrectness verifies Seek returns correct results across stride patterns
-// and prints the upper() call count distribution (run with -v).
+// TestSeekCorrectness verifies Seek returns correct results across stride patterns.
 func TestSeekCorrectness(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -169,7 +168,6 @@ func TestSeekCorrectness(t *testing.T) {
 			ef := buildEF(count, tc.stride)
 			maxOffset := (count - 1) * tc.stride
 
-			SearchForwardStats.Reset()
 			rng := rand.New(rand.NewPCG(42, 0))
 			const seeks = 100_000
 			notFound := 0
@@ -185,7 +183,7 @@ func TestSeekCorrectness(t *testing.T) {
 				}
 			}
 
-			t.Logf("notFound=%d\n%s", notFound, SearchForwardStats.String())
+			t.Logf("notFound=%d", notFound)
 		})
 	}
 }
