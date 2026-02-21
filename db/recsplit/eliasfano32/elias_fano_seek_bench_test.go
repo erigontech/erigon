@@ -17,7 +17,6 @@
 package eliasfano32
 
 import (
-	"fmt"
 	"math/rand/v2"
 	"testing"
 )
