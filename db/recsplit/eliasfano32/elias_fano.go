@@ -284,6 +284,7 @@ func Seek(data []byte, n uint64) (uint64, bool) {
 }
 
 func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok bool) {
+	SearchForwardStats.Calls.Add(1)
 	if v == 0 {
 		return ef.Min(), 0, true
 	}
@@ -293,6 +294,7 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 		return _max, ef.count, true
 	}
 	if v > _max {
+		SearchForwardStats.NotFound.Add(1)
 		return 0, 0, false
 	}
 
@@ -300,14 +302,6 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 	i := sort.Search(int(ef.count+1), func(i int) bool {
 		return ef.upper(uint64(i)) >= hi
 	})
-
-	//for j := uint64(i); j <= ef.count; j++ {
-	//	val, _, _, _, _ := ef.get(j)
-	//	if val >= v {
-	//		return val, j, true
-	//	}
-	//}
-	SearchForwardStats.Calls.Add(1)
 	j := uint64(i)
 	// Get2 checks two candidates with a single inner-loop restart in get().
 	// Covers the common case (scan length 1-2) with half the restarts.
@@ -341,7 +335,6 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 	SearchForwardStats.NotFound.Add(1)
 	return 0, 0, false
 }
-
 func (ef *EliasFano) searchReverse(v uint64) (nextV uint64, nextI uint64, ok bool) {
 	if v == 0 {
 		return 0, 0, ef.Min() == 0
