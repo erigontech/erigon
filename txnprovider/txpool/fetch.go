@@ -229,8 +229,11 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		}
 	}
 
-	// Start ticker goroutine to flush batch every second
-	ticker := time.NewTicker(1 * time.Second)
+	// Start ticker goroutine to flush batch every 100ms.
+	// Keeping this tight reduces the worst-case latency between receiving a
+	// POOLED_TRANSACTIONS_66 response and the transaction entering the pool,
+	// which matters for block builders picking up freshly-gossiped transactions.
+	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	go func() {
 		for {

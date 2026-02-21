@@ -1,0 +1,116 @@
+name: Hive Cancun Stress Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      repetitions:
+        description: 'Number of parallel repetitions (max 50 per dispatch)'
+        required: false
+        default: '50'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  test-hive-cancun:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on:
+      group: hive
+    strategy:
+      fail-fast: false
+      matrix:
+        run_id: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50]
+
+    steps:
+      - name: Checkout Erigon go.mod
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: go.mod
+          sparse-checkout-cone-mode: false
+          path: erigon-src
+
+      - name: Checkout Hive
+        uses: actions/checkout@v6
+        with:
+          repository: ethereum/hive
+          ref: 0ee187ce394720a5902c135324ac7de4240cbb37
+          path: hive
+
+      - name: Setup go env and cache
+        uses: actions/setup-go@v6
+        with:
+          go-version: '>=1.24'
+          go-version-file: 'hive/go.mod'
+
+      - name: Conditional Docker Login
+        if: |
+          github.repository == 'erigontech/erigon' &&
+          github.actor != 'dependabot[bot]' &&
+          (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork)
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
+          password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
+
+      - name: Get dependencies and build hive
+        env:
+          SOURCE_REPO: ${{ github.repository }}
+        run: |
+          cd hive
+          go get . >> buildlogs.log
+          rm clients/erigon/Dockerfile
+          mv clients/erigon/Dockerfile.git clients/erigon/Dockerfile
+          branch_name=$(echo ${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}} | sed 's/[&/\]/\\&/g')
+          echo Building Hive with Erigon repo - ${SOURCE_REPO}, branch - $branch_name
+          sed -i "s|^ARG github=erigontech/erigon$|ARG github=${SOURCE_REPO}|" clients/erigon/Dockerfile
+          sed -i "s/^ARG tag=main$/ARG tag=${branch_name}/" clients/erigon/Dockerfile
+          go_version=$(go mod edit -json ../erigon-src/go.mod | jq -r .Go)
+          echo "Patching builder Go version to ${go_version}"
+          sed -i "s|golang:[0-9.]*-alpine|golang:${go_version}-alpine|" clients/erigon/Dockerfile
+          go build . >> buildlogs.log
+
+      - name: Run hive engine/cancun (run ${{ matrix.run_id }}/50)
+        run: |
+          cd hive
+          run_suite() {
+            echo "Running engine/cancun - attempt ${{ matrix.run_id }}"
+            ./hive -docker.auth --sim ethereum/engine --sim.limit=cancun --sim.parallelism=8 --client erigon 2>&1 | tee output.log || true
+            status_line=$(tail -2 output.log | head -1 | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
+            suites=$(echo "$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
+            if [ -z "$suites" ]; then
+              status_line=$(tail -1 output.log | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
+              suites=$(echo "$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
+            fi
+            tests=$(echo "$status_line" | sed -n 's/.*tests=\([0-9]*\).*/\1/p')
+            failed=$(echo "$status_line" | sed -n 's/.*failed=\([0-9]*\).*/\1/p')
+            echo "Run ${{ matrix.run_id }}: Tests=$tests Failed=$failed"
+            if (( tests < 4 )); then
+              echo "Too few tests run: ${tests}"
+              exit 1
+            fi
+            max_allowed_failures=2
+            if (( failed > max_allowed_failures )); then
+              echo "Too many failures: ${failed} failed out of ${tests} (max allowed: ${max_allowed_failures})"
+              exit 1
+            fi
+            echo "PASS: ${failed} failures (within max=${max_allowed_failures})"
+          }
+          run_suite
+        continue-on-error: false
+
+      - name: Upload output log
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: hive-cancun-run-${{ matrix.run_id }}
+          path: hive/workspace/logs
+        continue-on-error: true
+
+      - name: Remove Hive directory
+        if: always()
+        run: rm -rf hive
+
+      - name: Prune docker
+        if: always()
+        run: docker system prune -af --volumes
