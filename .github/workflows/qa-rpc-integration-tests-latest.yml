@@ -210,7 +210,7 @@ jobs:
             db_version="no-version"
           fi
           
-          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --branch ${{ github.ref_name }} --test_name rpc-integration-tests --chain $CHAIN --runner ${{ runner.name }} --db_version $db_version --outcome $TEST_RESULT #--result_file ${{ github.workspace }}/result-$CHAIN.json
+          python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --branch ${{ github.ref_name }} --test_name rpc-integration-tests-latest --chain $CHAIN --runner ${{ runner.name }} --db_version $db_version --outcome $TEST_RESULT #--result_file ${{ github.workspace }}/result-$CHAIN.json
 
       - name: Delete Erigon Testbed Data Directory
         if: always() && steps.save_datadir_step.outputs.datadir_saved == 'true'
