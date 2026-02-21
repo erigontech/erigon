@@ -83,31 +83,20 @@ jobs:
           set +x
           echo "This workflow is being executed by this runner: $RUNNER_NAME"
 
-      - name: Checkout code
-        if: needs.source-of-changes.outputs.changed_files != 'true'
+      - name: Checkout custom actions
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0
-          filter: blob:none
-        env:
-          GIT_LFS_SKIP_SMUDGE: 1
-
-      - name: Clone submodules
-        if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: time git submodule update --init --recursive --depth 1
-
-      - name: Pull LFS objects (only files needed by tests)
-        if: needs.source-of-changes.outputs.changed_files != 'true'
-        run: |
-          time git lfs pull --include='execution/tests/test-corners/**'
-          cd execution/tests/execution-spec-tests
-          time git lfs pull --include='blockchain_tests/frontier/scenarios/*.json,blockchain_tests/osaka/eip7934_block_rlp_limit/*.json,blockchain_tests/static/state_tests/stPreCompiledContracts/*.json,blockchain_tests/static/state_tests/stStackTests/*.json,state_tests/static/state_tests/stStackTests/*.json'
+          fetch-depth: 1
 
       - if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: ./.github/actions/setup-erigon
         id: erigon
+        with:
+          submodules: true
+          lfs: tests
 
       - uses: ./.github/actions/restore-build-cache
+        id: restore-build
         if: needs.source-of-changes.outputs.changed_files != 'true'
         with:
           buildtag: ${{ env.gocache_tag }}
@@ -121,7 +110,7 @@ jobs:
         run: make test-all
 
       - uses: ./.github/actions/save-build-cache
-        if: always() && needs.source-of-changes.outputs.changed_files != 'true'
+        if: always() && steps.restore-build.outcome == 'success'
         with:
           buildtag: ${{ env.gocache_tag }}
           build: ${{ steps.erigon.outputs.build }}

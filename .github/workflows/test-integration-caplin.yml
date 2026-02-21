@@ -29,7 +29,8 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout custom actions
+        uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
@@ -54,7 +55,8 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout custom actions
+        uses: actions/checkout@v6
         with:
           fetch-depth: 1
 

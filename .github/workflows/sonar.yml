@@ -37,15 +37,19 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout custom actions
+        uses: actions/checkout@v6
         with:
-          submodules: recursive
-          lfs: true
+          fetch-depth: 1
 
       - uses: ./.github/actions/setup-erigon
         id: erigon
+        with:
+          submodules: true
+          lfs: tests
 
       - uses: ./.github/actions/restore-build-cache
+        id: restore-build
         with:
           buildtag: ${{ env.gocache_tag }}
           build: ${{ steps.erigon.outputs.build }}
@@ -63,7 +67,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
       - uses: ./.github/actions/save-build-cache
-        if: always()
+        if: always() && steps.restore-build.outcome == 'success'
         with:
           buildtag: ${{ env.gocache_tag }}
           build: ${{ steps.erigon.outputs.build }}

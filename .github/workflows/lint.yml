@@ -22,10 +22,10 @@ jobs:
       cancel-in-progress: true
 
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout custom actions
+        uses: actions/checkout@v6
         with:
           fetch-depth: 1
-          filter: blob:none
 
       - uses: ./.github/actions/setup-erigon
         id: erigon
@@ -33,6 +33,7 @@ jobs:
           modcache: false
 
       - name: Restore Go module cache
+        id: restore-modcache
         uses: actions/cache/restore@v4
         with:
           path: ${{ steps.erigon.outputs.modcache }}/cache/download
@@ -44,6 +45,7 @@ jobs:
             gomodcache-${{ runner.os }}-${{ hashFiles('go.sum') }}-
 
       - uses: ./.github/actions/restore-build-cache
+        id: restore-build
         with:
           buildtag: ${{ env.gocache_tag }}
           build: ${{ steps.erigon.outputs.build }}
@@ -59,14 +61,14 @@ jobs:
       - run: make lintci
 
       - uses: ./.github/actions/save-build-cache
-        if: always()
+        if: always() && steps.restore-build.outcome == 'success'
         with:
           buildtag: ${{ env.gocache_tag }}
           build: ${{ steps.erigon.outputs.build }}
           goversion: ${{ steps.erigon.outputs.goversion }}
 
       - uses: ./.github/actions/save-mod-cache
-        if: always()
+        if: always() && steps.restore-modcache.outcome == 'success'
         with:
           modcache: ${{ steps.erigon.outputs.modcache }}
           prefix: modcache-lint
