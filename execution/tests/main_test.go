@@ -22,21 +22,21 @@ func TestMain(m *testing.M) {
 }
 
 func printSystemSpecs() {
-	fmt.Fprintf(os.Stderr, "\n=== System Specs ===\n")
-	fmt.Fprintf(os.Stderr, "GOOS/GOARCH:  %s/%s\n", runtime.GOOS, runtime.GOARCH)
-	fmt.Fprintf(os.Stderr, "NumCPU:       %d\n", runtime.NumCPU())
-	fmt.Fprintf(os.Stderr, "GOMAXPROCS:   %d\n", runtime.GOMAXPROCS(0))
-	fmt.Fprintf(os.Stderr, "TMPDIR env:   %q\n", os.Getenv("TMPDIR"))
-	fmt.Fprintf(os.Stderr, "os.TempDir(): %q\n", os.TempDir())
-	fmt.Fprintf(os.Stderr, "CI env:       %q\n", os.Getenv("CI"))
+	fmt.Printf("\n=== System Specs ===\n")
+	fmt.Printf("GOOS/GOARCH:  %s/%s\n", runtime.GOOS, runtime.GOARCH)
+	fmt.Printf("NumCPU:       %d\n", runtime.NumCPU())
+	fmt.Printf("GOMAXPROCS:   %d\n", runtime.GOMAXPROCS(0))
+	fmt.Printf("TMPDIR env:   %q\n", os.Getenv("TMPDIR"))
+	fmt.Printf("os.TempDir(): %q\n", os.TempDir())
+	fmt.Printf("CI env:       %q\n", os.Getenv("CI"))
 
 	switch runtime.GOOS {
 	case "darwin":
 		if out, err := exec.Command("sysctl", "-n", "hw.memsize").Output(); err == nil {
-			fmt.Fprintf(os.Stderr, "Total RAM:    %s bytes\n", strings.TrimSpace(string(out)))
+			fmt.Printf("Total RAM:    %s bytes\n", strings.TrimSpace(string(out)))
 		}
 		if out, err := exec.Command("vm_stat").Output(); err == nil {
-			fmt.Fprintf(os.Stderr, "\n--- vm_stat ---\n%s", out)
+			fmt.Printf("\n--- vm_stat ---\n%s", out)
 		}
 	case "linux":
 		if out, err := os.ReadFile("/proc/meminfo"); err == nil {
@@ -44,7 +44,7 @@ func printSystemSpecs() {
 				if strings.HasPrefix(line, "MemTotal:") ||
 					strings.HasPrefix(line, "MemFree:") ||
 					strings.HasPrefix(line, "MemAvailable:") {
-					fmt.Fprintf(os.Stderr, "%s\n", line)
+					fmt.Printf("%s\n", line)
 				}
 			}
 		}
@@ -55,12 +55,12 @@ func printSystemSpecs() {
 	if err := unix.Statfs(tmpDir, &stat); err == nil {
 		totalMB := stat.Blocks * uint64(stat.Bsize) / 1024 / 1024
 		freeMB := stat.Bavail * uint64(stat.Bsize) / 1024 / 1024
-		fmt.Fprintf(os.Stderr, "\nDisk (%s):\n", tmpDir)
-		fmt.Fprintf(os.Stderr, "  Total: %d MB\n", totalMB)
-		fmt.Fprintf(os.Stderr, "  Free:  %d MB\n", freeMB)
+		fmt.Printf("\nDisk (%s):\n", tmpDir)
+		fmt.Printf("  Total: %d MB\n", totalMB)
+		fmt.Printf("  Free:  %d MB\n", freeMB)
 	}
 
-	fmt.Fprintf(os.Stderr, "====================\n\n")
+	fmt.Printf("====================\n\n")
 }
 
 // setupRAMTmpdir sets TMPDIR to a RAM-backed filesystem for faster I/O in tests.
