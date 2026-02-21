@@ -40,6 +40,9 @@ import (
 )
 
 func TestGasPrice(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 
 	cases := []struct {
 		description   string
@@ -79,6 +82,9 @@ func TestGasPrice(t *testing.T) {
 }
 
 func TestEthConfig(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	toTimeArg := func(t hexutil.Uint64) *hexutil.Uint64 { return &t }
 	for _, test := range []struct {

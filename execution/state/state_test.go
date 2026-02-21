@@ -176,7 +176,6 @@ func TestSnapshotEmpty(t *testing.T) {
 // use testing instead of checker because checker does not support
 // printing/logging in tests (-check.vv does not work)
 func TestSnapshot2(t *testing.T) {
-	//TODO: why I shouldn't recreate writer here? And why domains.SetBlockNum(1) is enough for green test?
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
 
@@ -373,8 +372,10 @@ func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Shar
 func TestDump(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
+	txNum, _, err := domains.SeekCommitment(t.Context(), tx)
+	require.NoError(t, err)
 
-	err := rawdbv3.TxNums.Append(tx, 1, 1)
+	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
 	st := New(NewReaderV3(domains.AsGetter(tx)))
@@ -391,7 +392,7 @@ func TestDump(t *testing.T) {
 	require.NoError(t, err)
 	obj3.SetBalance(*uint256.NewInt(44), true, tracing.BalanceChangeUnspecified)
 
-	w := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
+	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	// write some of them to the trie
 	err = w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
 	require.NoError(t, err)
@@ -400,7 +401,7 @@ func TestDump(t *testing.T) {
 	err = st.FinalizeTx(&chain.Rules{}, w)
 	require.NoError(t, err)
 
-	blockWriter := NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
+	blockWriter := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	err = st.CommitBlock(&chain.Rules{}, blockWriter)
 	require.NoError(t, err)
 	err = domains.Flush(context.Background(), tx)

@@ -200,6 +200,9 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		}(gas)
 	}
 
+	// BAL: record address access even if call fails due to gas/call depth/insufficient balance
+	evm.intraBlockState.MarkAddressAccess(addr, false)
+
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, gas, nil
 	}
@@ -219,9 +222,6 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			}
 		}
 	}
-
-	// BAL: record address access even if call fails due to gas/call depth and to precompiles
-	evm.intraBlockState.MarkAddressAccess(addr, false)
 
 	snapshot := evm.intraBlockState.PushSnapshot()
 	defer evm.intraBlockState.PopSnapshot(snapshot)

@@ -37,7 +37,7 @@ import (
 
 // In memory commitment and state to use with the tests
 type MockState struct {
-	t          *testing.T
+	t          testing.TB
 	concurrent atomic.Bool
 
 	mu     sync.Mutex            // to protect sm and cm for concurrent trie
@@ -46,7 +46,7 @@ type MockState struct {
 	numBuf [binary.MaxVarintLen64]byte
 }
 
-func NewMockState(t *testing.T) *MockState {
+func NewMockState(t testing.TB) *MockState {
 	t.Helper()
 	return &MockState{
 		t:  t,
