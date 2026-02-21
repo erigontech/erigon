@@ -72,6 +72,9 @@ var debugTraceTransactionNoRefundTests = []struct {
 }
 
 func TestTraceBlockByNumber(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0)

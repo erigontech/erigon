@@ -30,7 +30,7 @@ import (
 
 func TestLegacyBlockchain(t *testing.T) {
 	if testing.Short() {
-		t.Skip()
+		t.Skip("slow test")
 	}
 	t.Parallel()
 

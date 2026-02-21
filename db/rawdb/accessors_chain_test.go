@@ -321,6 +321,9 @@ func TestWriteRawTransactions_UniqueKeys(t *testing.T) {
 
 // Tests block header storage and retrieval operations.
 func TestHeaderStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	m := execmoduletester.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
@@ -362,6 +365,9 @@ func TestHeaderStorage(t *testing.T) {
 
 // Tests block body storage and retrieval operations.
 func TestBodyStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	m := execmoduletester.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
@@ -431,6 +437,9 @@ func TestBodyStorage(t *testing.T) {
 
 // Tests block storage and retrieval operations.
 func TestBlockStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	m := execmoduletester.New(t)
 	require := require.New(t)
@@ -549,6 +558,9 @@ func TestBlockStorage(t *testing.T) {
 
 // Tests that partial block contents don't get reassembled into full blocks.
 func TestPartialBlockStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	m := execmoduletester.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
@@ -596,6 +608,9 @@ func TestPartialBlockStorage(t *testing.T) {
 
 // Tests block total difficulty storage and retrieval operations.
 func TestTdStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	m := execmoduletester.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
@@ -641,6 +656,9 @@ func TestTdStorage(t *testing.T) {
 
 // Tests that canonical numbers can be mapped to hashes and retrieved.
 func TestCanonicalMappingStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	m := execmoduletester.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)
@@ -715,6 +733,9 @@ func TestHeadStorage2(t *testing.T) {
 
 // Tests that head headers and head blocks can be assigned, individually.
 func TestHeadStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	m := execmoduletester.New(t)
 	m.DB.(state.HasAgg).Agg().(*state.Aggregator).EnableDomain(kv.RCacheDomain)
@@ -740,6 +761,9 @@ func TestHeadStorage(t *testing.T) {
 
 // Tests that receipts associated with a single block can be stored and retrieved.
 func TestBlockReceiptStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	m := execmoduletester.New(t)
 	m.DB.(state.HasAgg).Agg().(*state.Aggregator).EnableDomain(kv.RCacheDomain)
@@ -850,6 +874,9 @@ func TestBlockReceiptStorage(t *testing.T) {
 
 // Tests block storage and retrieval operations with withdrawals.
 func TestBlockWithdrawalsStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	m := execmoduletester.New(t)
 	require := require.New(t)
@@ -1102,6 +1129,9 @@ func TestShanghaiBodyForStorageNoWithdrawals(t *testing.T) {
 }
 
 func TestBadBlocks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	m := execmoduletester.New(t)
 	tx, err := m.DB.BeginRw(m.Ctx)

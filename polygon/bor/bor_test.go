@@ -399,6 +399,9 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 }
 
 func TestSendBlock(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	heimdall := newTestHeimdall(polychain.BorDevnet.Config)
 	blocks := map[uint64]*types.Block{}
 

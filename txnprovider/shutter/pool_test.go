@@ -200,6 +200,9 @@ func TestPoolCleanupShouldNotDeleteNewEncTxnsDueToConsecutiveEmptyDecrMsgs(t *te
 
 //goland:noinspection DuplicatedCode
 func TestPoolSkipsBlobTxns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	pt := PoolTest{t}
 	pt.Run(func(ctx context.Context, t *testing.T, pool *shutter.Pool, handle PoolTestHandle) {

@@ -77,6 +77,9 @@ func newTestBackend(t *testing.T) *execmoduletester.ExecModuleTester {
 }
 
 func TestSuggestPrice(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	config := gaspricecfg.Config{
 		Blocks:     2,
 		Percentile: 60,

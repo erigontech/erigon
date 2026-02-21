@@ -41,6 +41,9 @@ func newBaseApiWithFiltersForTest(f *rpchelper.Filters, stateCache *kvcache.Cohe
 }
 
 func TestNewFilters(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
@@ -119,6 +122,9 @@ func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 }
 
 func TestBlockFilterGetFilterChangesInitiallyEmpty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	assert := assert.New(t)
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
@@ -144,6 +150,9 @@ func TestBlockFilterGetFilterChangesInitiallyEmpty(t *testing.T) {
 }
 
 func TestCompositeFiltersGetFilterChangesInitiallyEmpty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	assert := assert.New(t)
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
@@ -187,6 +196,9 @@ func TestCompositeFiltersGetFilterChangesInitiallyEmpty(t *testing.T) {
 }
 
 func TestGetFilterChangesReturnsFilterNotFoundForUnknownID(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	assert := assert.New(t)
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)

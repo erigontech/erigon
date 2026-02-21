@@ -27,6 +27,9 @@ import (
 )
 
 func TestGetTransactionBySenderAndNonce(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewOtterscanAPI(NewBaseApi(nil, nil, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0), m.DB, 25)
 
