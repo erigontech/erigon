@@ -499,8 +499,6 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 	assert.NoError(t, err)
 	defer domains.Close()
 
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
 	assert.NoError(t, err)
 
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
@@ -618,10 +616,6 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
-
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
-	assert.NoError(t, err)
 
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
 
