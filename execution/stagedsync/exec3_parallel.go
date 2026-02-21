@@ -23,7 +23,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
@@ -96,7 +95,7 @@ type parallelExecutor struct {
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
-	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
+	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
 	var asyncTxChan mdbx.TxApplyChan
 	var asyncTx kv.TemporalTx
@@ -146,7 +145,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	var hasLoggedCommittments atomic.Bool
 	var commitStart time.Time
 
-	var stepsInDb = rawdbhelpers.IdxStepsCountV3(rwTx, pe.agg.StepSize())
 	var lastProgress commitment.CommitProgress
 
 	execErr := func() (err error) {
@@ -617,6 +615,105 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				pe.invalidCount.Add(int64(blockExecutor.cntValidationFail))
 				pe.readCount.Add(blockExecutor.blockIO.ReadCount())
 				pe.writeCount.Add(blockExecutor.blockIO.WriteCount())
+
+				blockReceipts := make([]*types.Receipt, 0, len(blockExecutor.results))
+				for _, result := range blockExecutor.results {
+					if result.Receipt != nil {
+						blockReceipts = append(blockReceipts, result.Receipt)
+					}
+				}
+
+				if blockResult.BlockNum > 0 {
+					result := blockExecutor.results[len(blockExecutor.results)-1]
+
+					finalTask := blockExecutor.tasks[len(blockExecutor.tasks)-1].Task
+					finalVersion := finalTask.Version()
+					stateUpdates, err := func() (state.StateUpdates, error) {
+						pe.RLock()
+						defer pe.RUnlock()
+
+						var reader state.StateReader
+						if finalTask.IsHistoric() {
+							reader = state.NewHistoryReaderV3(applyTx, finalVersion.TxNum)
+						} else {
+							reader = state.NewReaderV3(pe.rs.Domains().AsGetter(applyTx))
+						}
+						ibs := state.New(state.NewBufferedReader(pe.rs, reader))
+						ibs.SetVersion(finalVersion.Incarnation)
+						localVersionMap := state.NewVersionMap(nil)
+						ibs.SetVersionMap(localVersionMap)
+						ibs.SetTxContext(finalVersion.BlockNum, finalVersion.TxIndex)
+
+						txTask, ok := result.Task.(*taskVersion).Task.(*exec.TxTask)
+
+						if !ok {
+							return state.StateUpdates{}, nil
+						}
+
+						syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
+							ret, err := protocol.SysCallContract(contract, data, pe.cfg.chainConfig, ibs, txTask.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
+							if err != nil {
+								return nil, err
+							}
+							result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
+							return ret, err
+						}
+
+						chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
+						if pe.isBlockProduction {
+							_, _, err =
+								pe.cfg.engine.FinalizeAndAssemble(
+									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, blockReceipts,
+									txTask.Withdrawals, chainReader, syscall, nil, pe.logger)
+						} else {
+							_, err =
+								pe.cfg.engine.Finalize(
+									pe.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, blockReceipts,
+									txTask.Withdrawals, chainReader, syscall, false, pe.logger)
+						}
+
+						if err != nil {
+							return state.StateUpdates{}, fmt.Errorf("can't finalize block %d: %w", blockResult.BlockNum, err)
+						}
+
+						blockExecutor.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
+						blockExecutor.blockIO.RecordAccesses(finalVersion, ibs.AccessedAddresses())
+
+						finalWrites := ibs.VersionedWrites(true)
+						if len(finalWrites) > 0 {
+							blockExecutor.blockIO.RecordWrites(finalVersion, finalWrites)
+							blockExecutor.versionMap.FlushVersionedWrites(finalWrites, true, "")
+						}
+
+						stateWriter := state.NewBufferedWriter(pe.rs, nil)
+						if err = ibs.MakeWriteSet(txTask.EvmBlockContext.Rules(txTask.Config), stateWriter); err != nil {
+							return state.StateUpdates{}, err
+						}
+
+						return stateWriter.WriteSet(), nil
+					}()
+
+					if err != nil {
+						return err
+					}
+
+					blockResult.ApplyCount += stateUpdates.UpdateCount()
+					if dbg.TraceApply && dbg.TraceBlock(blockResult.BlockNum) {
+						stateUpdates.TraceBlockUpdates(blockResult.BlockNum, true)
+						fmt.Println(blockResult.BlockNum, "apply count", blockResult.ApplyCount)
+					}
+
+					blockExecutor.applyResults <- &txResult{
+						blockNum:              blockResult.BlockNum,
+						txNum:                 blockResult.lastTxNum,
+						rules:                 result.Rules(),
+						stateUpdates:          stateUpdates,
+						logs:                  result.Logs,
+						traceFroms:            result.TraceFroms,
+						traceTos:              result.TraceTos,
+						cumulativeBlobGasUsed: blockExecutor.blobGasUsed,
+					}
+				}
 
 				if !blockExecutor.execStarted.IsZero() {
 					pe.blockExecMetrics.Duration.Add(time.Since(blockExecutor.execStarted))
@@ -1422,7 +1519,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				txResult := be.results[tx]
 
 				if err := be.gasPool.SubGas(txResult.ExecutionResult.BlockGasUsed); err != nil {
-					return nil, err
+					return nil, fmt.Errorf("%w, block=%d: block gas used overflow", rules.ErrInvalidBlock, be.blockNum)
 				}
 
 				txTask := be.tasks[tx].Task
@@ -1430,7 +1527,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if txTask.Tx() != nil {
 					blobGasUsed := txTask.Tx().GetBlobGas()
 					if err := be.gasPool.SubBlobGas(blobGasUsed); err != nil {
-						return nil, err
+						return nil, fmt.Errorf("%w, block=%d blob gas used overflow: %w", rules.ErrInvalidBlock, be.blockNum, err)
 					}
 					be.blobGasUsed += blobGasUsed
 				}
@@ -1456,7 +1553,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 				// Merge any additional reads/writes produced during finalize (fee calc, post apply, etc)
 				if addReads != nil {
-					mergedReads := be.blockIO.ReadSet(txVersion.TxIndex).Merge(addReads)
+					mergedReads := MergeReadSets(be.blockIO.ReadSet(txVersion.TxIndex), addReads)
 					be.blockIO.RecordReads(txVersion, mergedReads)
 				}
 				if len(addWrites) > 0 {
@@ -1526,8 +1623,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if result.Receipt != nil {
 				applyResult.blockGasUsed = int64(result.ExecutionResult.BlockGasUsed)
 				be.blockGasUsed += result.ExecutionResult.BlockGasUsed
-				applyResult.receipt = result.Receipt
-				applyResult.logs = append(applyResult.logs, result.Receipt.Logs...)
+				receipt := *result.Receipt
+				applyResult.receipt = &receipt
+				applyResult.receipt.Logs = append([]*types.Log{}, result.Receipt.Logs...)
+				applyResult.logs = applyResult.receipt.Logs
 				pe.executedGas.Add(int64(applyResult.blockGasUsed))
 			}
 
@@ -1683,4 +1782,59 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 				statsMutex: &be.Mutex})
 		}
 	}
+}
+
+func MergeReadSets(a state.ReadSet, b state.ReadSet) state.ReadSet {
+	if a == nil && b == nil {
+		return nil
+	}
+	out := make(state.ReadSet)
+	if a != nil {
+		a.Scan(func(vr *state.VersionedRead) bool {
+			out.Set(*vr)
+			return true
+		})
+	}
+	if b != nil {
+		b.Scan(func(vr *state.VersionedRead) bool {
+			out.Set(*vr)
+			return true
+		})
+	}
+	return out
+}
+
+func MergeVersionedWrites(prev, next state.VersionedWrites) state.VersionedWrites {
+	if len(prev) == 0 {
+		return next
+	}
+	if len(next) == 0 {
+		return prev
+	}
+	merged := state.WriteSet{}
+	for _, v := range prev {
+		merged.Set(*v)
+	}
+	for _, v := range next {
+		merged.Set(*v)
+	}
+	out := make(state.VersionedWrites, 0, merged.Len())
+	merged.Scan(func(v *state.VersionedWrite) bool {
+		out = append(out, v)
+		return true
+	})
+	return out
+}
+
+func MergeAccessedAddresses(dst, src map[accounts.Address]struct{}) map[accounts.Address]struct{} {
+	if len(src) == 0 {
+		return dst
+	}
+	if dst == nil {
+		dst = make(map[accounts.Address]struct{}, len(src))
+	}
+	for addr := range src {
+		dst[addr] = struct{}{}
+	}
+	return dst
 }

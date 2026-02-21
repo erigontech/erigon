@@ -35,6 +35,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -296,7 +297,12 @@ func Main(ctx *cli.Context) error {
 		return h, nil
 	}
 
-	db := temporaltest.NewTestDB(nil, datadir.New(""))
+	tmpDir, err := os.MkdirTemp("", "erigon-t8n-*")
+	if err != nil {
+		return err
+	}
+	defer dir.RemoveAll(tmpDir)
+	db := temporaltest.NewTestDB(nil, datadir.New(tmpDir))
 	defer db.Close()
 
 	tx, err := db.BeginTemporalRw(context.Background())
@@ -313,11 +319,9 @@ func Main(ctx *cli.Context) error {
 
 	blockNum, txNum := uint64(0), uint64(0)
 	sd.SetTxNum(txNum)
-	sd.SetBlockNum(blockNum)
 	reader, writer := MakePreState((&evmtypes.BlockContext{}).Rules(chainConfig), tx, sd, prestate.Pre, blockNum, txNum)
 	blockNum, txNum = uint64(1), uint64(2)
 	sd.SetTxNum(txNum)
-	sd.SetBlockNum(blockNum)
 
 	// Merge engine can be used for pre-merge blocks as well, as it
 	// redirects to the ethash engine based on the block number

@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package stagedsync
+package builderstages
 
 import (
 	"context"
@@ -35,62 +35,127 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-type MiningState struct {
-	MiningConfig    *buildercfg.MiningConfig
-	PendingResultCh chan *types.Block
-	MiningResultCh  chan *types.BlockWithReceipts
-	BlockAssembler  *exec.BlockAssembler
+type BuiltBlock struct {
+	ParentHeaderTime uint64
+	Header           *types.Header
+	Uncles           []*types.Header
+	Txns             types.Transactions
+	Receipts         types.Receipts
+	Withdrawals      []*types.Withdrawal
+	Requests         types.FlatRequests
+	BlockAccessList  types.BlockAccessList
+
+	headerRlpSize         *int
+	withdrawalsRlpSize    *int
+	unclesRlpSize         *int
+	txnsRlpSize           int
+	txnsRlpSizeCalculated int
 }
 
-func NewMiningState(cfg *buildercfg.MiningConfig) *MiningState {
-	return &MiningState{
-		MiningConfig:    cfg,
+func (mb *BuiltBlock) AddTxn(txn types.Transaction) {
+	mb.Txns = append(mb.Txns, txn)
+	s := txn.EncodingSize()
+	s += rlp.ListPrefixLen(s)
+	mb.txnsRlpSize += s
+	mb.txnsRlpSizeCalculated++
+}
+
+func (mb *BuiltBlock) AvailableRlpSpace(chainConfig *chain.Config, withAdditional ...types.Transaction) int {
+	if mb.headerRlpSize == nil {
+		s := mb.Header.EncodingSize()
+		s += rlp.ListPrefixLen(s)
+		mb.headerRlpSize = &s
+	}
+	if mb.withdrawalsRlpSize == nil {
+		var s int
+		if mb.Withdrawals != nil {
+			s = types.EncodingSizeGenericList(mb.Withdrawals)
+			s += rlp.ListPrefixLen(s)
+		}
+		mb.withdrawalsRlpSize = &s
+	}
+	if mb.unclesRlpSize == nil {
+		s := types.EncodingSizeGenericList(mb.Uncles)
+		s += rlp.ListPrefixLen(s)
+		mb.unclesRlpSize = &s
+	}
+
+	blockSize := *mb.headerRlpSize
+	blockSize += *mb.unclesRlpSize
+	blockSize += *mb.withdrawalsRlpSize
+	blockSize += mb.TxnsRlpSize(withAdditional...)
+	blockSize += rlp.ListPrefixLen(blockSize)
+	maxSize := chainConfig.GetMaxRlpBlockSize(mb.Header.Time)
+	return maxSize - blockSize
+}
+
+func (mb *BuiltBlock) TxnsRlpSize(withAdditional ...types.Transaction) int {
+	if len(mb.Txns) != mb.txnsRlpSizeCalculated {
+		panic("mismatch between mb.Txns and mb.txnsRlpSizeCalculated - did you forget to use mb.AddTxn()?")
+	}
+	s := mb.txnsRlpSize
+	s += types.EncodingSizeGenericList(withAdditional) // what size would be if we add additional txns
+	s += rlp.ListPrefixLen(s)
+	return s
+}
+
+type BuilderState struct {
+	BuilderConfig   *buildercfg.BuilderConfig
+	PendingResultCh chan *types.Block
+	BuilderResultCh chan *types.BlockWithReceipts
+	BuiltBlock      *BuiltBlock
+}
+
+func NewBuilderState(cfg *buildercfg.BuilderConfig) BuilderState {
+	return BuilderState{
+		BuilderConfig:   cfg,
 		PendingResultCh: make(chan *types.Block, 1),
-		MiningResultCh:  make(chan *types.BlockWithReceipts, 1),
+		BuilderResultCh: make(chan *types.BlockWithReceipts, 1),
+		BuiltBlock:      &BuiltBlock{},
 	}
 }
 
-type MiningCreateBlockCfg struct {
-	miner                  *MiningState
+type BuilderCreateBlockCfg struct {
+	builder                BuilderState
 	chainConfig            *chain.Config
 	engine                 rules.Engine
 	blockBuilderParameters *builder.Parameters
 	blockReader            services.FullBlockReader
-	experimentalBAL        bool
 }
 
-func StageMiningCreateBlockCfg(
-	miner *MiningState,
+func StageBuilderCreateBlockCfg(
+	builder BuilderState,
 	chainConfig *chain.Config,
 	engine rules.Engine,
 	blockBuilderParameters *builder.Parameters,
 	blockReader services.FullBlockReader,
-	experimentalBAL bool,
-) MiningCreateBlockCfg {
-	return MiningCreateBlockCfg{
-		miner:                  miner,
+) BuilderCreateBlockCfg {
+	return BuilderCreateBlockCfg{
+		builder:                builder,
 		chainConfig:            chainConfig,
 		engine:                 engine,
 		blockBuilderParameters: blockBuilderParameters,
 		blockReader:            blockReader,
-		experimentalBAL:        experimentalBAL,
 	}
 }
 
-// SpawnMiningCreateBlockStage
+// SpawnBuilderCreateBlockStage
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}, logger log.Logger) (err error) {
+func SpawnBuilderCreateBlockStage(s *stagedsync.StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg BuilderCreateBlockCfg, quit <-chan struct{}, logger log.Logger) (err error) {
+	current := cfg.builder.BuiltBlock
+	*current = BuiltBlock{}             // always start with a clean state
 	var txPoolLocals []accounts.Address //txPoolV2 has no concept of local addresses (yet?)
-	coinbase := accounts.InternAddress(cfg.miner.MiningConfig.Etherbase)
+	coinbase := accounts.InternAddress(cfg.builder.BuilderConfig.Etherbase)
 
 	const (
 		// staleThreshold is the maximum depth of the acceptable stale block.
@@ -111,9 +176,9 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv
 		return fmt.Errorf("wrong head block: %x (current) vs %x (requested)", parent.Hash(), cfg.blockBuilderParameters.ParentHash)
 	}
 
-	if cfg.miner.MiningConfig.Etherbase == (common.Address{}) {
+	if cfg.builder.BuilderConfig.Etherbase == (common.Address{}) {
 		if cfg.blockBuilderParameters == nil {
-			return errors.New("refusing to mine without etherbase")
+			return errors.New("refusing to build without etherbase")
 		}
 		// If we do not have an etherbase, let's use the suggested one
 		coinbase = accounts.InternAddress(cfg.blockBuilderParameters.SuggestedFeeRecipient)
@@ -125,7 +190,7 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv
 	if err != nil {
 		return err
 	}
-	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx, BlockReader: cfg.blockReader, Logger: logger}
+	chain := stagedsync.ChainReader{Cfg: cfg.chainConfig, Db: tx, BlockReader: cfg.blockReader, Logger: logger}
 	var GetBlocksFromHash = func(hash common.Hash, n int) (blocks []*types.Block) {
 		number, _ := cfg.blockReader.HeaderNumber(context.Background(), tx, hash)
 		if number == nil {
@@ -168,21 +233,21 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv
 		uncles:    mapset.NewSet[common.Hash](),
 	}
 
-	header := builder.MakeEmptyHeader(parent, cfg.chainConfig, timestamp, cfg.miner.MiningConfig.GasLimit)
+	header := builder.MakeEmptyHeader(parent, cfg.chainConfig, timestamp, cfg.builder.BuilderConfig.GasLimit)
 	if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
 		logger.Warn("Failed to verify gas limit given by the validator, defaulting to parent gas limit", "err", err)
 		header.GasLimit = parent.GasLimit
 	}
 
 	header.Coinbase = coinbase.Value()
-	header.Extra = cfg.miner.MiningConfig.ExtraData
+	header.Extra = cfg.builder.BuilderConfig.ExtraData
 
-	logger.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
+	logger.Info(fmt.Sprintf("[%s] Start building", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
 	ibs := state.New(state.NewReaderV3(sd.AsGetter(tx)))
 	defer ibs.Release(false)
 
 	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
-		logger.Error("Failed to prepare header for mining",
+		logger.Error("Failed to prepare header for building",
 			"err", err,
 			"headerNumber", header.Number.Uint64(),
 			"headerRoot", header.Root.String(),
@@ -194,21 +259,14 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv
 	}
 
 	if cfg.blockBuilderParameters != nil {
-		if cfg.blockBuilderParameters.ParentBeaconBlockRoot == nil {
-			return fmt.Errorf("ParentBeaconBlockRoot missing from builder parameters")
-		}
 		header.MixDigest = cfg.blockBuilderParameters.PrevRandao
 		header.ParentBeaconBlockRoot = cfg.blockBuilderParameters.ParentBeaconBlockRoot
 		header.SlotNumber = cfg.blockBuilderParameters.SlotNumber
 
-		cfg.miner.BlockAssembler = exec.NewBlockAssembler(
-			exec.AssemblerCfg{
-				ChainConfig:     cfg.chainConfig,
-				Engine:          cfg.engine,
-				BlockReader:     cfg.blockReader,
-				ExperimentalBAL: cfg.experimentalBAL,
-			},
-			cfg.blockBuilderParameters.PayloadId, parent.Time, header, nil, cfg.blockBuilderParameters.Withdrawals)
+		current.ParentHeaderTime = parent.Time
+		current.Header = header
+		current.Uncles = nil
+		current.Withdrawals = cfg.blockBuilderParameters.Withdrawals
 
 		return nil
 	}
@@ -287,12 +345,9 @@ func SpawnMiningCreateBlockStage(s *StageState, sd *execctx.SharedDomains, tx kv
 		}
 	}
 
-	cfg.miner.BlockAssembler = exec.NewBlockAssembler(exec.AssemblerCfg{
-		ChainConfig:     cfg.chainConfig,
-		Engine:          cfg.engine,
-		BlockReader:     cfg.blockReader,
-		ExperimentalBAL: cfg.experimentalBAL,
-	}, 0, 0, header, makeUncles(env.uncles), nil)
+	current.Header = header
+	current.Uncles = makeUncles(env.uncles)
+	current.Withdrawals = nil
 	return nil
 }
 

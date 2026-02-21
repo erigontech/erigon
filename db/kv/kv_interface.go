@@ -482,12 +482,12 @@ type TemporalMemBatch interface {
 	DomainPut(domain Domain, k string, v []byte, txNum uint64, preval []byte, prevStep Step) error
 	DomainDel(domain Domain, k string, txNum uint64, preval []byte, prevStep Step) error
 	GetLatest(domain Domain, key []byte) (v []byte, step Step, ok bool)
-	HasPrefix(domain Domain, prefix []byte, roTx Tx) ([]byte, []byte, bool, error)
 	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
 	Merge(other TemporalMemBatch) error
 	ClearRam()
 	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
 	IteratePrefix(domain Domain, prefix []byte, roTx Tx, it func(k []byte, v []byte, step Step) (cont bool, err error)) error
+	HasPrefix(domain Domain, prefix []byte, roTx Tx) ([]byte, []byte, bool, error)
 	SizeEstimate() uint64
 	Flush(ctx context.Context, tx RwTx) error
 	Close()

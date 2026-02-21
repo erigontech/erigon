@@ -37,9 +37,9 @@ import (
 	"github.com/erigontech/erigon/common/math"
 
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	_ "github.com/erigontech/erigon/execution/tracing/tracers/js"
@@ -97,14 +97,23 @@ type callTracerTest struct {
 // Iterates over all the input-output datasets in the tracer test harness and
 // runs the JavaScript tracers against them.
 func TestCallTracerLegacy(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	testCallTracer("callTracerLegacy", "call_tracer_legacy", t)
 }
 
 func TestCallTracerNative(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	testCallTracer("callTracer", "call_tracer", t)
 }
 
 func TestCallTracerNativeWithLog(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	testCallTracer("callTracer", "call_tracer_withLog", t)
 }
 
@@ -152,7 +161,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			}
 			rules := context.Rules(test.Genesis.Config)
 
-			m := mock.Mock(t)
+			m := execmoduletester.New(t)
 			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
@@ -264,7 +273,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 		Origin:   origin,
 		GasPrice: *tx.GetEffectiveGasTip(baseFee),
 	}
-	m := mock.Mock(b)
+	m := execmoduletester.New(b)
 	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(b, err)
 	defer dbTx.Rollback()
@@ -341,7 +350,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 		},
 	}
 	rules := context.Rules(chainspec.Mainnet.Config)
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
 	defer dbTx.Rollback()

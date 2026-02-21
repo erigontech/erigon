@@ -45,9 +45,8 @@ import (
 
 func TestSnapshotRandom(t *testing.T) {
 	if testing.Short() {
-		t.Skip()
+		t.Skip("slow test")
 	}
-
 	t.Parallel()
 	config := &quick.Config{MaxCount: 10}
 	ts := &snapshotTest{}
@@ -427,8 +426,6 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 
 	_, tx, domains := NewTestRwTx(t)
 
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 
@@ -504,8 +501,6 @@ func TestVersionMapRevert(t *testing.T) {
 
 	_, tx, domains := NewTestRwTx(t)
 
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
@@ -568,8 +563,6 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
 
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
@@ -642,8 +635,6 @@ func TestVersionMapOverwrite(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
 
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
@@ -735,8 +726,6 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
 
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
@@ -873,8 +862,6 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 func TestApplyVersionedWrites(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
 	mvhm := NewVersionMap(nil)
 	reader := NewReaderV3(domains.AsGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)

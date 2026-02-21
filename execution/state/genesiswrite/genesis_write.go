@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -311,8 +312,17 @@ func GenesisToBlock(tb testing.TB, g *types.Genesis, dirs datadir.Dirs, logger l
 
 	ctx := context.Background()
 
-	// some users creating > 1Gb custome genesis by `erigon init`
-	genesisTmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(tb, dirs.Tmp).MapSize(2 * datasize.TB).GrowthStep(1 * datasize.MB).MustOpen()
+	// some users creating > 1Gb custom genesis by `erigon init`.
+	// On Windows, MDBX file-mappings are backed by the paging file for their full map size,
+	// so a 2 TB reservation immediately exhausts the pagefile when parallel goroutines open
+	// multiple databases (e.g. during test runs). On Linux/macOS the reservation is backed by
+	// sparse files with copy-on-write, so 2 TB is harmless.
+	// 1 GB is plenty for any practical genesis block; the CI pagefile minimum is 8 GB.
+	genesisMapSize := 2 * datasize.TB
+	if runtime.GOOS == "windows" {
+		genesisMapSize = 1 * datasize.GB
+	}
+	genesisTmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(tb, dirs.Tmp).MapSize(genesisMapSize).GrowthStep(1 * datasize.MB).MustOpen()
 	defer genesisTmpDB.Close()
 
 	agg, err := dbstate.New(dirs).Logger(logger).Open(ctx, genesisTmpDB)

@@ -31,7 +31,7 @@ jobs:
       TRACKING_TIME_SECONDS: 3600 # 1 hour
       TOTAL_TIME_SECONDS: 28800 # 8 hours
       ERIGON_ASSERT: true
-      LIGHTHOUSE_VERSION: v8.0.1
+      LIGHTHOUSE_VERSION: v8.1.0
 
     steps:
       - name: Check out repository

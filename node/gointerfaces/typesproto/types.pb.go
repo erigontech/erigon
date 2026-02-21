@@ -1380,28 +1380,29 @@ func (x *PeerInfo) GetConnIsStatic() bool {
 	return false
 }
 
-type ExecutionPayloadBodyV1 struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Transactions  [][]byte               `protobuf:"bytes,1,rep,name=transactions,proto3" json:"transactions,omitempty"`
-	Withdrawals   []*Withdrawal          `protobuf:"bytes,2,rep,name=withdrawals,proto3" json:"withdrawals,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+type ExecutionPayloadBody struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Transactions    [][]byte               `protobuf:"bytes,1,rep,name=transactions,proto3" json:"transactions,omitempty"`
+	Withdrawals     []*Withdrawal          `protobuf:"bytes,2,rep,name=withdrawals,proto3" json:"withdrawals,omitempty"`
+	BlockAccessList []byte                 `protobuf:"bytes,3,opt,name=block_access_list,json=blockAccessList,proto3" json:"block_access_list,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
-func (x *ExecutionPayloadBodyV1) Reset() {
-	*x = ExecutionPayloadBodyV1{}
+func (x *ExecutionPayloadBody) Reset() {
+	*x = ExecutionPayloadBody{}
 	mi := &file_types_types_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ExecutionPayloadBodyV1) String() string {
+func (x *ExecutionPayloadBody) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ExecutionPayloadBodyV1) ProtoMessage() {}
+func (*ExecutionPayloadBody) ProtoMessage() {}
 
-func (x *ExecutionPayloadBodyV1) ProtoReflect() protoreflect.Message {
+func (x *ExecutionPayloadBody) ProtoReflect() protoreflect.Message {
 	mi := &file_types_types_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1413,21 +1414,28 @@ func (x *ExecutionPayloadBodyV1) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ExecutionPayloadBodyV1.ProtoReflect.Descriptor instead.
-func (*ExecutionPayloadBodyV1) Descriptor() ([]byte, []int) {
+// Deprecated: Use ExecutionPayloadBody.ProtoReflect.Descriptor instead.
+func (*ExecutionPayloadBody) Descriptor() ([]byte, []int) {
 	return file_types_types_proto_rawDescGZIP(), []int{20}
 }
 
-func (x *ExecutionPayloadBodyV1) GetTransactions() [][]byte {
+func (x *ExecutionPayloadBody) GetTransactions() [][]byte {
 	if x != nil {
 		return x.Transactions
 	}
 	return nil
 }
 
-func (x *ExecutionPayloadBodyV1) GetWithdrawals() []*Withdrawal {
+func (x *ExecutionPayloadBody) GetWithdrawals() []*Withdrawal {
 	if x != nil {
 		return x.Withdrawals
+	}
+	return nil
+}
+
+func (x *ExecutionPayloadBody) GetBlockAccessList() []byte {
+	if x != nil {
+		return x.BlockAccessList
 	}
 	return nil
 }
@@ -1850,10 +1858,11 @@ const file_types_types_proto_rawDesc = "" +
 	"\x0fconn_is_inbound\x18\b \x01(\bR\rconnIsInbound\x12&\n" +
 	"\x0fconn_is_trusted\x18\t \x01(\bR\rconnIsTrusted\x12$\n" +
 	"\x0econn_is_static\x18\n" +
-	" \x01(\bR\fconnIsStatic\"q\n" +
-	"\x16ExecutionPayloadBodyV1\x12\"\n" +
+	" \x01(\bR\fconnIsStatic\"\x9b\x01\n" +
+	"\x14ExecutionPayloadBody\x12\"\n" +
 	"\ftransactions\x18\x01 \x03(\fR\ftransactions\x123\n" +
-	"\vwithdrawals\x18\x02 \x03(\v2\x11.types.WithdrawalR\vwithdrawals\"\xb5\x05\n" +
+	"\vwithdrawals\x18\x02 \x03(\v2\x11.types.WithdrawalR\vwithdrawals\x12*\n" +
+	"\x11block_access_list\x18\x03 \x01(\fR\x0fblockAccessList\"\xb5\x05\n" +
 	"\x1dAccountAbstractionTransaction\x12\x14\n" +
 	"\x05nonce\x18\x01 \x01(\x04R\x05nonce\x12\x19\n" +
 	"\bchain_id\x18\x02 \x01(\fR\achainId\x12\x10\n" +
@@ -1920,7 +1929,7 @@ var file_types_types_proto_goTypes = []any{
 	(*NodeInfoPorts)(nil),                 // 17: types.NodeInfoPorts
 	(*NodeInfoReply)(nil),                 // 18: types.NodeInfoReply
 	(*PeerInfo)(nil),                      // 19: types.PeerInfo
-	(*ExecutionPayloadBodyV1)(nil),        // 20: types.ExecutionPayloadBodyV1
+	(*ExecutionPayloadBody)(nil),          // 20: types.ExecutionPayloadBody
 	(*AccountAbstractionTransaction)(nil), // 21: types.AccountAbstractionTransaction
 	(*Authorization)(nil),                 // 22: types.Authorization
 	(*descriptorpb.FileOptions)(nil),      // 23: google.protobuf.FileOptions
@@ -1958,7 +1967,7 @@ var file_types_types_proto_depIdxs = []int32{
 	12, // 29: types.BlockAccessListAccount.code_changes:type_name -> types.BlockAccessListCodeChange
 	1,  // 30: types.Withdrawal.address:type_name -> types.H160
 	17, // 31: types.NodeInfoReply.ports:type_name -> types.NodeInfoPorts
-	14, // 32: types.ExecutionPayloadBodyV1.withdrawals:type_name -> types.Withdrawal
+	14, // 32: types.ExecutionPayloadBody.withdrawals:type_name -> types.Withdrawal
 	22, // 33: types.AccountAbstractionTransaction.authorizations:type_name -> types.Authorization
 	23, // 34: types.service_major_version:extendee -> google.protobuf.FileOptions
 	23, // 35: types.service_minor_version:extendee -> google.protobuf.FileOptions
