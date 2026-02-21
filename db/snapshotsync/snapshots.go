@@ -442,13 +442,13 @@ func (s *DirtySegment) closeAndRemoveFiles() {
 	}
 }
 
-func (s *DirtySegment) OpenIdxIfNeed(dir string, optimistic bool) (err error) {
+func (s *DirtySegment) OpenIdxIfNeed(dir string, optimistic bool, dirEntries []string) (err error) {
 	if len(s.Type().IdxFileNames(s.from, s.to)) == 0 {
 		return nil
 	}
 
 	if s.refcount.Load() == 0 {
-		err = s.openIdx(dir)
+		err = s.openIdx(dir, dirEntries)
 
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
@@ -464,7 +464,7 @@ func (s *DirtySegment) OpenIdxIfNeed(dir string, optimistic bool) (err error) {
 	return nil
 }
 
-func (s *DirtySegment) openIdx(dir string) (err error) {
+func (s *DirtySegment) openIdx(dir string, dirEntries []string) (err error) {
 	if s.Decompressor == nil {
 		return nil
 	}
@@ -477,11 +477,18 @@ func (s *DirtySegment) openIdx(dir string) (err error) {
 		if s.indexes[i] != nil {
 			continue
 		}
-		fPathMask, err := version.ReplaceVersionWithMask(filepath.Join(dir, fileName))
+		fPathMask, err := version.ReplaceVersionWithMask(fileName)
 		if err != nil {
 			return fmt.Errorf("[open index] can't replace with mask in file %s: %w", fileName, err)
 		}
-		fPath, _, ok, err := version.FindFilesWithVersionsByPattern(fPathMask)
+
+		var fPath string
+		var ok bool
+		if dirEntries != nil {
+			fPath, _, ok, err = version.MatchVersionedFile(fPathMask, dirEntries, dir)
+		} else {
+			fPath, _, ok, err = version.FindFilesWithVersionsByPattern(filepath.Join(dir, fPathMask))
+		}
 		if err != nil {
 			return fmt.Errorf("%w, fileName: %s", err, fileName)
 		}
@@ -1090,6 +1097,21 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 
 	snConfig, _ := snapcfg.KnownCfg(s.cfg.ChainName)
 
+	// Read full directory listing once for efficient index file lookups
+	var dirEntries []string
+	if open {
+		entries, err := os.ReadDir(s.dir)
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("read dir %s: %w", s.dir, err)
+		}
+		dirEntries = make([]string, 0, len(entries))
+		for _, e := range entries {
+			if !e.IsDir() {
+				dirEntries = append(dirEntries, e.Name())
+			}
+		}
+	}
+
 	for _, fName := range fileNames {
 		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
 		if !ok || isState || snaptype.IsTorrentPartial(f.Ext) {
@@ -1150,7 +1172,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 
 		if open {
 			wg.Go(func() error {
-				if err := sn.OpenIdxIfNeed(s.dir, optimistic); err != nil {
+				if err := sn.OpenIdxIfNeed(s.dir, optimistic, dirEntries); err != nil {
 					return err
 				}
 				return nil

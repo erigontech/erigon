@@ -111,6 +111,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 
 		icc, err := tx.CursorDupSort(ii.KeysTable)
 		require.NoError(t, err)
+		defer icc.Close()
 
 		count := 0
 		for txn, _, err := icc.Seek(from[:]); txn != nil; txn, _, err = icc.Next() {
@@ -196,9 +197,10 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		// straight from pruned - not empty
 		icc, err := tx.CursorDupSort(ii.KeysTable)
 		require.NoError(t, err)
+		defer icc.Close()
 		txn, _, err := icc.Seek(from[:])
 		require.NoError(t, err)
-		println("from", binary.BigEndian.Uint64(from[:]), "txn", binary.BigEndian.Uint64(txn[:]))
+		println("from", binary.BigEndian.Uint64(from[:]), "txn", binary.BigEndian.Uint64(txn))
 
 		prunedInStep0 := 16 - 1
 		// we pruned by limit so next transaction after prune should be equal to `pruneIters*pruneLimit+1`
@@ -207,15 +209,15 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 		icc.Close()
 
 		// check second table
-		icc, err = tx.CursorDupSort(ii.ValuesTable)
+		icc2, err := tx.CursorDupSort(ii.ValuesTable)
 		require.NoError(t, err)
-		key, txn, err := icc.First()
+		defer icc2.Close()
+		key, txn, err := icc2.First()
 		t.Logf("key: %x, txn: %x", key, txn)
 		require.NoError(t, err)
 		// we pruned by limit so next transaction after prune should be equal to `pruneIters*pruneLimit+1`
 		// If we would prune by txnum then txTo prune should be available after prune is finished
 		require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInStep0, int(binary.BigEndian.Uint64(txn)-1))
-		icc.Close()
 	})
 
 }
@@ -431,9 +433,10 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 		// straight from pruned - not empty
 		icc, err := tx.CursorDupSort(ii.KeysTable)
 		require.NoError(t, err)
+		defer icc.Close()
 		txn, _, err := icc.Seek(from[:])
 		require.NoError(t, err)
-		println("from", binary.BigEndian.Uint64(from[:]), "txn", binary.BigEndian.Uint64(txn[:]))
+		println("from", binary.BigEndian.Uint64(from[:]), "txn", binary.BigEndian.Uint64(txn))
 
 		prunedInStep0 := 16 - 1
 		// we pruned by limit so next transaction after prune should be equal to `pruneIters*pruneLimit+1`
@@ -442,15 +445,15 @@ func TestInvIndexScanPruningCorrectness(t *testing.T) {
 		icc.Close()
 
 		// check second table
-		icc, err = tx.CursorDupSort(ii.ValuesTable)
+		icc2, err := tx.CursorDupSort(ii.ValuesTable)
 		require.NoError(t, err)
-		key, txn, err := icc.First()
+		defer icc2.Close()
+		key, txn, err := icc2.First()
 		t.Logf("key: %x, txn: %x", key, txn)
 		require.NoError(t, err)
 		// we pruned by limit so next transaction after prune should be equal to `pruneIters*pruneLimit+1`
 		// If we would prune by txnum then txTo prune should be available after prune is finished
 		require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInStep0, int(binary.BigEndian.Uint64(txn)-1))
-		icc.Close()
 	})
 
 }
@@ -539,7 +542,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	defer logEvery.Stop()
 	db, ii := testDbAndInvertedIndex(t, 16, log.New())
 	ctx := context.Background()
-	tx, err := db.BeginRw(ctx)
+	tx, err := db.BeginRw(ctx) //nolint:gocritic
 	require.NoError(t, err)
 	defer func() {
 		if tx != nil {
@@ -879,7 +882,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 func TestScanStaticFiles(t *testing.T) {
 	t.Parallel()
 
-	ii := emptyTestInvertedIndex(1)
+	ii := emptyTestInvertedIndex(t, 1)
 	files := []string{
 		"v1.0-accounts.0-1.ef",
 		"v1.0-accounts.1-2.ef",
@@ -895,7 +898,7 @@ func TestScanStaticFiles(t *testing.T) {
 }
 
 func TestCtxFiles(t *testing.T) {
-	ii := emptyTestInvertedIndex(1)
+	ii := emptyTestInvertedIndex(t, 1)
 	files := []string{
 		"v1.0-accounts.0-1.ef", // overlap with same `endTxNum=4`
 		"v1.0-accounts.1-2.ef",

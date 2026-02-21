@@ -32,7 +32,6 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/u256"
 )
@@ -221,8 +220,9 @@ func TestLoadECDSA(t *testing.T) {
 		},
 	}
 
+	tempdir := t.TempDir()
 	for _, test := range tests {
-		f, err := os.CreateTemp("", "loadecdsa_test.*.txt")
+		f, err := os.CreateTemp(tempdir, "loadecdsa_test.*.txt")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -243,13 +243,12 @@ func TestLoadECDSA(t *testing.T) {
 }
 
 func TestSaveECDSA(t *testing.T) {
-	f, err := os.CreateTemp("", "saveecdsa_test.*.txt")
+	f, err := os.CreateTemp(t.TempDir(), "saveecdsa_test.*.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
 	file := f.Name()
 	f.Close()
-	defer dir.RemoveFile(file)
 
 	key, _ := HexToECDSA(testPrivHex)
 	if e := SaveECDSA(file, key); e != nil {

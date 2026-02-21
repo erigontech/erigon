@@ -251,7 +251,7 @@ eest-bal:
 	)
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build . 2>&1 | tee buildlogs.log
 	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && go build ./cmd/hiveview && ./hiveview --serve --logdir ./workspace/logs &
-	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,".*amsterdam.*",--sim.buildarg branch=hive --sim.buildarg branch=tests-bal@v2.0.0 --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/bal%40v2.0.0/fixtures_bal.tar.gz)
+	cd "temp/eest-hive-$(SHORT_COMMIT)/hive" && $(call run_suite,eels/consume-engine,".*amsterdam.*",--sim.buildarg branch=hive --sim.buildarg branch=tests-bal@v5.1.0 --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/bal%40v5.1.0/fixtures_bal.tar.gz)
 
 # Define the run_suite function
 define run_suite
@@ -320,7 +320,7 @@ eest-hive:
 define run-kurtosis-assertoor
 	docker build -t test/erigon:current . ; \
 	kurtosis enclave rm -f makefile-kurtosis-testnet ; \
-	kurtosis run --enclave makefile-kurtosis-testnet github.com/ethpandaops/ethereum-package --args-file $(1) ; \
+	kurtosis run --enclave makefile-kurtosis-testnet github.com/ethpandaops/ethereum-package@5.0.1 --args-file $(1) ; \
 	printf "\nTo view logs: \nkurtosis service logs makefile-kurtosis-testnet el-1-erigon-lighthouse\n"
 endef
 
@@ -344,10 +344,6 @@ kurtosis-cleanup:
 	@kurtosis enclave ls
 	@echo "-----------------------------------\n"
 	kurtosis enclave rm -f makefile-kurtosis-testnet
-
-## lint-deps:                         install lint dependencies
-lint-deps:
-	@./tools/golangci_lint.sh --install-deps
 
 ## lintci:                            run golangci-lint linters
 lintci:

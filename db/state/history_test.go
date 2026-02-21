@@ -536,7 +536,7 @@ func TestHistoryCanPrune(t *testing.T) {
 				binary.BigEndian.PutUint64(val, i)
 			}
 
-			err = writer.AddPrevValue(append(addr[:], val...), i, prev)
+			err = writer.AddPrevValue(append(addr, val...), i, prev)
 			require.NoError(err)
 
 			prev = common.Copy(val)
@@ -558,8 +558,8 @@ func TestHistoryCanPrune(t *testing.T) {
 			writeKey(t, h, db)
 
 			rwTx, err := db.BeginRw(context.Background())
-			defer rwTx.Rollback()
 			require.NoError(t, err)
+			defer rwTx.Rollback()
 
 			hc := h.BeginFilesRo()
 			defer hc.Close()
@@ -597,8 +597,8 @@ func TestHistoryCanPrune(t *testing.T) {
 		writeKey(t, h, db)
 
 		rwTx, err := db.BeginRw(context.Background())
-		defer rwTx.Rollback()
 		require.NoError(t, err)
+		defer rwTx.Rollback()
 
 		hc := h.BeginFilesRo()
 		defer hc.Close()
@@ -911,6 +911,7 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 
 	icc, err := rwTx.CursorDupSort(h.ValuesTable)
 	require.NoError(t, err)
+	defer icc.Close()
 
 	count := 0
 	for key, _, err := icc.Seek(from[:]); key != nil; key, _, err = icc.Next() {
@@ -945,18 +946,14 @@ func TestHistoryPruneCorrectness(t *testing.T) {
 		t.Logf("[%d] stats: %v", i, stat)
 	}
 
-	icc, err = rwTx.CursorDupSort(h.ValuesTable)
+	icc2, err := rwTx.CursorDupSort(h.ValuesTable)
 	require.NoError(t, err)
-	defer icc.Close()
+	defer icc2.Close()
 
-	key, _, err := icc.First()
+	key, _, err := icc2.First()
 	require.NoError(t, err)
 	require.NotNil(t, key)
 	require.EqualValues(t, pruneIters*int(pruneLimit), binary.BigEndian.Uint64(key[len(key)-8:])-1)
-
-	icc, err = rwTx.CursorDupSort(h.ValuesTable)
-	require.NoError(t, err)
-	defer icc.Close()
 }
 
 func TestHistoryScanPruneCorrectness(t *testing.T) {
@@ -983,6 +980,7 @@ func TestHistoryScanPruneCorrectness(t *testing.T) {
 
 	icc, err := rwTx.CursorDupSort(h.ValuesTable)
 	require.NoError(t, err)
+	defer icc.Close()
 
 	count := 0
 	for key, _, err := icc.Seek(from[:]); key != nil; key, _, err = icc.Next() {
@@ -1711,7 +1709,7 @@ func TestScanStaticFilesH(t *testing.T) {
 	t.Parallel()
 
 	newTestDomain := func() (*InvertedIndex, *History) {
-		d := emptyTestDomain(1)
+		d := emptyTestDomain(t, 1)
 		d.History.InvertedIndex.Accessors = 0
 		d.History.Accessors = 0
 		return d.History.InvertedIndex, d.History

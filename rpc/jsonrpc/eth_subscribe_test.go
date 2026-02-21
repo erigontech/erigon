@@ -21,6 +21,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -29,9 +30,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -43,7 +44,7 @@ import (
 func TestEthSubscribe(t *testing.T) {
 	ctx := t.Context()
 	logger := log.New()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 7, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
@@ -75,7 +76,7 @@ func TestEthSubscribe(t *testing.T) {
 func TestEthSubscribeReceipts(t *testing.T) {
 	ctx := t.Context()
 	logger := log.New()
-	m := mock.Mock(t)
+	m := execmoduletester.New(t)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		tx, err := types.SignTx(types.NewTransaction(uint64(i), m.Address, uint256.NewInt(1), params.TxGas, uint256.NewInt(1), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
@@ -97,6 +98,14 @@ func TestEthSubscribeReceipts(t *testing.T) {
 		TransactionHashes: []common.Hash{},
 	})
 	defer ff.UnsubscribeReceipts(id)
+	// Wait for the server-side receipt filter to be fully activated before inserting
+	// blocks. SubscribeReceipts sends a filter update request through a channel which
+	// is processed asynchronously by the server goroutine. Without this wait,
+	// InsertChain may execute and call NotifyReceipts before HasReceiptSubscriptions
+	// returns true, causing all receipt notifications to be silently dropped.
+	require.Eventually(t, func() bool {
+		return m.Notifications.Events.HasReceiptSubscriptions()
+	}, 5*time.Second, time.Millisecond)
 	err = m.InsertChain(chain)
 	require.NoError(t, err)
 	highestSeenHeader := chain.TopBlock.NumberU64()

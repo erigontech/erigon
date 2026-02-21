@@ -196,6 +196,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 
 	tx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
+	defer tx.Rollback()
 	domains, err = execctx.NewSharedDomains(ctx, tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
@@ -214,7 +215,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	//	cct.Close()
 	//}
 
-	err = domains.SeekCommitment(ctx, tx)
+	_, _, err = domains.SeekCommitment(ctx, tx)
 	require.NoError(t, err)
 	tx.Rollback()
 
@@ -380,7 +381,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		require.NoError(t, err)
 		defer domains.Close()
 
-		err = domains.SeekCommitment(ctx, tx)
+		_, _, err = domains.SeekCommitment(ctx, tx)
 		tx.Rollback()
 		require.NoError(t, err)
 
@@ -446,7 +447,6 @@ func randomAccount(t *testing.T) (*accounts.Account, accounts.Address) {
 		t.Fatal(err)
 	}
 	acc := accounts.NewAccount()
-	acc.Initialised = true
 	acc.Balance = u256.U64(uint64(rand.Int63()))
 	addr := accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
 	return &acc, addr

@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"sort"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -69,12 +68,8 @@ type Snapshot struct {
 	Tally   map[accounts.Address]Tally    `json:"tally"`   // Current vote tally to avoid recalculating
 }
 
-// SignersAscending implements the sort interface to allow sorting a list of addresses
-type SignersAscending []common.Address
-
-func (s SignersAscending) Len() int           { return len(s) }
-func (s SignersAscending) Less(i, j int) bool { return bytes.Compare(s[i][:], s[j][:]) < 0 }
-func (s SignersAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+// SignersAscending is common.Addresses, kept as a type alias for external callers.
+type SignersAscending = common.Addresses
 
 // newSnapshot creates a new snapshot with the specified startup parameters. This
 // method does not initialize the set of recent signers, so only ever use if for
@@ -340,11 +335,11 @@ func (s *Snapshot) copy() *Snapshot {
 
 // signers retrieves the list of authorized signers in ascending order.
 func (s *Snapshot) GetSigners() []common.Address {
-	sigs := make([]common.Address, 0, len(s.Signers))
+	sigs := make(common.Addresses, 0, len(s.Signers))
 	for sig := range s.Signers {
 		sigs = append(sigs, sig.Value())
 	}
-	sort.Sort(SignersAscending(sigs))
+	sigs.Sort()
 	return sigs
 }
 

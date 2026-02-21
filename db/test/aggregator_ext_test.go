@@ -98,7 +98,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 			Incarnation: 0,
 		}
 		buf := accounts.SerialiseV3(&acc)
-		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf[:], txNum, nil, 0)
+		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil, 0)
 		require.NoError(t, err)
 
 		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil, 0)
@@ -141,6 +141,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	t.Cleanup(newDb.Close)
 
 	newAgg := state.New(agg.Dirs()).StepSize(stepSize).MustOpen(ctx, newDb)
+	t.Cleanup(newAgg.Close)
 	require.NoError(t, newAgg.OpenFolder())
 
 	db, _ = temporal.New(newDb, newAgg)
@@ -153,9 +154,8 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer newDoms.Close()
 
-	err = newDoms.SeekCommitment(ctx, tx)
+	latestTx, _, err := newDoms.SeekCommitment(ctx, tx)
 	require.NoError(t, err)
-	latestTx := newDoms.TxNum()
 	t.Logf("seek to latest_tx=%d", latestTx)
 
 	miss := uint64(0)
@@ -212,11 +212,13 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	commit := func(txn uint64) error {
 		err = domains.Flush(ctx, tx)
 		require.NoError(t, err)
+		domains.Close()
 
 		err = tx.Commit()
 		require.NoError(t, err)
 
-		tx, err = db.BeginTemporalRw(context.Background())
+		// TODO: either make the lint rule smarter about closures, or use db.View/db.Update here
+		tx, err = db.BeginTemporalRw(context.Background()) //nolint:gocritic
 		require.NoError(t, err)
 
 		domains, err = execctx.NewSharedDomains(context.Background(), tx, log.New())
@@ -272,6 +274,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, prev, step)
 		require.NoError(t, err)
 	}
+	domains.Close()
 
 	err = tx.Commit()
 
@@ -386,8 +389,8 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 		onChangeCalls++
 		if onChangeCalls == 1 {
-			mustSeeFile(newFiles, "domain", "accounts.0-2.kv") //TODO: when we build `accounts.0-1.kv` - we sending empty notifcation
-			require.False(t, filepath.IsAbs(newFiles[0]))      // expecting non-absolute paths (relative as of snapshots dir)
+			mustSeeFile(newFiles, "domain", "accounts.0-64.kv")
+			require.False(t, filepath.IsAbs(newFiles[0])) // expecting non-absolute paths (relative as of snapshots dir)
 		}
 	}, func(deletedFiles []string) {
 		if len(deletedFiles) == 0 {
@@ -396,20 +399,16 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 		onDelCalls++
 		if onDelCalls == 1 {
-			mustSeeFile(deletedFiles, "domain", "accounts.0-1.kv")
-			mustSeeFile(deletedFiles, "domain", "commitment.0-1.kv")
 			mustSeeFile(deletedFiles, "history", "accounts.0-1.v")
 			mustSeeFile(deletedFiles, "accessor", "accounts.0-1.vi")
-
-			mustSeeFile(deletedFiles, "domain", "accounts.1-2.kv")
 			require.False(t, filepath.IsAbs(deletedFiles[0])) // expecting non-absolute paths (relative as of snapshots dir)
 		}
 	})
 
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
-	require.Equal(t, 13, onChangeCalls)
-	require.Equal(t, 14, onDelCalls)
+	require.Equal(t, 3, onChangeCalls)
+	require.Equal(t, 4, onDelCalls)
 
 	{ //prune
 		rwTx, err = db.BeginTemporalRw(context.Background())
@@ -436,11 +435,11 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commKey1)
 	require.NoError(t, err)
-	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v[:]))
+	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v))
 
 	v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2)
 	require.NoError(t, err)
-	require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
+	require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v))
 }
 
 func TestAggregatorV3_PruneSmallBatches(t *testing.T) {

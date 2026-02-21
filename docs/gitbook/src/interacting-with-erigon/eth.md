@@ -18,7 +18,7 @@ For API usage refer to the below official resources:
 
 {% embed url="https://ethereum.org/en/developers/docs/apis/json-rpc/" %}
 
-{% embed url="https://ethereum.github.io/execution-apis/api-documentation/" %}
+{% embed url="https://ethereum.github.io/execution-apis/" %}
 
 ### eth\_getProof
 

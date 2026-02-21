@@ -53,11 +53,11 @@ var BorDefaultMinerGasPrice = big.NewInt(25 * common.GWei)
 // Fail-back block gas limit. Better specify one in the chain config.
 const DefaultBlockGasLimit uint64 = 60_000_000
 
-func DefaultBlockGasLimitByChain(config *Config) uint64 {
-	if config.Genesis == nil || config.Genesis.Config == nil || config.Genesis.Config.DefaultBlockGasLimit == nil {
+func DefaultBlockGasLimitByChain(chainConfig *chain.Config) uint64 {
+	if chainConfig.DefaultBlockGasLimit == nil {
 		return DefaultBlockGasLimit
 	}
-	return *config.Genesis.Config.DefaultBlockGasLimit
+	return *chainConfig.DefaultBlockGasLimit
 }
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
@@ -208,8 +208,8 @@ type Config struct {
 	// Whitelist of required block number -> hash values to accept
 	Whitelist map[uint64]common.Hash `toml:"-"`
 
-	// Mining options
-	Miner buildercfg.MiningConfig
+	// Block builder options
+	Builder buildercfg.BuilderConfig
 
 	// Ethash options
 	Ethash ethashcfg.Config

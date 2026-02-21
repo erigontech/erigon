@@ -72,8 +72,9 @@ type Aggregator struct {
 	snapshotBuildSema        *semaphore.Weighted
 
 	disableHistory         bool
-	collateAndBuildWorkers int // minimize amount of background workers by default
-	mergeWorkers           int // usually 1
+	collateAndBuildWorkers int  // minimize amount of background workers by default
+	mergeWorkers           int  // usually 1
+	lockWorkersEditing     bool // allow changing #workers for merge/collate/build
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
@@ -331,7 +332,6 @@ func (a *Aggregator) OpenFolder() error {
 	return nil
 }
 
-// TODO: convert this func to `map` or struct instead of 4 return params
 func scanDirs(dirs datadir.Dirs) (r *ScanDirsResult, err error) {
 	r = &ScanDirsResult{}
 	r.iiFiles, err = filesFromDir(dirs.SnapIdx)
@@ -346,13 +346,18 @@ func scanDirs(dirs datadir.Dirs) (r *ScanDirsResult, err error) {
 	if err != nil {
 		return
 	}
+	r.accessorFiles, err = filesFromDir(dirs.SnapAccessors)
+	if err != nil {
+		return
+	}
 	return r, nil
 }
 
 type ScanDirsResult struct {
-	domainFiles  []string
-	historyFiles []string
-	iiFiles      []string
+	domainFiles   []string
+	historyFiles  []string
+	iiFiles       []string
+	accessorFiles []string
 }
 
 func (a *Aggregator) openFolder() error {
@@ -442,10 +447,23 @@ func (a *Aggregator) closeDirtyFiles() {
 	wg.Wait()
 }
 
-func (a *Aggregator) EnableDomain(domain kv.Domain)   { a.d[domain].Disable = false }
-func (a *Aggregator) SetCollateAndBuildWorkers(i int) { a.collateAndBuildWorkers = i }
-func (a *Aggregator) SetMergeWorkers(i int)           { a.mergeWorkers = i }
+func (a *Aggregator) EnableDomain(domain kv.Domain) { a.d[domain].Disable = false }
+func (a *Aggregator) SetCollateAndBuildWorkers(i int) {
+	if a.lockWorkersEditing {
+		return
+	}
+	a.collateAndBuildWorkers = i
+}
+func (a *Aggregator) SetMergeWorkers(i int) {
+	if a.lockWorkersEditing {
+		return
+	}
+	a.mergeWorkers = i
+}
 func (a *Aggregator) SetCompressWorkers(i int) {
+	if a.lockWorkersEditing {
+		return
+	}
 	for _, d := range a.d {
 		d.CompressCfg.Workers = i
 		if d.History != nil {
@@ -457,6 +475,8 @@ func (a *Aggregator) SetCompressWorkers(i int) {
 		ii.CompressorCfg.Workers = i
 	}
 }
+func (a *Aggregator) LockWorkersEditing()   { a.lockWorkersEditing = true }
+func (a *Aggregator) UnlockWorkersEditing() { a.lockWorkersEditing = false }
 
 func (a *Aggregator) HasBackgroundFilesBuild2() bool {
 	return a.buildingFiles.Load() || a.mergingFiles.Load()
@@ -863,7 +883,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 		in.Close()
 		return true, err
 	}
-	a.IntegrateMergedDirtyFiles(outs, in)
+	a.IntegrateMergedDirtyFiles(in)
 	a.cleanAfterMerge(in)
 	return true, nil
 }
@@ -1182,35 +1202,6 @@ func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
 		as.Indices[k] = id
 	}
 }
-
-// temporal function to prune history straight after commitment is done - reduce history size in db until we build
-// pruning in background. This helps on chain-tip performance (while full pruning is not available we can prune at least commit)
-func (at *AggregatorRoTx) GreedyPruneHistory(ctx context.Context, domain kv.Domain, tx kv.RwTx) error {
-	cd := at.d[domain]
-	if cd.ht.h.HistoryDisabled {
-		return nil
-	}
-
-	txFrom := uint64(0)
-	canHist, txTo := cd.ht.canPruneUntil(tx, math.MaxUint64)
-	if dbg.NoPrune() || !canHist {
-		return nil
-	}
-
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	defer mxPruneTookAgg.ObserveDuration(time.Now())
-
-	stat, err := cd.ht.Prune(ctx, tx, txFrom, txTo, math.MaxUint64, false, logEvery)
-	if err != nil {
-		return err
-	}
-
-	at.a.logger.Info("commitment history backpressure pruning", "pruned", stat.String())
-	return nil
-}
-
-var invalidateOnce = map[string]int{}
 
 func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, aggressiveMode bool, logEvery *time.Ticker) (*AggregatorPruneStat, error) {
 	if !aggressiveMode {
@@ -1541,7 +1532,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 	return mf, err
 }
 
-func (a *Aggregator) IntegrateMergedDirtyFiles(outs *SelectedStaticFiles, in *MergedFilesV3) {
+func (a *Aggregator) IntegrateMergedDirtyFiles(in *MergedFilesV3) {
 	defer a.onFilesChange(in.FilePaths(a.dirs.Snap))
 
 	a.dirtyFilesLock.Lock()
@@ -1560,8 +1551,6 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(outs *SelectedStaticFiles, in *Me
 		}
 		ii.integrateMergedDirtyFiles(in.iis[id])
 	}
-
-	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 }
 
 func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
@@ -1620,6 +1609,8 @@ func (a *Aggregator) cleanAfterMerge(in *MergedFilesV3) {
 			ii.cleanAfterMerge(in.iis[id], dryRun)
 		}
 	}
+
+	a.recalcVisibleFiles(a.dirtyFilesEndTxNumMinimax())
 }
 
 // KeepRecentTxnsOfHistoriesWithDisabledSnapshots limits amount of recent transactions protected from prune in domains history.
@@ -1683,7 +1674,7 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 			lastIdInDB(a.db, a.d[kv.AccountsDomain]),
 			lastIdInDB(a.db, a.d[kv.CodeDomain]),
 			lastIdInDB(a.db, a.d[kv.StorageDomain]),
-			lastIdInDBNoHistory(a.db, a.d[kv.CommitmentDomain]))
+			lastIdInDB(a.db, a.d[kv.CommitmentDomain]))
 		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB)
 
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
@@ -2030,24 +2021,17 @@ func (at *AggregatorRoTx) Close() {
 	}
 }
 
-// Inverted index tables only
 func lastIdInDB(db kv.RoDB, domain *Domain) (lstInDb kv.Step) {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		lstInDb = domain.maxStepInDB(tx)
-		return nil
-	}); err != nil {
-		log.Warn("[snapshots] lastIdInDB", "err", err)
-	}
-	return lstInDb
-}
+		if domain.HistoryDisabled {
+			lstInDb = domain.maxStepInDBNoHistory(tx)
+		} else {
 
-func lastIdInDBNoHistory(db kv.RoDB, domain *Domain) (lstInDb kv.Step) {
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		//lstInDb = domain.maxStepInDB(tx)
-		lstInDb = domain.maxStepInDBNoHistory(tx)
+			lstInDb = domain.maxStepInDB(tx)
+		}
 		return nil
 	}); err != nil {
-		log.Warn("[snapshots] lastIdInDB", "err", err)
+		log.Warn("[snapshots] lastIdInDB", "history", domain.HistoryDisabled, "err", err)
 	}
 	return lstInDb
 }

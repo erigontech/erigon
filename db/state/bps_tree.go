@@ -64,7 +64,7 @@ func NewBpsTree(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLooku
 // "assert key behind offset == to stored key in bt"
 var envAssertBTKeys = dbg.EnvBool("BT_ASSERT_OFFSETS", false)
 
-func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, keyCmp keyCmpFunc, nodes []*Node) *BpsTree {
+func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, dataLookup dataLookupFunc, keyCmp keyCmpFunc, nodes []Node) *BpsTree {
 	bt := &BpsTree{M: M, offt: offt, dataLookupFunc: dataLookup, keyCmpFunc: keyCmp, mx: nodes}
 
 	nsz := uint64(unsafe.Sizeof(Node{}))
@@ -89,7 +89,7 @@ func NewBpsTreeWithNodes(kv *seg.Reader, offt *eliasfano32.EliasFano, M uint64, 
 
 type BpsTree struct {
 	offt  *eliasfano32.EliasFano // ef with offsets to key/vals
-	mx    []*Node
+	mx    []Node
 	M     uint64 // limit on amount of 'children' for node
 	trace bool
 
@@ -182,17 +182,15 @@ func encodeListNodes(nodes []Node, w io.Writer) error {
 	return nil
 }
 
-func decodeListNodes(data []byte) ([]*Node, error) {
+func decodeListNodes(data []byte) ([]Node, error) {
 	count := binary.BigEndian.Uint64(data[:8])
-	nodes := make([]*Node, count)
+	nodes := make([]Node, count)
 	pos := 8
 	for ni := 0; ni < int(count); ni++ {
-		node := new(Node)
-		dp, err := node.Decode(data[pos:])
+		dp, err := nodes[ni].Decode(data[pos:])
 		if err != nil {
 			return nil, fmt.Errorf("decode node %d: %w", ni, err)
 		}
-		nodes[ni] = node
 		pos += int(dp)
 	}
 	return nodes, nil
@@ -226,7 +224,7 @@ func (b *BpsTree) WarmUp(kv *seg.Reader) (err error) {
 	if N == 0 {
 		return nil
 	}
-	b.mx = make([]*Node, 0, N/b.M)
+	b.mx = make([]Node, 0, N/b.M)
 	if b.trace {
 		fmt.Printf("mx cap %d N=%d M=%d\n", cap(b.mx), N, b.M)
 	}
@@ -246,7 +244,7 @@ func (b *BpsTree) WarmUp(kv *seg.Reader) (err error) {
 		if err != nil {
 			return err
 		}
-		b.mx = append(b.mx, &Node{off: b.offt.Get(di), key: common.Copy(key), di: di})
+		b.mx = append(b.mx, Node{off: b.offt.Get(di), key: common.Copy(key), di: di})
 		cachedBytes += nsz + uint64(len(key))
 	}
 
@@ -264,7 +262,7 @@ func (b *BpsTree) bs(x []byte) (n *Node, dl, dr uint64) {
 
 	for l < r {
 		m = (l + r) >> 1
-		n = b.mx[m]
+		n = &b.mx[m]
 
 		if b.trace {
 			fmt.Printf("bs di:%d k:%x\n", n.di, n.key)

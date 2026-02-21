@@ -433,10 +433,10 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 			fmt.Printf("\n4. Trie batch update (%d updates)\n", len(updates))
 			fmt.Printf("active rows %d touchmap %16b aftermap %16b\n", trieBatchR.activeRows, trieBatchR.touchMap[0], trieBatchR.afterMap[0])
 
-			err := stateBatch.applyPlainUpdates(plainKeys[:], updates[:])
+			err := stateBatch.applyPlainUpdates(plainKeys, updates)
 			require.NoError(t, err)
 
-			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
+			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 			wc := WarmupConfig{
 				CtxFactory: func() (PatriciaContext, func()) {
 					return stateBatch, func() {}
@@ -488,10 +488,10 @@ func Test_HexPatriciaHashed_BrokenUniqueReprParallel(t *testing.T) {
 			fmt.Printf("\n6. Trie batch update (%d updates)\n", len(updates))
 			fmt.Printf("active rows %d touchmap %16b aftermap %16b\n", trieBatchR.activeRows, trieBatchR.touchMap[0], trieBatchR.afterMap[0])
 
-			err := stateBatch.applyPlainUpdates(plainKeys[:], updates[:])
+			err := stateBatch.applyPlainUpdates(plainKeys, updates)
 			require.NoError(t, err)
 
-			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
+			updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 			wc := WarmupConfig{
 				CtxFactory: func() (PatriciaContext, func()) {
 					return stateBatch, func() {}
@@ -584,10 +584,10 @@ func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
 		fmt.Printf("1. Trie sequential update (%d updates)\n", len(updates))
 		// for i := 0; i < len(updates); i++ {
 		// err := stateSeq.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1])
-		err := stateSeq.applyPlainUpdates(plainKeys[:], updates[:])
+		err := stateSeq.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
+		updsOne := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 
 		sequentialRoot, err := trieSequential.Process(ctx, updsOne, "", nil, WarmupConfig{})
 		require.NoError(t, err)
@@ -612,10 +612,10 @@ func Test_ParallelHexPatriciaHashed_EdgeCases(t *testing.T) {
 
 		fmt.Printf("\n2. Trie batch update (%d updates)\n", len(updates))
 
-		err := stateBatch.applyPlainUpdates(plainKeys[:], updates[:])
+		err := stateBatch.applyPlainUpdates(plainKeys, updates)
 		require.NoError(t, err)
 
-		updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys[:], updates[:])
+		updsTwo := WrapKeyUpdatesParallel(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 
 		wc := WarmupConfig{
 			CtxFactory: func() (PatriciaContext, func()) {
@@ -750,9 +750,9 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 		Build()
 
 	trieSequential := NewHexPatriciaHashed(length.Addr, stateSeq)
-	trieSequential.trace = true
+	//trieSequential.trace = true
 	trieBatch := NewHexPatriciaHashed(length.Addr, stateBatch)
-	trieBatch.trace = true
+	//trieBatch.trace = true
 
 	plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
 
@@ -960,7 +960,7 @@ func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	s.Root = make([]byte, 128)
 	rnd := rand.New(rand.NewSource(42))
 
-	n, err := rnd.Read(s.Root[:])
+	n, err := rnd.Read(s.Root)
 	require.NoError(t, err)
 	require.Equal(t, len(s.Root), n)
 	s.RootPresent = true
@@ -990,7 +990,7 @@ func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	err = s1.Decode(enc)
 	require.NoError(t, err)
 
-	require.Equal(t, s.Root[:], s1.Root[:])
+	require.Equal(t, s.Root, s1.Root)
 	require.Equal(t, s.Depths[:], s1.Depths[:])
 	require.Equal(t, s.AfterMap[:], s1.AfterMap[:])
 	require.Equal(t, s.TouchMap[:], s1.TouchMap[:])
@@ -1199,7 +1199,7 @@ func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 
 	err = trieOne.SetState(buf)
 	require.NoError(t, err)
-	require.Equal(t, beforeRestore[:], trieOne.root.hash[:])
+	require.Equal(t, beforeRestore, trieOne.root.hash[:])
 
 	hashAfterRestore, err := trieOne.RootHash()
 	require.NoError(t, err)
@@ -2021,7 +2021,7 @@ func Test_WitnessTrie_GenerateWitness(t *testing.T) {
 		toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 		defer toProcess.Close()
 
-		hph.trace = true
+		//hph.trace = true
 		root, err := hph.Process(ctx, toProcess, "", nil, WarmupConfig{})
 		require.NoError(t, err)
 

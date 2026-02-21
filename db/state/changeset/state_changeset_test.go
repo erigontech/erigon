@@ -59,12 +59,13 @@ func TestNoOverflowPages(t *testing.T) {
 func TestSerializeDeserializeDiff(t *testing.T) {
 	t.Parallel()
 
-	var d []kv.DomainEntryDiff
 	step1, step2, step3 := [8]byte{1}, [8]byte{2}, [8]byte{3}
-	d = append(d, kv.DomainEntryDiff{Key: "key188888888", Value: []byte("value1"), PrevStepBytes: step1[:]})
-	d = append(d, kv.DomainEntryDiff{Key: "key288888888", Value: []byte("value2"), PrevStepBytes: step2[:]})
-	d = append(d, kv.DomainEntryDiff{Key: "key388888888", Value: []byte("value3"), PrevStepBytes: step3[:]})
-	d = append(d, kv.DomainEntryDiff{Key: "key388888888", Value: []byte("value3"), PrevStepBytes: step1[:]})
+	d := []kv.DomainEntryDiff{
+		{Key: "key188888888", Value: []byte("value1"), PrevStepBytes: step1[:]},
+		{Key: "key288888888", Value: []byte("value2"), PrevStepBytes: step2[:]},
+		{Key: "key388888888", Value: []byte("value3"), PrevStepBytes: step3[:]},
+		{Key: "key388888888", Value: []byte("value3"), PrevStepBytes: step1[:]},
+	}
 
 	serialized := changeset.SerializeDiffSet(d, nil)
 	fmt.Println(len(serialized))
@@ -86,17 +87,19 @@ func TestSerializeDeserializeDiffEmpty(t *testing.T) {
 func TestMergeDiffSet(t *testing.T) {
 	t.Parallel()
 
-	var d1 []kv.DomainEntryDiff
 	step1, step2, step3 := [8]byte{1}, [8]byte{2}, [8]byte{3}
-	d1 = append(d1, kv.DomainEntryDiff{Key: "key188888888", Value: []byte("value1"), PrevStepBytes: step1[:]})
-	d1 = append(d1, kv.DomainEntryDiff{Key: "key288888888", Value: []byte("value2"), PrevStepBytes: step2[:]})
-	d1 = append(d1, kv.DomainEntryDiff{Key: "key388888888", Value: []byte("value3"), PrevStepBytes: step3[:]})
+	d1 := []kv.DomainEntryDiff{
+		{Key: "key188888888", Value: []byte("value1"), PrevStepBytes: step1[:]},
+		{Key: "key288888888", Value: []byte("value2"), PrevStepBytes: step2[:]},
+		{Key: "key388888888", Value: []byte("value3"), PrevStepBytes: step3[:]},
+	}
 
-	var d2 []kv.DomainEntryDiff
 	step4, step5, step6 := [8]byte{4}, [8]byte{5}, [8]byte{6}
-	d2 = append(d2, kv.DomainEntryDiff{Key: "key188888888", Value: []byte("value5"), PrevStepBytes: step5[:]})
-	d2 = append(d2, kv.DomainEntryDiff{Key: "key388888888", Value: []byte("value6"), PrevStepBytes: step6[:]})
-	d2 = append(d2, kv.DomainEntryDiff{Key: "key488888888", Value: []byte("value4"), PrevStepBytes: step4[:]})
+	d2 := []kv.DomainEntryDiff{
+		{Key: "key188888888", Value: []byte("value5"), PrevStepBytes: step5[:]},
+		{Key: "key388888888", Value: []byte("value6"), PrevStepBytes: step6[:]},
+		{Key: "key488888888", Value: []byte("value4"), PrevStepBytes: step4[:]},
+	}
 
 	merged := changeset.MergeDiffSets(d1, d2)
 	require.Len(t, merged, 4)
