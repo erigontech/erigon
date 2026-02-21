@@ -2,6 +2,7 @@ participants_matrix:
   el:
     - el_type: erigon
       el_image: test/erigon:current
+      el_log_level: "debug"
   cl:
     - cl_type: lighthouse
       cl_image: sigp/lighthouse:v7.0.1
@@ -18,6 +19,7 @@ additional_services:
 assertoor_params:
   run_stability_check: false
   run_block_proposal_check: true
+  image: ethpandaops/assertoor:v0.0.17
   tests:
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/all-opcodes-test.yaml
     - https://raw.githubusercontent.com/ethpandaops/assertoor-test/master/assertoor-tests/blob-transactions-test.yaml
