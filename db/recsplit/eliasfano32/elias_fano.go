@@ -295,13 +295,13 @@ func Seek(data []byte, n uint64) (uint64, bool) {
 func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok bool) {
 	SearchForwardStats.Calls.Add(1)
 	if v == 0 {
-		SearchForwardStats.EarlyFound.Add(1)
+		SearchForwardStats.FoundZero.Add(1)
 		return ef.Min(), 0, true
 	}
 	// TODO: large EF on mmap can be cold and calling `Max` in the begin of `Seek` can be a mistake (PageFault at the end). But need careful test in another ticket
 	_max := ef.Max()
 	if v == _max {
-		SearchForwardStats.EarlyFound.Add(1)
+		SearchForwardStats.FoundMax.Add(1)
 		return _max, ef.count, true
 	}
 	if v > _max {
