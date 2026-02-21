@@ -176,7 +176,6 @@ func TestCreateGas(t *testing.T) {
 
 		domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 		require.NoError(t, err)
-		defer domains.Close()
 
 		stateReader := rpchelper.NewLatestStateReader(domains.AsGetter(tx))
 		stateWriter := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), 0)
