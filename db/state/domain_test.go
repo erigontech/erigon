@@ -1104,11 +1104,12 @@ func TestDomain_OpenFilesWithDeletions(t *testing.T) {
 	dom.Close()
 }
 
-func emptyTestDomain(aggStep uint64) *Domain {
+func emptyTestDomain(t testing.TB, aggStep uint64) *Domain {
+	t.Helper()
 	cfg := statecfg.Schema.AccountsDomain
 
 	salt := uint32(1)
-	dirs := datadir2.New(os.TempDir())
+	dirs := datadir2.New(t.TempDir())
 	cfg.Hist.IiCfg.Name = kv.InvertedIdx(0)
 	cfg.Hist.IiCfg.FileVersion = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
 	cfg.Hist.IiCfg.Accessors = statecfg.AccessorHashMap
@@ -1125,7 +1126,7 @@ func emptyTestDomain(aggStep uint64) *Domain {
 func TestScanStaticFilesD(t *testing.T) {
 	t.Parallel()
 
-	d := emptyTestDomain(1)
+	d := emptyTestDomain(t, 1)
 
 	files := []string{
 		"v1.0-accounts.0-1.kv",

@@ -878,7 +878,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 func TestScanStaticFiles(t *testing.T) {
 	t.Parallel()
 
-	ii := emptyTestInvertedIndex(1)
+	ii := emptyTestInvertedIndex(t, 1)
 	files := []string{
 		"v1.0-accounts.0-1.ef",
 		"v1.0-accounts.1-2.ef",
@@ -894,7 +894,7 @@ func TestScanStaticFiles(t *testing.T) {
 }
 
 func TestCtxFiles(t *testing.T) {
-	ii := emptyTestInvertedIndex(1)
+	ii := emptyTestInvertedIndex(t, 1)
 	files := []string{
 		"v1.0-accounts.0-1.ef", // overlap with same `endTxNum=4`
 		"v1.0-accounts.1-2.ef",
