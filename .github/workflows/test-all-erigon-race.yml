@@ -97,8 +97,7 @@ jobs:
         id: vars
         run: echo "buildtag=race-${{ matrix.test-group }}" >> "$GITHUB_OUTPUT"
 
-      - name: Setup Go environment
-        if: needs.source-of-changes.outputs.changed_files != 'true'
+      - if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: ./.github/actions/setup-erigon
         id: erigon
 
