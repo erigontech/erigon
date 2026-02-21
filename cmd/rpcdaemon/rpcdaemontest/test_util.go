@@ -448,7 +448,7 @@ func CreateTestExecModuleForTraces(t *testing.T) *execmoduletester.ExecModuleTes
 	return m
 }
 
-func CreateTestSentryForTracesCollision(t *testing.T) *execmoduletester.ExecModuleTester {
+func CreateTestExecModuleForTracesCollision(t *testing.T) *execmoduletester.ExecModuleTester {
 	var (
 		// Generate a canonical chain to act as the main dataset
 		// A sender who makes transactions, has some funds

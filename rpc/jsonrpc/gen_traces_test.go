@@ -288,7 +288,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 }
 
 func TestGeneratedTraceApiCollision(t *testing.T) {
-	m := rpcdaemontest.CreateTestSentryForTracesCollision(t)
+	m := rpcdaemontest.CreateTestExecModuleForTracesCollision(t)
 	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
 	traces, err := api.Transaction(context.Background(), common.HexToHash("0xb2b9fa4c999c1c8370ce1fbd1c4315a9ce7f8421fe2ebed8a9051ff2e4e7e3da"), new(bool), nil)
 	if err != nil {

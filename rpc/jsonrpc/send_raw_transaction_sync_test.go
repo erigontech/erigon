@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package executiontests
+package jsonrpc_test
 
 import (
 	"math/big"
@@ -24,11 +24,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
-
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/types"
 )
 
 func TestSendRawTransactionSync(t *testing.T) {
@@ -37,7 +37,7 @@ func TestSendRawTransactionSync(t *testing.T) {
 	}
 
 	assert := require.New(t)
-	eat := DefaultEngineApiTester(t)
+	eat := engineapitester.DefaultEngineApiTester(t)
 
 	tx, err := eat.Transactor.CreateSimpleTransfer(eat.CoinbaseKey, common.Address{1}, big.NewInt(1234))
 	assert.NoError(err)
@@ -91,7 +91,7 @@ func TestSendRawTransactionSyncTimeout(t *testing.T) {
 	}
 
 	assert := require.New(t)
-	eat := DefaultEngineApiTester(t)
+	eat := engineapitester.DefaultEngineApiTester(t)
 
 	tx, err := eat.Transactor.CreateSimpleTransfer(eat.CoinbaseKey, common.Address{1}, big.NewInt(1234))
 	assert.NoError(err)
