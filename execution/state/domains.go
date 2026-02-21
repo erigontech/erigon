@@ -655,7 +655,6 @@ func (d *domain[K, V]) Merge(other *domain[K, V]) {
 func (d *domain[K, V]) FlushUpdates() {
 	d.lock.Lock()
 	defer d.lock.Unlock()
-	fmt.Println("FLUSH", d.name(), d.updates)
 	for k, vs := range d.updates.Iter() {
 		if len(vs) > 0 {
 			// the value cache only handles latest values for the moment
@@ -788,7 +787,7 @@ type storageCache struct {
 func newStorageCache(limit uint32) (*storageCache, error) {
 	c, err := freelru.NewSharded[storageLocation, ValueWithTxNum[uint256.Int]](limit, func(k storageLocation) uint32 {
 		return uint32(uintptr(unsafe.Pointer((*handle[common.Address])(unsafe.Pointer(&k.address)).value))) ^
-			uint32(uintptr(unsafe.Pointer((*handle[common.Hash])(unsafe.Pointer(&k.address)).value)))
+			uint32(uintptr(unsafe.Pointer((*handle[common.Hash])(unsafe.Pointer(&k.key)).value)))
 	})
 
 	if err != nil {
@@ -1181,6 +1180,8 @@ func (u *codeUpdates) Put(k accounts.Address, v ValueWithTxNum[codeWithHash]) (i
 			if valueInMap != newValue {
 				inserted = true
 			}
+		} else {
+			inserted = true
 		}
 		return newValue
 	})
