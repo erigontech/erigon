@@ -274,6 +274,16 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		batchLock.Lock()
 		batch = append(batch, req)
 		batchLock.Unlock()
+
+		// Flush immediately when transaction data arrives to minimize latency.
+		// For POOLED_TRANSACTIONS_66 and TRANSACTIONS_66, the data is ready to be
+		// added to the pool without waiting for the next ticker tick.
+		// This is critical for the blob tx ordering test where a 2s payload window
+		// requires transactions gossiped from a peer to reach the pool quickly.
+		if req.Id == sentryproto.MessageId_POOLED_TRANSACTIONS_66 ||
+			req.Id == sentryproto.MessageId_TRANSACTIONS_66 {
+			flushBatch()
+		}
 	}
 }
 

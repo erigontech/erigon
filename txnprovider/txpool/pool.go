@@ -158,6 +158,7 @@ type TxPool struct {
 		index   int
 		txnHash common.Hash
 	}
+	newRemoteTxnsCh chan struct{} // signals Run() that AddRemoteTxns was called; triggers immediate processRemoteTxns
 }
 
 type ValidateAA interface {
@@ -240,6 +241,7 @@ func New(
 		builderNotifyNewTxns:    builderNotifyNewTxns,
 		newSlotsStreams:         newSlotsStreams,
 		logger:                  logger,
+		newRemoteTxnsCh:         make(chan struct{}, 1),
 		auths:                   make(map[AuthAndNonce]*metaTxn),
 		blobHashToTxn: make(map[common.Hash]struct {
 			index   int
@@ -928,6 +930,12 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
 		}
 		p.unprocessedRemoteByHash[hashS] = len(p.unprocessedRemoteTxns.Txns)
 		p.unprocessedRemoteTxns.Append(txn, newTxns.Senders.At(i), false)
+	}
+	// Signal Run() to process remote txns immediately rather than waiting for the ticker.
+	// Non-blocking: if the channel already has a pending signal, skip.
+	select {
+	case p.newRemoteTxnsCh <- struct{}{}:
+	default:
 	}
 }
 
@@ -2066,6 +2074,17 @@ func (p *TxPool) Run(ctx context.Context) error {
 			return err
 		case <-logEvery.C:
 			p.logStats()
+		case <-p.newRemoteTxnsCh:
+			if !p.Started() {
+				continue
+			}
+			if err := p.processRemoteTxns(ctx); err != nil {
+				if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
+					time.Sleep(3 * time.Second)
+					continue
+				}
+				p.logger.Error("[txpool] process batch remote txns", "err", err)
+			}
 		case <-processRemoteTxnsEvery.C:
 			if !p.Started() {
 				continue
