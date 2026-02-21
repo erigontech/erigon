@@ -57,6 +57,31 @@ func (s *searchForwardStats) Reset() {
 	}
 }
 
+func (s *searchForwardStats) String() string {
+	calls := s.Calls.Load()
+	if calls == 0 {
+		return "searchForward: no calls"
+	}
+	notFound := s.NotFound.Load()
+	getCalls := s.GetCalls.Load()
+	out := fmt.Sprintf("searchForward: calls=%d notFound=%d(%.1f%%) avgRestarts=%.3f scanLen:[",
+		calls, notFound, float64(notFound)/float64(calls)*100,
+		float64(getCalls)/float64(calls))
+	for k := range s.ScanLen {
+		if k > 0 {
+			out += " "
+		}
+		v := s.ScanLen[k].Load()
+		label := fmt.Sprintf("%d", k)
+		if k == len(s.ScanLen)-1 {
+			label = fmt.Sprintf("%d+", k)
+		}
+		out += fmt.Sprintf("%s=%.1f%%", label, float64(v)/float64(calls)*100)
+	}
+	out += "]"
+	return out
+}
+
 // EliasFano algo overview https://www.antoniomallia.it/sorted-integers-compression-with-elias-fano-encoding.html
 // P. Elias. Efficient storage and retrieval by content and address of static files. J. ACM, 21(2):246–260, 1974.
 // Partitioned Elias-Fano Indexes http://groups.di.unipi.it/~ottavian/files/elias_fano_sigir14.pdf
