@@ -112,7 +112,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		blockNum = txNum / blockSize
 		writer.SetTxNum(txNum)
 		domains.SetTxNum(txNum)
-		domains.SetBlockNum(txNum / blockSize)
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
 		var locVal common.Hash
@@ -244,7 +243,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 		txNum = tt
 		blockNum = txNum / blockSize
 		domains.SetTxNum(txNum)
-		domains.SetBlockNum(blockNum)
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
 		//fmt.Printf("tx+ %d addr %x\n", txNum, addrs[i])
@@ -418,7 +416,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 			txNum = tt
 			blockNum = txNum / blockSize
 			domains.SetTxNum(txNum)
-			domains.SetBlockNum(blockNum)
 			binary.BigEndian.PutUint64(aux[:], txNum)
 
 			err = writer.UpdateAccountData(addrs[i], &accounts.Account{}, accs[i])

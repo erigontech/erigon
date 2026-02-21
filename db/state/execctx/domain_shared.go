@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"math"
 	"runtime"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -92,7 +91,6 @@ type SharedDomains struct {
 
 	txNum             uint64
 	currentStep       kv.Step
-	blockNum          atomic.Uint64
 	trace             bool //nolint
 	commitmentCapture bool
 	mem               kv.TemporalMemBatch
@@ -172,7 +170,6 @@ func (sd *SharedDomains) Merge(sdTxNum uint64, other *SharedDomains, otherTxNum 
 
 	sd.txNum = otherTxNum
 	sd.currentStep = kv.Step(otherTxNum / sd.stepSize)
-	sd.blockNum.Store(other.blockNum.Load())
 	return nil
 }
 
@@ -324,12 +321,6 @@ func (sd *SharedDomains) SetTxNum(txNum uint64) {
 
 func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
 
-func (sd *SharedDomains) BlockNum() uint64 { return sd.blockNum.Load() }
-
-func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
-	sd.blockNum.Store(blockNum)
-}
-
 func (sd *SharedDomains) SetTrace(b, capture bool) []string {
 	sd.trace = b
 	sd.commitmentCapture = capture
@@ -364,7 +355,6 @@ func (sd *SharedDomains) Close() {
 		return
 	}
 
-	sd.SetBlockNum(0)
 	sd.SetTxNum(0)
 	sd.ResetPendingUpdates()
 
@@ -649,7 +639,6 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 	if err != nil {
 		return 0, 0, err
 	}
-	sd.SetBlockNum(blockNum)
 	sd.SetTxNum(txNum)
 	return txNum, blockNum, nil
 }
