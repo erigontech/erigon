@@ -49,8 +49,9 @@ const (
 
 // searchForwardStatsT collects per-call metrics for searchForward.
 //
-// UpperCalls[n] = number of Seeks that called upper() exactly n times (n in 1..4).
-// UpperCalls[5] = Seeks that hit the fallback binary search (5+ upper() calls).
+// UpperCalls[1]    = fast-early: upper(0) >= hi, no binary search.
+// UpperCalls[2]    = fast-late:  upper(1) >= hi, skip all but first element.
+// UpperCalls[last] = slow-path:  fell through to sort.Search.
 // UpperBitsSizeBuckets[k] = seeks on EFs whose len(upperBits) is in [2^(k-1), 2^k).
 // Bucket 0 = empty array; last bucket = 2^16+ words (clamped).
 //
@@ -97,18 +98,12 @@ func (s *searchForwardStatsT) String() string {
 		out += fmt.Sprintf("    [%s]: %d (%.1f%%)\n", label, v, float64(v)/float64(total)*100)
 	}
 
-	out += "  upper() calls per seek:\n"
-	for i, cnt := range s.UpperCalls {
-		v := cnt.Load()
-		if v == 0 {
-			continue
-		}
-		label := fmt.Sprintf("%d", i)
-		if i == len(s.UpperCalls)-1 {
-			label = "fallback(5+)"
-		}
-		out += fmt.Sprintf("    [%s]: %d (%.1f%%)\n", label, v, float64(v)/float64(total)*100)
-	}
+	fastEarly := s.UpperCalls[1].Load()
+	fastLate := s.UpperCalls[2].Load()
+	slow := s.UpperCalls[len(s.UpperCalls)-1].Load()
+	out += fmt.Sprintf("  fast-early (upper(0)>=hi): %d (%.1f%%)\n", fastEarly, float64(fastEarly)/float64(total)*100)
+	out += fmt.Sprintf("  fast-late  (upper(1)>=hi): %d (%.1f%%)\n", fastLate, float64(fastLate)/float64(total)*100)
+	out += fmt.Sprintf("  slow-path  (sort.Search):  %d (%.1f%%)\n", slow, float64(slow)/float64(total)*100)
 	return out
 }
 
@@ -313,59 +308,32 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 	}
 
 	hi := v >> ef.l
-	maxHi := ef.maxOffset >> ef.l
 
-	// Interpolation search on the upper-bits index.
-	// For smooth sequences (block numbers, tx indices) this converges in 2–3 upper() calls
-	// vs sort.Search's log2(count)≈20 calls, each potentially faulting a different mmap page.
-	// Invariant: upper(j) < hi for all j < lo; upper(hiB) >= hi.
-	lo, hiB := uint64(0), ef.count
-	loVal := ef.upper(lo) // touches start of ef.jump[]/ef.upperBits[] — often warm after first call
-	hiVal := maxHi        // upper(ef.count) by construction; no extra mmap read
-	upperCalls := 1       // counted the upper(lo) call above
 	k := bits.Len(uint(len(ef.upperBits)))
 	if k >= len(SearchForwardStats.UpperBitsSizeBuckets) {
 		k = len(SearchForwardStats.UpperBitsSizeBuckets) - 1
 	}
 	SearchForwardStats.UpperBitsSizeBuckets[k].Add(1)
 
-	const maxIter = 4
-	for i := 0; i < maxIter && lo < hiB; i++ {
-		if loVal >= hi {
-			break
-		}
-		// spread > 0: loVal < hi <= hiVal, so hiVal-loVal >= hi-loVal >= 1
-		spread := hiVal - loVal
-		mid := lo + uint64(float64(hi-loVal)/float64(spread)*float64(hiB-lo))
-		if mid <= lo {
-			mid = lo + 1
-		} else if mid >= hiB {
-			mid = hiB - 1
-		}
-		midVal := ef.upper(mid)
-		upperCalls++
-		if midVal < hi {
-			lo = mid + 1
-			loVal = midVal // lower bound: actual upper(lo) >= midVal
-		} else {
-			hiB = mid
-			hiVal = midVal
-		}
-	}
-	// Fallback: binary search in remaining [lo, hiB] range.
-	// For smooth data the loop above converges; this handles adversarial cases.
-	usedFallback := lo < hiB && loVal < hi
-	if usedFallback {
-		i := sort.Search(int(hiB+1-lo), func(i int) bool {
-			upperCalls++
-			return ef.upper(lo+uint64(i)) >= hi
-		})
-		lo += uint64(i)
-	}
-	if usedFallback || upperCalls >= len(SearchForwardStats.UpperCalls) {
-		SearchForwardStats.UpperCalls[len(SearchForwardStats.UpperCalls)-1].Add(1)
+	// Probe positions 0 and 1 before falling back to binary search.
+	// Real-data profiling (mainnet 9M blocks) shows:
+	//   - 83% of seeks are on tiny EFs (upperBits 1–3 words, fits in one cache line)
+	//   - 64% have upper(0) >= hi (fast-early): target is at or before element 0
+	//   sort.Search always starts at count/2 and takes log2(count) steps to reach 0;
+	//   probing 0 (and 1) first avoids that cost for the dominant cases.
+	lo := uint64(0)
+	firstUpper := ef.upper(0)
+	if firstUpper >= hi {
+		SearchForwardStats.UpperCalls[1].Add(1)
+	} else if ef.count > 0 && ef.upper(1) >= hi {
+		SearchForwardStats.UpperCalls[2].Add(1)
+		lo = 1
 	} else {
-		SearchForwardStats.UpperCalls[upperCalls].Add(1)
+		SearchForwardStats.UpperCalls[len(SearchForwardStats.UpperCalls)-1].Add(1)
+		i := sort.Search(int(ef.count)-1, func(i int) bool {
+			return ef.upper(uint64(i+2)) >= hi
+		})
+		lo = uint64(i + 2)
 	}
 
 	for j := lo; j <= ef.count; j++ {
