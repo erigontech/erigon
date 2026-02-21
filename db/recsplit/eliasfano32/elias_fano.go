@@ -55,7 +55,7 @@ type EliasFano struct {
 	lowerBitsMask  uint64
 	count          uint64
 	u              uint64
-	l              uint64
+	l              uint64 //  number of lower bits per element. = floor(log2(average gap between elements))
 	maxOffset      uint64
 	i              uint64
 	wordsUpperBits int
@@ -156,16 +156,18 @@ func (ef *EliasFano) Build() {
 }
 
 func (ef *EliasFano) get(i uint64) (val uint64, window uint64, sel int, currWord uint64, lower uint64) {
-	lower = i * ef.l
-	idx64, shift := lower/64, lower%64
-	lower = ef.lowerBits[idx64] >> shift
-	if shift > 0 {
-		lower |= ef.lowerBits[idx64+1] << (64 - shift)
+	if ef.l != 0 {
+		lowerPos := i * ef.l
+		idx64, shift := lowerPos/64, lowerPos%64
+		lower = ef.lowerBits[idx64] >> shift
+		if shift > 0 {
+			lower |= ef.lowerBits[idx64+1] << (64 - shift)
+		}
 	}
 
 	jumpSuperQ := (i / superQ) * superQSize
 	jumpInsideSuperQ := (i % superQ) / q
-	idx64, shift = jumpSuperQ+1+(jumpInsideSuperQ>>1), 32*(jumpInsideSuperQ%2)
+	idx64, shift := jumpSuperQ+1+(jumpInsideSuperQ>>1), 32*(jumpInsideSuperQ%2)
 	mask := uint64(0xffffffff) << shift
 	jump := ef.jump[jumpSuperQ] + (ef.jump[idx64]&mask)>>shift
 
@@ -245,7 +247,7 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 	}
 
 	hi := v >> ef.l
-	lo := uint64(0)
+	var lo uint64
 
 	// Real-data (eth-mainnet):
 	//   - 80% of seeks are on tiny EFs: 35% upperBits=8bytes, 45% upperBits=8-24bytes ( 1–3 words = 8–24 bytes, fits in one cache line)
@@ -279,7 +281,7 @@ func (ef *EliasFano) searchReverse(v uint64) (nextV uint64, nextI uint64, ok boo
 	}
 
 	hi := v >> ef.l
-	lo := uint64(0)
+	var lo uint64
 
 	found := ef.upper(ef.count) <= hi // fast-lane. 60% hit-rate
 	if !found {
