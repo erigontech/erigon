@@ -34,22 +34,25 @@ import (
 
 // SearchForwardStats collects runtime statistics for searchForward.
 // Always active (atomic ops). Call SearchForwardStats.Reset() to clear.
+// Invariant: Calls == EarlyFound + NotFound + sum(ScanLen[*])
 var SearchForwardStats searchForwardStats
 
 type searchForwardStats struct {
-	Calls    atomic.Uint64
-	NotFound atomic.Uint64
-	GetCalls atomic.Uint64 // total get()/Get2() inner-loop restarts in linear scan
+	Calls      atomic.Uint64 // total calls
+	EarlyFound atomic.Uint64 // returned without binary search: v==0 or v==_max
+	NotFound   atomic.Uint64 // returned ok=false: v>_max or scan exhausted
+	GetCalls   atomic.Uint64 // total get()/Get2() inner-loop restarts in linear scan
 
-	// ScanLen[k] = searches where element at offset k from binary-search result was the answer.
-	// ScanLen[0]: first candidate was the answer (best case, no scan needed).
-	// ScanLen[1]: second candidate (covered by Get2 with no extra restart).
+	// ScanLen[k]: searches that reached binary search and found answer at offset k.
+	// ScanLen[0]: first candidate was the answer.
 	// ScanLen[9]: 10th candidate or beyond.
+	// Invariant: sum(ScanLen[*]) == Calls - EarlyFound - NotFound
 	ScanLen [10]atomic.Uint64
 }
 
 func (s *searchForwardStats) Reset() {
 	s.Calls.Store(0)
+	s.EarlyFound.Store(0)
 	s.NotFound.Store(0)
 	s.GetCalls.Store(0)
 	for i := range s.ScanLen {
@@ -62,11 +65,19 @@ func (s *searchForwardStats) String() string {
 	if calls == 0 {
 		return "searchForward: no calls"
 	}
+	earlyFound := s.EarlyFound.Load()
 	notFound := s.NotFound.Load()
 	getCalls := s.GetCalls.Load()
-	out := fmt.Sprintf("searchForward: calls=%d notFound=%d(%.1f%%) avgRestarts=%.3f scanLen:[",
-		calls, notFound, float64(notFound)/float64(calls)*100,
-		float64(getCalls)/float64(calls))
+	searched := calls - earlyFound - notFound // calls that reached the binary search
+	pct := func(n uint64) float64 {
+		if calls == 0 {
+			return 0
+		}
+		return float64(n) / float64(calls) * 100
+	}
+	out := fmt.Sprintf("searchForward: calls=%d earlyFound=%d(%.1f%%) notFound=%d(%.1f%%) searched=%d avgRestarts=%.3f scanLen:[",
+		calls, earlyFound, pct(earlyFound), notFound, pct(notFound), searched,
+		float64(getCalls)/float64(max(searched, 1)))
 	for k := range s.ScanLen {
 		if k > 0 {
 			out += " "
@@ -76,7 +87,7 @@ func (s *searchForwardStats) String() string {
 		if k == len(s.ScanLen)-1 {
 			label = fmt.Sprintf("%d+", k)
 		}
-		out += fmt.Sprintf("%s=%.1f%%", label, float64(v)/float64(calls)*100)
+		out += fmt.Sprintf("%s=%.1f%%", label, float64(v)/float64(max(searched, 1))*100)
 	}
 	out += "]"
 	return out
@@ -286,11 +297,13 @@ func Seek(data []byte, n uint64) (uint64, bool) {
 func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok bool) {
 	SearchForwardStats.Calls.Add(1)
 	if v == 0 {
+		SearchForwardStats.EarlyFound.Add(1)
 		return ef.Min(), 0, true
 	}
 	// TODO: large EF on mmap can be cold and calling `Max` in the begin of `Seek` can be a mistake (PageFault at the end). But need careful test in another ticket
 	_max := ef.Max()
 	if v == _max {
+		SearchForwardStats.EarlyFound.Add(1)
 		return _max, ef.count, true
 	}
 	if v > _max {
