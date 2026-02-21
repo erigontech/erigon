@@ -120,6 +120,7 @@ type TxPool struct {
 	minedBlobTxnsByHash     map[string]*metaTxn              // (hash => mt): map of recently mined blobs
 	isLocalLRU              *simplelru.LRU[string, struct{}] // txn_hash => is_local : to restore isLocal flag of unwinded transactions
 	newPendingTxns          chan Announcements               // notifications about new txns in Pending sub-pool
+	remoteTxnsReady         chan struct{}                    // signalled by AddRemoteTxns to trigger immediate processing
 	all                     *BySenderAndNonce                // senderID => (sorted map of txn nonce => *metaTxn)
 	deletedTxns             []*metaTxn                       // list of discarded txns since last db commit
 	promoted                Announcements
@@ -224,6 +225,7 @@ func New(
 		baseFee:                 NewSubPool(BaseFeeSubPool, cfg.BaseFeeSubPoolLimit),
 		queued:                  NewSubPool(QueuedSubPool, cfg.QueuedSubPoolLimit),
 		newPendingTxns:          newTxns,
+		remoteTxnsReady:         make(chan struct{}, 1),
 		_stateCache:             cache,
 		senders:                 newSendersBatch(tracedSenders),
 		poolDB:                  poolDB,
@@ -918,8 +920,8 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
 	}
 
 	defer addRemoteTxnsTimer.ObserveDuration(time.Now())
+	added := false
 	p.lock.Lock()
-	defer p.lock.Unlock()
 	for i, txn := range newTxns.Txns {
 		hashS := string(txn.IDHash[:])
 		_, ok := p.unprocessedRemoteByHash[hashS]
@@ -928,6 +930,20 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots) {
 		}
 		p.unprocessedRemoteByHash[hashS] = len(p.unprocessedRemoteTxns.Txns)
 		p.unprocessedRemoteTxns.Append(txn, newTxns.Senders.At(i), false)
+		added = true
+	}
+	p.lock.Unlock()
+
+	// Signal the main loop to process remote txns immediately rather than
+	// waiting for the processRemoteTxnsEvery ticker (default: 100ms). This
+	// eliminates the up-to-100ms delay for latency-sensitive paths such as
+	// blob tx ordering tests that have a 2s payload window.
+	if added {
+		select {
+		case p.remoteTxnsReady <- struct{}{}:
+		default:
+			// Already signalled; main loop will process all pending txns
+		}
 	}
 }
 
@@ -2078,6 +2094,23 @@ func (p *TxPool) Run(ctx context.Context) error {
 				}
 
 				p.logger.Error("[txpool] process batch remote txns", "err", err)
+			}
+		case <-p.remoteTxnsReady:
+			// Immediately process remote txns signalled by AddRemoteTxns,
+			// bypassing the processRemoteTxnsEvery ticker delay (default 100ms).
+			// This is critical for blob tx ordering: the txns must reach the
+			// pending pool well within the 2s GetPayload window.
+			if !p.Started() {
+				continue
+			}
+
+			if err := p.processRemoteTxns(ctx); err != nil {
+				if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
+					time.Sleep(3 * time.Second)
+					continue
+				}
+
+				p.logger.Error("[txpool] process batch remote txns (immediate)", "err", err)
 			}
 		case <-commitEvery.C:
 			if p.poolDB != nil && p.Started() {

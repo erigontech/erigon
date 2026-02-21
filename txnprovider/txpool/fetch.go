@@ -229,11 +229,15 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		}
 	}
 
+	// flushNow is a buffered channel used to signal the flush goroutine that
+	// new messages are waiting. This allows immediate processing of blob txns
+	// without waiting for the periodic ticker.
+	flushNow := make(chan struct{}, 1)
+
 	// Start ticker goroutine to flush batch.
-	// Reduced from 1s to 250ms to lower worst-case latency between receiving
-	// a POOLED_TRANSACTIONS_66 response and the transaction entering the pool.
-	// This matters for block builders that need freshly-gossiped transactions
-	// (e.g. multi-client blob tx ordering tests with a 2s payload window).
+	// The ticker acts as a safety net; the primary trigger is flushNow which
+	// fires immediately whenever a new message is added to the batch.
+	// This eliminates the worst-case 250ms latency for blob tx ordering.
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	go func() {
@@ -242,6 +246,8 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 			case <-streamCtx.Done():
 				return
 			case <-ticker.C:
+				flushBatch()
+			case <-flushNow:
 				flushBatch()
 			}
 		}
@@ -274,6 +280,15 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		batchLock.Lock()
 		batch = append(batch, req)
 		batchLock.Unlock()
+
+		// Signal the flush goroutine to process this batch immediately,
+		// eliminating the up-to-250ms ticker delay for latency-sensitive
+		// transactions (e.g. blob txs during a 2s payload window).
+		select {
+		case flushNow <- struct{}{}:
+		default:
+			// Already signalled - flush goroutine will pick up all pending msgs
+		}
 	}
 }
 
