@@ -106,7 +106,7 @@ jobs:
         if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
         run: |
           rm -rf ${{runner.workspace}}/rpc-tests
-          git -c advice.detachedHead=false clone --depth 1 --branch v1.115.0 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
+          git -c advice.detachedHead=false clone --depth 1 --branch canepat/v2 https://github.com/erigontech/rpc-tests ${{runner.workspace}}/rpc-tests
           cd ${{runner.workspace}}/rpc-tests
 
       - name: Clean Erigon Build Directory
@@ -216,18 +216,19 @@ jobs:
             # clean temporary area
             cd $workspace/rpc-tests/perf
             rm -rf ./reports/$network
-          
-            python3 ./run_perf_tests.py --blockchain "$network" \
+
+            # Move to home dir of rpc-tests
+            cd ..
+            go run ./cmd/perf --blockchain "$network" \
                                       --test-type "$method" \
-                                      --pattern-file pattern/"$network"/"$pattern".tar \
+                                      --pattern-file perf/pattern/"$network"/"$pattern".tar \
                                       --test-sequence "$sequence" \
                                       --repetitions 5 \
-                                      --erigon-dir "/" \
-                                      --silk-dir "/" \
-                                      --test-mode 2 \
+                                      --client-build-dir "/" \
                                       --test-report \
                                       --json-report $result_dir/$result_file \
-                                      --testing-daemon $client
+                                      --testing-client $client \
+                                      --not-verify-server-alive  
           
             # Capture test runner script exit status
             perf_exit_status=$?
