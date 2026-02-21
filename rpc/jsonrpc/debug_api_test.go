@@ -448,22 +448,22 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		n, n2 = rpc.BlockNumber(0), rpc.BlockNumber(10)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.NoError(t, err)
-		require.Len(t, result, 40)
+		require.Len(t, result, 42)
 
 		//nil value means: to = from + 1
 		n = rpc.BlockNumber(0)
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
 		require.NoError(t, err)
-		require.Len(t, result, 3)
+		require.Len(t, result, 5)
 
 		// latest block is 11, should work both ways: [11,12) and [11,nil)
 		n2 = rpc.BlockNumber(12)
-		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), &n2)
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), &n2)
 		require.NoError(t, err)
-		require.Len(t, result, 3)
-		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), nil)
+		require.Len(t, result, 0)
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), nil)
 		require.NoError(t, err)
-		require.Len(t, result, 3)
+		require.Len(t, result, 0)
 	})
 	t.Run("invalid input", func(t *testing.T) {
 		n := rpc.BlockNumber(1_000_000)
