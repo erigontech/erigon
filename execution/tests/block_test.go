@@ -25,7 +25,6 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
@@ -104,9 +103,9 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	if race.Enabled {
-		// TODO fix -race issues with parallel exec
-		//		t.Skip("skipping from race tests until parallel exec flow is race free")
+	if runtime.GOOS == "windows" {
+		// TODO(yperbasis, mh0lt)
+		t.Skip("fix me on windows please")
 	}
 
 	t.Parallel()

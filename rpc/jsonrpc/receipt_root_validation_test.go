@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package executiontests
+package jsonrpc_test
 
 import (
 	"context"
@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	enginetypes "github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/types"
@@ -58,15 +59,15 @@ func TestReceiptRootValidationAfterReorg(t *testing.T) {
 	maxReorgDepth := uint64(64)
 	logLvl := log.LvlDebug
 	receiver := common.HexToAddress("0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18")
-	sharedGenesis, coinbaseKey := DefaultEngineApiTesterGenesis(t)
+	sharedGenesis, coinbaseKey := engineapitester.DefaultEngineApiTesterGenesis(t)
 
 	// ==============================================================================================================
 	// Chain A: Deploy Changer + call Change() in block 2, call Change() again in block 3 (no-op SSTOREs, cheap gas)
 	// ==============================================================================================================
 	// After init, all testers share identical block 1 (empty). So the fork point is at block 1,
 	// and chains diverge starting at block 2.
-	chainA := make([]*MockClPayload, 2) // blocks 2 and 3
-	eatA := InitialiseEngineApiTester(t, EngineApiTesterInitArgs{
+	chainA := make([]*engineapitester.MockClPayload, 2) // blocks 2 and 3
+	eatA := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
 		Logger:      testlog.Logger(t, logLvl),
 		DataDir:     t.TempDir(),
 		Genesis:     sharedGenesis,
@@ -75,7 +76,7 @@ func TestReceiptRootValidationAfterReorg(t *testing.T) {
 			config.MaxReorgDepth = maxReorgDepth
 		},
 	})
-	eatA.Run(t, func(ctx context.Context, t *testing.T, eatA EngineApiTester) {
+	eatA.Run(t, func(ctx context.Context, t *testing.T, eatA engineapitester.EngineApiTester) {
 		transactOpts, err := bind.NewKeyedTransactorWithChainID(eatA.CoinbaseKey, eatA.ChainId())
 		require.NoError(t, err)
 		transactOpts.GasLimit = params.MaxTxnGasLimit
@@ -108,8 +109,8 @@ func TestReceiptRootValidationAfterReorg(t *testing.T) {
 	// ==============================================================================================================
 	// Same tx count per block as chain A (2 txs in block 2, 1 tx in block 3) to keep coinbase nonce aligned.
 	// But Changer.Change() is never called, so Changer storage remains {x:0, y:0, z:0}.
-	chainB := make([]*MockClPayload, 2) // blocks 2 and 3
-	eatB := InitialiseEngineApiTester(t, EngineApiTesterInitArgs{
+	chainB := make([]*engineapitester.MockClPayload, 2) // blocks 2 and 3
+	eatB := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
 		Logger:      testlog.Logger(t, logLvl),
 		DataDir:     t.TempDir(),
 		Genesis:     sharedGenesis,
@@ -118,7 +119,7 @@ func TestReceiptRootValidationAfterReorg(t *testing.T) {
 			config.MaxReorgDepth = maxReorgDepth
 		},
 	})
-	eatB.Run(t, func(ctx context.Context, t *testing.T, eatB EngineApiTester) {
+	eatB.Run(t, func(ctx context.Context, t *testing.T, eatB engineapitester.EngineApiTester) {
 		transactOpts, err := bind.NewKeyedTransactorWithChainID(eatB.CoinbaseKey, eatB.ChainId())
 		require.NoError(t, err)
 		transactOpts.GasLimit = params.MaxTxnGasLimit
@@ -148,7 +149,7 @@ func TestReceiptRootValidationAfterReorg(t *testing.T) {
 	// ==============================================================================================================
 	// Sync tester: process chain A, then re-org to chain B, then query receipts for orphaned block 3(A)
 	// ==============================================================================================================
-	eatSync := InitialiseEngineApiTester(t, EngineApiTesterInitArgs{
+	eatSync := engineapitester.InitialiseEngineApiTester(t, engineapitester.EngineApiTesterInitArgs{
 		Logger:      testlog.Logger(t, logLvl),
 		DataDir:     t.TempDir(),
 		Genesis:     sharedGenesis,
@@ -157,7 +158,7 @@ func TestReceiptRootValidationAfterReorg(t *testing.T) {
 			config.MaxReorgDepth = maxReorgDepth
 		},
 	})
-	eatSync.Run(t, func(ctx context.Context, t *testing.T, eatSync EngineApiTester) {
+	eatSync.Run(t, func(ctx context.Context, t *testing.T, eatSync engineapitester.EngineApiTester) {
 		// Insert and commit chain A (blocks 2(A) and 3(A))
 		for _, payload := range chainA {
 			status, err := eatSync.MockCl.InsertNewPayload(ctx, payload)
