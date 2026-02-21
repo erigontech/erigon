@@ -34,20 +34,21 @@ import (
 
 // SearchForwardStats collects runtime statistics for searchForward.
 // Always active (atomic ops). Call SearchForwardStats.Reset() to clear.
-// Invariant: Calls == FoundZero + FoundMax + NotFound + sum(ScanLen[*])
+// Invariant: Calls == FoundZero + FoundMax + NotFoundEarly + NotFoundLate + sum(ScanLen[*])
 var SearchForwardStats searchForwardStats
 
 type searchForwardStats struct {
-	Calls     atomic.Uint64 // total calls
-	FoundZero atomic.Uint64 // v==0: returned Min() without binary search
-	FoundMax  atomic.Uint64 // v==_max: returned Max() without binary search
-	NotFound  atomic.Uint64 // returned ok=false: v>_max or scan exhausted
-	GetCalls  atomic.Uint64 // total get()/Get2() inner-loop restarts in linear scan
+	Calls         atomic.Uint64 // total calls
+	FoundZero     atomic.Uint64 // v==0: returned Min() without binary search
+	FoundMax      atomic.Uint64 // v==_max: returned Max() without binary search
+	NotFoundEarly atomic.Uint64 // v>_max: rejected before binary search
+	NotFoundLate  atomic.Uint64 // scan exhausted after binary search (should be impossible in practice)
+	GetCalls      atomic.Uint64 // total get()/Get2() inner-loop restarts in linear scan
 
 	// ScanLen[k]: searches that reached binary search and found answer at offset k.
 	// ScanLen[0]: first candidate was the answer.
 	// ScanLen[9]: 10th candidate or beyond.
-	// Invariant: sum(ScanLen[*]) == Calls - FoundZero - FoundMax - NotFound
+	// Invariant: sum(ScanLen[*]) == Calls - FoundZero - FoundMax - NotFoundEarly - NotFoundLate
 	ScanLen [10]atomic.Uint64
 }
 
@@ -55,7 +56,8 @@ func (s *searchForwardStats) Reset() {
 	s.Calls.Store(0)
 	s.FoundZero.Store(0)
 	s.FoundMax.Store(0)
-	s.NotFound.Store(0)
+	s.NotFoundEarly.Store(0)
+	s.NotFoundLate.Store(0)
 	s.GetCalls.Store(0)
 	for i := range s.ScanLen {
 		s.ScanLen[i].Store(0)
@@ -69,13 +71,15 @@ func (s *searchForwardStats) String() string {
 	}
 	foundZero := s.FoundZero.Load()
 	foundMax := s.FoundMax.Load()
-	notFound := s.NotFound.Load()
+	notFoundEarly := s.NotFoundEarly.Load()
+	notFoundLate := s.NotFoundLate.Load()
 	getCalls := s.GetCalls.Load()
-	searched := calls - foundZero - foundMax - notFound
+	searched := calls - foundZero - foundMax - notFoundEarly - notFoundLate
 	pct := func(n uint64) float64 { return float64(n) / float64(calls) * 100 }
-	out := fmt.Sprintf("searchForward: calls=%d foundZero=%d(%.1f%%) foundMax=%d(%.1f%%) notFound=%d(%.1f%%) searched=%d avgRestarts=%.3f scanLen:[",
-		calls, foundZero, pct(foundZero), foundMax, pct(foundMax), notFound, pct(notFound), searched,
-		float64(getCalls)/float64(max(searched, 1)))
+	out := fmt.Sprintf("searchForward: calls=%d foundZero=%d(%.1f%%) foundMax=%d(%.1f%%) notFoundEarly=%d(%.1f%%) notFoundLate=%d(%.1f%%) searched=%d avgRestarts=%.3f scanLen:[",
+		calls, foundZero, pct(foundZero), foundMax, pct(foundMax),
+		notFoundEarly, pct(notFoundEarly), notFoundLate, pct(notFoundLate),
+		searched, float64(getCalls)/float64(max(searched, 1)))
 	for k := range s.ScanLen {
 		if k > 0 {
 			out += " "
@@ -305,7 +309,7 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 		return _max, ef.count, true
 	}
 	if v > _max {
-		SearchForwardStats.NotFound.Add(1)
+		SearchForwardStats.NotFoundEarly.Add(1)
 		return 0, 0, false
 	}
 
@@ -343,7 +347,7 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 			return val, j, true
 		}
 	}
-	SearchForwardStats.NotFound.Add(1)
+	SearchForwardStats.NotFoundLate.Add(1)
 	return 0, 0, false
 }
 func (ef *EliasFano) searchReverse(v uint64) (nextV uint64, nextI uint64, ok bool) {
