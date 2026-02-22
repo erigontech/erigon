@@ -29,7 +29,7 @@ import (
 
 func TestTransaction(t *testing.T) {
 	if testing.Short() {
-		t.Skip()
+		t.Skip("slow test")
 	}
 	t.Parallel()
 

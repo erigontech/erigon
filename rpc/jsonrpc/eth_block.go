@@ -345,7 +345,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 	defer tx.Rollback()
 
 	if blockNr == rpc.PendingBlockNumber {
-		b, err := api.blockByNumberWithSenders(ctx, tx, blockNr.Uint64())
+		b, err := api.blockByNumber(ctx, blockNr, tx)
 		if err != nil {
 			return nil, err
 		}

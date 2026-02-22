@@ -229,8 +229,12 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentryproto.Sen
 		}
 	}
 
-	// Start ticker goroutine to flush batch every second
-	ticker := time.NewTicker(1 * time.Second)
+	// Start ticker goroutine to flush batch.
+	// Reduced from 1s to 250ms to lower worst-case latency between receiving
+	// a POOLED_TRANSACTIONS_66 response and the transaction entering the pool.
+	// This matters for block builders that need freshly-gossiped transactions
+	// (e.g. multi-client blob tx ordering tests with a 2s payload window).
+	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	go func() {
 		for {
@@ -560,7 +564,8 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 					minedTxns.Append(utx, sender, false)
 					return nil
 				}); err != nil && !errors.Is(err, context.Canceled) {
-					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "index", i, "err", err)
+					txnType, _ := PeekTransactionType(change.Txs[i])
+					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "txnType", txnType, "index", i, "err", err)
 					continue // 1 txn handling error must not stop batch processing
 				}
 
@@ -581,7 +586,8 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 					}
 					return nil
 				}); err != nil && !errors.Is(err, context.Canceled) {
-					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "index", i, "err", err)
+					txnType, _ := PeekTransactionType(change.Txs[i])
+					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "txnType", txnType, "index", i, "err", err)
 					continue // 1 txn handling error must not stop batch processing
 				}
 			}

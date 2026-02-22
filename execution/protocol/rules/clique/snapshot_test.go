@@ -37,10 +37,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/rules/clique"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -437,7 +437,7 @@ func TestClique(t *testing.T) {
 			engine := clique.New(&config, chainspec.CliqueSnapshot, cliqueDB, log.New())
 			engine.FakeDiff = true
 			// Create a pristine blockchain with the genesis injected
-			m := mock.MockWithGenesisEngine(t, genesis, engine)
+			m := execmoduletester.NewWithGenesisEngine(t, genesis, engine)
 
 			chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, len(tt.votes), func(j int, gen *blockgen.BlockGen) {
 				// Cast the vote contained in this block
