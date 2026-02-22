@@ -61,3 +61,9 @@ func (f *fastKeccakState) BlockSize() int { return 136 }
 func (f *fastKeccakState) Read(out []byte) (int, error) {
 	return f.h.Read(out)
 }
+
+// Sum256 computes the Keccak-256 hash of data in a single shot with zero heap allocations
+// on platforms with assembly backends (arm64, amd64).
+func Sum256(data []byte) [32]byte {
+	return keccak.Sum256(data)
+}

@@ -6,9 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	keccak "github.com/erigontech/fastkeccak"
-
-	cryptokeccak "github.com/erigontech/erigon/common/crypto/keccak"
+	"github.com/erigontech/erigon/common/crypto/keccak"
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -162,13 +160,13 @@ func updatedNibs(num uint16) string {
 
 // hashes plainKey using keccakState and writes the hashed key nibbles to dest with respect to hashedKeyOffset.
 // Note that this function does not respect plainKey length so hashing it at once without splitting to account/storage part.
-func hashKey(keccak cryptokeccak.KeccakState, plainKey []byte, dest []byte, hashedKeyOffset int16, hashBuf []byte) error {
+func hashKey(hasher keccak.KeccakState, plainKey []byte, dest []byte, hashedKeyOffset int16, hashBuf []byte) error {
 	_, _ = hashBuf[length.Hash-1], dest[length.Hash*2-1] // bounds checks elimination
-	keccak.Reset()
-	if _, err := keccak.Write(plainKey); err != nil {
+	hasher.Reset()
+	if _, err := hasher.Write(plainKey); err != nil {
 		return err
 	}
-	if _, err := keccak.Read(hashBuf); err != nil {
+	if _, err := hasher.Read(hashBuf); err != nil {
 		return err
 	}
 	hb := hashBuf[hashedKeyOffset/2:]
