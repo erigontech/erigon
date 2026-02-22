@@ -570,7 +570,7 @@ func (d *Decompressor) WithReadAhead(f func() error) error {
 	if d == nil || d.mmapHandle1 == nil {
 		return nil
 	}
-	defer d.MadvSequential().DisableReadAhead()
+	defer d.MadvNormal().DisableReadAhead()
 	return f()
 }
 

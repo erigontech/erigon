@@ -90,7 +90,7 @@ func (a *Aggregator) sqeezeDomainFile(ctx context.Context, domain kv.Domain, fro
 		return err
 	}
 	defer decompressor.Close()
-	defer decompressor.MadvSequential().DisableReadAhead()
+	defer decompressor.MadvNormal().DisableReadAhead()
 
 	c, err := seg.NewCompressor(ctx, "sqeeze", to, a.dirs.Tmp, compressCfg, log.LvlInfo, a.logger)
 	if err != nil {

@@ -287,8 +287,8 @@ var (
 
 				bodyBuf, word := make([]byte, 0, 4096), make([]byte, 0, 4096)
 
-				defer d.MadvSequential().DisableReadAhead()
-				defer bodiesSegment.MadvSequential().DisableReadAhead()
+				defer d.MadvNormal().DisableReadAhead()
+				defer bodiesSegment.MadvNormal().DisableReadAhead()
 
 				for {
 					g, bodyGetter := d.MakeGetter(), bodiesSegment.MakeGetter()

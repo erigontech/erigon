@@ -512,7 +512,7 @@ func BuildIndex(ctx context.Context, info FileInfo, indexVersion version.Version
 	defer rs.Close()
 	rs.LogLvl(lvl)
 
-	defer d.MadvSequential().DisableReadAhead()
+	defer d.MadvNormal().DisableReadAhead()
 
 	for {
 		g := d.MakeGetter()
@@ -574,7 +574,7 @@ func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.Rec
 	defer rs.Close()
 	rs.LogLvl(lvl)
 
-	defer d.MadvSequential().DisableReadAhead()
+	defer d.MadvNormal().DisableReadAhead()
 
 	for {
 		g := d.MakeGetter()

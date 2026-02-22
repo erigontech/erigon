@@ -163,8 +163,7 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 				err = fmt.Errorf("panic in file: %s. Stack: %s", fileName, dbg.Stack())
 			}
 		}()
-		item.src.decompressor.MadvSequential()
-		defer item.src.decompressor.DisableReadAhead()
+		defer item.src.decompressor.MadvNormal().DisableReadAhead()
 
 		g := item.src.decompressor.MakeGetter()
 		g.Reset(0)

@@ -237,8 +237,8 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	var histKey []byte
 	var valOffset uint64
 
-	defer hist.MadvSequential().DisableReadAhead()
-	defer efHist.MadvSequential().DisableReadAhead()
+	defer hist.MadvNormal().DisableReadAhead()
+	defer efHist.MadvNormal().DisableReadAhead()
 
 	iiReader := h.InvertedIndex.dataReader(efHist)
 
