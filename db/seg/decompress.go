@@ -552,10 +552,12 @@ type Getter struct {
 	posDict *posTable // Huffman table for positions
 	data    []byte    // compressed bitstream (ptr at 48, len at 56 = CL0)
 	//less hot fields
-	patternDict *patternTable
-	d           *Decompressor
-	fName       string
-	trace       bool
+	patternDict     *patternTable
+	readAheadCtl    *ReadAheadController
+	readAheadNotify uint64 // next dataP threshold to notify the controller
+	d               *Decompressor
+	fName           string
+	trace           bool
 }
 
 func (g *Getter) MadvNormal() MadvDisabler {
@@ -567,6 +569,27 @@ func (g *Getter) Trace(t bool)        { g.trace = t }
 func (g *Getter) Count() int          { return g.d.Count() }
 func (g *Getter) FileName() string    { return g.fName }
 func (g *Getter) GetMetadata() []byte { return g.d.GetMetadata() }
+
+// StartReadAhead starts a manual prefetch controller for this Getter and returns
+// it for deferred cleanup. Typical usage:
+//
+//	defer g.StartReadAhead(DefaultAheadSize, 0).Close()
+//
+// aheadSize: bytes ahead of the read position to keep warm via MADV_WILLNEED.
+// trailSize: bytes behind the read position before issuing MADV_RANDOM on consumed pages;
+//
+//	use 0 when data fits comfortably in RAM, DefaultTrailSize when data >> RAM.
+//
+// Returns nil (and Close() on nil is a no-op) when madvise is unavailable.
+func (g *Getter) StartReadAhead(aheadSize, trailSize int64) *ReadAheadController {
+	if g.d == nil || g.d.mmapHandle1 == nil {
+		return nil
+	}
+	rac := newReadAheadController(g.data, aheadSize, trailSize)
+	g.readAheadCtl = rac
+	g.readAheadNotify = uint64(readAheadNotifyStep)
+	return rac
+}
 
 // nextPosClean aligns to the next byte boundary then reads the next position.
 func (g *Getter) nextPosClean() uint64 {
@@ -755,6 +778,10 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	}
 	g.dataP = postLoopPos
 	g.dataBit = 0
+	if g.readAheadCtl != nil && g.dataP >= g.readAheadNotify {
+		g.readAheadCtl.curPos.Store(g.dataP)
+		g.readAheadNotify = g.dataP + uint64(readAheadNotifyStep)
+	}
 	return buf, postLoopPos
 }
 
@@ -813,6 +840,10 @@ func (g *Getter) Skip() (uint64, int) {
 	}
 	// Uncovered characters
 	g.dataP += add
+	if g.readAheadCtl != nil && g.dataP >= g.readAheadNotify {
+		g.readAheadCtl.curPos.Store(g.dataP)
+		g.readAheadNotify = g.dataP + uint64(readAheadNotifyStep)
+	}
 	return g.dataP, wordLen
 }
 
