@@ -164,7 +164,6 @@ func (w *Warmuper) Start() {
 		return
 	}
 
-	w.startTime = time.Now()
 	w.work = make(chan warmupWorkItem, w.numWorkers*64)
 	w.g, w.ctx = errgroup.WithContext(w.ctx)
 
@@ -288,13 +287,6 @@ func (w *Warmuper) Wait() error {
 	// Only close the channel once
 	close(w.work)
 	w.g.Wait()
-
-	log.Debug(fmt.Sprintf("[%s][warmup] completed", w.logPrefix),
-		"keys", common.PrettyCounter(int(w.keysProcessed.Load())),
-		"maxDepth", w.maxDepth,
-		"workers", w.numWorkers,
-		"spent", time.Since(w.startTime),
-	)
 
 	return nil
 }
