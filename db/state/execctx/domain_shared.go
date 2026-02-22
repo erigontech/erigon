@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -89,8 +90,8 @@ type SharedDomains struct {
 
 	logger log.Logger
 
-	txNum             uint64
-	currentStep       kv.Step
+	txNum       atomic.Uint64
+	currentStep atomic.Uint64 // stores kv.Step as uint64
 	trace             bool //nolint
 	commitmentCapture bool
 	mem               kv.TemporalMemBatch
@@ -168,8 +169,8 @@ func (sd *SharedDomains) Merge(sdTxNum uint64, other *SharedDomains, otherTxNum 
 		sd.sdCtx.SetPendingUpdate(otherUpd)
 	}
 
-	sd.txNum = otherTxNum
-	sd.currentStep = kv.Step(otherTxNum / sd.stepSize)
+	sd.txNum.Store(otherTxNum)
+	sd.currentStep.Store(otherTxNum / sd.stepSize)
 	return nil
 }
 
@@ -315,11 +316,11 @@ func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
 // Requires for sd.rwTx because of commitment evaluation in shared domains if stepSize is reached
 func (sd *SharedDomains) SetTxNum(txNum uint64) {
-	sd.txNum = txNum
-	sd.currentStep = kv.Step(txNum / sd.stepSize)
+	sd.txNum.Store(txNum)
+	sd.currentStep.Store(txNum / sd.stepSize)
 }
 
-func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
+func (sd *SharedDomains) TxNum() uint64 { return sd.txNum.Load() }
 
 func (sd *SharedDomains) SetTrace(b, capture bool) []string {
 	sd.trace = b
@@ -389,7 +390,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		// files merge so this is not a problem in practice. file 0-1 will be non-deterministic
 		// but file 0-2 will be deterministic as it will include all entries from file 0-1 and so on.
 		if v, ok := sd.stateCache.Get(domain, k); ok {
-			return v, sd.currentStep, nil
+			return v, kv.Step(sd.currentStep.Load()), nil
 		}
 	}
 
