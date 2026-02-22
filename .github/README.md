@@ -84,15 +84,15 @@ The save key appends a hash of the installed module directories so that cache en
 
 | | Key |
 |-|-----|
-| Save | `gocache-{workflow}-{job}-{goversion}-{os}-{arch}-{branch}-{sha}-{run_id}` |
-| Restore (exact) | `gocache-{workflow}-{job}-{goversion}-{os}-{arch}-{branch}-{sha}-{run_id}` |
-| Restore fallback 1 | `gocache-{workflow}-{job}-{goversion}-{os}-{arch}-{branch}-{sha}-` |
-| Restore fallback 2 | `gocache-{workflow}-{job}-{goversion}-{os}-{arch}-{branch}-{parent}-` |
-| Restore fallback 3 | `gocache-{workflow}-{job}-{goversion}-{os}-{arch}-{branch}-` |
-| Restore fallback 4 | `gocache-{workflow}-{job}-{goversion}-{os}-{arch}-{base_ref}-{parent}-` |
-| Restore fallback 5 | `gocache-{workflow}-{job}-{goversion}-{os}-{arch}-{base_ref}-` |
+| Save | `gocache-{workflow_file}-{job}-{goversion}-{os}-{arch}-{branch}-{sha}-{run_id}` |
+| Restore (exact) | `gocache-{workflow_file}-{job}-{goversion}-{os}-{arch}-{branch}-{sha}-{run_id}` |
+| Restore fallback 1 | `gocache-{workflow_file}-{job}-{goversion}-{os}-{arch}-{branch}-{sha}-` |
+| Restore fallback 2 | `gocache-{workflow_file}-{job}-{goversion}-{os}-{arch}-{branch}-{parent}-` |
+| Restore fallback 3 | `gocache-{workflow_file}-{job}-{goversion}-{os}-{arch}-{branch}-` |
+| Restore fallback 4 | `gocache-{workflow_file}-{job}-{goversion}-{os}-{arch}-{base_ref}-{parent}-` |
+| Restore fallback 5 | `gocache-{workflow_file}-{job}-{goversion}-{os}-{arch}-{base_ref}-` |
 
-Each workflow+job combination gets its own cache namespace automatically via `github.workflow` and `github.job`. Branch-aware keys let PR caches restore from the base branch when no PR-specific cache exists.
+Each workflow+job combination gets its own cache namespace automatically via the workflow filename (e.g. `test-all-erigon`) and `github.job`. Branch-aware keys let PR caches restore from the base branch when no PR-specific cache exists.
 
 The build cache contains a `testexpire.txt` file that controls test cache staleness. It holds a Unix timestamp in nanoseconds; cached test results from before that time are re-run. It's only updated by `go clean -testcache`. Separately, `trim.txt` controls disk eviction of old cache entries (both build and test) that haven't been accessed recently.
 

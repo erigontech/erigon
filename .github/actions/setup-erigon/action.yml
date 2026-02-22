@@ -176,6 +176,7 @@ runs:
         echo "ERIGON_CI_GOCACHE=$(go env GOCACHE)" >> "$GITHUB_ENV"
         echo "ERIGON_CI_GOVERSION=$(go env GOVERSION)" >> "$GITHUB_ENV"
         echo "ERIGON_CI_MODCACHE=$(go env GOMODCACHE)" >> "$GITHUB_ENV"
+        echo "ERIGON_CI_WORKFLOW=$(basename "${GITHUB_WORKFLOW_REF%%@*}" .yml)" >> "$GITHUB_ENV"
 
     # Note we only cache $(go env GOMODCACHE)/cache/download, the rest is derived from that part. We don't use this for lint, because it fetches extra metadata.
 
