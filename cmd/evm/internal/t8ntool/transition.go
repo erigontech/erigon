@@ -271,18 +271,18 @@ func Main(ctx *cli.Context) error {
 				env.Timestamp, env.ParentTimestamp))
 		}
 		prestate.Env.Difficulty = calcDifficulty(chainConfig, env.Number, env.Timestamp,
-			env.ParentTimestamp, env.ParentDifficulty, env.ParentUncleHash)
+			env.ParentTimestamp, *env.ParentDifficulty, env.ParentUncleHash)
 	}
 
 	// manufacture block from above inputs
 	header := NewHeader(prestate.Env)
 
 	var ommerHeaders = make([]*types.Header, len(prestate.Env.Ommers))
-	header.Number.Add(header.Number, big.NewInt(int64(len(prestate.Env.Ommers))))
+	header.Number.AddUint64(&header.Number, uint64(len(prestate.Env.Ommers)))
 	for i, ommer := range prestate.Env.Ommers {
-		var ommerN big.Int
+		var ommerN uint256.Int
 		ommerN.SetUint64(header.Number.Uint64() - ommer.Delta)
-		ommerHeaders[i] = &types.Header{Coinbase: ommer.Address, Number: &ommerN}
+		ommerHeaders[i] = &types.Header{Coinbase: ommer.Address, Number: ommerN}
 	}
 	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals)
 
@@ -628,9 +628,11 @@ func dispatchOutput(ctx *cli.Context, baseDir string, result *protocol.Ephemeral
 func NewHeader(env stEnv) *types.Header {
 	var header types.Header
 	header.Coinbase = env.Coinbase
-	header.Difficulty = env.Difficulty
+	if env.Difficulty != nil {
+		header.Difficulty = *env.Difficulty
+	}
 	header.GasLimit = env.GasLimit
-	header.Number = new(big.Int).SetUint64(env.Number)
+	header.Number.SetUint64(env.Number)
 	header.Time = env.Timestamp
 	header.BaseFee = env.BaseFee
 	header.MixDigest = env.MixDigest

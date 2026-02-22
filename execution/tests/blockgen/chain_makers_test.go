@@ -60,7 +60,7 @@ func TestGenerateChain(t *testing.T) {
 	// Ensure that key1 has some funds in the genesis block.
 	gspec := &types.Genesis{
 		Config:     &chain.Config{HomesteadBlock: new(big.Int), ChainID: big.NewInt(1)},
-		Difficulty: big.NewInt(0),
+		Difficulty: uint256.NewInt(0),
 		Alloc:      types.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
 	}
 	m := execmoduletester.NewWithGenesis(t, gspec, key1)
@@ -113,7 +113,7 @@ func TestGenerateChain(t *testing.T) {
 
 	st := state.New(m.NewStateReader(tx))
 
-	if big.NewInt(5).Cmp(m.Current(tx).Number()) != 0 {
+	if m.Current(tx).NumberU64() != 5 {
 		t.Errorf("wrong block number: %d", m.Current(tx).Number())
 	}
 	balance, err := st.GetBalance(accounts.InternAddress(addr1))

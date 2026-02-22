@@ -192,7 +192,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			gasUsed += _gasUsed
 		} else {
 			var _gasUsed uint64
-			_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, block.Number(), block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, nil)
+			_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, nil)
 			gasUsed += _gasUsed
 		}
 		if err == nil {
@@ -347,7 +347,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	txCtx.TxHash = txn.Hash()
 
 	// Trace the transaction and return
-	_, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, block.Number(), block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, nil)
+	_, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.Header().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, nil)
 	return err
 }
 
@@ -400,11 +400,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 
 	var baseFee *uint256.Int
 	if header.BaseFee != nil {
-		var overflow bool
-		baseFee, overflow = uint256.FromBig(header.BaseFee)
-		if overflow {
-			return errors.New("header.BaseFee uint256 overflow")
-		}
+		baseFee = new(uint256.Int).Set(header.BaseFee)
 	}
 
 	if config != nil && config.BlockOverrides != nil {
