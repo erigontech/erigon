@@ -256,11 +256,11 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return err
 	}
 
-	indexWorkers := estimate.IndexSnapshot.Workers()
-	diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "E3 Indexing"})
-	if err := agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
-		return err
-	}
+	//indexWorkers := estimate.IndexSnapshot.Workers()
+	//diaglib.Send(diaglib.CurrentSyncSubStage{SubStage: "E3 Indexing"})
+	//if err := agg.BuildMissedAccessors(ctx, indexWorkers); err != nil {
+	//	return err
+	//}
 
 	if temporal, ok := tx.(*temporal.RwTx); ok {
 		temporal.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
