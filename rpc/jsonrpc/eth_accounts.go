@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -34,6 +35,12 @@ import (
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
 func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
+	// Erigon receives the pending block (header+txs) from the miner via gRPC but not the
+	// resulting EVM state. Executing pending txs on-the-fly would require architectural
+	// changes, so we match Geth and return an error.
+	if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
+		return nil, errors.New("pending state is not available")
+	}
 	tx, err1 := api.db.BeginTemporalRo(ctx)
 	if err1 != nil {
 		return nil, fmt.Errorf("getBalance cannot open tx: %w", err1)
@@ -84,6 +91,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 			reply.Nonce++
 			return (*hexutil.Uint64)(&reply.Nonce), nil
 		}
+		return nil, errors.New("pending state is not available")
 	}
 	tx, err1 := api.db.BeginTemporalRo(ctx)
 	if err1 != nil {
@@ -119,6 +127,10 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 
 // GetCode implements eth_getCode. Returns the byte code at a given address (if it's a smart contract).
 func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+	// See GetBalance for why pending returns an error.
+	if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
+		return nil, errors.New("pending state is not available")
+	}
 	tx, err1 := api.db.BeginTemporalRo(ctx)
 	if err1 != nil {
 		return nil, fmt.Errorf("getCode cannot open tx: %w", err1)
@@ -158,6 +170,10 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 
 // GetStorageAt implements eth_getStorageAt. Returns the value from a storage position at a given address.
 func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
+	// See GetBalance for why pending returns an error.
+	if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
+		return "", errors.New("pending state is not available")
+	}
 	var empty []byte
 	// Validation for index i.e. storage slot is non-standard: it can be interpreted as QUANTITY (stricter) or as DATA (like Hive tests do).
 	// Waiting for a spec, we choose the latter because it's more general, but we check that the length is not greater than 64 hex-digits.
