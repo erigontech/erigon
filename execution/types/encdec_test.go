@@ -107,15 +107,15 @@ func (tr *TRand) RandHeader() *Header {
 		TxHash:                tr.RandHash(),                              // common.Hash
 		ReceiptHash:           tr.RandHash(),                              // common.Hash
 		Bloom:                 tr.RandBloom(),                             // Bloom
-		Difficulty:            tr.RandBig(),                               // *big.Int
-		Number:                tr.RandBig(),                               // *big.Int
+		Difficulty:            *tr.RandUint256(),                          // uint256.Int
+		Number:                *tr.RandUint256(),                          // uint256.Int
 		GasLimit:              *tr.RandUint64(),                           // uint64
 		GasUsed:               *tr.RandUint64(),                           // uint64
 		Time:                  *tr.RandUint64(),                           // uint64
 		Extra:                 tr.RandBytes(tr.RandIntInRange(128, 1024)), // []byte
 		MixDigest:             tr.RandHash(),                              // common.Hash
 		Nonce:                 BlockNonce(tr.RandBytes(8)),                // BlockNonce
-		BaseFee:               tr.RandBig(),                               // *big.Int
+		BaseFee:               tr.RandUint256(),                           // *uint256.Int
 		WithdrawalsHash:       &wHash,                                     // *common.Hash
 		BlobGasUsed:           tr.RandUint64(),                            // *uint64
 		ExcessBlobGas:         tr.RandUint64(),                            // *uint64
@@ -159,6 +159,10 @@ func (tr *TRand) RandHeaderReflectAllFields(skipFields ...string) *Header {
 			field.Set(reflect.ValueOf(BlockNonce(tr.RandBytes(8))))
 		case reflect.TypeFor[*big.Int]():
 			field.Set(reflect.ValueOf(tr.RandBig()))
+		case reflect.TypeFor[uint256.Int]():
+			field.Set(reflect.ValueOf(*tr.RandUint256()))
+		case reflect.TypeFor[*uint256.Int]():
+			field.Set(reflect.ValueOf(tr.RandUint256()))
 		case reflect.TypeFor[uint64]():
 			field.Set(reflect.ValueOf(*tr.RandUint64()))
 		case reflect.TypeFor[*uint64]():
@@ -236,13 +240,13 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 	switch txType {
 	case LegacyTxType:
 		return &LegacyTx{
-			CommonTx: commonTx, //nolint
+			CommonTx: commonTx.copyData(),
 			GasPrice: uint256.NewInt(*tr.RandUint64()),
 		}
 	case AccessListTxType:
 		return &AccessListTx{
 			LegacyTx: LegacyTx{
-				CommonTx: commonTx, //nolint
+				CommonTx: commonTx.copyData(),
 				GasPrice: uint256.NewInt(*tr.RandUint64()),
 			},
 			ChainID:    uint256.NewInt(*tr.RandUint64()),
@@ -250,7 +254,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 		}
 	case DynamicFeeTxType:
 		return &DynamicFeeTransaction{
-			CommonTx:   commonTx, //nolint
+			CommonTx:   commonTx.copyData(),
 			ChainID:    uint256.NewInt(*tr.RandUint64()),
 			TipCap:     uint256.NewInt(*tr.RandUint64()),
 			FeeCap:     uint256.NewInt(*tr.RandUint64()),
@@ -260,7 +264,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 		r := *tr.RandUint64()
 		return &BlobTx{
 			DynamicFeeTransaction: DynamicFeeTransaction{
-				CommonTx:   commonTx, //nolint
+				CommonTx:   commonTx.copyData(),
 				ChainID:    uint256.NewInt(*tr.RandUint64()),
 				TipCap:     uint256.NewInt(*tr.RandUint64()),
 				FeeCap:     uint256.NewInt(*tr.RandUint64()),
@@ -272,7 +276,7 @@ func (tr *TRand) RandTransaction(_type int) Transaction {
 	case SetCodeTxType:
 		return &SetCodeTransaction{
 			DynamicFeeTransaction: DynamicFeeTransaction{
-				CommonTx:   commonTx, //nolint
+				CommonTx:   commonTx.copyData(),
 				ChainID:    uint256.NewInt(*tr.RandUint64()),
 				TipCap:     uint256.NewInt(*tr.RandUint64()),
 				FeeCap:     uint256.NewInt(*tr.RandUint64()),

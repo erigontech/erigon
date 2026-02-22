@@ -17,13 +17,19 @@
 package integrity
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -33,6 +39,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -203,20 +211,20 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 	}
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentCtx().SetLimitedHistoryStateReader(tx, maxTxNum) // to use tx.Debug().GetLatestFromFiles with maxTxNum
-	err = sd.SeekCommitment(ctx, tx)                                 // seek commitment again to use the new state reader instead
+	latestTxNum, _, err := sd.SeekCommitment(ctx, tx)                // seek commitment again to use the new state reader instead
 	if err != nil {
 		return nil, err
 	}
-	if sd.TxNum() > maxTxNum {
-		return nil, fmt.Errorf("%w: commitment root sd txNum should is gt maxTxNum: %d > %d", ErrIntegrity, sd.TxNum(), maxTxNum)
+	if latestTxNum > maxTxNum {
+		return nil, fmt.Errorf("%w: commitment root sd txNum should is gt maxTxNum: %d > %d", ErrIntegrity, latestTxNum, maxTxNum)
 	}
-	if sd.TxNum() > info.blockMaxTxNum {
-		return nil, fmt.Errorf("%w: commitment root sd txNum should is gt blockMaxTxNum: %d > %d", ErrIntegrity, sd.TxNum(), info.blockMaxTxNum)
+	if latestTxNum > info.blockMaxTxNum {
+		return nil, fmt.Errorf("%w: commitment root sd txNum should is gt blockMaxTxNum: %d > %d", ErrIntegrity, latestTxNum, info.blockMaxTxNum)
 	}
-	if sd.TxNum() < info.blockMinTxNum {
-		return nil, fmt.Errorf("%w: commitment root sd txNum should is lt blockMinTxNum: %d < %d", ErrIntegrity, sd.TxNum(), info.blockMinTxNum)
+	if latestTxNum < info.blockMinTxNum {
+		return nil, fmt.Errorf("%w: commitment root sd txNum should is lt blockMinTxNum: %d < %d", ErrIntegrity, latestTxNum, info.blockMinTxNum)
 	}
-	if sd.TxNum() == 0 {
+	if latestTxNum == 0 {
 		return nil, fmt.Errorf("%w: commitment root sd txNum should not be zero", ErrIntegrity)
 	}
 	if info.PartialBlock() {
@@ -236,14 +244,14 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 
 func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, info commitmentRootInfo, f state.VisibleFile, logger log.Logger) error {
 	touchLoggingVisitor := func(k []byte) {
-		logger.Debug("account touch for root block", "key", common.Address(k), "blockNum", sd.BlockNum(), "file", filepath.Base(f.Fullpath()))
+		logger.Debug("account touch for root block", "key", common.Address(k), "blockNum", info.blockNum, "file", filepath.Base(f.Fullpath()))
 	}
 	touches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, info.blockMinTxNum, info.txNum+1, touchLoggingVisitor)
 	if err != nil {
 		return err
 	}
 	logger.Info("recomputing commitment root after", "touches", touches, "file", filepath.Base(f.Fullpath()))
-	recomputedBytes, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, sd.BlockNum(), sd.TxNum(), "integrity", nil /* commitProgress */)
+	recomputedBytes, err := sd.ComputeCommitment(ctx, tx, false /* saveStateAfter */, info.blockNum, info.txNum, "integrity", nil /* commitProgress */)
 	if err != nil {
 		return err
 	}
@@ -748,15 +756,15 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 	sd.GetCommitmentCtx().SetHistoryStateReader(tx, toTxNum)
 	sd.GetCommitmentCtx().SetTrace(logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentContext().SetDeferBranchUpdates(false)
-	err = sd.SeekCommitment(ctx, tx) // seek commitment again with new history state reader
+	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx) // seek commitment again with new history state reader
 	if err != nil {
 		return err
 	}
-	if sd.BlockNum() != blockNum {
-		return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d", sd.BlockNum(), blockNum)
+	if latestBlockNum != blockNum {
+		return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d", latestBlockNum, blockNum)
 	}
-	if sd.TxNum() != maxTxNum {
-		return fmt.Errorf("commitment state txNum doesn't match maxTxNum: %d != %d", sd.TxNum(), maxTxNum)
+	if latestTxNum != maxTxNum {
+		return fmt.Errorf("commitment state txNum doesn't match maxTxNum: %d != %d", latestTxNum, maxTxNum)
 	}
 	logger.Info("commitment recalc info", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
 	touchLoggingVisitor := func(k []byte) {
@@ -807,17 +815,1175 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 		return fmt.Errorf("invalid blk range: %d >= %d", from, to)
 	}
 	start := time.Now()
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(estimate.AlmostAllCPUs())
 	for blockNum := from; blockNum < to; blockNum++ {
-		err := CheckCommitmentHistAtBlk(ctx, db, br, blockNum, logger)
-		if err != nil {
-			return err
-		}
+		blockNum := blockNum
+		g.Go(func() error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if err := CheckCommitmentHistAtBlk(ctx, db, br, blockNum, logger); err != nil {
+				return fmt.Errorf("checkCommitmentHistAtBlk: %d, %w", blockNum, err)
+			}
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return err
 	}
 	dur := time.Since(start)
 	blks := to - from
 	rate := float64(blks) / dur.Seconds()
 	logger.Info("checked commitment hist at blk range", "dur", dur, "blks", blks, "blks/s", rate, "from", from, "to", to)
 	return nil
+}
+
+func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fromStep uint64, logger log.Logger) error {
+	start := time.Now()
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	aggTx := state.AggTx(tx)
+	files := aggTx.Files(kv.CommitmentDomain)
+	stepSize := aggTx.StepSize()
+	var integrityErr error
+	var totalFiles int
+	for _, file := range files {
+		if !strings.HasSuffix(file.Fullpath(), ".kv") {
+			continue
+		}
+		startTxNum := file.StartRootNum()
+		fileStep := startTxNum / stepSize
+		if fileStep < fromStep {
+			continue
+		}
+		totalFiles++
+
+		var checkErr error
+		if startTxNum == 0 {
+			// Base file: forward check (commitment refs count <= domain entries count)
+			checkErr = checkStateCorrespondenceBase(ctx, file, stepSize, failFast, logger)
+		} else {
+			// Non-base file: reverse check (every domain key is in commitment refs)
+			// Include the next commitment file's refs to handle step boundary effects:
+			// accounts written near the end of a step may have their commitment branch
+			// data in the next step's file.
+			// Collect all previous files for no-op write detection.
+			var nextFile state.VisibleFile
+			var prevFiles []state.VisibleFile
+			for j := 0; j < len(files); j++ {
+				if files[j].StartRootNum() == file.EndRootNum() && strings.HasSuffix(files[j].Fullpath(), ".kv") {
+					nextFile = files[j]
+				}
+				if files[j].EndRootNum() <= file.StartRootNum() && strings.HasSuffix(files[j].Fullpath(), ".kv") {
+					prevFiles = append(prevFiles, files[j])
+				}
+			}
+			checkErr = checkStateCorrespondenceReverse(ctx, file, nextFile, prevFiles, stepSize, failFast, logger)
+		}
+		if checkErr != nil {
+			if !errors.Is(checkErr, ErrIntegrity) {
+				return checkErr
+			}
+			if failFast {
+				return checkErr
+			}
+			logger.Warn(checkErr.Error())
+			integrityErr = checkErr
+			continue
+		}
+	}
+	logger.Info("[verify-state] done", "dur", time.Since(start), "files", totalFiles)
+	return integrityErr
+}
+
+// checkStateCorrespondenceBase verifies base files (startTxNum==0) where commitment
+// branches reference ALL keys in the trie, and the accounts/storage files contain
+// all those keys. Forward check: commitment ref count <= domain entry count.
+func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) error {
+	start := time.Now()
+	fileName := filepath.Base(file.Fullpath())
+	startTxNum := file.StartRootNum()
+	endTxNum := file.EndRootNum()
+
+	logger.Info("[verify-state] checking base file", "kv", fileName, "startTxNum", startTxNum, "endTxNum", endTxNum)
+
+	// Open commitment decompressor + reader
+	commDecomp, err := seg.NewDecompressor(file.Fullpath())
+	if err != nil {
+		return err
+	}
+	defer commDecomp.Close()
+	commDecomp.MadvSequential()
+	commCompression := statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression
+	commReader := seg.NewReader(commDecomp.MakeGetter(), commCompression)
+
+	// Open accounts decompressor + reader
+	accDecomp, accReader, accClose, err := deriveDecompAndReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.AccountsDomain)
+	if err != nil {
+		return err
+	}
+	defer accClose()
+
+	// Open storage decompressor + reader
+	stoDecomp, storageReader, storageClose, err := deriveDecompAndReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.StorageDomain)
+	if err != nil {
+		return err
+	}
+	defer storageClose()
+
+	// Count domain entries (key/value pairs, so divide by 2)
+	expectedAccounts := uint64(accDecomp.Count()) / 2
+	expectedStorages := uint64(stoDecomp.Count()) / 2
+
+	isReferencing := state.MayContainValuesPlainKeyReferencing(stepSize, startTxNum, endTxNum)
+
+	// Track unique keys found in commitment branches
+	accountOffsets := make(map[uint64]struct{}) // for referenced files
+	storageOffsets := make(map[uint64]struct{}) // for referenced files
+	accountPlain := make(map[string]struct{})   // for plain key files
+	storagePlain := make(map[string]struct{})   // for plain key files
+
+	totalKeys := uint64(commDecomp.Count()) / 2
+	logTicker := time.NewTicker(30 * time.Second)
+	defer logTicker.Stop()
+	branchKeyBuf := make([]byte, 0, 128)
+	branchValueBuf := make([]byte, 0, datasize.MB.Bytes())
+	plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
+	var branchKeys uint64
+	var integrityErr error
+
+	for commReader.HasNext() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logTicker.C:
+			at := fmt.Sprintf("%d/%d", branchKeys, totalKeys)
+			percent := fmt.Sprintf("%.1f%%", float64(branchKeys)/float64(totalKeys)*100)
+			logger.Info("[verify-state] progress", "at", at, "p", percent, "kv", fileName)
+		default:
+		}
+
+		branchKey, _ := commReader.Next(branchKeyBuf[:0])
+		if !commReader.HasNext() {
+			err = errors.New("invalid key/value pair during decompression")
+			if failFast {
+				return fmt.Errorf("%w: %s in %s", ErrIntegrity, err, fileName)
+			}
+			integrityErr = fmt.Errorf("%w: %s in %s", ErrIntegrity, err, fileName)
+			logger.Warn(err.Error())
+			continue
+		}
+		branchValue, _ := commReader.Next(branchValueBuf[:0])
+
+		if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+			continue
+		}
+		branchKeys++
+
+		branchData := commitment.BranchData(branchValue)
+
+		// Check completeness
+		if !branchData.IsComplete() {
+			touchMap := uint16(0)
+			afterMap := uint16(0)
+			if len(branchData) >= 4 {
+				touchMap = binary.BigEndian.Uint16(branchData[0:])
+				afterMap = binary.BigEndian.Uint16(branchData[2:])
+			}
+			err := fmt.Errorf("%w: incomplete branch at key=%x (touchMap=0x%04x afterMap=0x%04x) in %s", ErrIntegrity, branchKey, touchMap, afterMap, fileName)
+			if failFast {
+				return err
+			}
+			logger.Warn(err.Error())
+			integrityErr = err
+			continue
+		}
+
+		// Walk the branch to extract all referenced keys
+		_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+			if isStorage {
+				if len(key) == length.Addr+length.Hash {
+					// Plain key
+					storagePlain[string(key)] = struct{}{}
+					return key, nil
+				}
+				if isReferencing {
+					// Referenced key — decode offset
+					offset := state.DecodeReferenceKey(key)
+					if offset >= uint64(storageReader.Size()) {
+						err := fmt.Errorf("%w: storage reference key %x out of bounds for branch %x in %s: %d vs %d", ErrIntegrity, key, branchKey, fileName, offset, storageReader.Size())
+						if failFast {
+							return nil, err
+						}
+						logger.Warn(err.Error())
+						return key, nil
+					}
+					storageOffsets[offset] = struct{}{}
+					// Also dereference and validate key length
+					storageReader.Reset(offset)
+					plainKey, _ := storageReader.Next(plainKeyBuf[:0])
+					if len(plainKey) != length.Addr+length.Hash {
+						err := fmt.Errorf("%w: storage reference key %x has invalid plainKey len=%d for branch %x in %s", ErrIntegrity, key, len(plainKey), branchKey, fileName)
+						if failFast {
+							return nil, err
+						}
+						logger.Warn(err.Error())
+					}
+					return plainKey, nil
+				}
+				// Unknown key format
+				err := fmt.Errorf("%w: unexpected storage key len=%d for branch %x in %s", ErrIntegrity, len(key), branchKey, fileName)
+				if failFast {
+					return nil, err
+				}
+				logger.Warn(err.Error())
+				return key, nil
+			}
+
+			// Account key
+			if len(key) == length.Addr {
+				// Plain key
+				accountPlain[string(key)] = struct{}{}
+				return key, nil
+			}
+			if isReferencing {
+				// Referenced key — decode offset
+				offset := state.DecodeReferenceKey(key)
+				if offset >= uint64(accReader.Size()) {
+					err := fmt.Errorf("%w: account reference key %x out of bounds for branch %x in %s: %d vs %d", ErrIntegrity, key, branchKey, fileName, offset, accReader.Size())
+					if failFast {
+						return nil, err
+					}
+					logger.Warn(err.Error())
+					return key, nil
+				}
+				accountOffsets[offset] = struct{}{}
+				// Also dereference and validate key length
+				accReader.Reset(offset)
+				plainKey, _ := accReader.Next(plainKeyBuf[:0])
+				if len(plainKey) != length.Addr {
+					err := fmt.Errorf("%w: account reference key %x has invalid plainKey len=%d for branch %x in %s", ErrIntegrity, key, len(plainKey), branchKey, fileName)
+					if failFast {
+						return nil, err
+					}
+					logger.Warn(err.Error())
+				}
+				return plainKey, nil
+			}
+			// Unknown key format
+			err := fmt.Errorf("%w: unexpected account key len=%d for branch %x in %s", ErrIntegrity, len(key), branchKey, fileName)
+			if failFast {
+				return nil, err
+			}
+			logger.Warn(err.Error())
+			return key, nil
+		})
+		if err != nil {
+			if failFast {
+				return err
+			}
+			logger.Warn(err.Error())
+			integrityErr = err
+		}
+	}
+
+	// Compare counts
+	var foundAccounts, foundStorages uint64
+	if isReferencing {
+		foundAccounts = uint64(len(accountOffsets))
+		foundStorages = uint64(len(storageOffsets))
+	} else {
+		foundAccounts = uint64(len(accountPlain))
+		foundStorages = uint64(len(storagePlain))
+	}
+
+	// Forward check: commitment must not reference MORE keys than exist in domain files.
+	// Commitment may reference FEWER keys because branch data for accounts written near
+	// step boundaries may land in the next step's commitment file.
+	if foundAccounts > expectedAccounts {
+		err := fmt.Errorf("%w: FAIL %s accounts_in_commitment=%d > accounts_in_file=%d (extra=%d)", ErrIntegrity, fileName, foundAccounts, expectedAccounts, foundAccounts-expectedAccounts)
+		if failFast {
+			return err
+		}
+		logger.Warn(err.Error())
+		integrityErr = err
+	}
+	if foundStorages > expectedStorages {
+		err := fmt.Errorf("%w: FAIL %s storage_in_commitment=%d > storage_in_file=%d (extra=%d)", ErrIntegrity, fileName, foundStorages, expectedStorages, foundStorages-expectedStorages)
+		if failFast {
+			return err
+		}
+		logger.Warn(err.Error())
+		integrityErr = err
+	}
+
+	dur := time.Since(start)
+	if integrityErr == nil {
+		logger.Info("[verify-state] key correspondence PASS (base)", "kv", fileName,
+			"accounts", fmt.Sprintf("%d/%d", foundAccounts, expectedAccounts),
+			"storage", fmt.Sprintf("%d/%d", foundStorages, expectedStorages),
+			"dur", dur)
+
+		// Phase 2: Hash verification — only runs if key correspondence passes.
+		numWorkers := dbg.EnvInt("CHECK_VERIFY_STATE_WORKERS", runtime.NumCPU())
+		hashErr := checkHashVerification(ctx, file, stepSize, failFast, numWorkers, logger)
+		if hashErr != nil {
+			integrityErr = hashErr
+		}
+	}
+	return integrityErr
+}
+
+// checkStateCorrespondenceReverse verifies non-base files (startTxNum > 0) by checking
+// that every key in accounts.kv and storage.kv is referenced by some commitment branch.
+//
+// nextFile (optional) is the next commitment .kv file. Refs from it are also extracted
+// to handle boundary effects: accounts written near the end of a step may have their
+// commitment branch data in the next step's file.
+//
+// Approach: walk commitment branches → write all extracted plain keys to temp files →
+// sort+dedup → merge-join with domain .kv files (which are also sorted by key).
+func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile, nextFile state.VisibleFile, prevFiles []state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) error {
+	start := time.Now()
+	fileName := filepath.Base(file.Fullpath())
+	startTxNum := file.StartRootNum()
+	endTxNum := file.EndRootNum()
+
+	logger.Info("[verify-state] checking non-base file", "kv", fileName, "startTxNum", startTxNum, "endTxNum", endTxNum)
+
+	// Open commitment decompressor + reader
+	commDecomp, err := seg.NewDecompressor(file.Fullpath())
+	if err != nil {
+		return err
+	}
+	defer commDecomp.Close()
+	commDecomp.MadvSequential()
+	commCompression := statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression
+	commReader := seg.NewReader(commDecomp.MakeGetter(), commCompression)
+
+	// Open accounts decompressor + reader (for dereferencing and reverse check)
+	accDecomp, accReader, accClose, err := deriveDecompAndReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.AccountsDomain)
+	if err != nil {
+		return err
+	}
+	defer accClose()
+
+	// Open storage decompressor + reader
+	stoDecomp, storageReader, storageClose, err := deriveDecompAndReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.StorageDomain)
+	if err != nil {
+		return err
+	}
+	defer storageClose()
+
+	expectedAccounts := uint64(accDecomp.Count()) / 2
+	expectedStorages := uint64(stoDecomp.Count()) / 2
+
+	// Create temp files for commitment-extracted keys (hex-encoded, one per line)
+	accKeysFile, err := os.CreateTemp("", "verify-acc-*.hex")
+	if err != nil {
+		return err
+	}
+	accKeysPath := accKeysFile.Name()
+	defer dir.RemoveFile(accKeysPath)
+
+	stoKeysFile, err := os.CreateTemp("", "verify-sto-*.hex")
+	if err != nil {
+		return err
+	}
+	stoKeysPath := stoKeysFile.Name()
+	defer dir.RemoveFile(stoKeysPath)
+
+	accBuf := bufio.NewWriterSize(accKeysFile, 1<<20)
+	stoBuf := bufio.NewWriterSize(stoKeysFile, 1<<20)
+
+	totalKeys := uint64(commDecomp.Count()) / 2
+	logTicker := time.NewTicker(30 * time.Second)
+	defer logTicker.Stop()
+	branchKeyBuf := make([]byte, 0, 128)
+	branchValueBuf := make([]byte, 0, datasize.MB.Bytes())
+	plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
+	hexBuf := make([]byte, (length.Addr+length.Hash)*2) // big enough for any hex-encoded key
+	var branchKeys uint64
+	var integrityErr error
+	var extractedAccKeys, extractedStoKeys, skippedAccKeys, skippedStoKeys uint64
+
+	// Phase 1: Walk commitment branches, write extracted plain keys to temp files
+	for commReader.HasNext() {
+		select {
+		case <-ctx.Done():
+			accKeysFile.Close()
+			stoKeysFile.Close()
+			return ctx.Err()
+		case <-logTicker.C:
+			logger.Info("[verify-state] extracting refs", "at", fmt.Sprintf("%d/%d", branchKeys, totalKeys),
+				"p", fmt.Sprintf("%.1f%%", float64(branchKeys)/float64(totalKeys)*100), "kv", fileName)
+		default:
+		}
+
+		branchKey, _ := commReader.Next(branchKeyBuf[:0])
+		if !commReader.HasNext() {
+			break
+		}
+		branchValue, _ := commReader.Next(branchValueBuf[:0])
+
+		if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+			continue
+		}
+		branchKeys++
+
+		branchData := commitment.BranchData(branchValue)
+
+		if !branchData.IsComplete() {
+			touchMap := uint16(0)
+			afterMap := uint16(0)
+			if len(branchData) >= 4 {
+				touchMap = binary.BigEndian.Uint16(branchData[0:])
+				afterMap = binary.BigEndian.Uint16(branchData[2:])
+			}
+			err := fmt.Errorf("%w: incomplete branch at key=%x (touchMap=0x%04x afterMap=0x%04x) in %s", ErrIntegrity, branchKey, touchMap, afterMap, fileName)
+			if failFast {
+				accKeysFile.Close()
+				stoKeysFile.Close()
+				return err
+			}
+			logger.Warn(err.Error())
+			integrityErr = err
+			continue
+		}
+
+		_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+			if isStorage {
+				plainKey := key
+				if len(key) == length.Addr+length.Hash {
+					// Plain key (52 bytes)
+				} else {
+					// Try to decode as file offset reference
+					offset := state.DecodeReferenceKey(key)
+					if offset < uint64(storageReader.Size()) {
+						storageReader.Reset(offset)
+						plainKey, _ = storageReader.Next(plainKeyBuf[:0])
+					} else {
+						skippedStoKeys++
+						return key, nil
+					}
+				}
+				if len(plainKey) == length.Addr+length.Hash {
+					extractedStoKeys++
+					n := hex.Encode(hexBuf, plainKey)
+					stoBuf.Write(hexBuf[:n])
+					stoBuf.WriteByte('\n')
+				}
+				return plainKey, nil
+			}
+			// Account key
+			plainKey := key
+			if len(key) == length.Addr {
+				// Plain key (20 bytes)
+			} else {
+				// Try to decode as file offset reference
+				offset := state.DecodeReferenceKey(key)
+				if offset < uint64(accReader.Size()) {
+					accReader.Reset(offset)
+					plainKey, _ = accReader.Next(plainKeyBuf[:0])
+				} else {
+					skippedAccKeys++
+					return key, nil
+				}
+			}
+			if len(plainKey) == length.Addr {
+				extractedAccKeys++
+				n := hex.Encode(hexBuf, plainKey)
+				accBuf.Write(hexBuf[:n])
+				accBuf.WriteByte('\n')
+			}
+			return plainKey, nil
+		})
+		if err != nil {
+			if failFast {
+				accKeysFile.Close()
+				stoKeysFile.Close()
+				return err
+			}
+			integrityErr = err
+		}
+	}
+
+	// Also extract refs from the next commitment file (handles step boundary effects)
+	if nextFile != nil {
+		if err := extractCommitmentRefsToTempFiles(ctx, nextFile, stepSize, accBuf, stoBuf, hexBuf, logger); err != nil {
+			logger.Warn("[verify-state] failed to extract refs from next file", "err", err)
+			// Non-fatal: proceed with what we have
+		}
+	}
+
+	accBuf.Flush()
+	stoBuf.Flush()
+	accKeysFile.Close()
+	stoKeysFile.Close()
+
+	logger.Info("[verify-state] extracted refs, sorting", "kv", fileName,
+		"extractedAcc", extractedAccKeys, "extractedSto", extractedStoKeys,
+		"skippedAcc", skippedAccKeys, "skippedSto", skippedStoKeys,
+		"branches", branchKeys, "dur", time.Since(start))
+
+	// Phase 2: Sort + dedup temp files using system sort (handles external sorting for large files)
+	if err := sortUniqueTempFile(accKeysPath); err != nil {
+		return fmt.Errorf("sorting account keys: %w", err)
+	}
+	if err := sortUniqueTempFile(stoKeysPath); err != nil {
+		return fmt.Errorf("sorting storage keys: %w", err)
+	}
+
+	logger.Info("[verify-state] sorted refs, verifying domains", "kv", fileName, "dur", time.Since(start))
+
+	// Phase 3: Reverse check — merge-join domain .kv with sorted commitment refs.
+	// Collect previous file paths for no-op write detection.
+	var prevCommitmentPaths []string
+	for _, pf := range prevFiles {
+		prevCommitmentPaths = append(prevCommitmentPaths, pf.Fullpath())
+	}
+	// Sort newest-first so we check the most recent previous file first.
+	sort.Slice(prevCommitmentPaths, func(i, j int) bool {
+		return prevCommitmentPaths[i] > prevCommitmentPaths[j]
+	})
+	accMissing, err := reverseCheckDomainKeys(accDecomp, kv.AccountsDomain, accKeysPath, prevCommitmentPaths, fileName, failFast, logger)
+	if err != nil && !errors.Is(err, ErrIntegrity) {
+		return err
+	}
+	if err != nil {
+		integrityErr = err
+	}
+	stoMissing, err := reverseCheckDomainKeys(stoDecomp, kv.StorageDomain, stoKeysPath, prevCommitmentPaths, fileName, failFast, logger)
+	if err != nil && !errors.Is(err, ErrIntegrity) {
+		return err
+	}
+	if err != nil {
+		integrityErr = err
+	}
+
+	dur := time.Since(start)
+	if integrityErr == nil {
+		logger.Info("[verify-state] key correspondence PASS", "kv", fileName,
+			"accounts", fmt.Sprintf("%d/%d", expectedAccounts-accMissing, expectedAccounts),
+			"storage", fmt.Sprintf("%d/%d", expectedStorages-stoMissing, expectedStorages),
+			"dur", dur)
+
+		// Phase 2: Hash verification — only runs if key correspondence passes.
+		numWorkers := dbg.EnvInt("CHECK_VERIFY_STATE_WORKERS", runtime.NumCPU())
+		hashErr := checkHashVerification(ctx, file, stepSize, failFast, numWorkers, logger)
+		if hashErr != nil {
+			integrityErr = hashErr
+		}
+	}
+	return integrityErr
+}
+
+// sortUniqueTempFile sorts and deduplicates a text file in-place using the system's sort command.
+func sortUniqueTempFile(path string) error {
+	cmd := exec.Command("sort", "-u", "-o", path, path)
+	cmd.Env = append(os.Environ(), "LC_ALL=C") // binary sort order for hex strings
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("sort -u %s: %w: %s", path, err, string(out))
+	}
+	return nil
+}
+
+// missingEntry holds a domain key+value that wasn't found in commitment refs.
+type missingEntry struct {
+	key []byte
+	val []byte
+}
+
+// reverseCheckDomainKeys opens a domain .kv decompressor and checks that every key
+// appears in the sorted hex keys file (produced from commitment refs).
+// Both the domain .kv and the sorted file are in ascending order, enabling a merge-join.
+//
+// prevCommitmentPaths are commitment file paths for previous steps (newest-first).
+// When a key is missing from refs, its value is compared with previous domain files
+// to detect no-op writes (same value recorded redundantly).
+func reverseCheckDomainKeys(decomp *seg.Decompressor, domain kv.Domain, sortedKeysPath string, prevCommitmentPaths []string, commitFileName string, failFast bool, logger log.Logger) (missing uint64, retErr error) {
+	compression := statecfg.Schema.GetDomainCfg(domain).Compression
+	reader := seg.NewReader(decomp.MakeGetter(), compression)
+	reader.Reset(0) // start from beginning
+
+	f, err := os.Open(sortedKeysPath)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+
+	// Advance to first ref key
+	var refKey string
+	hasRef := scanner.Scan()
+	if hasRef {
+		refKey = scanner.Text()
+	}
+
+	keyBuf := make([]byte, 0, length.Addr+length.Hash)
+	valBuf := make([]byte, 0, 128)
+	var checked, skippedEmpty uint64
+	var missingEntries []missingEntry
+	for reader.HasNext() {
+		key, _ := reader.Next(keyBuf[:0])
+		if !reader.HasNext() {
+			break // malformed: key without value
+		}
+		val, _ := reader.Next(valBuf[:0])
+
+		// Entries with empty values represent deletions — the key was removed
+		// from the state trie. Commitment branches only reference live entries,
+		// so we skip these.
+		if len(val) == 0 {
+			skippedEmpty++
+			continue
+		}
+
+		domainKeyHex := hex.EncodeToString(key)
+		checked++
+
+		// Advance sorted refs until >= domainKeyHex
+		for hasRef && refKey < domainKeyHex {
+			hasRef = scanner.Scan()
+			if hasRef {
+				refKey = scanner.Text()
+			}
+		}
+
+		if !hasRef || refKey != domainKeyHex {
+			// Collect for no-op verification against previous files.
+			missingEntries = append(missingEntries, missingEntry{
+				key: common.Copy(key),
+				val: common.Copy(val),
+			})
+		}
+	}
+
+	if skippedEmpty > 0 {
+		logger.Info("[verify-state] skipped empty-value entries (deletions)",
+			"domain", domain, "skipped", skippedEmpty, "kv", commitFileName)
+	}
+
+	if len(missingEntries) == 0 {
+		return 0, nil
+	}
+
+	// Check missing entries against previous domain files to detect no-op writes.
+	genuineMissing := verifyMissingAgainstPrevFiles(missingEntries, domain, prevCommitmentPaths, commitFileName, failFast, logger)
+	missing = uint64(genuineMissing)
+
+	if missing > 0 {
+		retErr = fmt.Errorf("%w: %s %d/%d keys not referenced by commitment in %s",
+			ErrIntegrity, domain, missing, checked, commitFileName)
+		logger.Warn(retErr.Error())
+	}
+	return missing, retErr
+}
+
+// verifyMissingAgainstPrevFiles checks each missing entry against previous domain files.
+// For each missing key, it scans previous files (newest-first) to find the same key.
+// If the value matches, it's a no-op write (not an error). If the value differs or
+// the key isn't found in any previous file, it's a genuine missing entry.
+//
+// Uses merge-join within each file: missing entries are sorted by key, and the file
+// is scanned sequentially, advancing both cursors in lockstep.
+func verifyMissingAgainstPrevFiles(entries []missingEntry, domain kv.Domain, prevCommitmentPaths []string, commitFileName string, failFast bool, logger log.Logger) int {
+	if len(prevCommitmentPaths) == 0 {
+		// No previous files to check — all are genuine.
+		for i, e := range entries {
+			if i < 10 {
+				logger.Warn("[verify-state] domain key not in commitment refs (no previous files)",
+					"domain", domain, "key", hex.EncodeToString(e.key), "kv", commitFileName)
+			}
+		}
+		return len(entries)
+	}
+
+	// Sort missing entries by key for merge-join.
+	sort.Slice(entries, func(i, j int) bool {
+		return bytes.Compare(entries[i].key, entries[j].key) < 0
+	})
+
+	// Track which entries are confirmed as no-ops.
+	confirmed := make([]bool, len(entries))
+	remaining := len(entries)
+
+	compression := statecfg.Schema.GetDomainCfg(domain).Compression
+
+	for _, prevCommitPath := range prevCommitmentPaths {
+		if remaining == 0 {
+			break
+		}
+
+		// Derive the domain file path from the commitment file path.
+		prevDomainReader, prevClose, err := deriveReaderForOtherDomain(prevCommitPath, kv.CommitmentDomain, domain)
+		if err != nil {
+			logger.Warn("[verify-state] could not open previous domain file",
+				"domain", domain, "err", err)
+			continue
+		}
+
+		// Merge-join: walk the previous file and check all unconfirmed entries.
+		_ = compression // reader already has compression configured
+		keyBuf := make([]byte, 0, length.Addr+length.Hash)
+		valBuf := make([]byte, 0, 128)
+		ei := 0 // index into sorted entries
+
+		for prevDomainReader.HasNext() && ei < len(entries) {
+			// Skip already confirmed entries.
+			for ei < len(entries) && confirmed[ei] {
+				ei++
+			}
+			if ei >= len(entries) {
+				break
+			}
+
+			prevKey, _ := prevDomainReader.Next(keyBuf[:0])
+			if !prevDomainReader.HasNext() {
+				break
+			}
+			prevVal, _ := prevDomainReader.Next(valBuf[:0])
+
+			// Advance entries index past keys that are < prevKey.
+			for ei < len(entries) && bytes.Compare(entries[ei].key, prevKey) < 0 {
+				ei++
+			}
+			if ei >= len(entries) {
+				break
+			}
+
+			if bytes.Equal(entries[ei].key, prevKey) {
+				if bytes.Equal(entries[ei].val, prevVal) {
+					// No-op write confirmed.
+					confirmed[ei] = true
+					remaining--
+					logger.Info("[verify-state] no-op write confirmed (same value in previous file)",
+						"domain", domain, "key", hex.EncodeToString(entries[ei].key),
+						"kv", commitFileName, "prevKv", filepath.Base(prevCommitPath))
+				}
+				ei++
+			}
+		}
+
+		prevClose()
+	}
+
+	// Report genuinely missing entries.
+	genuine := 0
+	for i, e := range entries {
+		if !confirmed[i] {
+			genuine++
+			if genuine <= 10 {
+				logger.Warn("[verify-state] domain key not in commitment refs",
+					"domain", domain, "key", hex.EncodeToString(e.key), "kv", commitFileName)
+			}
+		}
+	}
+	return genuine
+}
+
+// extractCommitmentRefsToTempFiles walks a commitment .kv file and appends all
+// extracted plain keys (hex-encoded) to the provided writers. This is used to
+// include refs from the "next" commitment file for boundary coverage.
+// Opens its own domain readers for dereferencing (the next file's offsets point
+// into its own domain files, not the current file's).
+func extractCommitmentRefsToTempFiles(ctx context.Context, file state.VisibleFile, stepSize uint64, accBuf *bufio.Writer, stoBuf *bufio.Writer, hexBuf []byte, logger log.Logger) error {
+	nextFileName := filepath.Base(file.Fullpath())
+	logger.Info("[verify-state] also extracting refs from next file", "kv", nextFileName)
+
+	commDecomp, err := seg.NewDecompressor(file.Fullpath())
+	if err != nil {
+		return err
+	}
+	defer commDecomp.Close()
+	commDecomp.MadvSequential()
+	commCompression := statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression
+	commReader := seg.NewReader(commDecomp.MakeGetter(), commCompression)
+
+	// Always open domain readers for dereferencing (commitment files may contain
+	// reference keys regardless of MayContainValuesPlainKeyReferencing result)
+	_, nextAccReader, nextAccClose, err := deriveDecompAndReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.AccountsDomain)
+	if err != nil {
+		return err
+	}
+	defer nextAccClose()
+	_, nextStoReader, nextStoClose, err := deriveDecompAndReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.StorageDomain)
+	if err != nil {
+		return err
+	}
+	defer nextStoClose()
+
+	branchKeyBuf := make([]byte, 0, 128)
+	branchValueBuf := make([]byte, 0, datasize.MB.Bytes())
+	plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
+
+	for commReader.HasNext() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		branchKey, _ := commReader.Next(branchKeyBuf[:0])
+		if !commReader.HasNext() {
+			break
+		}
+		branchValue, _ := commReader.Next(branchValueBuf[:0])
+
+		if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+			continue
+		}
+
+		branchData := commitment.BranchData(branchValue)
+		if !branchData.IsComplete() {
+			continue
+		}
+
+		branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+			if isStorage {
+				plainKey := key
+				if len(key) != length.Addr+length.Hash {
+					offset := state.DecodeReferenceKey(key)
+					if offset >= uint64(nextStoReader.Size()) {
+						return key, nil
+					}
+					nextStoReader.Reset(offset)
+					plainKey, _ = nextStoReader.Next(plainKeyBuf[:0])
+				}
+				if len(plainKey) == length.Addr+length.Hash {
+					n := hex.Encode(hexBuf, plainKey)
+					stoBuf.Write(hexBuf[:n])
+					stoBuf.WriteByte('\n')
+				}
+				return plainKey, nil
+			}
+			plainKey := key
+			if len(key) != length.Addr {
+				offset := state.DecodeReferenceKey(key)
+				if offset >= uint64(nextAccReader.Size()) {
+					return key, nil
+				}
+				nextAccReader.Reset(offset)
+				plainKey, _ = nextAccReader.Next(plainKeyBuf[:0])
+			}
+			if len(plainKey) == length.Addr {
+				n := hex.Encode(hexBuf, plainKey)
+				accBuf.Write(hexBuf[:n])
+				accBuf.WriteByte('\n')
+			}
+			return plainKey, nil
+		})
+	}
+	return nil
+}
+
+// hashWorkItem holds a single commitment branch entry for hash verification.
+type hashWorkItem struct {
+	branchKey   []byte
+	branchValue []byte
+}
+
+// checkHashVerification verifies that stateHash stored in each commitment branch cell
+// matches the hash recomputed from the actual domain values. Uses a producer-consumer
+// pattern: 1 producer reads the commitment file sequentially, N workers each open their
+// own domain readers and verify hashes in parallel.
+func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, numWorkers int, logger log.Logger) error {
+	start := time.Now()
+	fileName := filepath.Base(file.Fullpath())
+	startTxNum := file.StartRootNum()
+	endTxNum := file.EndRootNum()
+
+	isReferencing := state.MayContainValuesPlainKeyReferencing(stepSize, startTxNum, endTxNum)
+
+	logger.Info("[verify-state] hash verification starting",
+		"kv", fileName, "workers", numWorkers, "referencing", isReferencing)
+
+	if numWorkers < 1 {
+		numWorkers = 1
+	}
+
+	// For non-referencing files, preload domain key→value maps so workers
+	// can look up values for plain keys. These files are small enough to fit in memory.
+	var preloadedAccValues, preloadedStoValues map[string][]byte
+	if !isReferencing {
+		var err error
+		preloadedAccValues, err = preloadDomainValues(file.Fullpath(), kv.CommitmentDomain, kv.AccountsDomain, length.Addr)
+		if err != nil {
+			return fmt.Errorf("preload accounts: %w", err)
+		}
+		preloadedStoValues, err = preloadDomainValues(file.Fullpath(), kv.CommitmentDomain, kv.StorageDomain, length.Addr+length.Hash)
+		if err != nil {
+			return fmt.Errorf("preload storage: %w", err)
+		}
+		logger.Info("[verify-state] preloaded domain values",
+			"accounts", len(preloadedAccValues), "storage", len(preloadedStoValues), "kv", fileName)
+	}
+
+	// Channel for sending work items from producer to workers.
+	workCh := make(chan hashWorkItem, numWorkers*4)
+	var hashMismatches atomic.Uint64
+	var hashChecked atomic.Uint64
+
+	// Set up errgroup with context for cancellation on failure.
+	var eg *errgroup.Group
+	if failFast {
+		eg, ctx = errgroup.WithContext(ctx)
+	} else {
+		eg = &errgroup.Group{}
+	}
+
+	// Launch N worker goroutines.
+	for w := 0; w < numWorkers; w++ {
+		eg.Go(func() error {
+			// Each worker opens its own domain readers for referencing files.
+			var accReader, stoReader *seg.Reader
+			var accClose, stoClose func()
+			if isReferencing {
+				var err error
+				accReader, accClose, err = deriveReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.AccountsDomain)
+				if err != nil {
+					return fmt.Errorf("worker: open accounts reader: %w", err)
+				}
+				defer accClose()
+				stoReader, stoClose, err = deriveReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.StorageDomain)
+				if err != nil {
+					return fmt.Errorf("worker: open storage reader: %w", err)
+				}
+				defer stoClose()
+			}
+
+			plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
+			valBuf := make([]byte, 0, 128)
+
+			for item := range workCh {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
+
+				branchData := commitment.BranchData(item.branchValue)
+
+				// Build maps of accountValues and storageValues by resolving
+				// keys/values from domain files.
+				accountValues := make(map[string][]byte)
+				storageValues := make(map[string][]byte)
+
+				// We need branch data with plain keys for VerifyBranchHashes.
+				// Walk the branch to extract + resolve all keys and read values.
+				resolvedBranchData, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+					if isStorage {
+						plainKey := key
+						isRef := len(key) != length.Addr+length.Hash
+						if isRef {
+							if !isReferencing {
+								return key, nil
+							}
+							offset := state.DecodeReferenceKey(key)
+							if offset >= uint64(stoReader.Size()) {
+								return key, nil
+							}
+							stoReader.Reset(offset)
+							plainKey, _ = stoReader.Next(plainKeyBuf[:0])
+							if len(plainKey) != length.Addr+length.Hash {
+								return key, nil
+							}
+							val, _ := stoReader.Next(valBuf[:0])
+							storageValues[hex.EncodeToString(plainKey)] = common.Copy(val)
+						} else if preloadedStoValues != nil {
+							hexKey := hex.EncodeToString(plainKey)
+							if val, ok := preloadedStoValues[hexKey]; ok {
+								storageValues[hexKey] = val
+							}
+						}
+						return plainKey, nil
+					}
+
+					// Account key
+					plainKey := key
+					isRef := len(key) != length.Addr
+					if isRef {
+						if !isReferencing {
+							return key, nil
+						}
+						offset := state.DecodeReferenceKey(key)
+						if offset >= uint64(accReader.Size()) {
+							return key, nil
+						}
+						accReader.Reset(offset)
+						plainKey, _ = accReader.Next(plainKeyBuf[:0])
+						if len(plainKey) != length.Addr {
+							return key, nil
+						}
+						val, _ := accReader.Next(valBuf[:0])
+						accountValues[hex.EncodeToString(plainKey)] = common.Copy(val)
+					} else if preloadedAccValues != nil {
+						hexKey := hex.EncodeToString(plainKey)
+						if val, ok := preloadedAccValues[hexKey]; ok {
+							accountValues[hexKey] = val
+						}
+					}
+					return plainKey, nil
+				})
+				if err != nil {
+					if failFast {
+						return err
+					}
+					logger.Warn("[verify-state] hash: ReplacePlainKeys error", "err", err, "kv", fileName)
+					continue
+				}
+
+				// Only verify if we have at least one value to check.
+				if len(accountValues) == 0 && len(storageValues) == 0 {
+					continue
+				}
+
+				err = commitment.VerifyBranchHashes(item.branchKey, resolvedBranchData, accountValues, storageValues)
+				if err != nil {
+					hashMismatches.Add(1)
+					if failFast {
+						return fmt.Errorf("%w: %s in %s", ErrIntegrity, err.Error(), fileName)
+					}
+					logger.Warn("[verify-state] hash mismatch", "err", err, "kv", fileName)
+				}
+				hashChecked.Add(1)
+			}
+			return nil
+		})
+	}
+
+	// Producer: read commitment file and send work items.
+	eg.Go(func() error {
+		defer close(workCh)
+
+		commDecomp, err := seg.NewDecompressor(file.Fullpath())
+		if err != nil {
+			return err
+		}
+		defer commDecomp.Close()
+		commDecomp.MadvSequential()
+		commCompression := statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression
+		commReader := seg.NewReader(commDecomp.MakeGetter(), commCompression)
+
+		branchKeyBuf := make([]byte, 0, 128)
+		branchValueBuf := make([]byte, 0, datasize.MB.Bytes())
+		logTicker := time.NewTicker(30 * time.Second)
+		defer logTicker.Stop()
+		var produced uint64
+
+		for commReader.HasNext() {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logTicker.C:
+				logger.Info("[verify-state] hash verification progress",
+					"produced", produced,
+					"checked", hashChecked.Load(),
+					"mismatches", hashMismatches.Load(),
+					"kv", fileName)
+			default:
+			}
+
+			branchKey, _ := commReader.Next(branchKeyBuf[:0])
+			if !commReader.HasNext() {
+				break
+			}
+			branchValue, _ := commReader.Next(branchValueBuf[:0])
+
+			if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+				continue
+			}
+
+			branchData := commitment.BranchData(branchValue)
+			if !branchData.IsComplete() {
+				continue
+			}
+
+			produced++
+
+			// Copy data since buffers are reused.
+			item := hashWorkItem{
+				branchKey:   common.Copy(branchKey),
+				branchValue: common.Copy(branchValue),
+			}
+
+			select {
+			case workCh <- item:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return nil
+	})
+
+	err := eg.Wait()
+	dur := time.Since(start)
+
+	checked := hashChecked.Load()
+	mismatches := hashMismatches.Load()
+
+	if err != nil {
+		logger.Warn("[verify-state] hash verification FAIL",
+			"checked", checked, "mismatches", mismatches,
+			"dur", dur, "kv", fileName, "err", err)
+		return err
+	}
+
+	logger.Info("[verify-state] hash verification PASS",
+		"checked", checked, "mismatches", mismatches,
+		"dur", dur, "kv", fileName)
+	return nil
+}
+
+// preloadDomainValues reads all key-value pairs from a domain .kv file into a map.
+// Used for non-referencing files where keys are plain (not file offsets).
+func preloadDomainValues(commitmentFile string, oldDomain, newDomain kv.Domain, expectedKeyLen int) (map[string][]byte, error) {
+	reader, closeFn, err := deriveReaderForOtherDomain(commitmentFile, oldDomain, newDomain)
+	if err != nil {
+		return nil, err
+	}
+	defer closeFn()
+
+	values := make(map[string][]byte)
+	keyBuf := make([]byte, 0, expectedKeyLen)
+	valBuf := make([]byte, 0, 128)
+	for reader.HasNext() {
+		key, _ := reader.Next(keyBuf[:0])
+		if !reader.HasNext() {
+			break
+		}
+		val, _ := reader.Next(valBuf[:0])
+		if len(key) == expectedKeyLen {
+			values[hex.EncodeToString(key)] = common.Copy(val)
+		}
+	}
+	return values, nil
+}
+
+func deriveDecompAndReaderForOtherDomain(baseFile string, oldDomain, newDomain kv.Domain) (*seg.Decompressor, *seg.Reader, func(), error) {
+	fileVersionMask, err := version.ReplaceVersionWithMask(baseFile)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	fileVersionMask = strings.Replace(fileVersionMask, oldDomain.String(), newDomain.String(), 1)
+	newFile, _, ok, err := version.FindFilesWithVersionsByPattern(fileVersionMask)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if !ok {
+		return nil, nil, nil, fmt.Errorf("could not derive reader for other domain due to file not found: %s,%s->%s", baseFile, oldDomain, newDomain)
+	}
+	decomp, err := seg.NewDecompressor(newFile)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	compression := statecfg.Schema.GetDomainCfg(newDomain).Compression
+	return decomp, seg.NewReader(decomp.MakeGetter(), compression), decomp.Close, nil
 }
 
 func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domain, fromTxNum uint64, toTxNum uint64, visitor func(k []byte)) (uint64, error) {

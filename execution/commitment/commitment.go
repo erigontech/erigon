@@ -28,7 +28,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 	"unsafe"
 
 	"github.com/google/btree"
@@ -441,10 +440,6 @@ func ApplyDeferredBranchUpdates(
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error,
 ) (int, error) {
-	start := time.Now()
-	defer func() {
-		log.Debug("ApplyDeferredBranchUpdates completed", "updates", len(deferred), "took", time.Since(start))
-	}()
 	if len(deferred) == 0 {
 		return 0, nil
 	}
@@ -1139,6 +1134,7 @@ func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccakState) erro
 	if len(uncompactedBranchKey) > 128 {
 		return fmt.Errorf("branch key too long: %d", len(branchKey))
 	}
+	var hashBuf common.Hash
 	depth := int16(len(uncompactedBranchKey))
 	for _, c := range row {
 		if c == nil {
@@ -1147,7 +1143,7 @@ func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccakState) erro
 		if c.accountAddrLen == 0 && c.storageAddrLen == 0 {
 			continue
 		}
-		err := c.deriveHashedKeys(depth, keccak, length.Addr)
+		err := c.deriveHashedKeys(depth, keccak, length.Addr, hashBuf[:])
 		if err != nil {
 			return err
 		}

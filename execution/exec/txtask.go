@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"sync"
 	"time"
 
@@ -154,7 +153,7 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 
 	blockNum := r.Version().BlockNum
 	receipt := &types.Receipt{
-		BlockNumber:              big.NewInt(int64(blockNum)),
+		BlockNumber:              uint256.NewInt(blockNum),
 		BlockHash:                r.BlockHash(),
 		TransactionIndex:         uint(txIndex),
 		Type:                     r.TxType(),
@@ -550,6 +549,13 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}()
 
 		if result.Err == nil {
+			// Capture residual-balance selfdestructs before SoftFinalise clears the
+			// journal.  These are accounts selfdestructed in this tx that also received
+			// ETH after the SELFDESTRUCT opcode (EIP-7708 case 2).  SoftFinalise calls
+			// clearJournalAndRefund, so GetRemovedAccountsWithBalance returns nothing
+			// afterwards.
+			result.ExecutionResult.SelfDestructedWithBalance = ibs.GetRemovedAccountsWithBalance()
+
 			// TODO these can be removed - use result instead
 			// Update the state with pending changes
 			ibs.SoftFinalise()

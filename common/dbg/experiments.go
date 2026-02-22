@@ -75,11 +75,14 @@ var (
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
-	Exec3Parallel = EnvBool("EXEC3_PARALLEL", false)
-	numWorkers    = runtime.NumCPU() / 2
-	Exec3Workers  = EnvInt("EXEC3_WORKERS", numWorkers)
+	Exec3Parallel        = EnvBool("EXEC3_PARALLEL", false)
+	numWorkers           = runtime.NumCPU() / 2
+	Exec3Workers         = EnvInt("EXEC3_WORKERS", numWorkers)
+	ExecTerseLoggerLevel = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
 
 	CompressWorkers = EnvInt("COMPRESS_WORKERS", 1)
+	MergeWorkers    = EnvInt("MERGE_WORKERS", 1)
+	CollateWorkers  = EnvInt("COLLATE_WORKERS", 2)
 
 	TraceAccounts        = EnvStrings("TRACE_ACCOUNTS", ",", nil)
 	TraceStateKeys       = EnvStrings("TRACE_STATE_KEYS", ",", nil)
@@ -99,7 +102,7 @@ var (
 	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
-	UseStateCache        = EnvBool("USE_STATE_CACHE", false)
+	UseStateCache        = EnvBool("USE_STATE_CACHE", true)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)

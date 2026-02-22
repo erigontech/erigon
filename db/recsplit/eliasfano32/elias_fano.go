@@ -232,44 +232,50 @@ func Seek(data []byte, n uint64) (uint64, bool) {
 	return ef.Seek(n)
 }
 
-func (ef *EliasFano) search(v uint64, reverse bool) (nextV uint64, nextI uint64, ok bool) {
+func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok bool) {
 	if v == 0 {
-		if reverse {
-			return 0, 0, ef.Min() == 0
-		}
 		return ef.Min(), 0, true
 	}
-	if v == ef.Max() {
-		return ef.Max(), ef.count, true
+	// TODO: large EF on mmap can be cold and calling `Max` in the begin of `Seek` can be a mistake (PageFault at the end). But need careful test in another ticket
+	_max := ef.Max()
+	if v == _max {
+		return _max, ef.count, true
 	}
-	if v > ef.Max() {
-		if reverse {
-			return ef.Max(), ef.count, true
-		}
+	if v > _max {
 		return 0, 0, false
 	}
 
 	hi := v >> ef.l
 	i := sort.Search(int(ef.count+1), func(i int) bool {
-		if reverse {
-			return ef.upper(ef.count-uint64(i)) <= hi
-		}
 		return ef.upper(uint64(i)) >= hi
 	})
-	if reverse {
-		for j := uint64(i); j <= ef.count; j++ {
-			idx := ef.count - j
-			val, _, _, _, _ := ef.get(idx)
-			if val <= v {
-				return val, idx, true
-			}
+	for j := uint64(i); j <= ef.count; j++ {
+		val, _, _, _, _ := ef.get(j)
+		if val >= v {
+			return val, j, true
 		}
-	} else {
-		for j := uint64(i); j <= ef.count; j++ {
-			val, _, _, _, _ := ef.get(j)
-			if val >= v {
-				return val, j, true
-			}
+	}
+	return 0, 0, false
+}
+
+func (ef *EliasFano) searchReverse(v uint64) (nextV uint64, nextI uint64, ok bool) {
+	if v == 0 {
+		return 0, 0, ef.Min() == 0
+	}
+	_max := ef.Max()
+	if v >= _max {
+		return _max, ef.count, true
+	}
+
+	hi := v >> ef.l
+	i := sort.Search(int(ef.count+1), func(i int) bool {
+		return ef.upper(ef.count-uint64(i)) <= hi
+	})
+	for j := uint64(i); j <= ef.count; j++ {
+		idx := ef.count - j
+		val, _, _, _, _ := ef.get(idx)
+		if val <= v {
+			return val, idx, true
 		}
 	}
 	return 0, 0, false
@@ -277,7 +283,7 @@ func (ef *EliasFano) search(v uint64, reverse bool) (nextV uint64, nextI uint64,
 
 // Seek returns the value in the sequence, equal or greater than given value
 func (ef *EliasFano) Seek(v uint64) (uint64, bool) {
-	n, _, ok := ef.search(v, false /* reverse */)
+	n, _, ok := ef.searchForward(v)
 	return n, ok
 }
 
@@ -352,7 +358,19 @@ func (efi *EliasFanoIter) HasNext() bool {
 	return efi.itemsIterated <= efi.count
 }
 
-func (efi *EliasFanoIter) Reset() {
+func (efi *EliasFanoIter) Reset(ef *EliasFano, reverse bool) {
+	efi.ef = ef
+	efi.lowerBits = ef.lowerBits
+	efi.upperBits = ef.upperBits
+	efi.count = ef.count
+	efi.lowerBitsMask = ef.lowerBitsMask
+	efi.l = ef.l
+	efi.upperStep = uint64(1) << ef.l
+	efi.reverse = reverse
+	efi.internalReset()
+}
+
+func (efi *EliasFanoIter) internalReset() { // no `return parameter` to avoid heap-allocation of `efi` object
 	efi.upper = 0
 	efi.upperIdx = 0
 	efi.lowerIdx = 0
@@ -381,8 +399,15 @@ func (efi *EliasFanoIter) init() {
 func (efi *EliasFanoIter) Seek(n uint64) {
 	//fmt.Printf("b seek2: efi.upperMask(%d)=%d, upperIdx=%d, lowerIdx=%d, itemsIterated=%d\n", n, bits.TrailingZeros64(efi.upperMask), efi.upperIdx, efi.lowerIdx, efi.itemsIterated)
 	//fmt.Printf("b seek2: efi.upper=%d\n", efi.upper)
-	efi.Reset()
-	nn, nextI, ok := efi.ef.search(n, efi.reverse)
+	efi.internalReset()
+	var nn uint64
+	var nextI uint64
+	var ok bool
+	if efi.reverse {
+		nn, nextI, ok = efi.ef.searchReverse(n)
+	} else {
+		nn, nextI, ok = efi.ef.searchForward(n)
+	}
 	_ = nn
 	if !ok {
 		efi.itemsIterated = efi.count + 1
@@ -540,7 +565,7 @@ func ReadEliasFano(r []byte) (*EliasFano, int) {
 }
 
 // Reset - like ReadEliasFano, but for existing object
-func (ef *EliasFano) Reset(r []byte) *EliasFano {
+func (ef *EliasFano) Reset(r []byte) *EliasFano { // no `return parameter` to avoid heap-allocation of `ef` object
 	ef.count = binary.BigEndian.Uint64(r[:8])
 	ef.u = binary.BigEndian.Uint64(r[8:16])
 	ef.data = unsafe.Slice((*uint64)(unsafe.Pointer(&r[16])), (len(r)-16)/uint64Size)

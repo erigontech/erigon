@@ -132,7 +132,6 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 	var txNum, blockNum uint64
 	for i := 0; i < len(vals); i++ {
 		txNum = uint64(i)
-		domains.SetTxNum(txNum)
 
 		for j := 0; j < len(keys); j++ {
 			acc := accounts.Account{
@@ -366,7 +365,6 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	var txNum, blockNum uint64
 	for i := uint64(1); i <= txs; i++ {
 		txNum = i
-		domains.SetTxNum(txNum)
 		binary.BigEndian.PutUint64(aux[:], txNum)
 
 		n, err := rnd.Read(addr)
@@ -426,13 +424,12 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.NoError(t, err)
 	defer dom2.Close()
 
-	err = dom2.SeekCommitment(ctx, rwTx)
-	sstartTx := dom2.TxNum()
+	latestTxNum, _, err := dom2.SeekCommitment(ctx, rwTx)
 
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, sstartTx, startTx)
-	require.GreaterOrEqual(t, sstartTx, latestCommitTxNum)
-	_ = sstartTx
+	require.GreaterOrEqual(t, latestTxNum, startTx)
+	require.GreaterOrEqual(t, latestTxNum, latestCommitTxNum)
+	_ = latestTxNum
 	rwTx.Rollback()
 
 	// Check the history

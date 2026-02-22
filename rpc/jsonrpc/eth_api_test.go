@@ -31,8 +31,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -41,7 +41,7 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
-func newBaseApiForTest(m *mock.MockSentry) *BaseAPI {
+func newBaseApiForTest(m *execmoduletester.ExecModuleTester) *BaseAPI {
 	return NewBaseApi(nil, m.StateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0)
 }
 
@@ -62,7 +62,7 @@ func newEthApiForTest(base *BaseAPI, db kv.TemporalRoDB, txPool txpoolproto.Txpo
 func TestGetBalanceChangesInBlock(t *testing.T) {
 	assert := assert.New(t)
 	myBlockNum := rpc.BlockNumberOrHashWithNumber(0)
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	db := m.DB
 	api := NewErigonAPI(newBaseApiForTest(m), db, nil)
 	balances, err := api.GetBalanceChangesInBlock(context.Background(), myBlockNum)
@@ -82,7 +82,7 @@ func TestGetBalanceChangesInBlock(t *testing.T) {
 }
 
 func TestGetTransactionReceipt(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := newEthApiForTest(NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0), m.DB, nil, nil)
 	// Call GetTransactionReceipt for transaction which is not in the database
@@ -92,7 +92,7 @@ func TestGetTransactionReceipt(t *testing.T) {
 }
 
 func TestGetTransactionReceiptUnprotected(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	// Call GetTransactionReceipt for un-protected transaction
 	if _, err := api.GetTransactionReceipt(context.Background(), common.HexToHash("0x3f3cb8a0e13ed2481f97f53f7095b9cbc78b6ffb779f2d3e565146371a8830ea")); err != nil {
@@ -104,7 +104,7 @@ func TestGetTransactionReceiptUnprotected(t *testing.T) {
 
 func TestGetStorageAt_ByBlockNumber_WithRequireCanonicalDefault(t *testing.T) {
 	assert := assert.New(t)
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
@@ -118,7 +118,7 @@ func TestGetStorageAt_ByBlockNumber_WithRequireCanonicalDefault(t *testing.T) {
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault(t *testing.T) {
 	assert := assert.New(t)
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
@@ -132,7 +132,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault(t *testing.T) {
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue(t *testing.T) {
 	assert := assert.New(t)
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
@@ -145,7 +145,10 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue(t *testing.T) {
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_BlockNotFoundError(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
@@ -166,7 +169,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_BlockNotFoundError
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_BlockNotFoundError(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
@@ -188,7 +191,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_BlockNotFoundError(t 
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(t *testing.T) {
 	assert := assert.New(t)
-	m, _, orphanedChain := rpcdaemontest.CreateTestSentry(t)
+	m, _, orphanedChain := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
@@ -207,7 +210,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.T) {
-	m, _, orphanedChain := rpcdaemontest.CreateTestSentry(t)
+	m, _, orphanedChain := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
@@ -223,7 +226,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *
 }
 
 func TestCall_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(t *testing.T) {
-	m, _, orphanedChain := rpcdaemontest.CreateTestSentry(t)
+	m, _, orphanedChain := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
@@ -231,7 +234,7 @@ func TestCall_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(t *testi
 	orphanedBlock := orphanedChain[0].Blocks[0]
 
 	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false)
-	var blockNumberOrHashRef *rpc.BlockNumberOrHash = &blockNumberOrHash
+	var blockNumberOrHashRef = &blockNumberOrHash
 
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
@@ -249,14 +252,14 @@ func TestCall_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(t *testi
 }
 
 func TestCall_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.T) {
-	m, _, orphanedChain := rpcdaemontest.CreateTestSentry(t)
+	m, _, orphanedChain := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
 	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true)
-	var blockNumberOrHashRef *rpc.BlockNumberOrHash = &blockNumberOrHash
+	var blockNumberOrHashRef = &blockNumberOrHash
 
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,

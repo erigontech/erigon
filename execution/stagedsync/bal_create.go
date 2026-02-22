@@ -26,13 +26,36 @@ func CreateBAL(blockNum uint64, txIO *state.VersionedIO, dataDir string) types.B
 			if vr.Address.IsNil() {
 				return true
 			}
+			// Skip validation-only reads for non-existent accounts.
+			// These are recorded by versionedRead when the version map
+			// has no entry (MVReadResultNone) so that conflict detection
+			// works across transactions, but they should not appear in
+			// the block access list.
+			if vr.Path == state.AddressPath {
+				if val, ok := vr.Val.(*accounts.Account); ok && val == nil {
+					return true
+				}
+			}
 			account := ensureAccountState(ac, vr.Address)
 			updateAccountRead(account, vr)
 			return true
 		})
 
-		for _, vw := range txIO.WriteSet(txIndex) {
-			if vw.Address.IsNil() {
+		writes := txIO.WriteSet(txIndex)
+		// First pass: apply SelfDestructPath writes so the selfDestructed flag
+		// is up-to-date before balance/nonce/code writes are processed.
+		// The write slice order is non-deterministic, and a SelfDestructPath=false
+		// (un-selfdestruct in a later tx) may appear after BalancePath in the slice.
+		for _, vw := range writes {
+			if vw.Address.IsNil() || vw.Path != state.SelfDestructPath {
+				continue
+			}
+			account := ensureAccountState(ac, vw.Address)
+			updateAccountWrite(account, vw, blockAccessIndex(vw.Version.TxIndex))
+		}
+		// Second pass: process all other write paths.
+		for _, vw := range writes {
+			if vw.Address.IsNil() || vw.Path == state.SelfDestructPath {
 				continue
 			}
 			account := ensureAccountState(ac, vw.Address)
@@ -50,14 +73,15 @@ func CreateBAL(blockNum uint64, txIO *state.VersionedIO, dataDir string) types.B
 
 	bal := make([]*types.AccountChanges, 0, len(ac))
 	for _, account := range ac {
-		// The system address shows up as a touched address due to a balance check in IBS
-		// during a system call, however this should not be included in the BAL.
-		if isSystemBALAddress(account.changes.Address) {
-			continue
-		}
-
 		account.finalize()
 		normalizeAccountChanges(account.changes)
+		// The system address is touched during system calls (EIP-4788 beacon root)
+		// because it is msg.sender. Exclude it when it has no actual state changes,
+		// but keep it when a user tx sends real ETH to it (e.g. SELFDESTRUCT to
+		// the system address or a plain value transfer).
+		if isSystemBALAddress(account.changes.Address) && !hasAccountChanges(account.changes) {
+			continue
+		}
 		bal = append(bal, account.changes)
 	}
 
@@ -79,6 +103,10 @@ func updateAccountRead(account *accountState, vr *state.VersionedRead) {
 	case state.StoragePath:
 		if hasStorageWrite(account.changes, vr.Key) {
 			return
+		}
+		// Track the initial storage value so we can detect no-op writes later.
+		if val, ok := vr.Val.(uint256.Int); ok {
+			account.setStorageValue(vr.Key, val)
 		}
 		account.changes.StorageReads = append(account.changes.StorageReads, vr.Key)
 	case state.BalancePath:
@@ -133,10 +161,29 @@ func ensureAccountState(accounts map[accounts.Address]*accountState, addr accoun
 func updateAccountWrite(account *accountState, vw *state.VersionedWrite, accessIndex uint16) {
 	switch vw.Path {
 	case state.StoragePath:
+		val := vw.Val.(uint256.Int)
+		// Skip no-op writes: if the write value matches the initial read value
+		// and there is no prior write to this slot, keep it as a read.
+		if !hasStorageWrite(account.changes, vw.Key) {
+			if prev, ok := account.getStorageValue(vw.Key); ok && prev.Eq(&val) {
+				return
+			}
+		}
 		addStorageUpdate(account.changes, vw, accessIndex)
+	case state.SelfDestructPath:
+		if deleted, ok := vw.Val.(bool); ok {
+			account.selfDestructed = deleted
+		}
 	case state.BalancePath:
 		val, ok := vw.Val.(uint256.Int)
 		if !ok {
+			return
+		}
+		// Skip non-zero balance writes for selfdestructed accounts.
+		// Post-selfdestruct ETH (e.g. priority fee applied during finalize) must
+		// not appear in the BAL per EIP-7928 — only the zero-balance write from
+		// the selfdestruct itself belongs there.
+		if account.selfDestructed && !val.IsZero() {
 			return
 		}
 		// If we haven't seen a balance and the first write is zero, treat it as a touch only.
@@ -171,6 +218,11 @@ func isSystemBALAddress(addr accounts.Address) bool {
 	return addr == params.SystemAddress
 }
 
+func hasAccountChanges(ac *types.AccountChanges) bool {
+	return len(ac.StorageChanges) > 0 || len(ac.StorageReads) > 0 ||
+		len(ac.BalanceChanges) > 0 || len(ac.NonceChanges) > 0 || len(ac.CodeChanges) > 0
+}
+
 func hasStorageWrite(ac *types.AccountChanges, slot accounts.StorageKey) bool {
 	for _, sc := range ac.StorageChanges {
 		if sc != nil && sc.Slot == slot {
@@ -202,11 +254,13 @@ func blockAccessIndex(txIndex int) uint16 {
 }
 
 type accountState struct {
-	changes      *types.AccountChanges
-	balance      *fieldTracker[uint256.Int]
-	nonce        *fieldTracker[uint64]
-	code         *fieldTracker[[]byte]
-	balanceValue *uint256.Int // tracks latest seen balance
+	changes        *types.AccountChanges
+	balance        *fieldTracker[uint256.Int]
+	nonce          *fieldTracker[uint64]
+	code           *fieldTracker[[]byte]
+	balanceValue   *uint256.Int                        // tracks latest seen balance
+	storageValues  map[accounts.StorageKey]uint256.Int // tracks initial seen value per storage slot
+	selfDestructed bool                                // true once SelfDestructPath=true is seen for this account
 }
 
 // check pre- and post-values, add to BAL if different
@@ -386,6 +440,23 @@ func (a *accountState) setBalanceValue(v uint256.Int) {
 		a.balanceValue = &uint256.Int{}
 	}
 	*a.balanceValue = v
+}
+
+func (a *accountState) setStorageValue(key accounts.StorageKey, v uint256.Int) {
+	if a.storageValues == nil {
+		a.storageValues = make(map[accounts.StorageKey]uint256.Int)
+	}
+	if _, ok := a.storageValues[key]; !ok {
+		a.storageValues[key] = v
+	}
+}
+
+func (a *accountState) getStorageValue(key accounts.StorageKey) (uint256.Int, bool) {
+	if a.storageValues == nil {
+		return uint256.Int{}, false
+	}
+	v, ok := a.storageValues[key]
+	return v, ok
 }
 
 // writeBALToFile writes the Block Access List to a text file for debugging/analysis
