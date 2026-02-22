@@ -485,8 +485,8 @@ Returns traces matching given filter
    * `toAddress`: `Address` - (optional) Sent to these addresses.
    * `after`: `Quantity` - (optional) The offset trace number
    * `count`: `Quantity` - (optional) Integer number of traces to display in a batch.
-   * `mode`: `String` - (optional) Default is `"union"`, meaning traces matching either address filter are returned. Set to `"intersection"` to only return traces that satisfy both `fromAddress` and `toAddress` filters simultaneously.
-
+   * `mode`: `String` - (optional) Default is `"union"`, meaning traces matching either address filter are returned. Set
+     to `"intersection"` to only return traces that satisfy both `fromAddress` and `toAddress` filters simultaneously.
 
 ```js
 params: [{

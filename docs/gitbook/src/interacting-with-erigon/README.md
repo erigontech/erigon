@@ -115,7 +115,8 @@ erigon --http --ws --http.api eth,net,debug,trace
 
 IPC is a simpler transport protocol for use in local environments where the node and the client exist on the same machine.
 
-**Note:** IPC is only available through the separate `rpcdaemon` process, not the main `erigon` binary. Erigon uses a modular architecture where RPC functionality is handled by a standalone daemon.
+**Note:** IPC is only available through the separate `rpcdaemon` process, not the main `erigon` binary. Erigon uses a
+modular architecture where RPC functionality is handled by a standalone daemon.
 
 #### Enabling IPC with rpcdaemon
 
@@ -131,7 +132,7 @@ Then, in a separate terminal, start rpcdaemon with IPC enabled:
 rpcdaemon --socket.enabled --socket.url unix:///var/run/erigon.ipc
 ```
 
-On Linux and macOS, Erigon uses UNIX sockets. On Windows, IPC is provided using named pipes. 
+On Linux and macOS, Erigon uses UNIX sockets. On Windows, IPC is provided using named pipes.
 
 The socket inherits the API namespaces from the `--http.api` flag passed to `rpcdaemon`:
 

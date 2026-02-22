@@ -17,10 +17,10 @@
 package jsonrpc
 
 import (
-	"math/big"
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
@@ -46,7 +46,7 @@ func TestPendingBlock(t *testing.T) {
 	engine := ethash.NewFaker()
 	api := newEthApiForTest(NewBaseApi(ff, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, engine, m.Dirs, nil, 0), nil, nil, nil)
 	expect := uint64(12345)
-	b, err := rlp.EncodeToBytes(types.NewBlockWithHeader(&types.Header{Number: new(big.Int).SetUint64(expect)}))
+	b, err := rlp.EncodeToBytes(types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(expect)}))
 	require.NoError(t, err)
 	ch, id := ff.SubscribePendingBlock(1)
 	defer ff.UnsubscribePendingBlock(id)

@@ -23,11 +23,11 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"sync"
 
 	"google.golang.org/grpc"
 

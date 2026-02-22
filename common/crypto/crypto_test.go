@@ -227,6 +227,7 @@ func TestLoadECDSA(t *testing.T) {
 			t.Fatal(err)
 		}
 		filename := f.Name()
+		defer dir.RemoveFile(filename)
 		f.WriteString(test.input)
 		f.Close()
 

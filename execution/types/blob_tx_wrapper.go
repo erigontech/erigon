@@ -307,7 +307,7 @@ func (txw *BlobTxWrapper) GetBlobGas() uint64     { return txw.Tx.GetBlobGas() }
 func (txw *BlobTxWrapper) GetValue() *uint256.Int { return txw.Tx.GetValue() }
 func (txw *BlobTxWrapper) GetTo() *common.Address { return txw.Tx.GetTo() }
 
-func (txw *BlobTxWrapper) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+func (txw *BlobTxWrapper) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
 	return txw.Tx.AsMessage(s, baseFee, rules)
 }
 

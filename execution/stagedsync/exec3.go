@@ -179,7 +179,7 @@ func ExecV3(ctx context.Context,
 
 	commitThreshold := cfg.batchSize.Bytes()
 
-	logInterval := 20 * time.Second
+	logInterval := 10 * time.Second
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	defer resetExecGauges(ctx)
@@ -676,7 +676,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			}
 
 			te.execRequests <- &execRequest{
-				b.Number().Uint64(), b.Hash(),
+				b.NumberU64(), b.Hash(),
 				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
 				dbBAL, txTasks, applyResults, false, exhausted,
 			}

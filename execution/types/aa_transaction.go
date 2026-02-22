@@ -164,7 +164,7 @@ func (tx *AccountAbstractionTransaction) Type() byte {
 	return AccountAbstractionTxType
 }
 
-func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+func (tx *AccountAbstractionTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
 	return &Message{
 		to:         accounts.NilAddress,
 		gasPrice:   *tx.FeeCap,

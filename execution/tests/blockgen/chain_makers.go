@@ -25,6 +25,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -89,8 +91,8 @@ func (b *BlockGen) SetNonce(nonce types.BlockNonce) {
 // SetDifficulty sets the difficulty field of the generated block. This method is
 // useful for Clique tests where the difficulty does not depend on time. For the
 // ethash tests, please use OffsetTime, which implicitly recalculates the diff.
-func (b *BlockGen) SetDifficulty(diff *big.Int) {
-	b.header.Difficulty = diff
+func (b *BlockGen) SetDifficulty(diff uint64) {
+	b.header.Difficulty.SetUint64(diff)
 }
 
 // AddTx adds a transaction to the generated block. If no coinbase has
@@ -164,8 +166,8 @@ func (b *BlockGen) AddWithdrawal(withdrawal *types.Withdrawal) {
 }
 
 // Number returns the block number of the block being generated.
-func (b *BlockGen) Number() *big.Int {
-	return new(big.Int).Set(b.header.Number)
+func (b *BlockGen) Number() *uint256.Int {
+	return new(uint256.Int).Set(&b.header.Number)
 }
 
 // AddUncheckedReceipt forcefully adds a receipts to the block without a
@@ -382,7 +384,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			limit := new(big.Int).Add(daoBlock, misc.DAOForkExtraRange)
-			if b.header.Number.Cmp(daoBlock) >= 0 && b.header.Number.Cmp(limit) < 0 {
+			if b.header.Number.CmpBig(daoBlock) >= 0 && b.header.Number.CmpBig(limit) < 0 {
 				b.header.Extra = common.Copy(misc.DAOForkBlockExtra)
 			}
 		}

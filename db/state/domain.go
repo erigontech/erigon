@@ -1359,7 +1359,8 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 		maxTxNum = math.MaxUint64
 	}
 	useExistenceFilter := dt.d.Accessors.Has(statecfg.AccessorExistence)
-	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
+	//useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
+	useCache := maxTxNum == math.MaxUint64
 
 	hi, lo := dt.ht.iit.hashKey(k)
 
@@ -1416,6 +1417,9 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dt.name.String(), k, dt.files[i].src.decompressor.FileName())
 		}
 
+		if dt.files[i].endTxNum-dt.files[i].startTxNum == dt.stepSize {
+			useCache = false
+		}
 		if dt.getFromFileCache != nil && useCache {
 			dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), v: v})
 		}

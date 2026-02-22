@@ -115,7 +115,7 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, reorgBlockDepth uint6
 		ps:                     background.NewProgressSet(),
 		logger:                 logger,
 		collateAndBuildWorkers: 1,
-		mergeWorkers:           1,
+		mergeWorkers:           dbg.MergeWorkers,
 
 		produce: true,
 	}, nil
@@ -1462,7 +1462,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *SelectedStaticF
 		}
 	}()
 
-	at.a.logger.Info("[snapshots] merge state " + r.String())
+	at.a.logger.Info("[snapshots] merge state "+r.String(), "merge_workers", at.a.mergeWorkers)
 	commitmentUseReferencedBranches := at.a.Cfg(kv.CommitmentDomain).ReplaceKeysInValues
 
 	accStorageMerged := new(sync.WaitGroup)
