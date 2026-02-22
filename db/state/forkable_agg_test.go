@@ -617,3 +617,45 @@ func (i *inspectingFreezer) Check() {
 	require.Equal(i.t, 0, len(i.expectFrom))
 	require.Equal(i.t, 0, len(i.expectTo))
 }
+
+func TestUnmarkedForkableUnwindDeletesVals(t *testing.T) {
+	dirs, db, log := setupDb(t)
+	defer db.Close()
+
+	unmarkedId := kv.ForkableId(3)
+	_ = registerEntity(dirs, "unmarked_test", unmarkedId)
+
+	fcfg := &statecfg.ForkableCfg{ValsTbl: kv.BlockBody, ValuesOnCompressedPage: 1}
+	unmarked, err := NewUnmarkedForkable(unmarkedId, fcfg, IdentityRootRelationInstance, dirs, log)
+	require.NoError(t, err)
+	defer unmarked.Close()
+
+	rwtx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwtx.Rollback()
+
+	unmarkedTx := &UnmarkedTx{ap: unmarked, ProtoForkableTx: unmarked.ProtoForkable.BeginFilesRo()}
+	defer unmarkedTx.Close()
+
+	for i := 0; i < 10; i++ {
+		err := unmarkedTx.Append(Num(i), []byte{byte(i)}, rwtx)
+		require.NoError(t, err)
+	}
+
+	from := RootNum(5)
+	fs, err := unmarkedTx.Unwind(context.Background(), from, rwtx)
+	require.NoError(t, err)
+	require.Greater(t, fs.PruneCount, uint64(0))
+
+	for i := 0; i < 5; i++ {
+		v, err := rwtx.GetOne(kv.BlockBody, kv.EncToBytes(uint64(i), true))
+		require.NoError(t, err)
+		require.NotNil(t, v)
+	}
+
+	for i := 5; i < 10; i++ {
+		v, err := rwtx.GetOne(kv.BlockBody, kv.EncToBytes(uint64(i), true))
+		require.NoError(t, err)
+		require.Nil(t, v)
+	}
+}
