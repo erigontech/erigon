@@ -1059,10 +1059,13 @@ func (g *Getter) MatchPrefixUncompressed(prefix []byte) bool {
 	wordLen := g.nextPosClean()
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
 	prefixLen := len(prefix)
-	if wordLen == 0 && prefixLen != 0 {
+	if prefixLen == 0 {
 		return true
 	}
-	if prefixLen == 0 {
+	if wordLen == 0 {
+		return false
+	}
+	if uint64(prefixLen) > wordLen {
 		return false
 	}
 
