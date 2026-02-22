@@ -118,6 +118,13 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 			"isForkValidation", pe.isForkValidation, "isBlockProduction", pe.isBlockProduction, "isApplyingBlocks", pe.isApplyingBlocks)
 	}
 
+	// restoreTxNum must run before pe.run() so that doms.SetTxNum() completes
+	// before any goroutine reads txNum (via AsGetter/GetLatest).
+	restoredTxNum, _, _, _, err := restoreTxNum(ctx, &pe.cfg, rwTx, pe.doms, maxBlockNum)
+	if err != nil {
+		return nil, rwTx, err
+	}
+
 	executorContext, executorCancel, err := pe.run(ctx)
 	defer executorCancel()
 
@@ -129,7 +136,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 		return nil, rwTx, err
 	}
 
-	if err := pe.executeBlocks(executorContext, asyncTx, startBlockNum, maxBlockNum, blockLimit, initialTxNum, readAhead, initialCycle, applyResults); err != nil {
+	if err := pe.executeBlocks(executorContext, asyncTx, startBlockNum, maxBlockNum, blockLimit, initialTxNum, restoredTxNum, readAhead, initialCycle, applyResults); err != nil {
 		return nil, rwTx, err
 	}
 
@@ -267,7 +274,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 					if applyResult.BlockNum > lastBlockResult.BlockNum {
 						uncommittedBlocks++
-						pe.doms.SetTxNum(applyResult.lastTxNum)
 						lastBlockResult = *applyResult
 					}
 

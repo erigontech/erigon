@@ -44,12 +44,6 @@ type StateV3 struct {
 	syncCfg ethconfig.Sync
 	txNum   uint64
 	trace   bool
-	// selfdestructedByTx tracks the last incarnation of accounts selfdestructed by
-	// Writer.DeleteAccount within the current block.  It lets the next tx's fresh IBS
-	// (serial exec3 path, versionMap==nil) recover the previous incarnation so that
-	// CreateAccount can compute newInc = prevInc+1 correctly.  Cleared per-address
-	// by Writer.UpdateAccountData when the account is recreated.
-	selfdestructedByTx map[accounts.Address]uint64
 }
 
 func NewStateV3(domains *execctx.SharedDomains, syncCfg ethconfig.Sync, logger log.Logger) *StateV3 {
@@ -58,17 +52,6 @@ func NewStateV3(domains *execctx.SharedDomains, syncCfg ethconfig.Sync, logger l
 		logger:  logger,
 		syncCfg: syncCfg,
 		//trace: true,
-		selfdestructedByTx: map[accounts.Address]uint64{},
-	}
-}
-
-func (rs *StateV3) WithDomains(domains *execctx.SharedDomains) *StateV3 {
-	return &StateV3{
-		domains: domains,
-		logger:  rs.logger,
-		syncCfg: rs.syncCfg,
-		//trace: true,
-		selfdestructedByTx: rs.selfdestructedByTx,
 	}
 }
 
@@ -81,7 +64,7 @@ func (rs *StateV3) applyUpdates(roTx kv.TemporalTx, blockNum, txNum uint64, stat
 	if stateUpdates.BTreeG != nil {
 		var err error
 		stateUpdates.Scan(func(update *stateUpdate) bool {
-			if update.deleteAccount || update.createContract || (update.data != nil && update.originalIncarnation > update.data.Incarnation) {
+			if update.deleteAccount || (update.data != nil && update.originalIncarnation > update.data.Incarnation) {
 				if dbg.TraceApply && (rs.trace || dbg.TraceAccount(update.address.Handle())) {
 					fmt.Printf("%d apply:del code+storage: %x\n", blockNum, update.address)
 				}
@@ -330,9 +313,8 @@ type bufferedAccount struct {
 
 type stateUpdate struct {
 	*bufferedAccount
-	address        accounts.Address
-	deleteAccount  bool
-	createContract bool
+	address       accounts.Address
+	deleteAccount bool
 }
 
 func newStateUpdates() StateUpdates {
@@ -354,7 +336,7 @@ func (v StateUpdates) TraceBlockUpdates(blockNum uint64, traceAll bool) {
 
 	v.Scan(func(update *stateUpdate) bool {
 		if traceAll || dbg.TraceAccount(update.address.Handle()) {
-			if update.deleteAccount || update.createContract || (update.data != nil && update.originalIncarnation > update.data.Incarnation) {
+			if update.deleteAccount || (update.data != nil && update.originalIncarnation > update.data.Incarnation) {
 				fmt.Printf("%d del code+storage: %x\n", blockNum, update.address)
 			}
 
@@ -429,7 +411,7 @@ func NewStateV3Buffered(state *StateV3) *StateV3Buffered {
 
 func (s *StateV3Buffered) WithDomains(domains *execctx.SharedDomains) *StateV3Buffered {
 	return &StateV3Buffered{
-		StateV3:       s.StateV3.WithDomains(domains),
+		StateV3:       NewStateV3(domains, s.syncCfg, s.logger),
 		accounts:      s.accounts,
 		accountsMutex: s.accountsMutex,
 	}
@@ -477,17 +459,13 @@ func (w *BufferedWriter) UpdateAccountData(address accounts.Address, original, a
 	}
 
 	if update, ok := w.writeSet.Get(&stateUpdate{address: address}); !ok {
-		update = &stateUpdate{bufferedAccount: &bufferedAccount{
+		update = &stateUpdate{&bufferedAccount{
 			originalIncarnation: original.Incarnation,
 			data:                account,
-		}, address: address}
+		}, address, false}
 		w.writeSet.Set(update)
 	} else {
-		if update.bufferedAccount == nil {
-			update.bufferedAccount = &bufferedAccount{
-				originalIncarnation: original.Incarnation,
-			}
-		} else if original.Incarnation < update.originalIncarnation {
+		if original.Incarnation < update.originalIncarnation {
 			update.originalIncarnation = original.Incarnation
 		}
 		update.data = account
@@ -515,11 +493,8 @@ func (w *BufferedWriter) UpdateAccountCode(address accounts.Address, incarnation
 	}
 
 	if update, ok := w.writeSet.Get(&stateUpdate{address: address}); !ok {
-		w.writeSet.Set(&stateUpdate{bufferedAccount: &bufferedAccount{code: code}, address: address})
+		w.writeSet.Set(&stateUpdate{&bufferedAccount{code: code}, address, false})
 	} else {
-		if update.bufferedAccount == nil {
-			update.bufferedAccount = &bufferedAccount{}
-		}
 		update.code = code
 	}
 
@@ -544,7 +519,7 @@ func (w *BufferedWriter) DeleteAccount(address accounts.Address, original *accou
 	}
 
 	if update, ok := w.writeSet.Get(&stateUpdate{address: address}); !ok {
-		w.writeSet.Set(&stateUpdate{address: address, deleteAccount: true})
+		w.writeSet.Set(&stateUpdate{nil, address, true})
 	} else {
 		update.bufferedAccount = nil
 		update.deleteAccount = true
@@ -570,13 +545,10 @@ func (w *BufferedWriter) WriteAccountStorage(address accounts.Address, incarnati
 
 	update, ok := w.writeSet.Get(&stateUpdate{address: address})
 	if !ok {
-		update = &stateUpdate{bufferedAccount: &bufferedAccount{}, address: address}
+		update = &stateUpdate{&bufferedAccount{}, address, false}
 		w.writeSet.Set(update)
 	}
 
-	if update.bufferedAccount == nil {
-		update.bufferedAccount = &bufferedAccount{}
-	}
 	if update.storage == nil {
 		update.storage = btree.NewBTreeGOptions[storageItem](func(a, b storageItem) bool {
 			return a.key.Cmp(b.key) > 0
@@ -617,12 +589,6 @@ func (w *BufferedWriter) CreateContract(address accounts.Address) error {
 		fmt.Printf("create contract: %x\n", address)
 	}
 
-	if update, ok := w.writeSet.Get(&stateUpdate{address: address}); ok {
-		update.createContract = true
-	} else {
-		w.writeSet.Set(&stateUpdate{address: address, createContract: true})
-	}
-
 	return nil
 }
 
@@ -632,9 +598,6 @@ type Writer struct {
 	trace       bool
 	accumulator *shards.Accumulator
 	txNum       uint64
-	// rs is optionally set (via SetState) by the serial exec3 worker so that DeleteAccount
-	// and UpdateAccountData can maintain selfdestructedByTx for cross-tx incarnation tracking.
-	rs *StateV3
 }
 
 func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator, txNum uint64) *Writer {
@@ -648,11 +611,6 @@ func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator, txNum uint
 
 func (w *Writer) SetTxNum(v uint64)              { w.txNum = v }
 func (w *Writer) SetPutDel(tx kv.TemporalPutDel) { w.tx = tx }
-
-// SetRS wires the shared StateV3Buffered into the Writer so that DeleteAccount and
-// UpdateAccountData can maintain selfdestructedByTx for cross-tx incarnation tracking
-// in the serial exec3 path.
-func (w *Writer) SetState(rs *StateV3) { w.rs = rs }
 
 func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return nil, nil, nil, nil
@@ -679,11 +637,6 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 
 	if err := w.tx.DomainPut(kv.AccountsDomain, addressValue[:], value, w.txNum, nil, 0); err != nil {
 		return err
-	}
-	// The account has been (re)created; clear the selfdestructedByTx entry so that
-	// subsequent txs in the same block see the account as live (not deleted).
-	if w.rs != nil {
-		delete(w.rs.selfdestructedByTx, address)
 	}
 	return nil
 }
@@ -720,11 +673,6 @@ func (w *Writer) DeleteAccount(address accounts.Address, original *accounts.Acco
 	// if w.accumulator != nil { TODO: investigate later. basically this will always panic. keeping this out should be fine anyway.
 	// 	w.accumulator.DeleteAccount(address)
 	// }
-	// Record the deleted incarnation so the next tx's fresh IBS can recover prevInc when
-	// CreateAccount is called for the same address in the serial exec3 path (versionMap==nil).
-	if w.rs != nil && original != nil {
-		w.rs.selfdestructedByTx[address] = original.Incarnation
-	}
 	return nil
 }
 
@@ -817,17 +765,6 @@ func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
 	}
 	_, _, hasStorage, err := r.getter.HasPrefix(kv.StorageDomain, value[:])
 	return hasStorage, err
-}
-
-// ReadDeletedIncarnation returns the incarnation recorded by Writer.DeleteAccount for
-// the given address, if any.  Used by CreateAccount in the serial exec3 path
-// (versionMap==nil) to compute newInc = prevInc+1 correctly when the account was
-// selfdestructed by a previous tx in the same block.
-func (r *bufferedReader) ReadDeletedIncarnation(address accounts.Address) (uint64, bool) {
-	r.bufferedState.accountsMutex.RLock()
-	inc, ok := r.bufferedState.selfdestructedByTx[address]
-	r.bufferedState.accountsMutex.RUnlock()
-	return inc, ok
 }
 
 func (r *ReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {

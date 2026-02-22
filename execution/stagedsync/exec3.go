@@ -542,13 +542,7 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 	}
 }
 
-func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult) error {
-	inputTxNum, _, offsetFromBlockBeginning, _, err := restoreTxNum(ctx, &te.cfg, tx, te.doms, maxBlockNum)
-
-	if err != nil {
-		return err
-	}
-
+func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult) error {
 	if te.execLoopGroup == nil {
 		return errors.New("no exec group")
 	}
@@ -687,10 +681,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 
 			mxExecBlocks.Add(1)
 
-			if offsetFromBlockBeginning > 0 {
-				// after history execution no offset will be required
-				offsetFromBlockBeginning = 0
-			}
 			if exhausted != nil {
 				break
 			}

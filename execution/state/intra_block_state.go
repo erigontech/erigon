@@ -614,6 +614,21 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 		}
 		return nil, nil
 	}
+	// When commited=true (used by ResolveCode for EIP-7702 delegation),
+	// versionedRead skips local versionedWrites and may return a stale
+	// ReadSet value. If the current tx has set this account's code (e.g.,
+	// via EIP-7702 authorization processing), return the dirty code directly.
+	// When commited=true (used by ResolveCode for EIP-7702 delegation),
+	// versionedRead skips local versionedWrites and may return a stale
+	// ReadSet value. If the CURRENT tx has set this account's code (e.g.,
+	// via EIP-7702 authorization processing), return the dirty code directly.
+	// We must also check hasWrite to ensure the code was set in this tx,
+	// not in a previous tx sharing the same IBS (block generator reuses IBS).
+	if commited {
+		if so, ok := sdb.stateObjects[addr]; ok && so.dirtyCode && sdb.hasWrite(addr, CodePath, accounts.NilKey) {
+			return so.code, nil
+		}
+	}
 	code, source, _, err := versionedRead(sdb, addr, CodePath, accounts.NilKey, commited, nil,
 		func(v []byte) []byte {
 			return v
@@ -1562,6 +1577,11 @@ func (sdb *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 	sdb.setStateObject(addr, newobj)
 	data := newobj.data
 	versionWritten(sdb, addr, AddressPath, accounts.NilKey, &data)
+	// Write CodeHashPath so that any stale versionedReads cache entry
+	// (e.g. from the pre-creation GetCodeHash check in EVM create()) is
+	// invalidated.  newObject normalises the zero-value CodeHash to
+	// EmptyCodeHash, so this records keccak256("") for a fresh account.
+	versionWritten(sdb, addr, CodeHashPath, accounts.NilKey, newobj.data.CodeHash)
 	return newobj
 }
 
@@ -2352,11 +2372,28 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 				versionWritten(sdb, addr, IncarnationPath, accounts.NilKey, incarnation)
 			case CodePath:
 				code := val.([]byte)
-				if err := sdb.SetCode(addr, code); err != nil {
+				stateObject, err := sdb.GetOrNewStateObject(addr)
+				if err != nil {
 					return err
 				}
+				codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+				// Force-set code bypassing stateObject.SetCode's equality check.
+				// The finalize IBS uses a VersionedStateReader whose ReadSet may
+				// contain the post-write code value (when the worker read the code
+				// after a SetCodeTx modified it), causing SetCode's bytes.Equal
+				// comparison to incorrectly skip the update and leave dirtyCode unset.
+				sdb.journal.append(codeChange{
+					account:     addr,
+					prevhash:    stateObject.data.CodeHash,
+					prevcode:    stateObject.code,
+					wasCommited: !sdb.hasWrite(addr, CodePath, accounts.NilKey),
+				})
+				stateObject.setCode(codeHash, code)
+				versionWritten(sdb, addr, CodePath, accounts.NilKey, code)
+				versionWritten(sdb, addr, CodeHashPath, accounts.NilKey, codeHash)
+				versionWritten(sdb, addr, CodeSizePath, accounts.NilKey, len(code))
 			case CodeHashPath, CodeSizePath:
-				// set by SetCode
+				// set by CodePath case above
 			case SelfDestructPath:
 				deleted := val.(bool)
 				if deleted {

@@ -212,13 +212,6 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, s
 		rw.stateWriter = state.NewWriter(putdel, accumulator, 0)
 	}
 
-	// Wire the shared state into the Writer so that DeleteAccount / UpdateAccountData
-	// can maintain selfdestructedByTx for cross-tx incarnation tracking (serial exec3).
-	type stateSettable interface{ SetState(*state.StateV3) }
-	if settable, ok := rw.stateWriter.(stateSettable); ok {
-		settable.SetState(rs.StateV3)
-	}
-
 	if chainTx != nil {
 		if err := rw.resetTx(chainTx); err != nil {
 			return err
