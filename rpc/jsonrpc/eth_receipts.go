@@ -274,7 +274,12 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 	if err != nil {
 		return out, err
 	}
-	if topicsBitmap != nil {
+	// Only use the bitmap if it has results. When inverted index files are missing
+	// (e.g. LogTopicIdx snapshots not built), IndexRange returns empty-but-non-nil
+	// iterators. Using them would incorrectly filter out all results. By checking
+	// HasNext(), we fall through to the full-scan path where getLogsV3 applies
+	// correct in-memory filtering via Logs.Filter().
+	if topicsBitmap != nil && topicsBitmap.HasNext() {
 		out = topicsBitmap
 	}
 
@@ -288,13 +293,14 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 	if err != nil {
 		return out, err
 	}
-	if addrBitmap != nil {
+	if addrBitmap != nil && addrBitmap.HasNext() {
 		if out == nil {
 			out = addrBitmap
 		} else {
 			out = stream.Intersect[uint64](out, addrBitmap, asc, kv.Unlim)
 		}
 	}
+
 	if out == nil {
 		if asc == order.Asc {
 			out = stream.Range[uint64](fromTxNum, toTxNum)
