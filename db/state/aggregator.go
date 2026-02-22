@@ -1653,6 +1653,8 @@ func (a *Aggregator) BuildFilesInBackground(txNum uint64) chan struct{} {
 		return fin
 	}
 
+	a.logger.Info("BuildFilesInBackground", "stack", dbg.Stack())
+
 	step := kv.Step(a.visibleFilesMinimaxTxNum.Load() / a.StepSize())
 
 	a.wg.Add(1)
