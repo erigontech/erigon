@@ -24,8 +24,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"math/big"
 
+	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/common"
@@ -71,7 +71,7 @@ func MainnetGenesisBlock() *types.Genesis {
 		Nonce:      66,
 		ExtraData:  hexutil.MustDecode("0x11bbe8db4e347b4e8c937c1c8370e4b5ed33adb3db69cbdb7a38e1e50b1b82fa"),
 		GasLimit:   5000,
-		Difficulty: big.NewInt(17179869184),
+		Difficulty: uint256.NewInt(17179869184),
 		Alloc:      ReadPrealloc(allocs, "allocs/mainnet.json"),
 	}
 }
@@ -83,7 +83,7 @@ func BloatnetGenesisBlock() *types.Genesis {
 		Nonce:      66,
 		ExtraData:  hexutil.MustDecode("0x11bbe8db4e347b4e8c937c1c8370e4b5ed33adb3db69cbdb7a38e1e50b1b82fa"),
 		GasLimit:   5000,
-		Difficulty: big.NewInt(17179869184),
+		Difficulty: uint256.NewInt(17179869184),
 		Alloc:      ReadPrealloc(allocs, "allocs/mainnet.json"),
 	}
 }
@@ -95,7 +95,7 @@ func SepoliaGenesisBlock() *types.Genesis {
 		Nonce:      0,
 		ExtraData:  []byte("Sepolia, Athens, Attica, Greece!"),
 		GasLimit:   30000000,
-		Difficulty: big.NewInt(131072),
+		Difficulty: uint256.NewInt(131072),
 		Timestamp:  1633267481,
 		Alloc:      ReadPrealloc(allocs, "allocs/sepolia.json"),
 	}
@@ -108,7 +108,7 @@ func HoodiGenesisBlock() *types.Genesis {
 		Nonce:      0x1234,
 		ExtraData:  []byte(""),
 		GasLimit:   0x2255100, // 36M
-		Difficulty: big.NewInt(1),
+		Difficulty: uint256.NewInt(1),
 		Timestamp:  1742212800,
 		Alloc:      ReadPrealloc(allocs, "allocs/hoodi.json"),
 	}
@@ -120,7 +120,7 @@ func GnosisGenesisBlock() *types.Genesis {
 		Timestamp:  0,
 		AuRaSeal:   types.NewAuraSeal(0, common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
 		GasLimit:   0x989680,
-		Difficulty: big.NewInt(0x20000),
+		Difficulty: uint256.NewInt(0x20000),
 		Alloc:      ReadPrealloc(allocs, "allocs/gnosis.json"),
 	}
 }
@@ -131,7 +131,7 @@ func ChiadoGenesisBlock() *types.Genesis {
 		Timestamp:  0,
 		AuRaSeal:   types.NewAuraSeal(0, common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
 		GasLimit:   0x989680,
-		Difficulty: big.NewInt(0x20000),
+		Difficulty: uint256.NewInt(0x20000),
 		Alloc:      ReadPrealloc(allocs, "allocs/chiado.json"),
 	}
 }
@@ -152,7 +152,7 @@ func DeveloperGenesisBlock(period uint64, faucet common.Address) *types.Genesis 
 		Config:     &config,
 		ExtraData:  append(append(make([]byte, 32), faucet[:]...), make([]byte, crypto.SignatureLength)...),
 		GasLimit:   11500000,
-		Difficulty: big.NewInt(1),
+		Difficulty: uint256.NewInt(1),
 		Alloc:      ReadPrealloc(allocs, "allocs/dev.json"),
 	}
 }

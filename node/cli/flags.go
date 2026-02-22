@@ -76,7 +76,7 @@ var (
 
 	PruneModeFlag = cli.StringFlag{
 		Name: "prune.mode",
-		Usage: `Choose a pruning preset to run onto. Available values: "full", "archive", "minimal", "blocks".
+		Usage: `Choose a pruning preset to run on. Available values: "full", "archive", "minimal", "blocks".
 				full: Keep only necessary blocks and latest state,
 				blocks: Keep all blocks but not the state history,
 				archive: Keep the entire state history and all blocks,
