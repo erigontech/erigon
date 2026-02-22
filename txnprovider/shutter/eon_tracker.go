@@ -21,11 +21,11 @@ package shutter
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"sync"
 	"time"
 
 	"github.com/google/btree"
+	"github.com/holiman/uint256"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -203,7 +203,7 @@ func (et *KsmEonTracker) readEonAtNewBlockEvent(blockNum uint64) (Eon, bool, err
 		et.logger.Trace("readEonAtNewBlockEvent timing", "blockNum", blockNum, "cached", cached, "duration", time.Since(startTime))
 	}()
 
-	callOpts := &bind.CallOpts{BlockNumber: new(big.Int).SetUint64(blockNum)}
+	callOpts := &bind.CallOpts{BlockNumber: uint256.NewInt(blockNum)}
 	if et.currentEon == nil {
 		numKeyperSets, err := et.ksmContract.GetNumKeyperSets(callOpts)
 		if err != nil {
@@ -385,7 +385,7 @@ func (et *KsmEonTracker) handleKeyperSetAddedEvent(event *contracts.KeyperSetMan
 
 func (et *KsmEonTracker) readEonAtKeyperSetAddedEvent(event *contracts.KeyperSetManagerKeyperSetAdded) (Eon, bool, error) {
 	callOpts := &bind.CallOpts{
-		BlockNumber: new(big.Int).SetUint64(event.Raw.BlockNumber),
+		BlockNumber: uint256.NewInt(event.Raw.BlockNumber),
 	}
 
 	eonIndex := event.Eon
