@@ -283,6 +283,13 @@ func ReplaceVersionWithMask(path string) (string, error) {
 	fNameOld := fName
 	fName = strings.ReplaceAll(fName, ver.String(), "*")
 
+	// Insert wildcard before extension to match optional content hash particle
+	// e.g. *-000000-001000-bodies.seg → *-000000-001000-bodies*.seg
+	ext := filepath.Ext(fName)
+	if ext != "" {
+		fName = fName[:len(fName)-len(ext)] + "*" + ext
+	}
+
 	return strings.ReplaceAll(path, fNameOld, fName), nil
 }
 

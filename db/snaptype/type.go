@@ -634,6 +634,11 @@ func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, ind
 		return lastKeyValue, fmt.Errorf("compress: %w", err)
 	}
 
+	f, err = ApplyContentHash(f)
+	if err != nil {
+		return lastKeyValue, err
+	}
+
 	p := &background.Progress{}
 
 	if err := f.Type.BuildIndexes(ctx, f, indexBuilder, chainConfig, tmpDir, p, lvl, logger); err != nil {

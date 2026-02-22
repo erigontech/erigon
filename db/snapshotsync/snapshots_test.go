@@ -243,8 +243,11 @@ func TestMergeSnapshots(t *testing.T) {
 		require.NoError(err)
 	}
 
-	expectedFileName := snaptype.SegmentFileName(snaptype2.Transactions.Versions().Current, 0, 500_000, snaptype2.Transactions.Enum())
-	d, err := seg.NewDecompressor(filepath.Join(dir, expectedFileName))
+	expectedMask := snaptype.SegmentFileMask(0, 500_000, snaptype2.Transactions.Enum())
+	matches, err := filepath.Glob(filepath.Join(dir, expectedMask))
+	require.NoError(err)
+	require.Len(matches, 1, "expected exactly one merged segment matching %s", expectedMask)
+	d, err := seg.NewDecompressor(matches[0])
 	require.NoError(err)
 	defer d.Close()
 	a := d.Count()

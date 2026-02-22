@@ -639,6 +639,12 @@ func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGett
 	if err := sn.Compress(); err != nil {
 		return err
 	}
+
+	f, err = snaptype.ApplyContentHash(f)
+	if err != nil {
+		return err
+	}
+
 	// Generate .idx file, which is the slot => offset mapping.
 	p := &background.Progress{}
 
