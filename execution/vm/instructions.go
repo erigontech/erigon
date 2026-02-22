@@ -376,8 +376,10 @@ func opKeccak256(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error
 }
 
 func opAddress(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	var v uint256.Int
 	addrVal := scope.Contract.Address().Value()
-	scope.Stack.push(*new(uint256.Int).SetBytes(addrVal[:]))
+	v.SetBytes(addrVal[:])
+	scope.Stack.push(v)
 	return pc, nil, nil
 }
 
@@ -393,21 +395,21 @@ func opBalance(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 }
 
 func opOrigin(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if origin := evm.Origin; origin.IsNil() {
-		scope.Stack.push(uint256.Int{})
-	} else {
+	var v uint256.Int
+	if origin := evm.Origin; !origin.IsNil() {
 		originVal := origin.Value()
-		scope.Stack.push(*new(uint256.Int).SetBytes(originVal[:]))
+		v.SetBytes(originVal[:])
 	}
+	scope.Stack.push(v)
 	return pc, nil, nil
 }
 func opCaller(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if caller := scope.Contract.Caller(); caller.IsNil() {
-		scope.Stack.push(uint256.Int{})
-	} else {
+	var v uint256.Int
+	if caller := scope.Contract.Caller(); !caller.IsNil() {
 		callerValue := caller.Value()
-		scope.Stack.push(*new(uint256.Int).SetBytes(callerValue[:]))
+		v.SetBytes(callerValue[:])
 	}
+	scope.Stack.push(v)
 	return pc, nil, nil
 }
 
@@ -443,7 +445,9 @@ func stCallDataLoad(_ uint64, scope *CallContext) string {
 }
 
 func opCallDataSize(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.push(*new(uint256.Int).SetUint64(uint64(len(scope.input))))
+	var v uint256.Int
+	v.SetUint64(uint64(len(scope.input)))
+	scope.Stack.push(v)
 	return pc, nil, nil
 }
 
@@ -482,7 +486,9 @@ func stCallDataCopy(_ uint64, scope *CallContext) string {
 }
 
 func opReturnDataSize(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.push(*new(uint256.Int).SetUint64(uint64(len(evm.returnData))))
+	var v uint256.Int
+	v.SetUint64(uint64(len(evm.returnData)))
+	scope.Stack.push(v)
 	return pc, nil, nil
 }
 
@@ -551,9 +557,9 @@ func opExtCodeSize(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 }
 
 func opCodeSize(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	l := new(uint256.Int)
-	l.SetUint64(uint64(len(scope.Contract.Code)))
-	scope.Stack.push(*l)
+	var v uint256.Int
+	v.SetUint64(uint64(len(scope.Contract.Code)))
+	scope.Stack.push(v)
 	return pc, nil, nil
 }
 
@@ -692,24 +698,26 @@ func stBlockhash(_ uint64, scope *CallContext) string {
 }
 
 func opCoinbase(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if coinbase := evm.Context.Coinbase; coinbase.IsNil() {
-		scope.Stack.push(uint256.Int{})
-	} else {
+	var v uint256.Int
+	if coinbase := evm.Context.Coinbase; !coinbase.IsNil() {
 		coinbaseValue := coinbase.Value()
-		scope.Stack.push(*new(uint256.Int).SetBytes(coinbaseValue[:]))
+		v.SetBytes(coinbaseValue[:])
 	}
+	scope.Stack.push(v)
 	return pc, nil, nil
 }
 
 func opTimestamp(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	v := new(uint256.Int).SetUint64(evm.Context.Time)
-	scope.Stack.push(*v)
+	var v uint256.Int
+	v.SetUint64(evm.Context.Time)
+	scope.Stack.push(v)
 	return pc, nil, nil
 }
 
 func opNumber(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	v := new(uint256.Int).SetUint64(evm.Context.BlockNumber)
-	scope.Stack.push(*v)
+	var v uint256.Int
+	v.SetUint64(evm.Context.BlockNumber)
+	scope.Stack.push(v)
 	return pc, nil, nil
 }
 
@@ -720,27 +728,29 @@ func opSlotNum(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 }
 
 func opDifficulty(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	var v *uint256.Int
+	var v uint256.Int
 	if evm.Context.PrevRanDao != nil {
 		// EIP-4399: Supplant DIFFICULTY opcode with PREVRANDAO
-		v = new(uint256.Int).SetBytes(evm.Context.PrevRanDao.Bytes())
+		v.SetBytes(evm.Context.PrevRanDao.Bytes())
 	} else {
-		var overflow bool
-		v, overflow = uint256.FromBig(evm.Context.Difficulty)
+		vp, overflow := uint256.FromBig(evm.Context.Difficulty)
 		if overflow {
 			return pc, nil, errors.New("evm.Context.Difficulty higher than 2^256-1")
 		}
+		v = *vp
 	}
-	scope.Stack.push(*v)
+	scope.Stack.push(v)
 	return pc, nil, nil
 }
 
 func opGasLimit(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	var v uint256.Int
 	if evm.Context.MaxGasLimit {
-		scope.Stack.push(*new(uint256.Int).SetAllOne())
+		v.SetAllOne()
 	} else {
-		scope.Stack.push(*new(uint256.Int).SetUint64(evm.Context.GasLimit))
+		v.SetUint64(evm.Context.GasLimit)
 	}
+	scope.Stack.push(v)
 	return pc, nil, nil
 }
 
@@ -865,7 +875,9 @@ func opJumpdest(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 }
 
 func opPc(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.push(*new(uint256.Int).SetUint64(pc))
+	var v uint256.Int
+	v.SetUint64(pc)
+	scope.Stack.push(v)
 	return pc, nil, nil
 }
 
@@ -874,12 +886,16 @@ func stPc(pc uint64, scope *CallContext) string {
 }
 
 func opMsize(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.push(*new(uint256.Int).SetUint64(uint64(scope.Memory.Len())))
+	var v uint256.Int
+	v.SetUint64(uint64(scope.Memory.Len()))
+	scope.Stack.push(v)
 	return pc, nil, nil
 }
 
 func opGas(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	scope.Stack.push(*new(uint256.Int).SetUint64(scope.gas))
+	var v uint256.Int
+	v.SetUint64(scope.gas)
+	scope.Stack.push(v)
 	return pc, nil, nil
 }
 
@@ -1466,13 +1482,11 @@ func makeLog(size int) executionFunc {
 
 // opPush1 is a specialized version of pushN
 func opPush1(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	var (
-		codeLen = uint64(len(scope.Contract.Code))
-		integer = new(uint256.Int)
-	)
 	pc++
-	if pc < codeLen {
-		scope.Stack.push(*integer.SetUint64(uint64(scope.Contract.Code[pc])))
+	if pc < uint64(len(scope.Contract.Code)) {
+		var integer uint256.Int
+		integer.SetUint64(uint64(scope.Contract.Code[pc]))
+		scope.Stack.push(integer)
 	} else {
 		scope.Stack.push(uint256.Int{})
 	}
@@ -1494,17 +1508,15 @@ func stPush1(pc uint64, scope *CallContext) string {
 
 // opPush2 is a specialized version of pushN
 func opPush2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	var (
-		codeLen = uint64(len(scope.Contract.Code))
-		integer = new(uint256.Int)
-	)
+	var integer uint256.Int
+	codeLen := uint64(len(scope.Contract.Code))
 
 	if pc+2 < codeLen {
 		integer.SetBytes2(scope.Contract.Code[pc+1 : pc+3])
 	} else if pc+1 < codeLen {
 		integer.SetUint64(uint64(scope.Contract.Code[pc+1]) << 8)
 	}
-	scope.Stack.push(*integer)
+	scope.Stack.push(integer)
 	pc += 2
 	return pc, nil, nil
 }
@@ -1517,12 +1529,13 @@ func makePush(size uint64, pushByteSize int) executionFunc {
 		startMin := min(int(pc+1), codeLen)
 		endMin := min(startMin+pushByteSize, codeLen)
 
-		integer := new(uint256.Int).SetBytes(scope.Contract.Code[startMin:endMin])
+		var integer uint256.Int
+		integer.SetBytes(scope.Contract.Code[startMin:endMin])
 		// Missing bytes: pushByteSize - len(pushData)
 		if missing := pushByteSize - (endMin - startMin); missing > 0 {
-			integer.Lsh(integer, uint(8*missing))
+			integer.Lsh(&integer, uint(8*missing))
 		}
-		scope.Stack.push(*integer)
+		scope.Stack.push(integer)
 
 		pc += size
 		return pc, nil, nil

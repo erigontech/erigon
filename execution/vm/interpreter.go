@@ -179,6 +179,16 @@ type keccakState interface {
 	Read([]byte) (int, error)
 }
 
+// traceGas returns the appropriate gas value for tracing based on opcode type
+func traceGas(op OpCode, callGas, cost uint64) uint64 {
+	switch op {
+	case CALL, CALLCODE, DELEGATECALL, STATICCALL:
+		return callGas
+	default:
+		return cost
+	}
+}
+
 func copyJumpTable(jt *JumpTable) *JumpTable {
 	var copy JumpTable
 	for i, op := range jt {
@@ -308,15 +318,6 @@ func (evm *EVM) Run(contract Contract, gas uint64, input []byte, readOnly bool) 
 	// the execution of one of the operations or until the done flag is set by the
 	// parent context.
 	steps := 0
-
-	var traceGas = func(op OpCode, callGas, cost uint64) uint64 {
-		switch op {
-		case CALL, CALLCODE, DELEGATECALL, STATICCALL:
-			return callGas
-		default:
-			return cost
-		}
-	}
 
 	for {
 		steps++

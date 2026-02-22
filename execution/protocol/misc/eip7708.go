@@ -72,6 +72,11 @@ func EthSelfDestructLog(from common.Address, amount uint256.Int) *types.Log {
 
 // Transfer subtracts amount from sender and adds amount to recipient using the given Db
 func Transfer(db evmtypes.IntraBlockState, sender, recipient accounts.Address, amount uint256.Int, bailout bool, rules *chain.Rules) error {
+	// Skip zero-value transfers for non-Aura chains.
+	// Aura (Gnosis) needs zero-value transfers to touch accounts for state root compatibility.
+	if amount.IsZero() && !rules.IsAura {
+		return nil
+	}
 	if !bailout {
 		err := db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
 		if err != nil {
