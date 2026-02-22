@@ -1379,17 +1379,18 @@ func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, t
 		return nil, err
 	}
 
+	dbStartTxNum := max(startTxNum, ht.files.EndTxNum())
 	dbit := &HistoryRangeAsOfDB{
 		largeValues: ht.h.HistoryLargeValues,
 		roTx:        roTx,
 		valsTable:   ht.h.ValuesTable,
 		from:        from, toPrefix: to, limit: kv.Unlim, orderAscend: asc,
 
-		startTxNum: startTxNum,
+		startTxNum: dbStartTxNum,
 
 		ctx: ctx, logger: ht.h.logger,
 	}
-	binary.BigEndian.PutUint64(dbit.startTxKey[:], startTxNum)
+	binary.BigEndian.PutUint64(dbit.startTxKey[:], dbStartTxNum)
 	if err := dbit.advance(); err != nil {
 		dbit.Close() //it's responsibility of constructor (our) to close resource on error
 		return nil, err
@@ -1461,7 +1462,8 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 		limit:       limit,
 	}
 	if fromTxNum >= 0 {
-		binary.BigEndian.PutUint64(s.startTxKey[:], uint64(fromTxNum))
+		dbFromTxNum := max(uint64(fromTxNum), ht.files.EndTxNum())
+		binary.BigEndian.PutUint64(s.startTxKey[:], dbFromTxNum)
 	}
 	if err := s.advance(); err != nil {
 		s.Close() //it's responsibility of constructor (our) to close resource on error
