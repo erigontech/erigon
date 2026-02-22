@@ -138,6 +138,7 @@ type Compressor struct {
 	compPageValuesCount uint8
 	metadata            []byte
 }
+
 type Timings struct {
 	Enabled       bool
 	AddStart      time.Time
@@ -215,6 +216,17 @@ func (c *Compressor) SetMetadata(metadata []byte) {
 }
 
 func (c *Compressor) Count() int { return int(c.wordsCount) }
+
+// Separate pools for each bufio use-case in compression.
+// Each use case has a different typical buffer size, so sharing a single pool
+// for all of them could waste RAM: a large reader buffer returned to a pool
+// and later reused where a small writer buffer suffices wastes the difference.
+var (
+	forEachReaderPool      = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, int(8*datasize.MB)) }}
+	intermediateWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, 8*etl.BufIOSize) }}
+	compressedWriterPool   = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, 4*etl.BufIOSize) }}
+	intermediateReaderPool = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, 2*etl.BufIOSize) }}
+)
 
 func (c *Compressor) ReadFrom(g *Getter) error {
 	var v []byte
@@ -976,14 +988,15 @@ func (f *RawWordsFile) AppendUncompressed(v []byte) error {
 	return nil
 }
 
-// ForEach - Read keys from the file and generate superstring (with extra byte 0x1 prepended to each character, and with 0x0 0x0 pair inserted between keys and values)
-// We only consider values with length > 2, because smaller values are not compressible without going into bits
+// ForEach reads words from the file and calls walker for each one.
 func (f *RawWordsFile) ForEach(walker func(v []byte, compressed bool) error) error {
 	_, err := f.f.Seek(0, 0)
 	if err != nil {
 		return err
 	}
-	r := bufio.NewReaderSize(f.f, int(8*datasize.MB))
+	r := forEachReaderPool.Get().(*bufio.Reader)
+	defer forEachReaderPool.Put(r)
+	r.Reset(f.f)
 	buf := make([]byte, 16*1024)
 	l, e := binary.ReadUvarint(r)
 	for ; e == nil; l, e = binary.ReadUvarint(r) {
