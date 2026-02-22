@@ -173,6 +173,9 @@ func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
 	opts.growthStep = 2 * datasize.MB
 	opts.mapSize = 16 * datasize.GB
 	opts.dirtySpace = uint64(16 * datasize.MB)
+	if tb != nil {
+		opts.dirtySpace = uint64(2 * datasize.MB)
+	}
 	opts.shrinkThreshold = 0 // disable
 	opts.pageSize = 4096
 	return opts

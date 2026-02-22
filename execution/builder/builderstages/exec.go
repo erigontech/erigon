@@ -457,10 +457,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		}
 
 		if config.IsLondon(blockNumber) {
-			baseFee256 := uint256.NewInt(0)
-			if overflow := baseFee256.SetFromBig(header.BaseFee); overflow {
-				return nil, fmt.Errorf("bad baseFee %s", header.BaseFee)
-			}
+			baseFee256 := header.BaseFee
 			// Make sure the transaction gasFeeCap is greater than the block's baseFee.
 			if !transaction.GetFeeCap().IsZero() || !transaction.GetTipCap().IsZero() {
 				if err := protocol.CheckEip1559TxGasFeeCap(senderAddress, transaction.GetFeeCap(), transaction.GetTipCap(), baseFee256, false /* isFree */); err != nil {

@@ -37,6 +37,9 @@ import (
 
 // Tests that simple header verification works, for both good and bad blocks.
 func TestHeaderVerification(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	// Create a simple chain to verify
 	var (
@@ -85,6 +88,9 @@ func TestHeaderVerification(t *testing.T) {
 
 // Tests that simple header with seal verification works, for both good and bad blocks.
 func TestHeaderWithSealVerification(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	// Create a simple chain to verify
 	var (

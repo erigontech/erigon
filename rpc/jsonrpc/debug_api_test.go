@@ -20,11 +20,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"math/big"
 	"reflect"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/require"
 
@@ -72,6 +72,9 @@ var debugTraceTransactionNoRefundTests = []struct {
 }
 
 func TestTraceBlockByNumber(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0)
@@ -621,7 +624,7 @@ func TestGetBadBlocks(t *testing.T) {
 			Uncles: []*types.Header{{Extra: []byte("test header")}},
 		}
 
-		header := &types.Header{Number: big.NewInt(int64(number))}
+		header := &types.Header{Number: *uint256.NewInt(number)}
 		require.NoError(rawdb.WriteCanonicalHash(tx, header.Hash(), number))
 		require.NoError(rawdb.WriteHeader(tx, header))
 		require.NoError(rawdb.WriteBody(tx, header.Hash(), number, body))

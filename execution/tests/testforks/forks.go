@@ -206,6 +206,18 @@ func init() {
 	c.Bpo2Time = big.NewInt(0)
 	Forks["BPO2"] = c
 
+	// Amsterdam branches from BPO2 (not BPO3/BPO4).
+	// In EEST, Amsterdam inherits Osaka blob params; the devnet test fixtures
+	// were generated with BPO2's blob schedule (target=14, max=21, fraction=11684671).
+	cAms := configCopy(c)
+	cAms.AmsterdamTime = big.NewInt(15_000)
+	Forks["BPO2ToAmsterdamAtTime15k"] = cAms
+
+	cAms = configCopy(cAms)
+	cAms.AmsterdamTime = big.NewInt(0)
+	Forks["Amsterdam"] = cAms
+
+	// BPO3/BPO4 continue from BPO2 as a separate chain
 	c = configCopy(c)
 	c.Bpo3Time = big.NewInt(15_000)
 	Forks["BPO2ToBPO3AtTime15k"] = c
@@ -221,14 +233,6 @@ func init() {
 	c = configCopy(c)
 	c.Bpo4Time = big.NewInt(0)
 	Forks["BPO4"] = c
-
-	c = configCopy(c)
-	c.AmsterdamTime = big.NewInt(15_000)
-	Forks["BPO2ToAmsterdamAtTime15k"] = c
-
-	c = configCopy(c)
-	c.AmsterdamTime = big.NewInt(0)
-	Forks["Amsterdam"] = c
 }
 
 func configCopy(c *chain.Config) *chain.Config {

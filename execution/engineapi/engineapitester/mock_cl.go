@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 	"google.golang.org/grpc"
 
@@ -324,15 +325,15 @@ func MockClPayloadToHeader(p *MockClPayload) *types.Header {
 		Coinbase:              elPayload.FeeRecipient,
 		Root:                  elPayload.StateRoot,
 		Bloom:                 bloom,
-		BaseFee:               (*big.Int)(elPayload.BaseFeePerGas),
+		BaseFee:               uint256.MustFromBig(elPayload.BaseFeePerGas.ToInt()),
 		Extra:                 elPayload.ExtraData,
-		Number:                big.NewInt(0).SetUint64(elPayload.BlockNumber.Uint64()),
+		Number:                *uint256.NewInt(elPayload.BlockNumber.Uint64()),
 		GasUsed:               uint64(elPayload.GasUsed),
 		GasLimit:              uint64(elPayload.GasLimit),
 		Time:                  uint64(elPayload.Timestamp),
 		MixDigest:             elPayload.PrevRandao,
 		UncleHash:             empty.UncleHash,
-		Difficulty:            merge.ProofOfStakeDifficulty,
+		Difficulty:            *merge.ProofOfStakeDifficulty,
 		Nonce:                 merge.ProofOfStakeNonce,
 		ReceiptHash:           elPayload.ReceiptsRoot,
 		TxHash:                types.DeriveSha(txns),
