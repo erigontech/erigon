@@ -112,7 +112,7 @@ func TestSync(t *testing.T) {
 		activeBits[i] = i
 	}
 
-	var hasher Sha256Hasher
+	hasher := &Sha256Hasher{}
 
 	twig.syncL1(hasher, 0, activeBits)
 	twig.syncL1(hasher, 1, activeBits)

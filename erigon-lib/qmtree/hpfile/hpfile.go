@@ -290,10 +290,12 @@ func (f *File) Truncate(size int64) error {
 	remainingSize := size - int64(largestId*f.segmentSize)
 	fileName := fmt.Sprintf("%s/%d-%d", f.dirName, largestId, f.segmentSize)
 	file, err := (&options{}).read(true).write(true).open(fileName)
-	if err == nil {
+	if err != nil {
 		return err
 	}
-	file.SetLen(int64(remainingSize))
+	if err := file.SetLen(int64(remainingSize)); err != nil {
+		return err
+	}
 	file.Seek(0, io.SeekEnd)
 
 	f.fileMap.files[largestId] = &fileEntry{file, false}
@@ -568,17 +570,27 @@ func (pr *PreReader) tryRead(fileId uint64, start int64, bz []byte) bool {
 	}
 }
 
-type options struct{}
+type options struct {
+	writable bool
+}
 
 func (o *options) read(_ bool) *options {
 	return o
 }
 
-func (o *options) write(_ bool) *options {
+func (o *options) write(w bool) *options {
+	o.writable = w
 	return o
 }
 
 func (o *options) open(path string) (*file, error) {
+	if o.writable {
+		f, err := os.OpenFile(path, os.O_RDWR, 0666)
+		if err != nil {
+			return nil, err
+		}
+		return &file{file: f}, nil
+	}
 	return (&file{}).Open(path)
 }
 

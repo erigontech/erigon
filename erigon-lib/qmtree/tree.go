@@ -50,6 +50,9 @@ const (
 )
 
 func calcMaxLevel(youngestTwigId uint64) uint8 {
+	if youngestTwigId == 0 {
+		return FIRST_LEVEL_ABOVE_TWIG
+	}
 	return FIRST_LEVEL_ABOVE_TWIG + 63 - uint8(bits.LeadingZeros64(youngestTwigId))
 }
 
@@ -86,14 +89,31 @@ type UpperTree struct {
 }
 
 func NewUpperTree(shardId int) UpperTree {
-	return UpperTree{
-		shardId: shardId,
-		nodes:   make([][NODE_SHARD_COUNT]map[NodePos][32]byte, 0, MAX_TREE_LEVEL),
+	nodes := make([][NODE_SHARD_COUNT]map[NodePos][32]byte, MAX_TREE_LEVEL)
+	for i := range nodes {
+		for j := range nodes[i] {
+			nodes[i][j] = make(map[NodePos][32]byte)
+		}
 	}
+	ut := UpperTree{
+		shardId: shardId,
+		nodes:   nodes,
+	}
+	for i := range ut.activeTwigShards {
+		ut.activeTwigShards[i] = make(map[uint64]*Twig)
+	}
+	return ut
 }
 
 func (ut *UpperTree) IsEmpty() bool {
-	return len(ut.nodes) == 0
+	for _, shard := range ut.nodes {
+		for _, m := range shard {
+			if len(m) > 0 {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (ut *UpperTree) AddTwigs(twigMap map[uint64]*Twig) {
@@ -419,7 +439,7 @@ type Tree struct {
 }
 
 func newEmptyTree(hasher Hasher, shardId int, entryStorage EntryStorage, twigStorage TwigStorage) *Tree {
-	return &Tree{
+	t := &Tree{
 		shardId:               shardId,
 		upperTree:             NewUpperTree(shardId),
 		newTwigMap:            map[uint64]*Twig{},
@@ -432,6 +452,10 @@ func newEmptyTree(hasher Hasher, shardId int, entryStorage EntryStorage, twigSto
 		touchedPosOf512b:      map[uint64]struct{}{},
 		hasher:                hasher,
 	}
+	for i := range t.activeBitShards {
+		t.activeBitShards[i] = make(map[uint64]*ActiveBits)
+	}
+	return t
 }
 
 func NewTree(hasher Hasher, shardId int, entryStorage EntryStorage, twigStorage TwigStorage) *Tree {
@@ -478,7 +502,9 @@ func (t *Tree) TruncateFiles(entryFileSize int64, twigFileSize int64) {
 		t.entryStorage.Truncate(entryFileSize)
 	}
 	if t.twigStorage != nil {
-		t.twigStorage.Truncate(twigFileSize)
+		if err := t.twigStorage.Truncate(twigFileSize); err != nil {
+			panic(fmt.Sprintf("twigStorage.Truncate: %v", err))
+		}
 	}
 }
 
@@ -552,7 +578,9 @@ func (t *Tree) AppendEntry(entry Entry) (int64, error) {
 		t.syncMtForYoungestTwig(false)
 
 		if t.twigStorage != nil {
-			t.twigStorage.Append(t.mtreeForYoungestTwig, pos+entry.Len())
+			if err := t.twigStorage.Append(t.mtreeForYoungestTwig, pos+entry.Len()); err != nil {
+				panic(fmt.Sprintf("twigStorage.Append: %v", err))
+			}
 		}
 		// allocate new twig as youngest twig
 		t.youngestTwigId += 1
@@ -575,7 +603,9 @@ func (t *Tree) PruneTwigs(startId uint64, endId uint64, entryFileSize int64) {
 	}
 
 	if t.twigStorage != nil {
-		t.twigStorage.PruneHead(int64(endId * TWIG_SIZE))
+		if err := t.twigStorage.PruneHead(endId * TWIG_SIZE); err != nil {
+			panic(fmt.Sprintf("twigStorage.PruneHead: %v", err))
+		}
 	}
 }
 
@@ -706,7 +736,11 @@ func (t *Tree) LoadMtForNonYoungestTwig(twigId uint64) {
 	t.mtreeForYtChangeEnd = 0
 	activeTwig, _ := t.upperTree.GetTwig(t.youngestTwigId)
 	if t.twigStorage != nil {
-		t.twigStorage.GetHashRoot(twigId, activeTwig.leftRoot)
+		h, err := t.twigStorage.GetHashRoot(twigId)
+		if err != nil {
+			panic(fmt.Sprintf("twigStorage.GetHashRoot twig=%d: %v", twigId, err))
+		}
+		activeTwig.leftRoot = h
 	}
 }
 
@@ -820,7 +854,7 @@ func (t *Tree) GetHashesByPosList(posList []PosItem) []common.Hash {
 
 func (t *Tree) hashIter(posList []PosItem) iter.Seq[common.Hash] {
 	return func(yield func(common.Hash) bool) {
-		cache := map[int64]common.Hash{}
+		cache := map[uint64]common.Hash{}
 		for _, next := range posList {
 			hash := t.getHashByNode(next.level, next.n, cache)
 			if !yield(hash) {
@@ -830,7 +864,7 @@ func (t *Tree) hashIter(posList []PosItem) iter.Seq[common.Hash] {
 	}
 }
 
-func (t *Tree) getHashByNode(level uint8, nth uint64, cache map[int64]common.Hash) common.Hash {
+func (t *Tree) getHashByNode(level uint8, nth uint64, cache map[uint64]common.Hash) common.Hash {
 	var twigId uint64
 	var levelStride uint64
 	if level <= 12 {
@@ -849,7 +883,11 @@ func (t *Tree) getHashByNode(level uint8, nth uint64, cache map[int64]common.Has
 			if t.twigStorage == nil {
 				return common.Hash{}
 			}
-			return t.twigStorage.GetHashNode(twigId, idx, cache)
+			h, err := t.twigStorage.GetHashNode(twigId, idx, cache)
+			if err != nil {
+				return common.Hash{}
+			}
+			return h
 		}
 	}
 
@@ -857,7 +895,7 @@ func (t *Tree) getHashByNode(level uint8, nth uint64, cache map[int64]common.Has
 	if level >= 8 && level <= 11 {
 		s, k := GetShardIdxAndKey(twigId)
 		activeBits, ok := t.activeBitShards[s][k]
-		if ok {
+		if !ok {
 			activeBits = &ActiveBits{}
 		}
 		selfId := (nth % levelStride) - levelStride/2

@@ -26,7 +26,7 @@ func TestTwigFile(t *testing.T) {
 	dir, err := hpfile.NewTempDir("twigs")
 	defer dir.Drop()
 
-	hasher := Sha256Hasher{}
+	hasher := &Sha256Hasher{}
 	tf, err := NewTwigFile(64*1024, 1024*1024, dir.String(), hasher)
 	require.NoError(t, err)
 	twigs := [3][4096]common.Hash{}

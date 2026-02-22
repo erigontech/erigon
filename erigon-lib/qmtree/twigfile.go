@@ -208,3 +208,26 @@ func (tf *TwigFile) Close() {
 func (tf *TwigFile) PruneHead(off uint64) error {
 	return tf.file.PruneHead(off)
 }
+
+// Append satisfies TwigStorage. It writes the twig merkle tree to disk.
+func (tf *TwigFile) Append(twigMt TwigMT, pos int64) error {
+	return tf.appendTwig(twigMt, pos)
+}
+
+// Flush satisfies TwigStorage. It flushes buffered writes to disk.
+func (tf *TwigFile) Flush() {
+	if err := tf.file.Flush(false); err != nil {
+		panic(fmt.Sprintf("TwigFile.Flush: %v", err))
+	}
+}
+
+// Size satisfies TwigStorage.
+func (tf *TwigFile) Size() int64 {
+	return tf.file.Size()
+}
+
+// CloneTemp satisfies TwigStorage. Returns a lightweight handle for the
+// concurrent-flush pattern used by Tree.FlushFiles.
+func (tf *TwigFile) CloneTemp() TwigStorage {
+	return tf
+}

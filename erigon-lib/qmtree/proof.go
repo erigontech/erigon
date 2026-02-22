@@ -45,7 +45,8 @@ func (p *ProofPath) ToBytes() []byte {
 }
 
 func (p *ProofPath) Check(hasher Hasher, complete bool) error {
-	for i := range p.LeftOfTwig {
+	// levels 0..9: each level's hash feeds into the next level's SelfHash
+	for i := range 10 {
 		res := hasher.hash2x(
 			uint8(i),
 			p.LeftOfTwig[i].SelfHash[:],
@@ -60,6 +61,7 @@ func (p *ProofPath) Check(hasher Hasher, complete bool) error {
 		}
 	}
 
+	// level 10: produces the left-subtree root
 	leaf_mt_root := hasher.hash2x(
 		10,
 		p.LeftOfTwig[10].SelfHash[:],
@@ -221,12 +223,15 @@ func GetLeftPathInMem(mt4twig TwigMT, sn uint64) [11]ProofNode {
 }
 
 func GetLeftPathOnDisk(tf TwigStorage, twig_id uint64, sn uint64) [11]ProofNode {
-	cache := map[int64]common.Hash{}
+	cache := map[uint64]common.Hash{}
 	return GetLeftPath(sn, func(i uint64) common.Hash {
-		if v, ok := cache[int64(i)]; ok {
+		if v, ok := cache[i]; ok {
 			return v
-		} else {
-			return tf.GetHashNode(twig_id, i, cache)
 		}
+		h, err := tf.GetHashNode(twig_id, i, cache)
+		if err != nil {
+			panic(fmt.Sprintf("GetHashNode twig=%d idx=%d: %v", twig_id, i, err))
+		}
+		return h
 	})
 }

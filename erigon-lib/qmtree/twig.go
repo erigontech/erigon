@@ -10,15 +10,15 @@ const (
 )
 
 type TwigStorage interface {
-	Append(twigMt TwigMT, pos int64)
+	Append(twigMt TwigMT, pos int64) error
 	Flush()
 	Close()
 	Size() int64
-	PruneHead(offset int64)
-	Truncate(size int64)
+	PruneHead(offset uint64) error
+	Truncate(size int64) error
 
-	GetHashRoot(twigId uint64, leftRoot common.Hash) common.Hash
-	GetHashNode(twigId uint64, idx uint64, cache map[int64]common.Hash) common.Hash
+	GetHashRoot(twigId uint64) (common.Hash, error)
+	GetHashNode(twigId uint64, idx uint64, cache map[uint64]common.Hash) (common.Hash, error)
 
 	CloneTemp() TwigStorage
 }
@@ -28,7 +28,7 @@ type TwigMT []common.Hash // size is 4096
 func (t TwigMT) Clone() TwigMT {
 	clone := make(TwigMT, len(t))
 	copy(clone, t)
-	return t
+	return clone
 }
 
 func (mtree TwigMT) Sync(hasher Hasher, start int32, end int32) {
@@ -129,7 +129,7 @@ func (t *Twig) syncTop(hasher Hasher) {
 type ActiveBits [256]byte
 
 func (ab *ActiveBits) SetBit(offset uint32) {
-	if offset > LeafCountInTwig {
+	if offset >= LeafCountInTwig {
 		panic("invalid id")
 	}
 	mask := 1 << (offset & 0x7)
@@ -138,7 +138,7 @@ func (ab *ActiveBits) SetBit(offset uint32) {
 }
 
 func (ab *ActiveBits) ClearBit(offset uint32) {
-	if offset > LeafCountInTwig {
+	if offset >= LeafCountInTwig {
 		panic("invalid id")
 	}
 	mask := 1 << (offset & 0x7)
@@ -147,7 +147,7 @@ func (ab *ActiveBits) ClearBit(offset uint32) {
 }
 
 func (ab *ActiveBits) GetBit(offset uint32) bool {
-	if offset > LeafCountInTwig {
+	if offset >= LeafCountInTwig {
 		panic("invalid id")
 	}
 	mask := 1 << (offset & 0x7)

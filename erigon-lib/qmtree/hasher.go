@@ -80,7 +80,7 @@ func (h Sha256Hasher) hash2x(level uint8, h0 []byte, h1 []byte, exchange bool) c
 	return h.hash2(level, h0, h1)
 }
 
-func (h Sha256Hasher) initNulls() {
+func (h *Sha256Hasher) initNulls() {
 	h.nulls = &struct {
 		mtForTwig        TwigMT
 		nodesInHigerTree [64]common.Hash
@@ -91,7 +91,7 @@ func (h Sha256Hasher) initNulls() {
 	h.nulls.nodesInHigerTree = nullNodeInHigherTree(h, &h.nulls.twig)
 }
 
-func (h Sha256Hasher) nullMtForTwig() TwigMT {
+func (h *Sha256Hasher) nullMtForTwig() TwigMT {
 	if h.nulls == nil {
 		h.initNulls()
 	}
@@ -99,7 +99,7 @@ func (h Sha256Hasher) nullMtForTwig() TwigMT {
 	return h.nulls.mtForTwig
 }
 
-func (h Sha256Hasher) nullTwig() Twig {
+func (h *Sha256Hasher) nullTwig() Twig {
 	if h.nulls == nil {
 		h.initNulls()
 	}
@@ -107,7 +107,7 @@ func (h Sha256Hasher) nullTwig() Twig {
 	return h.nulls.twig
 }
 
-func (h Sha256Hasher) nullNodeInHigerTree(level uint8) common.Hash {
+func (h *Sha256Hasher) nullNodeInHigerTree(level uint8) common.Hash {
 	if h.nulls == nil {
 		h.initNulls()
 	}
