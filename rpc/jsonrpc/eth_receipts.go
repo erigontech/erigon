@@ -248,9 +248,6 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 		if err != nil {
 			return out, err
 		}
-		if err := assertReceiptsAvailable(context.Background(), txNumsReader, begin, fromTxNum, tx); err != nil {
-			return out, err
-		}
 	}
 
 	toTxNum, err = txNumsReader.Max(context.Background(), tx, end)
@@ -503,7 +500,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -614,7 +611,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
