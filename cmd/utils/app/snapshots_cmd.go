@@ -2703,15 +2703,15 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	}
 	defer clean()
 
-	defer br.MadvNormal().DisableReadAhead()
-	defer agg.MadvNormal().DisableReadAhead()
+	//defer br.MadvNormal().DisableReadAhead()
+	//defer agg.MadvNormal().DisableReadAhead()
 
 	blockSnapBuildSema := semaphore.NewWeighted(int64(runtime.NumCPU()))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
 	// `erigon retire` command is designed to maximize resouces utilization. But `Erigon itself` does minimize background impact (because not in rush).
 	agg.SetCollateAndBuildWorkers(min(8, estimate.StateV3Collate.Workers()))
-	agg.SetMergeWorkers(min(8, estimate.StateV3Collate.Workers()))
+	agg.SetMergeWorkers(2)
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	agg.PeriodicalyPrintProcessSet(ctx)
 
