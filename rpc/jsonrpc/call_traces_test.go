@@ -58,6 +58,9 @@ func blockNumbersFromTraces(t *testing.T, b []byte) []int {
 }
 
 func TestCallTraceOneByOne(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	m := execmoduletester.New(t)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
@@ -165,6 +168,9 @@ func TestCallTraceUnwind(t *testing.T) {
 }
 
 func TestFilterNoAddresses(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	m := execmoduletester.New(t)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})

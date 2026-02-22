@@ -71,6 +71,9 @@ func TestGetLogs(t *testing.T) {
 }
 
 func TestErigonGetLatestLogs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	db := m.DB

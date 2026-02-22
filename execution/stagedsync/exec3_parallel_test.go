@@ -499,8 +499,6 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 	assert.NoError(t, err)
 	defer domains.Close()
 
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
 	assert.NoError(t, err)
 
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
@@ -619,10 +617,6 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 	assert.NoError(t, err)
 	defer domains.Close()
 
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
-	assert.NoError(t, err)
-
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
 
 	pe := &parallelExecutor{
@@ -732,7 +726,7 @@ func TestLessConflictsWithMetadata(t *testing.T) {
 }
 
 func TestZeroTx(t *testing.T) {
-	if testing.Short() || runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" {
 		t.Skip()
 	}
 	//t.Parallel()
@@ -756,7 +750,7 @@ func TestZeroTx(t *testing.T) {
 }
 
 func TestAlternatingTx(t *testing.T) {
-	if testing.Short() || runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" {
 		t.Skip()
 	}
 	//t.Parallel()
@@ -783,7 +777,7 @@ func TestAlternatingTx(t *testing.T) {
 }
 
 func TestAlternatingTxWithMetadata(t *testing.T) {
-	if testing.Short() || runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" {
 		t.Skip()
 	}
 	//t.Parallel()

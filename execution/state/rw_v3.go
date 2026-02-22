@@ -183,10 +183,9 @@ func (rs *StateV3) Domains() *execctx.SharedDomains {
 	return rs.domains
 }
 
-func (rs *StateV3) SetTxNum(blockNum, txNum uint64) {
+func (rs *StateV3) SetTxNum(txNum uint64) {
 	rs.txNum = txNum
 	rs.domains.SetTxNum(txNum)
-	rs.domains.SetBlockNum(blockNum)
 }
 
 func (rs *StateV3) ApplyTxState(ctx context.Context,

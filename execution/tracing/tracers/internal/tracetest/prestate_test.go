@@ -72,6 +72,9 @@ func TestPrestateTracer(t *testing.T) {
 }
 
 func TestPrestateWithDiffModeTracer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	testPrestateTracer("prestateTracer", "prestate_tracer_with_diff_mode", t)
 }
 

@@ -109,7 +109,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		if (txNum+1)%stepSize == 0 {
 			trieState, err := hph.EncodeCurrentState(nil)
 			require.NoError(t, err)
-			cs := commitmentdb.NewCommitmentState(domains.TxNum(), 0, trieState)
+			cs := commitmentdb.NewCommitmentState(txNum, 0, trieState)
 			encodedState, err := cs.Encode()
 			require.NoError(t, err)
 			err = domains.DomainPut(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState, encodedState, txNum, nil, 0)
@@ -572,6 +572,9 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 }
 
 func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	stepSize := uint64(5)
@@ -725,6 +728,9 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 }
 
 func TestAggregatorV3_BuildFiles_WithReorgDepth(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	ctx := t.Context()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
