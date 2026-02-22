@@ -58,7 +58,6 @@ func (f *fastKeccakState) Reset() {
 func (f *fastKeccakState) Size() int      { return 32 }
 func (f *fastKeccakState) BlockSize() int { return 136 }
 
-func (f *fastKeccakState) Read(p []byte) (int, error) {
-	hash := f.h.Sum256()
-	return copy(p, hash[:]), nil
+func (f *fastKeccakState) Read(out []byte) (int, error) {
+	return f.h.Read(out)
 }
