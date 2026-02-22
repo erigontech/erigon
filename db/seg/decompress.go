@@ -621,6 +621,11 @@ func (d *Decompressor) MadvWillNeed() *Decompressor {
 // SequentialView provides a separate mmap of the same file with MADV_NORMAL for
 // sequential operations (merges, full scans) that run concurrently with random readers.
 //
+// All default RPC requests (eth_getBalance, eth_call, debug_traceTransaction, etc.)
+// continue to use the Decompressor's original mmap with MADV_RANDOM. They never touch
+// this second mapping — so their page fault behavior, readahead suppression, and hot
+// page residency are completely unaffected by concurrent merge I/O.
+//
 // Design decisions and kernel-level rationale:
 //
 //  1. Separate VMA isolates madvise flags from the shared mmap.
