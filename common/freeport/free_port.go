@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	maxPort    = 49151 // stay below Windows ephemeral port range (49152-65535)
+	maxPort    = 49151 // stay below Windows ephemeral ports 49152-65535 (TCP connections assigned there)
 	minPort    = 1024
 	bucketSize = 2500
 	numBuckets = (maxPort - minPort) / bucketSize
