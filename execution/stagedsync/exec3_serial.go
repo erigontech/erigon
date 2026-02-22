@@ -239,7 +239,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			se.txExecutor.lastCommittedTxNum.Store(inputTxNum)
 			se.logger.Info(
 				"periodic commit check",
-				"block", se.doms.BlockNum(),
+				"block", b.NumberU64(),
 				"txNum", se.doms.TxNum(),
 				"commitment", times.ComputeCommitment,
 			)
@@ -528,7 +528,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 		}
 
 		se.doms.SetTxNum(txTask.TxNum)
-		se.doms.SetBlockNum(txTask.BlockNumber())
 		se.lastBlockResult = &blockResult{
 			BlockNum:  txTask.BlockNumber(),
 			lastTxNum: txTask.TxNum,

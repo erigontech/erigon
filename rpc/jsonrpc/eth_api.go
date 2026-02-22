@@ -20,12 +20,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"math/big"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -456,7 +456,7 @@ func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPo
 // newRPCPendingTransaction returns a pending transaction that will serialize to the RPC representation
 func newRPCPendingTransaction(txn types.Transaction, current *types.Header, config *chain.Config) *ethapi.RPCTransaction {
 	var (
-		baseFee   *big.Int
+		baseFee   *uint256.Int
 		blockTime = uint64(0)
 	)
 	if current != nil {
@@ -478,21 +478,21 @@ func newRPCRawTransactionFromBlockIndex(b *types.Block, index uint64) (hexutil.B
 }
 
 type GasPriceCache struct {
-	latestPrice *big.Int
+	latestPrice *uint256.Int
 	latestHash  common.Hash
 	mtx         sync.Mutex
 }
 
 func NewGasPriceCache() *GasPriceCache {
 	return &GasPriceCache{
-		latestPrice: big.NewInt(0),
+		latestPrice: uint256.NewInt(0),
 		latestHash:  common.Hash{},
 	}
 }
 
-func (c *GasPriceCache) GetLatest() (common.Hash, *big.Int) {
+func (c *GasPriceCache) GetLatest() (common.Hash, *uint256.Int) {
 	var hash common.Hash
-	var price *big.Int
+	var price *uint256.Int
 	c.mtx.Lock()
 	hash = c.latestHash
 	price = c.latestPrice
@@ -500,7 +500,7 @@ func (c *GasPriceCache) GetLatest() (common.Hash, *big.Int) {
 	return hash, price
 }
 
-func (c *GasPriceCache) SetLatest(hash common.Hash, price *big.Int) {
+func (c *GasPriceCache) SetLatest(hash common.Hash, price *uint256.Int) {
 	c.mtx.Lock()
 	c.latestPrice = price
 	c.latestHash = hash

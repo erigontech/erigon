@@ -40,6 +40,9 @@ import (
 )
 
 func TestGasPrice(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 
 	cases := []struct {
 		description   string
@@ -79,6 +82,9 @@ func TestGasPrice(t *testing.T) {
 }
 
 func TestEthConfig(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	toTimeArg := func(t hexutil.Uint64) *hexutil.Uint64 { return &t }
 	for _, test := range []struct {
@@ -152,7 +158,7 @@ func TestEthConfig(t *testing.T) {
 		{
 			name:                 "mainnet prague scheduled but not activated no osaka no bpos with head at shanghai",
 			genesisFilePath:      path.Join(".", "testdata", "eth_config", "mainnet_prague_scheduled_no_osaka_no_bpos_genesis.json"),
-			head:                 &types.Header{Number: big.NewInt(123), Time: 1710338135 - 1000},
+			head:                 &types.Header{Number: *uint256.NewInt(123), Time: 1710338135 - 1000},
 			wantResponseFilePath: path.Join(".", "testdata", "eth_config", "mainnet_prague_scheduled_no_osaka_no_bpos_response_head_at_shanghai.json"),
 		},
 		{

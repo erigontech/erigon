@@ -270,7 +270,8 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	txNum := domains.TxNum()
+	txNum, _, err := domains.SeekCommitment(ctx, rwTx)
+	require.NoError(t, err)
 	for accs := 0; accs < noaccounts; accs++ {
 		k0[0] = byte(accs)
 		pv, step, err := domains.GetLatest(kv.AccountsDomain, rwTx, k0)
@@ -485,6 +486,9 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 }
 
 func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -562,7 +566,6 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, uint64(0), roTtx1.Debug().TxNumsInFiles(kv.StorageDomain))
 
 		// finally, verify SharedDomains.HasPrefix returns true
-		sd.SetTxNum(2) // needed for HasPrefix (in-mem has to be ahead of tx num)
 		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx1)
 		require.NoError(t, err)
 		require.True(t, ok)
@@ -669,7 +672,6 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		roTtx3, err := db.BeginTemporalRo(ctx)
 		require.NoError(t, err)
 		t.Cleanup(roTtx3.Rollback)
-		sd.SetTxNum(4) // needed for HasPrefix (in-mem has to be ahead of tx num)
 		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx3)
 		require.NoError(t, err)
 		require.False(t, ok)
@@ -700,7 +702,6 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		roTtx4, err := db.BeginTemporalRo(ctx)
 		require.NoError(t, err)
 		t.Cleanup(roTtx4.Rollback)
-		sd.SetTxNum(5) // needed for HasPrefix (in-mem has to be ahead of tx num)
 		firstKey, firstVal, ok, err = sd.HasPrefix(kv.StorageDomain, acc1.Bytes(), roTtx4)
 		require.NoError(t, err)
 		require.True(t, ok)
