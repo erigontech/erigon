@@ -1,40 +1,27 @@
 name: Save Go build cache
-description: Save Go build cache with a tagged key
-
-inputs:
-  buildtag:
-    description: "Build cache tag (e.g. plain, race, coverage)"
-    required: true
-  build:
-    description: "GOCACHE path (from setup-go outputs)"
-    required: true
-  goversion:
-    description: "Go version string (from setup-go outputs)"
-    required: true
+description: Save Go build cache keyed by workflow, job, and branch
 
 runs:
   using: composite
   steps:
+    - name: Validate required env vars
+      shell: bash
+      run: |
+        : "${ERIGON_CI_GOCACHE:?must be set by setup-erigon}"
+        : "${ERIGON_CI_GOVERSION:?must be set by setup-erigon}"
+
     - name: Show build cache size
       if: ${{ always() }}
       shell: bash
-      run: du -hs '${{ inputs.build }}' || true
+      run: du -hs "$ERIGON_CI_GOCACHE" || true
 
     - name: Clean non-deterministic cache metadata
       if: ${{ always() }}
       shell: bash
-      run: rm -f '${{ inputs.build }}/trim.txt' '${{ inputs.build }}/testexpire.txt'
-
-    - name: Hash build cache contents
-      id: cache-hash
-      if: ${{ always() }}
-      shell: bash
-      run: |
-        hash=$(cd '${{ inputs.build }}' && find . -type f | sort | sha256sum | cut -d' ' -f1)
-        echo "hash=$hash" >> "$GITHUB_OUTPUT"
+      run: rm -f "$ERIGON_CI_GOCACHE/trim.txt" "$ERIGON_CI_GOCACHE/testexpire.txt"
 
     - uses: actions/cache/save@v4
       if: ${{ always() }}
       with:
-        path: ${{ inputs.build }}
-        key: gocache-${{ inputs.buildtag }}-${{ inputs.goversion }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-hash.outputs.hash }}
+        path: ${{ env.ERIGON_CI_GOCACHE }}
+        key: gocache-${{ github.workflow }}-${{ github.job }}-${{ env.ERIGON_CI_GOVERSION }}-${{ runner.os }}-${{ runner.arch }}-${{ github.head_ref || github.ref_name }}-${{ github.sha }}-${{ github.run_id }}
