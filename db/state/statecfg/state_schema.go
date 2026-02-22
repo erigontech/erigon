@@ -205,7 +205,7 @@ var Schema = SchemaGen{
 			HistoryIdx:         kv.AccountsHistoryIdx,
 
 			IiCfg: InvIdxCfg{
-				FilenameBase: kv.AccountsDomain.String(), KeysTable: kv.TblAccountHistoryKeys, ValuesTable: kv.TblAccountIdx,
+				FilenameBase: kv.AccountsDomain.String(), KeysTable: kv.TblAccountHistoryKeys,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
 			},
@@ -226,7 +226,7 @@ var Schema = SchemaGen{
 			HistoryIdx:         kv.StorageHistoryIdx,
 
 			IiCfg: InvIdxCfg{
-				FilenameBase: kv.StorageDomain.String(), KeysTable: kv.TblStorageHistoryKeys, ValuesTable: kv.TblStorageIdx,
+				FilenameBase: kv.StorageDomain.String(), KeysTable: kv.TblStorageHistoryKeys,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
 			},
@@ -248,7 +248,7 @@ var Schema = SchemaGen{
 			HistoryIdx:         kv.CodeHistoryIdx,
 
 			IiCfg: InvIdxCfg{
-				FilenameBase: kv.CodeDomain.String(), KeysTable: kv.TblCodeHistoryKeys, ValuesTable: kv.TblCodeIdx,
+				FilenameBase: kv.CodeDomain.String(), KeysTable: kv.TblCodeHistoryKeys,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
 			},
@@ -274,7 +274,7 @@ var Schema = SchemaGen{
 			HistoryDisabled:   true,
 
 			IiCfg: InvIdxCfg{
-				FilenameBase: kv.CommitmentDomain.String(), KeysTable: kv.TblCommitmentHistoryKeys, ValuesTable: kv.TblCommitmentIdx,
+				FilenameBase: kv.CommitmentDomain.String(), KeysTable: kv.TblCommitmentHistoryKeys,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
 			},
@@ -296,7 +296,7 @@ var Schema = SchemaGen{
 			HistoryIdx:         kv.ReceiptHistoryIdx,
 
 			IiCfg: InvIdxCfg{
-				FilenameBase: kv.ReceiptDomain.String(), KeysTable: kv.TblReceiptHistoryKeys, ValuesTable: kv.TblReceiptIdx,
+				FilenameBase: kv.ReceiptDomain.String(), KeysTable: kv.TblReceiptHistoryKeys,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
 			},
@@ -322,7 +322,7 @@ var Schema = SchemaGen{
 
 			IiCfg: InvIdxCfg{
 				Disable:      true, // disable everything by default
-				FilenameBase: kv.RCacheDomain.String(), KeysTable: kv.TblRCacheHistoryKeys, ValuesTable: kv.TblRCacheIdx,
+				FilenameBase: kv.RCacheDomain.String(), KeysTable: kv.TblRCacheHistoryKeys,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
 			},
