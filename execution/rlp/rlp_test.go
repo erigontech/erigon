@@ -25,6 +25,8 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/keccak"
@@ -66,7 +68,7 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 				b.AddTx(tx)
 			}
 			for i := 0; i < uncles; i++ {
-				b.AddUncle(&types.Header{ParentHash: b.PrevBlock(n - 1 - i).Hash(), Number: big.NewInt(int64(n - i))})
+				b.AddUncle(&types.Header{ParentHash: b.PrevBlock(n - 1 - i).Hash(), Number: *uint256.NewInt(uint64(n - i))})
 			}
 		}
 	})
