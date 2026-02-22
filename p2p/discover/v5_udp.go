@@ -774,15 +774,15 @@ func (t *UDPv5) handlePacket(rawpacket []byte, fromAddr netip.AddrPort) error {
 func (t *UDPv5) handleCallResponse(fromID enode.ID, fromAddr netip.AddrPort, p v5wire.Packet) bool {
 	ac := t.activeCallByNode[fromID]
 	if ac == nil || !bytes.Equal(p.RequestID(), ac.reqid) {
-		t.log.Debug(fmt.Sprintf("Unsolicited/late %s response", p.Name()), "id", fromID, "addr", fromAddr)
+		t.log.Debug(fmt.Sprintf("[p2p] Unsolicited/late %s response", p.Name()), "id", fromID, "addr", fromAddr)
 		return false
 	}
 	if fromAddr != ac.addr {
-		t.log.Debug(fmt.Sprintf("%s from wrong endpoint", p.Name()), "id", fromID, "addr", fromAddr)
+		t.log.Debug(fmt.Sprintf("[p2p] %s from wrong endpoint", p.Name()), "id", fromID, "addr", fromAddr)
 		return false
 	}
 	if p.Kind() != ac.responseType {
-		t.log.Debug(fmt.Sprintf("Wrong discv5 response type %s", p.Name()), "id", fromID, "addr", fromAddr)
+		t.log.Debug(fmt.Sprintf("[p2p] Wrong discv5 response type %s", p.Name()), "id", fromID, "addr", fromAddr)
 		return false
 	}
 	t.startResponseTimeout(ac)
@@ -840,7 +840,7 @@ func (t *UDPv5) handleUnknown(p *v5wire.Unknown, fromID enode.ID, fromAddr netip
 		// them which handshake attempt they need to complete. We tell them to use the
 		// existing handshake attempt since the response to that one might still be in
 		// transit.
-		t.log.Debug("Repeating discv5 handshake challenge", "id", fromID, "addr", fromAddr)
+		t.log.Debug("[p2p] Repeating discv5 handshake challenge", "id", fromID, "addr", fromAddr)
 		t.sendResponse(fromID, fromAddr, currentChallenge)
 		return
 	}
@@ -864,13 +864,13 @@ var (
 func (t *UDPv5) handleWhoareyou(p *v5wire.Whoareyou, fromID enode.ID, fromAddr netip.AddrPort) {
 	c, err := t.matchWithCall(fromID, p.Nonce)
 	if err != nil {
-		t.log.Debug("Invalid "+p.Name(), "addr", fromAddr, "err", err)
+		t.log.Trace("[p2p] Invalid "+p.Name(), "addr", fromAddr, "err", err)
 		return
 	}
 
 	if c.node == nil {
 		// Can't perform handshake because we don't have the ENR.
-		t.log.Debug("Can't handle "+p.Name(), "addr", fromAddr, "err", "call has no ENR")
+		t.log.Debug("[p2p] Can't handle "+p.Name(), "addr", fromAddr, "err", "call has no ENR")
 		c.err <- errors.New("remote wants handshake, but call has no ENR")
 		return
 	}

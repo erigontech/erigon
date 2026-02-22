@@ -491,7 +491,7 @@ func (s *Sync) PrintTimings() []any {
 
 func (s *Sync) runStage(stage *Stage, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, initialCycle, firstCycle bool, badBlockUnwind bool) (bool, error) {
 	start := time.Now()
-	s.logger.Debug(fmt.Sprintf("[%s] Starting Stage run", s.LogPrefix()))
+	//s.logger.Debug(fmt.Sprintf("[%s] Starting Stage run", s.LogPrefix()))
 	stageState, err := s.StageState(stage.ID, rwTx, initialCycle, firstCycle)
 	if err != nil {
 		return false, err
@@ -518,7 +518,7 @@ func (s *Sync) logRunStageDone(stageState *StageState, start time.Time) {
 	if took > 60*time.Second {
 		s.logger.Info(fmt.Sprintf("[%s] DONE", logPrefix), "in", took, "block", stageState.BlockNumber)
 	} else {
-		s.logger.Debug(fmt.Sprintf("[%s] DONE", logPrefix), "in", took)
+		//s.logger.Debug(fmt.Sprintf("[%s] DONE", logPrefix), "in", took)
 	}
 	s.timings = append(s.timings, Timing{stage: stageState.ID, took: took})
 	s.metricsCache.stageRunDurationSummary(stageState.ID).Observe(took.Seconds())
