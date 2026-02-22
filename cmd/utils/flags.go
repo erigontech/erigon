@@ -23,7 +23,6 @@ package utils
 import (
 	"crypto/ecdsa"
 	"fmt"
-	"math/big"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -33,6 +32,7 @@ import (
 	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
@@ -629,10 +629,10 @@ var (
 		Usage: "Suggested gas price is the given percentile of a set of recent transaction gas prices",
 		Value: ethconfig.Defaults.GPO.Percentile,
 	}
-	GpoMaxGasPriceFlag = cli.Int64Flag{
+	GpoMaxGasPriceFlag = cli.Uint64Flag{
 		Name:  "gpo.maxprice",
 		Usage: "Maximum gas price will be recommended by gpo",
-		Value: ethconfig.Defaults.GPO.MaxPrice.Int64(),
+		Value: ethconfig.Defaults.GPO.MaxPrice.Uint64(),
 	}
 
 	// Metrics flags
@@ -1535,7 +1535,7 @@ func setGPO(ctx *cli.Context, cfg *gaspricecfg.Config) {
 		cfg.Percentile = ctx.Int(GpoPercentileFlag.Name)
 	}
 	if ctx.IsSet(GpoMaxGasPriceFlag.Name) {
-		cfg.MaxPrice = big.NewInt(ctx.Int64(GpoMaxGasPriceFlag.Name))
+		cfg.MaxPrice = uint256.NewInt(ctx.Uint64(GpoMaxGasPriceFlag.Name))
 	}
 }
 

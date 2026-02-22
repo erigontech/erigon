@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	ethereum "github.com/erigontech/erigon"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -46,11 +48,11 @@ func NewDirectBackend(api jsonrpc.EthAPI) DirectBackend {
 	}
 }
 
-func (b DirectBackend) CodeAt(ctx context.Context, account common.Address, blockNum *big.Int) ([]byte, error) {
+func (b DirectBackend) CodeAt(ctx context.Context, account common.Address, blockNum *uint256.Int) ([]byte, error) {
 	return b.api.GetCode(ctx, account, BlockNumArg(blockNum))
 }
 
-func (b DirectBackend) CallContract(ctx context.Context, callMsg ethereum.CallMsg, blockNum *big.Int) ([]byte, error) {
+func (b DirectBackend) CallContract(ctx context.Context, callMsg ethereum.CallMsg, blockNum *uint256.Int) ([]byte, error) {
 	blockNumberOrHash := BlockNumArg(blockNum)
 	var blockNumberOrHashRef = &blockNumberOrHash
 
@@ -153,7 +155,7 @@ func (b DirectBackend) SubscribeFilterLogs(ctx context.Context, query ethereum.F
 	return sub, nil
 }
 
-func BlockNumArg(blockNum *big.Int) rpc.BlockNumberOrHash {
+func BlockNumArg(blockNum *uint256.Int) rpc.BlockNumberOrHash {
 	var blockRef rpc.BlockReference
 	if blockNum == nil {
 		blockRef = rpc.LatestBlock

@@ -676,7 +676,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			}
 
 			te.execRequests <- &execRequest{
-				b.Number().Uint64(), b.Hash(),
+				b.NumberU64(), b.Hash(),
 				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
 				dbBAL, txTasks, applyResults, false, exhausted,
 			}
