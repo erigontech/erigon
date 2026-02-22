@@ -431,10 +431,11 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	require.Equal(b, msg.GetData())
 
 	// Make sure the chain total difficulty is the correct one
-	want := new(big.Int).Add(m.Genesis.Difficulty(), big.NewInt(td))
+	genDiff := m.Genesis.Difficulty()
+	want := new(uint256.Int).AddUint64(&genDiff, uint64(td))
 	have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
 	require.NoError(err)
-	if have.Cmp(want) != 0 {
+	if want.CmpBig(have) != 0 {
 		t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
 	}
 	// Make sure the canonical chain is the correct one
@@ -2324,7 +2325,7 @@ func TestEIP1559Transition(t *testing.T) {
 	block = chain.Blocks[0]
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
 		statedb := state.New(m.NewHistoryStateReader(1, tx))
-		baseFee := uint256.MustFromBig(block.BaseFee())
+		baseFee := block.BaseFee()
 		effectiveTip := block.Transactions()[0].GetEffectiveGasTip(baseFee).Uint64()
 
 		// 6+5: Ensure that miner received only the tx's effective tip.
