@@ -36,10 +36,6 @@ jobs:
         id: erigon
 
       - uses: ./.github/actions/restore-build-cache
-        with:
-          buildtag: plain
-          build: ${{ steps.erigon.outputs.build }}
-          goversion: ${{ steps.erigon.outputs.goversion }}
 
       - name: Build all
         run: make all
@@ -57,7 +53,3 @@ jobs:
 
       - uses: ./.github/actions/save-build-cache
         if: ${{ always() }}
-        with:
-          buildtag: plain
-          build: ${{ steps.erigon.outputs.build }}
-          goversion: ${{ steps.erigon.outputs.goversion }}

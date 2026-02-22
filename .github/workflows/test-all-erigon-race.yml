@@ -40,8 +40,6 @@ jobs:
               - '**/.github/workflows/backups-dashboards.yml'
   tests-linux:
     needs: source-of-changes
-    env:
-      gocache_tag: race
     timeout-minutes: 90
     concurrency:
       # concurrency group: there can be at most one running and one pending job in a 
@@ -86,17 +84,9 @@ jobs:
           submodules: true
           lfs: tests
 
-      - name: Set variables
-        id: vars
-        run: echo "buildtag=race-${{ matrix.test-group }}" >> "$GITHUB_OUTPUT"
-
       - uses: ./.github/actions/restore-build-cache
         id: restore-build
         if: needs.source-of-changes.outputs.changed_files != 'true'
-        with:
-          buildtag: ${{ steps.vars.outputs.buildtag }}
-          build: ${{ steps.erigon.outputs.build }}
-          goversion: ${{ steps.erigon.outputs.goversion }}
 
       - name: Run ${{ matrix.test-group }} tests on ${{ matrix.os }}
         env:
@@ -153,10 +143,6 @@ jobs:
 
       - uses: ./.github/actions/save-build-cache
         if: always() && steps.restore-build.outcome == 'success'
-        with:
-          buildtag: ${{ steps.vars.outputs.buildtag }}
-          build: ${{ steps.erigon.outputs.build }}
-          goversion: ${{ steps.erigon.outputs.goversion }}
 
       - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
         if: needs.source-of-changes.outputs.changed_files == 'true'

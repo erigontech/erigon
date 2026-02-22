@@ -48,6 +48,10 @@ runs:
       shell: bash
       run: echo "TIMEFORMAT=real %Rs user %Us sys %Ss" >> "$GITHUB_ENV"
 
+    - name: Display free disk space
+      shell: bash
+      run: time df -h
+
     - name: Cleanup space
       if: ${{ inputs.cleanup-space == 'true' && runner.os == 'Linux' }}
       shell: bash
@@ -57,12 +61,23 @@ runs:
                /usr/share/dotnet \
                /usr/share/miniconda \
                /usr/share/swift
+        df -h
+
+    - name: "Use D: drive for temp files on Windows"
+      if: ${{ runner.os == 'Windows' }}
+      shell: bash
+      run: |
+        mkdir -p D:/tmp
+        echo "TEMP=D:/tmp" >> "$GITHUB_ENV"
+        echo "TMP=D:/tmp" >> "$GITHUB_ENV"
+        echo "TMPDIR=D:/tmp" >> "$GITHUB_ENV"
 
     - name: Checkout code
       uses: actions/checkout@v6
       with:
         fetch-depth: ${{ inputs.fetch-depth }}
         filter: ${{ inputs.filter }}
+        clean: false
       env:
         GIT_LFS_SKIP_SMUDGE: 1
         GIT_TRACE: ${{ runner.debug }}
@@ -86,15 +101,6 @@ runs:
       env:
         GIT_TRACE: ${{ runner.debug }}
         GIT_CURL_VERBOSE: ${{ runner.debug }}
-
-    - name: "Use D: drive for temp files on Windows"
-      if: ${{ runner.os == 'Windows' }}
-      shell: bash
-      run: |
-        mkdir -p D:/tmp
-        echo "TEMP=D:/tmp" >> "$GITHUB_ENV"
-        echo "TMP=D:/tmp" >> "$GITHUB_ENV"
-        echo "TMPDIR=D:/tmp" >> "$GITHUB_ENV"
 
     - name: Install git-restore-mtime
       shell: bash
@@ -145,7 +151,7 @@ runs:
     - uses: actions/setup-go@v6
       with:
         go-version: ${{ steps.goversion.outputs.version }}
-        # We have our own caching to optimize testing.
+        # We have our own caching because we smrt.
         cache: false
 
     # TODO: Make this optional, it's possibly not needed for lints and a few other quick things.
@@ -167,6 +173,9 @@ runs:
         echo "goversion=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
         echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
         echo "modcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+        echo "ERIGON_CI_GOCACHE=$(go env GOCACHE)" >> "$GITHUB_ENV"
+        echo "ERIGON_CI_GOVERSION=$(go env GOVERSION)" >> "$GITHUB_ENV"
+        echo "ERIGON_CI_MODCACHE=$(go env GOMODCACHE)" >> "$GITHUB_ENV"
 
     # Note we only cache $(go env GOMODCACHE)/cache/download, the rest is derived from that part. We don't use this for lint, because it fetches extra metadata.
 

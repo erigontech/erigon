@@ -15,8 +15,6 @@ jobs:
   lint:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
-    env:
-      gocache_tag: plain
     concurrency:
       group: ${{ format('{0}-{1}', github.workflow, github.ref) }}
       cancel-in-progress: true
@@ -46,10 +44,6 @@ jobs:
 
       - uses: ./.github/actions/restore-build-cache
         id: restore-build
-        with:
-          buildtag: ${{ env.gocache_tag }}
-          build: ${{ steps.erigon.outputs.build }}
-          goversion: ${{ steps.erigon.outputs.goversion }}
 
       - name: Restore golangci-lint cache
         uses: actions/cache/restore@v4
@@ -62,10 +56,6 @@ jobs:
 
       - uses: ./.github/actions/save-build-cache
         if: always() && steps.restore-build.outcome == 'success'
-        with:
-          buildtag: ${{ env.gocache_tag }}
-          build: ${{ steps.erigon.outputs.build }}
-          goversion: ${{ steps.erigon.outputs.goversion }}
 
       - uses: ./.github/actions/save-mod-cache
         if: always() && steps.restore-modcache.outcome == 'success'

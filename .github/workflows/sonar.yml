@@ -24,8 +24,6 @@ defaults:
 
 jobs:
   sonar:
-    env:
-      gocache_tag: coverage
     concurrency:
       group: >-
         ${{
@@ -50,10 +48,6 @@ jobs:
 
       - uses: ./.github/actions/restore-build-cache
         id: restore-build
-        with:
-          buildtag: ${{ env.gocache_tag }}
-          build: ${{ steps.erigon.outputs.build }}
-          goversion: ${{ steps.erigon.outputs.goversion }}
 
       - name: Run tests with coverage
         env:
@@ -68,7 +62,3 @@ jobs:
 
       - uses: ./.github/actions/save-build-cache
         if: always() && steps.restore-build.outcome == 'success'
-        with:
-          buildtag: ${{ env.gocache_tag }}
-          build: ${{ steps.erigon.outputs.build }}
-          goversion: ${{ steps.erigon.outputs.goversion }}

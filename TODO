@@ -1,2 +1,8 @@
 - Set installing Linux build essentials to default off, to find out which workflows actually need it.
 - Work out which files actually affect hive tests. Probably do the same for the RPC tests.
+- did we lose the go mod tidy check in make lint, for CI?
+- is the directory mtime setting not correct for macos?
+- set clean: false for the second git clone?
+- is debug being set incorrectly in second clone?
+- the reproducible build workflow might be clobbering build caches, see what uses gocache-plain. show all workflows/jobs with overlapping keys, maybe include workflow in the prefix by default.
+- merge jobs that belong in teh same workflow
