@@ -175,7 +175,13 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
+	return sd.getLatest(domain, key)
+}
 
+// getLatest is the lock-free implementation of GetLatest.
+// The caller must already hold latestStateLock (either RLock or Lock),
+// e.g. from within an IteratePrefix callback.
+func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
 	var unwoundLatest = func(domain kv.Domain, key string) (v []byte, step kv.Step, ok bool) {
 		if sd.unwindChangeset != nil {
 			if values := sd.unwindChangeset[domain]; values != nil {
@@ -286,6 +292,24 @@ func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx 
 	}
 
 	return AggTx(roTx).d[domain].debugIteratePrefixLatest(prefix, ramIter, it, roTx)
+}
+
+func (sd *TemporalMemBatch) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
+	var firstKey, firstVal []byte
+	var hasPrefix bool
+	err := sd.IteratePrefix(domain, prefix, roTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
+		if lv, _, ok := sd.getLatest(domain, k); ok {
+			v = lv
+		}
+		if len(v) > 0 {
+			firstKey = common.Copy(k)
+			firstVal = common.Copy(v)
+			hasPrefix = true
+			return false, nil // do not continue, end on first occurrence
+		}
+		return true, nil
+	})
+	return firstKey, firstVal, hasPrefix, err
 }
 
 func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSet) {

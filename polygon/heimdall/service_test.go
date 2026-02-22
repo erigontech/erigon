@@ -531,10 +531,6 @@ type difficultiesKV struct {
 }
 
 func TestIsCatchingUp(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	ctrl := gomock.NewController(t)
 	mockClient := NewMockClient(ctrl)
 
@@ -557,10 +553,6 @@ func TestIsCatchingUp(t *testing.T) {
 }
 
 func TestIsCatchingUpLateBlock(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	ctrl := gomock.NewController(t)
 	mockClient := NewMockClient(ctrl)
 

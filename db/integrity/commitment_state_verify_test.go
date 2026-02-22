@@ -68,8 +68,6 @@ func TestCheckStateVerify(t *testing.T) {
 	rnd := rand.New(rand.NewSource(42))
 
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		domains.SetTxNum(txNum)
-
 		addr := make([]byte, length.Addr)
 		loc := make([]byte, length.Hash)
 		rnd.Read(addr)
@@ -150,8 +148,6 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 	var noopStorageVal []byte
 
 	for txNum := uint64(1); txNum <= 200; txNum++ {
-		domains.SetTxNum(txNum)
-
 		addr := make([]byte, length.Addr)
 		loc := make([]byte, length.Hash)
 		rnd.Read(addr)
@@ -187,8 +183,6 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 	// --- Step range 2: txNum 201..400 (steps 2-3) ---
 	// Write unique entries PLUS re-write the saved entry with the same value (no-op).
 	for txNum := uint64(201); txNum <= 400; txNum++ {
-		domains.SetTxNum(txNum)
-
 		addr := make([]byte, length.Addr)
 		loc := make([]byte, length.Hash)
 		rnd.Read(addr)
@@ -273,8 +267,6 @@ func TestVerifyBranchHashesFromDB(t *testing.T) {
 	rnd := rand.New(rand.NewSource(42))
 
 	for txNum := uint64(1); txNum <= 5; txNum++ {
-		domains.SetTxNum(txNum)
-
 		addr := make([]byte, length.Addr)
 		loc := make([]byte, length.Hash)
 		rnd.Read(addr)

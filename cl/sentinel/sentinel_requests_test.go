@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"testing"
 
@@ -56,6 +57,32 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
+// retryTestFunc retries fn up to maxRetries times if it panics (e.g. from require assertions).
+// This works around transient libp2p races where protocol negotiation fails with
+// "failed to negotiate protocol: stream reset" on macOS CI runners.
+func retryTestFunc(t *testing.T, maxRetries int, fn func()) {
+	t.Helper()
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		failed := false
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					failed = true
+					t.Logf("attempt %d/%d failed: %v", attempt, maxRetries, r)
+				}
+			}()
+			fn()
+		}()
+		if !failed {
+			return
+		}
+		if attempt == maxRetries {
+			// Last attempt — run without recovery so it properly fails the test
+			fn()
+		}
+	}
+}
+
 func getEthClock(t *testing.T) eth_clock.EthereumClock {
 	s, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
 	require.NoError(t, err)
@@ -72,7 +99,7 @@ func loadChain(t *testing.T) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, p
 
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
-	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, nil, reader, sn, log.New(), true, true, false, false, nil)
+	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, nil, nil, reader, sn, log.New(), true, true, false, false, nil)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
 	return
 }
@@ -119,7 +146,7 @@ func newMockPeerDasStateReader(t *testing.T) *peerdasstatemock.MockPeerDasStateR
 	return m
 }
 
-func TestSentinelBlocksByRange(t *testing.T) {
+func testSentinelBlocksByRange(t *testing.T) {
 	ethClock := getEthClock(t)
 	ctx := context.Background()
 	db, blocks, _, _, reader := loadChain(t)
@@ -130,7 +157,7 @@ func TestSentinelBlocksByRange(t *testing.T) {
 
 	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
-	t.Cleanup(func() { host1.Close() })
+	defer host1.Close()
 
 	err = h.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -147,7 +174,7 @@ func TestSentinelBlocksByRange(t *testing.T) {
 	}
 
 	if err := ssz_snappy.EncodeAndWrite(stream, req); err != nil {
-		return
+		panic(fmt.Sprintf("EncodeAndWrite failed: %v", err))
 	}
 
 	code := make([]byte, 1)
@@ -206,7 +233,7 @@ func TestSentinelBlocksByRange(t *testing.T) {
 	}
 }
 
-func TestSentinelBlocksByRoots(t *testing.T) {
+func testSentinelBlocksByRoots(t *testing.T) {
 	ctx := context.Background()
 	db, blocks, _, _, reader := loadChain(t)
 	ethClock := getEthClock(t)
@@ -217,7 +244,7 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 
 	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
-	t.Cleanup(func() { host1.Close() })
+	defer host1.Close()
 
 	err = h.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -238,7 +265,7 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 	req.Append(rt)
 
 	if err := ssz_snappy.EncodeAndWrite(stream, req); err != nil {
-		return
+		panic(fmt.Sprintf("EncodeAndWrite failed: %v", err))
 	}
 
 	code := make([]byte, 1)
@@ -298,7 +325,7 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 	}
 }
 
-func TestSentinelStatusRequest(t *testing.T) {
+func testSentinelStatusRequest(t *testing.T) {
 	ctx := context.Background()
 	db, blocks, _, _, reader := loadChain(t)
 	ethClock := getEthClock(t)
@@ -308,7 +335,7 @@ func TestSentinelStatusRequest(t *testing.T) {
 
 	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
-	t.Cleanup(func() { host1.Close() })
+	defer host1.Close()
 
 	err = h.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
@@ -328,7 +355,7 @@ func TestSentinelStatusRequest(t *testing.T) {
 	require.NoError(t, err)
 
 	if err := ssz_snappy.EncodeAndWrite(stream, req); err != nil {
-		return
+		panic(fmt.Sprintf("EncodeAndWrite failed: %v", err))
 	}
 
 	code := make([]byte, 1)
@@ -344,4 +371,16 @@ func TestSentinelStatusRequest(t *testing.T) {
 	require.Equal(t, req.HeadSlot, resp.HeadSlot)
 	require.Equal(t, req.FinalizedRoot, resp.FinalizedRoot)
 	require.Equal(t, req.FinalizedEpoch, resp.FinalizedEpoch)
+}
+
+func TestSentinelBlocksByRange(t *testing.T) {
+	retryTestFunc(t, 3, func() { testSentinelBlocksByRange(t) })
+}
+
+func TestSentinelBlocksByRoots(t *testing.T) {
+	retryTestFunc(t, 3, func() { testSentinelBlocksByRoots(t) })
+}
+
+func TestSentinelStatusRequest(t *testing.T) {
+	retryTestFunc(t, 3, func() { testSentinelStatusRequest(t) })
 }

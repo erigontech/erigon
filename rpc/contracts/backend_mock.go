@@ -17,6 +17,7 @@ import (
 	ethereum "github.com/erigontech/erigon"
 	common "github.com/erigontech/erigon/common"
 	types "github.com/erigontech/erigon/execution/types"
+	"github.com/holiman/uint256"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -45,7 +46,7 @@ func (m *MockBackend) EXPECT() *MockBackendMockRecorder {
 }
 
 // CallContract mocks base method.
-func (m *MockBackend) CallContract(ctx context.Context, callMsg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
+func (m *MockBackend) CallContract(ctx context.Context, callMsg ethereum.CallMsg, blockNumber *uint256.Int) ([]byte, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CallContract", ctx, callMsg, blockNumber)
 	ret0, _ := ret[0].([]byte)
@@ -72,19 +73,19 @@ func (c *MockBackendCallContractCall) Return(arg0 []byte, arg1 error) *MockBacke
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBackendCallContractCall) Do(f func(context.Context, ethereum.CallMsg, *big.Int) ([]byte, error)) *MockBackendCallContractCall {
+func (c *MockBackendCallContractCall) Do(f func(context.Context, ethereum.CallMsg, *uint256.Int) ([]byte, error)) *MockBackendCallContractCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBackendCallContractCall) DoAndReturn(f func(context.Context, ethereum.CallMsg, *big.Int) ([]byte, error)) *MockBackendCallContractCall {
+func (c *MockBackendCallContractCall) DoAndReturn(f func(context.Context, ethereum.CallMsg, *uint256.Int) ([]byte, error)) *MockBackendCallContractCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
 
 // CodeAt mocks base method.
-func (m *MockBackend) CodeAt(ctx context.Context, contract common.Address, blockNumber *big.Int) ([]byte, error) {
+func (m *MockBackend) CodeAt(ctx context.Context, contract common.Address, blockNumber *uint256.Int) ([]byte, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CodeAt", ctx, contract, blockNumber)
 	ret0, _ := ret[0].([]byte)
@@ -111,13 +112,13 @@ func (c *MockBackendCodeAtCall) Return(arg0 []byte, arg1 error) *MockBackendCode
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBackendCodeAtCall) Do(f func(context.Context, common.Address, *big.Int) ([]byte, error)) *MockBackendCodeAtCall {
+func (c *MockBackendCodeAtCall) Do(f func(context.Context, common.Address, *uint256.Int) ([]byte, error)) *MockBackendCodeAtCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBackendCodeAtCall) DoAndReturn(f func(context.Context, common.Address, *big.Int) ([]byte, error)) *MockBackendCodeAtCall {
+func (c *MockBackendCodeAtCall) DoAndReturn(f func(context.Context, common.Address, *uint256.Int) ([]byte, error)) *MockBackendCodeAtCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

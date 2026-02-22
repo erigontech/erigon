@@ -19,7 +19,6 @@ package state
 import (
 	"context"
 	"fmt"
-	"os"
 	"slices"
 	"testing"
 
@@ -115,11 +114,12 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 
 }
 
-func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
+func emptyTestInvertedIndex(t testing.TB, aggStep uint64) *InvertedIndex {
+	t.Helper()
 	salt := uint32(1)
 	cfg := statecfg.Schema.AccountsDomain.Hist.IiCfg
 
-	dirs := datadir.New(os.TempDir())
+	dirs := datadir.New(t.TempDir())
 	ii, err := NewInvertedIndex(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, log.New())
 	ii.Accessors = 0
 	ii.salt.Store(&salt)
@@ -133,7 +133,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 	t.Parallel()
 
 	newTestDomain := func() (*InvertedIndex, *History) {
-		d := emptyTestDomain(1)
+		d := emptyTestDomain(t, 1)
 		d.History.InvertedIndex.Accessors = 0
 		d.History.Accessors = 0
 		return d.History.InvertedIndex, d.History
@@ -828,7 +828,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		cfg := statecfg.Schema.GetDomainCfg(dom)
 
 		salt := uint32(1)
-		dirs := datadir.New(os.TempDir())
+		dirs := datadir.New(t.TempDir())
 		cfg.Hist.IiCfg.Name = kv.InvertedIdx(0)
 		cfg.Hist.IiCfg.FileVersion = statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}
 
@@ -1080,6 +1080,7 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 	t.Cleanup(db.Close)
 
 	agg := NewTest(dirs).Logger(logger).StepSize(1).MustOpen(t.Context(), db)
+	t.Cleanup(agg.Close)
 	setup := func() (account *Domain) {
 		agg.RegisterDomain(statecfg.Schema.GetDomainCfg(kv.AccountsDomain), nil, dirs, logger)
 		domain := agg.d[kv.AccountsDomain]

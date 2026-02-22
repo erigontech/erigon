@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"math"
 	"runtime"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -92,7 +91,6 @@ type SharedDomains struct {
 
 	txNum             uint64
 	currentStep       kv.Step
-	blockNum          atomic.Uint64
 	trace             bool //nolint
 	commitmentCapture bool
 	mem               kv.TemporalMemBatch
@@ -172,7 +170,6 @@ func (sd *SharedDomains) Merge(sdTxNum uint64, other *SharedDomains, otherTxNum 
 
 	sd.txNum = otherTxNum
 	sd.currentStep = kv.Step(otherTxNum / sd.stepSize)
-	sd.blockNum.Store(other.blockNum.Load())
 	return nil
 }
 
@@ -324,12 +321,6 @@ func (sd *SharedDomains) SetTxNum(txNum uint64) {
 
 func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
 
-func (sd *SharedDomains) BlockNum() uint64 { return sd.blockNum.Load() }
-
-func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
-	sd.blockNum.Store(blockNum)
-}
-
 func (sd *SharedDomains) SetTrace(b, capture bool) []string {
 	sd.trace = b
 	sd.commitmentCapture = capture
@@ -337,22 +328,7 @@ func (sd *SharedDomains) SetTrace(b, capture bool) []string {
 }
 
 func (sd *SharedDomains) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.Tx) ([]byte, []byte, bool, error) {
-	var firstKey, firstVal []byte
-	var hasPrefix bool
-	err := sd.IteratePrefix(domain, prefix, roTx, func(k []byte, v []byte, step kv.Step) (bool, error) {
-		// we need to do this to ensure the value has not been unwound
-		if lv, _, ok := sd.mem.GetLatest(domain, k); ok {
-			v = lv
-		}
-		if len(v) > 0 {
-			firstKey = common.Copy(k)
-			firstVal = common.Copy(v)
-			hasPrefix = true
-			return false, nil // do not continue, end on first occurrence
-		}
-		return true, nil
-	})
-	return firstKey, firstVal, hasPrefix, err
+	return sd.mem.HasPrefix(domain, prefix, roTx)
 }
 
 func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte, step kv.Step) (cont bool, err error)) error {
@@ -364,7 +340,6 @@ func (sd *SharedDomains) Close() {
 		return
 	}
 
-	sd.SetBlockNum(0)
 	sd.SetTxNum(0)
 	sd.ResetPendingUpdates()
 
@@ -651,7 +626,6 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 	if err != nil {
 		return 0, 0, err
 	}
-	sd.SetBlockNum(blockNum)
 	sd.SetTxNum(txNum)
 	return txNum, blockNum, nil
 }

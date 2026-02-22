@@ -28,7 +28,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 	"unsafe"
 
 	"github.com/google/btree"
@@ -437,10 +436,6 @@ func ApplyDeferredBranchUpdates(
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte) error,
 ) (int, error) {
-	start := time.Now()
-	defer func() {
-		log.Debug("ApplyDeferredBranchUpdates completed", "updates", len(deferred), "took", time.Since(start))
-	}()
 	if len(deferred) == 0 {
 		return 0, nil
 	}

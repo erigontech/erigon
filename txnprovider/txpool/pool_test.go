@@ -861,6 +861,9 @@ func TestTxnPoke(t *testing.T) {
 }
 
 func TestShanghaiValidateTxn(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	asrt := assert.New(t)
 	tests := map[string]struct {
 		expected   txpoolcfg.DiscardReason
@@ -1444,6 +1447,9 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 }
 
 func TestBlobSlots(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 5)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
@@ -1527,6 +1533,9 @@ func TestBlobSlots(t *testing.T) {
 }
 
 func TestWrappedSixBlobTxnExceedsRlpLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	require := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

@@ -293,6 +293,9 @@ func (test *udpV5Test) expectNodes(wantReqID []byte, wantTotal uint8, wantNodes 
 
 // This test checks that outgoing PING calls work.
 func TestUDPv5_pingCall(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	test := newUDPV5Test(t)
 	defer test.close()
@@ -509,6 +512,9 @@ func TestUDPv5_callResend(t *testing.T) {
 
 // This test ensures we don't allow multiple rounds of WHOAREYOU for a single call.
 func TestUDPv5_multipleHandshakeRounds(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	test := newUDPV5Test(t)
 	defer test.close()
@@ -535,6 +541,9 @@ func TestUDPv5_multipleHandshakeRounds(t *testing.T) {
 
 // This test checks that calls with n replies may take up to n * respTimeout.
 func TestUDPv5_callTimeoutReset(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	test := newUDPV5Test(t)
 	defer test.close()
@@ -624,6 +633,9 @@ func TestUDPv5_talkHandling(t *testing.T) {
 
 // This test checks that outgoing TALKREQ calls work.
 func TestUDPv5_talkRequest(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	test := newUDPV5Test(t)
 	defer test.close()
@@ -722,6 +734,9 @@ func TestUDPv5_lookupDistances(t *testing.T) {
 
 // This test checks that lookup works.
 func TestUDPv5_lookup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	test := newUDPV5Test(t)
 

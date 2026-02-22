@@ -235,13 +235,13 @@ func TableScanningPrune(
 
 	var pairs, valLen uint64
 
-	defer func() {
-		logger.Debug("scan pruning res", "name", name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys",
-			stat.PruneCountTx, "vals", stat.PruneCountValues, "all vals", valLen, "dups", stat.DupsDeleted,
-			"spent ms", time.Since(start).Milliseconds(),
-			"key prune status", stat.KeyProgress.String(),
-			"val prune status", stat.ValueProgress.String())
-	}()
+	//defer func() {
+	//	logger.Debug("scan pruning res", "name", name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "keys",
+	//		stat.PruneCountTx, "vals", stat.PruneCountValues, "all vals", valLen, "dups", stat.DupsDeleted,
+	//		"spent ms", time.Since(start).Milliseconds(),
+	//		"key prune status", stat.KeyProgress.String(),
+	//		"val prune status", stat.ValueProgress.String())
+	//}()
 	if prevStat.KeyProgress != Done {
 		txnb := common.Copy(keyCursorPosition.StartKey)
 		// This deletion iterator goes last to preserve invariant: if some `txNum=N` pruned - it's pruned Fully
@@ -384,7 +384,7 @@ func TableScanningPrune(
 		select {
 		case <-logEvery.C:
 			if len(txNumBytes) >= 8 {
-				txNum = binary.BigEndian.Uint64(txNumBytes)
+				txNum = txNumGetter(val, txNumBytes)
 			}
 			logger.Info("[snapshots] prune index", "name", filenameBase, "pruned tx", stat.PruneCountTx,
 				"pruned values", stat.PruneCountValues,

@@ -2003,6 +2003,9 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 }
 
 func Test_WitnessTrie_GenerateWitness(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	// t.Parallel()
 
 	buildTrieAndWitness := func(t *testing.T, builder *UpdateBuilder, plainKeysToWitness [][]byte, keyExists []bool) {
