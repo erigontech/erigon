@@ -19,6 +19,7 @@ package sentinel
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
@@ -290,51 +292,31 @@ func (s *Sentinel) proactiveSubnetPeerSearch() {
 // peerSubnetInfo holds information about a peer's subnet coverage for pruning decisions
 type peerSubnetInfo struct {
 	pid              peer.ID
-	attnets          [8]byte
-	subnetsCount     int   // Total subnets this peer covers
+	subnetsCount     int   // Total subnets this peer covers (from GossipSub)
 	criticalSubnets  []int // Subnets where this peer is the only provider
 	redundantSubnets []int // Subnets where this peer is one of many
 }
 
 // getSubnetCoverageWithPeers returns subnet coverage and which peers cover each subnet
-// Uses on-demand metadata queries with LRU cache (TTL = 1 epoch)
+// Uses GossipSub's actual topic subscriptions (more accurate than ENR-based counting)
 func (s *Sentinel) getSubnetCoverageWithPeers() (coverage [attestationSubnetCount]int, subnetToPeers [attestationSubnetCount][]peer.ID) {
-	peers := s.p2p.Host().Network().Peers()
-
-	metaSuccess, enrFallback, skipped := 0, 0, 0
-	for _, pid := range peers {
-		attnets, ok := s.GetPeerAttnets(pid)
-		if !ok {
-			// Fallback to ENR
-			nodeVal, ok := s.pidToEnr.Load(pid)
-			if !ok {
-				skipped++
-				continue
-			}
-			node, ok := nodeVal.(*enode.Node)
-			if !ok {
-				skipped++
-				continue
-			}
-			var peerSubnets bitfield.Bitvector64
-			if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err != nil {
-				skipped++
-				continue
-			}
-			attnets = [8]byte(peerSubnets)
-			enrFallback++
-		} else {
-			metaSuccess++
-		}
-
-		for i := 0; i < attestationSubnetCount; i++ {
-			if attnets[i/8]&(1<<(i%8)) != 0 {
-				coverage[i]++
-				subnetToPeers[i] = append(subnetToPeers[i], pid)
-			}
-		}
+	// Get current fork digest for topic construction
+	forkDigest, err := s.ethClock.CurrentForkDigest()
+	if err != nil {
+		log.Warn("[Sentinel] Failed to get current fork digest for subnet coverage", "err", err)
+		return coverage, subnetToPeers
 	}
-	log.Trace("[Sentinel] Subnet coverage check", "totalPeers", len(peers), "metaSuccess", metaSuccess, "enrFallback", enrFallback, "skipped", skipped)
+
+	// Query GossipSub for actual peers subscribed to each attestation subnet topic
+	for i := 0; i < attestationSubnetCount; i++ {
+		topicName := gossip.TopicNameBeaconAttestation(uint64(i))
+		fullTopic := fmt.Sprintf("/eth2/%x/%s/%s", forkDigest, topicName, gossip.SSZSnappyCodec)
+		peers := s.p2p.Pubsub().ListPeers(fullTopic)
+		coverage[i] = len(peers)
+		subnetToPeers[i] = peers
+	}
+
+	log.Trace("[Sentinel] Subnet coverage check (GossipSub)", "forkDigest", fmt.Sprintf("%x", forkDigest))
 	return coverage, subnetToPeers
 }
 
@@ -355,57 +337,32 @@ func (s *Sentinel) pruneExcessPeers() {
 	// Get detailed subnet coverage
 	coverage, subnetToPeers := s.getSubnetCoverageWithPeers()
 
-	// Build peer info for all peers
+	// Build peer info for all peers based on actual GossipSub subscriptions
 	peers := s.p2p.Host().Network().Peers()
 	peerInfos := make([]peerSubnetInfo, 0, len(peers))
 
+	// Build a map of peer -> subnets they're subscribed to (from GossipSub)
+	peerToSubnets := make(map[peer.ID][]int)
+	for i := 0; i < attestationSubnetCount; i++ {
+		for _, pid := range subnetToPeers[i] {
+			peerToSubnets[pid] = append(peerToSubnets[pid], i)
+		}
+	}
+
 	for _, pid := range peers {
-		attnets, ok := s.GetPeerAttnets(pid)
-		if !ok {
-			// Fallback to ENR
-			nodeVal, ok := s.pidToEnr.Load(pid)
-			if !ok {
-				// No subnet info, mark as lowest priority (can be removed)
-				peerInfos = append(peerInfos, peerSubnetInfo{
-					pid:          pid,
-					subnetsCount: 0,
-				})
-				continue
-			}
-			node, ok := nodeVal.(*enode.Node)
-			if !ok {
-				peerInfos = append(peerInfos, peerSubnetInfo{
-					pid:          pid,
-					subnetsCount: 0,
-				})
-				continue
-			}
-			var peerSubnets bitfield.Bitvector64
-			if err := node.Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &peerSubnets)); err != nil {
-				peerInfos = append(peerInfos, peerSubnetInfo{
-					pid:          pid,
-					subnetsCount: 0,
-				})
-				continue
-			}
-			attnets = [8]byte(peerSubnets)
-		}
-
+		subnets := peerToSubnets[pid]
 		info := peerSubnetInfo{
-			pid:     pid,
-			attnets: attnets,
+			pid:          pid,
+			subnetsCount: len(subnets),
 		}
 
-		// Check each subnet this peer covers
-		for i := 0; i < attestationSubnetCount; i++ {
-			if attnets[i/8]&(1<<(i%8)) != 0 {
-				info.subnetsCount++
-				if coverage[i] == 1 {
-					// This peer is the ONLY one covering this subnet - critical!
-					info.criticalSubnets = append(info.criticalSubnets, i)
-				} else {
-					info.redundantSubnets = append(info.redundantSubnets, i)
-				}
+		// Check each subnet this peer is actually subscribed to (via GossipSub)
+		for _, subnetIdx := range subnets {
+			if coverage[subnetIdx] == 1 {
+				// This peer is the ONLY one covering this subnet - critical!
+				info.criticalSubnets = append(info.criticalSubnets, subnetIdx)
+			} else {
+				info.redundantSubnets = append(info.redundantSubnets, subnetIdx)
 			}
 		}
 
