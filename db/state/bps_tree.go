@@ -370,11 +370,11 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 		fmt.Printf("get   %x\n", key)
 	}
 	if len(key) == 0 && b.offt.Count() > 0 {
-		k0, v0, _, err := b.dataLookupFunc(0, g)
-		if err != nil || k0 != nil {
+		_, v0, off0, err := b.dataLookupFunc(0, g)
+		if err != nil {
 			return nil, false, 0, err
 		}
-		return v0, true, 0, nil
+		return v0, true, off0, nil
 	}
 
 	n, l, r := b.bs(key) // l===r when key is found
