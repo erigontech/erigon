@@ -117,8 +117,10 @@ func TestEIP2200(t *testing.T) {
 			t.Parallel()
 
 			tx, sd := testTemporalTxSD(t)
+			txNum, _, err := sd.SeekCommitment(t.Context(), tx)
+			require.NoError(t, err)
 
-			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, sd.TxNum())
+			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
 
 			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
@@ -176,7 +178,6 @@ func TestCreateGas(t *testing.T) {
 
 		domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 		require.NoError(t, err)
-		defer domains.Close()
 
 		stateReader := rpchelper.NewLatestStateReader(domains.AsGetter(tx))
 		stateWriter := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), 0)
