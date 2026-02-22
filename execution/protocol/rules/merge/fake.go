@@ -17,7 +17,7 @@
 package merge
 
 import (
-	"math/big"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -37,6 +37,6 @@ func NewFaker(eth1Fake *ethash.FakeEthash) *FakeMerge {
 	}
 }
 
-func (s *FakeMerge) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *big.Int {
-	return ProofOfStakeDifficulty
+func (s *FakeMerge) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) uint256.Int {
+	return *ProofOfStakeDifficulty
 }
