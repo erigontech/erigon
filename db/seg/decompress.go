@@ -629,11 +629,22 @@ func (d *Decompressor) MadvWillNeed() *Decompressor {
 // Design decisions and kernel-level rationale:
 //
 //  1. Separate VMA isolates madvise flags from the shared mmap.
-//     madvise(2) operates per-VMA (Virtual Memory Area). A second mmap() of the
-//     same fd creates a new VMA with its own flags — the original VMA's MADV_RANDOM
-//     is untouched:
-//     https://man7.org/linux/man-pages/man2/madvise.2.html
-//     https://www.kernel.org/doc/html/latest/admin-guide/mm/concepts.html#virtual-memory-areas
+//     madvise(2) sets VM_SEQ_READ / VM_RAND_READ flags on the struct vm_area_struct.
+//     A second mmap() of the same fd creates a separate VMA with its own vm_flags —
+//     the original VMA's MADV_RANDOM (VM_RAND_READ) is untouched.
+//
+//     Proof in kernel source:
+//     - madvise_vma_behavior() sets flags per-VMA (vma->vm_flags):
+//     https://github.com/torvalds/linux/blob/master/mm/madvise.c
+//     MADV_SEQUENTIAL: new_flags = (new_flags & ~VM_RAND_READ) | VM_SEQ_READ
+//     MADV_RANDOM:     new_flags = (new_flags & ~VM_SEQ_READ) | VM_RAND_READ
+//     MADV_NORMAL:     new_flags = new_flags & ~VM_RAND_READ & ~VM_SEQ_READ
+//     - Page fault handler checks these flags per-VMA to decide readahead:
+//     https://github.com/torvalds/linux/blob/master/mm/filemap.c
+//     do_sync_mmap_readahead():
+//     if (vm_flags & VM_RAND_READ) return;     // skip readahead
+//     if (vm_flags & VM_SEQ_READ) { sync_ra(); } // aggressive readahead
+//     So two mmaps of the same file get independent readahead behavior.
 //
 //  2. Shared page cache — no double memory cost.
 //     Both mappings are backed by the same page cache pages (same inode). A second
