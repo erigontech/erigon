@@ -109,7 +109,7 @@ func (w *multyBytesWriter) Bytes() [][]byte                { return w.buffer }
 func (w *multyBytesWriter) FileName() string               { return "" }
 func (w *multyBytesWriter) Count() int                     { return 0 }
 func (w *multyBytesWriter) Close()                         {}
-func (w *multyBytesWriter) Compress() error { return nil }
+func (w *multyBytesWriter) Compress() error                { return nil }
 func (w *multyBytesWriter) Reset()                         { w.buffer = nil }
 func (w *multyBytesWriter) SetMetadata([]byte)             {}
 func (w *multyBytesWriter) GetValuesOnCompressedPage() int { return w.pageSize }
