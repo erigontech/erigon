@@ -28,9 +28,10 @@ import (
 	"math/bits"
 	"reflect"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp/internal/rlpstruct"
-	"github.com/holiman/uint256"
 )
 
 const (
