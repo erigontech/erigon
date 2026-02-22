@@ -358,7 +358,7 @@ var (
 	}
 	RpcBatchConcurrencyFlag = cli.UintFlag{
 		Name:  "rpc.batch.concurrency",
-		Usage: "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request",
+		Usage: "Does limit amount of goroutines to process 1 batch request. Means 1 batch request can't overload server. 1 batch still can have unlimited amount of request",
 		Value: 2,
 	}
 	RpcStreamingDisableFlag = cli.BoolFlag{
@@ -382,7 +382,7 @@ var (
 	HTTPDebugSingleFlag = cli.BoolFlag{
 		Name:    "http.dbg.single",
 		Aliases: []string{"rpc.dbg.single"},
-		Usage:   "Allow pass HTTP header 'dbg: true' to printt more detailed logs - how this request was executed",
+		Usage:   "Allow pass HTTP header 'dbg: true' to print more detailed logs - how this request was executed",
 	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
