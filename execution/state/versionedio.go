@@ -457,14 +457,34 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		return defaultV, StorageRead, UnknownVersion, nil
 	} else if res := s.versionMap.Read(addr, SelfDestructPath, accounts.NilKey, s.txIndex); res.Status() == MVReadResultDone && res.value.(bool) {
 		if path != CodePath {
+			// A prior tx self-destructed this account — all state reads must
+			// return the zero value of the type, not the caller-supplied default.
+			// refreshVersionedAccount passes the account's pre-destruction field
+			// values as defaultV, so using defaultV here would return stale data.
+			var zero T
+			sdVersion := Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
 			if commited {
-				// If a prior tx selfdestructed this account, so all storage slots are zero — return the
-				// default regardless of the current tx's local writes (which are part of the current tx's
-				// uncommitted changes, not the committed state).
-				return defaultV, MapRead, Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, nil
+				return zero, MapRead, sdVersion, nil
 			}
 			if vw, ok := s.versionedWrite(addr, SelfDestructPath, key); !ok || vw.Val.(bool) {
-				return defaultV, MapRead, Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}, nil
+				// Record the SelfDestructPath dependency so that
+				// ValidateVersion can verify the destruct is still
+				// valid.  Without this entry the readSet would be
+				// empty for the affected address, and validation
+				// would have nothing to cross-check — allowing
+				// skipCheck to commit stale results.
+				if s.versionedReads == nil {
+					s.versionedReads = ReadSet{}
+				}
+				s.versionedReads.Set(VersionedRead{
+					Address: addr,
+					Path:    SelfDestructPath,
+					Key:     accounts.NilKey,
+					Source:  MapRead,
+					Version: sdVersion,
+					Val:     true,
+				})
+				return zero, MapRead, sdVersion, nil
 			}
 			destrcutedVersion = Version{
 				TxIndex: res.DepIdx(),

@@ -744,10 +744,14 @@ func (sdb *IntraBlockState) ResolveCodeHash(addr accounts.Address) (accounts.Cod
 }
 
 func (sdb *IntraBlockState) ResolveCode(addr accounts.Address) ([]byte, error) {
-	code, err := sdb.getCode(addr, true)
+	// committed=false so the tx's own writes (e.g. from EIP-7702 authorization
+	// list) are visible. With committed=true the parallel executor reads stale
+	// delegation code from the version map instead of the current tx's SetCode.
+	// CodePath exemptions in versionedRead already handle SelfDestruct cases.
+	code, err := sdb.getCode(addr, false)
 	// eip-7702
 	if delegation, ok := types.ParseDelegation(code); ok {
-		return sdb.getCode(delegation, true)
+		return sdb.getCode(delegation, false)
 	}
 	if err != nil {
 		return nil, err
@@ -1237,13 +1241,11 @@ func (sdb *IntraBlockState) setState(addr accounts.Address, key accounts.Storage
 		return err
 	}
 	if set {
-		storageKey := AccountKey{Path: StoragePath, Key: key}
-		if _, ok := sdb.versionedWrites[addr][storageKey]; ok {
-			if origin, ok := stateObject.GetOriginState(key); ok && value == origin {
-				sdb.versionedWrites.Delete(addr, storageKey)
-				return nil
-			}
-		}
+		// Always record the write even when the value equals the origin.
+		// Deleting the write entry when value == origin broke revert semantics:
+		// if a nested call writes a value and the outer call reverts, the journal
+		// must restore the previous write entry. With the deletion optimization,
+		// the entry was gone and the revert had nothing to restore.
 		versionWritten(sdb, addr, StoragePath, key, value)
 	}
 	return nil
