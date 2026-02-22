@@ -149,6 +149,9 @@ type ExecModuleTester struct {
 
 func (emt *ExecModuleTester) Close() {
 	emt.cancel()
+	if err := emt.bgComponentsEg.Wait(); err != nil {
+		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
+	}
 	if emt.Engine != nil {
 		emt.Engine.Close()
 	}
@@ -157,9 +160,6 @@ func (emt *ExecModuleTester) Close() {
 	}
 	if emt.DB != nil {
 		emt.DB.Close()
-	}
-	if err := emt.bgComponentsEg.Wait(); err != nil {
-		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
 	}
 }
 
@@ -334,6 +334,8 @@ func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKe
 	cfg.Genesis = gspec
 	cfg.Prune = prune
 	cfg.ExperimentalBAL = opt.experimentalBAL
+	cfg.FcuBackgroundPrune = false
+	cfg.FcuBackgroundCommit = false
 
 	logLvl := log.LvlError
 	if lvl, ok := os.LookupEnv("MOCK_SENTRY_LOG_LEVEL"); ok {
@@ -679,13 +681,22 @@ func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKe
 	)
 
 	mock.StreamWg.Add(1)
-	go mock.sentriesClient.RecvMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
+	mock.bgComponentsEg.Go(func() error {
+		mock.sentriesClient.RecvMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
+		return nil
+	})
 	mock.StreamWg.Wait()
 	mock.StreamWg.Add(1)
-	go mock.sentriesClient.RecvUploadMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
+	mock.bgComponentsEg.Go(func() error {
+		mock.sentriesClient.RecvUploadMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
+		return nil
+	})
 	mock.StreamWg.Wait()
 	mock.StreamWg.Add(1)
-	go mock.sentriesClient.RecvUploadHeadersMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
+	mock.bgComponentsEg.Go(func() error {
+		mock.sentriesClient.RecvUploadHeadersMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
+		return nil
+	})
 	mock.StreamWg.Wait()
 
 	//app expecting that genesis will always be in db
