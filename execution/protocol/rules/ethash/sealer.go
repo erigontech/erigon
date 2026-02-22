@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -210,11 +209,13 @@ func (s *remoteSealer) loop() {
 //	result[3], hex encoded block number
 func (s *remoteSealer) makeWork(blockWithReceipts *types.BlockWithReceipts) {
 	block := blockWithReceipts.Block
+	blockNum := block.Number()
+	blockDiff := block.Difficulty()
 	hash := s.ethash.SealHash(block.Header())
 	s.currentWork[0] = hash.Hex()
 	s.currentWork[1] = common.BytesToHash(SeedHash(block.NumberU64())).Hex()
-	s.currentWork[2] = common.BytesToHash(new(big.Int).Div(two256, block.Difficulty()).Bytes()).Hex()
-	s.currentWork[3] = hexutil.EncodeBig(block.Number())
+	s.currentWork[2] = common.BytesToHash(new(big.Int).Div(two256, blockDiff.ToBig()).Bytes()).Hex()
+	s.currentWork[3] = blockNum.Hex()
 
 	// Trace the seal work fetched by remote sealer.
 	s.currentBlock = block

@@ -56,6 +56,9 @@ import (
 )
 
 func TestEstimateGas(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, execmoduletester.New(t))

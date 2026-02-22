@@ -238,7 +238,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			blockNumBytes := make([]byte, 8)
 			if err := blockReader.HeadersRange(ctx, func(header *types.Header) error {
 				blockNum, blockHash := header.Number.Uint64(), header.Hash()
-				td.Add(td, header.Difficulty)
+				td.Add(td, header.Difficulty.ToBig())
 				// What can happen if chaindata is deleted is that maybe header.seg progress is lower or higher than
 				// body.seg progress. In this case we need to skip the header, and "normalize" the progress to keep them in sync.
 				if blockNum > blocksAvailable {

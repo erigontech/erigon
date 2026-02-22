@@ -348,9 +348,6 @@ func TestDeleteSnapshots(t *testing.T) {
 }
 
 func TestRemoveOverlaps(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
 	mustSeeFile := func(files []string, fileNameWithoutVersion string) bool { //file-version agnostic
 		for _, f := range files {
 			if strings.HasSuffix(f, fileNameWithoutVersion) {

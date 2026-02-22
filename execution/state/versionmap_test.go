@@ -280,6 +280,9 @@ func BenchmarkReadTimeSameLocationDifferentTxIdx(b *testing.B) {
 }
 
 func TestTimeComplexity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	// for 1000000 read and write with no dependency at different memory location
@@ -302,6 +305,9 @@ func TestTimeComplexity(t *testing.T) {
 }
 
 func TestWriteTimeSameLocationDifferentTxnIdx(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	mvh1 := NewVersionMap(nil)
@@ -324,6 +330,9 @@ func TestWriteTimeSameLocationSameTxnIdx(t *testing.T) {
 }
 
 func TestWriteTimeDifferentLocation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	mvh1 := NewVersionMap(nil)

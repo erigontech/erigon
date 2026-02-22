@@ -168,6 +168,9 @@ func TestUDPv4_packetErrors(t *testing.T) {
 }
 
 func TestUDPv4_pingTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	test := newUDPTest(t)
 	defer test.close()
@@ -186,6 +189,9 @@ func (req testPacket) Kind() byte   { return byte(req) }
 func (req testPacket) Name() string { return "" }
 
 func TestUDPv4_responseTimeouts(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	test := newUDPTest(t)
 	defer test.close()
@@ -257,6 +263,9 @@ func TestUDPv4_responseTimeouts(t *testing.T) {
 }
 
 func TestUDPv4_findnodeTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	test := newUDPTest(t)
 	defer test.close()
@@ -331,6 +340,9 @@ func TestUDPv4_findnode(t *testing.T) {
 }
 
 func TestUDPv4_findnodeMultiReply(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	test := newUDPTest(t)
 	defer test.close()
 
@@ -517,6 +529,9 @@ func TestUDPv4_EIP868(t *testing.T) {
 
 // This test verifies that a small network of nodes can boot up into a healthy state.
 func TestUDPv4_smallNetConvergence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	// Start the network.
