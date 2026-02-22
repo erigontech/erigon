@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -834,4 +835,269 @@ func TestExecutionContext_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, u256.U64(3), firstVal)
 		roTtx4.Rollback()
 	}
+}
+
+func TestExecutionContext_GetAsOf(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	t.Parallel()
+
+	stepSize := uint64(100)
+	db := newTestDb(t, stepSize)
+	ctx := context.Background()
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	domains, err := execstate.NewExecutionContext(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	// --- Setup: create test keys ---
+	k0 := make([]byte, length.Addr)
+	k0[0] = 0xAA
+	addr0 := accounts.BytesToAddress(k0)
+
+	k1 := make([]byte, length.Addr)
+	k1[0] = 0xBB
+	addr1 := accounts.BytesToAddress(k1)
+
+	storageKey := make([]byte, length.Hash)
+	storageKey[0] = 0xCC
+	sKey := accounts.BytesToKey(storageKey)
+
+	codeAddr := make([]byte, length.Addr)
+	codeAddr[0] = 0xDD
+	addrCode := accounts.BytesToAddress(codeAddr)
+
+	// --- Write account data at multiple txNums ---
+	// addr0: txNum=0 (nonce=0), txNum=5 (nonce=5), txNum=10 (nonce=10)
+	for _, tc := range []struct {
+		txNum uint64
+		nonce uint64
+	}{
+		{0, 0},
+		{5, 5},
+		{10, 10},
+	} {
+		acc := accounts.Account{Nonce: tc.nonce, Balance: *uint256.NewInt(tc.nonce * 100), CodeHash: accounts.EmptyCodeHash}
+		domains.SetTxNum(tc.txNum)
+		err = domains.PutAccount(ctx, addr0, &acc, rwTx, tc.txNum)
+		require.NoError(t, err)
+	}
+
+	// addr1: txNum=1 (nonce=1), txNum=6 (nonce=6)
+	for _, tc := range []struct {
+		txNum uint64
+		nonce uint64
+	}{
+		{1, 1},
+		{6, 6},
+	} {
+		acc := accounts.Account{Nonce: tc.nonce, Balance: *uint256.NewInt(tc.nonce * 200), CodeHash: accounts.EmptyCodeHash}
+		domains.SetTxNum(tc.txNum)
+		err = domains.PutAccount(ctx, addr1, &acc, rwTx, tc.txNum)
+		require.NoError(t, err)
+	}
+
+	// --- Write storage data ---
+	// addr0/sKey: txNum=2 (val=100), txNum=7 (val=200)
+	domains.SetTxNum(2)
+	err = domains.PutStorage(ctx, addr0, sKey, u256.U64(100), rwTx, 2)
+	require.NoError(t, err)
+	domains.SetTxNum(7)
+	err = domains.PutStorage(ctx, addr0, sKey, u256.U64(200), rwTx, 7)
+	require.NoError(t, err)
+
+	// --- Write code data ---
+	// addrCode: txNum=3
+	testCode := []byte{0x60, 0x00, 0x60, 0x00, 0xFD} // PUSH0 PUSH0 REVERT
+	codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(testCode))
+	domains.SetTxNum(3)
+	// Put account first so code domain has context
+	accWithCode := accounts.Account{Nonce: 1, CodeHash: codeHash}
+	err = domains.PutAccount(ctx, addrCode, &accWithCode, rwTx, 3)
+	require.NoError(t, err)
+	err = domains.PutCode(ctx, addrCode, accounts.NilCodeHash, testCode, rwTx, 3)
+	require.NoError(t, err)
+
+	// =====================================================
+	// Phase 1: Local lookups (values in d.updates)
+	// =====================================================
+	t.Run("Phase1_LocalLookups", func(t *testing.T) {
+		// Account lookups via ExecutionContext.GetAsOf (byte interface)
+		addrKey0 := addr0.Value()
+
+		// ts=0: no value before txNum=0
+		_, ok, err := domains.GetAsOf(kv.AccountsDomain, addrKey0[:], 0)
+		require.NoError(t, err)
+		require.False(t, ok, "should not find value before txNum=0")
+
+		// ts=1: should return account written at txNum=0 (nonce=0)
+		v, ok, err := domains.GetAsOf(kv.AccountsDomain, addrKey0[:], 1)
+		require.NoError(t, err)
+		require.True(t, ok, "should find value at ts=1")
+		var a accounts.Account
+		require.NoError(t, accounts.DeserialiseV3(&a, v))
+		require.Equal(t, uint64(0), a.Nonce)
+
+		// ts=5: should return account at txNum=0 (nonce=0), since ts > 0 and ts <= 5
+		v, ok, err = domains.GetAsOf(kv.AccountsDomain, addrKey0[:], 5)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NoError(t, accounts.DeserialiseV3(&a, v))
+		require.Equal(t, uint64(0), a.Nonce, "at ts=5 should get value from txNum=0")
+
+		// ts=6: should return account at txNum=5 (nonce=5)
+		v, ok, err = domains.GetAsOf(kv.AccountsDomain, addrKey0[:], 6)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NoError(t, accounts.DeserialiseV3(&a, v))
+		require.Equal(t, uint64(5), a.Nonce)
+
+		// ts=7: between txNum=5 and txNum=10, should return nonce=5
+		v, ok, err = domains.GetAsOf(kv.AccountsDomain, addrKey0[:], 7)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NoError(t, accounts.DeserialiseV3(&a, v))
+		require.Equal(t, uint64(5), a.Nonce)
+
+		// ts=11: after last write, should return nonce=10
+		v, ok, err = domains.GetAsOf(kv.AccountsDomain, addrKey0[:], 11)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NoError(t, accounts.DeserialiseV3(&a, v))
+		require.Equal(t, uint64(10), a.Nonce)
+
+		// addr1 lookups
+		addrKey1 := addr1.Value()
+		v, ok, err = domains.GetAsOf(kv.AccountsDomain, addrKey1[:], 2)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NoError(t, accounts.DeserialiseV3(&a, v))
+		require.Equal(t, uint64(1), a.Nonce)
+
+		v, ok, err = domains.GetAsOf(kv.AccountsDomain, addrKey1[:], 7)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NoError(t, accounts.DeserialiseV3(&a, v))
+		require.Equal(t, uint64(6), a.Nonce)
+
+		// Storage lookups via byte interface
+		storageComposite := composite(addrKey0[:], storageKey)
+		v, ok, err = domains.GetAsOf(kv.StorageDomain, storageComposite, 3)
+		require.NoError(t, err)
+		require.True(t, ok)
+		var sval uint256.Int
+		sval.SetBytes(v)
+		require.Equal(t, u256.U64(100), sval)
+
+		v, ok, err = domains.GetAsOf(kv.StorageDomain, storageComposite, 8)
+		require.NoError(t, err)
+		require.True(t, ok)
+		sval.SetBytes(v)
+		require.Equal(t, u256.U64(200), sval)
+
+		// Code lookups via byte interface
+		codeAddrKey := addrCode.Value()
+		v, ok, err = domains.GetAsOf(kv.CodeDomain, codeAddrKey[:], 4)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, testCode, v)
+	})
+
+	// =====================================================
+	// Phase 2: After flush (updates cleared)
+	// =====================================================
+	t.Run("Phase2_AfterFlush", func(t *testing.T) {
+		err = domains.Flush(ctx, rwTx)
+		require.NoError(t, err)
+
+		addrKey0 := addr0.Value()
+
+		// After FlushUpdates, d.updates is cleared, so GetAsOf returns not-found
+		_, ok, err := domains.GetAsOf(kv.AccountsDomain, addrKey0[:], 6)
+		require.NoError(t, err)
+		require.False(t, ok, "after flush, in-memory updates should be cleared")
+
+		// But GetAccount (latest) should still work via cache/DB
+		a, _, ok, err := domains.GetAccount(ctx, addr0, rwTx)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, uint64(10), a.Nonce, "latest account should still be accessible after flush")
+	})
+
+	// Commit the transaction
+	err = rwTx.Commit()
+	require.NoError(t, err)
+
+	// =====================================================
+	// Phase 3: Historic reads via temporal tx
+	// =====================================================
+	t.Run("Phase3_HistoricReads", func(t *testing.T) {
+		rwTx2, err := db.BeginTemporalRw(ctx)
+		require.NoError(t, err)
+		defer rwTx2.Rollback()
+
+		addrKey0 := addr0.Value()
+
+		// Account historic reads through temporal tx
+		v, ok, err := rwTx2.GetAsOf(kv.AccountsDomain, addrKey0[:], 1)
+		require.NoError(t, err)
+		require.True(t, ok, "historic read at ts=1 should find value")
+		var a accounts.Account
+		require.NoError(t, accounts.DeserialiseV3(&a, v))
+		require.Equal(t, uint64(0), a.Nonce)
+
+		v, ok, err = rwTx2.GetAsOf(kv.AccountsDomain, addrKey0[:], 6)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NoError(t, accounts.DeserialiseV3(&a, v))
+		require.Equal(t, uint64(5), a.Nonce)
+
+		v, ok, err = rwTx2.GetAsOf(kv.AccountsDomain, addrKey0[:], 11)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.NoError(t, accounts.DeserialiseV3(&a, v))
+		require.Equal(t, uint64(10), a.Nonce)
+
+		// Storage historic reads
+		storageComposite := composite(addrKey0[:], storageKey)
+		v, ok, err = rwTx2.GetAsOf(kv.StorageDomain, storageComposite, 3)
+		require.NoError(t, err)
+		require.True(t, ok)
+		var sval uint256.Int
+		sval.SetBytes(v)
+		require.Equal(t, u256.U64(100), sval)
+
+		v, ok, err = rwTx2.GetAsOf(kv.StorageDomain, storageComposite, 8)
+		require.NoError(t, err)
+		require.True(t, ok)
+		sval.SetBytes(v)
+		require.Equal(t, u256.U64(200), sval)
+
+		// Code historic reads
+		codeAddrKey := addrCode.Value()
+		v, ok, err = rwTx2.GetAsOf(kv.CodeDomain, codeAddrKey[:], 4)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, testCode, v)
+
+		// Fresh ExecutionContext on new tx: GetAsOf returns not-found (empty updates)
+		domains2, err := execstate.NewExecutionContext(ctx, rwTx2, log.New())
+		require.NoError(t, err)
+		defer domains2.Close()
+
+		_, ok, err = domains2.GetAsOf(kv.AccountsDomain, addrKey0[:], 6)
+		require.NoError(t, err)
+		require.False(t, ok, "fresh ExecutionContext should have empty updates")
+
+		// But GetAccount should return the latest value from DB
+		a2, _, ok, err := domains2.GetAccount(ctx, addr0, rwTx2)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, uint64(10), a2.Nonce)
+	})
 }

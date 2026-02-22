@@ -480,9 +480,39 @@ func (sd *ExecutionContext) getLatest(ctx context.Context, domain kv.Domain, tx 
 }
 
 func (sd *ExecutionContext) GetAsOf(domain kv.Domain, key []byte, txNum uint64) (v []byte, ok bool, err error) {
-	//return sd.mem.GetAsOf(domain, key, ts)
-	// TODO - we need to add getAsOf to domains
-	return nil, false, fmt.Errorf("TODO")
+	switch domain {
+	case kv.AccountsDomain:
+		addr := accounts.BytesToAddress(key)
+		a, ok, err := sd.accountsDomain.GetAsOf(addr, txNum)
+		if !ok || err != nil {
+			return nil, ok, err
+		}
+		return accounts.SerialiseV3(a), true, nil
+	case kv.StorageDomain:
+		if len(key) > length.Addr {
+			addr := accounts.BytesToAddress(key[:length.Addr])
+			skey := accounts.BytesToKey(key[length.Addr:])
+			val, ok, err := sd.storageDomain.GetAsOf(addr, skey, txNum)
+			if !ok || err != nil {
+				return nil, ok, err
+			}
+			return val.Bytes(), true, nil
+		}
+		return nil, false, nil
+	case kv.CodeDomain:
+		addr := accounts.BytesToAddress(key)
+		_, code, ok, err := sd.codeDomain.GetAsOf(addr, txNum)
+		return code, ok, err
+	case kv.CommitmentDomain:
+		path := commitment.InternPath(key)
+		b, ok, err := sd.commitmentDomain.GetBranchAsOf(path, txNum)
+		if !ok || err != nil {
+			return nil, ok, err
+		}
+		return b, true, nil
+	default:
+		return nil, false, nil
+	}
 }
 
 func (sd *ExecutionContext) MetricsSnapshot() *DomainMetricsSnapshot {

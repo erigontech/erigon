@@ -599,36 +599,21 @@ func (d *domain[K, V]) getLatest(ctx context.Context, domain kv.Domain, k []byte
 	return v, uint64(step) * tx.StepSize(), nil
 }
 
-func (d *domain[K, V]) getAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
+func (d *domain[K, V]) getAsOf(key K, ts uint64) (v V, ok bool, err error) {
 	d.lock.RLock()
 	defer d.lock.RUnlock()
-	/* TODO
-	keyS := toStringZeroCopy(key)
-	var dataWithTxNums []dataWithTxNum
-	if domain == kv.StorageDomain {
-		dataWithTxNums, ok = sd.storage.Get(keyS)
-		if !ok {
-			return nil, false, nil
-		}
-		for i, dataWithTxNum := range dataWithTxNums {
-			if ts > dataWithTxNum.txNum && (i == len(dataWithTxNums)-1 || ts <= dataWithTxNums[i+1].txNum) {
-				return dataWithTxNum.data, true, nil
-			}
-		}
-		return nil, false, nil
+
+	vals, found := d.updates.Get(key)
+	if !found {
+		return v, false, nil
 	}
 
-	dataWithTxNums, ok = sd.domains[domain][keyS]
-	if !ok {
-		return nil, false, nil
-	}
-	for i, dataWithTxNum := range dataWithTxNums {
-		if ts > dataWithTxNum.txNum && (i == len(dataWithTxNums)-1 || ts <= dataWithTxNums[i+1].txNum) {
-			return dataWithTxNum.data, true, nil
+	for i, entry := range vals {
+		if ts > entry.TxNum && (i == len(vals)-1 || ts <= vals[i+1].TxNum) {
+			return entry.Value, true, nil
 		}
 	}
-	*/
-	return nil, false, nil
+	return v, false, nil
 }
 
 func (sd *domain[K, V]) ClearMetrics() {
@@ -738,6 +723,10 @@ func NewAccountsDomain(mem kv.TemporalMemBatch, storage *StorageDomain, code *Co
 
 func (ad *AccountsDomain) Get(ctx context.Context, k accounts.Address, tx kv.TemporalTx) (v *accounts.Account, txNum uint64, ok bool, err error) {
 	return ad.domain.get(ctx, k, tx)
+}
+
+func (ad *AccountsDomain) GetAsOf(k accounts.Address, ts uint64) (*accounts.Account, bool, error) {
+	return ad.domain.getAsOf(k, ts)
 }
 
 func (ad *AccountsDomain) Put(ctx context.Context, k accounts.Address, v *accounts.Account, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[*accounts.Account]) error {
@@ -979,6 +968,10 @@ func NewStorageDomain(mem kv.TemporalMemBatch, commitCtx *commitment.CommitmentC
 
 func (sd *StorageDomain) Get(ctx context.Context, addr accounts.Address, key accounts.StorageKey, tx kv.TemporalTx) (v uint256.Int, txNum uint64, ok bool, err error) {
 	return sd.domain.get(ctx, storageLocation{address: addr, key: key}, tx)
+}
+
+func (sd *StorageDomain) GetAsOf(addr accounts.Address, key accounts.StorageKey, ts uint64) (uint256.Int, bool, error) {
+	return sd.domain.getAsOf(storageLocation{address: addr, key: key}, ts)
 }
 
 func (sd *StorageDomain) Put(ctx context.Context, addr accounts.Address, key accounts.StorageKey, v uint256.Int, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[uint256.Int]) error {
@@ -1362,6 +1355,14 @@ func (cd *CodeDomain) Get(ctx context.Context, k accounts.Address, tx kv.Tempora
 	return v.hash, v.code, step, ok, err
 }
 
+func (cd *CodeDomain) GetAsOf(k accounts.Address, ts uint64) (accounts.CodeHash, []byte, bool, error) {
+	v, ok, err := cd.domain.getAsOf(k, ts)
+	if !ok || err != nil {
+		return accounts.EmptyCodeHash, nil, ok, err
+	}
+	return v.hash, v.code, true, nil
+}
+
 func (cd *CodeDomain) Put(ctx context.Context, k accounts.Address, h accounts.CodeHash, c []byte, roTx kv.TemporalTx, txNum uint64, prev ...CodeWithTxNum) error {
 	if c == nil {
 		return fmt.Errorf("domain: %s, trying to put nil value. not allowed", kv.CodeDomain)
@@ -1620,6 +1621,10 @@ func NewCommitmentDomain(mem kv.TemporalMemBatch, commitCtx *commitment.Commitme
 
 func (cd *CommitmentDomain) GetBranch(ctx context.Context, k commitment.Path, tx kv.TemporalTx) (v commitment.BranchData, txNum uint64, ok bool, err error) {
 	return cd.domain.get(dbg.WithTrace(ctx, false), k, tx)
+}
+
+func (cd *CommitmentDomain) GetBranchAsOf(k commitment.Path, ts uint64) (commitment.BranchData, bool, error) {
+	return cd.domain.getAsOf(k, ts)
 }
 
 func (cd *CommitmentDomain) PutBranch(ctx context.Context, k commitment.Path, v commitment.BranchData, roTx kv.TemporalTx, txNum uint64, prev ...ValueWithTxNum[commitment.BranchData]) error {
