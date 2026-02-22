@@ -23,8 +23,9 @@ import (
 	"errors"
 	"sync"
 
+	keccak "github.com/erigontech/fastkeccak"
+
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto/keccak"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/rlp"
 )

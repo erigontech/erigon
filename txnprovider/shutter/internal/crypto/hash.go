@@ -19,9 +19,8 @@ package crypto
 import (
 	"math/big"
 
+	keccak "github.com/erigontech/fastkeccak"
 	blst "github.com/supranational/blst/bindings/go"
-
-	"github.com/erigontech/erigon/common/crypto/keccak"
 )
 
 const HashToG1DST = "SHUTTER_V01_BLS12381G1_XMD:SHA-256_SSWU_RO_"

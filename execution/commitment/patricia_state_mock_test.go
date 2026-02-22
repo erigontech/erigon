@@ -26,13 +26,12 @@ import (
 	"sync/atomic"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/db/kv"
-
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto/keccak"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 // In memory commitment and state to use with the tests

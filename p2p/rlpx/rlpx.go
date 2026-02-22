@@ -37,11 +37,11 @@ import (
 	"net"
 	"time"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/golang/snappy"
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/ecies"
-	"github.com/erigontech/erigon/common/crypto/keccak"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 

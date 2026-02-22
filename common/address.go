@@ -23,7 +23,8 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/erigontech/erigon/common/crypto/keccak"
+	keccak "github.com/erigontech/fastkeccak"
+
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 )

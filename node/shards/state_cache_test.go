@@ -22,10 +22,10 @@ import (
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto/keccak"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 

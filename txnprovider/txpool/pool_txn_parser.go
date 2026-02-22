@@ -26,12 +26,12 @@ import (
 	"math/bits"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/erigontech/secp256k1"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/crypto/keccak"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/u256"

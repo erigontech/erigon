@@ -19,7 +19,7 @@ package common
 import (
 	"sync"
 
-	"github.com/erigontech/erigon/common/crypto/keccak"
+	keccak "github.com/erigontech/fastkeccak"
 )
 
 type Hasher struct {

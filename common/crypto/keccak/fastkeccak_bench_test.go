@@ -22,8 +22,6 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	keccak "github.com/erigontech/fastkeccak"
-
-	cryptokeccak "github.com/erigontech/erigon/common/crypto/keccak"
 )
 
 // BenchmarkKeccak256_Sha3 benchmarks the standard x/crypto/sha3 LegacyKeccak256 one-shot hash.
@@ -58,7 +56,7 @@ func BenchmarkKeccakStreaming_Sha3(b *testing.B) {
 	for i := range data {
 		data[i] = byte(i)
 	}
-	h := sha3.NewLegacyKeccak256().(cryptokeccak.KeccakState)
+	h := sha3.NewLegacyKeccak256().(keccak.KeccakState)
 	var buf [32]byte
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
