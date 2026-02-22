@@ -701,7 +701,7 @@ func (d *Decompressor) OpenSequentialView() (*SequentialView, error) {
 	// We intentionally avoid MADV_SEQUENTIAL here: its "deactivate behind" behavior
 	// operates at the page cache level and would push pages to the inactive LRU list,
 	// adding latency jitter to concurrent random readers on the shared mmap.
-	_ = mmap.MadviseNormal(h1)
+	_ = mmap.MadviseSequential(h1)
 	// d.data is a sub-slice of d.mmapHandle1 starting after file headers
 	// (version, feature flags, metadata). wordsStart is relative to d.data,
 	// so the file offset is: headerSize + wordsStart.
