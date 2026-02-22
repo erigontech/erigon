@@ -18,6 +18,7 @@ package freezeblocks
 
 import (
 	"context"
+	"math/big"
 	"path/filepath"
 	"testing"
 
@@ -156,4 +157,111 @@ func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
 	hasSenders, err := blockReader.HasSenders(context.Background(), tx, genesisHash, 0)
 	assert.NoError(t, err)
 	assert.False(t, hasSenders) // should be false because genesis block does not have senders
+}
+
+func TestCanonicalHashCache_DBHit(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	logger := log.New()
+
+	// Write a canonical hash to the DB
+	rwTx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	header := &types.Header{Number: common.Big0}
+	expectedHash := header.Hash()
+	require.NoError(t, rawdb.WriteCanonicalHash(rwTx, expectedHash, 0))
+	require.NoError(t, rwTx.Commit())
+
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := NewRoSnapshots(cfg, t.TempDir(), logger)
+	defer snapshots.Close()
+	blockReader := NewBlockReader(snapshots, nil)
+
+	tx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	// First call: should read from DB (DB results are not cached, only snapshot results are)
+	hash, ok, err := blockReader.CanonicalHash(context.Background(), tx, 0)
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, expectedHash, hash)
+
+	// DB results should NOT be cached (only snapshot data is immutable and cacheable)
+	_, found := blockReader.canonicalHashCache.Get(uint64(0))
+	assert.False(t, found)
+
+	// Second call: should still return correct result from DB
+	hash2, ok2, err := blockReader.CanonicalHash(context.Background(), tx, 0)
+	require.NoError(t, err)
+	assert.True(t, ok2)
+	assert.Equal(t, expectedHash, hash2)
+}
+
+func TestCanonicalHashCache_Miss(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	logger := log.New()
+
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := NewRoSnapshots(cfg, t.TempDir(), logger)
+	defer snapshots.Close()
+	blockReader := NewBlockReader(snapshots, nil)
+
+	tx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	// Block 999 doesn't exist in DB or snapshots
+	hash, ok, err := blockReader.CanonicalHash(context.Background(), tx, 999)
+	require.NoError(t, err)
+	assert.False(t, ok)
+	assert.Equal(t, common.Hash{}, hash)
+
+	// Should not be cached
+	_, found := blockReader.canonicalHashCache.Get(uint64(999))
+	assert.False(t, found)
+}
+
+func TestCanonicalHashCache_MultipleBlocks(t *testing.T) {
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	logger := log.New()
+
+	// Write multiple canonical hashes
+	rwTx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	hashes := make([]common.Hash, 5)
+	for i := uint64(0); i < 5; i++ {
+		header := &types.Header{Number: new(big.Int).SetUint64(i)}
+		hashes[i] = header.Hash()
+		require.NoError(t, rawdb.WriteCanonicalHash(rwTx, hashes[i], i))
+	}
+	require.NoError(t, rwTx.Commit())
+
+	cfg := ethconfig.Defaults.Snapshot
+	cfg.ChainName = networkname.Mainnet
+	snapshots := NewRoSnapshots(cfg, t.TempDir(), logger)
+	defer snapshots.Close()
+	blockReader := NewBlockReader(snapshots, nil)
+
+	tx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	// Read all blocks to populate cache
+	for i := uint64(0); i < 5; i++ {
+		hash, ok, err := blockReader.CanonicalHash(context.Background(), tx, i)
+		require.NoError(t, err)
+		assert.True(t, ok)
+		assert.Equal(t, hashes[i], hash)
+	}
+
+	// DB results should NOT be cached (only snapshot data is immutable and cacheable)
+	for i := uint64(0); i < 5; i++ {
+		_, found := blockReader.canonicalHashCache.Get(i)
+		assert.False(t, found, "block %d should not be cached (DB data)", i)
+	}
 }
