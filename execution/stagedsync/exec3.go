@@ -146,7 +146,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	if execStage.SyncMode() == stages.ModeApplyingBlocks {
-		agg.BuildFilesInBackground(doms.TxNum())
+		agg.BuildFilesInBackground(initialTxNum)
 	}
 
 	var (
@@ -359,10 +359,6 @@ func ExecV3(ctx context.Context,
 			"lastFrozenStep", lastFrozenStep, "lastFrozenTxNum", ((lastFrozenStep+1)*kv.Step(doms.StepSize()))-1)
 		return fmt.Errorf("can't persist comittement for blockNum %d, txNum %d: step %d is frozen",
 			lastCommittedBlockNum, lastCommittedTxNum, lastCommitedStep)
-	}
-
-	if execStage.SyncMode() == stages.ModeApplyingBlocks {
-		agg.BuildFilesInBackground(doms.TxNum())
 	}
 
 	if !shouldReportToTxPool && cfg.notifications != nil && cfg.notifications.Accumulator != nil && !isBlockProduction && lastHeader != nil {
