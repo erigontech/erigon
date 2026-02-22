@@ -80,6 +80,9 @@ loop:
 }
 
 func TestResubscribe(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	var i int

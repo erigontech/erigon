@@ -20,6 +20,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/execution/chain"
@@ -31,8 +32,8 @@ import (
 func TestBuiltBlock_AvailableRlpSpace_BugReproduction(t *testing.T) {
 	// Simulate post-Osaka scenario: block number < timestamp, but timestamp > Osaka activation
 	header := &types.Header{
-		Number: big.NewInt(27500000), // Block number (smaller than Osaka timestamp)
-		Time:   1764800001,           // Timestamp (greater than Osaka activation time)
+		Number: *uint256.NewInt(27500000), // Block number (smaller than Osaka timestamp)
+		Time:   1764800001,                // Timestamp (greater than Osaka activation time)
 	}
 
 	mb := &BuiltBlock{

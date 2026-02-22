@@ -173,6 +173,9 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount2(f *testing.F) {
 }
 
 func Fuzz_HexPatriciaHashed_ReviewKeys(f *testing.F) {
+	if testing.Short() {
+		f.Skip("slow test")
+	}
 	ctx := context.Background()
 	var (
 		keysCount uint64 = 100000

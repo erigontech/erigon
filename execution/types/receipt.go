@@ -25,8 +25,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"slices"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -71,9 +72,9 @@ type Receipt struct {
 
 	// Inclusion information: These fields provide information about the inclusion of the
 	// transaction corresponding to this receipt.
-	BlockHash        common.Hash `json:"blockHash,omitempty"`
-	BlockNumber      *big.Int    `json:"blockNumber,omitempty"`
-	TransactionIndex uint        `json:"transactionIndex"`
+	BlockHash        common.Hash  `json:"blockHash,omitempty"`
+	BlockNumber      *uint256.Int `json:"blockNumber,omitempty"`
+	TransactionIndex uint         `json:"transactionIndex"`
 
 	FirstLogIndexWithinBlock uint32 `json:"-"` // field which used to store in db and re-calc
 }
@@ -375,7 +376,7 @@ func (r *Receipt) Copy() *Receipt {
 		ContractAddress:   r.ContractAddress,
 		GasUsed:           r.GasUsed,
 		BlockHash:         r.BlockHash,
-		BlockNumber:       big.NewInt(0).Set(r.BlockNumber),
+		BlockNumber:       new(uint256.Int).Set(r.BlockNumber),
 		TransactionIndex:  r.TransactionIndex,
 
 		FirstLogIndexWithinBlock: r.FirstLogIndexWithinBlock,
@@ -550,14 +551,13 @@ func (r *Receipt) DeriveFieldsV3ForSingleReceipt(txnIdx int, blockHash common.Ha
 		return errors.New("tx must have cached sender")
 	}
 
-	blockNumber := new(big.Int).SetUint64(blockNum)
 	// The transaction type and hash can be retrieved from the transaction itself
 	r.Type = txn.Type()
 	r.TxHash = txn.Hash()
 
 	// block location fields
 	r.BlockHash = blockHash
-	r.BlockNumber = blockNumber
+	r.BlockNumber = uint256.NewInt(blockNum)
 	r.TransactionIndex = uint(txnIdx)
 
 	// The contract address can be derived from the transaction itself
@@ -592,7 +592,7 @@ func (r *Receipt) DeriveFieldsV4ForCachedReceipt(blockHash common.Hash, blockNum
 	logIndex := r.FirstLogIndexWithinBlock // logIdx is unique within the block and starts from 0
 
 	r.BlockHash = blockHash
-	r.BlockNumber = big.NewInt(int64(blockNum))
+	r.BlockNumber = uint256.NewInt(blockNum)
 	r.TxHash = txnHash
 
 	// The derived log fields can simply be set from the block and transaction

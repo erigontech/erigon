@@ -154,8 +154,7 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, req *executionproto.
 	block := blockWithReceipts.Block
 	header := block.Header()
 
-	baseFee := new(uint256.Int)
-	baseFee.SetFromBig(header.BaseFee)
+	baseFee := header.BaseFee
 
 	encodedTransactions, err := types.MarshalTransactionsBinary(block.Transactions())
 	if err != nil {

@@ -19,11 +19,11 @@ package p2p
 import (
 	"context"
 	"errors"
-	"math/big"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
@@ -112,7 +112,7 @@ func TestMessageListenerRegisterNewBlockObserver(t *testing.T) {
 		var done atomic.Bool
 		observer := func(message *DecodedInboundMessage[*eth.NewBlockPacket]) {
 			require.Equal(t, peerId, message.PeerId)
-			require.Equal(t, uint64(1), message.Decoded.Block.Number().Uint64())
+			require.Equal(t, uint64(1), message.Decoded.Block.NumberU64())
 			done.Store(true)
 		}
 
@@ -412,7 +412,7 @@ func newMockBlockHeaders(numHeaders int) []*types.Header {
 		}
 
 		headers[i] = &types.Header{
-			Number:     big.NewInt(int64(i) + 1),
+			Number:     *uint256.NewInt(uint64(i) + 1),
 			ParentHash: parentHash,
 		}
 
