@@ -618,41 +618,49 @@ func (d *Decompressor) MadvWillNeed() *Decompressor {
 	return d
 }
 
-// SequentialView provides a separate mmap of the same file with MADV_SEQUENTIAL.
-// Use this for sequential operations (merges, full scans) that run concurrently
-// with random readers — it avoids changing the madvise hint on the shared mmap.
+// SequentialView provides a separate mmap of the same file with MADV_NORMAL for
+// sequential operations (merges, full scans) that run concurrently with random readers.
 //
 // Design decisions and kernel-level rationale:
 //
-//  1. Separate VMA, independent madvise flags.
+//  1. Separate VMA isolates madvise flags from the shared mmap.
 //     madvise(2) operates per-VMA (Virtual Memory Area). A second mmap() of the
 //     same fd creates a new VMA with its own flags — the original VMA's MADV_RANDOM
-//     is untouched. This is documented in the Linux madvise(2) man page:
+//     is untouched:
 //     https://man7.org/linux/man-pages/man2/madvise.2.html
-//     "The advice applies to the region starting at addr and extending for len bytes."
-//     See also VMA-level advice in the kernel source:
 //     https://www.kernel.org/doc/html/latest/admin-guide/mm/concepts.html#virtual-memory-areas
 //
 //  2. Shared page cache — no double memory cost.
-//     Both mappings (MADV_RANDOM and MADV_SEQUENTIAL) are backed by the same page
-//     cache pages (same inode). A second mmap does NOT duplicate physical memory.
-//     The page cache is indexed by (inode, offset), so identical pages are shared
-//     regardless of how many VMAs map them:
+//     Both mappings are backed by the same page cache pages (same inode). A second
+//     mmap does NOT duplicate physical memory. The page cache is indexed by
+//     (inode, offset), so identical pages are shared regardless of how many VMAs
+//     map them:
 //     https://www.kernel.org/doc/html/latest/admin-guide/mm/concepts.html#page-cache
 //
-//  3. MADV_SEQUENTIAL triggers readahead and "deactivate behind".
-//     The kernel performs aggressive readahead on sequential VMAs and moves accessed
-//     pages to the inactive LRU list ("deactivate behind"). However, pages that are
-//     also hot in the MADV_RANDOM VMA have the "referenced" bit set and get promoted
-//     back to the active list by the second-chance / two-list LRU algorithm:
+//  3. MADV_NORMAL instead of MADV_SEQUENTIAL — why?
+//     MADV_SEQUENTIAL enables "deactivate behind": the kernel moves accessed pages
+//     to the inactive LRU list after the read pointer passes them. This operates at
+//     the page cache level (struct page), NOT per-VMA — so it evicts pages that are
+//     hot for concurrent random readers on the other MADV_RANDOM mmap. The "rescue"
+//     via the referenced-bit / second-chance algorithm adds latency jitter to random
+//     reads during merge.
+//     MADV_NORMAL avoids this: pages stay in their normal LRU position. The kernel's
+//     readahead auto-detection still recognizes our sequential pattern and prefetches
+//     (just with a smaller window than MADV_SEQUENTIAL's forced 2x). On modern kernels
+//     with MGLRU, the auto-detection is very effective:
 //     https://www.kernel.org/doc/html/latest/admin-guide/mm/multigen_lru.html
 //     https://www.kernel.org/doc/html/latest/mm/page_reclaim.html
+//     https://www.kernel.org/doc/html/latest/mm/readahead.html
 //
 //  4. Why not just call MadvSequential() on the shared mmap?
-//     Calling madvise(MADV_SEQUENTIAL) on the shared mmap changes the VMA flags for
-//     ALL concurrent readers of that file. Random RPC lookups would suddenly get
-//     sequential readahead (wasted I/O on unneeded pages) and "deactivate behind"
-//     (evicting hot pages from the page cache). This is the problem we are solving.
+//     That changes the VMA flags for ALL concurrent readers of that file. Random RPC
+//     lookups would get sequential readahead (wasted I/O) and "deactivate behind"
+//     (evicting hot pages). This is the core problem we are solving.
+//
+//  5. Windows: Mmap/Munmap work cross-platform. All Madvise* calls are no-ops on
+//     Windows — there is no madvise(2) equivalent for memory-mapped files.
+//     FILE_FLAG_SEQUENTIAL_SCAN only affects ReadFile/WriteFile, not MapViewOfFile.
+//     SequentialView still provides VMA isolation but without kernel hint benefits.
 type SequentialView struct {
 	d           *Decompressor
 	mmapHandle1 []byte
@@ -660,7 +668,9 @@ type SequentialView struct {
 	data        []byte // words data region from the sequential mmap
 }
 
-// OpenSequentialView creates a separate mmap of the same file with MADV_SEQUENTIAL.
+// OpenSequentialView creates a separate mmap of the same file with MADV_NORMAL.
+// Mmap() sets MADV_RANDOM by default, so we override to MADV_NORMAL to enable
+// the kernel's automatic sequential readahead detection.
 // The caller must call Close when done.
 func (d *Decompressor) OpenSequentialView() (*SequentialView, error) {
 	if d == nil || d.f == nil {
@@ -670,7 +680,12 @@ func (d *Decompressor) OpenSequentialView() (*SequentialView, error) {
 	if err != nil {
 		return nil, err
 	}
-	_ = mmap.MadviseSequential(h1)
+	// Mmap() sets MADV_RANDOM. Override to MADV_NORMAL so the kernel's readahead
+	// heuristic can detect our sequential pattern and prefetch pages ahead.
+	// We intentionally avoid MADV_SEQUENTIAL here: its "deactivate behind" behavior
+	// operates at the page cache level and would push pages to the inactive LRU list,
+	// adding latency jitter to concurrent random readers on the shared mmap.
+	_ = mmap.MadviseNormal(h1)
 	// d.data is a sub-slice of d.mmapHandle1 starting after file headers
 	// (version, feature flags, metadata). wordsStart is relative to d.data,
 	// so the file offset is: headerSize + wordsStart.
