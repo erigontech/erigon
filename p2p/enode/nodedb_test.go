@@ -466,94 +466,106 @@ func TestDBPersistency(t *testing.T) {
 	db.Close()
 }
 
-var nodeDBExpirationNodes = []struct {
+// makeDBExpirationNodes returns test data with pong timestamps computed relative
+// to the current time. This must be a function (not a package-level var) because
+// package-level vars are evaluated at init time; any delay between init and test
+// execution would erode the 1-minute margin, causing surviving nodes to expire.
+func makeDBExpirationNodes() []struct {
 	node      *Node
 	pong      time.Time
 	storeNode bool
 	exp       bool
-}{
-	// Node has new enough pong time and isn't expired:
-	{
-		node: NewV4(
-			hexPubkey("8d110e2ed4b446d9b5fb50f117e5f37fb7597af455e1dab0e6f045a6eeaa786a6781141659020d38bdc5e698ed3d4d2bafa8b5061810dfa63e8ac038db2e9b67"),
-			net.IP{127, 0, 0, 1},
-			30303,
-			30303,
-		),
-		storeNode: true,
-		pong:      time.Now().Add(-dbNodeExpiration + time.Minute),
-		exp:       false,
-	},
-	// Node with pong time before expiration is removed:
-	{
-		node: NewV4(
-			hexPubkey("913a205579c32425b220dfba999d215066e5bdbf900226b11da1907eae5e93eb40616d47412cf819664e9eacbdfcca6b0c6e07e09847a38472d4be46ab0c3672"),
-			net.IP{127, 0, 0, 2},
-			30303,
-			30303,
-		),
-		storeNode: true,
-		pong:      time.Now().Add(-dbNodeExpiration - time.Minute),
-		exp:       true,
-	},
-	// Just pong time, no node stored:
-	{
-		node: NewV4(
-			hexPubkey("b56670e0b6bad2c5dab9f9fe6f061a16cf78d68b6ae2cfda3144262d08d97ce5f46fd8799b6d1f709b1abe718f2863e224488bd7518e5e3b43809ac9bd1138ca"),
-			net.IP{127, 0, 0, 3},
-			30303,
-			30303,
-		),
-		storeNode: false,
-		pong:      time.Now().Add(-dbNodeExpiration - time.Minute),
-		exp:       true,
-	},
-	// Node with multiple pong times, all older than expiration.
-	{
-		node: NewV4(
-			hexPubkey("29f619cebfd32c9eab34aec797ed5e3fe15b9b45be95b4df3f5fe6a9ae892f433eb08d7698b2ef3621568b0fb70d57b515ab30d4e72583b798298e0f0a66b9d1"),
-			net.IP{127, 0, 0, 4},
-			30303,
-			30303,
-		),
-		storeNode: true,
-		pong:      time.Now().Add(-dbNodeExpiration - time.Minute),
-		exp:       true,
-	},
-	{
-		node: NewV4(
-			hexPubkey("29f619cebfd32c9eab34aec797ed5e3fe15b9b45be95b4df3f5fe6a9ae892f433eb08d7698b2ef3621568b0fb70d57b515ab30d4e72583b798298e0f0a66b9d1"),
-			net.IP{127, 0, 0, 5},
-			30303,
-			30303,
-		),
-		storeNode: false,
-		pong:      time.Now().Add(-dbNodeExpiration - 2*time.Minute),
-		exp:       true,
-	},
-	// Node with multiple pong times, one newer, one older than expiration.
-	{
-		node: NewV4(
-			hexPubkey("3b73a9e5f4af6c4701c57c73cc8cfa0f4802840b24c11eba92aac3aef65644a3728b4b2aec8199f6d72bd66be2c65861c773129039bd47daa091ca90a6d4c857"),
-			net.IP{127, 0, 0, 6},
-			30303,
-			30303,
-		),
-		storeNode: true,
-		pong:      time.Now().Add(-dbNodeExpiration + time.Minute),
-		exp:       false,
-	},
-	{
-		node: NewV4(
-			hexPubkey("3b73a9e5f4af6c4701c57c73cc8cfa0f4802840b24c11eba92aac3aef65644a3728b4b2aec8199f6d72bd66be2c65861c773129039bd47daa091ca90a6d4c857"),
-			net.IP{127, 0, 0, 7},
-			30303,
-			30303,
-		),
-		storeNode: false,
-		pong:      time.Now().Add(-dbNodeExpiration - time.Minute),
-		exp:       true,
-	},
+} {
+	now := time.Now()
+	return []struct {
+		node      *Node
+		pong      time.Time
+		storeNode bool
+		exp       bool
+	}{
+		// Node has new enough pong time and isn't expired:
+		{
+			node: NewV4(
+				hexPubkey("8d110e2ed4b446d9b5fb50f117e5f37fb7597af455e1dab0e6f045a6eeaa786a6781141659020d38bdc5e698ed3d4d2bafa8b5061810dfa63e8ac038db2e9b67"),
+				net.IP{127, 0, 0, 1},
+				30303,
+				30303,
+			),
+			storeNode: true,
+			pong:      now.Add(-dbNodeExpiration + time.Minute),
+			exp:       false,
+		},
+		// Node with pong time before expiration is removed:
+		{
+			node: NewV4(
+				hexPubkey("913a205579c32425b220dfba999d215066e5bdbf900226b11da1907eae5e93eb40616d47412cf819664e9eacbdfcca6b0c6e07e09847a38472d4be46ab0c3672"),
+				net.IP{127, 0, 0, 2},
+				30303,
+				30303,
+			),
+			storeNode: true,
+			pong:      now.Add(-dbNodeExpiration - time.Minute),
+			exp:       true,
+		},
+		// Just pong time, no node stored:
+		{
+			node: NewV4(
+				hexPubkey("b56670e0b6bad2c5dab9f9fe6f061a16cf78d68b6ae2cfda3144262d08d97ce5f46fd8799b6d1f709b1abe718f2863e224488bd7518e5e3b43809ac9bd1138ca"),
+				net.IP{127, 0, 0, 3},
+				30303,
+				30303,
+			),
+			storeNode: false,
+			pong:      now.Add(-dbNodeExpiration - time.Minute),
+			exp:       true,
+		},
+		// Node with multiple pong times, all older than expiration.
+		{
+			node: NewV4(
+				hexPubkey("29f619cebfd32c9eab34aec797ed5e3fe15b9b45be95b4df3f5fe6a9ae892f433eb08d7698b2ef3621568b0fb70d57b515ab30d4e72583b798298e0f0a66b9d1"),
+				net.IP{127, 0, 0, 4},
+				30303,
+				30303,
+			),
+			storeNode: true,
+			pong:      now.Add(-dbNodeExpiration - time.Minute),
+			exp:       true,
+		},
+		{
+			node: NewV4(
+				hexPubkey("29f619cebfd32c9eab34aec797ed5e3fe15b9b45be95b4df3f5fe6a9ae892f433eb08d7698b2ef3621568b0fb70d57b515ab30d4e72583b798298e0f0a66b9d1"),
+				net.IP{127, 0, 0, 5},
+				30303,
+				30303,
+			),
+			storeNode: false,
+			pong:      now.Add(-dbNodeExpiration - 2*time.Minute),
+			exp:       true,
+		},
+		// Node with multiple pong times, one newer, one older than expiration.
+		{
+			node: NewV4(
+				hexPubkey("3b73a9e5f4af6c4701c57c73cc8cfa0f4802840b24c11eba92aac3aef65644a3728b4b2aec8199f6d72bd66be2c65861c773129039bd47daa091ca90a6d4c857"),
+				net.IP{127, 0, 0, 6},
+				30303,
+				30303,
+			),
+			storeNode: true,
+			pong:      now.Add(-dbNodeExpiration + time.Minute),
+			exp:       false,
+		},
+		{
+			node: NewV4(
+				hexPubkey("3b73a9e5f4af6c4701c57c73cc8cfa0f4802840b24c11eba92aac3aef65644a3728b4b2aec8199f6d72bd66be2c65861c773129039bd47daa091ca90a6d4c857"),
+				net.IP{127, 0, 0, 7},
+				30303,
+				30303,
+			),
+			storeNode: false,
+			pong:      now.Add(-dbNodeExpiration - time.Minute),
+			exp:       true,
+		},
+	}
 }
 
 func TestDBExpiration(t *testing.T) {
@@ -563,8 +575,10 @@ func TestDBExpiration(t *testing.T) {
 	}
 	defer db.Close()
 
+	seeds := makeDBExpirationNodes()
+
 	// Add all the test nodes and set their last pong time.
-	for i, seed := range nodeDBExpirationNodes {
+	for i, seed := range seeds {
 		if seed.storeNode {
 			if err := db.UpdateNode(seed.node); err != nil {
 				t.Fatalf("node %d: failed to insert: %v", i, err)
@@ -579,7 +593,7 @@ func TestDBExpiration(t *testing.T) {
 
 	// Check that expired entries have been removed.
 	unixZeroTime := time.Unix(0, 0)
-	for i, seed := range nodeDBExpirationNodes {
+	for i, seed := range seeds {
 		node := db.Node(seed.node.ID())
 		pong := db.LastPongReceived(seed.node.ID(), seed.node.IPAddr())
 		if seed.exp {

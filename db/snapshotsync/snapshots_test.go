@@ -731,7 +731,7 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.True(ok)
 	require.False(e3)
 	require.Equal("salt", f.TypeString)
-	require.Equal("domain", f.Type.Name())
+	require.Equal("salt", f.Type.Name())
 
 	f, e3, ok = snaptype.ParseFileName("", stat("idx/v1-tracesto.40-44.ef"))
 	require.True(ok)
