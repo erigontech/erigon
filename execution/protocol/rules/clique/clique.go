@@ -27,12 +27,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"math/rand"
 	"sync"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -69,8 +69,8 @@ var (
 	NonceAuthVote = hexutil.MustDecode("0xffffffffffffffff") // Magic nonce number to vote on adding a new signer
 	nonceDropVote = hexutil.MustDecode("0x0000000000000000") // Magic nonce number to vote on removing a signer.
 
-	DiffInTurn = big.NewInt(2) // Block difficulty for in-turn signatures
-	diffNoTurn = big.NewInt(1) // Block difficulty for out-of-turn signatures
+	DiffInTurn = uint64(2) // Block difficulty for in-turn signatures
+	diffNoTurn = uint64(1) // Block difficulty for out-of-turn signatures
 )
 
 // Various error messages to mark blocks invalid. These should be private to
@@ -331,7 +331,7 @@ func (c *Clique) Prepare(chain rules.ChainHeaderReader, header *types.Header, st
 	c.lock.RUnlock()
 
 	// Set the correct difficulty
-	header.Difficulty = calcDifficulty(snap, signer)
+	header.Difficulty.SetUint64(calcDifficulty(snap, signer))
 
 	// Ensure the extra data has all its components
 	if len(header.Extra) < ExtraVanity {
@@ -445,7 +445,7 @@ func (c *Clique) Seal(chain rules.ChainHeaderReader, blockWithReceipts *types.Bl
 	}
 	// Sweet, the protocol permits us to sign the block, wait for our time
 	delay := time.Unix(int64(header.Time), 0).Sub(time.Now()) //nolint:staticcheck
-	if header.Difficulty.Cmp(diffNoTurn) == 0 {
+	if header.Difficulty.CmpUint64(diffNoTurn) == 0 {
 		// It's not our turn explicitly to sign, delay it a bit
 		wiggle := time.Duration(len(snap.Signers)/2+1) * wiggleTime
 		delay += time.Duration(rand.Int63n(int64(wiggle))) // nolint: gosec
@@ -482,23 +482,22 @@ func (c *Clique) Seal(chain rules.ChainHeaderReader, blockWithReceipts *types.Bl
 // that a new block should have:
 // * DIFF_NOTURN(2) if BLOCK_NUMBER % SIGNER_COUNT != SIGNER_INDEX
 // * DIFF_INTURN(1) if BLOCK_NUMBER % SIGNER_COUNT == SIGNER_INDEX
-func (c *Clique) CalcDifficulty(chain rules.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash, _ uint64) *big.Int {
-
+func (c *Clique) CalcDifficulty(chain rules.ChainHeaderReader, _, _ uint64, _ uint256.Int, parentNumber uint64, parentHash, _ common.Hash, _ uint64) uint256.Int {
 	snap, err := c.Snapshot(chain, parentNumber, parentHash, nil)
 	if err != nil {
-		return nil
+		return uint256.Int{}
 	}
 	c.lock.RLock()
 	signer := c.signer
 	c.lock.RUnlock()
-	return calcDifficulty(snap, signer)
+	return *uint256.NewInt(calcDifficulty(snap, signer))
 }
 
-func calcDifficulty(snap *Snapshot, signer common.Address) *big.Int {
+func calcDifficulty(snap *Snapshot, signer common.Address) uint64 {
 	if snap.inturn(snap.Number+1, signer) {
-		return new(big.Int).Set(DiffInTurn)
+		return DiffInTurn
 	}
-	return new(big.Int).Set(diffNoTurn)
+	return diffNoTurn
 }
 
 // SealHash returns the hash of a block prior to it being sealed.

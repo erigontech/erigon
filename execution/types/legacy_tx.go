@@ -334,7 +334,7 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (*Message, error) {
+func (tx *LegacyTx) AsMessage(s Signer, _ *uint256.Int, _ *chain.Rules) (*Message, error) {
 	var to accounts.Address
 	if tx.To == nil {
 		to = accounts.NilAddress

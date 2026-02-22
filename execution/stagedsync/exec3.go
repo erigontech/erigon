@@ -207,7 +207,7 @@ func ExecV3(ctx context.Context,
 	isChainTip := maxBlockNum == startBlockNum
 	// Do it only for chain-tip blocks!
 	doms.EnableWarmupCache(isChainTip)
-	log.Debug("Warmup Cache", "enabled", isChainTip)
+	//log.Debug("Warmup Cache", "enabled", isChainTip)
 	postValidator := newBlockPostExecutionValidator()
 	doms.SetDeferCommitmentUpdates(false)
 	if isChainTip {
@@ -676,7 +676,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 			}
 
 			te.execRequests <- &execRequest{
-				b.Number().Uint64(), b.Hash(),
+				b.NumberU64(), b.Hash(),
 				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
 				dbBAL, txTasks, applyResults, false, exhausted,
 			}

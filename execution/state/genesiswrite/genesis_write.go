@@ -230,7 +230,8 @@ func WriteGenesisState(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (
 
 	stateWriter := state.NewNoopWriter()
 
-	if block.Number().Sign() != 0 {
+	blockNum := block.Number()
+	if !blockNum.IsZero() {
 		return nil, statedb, errors.New("can't commit genesis block with number > 0")
 	}
 	if err := statedb.CommitBlock(&chain.Rules{}, stateWriter); err != nil {
@@ -282,7 +283,7 @@ func WriteGenesisBesideState(block *types.Block, tx kv.RwTx, g *types.Genesis) e
 	if err := rawdb.WriteBlock(tx, block); err != nil {
 		return err
 	}
-	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), g.Difficulty); err != nil {
+	if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), g.Difficulty.ToBig()); err != nil {
 		return err
 	}
 	if err := rawdbv3.TxNums.Append(tx, 0, uint64(block.Transactions().Len()+1)); err != nil {
@@ -441,14 +442,13 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 // GenesisWithoutStateToBlock creates the genesis block, assuming an empty state.
 func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawals []*types.Withdrawal) {
 	head = &types.Header{
-		Number:        new(big.Int).SetUint64(g.Number),
+		Number:        *uint256.NewInt(g.Number),
 		Nonce:         types.EncodeNonce(g.Nonce),
 		Time:          g.Timestamp,
 		ParentHash:    g.ParentHash,
 		Extra:         g.ExtraData,
 		GasLimit:      g.GasLimit,
 		GasUsed:       g.GasUsed,
-		Difficulty:    g.Difficulty,
 		MixDigest:     g.Mixhash,
 		Coinbase:      g.Coinbase,
 		BaseFee:       g.BaseFee,
@@ -465,13 +465,15 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		head.GasLimit = params.GenesisGasLimit
 	}
 	if g.Difficulty == nil {
-		head.Difficulty = params.GenesisDifficulty
+		head.Difficulty = *params.GenesisDifficulty
+	} else {
+		head.Difficulty = *g.Difficulty
 	}
 	if g.Config != nil && g.Config.IsLondon(0) {
 		if g.BaseFee != nil {
 			head.BaseFee = g.BaseFee
 		} else {
-			head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
+			head.BaseFee = uint256.NewInt(params.InitialBaseFee)
 		}
 	}
 
