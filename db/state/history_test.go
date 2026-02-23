@@ -2088,7 +2088,6 @@ func TestHistoryBuildVIPageOffsetBugDirect(t *testing.T) {
 	// page and GetFromPage returns nil.
 	t.Run("check_getfrompage", func(t *testing.T) {
 		g := h.dataReader(histDecomp)
-		var snappyBuf []byte
 		for txNum := 0; txNum < numTxNums; txNum++ {
 			for ki := 0; ki < numKeys; ki++ {
 				hk := historyKey(uint64(txNum), keys[ki], nil)
@@ -2096,8 +2095,7 @@ func TestHistoryBuildVIPageOffsetBugDirect(t *testing.T) {
 				require.True(t, ok, "histKey not in .vi: txNum=%d ki=%d", txNum, ki)
 				g.Reset(offset)
 				pageBytes, _ := g.Next(nil)
-				gotVal, _, newBuf := seg.GetFromPage(hk, pageBytes, snappyBuf, true)
-				snappyBuf = newBuf
+				gotVal, _, _ := seg.GetFromPage(hk, pageBytes, nil, true)
 				require.Equal(t, val(txNum, ki), gotVal,
 					"GetFromPage failed for hk(txNum=%d, ki=%d) at offset=%d (buggy buildVI mapped to wrong page)",
 					txNum, ki, offset)
