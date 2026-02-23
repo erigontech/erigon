@@ -259,7 +259,7 @@ func (h *History) buildVIFromPages(ctx context.Context, historyIdxPath string, h
 	cnt := 0
 	page := &seg.Page{}
 	histReader.Reset(0)
-	for histReader.HasNext() {
+	for histReader.HasNext() { //TODO: use vFile.Count()
 		pageData, _ := histReader.Next(nil)
 		page.Reset(pageData, true)
 		for page.HasNext() {
@@ -342,7 +342,7 @@ func (h *History) buildVIFromEF(ctx context.Context, historyIdxPath string, hist
 
 	var keyBuf, valBuf []byte
 	cnt := uint64(0)
-	for iiReader.HasNext() {
+	for iiReader.HasNext() { //TODO: use vFile.Count()
 		keyBuf, _ = iiReader.Next(keyBuf[:0])
 		valBuf, _ = iiReader.Next(valBuf[:0])
 		cnt += multiencseq.Count(efBaseTxNum, valBuf)
