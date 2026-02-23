@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -1880,4 +1881,226 @@ func TestHistory_OpenFolder(t *testing.T) {
 	err = h.openFolder(scanDirsRes)
 	require.NoError(t, err)
 	h.Close()
+}
+
+// TestHistoryBuildVIPageOffsetBug is a regression test for a bug in buildVI
+// where the .vi accessor index mapped keys to wrong page offsets in V1 paged
+// history snapshots.
+//
+// Root cause: buildVI iterates entries in (key, txNum) order (driven by the
+// .ef inverted-index file), but the .v file physically stores entries sorted
+// by (txNum, key). A modulo counter was used to decide when to advance the
+// file offset via histReader.Skip(), but because the two orderings differ,
+// the counter fired at the wrong positions. Entries from different keys are
+// interleaved across pages in the .v file, so a key's txNums do not occupy
+// consecutive pages. As a result ~75% of histKeys were mapped to the wrong
+// page, causing historySeekInFiles / GetFromPage to find nothing and return
+// nil — which made the EVM re-execute with zero account state, producing
+// empty logs.
+//
+// Fix: buildVIFromPages reads histKeys directly from the .v file pages in
+// file order, obtaining each key's correct page offset without relying on
+// the .ef ordering.
+func TestHistoryBuildVIPageOffsetBug(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	logger := log.New()
+	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
+		t.Helper()
+
+		// Use a small page size so that multiple keys' txNums are
+		// interleaved across pages, triggering the ordering mismatch.
+		// (Production uses 64; 4 keeps the test fast.)
+		h.CompressorCfg = h.CompressorCfg.WithValuesOnCompressedPage(4)
+		h.HistoryValuesOnCompressedPage = 4 //nolint:staticcheck
+
+		// collateAndMergeHistory builds merged .v files with page
+		// compression enabled, which calls buildVI internally.
+		collateAndMergeHistory(t, db, h, txs, true)
+
+		// checkHistoryHistory calls historySeekInFiles for every
+		// (txNum, key) pair. With the buggy buildVI, most lookups return
+		// nil because GetFromPage cannot find the key on the wrong page.
+		checkHistoryHistory(t, h, txs)
+	}
+
+	t.Run("large_values", func(t *testing.T) {
+		db, h, txs := filledHistory(t, true, logger)
+		test(t, h, db, txs)
+	})
+	t.Run("small_values", func(t *testing.T) {
+		db, h, txs := filledHistory(t, false, logger)
+		test(t, h, db, txs)
+	})
+}
+
+// TestHistoryBuildVIPageOffsetBugDirect is a lower-level regression test that
+// directly creates a .v file in (txNum, key) order — exactly as snapshot-synced
+// nodes receive it from the network — and verifies that buildVI assigns each
+// histKey the correct page offset in the resulting .vi accessor index.
+//
+// The locally-built merge path always writes .v files in (key, txNum) order
+// (using a key-sorted heap), so TestHistoryBuildVIPageOffsetBug above does NOT
+// trigger the ordering mismatch bug. This test manufactures the problematic
+// ordering directly and should FAIL on the buggy main branch.
+//
+// With 4 keys × 4 txNums and pageSize=4, the .v file contains 4 pages:
+//
+//	page 0: hk(0,k0), hk(0,k1), hk(0,k2), hk(0,k3)
+//	page 1: hk(1,k0), hk(1,k1), hk(1,k2), hk(1,k3)
+//	page 2: hk(2,k0), hk(2,k1), hk(2,k2), hk(2,k3)
+//	page 3: hk(3,k0), hk(3,k1), hk(3,k2), hk(3,k3)
+//
+// The .ef file drives buildVI in (key, txNum) order. The buggy modulo counter
+// increments for each (txNum,key) pair and skips to the next page every pageSize
+// increments, producing wrong offsets for 12 of 16 histKeys.
+func TestHistoryBuildVIPageOffsetBugDirect(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	_, h := testDbAndHistory(t, false, log.New())
+
+	const pageSize = 4
+	h.CompressorCfg = h.CompressorCfg.WithValuesOnCompressedPage(pageSize)
+	h.HistoryValuesOnCompressedPage = pageSize //nolint:staticcheck
+
+	const numKeys = pageSize   // 4 keys; equal to pageSize so each page holds exactly one txNum's worth
+	const numTxNums = pageSize // 4 txNums per key
+	const efBaseTxNum = uint64(0)
+
+	// keys[ki] is an 8-byte key uniquely identifying key ki.
+	keys := make([][]byte, numKeys)
+	for ki := range keys {
+		k := make([]byte, 8)
+		binary.BigEndian.PutUint64(k, uint64(ki+1))
+		keys[ki] = k
+	}
+
+	// val returns a unique 8-byte value for the (txNum, ki) combination.
+	val := func(txNum, ki int) []byte {
+		v := make([]byte, 8)
+		binary.BigEndian.PutUint64(v, uint64(txNum*numKeys+ki+1))
+		return v
+	}
+
+	tmpDir := t.TempDir()
+
+	// --- Write .v file in (txNum, key) order ---
+	// This is the ordering that snapshot-synced nodes receive.  Locally-built
+	// merge files use (key, txNum) order, which is why the other test misses the bug.
+	vPath := filepath.Join(tmpDir, "test.0-1.v")
+	vComp, err := seg.NewCompressor(ctx, "test-v", vPath, tmpDir, h.CompressorCfg, log.LvlTrace, log.New())
+	require.NoError(t, err)
+	pagedWr := h.dataWriter(vComp)
+	for txNum := 0; txNum < numTxNums; txNum++ {
+		for ki := 0; ki < numKeys; ki++ {
+			hk := historyKey(uint64(txNum), keys[ki], nil)
+			require.NoError(t, pagedWr.Add(hk, val(txNum, ki)))
+		}
+	}
+	require.NoError(t, pagedWr.Compress())
+	vComp.Close()
+
+	// --- Write .ef file in (key, txNums) order ---
+	efPath := filepath.Join(tmpDir, "test.0-1.ef")
+	efComp, err := seg.NewCompressor(ctx, "test-ef", efPath, tmpDir,
+		h.CompressorCfg.WithValuesOnCompressedPage(0), log.LvlTrace, log.New())
+	require.NoError(t, err)
+	efWriter := h.InvertedIndex.dataWriter(efComp, true /* forceNoCompress */)
+	for ki := 0; ki < numKeys; ki++ {
+		_, err = efWriter.Write(keys[ki])
+		require.NoError(t, err)
+		sb := multiencseq.NewBuilder(efBaseTxNum, uint64(numTxNums), uint64(numTxNums-1))
+		for txNum := 0; txNum < numTxNums; txNum++ {
+			sb.AddOffset(uint64(txNum))
+		}
+		sb.Build()
+		_, err = efWriter.Write(sb.AppendBytes(nil))
+		require.NoError(t, err)
+	}
+	require.NoError(t, efWriter.Compress())
+	efComp.Close()
+
+	// --- Open decompressors ---
+	histDecomp, err := seg.NewDecompressor(vPath)
+	require.NoError(t, err)
+	defer histDecomp.Close()
+
+	efDecomp, err := seg.NewDecompressor(efPath)
+	require.NoError(t, err)
+	defer efDecomp.Close()
+
+	// --- Precompute correct page offsets by reading the .v file sequentially ---
+	// pageOffsets[p] = the word-stream offset at which page p starts.
+	// After writing numKeys entries per txNum with pageSize==numKeys, there are
+	// numTxNums pages.  We read pages in order to discover each page's offset.
+	pageOffsets := []uint64{0}
+	{
+		pg := h.dataReader(histDecomp)
+		pg.Reset(0)
+		for pg.HasNext() {
+			nextOff, _ := pg.Skip()
+			if pg.HasNext() {
+				pageOffsets = append(pageOffsets, nextOff)
+			}
+		}
+	}
+	require.Len(t, pageOffsets, numTxNums,
+		"expected %d pages in .v file (one per txNum)", numTxNums)
+
+	// --- Call buildVI (buggy on main branch) ---
+	viPath := filepath.Join(tmpDir, "test.0-1.vi")
+	require.NoError(t, h.buildVI(ctx, viPath, histDecomp, efDecomp, efBaseTxNum, background.NewProgressSet()))
+
+	// --- Open the .vi index reader ---
+	viIdx, err := recsplit.OpenIndex(viPath)
+	require.NoError(t, err)
+	defer viIdx.Close()
+	viReader := recsplit.NewIndexReader(viIdx)
+
+	// --- Check 1: verify that each histKey is mapped to the correct page offset ---
+	// hk(txNum, ki) lives on page txNum (because numKeys==pageSize).
+	// Correct offset = pageOffsets[txNum].
+	// Buggy buildVI iterates in (key, txNum) order and skips a page every pageSize
+	// increments — it skips at i=4,8,12,16 instead of between every txNum group,
+	// so 12 out of 16 histKeys receive the wrong offset.
+	t.Run("check_offsets", func(t *testing.T) {
+		for txNum := 0; txNum < numTxNums; txNum++ {
+			for ki := 0; ki < numKeys; ki++ {
+				hk := historyKey(uint64(txNum), keys[ki], nil)
+				gotOffset, ok := viReader.Lookup(hk)
+				require.True(t, ok, "histKey not in .vi: txNum=%d ki=%d", txNum, ki)
+				wantOffset := pageOffsets[txNum]
+				require.Equal(t, wantOffset, gotOffset,
+					"wrong page offset for hk(txNum=%d, ki=%d): got=%d want=%d (buggy buildVI counter)",
+					txNum, ki, gotOffset, wantOffset)
+			}
+		}
+	})
+
+	// --- Check 2: verify that GetFromPage finds the expected value at the mapped offset ---
+	// This mirrors what historySeekInFiles does: look up offset in .vi, read the
+	// page word, call GetFromPage.  With wrong offsets the key is absent from the
+	// page and GetFromPage returns nil.
+	t.Run("check_getfrompage", func(t *testing.T) {
+		g := h.dataReader(histDecomp)
+		for txNum := 0; txNum < numTxNums; txNum++ {
+			for ki := 0; ki < numKeys; ki++ {
+				hk := historyKey(uint64(txNum), keys[ki], nil)
+				offset, ok := viReader.Lookup(hk)
+				require.True(t, ok, "histKey not in .vi: txNum=%d ki=%d", txNum, ki)
+				g.Reset(offset)
+				pageBytes, _ := g.Next(nil)
+				gotVal, ok, _ := seg.GetFromPage(hk, pageBytes, nil, true)
+				require.True(t, ok)
+				require.Equal(t, val(txNum, ki), gotVal,
+					"GetFromPage failed for hk(txNum=%d, ki=%d) at offset=%d (buggy buildVI mapped to wrong page)",
+					txNum, ki, offset)
+			}
+		}
+	})
 }

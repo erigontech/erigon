@@ -952,6 +952,9 @@ func (q *PriorityQueue[T]) AwaitDrain(ctx context.Context, waitTime time.Duratio
 	q.Unlock()
 
 	if resultCh == nil {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
 		var none T
 		return q.Drain(ctx, none)
 	}

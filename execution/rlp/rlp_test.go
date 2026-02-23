@@ -25,8 +25,7 @@ import (
 	"math/big"
 	"testing"
 
-	"golang.org/x/crypto/sha3"
-
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -165,7 +164,7 @@ func BenchmarkHashing(b *testing.B) {
 		blockRlp, _ = rlp.EncodeToBytes(block)
 	}
 	var got common.Hash
-	var hasher = sha3.NewLegacyKeccak256()
+	var hasher = keccak.NewFastKeccak()
 	b.Run("iteratorhashing", func(b *testing.B) {
 		b.ResetTimer()
 		for b.Loop() {

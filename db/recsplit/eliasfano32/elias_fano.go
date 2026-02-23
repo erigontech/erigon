@@ -55,7 +55,7 @@ type EliasFano struct {
 	lowerBitsMask  uint64
 	count          uint64
 	u              uint64
-	l              uint64
+	l              uint64 //  number of lower bits per element. = floor(log2(average gap between elements))
 	maxOffset      uint64
 	i              uint64
 	wordsUpperBits int
@@ -156,16 +156,18 @@ func (ef *EliasFano) Build() {
 }
 
 func (ef *EliasFano) get(i uint64) (val uint64, window uint64, sel int, currWord uint64, lower uint64) {
-	lower = i * ef.l
-	idx64, shift := lower/64, lower%64
-	lower = ef.lowerBits[idx64] >> shift
-	if shift > 0 {
-		lower |= ef.lowerBits[idx64+1] << (64 - shift)
+	if ef.l != 0 {
+		lowerPos := i * ef.l
+		idx64, shift := lowerPos/64, lowerPos%64
+		lower = ef.lowerBits[idx64] >> shift
+		if shift > 0 {
+			lower |= ef.lowerBits[idx64+1] << (64 - shift)
+		}
 	}
 
 	jumpSuperQ := (i / superQ) * superQSize
 	jumpInsideSuperQ := (i % superQ) / q
-	idx64, shift = jumpSuperQ+1+(jumpInsideSuperQ>>1), 32*(jumpInsideSuperQ%2)
+	idx64, shift := jumpSuperQ+1+(jumpInsideSuperQ>>1), 32*(jumpInsideSuperQ%2)
 	mask := uint64(0xffffffff) << shift
 	jump := ef.jump[jumpSuperQ] + (ef.jump[idx64]&mask)>>shift
 
@@ -234,22 +236,31 @@ func Seek(data []byte, n uint64) (uint64, bool) {
 
 func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok bool) {
 	if v == 0 {
-		return ef.Min(), 0, true
+		return ef.Min(), 0, true // .Min() touching `mmap`
 	}
-	// TODO: large EF on mmap can be cold and calling `Max` in the begin of `Seek` can be a mistake (PageFault at the end). But need careful test in another ticket
 	_max := ef.Max()
 	if v == _max {
 		return _max, ef.count, true
 	}
-	if v > _max {
+	if v > _max { // ~3% search-miss on mainnet (up to 15% at certain block ranges)
 		return 0, 0, false
 	}
 
 	hi := v >> ef.l
-	i := sort.Search(int(ef.count+1), func(i int) bool {
-		return ef.upper(uint64(i)) >= hi
-	})
-	for j := uint64(i); j <= ef.count; j++ {
+	var lo uint64
+
+	// Real-data (eth-mainnet):
+	//   - 80% of seeks are on tiny EFs: 35% upperBits=8bytes, 45% upperBits=8-24bytes ( 1–3 words = 8–24 bytes, fits in one cache line)
+	//   - 63% have upper(0) >= hi
+	found := ef.upper(0) >= hi // fast-lane
+	if !found {
+		// interpolation-sort showed good results, but keeping `sort.Sort` for simplicity now
+		i := sort.Search(int(ef.count), func(i int) bool {
+			return ef.upper(uint64(i+1)) >= hi
+		})
+		lo = uint64(i + 1)
+	}
+	for j := lo; j <= ef.count; j++ {
 		val, _, _, _, _ := ef.get(j)
 		if val >= v {
 			return val, j, true
@@ -257,21 +268,29 @@ func (ef *EliasFano) searchForward(v uint64) (nextV uint64, nextI uint64, ok boo
 	}
 	return 0, 0, false
 }
-
 func (ef *EliasFano) searchReverse(v uint64) (nextV uint64, nextI uint64, ok bool) {
 	if v == 0 {
-		return 0, 0, ef.Min() == 0
+		return 0, 0, ef.Min() == 0 // .Max() touching `mmap`
 	}
-	_max := ef.Max()
-	if v >= _max {
+	_max := ef.Max() // .Max() doesn't touch `mmap`
+	if v == _max {
+		return _max, ef.count, true
+	}
+	if v > _max { // reverse: v beyond range still returns max (not a miss)
 		return _max, ef.count, true
 	}
 
 	hi := v >> ef.l
-	i := sort.Search(int(ef.count+1), func(i int) bool {
-		return ef.upper(ef.count-uint64(i)) <= hi
-	})
-	for j := uint64(i); j <= ef.count; j++ {
+	var lo uint64
+
+	found := ef.upper(ef.count) <= hi // fast-lane. 60% hit-rate
+	if !found {
+		i := sort.Search(int(ef.count+1), func(i int) bool {
+			return ef.upper(ef.count-uint64(i)) <= hi
+		})
+		lo = uint64(i)
+	}
+	for j := lo; j <= ef.count; j++ {
 		idx := ef.count - j
 		val, _, _, _, _ := ef.get(idx)
 		if val <= v {
