@@ -28,8 +28,10 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/spaolacci/murmur3"
 
 	"github.com/erigontech/erigon/common"
@@ -43,6 +45,28 @@ import (
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/version"
 )
+
+// Erigon doesn't create tons of bufio readers/writers, but it has tons of
+// parallel small unit-tests which each create many small files and bufio
+// readers/writers — pooling avoids the allocation pressure in that scenario.
+var (
+	bufWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(512*datasize.KB)) }}
+	bufReaderPool = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, int(512*datasize.KB)) }}
+)
+
+func getBufWriter(w io.Writer) *bufio.Writer {
+	bw := bufWriterPool.Get().(*bufio.Writer)
+	bw.Reset(w)
+	return bw
+}
+func putBufWriter(w *bufio.Writer) { w.Reset(nil); bufWriterPool.Put(w) }
+
+func getBufReader(r io.Reader) *bufio.Reader {
+	br := bufReaderPool.Get().(*bufio.Reader)
+	br.Reset(r)
+	return br
+}
+func putBufReader(r *bufio.Reader) { r.Reset(nil); bufReaderPool.Put(r) }
 
 var ErrCollision = errors.New("duplicate key")
 
@@ -219,7 +243,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		if err != nil {
 			return nil, err
 		}
-		rs.offsetWriter = bufio.NewWriterSize(rs.offsetFile, 8*4096)
+		rs.offsetWriter = getBufWriter(rs.offsetFile)
 	}
 	if rs.enums && args.KeyCount > 0 && rs.lessFalsePositives {
 		if rs.dataStructureVersion == 0 {
@@ -227,7 +251,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			if err != nil {
 				return nil, err
 			}
-			rs.existenceWV0 = bufio.NewWriter(rs.existenceFV0)
+			rs.existenceWV0 = getBufWriter(rs.existenceFV0)
 		}
 
 	}
@@ -274,6 +298,10 @@ func (rs *RecSplit) Close() {
 		_ = dir.RemoveFile(rs.existenceFV0.Name())
 		rs.existenceFV0 = nil
 	}
+	if rs.existenceWV0 != nil {
+		putBufWriter(rs.existenceWV0)
+		rs.existenceWV0 = nil
+	}
 	if rs.existenceFV1 != nil {
 		rs.existenceFV1.Close()
 		rs.existenceFV1 = nil
@@ -285,6 +313,10 @@ func (rs *RecSplit) Close() {
 		_ = rs.offsetFile.Close()
 		_ = dir.RemoveFile(rs.offsetFile.Name())
 		rs.offsetFile = nil
+	}
+	if rs.offsetWriter != nil {
+		putBufWriter(rs.offsetWriter)
+		rs.offsetWriter = nil
 	}
 }
 
@@ -775,7 +807,8 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	}
 
 	defer rs.indexF.Close()
-	rs.indexW = bufio.NewWriterSize(rs.indexF, etl.BufIOSize)
+	rs.indexW = getBufWriter(rs.indexF)
+	defer putBufWriter(rs.indexW)
 	// 1 byte: dataStructureVersion, 7 bytes: app-specific minimal dataID (of current shard)
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)
 	rs.numBuf[0] = uint8(rs.dataStructureVersion)
@@ -931,8 +964,11 @@ func (rs *RecSplit) flushExistenceFilter() error {
 		if _, err := rs.existenceFV0.Seek(0, io.SeekStart); err != nil {
 			return err
 		}
-		if _, err := io.CopyN(rs.indexW, rs.existenceFV0, int64(rs.keysAdded)); err != nil {
-			return err
+		r := getBufReader(rs.existenceFV0)
+		_, copyErr := io.CopyN(rs.indexW, r, int64(rs.keysAdded))
+		putBufReader(r)
+		if copyErr != nil {
+			return copyErr
 		}
 	}
 
