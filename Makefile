@@ -5,6 +5,17 @@ else
 endif
 
 GO ?= go # if using docker, should not need to be installed/linked
+
+# Share Go build/module caches across all worktrees of this repo.
+# Each worktree has its own HOME so the default GOCACHE/GOMODCACHE are per-worktree
+# and always cold. git --git-common-dir points to the main repo's .git dir which is
+# shared by all worktrees and is always accessible. Go's cache is concurrent-safe.
+GIT_COMMON_DIR := $(shell git rev-parse --git-common-dir 2>/dev/null)
+ifneq ($(GIT_COMMON_DIR),)
+export GOCACHE ?= $(GIT_COMMON_DIR)/go-build-cache
+export GOMODCACHE ?= $(GIT_COMMON_DIR)/go-mod-cache
+endif
+
 GOAMD64_VERSION ?= v2 # See https://go.dev/wiki/MinimumRequirements#microarchitecture-support
 GOBINREL := build/bin
 export GOBIN := $(CURDIR)/$(GOBINREL)
