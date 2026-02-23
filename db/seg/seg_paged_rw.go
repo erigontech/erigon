@@ -285,7 +285,12 @@ func getCompressBuf() []byte {
 	}
 	return nil
 }
-func putCompressBuf(b []byte) { pagedWriterCompressBufPool.Put(b[:0]) }
+func putCompressBuf(b []byte) {
+	if b == nil {
+		return
+	}
+	pagedWriterCompressBufPool.Put(b[:0])
+}
 
 func getValsBuf() []byte {
 	if b := pagedWriterValsBufPool.Get(); b != nil {
@@ -352,19 +357,24 @@ func (c *PagedWriter) startParallelCompression(workers int) {
 	// drain: writes compressed pages to parent in order
 	eg.Go(func() error {
 		for page := range c.drainCh {
-			select {
-			case <-page.done:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-			if _, err := c.parent.Write(page.result); err != nil {
+			if err := c.writeDrainPage(page, ctx); err != nil {
 				return err
 			}
-			putCompressBuf(page.result)
-			putPendingPage(page)
 		}
 		return nil
 	})
+}
+
+func (c *PagedWriter) writeDrainPage(page *pendingPage, ctx context.Context) error {
+	defer putPendingPage(page)
+	select {
+	case <-page.done:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer putCompressBuf(page.result)
+	_, err := c.parent.Write(page.result)
+	return err
 }
 
 func (c *PagedWriter) stopParallelCompression() error {
