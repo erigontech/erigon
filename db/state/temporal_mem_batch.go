@@ -52,6 +52,17 @@ type TemporalMemBatch struct {
 
 	getCacheSize int
 
+	// inMemHistoryReads controls whether all writes (with their txNums) are accumulated in the
+	// per-key slice to enable GetAsOf time-travel reads from the in-mem batch.
+	// Note: DomainBufferedWriter already holds history in memory for eventual disk writes;
+	// this flag is orthogonal — it enables reading that history back at arbitrary txNums.
+	// When true, GetAsOf can answer queries against in-flight state — needed for RPC reads
+	// during live chain-tip execution.
+	// When false (default), only the latest value per key is kept; GetAsOf returns (nil, false, nil)
+	// so callers fall through to snapshots/MDBX. Correct and cheaper for offline commands
+	// (stage_exec, integration cmds) where history reads always come from disk anyway.
+	inMemHistoryReads bool
+
 	latestStateLock sync.RWMutex
 	domains         [kv.DomainLen]map[string][]dataWithTxNum
 	storage         *btree2.Map[string, []dataWithTxNum] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
@@ -75,8 +86,9 @@ type TemporalMemBatch struct {
 
 func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
-		storage: btree2.NewMap[string, []dataWithTxNum](128),
-		metrics: ioMetrics.(*changeset.DomainMetrics),
+		storage:           btree2.NewMap[string, []dataWithTxNum](128),
+		metrics:           ioMetrics.(*changeset.DomainMetrics),
+		inMemHistoryReads: true,
 	}
 	aggTx := AggTx(tx)
 	sd.stepSize = aggTx.StepSize()
@@ -99,6 +111,8 @@ func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 
 	return sd
 }
+
+func (sd *TemporalMemBatch) SetInMemHistoryReads(v bool) { sd.inMemHistoryReads = v }
 
 func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
 	sd.putLatest(domain, k, v, txNum)
@@ -148,8 +162,13 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	putValueSize := 0
 	if domain == kv.StorageDomain {
 		if old, ok := sd.storage.Get(key); ok {
-			sd.storage.Set(key, append(old, valWithStep))
-			putValueSize += len(val)
+			if sd.inMemHistoryReads {
+				sd.storage.Set(key, append(old, valWithStep))
+				putValueSize += len(val)
+			} else {
+				putValueSize += len(val) - len(old[len(old)-1].data)
+				sd.storage.Set(key, []dataWithTxNum{valWithStep})
+			}
 		} else {
 			sd.storage.Set(key, []dataWithTxNum{valWithStep})
 			putKeySize += len(key)
@@ -161,8 +180,13 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	}
 
 	if old, ok := sd.domains[domain][key]; ok {
-		putValueSize += len(val)
-		sd.domains[domain][key] = append(old, valWithStep)
+		if sd.inMemHistoryReads {
+			sd.domains[domain][key] = append(old, valWithStep)
+			putValueSize += len(val)
+		} else {
+			putValueSize += len(val) - len(old[len(old)-1].data)
+			sd.domains[domain][key] = []dataWithTxNum{valWithStep}
+		}
 	} else {
 		sd.domains[domain][key] = []dataWithTxNum{valWithStep}
 		putKeySize += len(key)
@@ -228,6 +252,9 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 }
 
 func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+	if !sd.inMemHistoryReads {
+		panic("GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled: call SetInMemHistoryReads(true) on this SharedDomains instance")
+	}
 	sd.latestStateLock.RLock()
 	defer sd.latestStateLock.RUnlock()
 
