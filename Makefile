@@ -214,7 +214,7 @@ else
 endif
 
 test-filtered:
-	(set -o pipefail && $(GOTEST) | tee run.log | ./tools/filter-test-output)
+	(set -o pipefail && $(GOTEST) | ./tools/filter-test-output | tee run.log)
 
 # Rather than add more special cases here, I'd suggest using GO_FLAGS and calling `make test-filtered GO_FLAGS='-cool flag' or `make test GO_FLAGS='-cool flag'`.
 test-short: override GO_FLAGS += -short -failfast

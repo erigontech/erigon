@@ -46,7 +46,10 @@ jobs:
         if: steps.download-spec-tests.outcome == 'success'
         run: |
           cd cl/spectest && make tests
-          make mainnet 2>&1 | ../../tools/filter-test-output
+          make mainnet 2>&1 | ../../tools/filter-test-output | tee run.log
+
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
 
   tests-windows:
     strategy:
@@ -66,4 +69,7 @@ jobs:
       - name: test-integration-caplin
         run: |
           cd cl/spectest && make tests
-          make mainnet 2>&1 | ../../tools/filter-test-output
+          make mainnet 2>&1 | ../../tools/filter-test-output | tee run.log
+
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()

@@ -98,7 +98,7 @@ jobs:
         if: needs.source-of-changes.outputs.changed_files != 'true'
         run: |
           run_tests() {
-            go test -race "$@" 2>&1 | ./tools/filter-test-output
+            go test -race "$@" 2>&1 | ./tools/filter-test-output | tee -a run.log
           }
           case "${{ matrix.test-group }}" in
             execution-tests)
@@ -143,6 +143,9 @@ jobs:
 
       - uses: ./.github/actions/save-build-cache
         if: always() && steps.restore-build.outcome == 'success'
+
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
 
       - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
         if: needs.source-of-changes.outputs.changed_files == 'true'

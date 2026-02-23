@@ -106,6 +106,9 @@ jobs:
       - uses: ./.github/actions/save-build-cache
         if: always() && steps.restore-build.outcome == 'success'
 
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
+
       - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
         if: needs.source-of-changes.outputs.changed_files == 'true'
         run: echo "This check does not make sense for changes within out-of-scope directories"
