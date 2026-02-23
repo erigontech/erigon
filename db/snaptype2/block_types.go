@@ -89,7 +89,7 @@ var Indexes = struct {
 
 var (
 	Salt = snaptype.RegisterType(
-		Enums.Domains,
+		Enums.Salt,
 		"salt",
 		snaptype.Versions{
 			Current:      version.ZeroVersion, //2,

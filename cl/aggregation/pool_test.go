@@ -21,11 +21,12 @@ import (
 	"log"
 	"testing"
 
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/mock/gomock"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/stretchr/testify/suite"
-	"go.uber.org/mock/gomock"
 )
 
 var (
@@ -158,7 +159,9 @@ func (t *PoolTestSuite) TestAddAttestationElectra() {
 		if tc.mockFunc != nil {
 			tc.mockFunc()
 		}
-		pool := NewAggregationPool(context.Background(), t.mockBeaconConfig, nil, t.mockEthClock)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
 		for i := range tc.atts {
 			pool.AddAttestation(tc.atts[i])
 		}
@@ -227,7 +230,9 @@ func (t *PoolTestSuite) TestAddAttestation() {
 		if tc.mockFunc != nil {
 			tc.mockFunc()
 		}
-		pool := NewAggregationPool(context.Background(), t.mockBeaconConfig, nil, t.mockEthClock)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
 		for i := range tc.atts {
 			pool.AddAttestation(tc.atts[i])
 		}

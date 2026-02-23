@@ -31,8 +31,8 @@ import (
 	"strings"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -368,7 +368,7 @@ func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
 }
 
 func rlpHash(x any) (h common.Hash) {
-	hw := sha3.NewLegacyKeccak256()
+	hw := keccak.NewFastKeccak()
 	if err := rlp.Encode(hw, x); err != nil {
 		panic(err)
 	}

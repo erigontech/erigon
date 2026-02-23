@@ -366,7 +366,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	txNumIncrement := func() {
 		txNum++
 		stateWriter.SetTxNum(txNum)
-		domains.SetTxNum(txNum)
 	}
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
 		stateWriter state.StateWriter) (*types.Block, types.Receipts, error) {
