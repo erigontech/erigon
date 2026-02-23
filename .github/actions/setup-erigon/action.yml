@@ -185,8 +185,8 @@ runs:
       uses: actions/cache/restore@v4
       with:
         path: ${{ steps.go-env.outputs.modcache }}/cache/download
-        key: gomodcache-${{ runner.os }}-${{ hashFiles('go.sum') }}-invalid
-        restore-keys: gomodcache-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+        key: gomodcache|${{ runner.os }}|${{ hashFiles('go.sum') }}|invalid
+        restore-keys: gomodcache|${{ runner.os }}|${{ hashFiles('go.sum') }}|
 
     - name: Download Go modules
       if: ${{ inputs.modcache == 'true' }}

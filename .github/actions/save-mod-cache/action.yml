@@ -31,4 +31,4 @@ runs:
       uses: actions/cache/save@v4
       with:
         path: ${{ inputs.modcache }}/cache/download
-        key: ${{ inputs.prefix }}-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ steps.mod-hash.outputs.hash }}
+        key: ${{ inputs.prefix }}|${{ runner.os }}|${{ hashFiles('go.sum') }}|${{ steps.mod-hash.outputs.hash }}

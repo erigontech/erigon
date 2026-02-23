@@ -15,7 +15,7 @@ runs:
       id: keys
       shell: bash
       env:
-        PREFIX: gocache-${{ env.ERIGON_CI_WORKFLOW }}-${{ github.job }}-${{ env.ERIGON_CI_GOVERSION }}-${{ runner.os }}-${{ runner.arch }}
+        PREFIX: gocache|${{ env.ERIGON_CI_WORKFLOW }}|${{ github.job }}|${{ env.ERIGON_CI_GOVERSION }}|${{ runner.os }}|${{ runner.arch }}
         BRANCH: ${{ github.head_ref || github.ref_name }}
         SHA: ${{ github.sha }}
         BASE_REF: ${{ github.base_ref }}
@@ -23,20 +23,20 @@ runs:
         PARENT=$(git rev-parse HEAD~1 2>/dev/null || true)
         keys=""
         # Tier 1: current commit, previous run
-        keys+="${PREFIX}-${BRANCH}-${SHA}-"$'\n'
+        keys+="${PREFIX}|${BRANCH}|${SHA}|"$'\n'
         # Tier 2: parent commit on this branch
         if [[ -n "$PARENT" ]]; then
-          keys+="${PREFIX}-${BRANCH}-${PARENT}-"$'\n'
+          keys+="${PREFIX}|${BRANCH}|${PARENT}|"$'\n'
         fi
         # Tier 3: any commit on this branch
-        keys+="${PREFIX}-${BRANCH}-"$'\n'
+        keys+="${PREFIX}|${BRANCH}|"$'\n'
         # Tier 4: parent commit on base branch (PRs only)
         if [[ -n "$BASE_REF" && -n "$PARENT" ]]; then
-          keys+="${PREFIX}-${BASE_REF}-${PARENT}-"$'\n'
+          keys+="${PREFIX}|${BASE_REF}|${PARENT}|"$'\n'
         fi
         # Tier 5: any commit on base branch (PRs only)
         if [[ -n "$BASE_REF" ]]; then
-          keys+="${PREFIX}-${BASE_REF}-"$'\n'
+          keys+="${PREFIX}|${BASE_REF}|"$'\n'
         fi
         {
           echo 'restore-keys<<RESTORE_KEYS_EOF'
@@ -47,5 +47,5 @@ runs:
     - uses: actions/cache/restore@v4
       with:
         path: ${{ env.ERIGON_CI_GOCACHE }}
-        key: gocache-${{ env.ERIGON_CI_WORKFLOW }}-${{ github.job }}-${{ env.ERIGON_CI_GOVERSION }}-${{ runner.os }}-${{ runner.arch }}-${{ github.head_ref || github.ref_name }}-${{ github.sha }}-${{ github.run_id }}
+        key: gocache|${{ env.ERIGON_CI_WORKFLOW }}|${{ github.job }}|${{ env.ERIGON_CI_GOVERSION }}|${{ runner.os }}|${{ runner.arch }}|${{ github.head_ref || github.ref_name }}|${{ github.sha }}|${{ github.run_id }}
         restore-keys: ${{ steps.keys.outputs.restore-keys }}

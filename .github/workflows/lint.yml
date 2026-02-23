@@ -37,11 +37,11 @@ jobs:
         with:
           path: ${{ steps.erigon.outputs.modcache }}/cache/download
           # We can never know ahead of time what to match against
-          key: gomodcache-lint-${{ runner.os }}-${{ hashFiles('go.sum') }}-alwaysmiss
+          key: gomodcache|lint|${{ runner.os }}|${{ hashFiles('go.sum') }}|alwaysmiss
           # We can use a regular build to bootstrap here, we only add some extra metadata
           restore-keys: |
-            gomodcache-lint-${{ runner.os }}-${{ hashFiles('go.sum') }}-
-            gomodcache-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            gomodcache|lint|${{ runner.os }}|${{ hashFiles('go.sum') }}|
+            gomodcache|${{ runner.os }}|${{ hashFiles('go.sum') }}|
 
       - uses: ./.github/actions/restore-build-cache
         id: restore-build
@@ -50,8 +50,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.cache/golangci-lint
-          key: golangci-lint-${{ runner.os }}-${{ hashFiles('go.mod') }}
-          restore-keys: golangci-lint-${{ runner.os }}-
+          key: golangci-lint|${{ runner.os }}|${{ hashFiles('go.mod') }}
+          restore-keys: golangci-lint|${{ runner.os }}|
 
       - run: make lintci
 
@@ -62,11 +62,11 @@ jobs:
         if: always() && steps.restore-modcache.outcome == 'success'
         with:
           modcache: ${{ steps.erigon.outputs.modcache }}
-          prefix: modcache-lint
+          prefix: modcache|lint
 
       - name: Save golangci-lint cache
         if: always()
         uses: actions/cache/save@v4
         with:
           path: ~/.cache/golangci-lint
-          key: golangci-lint-${{ runner.os }}-${{ hashFiles('go.mod') }}
+          key: golangci-lint|${{ runner.os }}|${{ hashFiles('go.mod') }}
