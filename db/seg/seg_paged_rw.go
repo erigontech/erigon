@@ -264,6 +264,37 @@ type compressJob struct {
 	data []byte
 }
 
+var (
+	// pagedWriterPagePool stores *pendingPage; done channel is buffered(1), send-based.
+	pagedWriterPagePool = sync.Pool{New: func() any { return &pendingPage{done: make(chan struct{}, 1)} }}
+	// pagedWriterCompressBufPool stores []byte for zstd-compressed output.
+	pagedWriterCompressBufPool sync.Pool
+	// pagedWriterValsBufPool stores []byte for uncompressed page input.
+	pagedWriterValsBufPool sync.Pool
+)
+
+func getPendingPage() *pendingPage { return pagedWriterPagePool.Get().(*pendingPage) }
+func putPendingPage(p *pendingPage) {
+	p.result = nil
+	pagedWriterPagePool.Put(p)
+}
+
+func getCompressBuf() []byte {
+	if b := pagedWriterCompressBufPool.Get(); b != nil {
+		return b.([]byte)
+	}
+	return nil
+}
+func putCompressBuf(b []byte) { pagedWriterCompressBufPool.Put(b[:0]) }
+
+func getValsBuf() []byte {
+	if b := pagedWriterValsBufPool.Get(); b != nil {
+		return b.([]byte)
+	}
+	return nil
+}
+func putValsBuf(b []byte) { pagedWriterValsBufPool.Put(b[:0]) }
+
 type PagedWriter struct {
 	parent             CompressorI
 	pageSize           int
@@ -289,7 +320,6 @@ func (c *PagedWriter) startParallelCompression(workers int) {
 	bufSize := workers * 2
 	c.jobCh = make(chan compressJob, bufSize)
 	c.drainCh = make(chan *pendingPage, bufSize)
-
 	eg, ctx := errgroup.WithContext(context.Background())
 	c.eg, c.egCtx = eg, ctx
 
@@ -304,10 +334,9 @@ func (c *PagedWriter) startParallelCompression(workers int) {
 					if !ok {
 						return nil
 					}
-					// Always allocate a fresh output buffer: the drain goroutine owns
-					// page.result until parent.Write returns, so we cannot reuse it.
-					_, job.page.result = compress.EncodeZstdIfNeed(nil, job.data, true)
-					close(job.page.done)
+					_, job.page.result = compress.EncodeZstdIfNeed(getCompressBuf(), job.data, true)
+					putValsBuf(job.data) // job.page.result == buf (same backing); return input buffer for reuse
+					job.page.done <- struct{}{}
 				case <-ctx.Done():
 					return nil
 				}
@@ -331,6 +360,8 @@ func (c *PagedWriter) startParallelCompression(workers int) {
 			if _, err := c.parent.Write(page.result); err != nil {
 				return err
 			}
+			putCompressBuf(page.result)
+			putPendingPage(page)
 		}
 		return nil
 	})
@@ -384,19 +415,24 @@ func (c *PagedWriter) writePage() error {
 	}
 
 	uncompressedPage, ok := c.bytesUncompressed()
-	c.resetPage()
 	if !ok {
+		c.resetPage()
 		return nil
 	}
 
 	if c.jobCh != nil {
-		// parallel path: copy page data and submit to a compression worker
-		data := make([]byte, len(uncompressedPage))
-		copy(data, uncompressedPage)
-		page := &pendingPage{done: make(chan struct{})}
+		// parallel path: zero-copy handoff of c.vals backing array to the worker.
+		// Seed c.vals for the next page from the pool (workers return input bufs there).
+		data := uncompressedPage
+		c.vals = getValsBuf()
+		c.keys = c.keys[:0]
+		c.kLengths = c.kLengths[:0]
+		c.vLengths = c.vLengths[:0]
+		page := getPendingPage()
 		select {
 		case c.drainCh <- page:
 		case <-c.egCtx.Done():
+			putPendingPage(page)
 			return c.egCtx.Err()
 		}
 		select {
@@ -407,6 +443,7 @@ func (c *PagedWriter) writePage() error {
 		}
 		return nil
 	}
+	c.resetPage()
 
 	// serial fallback
 	var compressedPage []byte
