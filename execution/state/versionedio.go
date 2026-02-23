@@ -331,6 +331,16 @@ func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte
 		}
 	}
 
+	// Check version map for CodePath entries written by prior transactions.
+	// ReadAccountData uses applyVersionedUpdates for Balance/Nonce/CodeHash,
+	// but code bytes were not checked, causing finalization to miss code
+	// changes when replaying writes via ApplyVersionedWrites.
+	if vr.versionMap != nil {
+		if code, ok := versionedUpdate[[]byte](vr.versionMap, address, CodePath, accounts.NilKey, vr.txIndex); ok {
+			return code, nil
+		}
+	}
+
 	if vr.stateReader != nil {
 		return vr.stateReader.ReadAccountCode(address)
 	}
@@ -341,6 +351,12 @@ func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte
 func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	if r, ok := vr.reads[address][AccountKey{Path: CodePath}]; ok && r.Val != nil {
 		if code, ok := r.Val.([]byte); ok {
+			return len(code), nil
+		}
+	}
+
+	if vr.versionMap != nil {
+		if code, ok := versionedUpdate[[]byte](vr.versionMap, address, CodePath, accounts.NilKey, vr.txIndex); ok {
 			return len(code), nil
 		}
 	}

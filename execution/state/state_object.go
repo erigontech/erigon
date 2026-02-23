@@ -420,6 +420,20 @@ func (so *stateObject) Code() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("can't read code for %x: %w", so.Address(), err)
 	}
+
+	// During parallel execution the state reader (e.g. BufferedReader) may
+	// not find code written by a prior transaction in the same block because
+	// it only exists in the multi-version map, not yet in the DB.  Check the
+	// version map so that code set by an earlier tx (e.g. EIP-7702 delegation)
+	// is visible to later transactions.
+	if code == nil && so.db.versionMap != nil {
+		if rr := so.db.versionMap.Read(so.address, CodePath, accounts.NilKey, so.db.txIndex); rr.Status() == MVReadResultDone {
+			if vmCode, ok := rr.Value().([]byte); ok {
+				code = vmCode
+			}
+		}
+	}
+
 	so.code = code
 	return code, nil
 }

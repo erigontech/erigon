@@ -1517,13 +1517,20 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					be.blockIO.RecordReads(txVersion, mergedReads)
 				}
 				if len(addWrites) > 0 {
-					// addWrites is the complete post-finalization write set (original
-					// writes re-applied via ApplyVersionedWrites plus any changes from
-					// fee calculation / post-apply). Replace rather than append to
-					// avoid duplicate entries for the same (Address, Path, Key) which
-					// cause non-deterministic BAL computation when VersionedWrites
-					// iterates Go maps in varying order across runs.
-					be.blockIO.RecordWrites(txVersion, addWrites)
+					// Merge finalization writes with existing execution writes.
+					// The finalization replays result.TxOut via ApplyVersionedWrites
+					// and adds fee calculation changes, but its VersionedWrites(true)
+					// may omit entries when the optimistic execution ran with stale
+					// state (e.g., an EIP-7702 delegation set by a prior tx was not
+					// visible). In that case the re-execution stored the correct
+					// writes in blockIO, but the finalization—which replays the
+					// potentially incomplete TxOut—drops them. Merging ensures that
+					// entries present in the execution writes but absent from the
+					// finalization writes are preserved, while finalization-only
+					// entries (fee calc, post-apply) are added.
+					existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
+					merged := MergeVersionedWrites(existingWrites, addWrites)
+					be.blockIO.RecordWrites(txVersion, merged)
 				}
 
 				stateUpdates := stateWriter.WriteSet()
