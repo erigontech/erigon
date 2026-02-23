@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -1991,7 +1992,7 @@ func TestHistoryBuildVIPageOffsetBugDirect(t *testing.T) {
 	// --- Write .v file in (txNum, key) order ---
 	// This is the ordering that snapshot-synced nodes receive.  Locally-built
 	// merge files use (key, txNum) order, which is why the other test misses the bug.
-	vPath := tmpDir + "/test.0-1.v"
+	vPath := filepath.Join(tmpDir, "test.0-1.v")
 	vComp, err := seg.NewCompressor(ctx, "test-v", vPath, tmpDir, h.CompressorCfg, log.LvlTrace, log.New())
 	require.NoError(t, err)
 	pagedWr := h.dataWriter(vComp)
@@ -2005,7 +2006,7 @@ func TestHistoryBuildVIPageOffsetBugDirect(t *testing.T) {
 	vComp.Close()
 
 	// --- Write .ef file in (key, txNums) order ---
-	efPath := tmpDir + "/test.0-1.ef"
+	efPath := filepath.Join(tmpDir, "test.0-1.ef")
 	efComp, err := seg.NewCompressor(ctx, "test-ef", efPath, tmpDir,
 		h.CompressorCfg.WithValuesOnCompressedPage(0), log.LvlTrace, log.New())
 	require.NoError(t, err)
@@ -2052,7 +2053,7 @@ func TestHistoryBuildVIPageOffsetBugDirect(t *testing.T) {
 		"expected %d pages in .v file (one per txNum)", numTxNums)
 
 	// --- Call buildVI (buggy on main branch) ---
-	viPath := tmpDir + "/test.0-1.vi"
+	viPath := filepath.Join(tmpDir, "test.0-1.vi")
 	require.NoError(t, h.buildVI(ctx, viPath, histDecomp, efDecomp, efBaseTxNum, background.NewProgressSet()))
 
 	// --- Open the .vi index reader ---
