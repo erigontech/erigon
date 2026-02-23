@@ -6,3 +6,9 @@
 - is debug being set incorrectly in second clone?
 - the reproducible build workflow might be clobbering build caches, see what uses gocache-plain. show all workflows/jobs with overlapping keys, maybe include workflow in the prefix by default.
 - merge jobs that belong in teh same workflow
+- always load newest build cache, and count the cache items and republish if it's bigger (with runid attached?)
+- get cpu count, for job parallelism? nproc, and go env GOMAXPROCS or something?
+- use parallel fetching in submodule clone (--jobs)
+- hash .git/modules using the heads of all submodules?
+- use bars/pipes for key separators
+- continue on errors for caching retry script
