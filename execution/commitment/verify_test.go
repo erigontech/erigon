@@ -4,9 +4,9 @@ import (
 	"encoding/hex"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
@@ -37,7 +37,7 @@ func TestVerifyBranchHashes_RoundTrip(t *testing.T) {
 
 	// Hash the account key to get the hashed extension.
 	// In production, root branch is folded at depth=1 (branchKey has 0 nibbles, depth = 0+1).
-	keccak := sha3.NewLegacyKeccak256().(keccakState)
+	keccak := keccak.NewFastKeccak()
 	depth := int16(1) // root branch fold depth
 	hashBuf := make([]byte, length.Hash)
 	if err := c.hashAccKey(keccak, depth, hashBuf); err != nil {
@@ -133,7 +133,7 @@ func TestVerifyBranchHashes_Singleton(t *testing.T) {
 	c.StorageLen = int8(len(storageVal))
 
 	// Hash keys at depth=2
-	keccak := sha3.NewLegacyKeccak256().(keccakState)
+	keccak := keccak.NewFastKeccak()
 	depth := int16(2)
 
 	// First hash storage key
@@ -227,7 +227,7 @@ func TestVerifyBranchHashes_SingletonDepth1(t *testing.T) {
 	c.StorageLen = int8(len(storageVal))
 
 	// Root branch is folded at depth=1 (branchKey has 0 nibbles, depth = 0 + 1 = 1)
-	keccak := sha3.NewLegacyKeccak256().(keccakState)
+	keccak := keccak.NewFastKeccak()
 	depth := int16(1)
 
 	// First hash storage key
@@ -300,7 +300,7 @@ func TestVerifyBranchHashes_Storage(t *testing.T) {
 	c.loaded = cellLoadStorage
 
 	// Hash the storage key (depth=65 means non-singleton storage-only cell)
-	keccak := sha3.NewLegacyKeccak256().(keccakState)
+	keccak := keccak.NewFastKeccak()
 	depth := int16(65)
 	hashedKeyOffset := depth - 64
 	hashBuf := make([]byte, length.Hash)
