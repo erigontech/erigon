@@ -59,6 +59,7 @@ type Dirs struct {
 	CaplinLatest     string
 	CaplinGenesis    string
 	CaplinHistory    string
+	Migrations       string // persistent DB tracking which migrations have been applied
 
 	Log string
 }
@@ -84,6 +85,7 @@ func New(datadir string) Dirs {
 		dirs.CaplinGenesis,
 		dirs.CaplinColumnData,
 		dirs.CaplinHistory,
+		dirs.Migrations,
 		filepath.Join(datadir, "logs"),
 	)
 
@@ -128,6 +130,7 @@ func Open(datadir string) Dirs {
 		CaplinLatest:     filepath.Join(datadir, "caplin", "latest"),
 		CaplinGenesis:    filepath.Join(datadir, "caplin", "genesis-state"),
 		CaplinHistory:    filepath.Join(datadir, "caplin", "history"),
+		Migrations:       filepath.Join(datadir, "migrations"),
 	}
 	return dirs
 }
