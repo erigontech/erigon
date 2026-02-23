@@ -2095,7 +2095,8 @@ func TestHistoryBuildVIPageOffsetBugDirect(t *testing.T) {
 				require.True(t, ok, "histKey not in .vi: txNum=%d ki=%d", txNum, ki)
 				g.Reset(offset)
 				pageBytes, _ := g.Next(nil)
-				gotVal, _, _ := seg.GetFromPage(hk, pageBytes, nil, true)
+				gotVal, ok, _ := seg.GetFromPage(hk, pageBytes, nil, true)
+				require.True(t, ok)
 				require.Equal(t, val(txNum, ki), gotVal,
 					"GetFromPage failed for hk(txNum=%d, ki=%d) at offset=%d (buggy buildVI mapped to wrong page)",
 					txNum, ki, offset)
