@@ -475,7 +475,10 @@ func (a *ProtoForkableTx) GetFromFile(entityNum Num, idx int) (v Bytes, found bo
 
 		v, _ := g.Next(nil)
 
-		v, a.snappyReadBuffer = seg.GetFromPage(entityNum.EncToBytes(true), v, a.snappyReadBuffer, compressionUsed)
+		v, ok, a.snappyReadBuffer = seg.GetFromPage(entityNum.EncToBytes(true), v, a.snappyReadBuffer, compressionUsed)
+		if !ok {
+			return nil, false, fmt.Errorf("not found on compressed-page %d (page %d) not found in index %s:%d-%d", entityNum, pageNum, snaps.name, file.startTxNum/stepSize, file.endTxNum/stepSize)
+		}
 		return v, true, nil
 	}
 
