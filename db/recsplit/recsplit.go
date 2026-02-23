@@ -46,28 +46,6 @@ import (
 	"github.com/erigontech/erigon/db/version"
 )
 
-// Erigon doesn't create tons of bufio readers/writers, but it has tons of
-// parallel small unit-tests which each create many small files and bufio
-// readers/writers — pooling avoids the allocation pressure in that scenario.
-var (
-	bufWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(512*datasize.KB)) }}
-	bufReaderPool = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, int(512*datasize.KB)) }}
-)
-
-func getBufioWriter(w io.Writer) *bufio.Writer {
-	bw := bufWriterPool.Get().(*bufio.Writer)
-	bw.Reset(w)
-	return bw
-}
-func putBufioWriter(w *bufio.Writer) { w.Reset(nil); bufWriterPool.Put(w) }
-
-func getBufioReader(r io.Reader) *bufio.Reader {
-	br := bufReaderPool.Get().(*bufio.Reader)
-	br.Reset(r)
-	return br
-}
-func putBufioReader(r *bufio.Reader) { r.Reset(nil); bufReaderPool.Put(r) }
-
 var ErrCollision = errors.New("duplicate key")
 
 const RecSplitLogPrefix = "recsplit"
