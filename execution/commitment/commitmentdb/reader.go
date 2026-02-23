@@ -143,35 +143,34 @@ type splitStateReader struct {
 
 var _ StateReader = (*splitStateReader)(nil)
 
-func (r splitStateReader) WithHistory() bool {
+func (r *splitStateReader) WithHistory() bool {
 	return r.withHistory
 }
 
-func (r splitStateReader) CheckDataAvailable(_ kv.Domain, _ kv.Step) error {
+func (r *splitStateReader) CheckDataAvailable(_ kv.Domain, _ kv.Step) error {
 	return nil
 }
 
-func (r splitStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
+func (r *splitStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
 	if d == kv.CommitmentDomain {
 		return r.commitmentReader.Read(d, plainKey, stepSize)
 	}
 	return r.plainStateReader.Read(d, plainKey, stepSize)
 }
 
-func (r splitStateReader) Clone(kv.TemporalTx) StateReader {
-	// Do *NOT* propagate kv.TemporalTx because each reader may need its own
-	return NewCommitmentSplitStateReader(r.commitmentReader, r.plainStateReader, r.withHistory)
+func (r *splitStateReader) Clone(tx kv.TemporalTx) StateReader {
+	return NewCommitmentSplitStateReader(r.commitmentReader.Clone(tx), r.plainStateReader.Clone(tx), r.withHistory)
 }
 
-func NewCommitmentSplitStateReader(commitmentReader StateReader, plainStateReader StateReader, withHistory bool) StateReader {
-	return splitStateReader{
+func NewCommitmentSplitStateReader(commitmentReader StateReader, plainStateReader StateReader, withHistory bool) *splitStateReader {
+	return &splitStateReader{
 		commitmentReader: commitmentReader,
 		plainStateReader: plainStateReader,
 		withHistory:      withHistory,
 	}
 }
 
-func NewCommitmentReplayStateReader(ttx, tx kv.TemporalTx, tsd sd, plainStateAsOf uint64) StateReader {
+func NewCommitmentReplayStateReader(ttx, tx kv.TemporalTx, tsd sd, plainStateAsOf uint64) *splitStateReader {
 	// Claim that during replay we do not operate on history, so we can temporarily save commitment state
 	return NewCommitmentSplitStateReader(NewLatestStateReader(ttx, tsd), NewHistoryStateReader(tx, plainStateAsOf), false)
 }
@@ -179,10 +178,10 @@ func NewCommitmentReplayStateReader(ttx, tx kv.TemporalTx, tsd sd, plainStateAsO
 // A history reader that reads:
 //   - commitment data as-of  commitmentAsOf txnum
 //   - account/storage/code data as-of plainsStateAsOf txnum
-func NewSplitHistoryReader(tx kv.TemporalTx, commitmentAsOf uint64, plainStateAsOf uint64) StateReader {
-	return splitStateReader{
+func NewSplitHistoryReader(tx kv.TemporalTx, commitmentAsOf uint64, plainStateAsOf uint64) *splitStateReader {
+	return &splitStateReader{
 		commitmentReader: NewHistoryStateReader(tx, commitmentAsOf),
 		plainStateReader: NewHistoryStateReader(tx, plainStateAsOf),
-		withHistory:      true, // we lie, it is without history so we can exercise SharedDomain's in-memory DomainPut(kv.CommitmmentDomain)
+		withHistory:      false, // we lie, it is without history so we can exercise SharedDomain's in-memory DomainPut(kv.CommitmmentDomain)
 	}
 }
