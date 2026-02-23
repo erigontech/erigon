@@ -89,7 +89,7 @@ type SharedDomains struct {
 
 	logger log.Logger
 
-	txNum uint64
+	txNum             uint64
 	trace             bool //nolint
 	commitmentCapture bool
 	mem               kv.TemporalMemBatch
