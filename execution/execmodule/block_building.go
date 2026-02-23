@@ -37,7 +37,7 @@ import (
 // slotDuration returns the actual slot duration in seconds by reading the parent
 // block timestamp from the database and computing timestamp - parentTime.
 // Falls back to SecondsPerSlot() if the parent block cannot be found.
-func (e *EthereumExecutionModule) slotDuration(ctx context.Context, parentHash common.Hash, timestamp uint64) uint64 {
+func (e *ExecModule) slotDuration(ctx context.Context, parentHash common.Hash, timestamp uint64) uint64 {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return e.config.SecondsPerSlot()
@@ -57,7 +57,7 @@ func (e *EthereumExecutionModule) slotDuration(ctx context.Context, parentHash c
 	return timestamp - parentHeader.Time
 }
 
-func (e *EthereumExecutionModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
+func (e *ExecModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
 	if !e.config.IsShanghai(time) && withdrawals != nil {
 		return &rpc.InvalidParamsError{Message: "withdrawals before shanghai"}
 	}
@@ -67,7 +67,7 @@ func (e *EthereumExecutionModule) checkWithdrawalsPresence(time uint64, withdraw
 	return nil
 }
 
-func (e *EthereumExecutionModule) evictOldBuilders() {
+func (e *ExecModule) evictOldBuilders() {
 	ids := common.SortedKeys(e.builders)
 
 	// remove old builders so that at most MaxBuilders - 1 remain
@@ -77,7 +77,7 @@ func (e *EthereumExecutionModule) evictOldBuilders() {
 }
 
 // Missing: NewPayload, AssembleBlock
-func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *executionproto.AssembleBlockRequest) (*executionproto.AssembleBlockResponse, error) {
+func (e *ExecModule) AssembleBlock(ctx context.Context, req *executionproto.AssembleBlockRequest) (*executionproto.AssembleBlockResponse, error) {
 	if !e.semaphore.TryAcquire(1) {
 		return &executionproto.AssembleBlockResponse{
 			Id:   0,
@@ -148,7 +148,7 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 	return blockValue
 }
 
-func (e *EthereumExecutionModule) GetAssembledBlockWithReceipts(payloadId uint64) (block *types.BlockWithReceipts, busy bool, err error) {
+func (e *ExecModule) GetAssembledBlockWithReceipts(payloadId uint64) (block *types.BlockWithReceipts, busy bool, err error) {
 	if !e.semaphore.TryAcquire(1) {
 		return nil, true, nil
 	}
@@ -161,7 +161,7 @@ func (e *EthereumExecutionModule) GetAssembledBlockWithReceipts(payloadId uint64
 	return blockWithReceipts, false, err
 }
 
-func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error) {
+func (e *ExecModule) GetAssembledBlock(ctx context.Context, req *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error) {
 	blockWithReceipts, busy, err := e.GetAssembledBlockWithReceipts(req.Id)
 	if err != nil {
 		e.logger.Error("Failed to build PoS block", "err", err)
@@ -181,8 +181,7 @@ func (e *EthereumExecutionModule) GetAssembledBlock(ctx context.Context, req *ex
 	block := blockWithReceipts.Block
 	header := block.Header()
 
-	baseFee := new(uint256.Int)
-	baseFee.SetFromBig(header.BaseFee)
+	baseFee := header.BaseFee
 
 	encodedTransactions, err := types.MarshalTransactionsBinary(block.Transactions())
 	if err != nil {

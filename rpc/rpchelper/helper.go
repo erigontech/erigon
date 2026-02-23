@@ -178,8 +178,8 @@ func CreateHistoryStateReader(ctx context.Context, tx kv.TemporalTx, blockNumber
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
 	if minHistoryTxNum := state.StateHistoryStartTxNum(tx); txNum < minHistoryTxNum {
-		bn, _, _ := txNumsReader.FindBlockNum(ctx, tx, minHistoryTxNum)
-		return nil, fmt.Errorf("%w: block tx: %d, min tx: %d last state history bn: %d", state.PrunedError, txNum, minHistoryTxNum, bn)
+		firstAvailBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, minHistoryTxNum)
+		return nil, fmt.Errorf("%w: requested block %d, history is available from block %d", state.PrunedError, blockNumber, firstAvailBlock)
 	}
 	return state.NewHistoryReaderV3(tx, txNum), nil
 }
@@ -194,7 +194,6 @@ func NewLatestStateWriter(tx kv.TemporalTx, domains *execctx.SharedDomains, bloc
 		panic(err)
 	}
 	txNum := uint64(int(minTxNum) + /* 1 system txNum in beginning of block */ 1)
-	domains.SetTxNum(txNum)
 	return state.NewWriter(domains.AsPutDel(tx), nil, txNum)
 }
 

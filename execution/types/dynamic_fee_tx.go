@@ -316,7 +316,7 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
 	var to accounts.Address
 	if tx.To == nil {
 		to = accounts.NilAddress
@@ -341,10 +341,7 @@ func (tx *DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *ch
 		return nil, errors.New("eip-1559 transactions require London")
 	}
 	if baseFee != nil {
-		overflow := msg.gasPrice.SetFromBig(baseFee)
-		if overflow {
-			return nil, errors.New("gasPrice higher than 2^256-1")
-		}
+		msg.gasPrice.Set(baseFee)
 	}
 	msg.gasPrice.Add(&msg.gasPrice, tx.TipCap)
 	if msg.gasPrice.Gt(tx.FeeCap) {

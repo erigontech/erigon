@@ -90,6 +90,9 @@ func TestUnmarked_PutToDb(t *testing.T) {
 }
 
 func TestUnmarkedPrune(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	for pruneTo := RootNum(0); ; pruneTo++ {
 		var entries_count uint64
 		t.Run(fmt.Sprintf("prune to %d", pruneTo), func(t *testing.T) {

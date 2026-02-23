@@ -365,7 +365,7 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	if err != nil {
 		return &AccountResult{}, err
 	}
-	if header == nil || header.Number == nil {
+	if header == nil {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
 	canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, header.Number.Uint64())

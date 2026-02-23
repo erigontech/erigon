@@ -43,6 +43,23 @@ type CommonTx struct {
 	V, R, S  uint256.Int     // signature values
 }
 
+// copyData returns a copy of CommonTx where the TransactionMisc cache fields
+// (hash, from) are not copied directly but rebuilt field-by-field, avoiding
+// go vet copylocks warnings on the embedded sync/atomic.Pointer.
+// The caches will be recomputed on demand if needed (both are deterministic).
+func (ct *CommonTx) copyData() CommonTx {
+	return CommonTx{
+		Nonce:    ct.Nonce,
+		GasLimit: ct.GasLimit,
+		To:       ct.To,
+		Value:    ct.Value,
+		Data:     ct.Data,
+		V:        ct.V,
+		R:        ct.R,
+		S:        ct.S,
+	}
+}
+
 func (ct *CommonTx) GetNonce() uint64 {
 	return ct.Nonce
 }
@@ -317,7 +334,7 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx *LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (*Message, error) {
+func (tx *LegacyTx) AsMessage(s Signer, _ *uint256.Int, _ *chain.Rules) (*Message, error) {
 	var to accounts.Address
 	if tx.To == nil {
 		to = accounts.NilAddress

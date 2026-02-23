@@ -65,6 +65,10 @@ type udpTest struct {
 }
 
 func newUDPTest(t *testing.T) *udpTest {
+	return newUDPTestWithConfig(t, Config{})
+}
+
+func newUDPTestWithConfig(t *testing.T, cfg Config) *udpTest {
 	test := &udpTest{
 		t:          t,
 		pipe:       newpipe(),
@@ -75,10 +79,9 @@ func newUDPTest(t *testing.T) *udpTest {
 
 	test.db, _ = enode.OpenDB("")
 	ln := enode.NewLocalNode(test.db, test.localkey)
-	test.udp, _ = ListenV4(test.pipe, ln, Config{
-		PrivateKey: test.localkey,
-		Log:        testlog.Logger(t, log.LvlTrace),
-	})
+	cfg.PrivateKey = test.localkey
+	cfg.Log = testlog.Logger(t, log.LvlTrace)
+	test.udp, _ = ListenV4(test.pipe, ln, cfg)
 	test.table = test.udp.tab
 	// Wait for initial refresh so the table doesn't send unexpected findnode.
 	<-test.table.initDone
@@ -165,6 +168,9 @@ func TestUDPv4_packetErrors(t *testing.T) {
 }
 
 func TestUDPv4_pingTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	test := newUDPTest(t)
 	defer test.close()
@@ -183,6 +189,9 @@ func (req testPacket) Kind() byte   { return byte(req) }
 func (req testPacket) Name() string { return "" }
 
 func TestUDPv4_responseTimeouts(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	test := newUDPTest(t)
 	defer test.close()
@@ -254,6 +263,9 @@ func TestUDPv4_responseTimeouts(t *testing.T) {
 }
 
 func TestUDPv4_findnodeTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 	test := newUDPTest(t)
 	defer test.close()
@@ -271,7 +283,9 @@ func TestUDPv4_findnodeTimeout(t *testing.T) {
 }
 
 func TestUDPv4_findnode(t *testing.T) {
-	test := newUDPTest(t)
+	// Use a very long PingInterval so revalidation never fires unsolicited PING
+	// packets during the test, which would cause spurious type-mismatch failures.
+	test := newUDPTestWithConfig(t, Config{PingInterval: time.Hour})
 	defer test.close()
 
 	// put a few nodes into the table. their exact
@@ -326,6 +340,9 @@ func TestUDPv4_findnode(t *testing.T) {
 }
 
 func TestUDPv4_findnodeMultiReply(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	test := newUDPTest(t)
 	defer test.close()
 
@@ -512,6 +529,9 @@ func TestUDPv4_EIP868(t *testing.T) {
 
 // This test verifies that a small network of nodes can boot up into a healthy state.
 func TestUDPv4_smallNetConvergence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	t.Parallel()
 
 	// Start the network.
