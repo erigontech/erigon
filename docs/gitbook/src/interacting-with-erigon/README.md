@@ -123,29 +123,53 @@ modular architecture where RPC functionality is handled by a standalone daemon.
 First, start Erigon with the private API enabled:
 
 ```bash
-erigon --private.api.addr=localhost:9090
+erigon --datadir=<path-to-datadir> --private.api.addr=localhost:9090
 ```
 
 Then, in a separate terminal, start rpcdaemon with IPC enabled:
 
 ```bash
-rpcdaemon --socket.enabled --socket.url unix:///var/run/erigon.ipc
+rpcdaemon --private.api.addr=localhost:9090 --socket.enabled --socket.url unix:///<path-to-datadir>/erigon.ipc
 ```
 
-On Linux and macOS, Erigon uses UNIX sockets. On Windows, IPC is provided using named pipes.
+**Important:** Make sure you have write permissions to the directory where the socket will be created.
 
-The socket inherits the API namespaces from the `--http.api` flag passed to `rpcdaemon`:
+On Linux and macOS, Erigon uses UNIX sockets. On Windows, IPC is provided using named pipes (use `\\.\pipe\erigon.ipc`
+format). The socket inherits the API namespaces from the `--http.api` flag passed to `rpcdaemon`:
 
 ```bash
-rpcdaemon --socket.enabled \
-          --socket.url unix:///var/run/erigon.ipc \
-          --http.api eth,net,web3,debug,trace
+rpcdaemon --private.api.addr=localhost:9090 --socket.enabled --socket.url unix:///<path-to-datadir>/erigon.ipc --http.api eth,net,web3,debug,trace
 ```
 
-You can also use TCP sockets:
+#### TCP Socket Alternative (Advanced)
+
+You can also serve the raw JSON-RPC2 protocol over TCP instead of Unix sockets:
 
 ```bash
-rpcdaemon --socket.enabled --socket.url tcp://127.0.0.1:8546
+rpcdaemon --private.api.addr=localhost:9090 --socket.enabled --socket.url tcp://127.0.0.1:8546
+```
+
+**Note**: This creates a raw JSON-RPC2 socket without HTTP wrapping. Most users should use the HTTP endpoint (enabled by
+default on port 8545) instead. The TCP socket is for specialized clients that support raw JSON-RPC2 protocol.
+
+#### Testing IPC Connection
+
+Test your IPC connection using curl:
+
+```bash
+curl --unix-socket <path-to-datadir>/erigon.ipc \
+     -X POST http://localhost/ \
+     -H "Content-Type: application/json" \
+     --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+```
+
+Or use the HTTP endpoint (enabled by default on port 8545):
+
+```bash
+curl http://127.0.0.1:8545 \
+     -X POST \
+     -H "Content-Type: application/json" \
+     --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
 ```
 
 ### gRPC

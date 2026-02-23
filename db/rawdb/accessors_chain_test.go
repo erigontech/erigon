@@ -25,9 +25,9 @@ import (
 	"math/big"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -349,7 +349,7 @@ func TestHeaderStorage(t *testing.T) {
 	if entry := rawdb.ReadHeaderRLP(tx, header.Hash(), header.Number.Uint64()); entry == nil {
 		t.Fatalf("Stored header RLP not found")
 	} else {
-		hasher := sha3.NewLegacyKeccak256()
+		hasher := keccak.NewFastKeccak()
 		hasher.Write(entry)
 
 		if hash := common.BytesToHash(hasher.Sum(nil)); hash != header.Hash() {
@@ -397,7 +397,7 @@ func TestBodyStorage(t *testing.T) {
 	}
 
 	// Create a test body to move around the database and make sure it's really new
-	hasher := sha3.NewLegacyKeccak256()
+	hasher := keccak.NewFastKeccak()
 	_ = rlp.Encode(hasher, body)
 	hash := common.BytesToHash(hasher.Sum(nil))
 	header := &types.Header{Number: *common.Num1}
@@ -421,7 +421,7 @@ func TestBodyStorage(t *testing.T) {
 		if err != nil {
 			log.Error("ReadBodyRLP failed", "err", err)
 		}
-		hasher := sha3.NewLegacyKeccak256()
+		hasher := keccak.NewFastKeccak()
 		hasher.Write(bodyRlp)
 
 		if calc := common.BytesToHash(hasher.Sum(nil)); calc != hash {
