@@ -1347,8 +1347,8 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	}
 
 	if compressedPageValuesCount > 1 {
-		v, ht.snappyReadBuffer = seg.GetFromPage(historyKey, v, ht.snappyReadBuffer, true)
-		if v == nil {
+		v, ok, ht.snappyReadBuffer = seg.GetFromPage(historyKey, v, ht.snappyReadBuffer, true)
+		if !ok {
 			// Key not found in page. The inverted index (.ef) contains a txNum
 			// entry that has no corresponding entry in the history values (.v)
 			// file. Fall back to DB/latest lookup to get the correct value.
@@ -1655,7 +1655,10 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 
 				if compressedPageValuesCount > 0 {
 					histKeyBuf = historyKey(txNum, key, histKeyBuf)
-					val, _ = seg.GetFromPage(histKeyBuf, val, nil, true)
+					val, ok, _ = seg.GetFromPage(histKeyBuf, val, nil, true)
+					if !ok {
+						return fmt.Errorf("HistoryDump: not found key [%x] on compressed page: %s", key, viFile.Fullpath())
+					}
 				}
 
 				dumpTo(key, txNum, val)

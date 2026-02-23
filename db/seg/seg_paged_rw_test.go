@@ -132,7 +132,8 @@ func TestPage(t *testing.T) {
 	for i := 0; i < sampling+1; i++ {
 		iter++
 		expectK, expectV := fmt.Sprintf("k %d", i), fmt.Sprintf("v %d", i)
-		v, _ := GetFromPage([]byte(expectK), pages[pageNum], nil, false)
+		v, ok, _ := GetFromPage([]byte(expectK), pages[pageNum], nil, false)
+		require.True(ok)
 		require.Equal(expectV, string(v), i)
 		require.True(p1.HasNext())
 		k, v := p1.Next()
