@@ -11,11 +11,9 @@ make erigon              # Build main binary (./build/bin/erigon)
 make integration         # Build integration test binary
 make lint                # Run golangci-lint + mod tidy check
 make test-short          # Quick unit tests (-short -failfast)
-make test-all            # Full test suite with coverage
+make test-all            # Full test suite
 make gen                 # Generate all auto-generated code (mocks, grpc, etc.)
 ```
-
-Before committing, always verify changes with: `make lint && make erigon integration`
 
 Run specific tests:
 ```bash
@@ -23,7 +21,7 @@ go test ./execution/stagedsync/...
 go test -run TestName ./path/to/package/...
 ```
 
-Build tag required: `goexperiment.synctest` (set automatically by Makefile)
+Before committing, always verify changes with: `make lint && make erigon integration`
 
 ## Architecture Overview
 
@@ -54,11 +52,11 @@ Erigon is a high-performance Ethereum execution client with embedded consensus l
 
 Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace configs optional`
 
-**Important**: Always run `make lint` after making code changes and before committing. Fix any linter errors before proceeding.
+## Lint
 
-## Lint Notes
+Always run `make lint` after making code changes and before committing. Fix any linter errors before proceeding.
 
-The linter (`make lint`) is non-deterministic in which files it scans — new issues may appear on subsequent runs. Run lint repeatedly until clean.
+The linter is non-deterministic in which files it scans — new issues may appear on subsequent runs. Run lint repeatedly until clean.
 
 Common lint categories and fixes:
 - **ruleguard (defer tx.Rollback/cursor.Close):** The error check must come *before* `defer tx.Rollback()`. Never remove an explicit `.Close()` or `.Rollback()` — add `defer` as a safety net alongside it, since the timing of the explicit call may matter.
