@@ -2563,9 +2563,9 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	//hph.trace = true
 
+	hph.metrics.Reset()
+	hph.metrics.updates.Store(updatesCount)
 	if hph.metrics.collectCommitmentMetrics {
-		hph.metrics.Reset()
-		hph.metrics.updates.Store(updatesCount)
 		defer func() {
 			hph.metrics.TotalProcessingTimeInc(start)
 			hph.metrics.WriteToCSV()
