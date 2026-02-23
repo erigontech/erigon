@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -56,10 +55,7 @@ func doSqueeze(cliCtx *cli.Context) error {
 		return err
 	}
 	defer l.Unlock()
-	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 	ctx := cliCtx.Context
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
