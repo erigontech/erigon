@@ -491,7 +491,11 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 	debugBlock := uint64(dbg.EnvInt("ERIGON_REBUILD_DEBUG_BLOCK", 0))
 
-	blockFrom := domains.BlockNum()
+	_, seekBlockNum, err := domains.SeekCommitment(ctx, rwTx)
+	if err != nil {
+		return nil, fmt.Errorf("SeekCommitment: %w", err)
+	}
+	blockFrom := seekBlockNum
 	if blockFrom > 0 {
 		blockFrom++ // SeekCommitment returns last committed block; start from next
 	}
@@ -582,8 +586,12 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		if err != nil {
 			return err
 		}
+		_, seekBlk, seekErr := domains.SeekCommitment(ctx, rwTx)
+		if seekErr != nil {
+			return fmt.Errorf("SeekCommitment after flush: %w", seekErr)
+		}
 		logger.Info("[rebuild_commitment_history] after flush: SeekCommitment restored",
-			"block", domains.BlockNum(), "txNum", domains.TxNum())
+			"block", seekBlk, "txNum", domains.TxNum())
 		domains.DiscardWrites(kv.AccountsDomain)
 		domains.DiscardWrites(kv.StorageDomain)
 		domains.DiscardWrites(kv.CodeDomain)
@@ -595,7 +603,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 
 	// finalizeBlock computes and verifies the commitment root for a single block.
 	finalizeBlock := func(blockNum, toTxNum uint64) error {
-		domains.SetBlockNum(blockNum)
 		domains.SetTxNum(toTxNum)
 		domains.GetCommitmentCtx().SetStateReader(backtester.NewRebuildStateReader(rwTx, domains, toTxNum+1))
 
@@ -692,7 +699,6 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				blockKeyCount = 0
 				// Set correct state reader and clear stale warmup cache before TouchKey calls begin.
 				toTxNum := batch.TxNum(blockNum)
-				domains.SetBlockNum(blockNum)
 				domains.SetTxNum(toTxNum)
 				domains.GetCommitmentCtx().SetStateReader(backtester.NewRebuildStateReader(rwTx, domains, toTxNum+1))
 				domains.ClearWarmupCache()
