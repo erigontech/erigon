@@ -271,7 +271,9 @@ const (
 	ArbWasmPrefixBucket     = "arbWasm"         // arbitrum wasm store prefix; wasm version
 	ArbWasmActivationBucket = "wasmActivation"  // arbitrum bucket for wasm activations
 	ArbInboxTrackerBucket   = "arbInboxTracker" // arbitrum bucket to keep inbox messages and meta
-	ArbL1SyncBucket         = "arbL1Sync"       // arbitrum L1 sync: raw batches, decoded messages, sync progress
+	ArbL1SyncBatch      = "arbL1SyncBatch"      // batchSeqNum -> raw batch data (value includes msgCount prefix)
+	ArbL1SyncMsg        = "arbL1SyncMsg"        // batchSeqNum+msgIdx -> decoded MessageWithMetadata (JSON)
+	ArbL1SyncDelayedMsg = "arbL1SyncDelayedMsg" // delayedSeqNum -> L1IncomingMessage (JSON)
 )
 
 // Keys
@@ -389,7 +391,9 @@ var ChaindataTables = []string{
 	ArbNodeTxStreamBucket,
 	ArbWasmPrefixBucket,
 	ArbWasmActivationBucket,
-	ArbL1SyncBucket,
+	ArbL1SyncBatch,
+	ArbL1SyncMsg,
+	ArbL1SyncDelayedMsg,
 
 	TblPruningProgress,
 
@@ -572,7 +576,9 @@ var ChaindataTablesCfg = TableCfg{
 	ArbNodeBucket:           {},
 	ArbInboxTrackerBucket:   {},
 	ArbNodeTxStreamBucket:   {},
-	ArbL1SyncBucket:         {},
+	ArbL1SyncBatch:          {},
+	ArbL1SyncMsg:            {},
+	ArbL1SyncDelayedMsg:     {},
 }
 
 var ArbitrumTablesCfg = TableCfg{
@@ -582,7 +588,9 @@ var ArbitrumTablesCfg = TableCfg{
 	ArbNodeBucket:           {},
 	ArbInboxTrackerBucket:   {},
 	ArbNodeTxStreamBucket:   {},
-	ArbL1SyncBucket:         {},
+	ArbL1SyncBatch:          {},
+	ArbL1SyncMsg:            {},
+	ArbL1SyncDelayedMsg:     {},
 }
 
 var AuRaTablesCfg = TableCfg{

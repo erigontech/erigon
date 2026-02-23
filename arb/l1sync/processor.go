@@ -9,24 +9,19 @@ import (
 
 	"github.com/erigontech/erigon-lib/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/nitro-erigon/arbos/arbostypes"
 	"github.com/erigontech/nitro-erigon/arbstate"
 	"github.com/erigontech/nitro-erigon/arbstate/daprovider"
 )
 
-// DB key prefixes for ArbL1SyncBucket
+// SyncStage keys for progress tracking via SyncStageProgress table
 var (
-	progressLastBatchSeqNum = []byte("lastBatchSeqNum")
-	progressLastL1Block     = []byte("lastL1Block")
-	prefixBatchRaw          = []byte("batch")
-	prefixMsg               = []byte("msg")
-	prefixBatchMsgCount     = []byte("batchMsgCount")
-	prefixDelayedMsg        = []byte("delayed")
+	StageL1SyncBatch   stages.SyncStage = "L1SyncBatch"
+	StageL1SyncL1Block stages.SyncStage = "L1SyncL1Block"
 )
 
 // singleBatchBackend implements arbstate.InboxBackend for a single batch
-// It feeds one batch's serialized data to the InboxMultiplexer and signals
-// when the batch is fully consumed.
 type singleBatchBackend struct {
 	data                  []byte
 	blockHash             common.Hash
@@ -108,28 +103,21 @@ func (s *L1SyncService) ProcessBatch(ctx context.Context, seqNum uint64, data []
 	}
 	defer tx.Rollback()
 
-	// Store raw batch data
-	batchKey := makeBatchRawKey(seqNum)
-	if err := tx.Put(kv.ArbL1SyncBucket, batchKey, data); err != nil {
-		return fmt.Errorf("failed to store raw batch %d: %w", seqNum, err)
+	// Store raw batch data with msg count: value = uint64(msgCount) + rawData
+	batchVal := make([]byte, 8+len(data))
+	binary.BigEndian.PutUint64(batchVal[:8], uint64(len(messages)))
+	copy(batchVal[8:], data)
+	if err := tx.Put(kv.ArbL1SyncBatch, uint64Key(seqNum), batchVal); err != nil {
+		return fmt.Errorf("failed to store batch %d: %w", seqNum, err)
 	}
 
-	// Store message count for this batch
-	countKey := makeBatchMsgCountKey(seqNum)
-	countVal := make([]byte, 8)
-	binary.BigEndian.PutUint64(countVal, uint64(len(messages)))
-	if err := tx.Put(kv.ArbL1SyncBucket, countKey, countVal); err != nil {
-		return fmt.Errorf("failed to store batch msg count %d: %w", seqNum, err)
-	}
-
+	// Store decoded messages
 	for i, msg := range messages {
-		// Store decoded message
-		msgKey := makeMsgKey(seqNum, uint64(i))
 		msgBytes, err := json.Marshal(msg)
 		if err != nil {
 			return fmt.Errorf("failed to marshal message %d/%d: %w", seqNum, i, err)
 		}
-		if err := tx.Put(kv.ArbL1SyncBucket, msgKey, msgBytes); err != nil {
+		if err := tx.Put(kv.ArbL1SyncMsg, msgKey(seqNum, uint64(i)), msgBytes); err != nil {
 			return fmt.Errorf("failed to store message %d/%d: %w", seqNum, i, err)
 		}
 
@@ -142,12 +130,12 @@ func (s *L1SyncService) ProcessBatch(ctx context.Context, seqNum uint64, data []
 		// s.logger.Debug("processed message", "batchSeqNum", seqNum, "msgIdx", i, "msgNum", msgNum, "blockHash", result)
 	}
 
-	// Update progress
-	if err := putUint64(tx, progressLastBatchSeqNum, seqNum); err != nil {
-		return fmt.Errorf("failed to update lastBatchSeqNum: %w", err)
+	// Update progress via SyncStageProgress
+	if err := stages.SaveStageProgress(tx, StageL1SyncBatch, seqNum); err != nil {
+		return fmt.Errorf("failed to update L1SyncBatch progress: %w", err)
 	}
-	if err := putUint64(tx, progressLastL1Block, l1BlockNumber); err != nil {
-		return fmt.Errorf("failed to update lastL1Block: %w", err)
+	if err := stages.SaveStageProgress(tx, StageL1SyncL1Block, l1BlockNumber); err != nil {
+		return fmt.Errorf("failed to update L1SyncL1Block progress: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -162,30 +150,36 @@ func (s *L1SyncService) ProcessBatch(ctx context.Context, seqNum uint64, data []
 func (s *L1SyncService) GetProgress(ctx context.Context) (lastBatchSeqNum uint64, lastL1Block uint64, err error) {
 	err = s.db.View(ctx, func(tx kv.Tx) error {
 		var e error
-		lastBatchSeqNum, e = getUint64(tx, progressLastBatchSeqNum)
+		lastBatchSeqNum, e = stages.GetStageProgress(tx, StageL1SyncBatch)
 		if e != nil {
 			return e
 		}
-		lastL1Block, e = getUint64(tx, progressLastL1Block)
+		lastL1Block, e = stages.GetStageProgress(tx, StageL1SyncL1Block)
 		return e
 	})
 	return
 }
 
-func (s *L1SyncService) GetStoredBatch(ctx context.Context, seqNum uint64) ([]byte, error) {
-	var data []byte
-	err := s.db.View(ctx, func(tx kv.Tx) error {
-		var e error
-		data, e = tx.GetOne(kv.ArbL1SyncBucket, makeBatchRawKey(seqNum))
-		return e
+func (s *L1SyncService) GetStoredBatch(ctx context.Context, seqNum uint64) (data []byte, msgCount uint64, err error) {
+	err = s.db.View(ctx, func(tx kv.Tx) error {
+		val, e := tx.GetOne(kv.ArbL1SyncBatch, uint64Key(seqNum))
+		if e != nil {
+			return e
+		}
+		if val == nil || len(val) < 8 {
+			return fmt.Errorf("batch %d not found", seqNum)
+		}
+		msgCount = binary.BigEndian.Uint64(val[:8])
+		data = val[8:]
+		return nil
 	})
-	return data, err
+	return
 }
 
 func (s *L1SyncService) GetStoredMessage(ctx context.Context, seqNum uint64, msgIdx uint64) (*arbostypes.MessageWithMetadata, error) {
 	var msg arbostypes.MessageWithMetadata
 	err := s.db.View(ctx, func(tx kv.Tx) error {
-		data, e := tx.GetOne(kv.ArbL1SyncBucket, makeMsgKey(seqNum, msgIdx))
+		data, e := tx.GetOne(kv.ArbL1SyncMsg, msgKey(seqNum, msgIdx))
 		if e != nil {
 			return e
 		}
@@ -200,23 +194,18 @@ func (s *L1SyncService) GetStoredMessage(ctx context.Context, seqNum uint64, msg
 	return &msg, nil
 }
 
-func makeDelayedMsgKey(seqNum uint64) []byte {
-	key := make([]byte, 0, len(prefixDelayedMsg)+8)
-	key = append(key, prefixDelayedMsg...)
-	key = appendUint64(key, seqNum)
-	return key
-}
+// --- delayed message helpers ---
 
 func putDelayedMessage(tx kv.RwTx, seqNum uint64, msg *arbostypes.L1IncomingMessage) error {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("failed to marshal delayed message %d: %w", seqNum, err)
 	}
-	return tx.Put(kv.ArbL1SyncBucket, makeDelayedMsgKey(seqNum), data)
+	return tx.Put(kv.ArbL1SyncDelayedMsg, uint64Key(seqNum), data)
 }
 
 func getDelayedMessage(tx kv.Tx, seqNum uint64) (*arbostypes.L1IncomingMessage, error) {
-	data, err := tx.GetOne(kv.ArbL1SyncBucket, makeDelayedMsgKey(seqNum))
+	data, err := tx.GetOne(kv.ArbL1SyncDelayedMsg, uint64Key(seqNum))
 	if err != nil {
 		return nil, err
 	}
@@ -230,48 +219,17 @@ func getDelayedMessage(tx kv.Tx, seqNum uint64) (*arbostypes.L1IncomingMessage, 
 	return &msg, nil
 }
 
-func makeBatchRawKey(seqNum uint64) []byte {
-	key := make([]byte, 0, len(prefixBatchRaw)+8)
-	key = append(key, prefixBatchRaw...)
-	key = appendUint64(key, seqNum)
-	return key
-}
+// --- key helpers ---
 
-func makeBatchMsgCountKey(seqNum uint64) []byte {
-	key := make([]byte, 0, len(prefixBatchMsgCount)+8)
-	key = append(key, prefixBatchMsgCount...)
-	key = appendUint64(key, seqNum)
-	return key
-}
-
-func makeMsgKey(seqNum uint64, msgIdx uint64) []byte {
-	key := make([]byte, 0, len(prefixMsg)+8+8)
-	key = append(key, prefixMsg...)
-	key = appendUint64(key, seqNum)
-	key = appendUint64(key, msgIdx)
-	return key
-}
-
-func appendUint64(buf []byte, v uint64) []byte {
+func uint64Key(v uint64) []byte {
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, v)
-	return append(buf, b...)
+	return b
 }
 
-func putUint64(tx kv.RwTx, key []byte, val uint64) error {
-	buf := make([]byte, 8)
-	binary.BigEndian.PutUint64(buf, val)
-	return tx.Put(kv.ArbL1SyncBucket, key, buf)
+func msgKey(batchSeqNum uint64, msgIdx uint64) []byte {
+	b := make([]byte, 16)
+	binary.BigEndian.PutUint64(b[:8], batchSeqNum)
+	binary.BigEndian.PutUint64(b[8:], msgIdx)
+	return b
 }
-
-func getUint64(tx kv.Tx, key []byte) (uint64, error) {
-	data, err := tx.GetOne(kv.ArbL1SyncBucket, key)
-	if err != nil {
-		return 0, err
-	}
-	if data == nil || len(data) < 8 {
-		return 0, nil
-	}
-	return binary.BigEndian.Uint64(data), nil
-}
-
