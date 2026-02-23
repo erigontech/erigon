@@ -695,6 +695,6 @@ func createMask(destID enode.ID, iv [16]byte) cipher.Stream {
 func applyMasking(destID enode.ID, iv [16]byte, packet []byte) []byte {
 	masked := packet[sizeofMaskingIV:]
 	mask := createMask(destID, iv)
-	mask.XORKeyStream(masked[:], masked[:])
+	mask.XORKeyStream(masked, masked)
 	return packet
 }
