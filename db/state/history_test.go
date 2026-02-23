@@ -1882,6 +1882,64 @@ func TestHistory_OpenFolder(t *testing.T) {
 	h.Close()
 }
 
+// filledHistoryPaged is like filledHistory but configures a small page size
+// on the History to ensure merged .v files use page-level compression,
+// exercising the buildVIFromPages code path.
+func filledHistoryPaged(tb testing.TB, largeValues bool, pageSize int, logger log.Logger) (kv.RwDB, *History, uint64) {
+	tb.Helper()
+	db, h := testDbAndHistory(tb, largeValues, logger)
+	h.CompressorCfg = h.CompressorCfg.WithValuesOnCompressedPage(pageSize)
+	h.HistoryValuesOnCompressedPage = pageSize
+
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(tb, err)
+	defer tx.Rollback()
+	hc := h.BeginFilesRo()
+	defer hc.Close()
+	writer := hc.NewWriter()
+	defer writer.close()
+
+	txs := uint64(1000)
+	var prevVal [32][]byte
+	var f flusher
+	for txNum := uint64(1); txNum <= txs; txNum++ {
+		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
+			if txNum%keyNum == 0 {
+				valNum := txNum / keyNum
+				var k [8]byte
+				var v [8]byte
+				binary.BigEndian.PutUint64(k[:], keyNum)
+				binary.BigEndian.PutUint64(v[:], valNum)
+				k[0] = 1   //mark key to simplify debug
+				v[0] = 255 //mark value to simplify debug
+				err = writer.AddPrevValue(k[:], txNum, prevVal[keyNum])
+				require.NoError(tb, err)
+				prevVal[keyNum] = v[:]
+			}
+		}
+		if f != nil {
+			err = f.Flush(ctx, tx)
+			require.NoError(tb, err)
+			f = nil
+		}
+		if txNum%10 == 0 {
+			f = writer
+			writer = hc.NewWriter()
+		}
+	}
+	if f != nil {
+		err = f.Flush(ctx, tx)
+		require.NoError(tb, err)
+	}
+	err = writer.Flush(ctx, tx)
+	require.NoError(tb, err)
+	err = tx.Commit()
+	require.NoError(tb, err)
+
+	return db, h, txs
+}
+
 // TestHistoryBuildVIWithPageCompression tests that the .vi index is built
 // correctly when the .v file uses page-level compression (multiple key-value
 // pairs per page). This is a regression test for a bug where buildVI
@@ -1896,79 +1954,8 @@ func TestHistoryBuildVIWithPageCompression(t *testing.T) {
 	t.Parallel()
 
 	logger := log.New()
-	test := func(t *testing.T, largeValues bool) {
+	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 		t.Helper()
-		require := require.New(t)
-
-		// Setup with a small page size (4) to ensure multiple pages per
-		// merged file, exercising the buildVIFromPages code path.
-		dirs := datadir.New(t.TempDir())
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
-		t.Cleanup(db.Close)
-
-		salt := uint32(1)
-		cfg := statecfg.Schema.AccountsDomain
-		cfg.Hist.IiCfg.Accessors = statecfg.AccessorHashMap
-		cfg.Hist.HistoryLargeValues = largeValues
-		cfg.Hist.IiCfg.Compression = seg.CompressNone
-		cfg.Hist.Compression = seg.CompressNone
-		cfg.Hist.CompressorCfg = cfg.Hist.CompressorCfg.WithValuesOnCompressedPage(4)
-		cfg.Hist.HistoryValuesOnCompressedPage = 4
-
-		aggregationStep := uint64(16)
-		h, err := NewHistory(cfg.Hist, aggregationStep, config3.DefaultStepsInFrozenFile, dirs, logger)
-		require.NoError(err)
-		t.Cleanup(h.Close)
-		h.salt.Store(&salt)
-		h.DisableFsync()
-
-		// Fill with data (same pattern as filledHistory)
-		ctx := context.Background()
-		tx, err := db.BeginRw(ctx)
-		require.NoError(err)
-		defer tx.Rollback()
-		hc := h.BeginFilesRo()
-		defer hc.Close()
-		writer := hc.NewWriter()
-		defer writer.close()
-
-		txs := uint64(1000)
-		var prevVal [32][]byte
-		var f flusher
-		for txNum := uint64(1); txNum <= txs; txNum++ {
-			for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
-				if txNum%keyNum == 0 {
-					valNum := txNum / keyNum
-					var k [8]byte
-					var v [8]byte
-					binary.BigEndian.PutUint64(k[:], keyNum)
-					binary.BigEndian.PutUint64(v[:], valNum)
-					k[0] = 1   //mark key to simplify debug
-					v[0] = 255 //mark value to simplify debug
-					err = writer.AddPrevValue(k[:], txNum, prevVal[keyNum])
-					require.NoError(err)
-					prevVal[keyNum] = v[:]
-				}
-			}
-			if f != nil {
-				err = f.Flush(ctx, tx)
-				require.NoError(err)
-				f = nil
-			}
-			if txNum%10 == 0 {
-				f = writer
-				writer = hc.NewWriter()
-			}
-		}
-		if f != nil {
-			err = f.Flush(ctx, tx)
-			require.NoError(err)
-		}
-		err = writer.Flush(ctx, tx)
-		require.NoError(err)
-		err = tx.Commit()
-		require.NoError(err)
-
 		// Collate, build files, and merge — this triggers buildVIFromPages
 		// on the merged .v files which now have page compression enabled.
 		collateAndMergeHistory(t, db, h, txs, true)
@@ -1979,6 +1966,12 @@ func TestHistoryBuildVIWithPageCompression(t *testing.T) {
 		checkHistoryHistory(t, h, txs)
 	}
 
-	t.Run("large_values", func(t *testing.T) { test(t, true) })
-	t.Run("small_values", func(t *testing.T) { test(t, false) })
+	t.Run("large_values", func(t *testing.T) {
+		db, h, txs := filledHistoryPaged(t, true, 4, logger)
+		test(t, h, db, txs)
+	})
+	t.Run("small_values", func(t *testing.T) {
+		db, h, txs := filledHistoryPaged(t, false, 4, logger)
+		test(t, h, db, txs)
+	})
 }
