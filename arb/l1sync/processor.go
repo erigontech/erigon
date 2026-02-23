@@ -21,6 +21,7 @@ var (
 	prefixBatchRaw          = []byte("batch")
 	prefixMsg               = []byte("msg")
 	prefixBatchMsgCount     = []byte("batchMsgCount")
+	prefixDelayedMsg        = []byte("delayed")
 )
 
 // singleBatchBackend implements arbstate.InboxBackend for a single batch
@@ -32,7 +33,7 @@ type singleBatchBackend struct {
 	seqNum                uint64
 	consumed              bool
 	positionWithinMessage uint64
-	delayedMessages       map[uint64]*arbostypes.L1IncomingMessage
+	db                    kv.RwDB
 }
 
 func (b *singleBatchBackend) PeekSequencerInbox() ([]byte, common.Hash, error) {
@@ -59,23 +60,25 @@ func (b *singleBatchBackend) SetPositionWithinMessage(pos uint64) {
 }
 
 func (b *singleBatchBackend) ReadDelayedInbox(seqNum uint64) (*arbostypes.L1IncomingMessage, error) {
-	if b.delayedMessages == nil {
+	if b.db == nil {
 		return nil, fmt.Errorf("delayed inbox not available (requested seqNum %d)", seqNum)
 	}
-	msg, ok := b.delayedMessages[seqNum]
-	if !ok {
-		return nil, fmt.Errorf("delayed message %d not found", seqNum)
-	}
-	return msg, nil
+	var msg *arbostypes.L1IncomingMessage
+	err := b.db.View(context.Background(), func(tx kv.Tx) error {
+		var e error
+		msg, e = getDelayedMessage(tx, seqNum)
+		return e
+	})
+	return msg, err
 }
 
 // UnpackBatch takes serialized batch data and extracts all MessageWithMetadata from it
-func UnpackBatch(ctx context.Context, seqNum uint64, data []byte, blockHash common.Hash, dapReaders []daprovider.Reader, delayedMessages map[uint64]*arbostypes.L1IncomingMessage) ([]*arbostypes.MessageWithMetadata, error) {
+func UnpackBatch(ctx context.Context, seqNum uint64, data []byte, blockHash common.Hash, dapReaders []daprovider.Reader, db kv.RwDB) ([]*arbostypes.MessageWithMetadata, error) {
 	backend := &singleBatchBackend{
-		data:            data,
-		blockHash:       blockHash,
-		seqNum:          seqNum,
-		delayedMessages: delayedMessages,
+		data:      data,
+		blockHash: blockHash,
+		seqNum:    seqNum,
+		db:        db,
 	}
 	multiplexer := arbstate.NewInboxMultiplexer(backend, 0, dapReaders, daprovider.KeysetValidate)
 
@@ -92,7 +95,7 @@ func UnpackBatch(ctx context.Context, seqNum uint64, data []byte, blockHash comm
 
 // ProcessBatch unpacks a batch into messages, stores everything in DB, and executes L2 blocks via DigestMessage
 func (s *L1SyncService) ProcessBatch(ctx context.Context, seqNum uint64, data []byte, blockHash common.Hash, l1BlockNumber uint64) error {
-	messages, err := UnpackBatch(ctx, seqNum, data, blockHash, s.dapReaders, s.delayedMessages)
+	messages, err := UnpackBatch(ctx, seqNum, data, blockHash, s.dapReaders, s.db)
 	if err != nil {
 		return err
 	}
@@ -193,6 +196,36 @@ func (s *L1SyncService) GetStoredMessage(ctx context.Context, seqNum uint64, msg
 	})
 	if err != nil {
 		return nil, err
+	}
+	return &msg, nil
+}
+
+func makeDelayedMsgKey(seqNum uint64) []byte {
+	key := make([]byte, 0, len(prefixDelayedMsg)+8)
+	key = append(key, prefixDelayedMsg...)
+	key = appendUint64(key, seqNum)
+	return key
+}
+
+func putDelayedMessage(tx kv.RwTx, seqNum uint64, msg *arbostypes.L1IncomingMessage) error {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal delayed message %d: %w", seqNum, err)
+	}
+	return tx.Put(kv.ArbL1SyncBucket, makeDelayedMsgKey(seqNum), data)
+}
+
+func getDelayedMessage(tx kv.Tx, seqNum uint64) (*arbostypes.L1IncomingMessage, error) {
+	data, err := tx.GetOne(kv.ArbL1SyncBucket, makeDelayedMsgKey(seqNum))
+	if err != nil {
+		return nil, err
+	}
+	if data == nil {
+		return nil, fmt.Errorf("delayed message %d not found in DB", seqNum)
+	}
+	var msg arbostypes.L1IncomingMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal delayed message %d: %w", seqNum, err)
 	}
 	return &msg, nil
 }

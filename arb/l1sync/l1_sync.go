@@ -9,7 +9,6 @@ import (
 	"github.com/erigontech/erigon-lib/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/nitro-erigon/arbnode"
-	"github.com/erigontech/nitro-erigon/arbos/arbostypes"
 	"github.com/erigontech/nitro-erigon/arbstate/daprovider"
 	"github.com/erigontech/nitro-erigon/execution"
 	"github.com/erigontech/nitro-erigon/execution/erigon/ethclient"
@@ -25,9 +24,6 @@ type L1SyncService struct {
 	exec           execution.ExecutionSequencer
 	db             kv.RwDB
 	logger         log.Logger
-
-	// delayedMessages accumulates delayed messages fetched from L1 across the entire sync range.
-	delayedMessages map[uint64]*arbostypes.L1IncomingMessage
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -57,20 +53,19 @@ func New(
 	}
 
 	return &L1SyncService{
-		config:          config,
-		sequencerInbox:  seqInbox,
-		delayedBridge:   delayedBridge,
-		l1Client:        l1Client,
-		dapReaders:      []daprovider.Reader{daprovider.NewReaderForBlobReader(blobClient)},
-		exec:            exec,
-		db:              db,
-		logger:          log.New("module", "l1sync"),
-		delayedMessages: make(map[uint64]*arbostypes.L1IncomingMessage),
+		config:         config,
+		sequencerInbox: seqInbox,
+		delayedBridge:  delayedBridge,
+		l1Client:       l1Client,
+		dapReaders:     []daprovider.Reader{daprovider.NewReaderForBlobReader(blobClient)},
+		exec:           exec,
+		db:             db,
+		logger:         log.New("module", "l1sync"),
 	}, nil
 }
 
 // fetchDelayedMessagesInRange fetches delayed messages from L1 for the given block range
-// and merges them into s.delayedMessages.
+// and stores them in DB.
 func (s *L1SyncService) fetchDelayedMessagesInRange(ctx context.Context, fromL1Block, toL1Block uint64) error {
 	from := new(big.Int).SetUint64(fromL1Block)
 	to := new(big.Int).SetUint64(toL1Block)
@@ -78,16 +73,30 @@ func (s *L1SyncService) fetchDelayedMessagesInRange(ctx context.Context, fromL1B
 	if err != nil {
 		return fmt.Errorf("failed to fetch delayed messages in L1 range [%d, %d]: %w", fromL1Block, toL1Block, err)
 	}
+	if len(delayedMsgs) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.BeginRw(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin DB transaction for delayed messages: %w", err)
+	}
+	defer tx.Rollback()
+
 	for _, dm := range delayedMsgs {
 		seqNum, err := dm.Message.Header.SeqNum()
 		if err != nil {
 			return fmt.Errorf("failed to get delayed message seqNum: %w", err)
 		}
-		s.delayedMessages[seqNum] = dm.Message
+		if err := putDelayedMessage(tx, seqNum, dm.Message); err != nil {
+			return err
+		}
 	}
-	if len(delayedMsgs) > 0 {
-		s.logger.Info("fetched delayed messages", "count", len(delayedMsgs), "fromL1Block", fromL1Block, "toL1Block", toL1Block, "totalCached", len(s.delayedMessages))
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit delayed messages: %w", err)
 	}
+	s.logger.Info("stored delayed messages", "count", len(delayedMsgs), "fromL1Block", fromL1Block, "toL1Block", toL1Block)
 	return nil
 }
 
