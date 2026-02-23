@@ -1057,12 +1057,12 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 			if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
 				execResult := result.ExecutionResult
 				// Use a versionedStateReader to get the coinbase balance
-			// deterministically from the block's version map (which
-			// includes fee-calc writes from prior txs) instead of
-			// reading from pe.rs whose content depends on apply-loop
-			// timing.
-			cbReader := state.NewVersionedStateReader(txIndex, nil, vm, stateReader)
-			coinbase, err := cbReader.ReadAccountData(result.Coinbase) // to generate logs we want the initial balance
+				// deterministically from the block's version map (which
+				// includes fee-calc writes from prior txs) instead of
+				// reading from pe.rs whose content depends on apply-loop
+				// timing.
+				cbReader := state.NewVersionedStateReader(txIndex, nil, vm, stateReader)
+				coinbase, err := cbReader.ReadAccountData(result.Coinbase) // to generate logs we want the initial balance
 
 				if err != nil {
 					return nil, nil, nil, err
