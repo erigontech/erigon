@@ -389,10 +389,10 @@ type Enums struct {
 }
 
 const MinCoreEnum = 1
-const MinBorEnum = 5
+const MinBorEnum = 11
 const MinCaplinEnum = 9
 
-const MaxEnum = 12
+const MaxEnum = 15
 
 var CaplinEnums = struct {
 	Enums
