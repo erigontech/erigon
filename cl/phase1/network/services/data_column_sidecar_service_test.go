@@ -135,10 +135,6 @@ func createMockDataColumnSidecar(slot uint64, index uint64) *cltypes.DataColumnS
 }
 
 func TestDataColumnSidecarService(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-
 	suite.Run(t, &dataColumnSidecarTestSuite{})
 }
 

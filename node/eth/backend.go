@@ -79,6 +79,7 @@ import (
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/builder/builderstages"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi"
@@ -162,7 +163,7 @@ type Ethereum struct {
 	genesisBlock *types.Block
 	genesisHash  common.Hash
 
-	eth1ExecutionServer *execmodule.EthereumExecutionModule
+	execModule *execmodule.ExecModule
 
 	ethBackendRPC       *privateapi2.EthBackendServer
 	ethRpcClient        rpchelper.ApiBackend
@@ -342,7 +343,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		sentryCancel:              ctxCancel,
 		config:                    config,
 		networkID:                 config.NetworkID,
-		etherbase:                 config.Miner.Etherbase,
+		etherbase:                 config.Builder.Etherbase,
 		waitForStageLoopStop:      make(chan struct{}),
 		blockBuilderNotifyNewTxns: make(chan struct{}, 1),
 		miningSealingQuit:         make(chan struct{}),
@@ -616,7 +617,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger, poshttp.WithApiVersioner(ctx))
 			bridgeClient = bridge.NewHttpClient(config.HeimdallURL, logger, poshttp.WithApiVersioner(ctx))
 		} else {
-			heimdallClient = heimdall.NewIdleClient(config.Miner)
+			heimdallClient = heimdall.NewIdleClient(config.Builder)
 			bridgeClient = bridge.NewIdleClient()
 		}
 		borConfig := rulesConfig.(*borcfg.BorConfig)
@@ -657,7 +658,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	inMemoryExecution := func(sd *execctx.SharedDomains, tx kv.TemporalRwTx, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {
 		terseLogger := log.New()
-		terseLogger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
+		terseLogger.SetHandler(log.LvlFilterHandler(log.Lvl(dbg.ExecTerseLoggerLevel), log.StderrHandler))
 		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
 		stateSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient,
 			dirs, notifications, blockReader, blockWriter, backend.silkworm, terseLogger)
@@ -891,17 +892,17 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		txnProvider = backend.shutterPool
 	}
 
-	miner := stagedsync.NewMiningState(&config.Miner)
+	miner := builderstages.NewBuilderState(&config.Builder)
 	backend.pendingBlocks = miner.PendingResultCh
 	// proof-of-stake mining
 	assembleBlockPOS := func(param *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
-		miningStatePos := stagedsync.NewMiningState(&config.Miner)
-		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
+		builderStatePos := builderstages.NewBuilderState(&config.Builder)
+		builderStatePos.BuilderConfig.Etherbase = param.SuggestedFeeRecipient
 		proposingSync := stagedsync.New(
 			config.Sync,
-			stagedsync.MiningStages(
+			builderstages.BuilderStages(
 				backend.sentryCtx,
-				stagedsync.StageMiningCreateBlockCfg(miningStatePos, backend.chainConfig, backend.engine, param, backend.blockReader),
+				builderstages.StageBuilderCreateBlockCfg(builderStatePos, backend.chainConfig, backend.engine, param, backend.blockReader),
 				stagedsync.StageExecuteBlocksCfg(
 					backend.chainDB,
 					config.Prune,
@@ -921,11 +922,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 					config.ExperimentalBAL,
 				),
 				stagedsync.StageSendersCfg(chainConfig, config.Sync, false /* badBlockHalt */, dirs.Tmp, config.Prune, blockReader, backend.sentriesClient.Hd),
-				stagedsync.StageMiningExecCfg(miningStatePos, backend.notifications.Events, backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, txnProvider, blockReader),
-				stagedsync.StageMiningFinishCfg(backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
+				builderstages.StageBuilderExecCfg(builderStatePos, backend.notifications.Events, backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, txnProvider, blockReader),
+				builderstages.StageBuilderFinishCfg(backend.chainConfig, backend.engine, builderStatePos, backend.miningSealingQuit, backend.blockReader, latestBlockBuiltStore),
 			),
-			stagedsync.MiningUnwindOrder,
-			stagedsync.MiningPruneOrder,
+			builderstages.BuilderUnwindOrder,
+			builderstages.BuilderPruneOrder,
 			logger,
 			stages.ModeBlockProduction,
 		)
@@ -933,7 +934,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if err := stageloop.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir, logger); err != nil {
 			return nil, err
 		}
-		block := <-miningStatePos.MiningResultCh
+		block := <-builderStatePos.BuilderResultCh
 		return block, nil
 	}
 
@@ -1015,12 +1016,31 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 	// for polygon, we only need to download snapshots on start so that all driver components are correctly initialised before any block execution begins
 	onlySnapDownloadOnStart := chainConfig.Bor != nil
-	backend.eth1ExecutionServer = execmodule.NewEthereumExecutionModule(ctx, blockReader, backend.chainDB, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.RecentReceipts, execmoduleCache, backend.notifications.StateChangesConsumer, logger, backend.engine, config.Sync, config.FcuBackgroundPrune, config.FcuBackgroundCommit, onlySnapDownloadOnStart)
-	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
+	backend.execModule = execmodule.NewExecModule(
+		ctx,
+		blockReader,
+		backend.chainDB,
+		backend.pipelineStagedSync,
+		backend.forkValidator,
+		chainConfig,
+		assembleBlockPOS,
+		hook,
+		backend.notifications.Accumulator,
+		backend.notifications.RecentReceipts,
+		execmoduleCache,
+		backend.notifications.StateChangesConsumer,
+		logger,
+		backend.engine,
+		config.Sync,
+		config.FcuBackgroundPrune,
+		config.FcuBackgroundCommit,
+		onlySnapDownloadOnStart,
+	)
+	executionRpc := direct.NewExecutionClientDirect(backend.execModule)
 
 	var executionEngine executionclient.ExecutionEngine
 
-	executionEngine, err = executionclient.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chainConfig, executionRpc, uint64(config.FcuTimeout.Milliseconds())), txPoolRpcClient)
+	executionEngine, err = executionclient.NewExecutionClientDirect(chainreader.NewChainReaderEth1(chainConfig, executionRpc, config.FcuTimeout), txPoolRpcClient)
 	if err != nil {
 		return nil, err
 	}
@@ -1040,7 +1060,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			bbd,
 		),
 		config.InternalCL && !config.CaplinConfig.EnableEngineAPI, // If the chain supports the engine API, then we should not make the server fail.
-		config.Miner.EnabledPOS,
+		config.Builder.EnabledPOS,
 		!config.PolygonPosSingleSlotFinality,
 		backend.txPoolRpcClient,
 		config.FcuTimeout,
@@ -1516,13 +1536,13 @@ func (s *Ethereum) Start() error {
 	if chainspec.IsChainPoS(s.chainConfig, currentTDProvider) {
 		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.pipelineStagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // TODO: Ethereum.Stop should wait for execution_server shutdown
-		go s.eth1ExecutionServer.Start(s.sentryCtx, hook)
+		go s.execModule.Start(s.sentryCtx, hook)
 	} else if s.chainConfig.Bor != nil {
 		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		s.waitForStageLoopStop = nil // Shutdown is handled by context
 		s.bgComponentsEg.Go(func() error {
 			defer s.logger.Info("[polygon.sync] exeuction server start goroutine completed")
-			s.eth1ExecutionServer.Start(s.sentryCtx, hook)
+			s.execModule.Start(s.sentryCtx, hook)
 			return nil
 		})
 		s.bgComponentsEg.Go(func() error {
@@ -1682,8 +1702,8 @@ func (s *Ethereum) TxpoolServer() txpoolproto.TxpoolServer {
 	return s.txPoolGrpcServer
 }
 
-func (s *Ethereum) ExecutionModule() *execmodule.EthereumExecutionModule {
-	return s.eth1ExecutionServer
+func (s *Ethereum) ExecutionModule() *execmodule.ExecModule {
+	return s.execModule
 }
 
 // RemoveContents is like dir.RemoveAll, but preserve dir itself
@@ -1747,9 +1767,9 @@ func (s *Ethereum) DataDir() string {
 }
 
 func setDefaultMinerGasLimit(config *ethconfig.Config, chainConfig *chain.Config) {
-	if config.Miner.GasLimit == nil {
+	if config.Builder.GasLimit == nil {
 		gasLimit := ethconfig.DefaultBlockGasLimitByChain(chainConfig)
-		config.Miner.GasLimit = &gasLimit
+		config.Builder.GasLimit = &gasLimit
 	}
 }
 

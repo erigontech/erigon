@@ -229,30 +229,30 @@ func newSimulator(
 // Note: this can modify BlockOverrides objects in simulated blocks.
 func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]SimulatedBlock, error) {
 	sanitizedBlocks := make([]SimulatedBlock, 0, len(blocks))
-	prevNumber := s.base.Number
+	prevNumber := s.base.Number.Uint64()
 	prevTimestamp := s.base.Time
 	for _, block := range blocks {
 		if block.BlockOverrides == nil {
 			block.BlockOverrides = &transactions.BlockOverrides{}
 		}
 		if block.BlockOverrides.BlockNumber == nil {
-			nextNumber := prevNumber.Uint64() + 1
+			nextNumber := prevNumber + 1
 			block.BlockOverrides.BlockNumber = (*hexutil.Uint64)(&nextNumber)
 		}
-		blockNumber := new(big.Int).SetUint64(block.BlockOverrides.BlockNumber.Uint64())
-		diff := new(big.Int).Sub(blockNumber, prevNumber)
-		if diff.Cmp(common.Big0) <= 0 {
+		blockNumber := block.BlockOverrides.BlockNumber.Uint64()
+		if blockNumber <= prevNumber {
 			return nil, invalidBlockNumberError(fmt.Sprintf("block numbers must be in order: %d <= %d", blockNumber, prevNumber))
 		}
-		if total := new(big.Int).Sub(blockNumber, s.base.Number); total.Cmp(big.NewInt(maxSimulateBlocks)) > 0 {
+		if total := blockNumber - s.base.Number.Uint64(); total > maxSimulateBlocks {
 			return nil, clientLimitExceededError(fmt.Sprintf("too many blocks: %d > %d", total, maxSimulateBlocks))
 		}
-		if diff.Cmp(big.NewInt(1)) > 0 {
+		diff := blockNumber - prevNumber
+		if diff > 1 {
 			// Fill the gap with empty blocks.
-			gap := new(big.Int).Sub(diff, big.NewInt(1))
+			gap := diff - 1
 			// Assign block number to the empty blocks.
-			for i := uint64(0); i < gap.Uint64(); i++ {
-				n := new(big.Int).Add(prevNumber, big.NewInt(int64(i+1))).Uint64()
+			for i := uint64(0); i < gap; i++ {
+				n := prevNumber + i + 1
 				t := prevTimestamp + timestampIncrement
 				b := SimulatedBlock{
 					BlockOverrides: &transactions.BlockOverrides{
@@ -326,7 +326,7 @@ func (s *simulator) sanitizeCall(
 	args *ethapi.CallArgs,
 	intraBlockState *state.IntraBlockState,
 	blockContext *evmtypes.BlockContext,
-	baseFee *big.Int,
+	baseFee *uint256.Int,
 	gasUsed uint64,
 	globalGasCap uint64,
 ) error {
@@ -476,7 +476,7 @@ func (s *simulator) simulateBlock(
 			if s.validation {
 				header.BaseFee = misc.CalcBaseFee(s.chainConfig, parent)
 			} else {
-				header.BaseFee = big.NewInt(0)
+				header.BaseFee = uint256.NewInt(0)
 			}
 		}
 	}
@@ -501,7 +501,6 @@ func (s *simulator) simulateBlock(
 	if err != nil {
 		return nil, nil, err
 	}
-	sharedDomains.SetBlockNum(blockNumber)
 	sharedDomains.SetTxNum(minTxNum)
 
 	var stateReader state.StateReader
@@ -564,7 +563,7 @@ func (s *simulator) simulateBlock(
 		return nil, nil, err
 	}
 
-	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), sharedDomains.TxNum())
+	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), minTxNum)
 	callResults := make([]CallResult, 0, len(bsc.Calls))
 	for callIndex, call := range bsc.Calls {
 		callResult, txn, receipt, err := s.simulateCall(ctx, blockCtx, intraBlockState, callIndex, &call, header,
@@ -604,17 +603,19 @@ func (s *simulator) simulateBlock(
 
 	// Compute the state root for execution on the latest state and also on the historical state if commitment history is present.
 	if latest || s.commitmentHistory {
+		commitTxNum := minTxNum
 		if !latest {
 			// Restore the commitment state at the start of the simulated block using historical state reader.
 			sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, minTxNum)
-			if err := sharedDomains.SeekCommitment(context.Background(), tx); err != nil {
+			commitTxNum, _, err = sharedDomains.SeekCommitment(context.Background(), tx)
+			if err != nil {
 				return nil, nil, err
 			}
 			// Change the state reader to a commitment-only history reader that reads non-commitment domains from the latest state.
 			txNum := minTxNum + 1 + uint64(len(bsc.Calls))
 			sharedDomains.GetCommitmentContext().SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains, txNum+1))
 		}
-		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNumber, sharedDomains.TxNum(), "eth_simulateV1", nil)
+		stateRoot, err := sharedDomains.ComputeCommitment(ctx, tx, false, blockNumber, commitTxNum, "eth_simulateV1", nil)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -709,7 +710,7 @@ func (s *simulator) simulateCall(
 		return nil, nil, nil, fmt.Errorf("execution aborted (timeout = %v)", s.evmCallTimeout)
 	}
 	*cumulativeGasUsed += result.ReceiptGasUsed
-	receipt := protocol.MakeReceipt(header.Number, common.Hash{}, msg, txn, *cumulativeGasUsed, result, intraBlockState, evm)
+	receipt := protocol.MakeReceipt(&header.Number, common.Hash{}, msg, txn, *cumulativeGasUsed, result, intraBlockState, evm)
 	*cumulativeBlobGasUsed += receipt.BlobGasUsed
 
 	var logs []*types.Log

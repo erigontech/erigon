@@ -76,7 +76,7 @@ var (
 
 	PruneModeFlag = cli.StringFlag{
 		Name: "prune.mode",
-		Usage: `Choose a pruning preset to run onto. Available values: "full", "archive", "minimal", "blocks".
+		Usage: `Choose a pruning preset to run on. Available values: "full", "archive", "minimal", "blocks".
 				full: Keep only necessary blocks and latest state,
 				blocks: Keep all blocks but not the state history,
 				archive: Keep the entire state history and all blocks,
@@ -459,6 +459,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		Feecap:              ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
 		MaxTraces:           ctx.Uint64(utils.TraceMaxtracesFlag.Name),
 		TraceCompatibility:  ctx.Bool(utils.RpcTraceCompatFlag.Name),
+		GethCompatibility:   ctx.Bool(utils.RpcGethCompatFlag.Name),
 		BatchLimit:          ctx.Int(utils.RpcBatchLimit.Name),
 		ReturnDataLimit:     ctx.Int(utils.RpcReturnDataLimit.Name),
 		AllowUnprotectedTxs: ctx.Bool(utils.AllowUnprotectedTxs.Name),

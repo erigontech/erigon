@@ -31,8 +31,8 @@ import (
 	"strings"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -114,12 +114,12 @@ type stTransaction struct {
 
 type stEnv struct {
 	Coinbase      common.Address `json:"currentCoinbase"   gencodec:"required"`
-	Difficulty    *big.Int       `json:"currentDifficulty" gencodec:"required"`
-	Random        *big.Int       `json:"currentRandom"     gencodec:"optional"`
+	Difficulty    *uint256.Int   `json:"currentDifficulty" gencodec:"required"`
+	Random        *uint256.Int   `json:"currentRandom"     gencodec:"optional"`
 	GasLimit      uint64         `json:"currentGasLimit"   gencodec:"required"`
 	Number        uint64         `json:"currentNumber"     gencodec:"required"`
 	Timestamp     uint64         `json:"currentTimestamp"  gencodec:"required"`
-	BaseFee       *big.Int       `json:"currentBaseFee"    gencodec:"optional"`
+	BaseFee       *uint256.Int   `json:"currentBaseFee"    gencodec:"optional"`
 	ExcessBlobGas *uint64        `json:"currentExcessBlobGas" gencodec:"optional"`
 }
 
@@ -224,13 +224,13 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	w := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), writeBlockNr)
 	statedb := state.New(r)
 
-	var baseFee *big.Int
+	var baseFee *uint256.Int
 	if config.IsLondon(0) {
 		baseFee = t.Json.Env.BaseFee
 		if baseFee == nil {
 			// Retesteth uses `0x10` for genesis baseFee. Therefore, it defaults to
 			// parent - 2 : 0xa as the basefee for 'this' context.
-			baseFee = big.NewInt(0x0a)
+			baseFee = uint256.NewInt(0x0a)
 		}
 	}
 	post := t.Json.Post[subtest.Fork][subtest.Index]
@@ -247,16 +247,15 @@ func (t *StateTest) RunNoVerify(tb testing.TB, tx kv.TemporalRwTx, subtest State
 	context := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, nil), nil, accounts.InternAddress(t.Json.Env.Coinbase), config)
 	context.GetHash = vmTestBlockHash
 	if baseFee != nil {
-		context.BaseFee = uint256.Int{}
-		context.BaseFee.SetFromBig(baseFee)
+		context.BaseFee.Set(baseFee)
 	}
 	if t.Json.Env.Difficulty != nil {
-		context.Difficulty = new(big.Int).Set(t.Json.Env.Difficulty)
+		context.Difficulty.Set(t.Json.Env.Difficulty)
 	}
 	if config.IsLondon(0) && t.Json.Env.Random != nil {
-		rnd := common.BigToHash(t.Json.Env.Random)
+		rnd := common.Hash(t.Json.Env.Random.Bytes32())
 		context.PrevRanDao = &rnd
-		context.Difficulty = big.NewInt(0)
+		context.Difficulty.Clear()
 	}
 	if config.IsCancun(block.Time()) && t.Json.Env.ExcessBlobGas != nil {
 		context.BlobBaseFee, err = misc.GetBlobGasPrice(config, *t.Json.Env.ExcessBlobGas, header.Time)
@@ -330,6 +329,10 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 		return nil, err
 	}
 	defer domains.Close()
+	latestTxNum, latestBlockNum, err := domains.SeekCommitment(context.Background(), tx)
+	if err != nil {
+		return nil, err
+	}
 
 	w := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), blockNr-1)
 
@@ -341,7 +344,7 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 		return nil, err
 	}
 
-	_, err = domains.ComputeCommitment(context.Background(), tx, true, domains.BlockNum(), domains.TxNum(), "flush-commitment", nil)
+	_, err = domains.ComputeCommitment(context.Background(), tx, true, latestBlockNum, latestTxNum, "flush-commitment", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +368,7 @@ func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
 }
 
 func rlpHash(x any) (h common.Hash) {
-	hw := sha3.NewLegacyKeccak256()
+	hw := keccak.NewFastKeccak()
 	if err := rlp.Encode(hw, x); err != nil {
 		panic(err)
 	}
@@ -377,7 +380,7 @@ func vmTestBlockHash(n uint64) (common.Hash, error) {
 	return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String()))), nil
 }
 
-func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (protocol.Message, error) {
+func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol.Message, error) {
 	// Derive sender from private key if present.
 	var from accounts.Address
 	if len(tx.PrivateKey) > 0 {
@@ -454,7 +457,7 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *big.Int) (protocol.Mes
 		tipCap = big.Int(*tx.MaxPriorityFeePerGas)
 		feeCap = big.Int(*tx.MaxFeePerGas)
 
-		gp := math.BigMin(new(big.Int).Add(&tipCap, baseFee), &feeCap)
+		gp := math.BigMin(new(big.Int).Add(&tipCap, baseFee.ToBig()), &feeCap)
 		gasPrice = math.NewHexOrDecimal256(gp.Int64())
 	}
 	if gasPrice == nil {

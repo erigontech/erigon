@@ -27,7 +27,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"reflect"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -40,10 +39,10 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -124,11 +123,17 @@ func (bal btBlockAccessList) toBAL() types.BlockAccessList {
 	result := make(types.BlockAccessList, len(bal))
 	for i, ac := range bal {
 		entry := &types.AccountChanges{
-			Address: accounts.InternAddress(ac.Address),
+			Address:        accounts.InternAddress(ac.Address),
+			StorageChanges: make([]*types.SlotChanges, 0, len(ac.StorageChanges)),
+			StorageReads:   make([]accounts.StorageKey, 0, len(ac.StorageReads)),
+			BalanceChanges: make([]*types.BalanceChange, 0, len(ac.BalanceChanges)),
+			NonceChanges:   make([]*types.NonceChange, 0, len(ac.NonceChanges)),
+			CodeChanges:    make([]*types.CodeChange, 0, len(ac.CodeChanges)),
 		}
 		for _, sc := range ac.StorageChanges {
 			slotChanges := &types.SlotChanges{
-				Slot: accounts.InternKey(common.BytesToHash(sc.Slot)),
+				Slot:    accounts.InternKey(common.BytesToHash(sc.Slot)),
+				Changes: make([]*types.StorageChange, 0, len(sc.SlotChanges)),
 			}
 			for _, change := range sc.SlotChanges {
 				slotChanges.Changes = append(slotChanges.Changes, &types.StorageChange{
@@ -171,7 +176,7 @@ type btHeader struct {
 	Coinbase              common.Address
 	MixHash               common.Hash
 	Nonce                 types.BlockNonce
-	Number                *big.Int
+	Number                *uint256.Int
 	Hash                  common.Hash
 	ParentHash            common.Hash
 	ReceiptTrie           common.Hash
@@ -179,11 +184,11 @@ type btHeader struct {
 	TransactionsTrie      common.Hash
 	UncleHash             common.Hash
 	ExtraData             []byte
-	Difficulty            *big.Int
+	Difficulty            *uint256.Int
 	GasLimit              uint64
 	GasUsed               uint64
 	Timestamp             uint64
-	BaseFeePerGas         *big.Int
+	BaseFeePerGas         *uint256.Int
 	WithdrawalsRoot       *common.Hash
 	BlobGasUsed           *uint64
 	ExcessBlobGas         *uint64
@@ -212,11 +217,11 @@ func (bt *BlockTest) Run(t *testing.T) error {
 		return testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
-	var mOpts []mock.Option
+	var mOpts []execmoduletester.Option
 	if bt.ExperimentalBAL {
-		mOpts = append(mOpts, mock.WithExperimentalBAL())
+		mOpts = append(mOpts, execmoduletester.WithExperimentalBAL())
 	}
-	m := mock.MockWithGenesisEngine(t, bt.genesis(config), engine, mOpts...)
+	m := execmoduletester.NewWithGenesisEngine(t, bt.genesis(config), engine, mOpts...)
 
 	bt.br = m.BlockReader
 	// import pre accounts & construct test genesis block & state root
@@ -257,7 +262,7 @@ func (bt *BlockTest) RunCLI() error {
 		return testforks.UnsupportedForkError{Name: bt.json.Network}
 	}
 	engine := rulesconfig.CreateRulesEngineBareBones(context.Background(), config, log.New())
-	m := mock.MockWithGenesisEngine(nil, bt.genesis(config), engine)
+	m := execmoduletester.NewWithGenesisEngine(nil, bt.genesis(config), engine)
 	defer m.DB.Close()
 
 	bt.br = m.BlockReader
@@ -328,7 +333,7 @@ See https://github.com/ethereum/tests/wiki/Blockchain-Tests-II
 	expected we are expected to ignore it and continue processing and then validate the
 	post state.
 */
-func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
+func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlock, error) {
 	validBlocks := make([]btBlock, 0)
 	// insert the test blocks, which will execute all transaction
 	for bi, b := range bt.json.Blocks {
@@ -359,30 +364,46 @@ func (bt *BlockTest) insertBlocks(m *mock.MockSentry) ([]btBlock, error) {
 				return nil, fmt.Errorf("block #%v insertion into chain failed: %w", cb.Number(), err1)
 			}
 		} else if b.BlockHeader == nil {
-			roTx, err := m.DB.BeginRo(m.Ctx)
+			isCanonical, err := bt.isCanonical(m, cb)
 			if err != nil {
 				return nil, err
 			}
-			defer roTx.Rollback()
-			canonical, _, cErr := bt.br.CanonicalHash(context.Background(), roTx, cb.NumberU64())
-			if cErr != nil {
-				return nil, cErr
-			}
-			if canonical == cb.Hash() {
+			if isCanonical {
 				return nil, fmt.Errorf("block (index %d) insertion should have failed due to: %v", bi, b.ExpectException)
 			}
-			roTx.Rollback()
 		}
 		if b.BlockHeader == nil {
 			continue
 		}
 		// validate RLP decoding by checking all values against test file JSON
-		if err = validateHeader(b.BlockHeader, cb.Header()); err != nil {
+		if err = validateHeader(b.BlockHeader, cb.HeaderNoCopy()); err != nil {
 			return nil, fmt.Errorf("deserialised block header validation failed: %w", err)
 		}
 		validBlocks = append(validBlocks, b)
 	}
 	return validBlocks, nil
+}
+
+// isCanonical reports whether block is the canonical block at its height.
+func (bt *BlockTest) isCanonical(m *execmoduletester.ExecModuleTester, block *types.Block) (bool, error) {
+	roTx, err := m.DB.BeginRo(m.Ctx)
+	if err != nil {
+		return false, err
+	}
+	defer roTx.Rollback()
+	canonical, _, err := bt.br.CanonicalHash(context.Background(), roTx, block.NumberU64())
+	if err != nil {
+		return false, err
+	}
+	return canonical == block.Hash(), nil
+}
+
+// equalPtr reports whether two optional pointers point to equal values.
+func equalPtr[T comparable](a, b *T) bool {
+	if a == nil {
+		return b == nil
+	}
+	return b != nil && *a == *b
 }
 
 func validateHeader(h *btHeader, h2 *types.Header) error {
@@ -404,8 +425,8 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if h.Nonce != h2.Nonce {
 		return fmt.Errorf("nonce: want: %x have: %x", h.Nonce, h2.Nonce)
 	}
-	if h.Number.Cmp(h2.Number) != 0 {
-		return fmt.Errorf("number: want: %v have: %v", h.Number, h2.Number)
+	if !h.Number.Eq(&h2.Number) {
+		return fmt.Errorf("number: want: %s have: %s", h.Number, &h2.Number)
 	}
 	if h.ParentHash != h2.ParentHash {
 		return fmt.Errorf("parent hash: want: %x have: %x", h.ParentHash, h2.ParentHash)
@@ -425,7 +446,7 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if !bytes.Equal(h.ExtraData, h2.Extra) {
 		return fmt.Errorf("extra data: want: %x have: %x", h.ExtraData, h2.Extra)
 	}
-	if h.Difficulty.Cmp(h2.Difficulty) != 0 {
+	if !h.Difficulty.Eq(&h2.Difficulty) {
 		return fmt.Errorf("difficulty: want: %v have: %v", h.Difficulty, h2.Difficulty)
 	}
 	if h.GasLimit != h2.GasLimit {
@@ -437,28 +458,28 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	if h.Timestamp != h2.Time {
 		return fmt.Errorf("timestamp: want: %v have: %v", h.Timestamp, h2.Time)
 	}
-	if !reflect.DeepEqual(h.BaseFeePerGas, h2.BaseFee) {
+	if !equalPtr(h.BaseFeePerGas, h2.BaseFee) {
 		return fmt.Errorf("baseFeePerGas: want: %v have: %v", h.BaseFeePerGas, h2.BaseFee)
 	}
-	if !reflect.DeepEqual(h.WithdrawalsRoot, h2.WithdrawalsHash) {
+	if !equalPtr(h.WithdrawalsRoot, h2.WithdrawalsHash) {
 		return fmt.Errorf("withdrawalsRoot: want: %v have: %v", h.WithdrawalsRoot, h2.WithdrawalsHash)
 	}
-	if !reflect.DeepEqual(h.BlobGasUsed, h2.BlobGasUsed) {
+	if !equalPtr(h.BlobGasUsed, h2.BlobGasUsed) {
 		return fmt.Errorf("blobGasUsed: want: %v have: %v", h.BlobGasUsed, h2.BlobGasUsed)
 	}
-	if !reflect.DeepEqual(h.ExcessBlobGas, h2.ExcessBlobGas) {
+	if !equalPtr(h.ExcessBlobGas, h2.ExcessBlobGas) {
 		return fmt.Errorf("excessBlobGas: want: %v have: %v", h.ExcessBlobGas, h2.ExcessBlobGas)
 	}
-	if !reflect.DeepEqual(h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot) {
+	if !equalPtr(h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot) {
 		return fmt.Errorf("parentBeaconBlockRoot: want: %v have: %v", h.ParentBeaconBlockRoot, h2.ParentBeaconBlockRoot)
 	}
-	if !reflect.DeepEqual(h.RequestsHash, h2.RequestsHash) {
+	if !equalPtr(h.RequestsHash, h2.RequestsHash) {
 		return fmt.Errorf("requestsHash: want: %v have: %v", h.RequestsHash, h2.RequestsHash)
 	}
-	if !reflect.DeepEqual(h.BlockAccessListHash, h2.BlockAccessListHash) {
+	if !equalPtr(h.BlockAccessListHash, h2.BlockAccessListHash) {
 		return fmt.Errorf("blockAccessListHash: want: %v have: %v", h.BlockAccessListHash, h2.BlockAccessListHash)
 	}
-	if !reflect.DeepEqual(h.SlotNumber, h2.SlotNumber) {
+	if !equalPtr(h.SlotNumber, h2.SlotNumber) {
 		return fmt.Errorf("slotNumber: want: %v have: %v", h.SlotNumber, h2.SlotNumber)
 	}
 	return nil
@@ -501,7 +522,7 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 	return nil
 }
 
-func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m *mock.MockSentry) error {
+func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m *execmoduletester.ExecModuleTester) error {
 	// to get constant lookup when verifying block headers by hash (some tests have many blocks)
 	bmap := make(map[common.Hash]btBlock, len(bt.json.Blocks))
 	for _, b := range validBlocks {
@@ -513,7 +534,7 @@ func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m 
 	// all blocks have been processed by BlockChain, as they may not
 	// be part of the longest chain until last block is imported.
 	for b, _ := m.BlockReader.CurrentBlock(tx); b != nil && b.NumberU64() != 0; {
-		if err := validateHeader(bmap[b.Hash()].BlockHeader, b.Header()); err != nil {
+		if err := validateHeader(bmap[b.Hash()].BlockHeader, b.HeaderNoCopy()); err != nil {
 			return fmt.Errorf("imported block header validation failed: %w", err)
 		}
 		number := rawdb.ReadHeaderNumber(tx, b.ParentHash())

@@ -28,12 +28,11 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 	"unsafe"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -441,10 +440,6 @@ func ApplyDeferredBranchUpdates(
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error,
 ) (int, error) {
-	start := time.Now()
-	defer func() {
-		log.Debug("ApplyDeferredBranchUpdates completed", "updates", len(deferred), "took", time.Since(start))
-	}()
 	if len(deferred) == 0 {
 		return 0, nil
 	}
@@ -1111,7 +1106,7 @@ func (branchData BranchData) Validate(branchKey []byte) error {
 	if err = validateAfterMap(afterMap, row); err != nil {
 		return err
 	}
-	if err = validatePlainKeys(branchKey, row, sha3.NewLegacyKeccak256().(keccakState)); err != nil {
+	if err = validatePlainKeys(branchKey, row, keccak.NewFastKeccak()); err != nil {
 		return err
 	}
 	return nil
@@ -1131,7 +1126,7 @@ func validateAfterMap(afterMap uint16, row [16]*cell) error {
 	return nil
 }
 
-func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccakState) error {
+func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccak.KeccakState) error {
 	uncompactedBranchKey := uncompactNibbles(branchKey)
 	if HasTerm(uncompactedBranchKey) {
 		uncompactedBranchKey = uncompactedBranchKey[:len(uncompactedBranchKey)-1]
@@ -1139,6 +1134,7 @@ func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccakState) erro
 	if len(uncompactedBranchKey) > 128 {
 		return fmt.Errorf("branch key too long: %d", len(branchKey))
 	}
+	var hashBuf common.Hash
 	depth := int16(len(uncompactedBranchKey))
 	for _, c := range row {
 		if c == nil {
@@ -1147,7 +1143,7 @@ func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccakState) erro
 		if c.accountAddrLen == 0 && c.storageAddrLen == 0 {
 			continue
 		}
-		err := c.deriveHashedKeys(depth, keccak, length.Addr)
+		err := c.deriveHashedKeys(depth, keccak, length.Addr, hashBuf[:])
 		if err != nil {
 			return err
 		}

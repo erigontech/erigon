@@ -40,8 +40,8 @@ func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
 		withdrawals = make([]*types.Withdrawal, withdrawalCount)
 	)
 	header := &types.Header{
-		Difficulty: math.BigPow(11, 11),
-		Number:     math.BigPow(2, 9),
+		Difficulty: *uint256.NewInt(285311670611), // 11^11
+		Number:     *uint256.NewInt(0x200),        // 2^9
 		GasLimit:   12345678,
 		GasUsed:    1476322,
 		Time:       9876543,
@@ -61,8 +61,8 @@ func makeBlock(txCount, uncleCount, withdrawalCount int) *types.Block {
 	}
 	for i := range uncles {
 		uncles[i] = &types.Header{
-			Difficulty: math.BigPow(11, 11),
-			Number:     math.BigPow(2, 9),
+			Difficulty: *uint256.NewInt(285311670611), // 11^11
+			Number:     *uint256.NewInt(0x200),        // 2^9
 			GasLimit:   12345678,
 			GasUsed:    1476322,
 			Time:       9876543,

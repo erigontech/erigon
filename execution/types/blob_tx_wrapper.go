@@ -77,11 +77,9 @@ func (li BlobKzgs) payloadSize() int {
 }
 
 func (li BlobKzgs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
-	// prefix
-	buf := newEncodingBuf()
-	l := rlp.EncodeListPrefix(payloadSize, buf[:])
-	w.Write(buf[:l])
-
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+		return err
+	}
 	for _, cmtmt := range li {
 		if err := rlp.EncodeString(cmtmt[:], w, b); err != nil {
 			return err
@@ -127,11 +125,9 @@ func (li KZGProofs) payloadSize() int {
 }
 
 func (li KZGProofs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
-	// prefix
-	buf := newEncodingBuf()
-	l := rlp.EncodeListPrefix(payloadSize, buf[:])
-	w.Write(buf[:l])
-
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+		return err
+	}
 	for _, proof := range li {
 		if err := rlp.EncodeString(proof[:], w, b); err != nil {
 			return err
@@ -181,17 +177,14 @@ func (blobs Blobs) payloadSize() int {
 }
 
 func (blobs Blobs) encodePayload(w io.Writer, b []byte, payloadSize int) error {
-	// prefix
-
-	buf := newEncodingBuf()
-	l := rlp.EncodeListPrefix(payloadSize, buf[:])
-	w.Write(buf[:l])
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b); err != nil {
+		return err
+	}
 	for _, blob := range blobs {
 		if err := rlp.EncodeString(blob[:], w, b); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
@@ -314,7 +307,7 @@ func (txw *BlobTxWrapper) GetBlobGas() uint64     { return txw.Tx.GetBlobGas() }
 func (txw *BlobTxWrapper) GetValue() *uint256.Int { return txw.Tx.GetValue() }
 func (txw *BlobTxWrapper) GetTo() *common.Address { return txw.Tx.GetTo() }
 
-func (txw *BlobTxWrapper) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (*Message, error) {
+func (txw *BlobTxWrapper) AsMessage(s Signer, baseFee *uint256.Int, rules *chain.Rules) (*Message, error) {
 	return txw.Tx.AsMessage(s, baseFee, rules)
 }
 
@@ -323,10 +316,8 @@ func (txw *BlobTxWrapper) WithSignature(signer Signer, sig []byte) (Transaction,
 	if err != nil {
 		return nil, err
 	}
-	//goland:noinspection GoVetCopyLock
 	blobTxnWrapper := &BlobTxWrapper{
-		// it's ok to copy here - because it's constructor of object - no parallel access yet
-		Tx:             *signedCopy.(*BlobTx), //nolint
+		Tx:             signedCopy.(*BlobTx).copyData(),
 		WrapperVersion: txw.WrapperVersion,
 		Blobs:          make(Blobs, len(txw.Blobs)),
 		Commitments:    make(BlobKzgs, len(txw.Commitments)),
@@ -433,8 +424,7 @@ func (txw *BlobTxWrapper) MarshalBinaryWrapped(w io.Writer) error {
 		return err
 	}
 	payloadSize := txw.payloadSize()
-	l := rlp.EncodeListPrefix(payloadSize, b[1:])
-	if _, err := w.Write(b[1 : 1+l]); err != nil {
+	if err := rlp.EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
 		return err
 	}
 	bw := bytes.Buffer{}

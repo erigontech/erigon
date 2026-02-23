@@ -17,6 +17,7 @@ type SimpleSequence struct {
 	baseNum uint64
 	raw     []byte
 	pos     int
+	count   uint64 //u64-typed pre-calculated `len(raw)/4`
 }
 
 func NewSimpleSequence(baseNum uint64, count uint64) *SimpleSequence {
@@ -24,6 +25,7 @@ func NewSimpleSequence(baseNum uint64, count uint64) *SimpleSequence {
 		baseNum: baseNum,
 		raw:     make([]byte, count*4),
 		pos:     0,
+		count:   count,
 	}
 }
 
@@ -37,60 +39,74 @@ func ReadSimpleSequence(baseNum uint64, raw []byte) *SimpleSequence {
 }
 
 func (s *SimpleSequence) Get(i uint64) uint64 {
-	idx := i * 4
-	delta := binary.BigEndian.Uint32(s.raw[idx : idx+4])
-	return s.baseNum + uint64(delta)
+	delta := uint64(binary.BigEndian.Uint32(s.raw[i*4:]))
+	return s.baseNum + delta
 }
 
 func (s *SimpleSequence) Min() uint64 {
-	return s.Get(0)
+	delta := uint64(binary.BigEndian.Uint32(s.raw))
+	return s.baseNum + delta
 }
 
 func (s *SimpleSequence) Max() uint64 {
-	return s.Get(s.Count() - 1)
+	delta := uint64(binary.BigEndian.Uint32(s.raw[len(s.raw)-4:]))
+	return s.baseNum + delta
 }
 
 func (s *SimpleSequence) Count() uint64 {
-	return uint64(len(s.raw) / 4)
+	return s.count
 }
+func (s *SimpleSequence) Empty() bool { return len(s.raw) == 0 }
 
 func (s *SimpleSequence) AddOffset(offset uint64) {
-	binary.BigEndian.PutUint32(s.raw[s.pos*4:(s.pos+1)*4], uint32(offset-s.baseNum))
+	binary.BigEndian.PutUint32(s.raw[s.pos*4:], uint32(offset-s.baseNum))
 	s.pos++
 }
 
-func (s *SimpleSequence) Reset(baseNum uint64, raw []byte) {
+func (s *SimpleSequence) Reset(baseNum uint64, raw []byte) { // no `return parameter` to avoid heap-allocation of `s` object
 	s.baseNum = baseNum
 	s.raw = raw
 	s.pos = len(raw) / 4
+	s.count = uint64(len(raw) / 4)
 }
 
 func (s *SimpleSequence) AppendBytes(buf []byte) []byte {
 	return append(buf, s.raw...)
 }
 
-func (s *SimpleSequence) search(v uint64) (int, bool) {
-	c := s.Count()
-	idx := sort.Search(int(c), func(i int) bool {
-		return s.Get(uint64(i)) >= v
-	})
-
-	if idx >= int(c) {
+func (s *SimpleSequence) search(seek uint64) (idx int, ok bool) {
+	// Real data lengths:
+	//   - 70% len=1
+	//   - 15% len=2
+	//   - ...
+	//
+	// Real data return `idx`:
+	//   - 85% return idx=0 (first element)
+	//   - 10% return "not found"
+	//   - 5% other lengths
+	if seek <= s.Min() { // fast-path for 1-st element hit
+		return 0, true
+	}
+	if s.count == 1 { // if len=1 then nothing left to search
 		return 0, false
 	}
-	return idx, true
+	idx = sort.Search(int(s.count), func(i int) bool {
+		return s.Get(uint64(i)) >= seek
+	})
+	return idx, idx < int(s.count)
 }
 
-func (s *SimpleSequence) reverseSearch(v uint64) (int, bool) {
-	c := s.Count()
-	idx := sort.Search(int(c), func(i int) bool {
-		return s.Get(c-uint64(i)-1) <= v
-	})
-
-	if idx >= int(c) {
+func (s *SimpleSequence) reverseSearch(seek uint64) (idx int, ok bool) {
+	if seek >= s.Max() { // fast-path for last element hit
+		return int(s.count) - 1, true
+	}
+	if s.count == 1 { // if len=1 then nothing left to search
 		return 0, false
 	}
-	return int(c) - idx - 1, true
+	idx = sort.Search(int(s.count), func(i int) bool {
+		return s.Get(uint64(i)) > seek
+	}) - 1
+	return idx, idx >= 0
 }
 
 func (s *SimpleSequence) Seek(v uint64) (uint64, bool) {

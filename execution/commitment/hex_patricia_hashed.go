@@ -23,7 +23,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"hash"
 	"io"
 	"math/bits"
 	"runtime"
@@ -32,7 +31,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/crypto/sha3"
+	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -47,14 +46,6 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
-
-// keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
-// Read to get a variable amount of data from the hash state. Read is faster than Sum
-// because it doesn't copy the internal state, but also modifies the internal state.
-type keccakState interface {
-	hash.Hash
-	Read([]byte) (int, error)
-}
 
 // DomainPutter is an interface for putting data into domains.
 // Used by commitment to write branch data.
@@ -82,8 +73,8 @@ type HexPatriciaHashed struct {
 	branchBefore  [128]bool     // For each row, whether there was a branch node in the database loaded in unfold
 	touchMap      [128]uint16   // For each row, bitmap of cells that were either present before modification, or modified or deleted
 	afterMap      [128]uint16   // For each row, bitmap of cells that were present after modification
-	keccak        keccakState
-	keccak2       keccakState
+	keccak        keccak.KeccakState
+	keccak2       keccak.KeccakState
 	rootChecked   bool // Set to false if it is not known whether the root is empty, set to true if it is checked
 	rootTouched   bool
 	rootPresent   bool
@@ -92,6 +83,7 @@ type HexPatriciaHashed struct {
 	capture       []string
 	ctx           PatriciaContext
 	hashAuxBuffer [128]byte     // buffer to compute cell hash or write hash-related things
+	cellHashBuf   common.Hash   // shared scratch buffer for hashKey calls (avoids per-cell allocation)
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
 	branchEncoder *BranchEncoder
 
@@ -132,8 +124,8 @@ func (hph *HexPatriciaHashed) SpawnSubTrie(ctx PatriciaContext, forNibble int) *
 func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext) *HexPatriciaHashed {
 	hph := &HexPatriciaHashed{
 		ctx:           ctx,
-		keccak:        sha3.NewLegacyKeccak256().(keccakState),
-		keccak2:       sha3.NewLegacyKeccak256().(keccakState),
+		keccak:        keccak.NewFastKeccak(),
+		keccak2:       keccak.NewFastKeccak(),
 		accountKeyLen: accountKeyLen,
 		auxBuffer:     bytes.NewBuffer(make([]byte, 8192)),
 		hadToLoadL:    make(map[uint64]skipStat),
@@ -162,9 +154,6 @@ type cell struct {
 	stateHashLen    int16     // stateHash length, if > 0 can reuse
 	loaded          loadFlags // folded Cell have only hash, unfolded have all fields
 	Update                    // state update
-
-	// temporary buffers
-	hashBuf common.Hash
 }
 
 type loadFlags uint8
@@ -209,12 +198,12 @@ var (
 	emptyRootHashBytes = empty.RootHash.Bytes()
 )
 
-func (cell *cell) hashAccKey(keccak keccakState, depth int16) error {
-	return hashKey(keccak, cell.accountAddr[:cell.accountAddrLen], cell.hashedExtension[:], depth, cell.hashBuf[:])
+func (cell *cell) hashAccKey(keccak keccak.KeccakState, depth int16, hashBuf []byte) error {
+	return hashKey(keccak, cell.accountAddr[:cell.accountAddrLen], cell.hashedExtension[:], depth, hashBuf)
 }
 
-func (cell *cell) hashStorageKey(keccak keccakState, accountKeyLen, downOffset int16, hashedKeyOffset int16) error {
-	return hashKey(keccak, cell.storageAddr[accountKeyLen:cell.storageAddrLen], cell.hashedExtension[downOffset:], hashedKeyOffset, cell.hashBuf[:])
+func (cell *cell) hashStorageKey(keccak keccak.KeccakState, accountKeyLen, downOffset int16, hashedKeyOffset int16, hashBuf []byte) error {
+	return hashKey(keccak, cell.storageAddr[accountKeyLen:cell.storageAddrLen], cell.hashedExtension[downOffset:], hashedKeyOffset, hashBuf)
 }
 
 func (cell *cell) reset() {
@@ -378,7 +367,7 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 	cell.loaded = lowCell.loaded
 }
 
-func (cell *cell) deriveHashedKeys(depth int16, keccak keccakState, accountKeyLen int16) error {
+func (cell *cell) deriveHashedKeys(depth int16, keccak keccak.KeccakState, accountKeyLen int16, hashBuf []byte) error {
 	extraLen := int16(0)
 	if cell.accountAddrLen > 0 {
 		if depth > 64 {
@@ -400,7 +389,7 @@ func (cell *cell) deriveHashedKeys(depth int16, keccak keccakState, accountKeyLe
 		cell.hashedExtLen = min(extraLen+cell.hashedExtLen, int16(len(cell.hashedExtension)))
 		var hashedKeyOffset, downOffset int16
 		if cell.accountAddrLen > 0 {
-			if err := cell.hashAccKey(keccak, depth); err != nil {
+			if err := cell.hashAccKey(keccak, depth, hashBuf); err != nil {
 				return err
 			}
 			downOffset = 64 - depth
@@ -412,7 +401,7 @@ func (cell *cell) deriveHashedKeys(depth int16, keccak keccakState, accountKeyLe
 			if depth == 0 {
 				accountKeyLen = 0
 			}
-			if err := cell.hashStorageKey(keccak, accountKeyLen, downOffset, hashedKeyOffset); err != nil {
+			if err := cell.hashStorageKey(keccak, accountKeyLen, downOffset, hashedKeyOffset, hashBuf); err != nil {
 				return err
 			}
 		}
@@ -897,7 +886,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 			// if account key is empty, then we need to hash storage key from the key beginning
 			koffset = 0
 		}
-		if err = hashKey(hph.keccak, cell.storageAddr[koffset:cell.storageAddrLen], hashedKeyBuf[:], hashedKeyOffset, cell.hashBuf[:]); err != nil {
+		if err = hashKey(hph.keccak, cell.storageAddr[koffset:cell.storageAddrLen], hashedKeyBuf[:], hashedKeyOffset, hph.cellHashBuf[:]); err != nil {
 			return nil, storageRootHashIsSet, nil, err
 		}
 		hashedKeyBuf[64-hashedKeyOffset] = terminatorHexByte // Add terminator
@@ -965,7 +954,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 		}
 	}
 	if cell.accountAddrLen > 0 {
-		if err := hashKey(hph.keccak, cell.accountAddr[:cell.accountAddrLen], hashedKeyBuf[:], depth, cell.hashBuf[:]); err != nil {
+		if err := hashKey(hph.keccak, cell.accountAddr[:cell.accountAddrLen], hashedKeyBuf[:], depth, hph.cellHashBuf[:]); err != nil {
 			return nil, storageRootHashIsSet, nil, err
 		}
 		hashedKeyBuf[64-depth] = terminatorHexByte // Add terminator
@@ -1089,7 +1078,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 				// if account key is empty, then we need to hash storage key from the key beginning
 				koffset = 0
 			}
-			if err = cell.hashStorageKey(hph.keccak, koffset, 0, hashedKeyOffset); err != nil {
+			if err = cell.hashStorageKey(hph.keccak, koffset, 0, hashedKeyOffset, hph.cellHashBuf[:]); err != nil {
 				return nil, err
 			}
 			cell.hashedExtension[64-hashedKeyOffset] = terminatorHexByte // Add terminator
@@ -1122,7 +1111,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 		}
 	}
 	if cell.accountAddrLen > 0 {
-		if err := cell.hashAccKey(hph.keccak, depth); err != nil {
+		if err := cell.hashAccKey(hph.keccak, depth, hph.cellHashBuf[:]); err != nil {
 			return nil, err
 		}
 		cell.hashedExtension[64-depth] = terminatorHexByte // Add terminator
@@ -1215,7 +1204,7 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int16 {
 		}
 		if hph.root.hashedExtLen == 64 && hph.root.accountAddrLen > 0 && hph.root.storageAddrLen > 0 {
 			// in case if root is a leaf node with storage and account, we need to derive storage part of a key
-			if err := hph.root.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen); err != nil {
+			if err := hph.root.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
 				log.Warn("deriveHashedKeys for root with storage", "err", err, "cell", hph.root.FullString())
 				return 0
 			}
@@ -1757,7 +1746,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 		}
 
 		// relies on plain account/storage key so need to be dereferenced before hashing
-		if err = cell.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen); err != nil {
+		if err = cell.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
 			return err
 		}
 		bitset ^= bit
@@ -2591,7 +2580,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 		warmup.EnableWarmupCache = hph.enableWarmupCache
 		warmuper = NewWarmuper(ctx, warmup)
 		warmuper.Start()
-		defer warmuper.Close()
+		defer warmuper.WaitAndClose()
 		// Set cache on trie if warmup cache is enabled
 		if warmup.EnableWarmupCache {
 			hph.cache = warmuper.Cache()

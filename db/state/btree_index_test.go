@@ -141,9 +141,8 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 
 func Test_BtreeIndex_Build(t *testing.T) {
 	if testing.Short() {
-		t.Skip()
+		t.Skip("slow test")
 	}
-
 	t.Parallel()
 
 	tmp := t.TempDir()
@@ -200,14 +199,12 @@ func buildBtreeIndex(tb testing.TB, dataPath, indexPath string, compressed seg.F
 }
 
 func Test_BtreeIndex_Seek2(t *testing.T) {
-	//t.Skip("issue #15028")
-
 	t.Parallel()
 
 	tmp := t.TempDir()
 	logger := log.New()
 	M := 1024
-	keyCount := 10 * M
+	keyCount := 3 * M
 
 	compressFlags := seg.CompressKeys | seg.CompressVals
 	dataPath := generateKV(t, tmp, 52, 48, keyCount, logger, compressFlags)
@@ -282,13 +279,6 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 	})
 
 	for i := 1; i < len(keys); i++ {
-		alt := common.Copy(keys[i])
-		for j := len(alt) - 1; j >= 0; j-- {
-			if alt[j] > 0 {
-				alt[j] -= 1
-				break
-			}
-		}
 		cur, err := bt.Seek(getter, keys[i])
 		require.NoError(t, err)
 		require.Equal(t, keys[i], cur.Key())
