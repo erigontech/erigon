@@ -54,19 +54,19 @@ var (
 	bufReaderPool = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, int(512*datasize.KB)) }}
 )
 
-func getBufWriter(w io.Writer) *bufio.Writer {
+func getBufioWriter(w io.Writer) *bufio.Writer {
 	bw := bufWriterPool.Get().(*bufio.Writer)
 	bw.Reset(w)
 	return bw
 }
-func putBufWriter(w *bufio.Writer) { w.Reset(nil); bufWriterPool.Put(w) }
+func putBufioWriter(w *bufio.Writer) { w.Reset(nil); bufWriterPool.Put(w) }
 
-func getBufReader(r io.Reader) *bufio.Reader {
+func getBufioReader(r io.Reader) *bufio.Reader {
 	br := bufReaderPool.Get().(*bufio.Reader)
 	br.Reset(r)
 	return br
 }
-func putBufReader(r *bufio.Reader) { r.Reset(nil); bufReaderPool.Put(r) }
+func putBufioReader(r *bufio.Reader) { r.Reset(nil); bufReaderPool.Put(r) }
 
 var ErrCollision = errors.New("duplicate key")
 
@@ -243,7 +243,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		if err != nil {
 			return nil, err
 		}
-		rs.offsetWriter = getBufWriter(rs.offsetFile)
+		rs.offsetWriter = getBufioWriter(rs.offsetFile)
 	}
 	if rs.enums && args.KeyCount > 0 && rs.lessFalsePositives {
 		if rs.dataStructureVersion == 0 {
@@ -251,7 +251,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			if err != nil {
 				return nil, err
 			}
-			rs.existenceWV0 = getBufWriter(rs.existenceFV0)
+			rs.existenceWV0 = getBufioWriter(rs.existenceFV0)
 		}
 
 	}
@@ -299,7 +299,7 @@ func (rs *RecSplit) Close() {
 		rs.existenceFV0 = nil
 	}
 	if rs.existenceWV0 != nil {
-		putBufWriter(rs.existenceWV0)
+		putBufioWriter(rs.existenceWV0)
 		rs.existenceWV0 = nil
 	}
 	if rs.existenceFV1 != nil {
@@ -315,7 +315,7 @@ func (rs *RecSplit) Close() {
 		rs.offsetFile = nil
 	}
 	if rs.offsetWriter != nil {
-		putBufWriter(rs.offsetWriter)
+		putBufioWriter(rs.offsetWriter)
 		rs.offsetWriter = nil
 	}
 }
@@ -807,8 +807,8 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	}
 
 	defer rs.indexF.Close()
-	rs.indexW = getBufWriter(rs.indexF)
-	defer putBufWriter(rs.indexW)
+	rs.indexW = getBufioWriter(rs.indexF)
+	defer putBufioWriter(rs.indexW)
 	// 1 byte: dataStructureVersion, 7 bytes: app-specific minimal dataID (of current shard)
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)
 	rs.numBuf[0] = uint8(rs.dataStructureVersion)
@@ -964,9 +964,9 @@ func (rs *RecSplit) flushExistenceFilter() error {
 		if _, err := rs.existenceFV0.Seek(0, io.SeekStart); err != nil {
 			return err
 		}
-		r := getBufReader(rs.existenceFV0)
+		r := getBufioReader(rs.existenceFV0)
 		_, copyErr := io.CopyN(rs.indexW, r, int64(rs.keysAdded))
-		putBufReader(r)
+		putBufioReader(r)
 		if copyErr != nil {
 			return copyErr
 		}
