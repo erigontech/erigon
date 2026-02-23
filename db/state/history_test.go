@@ -1881,3 +1881,104 @@ func TestHistory_OpenFolder(t *testing.T) {
 	require.NoError(t, err)
 	h.Close()
 }
+
+// TestHistoryBuildVIWithPageCompression tests that the .vi index is built
+// correctly when the .v file uses page-level compression (multiple key-value
+// pairs per page). This is a regression test for a bug where buildVI
+// incorrectly mapped keys to page offsets using a modulo counter, causing
+// keys to resolve to wrong pages. The fix reads keys directly from pages
+// via buildVIFromPages.
+func TestHistoryBuildVIWithPageCompression(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	logger := log.New()
+	test := func(t *testing.T, largeValues bool) {
+		t.Helper()
+		require := require.New(t)
+
+		// Setup with a small page size (4) to ensure multiple pages per
+		// merged file, exercising the buildVIFromPages code path.
+		dirs := datadir.New(t.TempDir())
+		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+		t.Cleanup(db.Close)
+
+		salt := uint32(1)
+		cfg := statecfg.Schema.AccountsDomain
+		cfg.Hist.IiCfg.Accessors = statecfg.AccessorHashMap
+		cfg.Hist.HistoryLargeValues = largeValues
+		cfg.Hist.IiCfg.Compression = seg.CompressNone
+		cfg.Hist.Compression = seg.CompressNone
+		cfg.Hist.CompressorCfg = cfg.Hist.CompressorCfg.WithValuesOnCompressedPage(4)
+		cfg.Hist.HistoryValuesOnCompressedPage = 4
+
+		aggregationStep := uint64(16)
+		h, err := NewHistory(cfg.Hist, aggregationStep, config3.DefaultStepsInFrozenFile, dirs, logger)
+		require.NoError(err)
+		t.Cleanup(h.Close)
+		h.salt.Store(&salt)
+		h.DisableFsync()
+
+		// Fill with data (same pattern as filledHistory)
+		ctx := context.Background()
+		tx, err := db.BeginRw(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+		hc := h.BeginFilesRo()
+		defer hc.Close()
+		writer := hc.NewWriter()
+		defer writer.close()
+
+		txs := uint64(1000)
+		var prevVal [32][]byte
+		var f flusher
+		for txNum := uint64(1); txNum <= txs; txNum++ {
+			for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
+				if txNum%keyNum == 0 {
+					valNum := txNum / keyNum
+					var k [8]byte
+					var v [8]byte
+					binary.BigEndian.PutUint64(k[:], keyNum)
+					binary.BigEndian.PutUint64(v[:], valNum)
+					k[0] = 1   //mark key to simplify debug
+					v[0] = 255 //mark value to simplify debug
+					err = writer.AddPrevValue(k[:], txNum, prevVal[keyNum])
+					require.NoError(err)
+					prevVal[keyNum] = v[:]
+				}
+			}
+			if f != nil {
+				err = f.Flush(ctx, tx)
+				require.NoError(err)
+				f = nil
+			}
+			if txNum%10 == 0 {
+				f = writer
+				writer = hc.NewWriter()
+			}
+		}
+		if f != nil {
+			err = f.Flush(ctx, tx)
+			require.NoError(err)
+		}
+		err = writer.Flush(ctx, tx)
+		require.NoError(err)
+		err = tx.Commit()
+		require.NoError(err)
+
+		// Collate, build files, and merge — this triggers buildVIFromPages
+		// on the merged .v files which now have page compression enabled.
+		collateAndMergeHistory(t, db, h, txs, true)
+
+		// Verify all values are correctly accessible through historySeekInFiles.
+		// With the old buggy code, keys would be mapped to wrong page offsets,
+		// causing GetFromPage to return ok=false and values to be lost.
+		checkHistoryHistory(t, h, txs)
+	}
+
+	t.Run("large_values", func(t *testing.T) { test(t, true) })
+	t.Run("small_values", func(t *testing.T) { test(t, false) })
+}
