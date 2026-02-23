@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math/big"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -156,9 +155,9 @@ func TestPrune(t *testing.T) {
 
 			getData := func(i int) (num Num, hash []byte, value []byte) {
 				header := &types.Header{
-					Number: big.NewInt(int64(i)),
-					Extra:  []byte("test header"),
+					Extra: []byte("test header"),
 				}
+				header.Number.SetUint64(uint64(i))
 				buffer.Reset()
 				err = header.EncodeRLP(buffer)
 				require.NoError(t, err)
@@ -245,9 +244,9 @@ func TestBuildFiles_Marked(t *testing.T) {
 
 	getData := func(i int) (num Num, hash []byte, value []byte) {
 		header := &types.Header{
-			Number: big.NewInt(int64(i)),
-			Extra:  []byte("test header"),
+			Extra: []byte("test header"),
 		}
+		header.Number.SetUint64(uint64(i))
 		buffer.Reset()
 		err = header.EncodeRLP(buffer)
 		require.NoError(t, err)

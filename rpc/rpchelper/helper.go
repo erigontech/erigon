@@ -194,7 +194,6 @@ func NewLatestStateWriter(tx kv.TemporalTx, domains *execctx.SharedDomains, bloc
 		panic(err)
 	}
 	txNum := uint64(int(minTxNum) + /* 1 system txNum in beginning of block */ 1)
-	domains.SetTxNum(txNum)
 	return state.NewWriter(domains.AsPutDel(tx), nil, txNum)
 }
 

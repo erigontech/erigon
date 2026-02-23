@@ -1,8 +1,9 @@
 package jsonrpc
 
 import (
-	"math/big"
 	"testing"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
@@ -15,7 +16,7 @@ func TestSimulateSanitizeBlockOrder(t *testing.T) {
 		timestamp uint64
 	}
 	for i, tc := range []struct {
-		baseNumber    int
+		baseNumber    uint64
 		baseTimestamp uint64
 		blocks        []SimulatedBlock
 		expected      []result
@@ -64,7 +65,7 @@ func TestSimulateSanitizeBlockOrder(t *testing.T) {
 			err:           "block timestamps must be in order: 72 <= 72",
 		},
 	} {
-		sim := &simulator{base: &types.Header{Number: big.NewInt(int64(tc.baseNumber)), Time: tc.baseTimestamp}}
+		sim := &simulator{base: &types.Header{Number: *uint256.NewInt(tc.baseNumber), Time: tc.baseTimestamp}}
 		res, err := sim.sanitizeSimulatedBlocks(tc.blocks)
 		if err != nil {
 			if err.Error() == tc.err {
