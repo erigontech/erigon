@@ -1517,15 +1517,13 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					be.blockIO.RecordReads(txVersion, mergedReads)
 				}
 				if len(addWrites) > 0 {
-					existing := be.blockIO.WriteSet(txVersion.TxIndex)
-					if len(existing) > 0 {
-						combined := append(state.VersionedWrites{}, existing...)
-						combined = append(combined, addWrites...)
-						be.blockIO.RecordWrites(txVersion, combined)
-					} else {
-						log.Info(fmt.Sprintf("writing %d, a: %v", len(addWrites), addWrites))
-						be.blockIO.RecordWrites(txVersion, addWrites)
-					}
+					// addWrites is the complete post-finalization write set (original
+					// writes re-applied via ApplyVersionedWrites plus any changes from
+					// fee calculation / post-apply). Replace rather than append to
+					// avoid duplicate entries for the same (Address, Path, Key) which
+					// cause non-deterministic BAL computation when VersionedWrites
+					// iterates Go maps in varying order across runs.
+					be.blockIO.RecordWrites(txVersion, addWrites)
 				}
 
 				stateUpdates := stateWriter.WriteSet()
