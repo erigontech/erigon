@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -125,12 +124,12 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	coinbase := parent.Coinbase
 	header := &types.Header{
 		ParentHash: parent.Hash(),
-		Number:     new(big.Int).SetUint64(blockNumber),
 		GasLimit:   parent.GasLimit,
 		Time:       timestamp,
 		Difficulty: parent.Difficulty,
 		Coinbase:   coinbase,
 	}
+	header.Number.SetUint64(blockNumber)
 
 	signer := types.MakeSigner(chainConfig, blockNumber, timestamp)
 	blockCtx := transactions.NewEVMBlockContext(engine, header, stateBlockNumberOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
@@ -345,7 +344,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 	defer tx.Rollback()
 
 	if blockNr == rpc.PendingBlockNumber {
-		b, err := api.blockByNumberWithSenders(ctx, tx, blockNr.Uint64())
+		b, err := api.blockByNumber(ctx, blockNr, tx)
 		if err != nil {
 			return nil, err
 		}

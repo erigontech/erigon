@@ -23,10 +23,10 @@ import (
 	"bytes"
 	"errors"
 	"math"
-	"math/big"
 	"reflect"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -79,7 +79,7 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 		TxHash:          tx.Hash(),
 		ContractAddress: common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
 		GasUsed:         111111,
-		BlockNumber:     big.NewInt(1),
+		BlockNumber:     uint256.NewInt(1),
 	}
 	receipt.Bloom = CreateBloom(Receipts{receipt})
 
@@ -174,7 +174,7 @@ func clearComputedFieldsOnReceipt(t *testing.T, receipt *Receipt) {
 
 	receipt.TxHash = common.Hash{}
 	receipt.BlockHash = common.Hash{}
-	receipt.BlockNumber = big.NewInt(math.MaxUint32)
+	receipt.BlockNumber = uint256.NewInt(math.MaxUint32)
 	receipt.TransactionIndex = math.MaxUint32
 	receipt.ContractAddress = common.Address{}
 	receipt.GasUsed = 0

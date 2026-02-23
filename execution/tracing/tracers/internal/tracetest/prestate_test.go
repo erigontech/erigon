@@ -21,13 +21,11 @@ package tracetest
 
 import (
 	"encoding/json"
-	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -72,6 +70,9 @@ func TestPrestateTracer(t *testing.T) {
 }
 
 func TestPrestateWithDiffModeTracer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	testPrestateTracer("prestateTracer", "prestate_tracer_with_diff_mode", t)
 }
 
@@ -109,11 +110,13 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 				Coinbase:    accounts.InternAddress(test.Context.Miner),
 				BlockNumber: uint64(test.Context.Number),
 				Time:        uint64(test.Context.Time),
-				Difficulty:  (*big.Int)(test.Context.Difficulty),
 				GasLimit:    uint64(test.Context.GasLimit),
 			}
+			if test.Context.Difficulty != nil {
+				context.Difficulty = *test.Context.Difficulty
+			}
 			if test.Context.BaseFee != nil {
-				baseFee, _ := uint256.FromBig((*big.Int)(test.Context.BaseFee))
+				baseFee := test.Context.BaseFee
 				context.BaseFee = *baseFee
 			}
 			rules := context.Rules(test.Genesis.Config)
@@ -153,7 +156,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 				)
 			}
 			statedb.SetHooks(tracer.Hooks)
-			msg, err := tx.AsMessage(*signer, (*big.Int)(test.Context.BaseFee), rules)
+			msg, err := tx.AsMessage(*signer, test.Context.BaseFee, rules)
 			if err != nil {
 				t.Fatalf("failed to prepare transaction for tracing: %v", err)
 			}

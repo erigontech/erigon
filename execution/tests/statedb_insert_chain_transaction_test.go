@@ -41,6 +41,9 @@ import (
 )
 
 func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
@@ -125,6 +128,9 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 }
 
 func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
@@ -730,6 +736,9 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 }
 
 func TestAccountDeleteIncorrectRoot(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]

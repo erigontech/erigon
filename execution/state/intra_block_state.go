@@ -452,12 +452,9 @@ func (sdb *IntraBlockState) Exist(addr accounts.Address) (exists bool, err error
 		return false, err
 	}
 
-	destructed, _, _, err := versionedRead(sdb, addr, SelfDestructPath, accounts.NilKey, false, false, nil, nil)
-	if err != nil {
-		return false, err
-	}
-
-	return readAccount != nil && !destructed, nil
+	// Same-tx self-destruct: the account is still alive (EIP-6780).
+	// Cross-tx self-destruct: getVersionedAccount returns nil.
+	return readAccount != nil, nil
 }
 
 var emptyAccount = accounts.NewAccount()
@@ -486,15 +483,17 @@ func (sdb *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 	if err != nil {
 		return false, err
 	}
-	destructed, _, _, err := versionedRead(sdb, addr, SelfDestructPath, accounts.NilKey, false, false, nil, nil)
-	if err != nil {
-		return false, err
-	}
-	if account == nil && !destructed {
+	if account == nil {
 		sdb.touchAccount(addr)
 		sdb.accountRead(addr, &emptyAccount, accountSource, accountVersion)
 	}
-	return account == nil || destructed || account.Empty(), nil
+	// Do not use SelfDestructPath here: a self-destructed account is still
+	// "alive" during the same tx (EIP-6780) and should not appear empty
+	// until end-of-tx cleanup.  Cross-tx destructs are already handled by
+	// getVersionedAccount returning nil (the versionedRead short-circuit
+	// returns default values for all paths when a previous tx destroyed the
+	// account).
+	return account == nil || account.Empty(), nil
 }
 
 // GetBalance retrieves the balance from the given address or 0 if object not found
@@ -597,6 +596,15 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 			fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, 0)
 		}
 		return nil, nil
+	}
+	// When commited=true (used by ResolveCode for EIP-7702 delegation),
+	// versionedRead skips local versionedWrites and may return a stale
+	// ReadSet value. If the current tx has set this account's code (e.g.,
+	// via EIP-7702 authorization processing), return the dirty code directly.
+	if commited {
+		if so, ok := sdb.stateObjects[addr]; ok && so.dirtyCode {
+			return so.code, nil
+		}
 	}
 	code, source, _, err := versionedRead(sdb, addr, CodePath, accounts.NilKey, commited, nil,
 		func(v []byte) []byte {
@@ -1517,6 +1525,11 @@ func (sdb *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 	sdb.setStateObject(addr, newobj)
 	data := newobj.data
 	versionWritten(sdb, addr, AddressPath, accounts.NilKey, &data)
+	// Write CodeHashPath so that any stale versionedReads cache entry
+	// (e.g. from the pre-creation GetCodeHash check in EVM create()) is
+	// invalidated.  newObject normalises the zero-value CodeHash to
+	// EmptyCodeHash, so this records keccak256("") for a fresh account.
+	versionWritten(sdb, addr, CodeHashPath, accounts.NilKey, newobj.data.CodeHash)
 	return newobj
 }
 
@@ -2232,11 +2245,28 @@ func (sdb *IntraBlockState) ApplyVersionedWrites(writes VersionedWrites) error {
 				}
 			case CodePath:
 				code := val.([]byte)
-				if err := sdb.SetCode(addr, code); err != nil {
+				stateObject, err := sdb.GetOrNewStateObject(addr)
+				if err != nil {
 					return err
 				}
+				codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
+				// Force-set code bypassing stateObject.SetCode's equality check.
+				// The finalize IBS uses a VersionedStateReader whose ReadSet may
+				// contain the post-write code value (when the worker read the code
+				// after a SetCodeTx modified it), causing SetCode's bytes.Equal
+				// comparison to incorrectly skip the update and leave dirtyCode unset.
+				sdb.journal.append(codeChange{
+					account:     addr,
+					prevhash:    stateObject.data.CodeHash,
+					prevcode:    stateObject.code,
+					wasCommited: !sdb.hasWrite(addr, CodePath, accounts.NilKey),
+				})
+				stateObject.setCode(codeHash, code)
+				versionWritten(sdb, addr, CodePath, accounts.NilKey, code)
+				versionWritten(sdb, addr, CodeHashPath, accounts.NilKey, codeHash)
+				versionWritten(sdb, addr, CodeSizePath, accounts.NilKey, len(code))
 			case CodeHashPath, CodeSizePath:
-				// set by SetCode
+				// set by CodePath case above
 			case SelfDestructPath:
 				deleted := val.(bool)
 				if deleted {

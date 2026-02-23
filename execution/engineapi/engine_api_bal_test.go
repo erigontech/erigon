@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package executiontests
+package engineapi_test
 
 import (
 	"context"
@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
@@ -36,9 +37,9 @@ func TestEngineApiGeneratedPayloadIncludesBlockAccessList(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
-	eat := DefaultEngineApiTester(t)
+	eat := engineapitester.DefaultEngineApiTester(t)
 	receiver := common.HexToAddress("0x333")
-	eat.Run(t, func(ctx context.Context, t *testing.T, eat EngineApiTester) {
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		sender := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
 		txn, err := eat.Transactor.SubmitSimpleTransfer(eat.CoinbaseKey, receiver, big.NewInt(1))
 		require.NoError(t, err)
