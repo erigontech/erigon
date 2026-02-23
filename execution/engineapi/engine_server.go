@@ -29,6 +29,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
@@ -218,15 +220,15 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		Coinbase:    req.FeeRecipient,
 		Root:        req.StateRoot,
 		Bloom:       bloom,
-		BaseFee:     (*big.Int)(req.BaseFeePerGas),
+		BaseFee:     uint256.MustFromBig(req.BaseFeePerGas.ToInt()),
 		Extra:       req.ExtraData,
-		Number:      big.NewInt(0).SetUint64(req.BlockNumber.Uint64()),
+		Number:      *uint256.NewInt(req.BlockNumber.Uint64()),
 		GasUsed:     uint64(req.GasUsed),
 		GasLimit:    uint64(req.GasLimit),
 		Time:        uint64(req.Timestamp),
 		MixDigest:   req.PrevRandao,
 		UncleHash:   empty.UncleHash,
-		Difficulty:  merge.ProofOfStakeDifficulty,
+		Difficulty:  *merge.ProofOfStakeDifficulty,
 		Nonce:       merge.ProofOfStakeNonce,
 		ReceiptHash: req.ReceiptsRoot,
 		TxHash:      types.DeriveSha(types.BinaryTransactions(txs)),
@@ -294,13 +296,20 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			blockAccessList, err = types.DecodeBlockAccessListBytes(req.BlockAccessList)
 			if err != nil {
 				s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(req.BlockAccessList))
-				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList decode: %v", err)}
+				return &engine_types.PayloadStatus{
+					Status:          engine_types.InvalidStatus,
+					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list decode: %v", err)),
+				}, nil
 			}
 			if err := blockAccessList.Validate(); err != nil {
-				return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid blockAccessList validate: %v", err)}
+				return &engine_types.PayloadStatus{
+					Status:          engine_types.InvalidStatus,
+					ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("invalid block access list validate: %v", err)),
+				}, nil
 			}
 			hash := crypto.Keccak256Hash(req.BlockAccessList)
 			header.BlockAccessListHash = &hash
+			blockAccessListBytes = req.BlockAccessList
 		}
 		if req.SlotNumber != nil {
 			slotNumber := uint64(*req.SlotNumber)
