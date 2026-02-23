@@ -21,6 +21,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"runtime"
+	"sync"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/db/compress"
 )
@@ -228,11 +232,15 @@ func (g *PagedReader) Skip() (uint64, int) {
 }
 
 func NewPagedWriter(parent CompressorI, compressionEnabled bool) *PagedWriter {
-	return &PagedWriter{
+	w := &PagedWriter{
 		parent:             parent,
 		pageSize:           parent.GetValuesOnCompressedPage(),
 		compressionEnabled: compressionEnabled,
 	}
+	if compressionEnabled && w.pageSize > 1 {
+		w.startParallelCompression(runtime.GOMAXPROCS(0))
+	}
+	return w
 }
 
 type CompressorI interface {
@@ -244,6 +252,17 @@ type CompressorI interface {
 	SetMetadata(data []byte)
 	GetValuesOnCompressedPage() int
 }
+
+type pendingPage struct {
+	done   chan struct{}
+	result []byte
+}
+
+type compressJob struct {
+	page *pendingPage
+	data []byte
+}
+
 type PagedWriter struct {
 	parent             CompressorI
 	pageSize           int
@@ -254,15 +273,78 @@ type PagedWriter struct {
 	compressionEnabled bool
 
 	pairs int
+
+	// parallel compression pipeline (non-nil when compressionEnabled && pageSize > 1)
+	jobCh   chan compressJob
+	drainCh chan *pendingPage
+	eg      errgroup.Group
+}
+
+func (c *PagedWriter) startParallelCompression(workers int) {
+	if workers < 1 {
+		workers = 1
+	}
+	bufSize := workers * 2
+	c.jobCh = make(chan compressJob, bufSize)
+	c.drainCh = make(chan *pendingPage, bufSize)
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		c.eg.Go(func() error {
+			defer wg.Done()
+			for job := range c.jobCh {
+				// Always allocate a fresh output buffer: the drain goroutine owns
+				// page.result until parent.Write returns, so we cannot reuse it.
+				_, job.page.result = compress.EncodeZstdIfNeed(nil, job.data, true)
+				close(job.page.done)
+			}
+			return nil
+		})
+	}
+	// closer: waits for all workers then signals drain to stop
+	c.eg.Go(func() error {
+		wg.Wait()
+		close(c.drainCh)
+		return nil
+	})
+	// drain: writes compressed pages to parent in order; consumes all pages even after an error
+	c.eg.Go(func() error {
+		var firstErr error
+		for page := range c.drainCh {
+			<-page.done
+			if firstErr != nil {
+				continue
+			}
+			if _, err := c.parent.Write(page.result); err != nil {
+				firstErr = err
+			}
+		}
+		return firstErr
+	})
+}
+
+func (c *PagedWriter) stopParallelCompression() error {
+	if c.jobCh == nil {
+		return nil
+	}
+	close(c.jobCh)
+	err := c.eg.Wait()
+	c.jobCh = nil
+	return err
 }
 
 func (c *PagedWriter) Empty() bool { return c.pairs == 0 }
 func (c *PagedWriter) Close() {
+	_ = c.stopParallelCompression()
 	c.parent.Close()
 }
 func (c *PagedWriter) Compress() error {
 	// Flush any remaining unwritten page data
 	if err := c.Flush(); err != nil {
+		return err
+	}
+	if err := c.stopParallelCompression(); err != nil {
 		return err
 	}
 	return c.parent.Compress()
@@ -278,7 +360,6 @@ func (c *PagedWriter) Count() int {
 func (c *PagedWriter) FileName() string { return c.parent.FileName() }
 
 func (c *PagedWriter) writePage() error {
-	// When page-level compression is enabled, defer compression to Compress() method
 	if !c.compressionEnabled {
 		bts, ok := c.bytes()
 		c.resetPage()
@@ -295,6 +376,17 @@ func (c *PagedWriter) writePage() error {
 		return nil
 	}
 
+	if c.jobCh != nil {
+		// parallel path: copy page data and submit to a compression worker
+		data := make([]byte, len(uncompressedPage))
+		copy(data, uncompressedPage)
+		page := &pendingPage{done: make(chan struct{})}
+		c.drainCh <- page
+		c.jobCh <- compressJob{page: page, data: data}
+		return nil
+	}
+
+	// serial fallback
 	var compressedPage []byte
 	c.compressionBuf, compressedPage = compress.EncodeZstdIfNeed(c.compressionBuf[:0], uncompressedPage, c.compressionEnabled)
 	if _, err := c.parent.Write(compressedPage); err != nil {
