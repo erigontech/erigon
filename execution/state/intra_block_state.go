@@ -738,16 +738,18 @@ func (sdb *IntraBlockState) ResolveCode(addr accounts.Address) ([]byte, error) {
 }
 
 func (sdb *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (accounts.Address, bool, error) {
-	// eip-7702 - for account read recording we don't count this as
-	// it may not result in an actual gas recorded access - if it
-	// is it will be marked via a direct call
+	// eip-7702 - first check if the account exists without recording a read.
+	// If it does exist and has code, use getCode to record the CodePath read
+	// so that Block STM conflict detection works correctly for delegation checks.
+	// Accounts with an empty code hash (EOAs, precompiles) cannot have delegation
+	// code, so skip the versioned read to avoid extra reads that would interfere
+	// with the touchAccount revert cleanup in journal.go.
 	stateObject, err := sdb.getStateObject(addr, false)
 	if err != nil {
 		return accounts.ZeroAddress, false, err
 	}
-	if stateObject != nil && !stateObject.deleted {
-		code, err := stateObject.Code()
-
+	if stateObject != nil && !stateObject.deleted && !stateObject.data.CodeHash.IsEmpty() {
+		code, err := sdb.getCode(addr, true)
 		if err != nil {
 			return accounts.ZeroAddress, false, err
 		}
