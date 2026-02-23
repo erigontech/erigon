@@ -136,7 +136,10 @@ func SpawnBuilderExecStage(ctx context.Context, s *stagedsync.StageState, sd *ex
 
 	chainReader := stagedsync.NewChainReaderImpl(cfg.chainConfig, tx, cfg.blockReader, logger)
 
-	txNum := sd.TxNum()
+	txNum, _, err := sd.SeekCommitment(ctx, tx)
+	if err != nil {
+		return err
+	}
 
 	protocol.InitializeBlockExecution(cfg.engine, chainReader, current.Header, cfg.chainConfig, ibs, &state.NoopWriter{}, logger, nil)
 	if needBAL {

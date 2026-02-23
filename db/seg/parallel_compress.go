@@ -302,7 +302,9 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	intermediatePath := intermediateFile.Name()
 	defer dir.RemoveFile(intermediatePath)
 	defer intermediateFile.Close()
-	intermediateW := bufio.NewWriterSize(intermediateFile, 8*etl.BufIOSize)
+	intermediateW := intermediateWriterPool.Get().(*bufio.Writer)
+	defer intermediateWriterPool.Put(intermediateW)
+	intermediateW.Reset(intermediateFile)
 
 	var inCount, outCount, emptyWordsCount uint64 // Counters words sent to compression and returned for compression
 	var numBuf [binary.MaxVarintLen64]byte
@@ -535,7 +537,9 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] Effective dictionary", logPrefix), logCtx...)
 	}
-	cw := bufio.NewWriterSize(cf, 4*etl.BufIOSize)
+	cw := compressedWriterPool.Get().(*bufio.Writer)
+	defer compressedWriterPool.Put(cw)
+	cw.Reset(cf)
 	// 1-st, output amount of words - just a useful metadata
 	binary.BigEndian.PutUint64(numBuf[:], inCount) // Dictionary size
 	if _, err = cw.Write(numBuf[:8]); err != nil {
@@ -652,7 +656,9 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	wc := 0
 	var hc BitWriter
 	hc.w = cw
-	r := bufio.NewReaderSize(intermediateFile, 2*etl.BufIOSize)
+	r := intermediateReaderPool.Get().(*bufio.Reader)
+	defer intermediateReaderPool.Put(r)
+	r.Reset(intermediateFile)
 	copyNBuf := make([]byte, 32*1024)
 
 	var l uint64
