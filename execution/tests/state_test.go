@@ -49,7 +49,7 @@ func TestStateCornerCases(t *testing.T) {
 		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
 	}
 
-	st := new(testMatcher)
+	st := new(testutil.TestMatcher)
 
 	tmpDir, err := os.MkdirTemp("", "erigon-test-*")
 	if err != nil {
@@ -59,7 +59,7 @@ func TestStateCornerCases(t *testing.T) {
 	dirs := datadir.New(tmpDir)
 	db := temporaltest.NewTestDB(t, dirs)
 	testDir := path.Join(cornersDir, "state")
-	st.walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
+	st.Walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
 		for _, subtest := range test.Subtests() {
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
@@ -75,7 +75,7 @@ func TestStateCornerCases(t *testing.T) {
 						// Ignore expected errors
 						return nil
 					}
-					return st.checkFailure(t, err)
+					return st.CheckFailure(t, err)
 				})
 			})
 		}
@@ -94,16 +94,16 @@ func TestState(t *testing.T) {
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 
-	st := new(testMatcher)
+	st := new(testutil.TestMatcher)
 	// Corresponds to GeneralStateTests from ethereum/tests:
 	// see https://github.com/ethereum/execution-spec-tests/releases/tag/v5.0.0
 	testDir := filepath.Join(eestDir, "state_tests", "static", "state_tests")
 
 	// Slow tests
-	st.slow(`^stPreCompiledContracts/precompsEIP2929Cancun`)
+	st.Slow(`^stPreCompiledContracts/precompsEIP2929Cancun`)
 
 	// Very slow tests
-	st.skipLoad(`^stTimeConsuming/`)
+	st.SkipLoad(`^stTimeConsuming/`)
 
 	tmpDir, err := os.MkdirTemp("", "erigon-test-*")
 	if err != nil {
@@ -112,7 +112,7 @@ func TestState(t *testing.T) {
 	t.Cleanup(func() { dir.RemoveAll(tmpDir) })
 	dirs := datadir.New(tmpDir)
 	db := temporaltest.NewTestDB(t, dirs)
-	st.walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
+	st.Walk(t, testDir, func(t *testing.T, name string, test *testutil.StateTest) {
 		for _, subtest := range test.Subtests() {
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
@@ -128,7 +128,7 @@ func TestState(t *testing.T) {
 						// Ignore expected errors
 						return nil
 					}
-					return st.checkFailure(t, err)
+					return st.CheckFailure(t, err)
 				})
 			})
 		}
