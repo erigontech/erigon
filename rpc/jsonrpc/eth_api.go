@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -369,7 +370,7 @@ func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint6
 		}
 		prunedTo := p.History.PruneTo(latest)
 		if block < prunedTo {
-			return state.PrunedError
+			return fmt.Errorf("%w: requested block %d, history is available from block %d", state.PrunedError, block, prunedTo)
 		}
 	}
 
