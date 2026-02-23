@@ -72,6 +72,13 @@ runs:
         echo "TMP=D:/tmp" >> "$GITHUB_ENV"
         echo "TMPDIR=D:/tmp" >> "$GITHUB_ENV"
 
+    - name: Enable git debug tracing
+      if: ${{ runner.debug }}
+      shell: bash
+      run: |
+        echo "GIT_TRACE=1" >> "$GITHUB_ENV"
+        echo "GIT_CURL_VERBOSE=1" >> "$GITHUB_ENV"
+
     - name: Checkout code
       uses: actions/checkout@v6
       with:
@@ -80,16 +87,11 @@ runs:
         clean: false
       env:
         GIT_LFS_SKIP_SMUDGE: 1
-        GIT_TRACE: ${{ runner.debug }}
-        GIT_CURL_VERBOSE: ${{ runner.debug }}
 
     - name: Clone submodules
       if: ${{ inputs.submodules == 'true' }}
       shell: bash
       run: time git submodule update --init --recursive --depth 1 --filter=blob:none
-      env:
-        GIT_TRACE: ${{ runner.debug }}
-        GIT_CURL_VERBOSE: ${{ runner.debug }}
 
     - name: Pull LFS test fixtures
       if: ${{ inputs.lfs == 'tests' }}
@@ -98,9 +100,6 @@ runs:
         time git lfs pull --include='execution/tests/test-corners/**'
         cd execution/tests/execution-spec-tests
         time git lfs pull --include='blockchain_tests/frontier/scenarios/*.json,blockchain_tests/osaka/eip7934_block_rlp_limit/*.json,blockchain_tests/static/state_tests/stPreCompiledContracts/*.json,blockchain_tests/static/state_tests/stStackTests/*.json,state_tests/static/state_tests/stStackTests/*.json'
-      env:
-        GIT_TRACE: ${{ runner.debug }}
-        GIT_CURL_VERBOSE: ${{ runner.debug }}
 
     - name: Install git-restore-mtime
       shell: bash
