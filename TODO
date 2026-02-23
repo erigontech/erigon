@@ -12,3 +12,4 @@
 - hash .git/modules using the heads of all submodules?
 - use bars/pipes for key separators
 - continue on errors for caching retry script
+- split up the long running single-package tests
