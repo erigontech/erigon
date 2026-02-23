@@ -186,6 +186,9 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 						pe.cfg.chainConfig, applyResult.rules, false)
 					blockApplyCount += applyResult.stateUpdates.UpdateCount()
 					pe.rs.SetTrace(false)
+					if applyResult.wg != nil {
+						applyResult.wg.Done()
+					}
 					if err != nil {
 						return err
 					}
@@ -620,6 +623,16 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				}
 
 				if blockResult.BlockNum > 0 {
+					// Wait for all per-tx state updates to be written to pe.rs
+					// by the apply-loop goroutine.  This ensures that the block
+					// finalize (which reads state via BufferedReader backed by
+					// pe.rs) sees deterministic, fully-applied post-user-tx state
+					// rather than a partial snapshot that depends on goroutine
+					// scheduling.  Without this, the VersionedIO reads recorded
+					// during finalize are non-deterministic, producing different
+					// BAL (EIP-7928 block access list) hashes across runs.
+					blockExecutor.applyWg.Wait()
+
 					result := blockExecutor.results[len(blockExecutor.results)-1]
 
 					finalTask := blockExecutor.tasks[len(blockExecutor.tasks)-1].Task
@@ -964,6 +977,7 @@ type txResult struct {
 	traceTos              map[accounts.Address]struct{}
 	stateUpdates          state.StateUpdates
 	rules                 *chain.Rules
+	wg                    *sync.WaitGroup // signalled after pe.rs.ApplyTxState completes
 }
 
 type execTask struct {
@@ -1042,7 +1056,13 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 		if engine != nil {
 			if postApplyMessageFunc := engine.GetPostApplyMessageFunc(); postApplyMessageFunc != nil {
 				execResult := result.ExecutionResult
-				coinbase, err := stateReader.ReadAccountData(result.Coinbase) // to generate logs we want the initial balance
+				// Use a versionedStateReader to get the coinbase balance
+			// deterministically from the block's version map (which
+			// includes fee-calc writes from prior txs) instead of
+			// reading from pe.rs whose content depends on apply-loop
+			// timing.
+			cbReader := state.NewVersionedStateReader(txIndex, nil, vm, stateReader)
+			coinbase, err := cbReader.ReadAccountData(result.Coinbase) // to generate logs we want the initial balance
 
 				if err != nil {
 					return nil, nil, nil, err
@@ -1261,6 +1281,7 @@ type blockExecutor struct {
 	stats map[int]ExecutionStat
 
 	applyResults chan applyResult
+	applyWg      sync.WaitGroup // tracks pending per-tx applyResults written to pe.rs
 
 	execStarted time.Time
 	result      *blockResult
@@ -1531,6 +1552,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
 					merged := MergeVersionedWrites(existingWrites, addWrites)
 					be.blockIO.RecordWrites(txVersion, merged)
+
+					// Flush the merged writes (including fee calc changes)
+					// to the version map so that subsequent per-tx
+					// finalizations see the full post-tx state (execution
+					// + fees) when reading via the version map fallback
+					// chain.  Without this, later txs' fee calc reads the
+					// coinbase balance without prior fees, producing
+					// non-deterministic BAL (EIP-7928) hashes.
+					be.versionMap.FlushVersionedWrites(merged, true, "")
 				}
 
 				stateUpdates := stateWriter.WriteSet()
@@ -1611,6 +1641,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 			}
 
+			be.applyWg.Add(1)
+			applyResult.wg = &be.applyWg
 			be.applyResults <- &applyResult
 		}
 	}
