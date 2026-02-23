@@ -13,16 +13,10 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/node/debug"
 	"github.com/urfave/cli/v2"
 )
 
 func domainStat(cliCtx *cli.Context) error {
-	_, err := debug.SetupSimple(cliCtx, true /* root logger */)
-	if err != nil {
-		return err
-	}
-
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
