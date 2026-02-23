@@ -991,3 +991,29 @@ func (rs *RecSplit) Stats() (int, int) {
 func (rs *RecSplit) Collision() bool {
 	return rs.collision
 }
+
+// Erigon doesn't create tons of bufio readers/writers, but it has tons of
+// parallel small unit-tests which each create many small files and bufio
+// readers/writers — pooling avoids the allocation pressure in that scenario.
+var (
+	bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(512*datasize.KB)) }}
+	bufioReaderPool = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, int(512*datasize.KB)) }}
+)
+
+func getBufioWriter(w io.Writer) *bufio.Writer {
+	bw := bufioWriterPool.Get().(*bufio.Writer)
+	bw.Reset(w)
+	return bw
+}
+
+// Reset(nil) before Put is required: without it the pool entry retains a
+// reference to the underlying io.Writer/io.Reader, keeping it alive until the
+// next GC cycle or until the entry is reused — whichever comes first.
+func putBufioWriter(w *bufio.Writer) { w.Reset(nil); bufioWriterPool.Put(w) }
+
+func getBufioReader(r io.Reader) *bufio.Reader {
+	br := bufioReaderPool.Get().(*bufio.Reader)
+	br.Reset(r)
+	return br
+}
+func putBufioReader(r *bufio.Reader) { r.Reset(nil); bufioReaderPool.Put(r) }
