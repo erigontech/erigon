@@ -18,6 +18,7 @@ package seg
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -277,7 +278,8 @@ type PagedWriter struct {
 	// parallel compression pipeline (non-nil when compressionEnabled && pageSize > 1)
 	jobCh   chan compressJob
 	drainCh chan *pendingPage
-	eg      errgroup.Group
+	eg      *errgroup.Group
+	egCtx   context.Context
 }
 
 func (c *PagedWriter) startParallelCompression(workers int) {
@@ -288,39 +290,49 @@ func (c *PagedWriter) startParallelCompression(workers int) {
 	c.jobCh = make(chan compressJob, bufSize)
 	c.drainCh = make(chan *pendingPage, bufSize)
 
+	eg, ctx := errgroup.WithContext(context.Background())
+	c.eg, c.egCtx = eg, ctx
+
 	var wg sync.WaitGroup
 	wg.Add(workers)
 	for range workers {
-		c.eg.Go(func() error {
+		eg.Go(func() error {
 			defer wg.Done()
-			for job := range c.jobCh {
-				// Always allocate a fresh output buffer: the drain goroutine owns
-				// page.result until parent.Write returns, so we cannot reuse it.
-				_, job.page.result = compress.EncodeZstdIfNeed(nil, job.data, true)
-				close(job.page.done)
+			for {
+				select {
+				case job, ok := <-c.jobCh:
+					if !ok {
+						return nil
+					}
+					// Always allocate a fresh output buffer: the drain goroutine owns
+					// page.result until parent.Write returns, so we cannot reuse it.
+					_, job.page.result = compress.EncodeZstdIfNeed(nil, job.data, true)
+					close(job.page.done)
+				case <-ctx.Done():
+					return nil
+				}
 			}
-			return nil
 		})
 	}
 	// closer: waits for all workers then signals drain to stop
-	c.eg.Go(func() error {
+	eg.Go(func() error {
 		wg.Wait()
 		close(c.drainCh)
 		return nil
 	})
-	// drain: writes compressed pages to parent in order; consumes all pages even after an error
-	c.eg.Go(func() error {
-		var firstErr error
+	// drain: writes compressed pages to parent in order
+	eg.Go(func() error {
 		for page := range c.drainCh {
-			<-page.done
-			if firstErr != nil {
-				continue
+			select {
+			case <-page.done:
+			case <-ctx.Done():
+				return ctx.Err()
 			}
 			if _, err := c.parent.Write(page.result); err != nil {
-				firstErr = err
+				return err
 			}
 		}
-		return firstErr
+		return nil
 	})
 }
 
@@ -331,6 +343,7 @@ func (c *PagedWriter) stopParallelCompression() error {
 	close(c.jobCh)
 	err := c.eg.Wait()
 	c.jobCh = nil
+	c.eg = nil
 	return err
 }
 
@@ -381,8 +394,17 @@ func (c *PagedWriter) writePage() error {
 		data := make([]byte, len(uncompressedPage))
 		copy(data, uncompressedPage)
 		page := &pendingPage{done: make(chan struct{})}
-		c.drainCh <- page
-		c.jobCh <- compressJob{page: page, data: data}
+		select {
+		case c.drainCh <- page:
+		case <-c.egCtx.Done():
+			return c.egCtx.Err()
+		}
+		select {
+		case c.jobCh <- compressJob{page: page, data: data}:
+		case <-c.egCtx.Done():
+			// page is already in drainCh but drain has exited; abandoning is safe
+			return c.egCtx.Err()
+		}
 		return nil
 	}
 
