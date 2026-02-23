@@ -263,16 +263,16 @@ func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *
 	return nil
 }
 
-func CheckCommitmentKvi(ctx context.Context, db kv.TemporalRoDB, failFast bool, logger log.Logger) error {
+func CheckCommitmentKvi(ctx context.Context, db kv.TemporalRoDB, cache *IntegrityCache, failFast bool, logger log.Logger) error {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	return CheckKvis(ctx, tx, kv.CommitmentDomain, failFast, logger)
+	return CheckKvis(ctx, tx, kv.CommitmentDomain, cache, failFast, logger)
 }
 
-func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bool, logger log.Logger) error {
+func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, cache *IntegrityCache, failFast bool, logger log.Logger) error {
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -281,6 +281,7 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 	defer tx.Rollback()
 	aggTx := state.AggTx(tx)
 	files := aggTx.Files(kv.CommitmentDomain)
+	stepSize := aggTx.StepSize()
 	var eg *errgroup.Group
 	if failFast {
 		// if 1 goroutine fails, fail others
@@ -291,14 +292,56 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 	if dbg.EnvBool("CHECK_COMMITMENT_KVS_DEREF_SEQUENTIAL", false) {
 		eg.SetLimit(1)
 	}
-	var branchKeys, referencedAccounts, plainAccounts, referencedStorages, plainStorages atomic.Uint64
+
+	type workItem struct {
+		file state.VisibleFile
+		fps  []fileFingerprint // nil when cache is disabled
+	}
+	var works []workItem
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".kv") {
 			continue
 		}
+		var fps []fileFingerprint
+		if cache != nil {
+			kvPath := file.Fullpath()
+			accPath, err := derivePathForOtherDomain(kvPath, kv.CommitmentDomain, kv.AccountsDomain)
+			if err != nil {
+				return err
+			}
+			stoPath, err := derivePathForOtherDomain(kvPath, kv.CommitmentDomain, kv.StorageDomain)
+			if err != nil {
+				return err
+			}
+			fpKv, err := fingerprintOf(kvPath)
+			if err != nil {
+				return err
+			}
+			fpAcc, err := fingerprintOf(accPath)
+			if err != nil {
+				return err
+			}
+			fpSto, err := fingerprintOf(stoPath)
+			if err != nil {
+				return err
+			}
+			fps = []fileFingerprint{fpKv, fpAcc, fpSto}
+			if cache.has(string(CommitmentKvDeref), fps) {
+				logger.Info("skipping (cache hit)", "kv", filepath.Base(kvPath))
+				continue
+			}
+		}
+		works = append(works, workItem{file, fps})
+	}
+
+	successes := make([]bool, len(works))
+	var branchKeys, referencedAccounts, plainAccounts, referencedStorages, plainStorages atomic.Uint64
+	for i, w := range works {
+		i, w := i, w
 		eg.Go(func() error {
-			counts, err := checkCommitmentKvDeref(ctx, file, aggTx.StepSize(), failFast, logger)
+			counts, err := checkCommitmentKvDeref(ctx, w.file, stepSize, failFast, logger)
 			if err == nil {
+				successes[i] = true
 				branchKeys.Add(counts.branchKeys)
 				referencedAccounts.Add(counts.referencedAccounts)
 				plainAccounts.Add(counts.plainAccounts)
@@ -315,6 +358,11 @@ func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, failFast bo
 	err = eg.Wait()
 	if err != nil {
 		return err
+	}
+	for i, w := range works {
+		if successes[i] {
+			cache.add(string(CommitmentKvDeref), w.fps)
+		}
 	}
 	logger.Info(
 		"checked commitment kvs dereference in",
@@ -549,18 +597,26 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 	return counts, integrityErr
 }
 
-func deriveReaderForOtherDomain(baseFile string, oldDomain, newDomain kv.Domain) (*seg.Reader, func(), error) {
+func derivePathForOtherDomain(baseFile string, oldDomain, newDomain kv.Domain) (string, error) {
 	fileVersionMask, err := version.ReplaceVersionWithMask(baseFile)
 	if err != nil {
-		return nil, nil, err
+		return "", err
 	}
 	fileVersionMask = strings.Replace(fileVersionMask, oldDomain.String(), newDomain.String(), 1)
 	newFile, _, ok, err := version.FindFilesWithVersionsByPattern(fileVersionMask)
 	if err != nil {
-		return nil, nil, err
+		return "", err
 	}
 	if !ok {
-		return nil, nil, fmt.Errorf("could not derive reader for other domain due to file not found: %s,%s->%s", baseFile, oldDomain, newDomain)
+		return "", fmt.Errorf("could not derive reader for other domain due to file not found: %s,%s->%s", baseFile, oldDomain, newDomain)
+	}
+	return newFile, nil
+}
+
+func deriveReaderForOtherDomain(baseFile string, oldDomain, newDomain kv.Domain) (*seg.Reader, func(), error) {
+	newFile, err := derivePathForOtherDomain(baseFile, oldDomain, newDomain)
+	if err != nil {
+		return nil, nil, err
 	}
 	decomp, err := seg.NewDecompressor(newFile)
 	if err != nil {
