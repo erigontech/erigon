@@ -1300,7 +1300,7 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txCount ui
 	view := r.sn.View()
 	defer view.Close()
 	for _, sn := range view.Bodies() {
-		defer sn.Src().MadvSequential().DisableReadAhead()
+		defer sn.Src().MadvNormal().DisableReadAhead()
 
 		var buf []byte
 		g := sn.Src().MakeGetter()

@@ -2054,8 +2054,8 @@ func doDiff(cliCtx *cli.Context) error {
 	}
 	defer dst.Close()
 
-	defer src.MadvSequential().DisableReadAhead()
-	defer dst.MadvSequential().DisableReadAhead()
+	defer src.MadvNormal().DisableReadAhead()
+	defer dst.MadvNormal().DisableReadAhead()
 
 	i := 0
 	srcG, dstG := src.MakeGetter(), dst.MakeGetter()
@@ -2149,7 +2149,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 	}
 	defer decompressor.Close()
 	func() {
-		defer decompressor.MadvSequential().DisableReadAhead()
+		defer decompressor.MadvNormal().DisableReadAhead()
 
 		t := time.Now()
 		g := decompressor.MakeGetter()
@@ -2160,7 +2160,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 		logger.Info("decompress speed", "took", time.Since(t))
 	}()
 	func() {
-		defer decompressor.MadvSequential().DisableReadAhead()
+		defer decompressor.MadvNormal().DisableReadAhead()
 
 		t := time.Now()
 		g := decompressor.MakeGetter()
@@ -2361,7 +2361,7 @@ func doUncompress(cliCtx *cli.Context) error {
 		return err
 	}
 	defer decompressor.Close()
-	defer decompressor.MadvSequential().DisableReadAhead()
+	defer decompressor.MadvNormal().DisableReadAhead()
 
 	src, cleanup := seg.Decompressor2bufio(decompressor)
 	defer cleanup()
@@ -2403,7 +2403,7 @@ func doCompress(cliCtx *cli.Context) error {
 			return err
 		}
 		defer decompressor.Close()
-		defer decompressor.MadvSequential().DisableReadAhead()
+		defer decompressor.MadvNormal().DisableReadAhead()
 		log.Info("[compress] from", "from", srcF)
 
 		var cleanup func()

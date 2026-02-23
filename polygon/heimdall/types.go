@@ -216,7 +216,7 @@ var (
 				defer rs.Close()
 				rs.LogLvl(log.LvlInfo)
 
-				defer d.MadvSequential().DisableReadAhead()
+				defer d.MadvNormal().DisableReadAhead()
 
 				for {
 					g.Reset(0)
@@ -525,7 +525,7 @@ func buildValueIndex(ctx context.Context, version version.Versions, sn snaptype.
 	defer rs.Close()
 	rs.LogLvl(log.LvlInfo)
 
-	defer d.MadvSequential().DisableReadAhead()
+	defer d.MadvNormal().DisableReadAhead()
 
 	for {
 		g := d.MakeGetter()
