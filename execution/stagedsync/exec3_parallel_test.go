@@ -92,9 +92,7 @@ func NewTestExecTask(txIdx int, ops []Op, sender accounts.Address, nonce int) *t
 }
 
 func sleep(i time.Duration) {
-	start := time.Now()
-	for time.Since(start) < i {
-	}
+	time.Sleep(i)
 }
 
 func (t *testExecTask) Execute(evm *vm.EVM,
