@@ -194,6 +194,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, fmt.Errorf("node is still initializing")
 	}
 
+	if err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin); err != nil {
+		return nil, err
+	}
+
 	erigonLogs, err := api.getLogsV3(ctx, tx, begin, end, crit, api.BaseAPI.rangeLimit)
 	if err != nil {
 		return nil, err
