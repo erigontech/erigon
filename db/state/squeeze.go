@@ -496,6 +496,14 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		return nil, fmt.Errorf("SeekCommitment: %w", err)
 	}
 	blockFrom := seekBlockNum
+
+	// If no commitment history files exist, start from block 0 regardless of what
+	// SeekCommitment returns (it falls back to execution progress which is wrong here).
+	if blockFrom > 0 && AggTx(rwTx).d[kv.CommitmentDomain].files.EndTxNum() == 0 {
+		logger.Info("[rebuild_commitment_history] no commitment files found, starting from block 0")
+		blockFrom = 0
+	}
+
 	if blockFrom > 0 {
 		blockFrom++ // SeekCommitment returns last committed block; start from next
 	}
@@ -779,6 +787,10 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		"blocks", blockTo+1, "totalKeys", common.PrettyCounter(totalKeysProcessed),
 		"root", hex.EncodeToString(latestRoot),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+
+	if totalKeysProcessed == 0 {
+		return latestRoot, nil
+	}
 
 	logger.Info("[rebuild_commitment_history] merging built files")
 	for {
