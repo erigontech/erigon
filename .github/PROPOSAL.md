@@ -29,6 +29,8 @@ regressions:
 
 local reproducibility:
 	- all jobs should have a way to locally reproduce for testing, and dev prechecks (i'm changing X code, so i should do X tests first).
+	- tests that can be reproduced locally should preferably only occur in the merge group checks.
+	- all workflows should have local invocation equivalents.
 
 flaky tests:
 	- these should be aggressively trimmed. unrelated failures in PRs should be reported, and skipped rather than waiting.

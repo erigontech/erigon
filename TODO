@@ -13,3 +13,4 @@
 - use bars/pipes for key separators
 - continue on errors for caching retry script
 - split up the long running single-package tests
+- add parallel to all tests where possible, (mainly execution/tests), see what breaks
