@@ -25,4 +25,4 @@ runs:
       if: ${{ always() }}
       with:
         path: ${{ env.ERIGON_CI_GOCACHE }}
-        key: gocache|${{ env.ERIGON_CI_WORKFLOW }}|${{ github.job }}|${{ env.ERIGON_CI_GOVERSION }}|${{ runner.os }}|${{ runner.arch }}|${{ github.head_ref || github.ref_name }}|${{ github.sha }}|${{ github.run_id }}
+        key: gocache|${{ env.ERIGON_CI_WORKFLOW }}|${{ github.job }}|${{ env.ERIGON_CI_GOVERSION }}|${{ runner.os }}|${{ runner.arch }}|${{ github.head_ref || github.ref_name }}|${{ github.sha }}|${{ github.run_number }}
