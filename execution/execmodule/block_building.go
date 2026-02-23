@@ -34,6 +34,29 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
+// slotDuration returns the actual slot duration in seconds by reading the parent
+// block timestamp from the database and computing timestamp - parentTime.
+// Falls back to SecondsPerSlot() if the parent block cannot be found.
+func (e *EthereumExecutionModule) slotDuration(ctx context.Context, parentHash common.Hash, timestamp uint64) uint64 {
+	tx, err := e.db.BeginRo(ctx)
+	if err != nil {
+		return e.config.SecondsPerSlot()
+	}
+	defer tx.Rollback()
+	parentNum, err := e.blockReader.HeaderNumber(ctx, tx, parentHash)
+	if err != nil || parentNum == nil {
+		return e.config.SecondsPerSlot()
+	}
+	parentHeader, err := e.blockReader.Header(ctx, tx, parentHash, *parentNum)
+	if err != nil || parentHeader == nil {
+		return e.config.SecondsPerSlot()
+	}
+	if timestamp <= parentHeader.Time {
+		return e.config.SecondsPerSlot()
+	}
+	return timestamp - parentHeader.Time
+}
+
 func (e *EthereumExecutionModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
 	if !e.config.IsShanghai(time) && withdrawals != nil {
 		return &rpc.InvalidParamsError{Message: "withdrawals before shanghai"}
@@ -99,7 +122,11 @@ func (e *EthereumExecutionModule) AssembleBlock(ctx context.Context, req *execut
 	param.PayloadId = e.nextPayloadId
 	e.lastParameters = &param
 
-	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, &param, e.config.SecondsPerSlot()/4)
+	maxBuildTimeSecs := e.slotDuration(ctx, param.ParentHash, param.Timestamp) / 4
+	if maxBuildTimeSecs < 1 {
+		maxBuildTimeSecs = 1
+	}
+	e.builders[e.nextPayloadId] = builder.NewBlockBuilder(e.builderFunc, &param, maxBuildTimeSecs)
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
 
 	return &executionproto.AssembleBlockResponse{

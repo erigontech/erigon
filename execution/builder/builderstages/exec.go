@@ -219,7 +219,7 @@ func SpawnBuilderExecStage(ctx context.Context, s *stagedsync.StageState, sd *ex
 	header := block.HeaderNoCopy()
 
 	if execCfg.ChainConfig().IsPrague(header.Time) {
-		hash := common.Hash{}
+		hash := empty.RequestsHash
 		if len(current.Requests) > 0 {
 			hash = *current.Requests.Hash()
 		}

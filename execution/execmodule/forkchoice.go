@@ -580,11 +580,23 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 			e.logger.Info("Timings: Forkchoice Prune", timings...)
 		}
 	}
-	backgroundPostForkChoice := e.fcuBackgroundCommit || e.fcuBackgroundPrune
-	if backgroundPostForkChoice {
+	if e.fcuBackgroundCommit {
+		// Background commit accesses SharedDomains, so the semaphore must be held
+		// by the goroutine until the commit completes.
 		shouldReleaseSema = false // pass on the semaphore to background goroutine
 		go func() {
 			defer e.semaphore.Release(1)
+			err := e.runPostForkchoice(currentContext, finishProgressBefore, isSynced, initialCycle)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				e.logger.Error("Error running background post forkchoice", "err", err)
+			}
+		}()
+	} else if e.fcuBackgroundPrune {
+		// Background prune runs its own db.UpdateTemporal transaction and does not
+		// access SharedDomains, so the semaphore can be released immediately.
+		// Holding it for the full prune duration causes spurious Busy responses on
+		// the next FCU, which stalls attestation and prevents finality.
+		go func() {
 			err := e.runPostForkchoice(currentContext, finishProgressBefore, isSynced, initialCycle)
 			if err != nil && !errors.Is(err, context.Canceled) {
 				e.logger.Error("Error running background post forkchoice", "err", err)
