@@ -269,6 +269,8 @@ func TestEliasFano(t *testing.T) {
 	assert.Equal(t, ef2.Max(), Max(buf.Bytes()))
 	assert.Equal(t, ef2.Min(), Min(buf.Bytes()))
 	assert.Equal(t, ef2.Count(), Count(buf.Bytes()))
+
+	ref := RebasedEliasFano{}; ref.Reset(1000, buf.Bytes()); assert.True(t, ref.Has(1037)); assert.False(t, ref.Has(1038))
 }
 
 func BenchmarkRead(b *testing.B) {
