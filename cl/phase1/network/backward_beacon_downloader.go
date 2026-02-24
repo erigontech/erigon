@@ -43,7 +43,7 @@ type BlockChecker interface {
 }
 
 type BackwardBeaconDownloader struct {
-	ctx            context0.Context
+	ctx            context.Context
 	slotToDownload atomic.Uint64
 	expectedRoot   common.Hash
 	rpc            *rpc.BeaconRpcP2P
@@ -132,7 +132,7 @@ func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 // RequestMore downloads a range of blocks in a backward manner.
 // It requests blocks, processes them in reverse order via the onNewBlock callback,
 // and rejects blocks whose root hash doesn't match the expected root.
-func (b *BackwardBeaconDownloader) RequestMore(ctx context0.Context) error {
+func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
 	responses, err := b.fetchBlockRange(ctx)
 	if err != nil {
 		return err
@@ -150,7 +150,7 @@ func (b *BackwardBeaconDownloader) RequestMore(ctx context0.Context) error {
 }
 
 // fetchBlockRange requests a range of blocks from peers and waits for a response.
-func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context0.Context) ([]*cltypes.SignedBeaconBlock, error) {
+func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context.Context) ([]*cltypes.SignedBeaconBlock, error) {
 	const count = uint64(64)
 	start := b.slotToDownload.Load() - count + 1
 	if start > b.slotToDownload.Load() { // overflow check
@@ -180,7 +180,7 @@ func (b *BackwardBeaconDownloader) fetchBlockRange(ctx context0.Context) ([]*clt
 
 // sendBlockRequest sends a block range request and writes the result to the channel.
 func (b *BackwardBeaconDownloader) sendBlockRequest(
-	ctx context0.Context,
+	ctx context.Context,
 	start, count uint64,
 	received chan<- []*cltypes.SignedBeaconBlock,
 	requestSent *atomic.Bool,
@@ -236,7 +236,7 @@ func (b *BackwardBeaconDownloader) processResponses(responses []*cltypes.SignedB
 }
 
 // trySkipToExistingBlock attempts to skip ahead if the expected block already exists in the database.
-func (b *BackwardBeaconDownloader) trySkipToExistingBlock(ctx context0.Context) error {
+func (b *BackwardBeaconDownloader) trySkipToExistingBlock(ctx context.Context) error {
 	tx, err := b.db.BeginRw(b.ctx)
 	if err != nil {
 		return err
@@ -308,7 +308,7 @@ func (b *BackwardBeaconDownloader) trySkipToExistingBlock(ctx context0.Context) 
 }
 
 // canSkipSlot checks if we can skip to an existing block at the given slot.
-func (b *BackwardBeaconDownloader) canSkipSlot(ctx context0.Context, tx kv.Tx, elFrozenBlocks, clFrozenBlocks, slot uint64) bool {
+func (b *BackwardBeaconDownloader) canSkipSlot(ctx context.Context, tx kv.Tx, elFrozenBlocks, clFrozenBlocks, slot uint64) bool {
 	if slot <= clFrozenBlocks {
 		return false
 	}
