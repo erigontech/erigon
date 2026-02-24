@@ -53,15 +53,10 @@ type TemporalMemBatch struct {
 
 	getCacheSize int
 
-	// inMemHistoryReads controls whether all writes (with their txNums) are accumulated in the
-	// per-key slice to enable GetAsOf time-travel reads from the in-mem batch.
-	// Note: DomainBufferedWriter already holds history in memory for eventual disk writes;
-	// this flag is orthogonal — it enables reading that history back at arbitrary txNums.
-	// When true, GetAsOf can answer queries against in-flight state — needed for RPC reads
-	// during live chain-tip execution.
-	// When false (default), only the latest value per key is kept; GetAsOf returns (nil, false, nil)
-	// so callers fall through to snapshots/MDBX. Correct and cheaper for offline commands
-	// (stage_exec, integration cmds) where history reads always come from disk anyway.
+	// inMemHistoryReads: accumulate all writes with txNums so GetAsOf can answer time-travel
+	// queries from in-flight state (needed for RPC reads during live chain-tip execution).
+	// Distinct from DomainBufferedWriter which also holds history in mem but only for writing.
+	// Disable for offline commands (stage_exec etc.) — history reads come from disk anyway.
 	inMemHistoryReads bool
 
 	latestStateLock sync.RWMutex
