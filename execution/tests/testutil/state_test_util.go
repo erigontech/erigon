@@ -23,7 +23,6 @@ import (
 	"context"
 	context2 "context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -33,6 +32,7 @@ import (
 
 	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -71,7 +71,7 @@ type StateSubtest struct {
 }
 
 func (t *StateTest) UnmarshalJSON(in []byte) error {
-	return json.Unmarshal(in, &t.Json)
+	return jsoniter.ConfigFastest.Unmarshal(in, &t.Json)
 }
 
 type stJSON struct {
