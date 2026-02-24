@@ -248,7 +248,11 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 
 	// It is allowed to call precompiles, even via delegatecall
 	if isPrecompile {
-		ret, gas, err = RunPrecompiledContract(p, input, gas, evm.Config().Tracer)
+		var stateDB tracing.IntraBlockState
+		if evm.chainRules.IsAmsterdam {
+			stateDB = evm.intraBlockState
+		}
+		ret, gas, err = RunPrecompiledContract(stateDB, p, addr, input, gas, evm.Config().Tracer)
 	} else if len(code) == 0 {
 		// If the account has no code, we can abort here
 		// The depth-check is already done, and precompiles handled above

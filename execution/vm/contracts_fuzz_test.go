@@ -23,6 +23,8 @@ import (
 	"maps"
 	"slices"
 	"testing"
+
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func FuzzPrecompiledContracts(f *testing.F) {
@@ -36,7 +38,7 @@ func FuzzPrecompiledContracts(f *testing.F) {
 			return
 		}
 		inWant := string(input)
-		RunPrecompiledContract(p, input, gas, nil)
+		RunPrecompiledContract(nil, p, accounts.InternAddress(a), input, gas, nil)
 		if inHave := string(input); inWant != inHave {
 			t.Errorf("Precompiled %v modified input data", a)
 		}
