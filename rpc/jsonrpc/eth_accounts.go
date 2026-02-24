@@ -32,6 +32,10 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
+// maxGetStorageSlots is the maximum total number of storage slots that can
+// be requested in a single eth_getStorageValues call.
+const maxGetStorageSlots = 1024
+
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
 func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
 	tx, err1 := api.db.BeginTemporalRo(ctx)
@@ -154,6 +158,65 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 		return hexutil.Bytes(""), nil
 	}
 	return res, nil
+}
+
+func (api *APIImpl) GetStorageValues(ctx context.Context, requests map[common.Address][]common.Hash, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address][]hexutil.Bytes, error) {
+	var totalSlots int
+
+	for _, keys := range requests {
+		totalSlots += len(keys)
+		if totalSlots > maxGetStorageSlots {
+			return nil, clientLimitExceededError(fmt.Sprintf("too many slots (max %d)", maxGetStorageSlots))
+		}
+	}
+	if totalSlots == 0 {
+		return nil, &rpc.InvalidParamsError{Message: "empty request"}
+	}
+
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNrOrHash.RequireCanonical = true
+	blockNumber, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[common.Address][]hexutil.Bytes, len(requests))
+	for addr, keys := range requests {
+		vals := make([]hexutil.Bytes, len(keys))
+		for i, key := range keys {
+			address := accounts.InternAddress(addr)
+			location := accounts.InternKey(key)
+			res, _, err := reader.ReadAccountStorage(address, location)
+			if err != nil {
+				return nil, err
+			}
+
+			vals[i] = res.PaddedBytes(32)
+		}
+		result[addr] = vals
+	}
+
+	return result, nil
 }
 
 // GetStorageAt implements eth_getStorageAt. Returns the value from a storage position at a given address.
