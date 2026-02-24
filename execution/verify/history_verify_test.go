@@ -50,10 +50,7 @@ func TestHistoryVerification_SimpleBlocks(t *testing.T) {
 	parent := m.Genesis
 	const batchSize = 100
 	for batchStart := 0; batchStart < numBlocks; batchStart += batchSize {
-		batchEnd := batchStart + batchSize
-		if batchEnd > numBlocks {
-			batchEnd = numBlocks
-		}
+		batchEnd := min(batchStart+batchSize, numBlocks)
 		chainResult, err := blockgen.GenerateChain(m.ChainConfig, parent, m.Engine, m.DB, batchEnd-batchStart, func(i int, b *blockgen.BlockGen) {
 			b.SetCoinbase(common.Address{1})
 		})
