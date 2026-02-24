@@ -118,10 +118,12 @@ func ExecV3(ctx context.Context,
 	maxBlockNum uint64,
 	logger log.Logger) (execErr error) {
 	syncMode := execStage.SyncMode()
-	isBlockProduction := syncMode == stages.ModeBlockProduction
-	isForkValidation := syncMode == stages.ModeForkValidation
-	isApplyingBlocks := syncMode.IsApplyingBlocks()
-	isOffline := syncMode.IsOffline()
+	var (
+		isBlockProduction = syncMode == stages.ModeBlockProduction
+		isForkValidation  = syncMode == stages.ModeForkValidation
+		isApplyingBlocks  = syncMode.IsApplyingBlocks()
+		isOffline         = syncMode.IsOffline()
+	)
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
 	hooks := cfg.vmConfig.Tracer
 	applyTx := rwTx
