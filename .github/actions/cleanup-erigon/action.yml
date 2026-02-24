@@ -16,6 +16,12 @@ runs:
   steps:
     - uses: ./.github/actions/save-build-cache
       if: ${{ always() && env.ERIGON_CI_GOCACHE != '' }}
+      with:
+        gocache: ${{ env.ERIGON_CI_GOCACHE }}
+        goversion: ${{ env.ERIGON_CI_GOVERSION }}
+        workflow: ${{ env.ERIGON_CI_WORKFLOW }}
+        extra-key: ${{ env.ERIGON_CI_BUILD_CACHE_EXTRA_KEY }}
+        restored-key: ${{ env.ERIGON_CI_BUILD_CACHE_RESTORED_KEY }}
 
     - uses: ./.github/actions/save-mod-cache
       if: ${{ always() && env.ERIGON_CI_MODCACHE_MODE != 'download' }}

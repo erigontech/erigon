@@ -1,20 +1,31 @@
 name: Save Go build cache
 description: Save Go build cache keyed by workflow, job, and branch
 
+inputs:
+  gocache:
+    description: "GOCACHE path"
+    required: true
+  goversion:
+    description: "Full Go version string (e.g. go1.25.7)"
+    required: true
+  workflow:
+    description: "Workflow name for cache key namespacing"
+    required: true
+  extra-key:
+    description: "Extra segment appended after runner.arch in the cache key (e.g. matrix value)"
+    required: false
+    default: ''
+  restored-key:
+    description: "The cache key that was restored (used to skip redundant saves on re-runs)"
+    required: true
+
 runs:
   using: composite
   steps:
-    - name: Validate required env vars
-      shell: bash
-      run: |
-        : "${ERIGON_CI_GOCACHE:?must be set by setup-erigon}"
-        : "${ERIGON_CI_GOVERSION:?must be set by setup-erigon}"
-        : "${ERIGON_CI_WORKFLOW:?must be set by setup-erigon}"
-
     - name: Show build cache size
       if: ${{ always() }}
       shell: bash
-      run: du -hs "$ERIGON_CI_GOCACHE" || true
+      run: du -hs "${{ inputs.gocache }}" || true
 
     - name: Clean fuzz cache
       if: ${{ always() }}
@@ -26,11 +37,26 @@ runs:
       shell: bash
       run: |
         # trim.txt format is Unix epoch seconds as a plain integer
-        printf '%d' "$(date +%s)" > "$ERIGON_CI_GOCACHE/trim.txt"
-        rm -f "$ERIGON_CI_GOCACHE/testexpire.txt"
+        printf '%d' "$(date +%s)" > "${{ inputs.gocache }}/trim.txt"
+        rm -f "${{ inputs.gocache }}/testexpire.txt"
+
+    - name: Compute base key and check for skip
+      id: check
+      if: ${{ always() }}
+      shell: bash
+      env:
+        BASE_KEY: gocache|${{ inputs.workflow }}|${{ github.job }}|${{ inputs.goversion }}|${{ runner.os }}|${{ runner.arch }}|${{ inputs.extra-key }}|${{ github.head_ref || github.ref_name }}|${{ github.sha }}|
+        RESTORED_KEY: ${{ inputs.restored-key }}
+      run: |
+        if [[ -n "$RESTORED_KEY" && "$RESTORED_KEY" == "$BASE_KEY"* ]]; then
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          echo "Skipping save: restored from same commit (restored key starts with base key)"
+        else
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+        fi
 
     - uses: actions/cache/save@v4
-      if: ${{ always() }}
+      if: ${{ always() && steps.check.outputs.skip != 'true' }}
       with:
-        path: ${{ env.ERIGON_CI_GOCACHE }}
-        key: gocache|${{ env.ERIGON_CI_WORKFLOW }}|${{ github.job }}|${{ env.ERIGON_CI_GOVERSION }}|${{ runner.os }}|${{ runner.arch }}|${{ env.ERIGON_CI_BUILD_CACHE_EXTRA_KEY }}|${{ github.head_ref || github.ref_name }}|${{ github.sha }}|${{ github.run_number }}
+        path: ${{ inputs.gocache }}
+        key: gocache|${{ inputs.workflow }}|${{ github.job }}|${{ inputs.goversion }}|${{ runner.os }}|${{ runner.arch }}|${{ inputs.extra-key }}|${{ github.head_ref || github.ref_name }}|${{ github.sha }}|${{ github.run_attempt }}
