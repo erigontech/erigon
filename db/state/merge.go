@@ -427,12 +427,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	var cp CursorHeap
 	heap.Init(&cp)
 	for _, item := range domainFiles {
-		view, err := item.decompressor.OpenSequentialView()
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		defer view.Close()
-		g := seg.NewReader(view.MakeGetter(), dt.d.Compression)
+		g := dt.dataReader(item.decompressor)
 		g.Reset(0)
 		if g.HasNext() {
 			key, _ := g.Next(nil)
