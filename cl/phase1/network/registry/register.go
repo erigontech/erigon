@@ -30,6 +30,10 @@ func RegisterGossipServices(
 	voluntaryExitService services.VoluntaryExitService,
 	blsToExecutionChangeService services.BLSToExecutionChangeService,
 	proposerSlashingService services.ProposerSlashingService,
+	executionPayloadService services.ExecutionPayloadService,
+	payloadAttestationService services.PayloadAttestationService,
+	proposerPreferencesService services.ProposerPreferencesService,
+	executionPayloadBidService services.ExecutionPayloadBidService,
 ) {
 	waitReady := withHeadSlotReady(forkChoiceReader, ethClock)
 
@@ -46,6 +50,11 @@ func RegisterGossipServices(
 	gossip.RegisterGossipService(gm, blobService, withEndVersion(clparams.FuluVersion), withGlobalTimeBasedRateLimiter(6*time.Second, 32))
 	// fulu
 	gossip.RegisterGossipService(gm, dataColumnSidecarService, withBeginVersion(clparams.FuluVersion), withRateLimiterByPeer(32, 64))
+	// gloas
+	gossip.RegisterGossipService(gm, executionPayloadService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(2, 4))
+	gossip.RegisterGossipService(gm, payloadAttestationService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(8, 16))
+	gossip.RegisterGossipService(gm, proposerPreferencesService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(2, 4))
+	gossip.RegisterGossipService(gm, executionPayloadBidService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(8, 16))
 }
 
 func withHeadSlotReady(forkChoiceReader forkchoice.ForkChoiceStorageReader, ethClock eth_clock.EthereumClock) gossip.ConditionFunc {

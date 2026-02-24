@@ -34,6 +34,11 @@ const (
 	TopicNameLightClientFinalityUpdate   = "light_client_finality_update"
 	TopicNameLightClientOptimisticUpdate = "light_client_optimistic_update"
 
+	TopicNameExecutionPayload    = "execution_payload"
+	TopicNameExecutionPayloadBid = "execution_payload_bid"
+	TopicNamePayloadAttestation  = "payload_attestation_message"
+	TopicNameProposerPreferences = "proposer_preferences"
+
 	TopicNamePrefixBlobSidecar       = "blob_sidecar_%d"
 	TopicNamePrefixBeaconAttestation = "beacon_attestation_%d"
 	TopicNamePrefixSyncCommittee     = "sync_committee_%d"
