@@ -48,8 +48,7 @@ func SigToPub(hash, sig []byte) (*ecdsa.PublicKey, error) {
 		return nil, err
 	}
 
-	x, y := S256().Unmarshal(s)
-	return &ecdsa.PublicKey{Curve: S256(), X: x, Y: y}, nil
+	return UnmarshalPubkeyStd(s)
 }
 
 // Sign calculates an ECDSA signature.

@@ -307,23 +307,24 @@ func (prv *PrivateKey) Decrypt(c, s1, s2 []byte) (m []byte, err error) {
 
 	R := new(PublicKey)
 	R.Curve = prv.PublicKey.Curve
-	if rc, ok := R.Curve.(crypto.EllipticCurve); ok {
-		R.X, R.Y = rc.Unmarshal(c[:rLen])
-	}
-	if R.X == nil {
-		return nil, ErrInvalidPublicKey
-	}
 
-	z, err := prv.GenerateShared(R, params.KeyLen, params.KeyLen)
-	if err != nil {
-		return nil, err
-	}
-	Ke, Km := deriveKeys(hash, z, s1, params.KeyLen)
+	if curve, ok := R.Curve.(crypto.EllipticCurve); ok {
+		R.X, R.Y = curve.Unmarshal(c[:rLen])
+		if R.X == nil {
+			return nil, ErrInvalidPublicKey
+		}
 
-	d := messageTag(params.Hash, Km, c[mStart:mEnd], s2)
-	if subtle.ConstantTimeCompare(c[mEnd:], d) != 1 {
-		return nil, ErrInvalidMessage
-	}
+		z, err := prv.GenerateShared(R, params.KeyLen, params.KeyLen)
+		if err != nil {
+			return nil, err
+		}
+		Ke, Km := deriveKeys(hash, z, s1, params.KeyLen)
 
-	return symDecrypt(params, Ke, c[mStart:mEnd])
+		d := messageTag(params.Hash, Km, c[mStart:mEnd], s2)
+		if subtle.ConstantTimeCompare(c[mEnd:], d) != 1 {
+			return nil, ErrInvalidMessage
+		}
+		return symDecrypt(params, Ke, c[mStart:mEnd])
+	}
+	return nil, ErrInvalidCurve
 }

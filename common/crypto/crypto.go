@@ -143,7 +143,7 @@ func toECDSA(d []byte, strict bool) (*ecdsa.PrivateKey, error) {
 		return nil, errors.New("invalid private key, zero or negative")
 	}
 
-	priv.PublicKey.X, priv.PublicKey.Y = priv.PublicKey.Curve.ScalarBaseMult(d)
+	priv.PublicKey.X, priv.PublicKey.Y = S256().ScalarBaseMult(d)
 	if priv.PublicKey.X == nil {
 		return nil, errors.New("invalid private key")
 	}
