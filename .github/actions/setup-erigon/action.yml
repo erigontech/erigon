@@ -93,7 +93,7 @@ runs:
     - name: Clone submodules
       if: ${{ inputs.submodules == 'true' }}
       shell: bash
-      run: time git submodule update --init --recursive --depth 1 --filter=blob:none --jobs 4 --progress
+      run: time GIT_LFS_SKIP_SMUDGE=1 git submodule update --init --recursive --depth 1 --filter=blob:none --jobs 4 --progress
 
     - name: Pull LFS test fixtures
       if: ${{ inputs.lfs == 'tests' }}
@@ -110,26 +110,42 @@ runs:
         chmod +x "$RUNNER_TEMP/git-restore-mtime"
         echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
-    - name: Restore file mtimes for Go test caching
+    - name: Restore fixture mtimes for Go test caching
       shell: bash
       run: |
-        # Go's test cache keys include stat metadata (mtime+size) for every file
-        # and directory accessed during test execution.
+        # Go's test cache keys include stat metadata (mtime+size) for every
+        # file and directory accessed during test execution. Source file
+        # changes are captured by the test binary hash, so we only need
+        # deterministic mtimes for fixture/data files that tests open at
+        # runtime.
         #
-        # Main repo (full history via fetch-depth: 0): git-restore-mtime sets
-        # each file's mtime to the commit that last touched it. This is
-        # deterministic and content-sensitive — changed fixtures get a new mtime.
+        # Main repo: git-restore-mtime sets each fixture's mtime to the
+        # commit that last touched it (deterministic and content-sensitive).
         #
-        # Submodules (depth 1): git-restore-mtime can't help because files not
-        # in the single commit's log are left untouched. Instead, set all files
-        # to the submodule HEAD commit timestamp. This changes whenever the
-        # submodule is updated.
+        # Submodules (depth 1): git-restore-mtime can't help because files
+        # not in the single commit's log keep checkout time. Instead, set
+        # all files to the submodule HEAD commit timestamp.
         #
-        # Directories: git-restore-mtime only handles dirs for file adds/deletes,
-        # not modifications. Normalize all directory mtimes to a fixed epoch.
-        time git restore-mtime --no-directories
+        # Directories: normalize to a fixed epoch since git-restore-mtime
+        # only handles dirs for file adds/deletes, not modifications.
+
+        # Fixture paths and extensions in the main repo:
+        #   **/testdata/**          - Go-convention test data dirs
+        #   execution/tests/test-corners/** - custom edge-case fixtures
+        #   cl/spectest/**/data_*/** - consensus spec test data
+        #   cl/transition/**/test_data/** - consensus transition test data
+        #   Extensions: .json .js .txt .ssz .ssz_snappy .yaml
+        time git restore-mtime --no-directories -- \
+          '**/testdata/**' \
+          'execution/tests/test-corners/**' \
+          'cl/spectest/**/data_*/**' \
+          'cl/transition/**/test_data/**'
+
+        # Submodules are all fixture data; set mtimes to HEAD commit time.
         git submodule foreach --quiet --recursive \
           'ts=$(git log -1 --format=%cd --date=format:%Y%m%d%H%M.%S HEAD); find . -not -path "./.git/*" -not -type d -print0 | TZ=UTC xargs -0 touch -t $ts'
+
+        # Normalize directory mtimes to a fixed epoch.
         find . -type d -not -path '*/.git/*' -print0 | TZ=UTC xargs -0 touch -t 200902132331.30
 
     - name: Debug file mtimes
