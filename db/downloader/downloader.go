@@ -925,11 +925,17 @@ func (d *Downloader) addPreverifiedSnapshotForDownload(
 	defer d.lock.Unlock()
 	t, ok, err := d.getExistingSnapshotTorrent(name, infoHash)
 	if err != nil {
-		// If the snapshot is already loaded with a different infohash (e.g. file was rebuilt by
-		// background recsplit between restarts), skip the preverified download and keep using the
-		// existing local torrent. This is not an error - the local file is valid.
+		// If a torrent for this name is already loaded with a different infohash, keep the
+		// existing local torrent and skip the preverified download. This handles the case where
+		// a node already has a valid local snapshot (e.g. re-compressed release with new hash,
+		// or a file rebuilt by background recsplit) — the existing file is usable.
+		//
+		// NOTE: The root cause of infohash mismatches on restart (stale .torrent files loaded
+		// by AddTorrentsFromDisk before initial sync runs) is tracked separately. The proper fix
+		// is to run initial sync before AddTorrentsFromDisk so the preverified TOML hashes can
+		// always take precedence. See: https://github.com/erigontech/erigon/issues/19435
 		if existingT, nameOk := d.torrentsByName[name]; nameOk && existingT.InfoHash() != infoHash {
-			d.log(log.LvlWarn, "snapshot already loaded with different infohash, keeping existing",
+			d.log(log.LvlWarn, "snapshot already loaded with different infohash, keeping existing local torrent (preverified skipped)",
 				"name", name,
 				"existing_infohash", existingT.InfoHash().HexString(),
 				"preverified_infohash", infoHash.HexString())
