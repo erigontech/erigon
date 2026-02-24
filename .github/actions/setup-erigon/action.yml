@@ -190,10 +190,9 @@ runs:
       shell: bash
       run: choco install make -y --no-progress
 
-    - name: Debug concurrency
+    - name: Debug parallelism
       shell: bash
       run: |
-        echo "GOMAXPROCS=$(go env GOMAXPROCS)"
         nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "nproc unavailable"
 
     - name: Get Go environment paths
