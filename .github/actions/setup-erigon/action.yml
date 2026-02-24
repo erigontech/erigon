@@ -100,7 +100,7 @@ runs:
     - name: Clone submodules
       if: ${{ inputs.submodules == 'true' }}
       shell: bash
-      run: time GIT_LFS_SKIP_SMUDGE=1 git submodule update --init --recursive --depth 1 --filter=blob:none --jobs 4 --progress
+      run: time GIT_LFS_SKIP_SMUDGE=1 git submodule update --init --recursive --depth 1 --filter=blob:none --jobs 4
 
     - name: Pull LFS test fixtures
       if: ${{ inputs.lfs == 'tests' }}
