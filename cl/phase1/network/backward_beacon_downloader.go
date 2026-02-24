@@ -17,7 +17,7 @@
 package network
 
 import (
-	context0 "context"
+	"context"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -59,7 +59,7 @@ type BackwardBeaconDownloader struct {
 	mu sync.Mutex
 }
 
-func NewBackwardBeaconDownloader(ctx context0.Context, rpc *rpc.BeaconRpcP2P, sn *freezeblocks.CaplinSnapshots, engine execution_client.ExecutionEngine, db kv.RwDB) *BackwardBeaconDownloader {
+func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn *freezeblocks.CaplinSnapshots, engine execution_client.ExecutionEngine, db kv.RwDB) *BackwardBeaconDownloader {
 	return &BackwardBeaconDownloader{
 		ctx:         ctx,
 		rpc:         rpc,

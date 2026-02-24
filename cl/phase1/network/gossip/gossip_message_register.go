@@ -1,7 +1,7 @@
 package gossip
 
 import (
-	context0 "context"
+	"context"
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -55,7 +55,7 @@ func (w *serviceWrapper[T]) DecodeGossipMessage(pid peer.ID, data []byte, versio
 	return w.service.DecodeGossipMessage(pid, data, version)
 }
 
-func (w *serviceWrapper[T]) ProcessMessage(ctx context0.Context, subnet *uint64, msg any) error {
+func (w *serviceWrapper[T]) ProcessMessage(ctx context.Context, subnet *uint64, msg any) error {
 	if typedMsg, ok := msg.(T); ok {
 		return w.service.ProcessMessage(ctx, subnet, typedMsg)
 	}

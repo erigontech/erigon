@@ -17,7 +17,7 @@
 package network
 
 import (
-	context0 "context"
+	"context"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -38,7 +38,7 @@ type ProcessFn func(
 	err error)
 
 type ForwardBeaconDownloader struct {
-	ctx                   context0.Context
+	ctx                   context.Context
 	highestSlotProcessed  uint64
 	highestSlotUpdateTime time.Time
 	rpc                   *rpc.BeaconRpcP2P
@@ -47,7 +47,7 @@ type ForwardBeaconDownloader struct {
 	mu sync.Mutex
 }
 
-func NewForwardBeaconDownloader(ctx context0.Context, rpc *rpc.BeaconRpcP2P) *ForwardBeaconDownloader {
+func NewForwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P) *ForwardBeaconDownloader {
 	return &ForwardBeaconDownloader{
 		ctx: ctx,
 		rpc: rpc,
