@@ -339,10 +339,10 @@ func TestCompressNoWordPatterns(t *testing.T) {
 
 	// Build expected words: empty, short, varied-length — all via AddUncompressedWord.
 	var words [][]byte
-	words = append(words, []byte{})
+	words = append(words, nil)
 	words = append(words, []byte("a"))
 	for i := range 100 {
-		words = append(words, []byte{}) // empty words interspersed
+		words = append(words, nil) // empty words interspersed
 		words = append(words, fmt.Appendf(nil, "%d longlongword %d", i, i))
 		words = append(words, bytes.Repeat([]byte("x"), i+1))
 	}
@@ -362,7 +362,11 @@ func TestCompressNoWordPatterns(t *testing.T) {
 	for _, expected := range words {
 		require.True(t, g.HasNext())
 		got, _ := g.Next(nil)
-		require.Equal(t, expected, got)
+		if len(expected) == 0 {
+			require.Empty(t, got)
+		} else {
+			require.Equal(t, expected, got)
+		}
 	}
 	require.False(t, g.HasNext())
 }
