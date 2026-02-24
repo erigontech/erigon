@@ -97,6 +97,9 @@ type ForkChoiceStore struct {
 	headSet                  map[common.Hash]struct{}
 	hotSidecars              map[common.Hash][]*cltypes.BlobSidecar // Set of sidecars that are not yet processed.
 	verifiedExecutionPayload *lru.Cache[common.Hash, struct{}]
+	// [New in Gloas:EIP7732] Track execution payload validation status by execution block hash.
+	// Used to check if parent execution payload has been validated/invalidated for gossip validation.
+	executionPayloadStatus *lru.Cache[common.Hash, execution_client.PayloadStatus]
 	// childrens
 	childrens sync.Map
 
@@ -259,6 +262,12 @@ func NewForkChoiceStore(
 		return nil, err
 	}
 
+	// [New in Gloas:EIP7732] Track execution payload validation status by execution block hash
+	executionPayloadStatus, err := lru.New[common.Hash, execution_client.PayloadStatus](checkpointsPerCache)
+	if err != nil {
+		return nil, err
+	}
+
 	publicKeysRegistry.ResetAnchor(anchorState)
 	participation.Add(state.Epoch(anchorState.BeaconState), anchorState.CurrentEpochParticipation().Copy())
 
@@ -301,6 +310,7 @@ func NewForkChoiceStore(
 		partialWithdrawals:       partialWithdrawals,
 		proposerLookahead:        proposerLookahead,
 		pendingEnvelopes:         pendingEnvelopes,
+		executionPayloadStatus:   executionPayloadStatus,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
 	f.finalizedCheckpoint.Store(anchorCheckpoint)
@@ -335,6 +345,13 @@ func (f *ForkChoiceStore) InitPeerDas(peerDas das.PeerDas) {
 
 func (f *ForkChoiceStore) GetPeerDas() das.PeerDas {
 	return f.peerDas
+}
+
+// GetRecentExecutionPayloadStatus returns the validation status of a recently validated execution payload
+// by its execution block hash. This is an LRU cache lookup; older payloads may not be found.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) GetRecentExecutionPayloadStatus(executionBlockHash common.Hash) (execution_client.PayloadStatus, bool) {
+	return f.executionPayloadStatus.Get(executionBlockHash)
 }
 
 // Highest seen returns highest seen slot

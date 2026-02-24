@@ -613,7 +613,7 @@ func (b *BeaconState) SetPayloadExpectedWithdrawals(withdrawals *solid.ListSSZ[*
 	b.markLeaf(PayloadExpectedWithdrawalsLeafIndex)
 }
 
-func (b *BeaconState) SetNextWithdrawalBuilderIndex(index cltypes.BuilderIndex) {
+func (b *BeaconState) SetNextWithdrawalBuilderIndex(index uint64) {
 	b.nextWithdrawalBuilderIndex = index
 	b.markLeaf(NextWithdrawalBuilderIndexLeafIndex)
 }
