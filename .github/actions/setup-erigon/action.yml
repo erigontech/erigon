@@ -29,10 +29,10 @@ inputs:
     description: "'download' to restore/download/save module cache, 'false' to skip, other values restore only (save deferred to cleanup-erigon)"
     required: false
     default: 'download'
-  build-cache:
-    description: "Restore Go build cache"
+  build-cache-extra-key:
+    description: "Extra segment appended to build cache key (e.g. matrix.test-group)"
     required: false
-    default: 'true'
+    default: ''
 
 outputs:
   goversion:
@@ -210,6 +210,7 @@ runs:
         echo "ERIGON_CI_MODCACHE=$(go env GOMODCACHE)" >> "$GITHUB_ENV"
         echo "ERIGON_CI_MODCACHE_MODE=${{ inputs.modcache }}" >> "$GITHUB_ENV"
         echo "ERIGON_CI_WORKFLOW=$workflow" >> "$GITHUB_ENV"
+        echo "ERIGON_CI_BUILD_CACHE_EXTRA_KEY=${{ inputs.build-cache-extra-key }}" >> "$GITHUB_ENV"
 
     # Note we only cache $(go env GOMODCACHE)/cache/download, the rest is derived from that part.
 
@@ -244,8 +245,8 @@ runs:
         key: gomodcache|${{ runner.os }}|${{ hashFiles('go.sum') }}|${{ inputs.modcache }}
 
     - uses: ./.github/actions/restore-build-cache
-      if: ${{ inputs.build-cache == 'true' }}
       with:
         gocache: ${{ steps.go-env.outputs.build }}
         goversion: ${{ steps.go-env.outputs.goversion }}
         workflow: ${{ steps.go-env.outputs.workflow }}
+        extra-key: ${{ inputs.build-cache-extra-key }}

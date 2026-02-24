@@ -87,6 +87,7 @@ jobs:
         with:
           submodules: true
           lfs: tests
+          build-cache-extra-key: ${{ matrix.test-group }}
 
       - name: Run ${{ matrix.test-group }} tests on ${{ matrix.os }}
         env:
