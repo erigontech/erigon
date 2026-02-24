@@ -325,3 +325,44 @@ func Test_CompressWithMetadata(t *testing.T) {
 		i++
 	}
 }
+
+// TestCompressNoWordPatterns exercises the compressNoWordPatterns fast path, which is
+// triggered when all words are added via AddUncompressedWord (noWordPatterns == true).
+// Verifies that the output is a valid compressed file that round-trips correctly.
+func TestCompressNoWordPatterns(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "compressed")
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, DefaultCfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+	defer c.Close()
+
+	// Build expected words: empty, short, varied-length — all via AddUncompressedWord.
+	var words [][]byte
+	words = append(words, []byte{})
+	words = append(words, []byte("a"))
+	for i := range 100 {
+		words = append(words, []byte{}) // empty words interspersed
+		words = append(words, fmt.Appendf(nil, "%d longlongword %d", i, i))
+		words = append(words, bytes.Repeat([]byte("x"), i+1))
+	}
+
+	for _, w := range words {
+		require.NoError(t, c.AddUncompressedWord(w))
+	}
+	require.NoError(t, c.Compress())
+
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	defer d.Close()
+
+	require.EqualValues(t, len(words), d.Count())
+
+	g := d.MakeGetter()
+	for _, expected := range words {
+		require.True(t, g.HasNext())
+		got, _ := g.Next(nil)
+		require.Equal(t, expected, got)
+	}
+	require.False(t, g.HasNext())
+}
