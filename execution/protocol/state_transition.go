@@ -502,6 +502,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		IsEIP2028:          rules.IsIstanbul,
 		IsEIP3860:          isEIP3860,
 		IsEIP7623:          rules.IsPrague,
+		IsEIP8037:          rules.IsAmsterdam,
 	})
 	if overflow {
 		return nil, ErrGasUintOverflow

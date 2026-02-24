@@ -146,6 +146,8 @@ type TxPool struct {
 	isPostPrague            atomic.Bool
 	osakaTime               *uint64
 	isPostOsaka             atomic.Bool
+	amsterdamTime           *uint64
+	isPostAmsterdam         atomic.Bool
 	feeCalculator           FeeCalculator
 	p2pFetcher              *Fetch
 	p2pSender               *Send
@@ -292,6 +294,13 @@ func New(
 		}
 		osakaTimeU64 := chainConfig.OsakaTime.Uint64()
 		res.osakaTime = &osakaTimeU64
+	}
+	if chainConfig.AmsterdamTime != nil {
+		if !chainConfig.AmsterdamTime.IsUint64() {
+			return nil, errors.New("amsterdamTime overflow")
+		}
+		amsterdamTimeU64 := chainConfig.AmsterdamTime.Uint64()
+		res.amsterdamTime = &amsterdamTimeU64
 	}
 
 	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, res.chainID, logger, opts...)
@@ -829,6 +838,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf, availa
 			IsEIP2028:          true,
 			IsEIP3860:          isEIP3860,
 			IsEIP7623:          isEIP7623,
+			IsEIP8037:          p.isAmsterdam(),
 			IsAATxn:            isAATxn,
 		})
 		intrinsicGas := intrinsicGasResult.RegularGas
@@ -993,6 +1003,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		IsEIP2028:          true,
 		IsEIP3860:          isEIP3860,
 		IsEIP7623:          isPrague,
+		IsEIP8037:          p.isAmsterdam(),
 		IsAATxn:            isAATxn,
 	})
 	gas := intrinsicGasResult.RegularGas
@@ -1246,6 +1257,10 @@ func (p *TxPool) isPrague() bool {
 
 func (p *TxPool) isOsaka() bool {
 	return isTimeBasedForkActivated(&p.isPostOsaka, p.osakaTime)
+}
+
+func (p *TxPool) isAmsterdam() bool {
+	return isTimeBasedForkActivated(&p.isPostAmsterdam, p.amsterdamTime)
 }
 
 func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
