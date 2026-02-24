@@ -1815,6 +1815,7 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 	pending, baseFee, queued := pool.CountContent()
 	b.Logf("Final pool stats - pending: %d, baseFee: %d, queued: %d", pending, baseFee, queued)
 }
+
 // TestZombieQueuedEviction verifies that queued transactions whose nonce is so far ahead of
 // the sender's on-chain nonce that they can never become pending are evicted from the pool.
 // This covers Bug #2: "zombie" queued txns on Gnosis Chain (e.g. on-chain nonce=281 but
