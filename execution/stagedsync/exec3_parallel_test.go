@@ -94,10 +94,12 @@ func NewTestExecTask(txIdx int, ops []Op, sender accounts.Address, nonce int) *t
 }
 
 func sleepWithContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-time.After(d):
+	case <-timer.C:
 		return nil
 	}
 }
