@@ -35,12 +35,14 @@ type IntrinsicGasCalcArgs struct {
 	IsEIP2028          bool
 	IsEIP3860          bool
 	IsEIP7623          bool
+	IsEIP8037          bool
 	IsAATxn            bool
 }
 
 type IntrinsicGasCalcResult struct {
 	RegularGas   uint64
 	FloorGasCost uint64
+	StateGas     uint64
 }
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
@@ -62,9 +64,10 @@ func IntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) {
 func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) {
 	var result IntrinsicGasCalcResult
 	dataLen := uint64(len(args.Data))
+	var stateGas uint64
 	// Set the starting gas for the raw transaction
 	if args.IsContractCreation && args.IsEIP2 {
-		result.RegularGas = params.TxGasContractCreation
+		stateGas += params.TxGasContractCreation
 	} else if args.IsAATxn {
 		result.RegularGas = params.TxAAGas
 	} else {
@@ -151,9 +154,18 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		return IntrinsicGasCalcResult{}, true
 	}
 
-	result.RegularGas, overflow = math.SafeAdd(result.RegularGas, product)
+	stateGas, overflow = math.SafeAdd(stateGas, product)
 	if overflow {
 		return IntrinsicGasCalcResult{}, true
+	}
+
+	if args.IsEIP8037 {
+		result.StateGas = stateGas
+	} else {
+		result.RegularGas, overflow = math.SafeAdd(result.RegularGas, stateGas)
+		if overflow {
+			return IntrinsicGasCalcResult{}, true
+		}
 	}
 
 	return result, false
