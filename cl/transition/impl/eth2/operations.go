@@ -483,8 +483,8 @@ func updateNextWithdrawalBuilderIndex(s abstract.BeaconState, processedBuildersS
 	if builders == nil || builders.Len() == 0 {
 		return
 	}
-	nextIndex := uint64(s.GetNextWithdrawalBuilderIndex()) + processedBuildersSweepCount
-	s.SetNextWithdrawalBuilderIndex(cltypes.BuilderIndex(nextIndex % uint64(builders.Len())))
+	nextIndex := s.GetNextWithdrawalBuilderIndex() + processedBuildersSweepCount
+	s.SetNextWithdrawalBuilderIndex(nextIndex % uint64(builders.Len()))
 }
 
 // ProcessExecutionPayloadBid processes the execution payload bid from the block.
@@ -496,7 +496,7 @@ func (I *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltypes.
 	amount := bid.Value
 
 	// For self-builds, amount must be zero regardless of withdrawal credential prefix
-	if builderIndex == cltypes.BuilderIndex(clparams.BuilderIndexSelfBuild) {
+	if builderIndex == clparams.BuilderIndexSelfBuild {
 		if amount != 0 {
 			return errors.New("processExecutionPayloadBid: self-build bid must have zero value")
 		}

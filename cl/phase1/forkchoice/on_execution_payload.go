@@ -22,21 +22,116 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/monitor"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
+// validateEnvelopeAgainstBlock validates the envelope against the block and state.
+// This includes:
+//   - bid matching (slot, builder_index, block_hash)
+//   - builder signature verification
+func (f *ForkChoiceStore) validateEnvelopeAgainstBlock(
+	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
+	block *cltypes.SignedBeaconBlock,
+	blockState abstract.BeaconState,
+) error {
+	envelope := signedEnvelope.Message
+
+	// Get the bid from the block
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	if bid == nil || bid.Message == nil {
+		return errors.New("block missing signed_execution_payload_bid")
+	}
+
+	// Validate block.slot equals envelope.slot
+	if block.Block.Slot != envelope.Slot {
+		return fmt.Errorf("block slot %d != envelope slot %d", block.Block.Slot, envelope.Slot)
+	}
+
+	// Validate envelope.builder_index == bid.builder_index
+	if envelope.BuilderIndex != bid.Message.BuilderIndex {
+		return fmt.Errorf("envelope builder_index %d != bid builder_index %d",
+			envelope.BuilderIndex, bid.Message.BuilderIndex)
+	}
+
+	// Validate payload.block_hash == bid.block_hash
+	if envelope.Payload == nil {
+		return errors.New("envelope missing payload")
+	}
+	if envelope.Payload.BlockHash != bid.Message.BlockHash {
+		return fmt.Errorf("payload block_hash %v != bid block_hash %v",
+			envelope.Payload.BlockHash, bid.Message.BlockHash)
+	}
+
+	// Verify builder signature
+	if err := f.verifyEnvelopeBuilderSignature(signedEnvelope, blockState); err != nil {
+		return fmt.Errorf("invalid builder signature: %w", err)
+	}
+
+	return nil
+}
+
+// verifyEnvelopeBuilderSignature verifies the builder's signature on the execution payload envelope.
+func (f *ForkChoiceStore) verifyEnvelopeBuilderSignature(
+	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
+	blockState abstract.BeaconState,
+) error {
+	envelope := signedEnvelope.Message
+	builderIndex := envelope.BuilderIndex
+
+	// Get builder from state
+	builders := blockState.GetBuilders()
+	if builders == nil {
+		return errors.New("builders not found in state")
+	}
+	if int(builderIndex) >= builders.Len() {
+		return fmt.Errorf("builder index %d out of range (max: %d)", builderIndex, builders.Len())
+	}
+	builder := builders.Get(int(builderIndex))
+	if builder == nil {
+		return errors.New("builder not found")
+	}
+
+	// Get domain for builder signature
+	epoch := state.GetEpochAtSlot(f.beaconCfg, envelope.Slot)
+	domain, err := blockState.GetDomain(f.beaconCfg.DomainBeaconBuilder, epoch)
+	if err != nil {
+		return fmt.Errorf("failed to get domain: %w", err)
+	}
+
+	// Compute signing root
+	signingRoot, err := fork.ComputeSigningRoot(envelope, domain)
+	if err != nil {
+		return fmt.Errorf("failed to compute signing root: %w", err)
+	}
+
+	// Verify BLS signature
+	pk := builder.Pubkey
+	valid, err := bls.Verify(signedEnvelope.Signature[:], signingRoot[:], pk[:])
+	if err != nil {
+		return fmt.Errorf("signature verification error: %w", err)
+	}
+	if !valid {
+		return errors.New("invalid signature")
+	}
+
+	return nil
+}
+
 // checkDataAvailability checks if blob data is available for the execution payload.
 // For GLOAS, blob_kzg_commitments are in the committed bid, not directly in BeaconBlock.
 // Returns nil if data is available, ErrEIP7594ColumnDataNotAvailable if not available yet.
-// [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) checkDataAvailability(
 	ctx context.Context,
 	block *cltypes.SignedBeaconBlock,
@@ -82,7 +177,6 @@ func (f *ForkChoiceStore) checkDataAvailability(
 // validatePayloadWithEL validates the execution payload with the execution layer engine.
 // This is called BEFORE ProcessExecutionPayloadEnvelope to match Pre-GLOAS flow where
 // NewPayload is called before state transition (AddChainSegment).
-// [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) validatePayloadWithEL(
 	ctx context.Context,
 	envelope *cltypes.ExecutionPayloadEnvelope,
@@ -129,15 +223,32 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 	monitor.ObserveNewPayloadTime(timeStartExec)
 	log.Debug("[validatePayloadWithEL] NewPayload", "status", payloadStatus, "beaconBlockRoot", beaconBlockRoot)
 
+	// Track payload status by execution block hash for parent payload validation
+	executionBlockHash := envelope.Payload.BlockHash
+	f.executionPayloadStatus.Add(executionBlockHash, payloadStatus)
+
 	switch payloadStatus {
 	case execution_client.PayloadStatusNotValidated:
 		log.Debug("validatePayloadWithEL: payload is not validated yet", "beaconBlockRoot", beaconBlockRoot)
-		// TODO: Add optimistic candidate handling for GLOAS if needed
+		// optimistic block candidate
+		if err := f.optimisticStore.AddOptimisticCandidate(block.Block); err != nil {
+			return fmt.Errorf("failed to add block to optimistic store: %v", err)
+		}
 	case execution_client.PayloadStatusInvalidated:
 		log.Warn("validatePayloadWithEL: payload is invalid", "beaconBlockRoot", beaconBlockRoot, "err", err)
+		f.forkGraph.MarkHeaderAsInvalid(beaconBlockRoot)
+		// remove from optimistic candidate
+		if err := f.optimisticStore.InvalidateBlock(block.Block); err != nil {
+			return fmt.Errorf("failed to remove block from optimistic store: %v", err)
+		}
 		return errors.New("execution payload is invalid")
 	case execution_client.PayloadStatusValidated:
 		log.Trace("validatePayloadWithEL: payload is validated", "beaconBlockRoot", beaconBlockRoot)
+		// remove from optimistic candidate
+		if err := f.optimisticStore.ValidateBlock(block.Block); err != nil {
+			return fmt.Errorf("failed to validate block in optimistic store: %v", err)
+		}
+		f.verifiedExecutionPayload.Add(beaconBlockRoot, struct{}{})
 	}
 
 	if err != nil {
@@ -155,8 +266,6 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 // Parameters:
 //   - checkBlobData: if true, verify blob data availability via PeerDAS before processing
 //   - validatePayload: if true, call engine.NewPayload() to validate with EL before state transition
-//
-// [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
 	if signedEnvelope == nil || signedEnvelope.Message == nil {
 		return errors.New("nil execution payload envelope")
@@ -167,6 +276,11 @@ func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
+	// Skip if envelope already processed and persisted
+	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
+		return nil
+	}
 
 	// The corresponding beacon block root needs to be known
 	blockStateCopy, err := f.forkGraph.GetState(beaconBlockRoot, true)
@@ -187,6 +301,12 @@ func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope
 		f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
 		log.Debug("OnExecutionPayload: block not found in fork graph, queuing envelope", "beaconBlockRoot", common.Hash(beaconBlockRoot))
 		return nil
+	}
+
+	// Validate envelope against block (bid matching + signature verification)
+	// This is done regardless of validatePayload flag for security
+	if err := f.validateEnvelopeAgainstBlock(signedEnvelope, block, blockStateCopy); err != nil {
+		return fmt.Errorf("OnExecutionPayload: envelope validation failed: %w", err)
 	}
 
 	// Check if blob data is available (skip during forward sync when data comes from snapshots)

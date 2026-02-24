@@ -2416,10 +2416,10 @@ func (c *MockBeaconStateGetLatestExecutionPayloadBidCall) DoAndReturn(f func() *
 }
 
 // GetNextWithdrawalBuilderIndex mocks base method.
-func (m *MockBeaconState) GetNextWithdrawalBuilderIndex() cltypes.BuilderIndex {
+func (m *MockBeaconState) GetNextWithdrawalBuilderIndex() uint64 {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetNextWithdrawalBuilderIndex")
-	ret0, _ := ret[0].(cltypes.BuilderIndex)
+	ret0, _ := ret[0].(uint64)
 	return ret0
 }
 
@@ -2436,19 +2436,19 @@ type MockBeaconStateGetNextWithdrawalBuilderIndexCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockBeaconStateGetNextWithdrawalBuilderIndexCall) Return(arg0 cltypes.BuilderIndex) *MockBeaconStateGetNextWithdrawalBuilderIndexCall {
+func (c *MockBeaconStateGetNextWithdrawalBuilderIndexCall) Return(arg0 uint64) *MockBeaconStateGetNextWithdrawalBuilderIndexCall {
 	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateGetNextWithdrawalBuilderIndexCall) Do(f func() cltypes.BuilderIndex) *MockBeaconStateGetNextWithdrawalBuilderIndexCall {
+func (c *MockBeaconStateGetNextWithdrawalBuilderIndexCall) Do(f func() uint64) *MockBeaconStateGetNextWithdrawalBuilderIndexCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateGetNextWithdrawalBuilderIndexCall) DoAndReturn(f func() cltypes.BuilderIndex) *MockBeaconStateGetNextWithdrawalBuilderIndexCall {
+func (c *MockBeaconStateGetNextWithdrawalBuilderIndexCall) DoAndReturn(f func() uint64) *MockBeaconStateGetNextWithdrawalBuilderIndexCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -2873,7 +2873,7 @@ func (c *MockBeaconStateHashSSZCall) DoAndReturn(f func() ([32]byte, error)) *Mo
 }
 
 // InitiateBuilderExit mocks base method.
-func (m *MockBeaconState) InitiateBuilderExit(builderIndex cltypes.BuilderIndex) {
+func (m *MockBeaconState) InitiateBuilderExit(builderIndex uint64) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "InitiateBuilderExit", builderIndex)
 }
@@ -2897,13 +2897,13 @@ func (c *MockBeaconStateInitiateBuilderExitCall) Return() *MockBeaconStateInitia
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateInitiateBuilderExitCall) Do(f func(cltypes.BuilderIndex)) *MockBeaconStateInitiateBuilderExitCall {
+func (c *MockBeaconStateInitiateBuilderExitCall) Do(f func(uint64)) *MockBeaconStateInitiateBuilderExitCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateInitiateBuilderExitCall) DoAndReturn(f func(cltypes.BuilderIndex)) *MockBeaconStateInitiateBuilderExitCall {
+func (c *MockBeaconStateInitiateBuilderExitCall) DoAndReturn(f func(uint64)) *MockBeaconStateInitiateBuilderExitCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -4629,7 +4629,7 @@ func (c *MockBeaconStateSetNextSyncCommitteeCall) DoAndReturn(f func(*solid.Sync
 }
 
 // SetNextWithdrawalBuilderIndex mocks base method.
-func (m *MockBeaconState) SetNextWithdrawalBuilderIndex(index cltypes.BuilderIndex) {
+func (m *MockBeaconState) SetNextWithdrawalBuilderIndex(index uint64) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "SetNextWithdrawalBuilderIndex", index)
 }
@@ -4653,13 +4653,13 @@ func (c *MockBeaconStateSetNextWithdrawalBuilderIndexCall) Return() *MockBeaconS
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockBeaconStateSetNextWithdrawalBuilderIndexCall) Do(f func(cltypes.BuilderIndex)) *MockBeaconStateSetNextWithdrawalBuilderIndexCall {
+func (c *MockBeaconStateSetNextWithdrawalBuilderIndexCall) Do(f func(uint64)) *MockBeaconStateSetNextWithdrawalBuilderIndexCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockBeaconStateSetNextWithdrawalBuilderIndexCall) DoAndReturn(f func(cltypes.BuilderIndex)) *MockBeaconStateSetNextWithdrawalBuilderIndexCall {
+func (c *MockBeaconStateSetNextWithdrawalBuilderIndexCall) DoAndReturn(f func(uint64)) *MockBeaconStateSetNextWithdrawalBuilderIndexCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

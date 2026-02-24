@@ -9,8 +9,6 @@ import (
 	"github.com/erigontech/erigon/common/ssz"
 )
 
-type BuilderIndex uint64
-
 var (
 	_ ssz.HashableSSZ = (*Builder)(nil)
 	_ ssz.HashableSSZ = (*BuilderPendingWithdrawal)(nil)
@@ -59,7 +57,7 @@ func (b *Builder) HashSSZ() ([32]byte, error) {
 type BuilderPendingWithdrawal struct {
 	FeeRecipient common.Address `json:"fee_recipient"`
 	Amount       uint64         `json:"amount"`
-	BuilderIndex BuilderIndex   `json:"builder_index"`
+	BuilderIndex uint64         `json:"builder_index"`
 }
 
 func (b *BuilderPendingWithdrawal) EncodingSizeSSZ() int {

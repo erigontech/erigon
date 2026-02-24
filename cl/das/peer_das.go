@@ -85,10 +85,10 @@ type peerdas struct {
 	blocksToCheckSync sync.Map // blockRoot -> ColumnSyncableSignedBlock (SignedBeaconBlock or SignedBlindedBeaconBlock)
 
 	// [New in Gloas:EIP7732] For fetching blocks to get kzg_commitments
-	forkChoice      BlockGetter
-	blockReader     freezeblocks.BeaconSnapshotReader
-	indiciesDB      kv.RoDB
-	gloasDataCache  *lru.Cache[common.Hash, *gloasBlockData] // cache for GLOAS block data (~1KB per entry)
+	forkChoice     BlockGetter
+	blockReader    freezeblocks.BeaconSnapshotReader
+	indiciesDB     kv.RoDB
+	gloasDataCache *lru.Cache[common.Hash, *gloasBlockData] // cache for GLOAS block data (~1KB per entry)
 }
 
 func NewPeerDas(

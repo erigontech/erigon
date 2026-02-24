@@ -23,21 +23,21 @@ func IsBuilderIndex(validatorIndex uint64) bool {
 
 // ConvertBuilderIndexToValidatorIndex converts a builder index to a validator index
 // by setting the BUILDER_INDEX_FLAG bit.
-func ConvertBuilderIndexToValidatorIndex(builderIndex cltypes.BuilderIndex) uint64 {
-	return uint64(builderIndex) | clparams.BuilderIndexFlag
+func ConvertBuilderIndexToValidatorIndex(builderIndex uint64) uint64 {
+	return builderIndex | clparams.BuilderIndexFlag
 }
 
 // ConvertValidatorIndexToBuilderIndex converts a validator index (with builder flag set)
 // to a builder index by clearing the BUILDER_INDEX_FLAG bit.
-func ConvertValidatorIndexToBuilderIndex(validatorIndex uint64) cltypes.BuilderIndex {
-	return cltypes.BuilderIndex(validatorIndex &^ clparams.BuilderIndexFlag)
+func ConvertValidatorIndexToBuilderIndex(validatorIndex uint64) uint64 {
+	return validatorIndex &^ clparams.BuilderIndexFlag
 }
 
 // IsActiveBuilder checks if the builder at builderIndex is active for the given state.
 // A builder is considered active if:
 // - Its deposit epoch is finalized (deposit_epoch < finalized_checkpoint.epoch)
 // - It has not initiated an exit (withdrawable_epoch == FAR_FUTURE_EPOCH)
-func IsActiveBuilder(state abstract.BeaconState, builderIndex cltypes.BuilderIndex) bool {
+func IsActiveBuilder(state abstract.BeaconState, builderIndex uint64) bool {
 	builders := state.GetBuilders()
 	if builders == nil {
 		log.Warn("builders is nil")
@@ -121,7 +121,7 @@ func IsParentBlockFull(s abstract.BeaconState) bool {
 
 // CanBuilderCoverBid returns true if the builder has enough balance to cover the bid amount
 // after accounting for the minimum deposit and pending withdrawals.
-func CanBuilderCoverBid(s abstract.BeaconState, builderIndex cltypes.BuilderIndex, bidAmount uint64) bool {
+func CanBuilderCoverBid(s abstract.BeaconState, builderIndex uint64, bidAmount uint64) bool {
 	builders := s.GetBuilders()
 	if builders == nil {
 		log.Warn("builders is nil")
@@ -146,7 +146,7 @@ func CanBuilderCoverBid(s abstract.BeaconState, builderIndex cltypes.BuilderInde
 // This includes:
 // - Amounts from builder_pending_withdrawals (direct withdrawal requests)
 // - Amounts from builder_pending_payments (payments that include withdrawals)
-func GetPendingBalanceToWithdrawForBuilder(s abstract.BeaconState, builderIndex cltypes.BuilderIndex) uint64 {
+func GetPendingBalanceToWithdrawForBuilder(s abstract.BeaconState, builderIndex uint64) uint64 {
 	var total uint64
 
 	// Sum from builder_pending_withdrawals
@@ -257,7 +257,7 @@ func IsValidDepositSignature(cfg *clparams.BeaconChainConfig, pubkey common.Byte
 // (withdrawable_epoch <= current_epoch and balance == 0), or len(state.builders)
 // if no such slot exists.
 // [New in Gloas:EIP7732]
-func GetIndexForNewBuilder(s abstract.BeaconState) cltypes.BuilderIndex {
+func GetIndexForNewBuilder(s abstract.BeaconState) uint64 {
 	builders := s.GetBuilders()
 	if builders == nil {
 		return 0
@@ -266,10 +266,10 @@ func GetIndexForNewBuilder(s abstract.BeaconState) cltypes.BuilderIndex {
 	for i := 0; i < builders.Len(); i++ {
 		builder := builders.Get(i)
 		if builder.WithdrawableEpoch <= epoch && builder.Balance == 0 {
-			return cltypes.BuilderIndex(i)
+			return uint64(i)
 		}
 	}
-	return cltypes.BuilderIndex(builders.Len())
+	return uint64(builders.Len())
 }
 
 // AddBuilderToRegistry adds a new builder to the registry.
