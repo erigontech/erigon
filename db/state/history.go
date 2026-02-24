@@ -352,6 +352,9 @@ func (h *History) buildVIFromEF(ctx context.Context, historyIdxPath string, hist
 		default:
 		}
 	}
+	if int(cnt) != int(hist.Count()) {
+		panic(fmt.Sprintf("expected count of %d, got %d", hist.Count(), cnt))
+	}
 
 	histReader := h.dataReader(hist)
 

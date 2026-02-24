@@ -748,6 +748,152 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	return nil
 }
 
+// compressNoWordPatterns is a fast path for Compress when no words were submitted to the
+// pattern-dictionary pipeline (superstringCount == 0). This happens for history .v files
+// that use CompressNone. Instead of building a dictionary and writing/reading an intermediate
+// file, it makes two sequential passes over the raw words file and writes directly to cf.
+func compressNoWordPatterns(logPrefix string, cf *os.File, uncompressedFile *RawWordsFile, lvl log.Lvl, logger log.Logger) error {
+	var numBuf [binary.MaxVarintLen64]byte
+
+	// Pass 1: collect word counts and position-length frequencies for the Huffman tree.
+	var inCount, emptyWordsCount uint64
+	posMap := make(map[uint64]uint64)
+	if err := uncompressedFile.ForEach(func(v []byte, _ bool) error {
+		inCount++
+		l := uint64(len(v))
+		posMap[l+1]++
+		posMap[0]++
+		if l == 0 {
+			emptyWordsCount++
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// Build Huffman tree for position codes (identical to compressWithPatternCandidates).
+	var positionList PositionList
+	pos2code := make(map[uint64]*Position)
+	for pos, uses := range posMap {
+		p := &Position{pos: pos, uses: uses, code: pos, codeBits: 0}
+		positionList = append(positionList, p)
+		pos2code[pos] = p
+	}
+	slices.SortFunc(positionList, positionListCmp)
+	i := 0
+	var posHeap PositionHeap
+	heap.Init(&posHeap)
+	tieBreaker := uint64(0)
+	for posHeap.Len()+(positionList.Len()-i) > 1 {
+		h := &PositionHuff{tieBreaker: tieBreaker}
+		if posHeap.Len() > 0 && (i >= positionList.Len() || posHeap[0].uses < positionList[i].uses) {
+			h.h0 = heap.Pop(&posHeap).(*PositionHuff)
+			h.h0.AddZero()
+			h.uses += h.h0.uses
+		} else {
+			h.p0 = positionList[i]
+			h.p0.code = 0
+			h.p0.codeBits = 1
+			h.uses += h.p0.uses
+			i++
+		}
+		if posHeap.Len() > 0 && (i >= positionList.Len() || posHeap[0].uses < positionList[i].uses) {
+			h.h1 = heap.Pop(&posHeap).(*PositionHuff)
+			h.h1.AddOne()
+			h.uses += h.h1.uses
+		} else {
+			h.p1 = positionList[i]
+			h.p1.code = 1
+			h.p1.codeBits = 1
+			h.uses += h.p1.uses
+			i++
+		}
+		tieBreaker++
+		heap.Push(&posHeap, h)
+	}
+	if posHeap.Len() > 0 {
+		posRoot := heap.Pop(&posHeap).(*PositionHuff)
+		posRoot.SetDepth(0)
+	}
+
+	var posSize uint64
+	for _, p := range positionList {
+		ns := binary.PutUvarint(numBuf[:], uint64(p.depth))
+		n := binary.PutUvarint(numBuf[:], p.pos)
+		posSize += uint64(ns + n)
+	}
+	if lvl < log.LvlTrace {
+		logger.Log(lvl, fmt.Sprintf("[%s] Positional dictionary (no-pattern fast path)", logPrefix), "positionList.len", positionList.Len(), "posSize", common.ByteCount(posSize))
+	}
+
+	cw := getBufioWriter(cf)
+	defer putBufioWriter(cw)
+
+	// Write data header: word count, empty word count, patternsSize=0, position dict.
+	binary.BigEndian.PutUint64(numBuf[:], inCount)
+	if _, err := cw.Write(numBuf[:8]); err != nil {
+		return err
+	}
+	binary.BigEndian.PutUint64(numBuf[:], emptyWordsCount)
+	if _, err := cw.Write(numBuf[:8]); err != nil {
+		return err
+	}
+	binary.BigEndian.PutUint64(numBuf[:], 0) // patternsSize = 0
+	if _, err := cw.Write(numBuf[:8]); err != nil {
+		return err
+	}
+	binary.BigEndian.PutUint64(numBuf[:], posSize)
+	if _, err := cw.Write(numBuf[:8]); err != nil {
+		return err
+	}
+	slices.SortFunc(positionList, positionListCmp)
+	for _, p := range positionList {
+		ns := binary.PutUvarint(numBuf[:], uint64(p.depth))
+		if _, err := cw.Write(numBuf[:ns]); err != nil {
+			return err
+		}
+		n := binary.PutUvarint(numBuf[:], p.pos)
+		if _, err := cw.Write(numBuf[:n]); err != nil {
+			return err
+		}
+	}
+
+	// Pass 2: Huffman-encode position codes and copy raw word bytes to output.
+	var hc BitWriter
+	hc.w = cw
+	if err := uncompressedFile.ForEach(func(v []byte, _ bool) error {
+		l := uint64(len(v))
+		posCode := pos2code[l+1]
+		if posCode != nil {
+			if e := hc.encode(posCode.code, posCode.codeBits); e != nil {
+				return e
+			}
+		}
+		if l == 0 {
+			if e := hc.flush(); e != nil {
+				return e
+			}
+		} else {
+			posCode = pos2code[0]
+			if posCode != nil {
+				if e := hc.encode(posCode.code, posCode.codeBits); e != nil {
+					return e
+				}
+			}
+			if e := hc.flush(); e != nil {
+				return e
+			}
+			if _, e := cw.Write(v); e != nil {
+				return e
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return cw.Flush()
+}
+
 // copyN - is alloc-free analog of io.CopyN func
 func copyN(r io.Reader, w io.Writer, uncoveredCount int, buf []byte) error {
 	// Replace the io.CopyN call with manual copy using the buffer
