@@ -1,5 +1,8 @@
 name: Setup Erigon environment
-description: Install Go, restore/save module cache
+description: >
+  Install Go, restore/save module cache. Callers may need a shallow checkout
+  first (actions/checkout with fetch-depth: 1) so this composite action is
+  available. setup-erigon then performs the full checkout per its inputs.
 
 inputs:
   fetch-depth:
