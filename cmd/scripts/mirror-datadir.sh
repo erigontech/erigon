@@ -99,8 +99,12 @@ if [ -n "$_cp_clone" ]; then
         done
     done
 else
-    # Fall back to rsync when reflinks are not supported
-    RSYNC_COPY_OPTS=(-a)
+    # Fall back to rsync when reflinks are not supported.
+    # --inplace: update files in place (avoids temp copy + rename for large files)
+    # --no-whole-file: use delta-transfer even for local copies (rsync defaults to
+    #   whole-file for local transfers, but mdbx.dat is ~100GB with small diffs)
+    echo "  Reflinks not supported, falling back to rsync (delta transfer)"
+    RSYNC_COPY_OPTS=(-a --inplace --no-whole-file)
     if [ -n "$dest_rel" ]; then
         RSYNC_COPY_OPTS+=(--exclude="$dest_rel")
     fi
