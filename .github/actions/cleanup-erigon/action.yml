@@ -1,9 +1,9 @@
 name: Cleanup Erigon
-description: Save module cache and warn about uncached tests
+description: Save module cache (when not handled by setup-erigon) and warn about uncached tests
 
 inputs:
   tag:
-    description: "Optional tag appended to the gomodcache prefix (e.g. 'lint' produces 'gomodcache|lint')"
+    description: "Optional tag for the modcache key (e.g. 'lint'). Defaults to ERIGON_CI_MODCACHE_MODE env var."
     required: false
     default: ""
   modcache-restored-key:
@@ -14,11 +14,14 @@ inputs:
 runs:
   using: composite
   steps:
+    - uses: ./.github/actions/save-build-cache
+      if: ${{ always() && env.ERIGON_CI_GOCACHE != '' }}
+
     - uses: ./.github/actions/save-mod-cache
-      if: ${{ always() }}
+      if: ${{ always() && env.ERIGON_CI_MODCACHE_MODE != 'download' }}
       with:
-        modcache: ${{ env.ERIGON_CI_MODCACHE }}
-        prefix: ${{ inputs.tag != '' && format('gomodcache|{0}', inputs.tag) || 'gomodcache' }}
+        modcache-path: ${{ env.ERIGON_CI_MODCACHE }}
+        tag: ${{ inputs.tag || env.ERIGON_CI_MODCACHE_MODE }}
         restored-key: ${{ inputs.modcache-restored-key || env.ERIGON_CI_MODCACHE_RESTORED_KEY }}
 
     - name: Check for uncached tests

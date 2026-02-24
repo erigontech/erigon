@@ -61,5 +61,5 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
-      - uses: ./.github/actions/save-build-cache
-        if: always() && steps.restore-build.outcome == 'success'
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()

@@ -29,22 +29,9 @@ jobs:
       - uses: ./.github/actions/setup-erigon
         id: erigon
         with:
-          modcache: false
-
-      - name: Restore Go module cache
-        id: restore-modcache
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ steps.erigon.outputs.modcache }}/cache/download
-          # We can never know ahead of time what to match against
-          key: gomodcache|lint|${{ runner.os }}|${{ hashFiles('go.sum') }}|alwaysmiss
-          # We can use a regular build to bootstrap here, we only add some extra metadata
-          restore-keys: |
-            gomodcache|lint|${{ runner.os }}|${{ hashFiles('go.sum') }}|
-            gomodcache|${{ runner.os }}|${{ hashFiles('go.sum') }}|
+          modcache: lint
 
       - uses: ./.github/actions/restore-build-cache
-        id: restore-build
 
       - name: Restore golangci-lint cache
         uses: actions/cache/restore@v4
@@ -55,14 +42,8 @@ jobs:
 
       - run: make lintci
 
-      - uses: ./.github/actions/save-build-cache
-        if: always() && steps.restore-build.outcome == 'success'
-
       - uses: ./.github/actions/cleanup-erigon
         if: always()
-        with:
-          tag: lint
-          modcache-restored-key: ${{ steps.restore-modcache.outputs.cache-matched-key }}
 
       - name: Save golangci-lint cache
         if: always()

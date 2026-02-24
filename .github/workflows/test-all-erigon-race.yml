@@ -158,9 +158,6 @@ jobs:
               ;;
           esac
 
-      - uses: ./.github/actions/save-build-cache
-        if: always() && steps.restore-build.outcome == 'success'
-
       - uses: ./.github/actions/cleanup-erigon
         if: always()
 

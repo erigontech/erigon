@@ -51,5 +51,5 @@ jobs:
             echo >&2 "Reproducible build broken"; cat erigon1.sha256; cat erigon2.sha256; exit 1
           fi
 
-      - uses: ./.github/actions/save-build-cache
-        if: ${{ always() }}
+      - uses: ./.github/actions/cleanup-erigon
+        if: always()
