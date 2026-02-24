@@ -35,14 +35,9 @@ jobs:
             docker kill $(docker ps -aq) || true
             docker rm -f $(docker ps -aq) || true
           fi
-          echo "Pruning all images..."
-          docker image prune -af || true
-          if [ -n "$(docker images -aq)" ]; then
-            echo "Force removing all images..."
-            docker rmi -f $(docker images -aq) || true
-          fi
-          echo "Pruning docker system..."
-          docker system prune -af --volumes
+          echo "Pruning stopped containers and dangling images (preserving layer cache)..."
+          docker container prune -f || true
+          docker image prune -f || true
       - name: Checkout Erigon go.mod
         uses: actions/checkout@v6
         with:
@@ -70,6 +65,9 @@ jobs:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
           password: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_TOKEN }}
     
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Setup go env and cache
         uses: actions/setup-go@v6
         with:
@@ -102,7 +100,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${{ env.EEST_VERSION }}/fixtures_develop.tar.gz 2>&1 | tee output.log || {
+            ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client erigon --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${{ env.EEST_VERSION }}/fixtures_develop.tar.gz 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
