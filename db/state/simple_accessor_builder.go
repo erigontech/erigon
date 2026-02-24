@@ -133,10 +133,8 @@ func (s *SimpleAccessorBuilder) SetAccessorArgs(args *AccessorArgs) {
 	s.args = args
 }
 
-func (s *SimpleAccessorBuilder) GetInputDataQuery(decomp *seg.Decompressor, compressionUsed bool) (*DecompressorIndexInputDataQuery, error) {
-	//sgname := s.parser.DataFile(version.V1_0, from, to)
-	//decomp, _ := seg.NewDecompressorWithMetadata(sgname, true)
-	reader := seg.NewPagedReader(decomp.MakeGetter(), s.args.ValuesOnCompressedPage, compressionUsed)
+func (s *SimpleAccessorBuilder) GetInputDataQuery(getter *seg.Getter, compressionUsed bool) (*DecompressorIndexInputDataQuery, error) {
+	reader := seg.NewPagedReader(getter, s.args.ValuesOnCompressedPage, compressionUsed)
 	return NewDecompressorIndexInputDataQuery(reader)
 }
 
@@ -155,7 +153,12 @@ func (s *SimpleAccessorBuilder) Build(ctx context.Context, decomp *seg.Decompres
 		}
 	}()
 
-	iidq, err := s.GetInputDataQuery(decomp, s.isCompressionUsed(from, to))
+	seqView, err := decomp.OpenSequentialView()
+	if err != nil {
+		return nil, err
+	}
+	defer seqView.Close()
+	iidq, err := s.GetInputDataQuery(seqView.MakeGetter(), s.isCompressionUsed(from, to))
 	if err != nil {
 		return nil, err
 	}
