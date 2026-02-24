@@ -2149,15 +2149,10 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 	}
 	defer decompressor.Close()
 	func() {
-		//defer decompressor.MadvSequential().DisableReadAhead()
+		defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
-		view, err := decompressor.OpenSequentialView()
-		if err != nil {
-			panic(err)
-		}
-		defer view.Close()
-		g := view.MakeGetter()
+		g := decompressor.MakeGetter()
 		buf := make([]byte, 0, 16*etl.BufIOSize)
 		for g.HasNext() {
 			buf, _ = g.Next(buf[:0])
@@ -2165,15 +2160,10 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 		logger.Info("decompress speed", "took", time.Since(t))
 	}()
 	func() {
-		//defer decompressor.MadvSequential().DisableReadAhead()
+		defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
-		view, err := decompressor.OpenSequentialView()
-		if err != nil {
-			panic(err)
-		}
-		defer view.Close()
-		g := view.MakeGetter()
+		g := decompressor.MakeGetter()
 		for g.HasNext() {
 			_, _ = g.Skip()
 		}
