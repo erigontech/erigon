@@ -212,11 +212,12 @@ func ExecV3(ctx context.Context,
 	doms.SetDeferCommitmentUpdates(false)
 	if isChainTip {
 		postValidator = newParallelBlockPostExecutionValidator()
-		// Only defer branch updates in fork validation mode (engine API flow)
-		// where MergeExtendingFork will flush the pending updates
-		if isForkValidation {
-			doms.SetDeferCommitmentUpdates(true)
-		}
+	}
+	// Enable deferred commitment updates only for serial execution (fork validation).
+	// The parallel executor has a subtle interaction with deferred updates that causes
+	// intermittent trie root mismatches during re-org validation.
+	if !parallel && isForkValidation {
+		doms.SetDeferCommitmentUpdates(true)
 	}
 	defer doms.SetDeferCommitmentUpdates(false)
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
