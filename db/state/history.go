@@ -237,10 +237,18 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	var histKey []byte
 	var valOffset uint64
 
-	defer hist.MadvSequential().DisableReadAhead()
-	defer efHist.MadvSequential().DisableReadAhead()
+	histView, err := hist.OpenSequentialView()
+	if err != nil {
+		return err
+	}
+	defer histView.Close()
+	efHistView, err := efHist.OpenSequentialView()
+	if err != nil {
+		return err
+	}
+	defer efHistView.Close()
 
-	iiReader := h.InvertedIndex.dataReader(efHist)
+	iiReader := seg.NewReader(efHistView.MakeGetter(), h.InvertedIndex.Compression)
 
 	var keyBuf, valBuf []byte
 	cnt := uint64(0)
@@ -255,7 +263,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		}
 	}
 
-	histReader := h.dataReader(hist)
+	histReader := seg.NewReader(histView.MakeGetter(), h.Compression)
 
 	_, fName := filepath.Split(historyIdxPath)
 	p := ps.AddNew(fName, uint64(efHist.Count())/2)
