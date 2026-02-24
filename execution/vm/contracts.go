@@ -312,8 +312,7 @@ func RunPrecompiledContract(stateDB tracing.IntraBlockState, p PrecompiledContra
 
 	suppliedGas -= gasCost
 
-	// Touch the precompile for block-level accessList recording once Amsterdam
-	// fork is activated.
+	// Ensure precompile is included in the block access list after Amsterdam fork
 	if stateDB != nil {
 		stateDB.Exist(address)
 	}
