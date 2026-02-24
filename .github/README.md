@@ -126,3 +126,7 @@ Raw logs (`gh run view <run-id> --log`) contain timestamps on every line, which 
 ## Notes that could be claude rules too
 
 * Tests that can be reproduced locally, should always fail-fast and terminate the rest to not waste runner time.
+
+https://github.com/erigontech/erigon/actions/metrics/performance?tab=jobs&filters=-runner_type%3Aself-hosted
+
+GODEBUG with gocachehash, gocachetest, gocacheverify
