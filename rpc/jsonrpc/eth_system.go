@@ -390,8 +390,27 @@ func (b *GasPriceOracleBackend) GetReceipts(ctx context.Context, block *types.Bl
 	return b.baseApi.getReceipts(ctx, b.tx, block)
 }
 
+// PendingBlockAndReceipts returns the latest block and its receipts as a substitute for the
+// pending block. A true pending block would require executing all pending transactions from the
+// txpool against the current state, which involves EVM execution,
+// cross-process txpool access, and result caching — too complex for this use case.
+// Returning the latest block is a pragmatic workaround: it satisfies eth_feeHistory callers
+// that request "pending" (fixes the N-1 block count bug) while keeping fee data accurate,
+// since baseFee and gasUsedRatio from the latest block are the best available approximation.
 func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
-	return nil, nil
+	latestNum, err := rpchelper.GetLatestBlockNumber(b.tx)
+	if err != nil {
+		return nil, nil
+	}
+	block, err := b.baseApi.blockByNumberWithSenders(context.Background(), b.tx, latestNum)
+	if err != nil || block == nil {
+		return nil, nil
+	}
+	receipts, err := b.baseApi.getReceipts(context.Background(), b.tx, block)
+	if err != nil {
+		return nil, nil
+	}
+	return block, receipts
 }
 
 func (b *GasPriceOracleBackend) GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error) {
