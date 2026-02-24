@@ -16,10 +16,18 @@ runs:
       shell: bash
       run: du -hs "$ERIGON_CI_GOCACHE" || true
 
-    - name: Clean non-deterministic cache metadata
+    - name: Clean fuzz cache
       if: ${{ always() }}
       shell: bash
-      run: rm -f "$ERIGON_CI_GOCACHE/trim.txt" "$ERIGON_CI_GOCACHE/testexpire.txt"
+      run: go clean -fuzzcache
+
+    - name: Normalize non-deterministic cache metadata
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        # trim.txt format is Unix epoch seconds as a plain integer
+        printf '%d' "$(date +%s)" > "$ERIGON_CI_GOCACHE/trim.txt"
+        rm -f "$ERIGON_CI_GOCACHE/testexpire.txt"
 
     - uses: actions/cache/save@v4
       if: ${{ always() }}
