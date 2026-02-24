@@ -348,7 +348,10 @@ func TestCompressNoWordPatterns(t *testing.T) {
 	words = append(words, nil)
 	words = append(words, []byte("a"))
 	for i := range 100 {
-		words = append(words, nil) // empty words interspersed
+		// Semantic: "empty word" means "found key with empty value". "nil" - means key was deleted - not encodable by compressor
+		words = append(words, nil)
+		words = append(words, []byte{})
+
 		words = append(words, fmt.Appendf(nil, "%d longlongword %d", i, i))
 		words = append(words, bytes.Repeat([]byte("x"), i+1))
 	}
@@ -368,16 +371,15 @@ func TestCompressNoWordPatterns(t *testing.T) {
 	for _, expected := range words {
 		require.True(t, g.HasNext())
 		got, _ := g.Next(nil)
-		if len(expected) == 0 {
-			require.NotNil(t, got)
-			require.Empty(t, got)
+		if expected == nil {
+			require.Equal(t, []byte{}, got) // Semantic: "empty word" means "found key with empty value". "nil" - means key was deleted - not encodable by compressor
 		} else {
 			require.Equal(t, expected, got)
 		}
 	}
 	require.False(t, g.HasNext())
 
-	if cs := checksum(file); cs != 2717099470 {
+	if cs := checksum(file); cs != 1879837905 {
 		t.Errorf("fast-path output differs from main, checksum=%d", cs)
 	}
 }
