@@ -17,7 +17,7 @@ import (
 func verifyExecutionPayloadEnvelopeSignature(s abstract.BeaconState, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
 	builderIndex := signedEnvelope.Message.BuilderIndex
 	var pk [48]byte
-	if builderIndex == cltypes.BuilderIndex(clparams.BuilderIndexSelfBuild) {
+	if builderIndex == clparams.BuilderIndexSelfBuild {
 		// Self-build: use the proposer's pubkey
 		proposerIndex := s.LatestBlockHeader().ProposerIndex
 		validator, err := s.ValidatorForValidatorIndex(int(proposerIndex))

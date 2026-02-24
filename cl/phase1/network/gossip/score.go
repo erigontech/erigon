@@ -34,6 +34,9 @@ const (
 	// beaconBlockWeight specifies the scoring weight that we apply to
 	// our beacon block topic.
 	beaconBlockWeight = 0.8
+	// executionPayloadWeight specifies the scoring weight that we apply to
+	// our execution payload topic. Similar to beacon block as it's one per slot.
+	executionPayloadWeight = 0.8
 	// aggregateWeight specifies the scoring weight that we apply to
 	// our aggregate topic.
 	aggregateWeight = 0.5
@@ -72,6 +75,8 @@ func (g *GossipManager) topicScoreParams(topic string) *pubsub.TopicScoreParams 
 	switch {
 	case strings.Contains(topic, gossip.TopicNameBeaconBlock) || gossip.IsTopicBlobSidecar(topic):
 		return g.defaultBlockTopicParams()
+	case strings.Contains(topic, gossip.TopicNameExecutionPayload):
+		return g.defaultExecutionPayloadTopicParams()
 	case strings.Contains(topic, gossip.TopicNameVoluntaryExit):
 		return g.defaultVoluntaryExitTopicParams()
 	case gossip.IsTopicBeaconAttestation(topic):
@@ -91,6 +96,32 @@ func (g *GossipManager) defaultBlockTopicParams() *pubsub.TopicScoreParams {
 	meshWeight := float64(0)
 	return &pubsub.TopicScoreParams{
 		TopicWeight:                     beaconBlockWeight,
+		TimeInMeshWeight:                maxInMeshScore / g.inMeshCap(),
+		TimeInMeshQuantum:               g.oneSlotDuration(),
+		TimeInMeshCap:                   g.inMeshCap(),
+		FirstMessageDeliveriesWeight:    1,
+		FirstMessageDeliveriesDecay:     g.scoreDecay(20 * g.oneEpochDuration()),
+		FirstMessageDeliveriesCap:       23,
+		MeshMessageDeliveriesWeight:     meshWeight,
+		MeshMessageDeliveriesDecay:      g.scoreDecay(5 * g.oneEpochDuration()),
+		MeshMessageDeliveriesCap:        float64(blocksPerEpoch * 5),
+		MeshMessageDeliveriesThreshold:  float64(blocksPerEpoch*5) / 10,
+		MeshMessageDeliveriesWindow:     2 * time.Second,
+		MeshMessageDeliveriesActivation: 4 * g.oneEpochDuration(),
+		MeshFailurePenaltyWeight:        meshWeight,
+		MeshFailurePenaltyDecay:         g.scoreDecay(5 * g.oneEpochDuration()),
+		InvalidMessageDeliveriesWeight:  -140.4475,
+		InvalidMessageDeliveriesDecay:   g.scoreDecay(50 * g.oneEpochDuration()),
+	}
+}
+
+// defaultExecutionPayloadTopicParams returns scoring parameters for the execution_payload topic.
+// Similar to beacon_block since execution payloads are one per slot in GLOAS (EIP-7732).
+func (g *GossipManager) defaultExecutionPayloadTopicParams() *pubsub.TopicScoreParams {
+	blocksPerEpoch := g.beaconConfig.SlotsPerEpoch
+	meshWeight := float64(0)
+	return &pubsub.TopicScoreParams{
+		TopicWeight:                     executionPayloadWeight,
 		TimeInMeshWeight:                maxInMeshScore / g.inMeshCap(),
 		TimeInMeshQuantum:               g.oneSlotDuration(),
 		TimeInMeshCap:                   g.inMeshCap(),
