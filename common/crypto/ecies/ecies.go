@@ -42,6 +42,7 @@ import (
 	"math/big"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 var (
@@ -97,15 +98,15 @@ func ImportECDSA(prv *ecdsa.PrivateKey) *PrivateKey {
 // Generate an elliptic curve public / private keypair. If params is nil,
 // the recommended default parameters for the key will be chosen.
 func GenerateKey(rand io.Reader, curve elliptic.Curve, params *ECIESParams) (prv *PrivateKey, err error) {
-	pb, x, y, err := elliptic.GenerateKey(curve, rand)
+	sk, err := ecdsa.GenerateKey(curve, rand)
 	if err != nil {
 		return
 	}
 	prv = new(PrivateKey)
-	prv.PublicKey.X = x
-	prv.PublicKey.Y = y
+	prv.PublicKey.X = sk.X
+	prv.PublicKey.Y = sk.Y
 	prv.PublicKey.Curve = curve
-	prv.D = new(big.Int).SetBytes(pb)
+	prv.D = new(big.Int).Set(sk.D)
 	if params == nil {
 		params = ParamsFromCurve(curve)
 	}
@@ -260,7 +261,11 @@ func Encrypt(rand io.Reader, pub *PublicKey, m, s1, s2 []byte) (ct []byte, err e
 
 	d := messageTag(params.Hash, Km, em, s2)
 
-	Rb := elliptic.Marshal(pub.Curve, R.PublicKey.X, R.PublicKey.Y)
+	c, ok := pub.Curve.(crypto.EllipticCurve)
+	if !ok {
+		return nil, ErrInvalidCurve
+	}
+	Rb := c.Marshal(R.PublicKey.X, R.PublicKey.Y)
 	ct = make([]byte, len(Rb)+len(em)+len(d))
 	copy(ct, Rb)
 	copy(ct[len(Rb):], em)
@@ -302,7 +307,9 @@ func (prv *PrivateKey) Decrypt(c, s1, s2 []byte) (m []byte, err error) {
 
 	R := new(PublicKey)
 	R.Curve = prv.PublicKey.Curve
-	R.X, R.Y = elliptic.Unmarshal(R.Curve, c[:rLen])
+	if rc, ok := R.Curve.(crypto.EllipticCurve); ok {
+		R.X, R.Y = rc.Unmarshal(c[:rLen])
+	}
 	if R.X == nil {
 		return nil, ErrInvalidPublicKey
 	}

@@ -23,7 +23,6 @@ package crypto
 
 import (
 	"crypto/ecdsa"
-	"crypto/elliptic"
 	"errors"
 	"fmt"
 
@@ -49,7 +48,7 @@ func SigToPub(hash, sig []byte) (*ecdsa.PublicKey, error) {
 		return nil, err
 	}
 
-	x, y := elliptic.Unmarshal(S256(), s)
+	x, y := S256().Unmarshal(s)
 	return &ecdsa.PublicKey{Curve: S256(), X: x, Y: y}, nil
 }
 
