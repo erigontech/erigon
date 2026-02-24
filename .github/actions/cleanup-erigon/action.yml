@@ -1,28 +1,14 @@
 name: Cleanup Erigon
-description: Report test cache statistics from run.log
+description: Warn if any tests ran without caching
 
 runs:
   using: composite
   steps:
-    - name: Test cache statistics
+    - name: Check for uncached tests
       if: hashFiles('run.log') != ''
       shell: bash
       run: |
-        cached=$(grep -cE '^ok\s.*\(cached\)' run.log || true)
         ran=$(grep -cE '^ok\s.*[0-9]+\.[0-9]+s$' run.log || true)
-        failed=$(grep -cE '^FAIL\s' run.log || true)
-        total=$((cached + ran + failed))
-        if [ "$total" -gt 0 ]; then
-          pct=$((cached * 100 / total))
-        else
-          pct=0
+        if [ "$ran" -gt 0 ]; then
+          echo "::warning::$ran test package(s) ran without caching"
         fi
-        echo "### Test Cache Statistics" >> "$GITHUB_STEP_SUMMARY"
-        echo "" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Metric | Count |" >> "$GITHUB_STEP_SUMMARY"
-        echo "|--------|------:|" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Cached | $cached |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Ran | $ran |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Failed | $failed |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| **Total** | **$total** |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| **Hit rate** | **${pct}%** |" >> "$GITHUB_STEP_SUMMARY"
