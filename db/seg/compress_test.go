@@ -363,6 +363,7 @@ func TestCompressNoWordPatterns(t *testing.T) {
 		require.True(t, g.HasNext())
 		got, _ := g.Next(nil)
 		if len(expected) == 0 {
+			require.NotNil(t, got)
 			require.Empty(t, got)
 		} else {
 			require.Equal(t, expected, got)
