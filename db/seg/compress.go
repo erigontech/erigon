@@ -222,7 +222,7 @@ func (c *Compressor) Count() int { return int(c.wordsCount) }
 // readers/writers — pooling avoids the allocation pressure in that scenario.
 var (
 	bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(128*datasize.KB)) }}
-	bufioReaderPool = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, int(64*datasize.KB)) }}
+	bufioReaderPool = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, int(128*datasize.KB)) }}
 )
 
 func getBufioWriter(w io.Writer) *bufio.Writer {
