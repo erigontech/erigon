@@ -212,7 +212,7 @@ func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
-	bitmap, touchMap, afterMap uint16,
+	afterMap uint16,
 	readCell func(nibble int, skip bool) (*cell, error),
 ) (lastNibble int, err error) {
 
@@ -220,21 +220,16 @@ func (be *BranchEncoder) CollectUpdate(
 	if err != nil {
 		return 0, err
 	}
-	update, lastNibble, err := be.EncodeBranch(bitmap, touchMap, afterMap, readCell)
+	update, lastNibble, err := be.EncodeBranch(afterMap, readCell)
 	if err != nil {
 		return 0, err
 	}
 
-	if len(prev) > 0 {
-		if bytes.Equal(prev, update) {
-			//fmt.Printf("skip collectBranchUpdate [%x]\n", prefix)
-			return lastNibble, nil // do not write the same data for prefix
-		}
-		update, err = be.merger.Merge(prev, update)
-		if err != nil {
-			return 0, err
-		}
+	if len(prev) > 0 && bytes.Equal(prev, update) {
+		//fmt.Printf("skip collectBranchUpdate [%x]\n", prefix)
+		return lastNibble, nil // do not write the same data for prefix
 	}
+	// No merge needed - updates are complete (contain all existing cells)
 	// fmt.Printf("\ncollectBranchUpdate [%x] -> %s\n", prefix, BranchData(update).String())
 	// has to copy :(
 	if err = ctx.PutBranch(common.Copy(prefix), common.Copy(update), prev, prevStep); err != nil {
@@ -259,12 +254,12 @@ func (be *BranchEncoder) putUvarAndVal(size uint64, val []byte) error {
 }
 
 // Encoded result should be copied before next call to EncodeBranch, underlying slice is reused
-func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCell func(nibble int, skip bool) (*cell, error)) (BranchData, int, error) {
+func (be *BranchEncoder) EncodeBranch(afterMap uint16, readCell func(nibble int, skip bool) (*cell, error)) (BranchData, int, error) {
 	be.buf.Reset()
 
-	var encoded [4]byte
-	binary.BigEndian.PutUint16(encoded[:], touchMap)
-	binary.BigEndian.PutUint16(encoded[2:], afterMap)
+	// Write header: cells that exist after this update
+	var encoded [2]byte
+	binary.BigEndian.PutUint16(encoded[:], afterMap)
 	if _, err := be.buf.Write(encoded[:]); err != nil {
 		return nil, 0, err
 	}
@@ -285,50 +280,48 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 			return nil, 0, err
 		}
 
-		if bitmap&bit != 0 {
-			var fields cellFields
-			if cell.extLen > 0 && cell.storageAddrLen == 0 {
-				fields |= fieldExtension
-			}
-			if cell.accountAddrLen > 0 {
-				fields |= fieldAccountAddr
-			}
-			if cell.storageAddrLen > 0 {
-				fields |= fieldStorageAddr
-			}
-			if cell.hashLen > 0 {
-				fields |= fieldHash
-			}
-			if cell.stateHashLen == 32 && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
-				fields |= fieldStateHash
-			}
-			if err := be.buf.WriteByte(byte(fields)); err != nil {
+		var fields cellFields
+		if cell.extLen > 0 && cell.storageAddrLen == 0 {
+			fields |= fieldExtension
+		}
+		if cell.accountAddrLen > 0 {
+			fields |= fieldAccountAddr
+		}
+		if cell.storageAddrLen > 0 {
+			fields |= fieldStorageAddr
+		}
+		if cell.hashLen > 0 {
+			fields |= fieldHash
+		}
+		if cell.stateHashLen == 32 && (cell.accountAddrLen > 0 || cell.storageAddrLen > 0) {
+			fields |= fieldStateHash
+		}
+		if err := be.buf.WriteByte(byte(fields)); err != nil {
+			return nil, 0, err
+		}
+		if fields&fieldExtension != 0 {
+			if err := be.putUvarAndVal(uint64(cell.extLen), cell.extension[:cell.extLen]); err != nil {
 				return nil, 0, err
 			}
-			if fields&fieldExtension != 0 {
-				if err := be.putUvarAndVal(uint64(cell.extLen), cell.extension[:cell.extLen]); err != nil {
-					return nil, 0, err
-				}
+		}
+		if fields&fieldAccountAddr != 0 {
+			if err := be.putUvarAndVal(uint64(cell.accountAddrLen), cell.accountAddr[:cell.accountAddrLen]); err != nil {
+				return nil, 0, err
 			}
-			if fields&fieldAccountAddr != 0 {
-				if err := be.putUvarAndVal(uint64(cell.accountAddrLen), cell.accountAddr[:cell.accountAddrLen]); err != nil {
-					return nil, 0, err
-				}
+		}
+		if fields&fieldStorageAddr != 0 {
+			if err := be.putUvarAndVal(uint64(cell.storageAddrLen), cell.storageAddr[:cell.storageAddrLen]); err != nil {
+				return nil, 0, err
 			}
-			if fields&fieldStorageAddr != 0 {
-				if err := be.putUvarAndVal(uint64(cell.storageAddrLen), cell.storageAddr[:cell.storageAddrLen]); err != nil {
-					return nil, 0, err
-				}
+		}
+		if fields&fieldHash != 0 {
+			if err := be.putUvarAndVal(uint64(cell.hashLen), cell.hash[:cell.hashLen]); err != nil {
+				return nil, 0, err
 			}
-			if fields&fieldHash != 0 {
-				if err := be.putUvarAndVal(uint64(cell.hashLen), cell.hash[:cell.hashLen]); err != nil {
-					return nil, 0, err
-				}
-			}
-			if fields&fieldStateHash != 0 {
-				if err := be.putUvarAndVal(uint64(cell.stateHashLen), cell.stateHash[:cell.stateHashLen]); err != nil {
-					return nil, 0, err
-				}
+		}
+		if fields&fieldStateHash != 0 {
+			if err := be.putUvarAndVal(uint64(cell.stateHashLen), cell.stateHash[:cell.stateHashLen]); err != nil {
+				return nil, 0, err
 			}
 		}
 		bitset ^= bit
@@ -342,51 +335,46 @@ func RetrieveCellNoop(nibble int, skip bool) (*cell, error) { return nil, nil }
 type BranchData []byte
 
 func (branchData BranchData) String() string {
-	if len(branchData) == 0 {
+	if len(branchData) < 2 {
 		return ""
 	}
-	touchMap := binary.BigEndian.Uint16(branchData[0:])
-	afterMap := binary.BigEndian.Uint16(branchData[2:])
-	pos := 4
+	afterMap := binary.BigEndian.Uint16(branchData[0:])
+	pos := 2
 	var sb strings.Builder
 	var cell cell
-	fmt.Fprintf(&sb, "touchMap %016b, afterMap %016b\n", touchMap, afterMap)
-	for bitset, j := touchMap, 0; bitset != 0; j++ {
+	fmt.Fprintf(&sb, "afterMap %016b\n", afterMap)
+	for bitset, j := afterMap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 		fmt.Fprintf(&sb, "   %x => ", nibble)
-		if afterMap&bit == 0 {
-			sb.WriteString("{DELETED}\n")
-		} else {
-			fields := cellFields(branchData[pos])
-			pos++
-			var err error
-			if pos, err = cell.fillFromFields(branchData, pos, fields); err != nil {
-				// This is used for test output, so ok to panic
-				panic(err)
-			}
-			sb.WriteString("{")
-			var comma string
-			if cell.hashedExtLen > 0 {
-				fmt.Fprintf(&sb, "hashedExtension=[%x]", cell.hashedExtension[:cell.hashedExtLen])
-				comma = ","
-			}
-			if cell.accountAddrLen > 0 {
-				fmt.Fprintf(&sb, "%saccountAddr=[%x]", comma, cell.accountAddr[:cell.accountAddrLen])
-				comma = ","
-			}
-			if cell.storageAddrLen > 0 {
-				fmt.Fprintf(&sb, "%sstorageAddr=[%x]", comma, cell.storageAddr[:cell.storageAddrLen])
-				comma = ","
-			}
-			if cell.hashLen > 0 {
-				fmt.Fprintf(&sb, "%shash=[%x]", comma, cell.hash[:cell.hashLen])
-			}
-			if cell.stateHashLen > 0 {
-				fmt.Fprintf(&sb, "%sleafHash=[%x]", comma, cell.stateHash[:cell.stateHashLen])
-			}
-			sb.WriteString("}\n")
+		fields := cellFields(branchData[pos])
+		pos++
+		var err error
+		if pos, err = cell.fillFromFields(branchData, pos, fields); err != nil {
+			// This is used for test output, so ok to panic
+			panic(err)
 		}
+		sb.WriteString("{")
+		var comma string
+		if cell.hashedExtLen > 0 {
+			fmt.Fprintf(&sb, "hashedExtension=[%x]", cell.hashedExtension[:cell.hashedExtLen])
+			comma = ","
+		}
+		if cell.accountAddrLen > 0 {
+			fmt.Fprintf(&sb, "%saccountAddr=[%x]", comma, cell.accountAddr[:cell.accountAddrLen])
+			comma = ","
+		}
+		if cell.storageAddrLen > 0 {
+			fmt.Fprintf(&sb, "%sstorageAddr=[%x]", comma, cell.storageAddr[:cell.storageAddrLen])
+			comma = ","
+		}
+		if cell.hashLen > 0 {
+			fmt.Fprintf(&sb, "%shash=[%x]", comma, cell.hash[:cell.hashLen])
+		}
+		if cell.stateHashLen > 0 {
+			fmt.Fprintf(&sb, "%sleafHash=[%x]", comma, cell.stateHash[:cell.stateHashLen])
+		}
+		sb.WriteString("}\n")
 		bitset ^= bit
 	}
 	return sb.String()
@@ -394,19 +382,18 @@ func (branchData BranchData) String() string {
 
 // if fn returns nil, the original key will be copied from branchData
 func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte, isStorage bool) (newKey []byte, err error)) (BranchData, error) {
-	if len(branchData) < 4 {
+	if len(branchData) < 2 {
 		return branchData, nil
 	}
 
 	var numBuf [binary.MaxVarintLen64]byte
-	touchMap := binary.BigEndian.Uint16(branchData[0:])
-	afterMap := binary.BigEndian.Uint16(branchData[2:])
-	if touchMap&afterMap == 0 {
+	afterMap := binary.BigEndian.Uint16(branchData[0:])
+	if afterMap == 0 {
 		return branchData, nil
 	}
-	pos := 4
-	newData = append(newData[:0], branchData[:4]...)
-	for bitset, j := touchMap&afterMap, 0; bitset != 0; j++ {
+	pos := 2
+	newData = append(newData[:0], branchData[:2]...)
+	for bitset, j := afterMap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
 		fields := cellFields(branchData[pos])
 		newData = append(newData, byte(fields))
@@ -536,13 +523,9 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 }
 
 // IsComplete determines whether given branch data is complete, meaning that all information about all the children is present
-// Each of 16 children of a branch node have two attributes
-// touch - whether this child has been modified or deleted in this branchData (corresponding bit in touchMap is set)
-// after - whether after this branchData application, the child is present in the tree or not (corresponding bit in afterMap is set)
+// Without touchMap, branch data is always considered complete since it contains all children in afterMap
 func (branchData BranchData) IsComplete() bool {
-	touchMap := binary.BigEndian.Uint16(branchData[0:])
-	afterMap := binary.BigEndian.Uint16(branchData[2:])
-	return ^touchMap&afterMap == 0
+	return true
 }
 
 // MergeHexBranches combines two branchData, number 2 coming after (and potentially shadowing) number 1
@@ -554,22 +537,17 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 		return branchData2, nil
 	}
 
-	touchMap1 := binary.BigEndian.Uint16(branchData[0:])
-	afterMap1 := binary.BigEndian.Uint16(branchData[2:])
-	bitmap1 := touchMap1 & afterMap1
-	pos1 := 4
-	touchMap2 := binary.BigEndian.Uint16(branchData2[0:])
-	afterMap2 := binary.BigEndian.Uint16(branchData2[2:])
-	bitmap2 := touchMap2 & afterMap2
-	pos2 := 4
-	var bitmapBuf [4]byte
-	binary.BigEndian.PutUint16(bitmapBuf[0:], touchMap1|touchMap2)
-	binary.BigEndian.PutUint16(bitmapBuf[2:], afterMap2)
+	afterMap1 := binary.BigEndian.Uint16(branchData[0:])
+	pos1 := 2
+	afterMap2 := binary.BigEndian.Uint16(branchData2[0:])
+	pos2 := 2
+	var bitmapBuf [2]byte
+	binary.BigEndian.PutUint16(bitmapBuf[0:], afterMap1|afterMap2)
 	newData = append(newData[:0], bitmapBuf[:]...)
-	for bitset, j := bitmap1|bitmap2, 0; bitset != 0; j++ {
+	for bitset, j := afterMap1|afterMap2, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
-		if bitmap2&bit != 0 {
-			// Add fields from branchData2
+		if afterMap2&bit != 0 {
+			// Add fields from branchData2 (newer, takes precedence)
 			fields := cellFields(branchData2[pos2])
 			newData = append(newData, byte(fields))
 			pos2++
@@ -591,8 +569,8 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 				}
 			}
 		}
-		if bitmap1&bit != 0 {
-			add := (touchMap2&bit == 0) && (afterMap2&bit != 0) // Add fields from branchData1
+		if afterMap1&bit != 0 {
+			add := afterMap2&bit == 0 // Add fields from branchData1 only if not in branchData2
 			fields := cellFields(branchData[pos1])
 			if add {
 				newData = append(newData, byte(fields))
@@ -625,21 +603,18 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 	return newData, nil
 }
 
-func (branchData BranchData) decodeCells() (touchMap, afterMap uint16, row [16]*cell, err error) {
-	touchMap = binary.BigEndian.Uint16(branchData[0:])
-	afterMap = binary.BigEndian.Uint16(branchData[2:])
-	pos := 4
-	for bitset, j := touchMap, 0; bitset != 0; j++ {
+func (branchData BranchData) decodeCells() (afterMap uint16, row [16]*cell, err error) {
+	afterMap = binary.BigEndian.Uint16(branchData[0:])
+	pos := 2
+	for bitset, j := afterMap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
-		if afterMap&bit != 0 {
-			fields := cellFields(branchData[pos])
-			pos++
-			row[nibble] = new(cell)
-			if pos, err = row[nibble].fillFromFields(branchData, pos, fields); err != nil {
-				err = fmt.Errorf("failed to fill cell at nibble %x: %w", nibble, err)
-				return
-			}
+		fields := cellFields(branchData[pos])
+		pos++
+		row[nibble] = new(cell)
+		if pos, err = row[nibble].fillFromFields(branchData, pos, fields); err != nil {
+			err = fmt.Errorf("failed to fill cell at nibble %x: %w", nibble, err)
+			return
 		}
 		bitset ^= bit
 	}
@@ -650,7 +625,7 @@ func (branchData BranchData) Validate(branchKey []byte) error {
 	if len(branchData) == 0 {
 		return nil
 	}
-	_, afterMap, row, err := branchData.decodeCells()
+	afterMap, row, err := branchData.decodeCells()
 	if err != nil {
 		return err
 	}
@@ -734,7 +709,7 @@ func validatePlainKeys(branchKey []byte, row [16]*cell, keccak keccakState) erro
 
 type BranchMerger struct {
 	buf []byte
-	num [4]byte
+	num [2]byte
 }
 
 func NewHexBranchMerger(capacity uint64) *BranchMerger {
@@ -750,26 +725,20 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 		return branch2, nil
 	}
 
-	touchMap1 := binary.BigEndian.Uint16(branch1[0:])
-	afterMap1 := binary.BigEndian.Uint16(branch1[2:])
-	bitmap1 := touchMap1 & afterMap1
-	pos1 := 4
+	afterMap1 := binary.BigEndian.Uint16(branch1[0:])
+	pos1 := 2
 
-	touchMap2 := binary.BigEndian.Uint16(branch2[0:])
-	afterMap2 := binary.BigEndian.Uint16(branch2[2:])
-	bitmap2 := touchMap2 & afterMap2
-	pos2 := 4
+	afterMap2 := binary.BigEndian.Uint16(branch2[0:])
+	pos2 := 2
 
-	binary.BigEndian.PutUint16(m.num[0:], touchMap1|touchMap2)
-	binary.BigEndian.PutUint16(m.num[2:], afterMap2)
-	dataPos := 4
+	binary.BigEndian.PutUint16(m.num[0:], afterMap1|afterMap2)
 
 	m.buf = append(m.buf[:0], m.num[:]...)
 
-	for bitset, j := bitmap1|bitmap2, 0; bitset != 0; j++ {
+	for bitset, j := afterMap1|afterMap2, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
-		if bitmap2&bit != 0 {
-			// Add fields from branch2
+		if afterMap2&bit != 0 {
+			// Add fields from branch2 (newer, takes precedence)
 			fields := cellFields(branch2[pos2])
 			m.buf = append(m.buf, byte(fields))
 			pos2++
@@ -784,19 +753,17 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 
 				m.buf = append(m.buf, branch2[pos2:pos2+n]...)
 				pos2 += n
-				dataPos += n
 				if len(branch2) < pos2+int(l) {
 					return nil, fmt.Errorf("MergeHexBranches branch2 is too small: expected at least %d got %d bytes", pos2+int(l), len(branch2))
 				}
 				if l > 0 {
 					m.buf = append(m.buf, branch2[pos2:pos2+int(l)]...)
 					pos2 += int(l)
-					dataPos += int(l)
 				}
 			}
 		}
-		if bitmap1&bit != 0 {
-			add := (touchMap2&bit == 0) && (afterMap2&bit != 0) // Add fields from branchData1
+		if afterMap1&bit != 0 {
+			add := afterMap2&bit == 0 // Add fields from branch1 only if not in branch2
 			fields := cellFields(branch1[pos1])
 			if add {
 				m.buf = append(m.buf, byte(fields))
@@ -927,12 +894,12 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 	if !bytes.Equal(key, []byte("state")) {
 		stat.IsRoot = false
 
-		tm, am, cells, err := BranchData(branch).decodeCells()
+		am, cells, err := BranchData(branch).decodeCells()
 		if err != nil {
 			return nil
 		}
-		stat.TAMapsSize = uint64(2 + 2) // touchMap + afterMap
-		stat.CellCount = uint64(bits.OnesCount16(tm & am))
+		stat.TAMapsSize = uint64(2) // afterMap only
+		stat.CellCount = uint64(bits.OnesCount16(am))
 
 		medians := make(map[string][]int16)
 		for _, c := range cells {

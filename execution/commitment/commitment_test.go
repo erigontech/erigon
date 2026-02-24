@@ -69,7 +69,7 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 	row, bm := generateCellRow(t, 16)
 
 	be := NewBranchEncoder(1024)
-	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
+	enc, _, err := be.EncodeBranch(bm, func(i int, skip bool) (*cell, error) {
 		return row[i], nil
 	})
 
@@ -82,9 +82,9 @@ func TestBranchData_MergeHexBranches2(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, enc, res)
 
-	tm, am, origins, err := res.decodeCells()
+	am, origins, err := res.decodeCells()
 	require.NoError(t, err)
-	require.Equal(t, tm, am)
+	_ = am
 	require.Equal(t, bm, am)
 
 	i := 0
@@ -153,7 +153,7 @@ func TestDecodeBranchWithLeafHashes(t *testing.T) {
 	}
 
 	be := NewBranchEncoder(1024)
-	enc, _, err := be.EncodeBranch(bm, bm, bm, func(i int, skip bool) (*cell, error) {
+	enc, _, err := be.EncodeBranch(bm, func(i int, skip bool) (*cell, error) {
 		return row[i], nil
 	})
 	require.NoError(t, err)
@@ -171,9 +171,9 @@ func unfoldBranchDataFromString(tb testing.TB, encs string) (row []*cell, am uin
 	enc, err := hex.DecodeString(encs)
 	require.NoError(tb, err)
 
-	tm, am, origins, err := BranchData(enc).decodeCells()
+	am, origins, err := BranchData(enc).decodeCells()
 	require.NoError(tb, err)
-	_, _ = tm, am
+	_ = am
 
 	tb.Logf("%s", BranchData(enc).String())
 	//require.EqualValues(tb, tm, am)
@@ -191,7 +191,7 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 
 	row, bm := generateCellRow(t, 16)
 
-	cells, am := unfoldBranchDataFromString(t, "86e586e5082035e72a782b51d9c98548467e3f868294d923cdbbdf4ce326c867bd972c4a2395090109203b51781a76dc87640aea038e3fdd8adca94049aaa436735b162881ec159f6fb408201aa2fa41b5fb019e8abf8fc32800805a2743cfa15373cf64ba16f4f70e683d8e0404a192d9050404f993d9050404e594d90508208642542ff3ce7d63b9703e85eb924ab3071aa39c25b1651c6dda4216387478f10404bd96d905")
+	cells, am := unfoldBranchDataFromString(t, "86e5082035e72a782b51d9c98548467e3f868294d923cdbbdf4ce326c867bd972c4a2395090109203b51781a76dc87640aea038e3fdd8adca94049aaa436735b162881ec159f6fb408201aa2fa41b5fb019e8abf8fc32800805a2743cfa15373cf64ba16f4f70e683d8e0404a192d9050404f993d9050404e594d90508208642542ff3ce7d63b9703e85eb924ab3071aa39c25b1651c6dda4216387478f10404bd96d905")
 	for i, c := range cells {
 		if c == nil {
 			continue
@@ -214,7 +214,7 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 	}
 
 	be := NewBranchEncoder(1024)
-	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
+	enc, _, err := be.EncodeBranch(bm, cg)
 	require.NoError(t, err)
 
 	original := common.Copy(enc)
@@ -263,7 +263,7 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 	}
 
 	be := NewBranchEncoder(1024)
-	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
+	enc, _, err := be.EncodeBranch(bm, cg)
 	require.NoError(t, err)
 
 	original := common.Copy(enc)
