@@ -93,7 +93,7 @@ type BeaconState struct {
 
 	// Gloas [New in EIP7732]
 	builders                     *solid.ListSSZ[*cltypes.Builder]                  // List[Builder, BUILDER_REGISTRY_LIMIT]
-	nextWithdrawalBuilderIndex   cltypes.BuilderIndex                              // next_withdrawal_builder_index
+	nextWithdrawalBuilderIndex   uint64                                            // next_withdrawal_builder_index
 	executionPayloadAvailability *solid.BitVector                                  // Bitvector[SLOTS_PER_HISTORICAL_ROOT]
 	builderPendingPayments       *solid.VectorSSZ[*cltypes.BuilderPendingPayment]  // Vector[BuilderPendingPayment, 2 * SLOTS_PER_EPOCH]
 	builderPendingWithdrawals    *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal] // List[BuilderPendingWithdrawal, BUILDER_PENDING_WITHDRAWALS_LIMIT]

@@ -503,7 +503,7 @@ func GetBuildersSweepWithdrawals(b abstract.BeaconState, withdrawalIndex uint64,
 			withdrawalIndex++
 		}
 
-		builderIndex = cltypes.BuilderIndex((uint64(builderIndex) + 1) % uint64(buildersLen))
+		builderIndex = (builderIndex + 1) % uint64(buildersLen)
 		processedCount++
 	}
 

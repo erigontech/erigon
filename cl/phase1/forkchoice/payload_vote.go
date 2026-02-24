@@ -7,6 +7,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -45,7 +46,8 @@ func (f *ForkChoiceStore) notifyPtcMessages(
 				Data:           payloadAttestation.Data,
 				Signature:      common.Bytes96{}, // Empty signature since it's from block
 			}
-			f.onPayloadAttestationMessage(msg, true)
+			// Ignore errors for in-block attestations - they've already been validated
+			_ = f.OnPayloadAttestationMessage(msg, true)
 		}
 	}
 }
@@ -285,8 +287,22 @@ func (f *ForkChoiceStore) getNodeChildren(node ForkChoiceNode, blocks map[common
 // validateParentPayloadPath validates that the block builds on the correct parent payload path.
 // If parent is FULL, the parent must have an execution payload state.
 // If parent is EMPTY, the block's parent_block_hash must match the parent's parent_block_hash.
+// Also validates that the parent execution payload is not invalidated.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock) error {
+	currentBid := block.Body.GetSignedExecutionPayloadBid()
+	if currentBid == nil || currentBid.Message == nil {
+		return errors.New("current block missing execution payload bid")
+	}
+
+	// Check if parent execution payload has been invalidated
+	parentBlockHash := currentBid.Message.ParentBlockHash
+	if status, ok := f.executionPayloadStatus.Get(parentBlockHash); ok {
+		if status == execution_client.PayloadStatusInvalidated {
+			return errors.New("parent execution payload is invalid")
+		}
+	}
+
 	if f.isParentNodeFull(block) {
 		// Parent is FULL - verify execution payload envelope exists on disk
 		if !f.forkGraph.HasEnvelope(block.ParentRoot) {
@@ -299,13 +315,8 @@ func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock) 
 			return errors.New("parent block not found")
 		}
 
-		currentBid := block.Body.GetSignedExecutionPayloadBid()
 		parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid()
 
-		// Both bids must exist for GLOAS blocks
-		if currentBid == nil || currentBid.Message == nil {
-			return errors.New("current block missing execution payload bid")
-		}
 		if parentBid == nil || parentBid.Message == nil {
 			// Parent might be pre-GLOAS, skip this check
 			return nil

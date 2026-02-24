@@ -437,7 +437,7 @@ func (b *BeaconState) GetBuilders() *solid.ListSSZ[*cltypes.Builder] {
 	return b.builders
 }
 
-func (b *BeaconState) GetNextWithdrawalBuilderIndex() cltypes.BuilderIndex {
+func (b *BeaconState) GetNextWithdrawalBuilderIndex() uint64 {
 	return b.nextWithdrawalBuilderIndex
 }
 
