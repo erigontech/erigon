@@ -150,7 +150,7 @@ func (ht *HistoryRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) HistoryRanges
 	if dbg.NoMergeHistory() {
 		return r
 	}
-	
+
 	mr := ht.iit.findMergeRange(maxEndTxNum, maxSpan)
 	r.index = *mr
 
