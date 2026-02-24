@@ -1304,7 +1304,7 @@ func (b *BeaconChainConfig) GetMinSlashingPenaltyQuotient(version StateVersion) 
 		return b.MinSlashingPenaltyQuotientBellatrix
 	case DenebVersion:
 		return b.MinSlashingPenaltyQuotientBellatrix
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return b.MinSlashingPenaltyQuotientElectra
 	default:
 		panic("not implemented")
@@ -1324,7 +1324,7 @@ func (b *BeaconChainConfig) GetProportionalSlashingMultiplier(version StateVersi
 		return b.ProportionalSlashingMultiplier
 	case AltairVersion:
 		return b.ProportionalSlashingMultiplierAltair
-	case BellatrixVersion, CapellaVersion, DenebVersion, ElectraVersion, FuluVersion:
+	case BellatrixVersion, CapellaVersion, DenebVersion, ElectraVersion, FuluVersion, GloasVersion:
 		return b.ProportionalSlashingMultiplierBellatrix
 	default:
 		panic("not implemented")
@@ -1343,7 +1343,7 @@ func (b *BeaconChainConfig) GetPenaltyQuotient(version StateVersion) uint64 {
 		return b.InactivityPenaltyQuotientBellatrix
 	case DenebVersion:
 		return b.InactivityPenaltyQuotientBellatrix
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return b.InactivityPenaltyQuotientBellatrix
 	default:
 		panic("not implemented")
@@ -1384,7 +1384,7 @@ func (b *BeaconChainConfig) MaxEffectiveBalanceForVersion(version StateVersion) 
 	switch version {
 	case Phase0Version, AltairVersion, BellatrixVersion, CapellaVersion, DenebVersion:
 		return b.MaxEffectiveBalance
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return b.MaxEffectiveBalanceElectra
 	default:
 		panic("invalid version")
@@ -1395,7 +1395,7 @@ func (b *BeaconChainConfig) MaxBlobsPerBlockByVersion(v StateVersion) uint64 {
 	switch v {
 	case Phase0Version, AltairVersion, BellatrixVersion, CapellaVersion, DenebVersion:
 		return b.MaxBlobsPerBlock
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return b.MaxBlobsPerBlockElectra
 	}
 	panic("invalid version")
@@ -1405,7 +1405,7 @@ func (b *BeaconChainConfig) MaxRequestBlobSidecarsByVersion(v StateVersion) int 
 	switch v {
 	case DenebVersion:
 		return int(b.MaxRequestBlobSidecars)
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return int(b.MaxRequestBlobSidecarsElectra)
 	}
 	panic("invalid version")
@@ -1415,7 +1415,7 @@ func (b *BeaconChainConfig) BlobSidecarSubnetCountByVersion(v StateVersion) uint
 	switch v {
 	case Phase0Version, AltairVersion, BellatrixVersion, CapellaVersion, DenebVersion:
 		return b.BlobSidecarSubnetCount
-	case ElectraVersion, FuluVersion:
+	case ElectraVersion, FuluVersion, GloasVersion:
 		return b.BlobSidecarSubnetCountElectra
 	}
 	panic("invalid version")
@@ -1459,6 +1459,8 @@ func (b *BeaconChainConfig) GetForkEpochByVersion(v StateVersion) uint64 {
 		return b.ElectraForkEpoch
 	case FuluVersion:
 		return b.FuluForkEpoch
+	case GloasVersion:
+		return b.GloasForkEpoch
 	}
 	panic("invalid version")
 }

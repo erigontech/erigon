@@ -198,9 +198,17 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		if len(indices) != 1 {
 			return fmt.Errorf("invalid committee_bits length in aggregate and proof: %v", len(indices))
 		}
-		// [REJECT] aggregate.data.index == 0
-		if aggregate.Data.CommitteeIndex != 0 {
-			return errors.New("invalid committee_index in aggregate and proof")
+
+		if clversion.AfterOrEqual(clparams.GloasVersion) {
+			// [New in GLOAS] [REJECT] aggregate.data.index >= 2
+			if aggregate.Data.CommitteeIndex >= 2 {
+				return errors.New("invalid committee_index in aggregate and proof: must be < 2")
+			}
+		} else {
+			// [Electra/Fulu] [REJECT] aggregate.data.index == 0
+			if aggregate.Data.CommitteeIndex != 0 {
+				return errors.New("invalid committee_index in aggregate and proof")
+			}
 		}
 		committeeIndex = uint64(indices[0])
 	}
@@ -237,8 +245,17 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		}
 
 		// [IGNORE] The block being voted for (aggregate.data.beacon_block_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue aggregates for processing once block is retrieved).
-		if _, ok := a.forkchoiceStore.GetHeader(aggregateData.BeaconBlockRoot); !ok {
+		blockHeader, blockHeaderOk := a.forkchoiceStore.GetHeader(aggregateData.BeaconBlockRoot)
+		if !blockHeaderOk {
 			return fmt.Errorf("%w: block not seen: %v", ErrIgnore, aggregateData.BeaconBlockRoot)
+		}
+
+		// [New in GLOAS] [REJECT] aggregate.data.index == 0 if block.slot == aggregate.data.slot
+		// This means: when same slot, index MUST be 0 (reject if not 0)
+		if clversion.AfterOrEqual(clparams.GloasVersion) {
+			if blockHeader.Slot == slot && aggregate.Data.CommitteeIndex != 0 {
+				return errors.New("invalid committee_index in aggregate and proof: must be 0 when block.slot == aggregate.data.slot")
+			}
 		}
 
 		// [IGNORE] The aggregate is the first valid aggregate received for the aggregator with index aggregate_and_proof.aggregator_index for the epoch aggregate.data.target.epoch

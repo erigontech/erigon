@@ -260,6 +260,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	csn := freezeblocks.NewCaplinSnapshots(freezeCfg, beaconConfig, dirs, logger)
 	rcsn := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconConfig)
 
+	epbsPool := pool.NewEpbsPool()
 	pool := pool.NewOperationsPool(beaconConfig)
 	attestationProducer := attestation_producer.New(ctx, beaconConfig)
 
@@ -350,7 +351,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	peerDasState.SetLocalNodeID(localNode)
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, ethClock, state)
 	peerDas := das.NewPeerDas(ctx, beaconRpc, beaconConfig, &config, columnStorage, blobStorage, sentinel, localNode.ID(), ethClock, peerDasState, gossipManager, rcsn, indexDB)
-	forkChoice.InitPeerDas(peerDas) // hack init
+	forkChoice.InitPeerDas(peerDas)   // hack init
 	peerDas.SetForkChoice(forkChoice) // [New in Gloas:EIP7732] Set forkChoice for GLOAS kzg_commitments lookup
 	committeeSub := committee_subscription.NewCommitteeSubscribeManagement(ctx, beaconConfig, networkConfig, ethClock, aggregationPool, syncedDataManager, gossipManager)
 	batchSignatureVerifier := services.NewBatchSignatureVerifier(ctx, sentinel)
@@ -366,6 +367,10 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	blsToExecutionChangeService := services.NewBLSToExecutionChangeService(pool, emitters, syncedDataManager, beaconConfig, batchSignatureVerifier)
 	proposerSlashingService := services.NewProposerSlashingService(pool, syncedDataManager, beaconConfig, ethClock, emitters)
 	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
+	executionPayloadService := services.NewExecutionPayloadService(ctx, forkChoice, beaconConfig)
+	payloadAttestationService := services.NewPayloadAttestationService(ctx, forkChoice, ethClock, networkConfig)
+	proposerPreferencesService := services.NewProposerPreferencesService(syncedDataManager, ethClock, beaconConfig, epbsPool)
+	executionPayloadBidService := services.NewExecutionPayloadBidService(ctx, syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool)
 	registry.RegisterGossipServices(
 		gossipManager,
 		forkChoice,
@@ -381,6 +386,10 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		voluntaryExitService,
 		blsToExecutionChangeService,
 		proposerSlashingService,
+		executionPayloadService,
+		payloadAttestationService,
+		proposerPreferencesService,
+		executionPayloadBidService,
 	)
 
 	{

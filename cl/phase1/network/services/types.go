@@ -37,3 +37,15 @@ type DataColumnSidecarService serviceinterface.Service[*cltypes.DataColumnSideca
 
 //go:generate mockgen -typed=true -destination=./mock_services/attester_slashing_service_mock.go -package=mock_services . AttesterSlashingService
 type AttesterSlashingService serviceinterface.Service[*cltypes.AttesterSlashing]
+
+//go:generate mockgen -typed=true -destination=./mock_services/execution_payload_service_mock.go -package=mock_services . ExecutionPayloadService
+type ExecutionPayloadService serviceinterface.Service[*cltypes.SignedExecutionPayloadEnvelope]
+
+//go:generate mockgen -typed=true -destination=./mock_services/execution_payload_bid_service_mock.go -package=mock_services . ExecutionPayloadBidService
+type ExecutionPayloadBidService serviceinterface.Service[*cltypes.SignedExecutionPayloadBid]
+
+//go:generate mockgen -typed=true -destination=./mock_services/payload_attestation_service_mock.go -package=mock_services . PayloadAttestationService
+type PayloadAttestationService serviceinterface.Service[*cltypes.PayloadAttestationMessage]
+
+//go:generate mockgen -typed=true -destination=./mock_services/proposer_preferences_service_mock.go -package=mock_services . ProposerPreferencesService
+type ProposerPreferencesService serviceinterface.Service[*cltypes.SignedProposerPreferences]

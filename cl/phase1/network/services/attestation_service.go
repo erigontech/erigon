@@ -246,9 +246,16 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			attestation = att.Attestation
 		} else {
 			// electra and after
-			// [REJECT] attestation.data.index == 0
-			if att.SingleAttestation.Data.CommitteeIndex != 0 {
-				return errors.New("committee index must be 0")
+			if clVersion >= clparams.GloasVersion {
+				// [New in Gloas] [REJECT] attestation.data.index < 2
+				if att.SingleAttestation.Data.CommitteeIndex >= 2 {
+					return errors.New("attestation data index must be less than 2")
+				}
+			} else {
+				// [REJECT] attestation.data.index == 0
+				if att.SingleAttestation.Data.CommitteeIndex != 0 {
+					return errors.New("committee index must be 0")
+				}
 			}
 			// [REJECT] The attester is a member of the committee -- i.e. attestation.attester_index in get_beacon_committee(state, attestation.data.slot, index).
 			memIndexInCommittee := contains(att.SingleAttestation.AttesterIndex, beaconCommittee)
@@ -287,9 +294,17 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 
 	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
 	// (a client MAY queue attestations for processing once block is retrieved).
-	if _, ok := s.forkchoiceStore.GetHeader(root); !ok {
+	blockHeader, ok := s.forkchoiceStore.GetHeader(root)
+	if !ok {
 		//s.scheduleAttestationForLaterProcessing(att)
 		return ErrIgnore
+	}
+
+	// [New in Gloas] [REJECT] attestation.data.index == 0 if block.slot == attestation.data.slot
+	if clVersion >= clparams.GloasVersion {
+		if blockHeader.Slot == data.Slot && data.CommitteeIndex != 0 {
+			return errors.New("attestation data index must be 0 when block slot equals attestation slot")
+		}
 	}
 
 	// [REJECT] The attestation's target block is an ancestor of the block named in the LMD vote -- i.e.

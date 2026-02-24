@@ -87,6 +87,10 @@ type ForkChoiceStorageReader interface {
 	IsRootOptimistic(root common.Hash) bool
 	IsHeadOptimistic() bool
 	GetPeerDas() das.PeerDas
+	// [New in Gloas:EIP7732] GetRecentExecutionPayloadStatus returns the validation status of a recently
+	// validated execution payload by its execution block hash. Used for parent payload validation in gossip.
+	// Note: This is an LRU cache lookup; older payloads may not be found.
+	GetRecentExecutionPayloadStatus(executionBlockHash common.Hash) (execution_client.PayloadStatus, bool)
 }
 
 type ForkChoiceStorageWriter interface {
@@ -103,6 +107,9 @@ type ForkChoiceStorageWriter interface {
 	// checkBlobData: verify blob data availability via PeerDAS
 	// validatePayload: call engine.NewPayload() to validate with EL
 	OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error
+	// [New in Gloas:EIP7732] OnPayloadAttestationMessage processes a PTC attestation message from gossip.
+	// Returns error if validation fails (REJECT), nil if accepted or ignored.
+	OnPayloadAttestationMessage(msg *cltypes.PayloadAttestationMessage, isFromBlock bool) error
 	AddPreverifiedBlobSidecar(blobSidecar *cltypes.BlobSidecar) error
 	OnTick(time uint64)
 	SetSynced(synced bool)
