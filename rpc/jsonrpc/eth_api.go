@@ -208,6 +208,9 @@ func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chai
 }
 
 func (api *BaseAPI) pendingBlock() *types.Block {
+	if api.filters == nil {
+		return nil
+	}
 	return api.filters.LastPendingBlock()
 }
 func (api *BaseAPI) engine() rules.EngineReader {
