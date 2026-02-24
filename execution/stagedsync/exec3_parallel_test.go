@@ -532,6 +532,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 	for _, task := range tasks {
 		task := task.(*testExecTask)
 		task.TxTask.Config = chainSpec.Config
+		task.ctx = executorContext //nolint:fatcontext
 	}
 
 	start := time.Now()
@@ -559,7 +560,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 
 	for _, writes := range finalWriteSet {
 		for _, d := range writes {
-			sleepWithContext(context.Background(), d) //nolint:errcheck
+			sleepWithContext(executorContext, d) //nolint:errcheck
 		}
 	}
 
@@ -638,9 +639,14 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 		workerCount: runtime.NumCPU() - 1,
 	}
 
-	_, executorCancel, err := pe.run(context.Background())
+	executorContext, executorCancel, err := pe.run(context.Background())
 	defer executorCancel()
 	assert.NoError(t, err, "error occur during parallel init")
+
+	for _, task := range tasks {
+		task := task.(*testExecTask)
+		task.ctx = executorContext //nolint:fatcontext
+	}
 
 	res, err := executeParallelWithCheck(t, pe, tasks, true, validation, false)
 
