@@ -349,11 +349,13 @@ func TestCompressNoWordPatterns(t *testing.T) {
 	words = append(words, []byte("a"))
 	for i := range 100 {
 		// Semantic: "empty word" means "found key with empty value". "nil" - means key was deleted - not encodable by compressor
-		words = append(words, nil)
-		words = append(words, []byte{})
+		words = append(words,
+			nil,
+			[]byte{},
 
-		words = append(words, fmt.Appendf(nil, "%d longlongword %d", i, i))
-		words = append(words, bytes.Repeat([]byte("x"), i+1))
+			fmt.Appendf(nil, "%d longlongword %d", i, i),
+			bytes.Repeat([]byte("x"), i+1),
+		)
 	}
 
 	for _, w := range words {
