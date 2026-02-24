@@ -115,4 +115,3 @@ func GetDataColumnSidecarsGloas(
 
 	return sidecars, nil
 }
-

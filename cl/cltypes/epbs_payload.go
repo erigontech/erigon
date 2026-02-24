@@ -15,6 +15,7 @@ var (
 	_ ssz.HashableSSZ = (*PayloadAttestationData)(nil)
 	_ ssz.HashableSSZ = (*PayloadAttestation)(nil)
 	_ ssz.HashableSSZ = (*ExecutionPayloadBid)(nil)
+	_ ssz.HashableSSZ = (*SignedExecutionPayloadBid)(nil)
 	_ ssz.HashableSSZ = (*ExecutionPayloadEnvelope)(nil)
 
 	_ ssz2.SizedObjectSSZ = (*PayloadAttestationData)(nil)
@@ -204,7 +205,7 @@ type ExecutionPayloadBid struct {
 	PrevRandao         common.Hash                   `json:"prev_randao"`
 	FeeRecipient       common.Address                `json:"fee_recipient"`
 	GasLimit           uint64                        `json:"gas_limit,string"`
-	BuilderIndex       BuilderIndex                  `json:"builder_index,string"`
+	BuilderIndex       uint64                        `json:"builder_index,string"`
 	Slot               uint64                        `json:"slot,string"`
 	Value              uint64                        `json:"value,string"`
 	ExecutionPayment   uint64                        `json:"execution_payment,string"`
@@ -219,11 +220,11 @@ func (e *ExecutionPayloadBid) HashSSZ() ([32]byte, error) {
 		e.PrevRandao[:],
 		e.FeeRecipient[:],
 		e.GasLimit,
-		uint64(e.BuilderIndex),
+		e.BuilderIndex,
 		e.Slot,
 		e.Value,
 		e.ExecutionPayment,
-		e.BlobKzgCommitments,
+		&e.BlobKzgCommitments,
 	)
 }
 
@@ -248,7 +249,7 @@ func (e *ExecutionPayloadBid) EncodeSSZ(buf []byte) ([]byte, error) {
 		e.Slot,
 		e.Value,
 		e.ExecutionPayment,
-		e.BlobKzgCommitments,
+		&e.BlobKzgCommitments,
 	)
 }
 
@@ -264,7 +265,7 @@ func (e *ExecutionPayloadBid) DecodeSSZ(buf []byte, version int) error {
 		&e.Slot,
 		&e.Value,
 		&e.ExecutionPayment,
-		e.BlobKzgCommitments,
+		&e.BlobKzgCommitments,
 	)
 }
 
@@ -292,6 +293,10 @@ func (e *ExecutionPayloadBid) Copy() *ExecutionPayloadBid {
 type SignedExecutionPayloadBid struct {
 	Message   *ExecutionPayloadBid `json:"message"`
 	Signature common.Bytes96       `json:"signature"`
+}
+
+func (s *SignedExecutionPayloadBid) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(s.Message, s.Signature[:])
 }
 
 func (s *SignedExecutionPayloadBid) EncodingSizeSSZ() int {
@@ -322,7 +327,7 @@ func (s *SignedExecutionPayloadBid) Clone() clonable.Clonable {
 type ExecutionPayloadEnvelope struct {
 	Payload           *Eth1Block         `json:"payload"`
 	ExecutionRequests *ExecutionRequests `json:"execution_requests"`
-	BuilderIndex      BuilderIndex       `json:"builder_index,string"`
+	BuilderIndex      uint64             `json:"builder_index,string"`
 	BeaconBlockRoot   common.Hash        `json:"beacon_block_root"`
 	Slot              uint64             `json:"slot,string"`
 	StateRoot         common.Hash        `json:"state_root"`
@@ -343,7 +348,7 @@ func (e *ExecutionPayloadEnvelope) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(
 		e.Payload,
 		e.ExecutionRequests,
-		uint64(e.BuilderIndex),
+		e.BuilderIndex,
 		e.BeaconBlockRoot[:],
 		e.Slot,
 		e.StateRoot[:],
@@ -397,6 +402,10 @@ func (e *ExecutionPayloadEnvelope) Clone() clonable.Clonable {
 type SignedExecutionPayloadEnvelope struct {
 	Message   *ExecutionPayloadEnvelope `json:"message"`
 	Signature common.Bytes96            `json:"signature"`
+}
+
+func (s *SignedExecutionPayloadEnvelope) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(s.Message, s.Signature[:])
 }
 
 func (s *SignedExecutionPayloadEnvelope) Static() bool {
