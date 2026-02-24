@@ -73,8 +73,9 @@ var (
 
 	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", true)
 
-	SnapshotOwnMmapMadvNormal = EnvBool("SNAPSHOT_OWN_MMAP_MADV_NORMAL", true)
-	SnapshotOwnMmapMadvRnd    = EnvBool("SNAPSHOT_OWN_MMAP_MADV_RND", true)
+	SnapshotOwnMmapMadvNormal     = EnvBool("SNAPSHOT_OWN_MMAP_MADV_NORMAL", true)
+	SnapshotOwnMmapMadvRnd        = EnvBool("SNAPSHOT_OWN_MMAP_MADV_RND", true)
+	SnapshotOwnMmapMadvSequential = EnvBool("SNAPSHOT_OWN_MMAP_MADV_SEQUENTIAL", true)
 
 	OnlyCreateDB = EnvBool("ONLY_CREATE_DB", false)
 

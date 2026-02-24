@@ -702,6 +702,10 @@ func (d *Decompressor) OpenSequentialView() (*SequentialView, error) {
 		if err := mmap.MadviseRandom(h1); err != nil {
 			return nil, err
 		}
+	} else if dbg.SnapshotOwnMmapMadvSequential {
+		if err := mmap.MadviseSequential(h1); err != nil {
+			return nil, err
+		}
 	} else {
 		if err := mmap.MadviseSequential(h1); err != nil {
 			return nil, err
