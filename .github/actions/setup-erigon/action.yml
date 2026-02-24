@@ -97,6 +97,24 @@ runs:
       env:
         GIT_LFS_SKIP_SMUDGE: 1
 
+    - name: Compute submodule objects cache key
+      id: submodule-key
+      if: ${{ inputs.submodules == 'true' }}
+      shell: bash
+      run: |
+        hash=$(git ls-tree -r HEAD | awk '$2 == "commit" {print $3}' | sort | sha256sum | cut -d' ' -f1)
+        echo "hash=$hash" >> "$GITHUB_OUTPUT"
+
+    - name: Cache submodule git objects
+      if: ${{ inputs.submodules == 'true' }}
+      uses: actions/cache@v4
+      with:
+        path: .git/modules
+        key: gitobjects|${{ runner.os }}|lfs-${{ inputs.lfs }}|${{ steps.submodule-key.outputs.hash }}
+        restore-keys: |
+          gitobjects|${{ runner.os }}|lfs-${{ inputs.lfs }}|
+        save-always: true
+
     - name: Clone submodules
       if: ${{ inputs.submodules == 'true' }}
       shell: bash
