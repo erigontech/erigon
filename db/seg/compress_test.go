@@ -370,4 +370,8 @@ func TestCompressNoWordPatterns(t *testing.T) {
 		}
 	}
 	require.False(t, g.HasNext())
+
+	if cs := checksum(file); cs != 2717099470 {
+		t.Errorf("fast-path output differs from main, checksum=%d", cs)
+	}
 }
