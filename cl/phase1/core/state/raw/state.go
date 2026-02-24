@@ -87,6 +87,9 @@ type BeaconState struct {
 	pendingPartialWithdrawals     *solid.ListSSZ[*solid.PendingPartialWithdrawal]
 	pendingConsolidations         *solid.ListSSZ[*solid.PendingConsolidation]
 
+	// EIP-7922
+	exitChurnVector solid.Uint64VectorSSZ // Vector[uint64, GENERATIONS_PER_EXIT_CHURN_VECTOR]
+
 	// Fulu
 	proposerLookahead solid.Uint64VectorSSZ // Vector[ValidatorIndex, (MIN_SEED_LOOKAHEAD + 1) * SLOTS_PER_EPOCH]
 
@@ -129,6 +132,7 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		pendingDeposits:              solid.NewPendingDepositList(cfg),
 		pendingPartialWithdrawals:    solid.NewPendingWithdrawalList(cfg),
 		pendingConsolidations:        solid.NewPendingConsolidationList(cfg),
+		exitChurnVector:              solid.NewUint64VectorSSZ(int(cfg.GenerationsPerExitChurnVector)),
 		proposerLookahead:            solid.NewUint64VectorSSZ(int((cfg.MinSeedLookahead + 1) * cfg.SlotsPerEpoch)),
 	}
 	state.init()
@@ -295,4 +299,12 @@ func (b *BeaconState) GetConsolidationBalanceToConsume() uint64 {
 
 func (b *BeaconState) GetProposerLookahead() solid.Uint64VectorSSZ {
 	return b.proposerLookahead
+}
+
+func (b *BeaconState) ExitChurnVectorAtIndex(i int) uint64 {
+	return b.exitChurnVector.Get(i)
+}
+
+func (b *BeaconState) GetExitChurnVector() solid.Uint64VectorSSZ {
+	return b.exitChurnVector
 }

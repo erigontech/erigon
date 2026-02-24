@@ -660,6 +660,12 @@ type BeaconChainConfig struct {
 	// Fulu
 	ValidatorCustodyRequirement      uint64 `yaml:"VALIDATOR_CUSTODY_REQUIREMENT" spec:"true" json:"VALIDATOR_CUSTODY_REQUIREMENT,string"`               // ValidatorCustodyRequirement defines the custody requirement for validators.
 	BalancePerAdditionalCustodyGroup uint64 `yaml:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP" spec:"true" json:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP,string"` // BalancePerAdditionalCustodyGroup defines the balance required per additional custody group.
+
+	// EIP-7922 — Dynamic exit queue rate limit
+	EpochsPerChurnGeneration         uint64 `yaml:"EPOCHS_PER_CHURN_GENERATION" spec:"true" json:"EPOCHS_PER_CHURN_GENERATION,string"`                   // EpochsPerChurnGeneration defines the number of epochs in a churn generation (~27 hours).
+	GenerationsPerExitChurnVector    uint64 `yaml:"GENERATIONS_PER_EXIT_CHURN_VECTOR" spec:"true" json:"GENERATIONS_PER_EXIT_CHURN_VECTOR,string"`        // GenerationsPerExitChurnVector defines the number of generations tracked in the exit churn vector.
+	GenerationsPerExitChurnLookahead uint64 `yaml:"GENERATIONS_PER_EXIT_CHURN_LOOKAHEAD" spec:"true" json:"GENERATIONS_PER_EXIT_CHURN_LOOKAHEAD,string"`  // GenerationsPerExitChurnLookahead defines the lookahead generations for exit churn.
+	ExitChurnSlackMultiplier         uint64 `yaml:"EXIT_CHURN_SLACK_MULTIPLIER" spec:"true" json:"EXIT_CHURN_SLACK_MULTIPLIER,string"`                   // ExitChurnSlackMultiplier defines the maximum multiplier for exit churn slack.
 }
 
 // GetBlobParameters returns the blob parameters at a given epoch
@@ -985,6 +991,12 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 		{412672, 15},
 		{419072, 21},
 	},
+
+	// EIP-7922
+	EpochsPerChurnGeneration:         256,
+	GenerationsPerExitChurnVector:    16,
+	GenerationsPerExitChurnLookahead: 2,
+	ExitChurnSlackMultiplier:         8,
 }
 
 func mainnetConfig() BeaconChainConfig {

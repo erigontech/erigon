@@ -63,14 +63,17 @@ const (
 	PendingConsolidationsLeafIndex         StateLeafIndex = 36
 	// Fulu
 	ProposerLookaheadLeafIndex StateLeafIndex = 37
+	// EIP-7922
+	ExitChurnVectorLeafIndex StateLeafIndex = 38
 )
 
 const (
 	StateLeafSizeDeneb   = 32
 	StateLeafSizeElectra = 37
 	StateLeafSizeFulu    = 38
+	StateLeafSizeGloas   = 39
 
-	StateLeafSizeLatest = StateLeafSizeFulu
+	StateLeafSizeLatest = StateLeafSizeGloas
 
 	LeafInitValue  = 0
 	LeafCleanValue = 1

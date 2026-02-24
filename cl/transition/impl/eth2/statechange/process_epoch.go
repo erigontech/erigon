@@ -76,6 +76,10 @@ func ProcessEpoch(s abstract.BeaconState) error {
 	if s.Version() >= clparams.ElectraVersion {
 		ProcessPendingDeposits(s)
 		ProcessPendingConsolidations(s)
+		// EIP-7922: process historical exit churn vector
+		if cbs, ok := s.(*state.CachingBeaconState); ok {
+			state.ProcessHistoricalExitChurnVector(cbs)
+		}
 	}
 
 	if err := ProcessEffectiveBalanceUpdates(s); err != nil {

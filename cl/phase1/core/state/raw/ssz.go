@@ -58,6 +58,8 @@ func (b *BeaconState) baseOffsetSSZ() uint32 {
 		return 2736653
 	case clparams.FuluVersion:
 		return 2736653
+	case clparams.GloasVersion:
+		return 2736653
 	default:
 		// ?????
 		panic("tf is that")
@@ -92,6 +94,9 @@ func (b *BeaconState) getSchema() []any {
 	if b.version >= clparams.FuluVersion {
 		s = append(s, b.proposerLookahead)
 	}
+	if b.version >= clparams.GloasVersion {
+		s = append(s, b.exitChurnVector)
+	}
 	return s
 }
 
@@ -110,6 +115,9 @@ func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	}
 	if version >= int(clparams.FuluVersion) {
 		b.proposerLookahead = solid.NewUint64VectorSSZ(int((b.beaconConfig.MinSeedLookahead + 1) * b.beaconConfig.SlotsPerEpoch))
+	}
+	if version >= int(clparams.GloasVersion) {
+		b.exitChurnVector = solid.NewUint64VectorSSZ(int(b.beaconConfig.GenerationsPerExitChurnVector))
 	}
 	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema()...); err != nil {
 		return err
@@ -144,6 +152,9 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 	}
 	if b.version >= clparams.FuluVersion {
 		size += b.proposerLookahead.EncodingSizeSSZ()
+	}
+	if b.version >= clparams.GloasVersion {
+		size += b.exitChurnVector.EncodingSizeSSZ()
 	}
 	return
 }

@@ -137,11 +137,14 @@ func (b *CachingBeaconState) InitiateValidatorExit(index uint64) error {
 
 // def compute_exit_epoch_and_update_churn(state: BeaconState, exit_balance: Gwei) -> Epoch
 func (b *CachingBeaconState) ComputeExitEpochAndUpdateChurn(exitBalance uint64) uint64 {
+	cfg := b.BeaconConfig()
+	currentEpoch := Epoch(b)
 	earliestExitEpoch := max(
 		b.EarliestExitEpoch(),
-		ComputeActivationExitEpoch(b.BeaconConfig(), Epoch(b)),
+		ComputeActivationExitEpoch(cfg, currentEpoch),
 	)
-	perEpochChurn := GetActivationExitChurnLimit(b)
+	// Modified in EIP-7922: use dynamic exit churn limit
+	perEpochChurn := GetExitChurnLimit(b)
 
 	var exitBalanceToConsume uint64
 	if b.EarliestExitEpoch() < earliestExitEpoch {
@@ -159,5 +162,17 @@ func (b *CachingBeaconState) ComputeExitEpochAndUpdateChurn(exitBalance uint64) 
 	// Consume the balance and update state variables.
 	b.SetExitBalanceToConsume(exitBalanceToConsume - exitBalance)
 	b.SetEarliestExitEpoch(earliestExitEpoch)
+
+	// New in EIP-7922: record churn usage in exit_churn_vector
+	currentEpochGeneration := currentEpoch / cfg.EpochsPerChurnGeneration
+	exitEpochGeneration := earliestExitEpoch / cfg.EpochsPerChurnGeneration
+	lookaheadGeneration := currentEpochGeneration + cfg.GenerationsPerExitChurnLookahead
+	exitEpochGenerationIndex := int(exitEpochGeneration % cfg.GenerationsPerExitChurnVector)
+	if exitEpochGeneration <= lookaheadGeneration &&
+		b.ExitChurnVectorAtIndex(exitEpochGenerationIndex) < ^uint64(0) {
+		b.SetExitChurnVectorAtIndex(exitEpochGenerationIndex,
+			b.ExitChurnVectorAtIndex(exitEpochGenerationIndex)+exitBalance)
+	}
+
 	return earliestExitEpoch
 }

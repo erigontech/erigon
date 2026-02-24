@@ -579,3 +579,13 @@ func (b *BeaconState) SetProposerLookahead(proposerLookahead solid.Uint64VectorS
 	b.proposerLookahead = proposerLookahead
 	b.markLeaf(ProposerLookaheadLeafIndex)
 }
+
+func (b *BeaconState) SetExitChurnVectorAtIndex(i int, v uint64) {
+	b.exitChurnVector.Set(i, v)
+	b.markLeaf(ExitChurnVectorLeafIndex)
+}
+
+func (b *BeaconState) SetExitChurnVector(v solid.Uint64VectorSSZ) {
+	b.exitChurnVector = v
+	b.markLeaf(ExitChurnVectorLeafIndex)
+}
