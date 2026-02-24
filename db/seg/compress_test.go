@@ -344,9 +344,10 @@ func TestCompressNoWordPatterns(t *testing.T) {
 	defer c.Close()
 
 	// Build expected words: empty, short, varied-length — all via AddUncompressedWord.
-	var words [][]byte
-	words = append(words, nil)
-	words = append(words, []byte("a"))
+	words := [][]byte{
+		nil,
+		[]byte("a"),
+	}
 	for i := range 100 {
 		// Semantic: "empty word" means "found key with empty value". "nil" - means key was deleted - not encodable by compressor
 		words = append(words,
