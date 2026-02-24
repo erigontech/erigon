@@ -38,8 +38,6 @@ import (
 	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
-var json = jsoniter.ConfigFastest
-
 var (
 	legacyDir  = filepath.Join(".", "legacy-tests")
 	eestDir    = filepath.Join(".", "execution-spec-tests")
@@ -53,7 +51,7 @@ func readJSONFile(fn string, value any) error {
 		return fmt.Errorf("error reading JSON file: %w", err)
 	}
 
-	if err = json.Unmarshal(data, &value); err != nil {
+	if err = jsoniter.Unmarshal(data, &value); err != nil {
 		if offset, ok := jsoniterErrorOffset(err); ok {
 			line := findLine(data, offset)
 			return fmt.Errorf("JSON syntax error at line %v: %w", line, err)
