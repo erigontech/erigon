@@ -85,13 +85,15 @@ runs:
         fetch-depth: ${{ inputs.fetch-depth }}
         filter: ${{ inputs.filter }}
         clean: false
+        submodules: false
+        lfs: false
       env:
         GIT_LFS_SKIP_SMUDGE: 1
 
     - name: Clone submodules
       if: ${{ inputs.submodules == 'true' }}
       shell: bash
-      run: time git submodule update --init --recursive --depth 1 --filter=blob:none
+      run: time git submodule update --init --recursive --depth 1 --filter=blob:none --jobs 4 --progress
 
     - name: Pull LFS test fixtures
       if: ${{ inputs.lfs == 'tests' }}
