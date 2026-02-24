@@ -1,9 +1,26 @@
 name: Cleanup Erigon
-description: Warn if any tests ran without caching
+description: Save module cache and warn about uncached tests
+
+inputs:
+  tag:
+    description: "Optional tag appended to the gomodcache prefix (e.g. 'lint' produces 'gomodcache|lint')"
+    required: false
+    default: ""
+  modcache-restored-key:
+    description: "Override for the restored modcache key. Falls back to ERIGON_CI_MODCACHE_RESTORED_KEY env var."
+    required: false
+    default: ""
 
 runs:
   using: composite
   steps:
+    - uses: ./.github/actions/save-mod-cache
+      if: ${{ always() }}
+      with:
+        modcache: ${{ env.ERIGON_CI_MODCACHE }}
+        prefix: ${{ inputs.tag != '' && format('gomodcache|{0}', inputs.tag) || 'gomodcache' }}
+        restored-key: ${{ inputs.modcache-restored-key || env.ERIGON_CI_MODCACHE_RESTORED_KEY }}
+
     - name: Check for uncached tests
       if: hashFiles('run.log') != ''
       shell: bash

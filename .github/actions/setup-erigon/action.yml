@@ -188,14 +188,13 @@ runs:
         key: gomodcache|${{ runner.os }}|${{ hashFiles('go.sum') }}|invalid
         restore-keys: gomodcache|${{ runner.os }}|${{ hashFiles('go.sum') }}|
 
+    - name: Export modcache restored key
+      if: ${{ inputs.modcache == 'true' }}
+      shell: bash
+      run: echo "ERIGON_CI_MODCACHE_RESTORED_KEY=${{ steps.restore-modcache.outputs.cache-matched-key }}" >> "$GITHUB_ENV"
+
     - name: Download Go modules
       if: ${{ inputs.modcache == 'true' }}
       shell: bash
       # -x because it doesn't log what it's doing otherwise, unlike if a download occurs during another tool call.
       run: time go mod download
-
-    - uses: ./.github/actions/save-mod-cache
-      if: ${{ always() && steps.restore-modcache.outcome == 'success' }}
-      with:
-        modcache: ${{ steps.go-env.outputs.modcache }}
-        restored-key: ${{ steps.restore-modcache.outputs.cache-matched-key }}
