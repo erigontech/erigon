@@ -1,13 +1,13 @@
 package gossip
 
 import (
+	context0 "context"
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	serviceintf "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"golang.org/x/net/context"
 )
 
 func RegisterGossipService[T any](gm *GossipManager, service serviceintf.Service[T], conditions ...ConditionFunc) {
@@ -55,7 +55,7 @@ func (w *serviceWrapper[T]) DecodeGossipMessage(pid peer.ID, data []byte, versio
 	return w.service.DecodeGossipMessage(pid, data, version)
 }
 
-func (w *serviceWrapper[T]) ProcessMessage(ctx context.Context, subnet *uint64, msg any) error {
+func (w *serviceWrapper[T]) ProcessMessage(ctx context0.Context, subnet *uint64, msg any) error {
 	if typedMsg, ok := msg.(T); ok {
 		return w.service.ProcessMessage(ctx, subnet, typedMsg)
 	}

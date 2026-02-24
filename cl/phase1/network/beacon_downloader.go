@@ -17,12 +17,11 @@
 package network
 
 import (
+	context0 "context"
 	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"golang.org/x/net/context"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/rpc"
@@ -39,7 +38,7 @@ type ProcessFn func(
 	err error)
 
 type ForwardBeaconDownloader struct {
-	ctx                   context.Context
+	ctx                   context0.Context
 	highestSlotProcessed  uint64
 	highestSlotUpdateTime time.Time
 	rpc                   *rpc.BeaconRpcP2P
@@ -48,7 +47,7 @@ type ForwardBeaconDownloader struct {
 	mu sync.Mutex
 }
 
-func NewForwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P) *ForwardBeaconDownloader {
+func NewForwardBeaconDownloader(ctx context0.Context, rpc *rpc.BeaconRpcP2P) *ForwardBeaconDownloader {
 	return &ForwardBeaconDownloader{
 		ctx: ctx,
 		rpc: rpc,
@@ -77,7 +76,7 @@ type peerAndBlocks struct {
 	blocks []*cltypes.SignedBeaconBlock
 }
 
-func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
+func (f *ForwardBeaconDownloader) RequestMore(ctx context0.Context) {
 	count := uint64(32)
 	var atomicResp atomic.Value
 	atomicResp.Store(peerAndBlocks{})
