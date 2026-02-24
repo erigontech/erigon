@@ -271,7 +271,14 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	pruneStat, err := prune.TableScanningPrune(ctx, logPrefix, "txlookup", txFrom, txTo, 0, 1,
+	pruneTimeout := 2 * time.Second
+	if s.CurrentSyncCycle.IsInitialCycle {
+		pruneTimeout = time.Hour
+	}
+	pruneCtx, pruneCancel := context.WithTimeout(ctx, pruneTimeout)
+	defer pruneCancel()
+
+	pruneStat, err := prune.TableScanningPrune(pruneCtx, logPrefix, "txlookup", txFrom, txTo, 0, 1,
 		logEvery, logger, nil, valsCursor, false, prevStat, prune.ValueOffset8StorageMode)
 	if err != nil {
 		return fmt.Errorf("prune TxLookup: %w", err)
