@@ -119,11 +119,8 @@ func (iit *InvertedIndexRoTx) FirstStepNotInFiles() kv.Step {
 // make merge determenistic across nodes: even if Node has much small files - do earliest-first merges
 // As any other methods of DomainRoTx - it can't see any files overlaps or garbage
 func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
-	hr := dt.ht.findMergeRange(maxEndTxNum, maxSpan)
-
 	r := DomainRanges{
 		name:    dt.name,
-		history: hr,
 		aggStep: dt.stepSize,
 	}
 	for _, item := range dt.files {
@@ -143,6 +140,13 @@ func (dt *DomainRoTx) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 
 		r.values = MergeRange{"", true, fromTxNum, item.endTxNum}
 	}
+
+	// merge History only if nothing to merge in Domain. to minimize amount of Domain files:
+	//  - to prioritize blocks execution perf (which needs only LatestState - Domains)
+	if !r.any() {
+		r.history = dt.ht.findMergeRange(maxEndTxNum, maxSpan)
+	}
+
 	return r
 }
 
