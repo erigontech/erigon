@@ -29,7 +29,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/erigontech/erigon/db/downloader"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
@@ -41,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
@@ -1032,8 +1032,7 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 	defer view.Close()
 
 	for _, sn := range view.Headers() {
-		if err := sn.Src().WithReadAhead(func() error {
-			g := sn.Src().MakeGetter()
+		if err := sn.Src().WithReadAhead(func(g *seg.Getter) error {
 			for i := 0; g.HasNext(); i++ {
 				word, _ = g.Next(word[:0])
 				var header types.Header
