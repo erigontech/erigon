@@ -17,22 +17,27 @@
 package forkchoice
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
 
-// onPayloadAttestationMessage processes a payload attestation message and updates
+// OnPayloadAttestationMessage processes a payload attestation message and updates
 // the PTC vote tracking in the store.
 // Run upon receiving a new ptc_message from either within a block or directly on the wire.
+// Returns ErrIgnore for IGNORE conditions, other errors for REJECT conditions.
+// Caller should handle errors appropriately based on isFromBlock context.
 // [New in Gloas:EIP7732]
-func (f *ForkChoiceStore) onPayloadAttestationMessage(
+func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 	msg *cltypes.PayloadAttestationMessage,
 	isFromBlock bool,
 ) error {
 	if msg.Data == nil {
-		return nil
+		return errors.New("nil payload attestation data")
 	}
 
 	data := msg.Data
@@ -40,8 +45,11 @@ func (f *ForkChoiceStore) onPayloadAttestationMessage(
 
 	// PTC attestation must be for a known block
 	blockState, err := f.forkGraph.GetState(blockRoot, false)
-	if err != nil || blockState == nil {
-		return err // Block unknown, delay consideration until block is found
+	if err != nil {
+		return err
+	}
+	if blockState == nil {
+		return fmt.Errorf("%w: block state not found for root %v", ErrIgnore, blockRoot)
 	}
 
 	// Get the PTC for the attestation slot
@@ -52,10 +60,10 @@ func (f *ForkChoiceStore) onPayloadAttestationMessage(
 
 	// PTC votes can only change the vote for their assigned beacon block
 	if data.Slot != blockState.Slot() {
-		return nil
+		return fmt.Errorf("%w: attestation slot %d does not match block slot %d", ErrIgnore, data.Slot, blockState.Slot())
 	}
 
-	// Check that the attester is from the PTC
+	// [REJECT] Check that the attester is from the PTC
 	ptcIndex := -1
 	for i, idx := range ptc {
 		if idx == msg.ValidatorIndex {
@@ -64,16 +72,16 @@ func (f *ForkChoiceStore) onPayloadAttestationMessage(
 		}
 	}
 	if ptcIndex == -1 {
-		return nil // Validator not in PTC
+		return fmt.Errorf("validator %d is not in PTC for slot %d", msg.ValidatorIndex, data.Slot)
 	}
 
 	// Verify the signature and check that it's for the current slot if coming from wire
 	if !isFromBlock {
-		// Check that the attestation is for the current slot
+		// [IGNORE] Check that the attestation is for the current slot
 		if data.Slot != f.Slot() {
-			return nil
+			return fmt.Errorf("%w: attestation slot %d is not current slot %d", ErrIgnore, data.Slot, f.Slot())
 		}
-		// Verify the signature
+		// [REJECT] Verify the signature
 		indexedAttestation := &cltypes.IndexedPayloadAttestation{
 			AttestingIndices: solid.NewRawUint64List(1, []uint64{msg.ValidatorIndex}),
 			Data:             data,
@@ -84,7 +92,7 @@ func (f *ForkChoiceStore) onPayloadAttestationMessage(
 			return err
 		}
 		if !valid {
-			return nil
+			return errors.New("invalid payload attestation signature")
 		}
 	}
 

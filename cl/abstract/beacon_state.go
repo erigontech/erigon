@@ -44,7 +44,7 @@ type BeaconStateUpgradable interface {
 type BeaconStateExtension interface {
 	SlashValidator(slashedInd uint64, whistleblowerInd *uint64) (uint64, error)
 	InitiateValidatorExit(index uint64) error
-	InitiateBuilderExit(builderIndex cltypes.BuilderIndex)
+	InitiateBuilderExit(builderIndex uint64)
 	GetActiveValidatorsIndices(epoch uint64) (indicies []uint64)
 	GetTotalActiveBalance() uint64
 	ComputeCommittee(indicies []uint64, slot uint64, index, count uint64) ([]uint64, error)
@@ -78,7 +78,7 @@ type BeaconStateExtension interface {
 	GetBuilderPendingWithdrawals() *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]
 	GetBuilderPendingPayments() *solid.VectorSSZ[*cltypes.BuilderPendingPayment]
 	GetBuilderPaymentQuorumThreshold() uint64
-	GetNextWithdrawalBuilderIndex() cltypes.BuilderIndex
+	GetNextWithdrawalBuilderIndex() uint64
 	GetPayloadExpectedWithdrawals() *solid.ListSSZ[*cltypes.Withdrawal]
 	GetIndexedPayloadAttestation(payloadAttestation *cltypes.PayloadAttestation) (*cltypes.IndexedPayloadAttestation, error)
 }
@@ -159,7 +159,7 @@ type BeaconStateMutator interface {
 	SetBuilderPendingWithdrawals(withdrawals *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal])
 	SetPayloadExpectedWithdrawals(withdrawals *solid.ListSSZ[*cltypes.Withdrawal])
 	SetLatestBlockHash(hash common.Hash)
-	SetNextWithdrawalBuilderIndex(index cltypes.BuilderIndex)
+	SetNextWithdrawalBuilderIndex(index uint64)
 	SetBuilders(builders *solid.ListSSZ[*cltypes.Builder])
 	SetLatestExecutionPayloadBid(bid *cltypes.ExecutionPayloadBid)
 

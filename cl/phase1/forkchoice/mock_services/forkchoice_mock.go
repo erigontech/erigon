@@ -74,6 +74,9 @@ type ForkChoiceStorageMock struct {
 
 	// Mock for PeerDas
 	MockPeerDas *mock_services.MockPeerDas
+
+	// [New in Gloas:EIP7732] Execution payload status by execution block hash
+	ExecutionPayloadStatusMap map[common.Hash]execution_client.PayloadStatus
 }
 
 func makeSyncContributionPoolMock(t *testing.T) sync_contribution_pool.SyncContributionPool {
@@ -199,6 +202,7 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		Eth1Hashes:                make(map[common.Hash]common.Hash),
 		SyncContributionPool:      makeSyncContributionPoolMock(t),
 		MockPeerDas:               mockPeerDas,
+		ExecutionPayloadStatusMap: make(map[common.Hash]execution_client.PayloadStatus),
 	}
 }
 
@@ -315,6 +319,10 @@ func (f *ForkChoiceStorageMock) OnBlock(
 }
 
 func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
+	return nil
+}
+
+func (f *ForkChoiceStorageMock) OnPayloadAttestationMessage(msg *cltypes.PayloadAttestationMessage, isFromBlock bool) error {
 	return nil
 }
 
@@ -457,4 +465,11 @@ func (f *ForkChoiceStorageMock) GetPendingPartialWithdrawals(blockRoot common.Ha
 
 func (f *ForkChoiceStorageMock) GetProposerLookahead(slot uint64) (solid.Uint64VectorSSZ, bool) {
 	return nil, false
+}
+
+// GetRecentExecutionPayloadStatus returns the validation status of a recently validated execution payload.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStorageMock) GetRecentExecutionPayloadStatus(executionBlockHash common.Hash) (execution_client.PayloadStatus, bool) {
+	status, ok := f.ExecutionPayloadStatusMap[executionBlockHash]
+	return status, ok
 }
