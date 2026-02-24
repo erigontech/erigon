@@ -331,13 +331,14 @@ var cmdPrintMigrations = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
+		dirs := datadir.New(datadirCli)
+		migrationsDB, err := migrations.OpenMigrationsDB(dirs.Migrations, logger)
 		if err != nil {
-			logger.Error("Opening DB", "error", err)
+			logger.Error("Opening migrations DB", "error", err)
 			return
 		}
-		defer db.Close()
-		if err := printAppliedMigrations(db, cmd.Context(), logger); err != nil {
+		defer migrationsDB.Close()
+		if err := printAppliedMigrations(migrationsDB, cmd.Context(), logger); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -351,13 +352,14 @@ var cmdRemoveMigration = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
+		dirs := datadir.New(datadirCli)
+		migrationsDB, err := migrations.OpenMigrationsDB(dirs.Migrations, logger)
 		if err != nil {
-			logger.Error("Opening DB", "error", err)
+			logger.Error("Opening migrations DB", "error", err)
 			return
 		}
-		defer db.Close()
-		if err := removeMigration(db, cmd.Context()); err != nil {
+		defer migrationsDB.Close()
+		if err := removeMigration(migrationsDB, cmd.Context()); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -1082,8 +1084,8 @@ func printAllStages(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 	return db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn, borSn) })
 }
 
-func printAppliedMigrations(db kv.RwDB, ctx context.Context, logger log.Logger) error {
-	return db.View(ctx, func(tx kv.Tx) error {
+func printAppliedMigrations(migrationsDB kv.RwDB, ctx context.Context, logger log.Logger) error {
+	return migrationsDB.View(ctx, func(tx kv.Tx) error {
 		applied, err := migrations.AppliedMigrations(tx, false /* withPayload */)
 		if err != nil {
 			return err
@@ -1100,8 +1102,8 @@ func printAppliedMigrations(db kv.RwDB, ctx context.Context, logger log.Logger) 
 	})
 }
 
-func removeMigration(db kv.RwDB, ctx context.Context) error {
-	return db.Update(ctx, func(tx kv.RwTx) error {
+func removeMigration(migrationsDB kv.RwDB, ctx context.Context) error {
+	return migrationsDB.Update(ctx, func(tx kv.RwTx) error {
 		return tx.Delete(kv.Migrations, []byte(migration))
 	})
 }

@@ -362,8 +362,8 @@ func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, sender
 		if !chainConfig.IsLondon(block.NumberU64()) {
 			effectiveGasPrice = txn.GetTipCap().Uint64()
 		} else {
-			baseFee, _ := uint256.FromBig(block.BaseFee())
-			gasPrice := new(big.Int).Add(block.BaseFee(), txn.GetEffectiveGasTip(baseFee).ToBig())
+			baseFee := block.BaseFee()
+			gasPrice := new(uint256.Int).Add(baseFee, txn.GetEffectiveGasTip(baseFee))
 			effectiveGasPrice = gasPrice.Uint64()
 		}
 
