@@ -30,13 +30,14 @@ jobs:
     steps:
       - name: Clean docker system
         run: |
-          echo "Force stopping and removing all containers..."
-          if [ -n "$(docker ps -aq)" ]; then
-            docker kill $(docker ps -aq) || true
-            docker rm -f $(docker ps -aq) || true
-          fi
-          echo "Pruning stopped containers and dangling images (preserving layer cache)..."
-          docker container prune -f || true
+          echo "Stopping and removing non-hive containers..."
+          for id in $(docker ps -aq); do
+            if ! docker inspect "$id" --format '{{index .Config.Labels "hive.type"}}' 2>/dev/null | grep -q .; then
+              docker kill "$id" || true
+              docker rm -f "$id" || true
+            fi
+          done
+          echo "Pruning dangling images (preserving layer cache and hive images)..."
           docker image prune -f || true
       - name: Checkout Erigon go.mod
         uses: actions/checkout@v6
@@ -163,11 +164,14 @@ jobs:
       # So it is good to PROACTIVELY run it (it should not cause any issues within github-managed runners either)  
       - name: Prune docker
         run: |
-          echo "Stopping and removing all containers..."
-          docker rm -f $(docker ps -aq) || true
-          echo "Removing all images..."
-          docker rmi -f $(docker images -aq) || true
-          echo "Pruning docker..."
-          docker system prune -af --volumes
+          echo "Stopping and removing non-hive containers..."
+          for id in $(docker ps -aq); do
+            if ! docker inspect "$id" --format '{{index .Config.Labels "hive.type"}}' 2>/dev/null | grep -q .; then
+              docker rm -f "$id" || true
+            fi
+          done
+          echo "Pruning dangling images (preserving hive client image layer cache)..."
+          docker image prune -f || true
+          docker volume prune -f || true
         if: always()
 
