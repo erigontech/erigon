@@ -76,7 +76,7 @@ type peerAndBlocks struct {
 	blocks []*cltypes.SignedBeaconBlock
 }
 
-func (f *ForwardBeaconDownloader) RequestMore(ctx context0.Context) {
+func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 	count := uint64(32)
 	var atomicResp atomic.Value
 	atomicResp.Store(peerAndBlocks{})
