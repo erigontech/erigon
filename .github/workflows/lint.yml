@@ -31,8 +31,6 @@ jobs:
         with:
           modcache: lint
 
-      - uses: ./.github/actions/restore-build-cache
-
       - name: Restore golangci-lint cache
         uses: actions/cache/restore@v4
         with:

@@ -47,9 +47,6 @@ jobs:
           submodules: true
           lfs: tests
 
-      - uses: ./.github/actions/restore-build-cache
-        id: restore-build
-
       - name: Run tests with coverage
         env:
           SKIP_FLAKY_TESTS: 'true'

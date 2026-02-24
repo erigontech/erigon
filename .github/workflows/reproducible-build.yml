@@ -35,8 +35,6 @@ jobs:
       - uses: ./.github/actions/setup-erigon
         id: erigon
 
-      - uses: ./.github/actions/restore-build-cache
-
       - name: Build all
         run: make all
 

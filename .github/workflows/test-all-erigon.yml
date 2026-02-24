@@ -93,10 +93,6 @@ jobs:
           submodules: true
           lfs: tests
 
-      - uses: ./.github/actions/restore-build-cache
-        id: restore-build
-        if: needs.source-of-changes.outputs.changed_files != 'true'
-
       - name: Run all tests on ${{ matrix.os }}
         if: needs.source-of-changes.outputs.changed_files != 'true'
         env:
