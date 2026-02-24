@@ -312,8 +312,34 @@ func (sdb *IntraBlockState) HasStorage(addr accounts.Address) (bool, error) {
 		}
 	}
 
+	// In parallel execution mode, check if a prior TX wrote IncarnationPath.
+	// IncarnationPath is written ONLY by CreateAccount and Selfdestruct —
+	// both operations that clear all storage.  If a prior TX wrote it, the
+	// account was created or destroyed in this block and HasStorage should
+	// return false.  This mirrors the same check in versionedRead for
+	// StoragePath (versionedio.go:660-703).
+	if sdb.versionMap != nil {
+		incRes := sdb.versionMap.Read(addr, IncarnationPath, accounts.NilKey, sdb.txIndex)
+		if incRes.Status() == MVReadResultDone {
+			// Record IncarnationPath dependency for validation.
+			if sdb.versionedReads == nil {
+				sdb.versionedReads = ReadSet{}
+			}
+			sdb.versionedReads.Set(VersionedRead{
+				Address: addr,
+				Path:    IncarnationPath,
+				Key:     accounts.NilKey,
+				Source:  MapRead,
+				Version: Version{TxIndex: incRes.DepIdx(), Incarnation: incRes.Incarnation()},
+				Val:     incRes.Value(),
+			})
+			return false, nil
+		}
+	}
+
 	// Otherwise check in the DB
-	return sdb.stateReader.HasStorage(addr)
+	result, err := sdb.stateReader.HasStorage(addr)
+	return result, err
 }
 
 // Reset clears out all ephemeral state objects from the state db, but keeps

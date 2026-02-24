@@ -667,7 +667,8 @@ func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path Accoun
 		// contain stale data from before a prior block's SELFDESTRUCT (because
 		// Writer.DeleteAccount clears AccountsDomain but NOT StorageDomain).
 		if path == StoragePath {
-			if incRes := s.versionMap.Read(addr, IncarnationPath, accounts.NilKey, s.txIndex); incRes.Status() == MVReadResultDone {
+			incRes := s.versionMap.Read(addr, IncarnationPath, accounts.NilKey, s.txIndex)
+			if incRes.Status() == MVReadResultDone {
 				var zero T
 				vr.Source = StorageRead
 				vr.Val = zero
