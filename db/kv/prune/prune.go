@@ -387,12 +387,12 @@ func TableScanningPrune(
 
 		select {
 		case <-logEvery.C:
-			if len(txNumBytes) >= 8 {
-				txNum = binary.BigEndian.Uint64(txNumBytes)
+			args := []interface{}{"name", filenameBase, "pruned values", stat.PruneCountValues}
+			if keysCursor != nil {
+				args = append(args, "pruned tx", stat.PruneCountTx)
 			}
-			logger.Info("[snapshots] prune index", "name", filenameBase, "pruned tx", stat.PruneCountTx,
-				"pruned values", stat.PruneCountValues,
-				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(stepSize), float64(txNum)/float64(stepSize)))
+			args = append(args, "val status", stat.ValueProgress.String())
+			logger.Info("[snapshots] prune index", args...)
 		default:
 		}
 
