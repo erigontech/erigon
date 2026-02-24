@@ -314,14 +314,11 @@ var snapshotCommand = cli.Command{
 				"It is useful for shadowforks, recovering broken nodes or chains, and/or for doing experiments that " +
 				"involve replaying certain blocks.",
 			Action: func(cliCtx *cli.Context) error {
-				logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
-				if err != nil {
-					panic(fmt.Errorf("rollback snapshots to block: could not setup logger: %w", err))
-				}
+				logger := log.Root()
 				block := cliCtx.Uint64("block")
 				prompt := cliCtx.Bool("prompt")
 				dataDir := cliCtx.String(utils.DataDirFlag.Name)
-				err = doRollbackSnapshotsToBlock(cliCtx.Context, block, prompt, dataDir, logger)
+				err := doRollbackSnapshotsToBlock(cliCtx.Context, block, prompt, dataDir, logger)
 				if err != nil {
 					logger.Error(err.Error())
 					return err
@@ -400,11 +397,8 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "check-commitment-hist-at-blk",
 			Action: func(cliCtx *cli.Context) error {
-				logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
-				if err != nil {
-					panic(fmt.Errorf("check commitment history at block: could not setup logger: %w", err))
-				}
-				err = doCheckCommitmentHistAtBlk(cliCtx, logger)
+				logger := log.Root()
+				err := doCheckCommitmentHistAtBlk(cliCtx, logger)
 				if err != nil {
 					log.Error("[check-commitment-hist-at-blk] failure", "err", err)
 					return err
@@ -421,11 +415,8 @@ var snapshotCommand = cli.Command{
 		{
 			Name: "check-commitment-hist-at-blk-range",
 			Action: func(cliCtx *cli.Context) error {
-				logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
-				if err != nil {
-					panic(fmt.Errorf("check commitment history at block range: could not setup logger: %w", err))
-				}
-				err = doCheckCommitmentHistAtBlkRange(cliCtx, logger)
+				logger := log.Root()
+				err := doCheckCommitmentHistAtBlkRange(cliCtx, logger)
 				if err != nil {
 					log.Error("[check-commitment-hist-at-blk-range] failure", "err", err)
 					return err
@@ -444,11 +435,8 @@ var snapshotCommand = cli.Command{
 			Name:        "verify-state",
 			Description: "verify correspondence between state snapshots (accounts, storage) and commitment snapshots",
 			Action: func(cliCtx *cli.Context) error {
-				logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
-				if err != nil {
-					panic(fmt.Errorf("verify-state: could not setup logger: %w", err))
-				}
-				err = doVerifyState(cliCtx, logger)
+				logger := log.Root()
+				err := doVerifyState(cliCtx, logger)
 				if err != nil {
 					log.Error("[verify-state] failure", "err", err)
 					return err
@@ -466,11 +454,8 @@ var snapshotCommand = cli.Command{
 			Name:        "verify-history",
 			Description: "verify history snapshots by re-executing blocks and comparing state changes",
 			Action: func(cliCtx *cli.Context) error {
-				logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
-				if err != nil {
-					panic(fmt.Errorf("verify-history: could not setup logger: %w", err))
-				}
-				err = doVerifyHistory(cliCtx, logger)
+				logger := log.Root()
+				err := doVerifyHistory(cliCtx, logger)
 				if err != nil {
 					log.Error("[verify-history] failure", "err", err)
 					return err
@@ -992,10 +977,7 @@ func doBtSearch(cliCtx *cli.Context) error {
 		return err
 	}
 	defer l.Unlock()
-	logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 
 	srcF := cliCtx.String("src")
 	dataFilePath := strings.TrimRight(srcF, ".bt") + ".kv"
@@ -1037,10 +1019,7 @@ func doBtSearch(cliCtx *cli.Context) error {
 }
 
 func doDebugKey(cliCtx *cli.Context) error {
-	logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 	key := common.FromHex(cliCtx.String("key"))
 	var domain kv.Domain
 	var idx kv.InvertedIdx
@@ -1090,10 +1069,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 }
 
 func doIntegrity(cliCtx *cli.Context) error {
-	logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 
 	ctx := cliCtx.Context
 	checkStr := cliCtx.String("check")
@@ -1996,10 +1972,7 @@ func deleteFilesWithExtensions(dir string, extensions []string) error {
 }
 
 func doBlkTxNum(cliCtx *cli.Context) error {
-	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 	defer logger.Info("Done")
 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
@@ -2168,10 +2141,7 @@ func doMeta(cliCtx *cli.Context) error {
 }
 
 func doDecompressSpeed(cliCtx *cli.Context) error {
-	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 	args := cliCtx.Args()
 	if args.Len() < 1 {
 		return errors.New("expecting file path as a first argument")
@@ -2184,10 +2154,15 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 	}
 	defer decompressor.Close()
 	func() {
-		defer decompressor.MadvSequential().DisableReadAhead()
+		//defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
-		g := decompressor.MakeGetter()
+		view, err := decompressor.OpenSequentialView()
+		if err != nil {
+			panic(err)
+		}
+		defer view.Close()
+		g := view.MakeGetter()
 		buf := make([]byte, 0, 16*etl.BufIOSize)
 		for g.HasNext() {
 			buf, _ = g.Next(buf[:0])
@@ -2195,10 +2170,15 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 		logger.Info("decompress speed", "took", time.Since(t))
 	}()
 	func() {
-		defer decompressor.MadvSequential().DisableReadAhead()
+		//defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
-		g := decompressor.MakeGetter()
+		view, err := decompressor.OpenSequentialView()
+		if err != nil {
+			panic(err)
+		}
+		defer view.Close()
+		g := view.MakeGetter()
 		for g.HasNext() {
 			_, _ = g.Skip()
 		}
@@ -2208,10 +2188,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 }
 
 func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
@@ -2260,10 +2237,7 @@ func doIndicesCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 	return nil
 }
 func doLS(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
@@ -2392,10 +2366,6 @@ func doUncompress(cliCtx *cli.Context) error {
 		return err
 	}
 	defer l.Unlock()
-	if _, err = debug.SetupSimple(cliCtx, true /* rootLogger */); err != nil {
-		return err
-	}
-
 	args := cliCtx.Args()
 	if args.Len() < 1 {
 		return errors.New("expecting file path as a first argument")
@@ -2430,10 +2400,7 @@ func doCompress(cliCtx *cli.Context) error {
 	}
 	defer lck.Unlock()
 
-	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 	ctx := cliCtx.Context
 
 	args := cliCtx.Args()
@@ -2531,10 +2498,7 @@ func doCompress(cliCtx *cli.Context) error {
 }
 
 func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 	defer logger.Info("Done")
 
 	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
@@ -2554,10 +2518,7 @@ func doRemoveOverlap(cliCtx *cli.Context, dirs datadir.Dirs) error {
 }
 
 func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 	defer logger.Info("Done")
 
 	ctx := cliCtx.Context
@@ -2689,10 +2650,7 @@ func doUnmerge(cliCtx *cli.Context, dirs datadir.Dirs) error {
 }
 
 func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
-	logger, err := debug.SetupSimple(cliCtx, true /* rootLogger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 	defer logger.Info("Done")
 	ctx := cliCtx.Context
 
@@ -2823,10 +2781,7 @@ func doRetireCommand(cliCtx *cli.Context, dirs datadir.Dirs) error {
 func doCompareIdx(cliCtx *cli.Context) error {
 	// doesn't compare exact hashes offset,
 	// only sizes, counts, offsets, and ordinal lookups.
-	logger, err := debug.SetupSimple(cliCtx, true /* root logger */)
-	if err != nil {
-		return err
-	}
+	logger := log.Root()
 
 	cmpFn := func(f, s uint64, msg string) {
 		if f != s {
