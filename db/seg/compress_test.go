@@ -65,6 +65,9 @@ func TestCompressEmptyDict(t *testing.T) {
 	if g.HasNext() {
 		t.Fatalf("not expecting anything else")
 	}
+	if cs := checksum(file); cs != 2900861311 {
+		t.Errorf("result file hash changed, %d", cs)
+	}
 }
 
 // nolint
@@ -323,6 +326,9 @@ func Test_CompressWithMetadata(t *testing.T) {
 			t.Errorf("expected %s, got (hex) [%s]", expected, word)
 		}
 		i++
+	}
+	if cs := checksum(d.filePath); cs != 4122484600 {
+		t.Errorf("result file hash changed, %d", cs)
 	}
 }
 
