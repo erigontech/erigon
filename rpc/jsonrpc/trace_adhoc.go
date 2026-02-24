@@ -1141,14 +1141,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 
 	// Get a new instance of the EVM.
-	var baseFee *uint256.Int
-	if header.BaseFee != nil {
-		var overflow bool
-		baseFee, overflow = uint256.FromBig(header.BaseFee)
-		if overflow {
-			return nil, errors.New("header.BaseFee uint256 overflow")
-		}
-	}
+	baseFee := header.BaseFee
 	msg, err := args.ToMessage(api.gasCap, baseFee)
 	if err != nil {
 		return nil, err
@@ -1283,11 +1276,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		return nil, fmt.Errorf("parent block %d(%x) not found", blockNumber, hash)
 	}
 	if parentHeader.BaseFee != nil {
-		var overflow bool
-		baseFee, overflow = uint256.FromBig(parentHeader.BaseFee)
-		if overflow {
-			return nil, errors.New("header.BaseFee uint256 overflow")
-		}
+		baseFee = parentHeader.BaseFee
 	}
 	msgs := make([]*types.Message, len(callParams))
 	txns := make([]types.Transaction, len(callParams))

@@ -18,9 +18,9 @@ package jsonrpc
 
 import (
 	"context"
-	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -29,8 +29,8 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
@@ -39,7 +39,7 @@ import (
 
 // Gets the latest block number with the latest tag
 func TestGetBlockByNumberWithLatestTag(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	b, err := api.GetBlockByNumber(context.Background(), rpc.LatestBlockNumber, false)
 	expected := common.HexToHash("0x5883164d4100b95e1d8e931b8b9574586a1dea7507941e6ad3c1e3a2591485fd")
@@ -50,7 +50,7 @@ func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 }
 
 func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
 	tx, err := m.DB.BeginRw(ctx)
 	require.NoError(t, err)
@@ -80,7 +80,7 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 }
 
 func TestGetBlockByNumberWithPendingTag(t *testing.T) {
-	m := mock.MockWithTxPool(t)
+	m := execmoduletester.NewWithTxPool(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
@@ -89,7 +89,7 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 
 	expected := 1
 	header := &types.Header{
-		Number: big.NewInt(int64(expected)),
+		Number: *uint256.NewInt(uint64(expected)),
 	}
 
 	rlpBlock, err := rlp.EncodeToBytes(types.NewBlockWithHeader(header))
@@ -105,11 +105,12 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 	if err != nil {
 		t.Errorf("error getting block number with pending tag: %s", err)
 	}
-	assert.Equal(t, (*hexutil.Big)(big.NewInt(int64(expected))), b["number"])
+	expectedNum := (*hexutil.Big)(uint256.NewInt(uint64(expected)).ToBig())
+	assert.Equal(t, expectedNum, b["number"])
 }
 
 func TestGetBlockByNumber_WithFinalizedTag_NoFinalizedBlockInDb(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	if _, err := api.GetBlockByNumber(ctx, rpc.FinalizedBlockNumber, false); err != nil {
@@ -118,7 +119,7 @@ func TestGetBlockByNumber_WithFinalizedTag_NoFinalizedBlockInDb(t *testing.T) {
 }
 
 func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
 	tx, err := m.DB.BeginRw(ctx)
 	require.NoError(t, err)
@@ -148,7 +149,7 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 }
 
 func TestGetBlockByNumber_WithSafeTag_NoSafeBlockInDb(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	if _, err := api.GetBlockByNumber(ctx, rpc.SafeBlockNumber, false); err != nil {
@@ -157,7 +158,7 @@ func TestGetBlockByNumber_WithSafeTag_NoSafeBlockInDb(t *testing.T) {
 }
 
 func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
 	tx, err := m.DB.BeginRw(ctx)
 	require.NoError(t, err)
@@ -187,7 +188,7 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 }
 
 func TestGetBlockTransactionCountByHash(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
 
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
@@ -220,7 +221,7 @@ func TestGetBlockTransactionCountByHash(t *testing.T) {
 }
 
 func TestGetBlockTransactionCountByHash_ZeroTx(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	blockHash := common.HexToHash("0x5883164d4100b95e1d8e931b8b9574586a1dea7507941e6ad3c1e3a2591485fd")
@@ -252,7 +253,7 @@ func TestGetBlockTransactionCountByHash_ZeroTx(t *testing.T) {
 }
 
 func TestGetBlockTransactionCountByNumber(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	blockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
@@ -284,7 +285,7 @@ func TestGetBlockTransactionCountByNumber(t *testing.T) {
 }
 
 func TestGetBlockTransactionCountByNumber_ZeroTx(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 

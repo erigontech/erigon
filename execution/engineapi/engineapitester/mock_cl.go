@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package executiontests
+package engineapitester
 
 import (
 	"context"
@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 	"google.golang.org/grpc"
 
@@ -145,7 +146,7 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 	}
 	cl.logger.Debug("[mock-cl] building block", "timestamp", timestamp)
 	// start the block building process
-	fcuRes, err := retryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
+	fcuRes, err := RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
 		func() (*enginetypes.ForkChoiceUpdatedResponse, enginetypes.EngineStatus, error) {
 			r, err := cl.engineApiClient.ForkchoiceUpdatedV4(ctx, &forkChoiceState, &payloadAttributes)
 			if err != nil {
@@ -160,7 +161,7 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 		return nil, fmt.Errorf("payload status of block building fcu is not valid: %s", fcuRes.PayloadStatus.Status)
 	}
 	// get the newly built block
-	newPayload, err := retryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, []error{&engine_helpers.UnknownPayloadErr},
+	newPayload, err := RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, []error{&engine_helpers.UnknownPayloadErr},
 		func() (*enginetypes.GetPayloadResponse, enginetypes.EngineStatus, error) {
 			r, err := cl.engineApiClient.GetPayloadV6(ctx, *fcuRes.PayloadId)
 			if err != nil {
@@ -179,7 +180,7 @@ func (cl *MockCl) BuildNewPayload(ctx context.Context, opts ...BlockBuildingOpti
 func (cl *MockCl) InsertNewPayload(ctx context.Context, p *MockClPayload) (*enginetypes.PayloadStatus, error) {
 	elPayload := p.ExecutionPayload
 	clParentBlockRoot := p.ParentBeaconBlockRoot
-	return retryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
+	return RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
 		func() (*enginetypes.PayloadStatus, enginetypes.EngineStatus, error) {
 			r, err := cl.engineApiClient.NewPayloadV5(ctx, elPayload, []common.Hash{}, clParentBlockRoot, []hexutil.Bytes{})
 			if err != nil {
@@ -197,7 +198,7 @@ func (cl *MockCl) UpdateForkChoice(ctx context.Context, p *MockClPayload) error 
 		SafeBlockHash:      cl.genesis,
 		FinalizedBlockHash: cl.genesis,
 	}
-	fcuRes, err := retryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
+	fcuRes, err := RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
 		func() (*enginetypes.ForkChoiceUpdatedResponse, enginetypes.EngineStatus, error) {
 			r, err := cl.engineApiClient.ForkchoiceUpdatedV4(ctx, &forkChoiceState, nil)
 			if err != nil {
@@ -250,7 +251,7 @@ type blockBuildingOptions struct {
 	waitUntilTimestamp bool
 }
 
-func retryEngine[T any](ctx context.Context, retryStatuses []enginetypes.EngineStatus, retryErrors []error,
+func RetryEngine[T any](ctx context.Context, retryStatuses []enginetypes.EngineStatus, retryErrors []error,
 	f func() (*T, enginetypes.EngineStatus, error)) (*T, error) {
 	operation := func() (*T, error) {
 		res, status, err := f()
@@ -324,15 +325,15 @@ func MockClPayloadToHeader(p *MockClPayload) *types.Header {
 		Coinbase:              elPayload.FeeRecipient,
 		Root:                  elPayload.StateRoot,
 		Bloom:                 bloom,
-		BaseFee:               (*big.Int)(elPayload.BaseFeePerGas),
+		BaseFee:               uint256.MustFromBig(elPayload.BaseFeePerGas.ToInt()),
 		Extra:                 elPayload.ExtraData,
-		Number:                big.NewInt(0).SetUint64(elPayload.BlockNumber.Uint64()),
+		Number:                *uint256.NewInt(elPayload.BlockNumber.Uint64()),
 		GasUsed:               uint64(elPayload.GasUsed),
 		GasLimit:              uint64(elPayload.GasLimit),
 		Time:                  uint64(elPayload.Timestamp),
 		MixDigest:             elPayload.PrevRandao,
 		UncleHash:             empty.UncleHash,
-		Difficulty:            merge.ProofOfStakeDifficulty,
+		Difficulty:            *merge.ProofOfStakeDifficulty,
 		Nonce:                 merge.ProofOfStakeNonce,
 		ReceiptHash:           elPayload.ReceiptsRoot,
 		TxHash:                types.DeriveSha(txns),

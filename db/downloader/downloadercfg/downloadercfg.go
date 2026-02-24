@@ -20,12 +20,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -62,6 +64,31 @@ func init() {
 	NetworkChunkSize = pp.Integer(i64)
 }
 
+// safeWriter wraps an io.WriteCloser and silently discards writes after Close.
+// This prevents panics from the torrent client's background goroutines (e.g.
+// forwardPort) that may attempt to log after the file has been closed.
+type safeWriter struct {
+	mu     sync.Mutex
+	w      io.WriteCloser
+	closed bool
+}
+
+func (s *safeWriter) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return len(p), nil
+	}
+	return s.w.Write(p)
+}
+
+func (s *safeWriter) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+	return s.w.Close()
+}
+
 type Cfg struct {
 	Dirs datadir.Dirs
 	// Separate rate limit for webseeds.
@@ -73,7 +100,7 @@ type Cfg struct {
 	ChainName string
 
 	ClientConfig   *torrent.ClientConfig
-	TorrentLogFile *os.File
+	TorrentLogFile io.Closer
 
 	MdbxWriteMap bool
 	// Don't trust any existing piece completion. Revalidate all pieces when added.
@@ -208,13 +235,16 @@ func New(
 
 	torrentSloggerHandlers := multiHandler{&torrentSlogToErigonHandler}
 
+	var torrentLogCloser io.Closer
 	torrentLogFile, err := os.OpenFile(
 		filepath.Join(dirs.DataDir, "logs", "torrent.log"),
 		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err == nil {
+		sw := &safeWriter{w: torrentLogFile}
+		torrentLogCloser = sw
 		torrentSloggerHandlers = append(
 			torrentSloggerHandlers,
-			slog.NewJSONHandler(torrentLogFile, &slog.HandlerOptions{
+			slog.NewJSONHandler(sw, &slog.HandlerOptions{
 				AddSource:   true,
 				Level:       min(erigonToSlogLevel(verbosity), slog.LevelWarn),
 				ReplaceAttr: nil,
@@ -250,7 +280,7 @@ func New(
 		Dirs:              dirs,
 		ChainName:         chainName,
 		ClientConfig:      torrentConfig,
-		TorrentLogFile:    torrentLogFile,
+		TorrentLogFile:    torrentLogCloser,
 		MdbxWriteMap:      mdbxWriteMap,
 		VerifyTorrentData: opts.Verify,
 		LogPrefix:         "[Downloader] ",

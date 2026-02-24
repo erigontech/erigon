@@ -467,7 +467,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 			if !isPos && chainConfig.TerminalTotalDifficulty != nil {
 				header := lastHeader
-				isPos = header.Difficulty.Sign() == 0 || header.Difficulty.Cmp(chainConfig.TerminalTotalDifficulty) >= 0
+				isPos = header.Difficulty.IsZero() || header.Difficulty.CmpBig(chainConfig.TerminalTotalDifficulty) >= 0
 			}
 
 			lastBlockHash = lastHeader.Hash()

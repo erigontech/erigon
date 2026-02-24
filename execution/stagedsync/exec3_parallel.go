@@ -23,7 +23,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
@@ -96,7 +95,7 @@ type parallelExecutor struct {
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
-	accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
+	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
 
 	var asyncTxChan mdbx.TxApplyChan
 	var asyncTx kv.TemporalTx
@@ -146,7 +145,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 	var hasLoggedCommittments atomic.Bool
 	var commitStart time.Time
 
-	var stepsInDb = rawdbhelpers.IdxStepsCountV3(rwTx, pe.agg.StepSize())
 	var lastProgress commitment.CommitProgress
 
 	execErr := func() (err error) {
@@ -178,7 +176,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 				case *txResult:
 					uncommittedGas += applyResult.blockGasUsed
 					uncommittedTransactions++
-					pe.rs.SetTxNum(applyResult.blockNum, applyResult.txNum)
 					if dbg.TraceApply && dbg.TraceBlock(applyResult.blockNum) {
 						pe.rs.SetTrace(true)
 						fmt.Println(applyResult.blockNum, "apply", applyResult.txNum, applyResult.stateUpdates.UpdateCount())
@@ -269,7 +266,6 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 					if applyResult.BlockNum > lastBlockResult.BlockNum {
 						uncommittedBlocks++
 						pe.doms.SetTxNum(applyResult.lastTxNum)
-						pe.doms.SetBlockNum(applyResult.BlockNum)
 						lastBlockResult = *applyResult
 					}
 
@@ -1486,7 +1482,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				txResult := be.results[tx]
 
 				if err := be.gasPool.SubGas(txResult.ExecutionResult.BlockGasUsed); err != nil {
-					return nil, err
+					return nil, fmt.Errorf("%w, block=%d: block gas used overflow", rules.ErrInvalidBlock, be.blockNum)
 				}
 
 				txTask := be.tasks[tx].Task
@@ -1494,7 +1490,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if txTask.Tx() != nil {
 					blobGasUsed := txTask.Tx().GetBlobGas()
 					if err := be.gasPool.SubBlobGas(blobGasUsed); err != nil {
-						return nil, err
+						return nil, fmt.Errorf("%w, block=%d blob gas used overflow: %w", rules.ErrInvalidBlock, be.blockNum, err)
 					}
 					be.blobGasUsed += blobGasUsed
 				}
@@ -1587,8 +1583,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if result.Receipt != nil {
 				applyResult.blockGasUsed = int64(result.ExecutionResult.BlockGasUsed)
 				be.blockGasUsed += result.ExecutionResult.BlockGasUsed
-				applyResult.receipt = result.Receipt
-				applyResult.logs = append(applyResult.logs, result.Receipt.Logs...)
+				receipt := *result.Receipt
+				applyResult.receipt = &receipt
+				applyResult.receipt.Logs = append([]*types.Log{}, result.Receipt.Logs...)
+				applyResult.logs = applyResult.receipt.Logs
 				pe.executedGas.Add(int64(applyResult.blockGasUsed))
 			}
 

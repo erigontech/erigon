@@ -35,8 +35,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/mock"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -47,21 +47,21 @@ import (
 )
 
 // Do 1 step to start txPool
-func oneBlockSteps(mockSentry *mock.MockSentry, require *require.Assertions, blocks int) {
-	chain, err := blockgen.GenerateChain(mockSentry.ChainConfig, mockSentry.Genesis, mockSentry.Engine, mockSentry.DB, blocks, func(i int, b *blockgen.BlockGen) {
+func oneBlockSteps(m *execmoduletester.ExecModuleTester, require *require.Assertions, blocks int) {
+	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, blocks, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	require.NoError(err)
-	err = mockSentry.InsertChain(chain)
+	err = m.InsertChain(chain)
 	require.NoError(err)
 }
 
 // Do 1 step to start txPool
-func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions) {
+func oneBlockStep(mockSentry *execmoduletester.ExecModuleTester, require *require.Assertions) {
 	oneBlockSteps(mockSentry, require, 1)
 }
 
-func newBaseApiForTest(m *mock.MockSentry) *jsonrpc.BaseAPI {
+func newBaseApiForTest(m *execmoduletester.ExecModuleTester) *jsonrpc.BaseAPI {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	return jsonrpc.NewBaseApi(nil, stateCache, m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0)
 }
@@ -81,8 +81,11 @@ func newEthApiForTest(base *jsonrpc.BaseAPI, db kv.TemporalRoDB, txPool txpoolpr
 }
 
 func TestGetBlobsV1(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	buf := bytes.NewBuffer(nil)
-	mockSentry, require := mock.MockWithTxPoolCancun(t), require.New(t)
+	mockSentry, require := execmoduletester.NewWithTxPoolCancun(t), require.New(t)
 	oneBlockStep(mockSentry, require)
 
 	wrappedTxn := types.MakeWrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
@@ -100,7 +103,7 @@ func TestGetBlobsV1(t *testing.T) {
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log)
 	api := newEthApiForTest(newBaseApiForTest(mockSentry), mockSentry.DB, txPool)
 
-	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
+	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
 	fcuTimeout := ethconfig.Defaults.FcuTimeout
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
@@ -132,8 +135,11 @@ func TestGetBlobsV1(t *testing.T) {
 }
 
 func TestGetBlobsV2(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	buf := bytes.NewBuffer(nil)
-	mockSentry, require := mock.MockWithTxPoolAllProtocolChanges(t), require.New(t)
+	mockSentry, require := execmoduletester.NewWithTxPoolAllProtocolChanges(t), require.New(t)
 	oneBlockStep(mockSentry, require)
 
 	wrappedTxn := types.MakeV1WrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
@@ -151,7 +157,7 @@ func TestGetBlobsV2(t *testing.T) {
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log)
 	api := newEthApiForTest(newBaseApiForTest(mockSentry), mockSentry.DB, txPool)
 
-	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
+	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
 	fcuTimeout := ethconfig.Defaults.FcuTimeout
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
@@ -192,8 +198,11 @@ func TestGetBlobsV2(t *testing.T) {
 }
 
 func TestGetBlobsV3(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	buf := bytes.NewBuffer(nil)
-	mockSentry, require := mock.MockWithTxPoolAllProtocolChanges(t), require.New(t)
+	mockSentry, require := execmoduletester.NewWithTxPoolAllProtocolChanges(t), require.New(t)
 	oneBlockStep(mockSentry, require)
 
 	wrappedTxn := types.MakeV1WrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
@@ -211,7 +220,7 @@ func TestGetBlobsV3(t *testing.T) {
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, mockSentry.Log)
 	api := newEthApiForTest(newBaseApiForTest(mockSentry), mockSentry.DB, txPool)
 
-	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
+	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
 	eth := rpcservices.NewRemoteBackend(nil, mockSentry.DB, mockSentry.BlockReader)
 	fcuTimeout := ethconfig.Defaults.FcuTimeout
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
@@ -275,10 +284,10 @@ func writeBlockAccessListBytes(t *testing.T, db kv.TemporalRwDB, blockHash commo
 }
 
 func TestGetPayloadBodiesByHashV2(t *testing.T) {
-	mockSentry, req := mock.MockWithTxPoolAllProtocolChanges(t), require.New(t)
+	mockSentry, req := execmoduletester.NewWithTxPoolAllProtocolChanges(t), require.New(t)
 	oneBlockStep(mockSentry, req)
 
-	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
+	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
 	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
 
@@ -308,10 +317,10 @@ func TestGetPayloadBodiesByHashV2(t *testing.T) {
 }
 
 func TestGetPayloadBodiesByRangeV2(t *testing.T) {
-	mockSentry, req := mock.MockWithTxPoolAllProtocolChanges(t), require.New(t)
+	mockSentry, req := execmoduletester.NewWithTxPoolAllProtocolChanges(t), require.New(t)
 	oneBlockSteps(mockSentry, req, 2)
 
-	executionRpc := direct.NewExecutionClientDirect(mockSentry.Eth1ExecutionService)
+	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
 	maxReorgDepth := ethconfig.Defaults.MaxReorgDepth
 	engineServer := NewEngineServer(mockSentry.Log, mockSentry.ChainConfig, executionRpc, nil, false, false, true, nil, ethconfig.Defaults.FcuTimeout, maxReorgDepth)
 

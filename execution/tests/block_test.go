@@ -25,13 +25,12 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 )
 
 func TestLegacyBlockchain(t *testing.T) {
 	if testing.Short() {
-		t.Skip()
+		t.Skip("slow test")
 	}
 	t.Parallel()
 
@@ -104,9 +103,9 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	if race.Enabled {
-		// TODO fix -race issues with parallel exec
-		t.Skip("skipping from race tests until parallel exec flow is race free")
+	if runtime.GOOS == "windows" {
+		// TODO(yperbasis, mh0lt)
+		t.Skip("fix me on windows please")
 	}
 
 	t.Parallel()
@@ -116,7 +115,10 @@ func TestExecutionSpecBlockchainDevnet(t *testing.T) {
 	bt := new(testMatcher)
 	// to run only tests for 1 eip do:
 	//bt.whitelist(`.*amsterdam/eip8024_dupn_swapn_exchange.*`)
-	bt.whitelist(`.*amsterdam.*`) // TODO run tests for older forks too once we fix amsterdam eips, for now focus only on amsterdam eips
+
+	// static — tested in state test format by TestState
+	bt.skipLoad(`^static/state_tests/`)
+
 	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
 		test.ExperimentalBAL = true // TODO eventually remove this from BlockTest and run normally

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
@@ -47,7 +49,9 @@ func (b btHeader) MarshalJSON() ([]byte, error) {
 	enc.Coinbase = b.Coinbase
 	enc.MixHash = b.MixHash
 	enc.Nonce = b.Nonce
-	enc.Number = (*math.HexOrDecimal256)(b.Number)
+	if b.Number != nil {
+		enc.Number = (*math.HexOrDecimal256)(b.Number.ToBig())
+	}
 	enc.Hash = b.Hash
 	enc.ParentHash = b.ParentHash
 	enc.ReceiptTrie = b.ReceiptTrie
@@ -55,11 +59,15 @@ func (b btHeader) MarshalJSON() ([]byte, error) {
 	enc.TransactionsTrie = b.TransactionsTrie
 	enc.UncleHash = b.UncleHash
 	enc.ExtraData = b.ExtraData
-	enc.Difficulty = (*math.HexOrDecimal256)(b.Difficulty)
+	if b.Difficulty != nil {
+		enc.Difficulty = (*math.HexOrDecimal256)(b.Difficulty.ToBig())
+	}
 	enc.GasLimit = math.HexOrDecimal64(b.GasLimit)
 	enc.GasUsed = math.HexOrDecimal64(b.GasUsed)
 	enc.Timestamp = math.HexOrDecimal64(b.Timestamp)
-	enc.BaseFeePerGas = (*math.HexOrDecimal256)(b.BaseFeePerGas)
+	if b.BaseFeePerGas != nil {
+		enc.BaseFeePerGas = (*math.HexOrDecimal256)(b.BaseFeePerGas.ToBig())
+	}
 	enc.WithdrawalsRoot = b.WithdrawalsRoot
 	enc.BlobGasUsed = (*math.HexOrDecimal64)(b.BlobGasUsed)
 	enc.ExcessBlobGas = (*math.HexOrDecimal64)(b.ExcessBlobGas)
@@ -115,7 +123,7 @@ func (b *btHeader) UnmarshalJSON(input []byte) error {
 		b.Nonce = *dec.Nonce
 	}
 	if dec.Number != nil {
-		b.Number = (*big.Int)(dec.Number)
+		b.Number = uint256.MustFromBig((*big.Int)(dec.Number))
 	}
 	if dec.Hash != nil {
 		b.Hash = *dec.Hash
@@ -139,7 +147,7 @@ func (b *btHeader) UnmarshalJSON(input []byte) error {
 		b.ExtraData = *dec.ExtraData
 	}
 	if dec.Difficulty != nil {
-		b.Difficulty = (*big.Int)(dec.Difficulty)
+		b.Difficulty = uint256.MustFromBig((*big.Int)(dec.Difficulty))
 	}
 	if dec.GasLimit != nil {
 		b.GasLimit = uint64(*dec.GasLimit)
@@ -151,7 +159,7 @@ func (b *btHeader) UnmarshalJSON(input []byte) error {
 		b.Timestamp = uint64(*dec.Timestamp)
 	}
 	if dec.BaseFeePerGas != nil {
-		b.BaseFeePerGas = (*big.Int)(dec.BaseFeePerGas)
+		b.BaseFeePerGas = uint256.MustFromBig((*big.Int)(dec.BaseFeePerGas))
 	}
 	if dec.WithdrawalsRoot != nil {
 		b.WithdrawalsRoot = dec.WithdrawalsRoot
