@@ -33,4 +33,4 @@ runs:
       if: ${{ always() }}
       with:
         path: ${{ env.ERIGON_CI_GOCACHE }}
-        key: gocache|${{ env.ERIGON_CI_WORKFLOW }}|${{ github.job }}|${{ env.ERIGON_CI_GOVERSION }}|${{ runner.os }}|${{ runner.arch }}${{ env.ERIGON_CI_BUILD_CACHE_EXTRA_KEY && format('|{0}', env.ERIGON_CI_BUILD_CACHE_EXTRA_KEY) || '' }}|${{ github.head_ref || github.ref_name }}|${{ github.sha }}|${{ github.run_number }}
+        key: gocache|${{ env.ERIGON_CI_WORKFLOW }}|${{ github.job }}|${{ env.ERIGON_CI_GOVERSION }}|${{ runner.os }}|${{ runner.arch }}|${{ env.ERIGON_CI_BUILD_CACHE_EXTRA_KEY }}|${{ github.head_ref || github.ref_name }}|${{ github.sha }}|${{ github.run_number }}
