@@ -727,31 +727,24 @@ func compressNoWordPatterns(logPrefix string, cf *os.File, uncompressedFile *Raw
 	hc.w = cw
 	if err := uncompressedFile.ForEach(func(v []byte, _ bool) error {
 		l := uint64(len(v))
-		posCode := pos2code[l+1]
-		if posCode != nil {
-			if e := hc.encode(posCode.code, posCode.codeBits); e != nil {
+		if c := pos2code[l+1]; c != nil {
+			if e := hc.encode(c.code, c.codeBits); e != nil {
 				return e
 			}
 		}
 		if l == 0 {
-			if e := hc.flush(); e != nil {
-				return e
-			}
-		} else {
-			posCode = pos2code[0]
-			if posCode != nil {
-				if e := hc.encode(posCode.code, posCode.codeBits); e != nil {
-					return e
-				}
-			}
-			if e := hc.flush(); e != nil {
-				return e
-			}
-			if _, e := cw.Write(v); e != nil {
+			return hc.flush()
+		}
+		if c := pos2code[0]; c != nil {
+			if e := hc.encode(c.code, c.codeBits); e != nil {
 				return e
 			}
 		}
-		return nil
+		if e := hc.flush(); e != nil {
+			return e
+		}
+		_, e := cw.Write(v)
+		return e
 	}); err != nil {
 		return err
 	}
