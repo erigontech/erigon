@@ -117,9 +117,11 @@ func ExecV3(ctx context.Context,
 	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger) (execErr error) {
-	isBlockProduction := execStage.SyncMode() == stages.ModeBlockProduction
-	isForkValidation := execStage.SyncMode() == stages.ModeForkValidation
-	isApplyingBlocks := execStage.SyncMode().IsApplyingBlocks()
+	syncMode := execStage.SyncMode()
+	isBlockProduction := syncMode == stages.ModeBlockProduction
+	isForkValidation := syncMode == stages.ModeForkValidation
+	isApplyingBlocks := syncMode.IsApplyingBlocks()
+	isOffline := syncMode.IsOffline()
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
 	hooks := cfg.vmConfig.Tracer
 	applyTx := rwTx
@@ -129,7 +131,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	if execStage.SyncMode().IsOffline() {
+	if isOffline {
 		// offline commands: always use high workers (no cycle-based reduction)
 		agg.SetCollateAndBuildWorkers(min(4, estimate.StateV3Collate.Workers()))
 		agg.SetMergeWorkers(min(4, estimate.StateV3Collate.Workers()))
