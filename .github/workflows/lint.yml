@@ -63,6 +63,7 @@ jobs:
         with:
           modcache: ${{ steps.erigon.outputs.modcache }}
           prefix: modcache|lint
+          restored-key: ${{ steps.restore-modcache.outputs.cache-matched-key }}
 
       - name: Save golangci-lint cache
         if: always()

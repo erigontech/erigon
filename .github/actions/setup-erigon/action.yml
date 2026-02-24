@@ -198,3 +198,4 @@ runs:
       if: ${{ always() && steps.restore-modcache.outcome == 'success' }}
       with:
         modcache: ${{ steps.go-env.outputs.modcache }}
+        restored-key: ${{ steps.restore-modcache.outputs.cache-matched-key }}

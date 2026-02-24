@@ -9,6 +9,10 @@ inputs:
     description: "The prefix to the save key"
     required: false
     default: gomodcache
+  restored-key:
+    description: "The cache key that was restored (from actions/cache/restore output cache-matched-key). If the save key matches, the save is skipped."
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -25,10 +29,19 @@ runs:
       run: |
         hash=$(cd '${{ inputs.modcache }}/cache/download' && find . -type d -name '*@*' | sort | sha256sum | cut -d' ' -f1)
         echo "hash=$hash" >> "$GITHUB_OUTPUT"
+        save_key='${{ inputs.prefix }}|${{ runner.os }}|${{ hashFiles('go.sum') }}|'"$hash"
+        echo "save-key=$save_key" >> "$GITHUB_OUTPUT"
+        if [[ "$save_key" == '${{ inputs.restored-key }}' ]]; then
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          echo "Module cache unchanged, skipping save (key: $save_key)"
+        else
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "Module cache changed, will save (key: $save_key, restored: ${{ inputs.restored-key }})"
+        fi
 
     - name: Save Go module cache
-      if: ${{ always() }}
+      if: ${{ always() && steps.mod-hash.outputs.skip != 'true' }}
       uses: actions/cache/save@v4
       with:
         path: ${{ inputs.modcache }}/cache/download
-        key: ${{ inputs.prefix }}|${{ runner.os }}|${{ hashFiles('go.sum') }}|${{ steps.mod-hash.outputs.hash }}
+        key: ${{ steps.mod-hash.outputs.save-key }}
