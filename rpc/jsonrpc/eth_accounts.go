@@ -32,8 +32,8 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
-// maxGetStorageSlots is the maximum total number of storage slots that can
-// be requested in a single eth_getStorageValues call.
+// maxGetStorageSlots caps the total number of storage slots allowed across
+// all addresses in a single eth_getStorageValues request.
 const maxGetStorageSlots = 1024
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
