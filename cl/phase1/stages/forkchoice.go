@@ -306,7 +306,9 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 	if headState == nil {
 		return nil
 	}
-	cfg.blobDownloader.SetHeadSlot(headSlot)
+	if cfg.blobBackfiller != nil {
+		cfg.blobBackfiller.SetHeadSlot(headSlot)
+	}
 	// First emit events that depend on the head state.
 	emitHeadEvent(cfg, headSlot, headRoot, headState)
 	emitNextPaylodAttributesEvent(cfg, headSlot, headRoot, headState)

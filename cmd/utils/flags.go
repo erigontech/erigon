@@ -1047,6 +1047,11 @@ var (
 		Usage: "disable blob pruning in caplin",
 		Value: false,
 	}
+	CaplinBlobBackfillerUrlFlag = cli.StringFlag{
+		Name:  "caplin.blobs-backfiller-url",
+		Usage: "URL of a remote beacon API to use for blob backfilling (e.g., http://localhost:5052)",
+		Value: "",
+	}
 	CaplinDisableCheckpointSyncFlag = cli.BoolFlag{
 		Name:  "caplin.checkpoint-sync.disable",
 		Usage: "disable checkpoint sync in caplin",
@@ -1790,6 +1795,7 @@ func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	cfg.CaplinConfig.ImmediateBlobsBackfilling = ctx.Bool(CaplinImmediateBlobBackfillFlag.Name)
+	cfg.CaplinConfig.BlobBackfillerUrl = ctx.String(CaplinBlobBackfillerUrlFlag.Name)
 	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
 	cfg.CaplinConfig.DisabledCheckpointSync = ctx.Bool(CaplinDisableCheckpointSyncFlag.Name)
 	// bunch of extra stuff
