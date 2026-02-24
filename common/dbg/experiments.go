@@ -71,9 +71,12 @@ var (
 	// Values from 1 to 4 makes sense since we have only 3 types of snapshots.
 	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1) // allows 1 kind of snapshots to be built simultaneously
 
-	SnapshotMadvRnd           = EnvBool("SNAPSHOT_MADV_RND", true)
+	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", true)
+
 	SnapshotOwnMmapMadvNormal = EnvBool("SNAPSHOT_OWN_MMAP_MADV_NORMAL", true)
-	OnlyCreateDB              = EnvBool("ONLY_CREATE_DB", false)
+	SnapshotOwnMmapMadvRnd    = EnvBool("SNAPSHOT_OWN_MMAP_MADV_RND", true)
+
+	OnlyCreateDB = EnvBool("ONLY_CREATE_DB", false)
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 

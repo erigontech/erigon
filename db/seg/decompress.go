@@ -688,7 +688,19 @@ func (d *Decompressor) OpenSequentialView() (*SequentialView, error) {
 	if err != nil {
 		return nil, err
 	}
-	_ = mmap.MadviseSequential(h1)
+	if dbg.SnapshotOwnMmapMadvNormal {
+		if err := mmap.MadviseSequential(h1); err != nil {
+			return nil, err
+		}
+	} else if dbg.SnapshotOwnMmapMadvRnd {
+		if err := mmap.MadviseRandom(h1); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := mmap.MadviseSequential(h1); err != nil {
+			return nil, err
+		}
+	}
 	// d.data is a sub-slice of d.mmapHandle1 starting after file headers
 	// (version, feature flags, metadata). wordsStart is relative to d.data,
 	// so the file offset is: headerSize + wordsStart.
