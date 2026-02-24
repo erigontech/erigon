@@ -41,9 +41,6 @@ outputs:
 runs:
   using: composite
   steps:
-    # Frees 20-30GB but takes ~30s. Only enable for workflows that hit the
-    # disk ceiling. If space is tight, first check whether caches have blown
-    # out in size before turning this on.
     - name: Set compact time format
       shell: bash
       run: echo "TIMEFORMAT=real %Rs user %Us sys %Ss" >> "$GITHUB_ENV"
@@ -52,11 +49,14 @@ runs:
       shell: bash
       run: time df -h
 
+    # Frees 20-30GB but takes ~30s. Only enable for workflows that hit the
+    # disk ceiling. If space is tight, first check whether caches have blown
+    # out in size before turning this on.
     - name: Cleanup space
       if: ${{ inputs.cleanup-space == 'true' && runner.os == 'Linux' }}
       shell: bash
       run: |
-        rm -fr /opt/az \
+        time rm -fr /opt/az \
                /opt/microsoft \
                /usr/share/dotnet \
                /usr/share/miniconda \
@@ -164,6 +164,12 @@ runs:
       if: ${{ runner.os == 'Windows' }}
       shell: bash
       run: choco install make -y --no-progress
+
+    - name: Debug concurrency
+      shell: bash
+      run: |
+        echo "GOMAXPROCS=$(go env GOMAXPROCS)"
+        nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "nproc unavailable"
 
     - name: Get Go environment paths
       id: go-env
