@@ -298,12 +298,13 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, trieVariant 
 	return ctx
 }
 
-func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, txNum uint64) *TrieContext {
+func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNum, txNum uint64) *TrieContext {
 	mainTtx := &TrieContext{
 		getter:   sdc.sharedDomains.AsGetter(tx),
 		putter:   sdc.sharedDomains.AsPutDel(tx),
 		stepSize: sdc.sharedDomains.StepSize(),
 		txNum:    txNum,
+		blockNum: blockNum,
 	}
 	if sdc.stateReader != nil {
 		mainTtx.stateReader = sdc.stateReader.Clone(tx)
@@ -399,7 +400,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}
 	}
 
-	trieContext := sdc.trieContext(tx, txNum)
+	trieContext := sdc.trieContext(tx, blockNum, txNum)
 
 	var warmupConfig commitment.WarmupConfig
 	if sdc.paraTrieDB != nil {
@@ -557,7 +558,7 @@ func (sdc *SharedDomainsCommitmentContext) enableConcurrentCommitmentIfPossible(
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
 func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (txNum, blockNum uint64, err error) {
-	trieContext := sdc.trieContext(tx, 0) // txNum not yet known; trieContext only used for reading here
+	trieContext := sdc.trieContext(tx, 0, 0) // blockNum/txNum not yet known; trieContext only used for reading here
 
 	_, _, state, err := sdc.LatestCommitmentState(trieContext)
 	if err != nil {
@@ -706,7 +707,8 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 type TrieContext struct {
 	getter kv.TemporalGetter
 	putter kv.TemporalPutDel
-	txNum  uint64
+	txNum    uint64
+	blockNum uint64
 
 	stepSize    uint64
 	trace       bool
@@ -739,12 +741,18 @@ func (sdc *TrieContext) TxNum() uint64 {
 // readDomain reads data from domain, dereferences key and returns encoded value and step.
 // Step returned only when reading from domain files, otherwise it is always 0.
 // Step is used in Trie for memo stats and file depth access statistics.
+var debugCommitmentReadBlock = uint64(dbg.EnvInt("ERIGON_DEBUG_COMMITMENT_READ_BLOCK", 0))
+
 func (sdc *TrieContext) readDomain(d kv.Domain, plainKey []byte) (enc []byte, step kv.Step, err error) {
 	//if sdc.patriciaTrie.Variant() == commitment.VariantConcurrentHexPatricia {
 	//	sdc.mu.Lock()
 	//	defer sdc.mu.Unlock()
 	//}
-	return sdc.stateReader.Read(d, plainKey, sdc.stepSize)
+	enc, step, err = sdc.stateReader.Read(d, plainKey, sdc.stepSize)
+	if debugCommitmentReadBlock > 0 && sdc.blockNum == debugCommitmentReadBlock && err == nil {
+		log.Info("[dbg_commitment_read]", "block", sdc.blockNum, "domain", d, "key", hex.EncodeToString(plainKey), "val", hex.EncodeToString(enc), "step", step, "txNum", sdc.txNum)
+	}
+	return enc, step, err
 }
 
 func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err error) {
