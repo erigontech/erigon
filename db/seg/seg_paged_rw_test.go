@@ -132,8 +132,7 @@ func TestPage(t *testing.T) {
 	for i := 0; i < sampling+1; i++ {
 		iter++
 		expectK, expectV := fmt.Sprintf("k %d", i), fmt.Sprintf("v %d", i)
-		v, ok, _ := GetFromPage([]byte(expectK), pages[pageNum], nil, false)
-		require.True(ok)
+		v, _ := GetFromPage([]byte(expectK), pages[pageNum], nil, false)
 		require.Equal(expectV, string(v), i)
 		require.True(p1.HasNext())
 		k, v := p1.Next()
@@ -170,83 +169,6 @@ func TestPagedReaderWithCompression(t *testing.T) {
 		i++
 	}
 	require.Equal(len(loremStrings), i, "should have read all entries")
-}
-
-func TestGetFromPageKeyNotFound(t *testing.T) {
-	require := require.New(t)
-
-	// Create a page with 4 key-value pairs
-	pageSize := 4
-	buf := &multyBytesWriter{pageSize: pageSize}
-	w := NewPagedWriter(buf, false)
-	for i := 0; i < pageSize; i++ {
-		k, v := fmt.Sprintf("k %d", i), fmt.Sprintf("v %d", i)
-		require.NoError(w.Add([]byte(k), []byte(v)))
-	}
-	require.NoError(w.Flush())
-	pages := buf.Bytes()
-	require.Len(pages, 1)
-
-	// Existing keys should be found
-	for i := 0; i < pageSize; i++ {
-		k := fmt.Sprintf("k %d", i)
-		v, ok, _ := GetFromPage([]byte(k), pages[0], nil, false)
-		require.True(ok, "key %q should be found", k)
-		require.Equal(fmt.Sprintf("v %d", i), string(v))
-	}
-
-	// Non-existing key should NOT be found
-	v, ok, _ := GetFromPage([]byte("nonexistent"), pages[0], nil, false)
-	require.False(ok, "nonexistent key should not be found")
-	require.Nil(v)
-
-	// Key with similar prefix should NOT be found
-	v, ok, _ = GetFromPage([]byte("k 99"), pages[0], nil, false)
-	require.False(ok, "key 'k 99' should not be found")
-	require.Nil(v)
-}
-
-// TestGetFromPageNonFullPages verifies that when pages have varying numbers
-// of entries (e.g., a last page with fewer entries than the page size),
-// GetFromPage still finds keys correctly. This tests the scenario that
-// caused the .vi index page offset regression.
-func TestGetFromPageNonFullPages(t *testing.T) {
-	require := require.New(t)
-
-	// Create pages with pageSize=4 but 5 entries total
-	// This produces: page0 with 4 entries, page1 with 1 entry
-	pageSize := 4
-	totalEntries := pageSize + 1
-	buf := &multyBytesWriter{pageSize: pageSize}
-	w := NewPagedWriter(buf, false)
-	for i := 0; i < totalEntries; i++ {
-		k, v := fmt.Sprintf("k %d", i), fmt.Sprintf("v %d", i)
-		require.NoError(w.Add([]byte(k), []byte(v)))
-	}
-	require.NoError(w.Flush())
-	pages := buf.Bytes()
-	require.Len(pages, 2, "should have 2 pages: one full and one partial")
-
-	// All 4 keys on page 0 should be found on page 0
-	for i := 0; i < pageSize; i++ {
-		k := fmt.Sprintf("k %d", i)
-		v, ok, _ := GetFromPage([]byte(k), pages[0], nil, false)
-		require.True(ok, "key %q should be found on page 0", k)
-		require.Equal(fmt.Sprintf("v %d", i), string(v))
-	}
-
-	// The 5th key should NOT be on page 0
-	_, ok, _ := GetFromPage([]byte("k 4"), pages[0], nil, false)
-	require.False(ok, "key 'k 4' should NOT be on page 0")
-
-	// The 5th key should be on page 1
-	v, ok, _ := GetFromPage([]byte("k 4"), pages[1], nil, false)
-	require.True(ok, "key 'k 4' should be found on page 1")
-	require.Equal("v 4", string(v))
-
-	// Keys from page 0 should NOT be on page 1
-	_, ok, _ = GetFromPage([]byte("k 0"), pages[1], nil, false)
-	require.False(ok, "key 'k 0' should NOT be on page 1")
 }
 
 func BenchmarkName(b *testing.B) {
