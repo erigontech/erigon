@@ -70,7 +70,8 @@ func TestSimpleSequence(t *testing.T) {
 		require.False(t, found)
 		require.Equal(t, uint64(0), v)
 
-		require.True(t, s.Has(1007)); require.False(t, s.Has(1008))
+		require.True(t, s.Has(1007))
+		require.False(t, s.Has(1008))
 	})
 
 	t.Run("iterator", func(t *testing.T) {

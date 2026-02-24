@@ -212,7 +212,8 @@ func requireSequenceChecks(t *testing.T, s *SequenceReader) {
 	it = s.ReverseIterator(999)
 	require.False(t, it.HasNext())
 
-	require.True(t, s.Has(1015)); require.False(t, s.Has(1014))
+	require.True(t, s.Has(1015))
+	require.False(t, s.Has(1014))
 }
 
 func requireRawDataChecks(t *testing.T, b []byte) {
