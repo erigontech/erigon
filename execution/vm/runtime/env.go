@@ -42,7 +42,7 @@ func NewEnv(cfg *Config) *vm.EVM {
 		GasLimit:    cfg.GasLimit,
 		BaseFee:     cfg.BaseFee,
 	}
-	if cfg.ChainConfig.IsAmsterdam(cfg.Time.Uint64()) {
+	if cfg.ChainConfig.IsAmsterdam(cfg.Time) {
 		blockContext.CostPerStateByte = misc.CostPerStateByte(cfg.GasLimit)
 	}
 	return vm.NewEVM(blockContext, txContext, cfg.State, cfg.ChainConfig, cfg.EVMConfig)
