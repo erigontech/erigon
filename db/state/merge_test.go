@@ -1109,6 +1109,14 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 		item.decompressor = &seg.Decompressor{}
 		return true
 	})
+	t.Cleanup(func() {
+		h.dirtyFiles.Scan(func(item *FilesItem) bool {
+			if item.decompressor != nil {
+				item.decompressor.Close()
+			}
+			return true
+		})
+	})
 
 	ii.scanDirtyFiles([]string{
 		"v1.0-accounts.0-1.ef",
@@ -1120,6 +1128,14 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 	ii.dirtyFiles.Scan(func(item *FilesItem) bool {
 		item.decompressor = &seg.Decompressor{}
 		return true
+	})
+	t.Cleanup(func() {
+		ii.dirtyFiles.Scan(func(item *FilesItem) bool {
+			if item.decompressor != nil {
+				item.decompressor.Close()
+			}
+			return true
+		})
 	})
 	h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 

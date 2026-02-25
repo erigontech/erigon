@@ -163,6 +163,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			require.NoError(t, err)
 			require.Zero(t, stat.PruneCountTx)
 			require.Zero(t, stat.PruneCountValues)
+			ic.Close()
 
 			// after reCalcVisibleFiles must be able to prune step 0. but not more
 			ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())

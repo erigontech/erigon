@@ -286,35 +286,53 @@ func TestMergeRangeSnapRepo(t *testing.T) {
 		cleanupFiles(t, repo, dirs)
 	}
 
+	execTestCase := func(ranges []testFileRange, vfCount int, needMerge bool, mergeFromStep, mergeToStep uint64) {
+		testFn(ranges, vfCount, needMerge, mergeFromStep, mergeToStep)
+		// Clean up temporary files created by compressors/decompressors in dirs.Tmp
+		filepath.WalkDir(dirs.Tmp, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				if os.IsNotExist(err) {
+					return nil
+				}
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+			_ = dir.RemoveFile(path)
+			return nil
+		})
+	}
+
 	// 0-1, 1-2 => 0-2
-	testFn([]testFileRange{{0, 1}, {1, 2}}, 2, true, 0, 2)
+	execTestCase([]testFileRange{{0, 1}, {1, 2}}, 2, true, 0, 2)
 
 	// 0-1, 1-2, 2-3 => 0-2, 2-3
-	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}}, 3, true, 0, 2)
+	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}}, 3, true, 0, 2)
 
 	// 0-1, 1-2, 2-3, 3-4 => 0-4
-	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}}, 4, true, 0, 4)
+	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}}, 4, true, 0, 4)
 
 	// 0-1, 1-2, 2-3, 3-4, 4-5, 5-6, 6-7 => 0-1, 1-2, 2-3, 3-4, 4-6, 6-7
-	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}}, 7, true, 4, 6)
+	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}}, 7, true, 4, 6)
 
 	// 0-1, 1-2, 2-3, 3-4, 4-6, 6-7 => 0-4, 4-6, 6-7
-	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 6}, {6, 7}}, 6, true, 0, 4)
+	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 6}, {6, 7}}, 6, true, 0, 4)
 
 	// 0-4, 4-6, 6-7 => same
-	testFn([]testFileRange{{0, 4}, {4, 6}, {6, 7}}, 3, false, 0, 0)
+	execTestCase([]testFileRange{{0, 4}, {4, 6}, {6, 7}}, 3, false, 0, 0)
 
 	// 0-1, 1-2, 2-3, 3-4, 0-4 => no merge
-	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {0, 4}}, 1, false, 0, 0)
+	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {0, 4}}, 1, false, 0, 0)
 
 	// 0-1, 1-2, 2-3, 3-4, 0-2 => 0-4
-	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {0, 2}}, 3, true, 0, 4)
+	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {0, 2}}, 3, true, 0, 4)
 
 	// 0-1, 1-2, ..... 14-15 => 0-1....12-13, 13-15
-	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 14}, {14, 15}}, 15, true, 13, 15)
+	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 14}, {14, 15}}, 15, true, 13, 15)
 
 	//0-1....12-13, 13-15, 15-16 => 0-16
-	testFn([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 15}, {15, 16}}, 15, true, 0, 16)
+	execTestCase([]testFileRange{{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {5, 6}, {6, 7}, {7, 8}, {8, 9}, {9, 10}, {10, 11}, {11, 12}, {12, 13}, {13, 15}, {15, 16}}, 15, true, 0, 16)
 }
 
 // foreign key; commitment <> accounts
