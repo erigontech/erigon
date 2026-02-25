@@ -237,6 +237,11 @@ func (s *StackStream) BufferAsString() (string, error) {
 }
 
 // WriteEmptyArray writes an empty array into the underlying stream
+func (s *StackStream) WriteVal(val any) {
+	s.stream.WriteVal(val)
+	s.popCommaOrField()
+}
+
 func (s *StackStream) WriteEmptyArray() {
 	s.stream.WriteEmptyArray()
 	s.popCommaOrField()

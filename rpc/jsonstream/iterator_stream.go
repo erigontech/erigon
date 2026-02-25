@@ -155,6 +155,10 @@ func (s *JsoniterStream) BufferAsString() (string, error) {
 	return string(s.Buffer()), nil
 }
 
+func (s *JsoniterStream) WriteVal(val any) {
+	s.stream.WriteVal(val)
+}
+
 func (s *JsoniterStream) WriteEmptyArray() {
 	s.stream.WriteEmptyArray()
 }

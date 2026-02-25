@@ -652,6 +652,7 @@ func (s *resultFieldStream) WriteEmptyArray()            { s.ensure(); s.Stream.
 func (s *resultFieldStream) WriteEmptyObject()           { s.ensure(); s.Stream.WriteEmptyObject() }
 func (s *resultFieldStream) Write(p []byte) (int, error) { s.ensure(); return s.Stream.Write(p) }
 func (s *resultFieldStream) WriteRaw(content string)     { s.ensure(); s.Stream.WriteRaw(content) }
+func (s *resultFieldStream) WriteVal(val any)            { s.ensure(); s.Stream.WriteVal(val) }
 
 // runMethod runs the Go callback for an RPC method.
 func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *callback, args []reflect.Value, stream jsonstream.Stream) *jsonrpcMessage {
@@ -660,7 +661,25 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 		if err != nil {
 			return msg.errorResponse(err)
 		}
-		return msg.response(result)
+		// Marshal the result first so encoding/json semantics are preserved
+		// (sorted map keys, HTML escaping, etc.), then write the full response
+		// envelope directly into the jsoniter stream. This avoids allocating a
+		// *jsonrpcMessage wrapper and the second json.Marshal call in handleMsg.
+		enc, merr := json.Marshal(result)
+		if merr != nil {
+			return msg.errorResponse(merr)
+		}
+		stream.WriteObjectStart()
+		stream.WriteObjectField("jsonrpc")
+		stream.WriteString(vsn)
+		stream.WriteMore()
+		stream.WriteObjectField("id")
+		stream.Write(msg.ID)
+		stream.WriteMore()
+		stream.WriteObjectField("result")
+		stream.Write(enc)
+		stream.WriteObjectEnd()
+		return nil
 	}
 
 	stream.WriteObjectStart()

@@ -65,6 +65,11 @@ type Stream interface {
 	WriteEmptyArray()
 	WriteEmptyObject()
 
+	// WriteVal serializes val to JSON using jsoniter's cached per-type encoder.
+	// For typed structs this is significantly faster than encoding/json.Marshal
+	// because the codec is compiled once and reused on every subsequent call.
+	WriteVal(val any)
+
 	// Extended functionality
 
 	ClosePending(skipLast uint) error
