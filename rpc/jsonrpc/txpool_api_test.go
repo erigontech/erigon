@@ -37,7 +37,8 @@ import (
 )
 
 func TestTxPoolContent(t *testing.T) {
-	m, require := execmoduletester.NewWithTxPool(t), require.New(t)
+	m := execmoduletester.New(t, execmoduletester.WithTxPool())
+	require := require.New(t)
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})

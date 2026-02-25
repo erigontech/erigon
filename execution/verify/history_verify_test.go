@@ -41,7 +41,12 @@ func TestHistoryVerification_SimpleBlocks(t *testing.T) {
 		},
 	}
 
-	m := execmoduletester.NewWithGenesis(t, gspec, key, execmoduletester.WithStepSize(stepSize))
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithKey(key),
+		execmoduletester.WithStepSize(stepSize),
+	)
 	ctx := context.Background()
 	logger := log.New()
 
@@ -120,7 +125,12 @@ func TestHistoryVerification_WithUserTransactions(t *testing.T) {
 		},
 	}
 
-	m := execmoduletester.NewWithGenesis(t, gspec, key, execmoduletester.WithStepSize(stepSize))
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithKey(key),
+		execmoduletester.WithStepSize(stepSize),
+	)
 	ctx := context.Background()
 	logger := log.New()
 	signer := types.LatestSignerForChainID(chainConfig.ChainID)
