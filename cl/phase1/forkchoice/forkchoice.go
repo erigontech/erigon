@@ -589,6 +589,18 @@ func (f *ForkChoiceStore) GetBlock(blockRoot common.Hash) (*cltypes.SignedBeacon
 	return f.forkGraph.GetBlock(blockRoot)
 }
 
+// HasEnvelope delegates to forkGraph.HasEnvelope.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) HasEnvelope(blockRoot common.Hash) bool {
+	return f.forkGraph.HasEnvelope(blockRoot)
+}
+
+// ReadEnvelopeFromDisk delegates to forkGraph.ReadEnvelopeFromDisk.
+// [New in Gloas:EIP7732]
+func (f *ForkChoiceStore) ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	return f.forkGraph.ReadEnvelopeFromDisk(blockRoot)
+}
+
 func (f *ForkChoiceStore) GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {
 	return f.forkGraph.GetBalances(blockRoot)
 }
