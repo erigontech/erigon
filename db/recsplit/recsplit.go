@@ -329,7 +329,7 @@ func (rs *RecSplit) ResetNextSalt() {
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()
 	}
-	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+rs.fileName, rs.tmpDir, etl.SmallSortableBuffers, rs.logger)
+	rs.bucketCollector = etl.NewCollectorWithAllocator(RecSplitLogPrefix+" "+rs.fileName, rs.tmpDir, etl.LargeSortableBuffers, rs.logger)
 	rs.bucketCollector.SortAndFlushInBackground(false)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
 	if rs.offsetFile != nil {
