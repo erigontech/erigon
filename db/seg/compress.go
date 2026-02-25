@@ -125,7 +125,7 @@ type Compressor struct {
 	superstring       []byte
 	wordsCount        uint64
 	superstringCount  uint64
-	uncompressedBytes uint64
+	uncompressedBytes int
 	Ratio             CompressionRatio
 	lvl               log.Lvl
 	trace             bool
@@ -283,7 +283,7 @@ func (c *Compressor) AddWord(word []byte) error {
 		c.superstring = append(c.superstring, 0, 0)
 	}
 
-	c.uncompressedBytes += uint64(len(word))
+	c.uncompressedBytes += len(word)
 	return c.uncompressedFile.Append(word)
 }
 
