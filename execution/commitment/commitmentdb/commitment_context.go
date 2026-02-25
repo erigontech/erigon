@@ -32,7 +32,6 @@ var (
 )
 
 type sd interface {
-	SetBlockNum(blockNum uint64)
 	SetTxNum(blockNum uint64)
 	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
@@ -248,8 +247,8 @@ func (sdc *SharedDomainsCommitmentContext) HasPendingUpdate() bool {
 // to ensure the previously deferred update is applied before processing new ones.
 func (sdc *SharedDomainsCommitmentContext) flushPendingUpdate(putter kv.TemporalPutDel) error {
 	upd := sdc.pendingUpdate
-	putBranch := func(prefix, data, prevData []byte, prevStep kv.Step) error {
-		return putter.DomainPut(kv.CommitmentDomain, prefix, data, upd.TxNum, prevData, prevStep)
+	putBranch := func(prefix, data, prevData []byte) error {
+		return putter.DomainPut(kv.CommitmentDomain, prefix, data, upd.TxNum, prevData)
 	}
 	if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
 		return err
@@ -291,12 +290,12 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, trieVariant 
 	return ctx
 }
 
-func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx) *TrieContext {
+func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, txNum uint64) *TrieContext {
 	mainTtx := &TrieContext{
 		getter:   sdc.sharedDomains.AsGetter(tx),
 		putter:   sdc.sharedDomains.AsPutDel(tx),
 		stepSize: sdc.sharedDomains.StepSize(),
-		txNum:    sdc.sharedDomains.TxNum(),
+		txNum:    txNum,
 	}
 	if sdc.stateReader != nil {
 		mainTtx.stateReader = sdc.stateReader.Clone(tx)
@@ -392,13 +391,13 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}
 	}
 
-	trieContext := sdc.trieContext(tx)
+	trieContext := sdc.trieContext(tx, txNum)
 
 	var warmupConfig commitment.WarmupConfig
 	if sdc.paraTrieDB != nil {
 		warmupConfig = commitment.WarmupConfig{
 			Enabled:    sdc.trieWarmup,
-			CtxFactory: sdc.trieContextFactory(ctx, sdc.paraTrieDB),
+			CtxFactory: sdc.trieContextFactory(ctx, sdc.paraTrieDB, txNum),
 			NumWorkers: 16,
 			MaxDepth:   commitment.WarmupMaxDepth,
 			LogPrefix:  logPrefix,
@@ -447,10 +446,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	return rootHash, err
 }
 
-func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Context, db kv.TemporalRoDB) commitment.TrieContextFactory {
+func (sdc *SharedDomainsCommitmentContext) trieContextFactory(ctx context.Context, db kv.TemporalRoDB, txNum uint64) commitment.TrieContextFactory {
 	// avoid races like this
 	stepSize := sdc.sharedDomains.StepSize()
-	txNum := sdc.sharedDomains.TxNum()
 	return func() (commitment.PatriciaContext, func()) {
 		roTx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		if err != nil {
@@ -484,7 +482,7 @@ func (e *errorTrieContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	return nil, 0, e.err
 }
 
-func (e *errorTrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error {
+func (e *errorTrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
 	return e.err
 }
 
@@ -550,38 +548,36 @@ func (sdc *SharedDomainsCommitmentContext) enableConcurrentCommitmentIfPossible(
 
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
-func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (blockNum, txNum uint64, ok bool, err error) {
-	trieContext := sdc.trieContext(tx)
+func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (txNum, blockNum uint64, err error) {
+	trieContext := sdc.trieContext(tx, 0) // txNum not yet known; trieContext only used for reading here
 
 	_, _, state, err := sdc.LatestCommitmentState(trieContext)
 	if err != nil {
-		return 0, 0, false, err
+		return 0, 0, err
 	}
 	if state != nil {
 		blockNum, txNum, err = sdc.restorePatriciaState(state)
 		if err != nil {
-			return 0, 0, false, err
+			return 0, 0, err
 		}
 		if blockNum > 0 {
 			lastBn, _, err := rawdbv3.TxNums.Last(tx)
 			if err != nil {
-				return 0, 0, false, err
+				return 0, 0, err
 			}
 			if lastBn < blockNum {
-				return 0, 0, false, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d", ErrBehindCommitment, lastBn, blockNum)
+				return 0, 0, fmt.Errorf("%w: TxNums index is at block %d and behind commitment %d", ErrBehindCommitment, lastBn, blockNum)
 			}
 		}
-		sdc.sharedDomains.SetBlockNum(blockNum)
-		sdc.sharedDomains.SetTxNum(txNum)
 		if err = sdc.enableConcurrentCommitmentIfPossible(); err != nil {
-			return 0, 0, false, err
+			return 0, 0, err
 		}
-		return blockNum, txNum, true, nil
+		return txNum, blockNum, nil
 	}
 	// handle case when we have no commitment, but have executed blocks
 	bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution"))
 	if err != nil {
-		return 0, 0, false, err
+		return 0, 0, err
 	}
 	if len(bnBytes) == 8 {
 		blockNum = binary.BigEndian.Uint64(bnBytes)
@@ -590,31 +586,13 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 			txNum, err = rawdbv3.TxNums.Max(ctx, tx, blockNum)
 		}
 		if err != nil {
-			return 0, 0, false, err
+			return 0, 0, err
 		}
 	}
-	sdc.sharedDomains.SetBlockNum(blockNum)
-	sdc.sharedDomains.SetTxNum(txNum)
-	if blockNum == 0 && txNum == 0 {
-		return 0, 0, true, nil
-	}
-	//
-	//newRh, err := sdc.rebuildCommitment(ctx, tx, blockNum, txNum)
-	//if err != nil {
-	//	return 0, 0, false, err
-	//}
-	//if bytes.Equal(newRh, empty.RootHash.Bytes()) {
-	//	sdc.sharedDomains.SetBlockNum(0)
-	//	sdc.sharedDomains.SetTxNum(0)
-	//	return 0, 0, false, err
-	//}
-	//if sdc.trace {
-	//	fmt.Printf("rebuilt commitment %x bn=%d txn=%d\n", newRh, blockNum, txNum)
-	//}
 	if err = sdc.enableConcurrentCommitmentIfPossible(); err != nil {
-		return 0, 0, false, err
+		return 0, 0, err
 	}
-	return blockNum, txNum, true, nil
+	return txNum, blockNum, nil
 }
 
 // encodes current trie state and saves it in SharedDomains
@@ -626,7 +604,7 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieCon
 	if err != nil {
 		return err
 	}
-	prevState, prevStep, err := trieContext.Branch(KeyCommitmentState)
+	prevState, _, err := trieContext.Branch(KeyCommitmentState)
 	if err != nil {
 		return err
 	}
@@ -641,7 +619,7 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieCon
 		return nil
 	}
 
-	return trieContext.PutBranch(KeyCommitmentState, encodedState, prevState, prevStep)
+	return trieContext.PutBranch(KeyCommitmentState, encodedState, prevState)
 }
 
 // Encodes current trie state and returns it
@@ -731,7 +709,7 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	return sdc.readDomain(kv.CommitmentDomain, pref)
 }
 
-func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error {
+func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
 	if sdc.stateReader.WithHistory() { // do not store branches if explicitly operate on history
 		return nil
 	}
@@ -743,7 +721,7 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, p
 	//	defer sdc.mu.Unlock()
 	//}
 
-	return sdc.putter.DomainPut(kv.CommitmentDomain, prefix, data, sdc.txNum, prevData, prevStep)
+	return sdc.putter.DomainPut(kv.CommitmentDomain, prefix, data, sdc.txNum, prevData)
 }
 
 func (sdc *TrieContext) TxNum() uint64 {

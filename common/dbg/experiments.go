@@ -56,7 +56,8 @@ var (
 
 	//state v3
 	noPrune              = EnvBool("NO_PRUNE", false)
-	noMerge              = EnvBool("NO_MERGE", false)
+	noMerge              = EnvBool("NO_MERGE", false)         // don't merge Domain/Hist/II
+	noMergeHistory       = EnvBool("NO_MERGE_HISTORY", false) // don't merge Hist/II but still merge Domain
 	discardCommitment    = EnvBool("DISCARD_COMMITMENT", false)
 	pruneTotalDifficulty = EnvBool("PRUNE_TOTAL_DIFFICULTY", true)
 
@@ -75,11 +76,14 @@ var (
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
 
-	Exec3Parallel = EnvBool("EXEC3_PARALLEL", false)
-	numWorkers    = runtime.NumCPU() / 2
-	Exec3Workers  = EnvInt("EXEC3_WORKERS", numWorkers)
+	Exec3Parallel        = EnvBool("EXEC3_PARALLEL", false)
+	numWorkers           = runtime.NumCPU() / 2
+	Exec3Workers         = EnvInt("EXEC3_WORKERS", numWorkers)
+	ExecTerseLoggerLevel = EnvInt("EXEC_TERSE_LOGGER_LEVEL", int(log.LvlWarn))
 
 	CompressWorkers = EnvInt("COMPRESS_WORKERS", 1)
+	MergeWorkers    = EnvInt("MERGE_WORKERS", 1)
+	CollateWorkers  = EnvInt("COLLATE_WORKERS", 2)
 
 	TraceAccounts        = EnvStrings("TRACE_ACCOUNTS", ",", nil)
 	TraceStateKeys       = EnvStrings("TRACE_STATE_KEYS", ",", nil)
@@ -99,7 +103,7 @@ var (
 	BatchCommitments     = EnvBool("BATCH_COMMITMENTS", true)
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
-	UseStateCache        = EnvBool("USE_STATE_CACHE", false)
+	UseStateCache        = EnvBool("USE_STATE_CACHE", true)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
@@ -117,6 +121,7 @@ func ReadMemStats(m *runtime.MemStats) {
 func DiscardCommitment() bool    { return discardCommitment }
 func NoPrune() bool              { return noPrune }
 func NoMerge() bool              { return noMerge }
+func NoMergeHistory() bool       { return noMergeHistory }
 func PruneTotalDifficulty() bool { return pruneTotalDifficulty }
 
 var (

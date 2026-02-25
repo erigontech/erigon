@@ -37,7 +37,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Dirs                                datadir.Dirs
 		ExternalSnapshotDownloaderAddr      string
 		Whitelist                           map[uint64]common.Hash `toml:"-"`
-		Miner                               buildercfg.MiningConfig
+		Builder                             buildercfg.BuilderConfig
 		Ethash                              ethashcfg.Config
 		Clique                              chainspec.ConsensusSnapshotConfig
 		Aura                                chain.AuRaConfig
@@ -88,7 +88,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.Dirs = c.Dirs
 	enc.ExternalSnapshotDownloaderAddr = c.ExternalSnapshotDownloaderAddr
 	enc.Whitelist = c.Whitelist
-	enc.Miner = c.Miner
+	enc.Builder = c.Builder
 	enc.Ethash = c.Ethash
 	enc.Clique = c.Clique
 	enc.Aura = c.Aura
@@ -143,7 +143,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Dirs                                *datadir.Dirs
 		ExternalSnapshotDownloaderAddr      *string
 		Whitelist                           map[uint64]common.Hash `toml:"-"`
-		Miner                               *buildercfg.MiningConfig
+		Builder                             *buildercfg.BuilderConfig
 		Ethash                              *ethashcfg.Config
 		Clique                              *chainspec.ConsensusSnapshotConfig
 		Aura                                *chain.AuRaConfig
@@ -221,8 +221,8 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.Whitelist != nil {
 		c.Whitelist = dec.Whitelist
 	}
-	if dec.Miner != nil {
-		c.Miner = *dec.Miner
+	if dec.Builder != nil {
+		c.Builder = *dec.Builder
 	}
 	if dec.Ethash != nil {
 		c.Ethash = *dec.Ethash

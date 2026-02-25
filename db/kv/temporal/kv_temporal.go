@@ -591,10 +591,10 @@ func (tx *RwTx) HistoryRange(name kv.Domain, fromTs, toTs int, asc order.By, lim
 
 // Write methods
 
-func (tx *tx) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+func (tx *tx) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
 	panic("implement me pls. or use SharedDomains")
 }
-func (tx *tx) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+func (tx *tx) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
 	panic("implement me pls. or use SharedDomains")
 }
 func (tx *tx) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
@@ -721,9 +721,6 @@ func (tx *RwTx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (h
 		return
 	}
 	return haveMore || hasMore, nil
-}
-func (tx *RwTx) GreedyPruneHistory(ctx context.Context, domain kv.Domain) error {
-	return tx.aggtx.GreedyPruneHistory(ctx, domain, tx.RwTx)
 }
 func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
 	return tx.aggtx.Unwind(ctx, tx.RwTx, txNumUnwindTo, changeset)

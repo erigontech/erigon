@@ -30,7 +30,7 @@ import (
 
 func TestLegacyBlockchain(t *testing.T) {
 	if testing.Short() {
-		t.Skip()
+		t.Skip("slow test")
 	}
 	t.Parallel()
 
@@ -96,21 +96,32 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 
 // Only runs EEST tests for current devnet - can "skip" on off-seasons
 func TestExecutionSpecBlockchainDevnet(t *testing.T) {
-	t.Skip("Osaka is already covered by TestExecutionSpecBlockchain")
-
+	const offSeason = false
+	if offSeason {
+		t.Skip("devnet off-season")
+	}
 	if testing.Short() {
 		t.Skip()
 	}
-	t.Parallel()
+	if runtime.GOOS == "windows" {
+		// TODO(yperbasis, mh0lt)
+		t.Skip("fix me on windows please")
+	}
 
+	t.Parallel()
 	defer log.Root().SetHandler(log.Root().GetHandler())
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
-
-	bt := new(testMatcher)
 	dir := filepath.Join(eestDir, "blockchain_tests_devnet")
+	bt := new(testMatcher)
+	// to run only tests for 1 eip do:
+	//bt.whitelist(`.*amsterdam/eip8024_dupn_swapn_exchange.*`)
+
+	// static — tested in state test format by TestState
+	bt.skipLoad(`^static/state_tests/`)
 
 	bt.walk(t, dir, func(t *testing.T, name string, test *testutil.BlockTest) {
 		// import pre accounts & construct test genesis block & state root
+		test.ExperimentalBAL = true // TODO eventually remove this from BlockTest and run normally
 		if err := bt.checkFailure(t, test.Run(t)); err != nil {
 			t.Error(err)
 		}

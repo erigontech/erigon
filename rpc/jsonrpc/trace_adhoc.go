@@ -1141,14 +1141,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 
 	// Get a new instance of the EVM.
-	var baseFee *uint256.Int
-	if header.BaseFee != nil {
-		var overflow bool
-		baseFee, overflow = uint256.FromBig(header.BaseFee)
-		if overflow {
-			return nil, errors.New("header.BaseFee uint256 overflow")
-		}
-	}
+	baseFee := header.BaseFee
 	msg, err := args.ToMessage(api.gasCap, baseFee)
 	if err != nil {
 		return nil, err
@@ -1283,11 +1276,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		return nil, fmt.Errorf("parent block %d(%x) not found", blockNumber, hash)
 	}
 	if parentHeader.BaseFee != nil {
-		var overflow bool
-		baseFee, overflow = uint256.FromBig(parentHeader.BaseFee)
-		if overflow {
-			return nil, errors.New("header.BaseFee uint256 overflow")
-		}
+		baseFee = parentHeader.BaseFee
 	}
 	msgs := make([]*types.Message, len(callParams))
 	txns := make([]types.Transaction, len(callParams))
@@ -1435,13 +1424,15 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			blockCtx.MaxGasLimit = true
 		}
 
-		// Clone the state cache before applying the changes for diff after transaction execution, clone is discarded
+		// Reset and clone only needed when stateDiff is requested:
+		// stateDiff requires per-tx isolation to compute before/after state.
+		// For trace/vmTrace only, skip Reset to match whole-block replay semantics (issue #12607).
 		var cloneReader state.StateReader
 		var sd *StateDiff
 		if traceTypeStateDiff {
+			ibs.Reset()
 			cloneCache := stateCache.Clone()
 			cloneReader = state.NewCachedReader(stateReader, cloneCache)
-			//cloneReader = stateReader
 			if isHistoricalStateReader {
 				historicalStateReader.SetTxNum(baseTxNum + uint64(txIndex))
 			}
@@ -1450,7 +1441,6 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			sd = &StateDiff{sdMap: sdMap}
 		}
 
-		ibs.Reset()
 		var finalizeTxStateWriter state.StateWriter
 		if sd != nil {
 			finalizeTxStateWriter = sd
@@ -1520,15 +1510,16 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 					return nil, nil, err
 				}
 			}
-			if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
-				return nil, nil, err
-			}
 		} else {
 			if !txFinalized {
 				if err = ibs.FinalizeTx(chainRules, noop); err != nil {
 					return nil, nil, err
 				}
 			}
+		}
+		if traceTypeStateDiff {
+			// CommitBlock after each tx to flush ibs changes into stateCache,
+			// so the next tx's cloneReader captures the correct "before" state
 			if err = ibs.CommitBlock(chainRules, cachedWriter); err != nil {
 				return nil, nil, err
 			}

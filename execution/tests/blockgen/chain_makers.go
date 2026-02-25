@@ -25,6 +25,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -89,8 +91,8 @@ func (b *BlockGen) SetNonce(nonce types.BlockNonce) {
 // SetDifficulty sets the difficulty field of the generated block. This method is
 // useful for Clique tests where the difficulty does not depend on time. For the
 // ethash tests, please use OffsetTime, which implicitly recalculates the diff.
-func (b *BlockGen) SetDifficulty(diff *big.Int) {
-	b.header.Difficulty = diff
+func (b *BlockGen) SetDifficulty(diff uint64) {
+	b.header.Difficulty.SetUint64(diff)
 }
 
 // AddTx adds a transaction to the generated block. If no coinbase has
@@ -164,8 +166,8 @@ func (b *BlockGen) AddWithdrawal(withdrawal *types.Withdrawal) {
 }
 
 // Number returns the block number of the block being generated.
-func (b *BlockGen) Number() *big.Int {
-	return new(big.Int).Set(b.header.Number)
+func (b *BlockGen) Number() *uint256.Int {
+	return new(uint256.Int).Set(&b.header.Number)
 }
 
 // AddUncheckedReceipt forcefully adds a receipts to the block without a
@@ -249,10 +251,11 @@ func (b *BlockGen) GetReceipts() []*types.Receipt {
 var GenerateTrace bool
 
 type ChainPack struct {
-	Headers  []*types.Header
-	Blocks   []*types.Block
-	Receipts []types.Receipts
-	TopBlock *types.Block // Convenience field to access the last block
+	Headers          []*types.Header
+	Blocks           []*types.Block
+	Receipts         []types.Receipts
+	TopBlock         *types.Block // Convenience field to access the last block
+	BlockAccessLists [][]byte     // RLP-encoded block access list bytes, indexed parallel to Blocks (nil entry = no BAL)
 }
 
 func (cp *ChainPack) Length() int {
@@ -262,12 +265,16 @@ func (cp *ChainPack) Length() int {
 // OneBlock returns a ChainPack which contains just one
 // block with given index
 func (cp *ChainPack) Slice(i, j int) *ChainPack {
-	return &ChainPack{
+	result := &ChainPack{
 		Headers:  cp.Headers[i:j],
 		Blocks:   cp.Blocks[i:j],
 		Receipts: cp.Receipts[i:j],
 		TopBlock: cp.Blocks[j-1],
 	}
+	if len(cp.BlockAccessLists) > 0 {
+		result.BlockAccessLists = cp.BlockAccessLists[i:j]
+	}
+	return result
 }
 
 // Copy creates a deep copy of the ChainPack.
@@ -293,11 +300,23 @@ func (cp *ChainPack) Copy() *ChainPack {
 
 	topBlock := cp.TopBlock.Copy()
 
+	var blockAccessLists [][]byte
+	if len(cp.BlockAccessLists) > 0 {
+		blockAccessLists = make([][]byte, len(cp.BlockAccessLists))
+		for i, bal := range cp.BlockAccessLists {
+			if bal != nil {
+				blockAccessLists[i] = make([]byte, len(bal))
+				copy(blockAccessLists[i], bal)
+			}
+		}
+	}
+
 	return &ChainPack{
-		Headers:  headers,
-		Blocks:   blocks,
-		Receipts: receipts,
-		TopBlock: topBlock,
+		Headers:          headers,
+		Blocks:           blocks,
+		Receipts:         receipts,
+		TopBlock:         topBlock,
+		BlockAccessLists: blockAccessLists,
 	}
 }
 
@@ -332,9 +351,13 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		return nil, err
 	}
 	defer domains.Close()
+	latestTxNum, _, err := domains.SeekCommitment(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 
 	stateReader := state.NewReaderV3(domains.AsGetter(tx))
-	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
+	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, latestTxNum)
 
 	txNum, err := rawdbv3.TxNums.Max(ctx, tx, parent.NumberU64())
 	if err != nil {
@@ -343,7 +366,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	txNumIncrement := func() {
 		txNum++
 		stateWriter.SetTxNum(txNum)
-		domains.SetTxNum(txNum)
 	}
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
 		stateWriter state.StateWriter) (*types.Block, types.Receipts, error) {
@@ -361,7 +383,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			limit := new(big.Int).Add(daoBlock, misc.DAOForkExtraRange)
-			if b.header.Number.Cmp(daoBlock) >= 0 && b.header.Number.Cmp(limit) < 0 {
+			if b.header.Number.CmpBig(daoBlock) >= 0 && b.header.Number.CmpBig(limit) < 0 {
 				b.header.Extra = common.Copy(misc.DAOForkBlockExtra)
 			}
 		}

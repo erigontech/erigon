@@ -129,12 +129,22 @@ type Compressor struct {
 	lvl              log.Lvl
 	trace            bool
 	logger           log.Logger
-	noFsync          bool // fsync is enabled by default, but tests can manually disable
+
+	noFsync bool // fsync is enabled by default, but tests can manually disable
+	timings Timings
 
 	version             uint8
 	featureFlagBitmask  FeatureFlagBitmask
 	compPageValuesCount uint8
 	metadata            []byte
+}
+
+type Timings struct {
+	Enabled       bool
+	AddStart      time.Time
+	AddTook       time.Duration
+	CompressStart time.Time
+	CompressTook  time.Duration
 }
 
 func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
@@ -207,6 +217,32 @@ func (c *Compressor) SetMetadata(metadata []byte) {
 
 func (c *Compressor) Count() int { return int(c.wordsCount) }
 
+// Erigon doesn't create tons of bufio readers/writers, but it has tons of
+// parallel small unit-tests which each create many small files and bufio
+// readers/writers — pooling avoids the allocation pressure in that scenario.
+var (
+	bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(128*datasize.KB)) }}
+	bufioReaderPool = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, int(128*datasize.KB)) }}
+)
+
+func getBufioWriter(w io.Writer) *bufio.Writer {
+	bw := bufioWriterPool.Get().(*bufio.Writer)
+	bw.Reset(w)
+	return bw
+}
+
+// Reset(nil) before Put is required: without it the pool entry retains a
+// reference to the underlying io.Writer/io.Reader, keeping it alive until the
+// next GC cycle or until the entry is reused — whichever comes first.
+func putBufioWriter(w *bufio.Writer) { w.Reset(nil); bufioWriterPool.Put(w) }
+
+func getBufioReader(r io.Reader) *bufio.Reader {
+	br := bufioReaderPool.Get().(*bufio.Reader)
+	br.Reset(r)
+	return br
+}
+func putBufioReader(r *bufio.Reader) { r.Reset(nil); bufioReaderPool.Put(r) }
+
 func (c *Compressor) ReadFrom(g *Getter) error {
 	var v []byte
 	for g.HasNext() {
@@ -265,6 +301,11 @@ func (c *Compressor) AddUncompressedWord(word []byte) error {
 func (c *Compressor) Compress() error {
 	if err := c.uncompressedFile.Flush(); err != nil {
 		return err
+	}
+	if c.timings.Enabled {
+		c.timings.AddTook = time.Since(c.timings.AddStart) // assume Adding data into compressor complete
+		c.timings.CompressStart = time.Now()
+		defer func() { c.timings.CompressTook = time.Since(c.timings.CompressStart) }()
 	}
 
 	logEvery := time.NewTicker(20 * time.Second)
@@ -347,7 +388,12 @@ func (c *Compressor) Compress() error {
 	return nil
 }
 
-func (c *Compressor) DisableFsync() { c.noFsync = true }
+func (c *Compressor) DisableFsync()    { c.noFsync = true }
+func (c *Compressor) Timings() Timings { return c.timings }
+
+func (c *Compressor) CollectTimings() {
+	c.timings.Enabled, c.timings.AddStart = true, time.Now() // assume Adding data into compressor starting
+}
 
 // fsync - other processes/goroutines must see only "fully-complete" (valid) files. No partial-writes.
 // To achieve it: write to .tmp file then `rename` when file is ready.
@@ -902,16 +948,14 @@ func NewRawWordsFile(filePath string) (*RawWordsFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	w := bufio.NewWriterSize(f, 2*etl.BufIOSize)
-	return &RawWordsFile{filePath: filePath, f: f, w: w, buf: make([]byte, 128)}, nil
+	return &RawWordsFile{filePath: filePath, f: f, w: getBufioWriter(f), buf: make([]byte, 128)}, nil
 }
 func OpenRawWordsFile(filePath string) (*RawWordsFile, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
-	w := bufio.NewWriterSize(f, 2*etl.BufIOSize)
-	return &RawWordsFile{filePath: filePath, f: f, w: w, buf: make([]byte, 128)}, nil
+	return &RawWordsFile{filePath: filePath, f: f, w: getBufioWriter(f), buf: make([]byte, 128)}, nil
 }
 func (f *RawWordsFile) Flush() error {
 	return f.w.Flush()
@@ -920,6 +964,7 @@ func (f *RawWordsFile) Close() {
 	if f.w != nil {
 		f.w.Flush()
 		f.f.Close()
+		putBufioWriter(f.w)
 		f.w = nil
 		f.f = nil
 	}
@@ -957,14 +1002,14 @@ func (f *RawWordsFile) AppendUncompressed(v []byte) error {
 	return nil
 }
 
-// ForEach - Read keys from the file and generate superstring (with extra byte 0x1 prepended to each character, and with 0x0 0x0 pair inserted between keys and values)
-// We only consider values with length > 2, because smaller values are not compressible without going into bits
+// ForEach reads words from the file and calls walker for each one.
 func (f *RawWordsFile) ForEach(walker func(v []byte, compressed bool) error) error {
 	_, err := f.f.Seek(0, 0)
 	if err != nil {
 		return err
 	}
-	r := bufio.NewReaderSize(f.f, int(8*datasize.MB))
+	r := getBufioReader(f.f)
+	defer putBufioReader(r)
 	buf := make([]byte, 16*1024)
 	l, e := binary.ReadUvarint(r)
 	for ; e == nil; l, e = binary.ReadUvarint(r) {

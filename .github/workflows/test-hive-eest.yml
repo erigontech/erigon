@@ -43,6 +43,13 @@ jobs:
           fi
           echo "Pruning docker system..."
           docker system prune -af --volumes
+      - name: Checkout Erigon go.mod
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: go.mod
+          sparse-checkout-cone-mode: false
+          path: erigon-src
+
       - name: Checkout Hive
         uses: actions/checkout@v6
         with:
@@ -66,7 +73,7 @@ jobs:
       - name: Setup go env and cache
         uses: actions/setup-go@v6
         with:
-          go-version: '>=1.24'
+          go-version: '>=1.25'
 
       # Targetting the clients/erigon/Dockerfile.git in the Hive director - 
       # this builds the container from github and uses it for tests
@@ -80,6 +87,9 @@ jobs:
           branch_name=$(echo ${GITHUB_REF#refs/heads/}  | sed 's/[&/\]/\\&/g')
           echo Building Hive with Erigon branch - $branch_name
           sed -i "s/^ARG tag=main$/ARG tag=${branch_name}/" clients/erigon/Dockerfile
+          go_version=$(go mod edit -json ../erigon-src/go.mod | jq -r .Go)
+          echo "Patching builder Go version to ${go_version}"
+          sed -i "s|golang:[0-9.]*-alpine|golang:${go_version}-alpine|" clients/erigon/Dockerfile
           go build . >> buildlogs.log
       # Depends on the last line of hive output that prints the number of suites, tests and failed
       # Currently, we fail even if suites and tests are too few, indicating the tests did not run
@@ -92,7 +102,7 @@ jobs:
             echo -e "\n\n============================================================"
             echo "Running test: ${1}"
             echo -e "\n"
-            ./hive --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${{ env.EEST_VERSION }}/fixtures_develop.tar.gz 2>&1 | tee output.log || {
+            ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client erigon  --docker.nocache=true --sim.buildarg fixtures=https://github.com/ethereum/execution-spec-tests/releases/download/${{ env.EEST_VERSION }}/fixtures_develop.tar.gz 2>&1 | tee output.log || {
               if [ $? -gt 0 ]; then
                 echo "Exitcode gt 0"
               fi
@@ -125,11 +135,14 @@ jobs:
           run_suite ${{ matrix.sim }} ${{ matrix.sim-limit }}
         continue-on-error: true
       - name: Upload output log
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: hive-workspace-log-${{ matrix.sim }}
           path: hive/workspace/logs
+          if-no-files-found: ignore
       - name: Test Results
+        if: always()
         run: |
           cat hive/result.log
           if grep -q "failed" hive/failed.log; then

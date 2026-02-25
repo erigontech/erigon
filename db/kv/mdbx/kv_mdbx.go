@@ -26,8 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
-	"strings"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -174,6 +173,9 @@ func (opts MdbxOpts) InMem(tb testing.TB, tmpDir string) MdbxOpts {
 	opts.growthStep = 2 * datasize.MB
 	opts.mapSize = 16 * datasize.GB
 	opts.dirtySpace = uint64(16 * datasize.MB)
+	if tb != nil {
+		opts.dirtySpace = uint64(2 * datasize.MB)
+	}
 	opts.shrinkThreshold = 0 // disable
 	opts.pageSize = 4096
 	return opts
@@ -1010,14 +1012,6 @@ func (tx *MdbxTx) Commit() error {
 	}()
 	tx.closeCursors()
 
-	//slowTx := 10 * time.Second
-	//if debug.SlowCommit() > 0 {
-	//	slowTx = debug.SlowCommit()
-	//}
-	//
-	//if debug.BigRoTxKb() > 0 || debug.BigRwTxKb() > 0 {
-	//	tx.PrintDebugInfo()
-	//}
 	tx.CollectMetrics()
 
 	latency, err := tx.tx.Commit()
@@ -1640,9 +1634,7 @@ func bucketSlice(b kv.TableCfg) []string {
 	for name := range b {
 		buckets = append(buckets, name)
 	}
-	sort.Slice(buckets, func(i, j int) bool {
-		return strings.Compare(buckets[i], buckets[j]) < 0
-	})
+	slices.Sort(buckets)
 	return buckets
 }
 

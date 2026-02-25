@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/erigontech/erigon/common"
@@ -53,6 +54,7 @@ type Op struct {
 
 type testExecTask struct {
 	*exec.TxTask
+	ctx          context.Context
 	ops          []Op
 	readMap      state.ReadSet
 	writeMap     state.WriteSet
@@ -76,11 +78,12 @@ func NewTestExecTask(txIdx int, ops []Op, sender accounts.Address, nonce int) *t
 	return &testExecTask{
 		TxTask: &exec.TxTask{
 			Header: &types.Header{
-				Number: big.NewInt(1),
+				Number: *uint256.NewInt(1),
 			},
 			TxNum:   1 + uint64(txIdx),
 			TxIndex: txIdx,
 		},
+		ctx:          context.Background(),
 		ops:          ops,
 		readMap:      state.ReadSet{},
 		writeMap:     state.WriteSet{},
@@ -90,9 +93,12 @@ func NewTestExecTask(txIdx int, ops []Op, sender accounts.Address, nonce int) *t
 	}
 }
 
-func sleep(i time.Duration) {
-	start := time.Now()
-	for time.Since(start) < i {
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
 	}
 }
 
@@ -106,7 +112,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	dirs datadir.Dirs,
 	calcFees bool) *exec.TxResult {
 	// Sleep for 50 microsecond to simulate setup time
-	sleep(time.Microsecond * 50)
+	sleepWithContext(t.ctx, time.Microsecond*50) //nolint:errcheck
 
 	version := t.Version()
 
@@ -121,7 +127,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 		switch op.opType {
 		case readType:
 			if _, ok := t.writeMap[k.addr][state.AccountKey{Path: k.path, Key: k.key}]; ok {
-				sleep(op.duration)
+				sleepWithContext(t.ctx, op.duration) //nolint:errcheck
 				continue
 			}
 
@@ -149,13 +155,13 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 				readKind = state.StorageRead
 			}
 
-			sleep(op.duration)
+			sleepWithContext(t.ctx, op.duration) //nolint:errcheck
 
 			t.readMap.Set(state.VersionedRead{Address: k.addr, Path: k.path, Key: k.key, Source: readKind, Version: state.Version{TxIndex: result.DepIdx(), Incarnation: result.Incarnation()}})
 		case writeType:
 			t.writeMap.Set(state.VersionedWrite{Address: k.addr, Path: k.path, Key: k.key, Version: version, Val: op.val})
 		case otherType:
-			sleep(op.duration)
+			sleepWithContext(t.ctx, op.duration) //nolint:errcheck
 		default:
 			panic(fmt.Sprintf("Unknown op type: %d", op.opType))
 		}
@@ -499,8 +505,6 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 	assert.NoError(t, err)
 	defer domains.Close()
 
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
 	assert.NoError(t, err)
 
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
@@ -528,6 +532,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 	for _, task := range tasks {
 		task := task.(*testExecTask)
 		task.TxTask.Config = chainSpec.Config
+		task.ctx = executorContext //nolint:fatcontext
 	}
 
 	start := time.Now()
@@ -555,7 +560,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 
 	for _, writes := range finalWriteSet {
 		for _, d := range writes {
-			sleep(d)
+			sleepWithContext(executorContext, d) //nolint:errcheck
 		}
 	}
 
@@ -603,6 +608,7 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 
 	dirs := datadir.New(t.TempDir())
 	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	defer rawDb.Close()
 	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(context.Background(), rawDb)
 	assert.NoError(t, err)
 	defer agg.Close()
@@ -617,10 +623,6 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 	assert.NoError(t, err)
 	defer domains.Close()
-
-	domains.SetTxNum(1)
-	domains.SetBlockNum(1)
-	assert.NoError(t, err)
 
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
 
@@ -637,9 +639,14 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 		workerCount: runtime.NumCPU() - 1,
 	}
 
-	_, executorCancel, err := pe.run(context.Background())
+	executorContext, executorCancel, err := pe.run(context.Background())
 	defer executorCancel()
 	assert.NoError(t, err, "error occur during parallel init")
+
+	for _, task := range tasks {
+		task := task.(*testExecTask)
+		task.ctx = executorContext //nolint:fatcontext
+	}
 
 	res, err := executeParallelWithCheck(t, pe, tasks, true, validation, false)
 
@@ -731,7 +738,7 @@ func TestLessConflictsWithMetadata(t *testing.T) {
 }
 
 func TestZeroTx(t *testing.T) {
-	if testing.Short() || runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" {
 		t.Skip()
 	}
 	//t.Parallel()
@@ -755,7 +762,7 @@ func TestZeroTx(t *testing.T) {
 }
 
 func TestAlternatingTx(t *testing.T) {
-	if testing.Short() || runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" {
 		t.Skip()
 	}
 	//t.Parallel()
@@ -782,7 +789,7 @@ func TestAlternatingTx(t *testing.T) {
 }
 
 func TestAlternatingTxWithMetadata(t *testing.T) {
-	if testing.Short() || runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" {
 		t.Skip()
 	}
 	//t.Parallel()

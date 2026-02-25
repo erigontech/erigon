@@ -212,9 +212,6 @@ Loop:
 // also, it appends/puts to db blockResults and not "txResult".
 func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.ExecArgs, db kv.TemporalRwDB, fromBlock, toBlock uint64, logPrefix string, logger log.Logger) error {
 	if err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		if err := tx.GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
-			return err
-		}
 		if _, err := tx.PruneSmallBatches(ctx, 10*time.Hour); err != nil {
 			return err
 		}
@@ -251,7 +248,10 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 			}
 		}
 
-		lastTxNum = doms.TxNum()
+		lastTxNum, _, err = doms.SeekCommitment(ctx, tx)
+		if err != nil {
+			return err
+		}
 		if err := tx.Commit(); err != nil {
 			return err
 		}
@@ -273,9 +273,6 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 		return err
 	}
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		if err := tx.(kv.TemporalRwTx).GreedyPruneHistory(ctx, kv.CommitmentDomain); err != nil {
-			return err
-		}
 		if _, err := tx.(kv.TemporalRwTx).PruneSmallBatches(ctx, 10*time.Hour); err != nil {
 			return err
 		}
