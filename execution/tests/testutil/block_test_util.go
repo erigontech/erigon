@@ -23,13 +23,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -58,7 +58,7 @@ type BlockTest struct {
 
 // UnmarshalJSON implements json.Unmarshaler interface.
 func (bt *BlockTest) UnmarshalJSON(in []byte) error {
-	return json.Unmarshal(in, &bt.json)
+	return jsoniter.ConfigFastest.Unmarshal(in, &bt.json)
 }
 
 type btJSON struct {

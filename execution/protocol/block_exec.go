@@ -25,8 +25,7 @@ import (
 	"slices"
 	"time"
 
-	"golang.org/x/crypto/sha3"
-
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -228,7 +227,7 @@ func ExecuteBlockEphemerally(
 }
 
 func rlpHash(x any) (h common.Hash) {
-	hw := sha3.NewLegacyKeccak256()
+	hw := keccak.NewFastKeccak()
 	rlp.Encode(hw, x) //nolint:errcheck
 	hw.Sum(h[:0])
 	return h

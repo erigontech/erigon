@@ -23,7 +23,6 @@ import (
 	"context"
 	context2 "context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -31,8 +30,9 @@ import (
 	"strings"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
+	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -71,7 +71,7 @@ type StateSubtest struct {
 }
 
 func (t *StateTest) UnmarshalJSON(in []byte) error {
-	return json.Unmarshal(in, &t.Json)
+	return jsoniter.ConfigFastest.Unmarshal(in, &t.Json)
 }
 
 type stJSON struct {
@@ -368,7 +368,7 @@ func (t *StateTest) genesis(config *chain.Config) *types.Genesis {
 }
 
 func rlpHash(x any) (h common.Hash) {
-	hw := sha3.NewLegacyKeccak256()
+	hw := keccak.NewFastKeccak()
 	if err := rlp.Encode(hw, x); err != nil {
 		panic(err)
 	}
