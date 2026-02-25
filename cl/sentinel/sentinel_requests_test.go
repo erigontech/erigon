@@ -57,7 +57,21 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
-// retryTestFunc retries fn up to maxRetries times if it panics (e.g. from if+panic assertions).
+// noErr panics if err is non-nil. Used with retryTestFunc so recover() can catch it.
+func noErr(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
+// assertPanic panics with a formatted message if cond is false.
+func assertPanic(cond bool, format string, args ...any) {
+	if !cond {
+		panic(fmt.Sprintf(format, args...))
+	}
+}
+
+// retryTestFunc retries fn up to maxRetries times if it panics (e.g. from noErr/assertPanic).
 // This works around transient libp2p races where protocol negotiation fails with
 // "failed to negotiate protocol: stream reset" on macOS CI runners.
 func retryTestFunc(t *testing.T, maxRetries int, fn func()) {
@@ -86,9 +100,7 @@ func retryTestFunc(t *testing.T, maxRetries int, fn func()) {
 
 func getEthClock(t *testing.T) eth_clock.EthereumClock {
 	s, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
-	if err != nil {
-		panic(err)
-	}
+	noErr(err)
 	return eth_clock.NewEthereumClock(s.GenesisTime(), s.GenesisValidatorsRoot(), s.BeaconConfig())
 }
 
@@ -98,16 +110,12 @@ func loadChain(t *testing.T) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, p
 	reader = antiquarytests.LoadChain(blocks, postState, db, t)
 
 	sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
-	if err := sn.OnHeadState(postState); err != nil {
-		panic(err)
-	}
+	noErr(sn.OnHeadState(postState))
 
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
 	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, nil, nil, reader, sn, log.New(), true, true, false, false, nil)
-	if err := a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33); err != nil {
-		panic(err)
-	}
+	noErr(a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
 	return
 }
 
@@ -122,9 +130,7 @@ func newTestP2PManager(t *testing.T, ethClock eth_clock.EthereumClock) p2p.P2PMa
 		NoDiscovery:   true,
 		MaxPeerCount:  100,
 	}, log.New(), ethClock)
-	if err != nil {
-		panic(err)
-	}
+	noErr(err)
 	t.Cleanup(func() { pm.Host().Close() })
 	return pm
 }
@@ -138,15 +144,11 @@ func newTestSentinel(t *testing.T, ethClock eth_clock.EthereumClock, reader free
 		EnableBlocks:  true,
 		MaxPeerCount:  100,
 	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{}, nil, mockPeerDasStateReader, pm)
-	if err != nil {
-		panic(err)
-	}
+	noErr(err)
 	t.Cleanup(func() { sent.Stop() })
 
 	_, err = sent.Start()
-	if err != nil {
-		panic(err)
-	}
+	noErr(err)
 	return sent
 }
 
@@ -169,51 +171,31 @@ func testSentinelBlocksByRange(t *testing.T) {
 	h := sent.Host()
 
 	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
-	if err != nil {
-		panic(err)
-	}
+	noErr(err)
 	defer host1.Close()
 
-	err = h.Connect(ctx, peer.AddrInfo{
-		ID:    host1.ID(),
-		Addrs: host1.Addrs(),
-	})
-	if err != nil {
-		panic(err)
-	}
+	noErr(h.Connect(ctx, peer.AddrInfo{ID: host1.ID(), Addrs: host1.Addrs()}))
 
 	stream, err := host1.NewStream(ctx, h.ID(), protocol.ID(communication.BeaconBlocksByRangeProtocolV2))
-	if err != nil {
-		panic(err)
-	}
+	noErr(err)
 	defer stream.Close()
 
 	req := &cltypes.BeaconBlocksByRangeRequest{
 		StartSlot: blocks[0].Block.Slot,
 		Count:     6,
 	}
-
-	if err := ssz_snappy.EncodeAndWrite(stream, req); err != nil {
-		panic(fmt.Sprintf("EncodeAndWrite failed: %v", err))
-	}
+	noErr(ssz_snappy.EncodeAndWrite(stream, req))
 
 	code := make([]byte, 1)
 	_, err = stream.Read(code)
-	if err != nil {
-		panic(err)
-	}
-	if code[0] != uint8(0) {
-		panic(fmt.Sprintf("expected code[0]=0, got %d", code[0]))
-	}
+	noErr(err)
+	assertPanic(code[0] == uint8(0), "expected code[0]=0, got %d", code[0])
 
 	var w bytes.Buffer
 	_, err = io.Copy(&w, stream)
-	if err != nil {
-		panic(err)
-	}
+	noErr(err)
 
 	responsePacket := make([]*cltypes.SignedBeaconBlock, 0)
-
 	r := bytes.NewReader(w.Bytes())
 	for i := 0; i < len(blocks); i++ {
 		forkDigest := make([]byte, 4)
@@ -221,56 +203,37 @@ func testSentinelBlocksByRange(t *testing.T) {
 			if err == io.EOF {
 				break
 			}
-			panic(err)
+			noErr(err)
 		}
 
 		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
-		if err != nil {
-			panic(err)
-		}
+		noErr(err)
 
 		raw := make([]byte, encodedLn)
 		sr := snappy.NewReader(r)
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
-			if err != nil {
-				panic(err)
-			}
+			noErr(err)
 			bytesRead += n
 		}
-		respForkDigest := binary.BigEndian.Uint32(forkDigest)
 
-		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
-		if err != nil {
-			panic(err)
-		}
+		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(binary.BigEndian.Uint32(forkDigest)))
+		noErr(err)
 
 		responseChunk := cltypes.NewSignedBeaconBlock(beaconConfig, clparams.DenebVersion)
-		if err := responseChunk.DecodeSSZ(raw, int(version)); err != nil {
-			panic(err)
-		}
+		noErr(responseChunk.DecodeSSZ(raw, int(version)))
 
 		responsePacket = append(responsePacket, responseChunk)
 		r.ReadByte()
 	}
-	if len(blocks) != len(responsePacket) {
-		panic(fmt.Sprintf("expected %d blocks, got %d", len(blocks), len(responsePacket)))
-	}
+	assertPanic(len(blocks) == len(responsePacket), "expected %d blocks, got %d", len(blocks), len(responsePacket))
 	for i := 0; i < len(blocks); i++ {
 		root1, err := responsePacket[i].HashSSZ()
-		if err != nil {
-			panic(err)
-		}
-
+		noErr(err)
 		root2, err := blocks[i].HashSSZ()
-		if err != nil {
-			panic(err)
-		}
-
-		if root1 != root2 {
-			panic(fmt.Sprintf("block %d root mismatch: %x != %x", i, root1, root2))
-		}
+		noErr(err)
+		assertPanic(root1 == root2, "block %d root mismatch: %x != %x", i, root1, root2)
 	}
 }
 
@@ -284,59 +247,35 @@ func testSentinelBlocksByRoots(t *testing.T) {
 	h := sent.Host()
 
 	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
-	if err != nil {
-		panic(err)
-	}
+	noErr(err)
 	defer host1.Close()
 
-	err = h.Connect(ctx, peer.AddrInfo{
-		ID:    host1.ID(),
-		Addrs: host1.Addrs(),
-	})
-	if err != nil {
-		panic(err)
-	}
+	noErr(h.Connect(ctx, peer.AddrInfo{ID: host1.ID(), Addrs: host1.Addrs()}))
 
 	stream, err := host1.NewStream(ctx, h.ID(), protocol.ID(communication.BeaconBlocksByRootProtocolV2))
-	if err != nil {
-		panic(err)
-	}
+	noErr(err)
 	defer stream.Close()
 
 	req := solid.NewHashList(1232)
 	rt, err := blocks[0].Block.HashSSZ()
-	if err != nil {
-		panic(err)
-	}
-
+	noErr(err)
 	req.Append(rt)
 	rt, err = blocks[1].Block.HashSSZ()
-	if err != nil {
-		panic(err)
-	}
+	noErr(err)
 	req.Append(rt)
 
-	if err := ssz_snappy.EncodeAndWrite(stream, req); err != nil {
-		panic(fmt.Sprintf("EncodeAndWrite failed: %v", err))
-	}
+	noErr(ssz_snappy.EncodeAndWrite(stream, req))
 
 	code := make([]byte, 1)
 	_, err = stream.Read(code)
-	if err != nil {
-		panic(err)
-	}
-	if code[0] != uint8(0) {
-		panic(fmt.Sprintf("expected code[0]=0, got %d", code[0]))
-	}
+	noErr(err)
+	assertPanic(code[0] == uint8(0), "expected code[0]=0, got %d", code[0])
 
 	var w bytes.Buffer
 	_, err = io.Copy(&w, stream)
-	if err != nil {
-		panic(err)
-	}
+	noErr(err)
 
 	responsePacket := make([]*cltypes.SignedBeaconBlock, 0)
-
 	r := bytes.NewReader(w.Bytes())
 	for i := 0; i < len(blocks); i++ {
 		forkDigest := make([]byte, 4)
@@ -344,57 +283,37 @@ func testSentinelBlocksByRoots(t *testing.T) {
 			if err == io.EOF {
 				break
 			}
-			panic(err)
+			noErr(err)
 		}
 
 		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
-		if err != nil {
-			panic(err)
-		}
+		noErr(err)
 
 		raw := make([]byte, encodedLn)
 		sr := snappy.NewReader(r)
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
-			if err != nil {
-				panic(err)
-			}
+			noErr(err)
 			bytesRead += n
 		}
-		respForkDigest := binary.BigEndian.Uint32(forkDigest)
 
-		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
-		if err != nil {
-			panic(err)
-		}
+		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(binary.BigEndian.Uint32(forkDigest)))
+		noErr(err)
 
 		responseChunk := cltypes.NewSignedBeaconBlock(beaconConfig, clparams.DenebVersion)
-		if err := responseChunk.DecodeSSZ(raw, int(version)); err != nil {
-			panic(err)
-		}
+		noErr(responseChunk.DecodeSSZ(raw, int(version)))
 
 		responsePacket = append(responsePacket, responseChunk)
 		r.ReadByte()
 	}
-
-	if len(blocks) != len(responsePacket) {
-		panic(fmt.Sprintf("expected %d blocks, got %d", len(blocks), len(responsePacket)))
-	}
+	assertPanic(len(blocks) == len(responsePacket), "expected %d blocks, got %d", len(blocks), len(responsePacket))
 	for i := 0; i < len(responsePacket); i++ {
 		root1, err := responsePacket[i].HashSSZ()
-		if err != nil {
-			panic(err)
-		}
-
+		noErr(err)
 		root2, err := blocks[i].HashSSZ()
-		if err != nil {
-			panic(err)
-		}
-
-		if root1 != root2 {
-			panic(fmt.Sprintf("block %d root mismatch: %x != %x", i, root1, root2))
-		}
+		noErr(err)
+		assertPanic(root1 == root2, "block %d root mismatch: %x != %x", i, root1, root2)
 	}
 }
 
@@ -407,18 +326,10 @@ func testSentinelStatusRequest(t *testing.T) {
 	h := sent.Host()
 
 	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
-	if err != nil {
-		panic(err)
-	}
+	noErr(err)
 	defer host1.Close()
 
-	err = h.Connect(ctx, peer.AddrInfo{
-		ID:    host1.ID(),
-		Addrs: host1.Addrs(),
-	})
-	if err != nil {
-		panic(err)
-	}
+	noErr(h.Connect(ctx, peer.AddrInfo{ID: host1.ID(), Addrs: host1.Addrs()}))
 
 	req := &cltypes.Status{
 		HeadRoot:       common.Hash(blocks[0].Block.ParentRoot),
@@ -429,41 +340,23 @@ func testSentinelStatusRequest(t *testing.T) {
 	sent.SetStatus(req)
 
 	stream, err := host1.NewStream(ctx, h.ID(), protocol.ID(communication.StatusProtocolV1))
-	if err != nil {
-		panic(err)
-	}
+	noErr(err)
 	defer stream.Close()
 
-	if err := ssz_snappy.EncodeAndWrite(stream, req); err != nil {
-		panic(fmt.Sprintf("EncodeAndWrite failed: %v", err))
-	}
+	noErr(ssz_snappy.EncodeAndWrite(stream, req))
 
 	code := make([]byte, 1)
 	_, err = stream.Read(code)
-	if err != nil {
-		panic(err)
-	}
-	if code[0] != uint8(0) {
-		panic(fmt.Sprintf("expected code[0]=0, got %d", code[0]))
-	}
+	noErr(err)
+	assertPanic(code[0] == uint8(0), "expected code[0]=0, got %d", code[0])
 
 	resp := &cltypes.Status{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(stream, resp, 0); err != nil {
-		panic(err)
-	}
+	noErr(ssz_snappy.DecodeAndReadNoForkDigest(stream, resp, 0))
 
-	if req.HeadRoot != resp.HeadRoot {
-		panic(fmt.Sprintf("HeadRoot mismatch: %v != %v", req.HeadRoot, resp.HeadRoot))
-	}
-	if req.HeadSlot != resp.HeadSlot {
-		panic(fmt.Sprintf("HeadSlot mismatch: %v != %v", req.HeadSlot, resp.HeadSlot))
-	}
-	if req.FinalizedRoot != resp.FinalizedRoot {
-		panic(fmt.Sprintf("FinalizedRoot mismatch: %v != %v", req.FinalizedRoot, resp.FinalizedRoot))
-	}
-	if req.FinalizedEpoch != resp.FinalizedEpoch {
-		panic(fmt.Sprintf("FinalizedEpoch mismatch: %v != %v", req.FinalizedEpoch, resp.FinalizedEpoch))
-	}
+	assertPanic(req.HeadRoot == resp.HeadRoot, "HeadRoot mismatch: %v != %v", req.HeadRoot, resp.HeadRoot)
+	assertPanic(req.HeadSlot == resp.HeadSlot, "HeadSlot mismatch: %v != %v", req.HeadSlot, resp.HeadSlot)
+	assertPanic(req.FinalizedRoot == resp.FinalizedRoot, "FinalizedRoot mismatch: %v != %v", req.FinalizedRoot, resp.FinalizedRoot)
+	assertPanic(req.FinalizedEpoch == resp.FinalizedEpoch, "FinalizedEpoch mismatch: %v != %v", req.FinalizedEpoch, resp.FinalizedEpoch)
 }
 
 func TestSentinelBlocksByRange(t *testing.T) {
