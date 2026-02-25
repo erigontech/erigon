@@ -17,12 +17,12 @@
 package commitment
 
 import (
-	"encoding/binary"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/stretchr/testify/require"
 )
 
 func BenchmarkBranchMerger_Merge(b *testing.B) {
@@ -68,20 +68,20 @@ func BenchmarkBranchData_ReplacePlainKeys(b *testing.B) {
 	row, bm := generateCellRow(b, 16)
 
 	cells, am := unfoldBranchDataFromString(b, "86e586e5082035e72a782b51d9c98548467e3f868294d923cdbbdf4ce326c867bd972c4a2395090109203b51781a76dc87640aea038e3fdd8adca94049aaa436735b162881ec159f6fb408201aa2fa41b5fb019e8abf8fc32800805a2743cfa15373cf64ba16f4f70e683d8e0404a192d9050404f993d9050404e594d90508208642542ff3ce7d63b9703e85eb924ab3071aa39c25b1651c6dda4216387478f10404bd96d905")
-	for i, c := range cells {
-		if c == nil {
-			continue
-		}
-		if c.accountAddrLen > 0 {
-			offt, _ := binary.Uvarint(c.accountAddr[:c.accountAddrLen])
-			b.Logf("%d apk %x, offt %d\n", i, c.accountAddr[:c.accountAddrLen], offt)
-		}
-		if c.storageAddrLen > 0 {
-			offt, _ := binary.Uvarint(c.storageAddr[:c.storageAddrLen])
-			b.Logf("%d spk %x offt %d\n", i, c.storageAddr[:c.storageAddrLen], offt)
-		}
-
-	}
+	//for i, c := range cells {
+	//	if c == nil {
+	//		continue
+	//	}
+	//	if c.accountAddrLen > 0 {
+	//		offt, _ := binary.Uvarint(c.accountAddr[:c.accountAddrLen])
+	//		b.Logf("%d apk %x, offt %d\n", i, c.accountAddr[:c.accountAddrLen], offt)
+	//	}
+	//	if c.storageAddrLen > 0 {
+	//		offt, _ := binary.Uvarint(c.storageAddr[:c.storageAddrLen])
+	//		b.Logf("%d spk %x offt %d\n", i, c.storageAddr[:c.storageAddrLen], offt)
+	//	}
+	//
+	//}
 	_ = cells
 	_ = am
 
