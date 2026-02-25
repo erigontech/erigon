@@ -2328,9 +2328,11 @@ func TestDomain_Unwind(t *testing.T) {
 
 			et, err := ectx.ht.HistoryRange(int(unwindTo)-1, -1, order.Asc, -1, etx)
 			require.NoError(t, err)
+			defer et.Close()
 
 			ut, err := uc.ht.HistoryRange(int(unwindTo)-1, -1, order.Asc, -1, utx)
 			require.NoError(t, err)
+			defer ut.Close()
 
 			compareIterators(t, et, ut)
 		})
@@ -2451,6 +2453,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 
 		it, err := domainRoTx.ht.IdxRange(pruningKey, 0, int(stepSize), order.Asc, math.MaxInt, tx)
 		require.NoError(t, err)
+		defer it.Close()
 
 		for it.HasNext() {
 			txn, err := it.Next()
@@ -2460,6 +2463,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 
 		hit, err := domainRoTx.ht.HistoryRange(0, int(stepSize), order.Asc, math.MaxInt, tx)
 		require.NoError(t, err)
+		defer hit.Close()
 
 		for hit.HasNext() {
 			k, v, err := hit.Next()
