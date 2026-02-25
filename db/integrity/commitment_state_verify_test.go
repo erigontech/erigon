@@ -68,8 +68,6 @@ func TestCheckStateVerify(t *testing.T) {
 	rnd := rand.New(rand.NewSource(42))
 
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		domains.SetTxNum(txNum)
-
 		addr := make([]byte, length.Addr)
 		loc := make([]byte, length.Hash)
 		rnd.Read(addr)
@@ -82,11 +80,11 @@ func TestCheckStateVerify(t *testing.T) {
 			Incarnation: 0,
 		}
 		buf := accounts.SerialiseV3(&acc)
-		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil, 0)
+		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil)
 		require.NoError(t, err)
 
 		storageKey := append(common.Copy(addr), loc...)
-		err = domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{addr[0], loc[0]}, txNum, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{addr[0], loc[0]}, txNum, nil)
 		require.NoError(t, err)
 
 		// Compute commitment after each write to ensure trie branch data
@@ -150,8 +148,6 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 	var noopStorageVal []byte
 
 	for txNum := uint64(1); txNum <= 200; txNum++ {
-		domains.SetTxNum(txNum)
-
 		addr := make([]byte, length.Addr)
 		loc := make([]byte, length.Hash)
 		rnd.Read(addr)
@@ -163,12 +159,12 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 			CodeHash: accounts.EmptyCodeHash,
 		}
 		buf := accounts.SerialiseV3(&acc)
-		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil, 0)
+		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil)
 		require.NoError(t, err)
 
 		storageKey := append(common.Copy(addr), loc...)
 		storageVal := []byte{addr[0], loc[0]}
-		err = domains.DomainPut(kv.StorageDomain, tx, storageKey, storageVal, txNum, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, tx, storageKey, storageVal, txNum, nil)
 		require.NoError(t, err)
 
 		// Save one entry from step 1 (txNum 100-199) for re-writing in step range 2.
@@ -187,8 +183,6 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 	// --- Step range 2: txNum 201..400 (steps 2-3) ---
 	// Write unique entries PLUS re-write the saved entry with the same value (no-op).
 	for txNum := uint64(201); txNum <= 400; txNum++ {
-		domains.SetTxNum(txNum)
-
 		addr := make([]byte, length.Addr)
 		loc := make([]byte, length.Hash)
 		rnd.Read(addr)
@@ -200,18 +194,18 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 			CodeHash: accounts.EmptyCodeHash,
 		}
 		buf := accounts.SerialiseV3(&acc)
-		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil, 0)
+		err = domains.DomainPut(kv.AccountsDomain, tx, addr, buf, txNum, nil)
 		require.NoError(t, err)
 
 		storageKey := append(common.Copy(addr), loc...)
-		err = domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{addr[0], loc[0]}, txNum, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{addr[0], loc[0]}, txNum, nil)
 		require.NoError(t, err)
 
 		// At txNum=250, re-write the saved entry with the SAME value (no-op).
 		if txNum == 250 {
-			err = domains.DomainPut(kv.AccountsDomain, tx, noopAddr, noopAccBuf, txNum, nil, 0)
+			err = domains.DomainPut(kv.AccountsDomain, tx, noopAddr, noopAccBuf, txNum, nil)
 			require.NoError(t, err)
-			err = domains.DomainPut(kv.StorageDomain, tx, noopStorageKey, noopStorageVal, txNum, nil, 0)
+			err = domains.DomainPut(kv.StorageDomain, tx, noopStorageKey, noopStorageVal, txNum, nil)
 			require.NoError(t, err)
 		}
 
@@ -273,8 +267,6 @@ func TestVerifyBranchHashesFromDB(t *testing.T) {
 	rnd := rand.New(rand.NewSource(42))
 
 	for txNum := uint64(1); txNum <= 5; txNum++ {
-		domains.SetTxNum(txNum)
-
 		addr := make([]byte, length.Addr)
 		loc := make([]byte, length.Hash)
 		rnd.Read(addr)
@@ -286,12 +278,12 @@ func TestVerifyBranchHashesFromDB(t *testing.T) {
 			CodeHash: accounts.EmptyCodeHash,
 		}
 		accBuf := accounts.SerialiseV3(&acc)
-		err = domains.DomainPut(kv.AccountsDomain, tx, addr, accBuf, txNum, nil, 0)
+		err = domains.DomainPut(kv.AccountsDomain, tx, addr, accBuf, txNum, nil)
 		require.NoError(t, err)
 
 		storageKey := append(common.Copy(addr), loc...)
 		storageVal := []byte{addr[0], loc[0]}
-		err = domains.DomainPut(kv.StorageDomain, tx, storageKey, storageVal, txNum, nil, 0)
+		err = domains.DomainPut(kv.StorageDomain, tx, storageKey, storageVal, txNum, nil)
 		require.NoError(t, err)
 
 		entries = append(entries, entry{addr: addr, loc: loc, storageKey: storageKey, acc: acc, storageVal: storageVal})

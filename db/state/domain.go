@@ -349,7 +349,7 @@ func (d *Domain) Close() {
 	d.closeWhatNotInList([]string{})
 }
 
-func (w *DomainBufferedWriter) PutWithPrev(k, v []byte, txNum uint64, preval []byte, prevStep kv.Step) error {
+func (w *DomainBufferedWriter) PutWithPrev(k, v []byte, txNum uint64, preval []byte) error {
 	step := kv.Step(txNum / w.h.ii.stepSize)
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
 	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
@@ -359,12 +359,12 @@ func (w *DomainBufferedWriter) PutWithPrev(k, v []byte, txNum uint64, preval []b
 		return err
 	}
 	if w.diff != nil {
-		w.diff.DomainUpdate(k, step, preval, prevStep)
+		w.diff.DomainUpdate(k, step, preval)
 	}
 	return w.addValue(k, v, step)
 }
 
-func (w *DomainBufferedWriter) DeleteWithPrev(k []byte, txNum uint64, prev []byte, prevStep kv.Step) (err error) {
+func (w *DomainBufferedWriter) DeleteWithPrev(k []byte, txNum uint64, prev []byte) (err error) {
 	step := kv.Step(txNum / w.h.ii.stepSize)
 
 	// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
@@ -375,7 +375,7 @@ func (w *DomainBufferedWriter) DeleteWithPrev(k []byte, txNum uint64, prev []byt
 		return err
 	}
 	if w.diff != nil {
-		w.diff.DomainUpdate(k, step, prev, prevStep)
+		w.diff.DomainUpdate(k, step, prev)
 	}
 	return w.addValue(k, nil, step)
 }
@@ -530,7 +530,8 @@ type DomainRoTx struct {
 	btReaders   []*BtIndex
 	mapReaders  []*recsplit.IndexReader
 
-	comBuf []byte
+	comBuf        []byte
+	lookupFullKey []byte // scratch buffer for lookupByShortenedKey
 
 	valsC      kv.Cursor
 	valCViewID uint64 // to make sure that valsC reading from the same view with given kv.Tx
@@ -1293,23 +1294,24 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		return err
 	}
 	defer valsCursor.Close()
-	// First revert keys
+	// Revert keys using diff entries.
+	// Always: delete current entry at the write step, restore prevValue at unwind target step.
+	// value == []byte{} means key was new (no previous value to restore).
+	unwindStepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(unwindStepBytes, ^uint64(step))
+
 	for i := range domainDiffs {
-		keyStr, value, prevStepBytes := domainDiffs[i].Key, domainDiffs[i].Value, domainDiffs[i].PrevStepBytes
+		keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
 		key := toBytesZeroCopy(keyStr)
 		if dt.d.LargeValues {
-			if len(value) == 0 {
-				if !bytes.Equal(key[len(key)-8:], prevStepBytes) {
-					if err := rwTx.Delete(d.ValuesTable, key); err != nil {
-						return err
-					}
-				} else {
-					if err := rwTx.Put(d.ValuesTable, key, []byte{}); err != nil {
-						return err
-					}
-				}
-			} else {
-				if err := rwTx.Put(d.ValuesTable, key, value); err != nil {
+			// Delete the entry at the write step
+			if err := rwTx.Delete(d.ValuesTable, key); err != nil {
+				return err
+			}
+			// Restore previous value at unwind step ([]byte{} = key was new, nothing to restore)
+			if len(value) > 0 {
+				fullKey := key[:len(key)-8]
+				if err := rwTx.Put(d.ValuesTable, append(fullKey, unwindStepBytes...), value); err != nil {
 					return err
 				}
 			}
@@ -1317,7 +1319,7 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 		}
 		stepBytes := key[len(key)-8:]
 		fullKey := key[:len(key)-8]
-		// Second, we need to restore the previous value
+		// Delete the current entry at the write step
 		valInDB, err := valsCursor.SeekBothRange(fullKey, stepBytes)
 		if err != nil {
 			return err
@@ -1331,12 +1333,11 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 			}
 		}
 
-		if !bytes.Equal(stepBytes, prevStepBytes) {
-			continue
-		}
-
-		if err := valsCursor.Put(fullKey, append(stepBytes, value...)); err != nil {
-			return err
+		// Restore previous value at unwind step ([]byte{} = key was new, nothing to restore)
+		if len(value) > 0 {
+			if err := valsCursor.Put(fullKey, append(unwindStepBytes, value...)); err != nil {
+				return err
+			}
 		}
 	}
 	// Compare valsKV with prevSeenKeys
@@ -1903,8 +1904,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	if limit == 0 {
 		limit = math.MaxUint64
 	}
-	st := time.Now()
-	defer mxPruneTookDomain.ObserveDuration(st)
+	defer mxPruneTookDomain.ObserveDuration(time.Now())
 	stat = &DomainPruneStat{MinStep: math.MaxUint64}
 	if stat.History, err = dt.ht.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
 		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
@@ -1918,13 +1918,9 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 		return stat, nil
 	}
 
-	defer func() {
-		dt.d.logger.Debug("scan domain pruning res", "name", dt.name, "txFrom", txFrom, "txTo", txTo, "limit", limit, "vals", stat.Values, "spent ms", time.Since(st).Milliseconds())
-	}()
-
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
-	defer func(t time.Time) { mxPruneTookDomain.ObserveDuration(t) }(time.Now())
+	defer mxPruneTookDomain.ObserveDuration(time.Now())
 	var valsCursor kv.PseudoDupSortRwCursor
 	var mode prune.StorageMode
 	if dt.d.LargeValues {

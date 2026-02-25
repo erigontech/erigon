@@ -78,7 +78,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 		key := <-longKeys
 		val := <-vals
 		txNum := uint64(i)
-		err := domains.DomainPut(kv.StorageDomain, tx, key, val, txNum, prev, 0)
+		err := domains.DomainPut(kv.StorageDomain, tx, key, val, txNum, prev)
 		prev = val
 		require.NoError(b, err)
 
@@ -604,7 +604,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	if keyCount > 1000 { // windows CI can't handle much small parallel disk flush
 		bufSize = 1 * datasize.MB
 	}
-	collector := etl.NewCollector(state.BtreeLogPrefix+" genCompress", tb.TempDir(), etl.NewSortableBuffer(bufSize), logger)
+	collector := etl.NewCollector(state.BtreeLogPrefix+" genCompress", tmp, etl.NewSortableBuffer(bufSize), logger)
 	defer collector.Close()
 
 	for i := 0; i < keyCount; i++ {
@@ -648,7 +648,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 
 	IndexFile := filepath.Join(tmp, fmt.Sprintf("%dk.bt", keyCount/1000))
 	r := seg.NewReader(decomp.MakeGetter(), compressFlags)
-	err = state.BuildBtreeIndexWithDecompressor(IndexFile, r, ps, tb.TempDir(), 777, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
+	err = state.BuildBtreeIndexWithDecompressor(IndexFile, r, ps, tmp, 777, logger, true, statecfg.AccessorBTree|statecfg.AccessorExistence)
 	require.NoError(tb, err)
 
 	return compPath

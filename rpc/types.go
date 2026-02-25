@@ -29,6 +29,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 )
@@ -375,6 +377,12 @@ func AsBlockReference(ref any) BlockReference {
 	switch ref := ref.(type) {
 	case *big.Int:
 		return IntBlockReference(ref)
+	case *uint256.Int:
+		if ref == nil {
+			return BlockReference{}
+		}
+		bn := BlockNumber(ref.Uint64())
+		return BlockReference{BlockNumber: &bn}
 	case BlockNumber:
 		return BlockReference{BlockNumber: &ref}
 	case *BlockNumber:

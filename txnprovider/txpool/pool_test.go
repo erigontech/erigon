@@ -861,6 +861,9 @@ func TestTxnPoke(t *testing.T) {
 }
 
 func TestShanghaiValidateTxn(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	asrt := assert.New(t)
 	tests := map[string]struct {
 		expected   txpoolcfg.DiscardReason
@@ -935,7 +938,7 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
 			sndrBytes := accounts3.SerialiseV3(&sndr)
 			txNum := uint64(0)
-			err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, txNum, nil, 0)
+			err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, txNum, nil)
 			asrt.NoError(err)
 
 			err = sd.Flush(ctx, tx)
@@ -1056,7 +1059,7 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
 	sndrBytes := accounts3.SerialiseV3(&sndr)
 	txNum := uint64(0)
-	err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, txNum, nil, 0)
+	err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, txNum, nil)
 	require.NoError(t, err)
 
 	err = sd.Flush(ctx, tx)
@@ -1444,6 +1447,9 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 }
 
 func TestBlobSlots(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 5)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
@@ -1527,6 +1533,9 @@ func TestBlobSlots(t *testing.T) {
 }
 
 func TestWrappedSixBlobTxnExceedsRlpLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	require := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

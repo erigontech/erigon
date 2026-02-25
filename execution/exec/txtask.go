@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"sync"
 	"time"
 
@@ -154,7 +153,7 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 
 	blockNum := r.Version().BlockNum
 	receipt := &types.Receipt{
-		BlockNumber:              big.NewInt(int64(blockNum)),
+		BlockNumber:              uint256.NewInt(blockNum),
 		BlockHash:                r.BlockHash(),
 		TransactionIndex:         uint(txIndex),
 		Type:                     r.TxType(),
@@ -953,6 +952,9 @@ func (q *PriorityQueue[T]) AwaitDrain(ctx context.Context, waitTime time.Duratio
 	q.Unlock()
 
 	if resultCh == nil {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
 		var none T
 		return q.Drain(ctx, none)
 	}

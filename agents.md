@@ -2,7 +2,7 @@
 
 This file provides guidance for AI agents working with this codebase.
 
-**Requirements**: Go 1.24+, GCC 10+ or Clang, 32GB+ RAM, SSD/NVMe storage
+**Requirements**: Go 1.25+, GCC 10+ or Clang, 32GB+ RAM, SSD/NVMe storage
 
 ## Build & Test
 
@@ -22,8 +22,6 @@ Run specific tests:
 go test ./execution/stagedsync/...
 go test -run TestName ./path/to/package/...
 ```
-
-Build tag required: `goexperiment.synctest` (set automatically by Makefile)
 
 ## Architecture Overview
 

@@ -366,7 +366,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			var stateRoot []byte
 			if postState.CommitmentHistory {
 				sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum+1)
-				stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, sharedDomains.TxNum(), "getReceipt", nil)
+				latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
+				if err != nil {
+					return nil, err
+				}
+				stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, latestTxNum, "getReceipt", nil)
 				if err != nil {
 					return nil, err
 				}
@@ -530,7 +534,11 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 			var stateRoot []byte
 			if commitmentHistory {
 				sharedDomains.GetCommitmentContext().SetHistoryStateReader(tx, txNum+1)
-				stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, sharedDomains.TxNum(), "getReceipts", nil)
+				latestTxNum, _, err := sharedDomains.SeekCommitment(ctx, tx)
+				if err != nil {
+					return nil, err
+				}
+				stateRoot, err = sharedDomains.ComputeCommitment(ctx, tx, false, blockNum, latestTxNum, "getReceipts", nil)
 				if err != nil {
 					return nil, err
 				}

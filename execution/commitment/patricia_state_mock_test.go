@@ -26,18 +26,17 @@ import (
 	"sync/atomic"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
-
-	"github.com/erigontech/erigon/db/kv"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 // In memory commitment and state to use with the tests
 type MockState struct {
-	t          *testing.T
+	t          testing.TB
 	concurrent atomic.Bool
 
 	mu     sync.Mutex            // to protect sm and cm for concurrent trie
@@ -46,7 +45,7 @@ type MockState struct {
 	numBuf [binary.MaxVarintLen64]byte
 }
 
-func NewMockState(t *testing.T) *MockState {
+func NewMockState(t testing.TB) *MockState {
 	t.Helper()
 	return &MockState{
 		t:  t,
@@ -63,7 +62,7 @@ func (ms *MockState) TempDir() string {
 	return ms.t.TempDir()
 }
 
-func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error {
+func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte) error {
 	// updates already merged by trie
 	if ms.concurrent.Load() {
 		ms.mu.Lock()
@@ -357,7 +356,7 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 	hashed := make([]string, 0, len(ub.keyset)+len(ub.keyset2))
 	preimages := make(map[string][]byte)
 	preimages2 := make(map[string][]byte)
-	keccak := sha3.NewLegacyKeccak256()
+	keccak := keccak.NewFastKeccak()
 	for key := range ub.keyset {
 		keccak.Reset()
 		keccak.Write([]byte(key))

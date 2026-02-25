@@ -32,7 +32,6 @@ var (
 )
 
 type sd interface {
-	SetBlockNum(blockNum uint64)
 	SetTxNum(blockNum uint64)
 	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
@@ -121,8 +120,8 @@ func (sdc *SharedDomainsCommitmentContext) HasPendingUpdate() bool {
 // to ensure the previously deferred update is applied before processing new ones.
 func (sdc *SharedDomainsCommitmentContext) flushPendingUpdate(putter kv.TemporalPutDel) error {
 	upd := sdc.pendingUpdate
-	putBranch := func(prefix, data, prevData []byte, prevStep kv.Step) error {
-		return putter.DomainPut(kv.CommitmentDomain, prefix, data, upd.TxNum, prevData, prevStep)
+	putBranch := func(prefix, data, prevData []byte) error {
+		return putter.DomainPut(kv.CommitmentDomain, prefix, data, upd.TxNum, prevData)
 	}
 	if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
 		return err
@@ -356,7 +355,7 @@ func (e *errorTrieContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	return nil, 0, e.err
 }
 
-func (e *errorTrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error {
+func (e *errorTrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
 	return e.err
 }
 
@@ -478,7 +477,7 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieCon
 	if err != nil {
 		return err
 	}
-	prevState, prevStep, err := trieContext.Branch(KeyCommitmentState)
+	prevState, _, err := trieContext.Branch(KeyCommitmentState)
 	if err != nil {
 		return err
 	}
@@ -493,7 +492,7 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieCon
 		return nil
 	}
 
-	return trieContext.PutBranch(KeyCommitmentState, encodedState, prevState, prevStep)
+	return trieContext.PutBranch(KeyCommitmentState, encodedState, prevState)
 }
 
 // Encodes current trie state and returns it
@@ -583,7 +582,7 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	return sdc.readDomain(kv.CommitmentDomain, pref)
 }
 
-func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep kv.Step) error {
+func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
 	if sdc.stateReader.WithHistory() { // do not store branches if explicitly operate on history
 		return nil
 	}
@@ -595,7 +594,7 @@ func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte, p
 	//	defer sdc.mu.Unlock()
 	//}
 
-	return sdc.putter.DomainPut(kv.CommitmentDomain, prefix, data, sdc.txNum, prevData, prevStep)
+	return sdc.putter.DomainPut(kv.CommitmentDomain, prefix, data, sdc.txNum, prevData)
 }
 
 func (sdc *TrieContext) TxNum() uint64 {
