@@ -210,7 +210,7 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	// A history reader that reads:
 	//   - commitment data as-of the beginning of the block
 	//   - account/storage/code data as-of the end of the block
-	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewSplitHistoryReader(tx, fromTxNum, toTxNum))
+	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewSplitHistoryReader(tx, fromTxNum, toTxNum /* withHistory */, false))
 	sd.GetCommitmentCtx().SetTrace(bt.logger.Enabled(ctx, log.LvlTrace))
 	sd.GetCommitmentCtx().EnableCsvMetrics(deriveBlockMetricsFilePrefix(blockOutputDir))
 	latestTxNum, latestBlockNum, err := sd.SeekCommitment(ctx, tx)

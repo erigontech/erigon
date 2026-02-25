@@ -133,55 +133,65 @@ func (r *LimitedHistoryStateReader) Clone(tx kv.TemporalTx) StateReader {
 	return NewLimitedHistoryStateReader(tx, r.sharedDomains, r.limitReadAsOfTxNum)
 }
 
-// splitStateReader implements commitmentdb.StateReader using (potentially) different state readers for commitment
+// SplitStateReader implements commitmentdb.StateReader using (potentially) different state readers for commitment
 // data and account/storage/code data.
-type splitStateReader struct {
+type SplitStateReader struct {
 	commitmentReader StateReader
 	plainStateReader StateReader
 	withHistory      bool
 }
 
-var _ StateReader = (*splitStateReader)(nil)
+var _ StateReader = (*SplitStateReader)(nil)
 
-func (r *splitStateReader) WithHistory() bool {
+func (r *SplitStateReader) WithHistory() bool {
 	return r.withHistory
 }
 
-func (r *splitStateReader) CheckDataAvailable(_ kv.Domain, _ kv.Step) error {
+func (r *SplitStateReader) CheckDataAvailable(_ kv.Domain, _ kv.Step) error {
 	return nil
 }
 
-func (r *splitStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
+func (r *SplitStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
 	if d == kv.CommitmentDomain {
 		return r.commitmentReader.Read(d, plainKey, stepSize)
 	}
 	return r.plainStateReader.Read(d, plainKey, stepSize)
 }
 
-func (r *splitStateReader) Clone(tx kv.TemporalTx) StateReader {
+func (r *SplitStateReader) Clone(tx kv.TemporalTx) StateReader {
 	return NewCommitmentSplitStateReader(r.commitmentReader.Clone(tx), r.plainStateReader.Clone(tx), r.withHistory)
 }
 
-func NewCommitmentSplitStateReader(commitmentReader StateReader, plainStateReader StateReader, withHistory bool) *splitStateReader {
-	return &splitStateReader{
+func NewCommitmentSplitStateReader(commitmentReader StateReader, plainStateReader StateReader, withHistory bool) *SplitStateReader {
+	return &SplitStateReader{
 		commitmentReader: commitmentReader,
 		plainStateReader: plainStateReader,
 		withHistory:      withHistory,
 	}
 }
 
-func NewCommitmentReplayStateReader(ttx, tx kv.TemporalTx, tsd sd, plainStateAsOf uint64) *splitStateReader {
-	// Claim that during replay we do not operate on history, so we can temporarily save commitment state
-	return NewCommitmentSplitStateReader(NewLatestStateReader(ttx, tsd), NewHistoryStateReader(tx, plainStateAsOf), false)
+type CommitmentReplayStateReader struct {
+	*SplitStateReader
+}
+
+func NewCommitmentReplayStateReader(ttx, tx kv.TemporalTx, tsd sd, plainStateAsOf uint64) *CommitmentReplayStateReader {
+	return &CommitmentReplayStateReader{
+		NewCommitmentSplitStateReader(NewLatestStateReader(ttx, tsd), NewHistoryStateReader(tx, plainStateAsOf), false),
+	}
+}
+
+func (crsr *CommitmentReplayStateReader) Clone(tx kv.TemporalTx) StateReader {
+	// do nothing
+	return crsr
 }
 
 // A history reader that reads:
 //   - commitment data as-of  commitmentAsOf txnum
 //   - account/storage/code data as-of plainsStateAsOf txnum
-func NewSplitHistoryReader(tx kv.TemporalTx, commitmentAsOf uint64, plainStateAsOf uint64) *splitStateReader {
-	return &splitStateReader{
+func NewSplitHistoryReader(tx kv.TemporalTx, commitmentAsOf uint64, plainStateAsOf uint64, withHistory bool) *SplitStateReader {
+	return &SplitStateReader{
 		commitmentReader: NewHistoryStateReader(tx, commitmentAsOf),
 		plainStateReader: NewHistoryStateReader(tx, plainStateAsOf),
-		withHistory:      false, // we lie, it is without history so we can exercise SharedDomain's in-memory DomainPut(kv.CommitmmentDomain)
+		withHistory:      withHistory,
 	}
 }
