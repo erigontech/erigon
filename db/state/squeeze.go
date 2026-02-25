@@ -437,7 +437,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	txNumsReader := blockReader.TxnumReader()
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 	defer rwDb.Debug().EnableReadAhead().DisableReadAhead()
-	a.DisableAllDependencies()
+	a.DisableInterDomainDependencies()
 
 	// Disable ReplaceKeysInValues before main loop; will be re-enabled for squeeze pass
 	a.ForTestReplaceKeysInValues(kv.CommitmentDomain, false)

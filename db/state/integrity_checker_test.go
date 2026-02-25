@@ -10,6 +10,7 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -95,6 +96,69 @@ func TestDependency_UnindexedMerged(t *testing.T) {
 	assertFn(0, 1, true, true, true)
 	assertFn(1, 2, true, true, true)
 	assertFn(0, 2, true, false, true)
+}
+
+func TestDependency_DisableInterDomain(t *testing.T) {
+	// DisableInterDomain should bypass domain→domain (inter-domain) checks
+	// while preserving II→history (intra-domain) checks.
+	//
+	// Setup:
+	//   commitment domain files: 0-1, 1-2
+	//   account domain files:    0-1, 1-2, 0-2
+	//   history files:           0-1, 1-2 (no 0-2)
+	//
+	// Inter-domain dep: account domain → commitment domain
+	//   account 0-2 has no matching commitment 0-2 → should FAIL normally
+	// Intra-domain dep: commitment II → commitment history
+	//   II 0-2 has no matching history 0-2 → should FAIL
+
+	dirs := datadir.New(t.TempDir())
+	logger := log.New()
+
+	// commitment domain files: 0-1, 1-2
+	commitmentFiles := btree.NewBTreeGOptions(filesItemLess, btree.Options{Degree: 128, NoLocks: false})
+	commitmentFiles.Set(getPopulatedCommitmentFilesItem(t, dirs, 0, 1, false, logger))
+	commitmentFiles.Set(getPopulatedCommitmentFilesItem(t, dirs, 1, 2, false, logger))
+
+	// history files: 0-1, 1-2 (simulating no merged 0-2)
+	historyFiles := btree.NewBTreeGOptions(filesItemLess, btree.Options{Degree: 128, NoLocks: false})
+	historyFiles.Set(getPopulatedCommitmentFilesItem(t, dirs, 0, 1, false, logger))
+	historyFiles.Set(getPopulatedCommitmentFilesItem(t, dirs, 1, 2, false, logger))
+
+	checker := NewDependencyIntegrityChecker(dirs, logger)
+
+	// Inter-domain: account → commitment
+	checker.AddDependency(AccountDomainUniversal, &DependentInfo{
+		entity:      CommitmentDomainUniversal,
+		filesGetter: func() *btree.BTreeG[*FilesItem] { return commitmentFiles.Copy() },
+		accessors:   statecfg.AccessorHashMap,
+	})
+
+	// Intra-domain: commitment II → commitment history
+	commitmentII := FromII(kv.CommitmentHistoryIdx)
+	checker.AddDependency(commitmentII, &DependentInfo{
+		entity:      commitmentII,
+		filesGetter: func() *btree.BTreeG[*FilesItem] { return historyFiles.Copy() },
+		accessors:   statecfg.AccessorHashMap,
+	})
+
+	// Before DisableInterDomain: both should enforce
+	require.True(t, checker.CheckDependentPresent(AccountDomainUniversal, All, 0, 1))
+	require.False(t, checker.CheckDependentPresent(AccountDomainUniversal, All, 0, 2)) // no commitment 0-2
+	require.True(t, checker.CheckDependentPresent(commitmentII, All, 0, 1))
+	require.False(t, checker.CheckDependentPresent(commitmentII, All, 0, 2)) // no history 0-2
+
+	// DisableInterDomain: inter-domain bypassed, intra-domain still active
+	checker.DisableInterDomain()
+	require.True(t, checker.CheckDependentPresent(AccountDomainUniversal, All, 0, 1))
+	require.True(t, checker.CheckDependentPresent(AccountDomainUniversal, All, 0, 2)) // bypassed
+	require.True(t, checker.CheckDependentPresent(commitmentII, All, 0, 1))
+	require.False(t, checker.CheckDependentPresent(commitmentII, All, 0, 2)) // still enforced
+
+	// EnableInterDomain: both enforce again
+	checker.EnableInterDomain()
+	require.False(t, checker.CheckDependentPresent(AccountDomainUniversal, All, 0, 2))
+	require.False(t, checker.CheckDependentPresent(commitmentII, All, 0, 2))
 }
 
 func getPopulatedCommitmentFilesItem(t *testing.T, dirs datadir.Dirs, startTxNum, endTxNum uint64, noIndex bool, logger log.Logger) *FilesItem {

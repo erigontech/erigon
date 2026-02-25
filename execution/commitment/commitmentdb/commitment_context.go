@@ -705,8 +705,8 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 }
 
 type TrieContext struct {
-	getter kv.TemporalGetter
-	putter kv.TemporalPutDel
+	getter   kv.TemporalGetter
+	putter   kv.TemporalPutDel
 	txNum    uint64
 	blockNum uint64
 

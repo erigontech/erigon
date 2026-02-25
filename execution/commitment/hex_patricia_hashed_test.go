@@ -2586,7 +2586,7 @@ func Test_HexPatriciaHashed_PhantomKeys(t *testing.T) {
 		hph.Reset()
 
 		builder := NewUpdateBuilder().
-			Balance("f1", 150). // real change
+			Balance("f1", 150).       // real change
 			Storage("f1", "01", "dd") // real storage change
 
 		if includePhantoms {
