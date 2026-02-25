@@ -276,7 +276,13 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *e
 		signer = types.LatestSigner(gspec.Config)
 	)
 
-	m := execmoduletester.NewWithGenesisPruneMode(t, gspec, key, chainSize, prune.DefaultMode)
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithKey(key),
+		execmoduletester.WithBlockBufferSize(chainSize),
+		execmoduletester.WithPruneMode(prune.DefaultMode),
+	)
 
 	// Generate testing blocks
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {
