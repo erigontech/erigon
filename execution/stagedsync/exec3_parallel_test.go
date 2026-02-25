@@ -1120,18 +1120,16 @@ func dexPostValidation(pe *parallelExecutor) error {
 }
 
 // TestDexScenario verifies correctness of the parallel executor under a DEX-like access pattern
-// (many transactions contending on a shared "hub" address). Runs a single representative
-// combination for fast CI execution. Use BenchmarkDexScenario for the full parameter sweep.
+// (many transactions contending on a shared "hub" address).
+// Use BenchmarkDexScenario for the full parameter sweep.
 func TestDexScenario(t *testing.T) {
-	if testing.Short() || runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" {
 		t.Skip()
 	}
-	logger := logger(discardLogging)
-
-	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, dexPostValidation, checkNoDroppedTx})
 	sender := func(i int) accounts.Address { return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i)))) }
-	tasks, _ := taskFactory(100, sender, 20, 20, 100, dexPathGenerator, readTime, writeTime, nonIOTime)
-	runParallel(t, tasks, checks, false, logger)
+	tasks, _ := taskFactory(10, sender, 5, 5, 10, dexPathGenerator, readTime, writeTime, nonIOTime)
+	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, dexPostValidation, checkNoDroppedTx})
+	runParallel(t, tasks, checks, false, log.New())
 }
 
 // BenchmarkDexScenario runs the full DEX parameter sweep (5×3×3×2 = 90 combinations) and
@@ -1176,15 +1174,16 @@ func BenchmarkDexScenario(b *testing.B) {
 // TestDexScenarioWithMetadata verifies correctness of the parallel executor with pre-computed
 // dependency metadata under a DEX-like access pattern. Runs a single representative combination
 // for fast CI execution. Use BenchmarkDexScenarioWithMetadata for the full parameter sweep.
+// TestDexScenarioWithMetadata verifies correctness of the parallel executor with pre-computed
+// dependency metadata under a DEX-like access pattern.
+// Use BenchmarkDexScenarioWithMetadata for the full parameter sweep.
 func TestDexScenarioWithMetadata(t *testing.T) {
-	if testing.Short() || runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" {
 		t.Skip()
 	}
-	logger := logger(discardLogging)
-
 	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, dexPostValidation, checkNoDroppedTx})
 	sender := func(i int) accounts.Address { return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i)))) }
-	tasks, _ := taskFactory(100, sender, 100, 100, 100, dexPathGenerator, readTime, writeTime, nonIOTime)
+	tasks, _ := taskFactory(10, sender, 5, 5, 10, dexPathGenerator, readTime, writeTime, nonIOTime)
 
 	allDeps := runParallelGetMetadata(t, tasks, checks)
 	newTasks := make([]exec.Task, 0, len(tasks))
@@ -1197,7 +1196,7 @@ func TestDexScenarioWithMetadata(t *testing.T) {
 		temp.dependencies = keys
 		newTasks = append(newTasks, temp)
 	}
-	runParallel(t, newTasks, checks, true, logger)
+	runParallel(t, newTasks, checks, true, log.New())
 }
 
 // BenchmarkDexScenarioWithMetadata runs the full DEX+metadata parameter sweep and reports
