@@ -1297,8 +1297,8 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 	defer func(t time.Time) { fmt.Printf("domain_test.go:1243: %s\n", time.Since(t)) }(time.Now())
 	ctx := context.Background()
 	ps := background.NewProgressSet()
-	for step := kv.Step(0); step < kv.Step(uint64(len(vals))/d.stepSize); step++ {
 
+	processStep := func(step kv.Step) {
 		domainRoTx := d.BeginFilesRo()
 		defer domainRoTx.Close()
 
@@ -1332,6 +1332,10 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 
 		logEvery.Stop()
+	}
+
+	for step := kv.Step(0); step < kv.Step(uint64(len(vals))/d.stepSize); step++ {
+		processStep(step)
 	}
 
 	defer func(t time.Time) { fmt.Printf("domain_test.go:1283: %s\n", time.Since(t)) }(time.Now())
