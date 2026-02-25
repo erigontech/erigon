@@ -28,6 +28,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -120,12 +121,23 @@ func (hph *HexPatriciaHashed) SpawnSubTrie(ctx PatriciaContext, forNibble int) *
 	return subTrie
 }
 
+var hphPool sync.Pool
+
 func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext) *HexPatriciaHashed {
+	hph, ok := hphPool.Get().(*HexPatriciaHashed)
+	if !ok {
+		hph = newHexPatriciaHashed()
+	}
+	hph.resetForReuse()
+	hph.accountKeyLen = accountKeyLen
+	hph.ctx = ctx
+	return hph
+}
+
+func newHexPatriciaHashed() *HexPatriciaHashed {
 	hph := &HexPatriciaHashed{
-		ctx:           ctx,
 		keccak:        keccak.NewFastKeccak(),
 		keccak2:       keccak.NewFastKeccak(),
-		accountKeyLen: accountKeyLen,
 		auxBuffer:     bytes.NewBuffer(make([]byte, 8192)),
 		hadToLoadL:    make(map[uint64]skipStat),
 		accValBuf:     make(rlp.RlpEncodedBytes, 128),
@@ -136,6 +148,72 @@ func NewHexPatriciaHashed(accountKeyLen int16, ctx PatriciaContext) *HexPatricia
 	hph.branchEncoder.setMetrics(hph.metrics)
 	hph.branchEncoder.SetDeferUpdates(true) // Enable deferred branch updates by default
 	return hph
+}
+
+// resetForReuse resets all mutable state so a pooled HexPatriciaHashed is safe to reuse.
+// The large grid array is NOT zeroed — activeRows=0 means no cells are live,
+// and cells are properly initialized via cell.reset() during unfold/fold.
+func (hph *HexPatriciaHashed) resetForReuse() {
+	// SetState(nil) resets: root, rootTouched, rootChecked, rootPresent,
+	// currentKeyLen, activeRows, depths, branchBefore, touchMap, afterMap.
+	hph.root.reset()
+	hph.rootTouched = false
+	hph.rootChecked = false
+	hph.rootPresent = false
+	hph.currentKeyLen = 0
+	hph.activeRows = 0
+	for i := range hph.depths {
+		hph.depths[i] = 0
+		hph.branchBefore[i] = false
+		hph.touchMap[i] = 0
+		hph.afterMap[i] = 0
+	}
+
+	// ctx — set by caller after pool get
+	hph.ctx = nil
+
+	// reuse map, don't reallocate
+	clear(hph.hadToLoadL)
+
+	// reuse slice backing
+	hph.mountedTries = hph.mountedTries[:0]
+	hph.mounted = false
+	hph.mountedNib = 0
+
+	// warmup cache
+	hph.cache = nil
+	hph.enableWarmupCache = false
+
+	// tracing / capture
+	hph.capture = nil
+	hph.trace = false
+	hph.traceDomain = false
+
+	// flags
+	hph.memoizationOff = false
+	hph.leaveDeferredForCaller = false
+
+	// auxiliary buffer
+	hph.auxBuffer.Reset()
+
+	// branch encoder: clear deferred updates, reset buffer, nil cache, re-enable deferred
+	hph.branchEncoder.ClearDeferred()
+	hph.branchEncoder.buf.Reset()
+	hph.branchEncoder.cache = nil
+	hph.branchEncoder.SetDeferUpdates(true)
+
+	// depth-to-txnum mapping
+	clear(hph.depthsToTxNum[:])
+}
+
+// Release returns this HexPatriciaHashed to the pool for reuse.
+// After calling Release, the caller must not use the struct.
+func (hph *HexPatriciaHashed) Release() {
+	hph.ctx = nil
+	hph.cache = nil
+	hph.mountedTries = nil
+	hph.capture = nil
+	hphPool.Put(hph)
 }
 
 type cell struct {
