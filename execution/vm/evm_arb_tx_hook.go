@@ -94,3 +94,6 @@ func (p DefaultTxProcessor) ExecuteWASM(scope *CallContext, input []byte, evm *E
 func (d DefaultTxProcessor) IsCalldataPricingIncreaseEnabled() bool {
 	return true
 }
+
+func (evm *EVM) IncDepth() { evm.depth++ }
+func (evm *EVM) DecDepth() { evm.depth-- }

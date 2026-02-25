@@ -166,6 +166,11 @@ func (evm *EVM) Cancel() { evm.abort.Store(true) }
 // Cancelled returns true if Cancel has been called
 func (evm *EVM) Cancelled() bool { return evm.abort.Load() }
 
+// Depth returns the current call depth
+func (evm *EVM) Depth() int {
+	return evm.depth
+}
+
 // CallGasTemp returns the callGasTemp for the EVM
 func (evm *EVM) CallGasTemp() uint64 {
 	return evm.callGasTemp
@@ -175,6 +180,9 @@ func (evm *EVM) CallGasTemp() uint64 {
 func (evm *EVM) SetCallGasTemp(gas uint64) {
 	evm.callGasTemp = gas
 }
+
+func (evm *EVM) ReadOnly() bool        { return evm.readOnly }
+func (evm *EVM) SetReturnData(d []byte) { evm.returnData = d }
 
 // SetPrecompiles sets the precompiles for the EVM
 func (evm *EVM) SetPrecompiles(precompiles PrecompiledContracts) {

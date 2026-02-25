@@ -23,8 +23,10 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/arb/multigas"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -53,6 +55,10 @@ type Contract struct {
 	CodeHash accounts.CodeHash
 
 	value uint256.Int
+
+	Gas              uint64
+	UsedMultiGas     multigas.MultiGas
+	RetainedMultiGas multigas.MultiGas
 
 	DelegateOrCallcode bool
 	IsDeployment       bool
@@ -144,4 +150,26 @@ func (c *Contract) Value() uint256.Int {
 
 func (c *Contract) IsDelegateOrCallcode() bool {
 	return c.DelegateOrCallcode
+}
+
+func (c *Contract) UseGas(cost uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) bool {
+	if cost > c.Gas {
+		return false
+	}
+	c.Gas -= cost
+	return true
+}
+
+func (c *Contract) UseMultiGas(mg multigas.MultiGas, tracer *tracing.Hooks, reason tracing.GasChangeReason) bool {
+	cost := mg.SingleGas()
+	if cost > c.Gas {
+		return false
+	}
+	c.Gas -= cost
+	c.UsedMultiGas.SaturatingAddInto(mg)
+	return true
+}
+
+func (c *Contract) GetTotalUsedMultiGas() multigas.MultiGas {
+	return c.UsedMultiGas.SaturatingSub(c.RetainedMultiGas)
 }
