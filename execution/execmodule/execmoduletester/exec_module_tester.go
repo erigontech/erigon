@@ -293,7 +293,7 @@ func WithPruneMode(pm prune.Mode) Option {
 
 func WithBlockBufferSize(size int) Option {
 	return func(opts *options) {
-		opts.blockBufSize = size
+		opts.blockBufferSize = size
 	}
 }
 
@@ -317,7 +317,7 @@ type options struct {
 	key             *ecdsa.PrivateKey
 	engine          rules.Engine
 	pruneMode       *prune.Mode
-	blockBufSize    int
+	blockBufferSize int
 	withTxPool      bool
 }
 
@@ -325,10 +325,10 @@ func applyOptions(opts []Option) options {
 	defaultKey, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	defaultPruneMode := prune.MockMode
 	opt := options{
-		key:          defaultKey,
-		pruneMode:    &defaultPruneMode,
-		blockBufSize: 128,
-		chainConfig:  chain.TestChainConfig,
+		key:             defaultKey,
+		pruneMode:       &defaultPruneMode,
+		blockBufferSize: 128,
+		chainConfig:     chain.TestChainConfig,
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -365,7 +365,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	key := opt.key
 	engine := opt.engine
 	pruneMode := *opt.pruneMode
-	bufSize := opt.blockBufSize
+	blockBufferSize := opt.blockBufferSize
 	withTxPool := opt.withTxPool
 	tmpdir, err := os.MkdirTemp("", "mock-sentry-*")
 	if err != nil {
@@ -554,7 +554,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		sentries,
 		cfg.Sync,
 		mock.BlockReader,
-		bufSize,
+		blockBufferSize,
 		statusDataProvider,
 		false,
 		maxBlockBroadcastPeers,
