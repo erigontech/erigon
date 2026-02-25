@@ -131,6 +131,7 @@ jobs:
       group: "selfhosted-win"
 
     steps:
+      # not needed on self-hosted runner. already configured.
       #- name: Configure Pagefile
       #  uses: al-cheb/configure-pagefile-action@v1.5
       #  with:
@@ -153,6 +154,7 @@ jobs:
           go-version: '>=1.25'
           cache: true
 
+      # "make" already preinstalled:
       #- name: Install make
       #  run: choco install make -y
 
@@ -160,6 +162,11 @@ jobs:
         if: needs.source-of-changes.outputs.changed_files != 'true'
         shell: bash
         run: make test-all
+
+      - name: Cleanup
+        if: always()
+        run: |
+          Remove-Item -Path "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue
 
       - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
         if: needs.source-of-changes.outputs.changed_files == 'true'
