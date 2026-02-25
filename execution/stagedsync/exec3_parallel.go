@@ -120,7 +120,7 @@ func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u U
 
 	// restoreTxNum must run before pe.run() so that doms.SetTxNum() completes
 	// before any goroutine reads txNum (via AsGetter/GetLatest).
-	restoredTxNum, _, _, _, err := restoreTxNum(ctx, &pe.cfg, rwTx, pe.doms, maxBlockNum)
+	restoredTxNum, _, _, _, err := restoreTxNum(ctx, &pe.cfg, rwTx, inputTxNum, maxBlockNum)
 	if err != nil {
 		return nil, rwTx, err
 	}
