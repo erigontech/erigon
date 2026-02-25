@@ -66,6 +66,7 @@ type ForkChoiceStorageMock struct {
 	SyncContributionPool      sync_contribution_pool.SyncContributionPool
 	Headers                   map[common.Hash]*cltypes.BeaconBlockHeader
 	Blocks                    map[common.Hash]*cltypes.SignedBeaconBlock
+	Envelopes                 map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	GetBeaconCommitteeMock    func(slot, committeeIndex uint64) ([]uint64, error)
 
 	Pool pool.OperationsPool
@@ -198,6 +199,7 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		LCUpdates:                 make(map[uint64]*cltypes.LightClientUpdate),
 		Headers:                   make(map[common.Hash]*cltypes.BeaconBlockHeader),
 		Blocks:                    make(map[common.Hash]*cltypes.SignedBeaconBlock),
+		Envelopes:                 make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
 		GetBeaconCommitteeMock:    nil,
 		Eth1Hashes:                make(map[common.Hash]common.Hash),
 		SyncContributionPool:      makeSyncContributionPoolMock(t),
@@ -388,6 +390,15 @@ func (f *ForkChoiceStorageMock) GetBlock(
 	blockRoot common.Hash,
 ) (*cltypes.SignedBeaconBlock, bool) {
 	return f.Blocks[blockRoot], f.Blocks[blockRoot] != nil
+}
+
+func (f *ForkChoiceStorageMock) HasEnvelope(blockRoot common.Hash) bool {
+	_, ok := f.Envelopes[blockRoot]
+	return ok
+}
+
+func (f *ForkChoiceStorageMock) ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	return f.Envelopes[blockRoot], nil
 }
 
 func (f *ForkChoiceStorageMock) GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error) {

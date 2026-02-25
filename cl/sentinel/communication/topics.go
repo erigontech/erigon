@@ -43,6 +43,9 @@ const LightClientUpdatesByRangeTopic = "/light_client_updates_by_range"
 const DataColumnSidecarsByRangeTopic = "/data_column_sidecars_by_range"
 const DataColumnSidecarsByRootTopic = "/data_column_sidecars_by_root"
 
+const ExecutionPayloadEnvelopesByRangeTopic = "/execution_payload_envelopes_by_range"
+const ExecutionPayloadEnvelopesByRootTopic = "/execution_payload_envelopes_by_root"
+
 // Request and Response protocol ids
 var (
 	PingProtocolV1    = ProtocolPrefix + PingTopic + Schema1 + EncodingProtocol
@@ -66,6 +69,9 @@ var (
 
 	DataColumnSidecarsByRootProtocolV1  = ProtocolPrefix + DataColumnSidecarsByRootTopic + Schema1 + EncodingProtocol
 	DataColumnSidecarsByRangeProtocolV1 = ProtocolPrefix + DataColumnSidecarsByRangeTopic + Schema1 + EncodingProtocol
+
+	ExecutionPayloadEnvelopesByRangeProtocolV1 = ProtocolPrefix + ExecutionPayloadEnvelopesByRangeTopic + Schema1 + EncodingProtocol
+	ExecutionPayloadEnvelopesByRootProtocolV1  = ProtocolPrefix + ExecutionPayloadEnvelopesByRootTopic + Schema1 + EncodingProtocol
 
 	LightClientOptimisticUpdateProtocolV1 = ProtocolPrefix + LightClientOptimisticUpdateTopic + Schema1 + EncodingProtocol
 	LightClientFinalityUpdateProtocolV1   = ProtocolPrefix + LightClientFinalityUpdateTopic + Schema1 + EncodingProtocol
