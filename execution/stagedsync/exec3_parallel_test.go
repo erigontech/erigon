@@ -322,8 +322,8 @@ func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonI
 	return exec, serialDuration
 }
 
-func testExecutorComb(t *testing.T, totalTxs []int, numReads []int, numWrites []int, numNonIO []int, taskRunner TaskRunner, logger log.Logger) {
-	t.Helper()
+func testExecutorComb(tb testing.TB, totalTxs []int, numReads []int, numWrites []int, numNonIO []int, taskRunner TaskRunner, logger log.Logger) {
+	tb.Helper()
 
 	improved := 0
 	total := 0
@@ -331,7 +331,7 @@ func testExecutorComb(t *testing.T, totalTxs []int, numReads []int, numWrites []
 	totalExecDuration := time.Duration(0)
 	totalSerialDuration := time.Duration(0)
 
-	fmt.Println("\n" + t.Name())
+	fmt.Println("\n" + tb.Name())
 	for _, numTx := range totalTxs {
 		for _, numRead := range numReads {
 			for _, numWrite := range numWrites {
@@ -364,8 +364,8 @@ func testExecutorComb(t *testing.T, totalTxs []int, numReads []int, numWrites []
 }
 
 // nolint: gocognit
-func testExecutorCombWithMetadata(t *testing.T, totalTxs []int, numReads []int, numWrites []int, numNonIOs []int, taskRunner TaskRunnerWithMetadata, logger log.Logger) {
-	t.Helper()
+func testExecutorCombWithMetadata(tb testing.TB, totalTxs []int, numReads []int, numWrites []int, numNonIOs []int, taskRunner TaskRunnerWithMetadata, logger log.Logger) {
+	tb.Helper()
 
 	improved := 0
 	improvedMetadata := 0
@@ -375,7 +375,7 @@ func testExecutorCombWithMetadata(t *testing.T, totalTxs []int, numReads []int, 
 	totalExecDuration := time.Duration(0)
 	totalExecDurationMetadata := time.Duration(0)
 	totalSerialDuration := time.Duration(0)
-	fmt.Println("\n" + t.Name())
+	fmt.Println("\n" + tb.Name())
 	for _, numTx := range totalTxs {
 		for _, numRead := range numReads {
 			for _, numWrite := range numWrites {
@@ -483,30 +483,36 @@ func checkNoDroppedTx(pe *parallelExecutor) error {
 	return nil
 }
 
-func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, metadata bool, logger log.Logger) time.Duration {
-	t.Helper()
+func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, metadata bool, logger log.Logger) time.Duration {
+	tb.Helper()
 
-	dirs := datadir.New(t.TempDir())
-	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	tmpDir, err := os.MkdirTemp("", "erigon-parallel-test-*")
+	if err != nil {
+		tb.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dirs := datadir.New(tmpDir)
+	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).MustOpen()
 
 	defer rawDb.Close()
 
 	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(context.Background(), rawDb)
-	assert.NoError(t, err)
+	assert.NoError(tb, err)
 	defer agg.Close()
 
 	db, err := temporal.New(rawDb, agg)
-	assert.NoError(t, err)
+	assert.NoError(tb, err)
 
 	tx, err := db.BeginTemporalRo(context.Background()) //nolint:gocritic
-	assert.NoError(t, err)
+	assert.NoError(tb, err)
 	defer tx.Rollback()
 
 	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-	assert.NoError(t, err)
+	assert.NoError(tb, err)
 	defer domains.Close()
 
-	assert.NoError(t, err)
+	assert.NoError(tb, err)
 
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
 
@@ -525,8 +531,8 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 
 	executorContext, executorCancel, err := pe.run(context.Background())
 
-	assert.NoError(t, err, "error occur during parallel init")
-	assert.NoError(t, executorContext.Err(), "error occur during parallel init")
+	assert.NoError(tb, err, "error occur during parallel init")
+	assert.NoError(tb, executorContext.Err(), "error occur during parallel init")
 
 	defer executorCancel()
 
@@ -537,9 +543,9 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 	}
 
 	start := time.Now()
-	_, err = executeParallelWithCheck(t, pe, tasks, false, validation, metadata)
+	_, err = executeParallelWithCheck(tb, pe, tasks, false, validation, metadata)
 
-	assert.NoError(t, err, "error occur during parallel execution")
+	assert.NoError(tb, err, "error occur during parallel execution")
 
 	// Need to apply the final write set to storage
 
@@ -572,7 +578,7 @@ func runParallel(t *testing.T, tasks []exec.Task, validation propertyCheck, meta
 
 type propertyCheck func(*parallelExecutor) error
 
-func executeParallelWithCheck(t *testing.T, pe *parallelExecutor, tasks []exec.Task, profile bool, check propertyCheck, metadata bool) (result *blockResult, err error) {
+func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.Task, profile bool, check propertyCheck, metadata bool) (result *blockResult, err error) {
 	if len(tasks) == 0 {
 		return nil, nil
 	}
@@ -602,27 +608,33 @@ func executeParallelWithCheck(t *testing.T, pe *parallelExecutor, tasks []exec.T
 	return result, err
 }
 
-func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation propertyCheck) map[int]map[int]bool {
-	t.Helper()
+func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propertyCheck) map[int]map[int]bool {
+	tb.Helper()
 
 	logger := log.Root()
 
-	dirs := datadir.New(t.TempDir())
-	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	tmpDir, err := os.MkdirTemp("", "erigon-parallel-meta-*")
+	if err != nil {
+		tb.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dirs := datadir.New(tmpDir)
+	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).MustOpen()
 	defer rawDb.Close()
 	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(context.Background(), rawDb)
-	assert.NoError(t, err)
+	assert.NoError(tb, err)
 	defer agg.Close()
 
 	db, err := temporal.New(rawDb, agg)
-	assert.NoError(t, err)
+	assert.NoError(tb, err)
 
 	tx, err := db.BeginTemporalRo(context.Background()) //nolint:gocritic
-	assert.NoError(t, err)
+	assert.NoError(tb, err)
 	defer tx.Rollback()
 
 	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-	assert.NoError(t, err)
+	assert.NoError(tb, err)
 	defer domains.Close()
 
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
@@ -642,16 +654,16 @@ func runParallelGetMetadata(t *testing.T, tasks []exec.Task, validation property
 
 	executorContext, executorCancel, err := pe.run(context.Background())
 	defer executorCancel()
-	assert.NoError(t, err, "error occur during parallel init")
+	assert.NoError(tb, err, "error occur during parallel init")
 
 	for _, task := range tasks {
 		task := task.(*testExecTask)
 		task.ctx = executorContext //nolint:fatcontext
 	}
 
-	res, err := executeParallelWithCheck(t, pe, tasks, true, validation, false)
+	res, err := executeParallelWithCheck(tb, pe, tasks, true, validation, false)
 
-	assert.NoError(t, err, "error occur during parallel execution")
+	assert.NoError(tb, err, "error occur during parallel execution")
 
 	return res.AllDeps
 }
@@ -1083,11 +1095,52 @@ func TestTxWithLongTailReadWithMetadata(t *testing.T) {
 	testExecutorCombWithMetadata(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
 }
 
+// dexPostValidation checks that each tx correctly depends on the immediately preceding writer.
+func dexPostValidation(pe *parallelExecutor) error {
+	pe.RLock()
+	defer pe.RUnlock()
+	for blockNum, blockStatus := range pe.blockExecutors {
+		if blockStatus.validateTasks.maxComplete() == len(blockStatus.tasks) {
+			for i, inputs := range blockStatus.result.TxIO.Inputs() {
+				var err error
+				inputs.Scan(func(input *state.VersionedRead) bool {
+					if input.Version.TxIndex != i-1 {
+						err = fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, input.Version.TxIndex)
+						return false
+					}
+					return true
+				})
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// TestDexScenario verifies correctness of the parallel executor under a DEX-like access pattern
+// (many transactions contending on a shared "hub" address). Runs a single representative
+// combination for fast CI execution. Use BenchmarkDexScenario for the full parameter sweep.
 func TestDexScenario(t *testing.T) {
 	if testing.Short() || runtime.GOOS == "windows" {
 		t.Skip()
 	}
-	//t.Parallel()
+	logger := logger(discardLogging)
+
+	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, dexPostValidation, checkNoDroppedTx})
+	sender := func(i int) accounts.Address { return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i)))) }
+	tasks, _ := taskFactory(100, sender, 20, 20, 100, dexPathGenerator, readTime, writeTime, nonIOTime)
+	runParallel(t, tasks, checks, false, logger)
+}
+
+// BenchmarkDexScenario runs the full DEX parameter sweep (5×3×3×2 = 90 combinations) and
+// reports parallel speedup over expected serial duration.
+// Run with: go test -run='^$' -bench=BenchmarkDexScenario -benchtime=1x
+func BenchmarkDexScenario(b *testing.B) {
+	if runtime.GOOS == "windows" {
+		b.Skip()
+	}
 	logger := logger(discardLogging)
 
 	totalTxs := []int{10, 50, 100, 200, 300}
@@ -1095,47 +1148,65 @@ func TestDexScenario(t *testing.T) {
 	numWrites := []int{20, 100, 200}
 	numNonIO := []int{100, 500}
 
-	postValidation := func(pe *parallelExecutor) error {
-		pe.RLock()
-		defer pe.RUnlock()
-		for blockNum, blockStatus := range pe.blockExecutors {
-			if blockStatus.validateTasks.maxComplete() == len(blockStatus.tasks) {
-				for i, inputs := range blockStatus.result.TxIO.Inputs() {
-					var err error
-					inputs.Scan(func(input *state.VersionedRead) bool {
-						if input.Version.TxIndex != i-1 {
-							err = fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, input.Version.TxIndex)
-							return false
+	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, dexPostValidation, checkNoDroppedTx})
+
+	for _, numTx := range totalTxs {
+		for _, numRead := range numReads {
+			for _, numWrite := range numWrites {
+				for _, numNonIO := range numNonIO {
+					numTx, numRead, numWrite, numNonIO := numTx, numRead, numWrite, numNonIO
+					name := fmt.Sprintf("txs=%d/reads=%d/writes=%d/nonIO=%d", numTx, numRead, numWrite, numNonIO)
+					b.Run(name, func(b *testing.B) {
+						sender := func(i int) accounts.Address {
+							return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i))))
 						}
-						return true
+						tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, dexPathGenerator, readTime, writeTime, nonIOTime)
+						b.ResetTimer()
+						parallelDuration := runParallel(b, tasks, checks, false, logger)
+						if parallelDuration > 0 {
+							b.ReportMetric(float64(serialDuration)/float64(parallelDuration), "speedup")
+						}
 					})
-					if err != nil {
-						return err
-					}
 				}
 			}
 		}
-
-		return nil
 	}
-
-	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, postValidation, checkNoDroppedTx})
-
-	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration) {
-		sender := func(i int) accounts.Address { return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i)))) }
-		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, dexPathGenerator, readTime, writeTime, nonIOTime)
-
-		return runParallel(t, tasks, checks, false, logger), serialDuration
-	}
-
-	testExecutorComb(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
 }
 
+// TestDexScenarioWithMetadata verifies correctness of the parallel executor with pre-computed
+// dependency metadata under a DEX-like access pattern. Runs a single representative combination
+// for fast CI execution. Use BenchmarkDexScenarioWithMetadata for the full parameter sweep.
 func TestDexScenarioWithMetadata(t *testing.T) {
 	if testing.Short() || runtime.GOOS == "windows" {
 		t.Skip()
 	}
-	//t.Parallel()
+	logger := logger(discardLogging)
+
+	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, dexPostValidation, checkNoDroppedTx})
+	sender := func(i int) accounts.Address { return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i)))) }
+	tasks, _ := taskFactory(100, sender, 100, 100, 100, dexPathGenerator, readTime, writeTime, nonIOTime)
+
+	allDeps := runParallelGetMetadata(t, tasks, checks)
+	newTasks := make([]exec.Task, 0, len(tasks))
+	for _, task := range tasks {
+		temp := task.(*testExecTask)
+		keys := make([]int, 0, len(allDeps[temp.Version().TxIndex]))
+		for k := range allDeps[temp.Version().TxIndex] {
+			keys = append(keys, k)
+		}
+		temp.dependencies = keys
+		newTasks = append(newTasks, temp)
+	}
+	runParallel(t, newTasks, checks, true, logger)
+}
+
+// BenchmarkDexScenarioWithMetadata runs the full DEX+metadata parameter sweep and reports
+// speedup with and without pre-computed dependency metadata.
+// Run with: go test -run='^$' -bench=BenchmarkDexScenarioWithMetadata -benchtime=1x
+func BenchmarkDexScenarioWithMetadata(b *testing.B) {
+	if runtime.GOOS == "windows" {
+		b.Skip()
+	}
 	logger := logger(discardLogging)
 
 	totalTxs := []int{300}
@@ -1143,60 +1214,27 @@ func TestDexScenarioWithMetadata(t *testing.T) {
 	numWrites := []int{100, 200}
 	numNonIO := []int{100, 500}
 
-	postValidation := func(pe *parallelExecutor) error {
-		pe.RLock()
-		defer pe.RUnlock()
-		for blockNum, blockStatus := range pe.blockExecutors {
-			if blockStatus.validateTasks.maxComplete() == len(blockStatus.tasks) {
-				for i, inputs := range blockStatus.result.TxIO.Inputs() {
-					var err error
-					inputs.Scan(func(input *state.VersionedRead) bool {
-						if input.Version.TxIndex != i-1 {
-							err = fmt.Errorf("Blk %d, Tx %d should depend on tx %d, but it actually depends on %d", blockNum, i, i-1, input.Version.TxIndex)
-							return false
-						}
-						return true
-					})
-					if err != nil {
-						return err
-					}
-				}
-			}
-		}
-
-		return nil
-	}
-
-	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, postValidation, checkNoDroppedTx})
+	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, dexPostValidation, checkNoDroppedTx})
 
 	taskRunner := func(numTx int, numRead int, numWrite int, numNonIO int) (time.Duration, time.Duration, time.Duration) {
 		sender := func(i int) accounts.Address { return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i)))) }
 		tasks, serialDuration := taskFactory(numTx, sender, numRead, numWrite, numNonIO, dexPathGenerator, readTime, writeTime, nonIOTime)
 
-		parallelDuration := runParallel(t, tasks, checks, false, logger)
+		parallelDuration := runParallel(b, tasks, checks, false, logger)
 
-		allDeps := runParallelGetMetadata(t, tasks, checks)
-
+		allDeps := runParallelGetMetadata(b, tasks, checks)
 		newTasks := make([]exec.Task, 0, len(tasks))
-
-		for _, t := range tasks {
-			temp := t.(*testExecTask)
-
-			keys := make([]int, len(allDeps[temp.Version().TxIndex]))
-
-			i := 0
-
+		for _, task := range tasks {
+			temp := task.(*testExecTask)
+			keys := make([]int, 0, len(allDeps[temp.Version().TxIndex]))
 			for k := range allDeps[temp.Version().TxIndex] {
-				keys[i] = k
-				i++
+				keys = append(keys, k)
 			}
-
 			temp.dependencies = keys
 			newTasks = append(newTasks, temp)
 		}
-
-		return parallelDuration, runParallel(t, newTasks, checks, true, logger), serialDuration
+		return parallelDuration, runParallel(b, newTasks, checks, true, logger), serialDuration
 	}
 
-	testExecutorCombWithMetadata(t, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
+	testExecutorCombWithMetadata(b, totalTxs, numReads, numWrites, numNonIO, taskRunner, logger)
 }
