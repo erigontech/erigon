@@ -770,7 +770,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 	return tx.Commit()
 }
 
-func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) (retErr error) {
 	if chainTipMode && noCommit {
 		return errors.New("--sync.mode.chaintip cannot work with --no-commit to be false")
 	}
@@ -844,7 +844,12 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	defer func() {
-		if noCommit {
+		// Always rollback on error to avoid committing inconsistent state.
+		// For example, if doms.Flush is interrupted mid-way by context cancellation,
+		// the MDBX tx may have partial domain writes (e.g. account state updated but
+		// commitment domain not yet written), which would cause "nonce too low" errors
+		// on restart. Rolling back ensures the DB stays at the last consistent checkpoint.
+		if retErr != nil || noCommit {
 			tx.Rollback()
 		} else {
 			tx.Commit()
