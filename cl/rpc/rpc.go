@@ -180,6 +180,65 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRangeReqV1(
 	return ColumnSidecars, pid, nil
 }
 
+// SendExecutionPayloadEnvelopesByRangeReq retrieves execution payload envelopes by slot range.
+// [New in Gloas:EIP7732]
+func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Context, start, count uint64) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error) {
+	var buf buffer.Buffer
+	if err := ssz_snappy.EncodeAndWrite(&buf, &cltypes.ExecutionPayloadEnvelopesByRangeRequest{
+		StartSlot: start,
+		Count:     count,
+	}); err != nil {
+		return nil, "", err
+	}
+
+	responsePacket, pid, err := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRangeProtocolV1, buf.Bytes())
+	if err != nil {
+		return nil, pid, err
+	}
+
+	envelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 0, len(responsePacket))
+	for _, data := range responsePacket {
+		envelope := &cltypes.SignedExecutionPayloadEnvelope{
+			Message: cltypes.NewExecutionPayloadEnvelope(b.beaconConfig),
+		}
+		if err := envelope.DecodeSSZ(data.raw, int(data.version)); err != nil {
+			return nil, pid, err
+		}
+		envelopes = append(envelopes, envelope)
+	}
+	return envelopes, pid, nil
+}
+
+// SendExecutionPayloadEnvelopesByRootReq retrieves execution payload envelopes by block root.
+// [New in Gloas:EIP7732]
+func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRootReq(ctx context.Context, roots [][32]byte) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error) {
+	var req solid.HashListSSZ = solid.NewHashList(int(b.beaconConfig.MaxRequestBlocksDeneb))
+	for _, root := range roots {
+		req.Append(root)
+	}
+	var buf buffer.Buffer
+	if err := ssz_snappy.EncodeAndWrite(&buf, req); err != nil {
+		return nil, "", err
+	}
+
+	responsePacket, pid, err := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRootProtocolV1, buf.Bytes())
+	if err != nil {
+		return nil, pid, err
+	}
+
+	envelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 0, len(responsePacket))
+	for _, data := range responsePacket {
+		envelope := &cltypes.SignedExecutionPayloadEnvelope{
+			Message: cltypes.NewExecutionPayloadEnvelope(b.beaconConfig),
+		}
+		if err := envelope.DecodeSSZ(data.raw, int(data.version)); err != nil {
+			return nil, pid, err
+		}
+		envelopes = append(envelopes, envelope)
+	}
+	return envelopes, pid, nil
+}
+
 // SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
 func (b *BeaconRpcP2P) SendBlobsSidecarByIdentifierReq(ctx context.Context, req *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
 	var buffer buffer.Buffer
