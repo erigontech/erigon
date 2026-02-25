@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
@@ -254,8 +253,6 @@ func (emt *ExecModuleTester) NodeInfo(context.Context, *emptypb.Empty) (*typespr
 	return nil, nil
 }
 
-const blockBufferSize = 128
-
 type Option func(*options)
 
 func WithStepSize(stepSize uint64) Option {
@@ -270,43 +267,106 @@ func WithExperimentalBAL() Option {
 	}
 }
 
+func WithGenesisSpec(gspec *types.Genesis) Option {
+	return func(opts *options) {
+		opts.genesis = gspec
+	}
+}
+
+func WithKey(key *ecdsa.PrivateKey) Option {
+	return func(opts *options) {
+		opts.key = key
+	}
+}
+
+func WithEngine(engine rules.Engine) Option {
+	return func(opts *options) {
+		opts.engine = engine
+	}
+}
+
+func WithPruneMode(pm prune.Mode) Option {
+	return func(opts *options) {
+		opts.pruneMode = &pm
+	}
+}
+
+func WithBlockBufferSize(size int) Option {
+	return func(opts *options) {
+		opts.blockBufSize = size
+	}
+}
+
+func WithTxPool() Option {
+	return func(opts *options) {
+		opts.withTxPool = true
+	}
+}
+
+func WithChainConfig(cfg *chain.Config) Option {
+	return func(opts *options) {
+		opts.chainConfig = cfg
+	}
+}
+
 type options struct {
 	stepSize        *uint64
 	experimentalBAL bool
+	genesis         *types.Genesis
+	chainConfig     *chain.Config
+	key             *ecdsa.PrivateKey
+	engine          rules.Engine
+	pruneMode       *prune.Mode
+	blockBufSize    int
+	withTxPool      bool
 }
 
 func applyOptions(opts []Option) options {
-	var opt options
+	defaultKey, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	defaultPruneMode := prune.MockMode
+	opt := options{
+		key:          defaultKey,
+		pruneMode:    &defaultPruneMode,
+		blockBufSize: 128,
+		chainConfig:  chain.TestChainConfig,
+	}
 	for _, o := range opts {
 		o(&opt)
+	}
+	// genesis depends on key and chainConfig
+	if opt.genesis == nil {
+		address := crypto.PubkeyToAddress(opt.key.PublicKey)
+		opt.genesis = &types.Genesis{
+			Config: opt.chainConfig,
+			Alloc: types.GenesisAlloc{
+				address: {Balance: big.NewInt(1 * common.Ether)},
+			},
+		}
+	}
+	// engine depends on genesis
+	if opt.engine == nil {
+		switch {
+		case opt.genesis.Config.Bor != nil:
+			opt.engine = bor.NewFaker()
+		default:
+			opt.engine = ethash.NewFaker()
+		}
 	}
 	return opt
 }
 
-func NewWithGenesis(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, opts ...Option) *ExecModuleTester {
-	return NewWithGenesisPruneMode(tb, gspec, key, blockBufferSize, prune.MockMode, opts...)
-}
-
-func NewWithGenesisEngine(tb testing.TB, gspec *types.Genesis, engine rules.Engine, opts ...Option) *ExecModuleTester {
-	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	return NewWithEverything(tb, gspec, key, prune.MockMode, engine, blockBufferSize, false, opts...)
-}
-
-func NewWithGenesisPruneMode(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, blockBufferSize int, prune prune.Mode, opts ...Option) *ExecModuleTester {
-	var engine rules.Engine
-
-	switch {
-	case gspec.Config.Bor != nil:
-		engine = bor.NewFaker()
-	default:
-		engine = ethash.NewFaker()
-	}
-
-	return NewWithEverything(tb, gspec, key, prune, engine, blockBufferSize, false, opts...)
-}
-
-func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKey, prune prune.Mode, engine rules.Engine, blockBufferSize int, withTxPool bool, opts ...Option) *ExecModuleTester {
+// New creates an ExecModuleTester. When called with no options, it uses
+// sensible defaults (TestChainConfig, 1 Ether alloc, ethash.NewFaker, etc.).
+// Use With* options to customise.
+func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	opt := applyOptions(opts)
+
+	gspec := opt.genesis
+	key := opt.key
+	engine := opt.engine
+	pruneMode := *opt.pruneMode
+	bufSize := opt.blockBufSize
+	withTxPool := opt.withTxPool
 	tmpdir, err := os.MkdirTemp("", "mock-sentry-*")
 	if err != nil {
 		panic(err)
@@ -332,7 +392,7 @@ func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKe
 	cfg.ChaosMonkey = false
 	cfg.Snapshot.ChainName = gspec.Config.ChainName
 	cfg.Genesis = gspec
-	cfg.Prune = prune
+	cfg.Prune = pruneMode
 	cfg.ExperimentalBAL = opt.experimentalBAL
 	cfg.FcuBackgroundPrune = false
 	cfg.FcuBackgroundCommit = false
@@ -494,7 +554,7 @@ func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKe
 		sentries,
 		cfg.Sync,
 		mock.BlockReader,
-		blockBufferSize,
+		bufSize,
 		statusDataProvider,
 		false,
 		maxBlockBroadcastPeers,
@@ -532,7 +592,7 @@ func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKe
 				builderstages.StageBuilderCreateBlockCfg(builderStatePos, mock.ChainConfig, mock.Engine, param, mock.BlockReader),
 				stagedsync.StageExecuteBlocksCfg(
 					mock.DB,
-					prune,
+					pruneMode,
 					cfg.BatchSize,
 					mock.ChainConfig,
 					mock.Engine,
@@ -548,7 +608,7 @@ func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKe
 					nil,
 					false, /*experimentalBAL*/
 				),
-				stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd),
+				stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, mock.sentriesClient.Hd),
 				builderstages.StageBuilderExecCfg(builderStatePos, nil /* notifier */, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, interrupt, param.PayloadId, mock.TxPool, mock.BlockReader),
 				builderstages.StageBuilderFinishCfg(mock.ChainConfig, mock.Engine, builderStatePos, miningCancel, mock.BlockReader, latestBlockBuiltStore),
 			),
@@ -570,14 +630,14 @@ func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKe
 		cfg.Sync,
 		stagedsync.DefaultStages(
 			mock.Ctx,
-			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, nil, prune),
+			stagedsync.StageSnapshotsCfg(mock.DB, mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, mock.BlockReader, mock.Notifications, false, false, false, nil, pruneMode),
 			stagedsync.StageHeadersCfg(mock.sentriesClient.Hd, mock.ChainConfig, cfg.Sync, sendHeaderRequest, propagateNewBlockHashes, penalize, false /* noP2PDiscovery */, mock.BlockReader),
 			stagedsync.StageBlockHashesCfg(mock.Dirs.Tmp, blockWriter),
 			stagedsync.StageBodiesCfg(mock.sentriesClient.Bd, sendBodyRequest, penalize, blockPropagator, cfg.Sync.BodyDownloadTimeoutSeconds, mock.ChainConfig, mock.BlockReader, blockWriter),
-			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd),
+			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, mock.sentriesClient.Hd),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
-				prune,
+				pruneMode,
 				cfg.BatchSize,
 				mock.ChainConfig,
 				mock.Engine,
@@ -593,7 +653,7 @@ func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKe
 				nil,
 				false, /*experimentalBAL*/
 			),
-			stagedsync.StageTxLookupCfg(prune, dirs.Tmp, mock.BlockReader),
+			stagedsync.StageTxLookupCfg(pruneMode, dirs.Tmp, mock.BlockReader),
 			stagedsync.StageFinishCfg(forkValidator),
 		),
 		stagedsync.DefaultUnwindOrder,
@@ -654,7 +714,7 @@ func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKe
 			builderstages.StageBuilderCreateBlockCfg(miner, mock.ChainConfig, mock.Engine, nil, mock.BlockReader),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
-				prune,
+				pruneMode,
 				cfg.BatchSize,
 				mock.ChainConfig,
 				mock.Engine,
@@ -670,7 +730,7 @@ func NewWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateKe
 				nil,
 				/*experimentalBAL*/ false,
 			),
-			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, prune, mock.BlockReader, mock.sentriesClient.Hd),
+			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, mock.sentriesClient.Hd),
 			builderstages.StageBuilderExecCfg(miner, nil, mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, mock.BlockReader),
 			builderstages.StageBuilderFinishCfg(mock.ChainConfig, mock.Engine, miner, miningCancel, mock.BlockReader, latestBlockBuiltStore),
 		),
@@ -721,74 +781,6 @@ func mockDownloader(ctrl *gomock.Controller, snapRoot string) downloader.Client 
 		AnyTimes()
 
 	return downloader.NewRpcClient(snapDownloader, snapRoot)
-}
-
-// New is convenience function to create an ExecModuleTester with some pre-set values
-func New(tb testing.TB) *ExecModuleTester {
-	funds := big.NewInt(1 * common.Ether)
-	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := chain.TestChainConfig
-	gspec := &types.Genesis{
-		Config: chainConfig,
-		Alloc: types.GenesisAlloc{
-			address: {Balance: funds},
-		},
-	}
-	return NewWithGenesis(tb, gspec, key)
-}
-
-func NewWithTxPool(t *testing.T) *ExecModuleTester {
-	funds := big.NewInt(1 * common.Ether)
-	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := chain.TestChainConfig
-	gspec := &types.Genesis{
-		Config: chainConfig,
-		Alloc: types.GenesisAlloc{
-			address: {Balance: funds},
-		},
-	}
-
-	return NewWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true)
-}
-
-func NewWithTxPoolCancun(t *testing.T) *ExecModuleTester {
-	funds := big.NewInt(1 * common.Ether)
-	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	address := crypto.PubkeyToAddress(key.PublicKey)
-
-	var chainConfig chain.Config
-	err := copier.CopyWithOption(&chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true})
-	require.NoError(t, err)
-	// disable post-cancun forks
-	chainConfig.PragueTime = nil
-	chainConfig.OsakaTime = nil
-	chainConfig.AmsterdamTime = nil
-
-	gspec := &types.Genesis{
-		Config: &chainConfig,
-		Alloc: types.GenesisAlloc{
-			address: {Balance: funds},
-		},
-	}
-
-	return NewWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true)
-}
-
-func NewWithTxPoolAllProtocolChanges(t *testing.T) *ExecModuleTester {
-	funds := big.NewInt(1 * common.Ether)
-	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainConfig := chain.AllProtocolChanges
-	gspec := &types.Genesis{
-		Config: chainConfig,
-		Alloc: types.GenesisAlloc{
-			address: {Balance: funds},
-		},
-	}
-
-	return NewWithEverything(t, gspec, key, prune.MockMode, ethash.NewFaker(), blockBufferSize, true)
 }
 
 func (emt *ExecModuleTester) EnableLogs() {
