@@ -507,6 +507,12 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	if blockFrom > 0 {
 		blockFrom++ // SeekCommitment returns last committed block; start from next
 	}
+	// flushEveryBlocks is separate from batchBlockCount because empty blocks produce no ETL
+	// keys — without an independent flush counter, progress is never committed during long
+	// stretches of empty blocks.
+	const minBatchBlockCount uint64 = 500
+	batchBlockCount := minBatchBlockCount
+
 	{
 		startFromTxNum, err := txNumsReader.Min(ctx, rwTx, blockFrom)
 		if err != nil {
@@ -518,13 +524,8 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		}
 		logger.Info("[rebuild_commitment_history] starting", "blockFrom", blockFrom, "blockTo", blockTo,
 			"txNumFrom", startFromTxNum, "txNumTo", endToTxNum, "batchSize", batchSize.HR(),
-			"warmupCache", useWarmupCache, "debugBlock", debugBlock)
+			"batchBlocks", minBatchBlockCount, "warmupCache", useWarmupCache, "debugBlock", debugBlock)
 	}
-
-	// flushEveryBlocks is separate from batchBlockCount because empty blocks produce no ETL
-	// keys — without an independent flush counter, progress is never committed during long
-	// stretches of empty blocks.
-	batchBlockCount := dbg.EnvInt("ERIGON_REBUILD_BATCH_BLOCKS", 5000)
 	flushAtBlock := uint64(dbg.EnvInt("ERIGON_REBUILD_FLUSH_AT", 0))
 
 	var totalKeysProcessed uint64
@@ -660,6 +661,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				"block", fmt.Sprintf("%d/%d", blockNum, blockTo),
 				"blk/s", fmt.Sprintf("%.1f", blkPerSec),
 				"keys", common.PrettyCounter(totalKeysProcessed),
+				"batchBlocks", batchBlockCount,
 				"root", hex.EncodeToString(rh),
 				"memBatch", common.ByteCount(domains.Size()),
 				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
@@ -669,7 +671,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	}
 
 	for blockFrom <= blockTo {
-		batchEnd := min(blockFrom+uint64(batchBlockCount)-1, blockTo)
+		batchEnd := min(blockFrom+batchBlockCount-1, blockTo)
 
 		//nolint:gocritic
 		roTx, err := rwDb.BeginTemporalRo(ctx)
@@ -763,6 +765,14 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 			}
 		}
 		batch.Close()
+
+		// Adapt batch block count based on memBatch vs target size.
+		memBatchSize := domains.Size()
+		if memBatchSize < uint64(batchSize) {
+			batchBlockCount = batchBlockCount * 3 / 2 // grow 50%
+		} else {
+			batchBlockCount = max(batchBlockCount*2/3, minBatchBlockCount) // shrink 50%, floor at minimum
+		}
 
 		blockFrom = batchEnd + 1
 
