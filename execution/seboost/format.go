@@ -22,6 +22,26 @@ const (
 	formatSparse byte = 1
 )
 
+// estimateBitmapSize returns the bitmap encoding size in bytes without allocating.
+func estimateBitmapSize(n int) int {
+	totalBits := n * (n - 1) / 2
+	return (totalBits + 7) / 8
+}
+
+// estimateSparseSize computes the exact sparse encoding size without allocating.
+func estimateSparseSize(deps map[int]map[int]bool, n int) int {
+	var tmp [binary.MaxVarintLen64]byte
+	size := 0
+	for i := 0; i < n; i++ {
+		row := deps[i]
+		size += binary.PutUvarint(tmp[:], uint64(len(row)))
+		for j := range row {
+			size += binary.PutUvarint(tmp[:], uint64(j))
+		}
+	}
+	return size
+}
+
 // encodeBitmap encodes a dependency map as a lower-triangular bit matrix.
 // For n entries, row i has i bits (for j=0..i-1), bit=1 means entry i depends
 // on entry j. Layout: row-major packed bits, LSB-first within each byte.
@@ -65,17 +85,15 @@ func encodeSparse(deps map[int]map[int]bool, n int) []byte {
 	return buf
 }
 
-// chooseEncoding computes both bitmap and sparse encodings and returns the
-// smaller one along with both sizes and the format byte.
+// chooseEncoding estimates both sizes first, then encodes only the winner.
+// This avoids the cost of encoding the losing format.
 func chooseEncoding(deps map[int]map[int]bool, n int) (payload []byte, format byte, bitmapBytes, sparseBytes int) {
-	bm := encodeBitmap(deps, n)
-	sp := encodeSparse(deps, n)
-	bitmapBytes = len(bm)
-	sparseBytes = len(sp)
+	bitmapBytes = estimateBitmapSize(n)
+	sparseBytes = estimateSparseSize(deps, n)
 	if bitmapBytes <= sparseBytes {
-		return bm, formatBitmap, bitmapBytes, sparseBytes
+		return encodeBitmap(deps, n), formatBitmap, bitmapBytes, sparseBytes
 	}
-	return sp, formatSparse, bitmapBytes, sparseBytes
+	return encodeSparse(deps, n), formatSparse, bitmapBytes, sparseBytes
 }
 
 // decodeBitmap decodes a lower-triangular bit matrix back to per-entry dep lists.

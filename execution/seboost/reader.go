@@ -1,6 +1,7 @@
 package seboost
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -11,21 +12,22 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// Reader reads seboost txdeps binary files lazily and sequentially.
+// Reader reads seboost txdeps binary files sequentially.
+// It keeps a forward-only position in the current file — no seeks on repeated calls.
+// Designed for sequential block access (monotonically increasing blockNum).
 type Reader struct {
 	dir    string
 	logger log.Logger
 
 	// current file state
 	curFile  *os.File
+	curBuf   *bufio.Reader
 	curStart uint64
-	curEnd   uint64
 	fileOpen bool
 
-	// cache of recently decoded block
-	cachedBlock uint64
-	cachedDeps  [][]int
-	hasCached   bool
+	// lastBlock is the last block number we scanned past, so we know
+	// not to seek backward for block numbers already behind us.
+	lastBlock uint64
 }
 
 // NewReader creates a new seboost Reader that reads files from dir.
@@ -39,34 +41,28 @@ func NewReader(dir string, logger log.Logger) *Reader {
 // GetDeps returns dependency lists for the given block number.
 // Returns nil, nil if the block is not present or has < 3 txs (graceful fallback).
 // Each element in the returned slice is a list of dep indices for that entry.
+// Optimised for sequential (monotonically increasing) block access: scans forward
+// from the current file position without seeking back to the start.
 func (r *Reader) GetDeps(blockNum uint64) ([][]int, error) {
-	// check cache
-	if r.hasCached && r.cachedBlock == blockNum {
-		return r.cachedDeps, nil
-	}
-
-	// ensure correct file is open
 	start, end := fileRange(blockNum)
-	if !r.fileOpen || start != r.curStart {
+
+	// Open or reopen file when crossing a 500k-block boundary, or if
+	// blockNum is behind the current scan position (non-sequential caller).
+	if !r.fileOpen || start != r.curStart || blockNum < r.lastBlock {
 		if err := r.openFile(start, end); err != nil {
 			// file doesn't exist: graceful fallback
 			return nil, nil //nolint:nilerr
 		}
 	}
 
-	// scan through the file looking for blockNum
-	deps, err := r.scanForBlock(blockNum)
+	deps, err := r.scanForwardToBlock(blockNum)
 	if err != nil {
 		return nil, nil //nolint:nilerr
 	}
 
 	if deps != nil {
-		r.cachedBlock = blockNum
-		r.cachedDeps = deps
-		r.hasCached = true
 		r.logger.Debug("seboost: loaded txdeps for block", "block", blockNum, "txCount", len(deps))
 	}
-
 	return deps, nil
 }
 
@@ -82,6 +78,7 @@ func (r *Reader) openFile(start, end uint64) error {
 	if r.curFile != nil {
 		r.curFile.Close() //nolint:errcheck
 		r.curFile = nil
+		r.curBuf = nil
 		r.fileOpen = false
 	}
 
@@ -92,13 +89,12 @@ func (r *Reader) openFile(start, end uint64) error {
 		return err
 	}
 
-	// validate header
+	// validate header (25 bytes: 4 magic + 1 version + 8 startBlock + 8 endBlock + 4 blockCount)
 	var hdr [25]byte
 	if _, err := io.ReadFull(f, hdr[:]); err != nil {
 		f.Close() //nolint:errcheck
 		return fmt.Errorf("seboost: read header %s: %w", path, err)
 	}
-
 	if hdr[0] != fileMagic[0] || hdr[1] != fileMagic[1] || hdr[2] != fileMagic[2] || hdr[3] != fileMagic[3] {
 		f.Close() //nolint:errcheck
 		return fmt.Errorf("seboost: invalid magic in %s", path)
@@ -109,91 +105,134 @@ func (r *Reader) openFile(start, end uint64) error {
 	}
 
 	r.curFile = f
+	r.curBuf = bufio.NewReaderSize(f, 256*1024) // 256 KB read-ahead
 	r.curStart = start
-	r.curEnd = end
 	r.fileOpen = true
-	r.hasCached = false
+	r.lastBlock = 0
 
 	return nil
 }
 
-func (r *Reader) scanForBlock(blockNum uint64) ([][]int, error) {
-	if r.curFile == nil {
-		return nil, fmt.Errorf("no file open")
+// scanForwardToBlock reads sequentially from the current file position until it
+// finds blockNum. It never seeks backward — if the file position is already past
+// blockNum, it returns nil (block not found without re-reading).
+func (r *Reader) scanForwardToBlock(blockNum uint64) ([][]int, error) {
+	if r.curBuf == nil {
+		return nil, fmt.Errorf("seboost: no file open")
 	}
 
-	// re-read from start of data (after header)
-	if _, err := r.curFile.Seek(25, 0); err != nil {
-		return nil, err
-	}
-
-	// read all remaining data
-	data, err := io.ReadAll(r.curFile)
-	if err != nil {
-		return nil, err
-	}
-
-	off := 0
-	for off < len(data) {
-		bn, k := binary.Uvarint(data[off:])
-		if k <= 0 {
-			break
+	for {
+		// Read blockNum varint
+		bn, err := binary.ReadUvarint(r.curBuf)
+		if err != nil {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				return nil, nil // end of file, block not present
+			}
+			return nil, err
 		}
-		off += k
 
-		tc, k := binary.Uvarint(data[off:])
-		if k <= 0 {
-			break
+		// Read txCount varint
+		tc, err := binary.ReadUvarint(r.curBuf)
+		if err != nil {
+			return nil, err
 		}
-		off += k
 		txCount := int(tc)
 
-		if off >= len(data) {
-			break
-		}
-		format := data[off]
-		off++
-
-		// compute payload size
-		var payloadSize int
-		switch format {
-		case formatBitmap:
-			totalBits := txCount * (txCount - 1) / 2
-			payloadSize = (totalBits + 7) / 8
-		case formatSparse:
-			// must parse to find the end
-			pOff := off
-			for i := 0; i < txCount; i++ {
-				count, k := binary.Uvarint(data[pOff:])
-				pOff += k
-				for d := 0; d < int(count); d++ {
-					_, k = binary.Uvarint(data[pOff:])
-					pOff += k
-				}
-			}
-			payloadSize = pOff - off
-		default:
-			return nil, fmt.Errorf("seboost: unknown format byte %d", format)
+		// Read format byte
+		formatByte, err := r.curBuf.ReadByte()
+		if err != nil {
+			return nil, err
 		}
 
-		if off+payloadSize > len(data) {
-			break
-		}
-
-		payload := data[off : off+payloadSize]
-		off += payloadSize
-
+		// Read and optionally decode payload
 		if bn == blockNum {
-			switch format {
-			case formatBitmap:
-				return decodeBitmap(payload, txCount), nil
-			case formatSparse:
-				return decodeSparse(payload, txCount), nil
-			}
+			r.lastBlock = bn
+			return r.readPayload(formatByte, txCount)
+		}
+
+		// Skip this block's payload and continue scanning forward
+		if err := r.skipPayload(formatByte, txCount); err != nil {
+			return nil, err
+		}
+
+		r.lastBlock = bn
+
+		// Since blocks are stored in ascending order, stop early
+		// if we've passed the target block number.
+		if bn > blockNum {
+			return nil, nil
 		}
 	}
+}
 
-	return nil, nil
+// readPayload reads and decodes the payload for the current record.
+func (r *Reader) readPayload(format byte, txCount int) ([][]int, error) {
+	switch format {
+	case formatBitmap:
+		size := estimateBitmapSize(txCount)
+		payload := make([]byte, size)
+		if _, err := io.ReadFull(r.curBuf, payload); err != nil {
+			return nil, err
+		}
+		return decodeBitmap(payload, txCount), nil
+
+	case formatSparse:
+		return r.readSparsePayload(txCount)
+
+	default:
+		return nil, fmt.Errorf("seboost: unknown format byte %d", format)
+	}
+}
+
+// skipPayload discards the payload bytes for a block we don't need.
+func (r *Reader) skipPayload(format byte, txCount int) error {
+	switch format {
+	case formatBitmap:
+		size := estimateBitmapSize(txCount)
+		_, err := r.curBuf.Discard(size)
+		return err
+
+	case formatSparse:
+		// Parse and discard all varint entries
+		for i := 0; i < txCount; i++ {
+			count, err := binary.ReadUvarint(r.curBuf)
+			if err != nil {
+				return err
+			}
+			for d := uint64(0); d < count; d++ {
+				if _, err := binary.ReadUvarint(r.curBuf); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+
+	default:
+		return fmt.Errorf("seboost: unknown format byte %d", format)
+	}
+}
+
+// readSparsePayload reads a sparse-encoded dep list from the buffered reader.
+func (r *Reader) readSparsePayload(txCount int) ([][]int, error) {
+	result := make([][]int, txCount)
+	for i := 0; i < txCount; i++ {
+		count, err := binary.ReadUvarint(r.curBuf)
+		if err != nil {
+			return nil, err
+		}
+		if count > 0 {
+			deps := make([]int, count)
+			for d := range deps {
+				v, err := binary.ReadUvarint(r.curBuf)
+				if err != nil {
+					return nil, err
+				}
+				deps[d] = int(v)
+			}
+			result[i] = deps
+		}
+	}
+	return result, nil
 }
 
 // ListFiles returns sorted seboost txdeps files in the directory.
