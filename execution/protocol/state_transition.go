@@ -255,8 +255,6 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		st.evm.Config().Tracer.OnGasChange(0, st.msg.Gas(), tracing.GasChangeTxInitialBalance)
 	}
 
-	st.gasRemaining.Regular += st.msg.Gas()
-	st.initialGas.Regular = st.msg.Gas()
 	st.evm.BlobFee = blobGasVal
 	return nil
 }
@@ -340,7 +338,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	}
 
 	// EIP-7825: Transaction Gas Limit Cap
-	if st.msg.CheckGas() && rules.IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
+	if st.msg.CheckGas() && !rules.IsAmsterdam && rules.IsOsaka && st.msg.Gas() > params.MaxTxnGasLimit {
 		return fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, st.msg.Gas())
 	}
 
@@ -360,8 +358,6 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	}
 
 	msg := st.msg
-	st.gasRemaining.Regular += st.msg.Gas()
-	st.initialGas.Regular = st.msg.Gas()
 	sender := msg.From()
 	contractCreation := msg.To().IsNil()
 	rules := st.evm.ChainRules()
@@ -380,6 +376,24 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	if isEIP3860 && contractCreation && len(st.data) > params.MaxInitCodeSize {
 		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
 	}
+
+	intrinsicGasResult, overflow := fixedgas.IntrinsicGas(fixedgas.IntrinsicGasCalcArgs{
+		Data:               st.data,
+		AuthorizationsLen:  uint64(len(auths)),
+		AccessListLen:      uint64(len(accessTuples)),
+		StorageKeysLen:     uint64(accessTuples.StorageKeys()),
+		IsContractCreation: contractCreation,
+		IsEIP2:             rules.IsHomestead,
+		IsEIP2028:          rules.IsIstanbul,
+		IsEIP3860:          isEIP3860,
+		IsEIP7623:          rules.IsPrague,
+		IsEIP8037:          rules.IsAmsterdam,
+	})
+	if overflow {
+		return nil, ErrGasUintOverflow
+	}
+	st.gasRemaining = ComputeMdGas(st.msg.Gas(), intrinsicGasResult, rules)
+	st.initialGas = st.gasRemaining
 
 	// Execute the preparatory steps for state transition which includes:
 	// - prepare accessList(post-berlin; eip-7702)
@@ -507,6 +521,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
+	st.gasRemaining = ComputeMdGas(st.msg.Gas(), intrinsicGasResult, rules)
+	st.initialGas = st.gasRemaining
 	if st.gasRemaining.Regular < intrinsicGasResult.RegularGas || st.gasRemaining.Regular < intrinsicGasResult.FloorGasCost {
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining.Regular, max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost))
 	}
