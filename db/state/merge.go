@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit"
@@ -531,11 +532,11 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 	if dt.d.Accessors.Has(statecfg.AccessorBTree) {
 		btPath := dt.d.kvBtAccessorNewFilePath(fromStep, toStep)
-		btM := DefaultBtreeM
+		btM := btindex.DefaultBtreeM
 		if toStep == 0 && dt.d.FilenameBase == "commitment" {
 			btM = 128
 		}
-		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, btM, dt.dataReader(valuesIn.decompressor), *dt.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.Accessors)
+		valuesIn.bindex, err = btindex.CreateBtreeIndexWithDecompressor(btPath, btM, dt.dataReader(valuesIn.decompressor), *dt.salt, ps, dt.d.dirs.Tmp, dt.d.logger, dt.d.noFsync, dt.d.Accessors)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dt.d.FilenameBase, r.values.from, r.values.to, err)
 		}
