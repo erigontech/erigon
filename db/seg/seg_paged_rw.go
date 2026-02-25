@@ -127,8 +127,8 @@ func WordsAmount2PagesAmount(wordsAmount int, pageSize int) (pagesAmount int) {
 }
 
 type pageWorkItem struct {
-	seq  int
-	data []byte // copy of uncompressed page; returned to pool after compression
+	seq              int
+	uncompressedData []byte // copy of uncompressed page; returned to pool after compression
 }
 
 type pageResult struct {
@@ -298,6 +298,9 @@ type PagedWriter struct {
 	workersShutdown bool                // tracks if workers have been shut down
 	pendingResults  map[int]*pageResult // out-of-order results waiting for seqOut
 	ctx             context.Context     // optional context for cancellation
+
+	// Metrics (optional, for diagnostics and testing)
+	pagesCompressed int // number of pages processed through workers
 }
 
 func (c *PagedWriter) initWorkers() {
@@ -313,7 +316,6 @@ func (c *PagedWriter) initWorkers() {
 
 func (c *PagedWriter) compressionWorker() {
 	defer c.wg.Done()
-	var workerBuf []byte // per-worker zstd scratch buffer; stays warm across pages
 	for {
 		select {
 		case item, ok := <-c.workCh:
@@ -323,13 +325,13 @@ func (c *PagedWriter) compressionWorker() {
 			// Ensure work item is returned to pool even if compression panics
 			func() {
 				defer pageWorkItemPool.Put(item)
-				var compressedSlice []byte
-				workerBuf, compressedSlice = compress.EncodeZstdIfNeed(workerBuf[:0], item.data, true)
 
 				result := pageResultPool.Get().(*pageResult)
 				result.seq = item.seq
-				result.data = append(result.data[:0], compressedSlice...) // copy out of workerBuf
 				result.err = nil
+
+				// Compress directly into result.data (no extra copy, each result owns its buffer)
+				result.data, _ = compress.EncodeZstdIfNeed(result.data[:0], item.uncompressedData, c.compressionEnabled)
 
 				// Send result, respecting context cancellation
 				select {
@@ -360,11 +362,15 @@ func (c *PagedWriter) writeInOrder() error {
 		delete(c.pendingResults, c.seqOut)
 		pageResultPool.Put(r)
 		c.seqOut++
+		if c.numWorkers > 1 {
+			c.pagesCompressed++
+		}
 	}
 }
 
 func (c *PagedWriter) Empty() bool              { return c.pairs == 0 }
 func (c *PagedWriter) IsAsyncCompression() bool { return c.numWorkers > 1 }
+func (c *PagedWriter) PagesCompressed() int     { return c.pagesCompressed }
 func (c *PagedWriter) Close() {
 	c.parent.Close()
 }
@@ -405,10 +411,10 @@ func (c *PagedWriter) writePage() error {
 			return nil
 		}
 
-		// Copy page into owned work item (c.keys/c.vals will be reused by next Add())
+		// Copy page into work item (c.keys/c.vals will be reused by next Add())
 		item := pageWorkItemPool.Get().(*pageWorkItem)
 		item.seq = c.seqIn
-		item.data = append(item.data[:0], uncompressedPage...)
+		item.uncompressedData = append(item.uncompressedData[:0], uncompressedPage...)
 		c.seqIn++
 
 		// Send to workers; if workCh is full, drain resultCh to unblock a worker first
@@ -530,6 +536,34 @@ func (c *PagedWriter) bytesUncompressed() (wholePage []byte, notEmpty bool) {
 	}
 
 	wholePage = append(wholePage, keysAndVals...)
+
+	return wholePage, true
+}
+
+// bytesUncompressedTo encodes page into external buffer (no internal state modification)
+func (c *PagedWriter) bytesUncompressedTo(buf []byte) (wholePage []byte, notEmpty bool) {
+	if len(c.kLengths) == 0 {
+		return nil, false
+	}
+
+	// Encode page metadata and keys/values into provided buffer
+	neededSize := 1 + len(c.kLengths)*2*4 + len(c.keys) + len(c.vals)
+	wholePage = growslice(buf[:0], neededSize)
+	clear(wholePage)
+
+	wholePage[0] = uint8(len(c.kLengths)) // first byte is amount of vals
+	lensBuf := wholePage[1:]
+	for i, l := range c.kLengths {
+		binary.BigEndian.PutUint32(lensBuf[i*4:(i+1)*4], uint32(l))
+	}
+	lensBuf = lensBuf[len(c.kLengths)*4:]
+	for i, l := range c.vLengths {
+		binary.BigEndian.PutUint32(lensBuf[i*4:(i+1)*4], uint32(l))
+	}
+
+	// Append keys and values without modifying internal state
+	wholePage = append(wholePage, c.keys...)
+	wholePage = append(wholePage, c.vals...)
 
 	return wholePage, true
 }

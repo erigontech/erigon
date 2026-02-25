@@ -19,6 +19,7 @@ package seg
 import (
 	"context"
 	"fmt"
+	"hash/crc32"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -169,6 +170,60 @@ func TestPagedReaderWithCompression(t *testing.T) {
 		i++
 	}
 	require.Equal(len(loremStrings), i, "should have read all entries")
+}
+
+func TestPagedWriterCRC32Sequential(t *testing.T) {
+	// Test that we can compute CRC32 of written pages
+	mock := &multyBytesWriter{pageSize: 4}
+	pw := NewPagedWriter(mock, true)
+
+	// Add test data
+	testData := []struct{ k, v string }{
+		{"k1", "v1"}, {"k2", "v2"}, {"k3", "v3"},
+		{"k4", "v4"}, {"k5", "v5"}, {"k6", "v6"},
+	}
+
+	for _, kv := range testData {
+		if err := pw.Add([]byte(kv.k), []byte(kv.v)); err != nil {
+			t.Fatalf("Add failed: %v", err)
+		}
+	}
+	if err := pw.Compress(); err != nil {
+		t.Fatalf("Compress failed: %v", err)
+	}
+
+	// Compute CRC32 of all pages written
+	hash := crc32.NewIEEE()
+	for _, page := range mock.Bytes() {
+		hash.Write(page)
+	}
+	crc32Sequential := hash.Sum32()
+	t.Logf("Sequential CRC32: 0x%08x", crc32Sequential)
+
+	// Now test parallel compression produces same CRC32
+	mock2 := &multyBytesWriter{pageSize: 4}
+	pw2 := NewPagedWriter(mock2, true)
+
+	for _, kv := range testData {
+		if err := pw2.Add([]byte(kv.k), []byte(kv.v)); err != nil {
+			t.Fatalf("Add failed: %v", err)
+		}
+	}
+	if err := pw2.Compress(); err != nil {
+		t.Fatalf("Compress failed: %v", err)
+	}
+
+	// Compute CRC32 of parallel compression
+	hash2 := crc32.NewIEEE()
+	for _, page := range mock2.Bytes() {
+		hash2.Write(page)
+	}
+	crc32Parallel := hash2.Sum32()
+	t.Logf("Parallel CRC32:   0x%08x", crc32Parallel)
+
+	if crc32Sequential != crc32Parallel {
+		t.Errorf("CRC32 mismatch: sequential=0x%08x, parallel=0x%08x", crc32Sequential, crc32Parallel)
+	}
 }
 
 func BenchmarkName(b *testing.B) {
