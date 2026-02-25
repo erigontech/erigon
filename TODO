@@ -19,3 +19,4 @@
 - can use cross os cache for go mod download
 - always run lint first? that way we can have a single modcache, avoid running tests for build failures, and encourage good git push hygiene.
 - generate content and mtime cache for build cache defer trim
+- make sure the race tests matrix can be invoked locally to reproduce.
