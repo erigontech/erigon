@@ -1,65 +1,112 @@
 #!/usr/bin/env bash
-# Runs a named test group with -race. Usage: run-test-group <test-group>
-# Environment: GODEBUG, GOTRACEBACK, GOGC, CGO_CFLAGS, SKIP_FLAKY_TESTS
+# Runs a named test group. Usage: run-test-group [--check] [<test-group>]
+# With no argument, runs all groups sequentially.
+# Environment: GODEBUG, GOTRACEBACK, GOGC, CGO_CFLAGS, SKIP_FLAKY_TESTS, GOTEST_FLAGS
 
 set -euo pipefail
 
-TEST_GROUP="${1:?Usage: run-test-group <test-group>}"
+ALL_GROUPS="execution-tests eest-frontier-scenarios eest-osaka-clz eest-prague-calldata eest-cancun-blobs execution-other consensus core-rpc other"
 
 run_tests() {
-  go test -race "$@" 2>&1 | "$(dirname "$0")/filter-test-output" | tee -a run.log
+  go test ${GOTEST_FLAGS:-} "$@" 2>&1 | "$(dirname "$0")/filter-test-output" | tee -a run.log
 }
 
-case "$TEST_GROUP" in
-  execution-tests)
-    # execution/tests minus the slow EEST sub-packages (separate jobs below)
-    PKGS=$(go list ./execution/tests/... | grep -v '/eest_')
-    run_tests -timeout 60m $PKGS
-    ;;
-  eest-frontier-scenarios)
-    run_tests -timeout 60m ./execution/tests/eest_frontier_scenarios/...
-    ;;
-  eest-osaka-clz)
-    run_tests -timeout 60m ./execution/tests/eest_osaka_clz/...
-    ;;
-  eest-prague-calldata)
-    run_tests -timeout 60m ./execution/tests/eest_prague_calldata/...
-    ;;
-  eest-cancun-blobs)
-    run_tests -timeout 60m ./execution/tests/eest_cancun_blobs/...
-    ;;
-  execution-other)
-    # All execution subdirectories except execution/tests
-    DIRS=$(ls -d -- execution/*/ | grep -vE "execution/tests/" | sed 's/\/$//')
-    for d in $DIRS; do
-      if [ -d "$d" ]; then
-        TEST_PACKAGES=$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' "./$d/..." 2>/dev/null)
-        if [ -n "$TEST_PACKAGES" ]; then
-          run_tests -timeout 30m "./$d/..."
-        fi
-      fi
-    done
-    ;;
-  consensus)
-    run_tests -timeout 60m ./cl/...
-    ;;
-  core-rpc)
-    run_tests -timeout 30m ./db/... ./node/... ./txnprovider/... ./p2p/... ./rpc/...
-    ;;
-  other)
-    DIRS=$(ls -d -- */ | grep -vE '^(execution|cl|p2p|rpc|db|node|txnprovider|dashboards)/$' | sed 's/\/$//')
-    for d in $DIRS; do
-      if [ -d "$d" ]; then
-        TEST_PACKAGES=$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' "./$d/...")
-        if [ -n "$TEST_PACKAGES" ]; then
-          run_tests -timeout 30m "./$d/..."
-        fi
-      fi
-    done
-    ;;
-  *)
-    echo "Error: Unknown test-group '$TEST_GROUP'"
-    echo "Expected one of: execution-tests, eest-frontier-scenarios, eest-osaka-clz, eest-prague-calldata, eest-cancun-blobs, execution-other, consensus, core-rpc, other"
+# packages_for_group emits package specs for the given group
+packages_for_group() {
+  case "$1" in
+    execution-tests)
+      go list ./execution/tests/... | grep -v '/eest_'
+      ;;
+    eest-frontier-scenarios)  echo ./execution/tests/eest_frontier_scenarios/... ;;
+    eest-osaka-clz)           echo ./execution/tests/eest_osaka_clz/... ;;
+    eest-prague-calldata)     echo ./execution/tests/eest_prague_calldata/... ;;
+    eest-cancun-blobs)        echo ./execution/tests/eest_cancun_blobs/... ;;
+    execution-other)
+      ls -d -- execution/*/ | grep -vE "execution/tests/" | sed 's|/*$|/...|; s|^|./|'
+      ;;
+    consensus)  echo ./cl/... ;;
+    core-rpc)   echo ./db/... ./node/... ./txnprovider/... ./p2p/... ./rpc/... ;;
+    other)
+      ls -d -- */ | grep -vE '^(execution|cl|p2p|rpc|db|node|txnprovider|dashboards)/$' | sed 's|/*$|/...|; s|^|./|'
+      ;;
+    *)
+      echo "Error: Unknown test-group '$1'" >&2
+      return 1
+      ;;
+  esac
+}
+
+# timeout_for_group returns the timeout for the given group
+timeout_for_group() {
+  case "$1" in
+    execution-tests|eest-*|consensus) echo 60m ;;
+    *) echo 30m ;;
+  esac
+}
+
+# No argument: run all groups sequentially
+if [ $# -eq 0 ]; then
+  for group in $ALL_GROUPS; do
+    "$0" "$group"
+  done
+  exit
+fi
+
+# --check: validate group partitioning against the full package list
+if [ "${1}" = "--check" ]; then
+  echo "Checking test group partitioning..."
+
+  tmpdir=$(mktemp -d)
+  trap 'rm -rf "$tmpdir"' EXIT
+
+  for group in $ALL_GROUPS; do
+    pkgs=$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' \
+      $(packages_for_group "$group") 2>/dev/null | awk 'NF' || true)
+    if [ -n "$pkgs" ]; then
+      echo "$pkgs" > "$tmpdir/$group.txt"
+    else
+      touch "$tmpdir/$group.txt"
+    fi
+    count=$(echo "$pkgs" | awk 'NF' | wc -l | tr -d ' ')
+    echo "  $group: $count packages"
+  done
+
+  cat "$tmpdir"/*.txt | sort > "$tmpdir/all_group_pkgs.txt"
+
+  ok=true
+
+  overlaps=$(uniq -d "$tmpdir/all_group_pkgs.txt")
+  if [ -n "$overlaps" ]; then
+    echo "ERROR: packages appear in multiple groups:" >&2
+    echo "$overlaps" | sed 's/^/  /' >&2
+    ok=false
+  fi
+
+  go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' ./... 2>/dev/null \
+    | awk 'NF' | sort > "$tmpdir/all_repo_pkgs.txt"
+
+  sort -u "$tmpdir/all_group_pkgs.txt" > "$tmpdir/group_pkgs_dedup.txt"
+
+  missing=$(comm -23 "$tmpdir/all_repo_pkgs.txt" "$tmpdir/group_pkgs_dedup.txt")
+  if [ -n "$missing" ]; then
+    echo "ERROR: packages with tests not covered by any group:" >&2
+    echo "$missing" | sed 's/^/  /' >&2
+    ok=false
+  fi
+
+  extra=$(comm -13 "$tmpdir/all_repo_pkgs.txt" "$tmpdir/group_pkgs_dedup.txt")
+  if [ -n "$extra" ]; then
+    echo "WARNING: group packages not found in ./...:" >&2
+    echo "$extra" | sed 's/^/  /' >&2
+  fi
+
+  if $ok; then
+    echo "OK: no overlaps or gaps"
+    exit 0
+  else
     exit 1
-    ;;
-esac
+  fi
+fi
+
+PKGS=$(packages_for_group "$1")
+run_tests -timeout "$(timeout_for_group "$1")" $PKGS
