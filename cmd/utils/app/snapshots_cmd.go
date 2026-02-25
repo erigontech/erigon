@@ -1335,10 +1335,7 @@ func doVerifyHistory(cliCtx *cli.Context, logger log.Logger) error {
 	fromStep := cliCtx.Uint64("from-step")
 	workers := cliCtx.Int("workers")
 	if workers <= 0 {
-		workers = runtime.NumCPU() / 2
-		if workers < 1 {
-			workers = 1
-		}
+		workers = max(runtime.NumCPU()/2, 1)
 	}
 
 	verifier := verify.NewHistoryVerifier(blockReader, chainConfig, engine, workers, logger)

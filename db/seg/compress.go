@@ -313,25 +313,15 @@ func (c *Compressor) Compress() error {
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
+	// Detect the fast path before sending the last superstring: if no superstrings were
+	// ever produced (neither overflow nor the current partial one), then no words were
+	// submitted for word-level compression, so the pattern dictionary will always be empty.
+	noWordPatterns := c.superstringCount == 0 && len(c.superstring) == 0
 	if len(c.superstring) > 0 {
 		c.superstrings <- c.superstring
 	}
 	close(c.superstrings)
 	c.wg.Wait()
-
-	if c.lvl < log.LvlTrace {
-		c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.Workers)
-	}
-	db, err := DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
-	if err != nil {
-		return err
-	}
-	if c.trace {
-		_, fileName := filepath.Split(c.outputFile)
-		if err := PersistDictionary(filepath.Join(c.tmpDir, fileName)+".dictionary.txt", db); err != nil {
-			return err
-		}
-	}
 
 	cf, err := dir.CreateTemp(c.outputFile)
 	if err != nil {
@@ -366,8 +356,34 @@ func (c *Compressor) Compress() error {
 	}
 
 	t := time.Now()
-	if err := compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, tmpFileName, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
-		return err
+	if noWordPatterns {
+		// Fast path: no words were fed to the pattern-dictionary pipeline (e.g. history .v
+		// files with CompressNone). Skip dictionary building and the intermediate file entirely.
+		for _, coll := range c.suffixCollectors {
+			coll.Close()
+		}
+		c.suffixCollectors = nil
+		if err = compressNoWordPatterns(c.logPrefix, cf, c.uncompressedFile, c.lvl, c.logger); err != nil {
+			return err
+		}
+	} else {
+		if c.lvl < log.LvlTrace {
+			c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.Workers)
+		}
+		var db *DictionaryBuilder
+		db, err = DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
+		if err != nil {
+			return err
+		}
+		if c.trace {
+			_, fileName := filepath.Split(c.outputFile)
+			if err := PersistDictionary(filepath.Join(c.tmpDir, fileName)+".dictionary.txt", db); err != nil {
+				return err
+			}
+		}
+		if err = compressWithPatternCandidates(c.ctx, c.trace, c.Cfg, c.logPrefix, tmpFileName, cf, c.uncompressedFile, db, c.lvl, c.logger); err != nil {
+			return err
+		}
 	}
 	if err = c.fsync(cf); err != nil {
 		return err
