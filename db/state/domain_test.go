@@ -596,10 +596,10 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step kv.Step, prun
 
 	if prune {
 		domainRoTx := d.BeginFilesRo()
+		defer domainRoTx.Close()
 		stat, err := domainRoTx.OldPrune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
 		t.Logf("prune stat: %s  (%d-%d)", stat, txFrom, txTo)
 		require.NoError(t, err)
-		domainRoTx.Close()
 	}
 
 	maxSpan := d.stepSize * config3.DefaultStepsInFrozenFile
@@ -1300,6 +1300,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 	for step := kv.Step(0); step < kv.Step(uint64(len(vals))/d.stepSize); step++ {
 
 		domainRoTx := d.BeginFilesRo()
+		defer domainRoTx.Close()
 
 		txFrom := uint64(step) * d.stepSize
 		txTo := uint64(step+1) * d.stepSize
@@ -1331,8 +1332,6 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 
 		logEvery.Stop()
-
-		domainRoTx.Close()
 	}
 
 	defer func(t time.Time) { fmt.Printf("domain_test.go:1283: %s\n", time.Since(t)) }(time.Now())
@@ -2529,6 +2528,8 @@ func TestDomain_PruneSimple(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(rotx.Rollback)
 
+		domainRoTx = d.BeginFilesRo()
+		defer domainRoTx.Close()
 		v, vs, ok, err = domainRoTx.GetLatest(pruningKey, rotx)
 		require.NoError(t, err)
 		require.True(t, ok)
