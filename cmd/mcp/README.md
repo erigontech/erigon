@@ -100,6 +100,21 @@ Add to `~/.config/claude-desktop/config.json`:
 }
 ```
 
+or
+
+```json
+{
+  "mcpServers": {
+    "erigon": {
+      "command": "/path/to/build/bin/mcp",
+      "args": ["--datadir", "path/to/erigon/data"]
+    }
+  }
+}
+```
+
+for datadir mode.
+
 ## Available Tools
 
 ### Ethereum Standard (eth_*)
