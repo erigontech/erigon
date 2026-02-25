@@ -136,7 +136,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		return nil, &rpc.CustomError{Message: fmt.Sprintf("end (%d) > MaxUint32)", end), Code: rpc.ErrCodeInvalidParams}
 	}
 
-	err := api.BaseAPI.checkPruneHistory(ctx, tx, begin)
+	err := api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +228,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: %d", errExceedBlockRange, api.rangeLimit), Code: rpc.ErrCodeInvalidParams}
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, begin)
+	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin)
 	if err != nil {
 		return nil, err
 	}
