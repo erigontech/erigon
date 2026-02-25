@@ -1201,11 +1201,14 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		silkwormRPCDaemonService := silkworm.NewRpcDaemonService(s.silkworm, chainKv, settings)
 		s.silkwormRPCDaemonService = &silkwormRPCDaemonService
 	} else {
-		go func() {
+		s.bgComponentsEg.Go(func() error {
+			defer s.logger.Debug("[rpcdaemon] HTTP rpc server goroutine terminated")
 			if err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger); err != nil {
 				s.logger.Error("cli.StartRpcServer error", "err", err)
+				return err
 			}
-		}()
+			return nil
+		})
 	}
 
 	if chainConfig.Bor == nil || config.PolygonPosSingleSlotFinality {
