@@ -360,6 +360,10 @@ func (c *Compressor) Compress() error {
 			coll.Close()
 		}
 		c.suffixCollectors = nil
+		if fi, statErr := os.Stat(c.uncompressedFile.filePath); statErr == nil && fi.Size() > int64(10*datasize.GB) {
+			_, fName := filepath.Split(c.uncompressedFile.filePath)
+			c.logger.Log(c.lvl, fmt.Sprintf("[%s] noWordPatterns: large uncompressed file", c.logPrefix), "file", fName, "size", common.ByteCount(uint64(fi.Size())))
+		}
 		if err = compressNoWordPatterns(c.logPrefix, cf, c.uncompressedFile, c.lvl, c.logger); err != nil {
 			return err
 		}
