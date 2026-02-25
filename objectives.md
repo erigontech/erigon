@@ -47,7 +47,12 @@ Phase 1 is done when all of the following are true:
 2. **Pass 1 (generate)** completed: seboost files written to `<datadir>/seboost_txdeps/` for Sepolia blocks 0–6M. `txdeps-sizes.csv` written.
 3. **Pass 2 (baseline)** completed: stage_exec + parallel_exec ran on Sepolia 0–6M with no seboost. Wall-clock time recorded.
 4. **Pass 3 (seboost)** completed: stage_exec + parallel_exec + txdeps seboost ran on Sepolia 0–6M. Wall-clock time recorded. State root checks passed (correctness verified).
-5. **Report generated**: `~/seboost-stats/report.md` exists with:
+5. **Log verification** — confirm from logs that each pass actually did what it claims:
+   - Pass 1: parallel execution is actually running (not sequential fallback). Txdeps are produced and non-empty (log the number of deps per block, flag blocks where all txs have zero deps).
+   - Pass 2: parallel execution is running, no seboost code path active.
+   - Pass 3: seboost files are loaded, txdeps are actually consumed by the scheduler (log when `Dependencies()` returns non-empty for a task). If logs show zero seboost hits, the pass is invalid.
+   - Add logging as needed to make this verifiable — the worker should instrument the code so these conditions are observable in the output.
+6. **Report generated**: `~/seboost-stats/report.md` exists with:
    - Baseline wall-clock time vs seboost wall-clock time.
    - Speedup ratio.
    - Total seboost file size (all `.bin` files combined).
