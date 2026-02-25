@@ -18,7 +18,6 @@ package sentinel
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -112,7 +111,7 @@ func loadChain(t *testing.T) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, p
 	sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 	noErr(sn.OnHeadState(postState))
 
-	ctx := context.Background()
+	ctx := t.Context()
 	vt := state_accessors.NewStaticValidatorTable()
 	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, nil, nil, reader, sn, log.New(), true, true, false, false, nil)
 	noErr(a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
@@ -121,7 +120,7 @@ func loadChain(t *testing.T) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, p
 
 func newTestP2PManager(t *testing.T, ethClock eth_clock.EthereumClock) p2p.P2PManager {
 	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
-	pm, err := p2p.NewP2Pmanager(context.Background(), &p2p.P2PConfig{
+	pm, err := p2p.NewP2Pmanager(t.Context(), &p2p.P2PConfig{
 		NetworkConfig: networkConfig,
 		BeaconConfig:  beaconConfig,
 		IpAddr:        "127.0.0.1",
@@ -138,7 +137,7 @@ func newTestP2PManager(t *testing.T, ethClock eth_clock.EthereumClock) p2p.P2PMa
 func newTestSentinel(t *testing.T, ethClock eth_clock.EthereumClock, reader freezeblocks.BeaconSnapshotReader, db kv.RoDB, mockPeerDasStateReader *peerdasstatemock.MockPeerDasStateReader) *Sentinel {
 	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
 	pm := newTestP2PManager(t, ethClock)
-	sent, err := New(context.Background(), &SentinelConfig{
+	sent, err := New(t.Context(), &SentinelConfig{
 		NetworkConfig: networkConfig,
 		BeaconConfig:  beaconConfig,
 		EnableBlocks:  true,
@@ -163,7 +162,7 @@ func newMockPeerDasStateReader(t *testing.T) *peerdasstatemock.MockPeerDasStateR
 
 func testSentinelBlocksByRange(t *testing.T) {
 	ethClock := getEthClock(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	db, blocks, _, _, reader := loadChain(t)
 	_, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
 
@@ -238,7 +237,7 @@ func testSentinelBlocksByRange(t *testing.T) {
 }
 
 func testSentinelBlocksByRoots(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	db, blocks, _, _, reader := loadChain(t)
 	ethClock := getEthClock(t)
 	_, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
@@ -318,7 +317,7 @@ func testSentinelBlocksByRoots(t *testing.T) {
 }
 
 func testSentinelStatusRequest(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	db, blocks, _, _, reader := loadChain(t)
 	ethClock := getEthClock(t)
 
