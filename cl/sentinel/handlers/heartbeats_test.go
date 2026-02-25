@@ -110,6 +110,7 @@ func TestPing(t *testing.T) {
 
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.PingProtocolV1))
 	require.NoError(t, err)
+	defer stream.Close()
 
 	_, err = stream.Write(nil)
 	require.NoError(t, err)
@@ -164,6 +165,7 @@ func TestGoodbye(t *testing.T) {
 
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.GoodbyeProtocolV1))
 	require.NoError(t, err)
+	defer stream.Close()
 
 	req := &cltypes.Ping{}
 	var reqBuf bytes.Buffer
@@ -225,6 +227,7 @@ func TestMetadataV2(t *testing.T) {
 
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.MetadataProtocolV2))
 	require.NoError(t, err)
+	defer stream.Close()
 
 	_, err = stream.Write(nil)
 	require.NoError(t, err)

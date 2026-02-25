@@ -130,6 +130,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	reqData := common.Copy(reqBuf.Bytes())
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BlobSidecarByRangeProtocolV1))
 	require.NoError(t, err)
+	defer stream.Close()
 
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
@@ -254,6 +255,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	reqData := common.Copy(reqBuf.Bytes())
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BlobSidecarByRootProtocolV1))
 	require.NoError(t, err)
+	defer stream.Close()
 
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)

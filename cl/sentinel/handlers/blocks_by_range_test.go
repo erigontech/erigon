@@ -101,6 +101,7 @@ func TestBlocksByRootHandler(t *testing.T) {
 	reqData := common.Copy(reqBuf.Bytes())
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BeaconBlocksByRangeProtocolV2))
 	require.NoError(t, err)
+	defer stream.Close()
 
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
