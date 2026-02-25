@@ -739,12 +739,14 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			values = append(values, n)
 		}
 		require.False(t, it.HasNext())
+		it.Close()
 
 		reverseStream, err := ic.IdxRange(k[:], 1000-1, 400-1, false, -1, roTx)
 		require.NoError(t, err)
 		arr := stream.ToArrU64Must(reverseStream)
 		expect := stream.ToArrU64Must(stream.ReverseArray(values))
 		require.Equal(t, expect, arr)
+		reverseStream.Close()
 	}
 }
 

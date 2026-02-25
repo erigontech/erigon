@@ -1638,6 +1638,7 @@ func TestDomainRange(t *testing.T) {
 	{
 		it, err := domainRoTx.ht.RangeAsOf(ctx, cutoffTxnum, nil, nil, order.Asc, -1, tx)
 		require.NoError(err)
+		defer it.Close()
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
 		order.Asc.AssertList(keys)
@@ -1648,6 +1649,7 @@ func TestDomainRange(t *testing.T) {
 	{
 		it, err := domainRoTx.DebugRangeLatest(tx, nil, nil, -1)
 		require.NoError(err)
+		defer it.Close()
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
 		order.Asc.AssertList(keys)
@@ -1658,6 +1660,7 @@ func TestDomainRange(t *testing.T) {
 	{
 		it, err := domainRoTx.RangeAsOf(ctx, tx, []byte(""), nil, cutoffTxnum, order.Asc, -1)
 		require.NoError(err)
+		defer it.Close()
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
 		order.Asc.AssertList(keys)
@@ -1671,6 +1674,7 @@ func TestDomainRange(t *testing.T) {
 		lim := len(keysLatest) - 1
 		it, err := domainRoTx.RangeAsOf(ctx, tx, []byte(""), nil, cutoffTxnum, order.Asc, lim)
 		require.NoError(err)
+		defer it.Close()
 		keys, vals, err := stream.ToArrayKV(it)
 		require.NoError(err)
 		order.Asc.AssertList(keys)

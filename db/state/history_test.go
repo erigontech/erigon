@@ -1206,6 +1206,7 @@ func TestHistoryRange1(t *testing.T) {
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
 		}
+		it.Close()
 		require.Equal([]string{
 			"0100000000000001",
 			"0100000000000002",
@@ -1239,6 +1240,7 @@ func TestHistoryRange1(t *testing.T) {
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
 		}
+		it.Close()
 		require.Equal([]string{"0100000000000001", "0100000000000002", "0100000000000003", "0100000000000004", "0100000000000005", "0100000000000006", "0100000000000008", "0100000000000009", "010000000000000a", "010000000000000c", "0100000000000014", "0100000000000019", "010000000000001b"}, keys)
 		require.Equal([]string{"ff000000000003e2", "ff000000000001f1", "ff0000000000014b", "ff000000000000f8", "ff000000000000c6", "ff000000000000a5", "ff0000000000007c", "ff0000000000006e", "ff00000000000063", "ff00000000000052", "ff00000000000031", "ff00000000000027", "ff00000000000024"}, vals)
 
@@ -1252,6 +1254,7 @@ func TestHistoryRange1(t *testing.T) {
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
 		}
+		it.Close()
 		require.Equal([]string{"0100000000000001", "0100000000000002"}, keys)
 		require.Equal([]string{"ff000000000003e2", "ff000000000001f1"}, vals)
 
@@ -1265,6 +1268,7 @@ func TestHistoryRange1(t *testing.T) {
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
 		}
+		it.Close()
 		require.Equal([]string{"0100000000000001", "0100000000000002"}, keys)
 		require.Equal([]string{"ff000000000003cf", "ff000000000001e7"}, vals)
 
@@ -1396,6 +1400,7 @@ func TestHistoryRange2(t *testing.T) {
 				keys = append(keys, fmt.Sprintf("%x", k))
 				vals = append(vals, fmt.Sprintf("%x", v))
 			}
+			it.Close()
 			require.NoError(err)
 			require.Equal([]string{
 				"0100000000000001",
