@@ -271,7 +271,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.Equal([]string{"key1", "key2", "key3"}, keyWords)
 		require.Equal([][]uint64{{2, 6}, {3, 6, 7}, {7}}, intArrs)
 		r := recsplit.NewIndexReader(sf.efHistoryIdx)
-			defer r.Close()
+		defer r.Close()
 		for i := 0; i < len(keyWords); i++ {
 			var offset uint64
 			var ok bool
@@ -291,7 +291,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 			require.Equal(keyWords[i], string(w))
 		}
 		r = recsplit.NewIndexReader(sf.historyIdx)
-			defer r.Close()
+		defer r.Close()
 
 		gh = seg.NewPagedReader(h.dataReader(sf.historyDecomp), compressedPageValuesCount, true)
 		var vi int
