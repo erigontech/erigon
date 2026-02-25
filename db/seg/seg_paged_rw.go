@@ -18,6 +18,7 @@ package seg
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -28,6 +29,12 @@ import (
 )
 
 var be = binary.BigEndian
+
+// Global pools for page work items and results - optimized for GC
+var (
+	pageWorkItemPool = sync.Pool{New: func() any { return &pageWorkItem{} }}
+	pageResultPool   = sync.Pool{New: func() any { return &pageResult{} }}
+)
 
 func GetFromPage(key, compressedPage []byte, compressionBuf []byte, compressionEnabled bool) (v []byte, compressionBufOut []byte) {
 	var err error
@@ -245,6 +252,7 @@ func NewPagedWriter(parent CompressorI, compressionEnabled bool) *PagedWriter {
 		parent:             parent,
 		pageSize:           parent.GetValuesOnCompressedPage(),
 		compressionEnabled: compressionEnabled,
+		ctx:                context.Background(),
 	}
 	if compressionEnabled && pw.pageSize > 1 {
 		pw.numWorkers = runtime.GOMAXPROCS(-1)
@@ -253,6 +261,12 @@ func NewPagedWriter(parent CompressorI, compressionEnabled bool) *PagedWriter {
 		}
 	}
 	return pw
+}
+
+// WithContext sets the context for cancellation support
+func (c *PagedWriter) WithContext(ctx context.Context) *PagedWriter {
+	c.ctx = ctx
+	return c
 }
 
 type CompressorI interface {
@@ -283,8 +297,7 @@ type PagedWriter struct {
 	seqOut          int                 // next seq to write to parent
 	workersShutdown bool                // tracks if workers have been shut down
 	pendingResults  map[int]*pageResult // out-of-order results waiting for seqOut
-	workItemPool    sync.Pool           // *pageWorkItem
-	resultPool      sync.Pool           // *pageResult
+	ctx             context.Context     // optional context for cancellation
 }
 
 func (c *PagedWriter) initWorkers() {
@@ -292,8 +305,6 @@ func (c *PagedWriter) initWorkers() {
 	c.workCh = make(chan *pageWorkItem, queueDepth)
 	c.resultCh = make(chan *pageResult, queueDepth)
 	c.pendingResults = make(map[int]*pageResult, queueDepth)
-	c.workItemPool = sync.Pool{New: func() any { return &pageWorkItem{} }}
-	c.resultPool = sync.Pool{New: func() any { return &pageResult{} }}
 	c.wg.Add(c.numWorkers)
 	for range c.numWorkers {
 		go c.compressionWorker()
@@ -303,17 +314,34 @@ func (c *PagedWriter) initWorkers() {
 func (c *PagedWriter) compressionWorker() {
 	defer c.wg.Done()
 	var workerBuf []byte // per-worker zstd scratch buffer; stays warm across pages
-	for item := range c.workCh {
-		var compressedSlice []byte
-		workerBuf, compressedSlice = compress.EncodeZstdIfNeed(workerBuf[:0], item.data, true)
+	for {
+		select {
+		case item, ok := <-c.workCh:
+			if !ok {
+				return // channel closed
+			}
+			// Ensure work item is returned to pool even if compression panics
+			func() {
+				defer pageWorkItemPool.Put(item)
+				var compressedSlice []byte
+				workerBuf, compressedSlice = compress.EncodeZstdIfNeed(workerBuf[:0], item.data, true)
 
-		result := c.resultPool.Get().(*pageResult)
-		result.seq = item.seq
-		result.data = append(result.data[:0], compressedSlice...) // copy out of workerBuf
-		result.err = nil
+				result := pageResultPool.Get().(*pageResult)
+				result.seq = item.seq
+				result.data = append(result.data[:0], compressedSlice...) // copy out of workerBuf
+				result.err = nil
 
-		c.workItemPool.Put(item) // return input buffer
-		c.resultCh <- result
+				// Send result, respecting context cancellation
+				select {
+				case c.resultCh <- result:
+				case <-c.ctx.Done():
+					pageResultPool.Put(result) // return result to pool if context cancelled
+				}
+			}()
+
+		case <-c.ctx.Done():
+			return // context cancelled
+		}
 	}
 }
 
@@ -330,7 +358,7 @@ func (c *PagedWriter) writeInOrder() error {
 			return err
 		}
 		delete(c.pendingResults, c.seqOut)
-		c.resultPool.Put(r)
+		pageResultPool.Put(r)
 		c.seqOut++
 	}
 }
@@ -378,7 +406,7 @@ func (c *PagedWriter) writePage() error {
 		}
 
 		// Copy page into owned work item (c.keys/c.vals will be reused by next Add())
-		item := c.workItemPool.Get().(*pageWorkItem)
+		item := pageWorkItemPool.Get().(*pageWorkItem)
 		item.seq = c.seqIn
 		item.data = append(item.data[:0], uncompressedPage...)
 		c.seqIn++
@@ -390,6 +418,9 @@ func (c *PagedWriter) writePage() error {
 				goto sent
 			case r := <-c.resultCh:
 				c.pendingResults[r.seq] = r
+			case <-c.ctx.Done():
+				pageWorkItemPool.Put(item) // return work item to pool
+				return c.ctx.Err()
 			}
 		}
 	sent:
@@ -458,15 +489,22 @@ func (c *PagedWriter) Flush() error {
 		close(c.workCh)
 		c.workersShutdown = true
 	}
+	defer func() {
+		c.wg.Wait() // ensure all worker goroutines have exited, even on error
+		c.resetPage()
+	}()
+
 	for c.seqOut < c.seqIn {
-		r := <-c.resultCh // blocking: workers are still running
-		c.pendingResults[r.seq] = r
-		if err := c.writeInOrder(); err != nil {
-			return err
+		select {
+		case r := <-c.resultCh:
+			c.pendingResults[r.seq] = r
+			if err := c.writeInOrder(); err != nil {
+				return err
+			}
+		case <-c.ctx.Done():
+			return c.ctx.Err()
 		}
 	}
-	c.wg.Wait() // ensure all worker goroutines have exited
-	c.resetPage()
 	return nil
 }
 
