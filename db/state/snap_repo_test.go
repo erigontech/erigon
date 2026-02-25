@@ -175,6 +175,7 @@ func TestIntegrateDirtyFile(t *testing.T) {
 
 	filesItem.decompressor, err = seg.NewDecompressor(filename)
 	require.NoError(t, err)
+	defer filesItem.decompressor.Close()
 	// add dirty file
 	repo.IntegrateDirtyFile(filesItem)
 	_, found := repo.dirtyFiles.Get(filesItem)

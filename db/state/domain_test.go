@@ -300,7 +300,7 @@ func TestDomain_AfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	domainRoTx := d.BeginFilesRo()
-	defer d.Close()
+	defer domainRoTx.Close()
 	writer := domainRoTx.NewWriter()
 	defer writer.Close()
 
@@ -551,27 +551,31 @@ func collateAndMergeOnceWithScanPrune(t *testing.T, d *Domain, tx kv.RwTx, step 
 
 	if prune {
 		domainRoTx := d.BeginFilesRo()
+		defer domainRoTx.Close()
 		stat, err := domainRoTx.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
 		t.Logf("prune stat: %s  (%d-%d)", stat, txFrom, txTo)
 		require.NoError(t, err)
-		domainRoTx.Close()
 	}
 
 	maxSpan := d.stepSize * config3.DefaultStepsInFrozenFile
 	for {
-		domainRoTx := d.BeginFilesRo()
-		r := domainRoTx.findMergeRange(domainRoTx.files.EndTxNum(), maxSpan)
-		if !r.any() {
-			domainRoTx.Close()
+		if stop := func() bool {
+			domainRoTx := d.BeginFilesRo()
+			defer domainRoTx.Close()
+			r := domainRoTx.findMergeRange(domainRoTx.files.EndTxNum(), maxSpan)
+			if !r.any() {
+				return true
+			}
+			valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
+			valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
+			require.NoError(t, err)
+
+			d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
+			d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+			return false
+		}(); stop {
 			break
 		}
-		valuesOuts, indexOuts, historyOuts := domainRoTx.staticFilesInRange(r)
-		valuesIn, indexIn, historyIn, err := domainRoTx.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, nil, background.NewProgressSet())
-		require.NoError(t, err)
-
-		d.integrateMergedDirtyFiles(valuesIn, indexIn, historyIn)
-		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
-		domainRoTx.Close()
 	}
 }
 

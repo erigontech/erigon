@@ -102,6 +102,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	}
 
 	writer := seg.NewWriter(comp, compressFlags)
+	defer writer.Close()
 
 	loader := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		_, err = writer.Write(k)
