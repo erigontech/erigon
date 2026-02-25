@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"os"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -23,6 +24,7 @@ import (
 // MCPTransport is the common interface for both embedded and standalone MCP servers.
 type MCPTransport interface {
 	Serve() error
+	ServeContext(ctx context.Context) error
 	ServeSSE(addr string) error
 }
 
@@ -1137,9 +1139,16 @@ func (e *ErigonMCPServer) handleOtsGetContractCreator(ctx context.Context, req m
 
 // Metrics gathering functions are now in metrics/gather.go
 
-// Serve starts MCP server in stdio mode
+// Serve starts MCP server in stdio mode with its own signal handling.
 func (e *ErigonMCPServer) Serve() error {
 	return server.ServeStdio(e.mcpServer)
+}
+
+// ServeContext starts MCP server in stdio mode using the provided context
+// for lifecycle management, avoiding duplicate signal handlers.
+func (e *ErigonMCPServer) ServeContext(ctx context.Context) error {
+	s := server.NewStdioServer(e.mcpServer)
+	return s.Listen(ctx, os.Stdin, os.Stdout)
 }
 
 // ServeSSE starts MCP server with SSE transport

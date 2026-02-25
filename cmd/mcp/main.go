@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -139,7 +140,7 @@ Examples:
 			}
 
 			srv := mcpserver.NewStandaloneMCPServer(client, logDir)
-			return serve(srv, transport, sseAddr, logger)
+			return serve(ctx, srv, transport, sseAddr, logger)
 		},
 	}
 
@@ -172,11 +173,11 @@ Examples:
 }
 
 // serve starts the MCP server in the chosen transport mode.
-func serve(srv mcpserver.MCPTransport, transport, sseAddr string, logger log.Logger) error {
+func serve(ctx context.Context, srv mcpserver.MCPTransport, transport, sseAddr string, logger log.Logger) error {
 	switch transport {
 	case "stdio":
 		logger.Info("[MCP] Starting stdio transport")
-		return srv.Serve()
+		return srv.ServeContext(ctx)
 	case "sse":
 		logger.Info("[MCP] Starting SSE transport", "addr", sseAddr)
 		return srv.ServeSSE(sseAddr)
@@ -225,10 +226,11 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 		Enabled:    true,
 		StateCache: kvcache.DefaultCoherentConfig,
 
-		DataDir:        dataDir,
-		Dirs:           dirs,
-		WithDatadir:    true,
-		PrivateApiAddr: privAPI,
+		DataDir:           dataDir,
+		Dirs:              dirs,
+		WithDatadir:       true,
+		PrivateApiAddr:    privAPI,
+		DBReadConcurrency: min(max(10, runtime.GOMAXPROCS(-1)*64), 9_000),
 	}
 
 	db, backend, txPool, mining, stateCache, blockReader, engine, ff, bridgeReader, heimdallReader, err :=
@@ -272,5 +274,5 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 	}
 
 	srv := mcpserver.NewErigonMCPServer(ethAPI, erigonAPI, otsAPI, logDir)
-	return serve(srv, transport, sseAddr, logger)
+	return serve(ctx, srv, transport, sseAddr, logger)
 }

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"os"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -1707,9 +1708,16 @@ func (s *StandaloneMCPServer) handleResourceTransactionAnalysis(ctx context.Cont
 
 // ===== TRANSPORT =====
 
-// Serve starts the MCP server in stdio mode.
+// Serve starts the MCP server in stdio mode with its own signal handling.
 func (s *StandaloneMCPServer) Serve() error {
 	return server.ServeStdio(s.mcpServer)
+}
+
+// ServeContext starts the MCP server in stdio mode using the provided context
+// for lifecycle management, avoiding duplicate signal handlers.
+func (s *StandaloneMCPServer) ServeContext(ctx context.Context) error {
+	stdio := server.NewStdioServer(s.mcpServer)
+	return stdio.Listen(ctx, os.Stdin, os.Stdout)
 }
 
 // ServeSSE starts the MCP server with SSE transport on the given address.
