@@ -122,13 +122,14 @@ type Compressor struct {
 	// is turned into 2 bytes, 0x01 and b, and two zero bytes 0x00 0x00 are inserted after each word
 	// this is needed for using ordinary (one string) suffix sorting algorithm instead of a generalised (many superstrings) suffix
 	// sorting algorithm
-	superstring      []byte
-	wordsCount       uint64
-	superstringCount uint64
-	Ratio            CompressionRatio
-	lvl              log.Lvl
-	trace            bool
-	logger           log.Logger
+	superstring       []byte
+	wordsCount        uint64
+	superstringCount  uint64
+	uncompressedBytes int
+	Ratio             CompressionRatio
+	lvl               log.Lvl
+	trace             bool
+	logger            log.Logger
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 	timings Timings
@@ -282,6 +283,7 @@ func (c *Compressor) AddWord(word []byte) error {
 		c.superstring = append(c.superstring, 0, 0)
 	}
 
+	c.uncompressedBytes += len(word)
 	return c.uncompressedFile.Append(word)
 }
 
@@ -295,6 +297,7 @@ func (c *Compressor) AddUncompressedWord(word []byte) error {
 		}
 	}
 
+	c.uncompressedBytes += len(word)
 	return c.uncompressedFile.AppendUncompressed(word)
 }
 
@@ -376,9 +379,13 @@ func (c *Compressor) Compress() error {
 		return fmt.Errorf("renaming: %w", err)
 	}
 
-	c.Ratio, err = Ratio(c.uncompressedFile.filePath, c.outputFile)
+	var outputStat os.FileInfo
+	outputStat, err = os.Stat(c.outputFile)
 	if err != nil {
 		return fmt.Errorf("ratio: %w", err)
+	}
+	if outputStat.Size() > 0 {
+		c.Ratio = CompressionRatio(float64(c.uncompressedBytes) / float64(outputStat.Size()))
 	}
 
 	_, fName := filepath.Split(c.outputFile)
@@ -919,18 +926,6 @@ func (da *DictAggregator) finish() error {
 type CompressionRatio float64
 
 func (r CompressionRatio) String() string { return fmt.Sprintf("%.2f", r) }
-
-func Ratio(f1, f2 string) (CompressionRatio, error) {
-	s1, err := os.Stat(f1)
-	if err != nil {
-		return 0, err
-	}
-	s2, err := os.Stat(f2)
-	if err != nil {
-		return 0, err
-	}
-	return CompressionRatio(float64(s1.Size()) / float64(s2.Size())), nil
-}
 
 // RawWordsFile - .idt file format - simple format for temporary data store
 // PerfCritical: Used to speedup foreground processes by moving heavy compression to background
