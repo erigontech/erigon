@@ -226,9 +226,9 @@ test-all:
 test-all-race:
 	$(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 GOFLAGS="-race" ./tools/run-test-group
 
-## test-group TEST_GROUP=<name>			run a named CI test group with -race (e.g. consensus, core-rpc, other)
+## test-group TEST_GROUP=<name>			run a named CI test group (e.g. consensus, core-rpc, other)
 test-group:
-	SKIP_FLAKY_TESTS=true $(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 GOFLAGS="-race" ./tools/run-test-group $(TEST_GROUP)
+	$(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 ./tools/run-test-group $(TEST_GROUP)
 
 ## check-test-groups:                        validate test group partitioning (no overlaps or gaps)
 check-test-groups:
