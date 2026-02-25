@@ -61,10 +61,13 @@ jobs:
         # Only login if we can. Workflow works without it but we want to avoid
         # rate limiting by Docker Hub when possible. External repos don't
         # have access to our Docker secrets.
+        # continue-on-error: transient Docker Hub network timeouts should not
+        # abort the entire workflow — the run proceeds without login (unlogged pull).
         if: |
           github.repository == 'erigontech/erigon' && 
           github.actor != 'dependabot[bot]' &&
           (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork)
+        continue-on-error: true
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.ORG_DOCKERHUB_ERIGONTECH_USERNAME }}
