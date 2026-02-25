@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.
@@ -104,7 +105,7 @@ var blake2FMalformedInputTests = []precompiledFailureTest{
 func testPrecompiled(t *testing.T, addr string, test precompiledTest) {
 	p := allPrecompiles[common.HexToAddress(addr)]
 	in := common.Hex2Bytes(test.Input)
-	gas := MdGas{
+	gas := evmtypes.MdGas{
 		Regular: p.RequiredGas(in),
 	}
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
@@ -128,7 +129,7 @@ func testPrecompiled(t *testing.T, addr string, test precompiledTest) {
 func testPrecompiledOOG(t *testing.T, addr string, test precompiledTest) {
 	p := allPrecompiles[common.HexToAddress(addr)]
 	in := common.Hex2Bytes(test.Input)
-	gas := MdGas{
+	gas := evmtypes.MdGas{
 		Regular: p.RequiredGas(in) - 1,
 	}
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
@@ -148,7 +149,7 @@ func testPrecompiledOOG(t *testing.T, addr string, test precompiledTest) {
 func testPrecompiledFailure(addr string, test precompiledFailureTest, t *testing.T) {
 	p := allPrecompiles[common.HexToAddress(addr)]
 	in := common.Hex2Bytes(test.Input)
-	gas := MdGas{
+	gas := evmtypes.MdGas{
 		Regular: p.RequiredGas(in),
 	}
 	t.Run(test.Name, func(t *testing.T) {
@@ -171,7 +172,7 @@ func benchmarkPrecompiled(b *testing.B, addr string, test precompiledTest) {
 	}
 	p := allPrecompiles[common.HexToAddress(addr)]
 	in := common.Hex2Bytes(test.Input)
-	reqGas := MdGas{
+	reqGas := evmtypes.MdGas{
 		Regular: p.RequiredGas(in),
 	}
 
@@ -270,7 +271,7 @@ func TestPrecompiledModExpPotentialOutOfRange(t *testing.T) {
 	modExpContract := allPrecompiles[common.BytesToAddress([]byte{0xa5})]
 	hexString := "0x0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000ffffffffffffffff0000000000000000000000000000000000000000000000000000000000000000ee"
 	input := hexutil.MustDecode(hexString)
-	maxGas := MdGas{
+	maxGas := evmtypes.MdGas{
 		Regular: uint64(math.MaxUint64),
 	}
 	_, _, err := RunPrecompiledContract(modExpContract, input, maxGas, nil)
@@ -283,13 +284,13 @@ func TestPrecompiledModExpInputEip7823(t *testing.T) {
 
 	// length_of_EXPONENT = 1024; everything else is zero
 	in := common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000000")
-	gas := MdGas{
+	gas := evmtypes.MdGas{
 		Regular: pragueModExp.RequiredGas(in),
 	}
 	res, _, err := RunPrecompiledContract(pragueModExp, in, gas, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
-	gas = MdGas{
+	gas = evmtypes.MdGas{
 		Regular: osakaModExp.RequiredGas(in),
 	}
 	_, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil)
@@ -298,13 +299,13 @@ func TestPrecompiledModExpInputEip7823(t *testing.T) {
 
 	// length_of_EXPONENT = 1025; everything else is zero
 	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004010000000000000000000000000000000000000000000000000000000000000000")
-	gas = MdGas{
+	gas = evmtypes.MdGas{
 		Regular: pragueModExp.RequiredGas(in),
 	}
 	res, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
-	gas = MdGas{
+	gas = evmtypes.MdGas{
 		Regular: osakaModExp.RequiredGas(in),
 	}
 	_, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil)
@@ -312,13 +313,13 @@ func TestPrecompiledModExpInputEip7823(t *testing.T) {
 
 	// length_of_EXPONENT = 2048; everything else is zero
 	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000000")
-	gas = MdGas{
+	gas = evmtypes.MdGas{
 		Regular: pragueModExp.RequiredGas(in),
 	}
 	res, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
-	gas = MdGas{
+	gas = evmtypes.MdGas{
 		Regular: osakaModExp.RequiredGas(in),
 	}
 	_, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil)
@@ -326,13 +327,13 @@ func TestPrecompiledModExpInputEip7823(t *testing.T) {
 
 	// length_of_EXPONENT = 2^32; everything else is zero
 	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000")
-	gas = MdGas{
+	gas = evmtypes.MdGas{
 		Regular: pragueModExp.RequiredGas(in),
 	}
 	res, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
-	gas = MdGas{
+	gas = evmtypes.MdGas{
 		Regular: osakaModExp.RequiredGas(in),
 	}
 	_, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil)
@@ -340,13 +341,13 @@ func TestPrecompiledModExpInputEip7823(t *testing.T) {
 
 	// length_of_EXPONENT = 2^64; everything else is zero
 	in = common.Hex2Bytes("000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000")
-	gas = MdGas{
+	gas = evmtypes.MdGas{
 		Regular: pragueModExp.RequiredGas(in),
 	}
 	res, _, err = RunPrecompiledContract(pragueModExp, in, gas, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "", common.Bytes2Hex(res))
-	gas = MdGas{
+	gas = evmtypes.MdGas{
 		Regular: osakaModExp.RequiredGas(in),
 	}
 	_, _, err = RunPrecompiledContract(osakaModExp, in, gas, nil)

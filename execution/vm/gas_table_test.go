@@ -136,7 +136,7 @@ func TestEIP2200(t *testing.T) {
 			}
 			_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
 			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{ExtraEips: []int{2200}})
-			mdGas := vm.MdGas{
+			mdGas := evmtypes.MdGas{
 				Regular: tt.gaspool,
 			}
 			_, gas, err := vmenv.Call(accounts.ZeroAddress, address, nil, mdGas, uint256.Int{}, false /* bailout */)
@@ -204,7 +204,7 @@ func TestCreateGas(t *testing.T) {
 		}
 
 		vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainConfig, config)
-		startGas := vm.MdGas{
+		startGas := evmtypes.MdGas{
 			Regular: math.MaxUint64,
 		}
 		_, gas, err := vmenv.Call(accounts.ZeroAddress, address, nil, startGas, uint256.Int{}, false /* bailout */)

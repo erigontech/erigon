@@ -1,4 +1,4 @@
-// Copyright 2026 The Erigon Authors
+// Copyright 2024 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package vm
+package evmtypes
 
 // MdGas represents multi-dimensional gas
 type MdGas struct {

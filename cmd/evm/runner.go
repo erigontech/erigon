@@ -53,7 +53,6 @@ import (
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/vm/runtime"
 )
@@ -99,7 +98,7 @@ type execStats struct {
 	GasUsed        uint64        `json:"gasUsed"`        // the amount of gas used during execution
 }
 
-func timedExec(bench bool, execFunc func() ([]byte, vm.MdGas, error)) (output []byte, stats execStats, err error) {
+func timedExec(bench bool, execFunc func() ([]byte, evmtypes.MdGas, error)) (output []byte, stats execStats, err error) {
 	if bench {
 		// Do one warm-up run
 		output, gasUsed, err := execFunc()

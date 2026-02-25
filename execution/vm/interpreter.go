@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 // Config are the configuration options for the Interpreter
@@ -72,7 +73,7 @@ var contextPool = sync.Pool{
 	},
 }
 
-func getCallContext(contract Contract, input []byte, gas MdGas) *CallContext {
+func getCallContext(contract Contract, input []byte, gas evmtypes.MdGas) *CallContext {
 	ctx, ok := contextPool.Get().(*CallContext)
 	if !ok {
 		log.Error("Type assertion failure", "err", "cannot get Stack pointer from stackPool")
@@ -168,8 +169,8 @@ func (ctx *CallContext) CodeHash() accounts.CodeHash {
 	return ctx.Contract.CodeHash
 }
 
-func (ctx *CallContext) Gas() MdGas {
-	return MdGas{
+func (ctx *CallContext) Gas() evmtypes.MdGas {
+	return evmtypes.MdGas{
 		Regular: ctx.gas,
 		State:   ctx.stateGas,
 	}
@@ -242,10 +243,10 @@ func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 // It's important to note that any errors returned by the interpreter should be
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
-func (evm *EVM) Run(contract Contract, gas MdGas, input []byte, readOnly bool) (_ []byte, _ MdGas, err error) {
+func (evm *EVM) Run(contract Contract, gas evmtypes.MdGas, input []byte, readOnly bool) (_ []byte, _ evmtypes.MdGas, err error) {
 	// Don't bother with the execution if there's no code.
 	if len(contract.Code) == 0 {
-		return nil, MdGas{}, nil
+		return nil, evmtypes.MdGas{}, nil
 	}
 
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer

@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 // Config is a basic type specifying certain configuration flags for running
@@ -153,7 +154,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		sender,
 		contractAsAddress,
 		input,
-		vm.MdGas{
+		evmtypes.MdGas{
 			Regular: cfg.GasLimit,
 			//
 			// TODO address
@@ -170,7 +171,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 }
 
 // Create executes the code using the EVM create method
-func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, vm.MdGas, error) {
+func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, evmtypes.MdGas, error) {
 	if cfg == nil {
 		cfg = new(Config)
 	}
@@ -180,7 +181,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	if !externalState {
 		tmp, err := os.MkdirTemp("", "erigon-create-vm-*")
 		if err != nil {
-			return nil, [20]byte{}, vm.MdGas{}, err
+			return nil, [20]byte{}, evmtypes.MdGas{}, err
 		}
 		defer dir.RemoveAll(tmp)
 
@@ -189,12 +190,12 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		defer db.Close()
 		tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 		if err != nil {
-			return nil, [20]byte{}, vm.MdGas{}, err
+			return nil, [20]byte{}, evmtypes.MdGas{}, err
 		}
 		defer tx.Rollback()
 		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 		if err != nil {
-			return nil, [20]byte{}, vm.MdGas{}, err
+			return nil, [20]byte{}, evmtypes.MdGas{}, err
 		}
 		defer sd.Close()
 		//cfg.w = state.NewWriter(sd, nil)
@@ -211,7 +212,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	code, address, leftOverGas, err := vmenv.Create(
 		sender,
 		input,
-		vm.MdGas{
+		evmtypes.MdGas{
 			Regular: cfg.GasLimit,
 			//
 			// TODO address
@@ -228,14 +229,14 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 //
 // Call, unlike Execute, requires a config and also requires the State field to
 // be set.
-func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, vm.MdGas, error) {
+func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, evmtypes.MdGas, error) {
 	setDefaults(cfg)
 
 	vmenv := NewEnv(cfg)
 
 	sender, err := cfg.State.GetOrNewStateObject(cfg.Origin)
 	if err != nil {
-		return nil, vm.MdGas{}, err
+		return nil, evmtypes.MdGas{}, err
 	}
 	statedb := cfg.State
 	rules := vmenv.ChainRules()
@@ -250,7 +251,7 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, vm.MdGas
 		sender.Address(),
 		address,
 		input,
-		vm.MdGas{
+		evmtypes.MdGas{
 			Regular: cfg.GasLimit,
 			//
 			// TODO address

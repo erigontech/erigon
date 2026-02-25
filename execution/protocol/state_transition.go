@@ -83,12 +83,12 @@ func (e ErrExecAbortError) Error() string {
 type StateTransition struct {
 	gp           *GasPool
 	msg          Message
-	gasRemaining vm.MdGas
+	gasRemaining evmtypes.MdGas
 	blockGasUsed uint64 // Gas used by the transaction relevant for block limit accounting - see EIP-7778
 	gasPrice     *uint256.Int
 	feeCap       *uint256.Int
 	tipCap       *uint256.Int
-	initialGas   vm.MdGas
+	initialGas   evmtypes.MdGas
 	value        uint256.Int
 	data         []byte
 	state        *state.IntraBlockState

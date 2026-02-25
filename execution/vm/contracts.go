@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 
 	//lint:ignore SA1019 Needed for precompile
 	"golang.org/x/crypto/ripemd160"
@@ -299,11 +300,11 @@ func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
 // - the returned bytes,
 // - the _remaining_ gas,
 // - any error that occurred
-func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas MdGas, tracer *tracing.Hooks,
-) (ret []byte, remainingGas MdGas, err error) {
+func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas evmtypes.MdGas, tracer *tracing.Hooks,
+) (ret []byte, remainingGas evmtypes.MdGas, err error) {
 	gasCost := p.RequiredGas(input)
 	if suppliedGas.Regular < gasCost {
-		return nil, MdGas{}, ErrOutOfGas
+		return nil, evmtypes.MdGas{}, ErrOutOfGas
 	}
 
 	if tracer != nil && tracer.OnGasChange != nil {

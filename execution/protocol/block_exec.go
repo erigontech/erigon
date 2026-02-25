@@ -273,7 +273,7 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 		txContext = NewEVMTxContext(msg)
 	}
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
-	mdGas := vm.MdGas{
+	mdGas := evmtypes.MdGas{
 		Regular: msg.Gas(),
 		State:   math.MaxUint64,
 	}
@@ -314,7 +314,7 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 	txContext := NewEVMTxContext(msg)
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author, chainConfig)
 	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
-	mdGas := vm.MdGas{
+	mdGas := evmtypes.MdGas{
 		Regular: msg.Gas(),
 		State:   math.MaxUint64,
 	}
