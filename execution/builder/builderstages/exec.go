@@ -17,6 +17,7 @@
 package builderstages
 
 import (
+	context0 "context"
 	"errors"
 	"fmt"
 	"sync/atomic"
@@ -24,7 +25,6 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
-	"golang.org/x/net/context"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -94,7 +94,7 @@ func StageBuilderExecCfg(
 // SpawnBuilderExecStage
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func SpawnBuilderExecStage(ctx context.Context, s *stagedsync.StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg BuilderExecCfg, sendersCfg stagedsync.SendersCfg, execCfg stagedsync.ExecuteBlockCfg, logger log.Logger, u stagedsync.Unwinder) (err error) {
+func SpawnBuilderExecStage(ctx context0.Context, s *stagedsync.StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, cfg BuilderExecCfg, sendersCfg stagedsync.SendersCfg, execCfg stagedsync.ExecuteBlockCfg, logger log.Logger, u stagedsync.Unwinder) (err error) {
 	cfg.vmConfig.NoReceipts = false
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 	logPrefix := s.LogPrefix()
@@ -346,7 +346,7 @@ func SpawnBuilderExecStage(ctx context.Context, s *stagedsync.StageState, sd *ex
 }
 
 func getNextTransactions(
-	ctx context.Context,
+	ctx context0.Context,
 	cfg BuilderExecCfg,
 	chainID *uint256.Int,
 	header *types.Header,
@@ -516,7 +516,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 }
 
 func addTransactionsToBlock(
-	ctx context.Context,
+	ctx context0.Context,
 	logPrefix string,
 	current *BuiltBlock,
 	chainConfig *chain.Config,
