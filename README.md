@@ -77,7 +77,7 @@ architecture.
 - ArchiveNode Gnosis: 640GB (May 2025). FullNode: 300GB (June 2024)
 - ArchiveNode Polygon Mainnet: 4.1TB (April 2024). FullNode: 2Tb (April 2024)
 
-SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind.
+SSD or NVMe. We do not recommend HDD — on HDD, Erigon will always stay a few blocks behind the chain tip but will not fall further behind.
 Bear in mind that SSD performance deteriorates when close to capacity. CloudDrives (like
 gp3): Blocks Execution is slow
 on [cloud-network-drives](https://github.com/erigontech/erigon?tab=readme-ov-file#cloud-network-drives)
@@ -89,7 +89,7 @@ on [cloud-network-drives](https://github.com/erigontech/erigon?tab=readme-ov-fil
 Sync Times
 ==========
 
-These are the  approximate sync times syncing from scratch to the tip of the chain (results may vary depending on hardware and bandwidth).
+These are the approximate sync times for syncing from scratch to the tip of the chain (results may vary depending on hardware and bandwidth).
 
 
 | Chain      | Archive         | Full           | Minimal        |
@@ -153,7 +153,7 @@ See the [lib](db/downloader/README.md) and [cmd](cmd/downloader/README.md) READM
 
 ### History on cheap disk
 
-If you can afford store datadir on 1 nvme-raid - great. If can't - it's possible to store history on cheap drive.
+If you can afford to store the datadir on a single NVMe RAID — great. If you can't, it's possible to store history on a cheaper drive.
 
 ```sh
 # place (or ln -s) `datadir` on slow disk. link some sub-folders to fast (low-latency) disk.
@@ -267,8 +267,8 @@ Erigon 3.1 adds the command `erigon snapshots reset`. This modifies your datadir
 
 Erigon by default is "all in one binary" solution, but it's possible start TxPool as separated processes.
 Same true about: JSON RPC layer (RPCDaemon), p2p layer (Sentry), history download layer (Downloader), consensus.
-Don't start services as separated processes unless you have clear reason for it: resource limiting, scale, replace by
-your own implementation, security.
+Don't start services as separate processes unless you have a clear reason to do so: resource limiting, scaling, replacing with
+your own implementation, or security.
 How to start Erigon's services as separated processes, see in [docker-compose.yml](./docker-compose.yml).
 Each service has own `./cmd/*/README.md` file.
 [Erigon Blog](https://erigon.tech/blog/).
@@ -349,7 +349,7 @@ Caplin is a full-fledged validating Consensus Client like Prysm, Lighthouse, Tek
 * keep the execution of blocks on chain tip
 * serve the Beacon API using a fast and compact data model alongside low CPU and memory usage.
 
-The main reason why developed a new Consensus Layer is to experiment with the possible benefits that could come with it.
+The main reason we developed a new Consensus Layer is to explore the potential benefits it can bring.
 For example, The Engine API does not work well with Erigon. The Engine API sends data one block at a time, which does
 not suit how Erigon works. Erigon is designed to handle many blocks simultaneously and needs to sort and process data
 efficiently. Therefore, it would be better for Erigon to handle the blocks independently instead of relying on the
@@ -357,9 +357,8 @@ Engine API.
 
 #### Caplin's Usage
 
-Caplin is be enabled by default. to disable it and enable the Engine API, use the `--externalcl` flag. from that point
-on, an external Consensus Layer will not be need
-anymore.
+Caplin is enabled by default. To disable it and use the Engine API instead, use the `--externalcl` flag. From that point
+on, an external Consensus Layer will no longer be needed.
 
 Caplin also has an archival mode for historical states and blocks. it can be enabled through the `--caplin.archive`
 flag.
@@ -392,12 +391,12 @@ Key features
 
 ### Faster Initial Sync
 
-On good network bandwidth EthereumMainnet FullNode syncs in 3
+On a good network connection, an Ethereum Mainnet Full Node syncs in 3
 hours: [OtterSync](https://erigon.substack.com/p/erigon-3-alpha-2-introducing-blazingly) can sync
 
 ### More Efficient State Storage
 
-**Flat KV storage.** Erigon uses a key-value database and storing accounts and storage in a simple way.
+**Flat KV storage.** Erigon uses a key-value database and stores accounts and storage in a straightforward way.
 
 <code> 🔬 See our detailed DB walkthrough [here](./docs/programmers_guide/db_walkthrough.MD).</code>
 
@@ -414,8 +413,8 @@ DB. That reduces write amplification and DB inserts are orders of magnitude quic
 
 ### JSON-RPC daemon
 
-Most of Erigon's components (txpool, rpcdaemon, snapshots downloader, sentry, ...) can work inside Erigon and as
-independent process on same Server (or another Server). Example:
+Most of Erigon's components (txpool, rpcdaemon, snapshots downloader, sentry, ...) can run inside Erigon or as
+independent processes on the same server (or a separate server). Example:
 
 ```sh
 make erigon rpcdaemon
