@@ -236,6 +236,8 @@ func getHeaderReturning(expectedHash common.Hash, rpcHeader *executionproto.Head
 // ---------------------------------------------------------------------------
 
 func TestBuildBlockV1(t *testing.T) {
+	t.Parallel()
+
 	const parentTimestamp = 1000
 
 	// Build a real parent header so that its computed hash matches BlockHash
@@ -244,6 +246,7 @@ func TestBuildBlockV1(t *testing.T) {
 	parentHash := parentHdr.Hash()
 
 	t.Run("disabled gate", func(t *testing.T) {
+		t.Parallel()
 		stub := &stubExecutionClient{}
 		api := newTestingAPI(allForksChainConfig(), stub, false)
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
@@ -255,6 +258,7 @@ func TestBuildBlockV1(t *testing.T) {
 	})
 
 	t.Run("nil payloadAttributes", func(t *testing.T) {
+		t.Parallel()
 		stub := &stubExecutionClient{}
 		api := newTestingAPI(allForksChainConfig(), stub, true)
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, nil, nil, nil)
@@ -266,6 +270,7 @@ func TestBuildBlockV1(t *testing.T) {
 	})
 
 	t.Run("explicit non-empty transaction list", func(t *testing.T) {
+		t.Parallel()
 		stub := &stubExecutionClient{}
 		api := newTestingAPI(allForksChainConfig(), stub, true)
 		txs := []hexutil.Bytes{{0x01, 0x02}}
@@ -278,6 +283,7 @@ func TestBuildBlockV1(t *testing.T) {
 	})
 
 	t.Run("empty transaction list is allowed", func(t *testing.T) {
+		t.Parallel()
 		// An empty slice (not nil pointer) means "build an empty block".
 		// This should pass the tx-list check and proceed to the parent-hash lookup.
 		stub := &stubExecutionClient{
@@ -298,6 +304,7 @@ func TestBuildBlockV1(t *testing.T) {
 	})
 
 	t.Run("unknown parent hash", func(t *testing.T) {
+		t.Parallel()
 		stub := &stubExecutionClient{
 			getHeaderFunc: func(_ context.Context, _ *executionproto.GetSegmentRequest, _ ...grpc.CallOption) (*executionproto.GetHeaderResponse, error) {
 				return &executionproto.GetHeaderResponse{Header: nil}, nil
@@ -313,6 +320,7 @@ func TestBuildBlockV1(t *testing.T) {
 	})
 
 	t.Run("timestamp equal to parent", func(t *testing.T) {
+		t.Parallel()
 		stub := &stubExecutionClient{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
 		}
@@ -328,6 +336,7 @@ func TestBuildBlockV1(t *testing.T) {
 	})
 
 	t.Run("timestamp less than parent", func(t *testing.T) {
+		t.Parallel()
 		stub := &stubExecutionClient{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
 		}
@@ -343,6 +352,7 @@ func TestBuildBlockV1(t *testing.T) {
 	})
 
 	t.Run("missing parentBeaconBlockRoot for Cancun+", func(t *testing.T) {
+		t.Parallel()
 		stub := &stubExecutionClient{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
 		}
@@ -358,6 +368,7 @@ func TestBuildBlockV1(t *testing.T) {
 	})
 
 	t.Run("unexpected parentBeaconBlockRoot pre-Cancun", func(t *testing.T) {
+		t.Parallel()
 		stub := &stubExecutionClient{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
 		}
@@ -373,7 +384,16 @@ func TestBuildBlockV1(t *testing.T) {
 		assert.Contains(t, rpcErr.Message, "parentBeaconBlockRoot not supported before Cancun")
 	})
 
+	// These two tests exercise the waitForResponse busy-polling loop which
+	// spins for SecondsPerSlot (12 s on mainnet) before timing out. They are
+	// skipped under -short to keep `make test-short` fast; run them in full
+	// mode to validate timeout behaviour.
+
 	t.Run("execution service busy on AssembleBlock", func(t *testing.T) {
+		t.Parallel()
+		if testing.Short() {
+			t.Skip("skipping busy-poll timeout test in -short mode")
+		}
 		stub := &stubExecutionClient{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
 			assembleBlockFunc: func(_ context.Context, _ *executionproto.AssembleBlockRequest, _ ...grpc.CallOption) (*executionproto.AssembleBlockResponse, error) {
@@ -391,6 +411,10 @@ func TestBuildBlockV1(t *testing.T) {
 	})
 
 	t.Run("execution service busy on GetAssembledBlock", func(t *testing.T) {
+		t.Parallel()
+		if testing.Short() {
+			t.Skip("skipping busy-poll timeout test in -short mode")
+		}
 		stub := &stubExecutionClient{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
 			assembleBlockFunc: func(_ context.Context, _ *executionproto.AssembleBlockRequest, _ ...grpc.CallOption) (*executionproto.AssembleBlockResponse, error) {
@@ -413,6 +437,7 @@ func TestBuildBlockV1(t *testing.T) {
 	})
 
 	t.Run("nil assembled block data", func(t *testing.T) {
+		t.Parallel()
 		stub := &stubExecutionClient{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
 			assembleBlockFunc: func(_ context.Context, _ *executionproto.AssembleBlockRequest, _ ...grpc.CallOption) (*executionproto.AssembleBlockResponse, error) {
@@ -433,6 +458,7 @@ func TestBuildBlockV1(t *testing.T) {
 	})
 
 	t.Run("happy path with mempool (nil transactions)", func(t *testing.T) {
+		t.Parallel()
 		const payloadID uint64 = 99
 		blockHash := common.HexToHash("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 		stateRoot := common.HexToHash("0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
@@ -498,6 +524,7 @@ func TestBuildBlockV1(t *testing.T) {
 	})
 
 	t.Run("happy path with extraData override", func(t *testing.T) {
+		t.Parallel()
 		stub := &stubExecutionClient{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
 			assembleBlockFunc: func(_ context.Context, _ *executionproto.AssembleBlockRequest, _ ...grpc.CallOption) (*executionproto.AssembleBlockResponse, error) {
@@ -538,6 +565,7 @@ func TestBuildBlockV1(t *testing.T) {
 	})
 
 	t.Run("missing withdrawals for Shanghai", func(t *testing.T) {
+		t.Parallel()
 		// Shanghai requires withdrawals to be non-nil.
 		stub := &stubExecutionClient{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
@@ -560,6 +588,7 @@ func TestBuildBlockV1(t *testing.T) {
 	})
 
 	t.Run("withdrawals before Shanghai", func(t *testing.T) {
+		t.Parallel()
 		stub := &stubExecutionClient{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
 		}
