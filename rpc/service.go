@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -64,6 +65,9 @@ type callback struct {
 	isSubscribe bool           // true if this is a subscription callback
 	streamable  bool           // support JSON streaming (more efficient for large responses)
 	logger      log.Logger
+
+	timerSuccess metrics.Summary // pre-cached success timer, avoids per-call GetOrCreateSummary
+	timerFailure metrics.Summary // pre-cached failure timer
 }
 
 func (r *serviceRegistry) registerName(name string, rcvr any) error {
@@ -90,11 +94,16 @@ func (r *serviceRegistry) registerName(name string, rcvr any) error {
 		}
 		r.services[name] = svc
 	}
-	for name, cb := range callbacks {
+	for shortName, cb := range callbacks {
+		// Pre-cache metrics timers using the full "namespace_method" name so the
+		// hot call path never needs to call GetOrCreateSummary or fmt.Sprintf.
+		fullMethod := name + serviceMethodSeparator + shortName
+		cb.timerSuccess = newRPCServingTimerMS(fullMethod, true)
+		cb.timerFailure = newRPCServingTimerMS(fullMethod, false)
 		if cb.isSubscribe {
-			svc.subscriptions[name] = cb
+			svc.subscriptions[shortName] = cb
 		} else {
-			svc.callbacks[name] = cb
+			svc.callbacks[shortName] = cb
 		}
 	}
 	return nil
@@ -102,13 +111,13 @@ func (r *serviceRegistry) registerName(name string, rcvr any) error {
 
 // callback returns the callback corresponding to the given RPC method name.
 func (r *serviceRegistry) callback(method string) *callback {
-	elem := strings.SplitN(method, serviceMethodSeparator, 2)
-	if len(elem) != 2 {
+	svc, name, ok := strings.Cut(method, serviceMethodSeparator)
+	if !ok {
 		return nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.services[elem[0]].callbacks[elem[1]]
+	return r.services[svc].callbacks[name]
 }
 
 // subscription returns a subscription callback in the given service.
