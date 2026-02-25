@@ -46,6 +46,11 @@ func (s *StateChangeSet) Copy() *StateChangeSet {
 }
 
 func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
+	// Version prefix: [0, 1]. Two bytes so we can distinguish from the old format where
+	// byte[0] is dictLen (>=1 for non-empty, 0 only when diffSetLen is also 0).
+	// New format: byte[0]==0, byte[1]>0 (version). Old format: byte[0]>=1 or both bytes==0.
+	out = append(out, 0, 1)
+
 	if len(diffSet) == 0 {
 		return append(out, 0, 0, 0, 0) // diffSet len (4) = 0
 	}
@@ -59,7 +64,7 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 		}
 	}
 
-	// Format: uint32(len) + per entry: uint32(keyLen) + key + uint8(hasValue) + [uint32(valLen) + val]
+	// Format: version(2) + uint32(len) + per entry: uint32(keyLen) + key + uint8(hasValue) + [uint32(valLen) + val]
 	totalSize := len(out) + 4 + len(diffSet)*(4+1) + totalKeyLen + totalValueLen
 	// Add space for value length prefixes (only for entries with values)
 	for i := range diffSet {
@@ -94,7 +99,7 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 }
 
 func serializeDiffSetBufLen(diffSet []kv.DomainEntryDiff) int {
-	totalSize := 4 // uint32 length prefix
+	totalSize := 2 + 4 // version prefix + uint32 length prefix
 	for i := range diffSet {
 		totalSize += 4 + len(diffSet[i].Key) + 1 // keyLen + key + hasValue flag
 		if diffSet[i].Value != nil {
@@ -105,6 +110,29 @@ func serializeDiffSetBufLen(diffSet []kv.DomainEntryDiff) int {
 }
 
 func DeserializeDiffSet(in []byte) []kv.DomainEntryDiff {
+	if len(in) < 2 {
+		return nil
+	}
+
+	// Format detection:
+	//   New versioned format starts with [0, version] where version > 0
+	//   Old empty format: [0, 0, 0, 0, 0] (dictLen=0, diffSetLen=0)
+	//   Old dictionary format: first byte >= 1 (dictLen >= 1)
+	if in[0] == 0 && in[1] > 0 {
+		// New versioned format: in[1] is the version number
+		return deserializeDiffSetV1(in[2:])
+	}
+	if in[0] == 0 {
+		// Old empty format (dictLen=0 implies diffSetLen=0)
+		return nil
+	}
+	// Old dictionary format (dictLen >= 1)
+	return deserializeDiffSetV0(in)
+}
+
+// deserializeDiffSetV1 parses the current format (without version prefix):
+// uint32(diffSetLen) + per entry: uint32(keyLen) + key + uint8(hasValue) + [uint32(valLen) + val]
+func deserializeDiffSetV1(in []byte) []kv.DomainEntryDiff {
 	if len(in) < 4 {
 		return nil
 	}
@@ -135,6 +163,46 @@ func DeserializeDiffSet(in []byte) []kv.DomainEntryDiff {
 				Key:   toStringZeroCopy(key),
 				Value: nil, // delete only
 			}
+		}
+	}
+	return diffSet
+}
+
+// deserializeDiffSetV0 parses the old dictionary-based format:
+// uint8(dictLen) + dictLen * (8 bytes step + 1 byte dictIdx) +
+// uint32(diffSetLen) + per entry: uint32(keyLen) + key + uint32(valLen) + val + uint8(dictIdx)
+func deserializeDiffSetV0(in []byte) []kv.DomainEntryDiff {
+	dictLen := int(in[0])
+	in = in[1:]
+	// Skip dictionary entries: each is 8 bytes (step) + 1 byte (unused)
+	in = in[dictLen*9:]
+
+	if len(in) < 4 {
+		return nil
+	}
+	diffSetLen := binary.BigEndian.Uint32(in)
+	in = in[4:]
+	if diffSetLen == 0 {
+		return nil
+	}
+	diffSet := make([]kv.DomainEntryDiff, diffSetLen)
+	for i := 0; i < int(diffSetLen); i++ {
+		keyLen := binary.BigEndian.Uint32(in)
+		in = in[4:]
+		key := in[:keyLen]
+		in = in[keyLen:]
+		valueLen := binary.BigEndian.Uint32(in)
+		in = in[4:]
+		var value []byte
+		if valueLen > 0 {
+			value = in[:valueLen]
+			in = in[valueLen:]
+		}
+		// Skip dictIdx (1 byte) — PrevStepBytes is discarded
+		in = in[1:]
+		diffSet[i] = kv.DomainEntryDiff{
+			Key:   toStringZeroCopy(key),
+			Value: value, // nil when valueLen == 0 (don't restore)
 		}
 	}
 	return diffSet

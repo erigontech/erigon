@@ -18,6 +18,7 @@ package changeset_test
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"testing"
 
@@ -78,9 +79,90 @@ func TestSerializeDeserializeDiffEmpty(t *testing.T) {
 
 	var empty []kv.DomainEntryDiff
 	serialized := changeset.SerializeDiffSet(empty, nil)
-	require.Equal(t, []byte{0, 0, 0, 0}, serialized) // count (4 bytes, zero entries)
+	require.Equal(t, []byte{0, 1, 0, 0, 0, 0}, serialized) // version [0,1] + count (4 bytes, zero entries)
 	deserialized := changeset.DeserializeDiffSet(serialized)
 	require.Empty(t, deserialized)
+}
+
+func TestDeserializeOldFormatEmpty(t *testing.T) {
+	t.Parallel()
+
+	// Old empty format: dictLen=0, diffSetLen=0
+	oldEmpty := []byte{0, 0, 0, 0, 0}
+	deserialized := changeset.DeserializeDiffSet(oldEmpty)
+	require.Empty(t, deserialized)
+}
+
+func TestDeserializeOldFormatNonEmpty(t *testing.T) {
+	t.Parallel()
+
+	// Construct old dictionary-based format bytes:
+	// dictLen(1) = 1
+	// dict entry: 8 bytes step + 1 byte (unused) = 9 bytes
+	// diffSetLen(4) = 2
+	// entry 1: keyLen(4) + key + valLen(4) + val + dictIdx(1)
+	// entry 2: keyLen(4) + key + valLen(4=0) + dictIdx(1) (valueLen=0 → nil)
+
+	var buf []byte
+	// dictLen = 1
+	buf = append(buf, 1)
+	// dict entry: step=42 (8 bytes big-endian) + 1 byte unused
+	step := make([]byte, 8)
+	binary.BigEndian.PutUint64(step, 42)
+	buf = append(buf, step...)
+	buf = append(buf, 0) // unused byte
+
+	// diffSetLen = 2
+	diffSetLen := make([]byte, 4)
+	binary.BigEndian.PutUint32(diffSetLen, 2)
+	buf = append(buf, diffSetLen...)
+
+	// entry 1: key="abc", value="xyz", dictIdx=0
+	keyLen := make([]byte, 4)
+	binary.BigEndian.PutUint32(keyLen, 3)
+	buf = append(buf, keyLen...)
+	buf = append(buf, "abc"...)
+	valLen := make([]byte, 4)
+	binary.BigEndian.PutUint32(valLen, 3)
+	buf = append(buf, valLen...)
+	buf = append(buf, "xyz"...)
+	buf = append(buf, 0) // dictIdx
+
+	// entry 2: key="def", valueLen=0 (→ nil), dictIdx=0
+	binary.BigEndian.PutUint32(keyLen, 3)
+	buf = append(buf, keyLen...)
+	buf = append(buf, "def"...)
+	binary.BigEndian.PutUint32(valLen, 0)
+	buf = append(buf, valLen...)
+	buf = append(buf, 0) // dictIdx
+
+	deserialized := changeset.DeserializeDiffSet(buf)
+	require.Len(t, deserialized, 2)
+	require.Equal(t, "abc", deserialized[0].Key)
+	require.Equal(t, []byte("xyz"), deserialized[0].Value)
+	require.Equal(t, "def", deserialized[1].Key)
+	require.Nil(t, deserialized[1].Value)
+}
+
+func TestDeserializeNilValue(t *testing.T) {
+	t.Parallel()
+
+	d := []kv.DomainEntryDiff{
+		{Key: "key1_padding", Value: []byte("value1")},
+		{Key: "key2_padding", Value: nil},
+		{Key: "key3_padding", Value: []byte{}},
+	}
+
+	serialized := changeset.SerializeDiffSet(d, nil)
+	deserialized := changeset.DeserializeDiffSet(serialized)
+
+	require.Len(t, deserialized, 3)
+	require.Equal(t, "key1_padding", deserialized[0].Key)
+	require.Equal(t, []byte("value1"), deserialized[0].Value)
+	require.Equal(t, "key2_padding", deserialized[1].Key)
+	require.Nil(t, deserialized[1].Value)
+	require.Equal(t, "key3_padding", deserialized[2].Key)
+	require.Equal(t, []byte{}, deserialized[2].Value)
 }
 
 func TestMergeDiffSet(t *testing.T) {
