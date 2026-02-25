@@ -17,6 +17,7 @@ on:
 
 jobs:
   assertoor_test:
+    if: ${{ github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'skip-uncaching') }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
