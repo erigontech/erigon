@@ -770,6 +770,23 @@ func Test_mergeEliasFano(t *testing.T) {
 	}
 }
 
+func TestCommitmentValTransformDomainPanicsWithNeedMergeFalse(t *testing.T) {
+	t.Parallel()
+	// Regression: aggregator.mergeFiles called commitmentValTransformDomain with a zero
+	// MergeRange{needMerge:false} whenever the commitment domain had any() work (e.g. history-only
+	// merge). That caused rawLookupFileByRange(0,0) to return
+	// "file v2.0-storage.0-0.kv was not found".
+	// Fix: (1) guard the call with values.needMerge in aggregator.go;
+	//      (2) this panic assert catches future callers that violate the contract.
+	d := emptyTestDomain(t, 1)
+	dc := d.BeginFilesRo()
+	defer dc.Close()
+
+	require.Panics(t, func() {
+		dc.commitmentValTransformDomain(MergeRange{needMerge: false}, dc, dc, nil, nil)
+	})
+}
+
 func TestMergeFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
