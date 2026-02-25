@@ -1779,9 +1779,7 @@ func (s *cursor2iter) advance() (err error) {
 	if err != nil {
 		return err
 	}
-	if k == nil {
-		s.done = true
-	}
+	s.done = k == nil
 	return nil
 }
 
@@ -1955,9 +1953,7 @@ func (s *cursorDup2iter) advance() (err error) {
 	if err != nil {
 		return err
 	}
-	if k == nil {
-		s.done = true
-	}
+	s.done = k == nil
 	return nil
 }
 
