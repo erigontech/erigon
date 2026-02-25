@@ -349,7 +349,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 			return nil, err
 		}
 		if b == nil {
-			// No pending block available: return 0x0 
+			// No pending block available: return 0x0
 			n := hexutil.Uint(0)
 			return &n, nil
 		}
@@ -473,6 +473,6 @@ func (api *APIImpl) blockByNumber(ctx context.Context, blockNumber rpc.BlockNumb
 		return block, nil
 	}
 
-	// No pending block available: return nil 
+	// No pending block available: return nil
 	return nil, nil
 }
