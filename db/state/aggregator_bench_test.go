@@ -79,7 +79,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 		key := <-longKeys
 		val := <-vals
 		txNum := uint64(i)
-		err := domains.DomainPut(kv.StorageDomain, tx, key, val, txNum, prev, 0)
+		err := domains.DomainPut(kv.StorageDomain, tx, key, val, txNum, prev)
 		prev = val
 		require.NoError(b, err)
 
