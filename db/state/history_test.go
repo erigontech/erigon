@@ -1320,14 +1320,17 @@ func TestHistoryRange2(t *testing.T) {
 			{ //check IdxRange
 				idxIt, err := hc.IdxRange(firstKey[:], -1, -1, order.Asc, -1, roTx)
 				require.NoError(err)
+				defer idxIt.Close()
 				cnt, err := stream.CountU64(idxIt)
 				require.NoError(err)
 				require.Equal(1000, cnt)
 
 				idxIt, err = hc.IdxRange(firstKey[:], 2, 20, order.Asc, -1, roTx)
 				require.NoError(err)
+				defer idxIt.Close()
 				idxItDesc, err := hc.IdxRange(firstKey[:], 19, 1, order.Desc, -1, roTx)
 				require.NoError(err)
+				defer idxItDesc.Close()
 				descArr, err := stream.ToArrayU64(idxItDesc)
 				require.NoError(err)
 				stream.ExpectEqualU64(t, idxIt, stream.ReverseArray(descArr))
@@ -1335,6 +1338,7 @@ func TestHistoryRange2(t *testing.T) {
 
 			it, err := hc.HistoryRange(2, 20, order.Asc, -1, roTx)
 			require.NoError(err)
+			defer it.Close()
 			for it.HasNext() {
 				k, v, err := it.Next()
 				require.NoError(err)
@@ -1616,6 +1620,7 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 
 		iter, err := ic.HistoryRange(1, -1, order.Asc, -1, tx)
 		require.NoError(err)
+		defer iter.Close()
 
 		keys := make([][]byte, 0)
 		for iter.HasNext() {

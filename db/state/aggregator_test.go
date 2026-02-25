@@ -115,8 +115,6 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	err = collector.Load(nil, "", loader, etl.TransformArgs{})
 	require.NoError(tb, err)
 
-	collector.Close()
-
 	err = comp.Compress()
 	require.NoError(tb, err)
 	comp.Close()
