@@ -260,6 +260,7 @@ func NewPagedWriter(parent CompressorI, compressionEnabled bool) *PagedWriter {
 		pageSize:           parent.GetValuesOnCompressedPage(),
 		compressionEnabled: compressionEnabled,
 		ctx:                context.Background(),
+		numWorkers:         1,
 	}
 	if compressionEnabled && pw.pageSize > 1 {
 		pw.numWorkers = runtime.GOMAXPROCS(-1)
