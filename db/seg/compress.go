@@ -126,11 +126,10 @@ type Compressor struct {
 	wordsCount        uint64
 	superstringCount  uint64
 	uncompressedBytes uint64
-
-	Ratio  CompressionRatio
-	lvl    log.Lvl
-	trace  bool
-	logger log.Logger
+	Ratio             CompressionRatio
+	lvl               log.Lvl
+	trace             bool
+	logger            log.Logger
 
 	noFsync bool // fsync is enabled by default, but tests can manually disable
 	timings Timings
