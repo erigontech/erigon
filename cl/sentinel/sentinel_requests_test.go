@@ -423,11 +423,11 @@ func testSentinelStatusRequest(t *testing.T) {
 		FinalizedEpoch: 0,
 	}
 	sent.SetStatus(req)
-
 	stream, err := host1.NewStream(ctx, h.ID(), protocol.ID(communication.StatusProtocolV1))
 	if err != nil {
 		panic(fmt.Sprintf("NewStream failed: %v", err))
 	}
+	defer stream.Close()
 
 	if err := ssz_snappy.EncodeAndWrite(stream, req); err != nil {
 		panic(fmt.Sprintf("EncodeAndWrite failed: %v", err))
