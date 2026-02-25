@@ -21,6 +21,9 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 )
 
+// Version is the MCP server version reported to clients.
+const Version = "0.0.2"
+
 // MCPTransport is the common interface for both embedded and standalone MCP servers.
 type MCPTransport interface {
 	Serve() error
@@ -48,7 +51,7 @@ func NewErigonMCPServer(ethAPI jsonrpc.EthAPI, erigonAPI jsonrpc.ErigonAPI, otsA
 
 	e.mcpServer = server.NewMCPServer(
 		"ErigonMCP",
-		"0.0.1",
+		Version,
 		server.WithResourceCapabilities(true, true),
 		server.WithToolCapabilities(true),
 		server.WithPromptCapabilities(true),

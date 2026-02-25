@@ -51,7 +51,7 @@ func NewStandaloneMCPServer(rpcClient *rpc.Client, logDir string) *StandaloneMCP
 
 	s.mcpServer = server.NewMCPServer(
 		"ErigonMCP",
-		"0.0.1",
+		Version,
 		server.WithResourceCapabilities(true, true),
 		server.WithToolCapabilities(true),
 		server.WithPromptCapabilities(true),
