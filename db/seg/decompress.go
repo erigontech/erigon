@@ -716,7 +716,7 @@ func (v *SequentialView) MakeGetter() *Getter {
 		fName:       v.d.FileName(),
 	}
 	if v.d.posDict != nil {
-		g.posMask = uint16(1)<<v.d.posDict.bitLen - 1
+		g.posMask = v.d.posDict.mask
 	}
 	return g
 }
