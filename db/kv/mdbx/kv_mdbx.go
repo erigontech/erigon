@@ -1706,9 +1706,7 @@ func (s *cursor2iter) init(table string, tx kv.Tx) error {
 		if err != nil {
 			return err
 		}
-		if firstK == nil {
-			s.done = true
-		}
+		s.done = firstK == nil
 		return nil
 	}
 
@@ -1717,9 +1715,7 @@ func (s *cursor2iter) init(table string, tx kv.Tx) error {
 		if err != nil {
 			return err
 		}
-		if firstK == nil {
-			s.done = true
-		}
+		s.done = firstK == nil
 		return nil
 	}
 
@@ -1896,9 +1892,7 @@ func (s *cursorDup2iter) init(table string, tx kv.Tx) error {
 		if err != nil {
 			return err
 		}
-		if firstV == nil {
-			s.done = true
-		}
+		s.done = firstV == nil
 		return nil
 	}
 
@@ -1907,9 +1901,7 @@ func (s *cursorDup2iter) init(table string, tx kv.Tx) error {
 		if err != nil {
 			return err
 		}
-		if firstV == nil {
-			s.done = true
-		}
+		s.done = firstV == nil
 		return nil
 	}
 
@@ -1920,9 +1912,7 @@ func (s *cursorDup2iter) init(table string, tx kv.Tx) error {
 		if err != nil {
 			return err
 		}
-		if firstV == nil {
-			s.done = true
-		}
+		s.done = firstV == nil
 		return nil
 	}
 
@@ -1935,9 +1925,7 @@ func (s *cursorDup2iter) init(table string, tx kv.Tx) error {
 		if err != nil {
 			return err
 		}
-		if firstV == nil {
-			s.done = true
-		}
+		s.done = firstV == nil
 		return nil
 	}
 
@@ -1953,9 +1941,7 @@ func (s *cursorDup2iter) init(table string, tx kv.Tx) error {
 	if err != nil {
 		return err
 	}
-	if firstV == nil {
-		s.done = true
-	}
+	s.done = firstV == nil
 	return nil
 }
 
