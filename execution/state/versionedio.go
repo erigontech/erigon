@@ -441,6 +441,72 @@ func (writes VersionedWrites) HasNewWrite(cmpSet []*VersionedWrite) bool {
 	return false
 }
 
+// StripBalanceWrite removes the BalancePath write for addr from the write set
+// and computes the TX's net balance delta by comparing the stale write with
+// the stale read from readSet. This is used in finalize to prevent stale
+// speculative coinbase/burnt-contract balance writes from being applied via
+// ApplyVersionedWrites. The delta is returned so it can be applied separately
+// on top of the correct base balance from the VersionedStateReader.
+//
+// Returns:
+//   - stripped: the write set with the balance write removed
+//   - delta: the absolute difference between stale write and stale read
+//   - increase: true if the TX increased the balance, false if decreased
+//   - found: true if both a stale read and write were found and a non-zero delta computed
+func (writes VersionedWrites) StripBalanceWrite(addr accounts.Address, readSet ReadSet) (stripped VersionedWrites, delta uint256.Int, increase bool, found bool) {
+	stripped = writes
+	if addr.IsNil() {
+		return
+	}
+
+	reads, ok := readSet[addr]
+	if !ok {
+		// TX didn't read this address — no delta to compute.
+		// Still strip the write to prevent stale cache pollution.
+		for i, w := range stripped {
+			if w.Address == addr && w.Path == BalancePath {
+				stripped = append(stripped[:i], stripped[i+1:]...)
+				return
+			}
+		}
+		return
+	}
+
+	balKey := AccountKey{Path: BalancePath, Key: accounts.NilKey}
+	balRead, ok := reads[balKey]
+	if !ok {
+		return
+	}
+	staleRead, ok := balRead.Val.(uint256.Int)
+	if !ok {
+		return
+	}
+
+	for i, w := range stripped {
+		if w.Address == addr && w.Path == BalancePath {
+			staleWrite, ok := w.Val.(uint256.Int)
+			if !ok {
+				break
+			}
+			// Remove the stale absolute write
+			stripped = append(stripped[:i], stripped[i+1:]...)
+			// Compute the TX's net effect on this balance
+			if staleWrite.Gt(&staleRead) {
+				delta.Sub(&staleWrite, &staleRead)
+				increase = true
+				found = true
+			} else if staleRead.Gt(&staleWrite) {
+				delta.Sub(&staleRead, &staleWrite)
+				increase = false
+				found = true
+			}
+			return
+		}
+	}
+
+	return
+}
+
 func versionedRead[T any](s *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, commited bool, defaultV T, copyV func(T) T, readStorage func(sdb *stateObject) (T, error)) (T, ReadSource, Version, error) {
 	if s.versionMap == nil {
 		so, err := s.getStateObject(addr, true)

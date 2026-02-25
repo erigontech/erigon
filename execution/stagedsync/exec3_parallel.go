@@ -1014,8 +1014,20 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 		defer fmt.Println(tracePrefix, "done finalize")
 	}
 
-	// we want to force a re-read of the conbiase & burnt contract address
-	// if thay where referenced by the tx
+	// Strip stale coinbase/burnt-contract balance writes from TxOut and
+	// compute the TX's net balance delta BEFORE deleting from TxIn.
+	// During parallel execution with delayed fee calc, the TX's speculative
+	// execution may have read/written these addresses with a stale base
+	// (missing prior TXs' fees). We strip the stale absolute write so
+	// ApplyVersionedWrites doesn't cache it, and apply the delta + fee
+	// on top of the correct base from the VersionedStateReader.
+	txOut, coinbaseDelta, coinbaseDeltaIncrease, hasCoinbaseDelta := result.TxOut.StripBalanceWrite(result.Coinbase, result.TxIn)
+	result.TxOut = txOut
+	txOut, burntDelta, burntDeltaIncrease, hasBurntDelta := result.TxOut.StripBalanceWrite(result.ExecutionResult.BurntContractAddress, result.TxIn)
+	result.TxOut = txOut
+
+	// Force a re-read of the coinbase & burnt contract address
+	// so the VersionedStateReader provides the correct base values.
 	delete(result.TxIn, result.Coinbase)
 	delete(result.TxIn, result.ExecutionResult.BurntContractAddress)
 
@@ -1045,12 +1057,36 @@ func (result *execResult) finalize(prevReceipt *types.Receipt, engine rules.Engi
 	}
 
 	if task.shouldDelayFeeCalc {
+		// Apply the TX's net balance effect on burnt contract (re-based on correct base)
+		if hasBurntDelta {
+			if burntDeltaIncrease {
+				if err := ibs.AddBalance(result.ExecutionResult.BurntContractAddress, burntDelta, tracing.BalanceChangeTransfer); err != nil {
+					return nil, nil, nil, err
+				}
+			} else {
+				if err := ibs.SubBalance(result.ExecutionResult.BurntContractAddress, burntDelta, tracing.BalanceChangeTransfer); err != nil {
+					return nil, nil, nil, err
+				}
+			}
+		}
 		if !result.ExecutionResult.BurntContractAddress.IsNil() && txTask.Config.IsLondon(blockNum) {
 			if err := ibs.AddBalance(result.ExecutionResult.BurntContractAddress, result.ExecutionResult.FeeBurnt, tracing.BalanceDecreaseGasBuy); err != nil {
 				return nil, nil, nil, err
 			}
 		}
 
+		// Apply the TX's net balance effect on coinbase (re-based on correct base)
+		if hasCoinbaseDelta {
+			if coinbaseDeltaIncrease {
+				if err := ibs.AddBalance(result.Coinbase, coinbaseDelta, tracing.BalanceChangeTransfer); err != nil {
+					return nil, nil, nil, err
+				}
+			} else {
+				if err := ibs.SubBalance(result.Coinbase, coinbaseDelta, tracing.BalanceChangeTransfer); err != nil {
+					return nil, nil, nil, err
+				}
+			}
+		}
 		if err := ibs.AddBalance(result.Coinbase, result.ExecutionResult.FeeTipped, tracing.BalanceIncreaseRewardTransactionFee); err != nil {
 			return nil, nil, nil, err
 		}
