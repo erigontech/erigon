@@ -1029,8 +1029,8 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 
 		if doPrune {
 			hc := h.BeginFilesRo()
+			defer hc.Close()
 			_, err = hc.Prune(ctx, tx, step.ToTxNum(h.stepSize), (step + 1).ToTxNum(h.stepSize), math.MaxUint64, false, logEvery)
-			hc.Close()
 			require.NoError(err)
 		}
 	}

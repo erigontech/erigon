@@ -330,8 +330,6 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 		return name, schema
 	})
 
-	defer accountsR.Close()
-
 	_, commitmentR := setupEntity(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (name string, schema SnapNameSchema) {
 		accessors := statecfg.AccessorHashMap
 		name = "commitment"
@@ -341,7 +339,6 @@ func TestReferencingIntegrityChecker(t *testing.T) {
 			Build()
 		return name, schema
 	})
-	defer commitmentR.Close()
 
 	accountsR.integrity = NewDependencyIntegrityChecker(dirs, log.New())
 	accountsR.integrity.AddDependency(FromDomain(kv.AccountsDomain), &DependentInfo{
@@ -584,6 +581,7 @@ func setupEntity(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uint64, 
 		SnapshotCreationConfig: &createConfig,
 		Schema:                 schema,
 	}, log.New())
+	t.Cleanup(repo.Close)
 
 	return name, repo
 }
@@ -665,12 +663,12 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 		if strings.HasSuffix(filename, ".ef") || strings.HasSuffix(filename, ".v") || strings.HasSuffix(filename, ".kv") {
 			seg, err := seg.NewCompressor(context.Background(), t.Name(), filename, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
+			defer seg.Close()
 			seg.DisableFsync()
 			if err = seg.AddWord([]byte("word")); err != nil {
 				t.Fatal(err)
 			}
 			require.NoError(t, seg.Compress())
-			seg.Close()
 
 			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) && strings.Contains(filename, dataFolder) {
 				dataFileCount++
@@ -682,6 +680,7 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 		if strings.HasSuffix(filename, ".bt") {
 			seg2, err := seg.NewCompressor(context.Background(), t.Name(), filename+".sample", dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
+			defer seg2.Close()
 			seg2.DisableFsync()
 			if err = seg2.AddWord([]byte("key")); err != nil {
 				t.Fatal(err)
@@ -690,17 +689,16 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 				t.Fatal(err)
 			}
 			require.NoError(t, seg2.Compress())
-			seg2.Close()
 			seg3, err := seg.NewDecompressor(filename + ".sample")
 			require.NoError(t, err)
+			defer seg3.Close()
 
 			r := seg.NewReader(seg3.MakeGetter(), seg.CompressNone)
 			btindex, err := CreateBtreeIndexWithDecompressor(filename, 128, r, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence)
 			if err != nil {
 				t.Fatal(err)
 			}
-			seg3.Close()
-			btindex.Close()
+			defer btindex.Close()
 
 			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) {
 				btCount++
@@ -712,9 +710,9 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 		if strings.HasSuffix(filename, ".kvei") {
 			filter, err := existence.NewFilter(0, filename, false)
 			require.NoError(t, err)
+			defer filter.Close()
 			filter.DisableFsync()
 			require.NoError(t, filter.Build())
-			filter.Close()
 
 			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) {
 				existenceCount++
