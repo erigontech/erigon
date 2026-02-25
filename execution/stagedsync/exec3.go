@@ -212,10 +212,8 @@ func ExecV3(ctx context.Context,
 	if isChainTip {
 		postValidator = newParallelBlockPostExecutionValidator()
 	}
-	// Enable deferred commitment updates only for serial execution (fork validation).
-	// The parallel executor has a subtle interaction with deferred updates that causes
-	// intermittent trie root mismatches during re-org validation.
-	if !parallel && isForkValidation {
+	// Enable deferred commitment updates for fork validation (both serial and parallel).
+	if isForkValidation {
 		doms.SetDeferCommitmentUpdates(true)
 	}
 	defer doms.SetDeferCommitmentUpdates(false)
