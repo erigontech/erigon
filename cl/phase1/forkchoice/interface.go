@@ -70,6 +70,10 @@ type ForkChoiceStorageReader interface {
 	GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool)
 	// [New in Gloas:EIP7732] GetBlock returns the full block for a given block root.
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
+	// [New in Gloas:EIP7732] HasEnvelope checks if a signed execution payload envelope exists.
+	HasEnvelope(blockRoot common.Hash) bool
+	// [New in Gloas:EIP7732] ReadEnvelopeFromDisk reads a signed execution payload envelope from disk.
+	ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
 
 	GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
 	GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
