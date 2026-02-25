@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"sync"
@@ -682,11 +681,6 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 // file, it makes two sequential passes over the raw words file and writes directly to cf.
 func compressNoWordPatterns(logPrefix string, cf *os.File, uncompressedFile *RawWordsFile, lvl log.Lvl, logger log.Logger) error {
 	var numBuf [binary.MaxVarintLen64]byte
-
-	if fi, err := uncompressedFile.f.Stat(); err == nil && fi.Size() > 1<<30 {
-		logger.Warn(fmt.Sprintf("[%s] noWordPatterns: large uncompressed file", logPrefix),
-			"file", filepath.Base(uncompressedFile.filePath), "size", common.ByteCount(uint64(fi.Size())))
-	}
 
 	// Pass 1: collect word counts and position-length frequencies for the Huffman tree.
 	var inCount, emptyWordsCount uint64
