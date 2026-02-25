@@ -24,8 +24,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -33,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/executionproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -40,49 +39,38 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Minimal stub implementing executionproto.ExecutionClient for unit tests.
+// Minimal stub implementing executionproto.ExecutionServer for unit tests.
 // Only the methods called by BuildBlockV1 (GetHeader, AssembleBlock,
-// GetAssembledBlock) are implemented; everything else panics.
+// GetAssembledBlock) are implemented; everything else returns Unimplemented.
 // ---------------------------------------------------------------------------
 
-type stubExecutionClient struct {
-	executionproto.ExecutionClient // embed to satisfy the interface; unused methods will panic
+type stubExecutionServer struct {
+	executionproto.UnimplementedExecutionServer // embed to satisfy the interface
 
-	getHeaderFunc         func(ctx context.Context, in *executionproto.GetSegmentRequest, opts ...grpc.CallOption) (*executionproto.GetHeaderResponse, error)
-	assembleBlockFunc     func(ctx context.Context, in *executionproto.AssembleBlockRequest, opts ...grpc.CallOption) (*executionproto.AssembleBlockResponse, error)
-	getAssembledBlockFunc func(ctx context.Context, in *executionproto.GetAssembledBlockRequest, opts ...grpc.CallOption) (*executionproto.GetAssembledBlockResponse, error)
+	getHeaderFunc         func(ctx context.Context, in *executionproto.GetSegmentRequest) (*executionproto.GetHeaderResponse, error)
+	assembleBlockFunc     func(ctx context.Context, in *executionproto.AssembleBlockRequest) (*executionproto.AssembleBlockResponse, error)
+	getAssembledBlockFunc func(ctx context.Context, in *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error)
 }
 
-func (s *stubExecutionClient) GetHeader(ctx context.Context, in *executionproto.GetSegmentRequest, opts ...grpc.CallOption) (*executionproto.GetHeaderResponse, error) {
+func (s *stubExecutionServer) GetHeader(ctx context.Context, in *executionproto.GetSegmentRequest) (*executionproto.GetHeaderResponse, error) {
 	if s.getHeaderFunc != nil {
-		return s.getHeaderFunc(ctx, in, opts...)
+		return s.getHeaderFunc(ctx, in)
 	}
 	return &executionproto.GetHeaderResponse{}, nil
 }
 
-func (s *stubExecutionClient) AssembleBlock(ctx context.Context, in *executionproto.AssembleBlockRequest, opts ...grpc.CallOption) (*executionproto.AssembleBlockResponse, error) {
+func (s *stubExecutionServer) AssembleBlock(ctx context.Context, in *executionproto.AssembleBlockRequest) (*executionproto.AssembleBlockResponse, error) {
 	if s.assembleBlockFunc != nil {
-		return s.assembleBlockFunc(ctx, in, opts...)
+		return s.assembleBlockFunc(ctx, in)
 	}
 	return &executionproto.AssembleBlockResponse{}, nil
 }
 
-func (s *stubExecutionClient) GetAssembledBlock(ctx context.Context, in *executionproto.GetAssembledBlockRequest, opts ...grpc.CallOption) (*executionproto.GetAssembledBlockResponse, error) {
+func (s *stubExecutionServer) GetAssembledBlock(ctx context.Context, in *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error) {
 	if s.getAssembledBlockFunc != nil {
-		return s.getAssembledBlockFunc(ctx, in, opts...)
+		return s.getAssembledBlockFunc(ctx, in)
 	}
 	return &executionproto.GetAssembledBlockResponse{}, nil
-}
-
-// Methods that may be called during EngineServer construction but are not
-// exercised in the test paths.
-
-func (s *stubExecutionClient) CurrentHeader(ctx context.Context, _ *emptypb.Empty, _ ...grpc.CallOption) (*executionproto.GetHeaderResponse, error) {
-	return &executionproto.GetHeaderResponse{}, nil
-}
-
-func (s *stubExecutionClient) GetTD(ctx context.Context, _ *executionproto.GetSegmentRequest, _ ...grpc.CallOption) (*executionproto.GetTDResponse, error) {
-	return &executionproto.GetTDResponse{}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -187,12 +175,13 @@ func makeParentHeader(timestamp uint64) (*types.Header, *executionproto.Header) 
 	return h, rpcHeader
 }
 
-// newTestingAPI creates a testingImpl backed by stub execution client.
-func newTestingAPI(cfg *chain.Config, stub *stubExecutionClient, enabled bool) TestingAPI {
+// newTestingAPI creates a testingImpl backed by a stub execution server
+// wrapped with direct.NewExecutionClientDirect.
+func newTestingAPI(cfg *chain.Config, stub *stubExecutionServer, enabled bool) TestingAPI {
 	srv := NewEngineServer(
 		log.New(),
 		cfg,
-		stub,
+		direct.NewExecutionClientDirect(stub),
 		nil,   // blockDownloader
 		false, // caplin
 		false, // proposing
@@ -219,8 +208,8 @@ func validPayloadAttrs(parentTimestamp uint64) *engine_types.PayloadAttributes {
 
 // getHeaderReturning creates a getHeaderFunc that returns the given RPC header
 // when the request hash matches expectedHash. Otherwise returns nil (unknown).
-func getHeaderReturning(expectedHash common.Hash, rpcHeader *executionproto.Header) func(ctx context.Context, in *executionproto.GetSegmentRequest, opts ...grpc.CallOption) (*executionproto.GetHeaderResponse, error) {
-	return func(_ context.Context, in *executionproto.GetSegmentRequest, _ ...grpc.CallOption) (*executionproto.GetHeaderResponse, error) {
+func getHeaderReturning(expectedHash common.Hash, rpcHeader *executionproto.Header) func(ctx context.Context, in *executionproto.GetSegmentRequest) (*executionproto.GetHeaderResponse, error) {
+	return func(_ context.Context, in *executionproto.GetSegmentRequest) (*executionproto.GetHeaderResponse, error) {
 		reqHash := gointerfaces.ConvertH256ToHash(in.BlockHash)
 		if reqHash != expectedHash {
 			return &executionproto.GetHeaderResponse{Header: nil}, nil
@@ -247,7 +236,7 @@ func TestBuildBlockV1(t *testing.T) {
 
 	t.Run("disabled gate", func(t *testing.T) {
 		t.Parallel()
-		stub := &stubExecutionClient{}
+		stub := &stubExecutionServer{}
 		api := newTestingAPI(allForksChainConfig(), stub, false)
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
 		require.Nil(t, resp)
@@ -259,7 +248,7 @@ func TestBuildBlockV1(t *testing.T) {
 
 	t.Run("nil payloadAttributes", func(t *testing.T) {
 		t.Parallel()
-		stub := &stubExecutionClient{}
+		stub := &stubExecutionServer{}
 		api := newTestingAPI(allForksChainConfig(), stub, true)
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, nil, nil, nil)
 		require.Nil(t, resp)
@@ -271,7 +260,7 @@ func TestBuildBlockV1(t *testing.T) {
 
 	t.Run("explicit non-empty transaction list", func(t *testing.T) {
 		t.Parallel()
-		stub := &stubExecutionClient{}
+		stub := &stubExecutionServer{}
 		api := newTestingAPI(allForksChainConfig(), stub, true)
 		txs := []hexutil.Bytes{{0x01, 0x02}}
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), &txs, nil)
@@ -286,8 +275,8 @@ func TestBuildBlockV1(t *testing.T) {
 		t.Parallel()
 		// An empty slice (not nil pointer) means "build an empty block".
 		// This should pass the tx-list check and proceed to the parent-hash lookup.
-		stub := &stubExecutionClient{
-			getHeaderFunc: func(_ context.Context, _ *executionproto.GetSegmentRequest, _ ...grpc.CallOption) (*executionproto.GetHeaderResponse, error) {
+		stub := &stubExecutionServer{
+			getHeaderFunc: func(_ context.Context, _ *executionproto.GetSegmentRequest) (*executionproto.GetHeaderResponse, error) {
 				// Return nil header to trigger unknown parent error (separate from tx check).
 				return &executionproto.GetHeaderResponse{Header: nil}, nil
 			},
@@ -305,8 +294,8 @@ func TestBuildBlockV1(t *testing.T) {
 
 	t.Run("unknown parent hash", func(t *testing.T) {
 		t.Parallel()
-		stub := &stubExecutionClient{
-			getHeaderFunc: func(_ context.Context, _ *executionproto.GetSegmentRequest, _ ...grpc.CallOption) (*executionproto.GetHeaderResponse, error) {
+		stub := &stubExecutionServer{
+			getHeaderFunc: func(_ context.Context, _ *executionproto.GetSegmentRequest) (*executionproto.GetHeaderResponse, error) {
 				return &executionproto.GetHeaderResponse{Header: nil}, nil
 			},
 		}
@@ -321,7 +310,7 @@ func TestBuildBlockV1(t *testing.T) {
 
 	t.Run("timestamp equal to parent", func(t *testing.T) {
 		t.Parallel()
-		stub := &stubExecutionClient{
+		stub := &stubExecutionServer{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
 		}
 		api := newTestingAPI(allForksChainConfig(), stub, true)
@@ -337,7 +326,7 @@ func TestBuildBlockV1(t *testing.T) {
 
 	t.Run("timestamp less than parent", func(t *testing.T) {
 		t.Parallel()
-		stub := &stubExecutionClient{
+		stub := &stubExecutionServer{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
 		}
 		api := newTestingAPI(allForksChainConfig(), stub, true)
@@ -353,7 +342,7 @@ func TestBuildBlockV1(t *testing.T) {
 
 	t.Run("missing parentBeaconBlockRoot for Cancun+", func(t *testing.T) {
 		t.Parallel()
-		stub := &stubExecutionClient{
+		stub := &stubExecutionServer{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
 		}
 		api := newTestingAPI(allForksChainConfig(), stub, true)
@@ -369,7 +358,7 @@ func TestBuildBlockV1(t *testing.T) {
 
 	t.Run("unexpected parentBeaconBlockRoot pre-Cancun", func(t *testing.T) {
 		t.Parallel()
-		stub := &stubExecutionClient{
+		stub := &stubExecutionServer{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
 		}
 		// Use a pre-Cancun config (Shanghai only).
@@ -384,26 +373,25 @@ func TestBuildBlockV1(t *testing.T) {
 		assert.Contains(t, rpcErr.Message, "parentBeaconBlockRoot not supported before Cancun")
 	})
 
-	// These two tests exercise the waitForResponse busy-polling loop which
-	// spins for SecondsPerSlot (12 s on mainnet) before timing out. They are
-	// skipped under -short to keep `make test-short` fast; run them in full
-	// mode to validate timeout behaviour.
+	// These two tests exercise the waitForResponse busy-polling loop.
+	// We use an Aura config (5 s slot) to keep the timeout short while
+	// still validating the busy-path logic.
+	shortSlotCfg := allForksChainConfig()
+	shortSlotCfg.Aura = &chain.AuRaConfig{} // SecondsPerSlot() == 5
+	shortSlotCfg.Ethash = nil               // Aura and Ethash are mutually exclusive
 
 	t.Run("execution service busy on AssembleBlock", func(t *testing.T) {
 		t.Parallel()
-		if testing.Short() {
-			t.Skip("skipping busy-poll timeout test in -short mode")
-		}
-		stub := &stubExecutionClient{
+		stub := &stubExecutionServer{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
-			assembleBlockFunc: func(_ context.Context, _ *executionproto.AssembleBlockRequest, _ ...grpc.CallOption) (*executionproto.AssembleBlockResponse, error) {
+			assembleBlockFunc: func(_ context.Context, _ *executionproto.AssembleBlockRequest) (*executionproto.AssembleBlockResponse, error) {
 				return &executionproto.AssembleBlockResponse{
 					Id:   0,
 					Busy: true,
 				}, nil
 			},
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(shortSlotCfg, stub, true)
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
@@ -412,24 +400,21 @@ func TestBuildBlockV1(t *testing.T) {
 
 	t.Run("execution service busy on GetAssembledBlock", func(t *testing.T) {
 		t.Parallel()
-		if testing.Short() {
-			t.Skip("skipping busy-poll timeout test in -short mode")
-		}
-		stub := &stubExecutionClient{
+		stub := &stubExecutionServer{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
-			assembleBlockFunc: func(_ context.Context, _ *executionproto.AssembleBlockRequest, _ ...grpc.CallOption) (*executionproto.AssembleBlockResponse, error) {
+			assembleBlockFunc: func(_ context.Context, _ *executionproto.AssembleBlockRequest) (*executionproto.AssembleBlockResponse, error) {
 				return &executionproto.AssembleBlockResponse{
 					Id:   42,
 					Busy: false,
 				}, nil
 			},
-			getAssembledBlockFunc: func(_ context.Context, _ *executionproto.GetAssembledBlockRequest, _ ...grpc.CallOption) (*executionproto.GetAssembledBlockResponse, error) {
+			getAssembledBlockFunc: func(_ context.Context, _ *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error) {
 				return &executionproto.GetAssembledBlockResponse{
 					Busy: true,
 				}, nil
 			},
 		}
-		api := newTestingAPI(allForksChainConfig(), stub, true)
+		api := newTestingAPI(shortSlotCfg, stub, true)
 		resp, err := api.BuildBlockV1(context.Background(), parentHash, validPayloadAttrs(parentTimestamp), nil, nil)
 		require.Nil(t, resp)
 		require.Error(t, err)
@@ -438,12 +423,12 @@ func TestBuildBlockV1(t *testing.T) {
 
 	t.Run("nil assembled block data", func(t *testing.T) {
 		t.Parallel()
-		stub := &stubExecutionClient{
+		stub := &stubExecutionServer{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
-			assembleBlockFunc: func(_ context.Context, _ *executionproto.AssembleBlockRequest, _ ...grpc.CallOption) (*executionproto.AssembleBlockResponse, error) {
+			assembleBlockFunc: func(_ context.Context, _ *executionproto.AssembleBlockRequest) (*executionproto.AssembleBlockResponse, error) {
 				return &executionproto.AssembleBlockResponse{Id: 42, Busy: false}, nil
 			},
-			getAssembledBlockFunc: func(_ context.Context, _ *executionproto.GetAssembledBlockRequest, _ ...grpc.CallOption) (*executionproto.GetAssembledBlockResponse, error) {
+			getAssembledBlockFunc: func(_ context.Context, _ *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error) {
 				return &executionproto.GetAssembledBlockResponse{
 					Data: nil,
 					Busy: false,
@@ -464,9 +449,9 @@ func TestBuildBlockV1(t *testing.T) {
 		stateRoot := common.HexToHash("0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
 		blockValue := uint256.NewInt(12345)
 
-		stub := &stubExecutionClient{
+		stub := &stubExecutionServer{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
-			assembleBlockFunc: func(_ context.Context, req *executionproto.AssembleBlockRequest, _ ...grpc.CallOption) (*executionproto.AssembleBlockResponse, error) {
+			assembleBlockFunc: func(_ context.Context, req *executionproto.AssembleBlockRequest) (*executionproto.AssembleBlockResponse, error) {
 				// Verify the request was built correctly.
 				assert.Equal(t, parentHash, common.Hash(gointerfaces.ConvertH256ToHash(req.ParentHash)))
 				assert.Equal(t, uint64(parentTimestamp+1), req.Timestamp)
@@ -475,7 +460,7 @@ func TestBuildBlockV1(t *testing.T) {
 					Busy: false,
 				}, nil
 			},
-			getAssembledBlockFunc: func(_ context.Context, req *executionproto.GetAssembledBlockRequest, _ ...grpc.CallOption) (*executionproto.GetAssembledBlockResponse, error) {
+			getAssembledBlockFunc: func(_ context.Context, req *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error) {
 				assert.Equal(t, payloadID, req.Id)
 				return &executionproto.GetAssembledBlockResponse{
 					Busy: false,
@@ -525,12 +510,12 @@ func TestBuildBlockV1(t *testing.T) {
 
 	t.Run("happy path with extraData override", func(t *testing.T) {
 		t.Parallel()
-		stub := &stubExecutionClient{
+		stub := &stubExecutionServer{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
-			assembleBlockFunc: func(_ context.Context, _ *executionproto.AssembleBlockRequest, _ ...grpc.CallOption) (*executionproto.AssembleBlockResponse, error) {
+			assembleBlockFunc: func(_ context.Context, _ *executionproto.AssembleBlockRequest) (*executionproto.AssembleBlockResponse, error) {
 				return &executionproto.AssembleBlockResponse{Id: 1, Busy: false}, nil
 			},
-			getAssembledBlockFunc: func(_ context.Context, _ *executionproto.GetAssembledBlockRequest, _ ...grpc.CallOption) (*executionproto.GetAssembledBlockResponse, error) {
+			getAssembledBlockFunc: func(_ context.Context, _ *executionproto.GetAssembledBlockRequest) (*executionproto.GetAssembledBlockResponse, error) {
 				return &executionproto.GetAssembledBlockResponse{
 					Busy: false,
 					Data: &executionproto.AssembledBlockData{
@@ -567,7 +552,7 @@ func TestBuildBlockV1(t *testing.T) {
 	t.Run("missing withdrawals for Shanghai", func(t *testing.T) {
 		t.Parallel()
 		// Shanghai requires withdrawals to be non-nil.
-		stub := &stubExecutionClient{
+		stub := &stubExecutionServer{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
 		}
 		// Use pre-Cancun (Shanghai-only) config.
@@ -589,7 +574,7 @@ func TestBuildBlockV1(t *testing.T) {
 
 	t.Run("withdrawals before Shanghai", func(t *testing.T) {
 		t.Parallel()
-		stub := &stubExecutionClient{
+		stub := &stubExecutionServer{
 			getHeaderFunc: getHeaderReturning(parentHash, parentRPC),
 		}
 		// Use pre-Shanghai config.

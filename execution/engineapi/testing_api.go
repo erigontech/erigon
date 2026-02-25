@@ -139,19 +139,28 @@ func (t *testingImpl) BuildBlockV1(
 		req.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*payloadAttributes.ParentBeaconBlockRoot)
 	}
 
-	t.server.lock.Lock()
-	defer t.server.lock.Unlock()
+	// Both steps share a single slot-duration budget so the total wall-clock
+	// time of BuildBlockV1 is bounded to one slot (e.g. 12 s), not two.
+	// Each step acquires the lock independently, matching production behaviour
+	// where ForkChoiceUpdated and GetPayload are separate RPC calls.
+	deadline := time.Now().Add(time.Duration(t.server.config.SecondsPerSlot()) * time.Second)
 
-	// Step 1: assemble (start building the block asynchronously in the execution service).
-	var assembleResp *executionproto.AssembleBlockResponse
-	var err error
-	execBusy, err := waitForResponse(time.Duration(t.server.config.SecondsPerSlot())*time.Second, func() (bool, error) {
-		assembleResp, err = t.server.executionService.AssembleBlock(ctx, req)
-		if err != nil {
-			return false, err
-		}
-		return assembleResp.Busy, nil
-	})
+	// Step 1: AssembleBlock (locked scope).
+	assembleResp, execBusy, err := func() (*executionproto.AssembleBlockResponse, bool, error) {
+		t.server.lock.Lock()
+		defer t.server.lock.Unlock()
+
+		var resp *executionproto.AssembleBlockResponse
+		var err error
+		busy, err := waitForResponse(time.Until(deadline), func() (bool, error) {
+			resp, err = t.server.executionService.AssembleBlock(ctx, req)
+			if err != nil {
+				return false, err
+			}
+			return resp.Busy, nil
+		})
+		return resp, busy, err
+	}()
 	if err != nil {
 		return nil, err
 	}
@@ -161,17 +170,24 @@ func (t *testingImpl) BuildBlockV1(
 
 	payloadID := assembleResp.Id
 
-	// Step 2: retrieve the assembled block (blocks until builder goroutine finishes).
-	var getResp *executionproto.GetAssembledBlockResponse
-	execBusy, err = waitForResponse(time.Duration(t.server.config.SecondsPerSlot())*time.Second, func() (bool, error) {
-		getResp, err = t.server.executionService.GetAssembledBlock(ctx, &executionproto.GetAssembledBlockRequest{
-			Id: payloadID,
+	// Step 2: GetAssembledBlock (separate locked scope).
+	getResp, execBusy, err := func() (*executionproto.GetAssembledBlockResponse, bool, error) {
+		t.server.lock.Lock()
+		defer t.server.lock.Unlock()
+
+		var resp *executionproto.GetAssembledBlockResponse
+		var err error
+		busy, err := waitForResponse(time.Until(deadline), func() (bool, error) {
+			resp, err = t.server.executionService.GetAssembledBlock(ctx, &executionproto.GetAssembledBlockRequest{
+				Id: payloadID,
+			})
+			if err != nil {
+				return false, err
+			}
+			return resp.Busy, nil
 		})
-		if err != nil {
-			return false, err
-		}
-		return getResp.Busy, nil
-	})
+		return resp, busy, err
+	}()
 	if err != nil {
 		return nil, err
 	}
