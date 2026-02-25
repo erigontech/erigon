@@ -330,7 +330,10 @@ func SpawnBuilderExecStage(ctx context.Context, s *stagedsync.StageState, sd *ex
 		return err
 	}
 
-	commitmentTxNum := execSd.TxNum()
+	commitmentTxNum, _, err := execSd.SeekCommitment(ctx, execTx)
+	if err != nil {
+		return fmt.Errorf("seek commitment failed: %w", err)
+	}
 	rh, err := execSd.ComputeCommitment(ctx, execTx, true, blockHeight, commitmentTxNum, s.LogPrefix(), nil)
 	if err != nil {
 		return fmt.Errorf("compute commitment failed: %w", err)
