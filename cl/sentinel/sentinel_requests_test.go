@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/golang/snappy"
 	"github.com/libp2p/go-libp2p"
@@ -75,6 +76,7 @@ func retryTestFunc(t *testing.T, maxRetries int, fn func()) {
 		if !failed {
 			return
 		}
+		time.Sleep(time.Second)
 		if attempt == maxRetries {
 			// Last attempt — run without recovery so it properly fails the test
 			fn()
