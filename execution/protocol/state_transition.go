@@ -392,7 +392,10 @@ func (st *StateTransition) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
-	st.gasRemaining = ComputeMdGas(st.msg.Gas(), intrinsicGasResult, rules)
+	st.gasRemaining, err = ComputeMdGas(st.msg.Gas(), intrinsicGasResult, rules, st.evm.Config().Tracer)
+	if err != nil {
+		return nil, err
+	}
 	st.initialGas = st.gasRemaining
 
 	// Execute the preparatory steps for state transition which includes:
@@ -521,21 +524,16 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	if overflow {
 		return nil, ErrGasUintOverflow
 	}
-	st.gasRemaining = ComputeMdGas(st.msg.Gas(), intrinsicGasResult, rules)
-	st.initialGas = st.gasRemaining
-	if st.gasRemaining.Regular < intrinsicGasResult.RegularGas || st.gasRemaining.Regular < intrinsicGasResult.FloorGasCost {
-		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining.Regular, max(intrinsicGasResult.RegularGas, intrinsicGasResult.FloorGasCost))
+	st.gasRemaining, err = ComputeMdGas(st.msg.Gas(), intrinsicGasResult, rules, st.evm.Config().Tracer)
+	if err != nil {
+		return nil, err
 	}
+	st.initialGas = st.gasRemaining
 
 	verifiedAuthorities, err := st.verifyAuthorities(auths, contractCreation, rules.ChainID.String())
 	if err != nil {
 		return nil, err
 	}
-
-	if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
-		t.OnGasChange(st.gasRemaining.Regular, st.gasRemaining.Regular-intrinsicGasResult.RegularGas, tracing.GasChangeTxIntrinsicGas)
-	}
-	st.gasRemaining.Regular -= intrinsicGasResult.RegularGas
 
 	var bailout bool
 	// Gas bailout (for trace_call) should only be applied if there is not sufficient balance to perform value transfer

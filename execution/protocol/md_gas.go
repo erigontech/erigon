@@ -17,13 +17,19 @@
 package protocol
 
 import (
+	"fmt"
+
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/fixedgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-func ComputeMdGas(txnGasLimit uint64, igas fixedgas.IntrinsicGasCalcResult, rules *chain.Rules) evmtypes.MdGas {
+func ComputeMdGas(txnGasLimit uint64, igas fixedgas.IntrinsicGasCalcResult, rules *chain.Rules, tracer *tracing.Hooks) (evmtypes.MdGas, error) {
+	if txnGasLimit < igas.RegularGas || txnGasLimit < igas.FloorGasCost {
+		return evmtypes.MdGas{}, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, txnGasLimit, max(igas.RegularGas, igas.FloorGasCost))
+	}
 	if rules.IsAmsterdam {
 		//intrinsic_gas = intrinsic_regular_gas + intrinsic_state_gas
 		//execution_gas = tx.gas - intrinsic_gas
@@ -35,7 +41,12 @@ func ComputeMdGas(txnGasLimit uint64, igas fixedgas.IntrinsicGasCalcResult, rule
 		regularGasBudget := params.MaxTxnGasLimit - intrinsicGas
 		gasLeft := min(regularGasBudget, executionGas)
 		stateGasReservoir := executionGas - gasLeft
-		return evmtypes.MdGas{Regular: gasLeft, State: stateGasReservoir}
+		return evmtypes.MdGas{Regular: gasLeft, State: stateGasReservoir}, nil
 	}
-	return evmtypes.MdGas{Regular: txnGasLimit}
+	mdGas := evmtypes.MdGas{Regular: txnGasLimit}
+	if tracer != nil && tracer.OnGasChange != nil {
+		tracer.OnGasChange(mdGas.Regular, mdGas.Regular-igas.RegularGas, tracing.GasChangeTxIntrinsicGas)
+	}
+	mdGas.Regular -= igas.RegularGas
+	return mdGas, nil
 }

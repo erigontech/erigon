@@ -21,3 +21,8 @@ type MdGas struct {
 	Regular uint64
 	State   uint64
 }
+
+func (g *MdGas) Sub(other MdGas) {
+	g.Regular -= other.Regular
+	g.State -= other.State
+}
