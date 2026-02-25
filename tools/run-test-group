@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Runs a named test group with -race. Usage: run-test-group <test-group>
+# Environment: GODEBUG, GOTRACEBACK, GOGC, CGO_CFLAGS, SKIP_FLAKY_TESTS
+
+set -euo pipefail
+
+TEST_GROUP="${1:?Usage: run-test-group <test-group>}"
+
+run_tests() {
+  go test -race "$@" 2>&1 | "$(dirname "$0")/filter-test-output" | tee -a run.log
+}
+
+case "$TEST_GROUP" in
+  execution-tests)
+    # execution/tests minus the slow EEST sub-packages (separate jobs below)
+    PKGS=$(go list ./execution/tests/... | grep -v '/eest_')
+    run_tests -timeout 60m $PKGS
+    ;;
+  eest-frontier-scenarios)
+    run_tests -timeout 60m ./execution/tests/eest_frontier_scenarios/...
+    ;;
+  eest-osaka-clz)
+    run_tests -timeout 60m ./execution/tests/eest_osaka_clz/...
+    ;;
+  eest-prague-calldata)
+    run_tests -timeout 60m ./execution/tests/eest_prague_calldata/...
+    ;;
+  eest-cancun-blobs)
+    run_tests -timeout 60m ./execution/tests/eest_cancun_blobs/...
+    ;;
+  execution-other)
+    # All execution subdirectories except execution/tests
+    DIRS=$(ls -d -- execution/*/ | grep -vE "execution/tests/" | sed 's/\/$//')
+    for d in $DIRS; do
+      if [ -d "$d" ]; then
+        TEST_PACKAGES=$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' "./$d/..." 2>/dev/null)
+        if [ -n "$TEST_PACKAGES" ]; then
+          run_tests -timeout 30m "./$d/..."
+        fi
+      fi
+    done
+    ;;
+  consensus)
+    run_tests -timeout 60m ./cl/...
+    ;;
+  core-rpc)
+    run_tests -timeout 30m ./db/... ./node/... ./txnprovider/... ./p2p/... ./rpc/...
+    ;;
+  other)
+    DIRS=$(ls -d -- */ | grep -vE '^(execution|cl|p2p|rpc|db|node|txnprovider|dashboards)/$' | sed 's/\/$//')
+    for d in $DIRS; do
+      if [ -d "$d" ]; then
+        TEST_PACKAGES=$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' "./$d/...")
+        if [ -n "$TEST_PACKAGES" ]; then
+          run_tests -timeout 30m "./$d/..."
+        fi
+      fi
+    done
+    ;;
+  *)
+    echo "Error: Unknown test-group '$TEST_GROUP'"
+    echo "Expected one of: execution-tests, eest-frontier-scenarios, eest-osaka-clz, eest-prague-calldata, eest-cancun-blobs, execution-other, consensus, core-rpc, other"
+    exit 1
+    ;;
+esac

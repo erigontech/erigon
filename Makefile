@@ -227,6 +227,10 @@ test-all: test-filtered
 test-all-race: override GO_FLAGS += --timeout 60m -race
 test-all-race: test-filtered
 
+## test-group TEST_GROUP=<name>			run a named CI test group with -race (e.g. consensus, core-rpc, other)
+test-group:
+	SKIP_FLAKY_TESTS=true $(GO_BUILD_ENV) GODEBUG=$(GODEBUG) GOTRACEBACK=1 GOGC=80 ./tools/run-test-group $(TEST_GROUP)
+
 test-sonar-coverage: override GO_FLAGS += --timeout 60m -coverprofile=coverage-test-all.out
 test-sonar-coverage: test-filtered
 
