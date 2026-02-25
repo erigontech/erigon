@@ -111,4 +111,7 @@ type HttpCfg struct {
 
 	RpcTxSyncDefaultTimeout time.Duration // Default timeout for eth_sendRawTransactionSync
 	RpcTxSyncMaxTimeout     time.Duration // Maximum timeout for eth_sendRawTransactionSync
+
+	// TestingEnabled enables the testing_ RPC namespace. Should only be used in test/dev environments.
+	TestingEnabled bool
 }
