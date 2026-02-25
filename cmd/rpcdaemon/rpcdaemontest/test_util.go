@@ -101,7 +101,7 @@ func genTestChainOnce(t *testing.T) {
 			GasLimit: 10000000,
 		}
 
-		m := execmoduletester.NewWithGenesis(t, gspec, addresses.key) // use it only to generate chain blocks, don't cache it
+		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(addresses.key)) // use it only to generate chain blocks, don't cache it
 		defer m.Close()
 		contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 		defer contractBackend.Close()
@@ -131,7 +131,7 @@ func CreateTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTester, *bl
 		},
 		GasLimit: 10000000,
 	}
-	m := execmoduletester.NewWithGenesis(t, gspec, addresses.key)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(addresses.key))
 
 	if err := m.InsertChain(testOrphanedChain); err != nil {
 		t.Fatal(err)
@@ -430,7 +430,7 @@ func CreateTestExecModuleForTraces(t *testing.T) *execmoduletester.ExecModuleTes
 			},
 		}
 	)
-	m := execmoduletester.NewWithGenesis(t, gspec, key)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AAAA
@@ -530,7 +530,7 @@ func CreateTestExecModuleForTracesCollision(t *testing.T) *execmoduletester.Exec
 			},
 		},
 	}
-	m := execmoduletester.NewWithGenesis(t, gspec, key)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
