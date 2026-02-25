@@ -185,7 +185,6 @@ func (rs *StateV3) Domains() *execctx.SharedDomains {
 
 func (rs *StateV3) SetTxNum(txNum uint64) {
 	rs.txNum = txNum
-	rs.domains.SetTxNum(txNum)
 }
 
 func (rs *StateV3) ApplyTxState(ctx context.Context,

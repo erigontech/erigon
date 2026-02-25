@@ -54,12 +54,12 @@ import (
 // Cases:
 //  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
 //  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
-func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms *execctx.SharedDomains, maxBlockNum uint64) (
+func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, currentTxNum uint64, maxBlockNum uint64) (
 	inputTxNum uint64, maxTxNum uint64, offsetFromBlockBeginning uint64, blockNum uint64, err error) {
 
 	txNumsReader := cfg.blockReader.TxnumReader()
 
-	inputTxNum = doms.TxNum()
+	inputTxNum = currentTxNum
 
 	lastBlockNum, lastTxNum, err := txNumsReader.Last(applyTx)
 	if err != nil {
@@ -75,7 +75,7 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms
 		return 0, 0, 0, 0, err
 	}
 
-	blockNum, ok, err := txNumsReader.FindBlockNum(ctx, applyTx, doms.TxNum())
+	blockNum, ok, err := txNumsReader.FindBlockNum(ctx, applyTx, currentTxNum)
 	if err != nil {
 		return 0, 0, 0, 0, err
 	}
@@ -86,7 +86,7 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms
 	}
 	{
 		max, _ := txNumsReader.Max(ctx, applyTx, blockNum)
-		if doms.TxNum() == max {
+		if currentTxNum == max {
 			blockNum++
 		}
 	}
@@ -96,17 +96,16 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, doms
 		return 0, 0, 0, 0, err
 	}
 
-	if doms.TxNum() > min {
+	if currentTxNum > min {
 		// if stopped in the middle of the block: start from beginning of block.
 		// first part will be executed in HistoryExecution mode
-		offsetFromBlockBeginning = doms.TxNum() - min
+		offsetFromBlockBeginning = currentTxNum - min
 	}
 
 	inputTxNum = min
 
 	//_max, _ := txNumsReader.Max(applyTx, blockNum)
-	//fmt.Printf("[commitment] found domain.txn %d, inputTxn %d, offset %d. DB found block %d {%d, %d}\n", doms.TxNum(), inputTxNum, offsetFromBlockBeginning, blockNum, _min, _max)
-	doms.SetTxNum(inputTxNum)
+	//fmt.Printf("[commitment] found domain.txn %d, inputTxn %d, offset %d. DB found block %d {%d, %d}\n", currentTxNum, inputTxNum, offsetFromBlockBeginning, blockNum, _min, _max)
 	return inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, nil
 }
 
@@ -155,7 +154,7 @@ func ExecV3(ctx context.Context,
 		maxTxNum                 uint64
 	)
 
-	if inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, err = restoreTxNum(ctx, &cfg, applyTx, doms, maxBlockNum); err != nil {
+	if inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, err = restoreTxNum(ctx, &cfg, applyTx, initialTxNum, maxBlockNum); err != nil {
 		return err
 	}
 
@@ -248,7 +247,7 @@ func ExecV3(ctx context.Context,
 			},
 			workerCount: cfg.syncCfg.ExecWorkerCount,
 		}
-		pe.lastCommittedTxNum.Store(doms.TxNum())
+		pe.lastCommittedTxNum.Store(inputTxNum)
 		// blockNum is the next block to execute (from doms.BlockNum()), so the last
 		// committed block is blockNum-1. LogCommitments uses Add to accumulate deltas
 		// on top of this value, so initializing to blockNum would double-count.
@@ -284,7 +283,7 @@ func ExecV3(ctx context.Context,
 				hooks:             hooks,
 				postValidator:     postValidator,
 			}}
-		se.lastCommittedTxNum.Store(doms.TxNum())
+		se.lastCommittedTxNum.Store(inputTxNum)
 		se.lastCommittedBlockNum.Store(blockNum)
 
 		defer func() {
@@ -308,8 +307,13 @@ func ExecV3(ctx context.Context,
 					}
 
 					se.lastCommittedBlockNum.Store(lastHeader.Number.Uint64())
-					committedTransactions := se.domains().TxNum() - se.lastCommittedTxNum.Load()
-					se.lastCommittedTxNum.Store(se.domains().TxNum())
+					// Get current txNum from the last executed block
+					currentTxNum, err := cfg.blockReader.TxnumReader().Max(ctx, applyTx, lastHeader.Number.Uint64())
+					if err != nil {
+						return err
+					}
+					committedTransactions := currentTxNum - se.lastCommittedTxNum.Load()
+					se.lastCommittedTxNum.Store(currentTxNum)
 
 					commitStart := time.Now()
 					stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, applyTx.Debug().StepSize())
@@ -807,7 +811,13 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		return true, times, nil
 	}
 
-	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), doms.TxNum(), e.LogPrefix(), nil)
+	// Get current txNum from the block being committed
+	txNumsReader := cfg.blockReader.TxnumReader()
+	blockTxNum, err := txNumsReader.Max(ctx, applyTx, header.Number.Uint64())
+	if err != nil {
+		return false, times, err
+	}
+	computedRootHash, err := doms.ComputeCommitment(ctx, applyTx, true, header.Number.Uint64(), blockTxNum, e.LogPrefix(), nil)
 
 	times.ComputeCommitment = time.Since(start)
 	if err != nil {
