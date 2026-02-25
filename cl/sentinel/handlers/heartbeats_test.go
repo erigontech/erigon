@@ -287,6 +287,7 @@ func TestMetadataV1(t *testing.T) {
 
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.MetadataProtocolV1))
 	require.NoError(t, err)
+	defer stream.Close()
 
 	_, err = stream.Write(nil)
 	require.NoError(t, err)
@@ -374,6 +375,7 @@ func TestStatus(t *testing.T) {
 
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.StatusProtocolV1))
 	require.NoError(t, err)
+	defer stream.Close()
 
 	_, err = stream.Write(nil)
 	require.NoError(t, err)

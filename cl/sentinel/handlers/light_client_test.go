@@ -97,6 +97,7 @@ func TestLightClientOptimistic(t *testing.T) {
 
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.LightClientOptimisticUpdateProtocolV1))
 	require.NoError(t, err)
+	defer stream.Close()
 
 	_, err = stream.Write(nil)
 	require.NoError(t, err)
@@ -167,6 +168,7 @@ func TestLightClientFinality(t *testing.T) {
 
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.LightClientFinalityUpdateProtocolV1))
 	require.NoError(t, err)
+	defer stream.Close()
 
 	_, err = stream.Write(nil)
 	require.NoError(t, err)
@@ -245,6 +247,7 @@ func TestLightClientBootstrap(t *testing.T) {
 
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.LightClientBootstrapProtocolV1))
 	require.NoError(t, err)
+	defer stream.Close()
 
 	var reqBuf bytes.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&reqBuf, &cltypes.Root{Root: reqRoot}); err != nil {
@@ -328,6 +331,7 @@ func TestLightClientUpdates(t *testing.T) {
 
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.LightClientUpdatesByRangeProtocolV1))
 	require.NoError(t, err)
+	defer stream.Close()
 
 	var reqBuf bytes.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&reqBuf, &cltypes.LightClientUpdatesByRangeRequest{StartPeriod: 0, Count: 2}); err != nil {
