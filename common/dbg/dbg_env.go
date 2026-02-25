@@ -105,6 +105,8 @@ func EnvUints(envVarName string, sep string, defaultVal []uint64) []uint64 {
 	return defaultVal
 }
 
+func ArbTrace() bool { return EnvBool("ARB_TRACE", false) }
+
 func EnvDataSize(envVarName string, defaultVal datasize.ByteSize) datasize.ByteSize {
 	if v, _ := envLookup(envVarName); v != "" {
 		val, err := datasize.ParseString(v)
