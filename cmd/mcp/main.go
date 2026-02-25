@@ -225,11 +225,13 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 		Sync:       ethconfig.Defaults.Sync,
 		Enabled:    true,
 		StateCache: kvcache.DefaultCoherentConfig,
+		API:        []string{"eth", "erigon", "ots"}, // APIs needed by MCP tools
 
 		DataDir:           dataDir,
 		Dirs:              dirs,
 		WithDatadir:       true,
 		PrivateApiAddr:    privAPI,
+		TxPoolApiAddr:     privAPI, // inherit from private API, same as rpcdaemon
 		DBReadConcurrency: min(max(10, runtime.GOMAXPROCS(-1)*64), 9_000),
 	}
 
