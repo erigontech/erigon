@@ -790,7 +790,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *blockgen.ChainPack) error {
 			})
 		}
 	}
-	if err := wr.InsertBlocksAndWaitWithAccessLists(ms.Ctx, chain.Blocks, balEntries); err != nil {
+	if err := wr.InsertBlocksAndWait(ms.Ctx, chain.Blocks, balEntries); err != nil {
 		return err
 	}
 

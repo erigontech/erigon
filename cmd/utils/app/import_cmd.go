@@ -258,7 +258,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	chainRW := chainreader.NewChainReaderEth1(ethereum.ChainConfig(), direct.NewExecutionClientDirect(ethereum.ExecutionModule()), uint64(time.Hour))
 
 	ctx := context.Background()
-	if err := chainRW.InsertBlocksAndWait(ctx, chain.Blocks); err != nil {
+	if err := chainRW.InsertBlocksAndWait(ctx, chain.Blocks, nil); err != nil {
 		return err
 	}
 

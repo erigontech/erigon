@@ -206,7 +206,7 @@ func (e *EngineBlockDownloader) downloadBlocks(ctx context.Context, req Backward
 		default:
 			e.logger.Trace("[EngineBlockDownloader] processing downloaded blocks", progressLogArgs...)
 		}
-		err := e.chainRW.InsertBlocksAndWait(ctx, blocks)
+		err := e.chainRW.InsertBlocksAndWait(ctx, blocks, nil)
 		if err != nil {
 			return err
 		}

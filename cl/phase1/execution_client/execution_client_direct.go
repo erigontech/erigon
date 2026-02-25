@@ -149,9 +149,9 @@ func (cc *ExecutionClientDirect) SupportInsertion() bool {
 
 func (cc *ExecutionClientDirect) InsertBlocks(ctx context.Context, blocks []*types.Block, wait bool) error {
 	if wait {
-		return cc.chainRW.InsertBlocksAndWait(ctx, blocks)
+		return cc.chainRW.InsertBlocksAndWait(ctx, blocks, nil)
 	}
-	return cc.chainRW.InsertBlocks(ctx, blocks)
+	return cc.chainRW.InsertBlocks(ctx, blocks, nil)
 }
 
 func (cc *ExecutionClientDirect) InsertBlock(ctx context.Context, blk *types.Block) error {
