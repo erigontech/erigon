@@ -818,6 +818,7 @@ func (m *sentryMultiplexer) AddTrustedPeer(ctx context.Context, in *sentryproto.
 			successMutex.Lock()
 			defer successMutex.Unlock()
 
+			// if any client returns success return success
 			if !success && result.GetSuccess() {
 				success = true
 			}
@@ -853,6 +854,7 @@ func (m *sentryMultiplexer) RemoveTrustedPeer(ctx context.Context, in *sentrypro
 			successMutex.Lock()
 			defer successMutex.Unlock()
 
+			// if any client returns success return success
 			if !success && result.GetSuccess() {
 				success = true
 			}
