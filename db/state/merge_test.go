@@ -121,11 +121,12 @@ func emptyTestInvertedIndex(t testing.TB, aggStep uint64) *InvertedIndex {
 
 	dirs := datadir.New(t.TempDir())
 	ii, err := NewInvertedIndex(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, log.New())
-	ii.Accessors = 0
-	ii.salt.Store(&salt)
 	if err != nil {
 		panic(err)
 	}
+	t.Cleanup(ii.Close)
+	ii.Accessors = 0
+	ii.salt.Store(&salt)
 	return ii
 }
 
@@ -769,6 +770,23 @@ func Test_mergeEliasFano(t *testing.T) {
 	}
 }
 
+func TestCommitmentValTransformDomainPanicsWithNeedMergeFalse(t *testing.T) {
+	t.Parallel()
+	// Regression: aggregator.mergeFiles called commitmentValTransformDomain with a zero
+	// MergeRange{needMerge:false} whenever the commitment domain had any() work (e.g. history-only
+	// merge). That caused rawLookupFileByRange(0,0) to return
+	// "file v2.0-storage.0-0.kv was not found".
+	// Fix: (1) guard the call with values.needMerge in aggregator.go;
+	//      (2) this panic assert catches future callers that violate the contract.
+	d := emptyTestDomain(t, 1)
+	dc := d.BeginFilesRo()
+	defer dc.Close()
+
+	require.Panics(t, func() {
+		dc.commitmentValTransformDomain(MergeRange{needMerge: false}, dc, dc, nil, nil)
+	})
+}
+
 func TestMergeFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -841,6 +859,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		d.History.InvertedIndex.Accessors = 0
 		d.History.Accessors = 0
 		d.Accessors = 0
+		t.Cleanup(d.Close)
 		return d
 	}
 
@@ -1107,6 +1126,14 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 		item.decompressor = &seg.Decompressor{}
 		return true
 	})
+	t.Cleanup(func() {
+		h.dirtyFiles.Scan(func(item *FilesItem) bool {
+			if item.decompressor != nil {
+				item.decompressor.Close()
+			}
+			return true
+		})
+	})
 
 	ii.scanDirtyFiles([]string{
 		"v1.0-accounts.0-1.ef",
@@ -1118,6 +1145,14 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 	ii.dirtyFiles.Scan(func(item *FilesItem) bool {
 		item.decompressor = &seg.Decompressor{}
 		return true
+	})
+	t.Cleanup(func() {
+		ii.dirtyFiles.Scan(func(item *FilesItem) bool {
+			if item.decompressor != nil {
+				item.decompressor.Close()
+			}
+			return true
+		})
 	})
 	h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 

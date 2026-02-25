@@ -143,7 +143,7 @@ func toECDSA(d []byte, strict bool) (*ecdsa.PrivateKey, error) {
 		return nil, errors.New("invalid private key, zero or negative")
 	}
 
-	priv.PublicKey.X, priv.PublicKey.Y = priv.PublicKey.Curve.ScalarBaseMult(d)
+	priv.PublicKey.X, priv.PublicKey.Y = S256().ScalarBaseMult(d)
 	if priv.PublicKey.X == nil {
 		return nil, errors.New("invalid private key")
 	}
@@ -162,7 +162,7 @@ func FromECDSA(priv *ecdsa.PrivateKey) []byte {
 // The input slice must be 65 bytes long and have this format: [4, X..., Y...]
 // See MarshalPubkeyStd.
 func UnmarshalPubkeyStd(pub []byte) (*ecdsa.PublicKey, error) {
-	x, y := elliptic.Unmarshal(S256(), pub)
+	x, y := S256().Unmarshal(pub)
 	if x == nil {
 		return nil, errInvalidPubkey
 	}
@@ -180,7 +180,7 @@ func MarshalPubkeyStd(pub *ecdsa.PublicKey) []byte {
 	if pub == nil || pub.X == nil || pub.Y == nil {
 		return nil
 	}
-	return elliptic.Marshal(S256(), pub.X, pub.Y)
+	return S256().Marshal(pub.X, pub.Y)
 }
 
 // UnmarshalPubkey parses a public key from the given bytes in the 64 bytes "uncompressed" format.

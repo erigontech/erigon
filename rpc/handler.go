@@ -575,8 +575,10 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream jsonstrea
 		rpcRequestGauge.Inc()
 		if answer != nil && answer.Error != nil {
 			failedReqeustGauge.Inc()
+			callb.timerFailure.ObserveDuration(start)
+		} else {
+			callb.timerSuccess.ObserveDuration(start)
 		}
-		newRPCServingTimerMS(msg.Method, answer == nil || answer.Error == nil).ObserveDuration(start)
 	}
 	return answer
 }
