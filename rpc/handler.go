@@ -665,6 +665,8 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 		// (sorted map keys, HTML escaping, etc.), then write the full response
 		// envelope directly into the jsoniter stream. This avoids allocating a
 		// *jsonrpcMessage wrapper and the second json.Marshal call in handleMsg.
+		// Use WriteRaw (not Write) to avoid jsoniter's flush-and-advance pattern
+		// that degrades the stream buffer capacity and causes allocations.
 		enc, merr := json.Marshal(result)
 		if merr != nil {
 			return msg.errorResponse(merr)
@@ -674,10 +676,10 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 		stream.WriteString(vsn)
 		stream.WriteMore()
 		stream.WriteObjectField("id")
-		stream.Write(msg.ID)
+		stream.WriteRaw(string(msg.ID))
 		stream.WriteMore()
 		stream.WriteObjectField("result")
-		stream.Write(enc)
+		stream.WriteRaw(string(enc))
 		stream.WriteObjectEnd()
 		return nil
 	}
@@ -688,7 +690,7 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 	stream.WriteMore()
 	if msg.ID != nil {
 		stream.WriteObjectField("id")
-		stream.Write(msg.ID)
+		stream.WriteRaw(string(msg.ID))
 		stream.WriteMore()
 	}
 	rs := &resultFieldStream{Stream: stream}
