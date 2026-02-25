@@ -156,7 +156,6 @@ func testDbAggregatorWithNoFiles(tb testing.TB, txCount int, cfg *testAggConfig)
 
 	err = domains.Flush(context.Background(), rwTx)
 	require.NoError(tb, err)
-	domains.Close() // closes ac
 
 	require.NoError(tb, rwTx.Commit())
 

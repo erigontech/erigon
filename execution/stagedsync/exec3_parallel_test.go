@@ -97,9 +97,10 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-time.After(d):
-		return nil
+	default:
 	}
+	time.Sleep(d)
+	return nil
 }
 
 func (t *testExecTask) Execute(evm *vm.EVM,
