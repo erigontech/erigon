@@ -511,6 +511,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	// keys — without an independent flush counter, progress is never committed during long
 	// stretches of empty blocks.
 	const minBatchBlockCount uint64 = 500
+	const maxBatchBlockCount uint64 = 100_000
 	batchBlockCount := minBatchBlockCount
 
 	{
@@ -769,7 +770,7 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		// Adapt batch block count based on memBatch vs target size.
 		memBatchSize := domains.Size()
 		if memBatchSize < uint64(batchSize) {
-			batchBlockCount = batchBlockCount * 3 / 2 // grow 50%
+			batchBlockCount = min(batchBlockCount*3/2, maxBatchBlockCount) // grow 50%, cap at maximum
 		} else {
 			batchBlockCount = max(batchBlockCount*2/3, minBatchBlockCount) // shrink 50%, floor at minimum
 		}
