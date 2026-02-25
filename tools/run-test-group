@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Runs a named test group. Usage: run-test-group [--check] [<test-group>]
 # With no argument, runs all groups sequentially.
-# Environment: GODEBUG, GOTRACEBACK, GOGC, CGO_CFLAGS, SKIP_FLAKY_TESTS, GOTEST_FLAGS
+# Environment: GODEBUG, GOTRACEBACK, GOGC, CGO_CFLAGS, SKIP_FLAKY_TESTS, GOFLAGS
 
 set -euo pipefail
 
 ALL_GROUPS="execution-tests eest-frontier-scenarios eest-osaka-clz eest-prague-calldata eest-cancun-blobs execution-other consensus core-rpc other"
 
 run_tests() {
-  go test ${GOTEST_FLAGS:-} "$@" 2>&1 | "$(dirname "$0")/filter-test-output" | tee -a run.log
+  go test "$@" 2>&1 | "$(dirname "$0")/filter-test-output" | tee -a run.log
 }
 
 # packages_for_group emits package specs for the given group
@@ -22,12 +22,21 @@ packages_for_group() {
     eest-prague-calldata)     echo ./execution/tests/eest_prague_calldata/... ;;
     eest-cancun-blobs)        echo ./execution/tests/eest_cancun_blobs/... ;;
     execution-other)
-      ls -d -- execution/*/ | grep -vE "execution/tests/" | sed 's|/*$|/...|; s|^|./|'
+      comm -23 \
+        <(go list ./execution/... 2>/dev/null | sort) \
+        <(go list $(for g in $ALL_GROUPS; do
+            case "$g" in execution-tests|eest-*) packages_for_group "$g" ;; esac
+          done) 2>/dev/null | sort)
       ;;
     consensus)  echo ./cl/... ;;
     core-rpc)   echo ./db/... ./node/... ./txnprovider/... ./p2p/... ./rpc/... ;;
     other)
-      ls -d -- */ | grep -vE '^(execution|cl|p2p|rpc|db|node|txnprovider|dashboards)/$' | sed 's|/*$|/...|; s|^|./|'
+      comm -23 \
+        <(go list ./... 2>/dev/null | sort) \
+        <(go list $(for g in $ALL_GROUPS; do
+            [ "$g" = other ] && continue
+            packages_for_group "$g"
+          done) 2>/dev/null | sort)
       ;;
     *)
       echo "Error: Unknown test-group '$1'" >&2
@@ -52,28 +61,14 @@ if [ $# -eq 0 ]; then
   exit
 fi
 
-# --check: validate group partitioning against the full package list
-if [ "${1}" = "--check" ]; then
-  echo "Checking test group partitioning..."
+# check_partitioning: validate group package files in tmpdir for overlaps/gaps.
+# Expects: $tmpdir/group-*.txt (one per group, already sorted), $tmpdir/all_repo_pkgs.txt (sorted).
+# Returns 0 if clean, 1 if overlaps or gaps found.
+check_partitioning() {
+  local tmpdir="$1"
+  local ok=true
 
-  tmpdir=$(mktemp -d)
-  trap 'rm -rf "$tmpdir"' EXIT
-
-  for group in $ALL_GROUPS; do
-    pkgs=$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' \
-      $(packages_for_group "$group") 2>/dev/null | awk 'NF' || true)
-    if [ -n "$pkgs" ]; then
-      echo "$pkgs" > "$tmpdir/$group.txt"
-    else
-      touch "$tmpdir/$group.txt"
-    fi
-    count=$(echo "$pkgs" | awk 'NF' | wc -l | tr -d ' ')
-    echo "  $group: $count packages"
-  done
-
-  cat "$tmpdir"/*.txt | sort > "$tmpdir/all_group_pkgs.txt"
-
-  ok=true
+  sort "$tmpdir"/group-*.txt > "$tmpdir/all_group_pkgs.txt"
 
   overlaps=$(uniq -d "$tmpdir/all_group_pkgs.txt")
   if [ -n "$overlaps" ]; then
@@ -82,14 +77,11 @@ if [ "${1}" = "--check" ]; then
     ok=false
   fi
 
-  go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' ./... 2>/dev/null \
-    | awk 'NF' | sort > "$tmpdir/all_repo_pkgs.txt"
-
   sort -u "$tmpdir/all_group_pkgs.txt" > "$tmpdir/group_pkgs_dedup.txt"
 
   missing=$(comm -23 "$tmpdir/all_repo_pkgs.txt" "$tmpdir/group_pkgs_dedup.txt")
   if [ -n "$missing" ]; then
-    echo "ERROR: packages with tests not covered by any group:" >&2
+    echo "ERROR: packages not covered by any group:" >&2
     echo "$missing" | sed 's/^/  /' >&2
     ok=false
   fi
@@ -100,8 +92,66 @@ if [ "${1}" = "--check" ]; then
     echo "$extra" | sed 's/^/  /' >&2
   fi
 
-  if $ok; then
+  $ok
+}
+
+# --check: validate group partitioning against the full package list
+if [ "${1}" = "--check" ]; then
+  echo "Checking test group partitioning..."
+
+  tmpdir=$(mktemp -d)
+  trap 'rm -rf "$tmpdir"' EXIT
+
+  for group in $ALL_GROUPS; do
+    pkgs=$(go list $(packages_for_group "$group") 2>/dev/null | sort || true)
+    echo "$pkgs" | awk 'NF' > "$tmpdir/group-$group.txt"
+    count=$(echo "$pkgs" | awk 'NF' | wc -l | tr -d ' ')
+    echo "  $group: $count packages"
+  done
+
+  go list ./... 2>/dev/null | sort > "$tmpdir/all_repo_pkgs.txt"
+
+  if check_partitioning "$tmpdir"; then
     echo "OK: no overlaps or gaps"
+    exit 0
+  else
+    exit 1
+  fi
+fi
+
+# --self-test: verify that check_partitioning correctly detects overlaps and passes clean cases
+if [ "${1}" = "--self-test" ]; then
+  echo "Running self-test for overlap detection..."
+  self_test_ok=true
+
+  # Test 1: overlapping groups must fail
+  t=$(mktemp -d)
+  printf 'pkg/a\npkg/b\n' > "$t/group-x.txt"
+  printf 'pkg/b\npkg/c\n' > "$t/group-y.txt"
+  printf 'pkg/a\npkg/b\npkg/c\n' > "$t/all_repo_pkgs.txt"
+  if check_partitioning "$t" 2>/dev/null; then
+    echo "FAIL: overlap test should have failed but passed" >&2
+    self_test_ok=false
+  else
+    echo "PASS: overlap detection works"
+  fi
+  rm -rf "$t"
+
+  # Test 2: clean partition must pass
+  t=$(mktemp -d)
+  printf 'pkg/a\n' > "$t/group-x.txt"
+  printf 'pkg/b\npkg/c\n' > "$t/group-y.txt"
+  printf 'pkg/a\npkg/b\npkg/c\n' > "$t/all_repo_pkgs.txt"
+  if check_partitioning "$t" 2>/dev/null; then
+    echo "PASS: clean partition check passes"
+  else
+    echo "FAIL: clean partition should have passed but failed" >&2
+    self_test_ok=false
+  fi
+  rm -rf "$t"
+
+  if $self_test_ok; then
+    echo "Self-test OK"
     exit 0
   else
     exit 1
