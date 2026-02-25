@@ -36,6 +36,13 @@ var (
 	pageResultPool   = sync.Pool{New: func() any { return &pageResult{} }}
 )
 
+// returnIfNotNil returns item to pool if it's not nil (helper for deferred cleanup)
+func returnIfNotNil(item *pageWorkItem) {
+	if item != nil {
+		pageWorkItemPool.Put(item)
+	}
+}
+
 func GetFromPage(key, compressedPage []byte, compressionBuf []byte, compressionEnabled bool) (v []byte, compressionBufOut []byte) {
 	var err error
 	var page []byte
@@ -403,57 +410,61 @@ func (c *PagedWriter) writePage() error {
 		return err
 	}
 
-	// Async path with parallel workers
-	if c.numWorkers > 1 {
+	// Synchronous path (single-threaded or disabled workers)
+	if c.numWorkers <= 1 {
 		uncompressedPage, ok := c.bytesUncompressed()
 		c.resetPage()
 		if !ok {
 			return nil
 		}
 
-		// Copy page into work item (c.keys/c.vals will be reused by next Add())
-		item := pageWorkItemPool.Get().(*pageWorkItem)
-		item.seq = c.seqIn
-		item.uncompressedData = append(item.uncompressedData[:0], uncompressedPage...)
-		c.seqIn++
-
-		// Send to workers; if workCh is full, drain resultCh to unblock a worker first
-		for {
-			select {
-			case c.workCh <- item:
-				goto sent
-			case r := <-c.resultCh:
-				c.pendingResults[r.seq] = r
-			case <-c.ctx.Done():
-				pageWorkItemPool.Put(item) // return work item to pool
-				return c.ctx.Err()
-			}
+		var compressedPage []byte
+		c.compressionBuf, compressedPage = compress.EncodeZstdIfNeed(c.compressionBuf[:0], uncompressedPage, c.compressionEnabled)
+		if _, err := c.parent.Write(compressedPage); err != nil {
+			return err
 		}
-	sent:
-		// Non-blocking drain of any ready results
-		for {
-			select {
-			case r := <-c.resultCh:
-				c.pendingResults[r.seq] = r
-			default:
-				return c.writeInOrder()
-			}
-		}
+		return nil
 	}
 
-	// Synchronous fallback path
+	// Async path with parallel workers
 	uncompressedPage, ok := c.bytesUncompressed()
 	c.resetPage()
 	if !ok {
 		return nil
 	}
 
-	var compressedPage []byte
-	c.compressionBuf, compressedPage = compress.EncodeZstdIfNeed(c.compressionBuf[:0], uncompressedPage, c.compressionEnabled)
-	if _, err := c.parent.Write(compressedPage); err != nil {
-		return err
+	item := pageWorkItemPool.Get().(*pageWorkItem)
+	sent := false
+	defer func() {
+		if !sent {
+			pageWorkItemPool.Put(item)
+		}
+	}()
+
+	item.seq = c.seqIn
+	item.uncompressedData = append(item.uncompressedData[:0], uncompressedPage...)
+	c.seqIn++
+
+	// Send to workers; if workCh is full, drain resultCh to unblock a worker first
+	for {
+		select {
+		case c.workCh <- item:
+			sent = true
+			// Non-blocking drain of any ready results
+			for {
+				select {
+				case r := <-c.resultCh:
+					c.pendingResults[r.seq] = r
+				default:
+					return c.writeInOrder()
+				}
+			}
+		case r := <-c.resultCh:
+			c.pendingResults[r.seq] = r
+		case <-c.ctx.Done():
+			return c.ctx.Err()
+		}
 	}
-	return nil
 }
 
 func (c *PagedWriter) Add(k, v []byte) (err error) {
