@@ -297,7 +297,7 @@ func (c *Compressor) AddUncompressedWord(word []byte) error {
 		}
 	}
 
-	c.uncompressedBytes += uint64(len(word))
+	c.uncompressedBytes += len(word)
 	return c.uncompressedFile.AppendUncompressed(word)
 }
 
