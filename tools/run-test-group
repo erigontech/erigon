@@ -25,7 +25,9 @@ packages_for_group() {
       comm -23 \
         <(go list ./execution/... 2>/dev/null | sort) \
         <(go list $(for g in $ALL_GROUPS; do
-            case "$g" in execution-tests|eest-*) packages_for_group "$g" ;; esac
+            if [ "$g" = "execution-tests" ] || [ "${g#eest-}" != "$g" ]; then
+              packages_for_group "$g"
+            fi
           done) 2>/dev/null | sort)
       ;;
     consensus)  echo ./cl/... ;;
