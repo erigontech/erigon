@@ -142,6 +142,9 @@ func NewConsensusHandlers(
 		// data column sidecars
 		hm[communication.DataColumnSidecarsByRangeProtocolV1] = c.dataColumnSidecarsByRangeHandler
 		hm[communication.DataColumnSidecarsByRootProtocolV1] = c.dataColumnSidecarsByRootHandler
+		// execution payload envelopes
+		hm[communication.ExecutionPayloadEnvelopesByRangeProtocolV1] = c.executionPayloadEnvelopesByRangeHandler
+		hm[communication.ExecutionPayloadEnvelopesByRootProtocolV1] = c.executionPayloadEnvelopesByRootHandler
 	}
 
 	c.handlers = map[protocol.ID]network.StreamHandler{}
