@@ -104,11 +104,7 @@ func (w *Warmuper) Cache() *WarmupCache {
 	return w.cache
 }
 
-// branchFromCacheOrDB reads branch data from cache if available, otherwise from DB.
-// Warmup workers must NOT write branch data to the cache because they may read stale
-// data from the mem batch (before the main trie's write) and then overwrite the main
-// trie's fresh cache entry, causing the next CollectUpdate to merge against stale data
-// and produce a wrong trie root. Only the main trie (via CollectUpdate) populates the cache.
+// branchFromCacheOrDB reads branch data from cache if available, otherwise from DB and caches it.
 func (w *Warmuper) branchFromCacheOrDB(trieCtx PatriciaContext, prefix []byte) ([]byte, error) {
 	if w.cache != nil {
 		if data, found := w.cache.GetBranch(prefix); found {
@@ -118,6 +114,9 @@ func (w *Warmuper) branchFromCacheOrDB(trieCtx PatriciaContext, prefix []byte) (
 	branchData, _, err := trieCtx.Branch(prefix)
 	if err != nil {
 		return nil, err
+	}
+	if w.cache != nil && len(branchData) > 0 {
+		w.cache.PutBranch(prefix, branchData)
 	}
 	return branchData, nil
 }
