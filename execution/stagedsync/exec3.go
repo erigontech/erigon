@@ -23,6 +23,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -43,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/seboost"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -255,6 +258,36 @@ func ExecV3(ctx context.Context,
 			pe.lastCommittedBlockNum.Store(blockNum - 1)
 		}
 
+		// seboost txdeps consumption
+		if os.Getenv("SEBOOST_LOAD") == "txdeps" {
+			seboostDir := os.Getenv("SEBOOST_DIR")
+			if seboostDir == "" {
+				seboostDir = filepath.Join(cfg.dirs.DataDir, "seboost_txdeps")
+			}
+			sr := seboost.NewReader(seboostDir, logger)
+			pe.seboostReader = sr
+			defer sr.Close()
+			logger.Info("seboost: consumption enabled", "dir", seboostDir)
+		}
+
+		// seboost txdeps generation
+		if os.Getenv("SEBOOST_GENERATE") == "txdeps" {
+			seboostDir := os.Getenv("SEBOOST_DIR")
+			if seboostDir == "" {
+				seboostDir = filepath.Join(cfg.dirs.DataDir, "seboost_txdeps")
+			}
+			homeDir, _ := os.UserHomeDir()
+			csvPath := filepath.Join(homeDir, "seboost-stats", "txdeps-sizes.csv")
+			sw, err := seboost.NewWriter(seboostDir, csvPath, logger)
+			if err != nil {
+				logger.Warn("seboost: failed to create writer", "err", err)
+			} else {
+				pe.seboostWriter = sw
+				defer sw.Close()
+				logger.Info("seboost: generation enabled", "dir", seboostDir, "csv", csvPath)
+			}
+		}
+
 		defer func() {
 			if !isChainTip {
 				pe.LogComplete(stepsInDb)
@@ -445,6 +478,7 @@ type txExecutor struct {
 
 	enableChaosMonkey bool
 	postValidator     BlockPostExecutionValidator
+	seboostReader     *seboost.Reader
 }
 
 func (te *txExecutor) readState() *state.StateV3Buffered {
@@ -632,6 +666,12 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 
 			var txTasks []exec.Task
 
+			// load seboost txdeps for this block if available
+			var blockDeps [][]int
+			if te.seboostReader != nil {
+				blockDeps, _ = te.seboostReader.GetDeps(blockNum)
+			}
+
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {
 				if inputTxNum > 0 && inputTxNum <= initialTxNum {
 					inputTxNum++
@@ -654,6 +694,15 @@ func (te *txExecutor) executeBlocks(ctx context.Context, tx kv.TemporalTx, start
 					Trace:            dbg.TraceTx(blockNum, txIndex),
 					Hooks:            te.hooks,
 					Logger:           te.logger,
+				}
+
+				// inject seboost txdeps if available
+				if blockDeps != nil {
+					depIndex := txIndex + 1 // 0=system tx, 1=user tx 0, etc.
+					if depIndex >= 0 && depIndex < len(blockDeps) && len(blockDeps[depIndex]) > 0 {
+						txTask.SetDependencies(blockDeps[depIndex])
+						te.logger.Trace("seboost: injecting deps", "block", blockNum, "txIndex", txIndex, "depCount", len(blockDeps[depIndex]))
+					}
 				}
 
 				txTasks = append(txTasks, txTask)

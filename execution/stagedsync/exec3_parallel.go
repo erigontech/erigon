@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"os"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -30,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/seboost"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -90,6 +92,7 @@ type parallelExecutor struct {
 	rws            *exec.ResultsQueue
 	workerCount    int
 	blockExecutors map[uint64]*blockExecutor
+	seboostWriter  *seboost.Writer
 }
 
 func (pe *parallelExecutor) exec(ctx context.Context, execStage *StageState, u Unwinder,
@@ -1618,6 +1621,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		if be.profile {
 			allDeps = state.GetDep(be.blockIO)
 			deps = state.BuildDAG(be.blockIO, pe.logger)
+		}
+
+		if os.Getenv("SEBOOST_GENERATE") == "txdeps" && pe.seboostWriter != nil {
+			seboostDeps := state.GetDep(be.blockIO)
+			txCount := len(be.tasks)
+			if err := pe.seboostWriter.WriteBlock(be.blockNum, seboostDeps, txCount); err != nil {
+				pe.logger.Warn("seboost: failed to write txdeps", "block", be.blockNum, "err", err)
+			}
 		}
 
 		isPartial := len(be.tasks) > 0 && be.tasks[0].Version().TxIndex != -1

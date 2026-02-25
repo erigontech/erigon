@@ -382,9 +382,17 @@ func (t *TxTask) Version() state.Version {
 	return state.Version{BlockNum: t.BlockNumber(), TxNum: t.TxNum, TxIndex: t.TxIndex}
 }
 
+func (t *TxTask) SetDependencies(deps []int) {
+	t.dependencies = deps
+}
+
 func (t *TxTask) Dependencies() []int {
+	if t.dependencies != nil {
+		return t.dependencies
+	}
+
 	if dbg.UseTxDependencies {
-		if t.dependencies == nil && t.Engine != nil {
+		if t.Engine != nil {
 			t.dependencies = []int{}
 
 			blockDependencies := t.Engine.TxDependencies(t.Header)
