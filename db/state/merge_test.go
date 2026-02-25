@@ -121,11 +121,12 @@ func emptyTestInvertedIndex(t testing.TB, aggStep uint64) *InvertedIndex {
 
 	dirs := datadir.New(t.TempDir())
 	ii, err := NewInvertedIndex(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, log.New())
-	ii.Accessors = 0
-	ii.salt.Store(&salt)
 	if err != nil {
 		panic(err)
 	}
+	t.Cleanup(ii.Close)
+	ii.Accessors = 0
+	ii.salt.Store(&salt)
 	return ii
 }
 
@@ -841,6 +842,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		d.History.InvertedIndex.Accessors = 0
 		d.History.Accessors = 0
 		d.Accessors = 0
+		t.Cleanup(d.Close)
 		return d
 	}
 
@@ -1107,6 +1109,14 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 		item.decompressor = &seg.Decompressor{}
 		return true
 	})
+	t.Cleanup(func() {
+		h.dirtyFiles.Scan(func(item *FilesItem) bool {
+			if item.decompressor != nil {
+				item.decompressor.Close()
+			}
+			return true
+		})
+	})
 
 	ii.scanDirtyFiles([]string{
 		"v1.0-accounts.0-1.ef",
@@ -1118,6 +1128,14 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 	ii.dirtyFiles.Scan(func(item *FilesItem) bool {
 		item.decompressor = &seg.Decompressor{}
 		return true
+	})
+	t.Cleanup(func() {
+		ii.dirtyFiles.Scan(func(item *FilesItem) bool {
+			if item.decompressor != nil {
+				item.decompressor.Close()
+			}
+			return true
+		})
 	})
 	h.reCalcVisibleFiles(h.dirtyFilesEndTxNumMinimax())
 

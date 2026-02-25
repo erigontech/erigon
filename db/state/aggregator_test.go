@@ -103,6 +103,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	}
 
 	writer := seg.NewWriter(comp, compressFlags)
+	defer writer.Close()
 
 	loader := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		_, err = writer.Write(k)
@@ -114,8 +115,6 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 
 	err = collector.Load(nil, "", loader, etl.TransformArgs{})
 	require.NoError(tb, err)
-
-	collector.Close()
 
 	err = comp.Compress()
 	require.NoError(tb, err)

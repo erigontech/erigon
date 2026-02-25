@@ -271,6 +271,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.Equal([]string{"key1", "key2", "key3"}, keyWords)
 		require.Equal([][]uint64{{2, 6}, {3, 6, 7}, {7}}, intArrs)
 		r := recsplit.NewIndexReader(sf.efHistoryIdx)
+		defer r.Close()
 		for i := 0; i < len(keyWords); i++ {
 			var offset uint64
 			var ok bool
@@ -290,6 +291,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 			require.Equal(keyWords[i], string(w))
 		}
 		r = recsplit.NewIndexReader(sf.historyIdx)
+		defer r.Close()
 
 		gh = seg.NewPagedReader(h.dataReader(sf.historyDecomp), compressedPageValuesCount, true)
 		var vi int
@@ -1029,8 +1031,8 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 
 		if doPrune {
 			hc := h.BeginFilesRo()
+			defer hc.Close()
 			_, err = hc.Prune(ctx, tx, step.ToTxNum(h.stepSize), (step + 1).ToTxNum(h.stepSize), math.MaxUint64, false, logEvery)
-			hc.Close()
 			require.NoError(err)
 		}
 	}
@@ -1150,6 +1152,7 @@ func TestHistoryRange1(t *testing.T) {
 
 		it, err := ic.HistoryRange(2, 20, order.Asc, -1, tx)
 		require.NoError(err)
+		defer it.Close()
 		for it.HasNext() {
 			k, v, err := it.Next()
 			require.NoError(err)
@@ -1206,6 +1209,7 @@ func TestHistoryRange1(t *testing.T) {
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
 		}
+		it.Close()
 		require.Equal([]string{
 			"0100000000000001",
 			"0100000000000002",
@@ -1239,6 +1243,7 @@ func TestHistoryRange1(t *testing.T) {
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
 		}
+		it.Close()
 		require.Equal([]string{"0100000000000001", "0100000000000002", "0100000000000003", "0100000000000004", "0100000000000005", "0100000000000006", "0100000000000008", "0100000000000009", "010000000000000a", "010000000000000c", "0100000000000014", "0100000000000019", "010000000000001b"}, keys)
 		require.Equal([]string{"ff000000000003e2", "ff000000000001f1", "ff0000000000014b", "ff000000000000f8", "ff000000000000c6", "ff000000000000a5", "ff0000000000007c", "ff0000000000006e", "ff00000000000063", "ff00000000000052", "ff00000000000031", "ff00000000000027", "ff00000000000024"}, vals)
 
@@ -1252,6 +1257,7 @@ func TestHistoryRange1(t *testing.T) {
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
 		}
+		it.Close()
 		require.Equal([]string{"0100000000000001", "0100000000000002"}, keys)
 		require.Equal([]string{"ff000000000003e2", "ff000000000001f1"}, vals)
 
@@ -1265,6 +1271,7 @@ func TestHistoryRange1(t *testing.T) {
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
 		}
+		it.Close()
 		require.Equal([]string{"0100000000000001", "0100000000000002"}, keys)
 		require.Equal([]string{"ff000000000003cf", "ff000000000001e7"}, vals)
 
@@ -1320,14 +1327,17 @@ func TestHistoryRange2(t *testing.T) {
 			{ //check IdxRange
 				idxIt, err := hc.IdxRange(firstKey[:], -1, -1, order.Asc, -1, roTx)
 				require.NoError(err)
+				defer idxIt.Close()
 				cnt, err := stream.CountU64(idxIt)
 				require.NoError(err)
 				require.Equal(1000, cnt)
 
 				idxIt, err = hc.IdxRange(firstKey[:], 2, 20, order.Asc, -1, roTx)
 				require.NoError(err)
+				defer idxIt.Close()
 				idxItDesc, err := hc.IdxRange(firstKey[:], 19, 1, order.Desc, -1, roTx)
 				require.NoError(err)
+				defer idxItDesc.Close()
 				descArr, err := stream.ToArrayU64(idxItDesc)
 				require.NoError(err)
 				stream.ExpectEqualU64(t, idxIt, stream.ReverseArray(descArr))
@@ -1335,6 +1345,7 @@ func TestHistoryRange2(t *testing.T) {
 
 			it, err := hc.HistoryRange(2, 20, order.Asc, -1, roTx)
 			require.NoError(err)
+			defer it.Close()
 			for it.HasNext() {
 				k, v, err := it.Next()
 				require.NoError(err)
@@ -1392,6 +1403,7 @@ func TestHistoryRange2(t *testing.T) {
 				keys = append(keys, fmt.Sprintf("%x", k))
 				vals = append(vals, fmt.Sprintf("%x", v))
 			}
+			it.Close()
 			require.NoError(err)
 			require.Equal([]string{
 				"0100000000000001",
@@ -1616,6 +1628,7 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 
 		iter, err := ic.HistoryRange(1, -1, order.Asc, -1, tx)
 		require.NoError(err)
+		defer iter.Close()
 
 		keys := make([][]byte, 0)
 		for iter.HasNext() {
