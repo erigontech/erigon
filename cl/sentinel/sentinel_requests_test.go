@@ -148,7 +148,7 @@ func newMockPeerDasStateReader(t *testing.T) *peerdasstatemock.MockPeerDasStateR
 
 func testSentinelBlocksByRange(t *testing.T) {
 	ethClock := getEthClock(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	db, blocks, _, _, reader := loadChain(t)
 	_, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
 
@@ -235,7 +235,7 @@ func testSentinelBlocksByRange(t *testing.T) {
 }
 
 func testSentinelBlocksByRoots(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	db, blocks, _, _, reader := loadChain(t)
 	ethClock := getEthClock(t)
 	_, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
@@ -328,7 +328,7 @@ func testSentinelBlocksByRoots(t *testing.T) {
 }
 
 func testSentinelStatusRequest(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	db, blocks, _, _, reader := loadChain(t)
 	ethClock := getEthClock(t)
 

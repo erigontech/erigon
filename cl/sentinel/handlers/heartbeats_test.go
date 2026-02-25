@@ -71,7 +71,7 @@ func testLocalNode(t *testing.T) *enode.LocalNode {
 }
 
 func TestPing(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
@@ -127,7 +127,7 @@ func TestPing(t *testing.T) {
 }
 
 func TestGoodbye(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
@@ -188,7 +188,7 @@ func TestGoodbye(t *testing.T) {
 }
 
 func TestMetadataV2(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
@@ -247,7 +247,7 @@ func TestMetadataV2(t *testing.T) {
 }
 
 func TestMetadataV1(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
@@ -306,7 +306,7 @@ func TestMetadataV1(t *testing.T) {
 }
 
 func TestStatus(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)

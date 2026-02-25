@@ -18,7 +18,6 @@ package handlers
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -42,7 +41,7 @@ import (
 )
 
 func TestBlocksByRootHandler(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)

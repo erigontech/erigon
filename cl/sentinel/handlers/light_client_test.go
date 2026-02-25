@@ -18,7 +18,6 @@ package handlers
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -46,7 +45,7 @@ var (
 )
 
 func TestLightClientOptimistic(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
@@ -118,7 +117,7 @@ func TestLightClientOptimistic(t *testing.T) {
 }
 
 func TestLightClientFinality(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
@@ -191,7 +190,7 @@ func TestLightClientFinality(t *testing.T) {
 }
 
 func TestLightClientBootstrap(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	ethClock := getEthClock(t)
 
 	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
@@ -276,7 +275,7 @@ func TestLightClientBootstrap(t *testing.T) {
 }
 
 func TestLightClientUpdates(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
