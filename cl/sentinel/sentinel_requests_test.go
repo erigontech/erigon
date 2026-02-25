@@ -28,7 +28,6 @@ import (
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
-	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/antiquary"
@@ -85,7 +84,9 @@ func retryTestFunc(t *testing.T, maxRetries int, fn func()) {
 
 func getEthClock(t *testing.T) eth_clock.EthereumClock {
 	s, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
-	require.NoError(t, err)
+	if err != nil {
+		panic(fmt.Sprintf("GetGenesisState failed: %v", err))
+	}
 	return eth_clock.NewEthereumClock(s.GenesisTime(), s.GenesisValidatorsRoot(), s.BeaconConfig())
 }
 
@@ -95,12 +96,16 @@ func loadChain(t *testing.T) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, p
 	reader = antiquarytests.LoadChain(blocks, postState, db, t)
 
 	sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
-	require.NoError(t, sn.OnHeadState(postState))
+	if err := sn.OnHeadState(postState); err != nil {
+		panic(fmt.Sprintf("OnHeadState failed: %v", err))
+	}
 
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
 	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, nil, nil, reader, sn, log.New(), true, true, false, false, nil)
-	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
+	if err := a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33); err != nil {
+		panic(fmt.Sprintf("IncrementBeaconState failed: %v", err))
+	}
 	return
 }
 
@@ -115,7 +120,9 @@ func newTestP2PManager(t *testing.T, ethClock eth_clock.EthereumClock) p2p.P2PMa
 		NoDiscovery:   true,
 		MaxPeerCount:  100,
 	}, log.New(), ethClock)
-	require.NoError(t, err)
+	if err != nil {
+		panic(fmt.Sprintf("NewP2Pmanager failed: %v", err))
+	}
 	t.Cleanup(func() { pm.Host().Close() })
 	return pm
 }
@@ -129,11 +136,15 @@ func newTestSentinel(t *testing.T, ethClock eth_clock.EthereumClock, reader free
 		EnableBlocks:  true,
 		MaxPeerCount:  100,
 	}, ethClock, reader, nil, db, log.New(), &mock_services.ForkChoiceStorageMock{}, nil, mockPeerDasStateReader, pm)
-	require.NoError(t, err)
+	if err != nil {
+		panic(fmt.Sprintf("New sentinel failed: %v", err))
+	}
 	t.Cleanup(func() { sent.Stop() })
 
 	_, err = sent.Start()
-	require.NoError(t, err)
+	if err != nil {
+		panic(fmt.Sprintf("sentinel.Start failed: %v", err))
+	}
 	return sent
 }
 
@@ -156,17 +167,23 @@ func testSentinelBlocksByRange(t *testing.T) {
 	h := sent.Host()
 
 	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
-	require.NoError(t, err)
+	if err != nil {
+		panic(fmt.Sprintf("New(host1) failed: %v", err))
+	}
 	defer host1.Close()
 
 	err = h.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
 		Addrs: host1.Addrs(),
 	})
-	require.NoError(t, err)
+	if err != nil {
+		panic(fmt.Sprintf("Connect failed: %v", err))
+	}
 
 	stream, err := host1.NewStream(ctx, h.ID(), protocol.ID(communication.BeaconBlocksByRangeProtocolV2))
-	require.NoError(t, err)
+	if err != nil {
+		panic(fmt.Sprintf("NewStream failed: %v", err))
+	}
 
 	req := &cltypes.BeaconBlocksByRangeRequest{
 		StartSlot: blocks[0].Block.Slot,
@@ -179,12 +196,18 @@ func testSentinelBlocksByRange(t *testing.T) {
 
 	code := make([]byte, 1)
 	_, err = stream.Read(code)
-	require.NoError(t, err)
-	require.Equal(t, uint8(0), code[0])
+	if err != nil {
+		panic(fmt.Sprintf("stream.Read(code) failed: %v", err))
+	}
+	if code[0] != 0 {
+		panic(fmt.Sprintf("expected code 0, got %d", code[0]))
+	}
 
 	var w bytes.Buffer
 	_, err = io.Copy(&w, stream)
-	require.NoError(t, err)
+	if err != nil {
+		panic(fmt.Sprintf("io.Copy failed: %v", err))
+	}
 
 	responsePacket := make([]*cltypes.SignedBeaconBlock, 0)
 
@@ -195,41 +218,56 @@ func testSentinelBlocksByRange(t *testing.T) {
 			if err == io.EOF {
 				break
 			}
-			require.NoError(t, err)
+			panic(fmt.Sprintf("r.Read(forkDigest) failed: %v", err))
 		}
 
 		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
-		require.NoError(t, err)
+		if err != nil {
+			panic(fmt.Sprintf("ReadUvarint failed: %v", err))
+		}
 
 		raw := make([]byte, encodedLn)
 		sr := snappy.NewReader(r)
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
-			require.NoError(t, err)
+			if err != nil {
+				panic(fmt.Sprintf("snappy.Read failed: %v", err))
+			}
 			bytesRead += n
 		}
 		respForkDigest := binary.BigEndian.Uint32(forkDigest)
-		require.NoError(t, err)
 
 		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
-		require.NoError(t, err)
+		if err != nil {
+			panic(fmt.Sprintf("StateVersionByForkDigest failed: %v", err))
+		}
 
 		responseChunk := cltypes.NewSignedBeaconBlock(beaconConfig, clparams.DenebVersion)
-		require.NoError(t, responseChunk.DecodeSSZ(raw, int(version)))
+		if err := responseChunk.DecodeSSZ(raw, int(version)); err != nil {
+			panic(fmt.Sprintf("DecodeSSZ failed: %v", err))
+		}
 
 		responsePacket = append(responsePacket, responseChunk)
 		r.ReadByte()
 	}
-	require.Len(t, blocks, len(responsePacket))
+	if len(blocks) != len(responsePacket) {
+		panic(fmt.Sprintf("expected %d blocks, got %d", len(blocks), len(responsePacket)))
+	}
 	for i := 0; i < len(blocks); i++ {
 		root1, err := responsePacket[i].HashSSZ()
-		require.NoError(t, err)
+		if err != nil {
+			panic(fmt.Sprintf("responsePacket[%d].HashSSZ failed: %v", i, err))
+		}
 
 		root2, err := blocks[i].HashSSZ()
-		require.NoError(t, err)
+		if err != nil {
+			panic(fmt.Sprintf("blocks[%d].HashSSZ failed: %v", i, err))
+		}
 
-		require.Equal(t, root1, root2)
+		if root1 != root2 {
+			panic(fmt.Sprintf("block %d root mismatch: %v != %v", i, root1, root2))
+		}
 	}
 }
 
@@ -243,25 +281,35 @@ func testSentinelBlocksByRoots(t *testing.T) {
 	h := sent.Host()
 
 	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
-	require.NoError(t, err)
+	if err != nil {
+		panic(fmt.Sprintf("New(host1) failed: %v", err))
+	}
 	defer host1.Close()
 
 	err = h.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
 		Addrs: host1.Addrs(),
 	})
-	require.NoError(t, err)
+	if err != nil {
+		panic(fmt.Sprintf("Connect failed: %v", err))
+	}
 
 	stream, err := host1.NewStream(ctx, h.ID(), protocol.ID(communication.BeaconBlocksByRootProtocolV2))
-	require.NoError(t, err)
+	if err != nil {
+		panic(fmt.Sprintf("NewStream failed: %v", err))
+	}
 
 	req := solid.NewHashList(1232)
 	rt, err := blocks[0].Block.HashSSZ()
-	require.NoError(t, err)
+	if err != nil {
+		panic(fmt.Sprintf("blocks[0].Block.HashSSZ failed: %v", err))
+	}
 
 	req.Append(rt)
 	rt, err = blocks[1].Block.HashSSZ()
-	require.NoError(t, err)
+	if err != nil {
+		panic(fmt.Sprintf("blocks[1].Block.HashSSZ failed: %v", err))
+	}
 	req.Append(rt)
 
 	if err := ssz_snappy.EncodeAndWrite(stream, req); err != nil {
@@ -270,12 +318,18 @@ func testSentinelBlocksByRoots(t *testing.T) {
 
 	code := make([]byte, 1)
 	_, err = stream.Read(code)
-	require.NoError(t, err)
-	require.Equal(t, uint8(0), code[0])
+	if err != nil {
+		panic(fmt.Sprintf("stream.Read(code) failed: %v", err))
+	}
+	if code[0] != 0 {
+		panic(fmt.Sprintf("expected code 0, got %d", code[0]))
+	}
 
 	var w bytes.Buffer
 	_, err = io.Copy(&w, stream)
-	require.NoError(t, err)
+	if err != nil {
+		panic(fmt.Sprintf("io.Copy failed: %v", err))
+	}
 
 	responsePacket := make([]*cltypes.SignedBeaconBlock, 0)
 
@@ -286,42 +340,57 @@ func testSentinelBlocksByRoots(t *testing.T) {
 			if err == io.EOF {
 				break
 			}
-			require.NoError(t, err)
+			panic(fmt.Sprintf("r.Read(forkDigest) failed: %v", err))
 		}
 
 		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
-		require.NoError(t, err)
+		if err != nil {
+			panic(fmt.Sprintf("ReadUvarint failed: %v", err))
+		}
 
 		raw := make([]byte, encodedLn)
 		sr := snappy.NewReader(r)
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
-			require.NoError(t, err)
+			if err != nil {
+				panic(fmt.Sprintf("snappy.Read failed: %v", err))
+			}
 			bytesRead += n
 		}
 		respForkDigest := binary.BigEndian.Uint32(forkDigest)
-		require.NoError(t, err)
 
 		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
-		require.NoError(t, err)
+		if err != nil {
+			panic(fmt.Sprintf("StateVersionByForkDigest failed: %v", err))
+		}
 
 		responseChunk := cltypes.NewSignedBeaconBlock(beaconConfig, clparams.DenebVersion)
-		require.NoError(t, responseChunk.DecodeSSZ(raw, int(version)))
+		if err := responseChunk.DecodeSSZ(raw, int(version)); err != nil {
+			panic(fmt.Sprintf("DecodeSSZ failed: %v", err))
+		}
 
 		responsePacket = append(responsePacket, responseChunk)
 		r.ReadByte()
 	}
 
-	require.Len(t, blocks, len(responsePacket))
+	if len(blocks) != len(responsePacket) {
+		panic(fmt.Sprintf("expected %d blocks, got %d", len(blocks), len(responsePacket)))
+	}
 	for i := 0; i < len(responsePacket); i++ {
 		root1, err := responsePacket[i].HashSSZ()
-		require.NoError(t, err)
+		if err != nil {
+			panic(fmt.Sprintf("responsePacket[%d].HashSSZ failed: %v", i, err))
+		}
 
 		root2, err := blocks[i].HashSSZ()
-		require.NoError(t, err)
+		if err != nil {
+			panic(fmt.Sprintf("blocks[%d].HashSSZ failed: %v", i, err))
+		}
 
-		require.Equal(t, root1, root2)
+		if root1 != root2 {
+			panic(fmt.Sprintf("block %d root mismatch: %v != %v", i, root1, root2))
+		}
 	}
 }
 
@@ -334,14 +403,18 @@ func testSentinelStatusRequest(t *testing.T) {
 	h := sent.Host()
 
 	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
-	require.NoError(t, err)
+	if err != nil {
+		panic(fmt.Sprintf("New(host1) failed: %v", err))
+	}
 	defer host1.Close()
 
 	err = h.Connect(ctx, peer.AddrInfo{
 		ID:    host1.ID(),
 		Addrs: host1.Addrs(),
 	})
-	require.NoError(t, err)
+	if err != nil {
+		panic(fmt.Sprintf("Connect failed: %v", err))
+	}
 
 	req := &cltypes.Status{
 		HeadRoot:       common.Hash(blocks[0].Block.ParentRoot),
@@ -352,7 +425,9 @@ func testSentinelStatusRequest(t *testing.T) {
 	sent.SetStatus(req)
 
 	stream, err := host1.NewStream(ctx, h.ID(), protocol.ID(communication.StatusProtocolV1))
-	require.NoError(t, err)
+	if err != nil {
+		panic(fmt.Sprintf("NewStream failed: %v", err))
+	}
 
 	if err := ssz_snappy.EncodeAndWrite(stream, req); err != nil {
 		panic(fmt.Sprintf("EncodeAndWrite failed: %v", err))
@@ -360,17 +435,30 @@ func testSentinelStatusRequest(t *testing.T) {
 
 	code := make([]byte, 1)
 	_, err = stream.Read(code)
-	require.NoError(t, err)
-	require.Equal(t, uint8(0), code[0])
+	if err != nil {
+		panic(fmt.Sprintf("stream.Read(code) failed: %v", err))
+	}
+	if code[0] != 0 {
+		panic(fmt.Sprintf("expected code 0, got %d", code[0]))
+	}
 
 	resp := &cltypes.Status{}
-	err = ssz_snappy.DecodeAndReadNoForkDigest(stream, resp, 0)
-	require.NoError(t, err)
+	if err = ssz_snappy.DecodeAndReadNoForkDigest(stream, resp, 0); err != nil {
+		panic(fmt.Sprintf("DecodeAndReadNoForkDigest failed: %v", err))
+	}
 
-	require.Equal(t, req.HeadRoot, resp.HeadRoot)
-	require.Equal(t, req.HeadSlot, resp.HeadSlot)
-	require.Equal(t, req.FinalizedRoot, resp.FinalizedRoot)
-	require.Equal(t, req.FinalizedEpoch, resp.FinalizedEpoch)
+	if req.HeadRoot != resp.HeadRoot {
+		panic(fmt.Sprintf("HeadRoot mismatch: %v != %v", req.HeadRoot, resp.HeadRoot))
+	}
+	if req.HeadSlot != resp.HeadSlot {
+		panic(fmt.Sprintf("HeadSlot mismatch: %d != %d", req.HeadSlot, resp.HeadSlot))
+	}
+	if req.FinalizedRoot != resp.FinalizedRoot {
+		panic(fmt.Sprintf("FinalizedRoot mismatch: %v != %v", req.FinalizedRoot, resp.FinalizedRoot))
+	}
+	if req.FinalizedEpoch != resp.FinalizedEpoch {
+		panic(fmt.Sprintf("FinalizedEpoch mismatch: %d != %d", req.FinalizedEpoch, resp.FinalizedEpoch))
+	}
 }
 
 func TestSentinelBlocksByRange(t *testing.T) {
