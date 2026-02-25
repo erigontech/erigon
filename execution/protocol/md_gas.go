@@ -41,6 +41,9 @@ func ComputeMdGas(txnGasLimit uint64, igas fixedgas.IntrinsicGasCalcResult, rule
 		regularGasBudget := params.MaxTxnGasLimit - intrinsicGas
 		gasLeft := min(regularGasBudget, executionGas)
 		stateGasReservoir := executionGas - gasLeft
+		if tracer != nil && tracer.OnGasChange != nil {
+			tracer.OnGasChange(txnGasLimit, executionGas, tracing.GasChangeTxIntrinsicGas)
+		}
 		return evmtypes.MdGas{Regular: gasLeft, State: stateGasReservoir}, nil
 	}
 	mdGas := evmtypes.MdGas{Regular: txnGasLimit}
