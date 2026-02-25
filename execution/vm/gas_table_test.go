@@ -136,12 +136,14 @@ func TestEIP2200(t *testing.T) {
 			}
 			_ = s.CommitBlock(vmctx.Rules(chain.AllProtocolChanges), w)
 			vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.AllProtocolChanges, vm.Config{ExtraEips: []int{2200}})
-
-			_, gas, err := vmenv.Call(accounts.ZeroAddress, address, nil, tt.gaspool, uint256.Int{}, false /* bailout */)
+			mdGas := vm.MdGas{
+				Regular: tt.gaspool,
+			}
+			_, gas, err := vmenv.Call(accounts.ZeroAddress, address, nil, mdGas, uint256.Int{}, false /* bailout */)
 			if !errors.Is(err, tt.failure) {
 				t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 			}
-			if used := tt.gaspool - gas; used != tt.used {
+			if used := tt.gaspool - gas.Regular; used != tt.used {
 				t.Errorf("test %d: gas used mismatch: have %v, want %v", i, used, tt.used)
 			}
 			if refund := vmenv.IntraBlockState().GetRefund(); refund != tt.refund {
@@ -202,13 +204,14 @@ func TestCreateGas(t *testing.T) {
 		}
 
 		vmenv := vm.NewEVM(vmctx, evmtypes.TxContext{}, s, chain.TestChainConfig, config)
-
-		var startGas uint64 = math.MaxUint64
+		startGas := vm.MdGas{
+			Regular: math.MaxUint64,
+		}
 		_, gas, err := vmenv.Call(accounts.ZeroAddress, address, nil, startGas, uint256.Int{}, false /* bailout */)
 		if err != nil {
 			t.Errorf("test %d execution failed: %v", i, err)
 		}
-		if gasUsed := startGas - gas; gasUsed != tt.gasUsed {
+		if gasUsed := startGas.Regular - gas.Regular; gasUsed != tt.gasUsed {
 			t.Errorf("test %d: gas used mismatch: have %v, want %v", i, gasUsed, tt.gasUsed)
 		}
 		domains.Close()

@@ -971,15 +971,15 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		offset = scope.Stack.pop()
 		size   = scope.Stack.peek()
 		input  = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
-		gas    = scope.gas
+		gas    = scope.Gas()
 	)
 	if evm.ChainRules().IsTangerineWhistle {
-		gas -= gas / 64
+		gas.Regular -= gas.Regular / 64
 	}
 	// reuse size int for stackvalue
 	stackvalue := size
 
-	scope.useGas(gas, evm.Config().Tracer, tracing.GasChangeCallContractCreation)
+	scope.useGas(gas.Regular, evm.Config().Tracer, tracing.GasChangeCallContractCreation)
 
 	res, addr, returnGas, suberr := evm.Create(scope.Contract.Address(), input, gas, value, false)
 
@@ -996,7 +996,7 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		stackvalue.SetBytes(addrVal[:])
 	}
 
-	scope.refundGas(returnGas, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+	scope.refundGas(returnGas.Regular, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	if suberr == ErrExecutionReverted {
 		evm.returnData = res // set REVERT data to return data buffer
@@ -1027,12 +1027,12 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 		offset, size = scope.Stack.pop(), scope.Stack.pop()
 		salt         = scope.Stack.pop()
 		input        = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
-		gas          = scope.gas
+		gas          = scope.Gas()
 	)
 
 	// Apply EIP150
-	gas -= gas / 64
-	scope.useGas(gas, evm.Config().Tracer, tracing.GasChangeCallContractCreation2)
+	gas.Regular -= gas.Regular / 64
+	scope.useGas(gas.Regular, evm.Config().Tracer, tracing.GasChangeCallContractCreation2)
 	// reuse size int for stackvalue
 	stackValue := size
 	res, addr, returnGas, suberr := evm.Create2(scope.Contract.Address(), input, gas, endowment, &salt, false)
@@ -1046,7 +1046,7 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 	}
 
 	scope.Stack.push(stackValue)
-	scope.refundGas(returnGas, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+	scope.refundGas(returnGas.Regular, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	if suberr == ErrExecutionReverted {
 		evm.returnData = res // set REVERT data to return data buffer
@@ -1073,7 +1073,10 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	// Pop gas. The actual gas in evm.callGasTemp.
 	// We can use this as a temporary value
 	temp := stack.pop()
-	gas := evm.CallGasTemp()
+	gas := MdGas{
+		Regular: evm.CallGasTemp(),
+		State:   scope.stateGas,
+	}
 	// Pop other call parameters.
 	addr, value, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
 	toAddr := accounts.InternAddress(addr.Bytes20())
@@ -1084,7 +1087,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		if evm.readOnly {
 			return pc, nil, ErrWriteProtection
 		}
-		gas += params.CallStipend
+		gas.Regular += params.CallStipend
 	}
 
 	ret, returnGas, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, value, false /* bailout */)
@@ -1100,7 +1103,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.refundGas(returnGas, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+	scope.refundGas(returnGas.Regular, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1121,7 +1124,10 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	stack := &scope.Stack
 	// We use it as a temporary value
 	temp := stack.pop()
-	gas := evm.CallGasTemp()
+	gas := MdGas{
+		Regular: evm.CallGasTemp(),
+		State:   scope.stateGas,
+	}
 	// Pop other call parameters.
 	addr, value, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
 	toAddr := accounts.InternAddress(addr.Bytes20())
@@ -1129,7 +1135,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
 	if !value.IsZero() {
-		gas += params.CallStipend
+		gas.Regular += params.CallStipend
 	}
 
 	ret, returnGas, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, value)
@@ -1144,7 +1150,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.refundGas(returnGas, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+	scope.refundGas(returnGas.Regular, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1165,7 +1171,10 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	// Pop gas. The actual gas is in evm.callGasTemp.
 	// We use it as a temporary value
 	temp := stack.pop()
-	gas := evm.CallGasTemp()
+	gas := MdGas{
+		Regular: evm.CallGasTemp(),
+		State:   scope.stateGas,
+	}
 	// Pop other call parameters.
 	addr, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
 	toAddr := accounts.InternAddress(addr.Bytes20())
@@ -1184,7 +1193,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.refundGas(returnGas, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+	scope.refundGas(returnGas.Regular, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	evm.returnData = ret
 	return pc, ret, nil
@@ -1205,7 +1214,10 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	stack := &scope.Stack
 	// We use it as a temporary value
 	temp := stack.pop()
-	gas := evm.CallGasTemp()
+	gas := MdGas{
+		Regular: evm.CallGasTemp(),
+		State:   scope.stateGas,
+	}
 	// Pop other call parameters.
 	addr, inOffset, inSize, retOffset, retSize := stack.pop(), stack.pop(), stack.pop(), stack.pop(), stack.pop()
 	toAddr := accounts.InternAddress(addr.Bytes20())
@@ -1223,7 +1235,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
 
-	scope.refundGas(returnGas, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
+	scope.refundGas(returnGas.Regular, evm.config.Tracer, tracing.GasChangeCallLeftOverRefunded)
 
 	evm.returnData = ret
 	return pc, ret, nil

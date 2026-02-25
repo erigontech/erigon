@@ -1,7 +1,4 @@
-// Copyright 2023 The go-ethereum Authors
-// (original work)
-// Copyright 2025 The Erigon Authors
-// (modifications)
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -19,28 +16,8 @@
 
 package vm
 
-import (
-	"maps"
-	"slices"
-	"testing"
-)
-
-func FuzzPrecompiledContracts(f *testing.F) {
-	// Create list of addresses
-	addrs := slices.Collect(maps.Keys(allPrecompiles))
-	f.Fuzz(func(t *testing.T, addr uint8, input []byte) {
-		a := addrs[int(addr)%len(addrs)]
-		p := allPrecompiles[a]
-		gas := MdGas{
-			Regular: p.RequiredGas(input),
-		}
-		if gas.Regular > 10_000_000 {
-			return
-		}
-		inWant := string(input)
-		RunPrecompiledContract(p, input, gas, nil)
-		if inHave := string(input); inWant != inHave {
-			t.Errorf("Precompiled %v modified input data", a)
-		}
-	})
+// MdGas represents multi-dimensional gas
+type MdGas struct {
+	Regular uint64
+	State   uint64
 }

@@ -153,7 +153,12 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		sender,
 		contractAsAddress,
 		input,
-		cfg.GasLimit,
+		vm.MdGas{
+			Regular: cfg.GasLimit,
+			//
+			// TODO address
+			//
+		},
 		cfg.Value,
 		false, /* bailout */
 	)
@@ -165,7 +170,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 }
 
 // Create executes the code using the EVM create method
-func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, uint64, error) {
+func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, vm.MdGas, error) {
 	if cfg == nil {
 		cfg = new(Config)
 	}
@@ -175,7 +180,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	if !externalState {
 		tmp, err := os.MkdirTemp("", "erigon-create-vm-*")
 		if err != nil {
-			return nil, [20]byte{}, 0, err
+			return nil, [20]byte{}, vm.MdGas{}, err
 		}
 		defer dir.RemoveAll(tmp)
 
@@ -184,12 +189,12 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		defer db.Close()
 		tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
 		if err != nil {
-			return nil, [20]byte{}, 0, err
+			return nil, [20]byte{}, vm.MdGas{}, err
 		}
 		defer tx.Rollback()
 		sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
 		if err != nil {
-			return nil, [20]byte{}, 0, err
+			return nil, [20]byte{}, vm.MdGas{}, err
 		}
 		defer sd.Close()
 		//cfg.w = state.NewWriter(sd, nil)
@@ -206,7 +211,12 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 	code, address, leftOverGas, err := vmenv.Create(
 		sender,
 		input,
-		cfg.GasLimit,
+		vm.MdGas{
+			Regular: cfg.GasLimit,
+			//
+			// TODO address
+			//
+		},
 		cfg.Value,
 		false,
 	)
@@ -218,14 +228,14 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 //
 // Call, unlike Execute, requires a config and also requires the State field to
 // be set.
-func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, uint64, error) {
+func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, vm.MdGas, error) {
 	setDefaults(cfg)
 
 	vmenv := NewEnv(cfg)
 
 	sender, err := cfg.State.GetOrNewStateObject(cfg.Origin)
 	if err != nil {
-		return nil, 0, err
+		return nil, vm.MdGas{}, err
 	}
 	statedb := cfg.State
 	rules := vmenv.ChainRules()
@@ -240,13 +250,18 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, uint64, 
 		sender.Address(),
 		address,
 		input,
-		cfg.GasLimit,
+		vm.MdGas{
+			Regular: cfg.GasLimit,
+			//
+			// TODO address
+			//
+		},
 		cfg.Value,
 		false, /* bailout */
 	)
 
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
-		cfg.EVMConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas}, err)
+		cfg.EVMConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas.Regular}, err)
 	}
 
 	return ret, leftOverGas, err

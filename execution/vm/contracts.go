@@ -299,18 +299,18 @@ func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
 // - the returned bytes,
 // - the _remaining_ gas,
 // - any error that occurred
-func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64, tracer *tracing.Hooks,
-) (ret []byte, remainingGas uint64, err error) {
+func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas MdGas, tracer *tracing.Hooks,
+) (ret []byte, remainingGas MdGas, err error) {
 	gasCost := p.RequiredGas(input)
-	if suppliedGas < gasCost {
-		return nil, 0, ErrOutOfGas
+	if suppliedGas.Regular < gasCost {
+		return nil, MdGas{}, ErrOutOfGas
 	}
 
 	if tracer != nil && tracer.OnGasChange != nil {
-		tracer.OnGasChange(suppliedGas, suppliedGas-gasCost, tracing.GasChangeCallPrecompiledContract)
+		tracer.OnGasChange(suppliedGas.Regular, suppliedGas.Regular-gasCost, tracing.GasChangeCallPrecompiledContract)
 	}
 
-	suppliedGas -= gasCost
+	suppliedGas.Regular -= gasCost
 	output, err := p.Run(input)
 	return output, suppliedGas, err
 }
