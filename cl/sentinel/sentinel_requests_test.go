@@ -167,6 +167,7 @@ func testSentinelBlocksByRange(t *testing.T) {
 
 	stream, err := host1.NewStream(ctx, h.ID(), protocol.ID(communication.BeaconBlocksByRangeProtocolV2))
 	require.NoError(t, err)
+	defer stream.Close()
 
 	req := &cltypes.BeaconBlocksByRangeRequest{
 		StartSlot: blocks[0].Block.Slot,
@@ -254,6 +255,7 @@ func testSentinelBlocksByRoots(t *testing.T) {
 
 	stream, err := host1.NewStream(ctx, h.ID(), protocol.ID(communication.BeaconBlocksByRootProtocolV2))
 	require.NoError(t, err)
+	defer stream.Close()
 
 	req := solid.NewHashList(1232)
 	rt, err := blocks[0].Block.HashSSZ()
@@ -353,6 +355,7 @@ func testSentinelStatusRequest(t *testing.T) {
 
 	stream, err := host1.NewStream(ctx, h.ID(), protocol.ID(communication.StatusProtocolV1))
 	require.NoError(t, err)
+	defer stream.Close()
 
 	if err := ssz_snappy.EncodeAndWrite(stream, req); err != nil {
 		panic(fmt.Sprintf("EncodeAndWrite failed: %v", err))
