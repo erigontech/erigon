@@ -153,6 +153,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			collation, err := ii.collate(context.Background(), 0, tx)
 			require.NoError(t, err)
 			sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
+			collation.Close()
 			txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
 			ii.integrateDirtyFiles(sf, txFrom, txTo)
 
@@ -163,7 +164,6 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			require.NoError(t, err)
 			require.Zero(t, stat.PruneCountTx)
 			require.Zero(t, stat.PruneCountValues)
-			ic.Close()
 
 			// after reCalcVisibleFiles must be able to prune step 0. but not more
 			ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
@@ -351,6 +351,7 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			collation, err := ii.collate(context.Background(), 0, tx)
 			require.NoError(t, err)
 			sf, _ := ii.buildFiles(context.Background(), 0, collation, background.NewProgressSet())
+			collation.Close()
 			txFrom, txTo := firstTxNumOfStep(0, ii.stepSize), firstTxNumOfStep(1, ii.stepSize)
 			ii.integrateDirtyFiles(sf, txFrom, txTo)
 
@@ -575,7 +576,6 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	ii.integrateDirtyFiles(sf, 0, 16)
 	ii.reCalcVisibleFiles(ii.dirtyFilesEndTxNumMinimax())
 
-	ic.Close()
 	err = db.Update(ctx, func(tx kv.RwTx) error {
 		from, to := ic.stepsRangeInDB(tx)
 		require.Equal(t, "0.1", fmt.Sprintf("%.1f", from))

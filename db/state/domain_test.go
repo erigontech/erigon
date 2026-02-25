@@ -344,6 +344,7 @@ func TestDomain_AfterPrune(t *testing.T) {
 
 	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 	require.NoError(t, err)
+	c.Close()
 
 	d.integrateDirtyFiles(sf, 0, 16)
 	d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
@@ -2080,6 +2081,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 
 		sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
 		require.NoError(t, err)
+		c.Close()
 		d.integrateDirtyFiles(sf, txFrom, txTo)
 		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 	}
@@ -2527,6 +2529,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		require.NoError(t, err)
 		sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(t, err)
+		c.Close()
 		d.integrateDirtyFiles(sf, pruneFrom, pruneTo)
 		d.reCalcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
 		rotx.Rollback()
