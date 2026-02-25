@@ -105,15 +105,15 @@ runs:
         hash=$(git ls-tree -r HEAD | awk '$2 == "commit" {print $3}' | sort | sha256sum | cut -d' ' -f1)
         echo "hash=$hash" >> "$GITHUB_OUTPUT"
 
-    - name: Cache submodule git objects
+    - name: Restore submodule git objects cache
+      id: restore-submodules
       if: ${{ inputs.submodules == 'true' }}
-      uses: actions/cache@v4
+      uses: actions/cache/restore@v4
       with:
         path: .git/modules
         key: gitobjects|${{ runner.os }}|lfs-${{ inputs.lfs }}|${{ steps.submodule-key.outputs.hash }}
         restore-keys: |
           gitobjects|${{ runner.os }}|lfs-${{ inputs.lfs }}|
-        save-always: true
 
     - name: Clone submodules
       if: ${{ inputs.submodules == 'true' }}
@@ -272,3 +272,10 @@ runs:
     - name: Export build cache restored key
       shell: bash
       run: echo "ERIGON_CI_BUILD_CACHE_RESTORED_KEY=${{ steps.restore-build-cache.outputs.cache-matched-key }}" >> "$GITHUB_ENV"
+
+    - name: Export submodule cache keys
+      if: ${{ inputs.submodules == 'true' }}
+      shell: bash
+      run: |
+        echo "ERIGON_CI_SUBMODULE_CACHE_KEY=gitobjects|${{ runner.os }}|lfs-${{ inputs.lfs }}|${{ steps.submodule-key.outputs.hash }}" >> "$GITHUB_ENV"
+        echo "ERIGON_CI_SUBMODULE_CACHE_RESTORED_KEY=${{ steps.restore-submodules.outputs.cache-matched-key }}" >> "$GITHUB_ENV"

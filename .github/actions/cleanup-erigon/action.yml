@@ -30,6 +30,16 @@ runs:
         tag: ${{ inputs.tag || env.ERIGON_CI_MODCACHE_MODE }}
         restored-key: ${{ inputs.modcache-restored-key || env.ERIGON_CI_MODCACHE_RESTORED_KEY }}
 
+    - name: Save submodule git objects cache
+      if: >-
+        ${{ always()
+        && env.ERIGON_CI_SUBMODULE_CACHE_KEY != ''
+        && env.ERIGON_CI_SUBMODULE_CACHE_RESTORED_KEY != env.ERIGON_CI_SUBMODULE_CACHE_KEY }}
+      uses: actions/cache/save@v4
+      with:
+        path: .git/modules
+        key: ${{ env.ERIGON_CI_SUBMODULE_CACHE_KEY }}
+
     - name: Check for uncached tests
       if: hashFiles('run.log') != ''
       shell: bash
