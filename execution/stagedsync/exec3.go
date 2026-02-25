@@ -287,7 +287,9 @@ func ExecV3(ctx context.Context,
 		se.lastCommittedBlockNum.Store(blockNum)
 
 		defer func() {
-			se.LogComplete(stepsInDb)
+			if !isChainTip {
+				se.LogComplete(stepsInDb)
+			}
 		}()
 
 		lastHeader, applyTx, execErr = se.exec(ctx, execStage, u, startBlockNum, offsetFromBlockBeginning, maxBlockNum, blockLimit,

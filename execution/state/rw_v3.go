@@ -463,6 +463,7 @@ func (w *BufferedWriter) UpdateAccountData(address accounts.Address, original, a
 	// Account memory, corrupting data stored in the writeSet and rs.accounts.
 	var accountCopy accounts.Account
 	accountCopy.Copy(account)
+	accountCopy.PrevIncarnation = account.PrevIncarnation
 
 	if update, ok := w.writeSet.Get(&stateUpdate{address: address}); !ok {
 		update = &stateUpdate{&bufferedAccount{

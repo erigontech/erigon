@@ -880,7 +880,7 @@ func (io *VersionedIO) Merge(other *VersionedIO) *VersionedIO {
 			} else {
 				merged.outputs[i] = io.outputs[i].Merge(nil)
 			}
-		} else if i < len(other.inputs) {
+		} else if i < len(other.outputs) {
 			merged.outputs[i] = other.outputs[i].Merge(nil)
 		}
 		if i < len(io.accessed) {
