@@ -482,8 +482,8 @@ type TemporalDebugDB interface {
 }
 
 type TemporalMemBatch interface {
-	DomainPut(domain Domain, k string, v []byte, txNum uint64, preval []byte, prevStep Step) error
-	DomainDel(domain Domain, k string, txNum uint64, preval []byte, prevStep Step) error
+	DomainPut(domain Domain, k string, v []byte, txNum uint64, preval []byte) error
+	DomainDel(domain Domain, k string, txNum uint64, preval []byte) error
 	GetLatest(domain Domain, key []byte) (v []byte, step Step, ok bool)
 	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
 	Merge(other TemporalMemBatch) error
@@ -525,7 +525,7 @@ type TemporalPutDel interface {
 	// Optimizations:
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not perform append
-	DomainPut(domain Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep Step) error
+	DomainPut(domain Domain, k, v []byte, txNum uint64, prevVal []byte) error
 	//DomainPut2(domain Domain, k1 []byte, val []byte, ts uint64) error
 
 	// DomainDel
@@ -533,7 +533,7 @@ type TemporalPutDel interface {
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not perform append
 	//   - if `val == nil` it will call DomainDel
-	DomainDel(domain Domain, k []byte, txNum uint64, prevVal []byte, prevStep Step) error
+	DomainDel(domain Domain, k []byte, txNum uint64, prevVal []byte) error
 	DomainDelPrefix(domain Domain, prefix []byte, txNum uint64) error
 }
 

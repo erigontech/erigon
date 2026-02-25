@@ -608,10 +608,10 @@ func (tx *RwTx) HistoryKeyTxNumRange(name kv.Domain, fromTs, toTs int, asc order
 
 // Write methods
 
-func (tx *tx) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+func (tx *tx) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
 	panic("implement me pls. or use SharedDomains")
 }
-func (tx *tx) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+func (tx *tx) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
 	panic("implement me pls. or use SharedDomains")
 }
 func (tx *tx) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {

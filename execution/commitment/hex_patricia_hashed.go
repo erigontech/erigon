@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/stateifs"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
@@ -1678,11 +1677,11 @@ func (hph *HexPatriciaHashed) toWitnessTrie(hashedKey []byte, codeReads map[comm
 
 // readBranchAndCheckForFlushing reads a branch from ctx, flushing deferred updates first if the prefix is pending.
 // This ensures we read fresh data when a prefix has been modified but not yet written.
-func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]byte, kv.Step, error) {
+func (hph *HexPatriciaHashed) readBranchAndCheckForFlushing(prefix []byte) ([]byte, error) {
 	be := hph.branchEncoder
 	if be.DeferUpdatesEnabled() && be.HasPendingPrefix(prefix) {
 		if err := be.ApplyDeferredUpdates(16, hph.ctx.PutBranch); err != nil {
-			return nil, 0, err
+			return nil, err
 		}
 		be.ClearDeferred()
 	}
@@ -1694,13 +1693,14 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 	key := HexNibblesToCompactBytes(hph.currentKey[:hph.currentKeyLen])
 	hph.metrics.BranchLoad(hph.currentKey[:hph.currentKeyLen])
 
-	branchData, step, err := hph.readBranchAndCheckForFlushing(key)
+	branchData, err := hph.readBranchAndCheckForFlushing(key)
 	if err != nil {
 		return err
 	}
 
-	fileEndTxNum := uint64(step) // TODO: investigate why we cast step to txNum!
-	hph.depthsToTxNum[depth] = fileEndTxNum
+	// depthsToTxNum is used for per-file metrics; step is no longer available
+	// from the cache-or-DB helper (cache never had a meaningful step anyway).
+	hph.depthsToTxNum[depth] = 0
 
 	if len(branchData) >= 2 {
 		branchData = branchData[2:] // skip touch map and keep the rest
@@ -1717,7 +1717,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted boo
 	if len(branchData) == 0 {
 		log.Warn("got empty branch data during unfold", "key", hex.EncodeToString(key), "row", row, "depth", depth, "deleted", deleted)
 		if hph.trace {
-			branchData, _, _ = hph.branchFromCacheOrDB(key)
+			branchData, _ = hph.branchFromCacheOrDB(key)
 			fmt.Printf("unfoldBranchNode prefix '%x', nibbles [%x] depth %d row %d '%x' %s\n", key, hph.currentKey[:hph.currentKeyLen], depth, row, branchData, BranchData(branchData).String())
 		}
 		return fmt.Errorf("empty branch data read during unfold, compact prefix %x nibbles %x", key, hph.currentKey[:hph.currentKeyLen])
@@ -2802,13 +2802,14 @@ func (hph *HexPatriciaHashed) Cache() *WarmupCache {
 }
 
 // branchFromCacheOrDB reads branch data from cache if available, otherwise from DB.
-func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, kv.Step, error) {
+func (hph *HexPatriciaHashed) branchFromCacheOrDB(key []byte) ([]byte, error) {
 	if hph.cache != nil {
-		if data, step, found := hph.cache.GetBranch(key); found {
-			return data, step, nil
+		if data, found := hph.cache.GetBranch(key); found {
+			return data, nil
 		}
 	}
-	return hph.ctx.Branch(key)
+	data, _, err := hph.ctx.Branch(key)
+	return data, err
 }
 
 // accountFromCacheOrDB reads account data from cache if available, otherwise from DB.
