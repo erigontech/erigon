@@ -217,16 +217,31 @@ func (c *Compressor) SetMetadata(metadata []byte) {
 
 func (c *Compressor) Count() int { return int(c.wordsCount) }
 
-// Separate pools for each bufio use-case in compression.
-// Each use case has a different typical buffer size, so sharing a single pool
-// for all of them could waste RAM: a large reader buffer returned to a pool
-// and later reused where a small writer buffer suffices wastes the difference.
+// Erigon doesn't create tons of bufio readers/writers, but it has tons of
+// parallel small unit-tests which each create many small files and bufio
+// readers/writers — pooling avoids the allocation pressure in that scenario.
 var (
-	forEachReaderPool      = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, int(8*datasize.MB)) }}
-	intermediateWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, 8*etl.BufIOSize) }}
-	compressedWriterPool   = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, 4*etl.BufIOSize) }}
-	intermediateReaderPool = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, 2*etl.BufIOSize) }}
+	bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(128*datasize.KB)) }}
+	bufioReaderPool = sync.Pool{New: func() any { return bufio.NewReaderSize(nil, int(128*datasize.KB)) }}
 )
+
+func getBufioWriter(w io.Writer) *bufio.Writer {
+	bw := bufioWriterPool.Get().(*bufio.Writer)
+	bw.Reset(w)
+	return bw
+}
+
+// Reset(nil) before Put is required: without it the pool entry retains a
+// reference to the underlying io.Writer/io.Reader, keeping it alive until the
+// next GC cycle or until the entry is reused — whichever comes first.
+func putBufioWriter(w *bufio.Writer) { w.Reset(nil); bufioWriterPool.Put(w) }
+
+func getBufioReader(r io.Reader) *bufio.Reader {
+	br := bufioReaderPool.Get().(*bufio.Reader)
+	br.Reset(r)
+	return br
+}
+func putBufioReader(r *bufio.Reader) { r.Reset(nil); bufioReaderPool.Put(r) }
 
 func (c *Compressor) ReadFrom(g *Getter) error {
 	var v []byte
@@ -933,16 +948,14 @@ func NewRawWordsFile(filePath string) (*RawWordsFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	w := bufio.NewWriterSize(f, 2*etl.BufIOSize)
-	return &RawWordsFile{filePath: filePath, f: f, w: w, buf: make([]byte, 128)}, nil
+	return &RawWordsFile{filePath: filePath, f: f, w: getBufioWriter(f), buf: make([]byte, 128)}, nil
 }
 func OpenRawWordsFile(filePath string) (*RawWordsFile, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
-	w := bufio.NewWriterSize(f, 2*etl.BufIOSize)
-	return &RawWordsFile{filePath: filePath, f: f, w: w, buf: make([]byte, 128)}, nil
+	return &RawWordsFile{filePath: filePath, f: f, w: getBufioWriter(f), buf: make([]byte, 128)}, nil
 }
 func (f *RawWordsFile) Flush() error {
 	return f.w.Flush()
@@ -951,6 +964,7 @@ func (f *RawWordsFile) Close() {
 	if f.w != nil {
 		f.w.Flush()
 		f.f.Close()
+		putBufioWriter(f.w)
 		f.w = nil
 		f.f = nil
 	}
@@ -994,9 +1008,8 @@ func (f *RawWordsFile) ForEach(walker func(v []byte, compressed bool) error) err
 	if err != nil {
 		return err
 	}
-	r := forEachReaderPool.Get().(*bufio.Reader)
-	defer forEachReaderPool.Put(r)
-	r.Reset(f.f)
+	r := getBufioReader(f.f)
+	defer putBufioReader(r)
 	buf := make([]byte, 16*1024)
 	l, e := binary.ReadUvarint(r)
 	for ; e == nil; l, e = binary.ReadUvarint(r) {

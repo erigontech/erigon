@@ -26,13 +26,12 @@ import (
 	"sync/atomic"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
-
-	"github.com/erigontech/erigon/db/kv"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 // In memory commitment and state to use with the tests
@@ -357,7 +356,7 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 	hashed := make([]string, 0, len(ub.keyset)+len(ub.keyset2))
 	preimages := make(map[string][]byte)
 	preimages2 := make(map[string][]byte)
-	keccak := sha3.NewLegacyKeccak256()
+	keccak := keccak.NewFastKeccak()
 	for key := range ub.keyset {
 		keccak.Reset()
 		keccak.Write([]byte(key))
