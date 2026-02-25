@@ -160,6 +160,8 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 	return res, nil
 }
 
+// GetStorageValues implements eth_getStorageValues. Returns the values of multiple
+// storage slots for multiple accounts in a single request.
 func (api *APIImpl) GetStorageValues(ctx context.Context, requests map[common.Address][]common.Hash, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address][]hexutil.Bytes, error) {
 	var totalSlots int
 
@@ -203,8 +205,8 @@ func (api *APIImpl) GetStorageValues(ctx context.Context, requests map[common.Ad
 	result := make(map[common.Address][]hexutil.Bytes, len(requests))
 	for addr, keys := range requests {
 		vals := make([]hexutil.Bytes, len(keys))
+		address := accounts.InternAddress(addr)
 		for i, key := range keys {
-			address := accounts.InternAddress(addr)
 			location := accounts.InternKey(key)
 			res, _, err := reader.ReadAccountStorage(address, location)
 			if err != nil {

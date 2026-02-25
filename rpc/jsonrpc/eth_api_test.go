@@ -310,6 +310,39 @@ func TestGetStorageValues_HappyPath(t *testing.T) {
 	}
 }
 
+func TestGetStorageValues_MultipleAddresses(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	addr1 := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	addr2 := common.HexToAddress("0x1000000000000000000000000000000000000001")
+	addr3 := common.HexToAddress("0x2000000000000000000000000000000000000002")
+	slot0 := common.Hash{}
+	slot1 := common.BigToHash(big.NewInt(1))
+	slot2 := common.BigToHash(big.NewInt(2))
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	request := map[common.Address][]common.Hash{
+		addr1: {slot0, slot1},
+		addr2: {slot1, slot2},
+		addr3: {slot0, slot2},
+	}
+	result, err := api.GetStorageValues(context.Background(), request, latest)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != len(request) {
+		t.Fatalf("expected %d addresses in result, got %d", len(request), len(result))
+	}
+	for addr, slots := range request {
+		values, ok := result[addr]
+		if !ok {
+			t.Fatalf("missing results for address %s", addr.Hex())
+		}
+		if len(values) != len(slots) {
+			t.Fatalf("expected %d slots for address %s, got %d", len(slots), addr.Hex(), len(values))
+		}
+	}
+}
+
 func TestGetStorageValues_MissingSlotReturnsZero(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
