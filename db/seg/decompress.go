@@ -653,17 +653,11 @@ func (d *Decompressor) MadvWillNeed() *Decompressor {
 //     map them:
 //     https://www.kernel.org/doc/html/latest/admin-guide/mm/concepts.html#page-cache
 //
-//  3. MADV_NORMAL instead of MADV_SEQUENTIAL — why?
-//     MADV_SEQUENTIAL enables "deactivate behind": the kernel moves accessed pages
-//     to the inactive LRU list after the read pointer passes them. This operates at
-//     the page cache level (struct page), NOT per-VMA — so it evicts pages that are
-//     hot for concurrent random readers on the other MADV_RANDOM mmap. The "rescue"
-//     via the referenced-bit / second-chance algorithm adds latency jitter to random
-//     reads during merge.
-//     MADV_NORMAL avoids this: pages stay in their normal LRU position. The kernel's
-//     readahead auto-detection still recognizes our sequential pattern and prefetches
-//     (just with a smaller window than MADV_SEQUENTIAL's forced 2x). On modern kernels
-//     with MGLRU, the auto-detection is very effective:
+//  3. MADV_SEQUENTIAL triggers readahead and "deactivate behind".
+//     The kernel performs aggressive readahead on sequential VMAs and moves accessed
+//     pages to the inactive LRU list ("deactivate behind"). However, pages that are
+//     also hot in the MADV_RANDOM VMA have the "referenced" bit set and get promoted
+//     back to the active list by the second-chance / two-list LRU algorithm:
 //     https://www.kernel.org/doc/html/latest/admin-guide/mm/multigen_lru.html
 //     https://www.kernel.org/doc/html/latest/mm/page_reclaim.html
 //     https://www.kernel.org/doc/html/latest/mm/readahead.html
@@ -684,9 +678,7 @@ type SequentialView struct {
 	data        []byte // words data region from the sequential mmap
 }
 
-// OpenSequentialView creates a separate mmap of the same file with MADV_NORMAL.
-// Mmap() sets MADV_RANDOM by default, so we override to MADV_NORMAL to enable
-// the kernel's automatic sequential readahead detection.
+// OpenSequentialView creates a separate mmap of the same file with MADV_SEQUENTIAL.
 // The caller must call Close when done.
 func (d *Decompressor) OpenSequentialView() (*SequentialView, error) {
 	if d == nil || d.f == nil {
@@ -696,11 +688,6 @@ func (d *Decompressor) OpenSequentialView() (*SequentialView, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Mmap() sets MADV_RANDOM. Override to MADV_NORMAL so the kernel's readahead
-	// heuristic can detect our sequential pattern and prefetch pages ahead.
-	// We intentionally avoid MADV_SEQUENTIAL here: its "deactivate behind" behavior
-	// operates at the page cache level and would push pages to the inactive LRU list,
-	// adding latency jitter to concurrent random readers on the shared mmap.
 	_ = mmap.MadviseSequential(h1)
 	// d.data is a sub-slice of d.mmapHandle1 starting after file headers
 	// (version, feature flags, metadata). wordsStart is relative to d.data,
