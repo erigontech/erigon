@@ -7,6 +7,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
@@ -293,14 +294,14 @@ func Test_ArbRetryTx_Timeboosted(t *testing.T) {
 		tx := &ArbitrumRetryTx{
 			ChainId:             chainID,
 			Nonce:               4,
-			From:                common.HexToAddress("0x1"),
+			From:                accounts.InternAddress(common.HexToAddress("0x1")),
 			GasFeeCap:           two,
 			Gas:                 21000,
 			To:                  &toAddr,
 			Value:               two,
 			Data:                []byte("data"),
 			TicketId:            ticketId,
-			RefundTo:            common.HexToAddress("0x3"),
+			RefundTo:            accounts.InternAddress(common.HexToAddress("0x3")),
 			MaxRefund:           two,
 			SubmissionFeeRefund: two,
 		}

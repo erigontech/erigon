@@ -295,6 +295,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		}
 		if typ == DELEGATECALL {
 			contract.caller = callerAddress
+			contract.addr = caller
 			contract.delegateOrCallcode = true
 		}
 
@@ -368,7 +369,7 @@ func (evm *EVM) CallCode(caller accounts.Address, addr accounts.Address, input [
 // DelegateCall differs from CallCode in the sense that it executes the given address'
 // code with the caller as context and the caller is set to the caller of the caller.
 func (evm *EVM) DelegateCall(caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, input []byte, value uint256.Int, gas uint64) (ret []byte, leftOverGas uint64, usedMultiGas multigas.MultiGas, err error) {
-	return evm.call(DELEGATECALL, caller, callerAddress, addr, input, gas, u256.Num0, false, &AdvancedPrecompileCall{
+	return evm.call(DELEGATECALL, caller, callerAddress, addr, input, gas, value, false, &AdvancedPrecompileCall{
 		PrecompileAddress: addr.Value(),
 		ActingAsAddress:   caller.Value(),
 		Caller:            callerAddress.Value(),
@@ -519,7 +520,8 @@ func (evm *EVM) create(caller accounts.Address, codeAndHash *codeAndHash, gasRem
 
 	multiGasSpent := multigas.ZeroGas()
 	ret, gasRemaining, multiGasSpent, err = evm.interpreter.Run(contract, gasRemaining, multiGasSpent, nil, false)
-	//scope.gas = gasRemaining
+	scope.gas = gasRemaining
+	scope.UsedMultiGas.SaturatingAddInto(multiGasSpent)
 
 	// EIP-170: Contract code size limit
 	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > evm.maxCodeSize() {

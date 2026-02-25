@@ -173,7 +173,7 @@ func (tx *ArbitrumUnsignedTx) Hash() common.Hash {
 	//TODO implement me
 	return prefixedRlpHash(ArbitrumUnsignedTxType, []interface{}{
 		tx.ChainId,
-		tx.From,
+		tx.From.Value(),
 		tx.Nonce,
 		tx.GasFeeCap,
 		tx.Gas,
@@ -207,9 +207,7 @@ func (tx *ArbitrumUnsignedTx) payloadSize() (payloadSize int, nonceLen, gasLen i
 
 	// size of From (20 bytes)
 	payloadSize++
-	if tx.To != nil {
-		payloadSize += length.Addr
-	}
+	payloadSize += length.Addr
 
 	// GasFeeCap
 	payloadSize += rlp.BigIntLen(tx.GasFeeCap)
@@ -225,7 +223,7 @@ func (tx *ArbitrumUnsignedTx) payloadSize() (payloadSize int, nonceLen, gasLen i
 	}
 
 	// Value
-	payloadSize += rlp.BigIntLen(tx.GasFeeCap)
+	payloadSize += rlp.BigIntLen(tx.Value)
 
 	// Data (includes its own header)
 	payloadSize += rlp.StringLen(tx.Data)
@@ -251,34 +249,16 @@ func (tx *ArbitrumUnsignedTx) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 
-	if tx.Nonce > 0 && tx.Nonce < 128 {
-		b[0] = byte(tx.Nonce)
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	} else {
-		binary.BigEndian.PutUint64(b[1:], tx.Nonce)
-		b[8-nonceLen] = 128 + byte(nonceLen)
-		if _, err := w.Write(b[8-nonceLen : 9]); err != nil {
-			return err
-		}
+	if err := rlp.EncodeInt(tx.Nonce, w, b); err != nil {
+		return err
 	}
 
 	if err := rlp.EncodeBigInt(tx.GasFeeCap, w, b); err != nil {
 		return err
 	}
 
-	if tx.Gas > 0 && tx.Gas < 128 {
-		b[0] = byte(tx.Gas)
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	} else {
-		binary.BigEndian.PutUint64(b[1:], tx.Gas)
-		b[8-gasLen] = 128 + byte(gasLen)
-		if _, err := w.Write(b[8-gasLen : 9]); err != nil {
-			return err
-		}
+	if err := rlp.EncodeInt(tx.Gas, w, b); err != nil {
+		return err
 	}
 
 	if tx.To == nil {
@@ -573,7 +553,7 @@ func (tx *ArbitrumContractTx) Hash() common.Hash {
 	return prefixedRlpHash(ArbitrumContractTxType, []interface{}{
 		tx.ChainId,
 		tx.RequestId,
-		tx.From,
+		tx.From.Value(),
 		tx.GasFeeCap,
 		tx.Gas,
 		tx.To,
@@ -663,20 +643,8 @@ func (tx *ArbitrumContractTx) encodePayload(w io.Writer, b []byte, payloadSize, 
 	}
 
 	// 5. Gas (uint64)
-	// If Gas is less than 128, it is encoded as a single byte.
-	if tx.Gas > 0 && tx.Gas < 128 {
-		b[0] = byte(tx.Gas)
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	} else {
-		// Otherwise, encode as big‑endian. Write into b[1:9],
-		// then set the header at position 8 - gasLen.
-		binary.BigEndian.PutUint64(b[1:], tx.Gas)
-		b[8-gasLen] = 128 + byte(gasLen)
-		if _, err := w.Write(b[8-gasLen : 9]); err != nil {
-			return err
-		}
+	if err := rlp.EncodeInt(tx.Gas, w, b); err != nil {
+		return err
 	}
 
 	// 6. To (*common.Address)
@@ -1005,14 +973,14 @@ func (t *ArbitrumRetryTx) Hash() common.Hash {
 	return prefixedRlpHash(ArbitrumRetryTxType, []interface{}{
 		t.ChainId,
 		t.Nonce,
-		t.From,
+		t.From.Value(),
 		t.GasFeeCap,
 		t.Gas,
 		t.To,
 		t.Value,
 		t.Data,
 		t.TicketId,
-		t.RefundTo,
+		t.RefundTo.Value(),
 		t.MaxRefund,
 		t.SubmissionFeeRefund,
 	})
@@ -1040,17 +1008,8 @@ func (t *ArbitrumRetryTx) encodePayload(w io.Writer, b []byte, payloadSize, nonc
 	}
 
 	// Nonce (uint64)
-	if t.Nonce > 0 && t.Nonce < 128 {
-		b[0] = byte(t.Nonce)
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-	} else {
-		binary.BigEndian.PutUint64(b[1:], t.Nonce)
-		b[8-nonceLen] = 128 + byte(nonceLen)
-		if _, err := w.Write(b[8-nonceLen : 9]); err != nil {
-			return err
-		}
+	if err := rlp.EncodeInt(t.Nonce, w, b); err != nil {
+		return err
 	}
 
 	// From (common.Address, 20 bytes)
@@ -1744,16 +1703,16 @@ func (tx *ArbitrumSubmitRetryableTx) Hash() common.Hash {
 	return prefixedRlpHash(ArbitrumSubmitRetryableTxType, []interface{}{
 		tx.ChainId,
 		tx.RequestId,
-		tx.From,
+		tx.From.Value(),
 		tx.L1BaseFee,
 		tx.DepositValue,
 		tx.GasFeeCap,
 		tx.Gas,
 		tx.RetryTo,
 		tx.RetryValue,
-		tx.Beneficiary,
+		tx.Beneficiary.Value(),
 		tx.MaxSubmissionFee,
-		tx.FeeRefundAddr,
+		tx.FeeRefundAddr.Value(),
 		tx.RetryData,
 	})
 }
@@ -2121,7 +2080,7 @@ func (tx *ArbitrumDepositTx) Hash() common.Hash {
 	return prefixedRlpHash(ArbitrumDepositTxType, []interface{}{
 		tx.ChainId,
 		tx.L1RequestId,
-		tx.From,
+		tx.From.Value(),
 		tx.To,
 		tx.Value,
 	})

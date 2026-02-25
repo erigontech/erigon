@@ -1238,7 +1238,7 @@ func (sdb *IntraBlockState) Selfdestruct(addr accounts.Address) (bool, error) {
 			sdb.tracingHooks.OnBalanceChange(addr, prevBalance, zeroBalance, tracing.BalanceDecreaseSelfdestruct)
 		}
 		if sdb.tracingHooks.CaptureArbitrumTransfer != nil {
-			sdb.tracingHooks.CaptureArbitrumTransfer(addr, accounts.ZeroAddress, &prevBalance, false, "selfDestruct")
+			sdb.tracingHooks.CaptureArbitrumTransfer(addr, accounts.NilAddress, &prevBalance, false, "selfDestruct")
 		}
 	}
 

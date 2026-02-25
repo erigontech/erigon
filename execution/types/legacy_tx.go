@@ -221,7 +221,7 @@ func (tx *LegacyTx) payloadSize(hashingOnly bool) (payloadSize int) {
 	payloadSize += rlp.Uint256Len(tx.V)
 	payloadSize += rlp.Uint256Len(tx.R)
 	payloadSize += rlp.Uint256Len(tx.S)
-	if tx.Timeboosted != nil {
+	if !hashingOnly && tx.Timeboosted != nil {
 		payloadSize += rlp.BoolLen()
 	}
 	return payloadSize

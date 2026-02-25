@@ -7,6 +7,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/stretchr/testify/require"
 )
 
@@ -124,16 +125,16 @@ func TestArbitrumSubmitRetryableTxGasUsed(t *testing.T) {
 		tx := &ArbitrumSubmitRetryableTx{
 			ChainId:          chainID,
 			RequestId:        requestId,
-			From:             from,
+			From:             accounts.InternAddress(from),
 			L1BaseFee:        big.NewInt(0),
 			DepositValue:     big.NewInt(1000),
 			GasFeeCap:        two,
 			Gas:              60000,
 			RetryTo:          &retryTo,
 			RetryValue:       two,
-			Beneficiary:      beneficiary,
+			Beneficiary:      accounts.InternAddress(beneficiary),
 			MaxSubmissionFee: big.NewInt(7),
-			FeeRefundAddr:    feeRefund,
+			FeeRefundAddr:    accounts.InternAddress(feeRefund),
 			RetryData:        []byte("data"),
 			EffectiveGasUsed: gasUsed,
 		}

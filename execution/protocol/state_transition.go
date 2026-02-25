@@ -261,7 +261,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	}
 
 	if tracer := st.evm.Config().Tracer; tracer != nil && tracer.CaptureArbitrumTransfer != nil {
-		tracer.CaptureArbitrumTransfer(st.msg.From(), accounts.ZeroAddress, &gasVal, true, "feePayment")
+		tracer.CaptureArbitrumTransfer(st.msg.From(), accounts.NilAddress, &gasVal, true, "feePayment")
 	}
 
 	// Check for overflow before adding gas
@@ -648,6 +648,9 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 
 		deployedContract = new(accounts.Address)
 	)
+
+	fmt.Printf("(1) Remainig gas is: %d\n", st.gasRemaining)
+	fmt.Printf("(1) USed gas is: %d\n", st.gasUsed())
 	if contractCreation {
 		// The reason why we don't increment nonce here is that we need the original
 		// nonce to calculate the address of the contract that is being created
@@ -661,6 +664,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
 	}
 
+	fmt.Printf("(2) Remainig gas is: %d\n", st.gasRemaining)
+	fmt.Printf("(2) USed gas is: %d\n", st.gasUsed())
 	if refunds && !gasBailout {
 		//refund := st.calcGasRefund(rules)
 		//usedMultiGas = st.reimburseGas(rules, refund, floorGas7623, usedMultiGas)
@@ -678,6 +683,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			//	st.evm.Context.BlockNumber, st.gasUsed(), frg, st.gasRemaining)
 			st.gasRemaining += frg
 
+			fmt.Printf("(3) Remainig gas is: %d\n", st.gasRemaining)
+			fmt.Printf("(3) USed gas is: %d\n", st.gasUsed())
 			nonrefundable := st.evm.ProcessingHook.NonrefundableGas()
 			if nonrefundable < st.gasUsed() {
 				// Apply refund counter, capped to a refund quotient
@@ -689,6 +696,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 				// Arbitrum: set the multigas refunds
 				usedMultiGas = usedMultiGas.WithRefund(refund)
 			}
+			fmt.Printf("(4) Remainig gas is: %d\n", st.gasRemaining)
+			fmt.Printf("(4) USed gas is: %d\n", st.gasUsed())
 
 			if rules.IsPrague && st.evm.ProcessingHook.IsCalldataPricingIncreaseEnabled() {
 				// After EIP-7623: Data-heavy transactions pay the floor gas.
@@ -722,6 +731,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 		st.gasRemaining = st.initialGas - max(floorGas7623, st.gasUsed())
 	}
 
+	fmt.Printf("(5) Remainig gas is: %d\n", st.gasRemaining)
+	fmt.Printf("(5) USed gas is: %d\n", st.gasUsed())
 	effectiveTip := *st.gasPrice
 	if rules.IsLondon {
 		if st.feeCap.Gt(&st.evm.Context.BaseFee) {
@@ -754,7 +765,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			return nil, fmt.Errorf("%w: %w", ErrStateTransitionFailed, err)
 		}
 	}
-
+	fmt.Printf("(6) Remainig gas is: %d\n", st.gasRemaining)
+	fmt.Printf("(6) USed gas is: %d\n", st.gasUsed())
 	var burnAmount uint256.Int
 	var burntContractAddress accounts.Address
 	var tracingTipAmount *uint256.Int
@@ -779,7 +791,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 			}
 		}
 	}
-
+	fmt.Printf("(7) Remainig gas is: %d\n", st.gasRemaining)
+	fmt.Printf("(7) USed gas is: %d\n", st.gasUsed())
 	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Handle()) {
 		fmt.Printf("%d (%d.%d) Fees %x: tipped: %d, burnt: %d, price: %d, gas: %d\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), &tipAmount, &burnAmount, st.gasPrice, st.gasUsed())
 	}
@@ -818,7 +831,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (result *
 	if st.evm.Context.PostApplyMessage != nil {
 		st.evm.Context.PostApplyMessage(st.state, msg.From(), coinbase, result)
 	}
-
+	fmt.Printf("(8) Remainig gas is: %d\n", st.gasRemaining)
+	fmt.Printf("(8) USed gas is: %d\n", st.gasUsed())
 	return result, nil
 }
 
