@@ -176,7 +176,14 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 
 		valid, err := s.handshaker.ValidatePeer(peerId)
 		if err != nil {
-			log.Trace("[sentinel] failed to validate peer:", "err", err)
+			// Transient stream error (e.g. protocol not yet negotiated, stream reset on macOS).
+			// We cannot definitively determine the peer is invalid, so add it provisionally
+			// rather than closing the connection. The peer will be evaluated again on subsequent
+			// message exchange. Only a clean valid=false with no error means a deliberate
+			// rejection (e.g. fork-digest mismatch).
+			log.Trace("[sentinel] transient error during peer validation, keeping peer:", "err", err)
+			s.peers.AddPeer(peerId)
+			return
 		}
 
 		if !valid {
