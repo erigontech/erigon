@@ -679,7 +679,8 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 		}
 
 		if strings.HasSuffix(filename, ".bt") {
-			seg2, err := seg.NewCompressor(context.Background(), t.Name(), filename+".sample", dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+			sampleFile := filename + ".sample"
+			seg2, err := seg.NewCompressor(context.Background(), t.Name(), sampleFile, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
 			require.NoError(t, err)
 			defer seg2.Close()
 			seg2.DisableFsync()
@@ -690,9 +691,10 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 				t.Fatal(err)
 			}
 			require.NoError(t, seg2.Compress())
-			seg3, err := seg.NewDecompressor(filename + ".sample")
+			seg3, err := seg.NewDecompressor(sampleFile)
 			require.NoError(t, err)
 			defer seg3.Close()
+			defer dir.RemoveFile(sampleFile)
 
 			r := seg.NewReader(seg3.MakeGetter(), seg.CompressNone)
 			btindex, err := CreateBtreeIndexWithDecompressor(filename, 128, r, uint32(1), background.NewProgressSet(), dirs.Tmp, log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence)

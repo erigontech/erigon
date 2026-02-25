@@ -121,12 +121,12 @@ func emptyTestInvertedIndex(t testing.TB, aggStep uint64) *InvertedIndex {
 
 	dirs := datadir.New(t.TempDir())
 	ii, err := NewInvertedIndex(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, log.New())
-	t.Cleanup(ii.Close)
-	ii.Accessors = 0
-	ii.salt.Store(&salt)
 	if err != nil {
 		panic(err)
 	}
+	t.Cleanup(ii.Close)
+	ii.Accessors = 0
+	ii.salt.Store(&salt)
 	return ii
 }
 
