@@ -841,6 +841,7 @@ func TestMergeFilesWithDependency(t *testing.T) {
 		d.History.InvertedIndex.Accessors = 0
 		d.History.Accessors = 0
 		d.Accessors = 0
+		t.Cleanup(d.Close)
 		return d
 	}
 

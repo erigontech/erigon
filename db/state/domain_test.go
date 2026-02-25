@@ -1119,6 +1119,7 @@ func emptyTestDomain(t testing.TB, aggStep uint64) *Domain {
 		panic(err)
 	}
 	d.salt.Store(&salt)
+	t.Cleanup(d.Close)
 
 	return d
 }
