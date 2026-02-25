@@ -189,6 +189,7 @@ COMMANDS += evm
 COMMANDS += caplin
 COMMANDS += snapshots
 COMMANDS += diag
+COMMANDS += mcp
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd

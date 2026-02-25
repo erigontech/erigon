@@ -20,6 +20,12 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 )
 
+// MCPTransport is the common interface for both embedded and standalone MCP servers.
+type MCPTransport interface {
+	Serve() error
+	ServeSSE(addr string) error
+}
+
 // ErigonMCPServer wraps Erigon APIs with MCP server capabilities.
 type ErigonMCPServer struct {
 	mcpServer *server.MCPServer
@@ -578,10 +584,11 @@ func (e *ErigonMCPServer) handleGetLogs(ctx context.Context, req mcp.CallToolReq
 	if addr := req.GetString("address", ""); addr != "" {
 		if strings.HasPrefix(addr, "[") {
 			var addrs []string
-			if json.Unmarshal([]byte(addr), &addrs) == nil {
-				for _, a := range addrs {
-					crit.Addresses = append(crit.Addresses, common.HexToAddress(a))
-				}
+			if err := json.Unmarshal([]byte(addr), &addrs); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("invalid address JSON array: %v", err)), nil
+			}
+			for _, a := range addrs {
+				crit.Addresses = append(crit.Addresses, common.HexToAddress(a))
 			}
 		} else {
 			crit.Addresses = []common.Address{common.HexToAddress(addr)}
@@ -589,9 +596,10 @@ func (e *ErigonMCPServer) handleGetLogs(ctx context.Context, req mcp.CallToolReq
 	}
 	if topics := req.GetString("topics", ""); topics != "" {
 		var t [][]common.Hash
-		if json.Unmarshal([]byte(topics), &t) == nil {
-			crit.Topics = t
+		if err := json.Unmarshal([]byte(topics), &t); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid topics JSON: %v", err)), nil
 		}
+		crit.Topics = t
 	}
 	if bh := req.GetString("blockHash", ""); bh != "" {
 		h := common.HexToHash(bh)
@@ -645,7 +653,10 @@ func (e *ErigonMCPServer) handleCall(ctx context.Context, req mcp.CallToolReques
 	args.To = &to
 
 	if data := req.GetString("data", ""); data != "" {
-		d := hexutil.MustDecode(data)
+		d, err := hexutil.Decode(data)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid data hex: %v", err)), nil
+		}
 		args.Data = (*hexutil.Bytes)(&d)
 	}
 	if from := req.GetString("from", ""); from != "" {
@@ -653,7 +664,10 @@ func (e *ErigonMCPServer) handleCall(ctx context.Context, req mcp.CallToolReques
 		args.From = &f
 	}
 	if val := req.GetString("value", ""); val != "" {
-		v := hexutil.MustDecodeBig(val)
+		v, err := hexutil.DecodeBig(val)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid value hex: %v", err)), nil
+		}
 		args.Value = (*hexutil.Big)(v)
 	}
 	if gas := req.GetString("gas", ""); gas != "" {
@@ -679,7 +693,10 @@ func (e *ErigonMCPServer) handleEstimateGas(ctx context.Context, req mcp.CallToo
 		args.To = &t
 	}
 	if data := req.GetString("data", ""); data != "" {
-		d := hexutil.MustDecode(data)
+		d, err := hexutil.Decode(data)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid data hex: %v", err)), nil
+		}
 		args.Data = (*hexutil.Bytes)(&d)
 	}
 	if from := req.GetString("from", ""); from != "" {
@@ -687,7 +704,10 @@ func (e *ErigonMCPServer) handleEstimateGas(ctx context.Context, req mcp.CallToo
 		args.From = &f
 	}
 	if val := req.GetString("value", ""); val != "" {
-		v := hexutil.MustDecodeBig(val)
+		v, err := hexutil.DecodeBig(val)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid value hex: %v", err)), nil
+		}
 		args.Value = (*hexutil.Big)(v)
 	}
 
@@ -741,7 +761,9 @@ func (e *ErigonMCPServer) handleGetProof(ctx context.Context, req mcp.CallToolRe
 	addr := common.HexToAddress(req.GetString("address", ""))
 	var keys []hexutil.Bytes
 	if k := req.GetString("storageKeys", ""); k != "" {
-		json.Unmarshal([]byte(k), &keys)
+		if err := json.Unmarshal([]byte(k), &keys); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid storageKeys JSON: %v", err)), nil
+		}
 	}
 	blockNumOrHash, _ := parseBlockNumberOrHash(req.GetString("blockNumber", "latest"))
 	result, err := e.ethAPI.GetProof(ctx, addr, keys, blockNumOrHash)
@@ -929,7 +951,9 @@ func (e *ErigonMCPServer) handleErigonGetLogs(ctx context.Context, req mcp.CallT
 	}
 	if topics := req.GetString("topics", ""); topics != "" {
 		var t [][]common.Hash
-		json.Unmarshal([]byte(topics), &t)
+		if err := json.Unmarshal([]byte(topics), &t); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("invalid topics JSON: %v", err)), nil
+		}
 		crit.Topics = t
 	}
 	result, err := e.erigonAPI.GetLogs(ctx, crit)
