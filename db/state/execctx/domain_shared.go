@@ -129,12 +129,12 @@ type temporalPutDel struct {
 	tx kv.TemporalTx
 }
 
-func (pd *temporalPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
-	return pd.sd.DomainPut(domain, pd.tx, k, v, txNum, prevVal, prevStep)
+func (pd *temporalPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum uint64, prevVal []byte) error {
+	return pd.sd.DomainPut(domain, pd.tx, k, v, txNum, prevVal)
 }
 
-func (pd *temporalPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
-	return pd.sd.DomainDel(domain, pd.tx, k, txNum, prevVal, prevStep)
+func (pd *temporalPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
+	return pd.sd.DomainDel(domain, pd.tx, k, txNum, prevVal)
 }
 
 func (pd *temporalPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
@@ -190,8 +190,8 @@ func (sd *SharedDomains) FlushPendingUpdates(ctx context.Context, tx kv.Temporal
 	}
 	defer upd.Clear()
 
-	putBranch := func(prefix, data, prevData []byte, prevStep kv.Step) error {
-		return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData, prevStep)
+	putBranch := func(prefix, data, prevData []byte) error {
+		return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData)
 	}
 
 	switcher, ok := sd.mem.(changesetSwitcher)
@@ -384,13 +384,14 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
+	// stateCache holds in-flight values from previous transactions in the same batch
+	// that haven't been flushed to DB yet. Early return keeps correctness AND performance.
+	// We return step=0 (unknown) because the cache doesn't store the step at which a key
+	// was last written — and prevStep has been removed from DomainPut (see #19240), so
+	// callers no longer require an accurate step from this path.
 	if sd.stateCache != nil {
-		// This is fine, we will have some extra entries into domain worst case.
-		// regarding file determinism: probability of non-deterministic goes to 0 as we do
-		// files merge so this is not a problem in practice. file 0-1 will be non-deterministic
-		// but file 0-2 will be deterministic as it will include all entries from file 0-1 and so on.
 		if v, ok := sd.stateCache.Get(domain, k); ok {
-			return v, sd.currentStep, nil
+			return v, 0, nil
 		}
 	}
 
@@ -483,7 +484,7 @@ func (sd *SharedDomains) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []b
 //   - user can provide `prevVal != nil` - then it will not read prev value from storage
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
-func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte) error {
 	if v == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
@@ -492,7 +493,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.GetLatest(domain, roTx, k)
+		prevVal, _, err = sd.GetLatest(domain, roTx, k)
 		if err != nil {
 			return err
 		}
@@ -515,7 +516,7 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		sd.stateCache.Put(domain, k, v)
 	}
 
-	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal, prevStep)
+	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal)
 }
 
 // DomainDel
@@ -523,12 +524,13 @@ func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 //   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
-func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte, txNum uint64, prevVal []byte, prevStep kv.Step) error {
+func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte, txNum uint64, prevVal []byte) error {
 	ks := string(k)
 	sd.sdCtx.TouchKey(domain, ks, nil)
+
 	if prevVal == nil {
 		var err error
-		prevVal, prevStep, err = sd.GetLatest(domain, tx, k)
+		prevVal, _, err = sd.GetLatest(domain, tx, k)
 		if err != nil {
 			return err
 		}
@@ -539,7 +541,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		if err := sd.DomainDelPrefix(kv.StorageDomain, tx, k, txNum); err != nil {
 			return err
 		}
-		if err := sd.DomainDel(kv.CodeDomain, tx, k, txNum, nil, 0); err != nil {
+		if err := sd.DomainDel(kv.CodeDomain, tx, k, txNum, nil); err != nil {
 			return err
 		}
 		// Remove from state cache when account is deleted
@@ -547,7 +549,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 			sd.stateCache.Delete(kv.AccountsDomain, k)
 			sd.stateCache.Delete(kv.CodeDomain, k)
 		}
-		return sd.mem.DomainDel(kv.AccountsDomain, ks, txNum, prevVal, prevStep)
+		return sd.mem.DomainDel(kv.AccountsDomain, ks, txNum, prevVal)
 	case kv.StorageDomain:
 		// Remove from state cache when storage is deleted
 		if sd.stateCache != nil {
@@ -564,7 +566,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	default:
 		//noop
 	}
-	return sd.mem.DomainDel(domain, ks, txNum, prevVal, prevStep)
+	return sd.mem.DomainDel(domain, ks, txNum, prevVal)
 }
 
 func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.TemporalTx, prefix []byte, txNum uint64) error {
@@ -585,7 +587,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, roTx kv.TemporalTx, p
 		return err
 	}
 	for _, tomb := range tombs {
-		if err := sd.DomainDel(kv.StorageDomain, roTx, tomb.k, txNum, tomb.v, tomb.step); err != nil {
+		if err := sd.DomainDel(kv.StorageDomain, roTx, tomb.k, txNum, tomb.v); err != nil {
 			return err
 		}
 	}

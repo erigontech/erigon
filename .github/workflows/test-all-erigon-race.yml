@@ -99,7 +99,6 @@ jobs:
           SKIP_FLAKY_TESTS: 'true'
           GODEBUG: cgocheck=0
           GOTRACEBACK: 1
-          GOEXPERIMENT: synctest
           GOGC: 80
           CGO_CFLAGS: -D__BLST_PORTABLE__
         if: needs.source-of-changes.outputs.changed_files != 'true'
