@@ -108,7 +108,7 @@ func TestCheckStateVerify(t *testing.T) {
 	require.Greater(t, endTxNum, uint64(0), "expected BuildFiles to produce snapshot files")
 
 	// Run the state verification check
-	err = integrity.CheckStateVerify(ctx, db, true /* failFast */, 0 /* fromStep */, logger)
+	err = integrity.CheckStateVerify(ctx, db, t.TempDir(), true /* failFast */, 0 /* fromStep */, logger)
 	require.NoError(t, err)
 }
 
@@ -228,7 +228,7 @@ func TestCheckStateVerify_NoopWrite(t *testing.T) {
 	require.Greater(t, endTxNum, uint64(0))
 
 	// Run verify-state — should pass, detecting the no-op write.
-	err = integrity.CheckStateVerify(ctx, db, true /* failFast */, 0 /* fromStep */, logger)
+	err = integrity.CheckStateVerify(ctx, db, t.TempDir(), true /* failFast */, 0 /* fromStep */, logger)
 	require.NoError(t, err)
 }
 
