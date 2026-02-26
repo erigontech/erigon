@@ -19,10 +19,12 @@ package engineapi
 import (
 	"bytes"
 	"context"
+	"math/big"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
@@ -30,11 +32,13 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -85,7 +89,29 @@ func TestGetBlobsV1(t *testing.T) {
 		t.Skip("slow test")
 	}
 	buf := bytes.NewBuffer(nil)
-	mockSentry, require := execmoduletester.NewWithTxPoolCancun(t), require.New(t)
+	funds := big.NewInt(1 * common.Ether)
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	address := crypto.PubkeyToAddress(key.PublicKey)
+
+	var chainConfig chain.Config
+	err := copier.CopyWithOption(&chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true})
+	require.NoError(t, err)
+	chainConfig.PragueTime = nil
+	chainConfig.OsakaTime = nil
+	chainConfig.AmsterdamTime = nil
+	gspec := &types.Genesis{
+		Config: &chainConfig,
+		Alloc: types.GenesisAlloc{
+			address: {Balance: funds},
+		},
+	}
+	mockSentry := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(gspec),
+		execmoduletester.WithKey(key),
+		execmoduletester.WithTxPool(),
+	)
+	require := require.New(t)
 	oneBlockStep(mockSentry, require)
 
 	wrappedTxn := types.MakeWrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
@@ -139,7 +165,8 @@ func TestGetBlobsV2(t *testing.T) {
 		t.Skip("slow test")
 	}
 	buf := bytes.NewBuffer(nil)
-	mockSentry, require := execmoduletester.NewWithTxPoolAllProtocolChanges(t), require.New(t)
+	mockSentry := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	require := require.New(t)
 	oneBlockStep(mockSentry, require)
 
 	wrappedTxn := types.MakeV1WrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
@@ -202,7 +229,8 @@ func TestGetBlobsV3(t *testing.T) {
 		t.Skip("slow test")
 	}
 	buf := bytes.NewBuffer(nil)
-	mockSentry, require := execmoduletester.NewWithTxPoolAllProtocolChanges(t), require.New(t)
+	mockSentry := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	require := require.New(t)
 	oneBlockStep(mockSentry, require)
 
 	wrappedTxn := types.MakeV1WrappedBlobTxn(uint256.MustFromBig(mockSentry.ChainConfig.ChainID))
@@ -284,7 +312,8 @@ func writeBlockAccessListBytes(t *testing.T, db kv.TemporalRwDB, blockHash commo
 }
 
 func TestGetPayloadBodiesByHashV2(t *testing.T) {
-	mockSentry, req := execmoduletester.NewWithTxPoolAllProtocolChanges(t), require.New(t)
+	mockSentry := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	req := require.New(t)
 	oneBlockStep(mockSentry, req)
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
@@ -317,7 +346,8 @@ func TestGetPayloadBodiesByHashV2(t *testing.T) {
 }
 
 func TestGetPayloadBodiesByRangeV2(t *testing.T) {
-	mockSentry, req := execmoduletester.NewWithTxPoolAllProtocolChanges(t), require.New(t)
+	mockSentry := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	req := require.New(t)
 	oneBlockSteps(mockSentry, req, 2)
 
 	executionRpc := direct.NewExecutionClientDirect(mockSentry.ExecModule)
