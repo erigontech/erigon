@@ -116,6 +116,6 @@ var FastChecks = []Check{
 	CommitmentKvi,
 }
 
-var SlowChecks = []Check{CommitmentHistVal, StateVerify, CommitmentKvDeref}
+var SlowChecks = []Check{CommitmentHistVal, StateVerify}
 var DeprecatedChecks = []Check{CommitmentKvDeref}
 var AllChecks = append(append(append([]Check{}, FastChecks...), SlowChecks...), DeprecatedChecks...)
