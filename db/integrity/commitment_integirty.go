@@ -1007,86 +1007,47 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		}
 
 		// Walk the branch to extract all referenced keys.
+		// checkKey handles both account and storage: counts plain keys, validates reference key offsets/lengths.
+		// Returns nil error on success (or non-failFast integrity violation logged inline).
+		checkKey := func(key []byte, plainSet map[string]struct{}, offsetSet map[uint64]struct{}, reader *seg.Reader, expectedLen int, kind string) error {
+			if len(key) == expectedLen {
+				plainSet[string(key)] = struct{}{}
+				return nil
+			}
+			if !isReferencing {
+				return fmt.Errorf("%w: unexpected %s key len=%d for branch %x in %s", ErrIntegrity, kind, len(key), branchKey, fileName)
+			}
+			offset := state.DecodeReferenceKey(key)
+			if offset >= uint64(reader.Size()) {
+				return fmt.Errorf("%w: %s reference key %x out of bounds for branch %x in %s: %d vs %d", ErrIntegrity, kind, key, branchKey, fileName, offset, reader.Size())
+			}
+			if _, alreadySeen := offsetSet[offset]; !alreadySeen {
+				offsetSet[offset] = struct{}{}
+				reader.Reset(offset)
+				// Skip (single Huffman pass) — we only need the key length, not the key itself
+				if _, keyLen := reader.Skip(); keyLen != expectedLen {
+					return fmt.Errorf("%w: %s reference key %x has invalid plainKey len=%d for branch %x in %s", ErrIntegrity, kind, key, keyLen, branchKey, fileName)
+				}
+			}
+			return nil
+		}
 		// The callback returns nil (keep original key in output) because the result of ReplacePlainKeys
-		// is discarded (_): all side-effects (populating storageOffsets/accountOffsets, length validation)
-		// happen before the return, so the decoded plain key value itself is not needed here.
+		// is discarded (_): all side-effects happen before the return.
 		_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+			var checkErr error
 			if isStorage {
-				if len(key) == length.Addr+length.Hash {
-					// Plain key
-					storagePlain[string(key)] = struct{}{}
-					return key, nil
-				}
-				if isReferencing {
-					// Referenced key — decode offset
-					offset := state.DecodeReferenceKey(key)
-					if offset >= uint64(storageReader.Size()) {
-						err := fmt.Errorf("%w: storage reference key %x out of bounds for branch %x in %s: %d vs %d", ErrIntegrity, key, branchKey, fileName, offset, storageReader.Size())
-						if failFast {
-							return nil, err
-						}
-						logger.Warn(err.Error())
-						return key, nil
-					}
-					if _, alreadySeen := storageOffsets[offset]; !alreadySeen {
-						storageOffsets[offset] = struct{}{}
-						storageReader.Reset(offset)
-						if _, keyLen := storageReader.Skip(); keyLen != length.Addr+length.Hash { // we don't need key itself
-							err := fmt.Errorf("%w: storage reference key %x has invalid plainKey len=%d for branch %x in %s", ErrIntegrity, key, keyLen, branchKey, fileName)
-							if failFast {
-								return nil, err
-							}
-							logger.Warn(err.Error())
-						}
-					}
-					return nil, nil // safe: result of ReplacePlainKeys is discarded (_)
-				}
-				// Unknown key format
-				err := fmt.Errorf("%w: unexpected storage key len=%d for branch %x in %s", ErrIntegrity, len(key), branchKey, fileName)
+				checkErr = checkKey(key, storagePlain, storageOffsets, storageReader, length.Addr+length.Hash, "storage")
+			} else {
+				checkErr = checkKey(key, accountPlain, accountOffsets, accReader, length.Addr, "account")
+			}
+			if checkErr != nil {
 				if failFast {
-					return nil, err
+					return nil, checkErr
 				}
-				logger.Warn(err.Error())
-				return key, nil
+				logger.Warn(checkErr.Error())
+				integrityErr = checkErr
 			}
-
-			// Account key
-			if len(key) == length.Addr {
-				// Plain key
-				accountPlain[string(key)] = struct{}{}
-				return key, nil
-			}
-			if isReferencing {
-				// Referenced key — decode offset
-				offset := state.DecodeReferenceKey(key)
-				if offset >= uint64(accReader.Size()) {
-					err := fmt.Errorf("%w: account reference key %x out of bounds for branch %x in %s: %d vs %d", ErrIntegrity, key, branchKey, fileName, offset, accReader.Size())
-					if failFast {
-						return nil, err
-					}
-					logger.Warn(err.Error())
-					return key, nil
-				}
-				if _, alreadySeen := accountOffsets[offset]; !alreadySeen {
-					accountOffsets[offset] = struct{}{}
-					accReader.Reset(offset)
-					if _, keyLen := accReader.Skip(); keyLen != length.Addr { // we don't need key itself
-						err := fmt.Errorf("%w: account reference key %x has invalid plainKey len=%d for branch %x in %s", ErrIntegrity, key, keyLen, branchKey, fileName)
-						if failFast {
-							return nil, err
-						}
-						logger.Warn(err.Error())
-					}
-				}
-				return nil, nil // safe: result of ReplacePlainKeys is discarded (_)
-			}
-			// Unknown key format
-			err := fmt.Errorf("%w: unexpected account key len=%d for branch %x in %s", ErrIntegrity, len(key), branchKey, fileName)
-			if failFast {
-				return nil, err
-			}
-			logger.Warn(err.Error())
-			return key, nil
+			return nil, nil // safe: result of ReplacePlainKeys is discarded (_)
 		})
 		if err != nil {
 			if failFast {
