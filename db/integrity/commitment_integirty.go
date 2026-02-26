@@ -30,6 +30,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -56,6 +57,8 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
+
+var plainKeySeed = maphash.MakeSeed()
 
 func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, failFast bool, logger log.Logger) error {
 	tx, err := db.BeginTemporalRo(ctx)
@@ -908,7 +911,6 @@ func processBranch(
 	isReferencing bool, fileName string, failFast bool,
 	accountOffsets, storageOffsets map[uint64]struct{},
 	accountPlain, storagePlain map[uint64]struct{},
-	seed maphash.Seed,
 ) error {
 	if !branchData.IsComplete() {
 		touchMap := uint16(0)
@@ -923,7 +925,7 @@ func processBranch(
 	// checkKey counts plain keys and validates reference key offsets/lengths.
 	checkKey := func(key []byte, plainSet map[uint64]struct{}, offsetSet map[uint64]struct{}, reader *seg.Reader, expectedLen int, kind string) error {
 		if len(key) == expectedLen {
-			plainSet[maphash.Bytes(seed, key)] = struct{}{}
+			plainSet[maphash.Bytes(plainKeySeed, key)] = struct{}{}
 			return nil
 		}
 		if !isReferencing {
@@ -963,11 +965,11 @@ type workerState struct {
 	integrityErr                   error
 }
 
-func processBranchWorker(ch <-chan branchItem, w *workerState, accReader, stoReader *seg.Reader, isReferencing bool, fileName string, failFast bool, logger log.Logger, seed maphash.Seed) error {
+func processBranchWorker(ch <-chan branchItem, w *workerState, accReader, stoReader *seg.Reader, isReferencing bool, fileName string, failFast bool, logger log.Logger) error {
 	for item := range ch {
 		if err := processBranch(item.key, commitment.BranchData(item.value),
 			accReader, stoReader, isReferencing, fileName, failFast,
-			w.accountOffsets, w.storageOffsets, w.accountPlain, w.storagePlain, seed); err != nil {
+			w.accountOffsets, w.storageOffsets, w.accountPlain, w.storagePlain); err != nil {
 			if failFast {
 				return err
 			}
@@ -1032,7 +1034,6 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 	}
 
 	ch := make(chan branchItem, numWorkers*4)
-	seed := maphash.MakeSeed()
 	var visitedBranchKeys atomic.Uint64
 	var producerIntegrityErr error
 
@@ -1089,7 +1090,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		workerAccReader := seg.NewReader(accDecomp.MakeGetter(), accCompression)
 		workerStoReader := seg.NewReader(stoDecomp.MakeGetter(), stoCompression)
 		g.Go(func() error {
-			return processBranchWorker(ch, w, workerAccReader, workerStoReader, isReferencing, fileName, failFast, logger, seed)
+			return processBranchWorker(ch, w, workerAccReader, workerStoReader, isReferencing, fileName, failFast, logger)
 		})
 	}
 
@@ -1151,10 +1152,13 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 
 	dur := time.Since(start)
 	if integrityErr == nil {
+		runtime.GC()
+		var m runtime.MemStats
+		dbg.ReadMemStats(&m)
 		logger.Info("[verify-state] key correspondence PASS (base)", "kv", fileName,
 			"accounts", fmt.Sprintf("%d/%d", foundAccounts, expectedAccounts),
 			"storage", fmt.Sprintf("%d/%d", foundStorages, expectedStorages),
-			"dur", dur)
+			"dur", dur, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 
 		// Phase 2: Hash verification — only runs if key correspondence passes.
 		hashErr := checkHashVerification(ctx, file, stepSize, failFast, numWorkers, logger)
