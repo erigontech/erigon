@@ -123,4 +123,5 @@ var DeprecatedChecks = []Check{
 	CommitmentKvi, // replaced by by `StateVerify`
 }
 
+
 var AllChecks = append(append(append([]Check{}, FastChecks...), SlowChecks...), DeprecatedChecks...)

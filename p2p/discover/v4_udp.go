@@ -171,6 +171,9 @@ func (t *UDPv4) Close() {
 		t.conn.Close()
 		t.wg.Wait()
 		t.tab.close()
+		if t.db != nil {
+			t.db.Close()
+		}
 	})
 }
 

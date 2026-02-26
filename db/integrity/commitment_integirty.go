@@ -925,7 +925,6 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		return err
 	}
 	defer commDecomp.Close()
-	commDecomp.MadvSequential()
 	commCompression := statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).Compression
 	commReader := seg.NewReader(commDecomp.MakeGetter(), commCompression)
 
@@ -1789,6 +1788,10 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 	workCh := make(chan hashWorkItem, numWorkers*4)
 	var hashMismatches atomic.Uint64
 	var hashChecked atomic.Uint64
+
+	// Pool to reuse per-item value maps and reduce GC pressure.
+	var valMapPool sync.Pool
+	valMapPool.New = func() any { return make(map[string][]byte, 8) }
 
 	// Set up errgroup with context for cancellation on failure.
 	var eg *errgroup.Group

@@ -390,8 +390,8 @@ var snapshotCommand = cli.Command{
 			Description: "run slow validation of files. use --check to run multiple/single",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
-				&cli.StringFlag{Name: "check", Usage: fmt.Sprintf("comma separated list from: %s", integrity.AllChecks)},
-				&cli.StringFlag{Name: "skip-check", Usage: fmt.Sprintf("comma separated list from: %s", integrity.AllChecks)},
+				&cli.StringFlag{Name: "check", Usage: fmt.Sprintf("comma separated list from: %s", integrity.FastChecks)},
+				&cli.StringFlag{Name: "skip-check", Usage: fmt.Sprintf("comma separated list from: %s", integrity.FastChecks)},
 				&cli.BoolFlag{Name: "failFast", Value: true, Usage: "to stop after 1st problem or print WARN log and continue check"},
 				&cli.Uint64Flag{Name: "fromStep", Value: 0, Usage: "skip files before given step"},
 			}),
@@ -1226,6 +1226,8 @@ func doIntegrity(cliCtx *cli.Context) error {
 			default:
 				return fmt.Errorf("unknown check: %s", chk)
 			}
+			return nil
+			})
 			return nil
 		})
 	}
