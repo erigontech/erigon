@@ -1414,7 +1414,7 @@ func reverseCheckDomainKeys(ctx context.Context, decomp *seg.Decompressor, domai
 	}
 
 	// Check missing entries against previous domain files to detect no-op writes.
-	genuineMissing := verifyMissingAgainstPrevFiles(missingEntries, domain, prevCommitmentPaths, commitFileName, failFast, logger)
+	genuineMissing := verifyMissingAgainstPrevFiles(missingEntries, domain, prevCommitmentPaths, commitFileName, logger)
 	missing = uint64(genuineMissing)
 
 	if missing > 0 {
@@ -1432,7 +1432,7 @@ func reverseCheckDomainKeys(ctx context.Context, decomp *seg.Decompressor, domai
 //
 // Uses merge-join within each file: missing entries are sorted by key, and the file
 // is scanned sequentially, advancing both cursors in lockstep.
-func verifyMissingAgainstPrevFiles(entries []missingEntry, domain kv.Domain, prevCommitmentPaths []string, commitFileName string, failFast bool, logger log.Logger) int {
+func verifyMissingAgainstPrevFiles(entries []missingEntry, domain kv.Domain, prevCommitmentPaths []string, commitFileName string, logger log.Logger) int {
 	if len(prevCommitmentPaths) == 0 {
 		// No previous files to check — all are genuine.
 		for i, e := range entries {
