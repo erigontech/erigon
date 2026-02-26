@@ -241,8 +241,11 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 }
 
 func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, info commitmentRootInfo, f state.VisibleFile, logger log.Logger) error {
+	trace := logger.Enabled(ctx, log.LvlTrace)
 	touchLoggingVisitor := func(k []byte) {
-		logger.Debug("account touch for root block", "key", common.Address(k), "blockNum", info.blockNum, "file", filepath.Base(f.Fullpath()))
+		if trace {
+			logger.Trace("account touch for root block", "key", common.Address(k), "blockNum", info.blockNum, "file", filepath.Base(f.Fullpath()))
+		}
 	}
 	touches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, info.blockMinTxNum, info.txNum+1, touchLoggingVisitor)
 	if err != nil {
@@ -350,6 +353,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 		)
 		return derefCounts{}, nil
 	}
+	trace := logger.Enabled(ctx, log.LvlTrace)
 	logger.Info("[integrity] commitment deref in", "kv", fileName, "startTxNum", startTxNum, "endTxNum", endTxNum)
 	commDecomp, err := seg.NewDecompressor(file.Fullpath())
 	if err != nil {
@@ -421,7 +425,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 		counts.branchKeys++
 		branchData := commitment.BranchData(branchValue)
 		newBranchData, err := branchData.ReplacePlainKeys(newBranchValueBuf[:0], func(key []byte, isStorage bool) ([]byte, error) {
-			if logger.Enabled(ctx, log.LvlTrace) {
+			if trace {
 				logger.Trace(
 					"checking commitment deref for branch",
 					"branchKey", hex.EncodeToString(branchKey),
@@ -432,7 +436,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 			}
 			if isStorage {
 				if len(key) == length.Addr+length.Hash {
-					if logger.Enabled(ctx, log.LvlTrace) {
+					if trace {
 						logger.Trace(
 							"skipping, not a storage reference",
 							"branchKey", hex.EncodeToString(branchKey),
@@ -465,7 +469,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 					integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 					return key, nil
 				}
-				if logger.Enabled(ctx, log.LvlTrace) {
+				if trace {
 					logger.Trace(
 						"dereferenced storage key",
 						"branchKey", hex.EncodeToString(branchKey),
@@ -479,7 +483,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 				return plainKey, nil
 			}
 			if len(key) == length.Addr {
-				if logger.Enabled(ctx, log.LvlTrace) {
+				if trace {
 					logger.Trace(
 						"skipping, not an account reference",
 						"branchKey", hex.EncodeToString(branchKey),
@@ -511,7 +515,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 				integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 				return key, nil
 			}
-			if logger.Enabled(ctx, log.LvlTrace) {
+			if trace {
 				logger.Trace(
 					"dereferenced account key",
 					"branchKey", hex.EncodeToString(branchKey),
@@ -767,12 +771,15 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		return fmt.Errorf("commitment state txNum doesn't match maxTxNum: %d != %d", latestTxNum, maxTxNum)
 	}
 	logger.Info("commitment recalc info", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
+	trace := logger.Enabled(ctx, log.LvlTrace)
 	touchLoggingVisitor := func(k []byte) {
-		args := []any{"key", common.Address(k[:length.Addr])}
-		if len(k) > length.Addr {
-			args = append(args, "slot", common.Hash(k[length.Addr:]))
+		if trace {
+			args := []any{"key", common.Address(k[:length.Addr])}
+			if len(k) > length.Addr {
+				args = append(args, "slot", common.Hash(k[length.Addr:]))
+			}
+			logger.Trace("commitment touched key", args...)
 		}
-		logger.Debug("commitment touched key", args...)
 	}
 	touchStart := time.Now()
 	accTouches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, minTxNum, toTxNum, touchLoggingVisitor)
