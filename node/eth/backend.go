@@ -1201,11 +1201,13 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		silkwormRPCDaemonService := silkworm.NewRpcDaemonService(s.silkworm, chainKv, settings)
 		s.silkwormRPCDaemonService = &silkwormRPCDaemonService
 	} else {
-		go func() {
-			if err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger); err != nil {
+		s.bgComponentsEg.Go(func() error {
+			err := rpcdaemoncli.StartRpcServer(ctx, &httpRpcCfg, s.apiList, s.logger)
+			if err != nil && !errors.Is(err, context.Canceled) {
 				s.logger.Error("cli.StartRpcServer error", "err", err)
 			}
-		}()
+			return err
+		})
 	}
 
 	if chainConfig.Bor == nil || config.PolygonPosSingleSlotFinality {

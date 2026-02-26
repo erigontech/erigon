@@ -46,7 +46,7 @@ func TestSideChainInsert(t *testing.T) {
 			address: {Balance: funds},
 		},
 	}
-	m := execmoduletester.NewWithGenesis(t, gspec, key)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	db := m.DB
 	genesis := m.Genesis
 	tx, err := db.BeginRw(context.Background())
