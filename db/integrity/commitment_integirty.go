@@ -24,6 +24,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash/maphash"
 	"maps"
 	"math/rand"
 	"os"
@@ -906,7 +907,8 @@ func processBranch(
 	accReader, storageReader *seg.Reader,
 	isReferencing bool, fileName string, failFast bool,
 	accountOffsets, storageOffsets map[uint64]struct{},
-	accountPlain, storagePlain map[string]struct{},
+	accountPlain, storagePlain map[uint64]struct{},
+	seed maphash.Seed,
 ) error {
 	if !branchData.IsComplete() {
 		touchMap := uint16(0)
@@ -919,9 +921,9 @@ func processBranch(
 	}
 
 	// checkKey counts plain keys and validates reference key offsets/lengths.
-	checkKey := func(key []byte, plainSet map[string]struct{}, offsetSet map[uint64]struct{}, reader *seg.Reader, expectedLen int, kind string) error {
+	checkKey := func(key []byte, plainSet map[uint64]struct{}, offsetSet map[uint64]struct{}, reader *seg.Reader, expectedLen int, kind string) error {
 		if len(key) == expectedLen {
-			plainSet[string(key)] = struct{}{}
+			plainSet[maphash.Bytes(seed, key)] = struct{}{}
 			return nil
 		}
 		if !isReferencing {
@@ -957,15 +959,15 @@ type branchItem struct{ key, value []byte }
 
 type workerState struct {
 	accountOffsets, storageOffsets map[uint64]struct{}
-	accountPlain, storagePlain     map[string]struct{}
+	accountPlain, storagePlain     map[uint64]struct{}
 	integrityErr                   error
 }
 
-func processBranchWorker(ch <-chan branchItem, w *workerState, accReader, stoReader *seg.Reader, isReferencing bool, fileName string, failFast bool, logger log.Logger) error {
+func processBranchWorker(ch <-chan branchItem, w *workerState, accReader, stoReader *seg.Reader, isReferencing bool, fileName string, failFast bool, logger log.Logger, seed maphash.Seed) error {
 	for item := range ch {
 		if err := processBranch(item.key, commitment.BranchData(item.value),
 			accReader, stoReader, isReferencing, fileName, failFast,
-			w.accountOffsets, w.storageOffsets, w.accountPlain, w.storagePlain); err != nil {
+			w.accountOffsets, w.storageOffsets, w.accountPlain, w.storagePlain, seed); err != nil {
 			if failFast {
 				return err
 			}
@@ -1024,12 +1026,13 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		workers[i] = workerState{
 			accountOffsets: make(map[uint64]struct{}),
 			storageOffsets: make(map[uint64]struct{}),
-			accountPlain:   make(map[string]struct{}),
-			storagePlain:   make(map[string]struct{}),
+			accountPlain:   make(map[uint64]struct{}),
+			storagePlain:   make(map[uint64]struct{}),
 		}
 	}
 
 	ch := make(chan branchItem, numWorkers*4)
+	seed := maphash.MakeSeed()
 	var visitedBranchKeys atomic.Uint64
 	var producerIntegrityErr error
 
@@ -1086,7 +1089,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		workerAccReader := seg.NewReader(accDecomp.MakeGetter(), accCompression)
 		workerStoReader := seg.NewReader(stoDecomp.MakeGetter(), stoCompression)
 		g.Go(func() error {
-			return processBranchWorker(ch, w, workerAccReader, workerStoReader, isReferencing, fileName, failFast, logger)
+			return processBranchWorker(ch, w, workerAccReader, workerStoReader, isReferencing, fileName, failFast, logger, seed)
 		})
 	}
 
@@ -1101,8 +1104,8 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 	// Merge per-worker results into final sets.
 	accountOffsets := make(map[uint64]struct{})
 	storageOffsets := make(map[uint64]struct{})
-	accountPlain := make(map[string]struct{})
-	storagePlain := make(map[string]struct{})
+	accountPlain := make(map[uint64]struct{})
+	storagePlain := make(map[uint64]struct{})
 	for _, w := range workers {
 		maps.Copy(accountOffsets, w.accountOffsets)
 		maps.Copy(storageOffsets, w.storageOffsets)
