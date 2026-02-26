@@ -1901,7 +1901,7 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 
 		branchKeyBuf := make([]byte, 0, 128)
 		branchValueBuf := make([]byte, 0, datasize.MB.Bytes())
-		logTicker := time.NewTicker(30 * time.Second)
+		logTicker := time.NewTicker(20 * time.Second)
 		defer logTicker.Stop()
 		var produced uint64
 
