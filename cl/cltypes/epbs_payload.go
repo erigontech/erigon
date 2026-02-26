@@ -14,9 +14,12 @@ import (
 var (
 	_ ssz.HashableSSZ = (*PayloadAttestationData)(nil)
 	_ ssz.HashableSSZ = (*PayloadAttestation)(nil)
+	_ ssz.HashableSSZ = (*PayloadAttestationMessage)(nil)
+	_ ssz.HashableSSZ = (*IndexedPayloadAttestation)(nil)
 	_ ssz.HashableSSZ = (*ExecutionPayloadBid)(nil)
 	_ ssz.HashableSSZ = (*SignedExecutionPayloadBid)(nil)
 	_ ssz.HashableSSZ = (*ExecutionPayloadEnvelope)(nil)
+	_ ssz.HashableSSZ = (*SignedExecutionPayloadEnvelope)(nil)
 
 	_ ssz2.SizedObjectSSZ = (*PayloadAttestationData)(nil)
 	_ ssz2.SizedObjectSSZ = (*PayloadAttestation)(nil)
@@ -36,6 +39,10 @@ const (
 	PayloadStatusFull    PayloadStatus = 2
 )
 
+// PayloadAttestationSSZSize is the fixed SSZ encoding size of PayloadAttestation:
+// AggregationBits (PtcSize/8) + PayloadAttestationData (Hash + uint64 + bool + bool) + Signature (Bytes96)
+const PayloadAttestationSSZSize = int(clparams.PtcSize/8) + length.Hash + 8 + 1 + 1 + length.Bytes96
+
 // PayloadAttestationData represents attestation data for a payload.
 type PayloadAttestationData struct {
 	BeaconBlockRoot   common.Hash `json:"beacon_block_root"`
@@ -48,8 +55,8 @@ func (p *PayloadAttestationData) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(
 		p.BeaconBlockRoot[:],
 		p.Slot,
-		ssz.BoolSSZ(p.PayloadPresent),
-		ssz.BoolSSZ(p.BlobDataAvailable),
+		uint64(ssz.BoolSSZ(p.PayloadPresent)),
+		uint64(ssz.BoolSSZ(p.BlobDataAvailable)),
 	)
 }
 
@@ -115,9 +122,8 @@ func (p *PayloadAttestation) DecodeSSZ(buf []byte, version int) error {
 
 func (p *PayloadAttestation) Clone() clonable.Clonable {
 	return &PayloadAttestation{
-		AggregationBits: p.AggregationBits.Copy(),
-		Data:            p.Data.Clone().(*PayloadAttestationData),
-		Signature:       p.Signature,
+		AggregationBits: solid.NewBitVector(int(clparams.PtcSize)),
+		Data:            new(PayloadAttestationData),
 	}
 }
 
@@ -143,6 +149,10 @@ func (p *PayloadAttestationMessage) EncodeSSZ(buf []byte) ([]byte, error) {
 func (p *PayloadAttestationMessage) DecodeSSZ(buf []byte, version int) error {
 	p.Data = new(PayloadAttestationData)
 	return ssz2.UnmarshalSSZ(buf, version, &p.ValidatorIndex, p.Data, p.Signature[:])
+}
+
+func (p *PayloadAttestationMessage) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(p.ValidatorIndex, p.Data, p.Signature[:])
 }
 
 func (p *PayloadAttestationMessage) Clone() clonable.Clonable {
@@ -183,6 +193,10 @@ func (i *IndexedPayloadAttestation) DecodeSSZ(buf []byte, version int) error {
 
 func (i *IndexedPayloadAttestation) EncodingSizeSSZ() int {
 	return i.AttestingIndices.EncodingSizeSSZ() + i.Data.EncodingSizeSSZ() + length.Bytes96
+}
+
+func (i *IndexedPayloadAttestation) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(i.AttestingIndices, i.Data, i.Signature[:])
 }
 
 func (i *IndexedPayloadAttestation) Clone() clonable.Clonable {
@@ -254,6 +268,7 @@ func (e *ExecutionPayloadBid) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (e *ExecutionPayloadBid) DecodeSSZ(buf []byte, version int) error {
+	e.BlobKzgCommitments = *solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48)
 	return ssz2.UnmarshalSSZ(buf, version,
 		e.ParentBlockHash[:],
 		e.ParentBlockRoot[:],
@@ -270,7 +285,9 @@ func (e *ExecutionPayloadBid) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (e *ExecutionPayloadBid) Clone() clonable.Clonable {
-	return &ExecutionPayloadBid{}
+	return &ExecutionPayloadBid{
+		BlobKzgCommitments: *solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
+	}
 }
 
 func (e *ExecutionPayloadBid) Copy() *ExecutionPayloadBid {
@@ -304,7 +321,7 @@ func (s *SignedExecutionPayloadBid) EncodingSizeSSZ() int {
 }
 
 func (s *SignedExecutionPayloadBid) Static() bool {
-	return true
+	return false
 }
 
 func (s *SignedExecutionPayloadBid) EncodeSSZ(buf []byte) ([]byte, error) {
