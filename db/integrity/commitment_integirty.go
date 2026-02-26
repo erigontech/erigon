@@ -877,7 +877,11 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 		var checkErr error
 		if startTxNum == 0 {
 			// Base file: forward check (commitment refs count <= domain entries count)
+			// Hash verification runs after, so large worker maps are GC'd first.
 			checkErr = checkStateCorrespondenceBase(ctx, file, stepSize, failFast, logger)
+			if checkErr == nil {
+				checkErr = checkHashVerification(ctx, file, stepSize, failFast, dbg.EnvInt("CHECK_VERIFY_STATE_WORKERS", estimate.AlmostAllCPUs()), logger)
+			}
 		} else {
 			// Non-base file: reverse check (every domain key is in commitment refs)
 			// Include the next commitment file's refs to handle step boundary effects:
@@ -1159,12 +1163,6 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 			"accounts", fmt.Sprintf("%d/%d", foundAccounts, expectedAccounts),
 			"storage", fmt.Sprintf("%d/%d", foundStorages, expectedStorages),
 			"dur", dur, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
-
-		// Phase 2: Hash verification — only runs if key correspondence passes.
-		hashErr := checkHashVerification(ctx, file, stepSize, failFast, numWorkers, logger)
-		if hashErr != nil {
-			integrityErr = hashErr
-		}
 	}
 	return integrityErr
 }
