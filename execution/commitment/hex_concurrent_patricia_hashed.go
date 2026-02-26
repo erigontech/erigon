@@ -345,6 +345,10 @@ func (p *ConcurrentPatriciaHashed) Reset() {
 	}
 }
 
+func (p *ConcurrentPatriciaHashed) Release() {
+	p.root.Release()
+}
+
 // Set context for state IO
 func (p *ConcurrentPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	p.root.ctx = ctx

@@ -501,7 +501,6 @@ func (s *simulator) simulateBlock(
 	if err != nil {
 		return nil, nil, err
 	}
-	sharedDomains.SetTxNum(minTxNum)
 
 	var stateReader state.StateReader
 	if latest {

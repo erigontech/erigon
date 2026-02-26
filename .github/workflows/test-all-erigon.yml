@@ -75,6 +75,15 @@ jobs:
           minimum-size: 8GB
           disk-root: "C:"
 
+      - name: Cleanup space on Linux runner
+        if: needs.source-of-changes.outputs.changed_files != 'true'
+        run: |
+          rm -fr /opt/az \
+                 /opt/microsoft \
+                 /usr/share/dotnet \
+                 /usr/share/miniconda \
+                 /usr/share/swift
+
       - name: Declare runners
         if: needs.source-of-changes.outputs.changed_files != 'true'
         run: |
