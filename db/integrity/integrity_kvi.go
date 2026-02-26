@@ -41,7 +41,7 @@ import (
 // ErrIntegrity is useful to differentiate integrity errors from program errors.
 var ErrIntegrity = errors.New("integrity error")
 
-func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, failFast bool, logger log.Logger) error {
+func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, cache *IntegrityCache, failFast bool, logger log.Logger) error {
 	start := time.Now()
 	aggTx := state.AggTx(tx)
 	files := aggTx.Files(domain)
@@ -56,7 +56,13 @@ func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, failFast
 	if dbg.EnvBool("CHECK_KVIS_SEQUENTIAL", false) {
 		eg.SetLimit(1)
 	}
-	var keyCount atomic.Uint64
+
+	type workItem struct {
+		kvPath  string
+		kviPath string
+		fps     []fileFingerprint // nil when cache is disabled
+	}
+	var works []workItem
 	for _, file := range files {
 		if !strings.HasSuffix(file.Fullpath(), ".kv") {
 			continue
@@ -76,9 +82,33 @@ func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, failFast
 		if !ok {
 			return fmt.Errorf("kvi not found for %s", kvPath)
 		}
+		var fps []fileFingerprint
+		if cache != nil {
+			fpKv, err := fingerprintOf(kvPath)
+			if err != nil {
+				return err
+			}
+			fpKvi, err := fingerprintOf(kviPath)
+			if err != nil {
+				return err
+			}
+			fps = []fileFingerprint{fpKv, fpKvi}
+			if cache.has(string(CommitmentKvi), fps) {
+				logger.Info("skipping (cache hit)", "kv", filepath.Base(kvPath))
+				continue
+			}
+		}
+		works = append(works, workItem{kvPath, kviPath, fps})
+	}
+
+	successes := make([]bool, len(works))
+	var keyCount atomic.Uint64
+	for i, w := range works {
+		i, w := i, w
 		eg.Go(func() error {
-			keys, err := CheckKvi(ctx, kviPath, kvPath, kvCompression, failFast, logger)
+			keys, err := CheckKvi(ctx, w.kviPath, w.kvPath, kvCompression, failFast, logger)
 			if err == nil {
+				successes[i] = true
 				keyCount.Add(keys)
 				return nil
 			}
@@ -91,6 +121,11 @@ func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, failFast
 	err := eg.Wait()
 	if err != nil {
 		return err
+	}
+	for i, w := range works {
+		if successes[i] {
+			cache.add(string(CommitmentKvi), w.fps)
+		}
 	}
 	logger.Info("checked kvi files in", "dur", time.Since(start), "files", len(files), "keys", keyCount.Load())
 	return nil
