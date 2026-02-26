@@ -24,6 +24,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -957,9 +958,6 @@ func processBranch(
 	return err
 }
 
-// checkStateCorrespondenceBase verifies base files (startTxNum==0) where commitment
-// branches reference ALL keys in the trie, and the accounts/storage files contain
-// all those keys. Forward check: commitment ref count <= domain entry count.
 type branchItem struct{ key, value []byte }
 
 type workerState struct {
@@ -983,6 +981,9 @@ func processBranchWorker(ch <-chan branchItem, w *workerState, accReader, stoRea
 	return nil
 }
 
+// checkStateCorrespondenceBase verifies base files (startTxNum==0) where commitment
+// branches reference ALL keys in the trie, and the accounts/storage files contain
+// all those keys. Forward check: commitment ref count <= domain entry count.
 func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) error {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
@@ -1034,7 +1035,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 	}
 
 	ch := make(chan branchItem, numWorkers*4)
-	var branchKeys atomic.Uint64
+	var visitedBranchKeys atomic.Uint64
 	var producerIntegrityErr error
 
 	g, gCtx := errgroup.WithContext(ctx)
@@ -1061,7 +1062,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 			if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
 				continue
 			}
-			branchKeys.Add(1)
+			visitedBranchKeys.Add(1)
 			select {
 			case ch <- branchItem{key: bytes.Clone(branchKey), value: bytes.Clone(branchValue)}:
 			case <-gCtx.Done():
@@ -1072,7 +1073,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 				case <-gCtx.Done():
 					return gCtx.Err()
 				case <-logTicker.C:
-					n := branchKeys.Load()
+					n := visitedBranchKeys.Load()
 					logger.Info("[verify-state] progress",
 						"at", fmt.Sprintf("%d/%d", n, totalKeys),
 						"p", fmt.Sprintf("%.1f%%", float64(n)/float64(totalKeys)*100),
@@ -1108,10 +1109,10 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 	accountPlain := make(map[string]struct{})
 	storagePlain := make(map[string]struct{})
 	for _, w := range workers {
-		for k := range w.accountOffsets { accountOffsets[k] = struct{}{} }
-		for k := range w.storageOffsets { storageOffsets[k] = struct{}{} }
-		for k := range w.accountPlain   { accountPlain[k] = struct{}{} }
-		for k := range w.storagePlain   { storagePlain[k] = struct{}{} }
+		maps.Copy(accountOffsets, w.accountOffsets)
+		maps.Copy(storageOffsets, w.storageOffsets)
+		maps.Copy(accountPlain, w.accountPlain)
+		maps.Copy(storagePlain, w.storagePlain)
 		if w.integrityErr != nil {
 			integrityErr = w.integrityErr
 		}
@@ -1119,7 +1120,6 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 	if producerIntegrityErr != nil {
 		integrityErr = producerIntegrityErr
 	}
-
 
 	// Compare counts
 	var foundAccounts, foundStorages uint64
@@ -1159,7 +1159,6 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 			"dur", dur)
 
 		// Phase 2: Hash verification — only runs if key correspondence passes.
-		numWorkers := dbg.EnvInt("CHECK_VERIFY_STATE_WORKERS", runtime.NumCPU())
 		hashErr := checkHashVerification(ctx, file, stepSize, failFast, numWorkers, logger)
 		if hashErr != nil {
 			integrityErr = hashErr
