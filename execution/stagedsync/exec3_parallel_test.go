@@ -669,6 +669,116 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 	return res.AllDeps
 }
 
+// runProfileAndExecute profiles tasks to discover dependencies, then re-runs with that metadata.
+// Uses a single DB stack for both passes, halving the MDBX/aggregator/temporal setup cost.
+func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyCheck, logger log.Logger) time.Duration {
+	tb.Helper()
+
+	tmpDir, err := os.MkdirTemp("", "erigon-parallel-meta-test-*")
+	if err != nil {
+		tb.Fatal(err)
+	}
+	defer dir.RemoveAll(tmpDir)
+
+	dirs := datadir.New(tmpDir)
+	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).MustOpen()
+	defer rawDb.Close()
+
+	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(context.Background(), rawDb)
+	assert.NoError(tb, err)
+	defer agg.Close()
+
+	db, err := temporal.New(rawDb, agg)
+	assert.NoError(tb, err)
+
+	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
+
+	// newExecutor creates a fresh domains/state/executor on the shared DB.
+	newExecutor := func() (*parallelExecutor, context.Context, context.CancelFunc, func()) {
+		tx, err := db.BeginTemporalRo(context.Background()) //nolint:gocritic
+		assert.NoError(tb, err)
+		domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+		assert.NoError(tb, err)
+
+		pe := &parallelExecutor{
+			txExecutor: txExecutor{
+				cfg:    ExecuteBlockCfg{chainConfig: chainSpec.Config, db: db},
+				doms:   domains,
+				rs:     state.NewStateV3Buffered(state.NewStateV3(domains, ethconfig.Sync{}, logger)),
+				logger: logger,
+			},
+			workerCount: runtime.NumCPU() - 1,
+		}
+
+		executorCtx, executorCancel, err := pe.run(context.Background())
+		assert.NoError(tb, err, "error during parallel init")
+
+		cleanup := func() {
+			executorCancel()
+			domains.Close()
+			tx.Rollback()
+		}
+		return pe, executorCtx, executorCancel, cleanup
+	}
+
+	// Pass 1: profile to discover dependency metadata
+	var allDeps map[int]map[int]bool
+	{
+		pe, executorCtx, _, cleanup := newExecutor()
+		defer cleanup()
+
+		for _, task := range tasks {
+			task := task.(*testExecTask)
+			task.TxTask.Config = chainSpec.Config
+			task.ctx = executorCtx //nolint:fatcontext
+		}
+
+		res, err := executeParallelWithCheck(tb, pe, tasks, true, validation, false)
+		assert.NoError(tb, err, "error during profiling pass")
+		cleanup() // cleanup eagerly so pass 2 gets a clean slate
+		allDeps = res.AllDeps
+	}
+
+	// Apply dependency metadata
+	tasks = applyDeps(tasks, allDeps)
+
+	// Pass 2: execute with metadata
+	pe, executorCtx, _, cleanup := newExecutor()
+	defer cleanup()
+
+	for _, task := range tasks {
+		task := task.(*testExecTask)
+		task.TxTask.Config = chainSpec.Config
+		task.ctx = executorCtx //nolint:fatcontext
+	}
+
+	start := time.Now()
+	_, err = executeParallelWithCheck(tb, pe, tasks, false, validation, true)
+	assert.NoError(tb, err, "error during metadata execution pass")
+
+	finalWriteSet := map[accounts.Address]map[state.AccountKey]time.Duration{}
+	for _, task := range tasks {
+		task := task.(*testExecTask)
+		for _, op := range task.ops {
+			if op.opType == writeType {
+				writes, ok := finalWriteSet[op.key.addr]
+				if !ok {
+					writes = map[state.AccountKey]time.Duration{}
+					finalWriteSet[op.key.addr] = writes
+				}
+				writes[state.AccountKey{Path: op.key.path, Key: op.key.key}] = op.duration
+			}
+		}
+	}
+	for _, writes := range finalWriteSet {
+		for _, d := range writes {
+			sleepWithContext(executorCtx, d) //nolint:errcheck
+		}
+	}
+
+	return time.Since(start)
+}
+
 var discardLogging = true
 
 // lessConflictsSender returns a sender function that distributes txs across many addresses (low contention).
@@ -792,8 +902,7 @@ func TestAlternatingTxWithMetadata(t *testing.T) {
 		return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % 2))))
 	}
 	tasks, _ := taskFactory(10, sender, 5, 5, 10, randomPathGenerator, readTime, writeTime, nonIOTime)
-	allDeps := runParallelGetMetadata(t, tasks, defaultChecks)
-	runParallel(t, applyDeps(tasks, allDeps), defaultChecks, true, log.New())
+	runProfileAndExecute(t, tasks, defaultChecks, log.New())
 }
 
 // --- Benchmarks (full parameter sweeps, only run with -bench) ---
@@ -1158,19 +1267,7 @@ func TestDexScenarioWithMetadata(t *testing.T) {
 	checks := composeValidations([]propertyCheck{checkNoStatusOverlap, dexPostValidation, checkNoDroppedTx})
 	sender := func(i int) accounts.Address { return accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i)))) }
 	tasks, _ := taskFactory(10, sender, 5, 5, 10, dexPathGenerator, readTime, writeTime, nonIOTime)
-
-	allDeps := runParallelGetMetadata(t, tasks, checks)
-	newTasks := make([]exec.Task, 0, len(tasks))
-	for _, task := range tasks {
-		temp := task.(*testExecTask)
-		keys := make([]int, 0, len(allDeps[temp.Version().TxIndex]))
-		for k := range allDeps[temp.Version().TxIndex] {
-			keys = append(keys, k)
-		}
-		temp.dependencies = keys
-		newTasks = append(newTasks, temp)
-	}
-	runParallel(t, newTasks, checks, true, log.New())
+	runProfileAndExecute(t, tasks, checks, log.New())
 }
 
 // BenchmarkDexScenarioWithMetadata runs the full DEX+metadata parameter sweep and reports
