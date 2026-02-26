@@ -368,7 +368,11 @@ func InitPraguePreDeploys(db kv.TemporalRwDB, logger log.Logger) error {
 			return err
 		}
 		defer domains.Close()
-		stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, domains.TxNum())
+		latestTxNum, _, err := domains.SeekCommitment(ctx, tx)
+		if err != nil {
+			return err
+		}
+		stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, latestTxNum)
 
 		stateWriter.UpdateAccountData(params.WithdrawalRequestAddress, &accounts.Account{}, &accounts.Account{
 			CodeHash: withdrawalRequestCodeHash,
