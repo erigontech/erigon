@@ -567,6 +567,7 @@ type RoSnapshots struct {
 	segmentsMinByType map[snaptype.Enum]*atomic.Uint64 // min block number per segment type
 	idxMax            atomic.Uint64                    // all types of .idx files are available - up to this number
 	cfg               ethconfig.BlocksFreezing
+	snCfg             *snapcfg.Cfg
 	logger            log.Logger
 
 	ready     ready
@@ -591,7 +592,8 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	for i, t := range types {
 		enums[i] = t.Enum()
 	}
-	s := &RoSnapshots{dir: snapDir, cfg: cfg, logger: logger,
+	snCfg, _ := snapcfg.KnownCfg(cfg.ChainName)
+	s := &RoSnapshots{dir: snapDir, cfg: cfg, snCfg: snCfg, logger: logger,
 		types: types, enums: enums,
 		dirty:             make([]*btree.BTreeG[*DirtySegment], snaptype.MaxEnum),
 		alignMin:          alignMin,
@@ -1096,8 +1098,6 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 	//fmt.Println("RS", s)
 	//defer fmt.Println("Done RS", s)
 
-	snConfig, _ := snapcfg.KnownCfg(s.cfg.ChainName)
-
 	// Read full directory listing once for efficient index file lookups
 	var dirEntries []string
 	if open {
@@ -1145,7 +1145,7 @@ func (s *RoSnapshots) openSegments(fileNames []string, open bool, optimistic boo
 		})
 
 		if !exists {
-			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: snConfig.IsFrozen(f)}
+			sn = &DirtySegment{segType: f.Type, version: f.Version, Range: Range{f.From, f.To}, frozen: s.snCfg.IsFrozen(f)}
 		}
 
 		if open {
