@@ -38,7 +38,7 @@ func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 
 	log.Info("[integrity] RCacheNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
 
-	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, RCacheNoDupsRange)
+	return parallelChunkCheck(ctx, fromBlock, toBlock, db, blockReader, failFast, "CheckRCacheNoDups", RCacheNoDupsRange)
 }
 
 func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
@@ -131,7 +131,7 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.Tem
 
 type chunkFn func(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) error
 
-func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool, fn chunkFn) (err error) {
+func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool, prefix string, fn chunkFn) (err error) {
 	blockRange := toBlock - fromBlock + 1
 	if blockRange == 0 {
 		return nil
@@ -157,7 +157,7 @@ func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.Te
 			case <-logEvery.C:
 				completed := completedChunks.Load()
 				progress := float64(completed) / float64(totalChunks) * 100
-				log.Info("[integrity] CheckRCacheNoDups", "progress", fmt.Sprintf("%.1f%%", progress))
+				log.Info("[integrity] "+prefix, "progress", fmt.Sprintf("%.1f%%", progress))
 			}
 		}
 	}()
