@@ -128,6 +128,16 @@ func IsUint64SortedSet(set IterableSSZ[uint64]) bool {
 	return true
 }
 
+// IsUint64Sorted checks if the list is sorted in non-decreasing order (duplicates allowed). O(N) complexity.
+func IsUint64Sorted(list IterableSSZ[uint64]) bool {
+	for i := 0; i < list.Length()-1; i++ {
+		if list.Get(i) > list.Get(i+1) {
+			return false
+		}
+	}
+	return true
+}
+
 func IntersectionOfSortedSets(v1, v2 IterableSSZ[uint64]) []uint64 {
 	intersection := []uint64{}
 	// keep track of v1 and v2 element iteration
