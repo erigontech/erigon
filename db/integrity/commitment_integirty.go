@@ -1006,7 +1006,10 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 			continue
 		}
 
-		// Walk the branch to extract all referenced keys
+		// Walk the branch to extract all referenced keys.
+		// The callback returns nil (keep original key in output) because the result of ReplacePlainKeys
+		// is discarded (_): all side-effects (populating storageOffsets/accountOffsets, length validation)
+		// happen before the return, so the decoded plain key value itself is not needed here.
 		_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 			if isStorage {
 				if len(key) == length.Addr+length.Hash {
@@ -1027,10 +1030,8 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 					}
 					if _, alreadySeen := storageOffsets[offset]; !alreadySeen {
 						storageOffsets[offset] = struct{}{}
-						// Validate key length: use Skip (single Huffman pass, no allocation)
 						storageReader.Reset(offset)
-						_, keyLen := storageReader.Skip()
-						if keyLen != length.Addr+length.Hash {
+						if _, keyLen := storageReader.Skip(); keyLen != length.Addr+length.Hash { // we don't need key itself
 							err := fmt.Errorf("%w: storage reference key %x has invalid plainKey len=%d for branch %x in %s", ErrIntegrity, key, keyLen, branchKey, fileName)
 							if failFast {
 								return nil, err
@@ -1038,7 +1039,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 							logger.Warn(err.Error())
 						}
 					}
-					return nil, nil
+					return nil, nil // safe: result of ReplacePlainKeys is discarded (_)
 				}
 				// Unknown key format
 				err := fmt.Errorf("%w: unexpected storage key len=%d for branch %x in %s", ErrIntegrity, len(key), branchKey, fileName)
@@ -1068,10 +1069,8 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 				}
 				if _, alreadySeen := accountOffsets[offset]; !alreadySeen {
 					accountOffsets[offset] = struct{}{}
-					// Validate key length: use Skip (single Huffman pass, no allocation)
 					accReader.Reset(offset)
-					_, keyLen := accReader.Skip()
-					if keyLen != length.Addr {
+					if _, keyLen := accReader.Skip(); keyLen != length.Addr { // we don't need key itself
 						err := fmt.Errorf("%w: account reference key %x has invalid plainKey len=%d for branch %x in %s", ErrIntegrity, key, keyLen, branchKey, fileName)
 						if failFast {
 							return nil, err
@@ -1079,7 +1078,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 						logger.Warn(err.Error())
 					}
 				}
-				return nil, nil
+				return nil, nil // safe: result of ReplacePlainKeys is discarded (_)
 			}
 			// Unknown key format
 			err := fmt.Errorf("%w: unexpected account key len=%d for branch %x in %s", ErrIntegrity, len(key), branchKey, fileName)
