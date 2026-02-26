@@ -18,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 )
 
 type Merger struct {
@@ -28,15 +29,20 @@ type Merger struct {
 	chainDB         kv.RoDB
 	logger          log.Logger
 	noFsync         bool // fsync is enabled by default, but tests can manually disable
+	snCfg           *snapcfg.Cfg
 }
 
 func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB, chainConfig *chain.Config, logger log.Logger) *Merger {
-	return &Merger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainDB: chainDB, chainConfig: chainConfig, logger: logger}
+	snCfg, ok := snapcfg.KnownCfg(chainConfig.ChainName)
+	if !ok {
+		snCfg, _ = snapcfg.KnownCfg(networkname.Mainnet)
+	}
+	return &Merger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainDB: chainDB, chainConfig: chainConfig, logger: logger, snCfg: snCfg}
 }
 func (m *Merger) DisableFsync() { m.noFsync = true }
 
 func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
-	cfg, _ := snapcfg.KnownCfg(m.chainConfig.ChainName)
+	cfg := m.snCfg
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
 		mergeLimit := cfg.MergeLimit(snaptype.Unknown, r.From())
@@ -328,8 +334,12 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 	if err = f.Compress(); err != nil {
 		return nil, err
 	}
-	sn := &DirtySegment{segType: targetFile.Type, version: targetFile.Version, Range: Range{targetFile.From, targetFile.To},
-		frozen: snapcfg.Seedable(v.s.cfg.ChainName, targetFile)}
+	sn := &DirtySegment{
+		segType: targetFile.Type,
+		version: targetFile.Version,
+		Range:   Range{targetFile.From, targetFile.To},
+		frozen:  m.snCfg.IsFrozen(targetFile),
+	}
 
 	err = sn.Open(snapDir)
 	if err != nil {
