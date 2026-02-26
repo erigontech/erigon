@@ -1591,13 +1591,13 @@ func checkIfStateSnapshotsPublishable(dirs datadir.Dirs, chainDB kv.RoDB) error 
 		if err != nil {
 			return fmt.Errorf("failed to read PersistReceipts config: %w", err)
 		}
-		log.Warn("This installation doesn't persist receipts cache; ignoring .rcache checks")
+		log.Warn("[integrity] This installation doesn't persist receipts cache; ignoring .rcache checks")
 
 		commitmentHistory, _, err = rawdb.ReadDBCommitmentHistoryEnabled(tx)
 		if err != nil {
 			return fmt.Errorf("failed to read CommitmentHistory config: %w", err)
 		}
-		log.Warn("This installation doesn't persist commitment history; ignoring commitment history checks")
+		log.Warn("[integrity] This installation doesn't persist commitment history; ignoring commitment history checks")
 
 		return nil
 	}); err != nil {
