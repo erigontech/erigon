@@ -42,6 +42,9 @@ func CheckRCacheNoDups(ctx context.Context, db kv.TemporalRoDB, blockReader serv
 }
 
 func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+	if fromBlock > toBlock {
+		panic(fmt.Sprintf("fromBlock(%d) > toBlock(%d)", fromBlock, toBlock))
+	}
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
