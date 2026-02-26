@@ -953,9 +953,13 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 
 	// ETL collectors accumulate plain keys on disk (spill when buffer full), deduplicating via
 	// OldestEntryBuffer. Both are guarded by a single mutex since Collect is not goroutine-safe.
-	accCollector := etl.NewCollector("verify-base-acc", tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger)
+	accCollector := etl.NewCollector("verify-base-acc", tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger).
+		LogLvl(log.LvlDebug).
+		SortAndFlushInBackground(true)
 	defer accCollector.Close()
-	stoCollector := etl.NewCollector("verify-base-sto", tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger)
+	stoCollector := etl.NewCollector("verify-base-sto", tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger).
+		LogLvl(log.LvlDebug).
+		SortAndFlushInBackground(true)
 	defer stoCollector.Close()
 	var collectMu sync.Mutex
 
