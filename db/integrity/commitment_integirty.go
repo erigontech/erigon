@@ -774,12 +774,15 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br servic
 		return fmt.Errorf("commitment state txNum doesn't match maxTxNum: %d != %d", latestTxNum, maxTxNum)
 	}
 	logger.Info("commitment recalc info", "blockNum", blockNum, "minTxNum", minTxNum, "maxTxNum", maxTxNum, "toTxNum", toTxNum)
+	trace := logger.Enabled(ctx, log.LvlTrace)
 	touchLoggingVisitor := func(k []byte) {
-		args := []any{"key", common.Address(k[:length.Addr])}
-		if len(k) > length.Addr {
-			args = append(args, "slot", common.Hash(k[length.Addr:]))
+		if trace {
+			args := []any{"key", common.Address(k[:length.Addr])}
+			if len(k) > length.Addr {
+				args = append(args, "slot", common.Hash(k[length.Addr:]))
+			}
+			logger.Trace("commitment touched key", args...)
 		}
-		logger.Debug("commitment touched key", args...)
 	}
 	touchStart := time.Now()
 	accTouches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, minTxNum, toTxNum, touchLoggingVisitor)
