@@ -428,12 +428,6 @@ func (c *PagedWriter) writePage() error {
 	}
 
 	// Async path with parallel workers
-	uncompressedPage, ok := c.bytesUncompressed()
-	c.resetPage()
-	if !ok {
-		return nil
-	}
-
 	item := pageWorkItemPool.Get().(*pageWorkItem)
 	sent := false
 	defer func() {
@@ -442,8 +436,14 @@ func (c *PagedWriter) writePage() error {
 		}
 	}()
 
+	var ok bool
+	item.uncompressedData, ok = c.bytesUncompressedTo(item.uncompressedData)
+	c.resetPage()
+	if !ok {
+		return nil
+	}
+
 	item.seq = c.seqIn
-	item.uncompressedData = append(item.uncompressedData[:0], uncompressedPage...)
 	c.seqIn++
 
 	// Send to workers; if workCh is full, drain resultCh to unblock a worker first
