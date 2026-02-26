@@ -118,7 +118,8 @@ runs:
     - name: Warn on submodule cache miss
       if: ${{ inputs.submodules == 'true' && steps.restore-submodules.outputs.cache-hit != 'true' }}
       shell: bash
-      run: echo "::warning::.git/modules cache miss (matched key: '${{ steps.restore-submodules.outputs.cache-matched-key }}')"
+      run: |
+        echo "::warning::.git/modules cache miss (matched key: '${{ steps.restore-submodules.outputs.cache-matched-key }}')"
 
     - name: Clone submodules
       if: ${{ inputs.submodules == 'true' }}
