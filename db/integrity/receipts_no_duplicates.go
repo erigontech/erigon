@@ -85,9 +85,9 @@ func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 		cumGasUsed := uvarint(v)
 		blockChanged := false
 
-		if txNum >= _max {
-			blockNum, _, _ = txNumsReader.FindBlockNum(ctx, tx, txNum)
-			_min, _ = txNumsReader.Min(ctx, tx, blockNum)
+		for txNum >= _max {
+			blockNum++
+			_min = _max + 1
 			_max, _ = txNumsReader.Max(ctx, tx, blockNum)
 			blockChanged = true
 		}

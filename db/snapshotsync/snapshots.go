@@ -504,6 +504,9 @@ type VisibleSegments []*VisibleSegment
 
 func (s VisibleSegments) BeginRo() *RoTx {
 	for _, seg := range s {
+		if seg.src.frozen {
+			continue
+		}
 		seg.src.refcount.Add(1)
 	}
 	return &RoTx{Segments: s}
