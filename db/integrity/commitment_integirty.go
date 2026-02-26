@@ -1022,7 +1022,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 	stoCompression := statecfg.Schema.GetDomainCfg(kv.StorageDomain).Compression
 
 	totalKeys := uint64(commDecomp.Count()) / 2
-	numWorkers := dbg.EnvInt("CHECK_VERIFY_STATE_WORKERS", runtime.NumCPU())
+	numWorkers := dbg.EnvInt("CHECK_VERIFY_STATE_WORKERS", estimate.AlmostAllCPUs())
 
 	workers := make([]workerState, numWorkers)
 	for i := range workers {
