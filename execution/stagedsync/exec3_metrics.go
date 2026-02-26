@@ -455,6 +455,11 @@ func NewProgress(initialBlockNum, initialTxNum, commitThreshold uint64, updateMe
 }
 
 type Progress struct {
+	// mu protects all prev* fields accessed concurrently from the commit-logger
+	// goroutine (func1.2 inside parallelExecutor.exec) and the outer exec()
+	// function after pe.wait() returns. The commit-logger goroutine may still
+	// be running when the outer exec calls LogCommitments for the final summary.
+	mu                             sync.Mutex
 	initialTime                    time.Time
 	initialTxNum                   uint64
 	initialBlockNum                uint64
@@ -725,6 +730,9 @@ func (p *Progress) LogExecution(rs *state.StateV3, ex executor) {
 }
 
 func (p *Progress) LogCommitments(rs *state.StateV3, ex executor, commitStart time.Time, stepsInDb float64, lastProgress commitment.CommitProgress) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	var te *txExecutor
 	var suffix string
 
