@@ -312,6 +312,10 @@ func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock) 
 		// Parent is EMPTY - verify bid.parent_block_hash == parent_bid.parent_block_hash
 		parentBlock, ok := f.forkGraph.GetBlock(block.ParentRoot)
 		if !ok || parentBlock == nil {
+			// Anchor block: not in store but header exists (finalized starting point), skip bid validation
+			if _, hasHeader := f.forkGraph.GetHeader(block.ParentRoot); hasHeader {
+				return nil
+			}
 			return errors.New("parent block not found")
 		}
 

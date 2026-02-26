@@ -64,7 +64,7 @@ func IsBuilderWithdrawalCredential(withdrawalCredentials [32]byte, beaconConfig 
 // - The aggregate signature is valid
 func IsValidIndexedPayloadAttestation(s abstract.BeaconState, attestation *cltypes.IndexedPayloadAttestation) (bool, error) {
 	indices := attestation.AttestingIndices
-	if indices.Length() == 0 || !solid.IsUint64SortedSet(indices) {
+	if indices.Length() == 0 || !solid.IsUint64Sorted(indices) {
 		return false, errors.New("isValidIndexedPayloadAttestation: attesting indices are empty or not sorted")
 	}
 
