@@ -19,6 +19,9 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,4 +140,49 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Lo
 	}
 
 	return temporal.New(rawDB, agg)
+}
+
+func allDBStaff(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger, dataDir string) (sn *freezeblocks.RoSnapshots, borSn *heimdall.RoSnapshots, agg *state.Aggregator, tdb kv.TemporalRwDB, err error) {
+	migrationDBs := map[kv.Label]bool{
+		dbcfg.ChainDB:         true,
+		dbcfg.ConsensusDB:     true,
+		dbcfg.HeimdallDB:      true,
+		dbcfg.PolygonBridgeDB: true,
+	}
+	if _, ok := migrationDBs[opts.GetLabel()]; !ok {
+		panic(opts.GetLabel())
+	}
+
+	rawDB := opts.MustOpen()
+	if applyMigrations {
+		migrator := migrations.NewMigrator(opts.GetLabel())
+		has, err := migrator.HasPendingMigrations(rawDB)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		if has {
+			rawDB.Close()
+			rawDB = opts.Exclusive(true).MustOpen()
+			if err := migrator.Apply(rawDB, datadirCli, "", logger); err != nil {
+				return nil, nil, nil, nil, err
+			}
+			rawDB.Close()
+			rawDB = opts.MustOpen()
+		}
+	}
+
+	dirs := datadir.New(dataDir)
+	if err := CheckSaltFilesExist(dirs); err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	sn, borSn, agg, _, _, _, err = allSnapshots(context.Background(), rawDB, logger)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	tdb, err = temporal.New(rawDB, agg)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return sn, borSn, agg, tdb, nil
 }

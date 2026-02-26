@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/cmd/hack/tool"
 	"os"
 	"text/tabwriter"
 
@@ -115,6 +116,142 @@ func init() {
 
 	withDataDir(cmdClearBadBlocks)
 	rootCmd.AddCommand(cmdClearBadBlocks)
+}
+
+func InfoStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *heimdall.RoSnapshots) (info *StagesInfo, err error) {
+	defer func() {
+		recovered := recover()
+		if recovered != nil {
+			err = fmt.Errorf("recovered from panic: %v", recovered)
+		}
+	}()
+	var progress uint64
+	info = &StagesInfo{}
+	cfg, err := tool.ChainConfigWithErr(tx)
+	if err == nil {
+		info.ChainInfo = ChainInfo{
+			ChainID:   cfg.ChainID.Uint64(),
+			ChainName: cfg.ChainName,
+		}
+	}
+
+	info.StagesProgress = make([]StageProgress, 0, len(stages.AllStages))
+	for _, stage := range stages.AllStages {
+		if progress, err = stages.GetStageProgress(tx, stage); err != nil {
+			return nil, err
+		}
+		prunedTo, err := stages.GetStagePruneProgress(tx, stage)
+		if err != nil {
+			return nil, err
+		}
+		info.StagesProgress = append(info.StagesProgress, StageProgress{
+			Stage:    stage,
+			PrunedTo: prunedTo,
+			Progress: progress,
+		})
+	}
+	pm, err := prune.Get(tx)
+	if err != nil {
+		return nil, err
+	}
+	info.PruneDistance = pm
+	if snapshots != nil {
+		info.SnapshotInfo = Snapshot{
+			SegMax: snapshots.SegmentsMax(),
+			IndMax: snapshots.IndicesMax(),
+		}
+	} else {
+		info.SnapshotInfo = Snapshot{
+			SegMax: 0,
+			IndMax: 0,
+		}
+	}
+	if borSn != nil {
+		info.BorSnapshotInfo = Snapshot{
+			SegMax: borSn.SegmentsMax(),
+			IndMax: borSn.IndicesMax(),
+		}
+	} else {
+		info.BorSnapshotInfo = Snapshot{
+			SegMax: 0,
+			IndMax: 0,
+		}
+	}
+
+	_lb, _lt, _ := rawdbv3.TxNums.Last(tx)
+
+	info.LastInfo = Last{
+		TxNum:    _lt,
+		BlockNum: _lb,
+		IdxSteps: rawdbhelpers.IdxStepsCountV3(tx),
+	}
+	ethTxSequence, err := tx.ReadSequence(kv.EthTx)
+	if err != nil {
+		return nil, err
+	}
+	info.EthTxSequence = ethTxSequence
+
+	{
+		firstNonGenesisHeader, err := rawdbv3.SecondKey(tx, kv.Headers)
+		if err != nil {
+			return nil, err
+		}
+		lastHeaders, err := rawdbv3.LastKey(tx, kv.Headers)
+		if err != nil {
+			return nil, err
+		}
+		firstNonGenesisBody, err := rawdbv3.SecondKey(tx, kv.BlockBody)
+		if err != nil {
+			return nil, err
+		}
+		lastBody, err := rawdbv3.LastKey(tx, kv.BlockBody)
+		if err != nil {
+			return nil, err
+		}
+		fstHeader := u64or0(firstNonGenesisHeader)
+		lstHeader := u64or0(lastHeaders)
+		fstBody := u64or0(firstNonGenesisBody)
+		lstBody := u64or0(lastBody)
+		info.DB = DB{
+			FirstHeader: fstHeader,
+			LastHeader:  lstHeader,
+			FirstBody:   fstBody,
+			LastBody:    lstBody,
+		}
+	}
+
+	info.DomainIIProgress = make([]DomainIIProgress, 0, kv.DomainLen+4)
+	dbg := tx.Debug()
+	stepSize := dbg.StepSize()
+	for i := 0; i < int(kv.DomainLen); i++ {
+		d := kv.Domain(i)
+		txNum := dbg.DomainProgress(d)
+		step := txNum / stepSize
+		if d == kv.CommitmentDomain {
+			info.DomainIIProgress = append(info.DomainIIProgress, DomainIIProgress{
+				Name: d.String(),
+				Step: step,
+			})
+			continue
+		}
+		info.DomainIIProgress = append(info.DomainIIProgress, DomainIIProgress{
+			Name:             d.String(),
+			HistoryStartFrom: dbg.HistoryStartFrom(d),
+			TxNum:            txNum,
+			Step:             step,
+		})
+	}
+	for _, ii := range []kv.InvertedIdx{kv.LogTopicIdx, kv.LogAddrIdx, kv.TracesFromIdx, kv.TracesToIdx} {
+		txNum := dbg.IIProgress(ii)
+		step := txNum / stepSize
+		info.DomainIIProgress = append(info.DomainIIProgress, DomainIIProgress{
+			Name:  ii.String(),
+			TxNum: txNum,
+			Step:  step,
+		})
+	}
+
+	return info, nil
 }
 
 func printStages(tx kv.TemporalTx, snapshots *freezeblocks.RoSnapshots, borSn *heimdall.RoSnapshots) error {
