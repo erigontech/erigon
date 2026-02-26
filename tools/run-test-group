@@ -47,14 +47,6 @@ packages_for_group() {
   esac
 }
 
-# timeout_for_group returns the timeout for the given group
-timeout_for_group() {
-  case "$1" in
-    execution-tests|eest-*|consensus) echo 60m ;;
-    *) echo 30m ;;
-  esac
-}
-
 # No argument: run all groups sequentially
 if [ $# -eq 0 ]; then
   for group in $ALL_GROUPS; do
@@ -161,4 +153,4 @@ if [ "${1}" = "--self-test" ]; then
 fi
 
 PKGS=$(packages_for_group "$1")
-run_tests -timeout "$(timeout_for_group "$1")" $PKGS
+run_tests $PKGS
