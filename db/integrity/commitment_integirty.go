@@ -958,20 +958,6 @@ type workerState struct {
 	integrityErr                   error
 }
 
-func processBranchWorker(ch <-chan branchItem, w *workerState, accReader, stoReader *seg.Reader, isReferencing bool, fileName string, failFast bool, logger log.Logger) error {
-	for item := range ch {
-		if err := processBranch(item.key, commitment.BranchData(item.value),
-			accReader, stoReader, isReferencing, fileName, failFast,
-			w.accountOffsets, w.storageOffsets, w.accountPlain, w.storagePlain); err != nil {
-			if failFast {
-				return err
-			}
-			logger.Warn(err.Error())
-			w.integrityErr = err
-		}
-	}
-	return nil
-}
 
 func checkStateCorrespondenceBaseAndHash(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) error {
 	if err := checkStateCorrespondenceBase(ctx, file, stepSize, failFast, logger); err != nil {
