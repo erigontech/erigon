@@ -1227,8 +1227,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 				return fmt.Errorf("unknown check: %s", chk)
 			}
 			return nil
-			})
-			return nil
 		})
 	}
 

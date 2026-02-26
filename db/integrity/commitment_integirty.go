@@ -1102,15 +1102,28 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		integrityErr = producerIntegrityErr
 	}
 
-	// Count unique plain keys via ETL merge-sort+dedup.
+	// Count unique plain keys via ETL merge-sort.
+	// OldestEntryBuffer deduplicates within each flush window but not across windows.
+	// ETL outputs keys in sorted order, so cross-window duplicates are always adjacent —
+	// skip them by comparing against the previous key.
 	var foundAccounts, foundStorages uint64
+	var prevAccKey []byte
 	if err := accCollector.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		if bytes.Equal(k, prevAccKey) {
+			return nil
+		}
+		prevAccKey = append(prevAccKey[:0], k...)
 		foundAccounts++
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
+	var prevStoKey []byte
 	if err := stoCollector.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		if bytes.Equal(k, prevStoKey) {
+			return nil
+		}
+		prevStoKey = append(prevStoKey[:0], k...)
 		foundStorages++
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
