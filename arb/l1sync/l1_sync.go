@@ -197,9 +197,7 @@ func (s *L1SyncService) pollOnce(ctx context.Context) (pollMore bool, err error)
 			if ctx.Err() != nil {
 				return false, ctx.Err()
 			}
-			if batch.SequenceNumber == 0 {
-				continue
-			}
+			
 			// skip batches we already processed
 			if batch.SequenceNumber <= lastBatchSeqNum && lastBatchSeqNum > 0 {
 				continue
