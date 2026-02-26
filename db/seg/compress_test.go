@@ -65,6 +65,9 @@ func TestCompressEmptyDict(t *testing.T) {
 	if g.HasNext() {
 		t.Fatalf("not expecting anything else")
 	}
+	if cs := checksum(file); cs != 2900861311 {
+		t.Errorf("result file hash changed, %d", cs)
+	}
 }
 
 // nolint
@@ -323,5 +326,63 @@ func Test_CompressWithMetadata(t *testing.T) {
 			t.Errorf("expected %s, got (hex) [%s]", expected, word)
 		}
 		i++
+	}
+	if cs := checksum(d.filePath); cs != 4122484600 {
+		t.Errorf("result file hash changed, %d", cs)
+	}
+}
+
+// TestCompressNoWordPatterns exercises the compressNoWordPatterns fast path, which is
+// triggered when all words are added via AddUncompressedWord (noWordPatterns == true).
+// Verifies that the output is a valid compressed file that round-trips correctly.
+func TestCompressNoWordPatterns(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "compressed")
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, DefaultCfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+	defer c.Close()
+
+	// Build expected words: empty, short, varied-length — all via AddUncompressedWord.
+	words := [][]byte{
+		nil,
+		[]byte("a"),
+	}
+	for i := range 100 {
+		// Semantic: "empty word" means "found key with empty value". "nil" - means key was deleted - not encodable by compressor
+		words = append(words,
+			nil,
+			[]byte{},
+
+			fmt.Appendf(nil, "%d longlongword %d", i, i),
+			bytes.Repeat([]byte("x"), i+1),
+		)
+	}
+
+	for _, w := range words {
+		require.NoError(t, c.AddUncompressedWord(w))
+	}
+	require.NoError(t, c.Compress())
+
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	defer d.Close()
+
+	require.EqualValues(t, len(words), d.Count())
+
+	g := d.MakeGetter()
+	for _, expected := range words {
+		require.True(t, g.HasNext())
+		got, _ := g.Next(nil)
+		if expected == nil {
+			require.Equal(t, []byte{}, got) // Semantic: "empty word" means "found key with empty value". "nil" - means key was deleted - not encodable by compressor
+		} else {
+			require.Equal(t, expected, got)
+		}
+	}
+	require.False(t, g.HasNext())
+
+	if cs := checksum(file); cs != 1879837905 {
+		t.Errorf("fast-path output differs from main, checksum=%d", cs)
 	}
 }

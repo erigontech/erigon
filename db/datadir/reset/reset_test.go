@@ -14,11 +14,12 @@ import (
 	"testing"
 
 	g "github.com/anacrolix/generics"
+	"github.com/go-quicktest/qt"
+
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/preverified"
-	"github.com/go-quicktest/qt"
 )
 
 func haveDir(name string) fsChecker {
