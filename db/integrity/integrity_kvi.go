@@ -99,21 +99,19 @@ func CheckKvis(ctx context.Context, tx kv.TemporalTx, domain kv.Domain, failFast
 func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression seg.FileCompression, failFast bool, logger log.Logger) (uint64, error) {
 	kviFileName := filepath.Base(kviPath)
 	kvFileName := filepath.Base(kvPath)
-	logger.Info("checking kvi", "kvi", kviFileName, "kv", kvFileName)
+	logger.Info("[integrity] checking kvi", "kvi", kviFileName, "kv", kvFileName)
 	start := time.Now()
 	kvi, err := recsplit.OpenIndex(kviPath)
 	if err != nil {
 		return 0, err
 	}
 	defer kvi.Close()
-	kvi.MadvSequential()
 	kviReader := kvi.GetReaderFromPool()
 	kvDecompressor, err := seg.NewDecompressor(kvPath)
 	if err != nil {
 		return 0, err
 	}
 	defer kvDecompressor.Close()
-	kvDecompressor.MadvSequential()
 	kvReader := seg.NewReader(kvDecompressor.MakeGetter(), kvCompression)
 	var integrityErr error
 	if kvKeyCount := uint64(kvReader.Count()) / 2; kvKeyCount != kvi.KeyCount() {
@@ -129,18 +127,21 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 	var keyBuf []byte
 	var keyOffset, keyCount uint64
 	var atValue bool
-	for kvReader.HasNext() {
-		select {
-		case <-ctx.Done():
-			return 0, ctx.Err()
-		case <-logTicker.C:
-			at := fmt.Sprintf("%d/%d", keyCount, kvi.KeyCount())
-			percent := fmt.Sprintf("%.1f%%", float64(keyCount)/float64(kvi.KeyCount())*100)
-			rate := float64(keyCount) / time.Since(start).Seconds()
-			eta := time.Duration(float64(kvi.KeyCount()-keyCount)/rate) * time.Second
-			logger.Info("checking kvi progress", "at", at, "p", percent, "k/s", rate, "eta", eta, "kvi", kviFileName)
-		default: // proceed
+	for i := 0; kvReader.HasNext(); i++ {
+		if i%1024 == 0 {
+			select {
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			case <-logTicker.C:
+				at := fmt.Sprintf("%d/%d", keyCount, kvi.KeyCount())
+				percent := fmt.Sprintf("%.1f%%", float64(keyCount)/float64(kvi.KeyCount())*100)
+				rate := float64(keyCount) / time.Since(start).Seconds()
+				eta := time.Duration(float64(kvi.KeyCount()-keyCount)/rate) * time.Second
+				logger.Info("[integrity] checking kvi progress", "at", at, "p", percent, "k/s", rate, "kvi", kviFileName, "eta", eta)
+			default: // proceed
+			}
 		}
+
 		if atValue {
 			keyOffset, _ = kvReader.Skip()
 			atValue = false
@@ -148,7 +149,7 @@ func CheckKvi(ctx context.Context, kviPath string, kvPath string, kvCompression 
 		}
 		keyBuf, _ = kvReader.Next(keyBuf[:0])
 		if logger.Enabled(ctx, log.LvlTrace) {
-			logger.Trace("checking kvi for", "key", hex.EncodeToString(keyBuf), "offset", keyOffset, "kvi", kviFileName)
+			logger.Trace("[integrity] checking kvi for", "key", hex.EncodeToString(keyBuf), "kvi", kviFileName, "offset", keyOffset)
 		}
 		keyCount++
 		atValue = true
