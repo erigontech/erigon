@@ -244,8 +244,11 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 }
 
 func checkCommitmentRootViaRecompute(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, info commitmentRootInfo, f state.VisibleFile, logger log.Logger) error {
+	trace := logger.Enabled(ctx, log.LvlTrace)
 	touchLoggingVisitor := func(k []byte) {
-		logger.Debug("account touch for root block", "key", common.Address(k), "blockNum", info.blockNum, "file", filepath.Base(f.Fullpath()))
+		if trace {
+			logger.Trace("account touch for root block", "key", common.Address(k), "blockNum", info.blockNum, "file", filepath.Base(f.Fullpath()))
+		}
 	}
 	touches, err := touchHistoricalKeys(sd, tx, kv.AccountsDomain, info.blockMinTxNum, info.txNum+1, touchLoggingVisitor)
 	if err != nil {
