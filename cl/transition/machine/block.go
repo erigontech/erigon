@@ -39,15 +39,13 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 		version = s.Version()
 		body    = block.GetBody()
 	)
-	payloadHeader, err := body.GetPayloadHeader()
-	if err != nil {
-		return fmt.Errorf("processBlock: failed to extract execution payload header: %w", err)
-	}
 
 	// Check the state version is correct.
 	if block.Version() != version {
 		return fmt.Errorf("processBlock: wrong state version for block at slot %d. state version %v. block version %v", block.GetSlot(), version, block.Version())
 	}
+
+	// 1. process_block_header
 	bodyRoot, err := body.HashSSZ()
 	if err != nil {
 		return fmt.Errorf("processBlock: failed to hash block body: %w", err)
@@ -55,52 +53,59 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	if err := impl.ProcessBlockHeader(s, block.GetSlot(), block.GetProposerIndex(), block.GetParentRoot(), bodyRoot); err != nil {
 		return fmt.Errorf("processBlock: failed to process block header: %v", err)
 	}
-	// Process execution payload if enabled.
-	if version >= clparams.BellatrixVersion && executionEnabled(s, payloadHeader.BlockHash) {
-		if s.Version() >= clparams.CapellaVersion {
-			// Process withdrawals in the execution payload.
-			expect := state.GetExpectedWithdrawals(s, state.Epoch(s))
-			expectWithdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(s.BeaconConfig().MaxWithdrawalsPerPayload), 44)
-			for i := range expect.Withdrawals {
-				expectWithdrawals.Append(expect.Withdrawals[i])
-			}
-			if err := impl.ProcessWithdrawals(s, expectWithdrawals); err != nil {
-				return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
-			}
+
+	if version >= clparams.GloasVersion {
+		// 2. [Modified in Gloas:EIP7732] process_withdrawals(state)
+		if err := impl.ProcessWithdrawals(s, nil); err != nil {
+			return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
 		}
-		if s.Version() < clparams.GloasVersion {
-			// DO NOT process execution payload for Gloas and later versions here.
+		// 3. [New in Gloas:EIP7732] process_execution_payload_bid(state, block)
+		if err := impl.ProcessExecutionPayloadBid(s, block); err != nil {
+			return fmt.Errorf("processBlock: failed to process execution payload bid: %v", err)
+		}
+	} else if version >= clparams.BellatrixVersion {
+		// Pre-Gloas: process execution payload if enabled
+		payloadHeader, err := body.GetPayloadHeader()
+		if err != nil {
+			return fmt.Errorf("processBlock: failed to extract execution payload header: %w", err)
+		}
+		if executionEnabled(s, payloadHeader.BlockHash) {
+			if version >= clparams.CapellaVersion {
+				expect, err := state.GetExpectedWithdrawals(s, state.Epoch(s))
+				if err != nil {
+					return fmt.Errorf("processBlock: failed to get expected withdrawals: %v", err)
+				}
+				expectWithdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(s.BeaconConfig().MaxWithdrawalsPerPayload), 44)
+				for i := range expect.Withdrawals {
+					expectWithdrawals.Append(expect.Withdrawals[i])
+				}
+				if err := impl.ProcessWithdrawals(s, expectWithdrawals); err != nil {
+					return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
+				}
+			}
 			if err := impl.ProcessExecutionPayload(s, body); err != nil {
 				return fmt.Errorf("processBlock: failed to process execution payload: %v", err)
 			}
 		}
 	}
 
-	if s.Version() >= clparams.GloasVersion {
-		// Process execution payload bid. [New in Gloas:EIP7732]
-		if err := impl.ProcessExecutionPayloadBid(s, block); err != nil {
-			return fmt.Errorf("processBlock: failed to process execution payload bid: %v", err)
-		}
-	}
-
+	// 4. process_randao
 	var signatures, messages, publicKeys [][]byte
-	// Process each proposer slashing
 	sigs, msgs, pubKeys, err := processRandao(impl, s, body, block)
 	if err != nil {
 		return err
 	}
 	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
 
-	// Process Eth1 data.
+	// 5. process_eth1_data
 	if err := impl.ProcessEth1Data(s, body.GetEth1Data()); err != nil {
 		return fmt.Errorf("processBlock: failed to process Eth1 data: %v", err)
 	}
 
-	// Process block body operations.
+	// 6. process_operations
 	sigs, msgs, pubKeys, err = ProcessOperations(impl, s, body)
 	if err != nil {
 		return fmt.Errorf("processBlock: failed to process block body operations: %v", err)
-
 	}
 	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
 
@@ -115,7 +120,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 		}
 	}
 
-	// Process sync aggregate in case of Altair version.
+	// 7. process_sync_aggregate
 	if version >= clparams.AltairVersion {
 		if err := impl.ProcessSyncAggregate(s, body.GetSyncAggregate()); err != nil {
 			return fmt.Errorf("processBlock: failed to process sync aggregate: %v", err)

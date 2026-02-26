@@ -99,7 +99,9 @@ func (I *impl) ProcessProposerSlashing(
 		}
 		if clear {
 			payments := s.GetBuilderPendingPayments()
-			payments.Set(paymentIndex, &cltypes.BuilderPendingPayment{})
+			payments.Set(paymentIndex, &cltypes.BuilderPendingPayment{
+				Withdrawal: &cltypes.BuilderPendingWithdrawal{},
+			})
 			s.SetBuilderPendingPayments(payments)
 		}
 	}
@@ -360,7 +362,10 @@ func (I *impl) processWithdrawalsGloas(s abstract.BeaconState) error {
 	}
 
 	// Get expected withdrawals
-	expected := state.GetExpectedWithdrawals(s, state.Epoch(s))
+	expected, err := state.GetExpectedWithdrawals(s, state.Epoch(s))
+	if err != nil {
+		return err
+	}
 
 	// Build a ListSSZ from expected withdrawals for applyWithdrawals
 	withdrawalsList := solid.NewStaticListSSZ[*cltypes.Withdrawal](
@@ -396,7 +401,10 @@ func (I *impl) processWithdrawalsPreGloas(
 	withdrawals *solid.ListSSZ[*cltypes.Withdrawal],
 ) error {
 	// Check if full validation is required and verify expected withdrawals.
-	expectedWithdrawals := state.GetExpectedWithdrawals(s, state.Epoch(s))
+	expectedWithdrawals, err := state.GetExpectedWithdrawals(s, state.Epoch(s))
+	if err != nil {
+		return err
+	}
 	if I.FullValidation {
 		if len(expectedWithdrawals.Withdrawals) != withdrawals.Len() {
 			return fmt.Errorf(
@@ -470,6 +478,9 @@ func applyWithdrawals(s abstract.BeaconState, withdrawals *solid.ListSSZ[*cltype
 		// [Modified in Gloas:EIP7732]
 		if s.Version() >= clparams.GloasVersion && state.IsBuilderIndex(w.Validator) {
 			builderIndex := state.ConvertValidatorIndexToBuilderIndex(w.Validator)
+			if builders == nil || int(builderIndex) >= builders.Len() {
+				return fmt.Errorf("applyWithdrawals: builder_index %d out of range (builders length %d)", builderIndex, builders.Len())
+			}
 			builder := builders.Get(int(builderIndex))
 			builder.Balance -= min(w.Amount, builder.Balance)
 			builders.Set(int(builderIndex), builder)
@@ -739,7 +750,9 @@ func (I *impl) ProcessExecutionPayloadEnvelope(s abstract.BeaconState, signedEnv
 		withdrawals.Append(payment.Withdrawal)
 		s.SetBuilderPendingWithdrawals(withdrawals)
 	}
-	payments.Set(paymentIndex, &cltypes.BuilderPendingPayment{})
+	payments.Set(paymentIndex, &cltypes.BuilderPendingPayment{
+		Withdrawal: &cltypes.BuilderPendingWithdrawal{},
+	})
 	s.SetBuilderPendingPayments(payments)
 
 	// Cache the execution payload hash
@@ -1516,8 +1529,11 @@ func (I *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 }
 
 func (I *impl) ProcessDepositRequest(s abstract.BeaconState, depositRequest *solid.DepositRequest) error {
-	if s.GetDepositRequestsStartIndex() == s.BeaconConfig().UnsetDepositRequestsStartIndex {
-		s.SetDepositRequestsStartIndex(depositRequest.Index)
+	// [Pre-Gloas] Set deposit request start index on first deposit request
+	if s.Version() < clparams.GloasVersion {
+		if s.GetDepositRequestsStartIndex() == s.BeaconConfig().UnsetDepositRequestsStartIndex {
+			s.SetDepositRequestsStartIndex(depositRequest.Index)
+		}
 	}
 
 	// [New in Gloas:EIP7732] Route builder deposits immediately

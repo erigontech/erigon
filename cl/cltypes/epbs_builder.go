@@ -38,11 +38,16 @@ func (b *Builder) Static() bool {
 }
 
 func (b *Builder) EncodeSSZ(buf []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(buf, b.Pubkey[:], b.Version, b.ExecutionAddress[:], b.Balance, b.DepositEpoch, b.WithdrawableEpoch)
+	return ssz2.MarshalSSZ(buf, b.Pubkey[:], []byte{b.Version}, b.ExecutionAddress[:], b.Balance, b.DepositEpoch, b.WithdrawableEpoch)
 }
 
 func (b *Builder) DecodeSSZ(buf []byte, version int) error {
-	return ssz2.UnmarshalSSZ(buf, version, b.Pubkey[:], &b.Version, b.ExecutionAddress[:], &b.Balance, &b.DepositEpoch, &b.WithdrawableEpoch)
+	versionBuf := make([]byte, 1)
+	if err := ssz2.UnmarshalSSZ(buf, version, b.Pubkey[:], versionBuf, b.ExecutionAddress[:], &b.Balance, &b.DepositEpoch, &b.WithdrawableEpoch); err != nil {
+		return err
+	}
+	b.Version = versionBuf[0]
+	return nil
 }
 
 func (b *Builder) Clone() clonable.Clonable {

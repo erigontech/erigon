@@ -908,7 +908,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	ElectraForkEpoch:     364032,
 	FuluForkVersion:      0x06000000,
 	FuluForkEpoch:        411392,
-	GloasForkVersion:     0x70000000,
+	GloasForkVersion:     0x07000000,
 	GloasForkEpoch:       math.MaxUint64,
 
 	// New values introduced in Altair hard fork 1.

@@ -306,7 +306,7 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 		GasLimit:           0,
 		Value:              0,
 		ExecutionPayment:   0,
-		BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](0, 48),
+		BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
 	}
 	b.SetLatestExecutionPayloadBid(bid)
 
@@ -324,7 +324,9 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 	// Initialize builder_pending_payments with empty payments
 	builderPendingPayments := solid.NewVectorSSZ[*cltypes.BuilderPendingPayment](int(2 * cfg.SlotsPerEpoch))
 	for i := 0; i < int(2*cfg.SlotsPerEpoch); i++ {
-		builderPendingPayments.Set(i, &cltypes.BuilderPendingPayment{})
+		builderPendingPayments.Set(i, &cltypes.BuilderPendingPayment{
+			Withdrawal: &cltypes.BuilderPendingWithdrawal{},
+		})
 	}
 	b.SetBuilderPendingPayments(builderPendingPayments)
 

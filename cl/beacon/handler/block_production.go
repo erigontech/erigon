@@ -610,10 +610,14 @@ func (a *ApiHandler) produceBeaconBody(
 		retryTime := 10 * time.Millisecond
 		secsDiff := (targetSlot - baseBlock.Slot) * a.beaconChainCfg.SecondsPerSlot
 		feeRecipient, _ := a.validatorParams.GetFeeRecipient(proposerIndex)
-		clWithdrawals := state.GetExpectedWithdrawals(
+		clWithdrawals, err := state.GetExpectedWithdrawals(
 			baseState,
 			targetSlot/a.beaconChainCfg.SlotsPerEpoch,
 		)
+		if err != nil {
+			log.Error("BlockProduction: GetExpectedWithdrawals failed", "err", err)
+			return
+		}
 		withdrawals := make([]*types.Withdrawal, 0, len(clWithdrawals.Withdrawals))
 		for _, w := range clWithdrawals.Withdrawals {
 			withdrawals = append(withdrawals, &types.Withdrawal{
