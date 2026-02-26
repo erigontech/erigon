@@ -1,21 +1,11 @@
-- Set installing Linux build essentials to default off, to find out which workflows actually need it.
-- Work out which files actually affect hive tests. Probably do the same for the RPC tests.
-- is the directory mtime setting not correct for macos?
-- set clean: false for the second git clone?
-- is debug being set incorrectly in second clone?
-- the reproducible build workflow might be clobbering build caches, see what uses gocache-plain. show all workflows/jobs with overlapping keys, maybe include workflow in the prefix by default.
-- merge jobs that belong in teh same workflow
-- always load newest build cache, and count the cache items and republish if it's bigger (with runid attached?)
-- get cpu count, for job parallelism? nproc, and go env GOMAXPROCS or something?
-- use parallel fetching in submodule clone (--jobs)
-- hash .git/modules using the heads of all submodules?
-- use bars/pipes for key separators
-- continue on errors for caching retry script
-- split up the long running single-package tests
-- add parallel to all tests where possible, (mainly execution/tests), see what breaks
-- use annotations for warnings on cache misses?
 - extract useful info from .github/*.md files
-- can use cross os cache for go mod download
-- always run lint first? that way we can have a single modcache, avoid running tests for build failures, and encourage good git push hygiene.
 - generate content and mtime cache for build cache defer trim
 - make sure the race tests matrix can be invoked locally to reproduce.
+- split tests into files, and balance them by run time. simplifies dupe checking etc.
+
+deferred:
+- Set installing Linux build essentials to default off, to find out which workflows actually need it.
+- add parallel to all tests where possible, (mainly execution/tests), see what breaks
+- always run lint first? that way we can have a single modcache, avoid running tests for build failures, and encourage good git push hygiene.
+- merge workflows with similar triggers
+- add a workflow that checks benchmarks work

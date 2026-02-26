@@ -34,8 +34,11 @@ local reproducibility:
 
 flaky tests:
 	- these should be aggressively trimmed. unrelated failures in PRs should be reported, and skipped rather than waiting.
+	- scheduled race and non-race workflows for discovering flaky tests by repeating tests
 	- ideal place for bots to discover, and fix
 
 next steps:
 	- 3-5x our runner counts
 	- enable merge queue, perhaps on a test branch (merge-queue-experiment/main)
+
+look for flaky tests in scheduled runs that repeat tests constantly
