@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -517,7 +518,7 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream jsons
 			}
 		}
 
-		if resp != nil && resp.Error != nil && resp.Error.Message != "context canceled" {
+		if resp != nil && resp.Error != nil && !errors.Is(ctx.ctx.Err(), context.Canceled) {
 			if resp.Error.Data != nil {
 				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message, "errdata", resp.Error.Data)
