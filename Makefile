@@ -348,12 +348,13 @@ kurtosis-cleanup:
 ## lintci:                            run golangci-lint linters (full run, used in CI; skips fast-only and mod tidy)
 lintci:
 	@go tool golangci-lint run --config ./.golangci.yml
+	@./tools/mod_tidy_check.sh
 
 ## lint:                              run all linters (fast-only first for quick feedback, then full)
 lint:
 	@go tool golangci-lint run --config ./.golangci.yml --fast-only
-	@go tool golangci-lint run --config ./.golangci.yml
 	@./tools/mod_tidy_check.sh
+	@go tool golangci-lint run --config ./.golangci.yml
 
 ## tidy:                              `go mod tidy`
 tidy:
