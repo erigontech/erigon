@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"math/rand"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
