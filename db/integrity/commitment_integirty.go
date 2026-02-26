@@ -381,29 +381,32 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 	plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
 	var counts derefCounts
 	var integrityErr error
-	for commReader.HasNext() {
-		select {
-		case <-ctx.Done():
-			return derefCounts{}, ctx.Err()
-		case <-logTicker.C:
-			at := fmt.Sprintf("%d/%d", counts.branchKeys, totalKeys)
-			percent := fmt.Sprintf("%.1f%%", float64(counts.branchKeys)/float64(totalKeys)*100)
-			rate := float64(counts.branchKeys) / time.Since(start).Seconds()
-			eta := time.Duration(float64(totalKeys-counts.branchKeys)/rate) * time.Second
-			logger.Info(
-				"[integrity] commitment deref",
-				"at", at,
-				"p", percent,
-				"k/s", rate,
-				"eta", eta,
-				"referencedAccounts", counts.referencedAccounts,
-				"plainAccounts", counts.plainAccounts,
-				"referencedStorages", counts.referencedStorages,
-				"plainStorages", counts.plainStorages,
-				"kv", fileName,
-			)
-		default: // proceed
+	for i := 0; commReader.HasNext(); i++ {
+		if i%1024 == 0 {
+			select {
+			case <-ctx.Done():
+				return derefCounts{}, ctx.Err()
+			case <-logTicker.C:
+				at := fmt.Sprintf("%d/%d", counts.branchKeys, totalKeys)
+				percent := fmt.Sprintf("%.1f%%", float64(counts.branchKeys)/float64(totalKeys)*100)
+				rate := float64(counts.branchKeys) / time.Since(start).Seconds()
+				eta := time.Duration(float64(totalKeys-counts.branchKeys)/rate) * time.Second
+				logger.Info(
+					"[integrity] commitment deref",
+					"at", at,
+					"p", percent,
+					"k/s", rate,
+					"eta", eta,
+					"referencedAccounts", counts.referencedAccounts,
+					"plainAccounts", counts.plainAccounts,
+					"referencedStorages", counts.referencedStorages,
+					"plainStorages", counts.plainStorages,
+					"kv", fileName,
+				)
+			default: // proceed
+			}
 		}
+
 		branchKey, _ := commReader.Next(branchKeyBuf[:0])
 		if !commReader.HasNext() {
 			err = errors.New("invalid key/value pair during decompression")
