@@ -96,7 +96,6 @@ func TestExecutionSpecBlockchain(t *testing.T) {
 
 // Only runs EEST tests for current devnet - can "skip" on off-seasons
 func TestExecutionSpecBlockchainDevnet(t *testing.T) {
-	t.Skip("Osaka is already covered by TestExecutionSpecBlockchain")
 	if testing.Short() {
 		t.Skip()
 	}
