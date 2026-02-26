@@ -167,12 +167,10 @@ func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 		blockChanged := false
 
 		if txNum >= _max {
-			fmt.Printf("[dbg] b: txNum=%d, _max=%d\n", txNum, _max)
 			blockNum, _, _ = txNumsReader.FindBlockNum(ctx, tx, txNum)
 			_min, _ = txNumsReader.Min(ctx, tx, blockNum)
 			_max, _ = txNumsReader.Max(ctx, tx, blockNum)
 			blockChanged = true
-			fmt.Printf("[dbg] a: txNum=%d, _max=%d, blockNum=%d\n", txNum, _max, blockNum)
 		}
 
 		if blockChanged {
