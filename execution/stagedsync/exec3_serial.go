@@ -527,7 +527,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 			return false, err
 		}
 
-		se.doms.SetTxNum(txTask.TxNum)
 		se.lastBlockResult = &blockResult{
 			BlockNum:  txTask.BlockNumber(),
 			lastTxNum: txTask.TxNum,

@@ -127,14 +127,16 @@ jobs:
     strategy:
       matrix:
         os: [ windows-2025 ]
-    runs-on: ${{ matrix.os }}
+    runs-on:
+      group: "selfhosted-win"
 
     steps:
-      - name: Configure Pagefile
-        uses: al-cheb/configure-pagefile-action@v1.5
-        with:
-          minimum-size: 8GB
-          disk-root: "C:"
+      # not needed on self-hosted runner. already configured.
+      #- name: Configure Pagefile
+      #  uses: al-cheb/configure-pagefile-action@v1.5
+      #  with:
+      #    minimum-size: 8GB
+      #    disk-root: "C:"
 
       - name: "Checkout code with submodules and large files (lfs) on ${{ matrix.os }}"
         if: needs.source-of-changes.outputs.changed_files != 'true'
@@ -143,21 +145,31 @@ jobs:
           fetch-depth: 1
           submodules: recursive
           lfs: true
+          clean: true
 
       - name: Setup Go environment on ${{ matrix.os }}
         if: needs.source-of-changes.outputs.changed_files != 'true'
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25'
-          cache: true
+          go-version: '>=1.25'
+          cache: false
 
-      - name: Install make
-        run: choco install make -y
+      # "make" already preinstalled:
+      #- name: Install make
+      #  run: choco install make -y
 
       - name: Run all tests on ${{ matrix.os }}
         if: needs.source-of-changes.outputs.changed_files != 'true'
         shell: bash
+        env:
+          GOMODCACHE: C:\go-cache\mod
+          GOCACHE: C:\go-cache\build
         run: make test-all
+
+      - name: Cleanup
+        if: always()
+        run: |
+          Remove-Item -Path "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue
 
       - name: This ${{ matrix.os }} check does not make sense for changes within out-of-scope directories
         if: needs.source-of-changes.outputs.changed_files == 'true'
