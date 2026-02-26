@@ -956,7 +956,6 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 	defer logTicker.Stop()
 	branchKeyBuf := make([]byte, 0, 128)
 	branchValueBuf := make([]byte, 0, datasize.MB.Bytes())
-	plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
 	var branchKeys uint64
 	var integrityErr error
 
@@ -1028,18 +1027,20 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 						logger.Warn(err.Error())
 						return key, nil
 					}
-					storageOffsets[offset] = struct{}{}
-					// Also dereference and validate key length
-					storageReader.Reset(offset)
-					plainKey, _ := storageReader.Next(plainKeyBuf[:0])
-					if len(plainKey) != length.Addr+length.Hash {
-						err := fmt.Errorf("%w: storage reference key %x has invalid plainKey len=%d for branch %x in %s", ErrIntegrity, key, len(plainKey), branchKey, fileName)
-						if failFast {
-							return nil, err
+					if _, alreadySeen := storageOffsets[offset]; !alreadySeen {
+						storageOffsets[offset] = struct{}{}
+						// Validate key length: use Skip (single Huffman pass, no allocation)
+						storageReader.Reset(offset)
+						_, keyLen := storageReader.Skip()
+						if keyLen != length.Addr+length.Hash {
+							err := fmt.Errorf("%w: storage reference key %x has invalid plainKey len=%d for branch %x in %s", ErrIntegrity, key, keyLen, branchKey, fileName)
+							if failFast {
+								return nil, err
+							}
+							logger.Warn(err.Error())
 						}
-						logger.Warn(err.Error())
 					}
-					return plainKey, nil
+					return nil, nil
 				}
 				// Unknown key format
 				err := fmt.Errorf("%w: unexpected storage key len=%d for branch %x in %s", ErrIntegrity, len(key), branchKey, fileName)
@@ -1067,18 +1068,20 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 					logger.Warn(err.Error())
 					return key, nil
 				}
-				accountOffsets[offset] = struct{}{}
-				// Also dereference and validate key length
-				accReader.Reset(offset)
-				plainKey, _ := accReader.Next(plainKeyBuf[:0])
-				if len(plainKey) != length.Addr {
-					err := fmt.Errorf("%w: account reference key %x has invalid plainKey len=%d for branch %x in %s", ErrIntegrity, key, len(plainKey), branchKey, fileName)
-					if failFast {
-						return nil, err
+				if _, alreadySeen := accountOffsets[offset]; !alreadySeen {
+					accountOffsets[offset] = struct{}{}
+					// Validate key length: use Skip (single Huffman pass, no allocation)
+					accReader.Reset(offset)
+					_, keyLen := accReader.Skip()
+					if keyLen != length.Addr {
+						err := fmt.Errorf("%w: account reference key %x has invalid plainKey len=%d for branch %x in %s", ErrIntegrity, key, keyLen, branchKey, fileName)
+						if failFast {
+							return nil, err
+						}
+						logger.Warn(err.Error())
 					}
-					logger.Warn(err.Error())
 				}
-				return plainKey, nil
+				return nil, nil
 			}
 			// Unknown key format
 			err := fmt.Errorf("%w: unexpected account key len=%d for branch %x in %s", ErrIntegrity, len(key), branchKey, fileName)
