@@ -3,12 +3,12 @@ package integrity
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -137,7 +137,7 @@ func parallelChunkCheck(ctx context.Context, fromBlock, toBlock uint64, db kv.Te
 		return nil
 	}
 
-	numWorkers := runtime.NumCPU() * 5
+	numWorkers := estimate.AlmostAllCPUs()
 	chunkSize := uint64(1000)
 
 	g, ctx := errgroup.WithContext(ctx)
