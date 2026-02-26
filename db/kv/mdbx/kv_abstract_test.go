@@ -104,12 +104,10 @@ func TestManagedTx(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		c, err := tx.RwCursor(bucket1)
+		c, err := tx.RwCursor(bucket1) //nolint:gocritic
 		require.NoError(t, err)
-		defer c.Close()
-		c1, err := tx.RwCursor(bucket2)
+		c1, err := tx.RwCursor(bucket2) //nolint:gocritic
 		require.NoError(t, err)
-		defer c1.Close()
 		require.NoError(t, c.Append([]byte{0}, []byte{1}))
 		require.NoError(t, c1.Append([]byte{0}, []byte{1}))
 		require.NoError(t, c.Append([]byte{0, 0, 0, 0, 0, 1}, []byte{1})) // prefixes of len=FromLen for DupSort test (other keys must be <ToLen)
@@ -124,6 +122,8 @@ func TestManagedTx(t *testing.T) {
 		}
 		require.NoError(t, c.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
 		require.NoError(t, c1.Put([]byte{0, 0, 0, 0, 0, 1}, []byte{2}))
+		c.Close()
+		c1.Close()
 		err = tx.Commit()
 		require.NoError(t, err)
 	}
