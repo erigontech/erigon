@@ -1785,49 +1785,6 @@ func verifyHashItem(
 	return nil
 }
 
-func hashVerificationWorker(ctx context.Context, workCh <-chan hashWorkItem, filePath string, isReferencing bool, preloadedAccValues, preloadedStoValues map[string][]byte, hashChecked, hashMismatches *atomic.Uint64, failFast bool, fileName string, logger log.Logger) error {
-	var accReader, stoReader *seg.Reader
-	var accClose, stoClose func()
-	if isReferencing {
-		var err error
-		accReader, accClose, err = deriveReaderForOtherDomain(filePath, kv.CommitmentDomain, kv.AccountsDomain)
-		if err != nil {
-			return fmt.Errorf("worker: open accounts reader: %w", err)
-		}
-		defer accClose()
-		stoReader, stoClose, err = deriveReaderForOtherDomain(filePath, kv.CommitmentDomain, kv.StorageDomain)
-		if err != nil {
-			return fmt.Errorf("worker: open storage reader: %w", err)
-		}
-		defer stoClose()
-	}
-
-	plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
-	valBuf := make([]byte, 0, 128)
-
-	for item := range workCh {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		if err := verifyHashItem(item, accReader, stoReader, isReferencing, preloadedAccValues, preloadedStoValues, plainKeyBuf, valBuf, hashChecked, hashMismatches); err != nil {
-			if errors.Is(err, ErrIntegrity) {
-				if failFast {
-					return fmt.Errorf("%w in %s", err, fileName)
-				}
-				logger.Warn("[verify-state] hash mismatch", "err", err, "kv", fileName)
-			} else {
-				if failFast {
-					return err
-				}
-				logger.Warn("[verify-state] hash: ReplacePlainKeys error", "err", err, "kv", fileName)
-			}
-		}
-	}
-	return nil
-}
-
 // checkHashVerification verifies that stateHash stored in each commitment branch cell
 // matches the hash recomputed from the actual domain values. Uses a producer-consumer
 // pattern: 1 producer reads the commitment file sequentially, N workers each open their
@@ -1880,7 +1837,44 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, stepSize
 	// Launch N worker goroutines.
 	for range numWorkers {
 		eg.Go(func() error {
-			return hashVerificationWorker(ctx, workCh, file.Fullpath(), isReferencing, preloadedAccValues, preloadedStoValues, &hashChecked, &hashMismatches, failFast, fileName, logger)
+			var accReader, stoReader *seg.Reader
+			var accClose, stoClose func()
+			if isReferencing {
+				var err error
+				accReader, accClose, err = deriveReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.AccountsDomain)
+				if err != nil {
+					return fmt.Errorf("worker: open accounts reader: %w", err)
+				}
+				defer accClose()
+				stoReader, stoClose, err = deriveReaderForOtherDomain(file.Fullpath(), kv.CommitmentDomain, kv.StorageDomain)
+				if err != nil {
+					return fmt.Errorf("worker: open storage reader: %w", err)
+				}
+				defer stoClose()
+			}
+			plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
+			valBuf := make([]byte, 0, 128)
+			for item := range workCh {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
+				if err := verifyHashItem(item, accReader, stoReader, isReferencing, preloadedAccValues, preloadedStoValues, plainKeyBuf, valBuf, &hashChecked, &hashMismatches); err != nil {
+					if errors.Is(err, ErrIntegrity) {
+						if failFast {
+							return fmt.Errorf("%w in %s", err, fileName)
+						}
+						logger.Warn("[verify-state] hash mismatch", "err", err, "kv", fileName)
+					} else {
+						if failFast {
+							return err
+						}
+						logger.Warn("[verify-state] hash: ReplacePlainKeys error", "err", err, "kv", fileName)
+					}
+				}
+			}
+			return nil
 		})
 	}
 
