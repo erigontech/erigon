@@ -1220,7 +1220,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 					return err
 				}
 			case integrity.StateVerify:
-				if err := integrity.CheckStateVerify(ctx, db, failFast, fromStep, logger); err != nil {
+				if err := integrity.CheckStateVerify(ctx, db, dirs.Tmp, failFast, fromStep, logger); err != nil {
 					return err
 				}
 			default:
@@ -1307,7 +1307,7 @@ func doVerifyState(cliCtx *cli.Context, logger log.Logger) error {
 	defer db.Close()
 	failFast := cliCtx.Bool("failFast")
 	fromStep := cliCtx.Uint64("from-step")
-	return integrity.CheckStateVerify(ctx, db, failFast, fromStep, logger)
+	return integrity.CheckStateVerify(ctx, db, dirs.Tmp, failFast, fromStep, logger)
 }
 
 func doVerifyHistory(cliCtx *cli.Context, logger log.Logger) error {

@@ -24,8 +24,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"hash/maphash"
-	"maps"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -33,6 +31,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -45,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/seg"
@@ -56,8 +56,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
-
-var plainKeySeed = maphash.MakeSeed()
 
 func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br services.FullBlockReader, failFast bool, logger log.Logger) error {
 	tx, err := db.BeginTemporalRo(ctx)
@@ -843,7 +841,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, db kv.TemporalRoDB, br s
 	return nil
 }
 
-func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fromStep uint64, logger log.Logger) error {
+func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, tmpdir string, failFast bool, fromStep uint64, logger log.Logger) error {
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -875,7 +873,7 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 
 		var checkErr error
 		if startTxNum == 0 {
-			checkErr = checkStateCorrespondenceBaseAndHash(ctx, file, stepSize, failFast, logger)
+			checkErr = checkStateCorrespondenceBaseAndHash(ctx, file, stepSize, tmpdir, failFast, logger)
 		} else {
 			// Non-base file: reverse check (every domain key is in commitment refs)
 			// Include the next commitment file's refs to handle step boundary effects:
@@ -896,74 +894,12 @@ func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fr
 	return integrityErr
 }
 
-// processBranch validates a single commitment branch and accumulates found keys into the provided sets.
-// accReader and storageReader must not be shared across goroutines — each caller must use its own instances.
-func processBranch(
-	branchKey []byte, branchData commitment.BranchData,
-	accReader, storageReader *seg.Reader,
-	isReferencing bool, fileName string, failFast bool,
-	accountOffsets, storageOffsets map[uint64]struct{},
-	accountPlain, storagePlain map[uint64]struct{},
-) error {
-	if !branchData.IsComplete() {
-		touchMap := uint16(0)
-		afterMap := uint16(0)
-		if len(branchData) >= 4 {
-			touchMap = binary.BigEndian.Uint16(branchData[0:])
-			afterMap = binary.BigEndian.Uint16(branchData[2:])
-		}
-		return fmt.Errorf("%w: incomplete branch at key=%x (touchMap=0x%04x afterMap=0x%04x) in %s", ErrIntegrity, branchKey, touchMap, afterMap, fileName)
-	}
-
-	// checkKey counts plain keys and validates reference key offsets/lengths.
-	checkKey := func(key []byte, plainSet map[uint64]struct{}, offsetSet map[uint64]struct{}, reader *seg.Reader, expectedLen int, kind string) error {
-		if len(key) == expectedLen {
-			plainSet[maphash.Bytes(plainKeySeed, key)] = struct{}{}
-			return nil
-		}
-		if !isReferencing {
-			return fmt.Errorf("%w: unexpected %s key len=%d for branch %x in %s", ErrIntegrity, kind, len(key), branchKey, fileName)
-		}
-		offset := state.DecodeReferenceKey(key)
-		if offset >= uint64(reader.Size()) {
-			return fmt.Errorf("%w: %s reference key %x out of bounds for branch %x in %s: %d vs %d", ErrIntegrity, kind, key, branchKey, fileName, offset, reader.Size())
-		}
-		if _, alreadySeen := offsetSet[offset]; !alreadySeen {
-			offsetSet[offset] = struct{}{}
-			reader.Reset(offset)
-			// Skip (single Huffman pass) — we only need the key length, not the key itself
-			if _, keyLen := reader.Skip(); keyLen != expectedLen {
-				return fmt.Errorf("%w: %s reference key %x has invalid plainKey len=%d for branch %x in %s", ErrIntegrity, kind, key, keyLen, branchKey, fileName)
-			}
-		}
-		return nil
-	}
-
-	// The callback returns nil (keep original key in output) because the result of ReplacePlainKeys
-	// is discarded (_): all side-effects happen before the return.
-	_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-		if isStorage {
-			return nil, checkKey(key, storagePlain, storageOffsets, storageReader, length.Addr+length.Hash, "storage")
-		}
-		return nil, checkKey(key, accountPlain, accountOffsets, accReader, length.Addr, "account")
-	})
-	return err
-}
-
 type branchItem struct{ key, value []byte }
 
-type workerState struct {
-	accountOffsets, storageOffsets map[uint64]struct{}
-	accountPlain, storagePlain     map[uint64]struct{}
-	integrityErr                   error
-}
-
-
-func checkStateCorrespondenceBaseAndHash(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) error {
-	if err := checkStateCorrespondenceBase(ctx, file, stepSize, failFast, logger); err != nil {
+func checkStateCorrespondenceBaseAndHash(ctx context.Context, file state.VisibleFile, stepSize uint64, tmpdir string, failFast bool, logger log.Logger) error {
+	if err := checkStateCorrespondenceBase(ctx, file, stepSize, tmpdir, failFast, logger); err != nil {
 		return err
 	}
-	// GC large worker maps before hash verification.
 	runtime.GC()
 	return checkHashVerification(ctx, file, stepSize, failFast, dbg.EnvInt("CHECK_VERIFY_STATE_WORKERS", estimate.AlmostAllCPUs()), logger)
 }
@@ -971,7 +907,11 @@ func checkStateCorrespondenceBaseAndHash(ctx context.Context, file state.Visible
 // checkStateCorrespondenceBase verifies base files (startTxNum==0) where commitment
 // branches reference ALL keys in the trie, and the accounts/storage files contain
 // all those keys. Forward check: commitment ref count <= domain entry count.
-func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, stepSize uint64, failFast bool, logger log.Logger) error {
+//
+// Plain keys are collected into ETL collectors (spill to disk when buffer full) to avoid
+// keeping all keys in RAM. OldestEntryBuffer deduplicates: if the same key appears in
+// multiple branches (trie corruption), it is counted only once.
+func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, stepSize uint64, tmpdir string, failFast bool, logger log.Logger) error {
 	start := time.Now()
 	fileName := filepath.Base(file.Fullpath())
 	startTxNum := file.StartRootNum()
@@ -1011,19 +951,19 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 	totalKeys := uint64(commDecomp.Count()) / 2
 	numWorkers := dbg.EnvInt("CHECK_VERIFY_STATE_WORKERS", estimate.AlmostAllCPUs())
 
-	workers := make([]workerState, numWorkers)
-	for i := range workers {
-		workers[i] = workerState{
-			accountOffsets: make(map[uint64]struct{}),
-			storageOffsets: make(map[uint64]struct{}),
-			accountPlain:   make(map[uint64]struct{}),
-			storagePlain:   make(map[uint64]struct{}),
-		}
-	}
+	// ETL collectors accumulate plain keys on disk (spill when buffer full), deduplicating via
+	// OldestEntryBuffer. Both are guarded by a single mutex since Collect is not goroutine-safe.
+	accCollector := etl.NewCollector("verify-base-acc", tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger)
+	defer accCollector.Close()
+	stoCollector := etl.NewCollector("verify-base-sto", tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), logger)
+	defer stoCollector.Close()
+	var collectMu sync.Mutex
 
 	ch := make(chan branchItem, numWorkers*4)
 	var visitedBranchKeys atomic.Uint64
 	var producerIntegrityErr error
+	var workerIntErr error
+	var workerIntErrMu sync.Mutex
 
 	g, gCtx := errgroup.WithContext(ctx)
 
@@ -1073,20 +1013,73 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 	})
 
 	// Workers: each gets its own Reader (independent Getter, shared mmap data).
-	for i := range workers {
-		w := &workers[i]
+	for range numWorkers {
 		workerAccReader := seg.NewReader(accDecomp.MakeGetter(), accCompression)
 		workerStoReader := seg.NewReader(stoDecomp.MakeGetter(), stoCompression)
 		g.Go(func() error {
+			plainKeyBuf := make([]byte, 0, length.Addr+length.Hash)
 			for item := range ch {
-				if err := processBranch(item.key, commitment.BranchData(item.value),
-					workerAccReader, workerStoReader, isReferencing, fileName, failFast,
-					w.accountOffsets, w.storageOffsets, w.accountPlain, w.storagePlain); err != nil {
+				branchData := commitment.BranchData(item.value)
+				if !branchData.IsComplete() {
+					touchMap, afterMap := uint16(0), uint16(0)
+					if len(branchData) >= 4 {
+						touchMap = binary.BigEndian.Uint16(branchData[0:])
+						afterMap = binary.BigEndian.Uint16(branchData[2:])
+					}
+					e := fmt.Errorf("%w: incomplete branch at key=%x (touchMap=0x%04x afterMap=0x%04x) in %s",
+						ErrIntegrity, item.key, touchMap, afterMap, fileName)
+					if failFast {
+						return e
+					}
+					logger.Warn(e.Error())
+					workerIntErrMu.Lock()
+					workerIntErr = e
+					workerIntErrMu.Unlock()
+					continue
+				}
+				_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+					expectedLen := length.Addr
+					kind := "account"
+					reader := workerAccReader
+					collector := accCollector
+					if isStorage {
+						expectedLen = length.Addr + length.Hash
+						kind = "storage"
+						reader = workerStoReader
+						collector = stoCollector
+					}
+					plainKey := key
+					if len(key) != expectedLen {
+						if !isReferencing {
+							return nil, fmt.Errorf("%w: unexpected %s key len=%d for branch %x in %s",
+								ErrIntegrity, kind, len(key), item.key, fileName)
+						}
+						offset := state.DecodeReferenceKey(key)
+						if offset >= uint64(reader.Size()) {
+							return nil, fmt.Errorf("%w: %s reference key %x out of bounds for branch %x in %s: %d vs %d",
+								ErrIntegrity, kind, key, item.key, fileName, offset, reader.Size())
+						}
+						reader.Reset(offset)
+						var keyLen uint64
+						plainKey, keyLen = reader.Next(plainKeyBuf[:0])
+						if int(keyLen) != expectedLen {
+							return nil, fmt.Errorf("%w: %s reference key %x has invalid plainKey len=%d for branch %x in %s",
+								ErrIntegrity, kind, key, keyLen, item.key, fileName)
+						}
+					}
+					collectMu.Lock()
+					err := collector.Collect(plainKey, nil)
+					collectMu.Unlock()
+					return nil, err
+				})
+				if err != nil {
 					if failFast {
 						return err
 					}
 					logger.Warn(err.Error())
-					w.integrityErr = err
+					workerIntErrMu.Lock()
+					workerIntErr = err
+					workerIntErrMu.Unlock()
 				}
 			}
 			return nil
@@ -1100,33 +1093,26 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		}
 		integrityErr = err
 	}
-
-	// Merge per-worker results into final sets.
-	accountOffsets := make(map[uint64]struct{})
-	storageOffsets := make(map[uint64]struct{})
-	accountPlain := make(map[uint64]struct{})
-	storagePlain := make(map[uint64]struct{})
-	for _, w := range workers {
-		maps.Copy(accountOffsets, w.accountOffsets)
-		maps.Copy(storageOffsets, w.storageOffsets)
-		maps.Copy(accountPlain, w.accountPlain)
-		maps.Copy(storagePlain, w.storagePlain)
-		if w.integrityErr != nil {
-			integrityErr = w.integrityErr
-		}
+	if workerIntErr != nil {
+		integrityErr = workerIntErr
 	}
 	if producerIntegrityErr != nil {
 		integrityErr = producerIntegrityErr
 	}
 
-	// Compare counts
+	// Count unique plain keys via ETL merge-sort+dedup.
 	var foundAccounts, foundStorages uint64
-	if isReferencing {
-		foundAccounts = uint64(len(accountOffsets))
-		foundStorages = uint64(len(storageOffsets))
-	} else {
-		foundAccounts = uint64(len(accountPlain))
-		foundStorages = uint64(len(storagePlain))
+	if err := accCollector.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		foundAccounts++
+		return nil
+	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := stoCollector.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		foundStorages++
+		return nil
+	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
 	}
 
 	// Forward check: commitment must not reference MORE keys than exist in domain files.
